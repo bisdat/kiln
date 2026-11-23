@@ -171,6 +171,48 @@ void nested_transactions_are_refused() {
           "refusing nested transactions preserves the outer write and its handle");
     registry_live_revert(72, nested, &reply); registry_live_revert(71, outer, &reply);
 }
+void wrong_world_thread_is_refused_under_lock() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto active = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, active, &reply); registry_live_publish();
+    const auto draft = change(72, "b", "[{" + wood + R"("op":80}])");
+    auto thread = std::make_shared<bool>(false);
+    g.in->on_world_thread = [thread](uint32_t kind) { return kind == KILN_WORLD_SERVER && *thread; };
+    const auto generation = store_generation();
+    const auto commit_rc = registry_live_commit(72, draft, &reply);
+    const auto revert_rc = registry_live_revert(71, active, &reply);
+    std::string value;
+    const auto read_rc = registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value);
+    check(commit_rc == KILN_ERR_WRONG_THREAD && revert_rc == KILN_ERR_WRONG_THREAD && read_rc == KILN_ERR_WRONG_THREAD,
+          "the backend checks the active world's thread under its store lock for commit, revert and read");
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50 && registry_live_status().active == 1,
+          "off-thread requests neither write nor consume handles");
+    registry_live_owner_gone(71);
+    registry_live_publish();
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50 && registry_live_status().active == 1,
+          "an off-thread pump leaves owner cleanup queued for the world thread");
+    *thread = true;
+    registry_live_publish();
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
+          "the next world-thread pump removes the retired owner's complete change");
+    check(registry_live_status().world_kind == KILN_WORLD_SERVER, "status copies the kind paired with its world token");
+    registry_live_revert(72, draft, &reply);
+}
+void stopped_world_uses_only_copied_data() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto process = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    registry_live_commit(71, process, &reply);
+    registry_live_world_stop();
+    g.in->on_world_thread = [](uint32_t) { return false; };
+    const auto generation = store_generation();
+    const auto pending = change(72, "b", "[{" + wood + R"("op":80}])", 1);
+    check(registry_live_commit(72, pending, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld,
+          "after the stop fence a caller may commit copied process inputs without touching the old world");
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50,
+          "a stopped-world process commit does not write the old world's bytes");
+    check(registry_live_status().world == 0 && registry_live_status().world_kind == KILN_WORLD_KINDS,
+          "the stopped token and kind are cleared together");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -275,6 +317,8 @@ int main() {
         {"commit_does_not_reenter_ready", commit_does_not_reenter_ready},
         {"revert_defers_its_snapshot", revert_defers_its_snapshot},
         {"nested_transactions_are_refused", nested_transactions_are_refused},
+        {"wrong_world_thread_is_refused_under_lock", wrong_world_thread_is_refused_under_lock},
+        {"stopped_world_uses_only_copied_data", stopped_world_uses_only_copied_data},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

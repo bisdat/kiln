@@ -57,6 +57,8 @@ struct RegistryLive {
     std::function<void(const registry::Result&, bool application)> report;
     // A deferred transaction snapshot: generation +1, but never WORLDLOAD. The bool says whether a world exists.
     std::function<void(const registry::Result&, bool world)> changed;
+    // Checked under store_mutex against the token/kind that gates all live accesses; false/missing fails closed.
+    std::function<bool(uint32_t kind)> on_world_thread;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).
@@ -88,7 +90,7 @@ void registry_live_publish();
 void registry_live_table(const Entry& table);
 // The last application's result as reported (the stage's plus the live refusals), a copy; none before any.
 std::optional<registry::Result> registry_live_result();
-// Explicit live changes (kiln.registry.live). The wrappers bind/check owners and enforce the world thread.
+// Explicit live changes (kiln.registry.live). Wrappers bind owners; the backend enforces the world thread under store_mutex.
 enum class RegistryLiveOutcome : uint32_t { Applied, PendingWorld, Refused, RestartRequired, WorldRequired, Reverted, Skipped, Unverified, PendingResource };
 struct RegistryLiveReply {
     RegistryLiveOutcome outcome = RegistryLiveOutcome::Refused;
@@ -96,14 +98,14 @@ struct RegistryLiveReply {
     uint64_t world = 0;
     std::string reason;
 };
-struct RegistryLiveStatus { uint64_t world = 0; uint32_t drafts = 0, active = 0; };
+struct RegistryLiveStatus { uint64_t world = 0; uint32_t drafts = 0, active = 0, world_kind = KILN_WORLD_KINDS; };
 KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t point, uint64_t* out);
 KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::string& ir, RegistryLiveReply* out, std::string* report);
 KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
 KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
 KilnResult registry_live_read(const std::string& registry, const std::string& id, const std::string& field, std::string* out);
 RegistryLiveStatus registry_live_status();
-void registry_live_world_begin();
+void registry_live_world_begin(uint32_t kind = KILN_WORLD_SERVER);
 void registry_live_world_stop();
 void registry_live_owner_gone(KilnOwner owner); // notification thread: mark only, never call the game
 // How the live back-end sizes a game type (type_size; tests replace it).

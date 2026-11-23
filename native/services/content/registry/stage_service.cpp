@@ -357,9 +357,6 @@ void live_out(const RegistryLiveReply& reply, KilnRegistryLiveResult* out) {
     while (n && n < reply.reason.size() && (static_cast<unsigned char>(reply.reason[n]) & 0xc0) == 0x80) --n;
     std::memcpy(out->reason, reply.reason.data(), n);
 }
-KilnResult live_thread() {
-    return active_world() && !g_api->on_world_thread(active_kind()) ? KILN_ERR_WRONG_THREAD : KILN_OK;
-}
 KilnResult KILN_CALL l_begin(KilnOwner owner, uint32_t point, KilnHandle* out) {
     if (!out) return KILN_ERR_INVALID_ARGUMENT;
     std::string mod; const KilnResult rc = live_owner(owner, &mod);
@@ -375,21 +372,18 @@ KilnResult KILN_CALL l_submit(KilnOwner owner, KilnHandle handle, KilnStr ir, Ki
 KilnResult KILN_CALL l_commit(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
     if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
     const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    const KilnResult thread = live_thread(); if (thread != KILN_OK) return thread;
     RegistryLiveReply reply; const KilnResult rc = registry_live_commit(owner, handle, &reply);
     live_out(reply, out); return rc;
 }
 KilnResult KILN_CALL l_revert(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
     if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
     const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    const KilnResult thread = live_thread(); if (thread != KILN_OK) return thread;
     RegistryLiveReply reply; const KilnResult rc = registry_live_revert(owner, handle, &reply);
     live_out(reply, out); return rc;
 }
 KilnResult KILN_CALL l_read(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
     if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
     const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    const KilnResult thread = live_thread(); if (thread != KILN_OK) return thread;
     std::string text; const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text);
     return rc == KILN_OK ? copy_out(text, buf, cap, len) : rc;
 }
@@ -397,7 +391,7 @@ KilnResult KILN_CALL l_status(KilnRegistryLiveStatus* out) {
     if (!out || out->size < sizeof(*out)) return KILN_ERR_INVALID_ARGUMENT;
     const auto status = registry_live_status();
     std::memset(out, 0, sizeof(*out)); out->size = sizeof(*out);
-    out->world = status.world; out->world_kind = status.world ? active_kind() : KILN_WORLD_KINDS;
+    out->world = status.world; out->world_kind = status.world_kind;
     out->generation = runner().generation(); out->drafts = status.drafts; out->active = status.active;
     return KILN_OK;
 }
@@ -456,6 +450,7 @@ void bind_service() {
         in.check = h.check;
         in.report = h.report;
         in.changed = h.changed;
+        in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         registry_live_install(std::move(in));
     });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);

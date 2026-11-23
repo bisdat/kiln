@@ -342,6 +342,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     }
     RegistryLive in;
     in.schema = std::make_shared<const registry::Schema>(sc);
+    in.on_world_thread = [](uint32_t) { return true; };
     in.regmap = g_regmap;
     in.base = base();
     in.mods = mods;

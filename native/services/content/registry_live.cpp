@@ -79,6 +79,7 @@ struct LiveState {
     std::map<uint64_t, Change> changes;
     std::set<KilnOwner> dead;
     uint64_t world = 0, next_order = 0;
+    uint32_t world_kind = KILN_WORLD_KINDS;
     registry::Result stage_result;
     bool reading = false;
     std::string read_reason;
@@ -93,6 +94,11 @@ struct TransactionScope {
     TransactionScope() { g_transaction_active = true; }
     ~TransactionScope() { g_transaction_active = false; }
 };
+// All callers hold store_mutex, so the token, kind and admission decision are one snapshot.
+bool on_live_thread() {
+    return !g.world || (g.in && g.in->on_world_thread && g.in->on_world_thread(g.world_kind));
+}
+// All callers hold store_mutex; the leaf lock covers only incoming retirement notifications.
 bool retired(KilnOwner owner) {
     std::lock_guard lock(g_retiring_mu);
     return g.dead.count(owner) || g_retiring.count(owner);
@@ -1126,7 +1132,7 @@ void registry_live_install(RegistryLive in) {
     g.in = std::make_shared<RegistryLive>(std::move(in));
     g.stage_result = g.in->result;
     g.fields.clear(); g.pending_tables.clear(); g.table_fields.clear(); g.table_addrs.clear();
-    g.changes.clear(); g.dead.clear(); g.world = 0;
+    g.changes.clear(); g.dead.clear(); g.world = 0; g.world_kind = KILN_WORLD_KINDS;
     { std::lock_guard retiring(g_retiring_mu); g_retiring.clear(); }
 
     if (!g.in->schema) g.in->schema = std::make_shared<const registry::Schema>(registry_schema());
@@ -1181,6 +1187,7 @@ void registry_live_publish() {
     bool application;
     {
         std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return; // keep retirement and publication queued for the world's next tick
         if (g.in && pump_retiring()) {
             if (g.world) { std::string error; apply_changes(&error); if (!error.empty()) LOGW("registry (live): owner cleanup: %s", error.c_str()); }
             else compose_changes();
@@ -1330,6 +1337,7 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
     RegistryLiveReply reply;
     {
         std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
         LiveState::Change* change = nullptr;
         const KilnResult rc = change_of(owner, handle, &change);
         if (rc != KILN_OK) return rc;
@@ -1416,6 +1424,7 @@ KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveRe
     RegistryLiveReply reply;
     {
         std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
         LiveState::Change* change = nullptr;
         const KilnResult rc = change_of(owner, handle, &change);
         if (rc != KILN_OK) return rc;
@@ -1438,25 +1447,26 @@ void registry_live_owner_gone(KilnOwner owner) {
     if (!owner) return;
     std::lock_guard lock(g_retiring_mu); g_retiring.insert(owner);
 }
-void registry_live_world_begin() {
-    std::lock_guard lock(store_mutex()); g.world = ++g_next_world;
+void registry_live_world_begin(uint32_t kind) {
+    std::lock_guard lock(store_mutex()); g.world = ++g_next_world; g.world_kind = kind;
 }
 void registry_live_world_stop() {
     std::lock_guard lock(store_mutex());
-    g.world = 0;
+    g.world = 0; g.world_kind = KILN_WORLD_KINDS;
     std::erase_if(g.changes, [](const auto& item) { return item.second.world != 0; });
     g.fields.clear(); g.pending_tables.clear(); g.table_addrs.clear(); g.table_fields.clear();
     if (g.in) compose_changes();
 }
 RegistryLiveStatus registry_live_status() {
     std::lock_guard lock(store_mutex());
-    RegistryLiveStatus status; status.world = g.world;
+    RegistryLiveStatus status; status.world = g.world; status.world_kind = g.world_kind;
     for (const auto& [h, c] : g.changes) { if (c.order) ++status.active; else ++status.drafts; }
     return status;
 }
 
 KilnResult registry_live_read(const std::string& reg_name, const std::string& id, const std::string& field, std::string* out) {
     std::lock_guard lock(store_mutex());
+    if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
     if (!g.in || !out) return KILN_ERR_UNAVAILABLE;
     const auto* reg_spec = g.in->schema->registry(reg_name);
     const auto* spec = reg_spec ? reg_spec->field(registry::generic_path(field)) : nullptr;
