@@ -9,6 +9,8 @@
   <ItemGroup>
     <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" />
+    <ProjectReference Include="../../../managed/services/Kiln.Camera/Kiln.Camera.csproj" Private="false" />
+    <ProjectReference Include="../../../managed/services/Kiln.Network/Kiln.Network.csproj" Private="false" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

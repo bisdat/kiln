@@ -105,6 +105,18 @@ internal static unsafe class CameraNative
         public delegate* unmanaged[Cdecl]<ulong, ulong, ulong, uint, uint, NativeStr, int> TransportEnded;
     }
 
+    /// <summary>KilnCameraTransport: the bridge Kiln.Camera binds (CameraBridgeStartup). 32 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Transport
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<ulong, uint, ulong, ulong, Request*, delegate* unmanaged[Cdecl]<Result*, void*, void>, void*, int> Submit;
+        public delegate* unmanaged[Cdecl]<uint, ulong*, int> Caps;
+        public delegate* unmanaged[Cdecl]<ulong, void> Retire;
+    }
+
+    public const uint EndpointServerMode = 1, EndpointLocal = 2, EndpointRemote = 3;
+
     private static Table* _table;
 
     /// <summary>The service's table, or null. Looked up again while it is missing.</summary>

@@ -22,6 +22,7 @@ public sealed unsafe class AbiTests
         Assert.Equal(72, sizeof(CameraNative.Change));
         Assert.Equal(96, sizeof(CameraNative.Visual));
         Assert.Equal(88, sizeof(CameraNative.Table));
+        Assert.Equal(32, sizeof(CameraNative.Transport));
         CameraNative.Request r = default;
         var start = (byte*)&r;
         Assert.Equal(32, (int)((byte*)&r.Priority - start));

@@ -10,7 +10,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- the transport bridge (S8): the channel kiln.camera over Kiln.Network, the client world's step from Kiln.Client -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
     <InternalsVisibleTo Include="Kiln.Camera.Tests" />
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- the lab test stands lab transport peers in for players (CameraBridgeStartup.LabPlayerOf) -->
+    <InternalsVisibleTo Include="CameraTest" />
   </ItemGroup>
 </Project>

@@ -88,7 +88,7 @@ internal sealed class ServerBinding
         public required Action<TransportResult> Done;
         public ulong Serial, RequestId;
         public byte[]? Bytes;          // null while parked (no binding yet)
-        public long FirstSentAt, LastSentAt;
+        public long FirstSentAt, LastSentAt, ParkedAt;
         public int Retries;
     }
 
@@ -252,8 +252,10 @@ internal sealed class ServerBinding
             _tokens -= 1;
         }
         _pending = p;
-        if (_state == ServerBindingState.Bound) SendPending(p, _o.Clock());
-        // Waiting: parked until the Hello (Tick refuses it Negotiation after 2 s)
+        p.ParkedAt = _o.Clock();
+        if (_state == ServerBindingState.Bound) SendPending(p, p.ParkedAt);
+        // Waiting: parked until the Hello (Tick refuses it Negotiation after 2 s, from the peer's readiness or, for a peer
+        // that is not ready yet, from the request)
     }
 
     private void SendPending(Pending p, long now)
@@ -395,6 +397,13 @@ internal sealed class ServerBinding
     public void Tick()
     {
         var now = _o.Clock();
+        if (_state is ServerBindingState.Waiting && !_ready && _pending is { Bytes: null } early && now - early.ParkedAt >= NegotiationTimeoutMs)
+        {
+            // the peer never got ready (its Kiln handshake did not finish): this request is refused, the binding waits on
+            _pending = null;
+            Queue(early, TransportResult.Refused(CameraReasons.Negotiation, early.Lease, early.Revision, 0,
+                "the player's client did not finish its Kiln handshake within 2 s"));
+        }
         if (_state is ServerBindingState.Waiting && _ready && now - _readySince >= NegotiationTimeoutMs)
         {
             _state = ServerBindingState.Failed;

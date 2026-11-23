@@ -93,8 +93,3 @@ internal static unsafe class CameraCaps
     }
 }
 
-/// <summary>Started by Kiln (ServiceTick.AutoStart) at its first service tick: the rows are there before a mod asks.</summary>
-internal static class CameraStartup
-{
-    static CameraStartup() => CameraCaps.Rows.Ensure();
-}

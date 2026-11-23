@@ -109,11 +109,33 @@ first frame and ends the lease `SafetyRejected` after it. Kiln leaves the game's
 take (a scaled camera, a lens outside 0.01 to pi - 0.01 rad). A write that faults turns visual writes off for the rest
 of the client world (the rows say so). Since mod API 0.2.17.
 
-## Other endpoints
+## A server's visual for a player's client (`Camera.Set`)
 
-The typed records, native ABI, TestKit fake, and managed wire/state machines also describe remote visuals. Their
-transport bridge is not implemented in this slice: `camera.remote` is unavailable, not hidden behind a client-test
-switch. No arbitrary pose, lens, follow profile, or shake is sent to a vanilla peer.
+`Camera.Set(player, request)` with visual parts (no `Mode`) asks the render-only camera of one player's client, from the
+server world. It needs `camera.remote`: Kiln.Camera binds its transport bridge at Kiln's first service tick (outside any
+mod, so no mod owns or unloads it), opens the channel `kiln.camera` version 1 (not required: vanilla and older clients
+still join; at most 16384 bytes a message) and turns the row on. Per player:
+
+- **A guest whose client runs Kiln** gets the request over `kiln.camera`: its client says Hello with the local part rows
+  it has, the server answers Welcome with a binding token, and each Apply, Update and End carries that binding, the
+  lease and its revision. `Ok` comes only when a frame of that client was drawn with it (`CameraCommitScope.ClientFrame`,
+  `Camera.Changed`'s `Frame` is the client's). No answer within 3 s (two resends of the same request) is
+  `TransportTimeout` with `MayHaveApplied`: end the lease. The client lets go by itself at the lease's duration, when the
+  server's heartbeat is missing for 3 s, and when the connection or a world ends; it reports its own end, which arrives as
+  `Changed` `Ended` with the client's reason (`Expired`, `TargetLost`, `SafetyRejected` ...). A player who leaves ends
+  the lease `PeerDisconnected`.
+- **The host's own player** (a client that hosts) goes through a local queue from the server world to the client world:
+  no packet, no handshake; the host's own `camera.local_*` rows decide.
+- **Refusals** (`Ok = false`, never a silent stock fallback): a vanilla client, or a Kiln without `kiln.camera`,
+  `RequiresKilnClient`; a client without a part the request needs (its `camera.local_*` row is off there)
+  `ClientCapability`; a client that does not finish the camera handshake within 2 s `Negotiation`; no such player
+  connected `PeerUnavailable`; more than 10 requests a second (burst 16) to one player `RateLimit`; a request larger than
+  the negotiated body `BodyTooLarge`.
+
+`Camera.GetCapabilities(CameraEndpoint.Remote, player)` answers `Remote` plus the parts that player's client offered (the
+host's own player: the host's local rows). A mount or cutscene that requires a part checks it there first.
+No arbitrary pose, lens, follow profile, or shake is ever sent to a vanilla peer; a vanilla player only gets stock mode
+locks (`SetMode`).
 The input camera and aim are not a visual-control API. The reserved resource-profile bit is unavailable in v1.
 `camera.service` means the table exists; `camera.server` and `camera.local` are managed aggregates, not substitutes
 for checking every requested part. See [capability rows](caps.md).
@@ -126,7 +148,7 @@ has both. `Update` and `End` follow the lease's stored world, even if both world
 | Entry | World / thread | Required row |
 |---|---|---|
 | `SetMode`, `Set` with Mode | SERVER Pre / tick thread | `camera.server_mode` |
-| `Set` with visuals | SERVER Pre / tick thread | `camera.remote` (bridge not implemented yet) |
+| `Set` with visuals | SERVER Pre / tick thread | `camera.remote`; the player's client must offer the parts (else `ClientCapability`) |
 | `SetLocal` | CLIENT Pre / client-world thread | Each requested `camera.local_*` part; Mode refuses `WrongEndpoint` |
 | `Update` | Stored owning world / tick thread | `camera.service` and the replacement's part rows |
 | `End` | Stored owning world / tick thread | `camera.service`; cleanup is allowed after a part turns off |
