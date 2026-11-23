@@ -370,7 +370,7 @@ void service_tests() {
           kitems::parks.size() == 1);
     auto& parked_player = kitems::model.players.at(0);
     const auto hints_before = calls;
-    CHECK(kitems::park_holder(access, parked_player, "mod:bag", KIS_PARK_UNREGISTERED, true, service_lock));
+    CHECK(kitems::park_holder(access, 0, rejoin, "mod:bag", KIS_PARK_UNREGISTERED, true, service_lock));
     CHECK(calls == hints_before + 1 && !components.count({live.entity, kHashInventorySetup}) &&
           parked_player.holders.empty() && parked_player.entries.size() == 1 &&
           parked_player.entries[0].records.size() == 1);

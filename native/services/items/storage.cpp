@@ -242,6 +242,15 @@ Player* player_entity(uint32_t entity) {
             return &p;
     return nullptr;
 }
+// A slot's player as long as it is the same join (and, when `live`, has not left). A hint releases the model mutex,
+// so Post re-finds its player, holder and registration after every hint instead of keeping iterators across it.
+Player* joined(uint32_t slot, uint64_t join, bool live = true) {
+    auto i = model.players.find(slot);
+    if (i == model.players.end() || i->second.witness.join != join ||
+        (live && (i->second.witness.flags & KIS_WITNESS_LEFT)))
+        return nullptr;
+    return &i->second;
+}
 Entry entry_for(const std::string& key, uint32_t kind, uint32_t slots, uint32_t why = 0) {
     Entry e;
     e.row.size = sizeof e.row;
@@ -1103,28 +1112,35 @@ void finish_return(Return& q, Player* p, uint32_t status_code, const char* messa
     q.phase = 3;
 }
 void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) {
-    for (auto& q : returns) {
-        auto i = model.players.find(q.slot);
-        if (i == model.players.end() || i->second.witness.join != q.join ||
-            (i->second.witness.flags & KIS_WITNESS_LEFT)) {
+    // By index: return_parked may queue another return while a hint runs (push_back keeps element references).
+    for (size_t n = 0; n < returns.size(); ++n) {
+        auto& q = returns[n];
+        Player* found = joined(q.slot, q.join);
+        if (!found) {
             q.holder = {};
             finish_return(q, nullptr, KILN_ITEMS_DROPPED, "the player left");
             continue;
         }
-        auto& p = i->second;
         if (q.phase == 2) {
             Entry kept;
-            EntityRef ref{p.witness.player, 0, 0, 0, a.storage, nullptr};
+            EntityRef ref{found->witness.player, 0, 0, 0, a.storage, nullptr};
             if (!freeze_return(q, a.attributes, bindings.data(), &ref, &kept)) {
                 off(KILN_CAP_REASON_FAULTED, "items.storage: parked-return freeze failed");
                 return;
             }
-            model.event(KIS_EVENT_PARKED, &p, q.key, 0, KIS_PARK_REQUESTED);
+            model.event(KIS_EVENT_PARKED, found, q.key, 0, q.reason);
             model.events.back().handle = 0;
             model.events.back().target = q.holder.entity;
             model.events.back().stacks = static_cast<uint32_t>(kept.records.size());
             if (!housekeeping(KIS_STAGE_PARKED, lock))
                 return;
+            found = joined(q.slot, q.join);
+            if (!found) {
+                q.holder = {};
+                finish_return(q, nullptr, KILN_ITEMS_DROPPED, "the player left");
+                continue;
+            }
+            auto& p = *found;
             if (!kept.records.empty())
                 p.entries.push_back(std::move(kept));
             if (!destroy_holder(a, &q.holder)) {
@@ -1147,6 +1163,7 @@ void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) 
         }
         if (q.phase != 0)
             continue;
+        auto& p = *found;
         if (!create_holder(a, p.witness.player, 64, &q.holder)) {
             finish_return(q, &p, KILN_ITEMS_UNAVAILABLE, "cannot create a temporary return inventory");
             continue;
@@ -1286,29 +1303,40 @@ void deliver_returns() {
     }
 }
 bool death_wrap_ready();
-bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t why, bool retired,
+bool park_holder(const Access& a, uint32_t slot, uint64_t join, const std::string& key, uint32_t why, bool retired,
                  std::unique_lock<std::recursive_mutex>& lock) {
-    auto h = p.holders.find(key);
-    if (h == p.holders.end())
+    Player* found = joined(slot, join, false);
+    if (!found)
         return true;
+    auto h = found->holders.find(key);
+    if (h == found->holders.end())
+        return true;
+    const Holder holder = h->second;
     // a park never lowers a reason: live records that join a held bag become held with it
-    why = parked_reason(p, key, why);
-    Entry e = entry_for(key, KIS_ENTRY_PARKED, h->second.slots, why);
-    EntityRef ref{p.witness.player, 0, 0, 0, a.storage, nullptr};
-    if (!freeze_holder(h->second, a.attributes, bindings.data(), &ref, &e)) {
+    why = parked_reason(*found, key, why);
+    Entry e = entry_for(key, KIS_ENTRY_PARKED, holder.slots, why);
+    EntityRef ref{found->witness.player, 0, 0, 0, a.storage, nullptr};
+    if (!freeze_holder(holder, a.attributes, bindings.data(), &ref, &e)) {
         off(KILN_CAP_REASON_FAULTED, "items.storage: park freeze failed; holder retained");
         return false;
     }
-    model.event(KIS_EVENT_PARKED, &p, key, 0, why);
+    model.event(KIS_EVENT_PARKED, found, key, 0, why);
     // Target is the old holder; a retired owner's teardown stays internal even if the key registered again since
     if (retired)
         model.events.back().handle = 0;
-    model.events.back().target = h->second.entity;
+    model.events.back().target = holder.entity;
     model.events.back().stacks = static_cast<uint32_t>(e.records.size());
     for (const auto& r : e.records)
         model.events.back().items += r.count;
     if (!housekeeping(KIS_STAGE_PARKED, lock))
         return false;
+    found = joined(slot, join, false);
+    if (!found)
+        return true;
+    auto& p = *found;
+    h = p.holders.find(key);
+    if (h == p.holders.end() || h->second.entity != holder.entity)
+        return true; // gone while the hint ran (a leave took it with its own capture)
     if (!clear_holder_references(api->server_world(), p.witness.player, h->second)) {
         off(KILN_CAP_REASON_FAULTED, "items.storage: cannot clear references before parking");
         return false;
@@ -1320,6 +1348,35 @@ bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t wh
     }
     p.holders.erase(h);
     settle(p);
+    return true;
+}
+// The first part of a player's build pass: unregistered live copies are parked, and the first pass announces
+// every parked entry (Target 0). False: nothing to build for this player in this Post.
+bool begin_build(uint32_t slot, uint64_t join) {
+    Player* found = joined(slot, join);
+    if (!found || !model.build_ready(slot) || !model.bound())
+        return false;
+    auto& p = *found;
+    uint8_t setup[84]{};
+    if (!component_copy(api->server_world(), kHashInventorySetup, p.witness.player, setup, 84) || !setup[83])
+        return false;
+    for (auto& e : p.entries)
+        if (!model.registrations.count(e.row.key) && e.row.kind == KIS_ENTRY_LIVE) {
+            // only before the first build: its PARKED event (Target 0) is the first restore's one below
+            e.row.kind = KIS_ENTRY_PARKED;
+            e.row.reason = KIS_PARK_UNREGISTERED;
+        }
+    if (!p.build_pass_completed)
+        settle(p); // a live copy of an unregistered key joins that key's parked records
+    if (!p.build_pass_completed)
+        for (const auto& entry : p.entries)
+            if (entry.row.kind == KIS_ENTRY_PARKED) {
+                model.event(KIS_EVENT_PARKED, &p, entry.row.key, 0, entry.row.reason);
+                auto& event = model.events.back();
+                event.stacks = static_cast<uint32_t>(entry.records.size());
+                for (const auto& record : entry.records)
+                    event.items += record.count;
+            }
     return true;
 }
 void post_body() {
@@ -1340,19 +1397,22 @@ void post_body() {
     while (!parks.empty()) {
         auto q = std::move(parks.front());
         parks.pop_front();
-        auto i = model.players.find(q.slot);
-        if (i == model.players.end() || i->second.witness.join != q.join)
+        Player* found = joined(q.slot, q.join, false);
+        if (!found)
             continue;
-        auto& p = i->second;
         if (q.unpark) {
-            for (auto& e : p.entries)
+            for (auto& e : found->entries)
                 if (q.key == e.row.key && e.row.kind == KIS_ENTRY_PARKED)
                     e.row.reason = KIS_PARK_UNREGISTERED;
             continue;
         }
-        bool had_holder = p.holders.count(q.key) != 0;
-        if (!park_holder(a, p, q.key, q.reason, q.retired, lock))
+        bool had_holder = found->holders.count(q.key) != 0;
+        if (!park_holder(a, q.slot, q.join, q.key, q.reason, q.retired, lock))
             return;
+        found = joined(q.slot, q.join, false);
+        if (!found)
+            continue;
+        auto& p = *found;
         // Never lower a reason: an unload must not turn a held bag into one that restores by itself.
         for (auto& e : p.entries)
             if (q.key == e.row.key && e.row.kind == KIS_ENTRY_PARKED)
@@ -1361,30 +1421,25 @@ void post_body() {
         if (!had_holder && !q.retired)
             model.event(KIS_EVENT_PARKED, &p, q.key, 0, parked_reason(p, q.key, q.reason));
     }
-    for (auto& [slot, p] : model.players) {
-        if (!model.build_ready(slot) || !model.bound())
+    std::vector<std::pair<uint32_t, uint64_t>> building;
+    for (const auto& [slot, p] : model.players)
+        building.emplace_back(slot, p.witness.join);
+    for (const auto [slot, join] : building) {
+        if (!begin_build(slot, join))
             continue;
-        uint8_t setup[84]{};
-        if (!component_copy(api->server_world(), kHashInventorySetup, p.witness.player, setup, 84) || !setup[83])
-            continue;
-        for (auto& e : p.entries)
-            if (!model.registrations.count(e.row.key) && e.row.kind == KIS_ENTRY_LIVE) {
-                // only before the first build: its PARKED event (Target 0) is the first restore's one below
-                e.row.kind = KIS_ENTRY_PARKED;
-                e.row.reason = KIS_PARK_UNREGISTERED;
-            }
-        if (!p.build_pass_completed)
-            settle(p); // a live copy of an unregistered key joins that key's parked records
-        if (!p.build_pass_completed)
-            for (const auto& entry : p.entries)
-                if (entry.row.kind == KIS_ENTRY_PARKED) {
-                    model.event(KIS_EVENT_PARKED, &p, entry.row.key, 0, entry.row.reason);
-                    auto& event = model.events.back();
-                    event.stacks = static_cast<uint32_t>(entry.records.size());
-                    for (const auto& record : entry.records)
-                        event.items += record.count;
-                }
-        for (const auto& [key, r] : model.registrations) {
+        // Keys, not map iterators: the owner of a key may retire (or a mod register) while a hint runs.
+        std::vector<std::string> keys_now;
+        for (const auto& [key, r] : model.registrations)
+            keys_now.push_back(key);
+        for (const auto& key : keys_now) {
+            Player* found = joined(slot, join);
+            if (!found)
+                break;
+            auto& p = *found;
+            auto registration = model.registrations.find(key);
+            if (registration == model.registrations.end())
+                continue;
+            const Registration& r = registration->second;
             auto h = p.holders.find(key);
             bool created_now = h == p.holders.end();
             uint32_t restored_stacks = 0, restored_items = 0;
@@ -1494,8 +1549,10 @@ void post_body() {
                     return;
             }
         }
-        p.build_pass_completed = true;
-        settle(p);
+        if (Player* found = joined(slot, join)) {
+            found->build_pass_completed = true;
+            settle(*found);
+        }
     }
     return_post(a, lock);
 }
@@ -1900,6 +1957,7 @@ void retire_owner_locked(KilnOwner owner) {
     model.revoke(owner);
 }
 void KILN_CALL storage_owner_retiring(KilnOwner owner, void*) {
+    std::lock_guard callback_lock(callback_mu); // a hint or callback of this owner may be running
     std::lock_guard lock(storage_mu);
     retire_owner_locked(owner);
 }
@@ -1912,6 +1970,7 @@ void storage_cancel_owner(KilnOwner owner) {
     retire_owner_locked(owner);
 }
 void storage_reset() {
+    std::lock_guard callback_lock(callback_mu);
     std::lock_guard lock(storage_mu);
     for (auto& q : returns) {
         q.result.status = KILN_ITEMS_DROPPED;
