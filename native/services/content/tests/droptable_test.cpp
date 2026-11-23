@@ -102,6 +102,11 @@ void nc_drops_table(const Entry&) {
     fake::patches.fetch_add(1);
     fake::in_patch = false;
 }
+// registry_live.cpp's (dev.31): note_table hands the new table to it; the registry's layers are not part of this test
+void drops_table_loaded(const Entry& table) {
+    if (drops_have_rules()) drops_apply_rules(table);
+    nc_drops_table(table);
+}
 size_t store_flush(std::string*) { return 0; }
 void timing_mark_job_thread(bool) {}
 PhaseTimer::PhaseTimer(Phase) {}
