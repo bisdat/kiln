@@ -112,7 +112,7 @@ Channel `kiln:character` v1 (not required: a client without it just doesn't take
 3. **The newest revision wins.** Client newer: its copy replaces the server's, after the checks below. Equal or older: the server's copy stays, and the client gets what it lacks.
 4. At each world save (autosave every 30 s, a player leaving, `Saves.Request`, shutdown), the server diffs the character's carried data against what the client has. A change makes a new
    revision and a `CharUpdate`. The client merges it into the file (keys the update doesn't name stay), keeps the previous file as `.prev`, and answers `CharAck`. What isn't acknowledged goes again at the next save.
-5. Leaving: the game saves when a player leaves and its client waits for its character (`docs/re/characters.md` section 4), so the update arrives in that window. A last push runs when the session closes.
+5. Leaving: the game saves when a player leaves and its client waits for its character (`docs/re/characters.md` section 4), so the update arrives in that window. A last push runs when the session closes. Player storage captured with the leave save (or a closing hosted world's final save) commits after the session closed: for up to two minutes Kiln still sends that storage pair alone (a hosted player's sidecar is written directly), never progress.
 
 - **In a hosted game** this machine's player has no messages: the same code reads and writes the sidecar directly. Other players who joined that game use the channel.
 - **Vanilla clients** never get a hello. Their data stays on the server, per character, at revision 0. If they later come with a Kiln client that has a newer file, the file wins.
@@ -124,7 +124,8 @@ A client's copy is treated as the game treats a character: client-side and edita
 
 | Check | Effect |
 |---|---|
-| Setting `importProgress: false` | nothing taken, nothing sent; the client's file stays as it is; this server keeps its own copy per character |
+| Setting `importProgress: false` | no carried progress is taken or sent; this server keeps its own progress per character. Player storage has its own setting below |
+| Setting `storage.trustClient: false` | no client storage is instantiated or sent back. This server uses its own paired storage; an unpaired copy is parked if the client reports a newer revision, because storage changed elsewhere |
 | Over `maxImportBytes`, `maxKeys`, or `maxCharactersPerAccount` new characters | the whole offer is refused; nothing changes on either side |
 | A value over `maxValueBytes`, a broken key, a mod id with other characters than letters, digits, `.`, `_`, `-`, `:` | that entry is dropped from what the server takes |
 | A mod not loaded here | its data is **kept, not applied**: stored, passed on, read by nobody |
@@ -135,13 +136,32 @@ A client's copy is treated as the game treats a character: client-side and edita
 `kiln/config/characters.json` (server, read at each join; a file that doesn't parse refuses imports until it is fixed):
 ```json
 {
-  "importProgress": true,            // false: refuse imported progress, and leave clients' copies alone
+  "importProgress": true,            // false: refuse imported progress
+  "storage": { "trustClient": true }, // false: keep server storage; clients may withhold, never add
   "maxImportBytes": 204800,
   "maxValueBytes": 65536,
   "maxKeys": 256,
   "maxCharactersPerAccount": 32
 }
 ```
+
+Missing settings default to true. An unreadable `characters.json` disables both imported progress and trusted client storage until it is fixed. The settings are independent: `importProgress: false` with `storage.trustClient: true` refuses progress but still lets storage travel.
+
+### Player storage copies (since 0.2.0-dev.30.7)
+
+Kiln-owned storage uses mod `kiln-items`, key `storage`, over the same `kiln:character` v1 offer/update channel. The server copy is the generation scope `player-storage/<character key>`. It is frozen with the game's character capture and queued at captures-done; the existing stage barrier holds the world write (and therefore character publication) until the pending copy is durable. It is sent back only after world-written; a failed world write keeps the pending copy. As with other Kiln saves, the barrier is bounded: if disk writes fail or the wait expires, the game continues, storage is marked degraded, and its in-memory pair is retained for the next save instead of publishing an undurable carried copy.
+
+Storage does not use the progress newest-revision rule. A copy paired with the arriving character inventory wins, with the highest revision among matching pairs; only if none matches does the newest unpaired copy win, with a warning. History keeps up to 8 carried and 32 server pairs, within separate 64 KiB carried and 256 KiB server document caps. The oldest pairs are trimmed when necessary (logged at Info), never current storage, parked items, quarantine or the newest historical entry. If that protected minimum still exceeds a side's cap, its previous copy stays unchanged and `Saves.PlayerStoragePersistenceFailure` plus the `saves.player_storage` capability report degraded persistence; the next save retries. Equal consecutive contents share records through optional `pairs` witness aliases. Unknown storage keys and overflow after a slot-count reduction stay parked. Unsupported future document versions stay read-only, whole. Malformed entries go to quarantine with their bytes and reason. An unparseable sidecar is preserved as `.corrupt-<stamp>` before replacement; atomic writes retain `.prev`.
+
+A Kiln peer has 15 seconds to offer storage before the server chooses its own candidates (`client offer late` in the log). A later offer cannot replace live storage that session; since this server's later updates replace the player's copy, a trusted late copy's pairs are kept as the oldest history instead (never restored live). Hosted local players use their sidecar directly; vanilla clients use server candidates without waiting. Saving or leaving before restoration never replaces existing records with an empty pair.
+
+With `storage.trustClient: false`, client records are never instantiated. A newer client document can still **withhold** an unpaired server copy: it is parked with the reason "changed elsewhere since this server's copy", rather than duplicating items moved into the backpack on another world or by offline return. A forged revision can hold only that character's storage, not add items. Parked storage can be explicitly returned through the admin-only orphan-return command described below.
+
+Offline return adds up to 8 explicit `returns` markers to the storage document. A marker records its positive revision and the old/new character witnesses. When no copy pairs with the arriving character, a return marker holds a server copy outside the client's exact post-return lineage, even if that server's revision is newer and either import setting is disabled. Pre-return recovery history is not permission to restore returned records. No marker means ordinary unpaired play keeps the normal selection rule.
+
+A vanilla client sends no sidecar. If no valid client storage document arrives and Native reports extra main inventory pages, an unpaired server copy is held with reason **returned outside Kiln**. Extra backpack pages alone do not count. Another inventory mod may cause a conservative false-positive hold: nothing is deleted. A paired arrival bypasses this new hold, and the next save pairs the held state with the character, so the same arrival does not create another hold on every rejoin.
+
+The player receives a plain chat notice, including on vanilla clients. Each held key logs its player's name, character id, stack count, reason and exact release command. An admin can inspect `/playerstorage list <player>` and use `/playerstorage release <player> <key>` to return what fits to the backpack; the remainder stays parked. `<player>` is the player's name as the notice and log print it (quoted when it has spaces) or the character id, not an entity id: entity ids pass to the next player in the slot. A release needs the player in game as that character. Release is admin-only because releasing a genuine offline-return hold can duplicate items. Do not delete the sidecar or server scope to clear a warning. A key has at most 64 parked records: when live records join a held bag, they get free slot numbers after the held records. Excess keeps its original bytes in quarantine (`parked storage full`) and is logged with player/key; it is not directly releasable by the orphan-return command in this document version.
 
 ## The move from account-keyed data
 Kiln.Quests and Kiln.Skills kept `book`, `gameShadow` and `talents:<tree>` per Steam id, else account id, else host key 1.

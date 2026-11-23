@@ -78,7 +78,10 @@ oversized result is refused. Items added later are not automatically included.
 never creates an extra grave just for it. `PlayerStorageDeathEvent` reports the actual moved stacks and destination.
 
 A filter or slot-count change never deletes saved records: rejects and overflow wait parked. Bad/unknown records are
-quarantined. `PlayerStorageParkedEvent` and `PlayerStorageStatus` explain the outcome. Parking does not authorize
+quarantined. Each key has only one parked bag (64 records). When live records join an existing held bag, held records
+and their reason take priority; joining records get free slot numbers, and excess is preserved in quarantine as
+`parked storage full`, not deleted. See the [persistence limits](../services/player-storage.md#saving-travel-removal-and-trust).
+`PlayerStorageParkedEvent` and `PlayerStorageStatus` explain the outcome. Parking does not authorize
 silently retargeting a saved ammo selection after rebuilding; the public storage object has no selection setter.
 External-cell ammo firing/debit/cycling must be verified separately from the storage of ammunition.
 

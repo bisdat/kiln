@@ -1,1 +1,8 @@
 #nullable enable
+Kiln.CharacterSettings.Storage.get -> Kiln.PlayerStorageSettings!
+Kiln.CharacterSettings.Storage.init -> void
+Kiln.PlayerStorageSettings
+Kiln.PlayerStorageSettings.PlayerStorageSettings() -> void
+Kiln.PlayerStorageSettings.TrustClient.get -> bool
+Kiln.PlayerStorageSettings.TrustClient.init -> void
+static Kiln.Saves.PlayerStoragePersistenceFailure.get -> string?
