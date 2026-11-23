@@ -2,10 +2,6 @@
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
-## services/kiln_example.h — service `kiln.example`
-### KilnExampleApi — 16 bytes
-- kiln_example.h `KilnExampleApi.steps` @8
-
 ## services/kiln_gamedata.h — service `kiln.gamedata`
 ### KilnGamedataApi — 160 bytes
 - kiln_gamedata.h `KilnGamedataApi.status` @8 — JSON {ready, sections: {name: {available, count, changed}}, configs, externals, definitions, detail}.
@@ -158,6 +154,24 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_items.h `KilnItemsApi.container_rename` @368 `0.2.13` — Checks the request now and queues the rename for the next Pre, where it runs through the game's own rename.
 - kiln_items.h `KilnItemsApi.rename_status` @376 `0.2.13` — any thread
 - kiln_items.h `KilnItemsApi.give_equip` @384 `0.2.15` — Since 0.2.0-dev.30.6; appended at 384, table end 392.
+
+## services/kiln_items_storage.h — service `kiln.items.storage`
+### KilnItemsStorageApi — 128 bytes
+- kiln_items_storage.h `KilnItemsStorageApi.register_storage` @8 `0.2.16` — Registers one storage for every player.
+- kiln_items_storage.h `KilnItemsStorageApi.holder` @16 `0.2.16` — The player's holder of a registration.
+- kiln_items_storage.h `KilnItemsStorageApi.state` @24 `0.2.16` — The player's state of a registration (any status).
+- kiln_items_storage.h `KilnItemsStorageApi.set_ref` @32 `0.2.16` — Points the player's reference slot equip_slot (keen::EquipmentSlot 12, 14, 15 or 16) at the storage's cell...
+- kiln_items_storage.h `KilnItemsStorageApi.status` @40 `0.2.16` — The service's state.
+- kiln_items_storage.h `KilnItemsStorageApi.list` @48 `0.2.16` — Every key of the player: its registrations (any status) and its parked keys, sorted by key.
+- kiln_items_storage.h `KilnItemsStorageApi.next_event` @56 `0.2.16` — The oldest event with seq > after_seq (the queue keeps the newest 256).
+- kiln_items_storage.h `KilnItemsStorageApi.return_parked` @64 `0.2.16` — Rebuilds every parked record of 'key' (any reason) into 'target', in the next sim step: the player itself...
+- kiln_items_storage.h `KilnItemsStorageApi.persist_bind` @72 `0.2.16` — Claims the persist rows for 'owner' and sets its stage function (fn = NULL keeps the claim without one...
+- kiln_items_storage.h `KilnItemsStorageApi.take_frozen` @80 `0.2.16` — Copies batch 'tag': its header, captures, entries and records.
+- kiln_items_storage.h `KilnItemsStorageApi.release_frozen` @88 `0.2.16` — Drops batch 'tag': Kiln.Saves has it, committed or staged on its own.
+- kiln_items_storage.h `KilnItemsStorageApi.witness_of` @96 `0.2.16` — The current join of the game's player slot 'slot': W_g and the character the game read.
+- kiln_items_storage.h `KilnItemsStorageApi.restore` @104 `0.2.16` — Restores the chosen document for join 'join' of slot 'slot' (once per join, at any time after the game...
+- kiln_items_storage.h `KilnItemsStorageApi.park` @112 `0.2.16` — Parks the player's storage 'key' in the next sim step: its holder's contents are frozen into a PARKED...
+- kiln_items_storage.h `KilnItemsStorageApi.unpark` @120 `0.2.16` — Puts the player's parked records of 'key' (any reason) back into its holder in the next sim step: each...
 
 ## services/kiln_launch.h — service `kiln.launch`
 ### KilnLaunchApi — 24 bytes
