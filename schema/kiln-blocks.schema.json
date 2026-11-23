@@ -563,7 +563,7 @@
         "tweak": { "$ref": "#/$defs/tweak" },
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
-        "seconds": { "type": "number", "exclusiveMinimum": 0, "description": "How long it lasts unless whoever applies it says otherwise. Not needed with while." },
+        "seconds": { "type": "number", "description": "How long it lasts unless whoever applies it says otherwise. Not needed with while.", "minimum": 0 },
         "while": { "$ref": "#/$defs/state", "description": "A player has it for as long as they are in this state." },
         "kind": { "enum": ["debuff", "buff"] },
         "look": { "enum": ["frost", "poison", "fire"], "description": "Its icon and body effect. Default: a timer's icon for a debuff, a blessing's for a buff, and no body effect." },
@@ -585,8 +585,7 @@
         "onExpire": { "$ref": "#/$defs/effects" },
         "was": { "$ref": "#/$defs/name", "description": "The name this block had before a rename. Ids come from the oldest name, so saves keep it." }
       },
-      "additionalProperties": false
-    },
+      "additionalProperties": false, "allOf": [{"if": {"not": {"required": ["while"]}}, "then": {"properties": {"seconds": {"exclusiveMinimum": 0}}}}] },
     "cast": {
       "type": "object",
       "description": "How a spell or an ability is cast: animation, timing, costs.",
@@ -646,7 +645,7 @@
     },
     "delivery": {
       "description": "How it gets there: a flight, or one of the deliveries placed where the caster is.",
-      "oneOf": [ { "$ref": "#/$defs/projectile" }, { "type": "object", "required": ["type", "effects"], "description": "Only the caster.", "properties": { "type": { "const": "self" }, "effects": { "$ref": "#/$defs/effects" }, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "radius", "effects"], "description": "Everyone around the caster.", "properties": { "type": { "const": "around" }, "radius": { "type": "number", "exclusiveMinimum": 0, "description": "Metres." }, "effects": { "$ref": "#/$defs/effects" }, "affects": {}, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "effects"], "description": "Everyone in a cone in front of the caster.", "properties": { "type": { "const": "cone" }, "range": { "type": "number", "exclusiveMinimum": 0, "description": "Metres (default 8)." }, "angle": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180, "description": "Its whole width in degrees (default 60)." }, "effects": { "$ref": "#/$defs/effects" }, "affects": {}, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "effects"], "description": "Everyone along a line in front of the caster, through walls.", "properties": { "type": { "const": "beam" }, "range": { "type": "number", "exclusiveMinimum": 0, "description": "Metres (default 20)." }, "width": { "type": "number", "exclusiveMinimum": 0, "description": "Metres across (default 1)." }, "seconds": { "type": "number", "minimum": 0, "description": "How long it keeps hitting, turning with the caster. 0 (default): one hit." }, "tickEvery": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds between hits (default 0.25)." }, "effects": { "$ref": "#/$defs/effects" }, "affects": {}, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "radius", "seconds", "effects"], "description": "A place that keeps hitting whoever is in it.", "properties": { "type": { "const": "zone" }, "radius": { "type": "number", "exclusiveMinimum": 0, "description": "Metres." }, "seconds": { "type": "number", "exclusiveMinimum": 0 }, "tickEvery": { "type": "number", "exclusiveMinimum": 0, "description": "Default 1." }, "ahead": { "type": "number", "description": "Metres in front of the caster (default 0)." }, "effects": { "$ref": "#/$defs/effects" }, "affects": {}, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "effects"], "description": "From the first in front of the caster on to the next within reach of each, never the same twice.", "properties": { "type": { "const": "chain" }, "range": { "type": "number", "exclusiveMinimum": 0, "description": "Metres to the first (default 15)." }, "angle": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180, "description": "How wide the caster looks for the first (default 120)." }, "jumps": { "type": "integer", "minimum": 0, "maximum": 8, "description": "How many after the first (default 2)." }, "jumpRange": { "type": "number", "exclusiveMinimum": 0, "description": "Metres from one to the next (default 6)." }, "effects": { "$ref": "#/$defs/effects" }, "affects": {}, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false }, { "type": "object", "required": ["type", "template"], "description": "Something spawned in front of the caster, as its child, at its level and of its faction.", "properties": { "type": { "const": "summon" }, "template": { "type": "string", "minLength": 1, "description": "A game template's name, or a template's GUID." }, "count": { "type": "integer", "minimum": 1, "maximum": 16 }, "ahead": { "type": "number", "description": "Metres in front of the caster (default 2)." }, "seconds": { "type": "number", "exclusiveMinimum": 0, "description": "When they are taken away. Default: they live on." }, "look": {}, "vfx": {}, "tweak": {} }, "allOf": [ { "$ref": "#/$defs/placed" } ], "additionalProperties": false } ]
+      "oneOf": [{"$ref": "#/$defs/projectile"}, {"type": "object", "required": ["type", "effects"], "description": "Only the caster.", "properties": {"type": {"const": "self"}, "effects": {"$ref": "#/$defs/effects"}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "radius", "effects"], "description": "Everyone around the caster.", "properties": {"type": {"const": "around"}, "radius": {"type": "number", "exclusiveMinimum": 0, "description": "Metres."}, "effects": {"$ref": "#/$defs/effects"}, "affects": {}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "effects"], "description": "Everyone in a cone in front of the caster.", "properties": {"type": {"const": "cone"}, "range": {"type": "number", "exclusiveMinimum": 0, "description": "Metres (default 8)."}, "angle": {"type": "number", "exclusiveMinimum": 0, "description": "Whole cone aperture in degrees, more than 0 and at most 360; 360 reaches all around.", "maximum": 360}, "effects": {"$ref": "#/$defs/effects"}, "affects": {}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "effects"], "description": "Everyone along a line in front of the caster, through walls.", "properties": {"type": {"const": "beam"}, "range": {"type": "number", "exclusiveMinimum": 0, "description": "Metres (default 20)."}, "width": {"type": "number", "exclusiveMinimum": 0, "description": "Metres across (default 1)."}, "seconds": {"type": "number", "minimum": 0, "description": "How long it keeps hitting, turning with the caster. 0 (default): one hit."}, "tickEvery": {"type": "number", "exclusiveMinimum": 0, "description": "Seconds between hits (default 0.25)."}, "effects": {"$ref": "#/$defs/effects"}, "affects": {}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "radius", "seconds", "effects"], "description": "A place that keeps hitting whoever is in it.", "properties": {"type": {"const": "zone"}, "radius": {"type": "number", "exclusiveMinimum": 0, "description": "Metres."}, "seconds": {"type": "number", "exclusiveMinimum": 0}, "tickEvery": {"type": "number", "exclusiveMinimum": 0, "description": "Default 1."}, "ahead": {"type": "number", "description": "Metres in front of the caster (default 0)."}, "effects": {"$ref": "#/$defs/effects"}, "affects": {}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "effects"], "description": "From the first in front of the caster on to the next within reach of each, never the same twice.", "properties": {"type": {"const": "chain"}, "range": {"type": "number", "exclusiveMinimum": 0, "description": "Metres to the first (default 15)."}, "angle": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180, "description": "How wide the caster looks for the first (default 120)."}, "jumps": {"type": "integer", "minimum": 0, "maximum": 8, "description": "How many after the first (default 2)."}, "jumpRange": {"type": "number", "exclusiveMinimum": 0, "description": "Metres from one to the next (default 6)."}, "effects": {"$ref": "#/$defs/effects"}, "affects": {}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}, {"type": "object", "required": ["type", "template"], "description": "Something spawned in front of the caster, as its child, at its level and of its faction.", "properties": {"type": {"const": "summon"}, "template": {"type": "string", "minLength": 1, "description": "A game template's name, or a template's GUID."}, "count": {"type": "integer", "minimum": 1, "maximum": 16}, "ahead": {"type": "number", "description": "Metres in front of the caster (default 2)."}, "seconds": {"type": "number", "exclusiveMinimum": 0, "description": "When they are taken away. Default: they live on."}, "look": {}, "vfx": {}, "tweak": {}}, "allOf": [{"$ref": "#/$defs/placed"}], "additionalProperties": false}]
     },
     "state": {
       "type": "string",
@@ -747,8 +746,7 @@
         },
         "was": { "$ref": "#/$defs/name" }
       },
-      "additionalProperties": false
-    },
+      "additionalProperties": false, "allOf": [{"if": {"required": ["game"]}, "then": {"properties": {"maxLevel": {"maximum": 7}, "pointsSpent": {"const": 0}, "characterLevel": {"const": 0}, "requireAll": {"const": false}}, "not": {"anyOf": [{"required": ["column"]}, {"required": ["row"]}]}}}] },
     "talentTree": {
       "type": "object",
       "required": ["name", "nodes"],
@@ -1196,14 +1194,14 @@
         "power": { "type": "integer", "exclusiveMinimum": 0, "description": "How hard it bites: an axe's wood damage, a pickaxe's or a sieve's stone damage (the rest scales along), a rake's flattening strength (the game's: 500, 1000)." },
         "staminaCost": { "type": "integer", "minimum": 0, "description": "Stamina each use costs; the tooltip follows. Not for a fishing rod or a torch." },
         "range": { "type": "number", "exclusiveMinimum": 0, "maximum": 32, "description": "Metres: how far a rake flattens around where it aims (3), how far a grappling hook reaches (13.5)." },
-        "durability": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds a torch burns while held, the tooltip's Duration (600). Only a torch." },
+        "durability": { "type": "number", "exclusiveMinimum": 0, "description": "Seconds a torch burns while held, the tooltip's Duration (600). Only a torch.", "maximum": 2147483647 },
         "breaksInto": { "$ref": "#/$defs/itemRef", "description": "What it becomes when its durability runs out: a game item or an item of this mod. A torch, or a tool with enhancement slots." },
         "wearPerDebit": { "type": "integer", "minimum": 0, "maximum": 32767, "description": "What each of the game's wear debits costs the tool's durability (1: the game's own; 0: it does not wear). Per debit, not per swing. A tool with enhancement slots (an axe, a pickaxe, a sieve). Set where the world runs. Needs items.tool_wear_debit." },
         "fishing": {
           "type": "object", "additionalProperties": false, "description": "A fishing rod's pull and stamina.",
           "properties": {
-            "strength": { "type": "number", "exclusiveMinimum": 0, "description": "The tooltip's Strength (1, 2)." },
-            "endurance": { "type": "number", "exclusiveMinimum": 0, "description": "The tooltip's Endurance (30, 45)." }
+            "strength": { "type": "number", "exclusiveMinimum": 0, "description": "The tooltip's Strength (1, 2).", "maximum": 3.4028234663852886e+38 },
+            "endurance": { "type": "number", "exclusiveMinimum": 0, "description": "The tooltip's Endurance (30, 45).", "maximum": 3.4028234663852886e+38 }
           }
         }
       },
@@ -1512,7 +1510,7 @@
     },
     "animClip": {
       "description": "What a state plays: a glTF animation's name, or { \"clip\": name, ... }, or { \"blend\": ... }.",
-      "oneOf": [ { "type": "string", "minLength": 1 }, { "type": "object", "additionalProperties": false, "anyOf": [ { "required": ["clip"] }, { "required": ["blend"] } ], "properties": { "clip": { "type": "string", "minLength": 1, "description": "The glTF animation." }, "blend": { "$ref": "#/$defs/animBlend" }, "speed": { "type": "number", "description": "Faster above 1.", "minimum": 0 }, "loop": { "type": "boolean" }, "then": { "type": "string", "description": "The state it moves on to when its clip ends." }, "rootMotion": { "type": "boolean" }, "blendIn": { "type": "number", "description": "Seconds it blends in over.", "minimum": 0 }, "reference": { "type": "string", "description": "On hit: the animation its pose is relative to." }, "bones": { "type": "array", "items": { "type": "string" } } } } ]
+      "oneOf": [{"type": "string", "minLength": 1}, {"type": "object", "additionalProperties": false, "anyOf": [{"required": ["clip"]}, {"required": ["blend"]}], "properties": {"clip": {"type": "string", "minLength": 1, "description": "The glTF animation."}, "blend": {"$ref": "#/$defs/animBlend"}, "speed": {"type": "number", "description": "Faster above 1.", "exclusiveMinimum": 0}, "loop": {"type": "boolean"}, "then": {"type": "string", "description": "The state it moves on to when its clip ends."}, "rootMotion": {"type": "boolean"}, "blendIn": {"type": "number", "description": "Seconds it blends in over.", "minimum": 0}, "reference": {"type": "string", "description": "On hit: the animation its pose is relative to."}, "bones": {"type": "array", "items": {"type": "string"}}}}]
     },
     "animBlend": {
       "type": "object",
@@ -1521,7 +1519,7 @@
       "description": "Animations mixed by an input.",
       "properties": {
         "input": { "type": "string", "description": "moveDirection, hitDirection, lookYaw, ..., or a name of your own." },
-        "clips": { "type": "object", "propertyNames": { "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }, "additionalProperties": { "type": "string" } },
+        "clips": { "type": "object", "propertyNames": { "pattern": "^[ \\t\\r\\n]*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?[ \\t\\r\\n]*$" }, "additionalProperties": { "type": "string" }, "minProperties": 2 },
         "circular": { "type": "boolean" }
       }
     },
@@ -1548,7 +1546,7 @@
       "description": "How a body moves: a glTF of the mod with its clips (cooked when the mod builds), the engine's states and your own. Or a premade: \"like\".",
       "properties": {
         "like": { "type": "string", "enum": ["vukah", "scavenger", "fisher", "villager"] },
-        "clips": { "type": "string", "pattern": "\\.([gG][lL][bB]|[gG][lL][tT][fF])$", "description": "The glTF file, its path in the mod's folder." },
+        "clips": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$", "description": "The glTF file, its path in the mod's folder." },
         "skeleton": { "type": "string" },
         "retarget": {
           "type": "object",
@@ -1567,7 +1565,7 @@
           }
         },
         "template": { "type": "string", "description": "A game creature whose graph this is." },
-        "states": { "type": "object", "description": "States of your own, by name.", "additionalProperties": { "$ref": "#/$defs/animClip" } },
+        "states": { "type": "object", "description": "States of your own, by name.", "additionalProperties": { "$ref": "#/$defs/animClip" }, "propertyNames": {"not": {"anyOf": [{"pattern": "^(?:[iI][dD][lL][eE]|[wW][aA][lL][kK]|[rR][uU][nN]|[sS][pP][rR][iI][nN][tT]|[iI][dD][lL][eE][cC][oO][mM][bB][aA][tT]|[fF][aA][lL][lL]|[iI][dD][lL][eE][sS][nN][eE][aA][kK]|[sS][nN][eE][aA][kK]|[dD][eE][aA][dD]|[sS][tT][uU][nN])$"}, {"pattern": "^(?:0[xX]|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"}, {"const": "Stagger"}]}} },
         "layers": { "type": "array", "items": { "$ref": "#/$defs/animLayer" } },
         "idle": { "$ref": "#/$defs/animClip" },
         "walk": { "$ref": "#/$defs/animClip" },
@@ -1581,14 +1579,13 @@
         "stun": { "$ref": "#/$defs/animClip" },
         "hit": { "$ref": "#/$defs/animClip" },
         "stagger": { "$ref": "#/$defs/animClip", "description": "What a hit reaction, a stun or a parry plays over the whole body. Default: the hit clip once, else Idle." }
-      }
-    },
+      }, "allOf": [{"anyOf": [{"required": ["clips"]}, {"required": ["template"]}, {"required": ["like"]}]}, {"if": {"required": ["clips"]}, "then": {"required": ["idle"], "not": {"anyOf": [{"required": ["template"]}, {"required": ["like"]}]}}}, {"if": {"anyOf": [{"required": ["template"]}, {"required": ["like"]}]}, "then": {"not": {"anyOf": [{"required": ["idle"]}, {"required": ["walk"]}, {"required": ["run"]}, {"required": ["sprint"]}, {"required": ["idleCombat"]}, {"required": ["fall"]}, {"required": ["idleSneak"]}, {"required": ["sneak"]}, {"required": ["dead"]}, {"required": ["stun"]}, {"required": ["hit"]}, {"required": ["stagger"]}]}, "properties": {"states": {"maxProperties": 0}, "layers": {"maxItems": 0}}}}, {"properties": {"hit": {"not": {"required": ["blend"], "type": "object"}}}}] },
     "collider": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "shape": { "enum": ["capsule", "sphere"] },
-        "radius": { "type": "number", "description": "Metres.", "minimum": 0 },
+        "radius": { "type": "number", "description": "Metres.", "exclusiveMinimum": 0 },
         "height": { "type": "number", "description": "Metres, a capsule's caps included.", "minimum": 0 }
       }
     },
@@ -1599,21 +1596,20 @@
       "properties": {
         "like": { "type": "string", "enum": ["vukah", "scavenger", "fisher", "villager"] },
         "template": { "type": "string" },
-        "model": { "type": "string", "pattern": "\\.([gG][lL][bB]|[gG][lL][tT][fF])$" },
+        "model": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$" },
         "skeleton": { "type": "string" },
-        "scale": { "type": "number", "description": "1 as modelled.", "minimum": 0, "maximum": 20 },
+        "scale": { "type": "number", "description": "1 as modelled.", "maximum": 20, "exclusiveMinimum": 0 },
         "colliders": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/collider" } },
         "slots": { "type": "object", "description": "The game's attachment slots on joints: { \"HandR\": \"hand_r\" }.", "additionalProperties": { "type": "string" } },
         "size": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["radius", "height"],
-          "properties": { "radius": { "type": "number", "description": "Metres.", "minimum": 0 }, "height": { "type": "number", "description": "Metres.", "minimum": 0 } }
+          "required": ["height"],
+          "properties": { "radius": { "type": "number", "description": "Metres, at least 0; omitted: 0.", "minimum": 0 }, "height": { "type": "number", "description": "Metres.", "exclusiveMinimum": 0 } }
         },
         "workshop": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
         "tool": { "type": "string" }
-      }
-    },
+      }, "allOf": [{"anyOf": [{"required": ["model"]}, {"required": ["template"]}, {"required": ["like"]}]}, {"if": {"anyOf": [{"required": ["template"]}, {"required": ["like"]}]}, "then": {"not": {"anyOf": [{"required": ["model"]}, {"required": ["colliders"]}, {"required": ["slots"]}, {"required": ["size"]}]}}}] },
     "ai": {
       "type": "object",
       "additionalProperties": false,
@@ -1629,7 +1625,7 @@
         "moves": { "type": "boolean" },
         "fights": { "type": "boolean" },
         "pickTarget": { "type": "string", "description": "A picker registered with Blocks.Target." },
-        "pickEvery": { "type": "number", "description": "Seconds.", "minimum": 0, "maximum": 60 },
+        "pickEvery": { "type": "number", "description": "Seconds.", "maximum": 60, "exclusiveMinimum": 0 },
         "tune": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Any field of the game's AI by path." },
         "nightSight": { "type": "number", "description": "Share of its sight at night.", "minimum": 0, "maximum": 4 },
         "hears": { "type": "boolean", "description": "False: it does not react to noise." },
@@ -1712,7 +1708,7 @@
         "on": {
           "enum": ["onUpdate", "onEnter", "onExit", "onStartAttack", "onEndAttack", "onEnterState", "onExitState", "OnUpdate", "OnEnter", "OnExit", "OnStartAttack", "OnEndAttack", "OnEnterState", "OnExitState"]
         },
-        "every": { "type": "number", "description": "Seconds.", "minimum": 0, "maximum": 3600 },
+        "every": { "type": "number", "description": "Seconds.", "maximum": 3600, "exclusiveMinimum": 0 },
         "cooldown": { "type": "number", "description": "Seconds.", "minimum": 0 },
         "chance": { "type": "number", "description": "0..1.", "minimum": 0, "maximum": 1 },
         "when": { "type": "array", "items": { "$ref": "#/$defs/condition" } },
@@ -1726,19 +1722,18 @@
       "properties": {
         "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
         "plays": { "type": "string" },
-        "range": { "type": "number", "description": "Metres.", "minimum": 0, "maximum": 200 },
-        "minRange": { "type": "number", "description": "Metres.", "minimum": 0 },
+        "range": { "type": "number", "description": "Metres.", "maximum": 200, "exclusiveMinimum": 0 },
+        "minRange": { "type": "number", "description": "Metres, at least 0 and strictly less than range (default range 2.5); kiln lint checks the relationship.", "minimum": 0 },
         "cooldown": { "type": "number", "description": "Seconds.", "minimum": 0 },
         "style": { "type": "array", "items": { "type": "string" } },
         "chance": { "type": "number", "description": "0..1.", "minimum": 0, "maximum": 1 },
-        "hitAt": { "type": "number", "description": "Seconds into it.", "minimum": 0 },
-        "length": { "type": "number", "description": "Seconds.", "minimum": 0, "maximum": 30 },
-        "angle": { "type": "number", "description": "Degrees in front.", "minimum": 0, "maximum": 360 },
-        "onHit": { "type": "array", "items": { "$ref": "#/$defs/effectRef" } },
+        "hitAt": { "type": "number", "description": "Seconds into it, at least 0 and strictly less than length when supplied; kiln lint checks the relationship. A cooked clip can impose a shorter length at runtime.", "minimum": 0 },
+        "length": { "type": "number", "description": "Seconds.", "maximum": 30, "exclusiveMinimum": 0 },
+        "angle": { "type": "number", "description": "Whole cone aperture in degrees, more than 0 and at most 360. 360 hits all around; 359 leaves a one-degree gap behind.", "maximum": 360, "exclusiveMinimum": 0 },
+        "onHit": { "type": "array", "items": { "$ref": "#/$defs/effectRef" }, "minItems": 1 },
         "delivery": { "$ref": "#/$defs/delivery" },
         "sequence": { "$ref": "#/$defs/guid" }
-      }
-    },
+      }, "allOf": [{"if": {"required": ["sequence"]}, "then": {"not": {"anyOf": [{"required": ["plays"]}, {"required": ["onHit"]}, {"required": ["delivery"]}]}}}, {"if": {"not": {"required": ["sequence"]}}, "then": {"required": ["plays"], "oneOf": [{"required": ["onHit"], "not": {"anyOf": [{"required": ["delivery"]}]}}, {"required": ["delivery"], "not": {"anyOf": [{"required": ["onHit"]}]}}]}}] },
     "behaviour": {
       "type": "object",
       "additionalProperties": false,
@@ -1750,7 +1745,7 @@
         "rules": { "type": "array", "maxItems": 32, "items": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/rule" } ] } },
         "phases": { "type": "array", "items": { "type": "string" } },
         "pickAttack": { "type": "string" },
-        "pickEvery": { "type": "number", "description": "Seconds.", "minimum": 0, "maximum": 60 },
+        "pickEvery": { "type": "number", "description": "Seconds.", "maximum": 60, "exclusiveMinimum": 0 },
         "brain": { "type": "string", "description": "A brain registered with Blocks.Brain." },
         "perception": {
           "type": "object",
@@ -1793,8 +1788,7 @@
         "chance": { "type": "number", "description": "0..1.", "minimum": 0, "maximum": 1 },
         "nightOnly": { "type": "boolean" },
         "dayOnly": { "type": "boolean" }
-      }
-    },
+      }, "allOf": [{"not": {"required": ["nightOnly", "dayOnly"], "properties": {"nightOnly": {"const": true}, "dayOnly": {"const": true}}}}] },
     "creature": {
       "type": "object",
       "additionalProperties": false,
@@ -1821,9 +1815,9 @@
         "name": { "type": "string", "minLength": 1 },
         "was": { "type": "string" },
         "body": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/body" } ] },
-        "animation": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/animation" } ] },
-        "ai": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/ai" } ] },
-        "behaviour": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/behaviour" } ] },
+        "animation": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/animation" } ], "not": {} },
+        "ai": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/ai" } ], "not": {} },
+        "behaviour": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/behaviour" } ], "not": {} },
         "talk": { "type": "string", "description": "A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build." },
         "names": { "type": "object", "additionalProperties": { "type": "string" } },
         "vendor": {
@@ -1834,15 +1828,13 @@
               "type": "object",
               "additionalProperties": {
                 "type": "object",
-                "required": ["item"],
+                "required": ["item", "count"],
                 "additionalProperties": false,
                 "properties": { "item": { "type": "string" }, "count": { "type": "integer", "minimum": 1 } }
-              }
-            },
+              }, "minProperties": 1 },
             "gives": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
-            "workshop": { "type": "string" }
-          }
-        },
+            "workshop": { "type": "string", "pattern": "^0x" }
+          }, "required": ["sells"] },
         "roster": {
           "type": "object",
           "additionalProperties": false,
@@ -1862,8 +1854,7 @@
             "once": { "type": "boolean" },
             "inBase": { "type": "boolean", "description": "A base is fine (default true): a friendly NPC comes as near as distance asks while the player is home. false: 20 m outside every base zone." },
             "exact": { "type": "boolean", "description": "Exactly at: no ground, no base check." }
-          }
-        }
+          }, "allOf": [{"if": {"required": ["exact"], "properties": {"exact": {"const": true}}}, "then": {"required": ["at"]}}] }
       }
     },
     "interactionRef": {
@@ -3333,8 +3324,7 @@
           "minLength": 1,
           "description": "A loot table rolled when the reward is paid: the name of a lootTables block of this mod (or \"other-mod:name\"). What comes up is given like items. A name that is no loot table refuses the quest."
         }
-      }
-    },
+      }, "minProperties": 1 },
     "questStep": {
       "type": "object",
       "additionalProperties": false,
@@ -3410,8 +3400,7 @@
             "$ref": "#/$defs/questAction"
           }
         }
-      }
-    },
+      }, "allOf": [{"anyOf": [{"required": ["text"]}, {"required": ["title"]}]}] },
     "questIdName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]+$",

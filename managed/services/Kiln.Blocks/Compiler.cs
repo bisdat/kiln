@@ -208,6 +208,7 @@ internal static partial class Compiler
     {
         if (string.IsNullOrWhiteSpace(s.Name)) throw new BlockError(ctx.Block, "name", "a status needs a name players can read");
         if (s.While == null && s.Seconds <= 0) throw new BlockError(ctx.Block, "seconds", $"{s.Seconds} must be more than 0");
+        if (s.TickEvery <= 0) throw new BlockError(ctx.Block, "tickEvery", $"{s.TickEvery} must be more than 0");
         if (s.Seconds < 0) throw new BlockError(ctx.Block, "seconds", $"{s.Seconds} is less than 0");
         var key = s.Was ?? name;
         var guid = BlockIds.Derive(ctx.Mod.Id, "buff", key);

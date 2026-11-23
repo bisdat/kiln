@@ -57,6 +57,7 @@ internal static class NpcCompiler
                 low.Json["attack"] = name;
                 return new BlockHandle<AttackBlock>(mod, name, RuleIds.Derive(mod, "attack", at.Name ?? name), at.Name ?? name, at);
             case RuleBlock r:
+                CheckRule(ctx, r, "");
                 low.Json["rule"] = name;
                 return new BlockHandle<RuleBlock>(mod, name, RuleIds.Derive(mod, "rule", r.Name ?? name), r.Name ?? name, r);
             case CreatureBlock c:
@@ -121,7 +122,7 @@ internal static class NpcCompiler
     {
         if (b.Template == null && b.Model == null) throw new BlockError(ctx.Block, Join(path, "model"), "a body is a model of the mod (a glTF file) or a game creature's: say model, or start from a premade (like)");
         if (b.Template != null && b.Model != null) throw new BlockError(ctx.Block, Join(path, "model"), $"a body is the game's {b.Template} or a model of yours, not both");
-        if (b.Scale is <= 0 or > 20) throw new BlockError(ctx.Block, Join(path, "scale"), $"{b.Scale} is outside 0..20");
+        if (b.Scale is <= 0 or > 20) throw new BlockError(ctx.Block, Join(path, "scale"), $"{b.Scale} must be more than 0 and at most 20");
         if (b.Model != null)
         {
             CheckFile(ctx, b.Model, Join(path, "model"));
@@ -132,7 +133,7 @@ internal static class NpcCompiler
         foreach (var (c, i) in (b.Colliders ?? []).Select((c, i) => (c, i)))
         {
             if (c.Shape is not ("capsule" or "sphere")) throw new BlockError(ctx.Block, Join(path, $"colliders[{i}].shape"), $"\"{c.Shape}\": capsule or sphere");
-            if (c.Radius <= 0 || c.Height < c.Radius * 2 && c.Shape == "capsule") throw new BlockError(ctx.Block, Join(path, $"colliders[{i}]"), "a radius above 0, and a capsule at least as high as it is wide");
+            if (c.Radius <= 0 || c.Height < 0 || c.Height < c.Radius * 2 && c.Shape == "capsule") throw new BlockError(ctx.Block, Join(path, $"colliders[{i}]"), "a radius above 0, a height of 0 or more, and a capsule at least as high as it is wide");
         }
         if (b.Colliders is { Count: > 2 }) throw new BlockError(ctx.Block, Join(path, "colliders"), "at most two: one for hits, one for what it bumps into");
     }
@@ -156,7 +157,7 @@ internal static class NpcCompiler
         if (a.Template == null && a.Clips == null) throw new BlockError(ctx.Block, Join(path, "clips"), "an animation is a glTF of the mod with its clips, or a game creature's: say clips, or start from a premade (like)");
         if (a.Template != null)
         {
-            if (EngineClips(a).Any() || a.States.Count > 0 || a.Hit != null || a.Layers is { Count: > 0 })
+            if (EngineClips(a).Any() || a.States.Count > 0 || a.Hit != null || a.Stagger != null || a.Layers is { Count: > 0 })
                 throw new BlockError(ctx.Block, Join(path, "states"), $"the game's graph of {a.Template} is as it is: states of your own need clips of your own");
             return;
         }
@@ -175,27 +176,30 @@ internal static class NpcCompiler
         foreach (var (state, clip) in a.States.Select(x => (x.Key.Name, x.Value)).Concat(EngineClips(a)))
             if (clip.Then is { } then && !names.Contains(then.ToString()))
                 throw new BlockError(ctx.Block, Join(path, $"states[{state}].then"), $"\"{then}\" is not a state of this animation; it has {string.Join(", ", names.Order())}");
+        if (a.Hit is { } hit) CheckClip(ctx, hit, Join(path, "hit"));
         if (a.Hit is { Blend: not null }) throw new BlockError(ctx.Block, Join(path, "hit"), "a clip, not a blend");
         if (a.Stagger is { } stg) CheckClip(ctx, stg, Join(path, "stagger"));
     }
 
     private static void CheckClip(BlockContext ctx, Clip c, string path)
     {
-        if (c.Name == null && c.Blend == null) throw new BlockError(ctx.Block, path, "a glTF animation's name, or a blend");
+        if (c.Name is { Length: 0 } || c.Name == null && c.Blend == null) throw new BlockError(ctx.Block, path, "a glTF animation's name, or a blend");
+        if (c.BlendIn is < 0) throw new BlockError(ctx.Block, $"{path}.blendIn", $"{c.BlendIn} must be at least 0");
         if (c.Speed is <= 0) throw new BlockError(ctx.Block, $"{path}.speed", $"{c.Speed} must be more than 0");
         if (c.Blend is { } b)
         {
             if (b.Clips.Count < 2) throw new BlockError(ctx.Block, $"{path}.blend.clips", "a blend mixes two animations or more");
             foreach (var k in b.Clips.Keys)
-                if (!double.TryParse(k, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
+                if (!double.TryParse(k, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var point) || !double.IsFinite(point))
                     throw new BlockError(ctx.Block, $"{path}.blend.clips", $"\"{k}\" is not a number: the input's value where that animation plays");
         }
     }
 
     private static void CheckAi(BlockContext ctx, AIBlock a, string path)
     {
-        foreach (var (field, v) in new[] { ("sight", a.Sight), ("aggro", a.Aggro), ("leash", a.Leash), ("pickEvery", a.PickEvery) })
+        foreach (var (field, v) in new[] { ("sight", a.Sight), ("aggro", a.Aggro), ("leash", a.Leash) })
             if (v is < 0 or > 1000) throw new BlockError(ctx.Block, Join(path, field), $"{v} is outside 0..1000 metres");
+        if (a.PickEvery is <= 0 or > 60) throw new BlockError(ctx.Block, Join(path, "pickEvery"), $"{a.PickEvery} must be more than 0 and at most 60 seconds");
         if (a.SightAngle is < 0 or > 180) throw new BlockError(ctx.Block, Join(path, "sightAngle"), $"{a.SightAngle} is outside 0..180 degrees");
         if (a.PickTargetName is { } n && NpcRuntime.Lookup(NpcRuntime.Targets, n) == null)
             throw new BlockError(ctx.Block, Join(path, "pickTarget"), $"no target picker \"{n}\": register it with Blocks.Target(\"{n}\", npc => ...) in OnLoad");
@@ -211,10 +215,12 @@ internal static class NpcCompiler
             throw new BlockError(ctx.Block, Join(path, "brain"), $"no brain \"{bn}\": register it with Blocks.Brain(\"{bn}\", () => new MyBrain()) in OnLoad");
         if (b.PickAttackName is { } pn && NpcRuntime.Lookup(NpcRuntime.AttackPicks, pn) == null)
             throw new BlockError(ctx.Block, Join(path, "pickAttack"), $"no attack picker \"{pn}\": register it with Blocks.AttackPicker(\"{pn}\", npc => ...) in OnLoad");
-        if (b.PickEvery is <= 0 or > 60) throw new BlockError(ctx.Block, Join(path, "pickEvery"), $"{b.PickEvery} is outside 0..60 seconds");
+        if (b.PickEvery is <= 0 or > 60) throw new BlockError(ctx.Block, Join(path, "pickEvery"), $"{b.PickEvery} must be more than 0 and at most 60 seconds");
         var attacks = b.Attacks ?? [];
         if (attacks.Count > 32) throw new BlockError(ctx.Block, Join(path, "attacks"), $"{attacks.Count} attacks: an arsenal holds 32");
         if ((b.Rules?.Count ?? 0) > 32) throw new BlockError(ctx.Block, Join(path, "rules"), $"{b.Rules!.Count} rules: an arsenal holds 32");
+        foreach (var (rule, i) in (b.Rules ?? []).Select((r, i) => (r, i)))
+            CheckRule(ctx, ctx.Part(rule, Join(path, $"rules[{i}]")), Join(path, $"rules[{i}]"));
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < attacks.Count; i++)
         {
@@ -228,11 +234,14 @@ internal static class NpcCompiler
     {
         if (a.Name is { } n && (n.Length == 0 || n.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.')))
             throw new BlockError(ctx.Block, Join(path, "name"), "letters, digits, '-', '_' and '.'");
-        if (a.Range <= 0 || a.Range > 200) throw new BlockError(ctx.Block, Join(path, "range"), $"{a.Range} is outside 0..200 metres");
-        if (a.MinRange is { } min && (min < 0 || min >= a.Range)) throw new BlockError(ctx.Block, Join(path, "minRange"), $"{min} is not between 0 and its range {a.Range}");
+        if (a.Range <= 0 || a.Range > 200) throw new BlockError(ctx.Block, Join(path, "range"), $"{a.Range} must be more than 0 and at most 200 metres");
+        if (a.MinRange is { } min && (min < 0 || min >= a.Range)) throw new BlockError(ctx.Block, Join(path, "minRange"), $"{min} must be at least 0 and less than its range {a.Range}");
         if (a.Cooldown is < 0) throw new BlockError(ctx.Block, Join(path, "cooldown"), $"{a.Cooldown} is less than 0");
         if (a.Chance is < 0 or > 1) throw new BlockError(ctx.Block, Join(path, "chance"), $"{a.Chance} is outside 0..1");
-        if (a.Angle is <= 0 or >= 360) throw new BlockError(ctx.Block, Join(path, "angle"), $"{a.Angle} is outside 0..360 degrees");
+        if (a.Angle is <= 0 or > 360) throw new BlockError(ctx.Block, Join(path, "angle"), $"{a.Angle} must be more than 0 and at most 360 degrees");
+        if (a.HitAt < 0) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be at least 0 seconds");
+        if (a.Length is { } len && a.HitAt >= len) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be less than the attack's length {len} seconds");
+        if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds");
         if (a.Sequence != null)
         {
             if (a.Plays != null || a.OnHit != null || a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "sequence"), "a game sequence plays as it is: no plays, onHit or delivery with it");
@@ -240,9 +249,15 @@ internal static class NpcCompiler
         }
         if (a.Plays == null) throw new BlockError(ctx.Block, Join(path, "plays"), "the state the attack plays: one of the animation's");
         if (a.OnHit is not { Count: > 0 } && a.Delivery == null) throw new BlockError(ctx.Block, Join(path, "onHit"), "an attack that does nothing: give it onHit or a delivery");
-        if (a.OnHit is { Count: > 0 } && a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "delivery"), "a delivery carries its own effects: onHit is for a blow");
-        if (a.HitAt < 0 || a.Length is { } len && a.HitAt >= len) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} is not inside the attack's {a.Length} seconds");
-        if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} is outside 0..30 seconds");
+        if (a.OnHit != null && a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "delivery"), "a delivery carries its own effects: onHit is for a blow");
+    }
+
+    private static void CheckRule(BlockContext ctx, RuleBlock r, string path)
+    {
+        if (r.Every <= 0 || r.Every > 3600) throw new BlockError(ctx.Block, Join(path, "every"), $"{r.Every} must be more than 0 and at most 3600 seconds");
+        if (r.Cooldown < 0) throw new BlockError(ctx.Block, Join(path, "cooldown"), $"{r.Cooldown} is less than 0");
+        if (r.Chance is < 0 or > 1) throw new BlockError(ctx.Block, Join(path, "chance"), $"{r.Chance} is outside 0..1");
+        if (r.Do.Count == 0) throw new BlockError(ctx.Block, Join(path, "do"), "a rule that does nothing");
     }
 
     // ---- cooked files -----------------------------------------------------------------------------------------------
@@ -689,10 +704,7 @@ internal static class NpcCompiler
         {
             var r = ctx.Part(rules[i], $"behaviour.rules[{i}]");
             var path = $"behaviour.rules[{i}]";
-            if (r.Every <= 0 || r.Every > 3600) throw new BlockError(ctx.Block, $"{path}.every", $"{r.Every} is outside 0..3600 seconds");
-            if (r.Cooldown < 0) throw new BlockError(ctx.Block, $"{path}.cooldown", $"{r.Cooldown} is less than 0");
-            if (r.Chance is < 0 or > 1) throw new BlockError(ctx.Block, $"{path}.chance", $"{r.Chance} is outside 0..1");
-            if (r.Do.Count == 0) throw new BlockError(ctx.Block, $"{path}.do", "a rule that does nothing");
+            CheckRule(ctx, r, path);
             var when = r.When.Select((x, k) => NpcRules.Condition(x, mod, ctx, $"{path}.when[{k}]")).ToList();
             var actions = new List<RuleAction>();
             for (var k = 0; k < r.Do.Count; k++)
@@ -793,7 +805,7 @@ internal static class NpcCompiler
             length = ClipLength(anim.Mod, anim.Block.Skeleton ?? Stem(anim.Block.Clips!), clip, false);
         length ??= Math.Max(a.HitAt + 0.5, 1.2);
         if (a.HitAt >= length) throw new BlockError(ctx.Block, $"{path}.hitAt", $"{a.HitAt} is not inside the attack's {length:0.###} seconds (its clip's length)");
-        var delivery = a.Delivery ?? new ConeBlock { Range = (float)a.Range, Angle = (float)Math.Min(a.Angle, 179), Effects = a.OnHit! };
+        var delivery = a.Delivery ?? new ConeBlock { Range = (float)a.Range, Angle = (float)a.Angle, Effects = a.OnHit! };
         var lowered = Compiler.LowerDelivery(ctx, low, akey, $"{name}.{aname}", delivery, a.Delivery != null ? $"{path}.delivery" : $"{path}.onHit", primary: false);
         var seqGuid = BlockIds.Derive(mod, "sequence", akey);
         var seqName = $"{mod}.{name}.{aname}";
@@ -891,6 +903,8 @@ internal static class NpcCompiler
         }
 
         // the quests' NPC, as it is: the engine finds it, and its roster entry goes to the boot build
+        if (n.Place?.At is { Length: not 3 }) throw new BlockError(ctx.Block, "place.at", "takes [x, y, z]");
+        if (n.Place?.Distance is { Length: not 2 }) throw new BlockError(ctx.Block, "place.distance", "takes [min, max]");
         if (n.Place is { Exact: true, At: null }) throw new BlockError(ctx.Block, "place.exact", "exactly where? It needs place.at");
         var place = n.Place is { } pl ? new QuestPlace
         {

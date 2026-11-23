@@ -110,7 +110,7 @@ How a spell, a wand's attack or an ability gets there. A spell's staff and a wan
 | `ProjectileBlock` | `Speed`, `Gravity`, `Range`, `Look`, `OnImpact` where it stops, `OnHit` on what it strikes, `Homing`, `Pierce` (it flies through that many creatures, 0..8, `OnHit` on each once, and stops at the next or at anything that is not a creature) | `projectile` |
 | `SelfBlock` | The caster | `self` |
 | `AroundBlock` | Everyone within `Radius` of the caster | `around` |
-| `ConeBlock` | Everyone within `Range`, inside `Angle` degrees of the aim | `cone` |
+| `ConeBlock` | Everyone within `Range`, inside the whole aperture `Angle` (0 < angle ≤ 360 degrees); 360 reaches all around | `cone` |
 | `BeamBlock` | Everyone along a line, `Range` long and `Width` wide. With `Seconds` it keeps hitting every `TickEvery`, turning with the caster | `beam` |
 | `ZoneBlock` | Everyone within `Radius` of a place `Ahead` of the caster, every `TickEvery`, for `Seconds` | `zone` |
 | `ChainBlock` | The first within `Range` and `Angle`, then `Jumps` more, each within `JumpRange` of the last, never one twice | `chain` |
