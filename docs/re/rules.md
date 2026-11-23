@@ -157,7 +157,17 @@ u32)`: `0x9e850` (the main checks), then bit 0 (invalid transform) from the acto
   client, the same function from `client_cursor` (`ClientCursor` +0x80 / +0x84) and the hosted world's server cursor.
 - The cursor context's first qword is the ProgramContext (both programs, both executables), so the current entity
   comes from `CurrentEntityId(ctx)` and the world kind from its job's storage.
-- A building program runs its action only when `0x393f0` gives 0: the primary or the secondary flags, by input.
+- A building program runs its action only when `0x393f0` gives 0: the primary or the secondary flags, by input. The
+  terraform impact makes the same test for a player's stroke (S `0x18e8d9`): nonzero flags end it with BuildFinish's
+  failure before any terrain work.
+- Bit 12 per input (0.2.0-dev.30.8, kiln#133, S `0x9a5b0` / `0x99750`, read-only static [dis]): each input has its own
+  query; the builder copies the held item's `equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction` (ItemInfo
+  `+0x1a4`) into the primary query `+0x47` and `...OnSecondaryAction` (`+0x1a8`) into the secondary one. Only with
+  that byte set does `0x99750` run: an item with `voxelObject` (`+0x458`) or `terrainVoxelObject` (`+0x468`) takes the
+  voxel-object branch (a blueprint registry lookup by item id, then blocks needed against stock); otherwise an
+  `IsTerraformer` item needs the query's material (`[query+0x68]`, the builder's fourth argument; none sets the bit)
+  and its stock. `Building_Overgrowth_Shape_Small` checks on primary (its Add) and not on secondary (its Remove). A
+  Kiln tool brush turns the check off on an input bound to a Remove.
 
 | Bit | `CursorFlag` | Kiln rule that clears it |
 |---|---|---|
