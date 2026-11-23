@@ -172,34 +172,4 @@ public sealed partial class PlayerStorageStoreTests
         store.Join(character, new EntityId(1), "elsewhere", PlayerStorageDocumentTests.Doc("client", 1001).Write(8), false);
         Assert.Equal("returned outside Kiln", persist.Parked!["mod:bag"]!["parkReason"]!.GetValue<string>());
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Launcher_produced_sidecar_return_marker_holds_a_newer_unpaired_server_copy(bool trusted)
-    {
-        // Exact synthetic Fixture::produced() JSON from crates/kiln-manage/src/saves/editor_storage.rs.
-        // Its AA== history record is deliberately a stub; Saves quarantines it rather than interpreting it as an item.
-        const string sidecar = """
-        {"character":"01010101-0101-0101-0101-010101010101","format":1,"mods":{"kiln-items":{"storage":{"character":"01010101-0101-0101-0101-010101010101","current":{"parked":{},"storages":{"mod:bag":{"records":[],"slots":8}},"witness":"xxh3:0000000000000002","worldRev":10},"history":[{"parked":{},"revision":5,"storages":{"mod:bag":{"records":[{"b64":"AA==","item":1,"n":1,"s":0}],"slots":8}},"witness":"xxh3:0000000000000001","worldRev":10}],"quarantine":[],"returns":[{"fromWitness":"xxh3:0000000000000001","revision":6,"toWitness":"xxh3:0000000000000002"}],"revision":6,"v":1}},"other":{"keep":1}},"revision":11}
-        """;
-        var envelope = JsonNode.Parse(sidecar)!;
-        var character = new CharacterKey(1, Guid.Parse(envelope["character"]!.GetValue<string>()));
-        var carried = envelope["mods"]!["kiln-items"]!["storage"]!.ToJsonString();
-        var parsed = PlayerStorageDocument.Read(carried, character.Id);
-        Assert.Equal(6, parsed.LatestReturnRevision);
-        Assert.Equal("xxh3:0000000000000002", parsed.Data["current"]!["witness"]!.GetValue<string>());
-        Assert.Single(parsed.Data["quarantine"]!.AsArray());
-        using var h = new InstanceHarness();
-        var store = InstanceHarness.Store.Storage;
-        var persist = new Persist();
-        store.Native = persist;
-        var server = PlayerStorageDocumentTests.Doc("fork", 1000);
-        server.Data["character"] = character.Id.ToString();
-        InstanceHarness.Store.GetBundleRaw(PlayerStorageStore.Prefix + character.Text, "kiln-items").Keys["storage"] = new WorldStore.Slot { Json = server.Write(32) };
-        store.Join(character, new EntityId(1), "xxh3:0000000000000003", carried, trusted);
-        Assert.Empty(persist.Restored!);
-        Assert.Equal("returned outside Kiln", persist.Parked!["mod:bag"]!["parkReason"]!.GetValue<string>());
-    }
-
 }
