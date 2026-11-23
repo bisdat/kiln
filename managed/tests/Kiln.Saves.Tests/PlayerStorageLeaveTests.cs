@@ -104,3 +104,41 @@ public sealed partial class PlayerStorageStoreTests
         finally { store.Native = null; }
     }
 }
+
+public sealed partial class PlayerStorageStoreTests
+{
+    [Fact]
+    public void A_late_offer_after_the_join_timeout_never_swaps_live_storage_and_its_pairs_are_kept()
+    {
+        // The player's offer came after the 15-second window: storage was restored from this server's copy. The late copy
+        // must not replace live storage, but this server's next carried update replaces the player's sidecar value, so the
+        // late copy's pairs ride on as history instead of disappearing (it may be the only copy, e.g. of a deleted world).
+        using var h = new InstanceHarness();
+        var persist = new Persist { JoinWitness = "elsewhere" };
+        var store = InstanceHarness.Store.Storage;
+        store.Native = persist;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            InstanceHarness.Store.GetBundleRaw(PlayerStorageStore.Prefix + character.Text, "kiln-items").Keys["storage"] =
+                new WorldStore.Slot { Json = PlayerStorageDocumentTests.Doc("server", 10, slot: 1).Write(32) };
+            var type = typeof(CharacterSync).GetNestedType("Session", BindingFlags.NonPublic)!;
+            var session = Activator.CreateInstance(type, Hidden, null, [character, new EntityId(1), "late player"], null)!;
+            var window = (StorageOfferWindow)type.GetField("StorageWindow", Hidden)!.GetValue(session)!;
+            Assert.True(window.Poll(ulong.MaxValue / 2, vanilla: false));
+            Assert.True(window.TimedOut);
+            typeof(CharacterSync).GetMethod("RestoreStorage", Hidden)!.Invoke(null, [session]);   // server copy only
+            var restored = persist.Restored!.ToJsonString();
+            var late = PlayerStorageDocumentTests.Doc("elsewhere", 20, slot: 5);                  // pairs with the character
+            var offered = new Dictionary<string, Dictionary<string, string>> { ["kiln-items"] = new() { ["storage"] = late.Write(8) } };
+            typeof(CharacterSync).GetMethod("Decide", Hidden)!.Invoke(null, [session, 1L, offered]);
+            Assert.Equal(restored, persist.Restored!.ToJsonString());                             // no live swap
+            h.Save(1);
+            var carried = PlayerStorageDocument.Read(store.Carried(character)!, character.Id);
+            var kept = carried.Data["history"]!.AsArray().OfType<JsonObject>().Single(p => p["witness"]!.GetValue<string>() == "elsewhere");
+            Assert.Equal(5, kept["storages"]!["mod:bag"]!["records"]![0]!["s"]!.GetValue<int>());
+            Assert.Contains(store.Read(character)!.Data["history"]!.AsArray().OfType<JsonObject>(), p => p["witness"]!.GetValue<string>() == "elsewhere");
+        }
+        finally { store.Native = null; }
+    }
+}
