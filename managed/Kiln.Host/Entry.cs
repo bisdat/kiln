@@ -782,6 +782,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
             _mods.ProcessRequests();
             var tick = HostAccess.Tick(MenuStepBase + ++_menuStep, 0, 0, 0, 0);
             RunServiceTick(in tick);
+            _mods.TickRegistry();
         }
     }
 

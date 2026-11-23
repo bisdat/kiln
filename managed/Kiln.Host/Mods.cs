@@ -1122,6 +1122,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
 
     public void Pre(in TickInfo tick, IReadOnlyList<(LogLevel Level, string Text)> gameLines)
     {
+        TickRegistry();
         while (_unobserved.TryDequeue(out var lost)) AttributeUnobserved(lost);
         FinishWaitingUnloads();
         foreach (var mod in _mods)

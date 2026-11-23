@@ -10,7 +10,8 @@ internal sealed class FakeHost : IHostServices, IKilnBackend
 {
     public FakeHost() => Backend.Current = this;
     public string Version => "0.1.0-dev";
-    public bool IsTickThread => true;
+    public Func<bool>? TickThread;
+    public bool IsTickThread => TickThread?.Invoke() ?? true;
     public bool HasFeature(string name) => name != "no.such.feature";
     public void Log(ulong owner, LogLevel level, string text) => Log(level, text);
     public readonly Dictionary<string, nint> Services = [];

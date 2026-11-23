@@ -23,6 +23,44 @@ public sealed class RegistryDispatchTests : ModsFixture
         public override void OnRegistry(RegistryContext context) => callback(context);
     }
     [Fact]
+    public void ForeignReadyWaitsForTheNextHostPreBeforeRunningRuntimeAuthors()
+    {
+        using var native = new FakeRegistry { Phase = 0 };
+        using var manager = NewManager(native.Host);
+        manager.PrepareRegistry(100);
+        var dispatch = Assert.IsType<RegistryDispatch>(RegistryRuntime.Host);
+        var tick = Environment.CurrentManagedThreadId;
+        var threads = new List<int>();
+        var owner = Owner(native, "pending");
+        dispatch.Loaded(new Author(_ => threads.Add(Environment.CurrentManagedThreadId)), owner, Root, false);
+        dispatch.FlushLoads(); Assert.Empty(threads);
+        var loader = new Thread(() => { native.Phase = 4; native.FireReady(); });
+        loader.Start(); loader.Join();
+        Assert.Empty(threads);
+        manager.Pre(Tick(1), []);
+        Assert.Equal(new[] { tick, tick, tick }, threads);
+        owner.Retire();
+    }
+    [Fact]
+    public void RuntimeDrainsAndManualChangesRefuseAForeignThread()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "threaded");
+        var tick = Environment.CurrentManagedThreadId;
+        native.Host.TickThread = () => Environment.CurrentManagedThreadId == tick;
+        Exception? drain = null, manual = null;
+        var worker = new Thread(() => {
+            drain = Record.Exception(dispatch.FlushLoads);
+            manual = Record.Exception(() => RegistryRuntime.Manual!(owner, c => Edit(c, 90)));
+        });
+        worker.Start(); worker.Join();
+        Assert.IsType<InvalidOperationException>(drain);
+        Assert.IsType<InvalidOperationException>(manual);
+        Assert.Equal(0, native.Submits);
+        owner.Retire();
+    }
+    [Fact]
     public void AllAlterPassesPrecedeFinalAndAllFinalsReadTheAlterView()
     {
         using var native = new FakeRegistry(); using var manager = NewManager(native.Host);

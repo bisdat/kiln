@@ -36,6 +36,12 @@ internal sealed unsafe class FakeRegistry : IDisposable
         Host.Services["kiln.registry"] = (nint)Stage;
         Host.Services["kiln.registry.live"] = (nint)Live;
     }
+    internal void FireReady()
+    {
+        var info = new RegistryReadyInfo { Size = 24, Phase = Phase, Generation = ++Generation, World = 1 };
+        foreach (var callback in _callbacks.Values.Where(c => c.Ready).ToArray())
+            ((delegate* unmanaged[Cdecl]<RegistryReadyInfo*, void*, void>)callback.Fn)(&info, (void*)callback.User);
+    }
     private static FakeRegistry Current => _current!;
     private static int Text(string value, byte* output, nuint capacity, nuint* length)
     {

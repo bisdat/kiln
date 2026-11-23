@@ -12,7 +12,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private readonly List<Runtime> _runtime = [];
     private readonly Dictionary<ulong, HashSet<ulong>> _changes = [];
     private readonly Dictionary<ModContext, Action> _retirements = [];
-    private bool _closed;
+    private volatile bool _closed;
+    private readonly object _signals = new();
+    private (RegistryPhase Phase, ulong Generation)? _pendingReady;
+    private bool _worldChanged;
+    private string? _worldDirectory;
     private IDisposable? _ready;
     private bool _dispatchingWorld, _starting, _flushing;
     private readonly RegistryWorldBinding _worldBinding = new();
@@ -42,7 +46,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         RegistryRuntime.Manual = Manual;
         RegistryRuntime.Revert = (mod, handle) => _native.Revert(mod.Owner, handle);
         RegistryRuntime.Read = Read;
-        RegistryRuntime.WorldChanged = directory => { _worldBinding.Signal(directory); TryWorld(); };
+        RegistryRuntime.WorldChanged = directory =>
+        {
+            lock (_signals) { _worldDirectory = directory; _worldChanged = true; }
+        };
         if (!_native.Available) return;
         _starting = _native.StageStatus().Phase < 1;
         _ready = _native.Subscribe(hostOwner, true, Ready, e => Log("ready callback", e));
@@ -89,7 +96,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     internal void FlushLoads()
     {
-        if (_closed || _flushing || !_native.LiveAvailable || _native.StageStatus().Phase < 4) return; // a menu load can precede resources-ready
+        Game.AssertTickThread();
+        if (_closed || _flushing) return;
+        DrainSignals();
+        if (!_native.LiveAvailable || _native.StageStatus().Phase < 4) return; // a menu load can precede resources-ready
         _flushing = true;
         try
         {
@@ -151,17 +161,28 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     private void Ready(RegistryPhase phase, ulong generation)
     {
-        if (_closed) return;
-        if (_starting && (uint)phase >= 4)
+        // Native readiness can arrive on a resource thread. Only the tick owns runtime records and author retirement.
+        lock (_signals) { if (!_closed) _pendingReady = (phase, generation); }
+    }
+    private void DrainSignals()
+    {
+        (RegistryPhase Phase, ulong Generation)? ready;
+        lock (_signals)
+        {
+            ready = _pendingReady; _pendingReady = null;
+            if (_worldChanged) { _worldBinding.Signal(_worldDirectory); _worldChanged = false; }
+        }
+        if (ready is not { } snapshot) return;
+        if (_starting && (uint)snapshot.Phase >= 4)
         {
             _starting = false;
             foreach (var author in _authors.ToArray().Reverse()) Retire(author);
         }
-        FlushLoads();
-        RegistryRuntime.PublishReady(phase, generation, _native.LiveAvailable ? World() : null);
+        RegistryRuntime.PublishReady(snapshot.Phase, snapshot.Generation, _native.LiveAvailable ? World() : null);
     }
     private void TryWorld()
     {
+        Game.AssertTickThread();
         if (_dispatchingWorld || _flushing || !_native.LiveAvailable || _native.StageStatus().Phase < 4) return;
         _dispatchingWorld = true;
         try
@@ -176,6 +197,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     private void Apply(IEnumerable<Runtime> records, RegistryEntryPoint point, Func<Runtime, bool> selected)
     {
+        Game.AssertTickThread();
         var ordered = records.Where(r => selected(r) && r.Context.Alive).ToArray();
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
         foreach (var phase in new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final })
@@ -220,6 +242,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     private RegistryCompletion Manual(ModContext owner, Action<RegistryContext> action)
     {
+        Game.AssertTickThread();
         if (!_native.LiveAvailable) throw new KilnUnavailableException("kiln.registry.live");
         var world = World();
         if (world is null) return new(4, 0, 0, 0, 0, 0, 0, "a world is required");
@@ -236,6 +259,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     private void Read(ModContext owner, Action<RegistryContext> action)
     {
+        Game.AssertTickThread();
         if (!_native.LiveAvailable || _native.StageStatus().Phase < 4) throw new KilnUnavailableException("kiln.registry");
         var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), "resolved", false, new(), readOnly: true);
         using var scope = context.Enter();
@@ -274,6 +298,7 @@ internal sealed partial class ModManager
     private RegistryDispatch? _registry;
     private bool _registryReload;
     internal void PrepareRegistry(ulong hostOwner) { _registry = new(this); _registry.Prepare(hostOwner); }
+    internal void TickRegistry() => _registry?.FlushLoads();
     internal List<(Manifest Manifest, string Directory)> RegistryCandidates()
     {
         var byId = BootCandidates().GroupBy(c => c.Manifest.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
