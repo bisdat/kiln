@@ -990,6 +990,161 @@
       },
       "sha256": "d918425d6c8fd40c87b753daf2fa5ab1cd01f41bf6e698378da3d902bb095bd0"
     },
+    "native/core/abi/services/kiln_camera.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnCameraApi": {
+          "align": 8,
+          "fields": {
+            "apply": 16,
+            "bind_transport": 64,
+            "capabilities": 8,
+            "end": 32,
+            "get_visual": 56,
+            "header": 0,
+            "subscribe": 40,
+            "transport_ended": 80,
+            "unbind_transport": 72,
+            "unsubscribe": 48,
+            "update": 24
+          },
+          "size": 88
+        },
+        "KilnCameraChange": {
+          "align": 8,
+          "fields": {
+            "end_reason": 20,
+            "endpoint": 8,
+            "frame": 48,
+            "kind": 4,
+            "lease": 32,
+            "local_generation": 16,
+            "player_entity": 12,
+            "reason": 56,
+            "reason_code": 24,
+            "reserved": 28,
+            "revision": 40,
+            "size": 0
+          },
+          "size": 72
+        },
+        "KilnCameraKey": {
+          "align": 8,
+          "fields": {
+            "at_ms": 0,
+            "fov_y_degrees": 48,
+            "pose": 8,
+            "reserved": 4,
+            "reserved2": 52
+          },
+          "size": 56
+        },
+        "KilnCameraPose": {
+          "align": 8,
+          "fields": {
+            "position": 0,
+            "rotation": 24
+          },
+          "size": 40
+        },
+        "KilnCameraProfile": {
+          "align": 4,
+          "fields": {
+            "collision_policy": 12,
+            "distance": 16,
+            "follow_entity": 4,
+            "offset_local": 20,
+            "offset_world_y": 32,
+            "rotation": 36,
+            "rotation_mode": 8,
+            "size": 0
+          },
+          "size": 52
+        },
+        "KilnCameraRequest": {
+          "align": 8,
+          "fields": {
+            "blend_in_ms": 24,
+            "blend_out_ms": 28,
+            "camera_id": 44,
+            "duration_ms": 20,
+            "endpoint": 8,
+            "fov_y_degrees": 40,
+            "input_policy": 16,
+            "key_count": 116,
+            "keys": 120,
+            "lens_source": 36,
+            "parts": 4,
+            "player_entity": 12,
+            "priority": 32,
+            "profile": 48,
+            "reserved": 46,
+            "shake": 100,
+            "size": 0,
+            "transition_override": 45
+          },
+          "size": 128
+        },
+        "KilnCameraResult": {
+          "align": 8,
+          "fields": {
+            "commit_scope": 12,
+            "endpoint": 20,
+            "flags": 16,
+            "frame": 48,
+            "lease": 32,
+            "local_generation": 28,
+            "ok": 4,
+            "player_entity": 24,
+            "reason": 56,
+            "reason_code": 8,
+            "revision": 40,
+            "size": 0
+          },
+          "size": 72
+        },
+        "KilnCameraShake": {
+          "align": 4,
+          "fields": {
+            "amplitude_metres": 0,
+            "falloff_ms": 8,
+            "frequency_hz": 4,
+            "seed": 12
+          },
+          "size": 16
+        },
+        "KilnCameraTransport": {
+          "align": 8,
+          "fields": {
+            "caps": 16,
+            "header": 0,
+            "retire": 24,
+            "submit": 8
+          },
+          "size": 32
+        },
+        "KilnCameraVisual": {
+          "align": 8,
+          "fields": {
+            "aspect": 84,
+            "captured_monotonic_ns": 32,
+            "far_plane": 92,
+            "fov_y_radians": 80,
+            "frame": 16,
+            "local_generation": 8,
+            "near_plane": 88,
+            "pose": 40,
+            "reserved": 12,
+            "size": 0,
+            "target_sample_step": 24,
+            "valid": 4
+          },
+          "size": 96
+        }
+      },
+      "sha256": "3f6f0286c72b8cbccd592e9fba403f4492d240c85f9bc4a2f57517ec946e2967"
+    },
     "native/core/abi/services/kiln_capacity.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -9866,7 +10021,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "2a559b89a361b920ce6a462072b76228c3c761f774623727b20740a5c4b54b59",
+    "src/layout.rs": "c1ac29c9d11eede1dee9089f3515f26eff65047ee2c932efab1e167a11990dbc",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -9874,6 +10029,7 @@
     "src/services/kiln_base_rules.rs": "051981ceeb97a78f02f625d8fb573289c0b388bd10a2dd303fa99a20fd53c53a",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
     "src/services/kiln_build.rs": "aa7aa753e9a3cc411b48d3e1cb32144efaf5c60bf3bdaf9818ca295dcbd008c9",
+    "src/services/kiln_camera.rs": "ae8af992fc075f61140c42b7864c0391b93a31ea214fe47ac9c8200cd157c0f7",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
     "src/services/kiln_chat.rs": "79e3b08c8c6678ece24cdbfd1cc62011acf5501a5185f4b323db61e459c0b4e7",
@@ -9945,7 +10101,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "cf115369856ecea8bfef7d770818acf9dd3cfbe2c1bf61867c12e3ec849bbfec"
+    "src/services/mod.rs": "1c529e1e609d97502bc273b15e97d7ae49232e10872a664c646c9459e2bbf4fa"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

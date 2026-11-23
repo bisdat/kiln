@@ -1,0 +1,242 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.camera on the game client (since mod API 0.2.17, chapter 03): where the renderer selects its camera and where the frame's camera is final. The service reads the renderer only inside these two mid hooks, only the fields named here, and keeps no pointer. A row is on only when every guard of it resolves; the service lowers it further (no owner cleanup, a fault). Checked on client 26430625 (sigdb_check).",
+  "symbols": {
+    "camera/RenderFovSelected": {
+      "comment": "The renderer's camera selection, at the store of the selected vertical field of view: r13 = renderer, the selected pose (52 value bytes at camera/render.pose_start) is already copied, xmm6's low float is the field of view in radians. Mid hook; the one place a visual request is committed.",
+      "find": [
+        {
+          "pattern": "F2 41 0F 11 8D {camera/render.pose_tail:d32} F3 41 0F 11 B5 {camera/render.selected_fov:d32} EB ?? 49 8D 85",
+          "offset": 9
+        }
+      ]
+    },
+    "camera/VisualFrameReady": {
+      "comment": "Frame preparation, after the projection descriptor's aspect, field of view, far and near were stored: rsi = renderer. Mid hook, read-only: the camera the frame is drawn with.",
+      "find": [
+        {
+          "pattern": "8B 86 A8 01 00 00 0F 10 86 98 01 00 00 89 86 {camera/render.proj_aspect:d32} 8B 86 {camera/render.selected_fov:d32} 89 86 {camera/render.proj_fov:d32} 8B 86 {camera/render.far:d32} 89 86 {camera/render.proj_far:d32} 8B 86 {camera/render.near:d32} 89 86 {camera/render.proj_near:d32}",
+          "offset": 55
+        }
+      ]
+    },
+    "@camera/ModeFovRenderSource": {
+      "comment": "The selection's call of the pose getter (captures camera/RenderPoseGetter) next to the mode field of view it reads from the renderer.",
+      "find": [
+        {
+          "pattern": "E8 {camera/RenderPoseGetter:rel32} F3 41 0F 10 B5 {camera/render.mode_fov:d32} EB ?? 49 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F 10 00"
+        }
+      ]
+    },
+    "@camera/RenderPoseGetter.fields": {
+      "comment": "The getter is a leaf that returns the client game's selected camera transform (lea rax,[rcx+client_pose]; ret).",
+      "find": [
+        {
+          "scope": {
+            "symbol": "camera/RenderPoseGetter",
+            "size": 8
+          },
+          "pattern": "48 8D 81 {camera/render.client_pose:d32} C3"
+        }
+      ]
+    },
+    "@camera/SelectedPoseFields": {
+      "comment": "The copy of the selected pose into the renderer: three stores that fix where its 56 bytes are.",
+      "find": [
+        {
+          "pattern": "0F 10 45 10 49 8D 44 3D 00 0F 10 4D 20 41 0F 11 85 {camera/render.pose_start:d32} 0F 10 45 30 41 0F 11 8D {camera/render.pose_block1:d32} F2 0F 10 4D 40 41 0F 11 85 {camera/render.pose_block2:d32}"
+        }
+      ]
+    },
+    "@camera/RendererWorld": {
+      "comment": "The renderer's client-world field, read twice by the selection.",
+      "find": [
+        {
+          "pattern": "44 8B 05 ?? ?? ?? ?? 48 8D 4C 24 70 49 8B 95 {camera/render.client_world:d32} 44 8B CF E8 ?? ?? ?? ?? 44 8B 05 ?? ?? ?? ?? 48 8D 4C 24 70 49 8B 95 {camera/render.client_world:d32} 44 8B CF 48 8B 30 E8"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "camera/render.pose_start": {
+      "value": 4616872
+    },
+    "camera/render.pose_block1": {
+      "value": 4616888
+    },
+    "camera/render.pose_block2": {
+      "value": 4616904
+    },
+    "camera/render.pose_tail": {
+      "value": 4616920
+    },
+    "camera/render.selected_fov": {
+      "value": 4616936
+    },
+    "camera/render.near": {
+      "value": 4616928
+    },
+    "camera/render.far": {
+      "value": 4616932
+    },
+    "camera/render.mode_fov": {
+      "value": 4617036
+    },
+    "camera/render.proj_aspect": {
+      "value": 4625336
+    },
+    "camera/render.proj_near": {
+      "value": 4625340
+    },
+    "camera/render.proj_far": {
+      "value": 4625344
+    },
+    "camera/render.proj_fov": {
+      "value": 4625348
+    },
+    "camera/render.client_world": {
+      "value": 464
+    },
+    "camera/render.client_pose": {
+      "value": 1488
+    }
+  },
+  "features": {
+    "camera.rendered_snapshot": {
+      "symbols": [
+        "camera/VisualFrameReady",
+        "camera/RenderPoseGetter",
+        "@camera/RenderPoseGetter.fields",
+        "@camera/ModeFovRenderSource",
+        "@camera/SelectedPoseFields",
+        "@camera/RendererWorld"
+      ],
+      "constants": [
+        "camera/render.pose_start",
+        "camera/render.pose_block1",
+        "camera/render.pose_block2",
+        "camera/render.pose_tail",
+        "camera/render.selected_fov",
+        "camera/render.near",
+        "camera/render.far",
+        "camera/render.mode_fov",
+        "camera/render.proj_aspect",
+        "camera/render.proj_near",
+        "camera/render.proj_far",
+        "camera/render.proj_fov",
+        "camera/render.client_world",
+        "camera/render.client_pose"
+      ]
+    },
+    "camera.local_fov": {
+      "symbols": [
+        "camera/RenderFovSelected",
+        "@camera/SelectedPoseFields",
+        "@camera/RendererWorld",
+        "camera/VisualFrameReady",
+        "camera/RenderPoseGetter",
+        "@camera/RenderPoseGetter.fields",
+        "@camera/ModeFovRenderSource"
+      ],
+      "constants": [
+        "camera/render.pose_start",
+        "camera/render.pose_block1",
+        "camera/render.pose_block2",
+        "camera/render.pose_tail",
+        "camera/render.selected_fov",
+        "camera/render.near",
+        "camera/render.far",
+        "camera/render.mode_fov",
+        "camera/render.proj_aspect",
+        "camera/render.proj_near",
+        "camera/render.proj_far",
+        "camera/render.proj_fov",
+        "camera/render.client_world",
+        "camera/render.client_pose"
+      ]
+    },
+    "camera.local_pose": {
+      "symbols": [
+        "camera/RenderFovSelected",
+        "@camera/SelectedPoseFields",
+        "@camera/RendererWorld",
+        "camera/VisualFrameReady",
+        "camera/RenderPoseGetter",
+        "@camera/RenderPoseGetter.fields",
+        "@camera/ModeFovRenderSource"
+      ],
+      "constants": [
+        "camera/render.pose_start",
+        "camera/render.pose_block1",
+        "camera/render.pose_block2",
+        "camera/render.pose_tail",
+        "camera/render.selected_fov",
+        "camera/render.near",
+        "camera/render.far",
+        "camera/render.mode_fov",
+        "camera/render.proj_aspect",
+        "camera/render.proj_near",
+        "camera/render.proj_far",
+        "camera/render.proj_fov",
+        "camera/render.client_world",
+        "camera/render.client_pose"
+      ]
+    },
+    "camera.local_profile": {
+      "symbols": [
+        "camera/RenderFovSelected",
+        "@camera/SelectedPoseFields",
+        "@camera/RendererWorld",
+        "camera/VisualFrameReady",
+        "camera/RenderPoseGetter",
+        "@camera/RenderPoseGetter.fields",
+        "@camera/ModeFovRenderSource"
+      ],
+      "constants": [
+        "camera/render.pose_start",
+        "camera/render.pose_block1",
+        "camera/render.pose_block2",
+        "camera/render.pose_tail",
+        "camera/render.selected_fov",
+        "camera/render.near",
+        "camera/render.far",
+        "camera/render.mode_fov",
+        "camera/render.proj_aspect",
+        "camera/render.proj_near",
+        "camera/render.proj_far",
+        "camera/render.proj_fov",
+        "camera/render.client_world",
+        "camera/render.client_pose"
+      ]
+    },
+    "camera.local_shake": {
+      "symbols": [
+        "camera/RenderFovSelected",
+        "@camera/SelectedPoseFields",
+        "@camera/RendererWorld",
+        "camera/VisualFrameReady",
+        "camera/RenderPoseGetter",
+        "@camera/RenderPoseGetter.fields",
+        "@camera/ModeFovRenderSource"
+      ],
+      "constants": [
+        "camera/render.pose_start",
+        "camera/render.pose_block1",
+        "camera/render.pose_block2",
+        "camera/render.pose_tail",
+        "camera/render.selected_fov",
+        "camera/render.near",
+        "camera/render.far",
+        "camera/render.mode_fov",
+        "camera/render.proj_aspect",
+        "camera/render.proj_near",
+        "camera/render.proj_far",
+        "camera/render.proj_fov",
+        "camera/render.client_world",
+        "camera/render.client_pose"
+      ]
+    }
+  },
+  "extends": "server.d/dev28-03-camera.json"
+}

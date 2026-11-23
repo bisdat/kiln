@@ -80,6 +80,9 @@ struct BuildRecord {
     // common file in name order); a record whose digest is not the deployed common's enables no row (review2 S1)
     std::string regmap_digest;
     bool verified = false;
+    // written by kilnctl regproof --mark into this server's own Kiln folder ("markedLocally"), not shipped by Kiln: when
+    // regmap/common changes under it, the fix is a new proof on this server, not a Kiln update (review3 S4)
+    bool marked_locally = false;
     std::map<std::string, BuildRow> rows;      // "<registry>.<field>"
     std::map<std::string, std::string> reasons; // "<registry>.<field>" -> why an unproven row is not proven (Kiln words)
     std::map<std::string, uint32_t> layouts;   // root type -> the reflection's layout hash on this build
@@ -92,6 +95,11 @@ struct RegMap {
     bool has_build = false;
     std::string side, exe_sha256;  // the running game's (load_dir), named when there is no record for it
     std::string common_digest;     // the deployed regmap/common's digest (load_dir), as the record's regmapDigest is made
+    // files in regmap/common that are not a registry's own <registry>.json (a copy left beside one, a file that does not
+    // read as a regmap): they change the digest, so the record enables nothing; the fix is removing them or a repair
+    std::vector<std::string> stray_common;
+    // the record of the running exe is verified AND was proven on the deployed regmap/common: only then can a row apply
+    bool verified() const { return has_build && build.verified && build.regmap_digest == common_digest; }
     // The state of a field on this build and, unless Mapped, the reason an edit of it is refused (BRIEF 6.2: it names the field
 // and the game build and ends "; this edit was not applied"). Without a verified record for the running exe every field is
 // Unproven: Kiln never writes a field it has not proven on that exact build.

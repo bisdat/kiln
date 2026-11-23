@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Camera: camera overrides for mods. A server locks a player's stock camera mode; a client (and a server, for
+       players whose client runs Kiln) sets a render-only camera: a path, a follow profile, a lens, a shake. Wrapper for
+       the native kiln.camera service. Deployed to kiln/host/ and shared by every mod. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- the transport bridge (S8): the channel kiln.camera over Kiln.Network, the client world's step from Kiln.Client -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
+    <InternalsVisibleTo Include="Kiln.Camera.Tests" />
+    <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- the lab test stands lab transport peers in for players (CameraBridgeStartup.LabPlayerOf) -->
+    <InternalsVisibleTo Include="CameraTest" />
+  </ItemGroup>
+</Project>

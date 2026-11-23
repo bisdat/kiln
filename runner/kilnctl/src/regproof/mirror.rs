@@ -59,6 +59,10 @@ pub fn mirror(inp: &MirrorInputs, when: &str) -> Proof {
         }
         if server.get("verified").and_then(Value::as_bool) != Some(true) {
             p.blockers.push(format!("the server record of {} is not verified: there is no lab proof to mirror", short(&server_sha)));
+        } else if s(server, "provenBy") != super::PROVEN_BY_LAB {
+            // review3 S5: a reflection-only candidate (the gate copy's) is verified with every row ok, but proves nothing
+            p.blockers.push(format!("the server record of {} is not proven by a lab (provenBy {:?}; kilnctl regproof writes \"lab\" when it \
+                                     marks from fresh lab evidence)", short(&server_sha), s(server, "provenBy")));
         }
         match server.get("regmapDigest").and_then(Value::as_str) {
             Some(d) if !d.eq_ignore_ascii_case(&inp.regmap_digest) => p.blockers.push(format!(
@@ -189,7 +193,7 @@ mod tests {
 
     fn server_record() -> Value {
         json!({"regmap": 1, "side": "server", "exeSha256": SERVER, "gameBuild": "101", "verified": true, "proof": "kilnctl regproof (lab)",
-               "regmapDigest": DIGEST,
+               "regmapDigest": DIGEST, "provenBy": "lab",
                "rows": {"gadgets.size": "ok", "gadgets.tier": "ok", "gadgets.power": "unproven", "gadgets.label": "ok", "gadgets.glow": "unmapped",
                         "plans.parts": "ok", "plans.parts[].count": "ok", "plans.cap": "changed"},
                "reasons": {"gadgets.power": "no lab round trip of it on this build yet"},
@@ -243,6 +247,7 @@ mod tests {
         assert_eq!(rec["aliases"], client_candidate()["aliases"], "the client's own aliases and layouts are kept");
         assert_eq!(rec["layouts"], client_candidate()["layouts"]);
         assert_eq!(rec["regmapDigest"], DIGEST, "the mirror is bound to the same mapping");
+        assert_eq!(rec["provenBy"], "mirror", "a mirror is never a lab proof another mirror could start from");
         let s = rec["proof"].as_str().unwrap();
         assert!(s.contains("mirror") && s.contains(&SERVER[..12]) && s.contains("rows ok 5/7 (2 unproven)"), "{s}");
     }
@@ -286,6 +291,10 @@ mod tests {
             (|i| i.server.as_mut().unwrap()["side"] = json!("client"), "not a server build"),
             (|i| i.server.as_mut().unwrap()["regmapDigest"] = json!("e2".repeat(32)), "another mapping"),
             (|i| { i.server.as_mut().unwrap().as_object_mut().unwrap().remove("regmapDigest"); }, "names no regmapDigest"),
+            // review3 S5: only a lab-proven server record (the gate copy's reflection-only candidate is verified, all ok and
+            // carries the copy's digest, but proves nothing)
+            (|i| { i.server.as_mut().unwrap().as_object_mut().unwrap().remove("provenBy"); }, "not proven by a lab"),
+            (|i| i.server.as_mut().unwrap()["provenBy"] = json!("mirror"), "not proven by a lab"),
             (|i| i.server_refl = None, "server exe"),
             (|i| i.server_refl = Some(db(old_types(), CLIENT)), "server reflection dump"),
             (|i| i.client_refl = None, "client exe"),
@@ -303,6 +312,7 @@ mod tests {
             assert!(!p.verified, "{word}: should block");
             assert!(p.blockers.iter().any(|b| b.contains(word)), "{word:?} not in {:?}", p.blockers);
             assert_eq!(record(&p, &client_candidate())["verified"], false, "{word}");
+            assert!(record(&p, &client_candidate()).get("provenBy").is_none(), "{word}: an unverified record is proven by nothing");
         }
     }
 }

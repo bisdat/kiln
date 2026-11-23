@@ -42,6 +42,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
     private bool _ran;
     private string _kiln = "";
 
+    // Why a field has no sample, in Kiln words: kilnctl makes it the record's unproven reason, which kiln.content shows inside
+    // parentheses ("... is not proven for game build <b> (<reason>)"), so no parentheses of their own (review3 N2).
+    private const string NoDropTables = "no drop table was loaded in the lab's world; the game loads them as players need them";
+    // every entry the lab read holds no value of the field (recipes.station on f0d824be): nothing to round-trip (review3 N1)
+    private const string NoValue = "no entry the lab read has a value of it on this build, so there was nothing to round-trip";
+
     private void Check(bool ok, string text)
     {
         if (ok) ++_pass; else ++_fail;
@@ -188,13 +194,14 @@ public sealed unsafe class RegistryProofTestMod : Mod
     }
 
     /// <summary>The kind of an entry's impact config (coordinator ruling, 2026-11-23: evidence only for the kinds the build
-    /// has): "sint32", "float", "unknown" (the entry holds the value, but its config kind cannot be read), or null (the entry
-    /// has no such config).</summary>
-    private static string? ConfigKind(ContentValueType? type, bool holdsValue) => type switch
+    /// has): "sint32", "float", "unknown" (the entry holds the value, but its config kind cannot be read), "notInWorld" (the
+    /// entry is in the build's id table but not in the lab's world, so nothing reads it: never counted as "no config";
+    /// kilnctl asks the values export whether it holds one, review3 S1), or null (the entry has no such config).</summary>
+    private static string? ConfigKind(ContentValueType? type, bool holdsValue, bool inWorld) => type switch
     {
         ContentValueType.Int => "sint32",
         ContentValueType.Float => "float",
-        null when !holdsValue => null,
+        null when !holdsValue => inWorld ? null : "notInWorld",
         _ => "unknown",
     };
 
@@ -354,6 +361,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         Check(exe.Length == 64, $"the running build {exe}");
         var samples = new JsonArray();
         var kinds = new JsonObject();
+        var notInWorld = new JsonObject();
         var unsampled = new JsonObject(); // a field the lab could not sample, why (Kiln words: kilnctl's unproven reason)
         foreach (var registry in Live)
         {
@@ -387,7 +395,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 if (readable == 0)
                     foreach (var (field, rowNode) in map["rows"]!.AsObject())
                         if ((string?)rowNode?["state"] != "unmapped")
-                            unsampled[$"{registry}.{field}"] = "no drop table was loaded in the lab's world (the game loads them as players need them)";
+                            unsampled[$"{registry}.{field}"] = NoDropTables;
             }
             foreach (var (field, rowNode) in map["rows"]!.AsObject())
             {
@@ -396,17 +404,17 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 if ((string?)row["state"] == "unmapped" || paths.Count == 0) continue;
                 var backend = (string?)row["backend"] ?? "";
                 if ((string?)row["conv"] == "impactConfig")
-                    kinds[$"{registry}.{field}"] = CountKinds(registry, field, row, paths, entries, table);
+                    kinds[$"{registry}.{field}"] = CountKinds(registry, field, row, paths, entries, table, notInWorld);
                 // Never infer the config's representation from whether its current value is whole.
                 foreach (var mode in (string?)row["conv"] == "impactConfig" ? new[] { "sint32", "sint32-refusal", "float" } : new[] { "" })
                 {
-                    var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids, mode);
+                    var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids, mode, unsampled);
                     if (sample != null) samples.Add(sample);
                 }
             }
         }
         var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = side, ["exeSha256"] = exe, ["generation"] = "live",
-            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["unsampled"] = unsampled, ["samples"] = samples };
+            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["notInWorld"] = notInWorld, ["unsampled"] = unsampled, ["samples"] = samples };
         Directory.CreateDirectory(proof);
         var path = Path.Combine(proof, $"roundtrip-{side}-live.json");
         File.WriteAllText(path + ".tmp", doc.ToJsonString());
@@ -415,11 +423,15 @@ public sealed unsafe class RegistryProofTestMod : Mod
     }
 
     /// <summary>How many of the build's entries (every entry of the id table, also those Content's enumeration does not list)
-    /// hold an impact config in each kind: { "sint32": n, "float": n, "unknown": n }. kilnctl requires evidence only for the
-    /// kinds present; an entry that holds the value but whose kind cannot be read is "unknown" (never assumed absent).</summary>
-    private JsonObject CountKinds(string registry, string field, JsonObject row, List<string> paths, List<(ContentEntry E, string Id)> entries, JsonObject table)
+    /// hold an impact config in each kind: { "sint32": n, "float": n, "unknown": n, "notInWorld": n }. kilnctl requires
+    /// evidence only for the kinds present; an entry that holds the value but whose kind cannot be read is "unknown" (never
+    /// assumed absent). An entry the lab's world does not hold and nothing reads is "notInWorld", its id added to
+    /// <paramref name="notInWorld"/> under the field: kilnctl checks the counts against the values export (review3 S1).</summary>
+    private JsonObject CountKinds(string registry, string field, JsonObject row, List<string> paths, List<(ContentEntry E, string Id)> entries,
+                                  JsonObject table, JsonObject notInWorld)
     {
-        var counts = new SortedDictionary<string, int>(StringComparer.Ordinal) { ["sint32"] = 0, ["float"] = 0, ["unknown"] = 0 };
+        var counts = new SortedDictionary<string, int>(StringComparer.Ordinal) { ["sint32"] = 0, ["float"] = 0, ["unknown"] = 0, ["notInWorld"] = 0 };
+        var outside = new JsonArray();
         if (ConfigId((string?)row["config"]) is not { } configId)
         {
             Log.Info($"registry-proof-test: {registry}.{field}: Kiln has no config id for {(string?)row["config"]}: its kinds are not counted");
@@ -433,9 +445,13 @@ public sealed unsafe class RegistryProofTestMod : Mod
             if ((string?)idNode is not { } id) continue;
             var text = Read(registry, id, field);
             var holds = text != null && JsonNode.Parse(text) is JsonValue jv && jv.TryGetValue<double>(out _);
-            var value = byKey.TryGetValue(key, out var e) ? ConfigValue(e, path) : ConfigValueOf(key, path);
-            if (ConfigKind(value?.Type, holds) is { } kind) counts[kind]++;
+            var inWorld = byKey.TryGetValue(key, out var e);
+            var value = inWorld ? ConfigValue(e!, path) : ConfigValueOf(key, path);
+            if (ConfigKind(value?.Type, holds, inWorld) is not { } kind) continue;
+            counts[kind]++;
+            if (kind == "notInWorld") outside.Add(id);
         }
+        notInWorld[$"{registry}.{field}"] = outside;
         Log.Info($"registry-proof-test: {registry}.{field}: config kinds over {table.Count} entries: " + string.Join(", ", counts.Select(p => $"{p.Key} {p.Value}")));
         var o = new JsonObject();
         foreach (var (k, v) in counts) o[k] = v;
@@ -463,7 +479,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
 
     /// <summary>One sample of a field: the first entry that reads (and, for a writable field, takes a probe).</summary>
     private JsonObject? SampleOf(string registry, string field, JsonObject row, List<string> paths, string backend,
-                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables, string mode = "")
+                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables, string mode = "",
+                                 JsonObject? unsampled = null)
     {
         var q = $"{registry}.{field}";
         var element = field.Contains("[].");
@@ -579,6 +596,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         }
         Log.Info($"registry-proof-test: no sample of {q} ({entries.Count} entries): " + (why.Count == 0 ? "no entry" : string.Join(", ", why.Select(p => $"{p.Key} x{p.Value}")))
                      + (backend == "live" && why.Count == 1 && why.Keys.First().StartsWith("read rc=", StringComparison.Ordinal) ? WriteWhy(registry, entries[0].Id, field, conv) : ""));
+        if (unsampled != null && why.Count == 1 && why.ContainsKey("null or empty") && unsampled[q] is null) unsampled[q] = NoValue;
         return null; // no entry took a probe: unproven, not a disproof
     }
 

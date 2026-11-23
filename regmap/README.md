@@ -13,6 +13,9 @@ Read by kiln.content (`native/services/content/registry/regmap.{h,cpp}`); checke
 `tools/registrygen/regmap_check.py` (against the committed type dumps under `sigdb/types/`, or against a game
 executable's own reflection with `--exe`, the file read as data and never run).
 
+Adding a registry (schema, mapping, back-ends, proof, tests, and the pitfalls the first registries hit):
+[docs/kiln/adding-a-registry.md](../docs/kiln/adding-a-registry.md).
+
 ## common/<registry>.json
 
 ```jsonc
@@ -69,8 +72,10 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
   "layouts": { "keen::ItemInfo": "0x07009d37" },          // the reflection's layout hash of each root type
   "rows": { "items.maxStack": "ok" },                      // ok | changed | unproven | unmapped
   "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
-  "kinds": { "items.manaCost": { "sint32": "proven (141 entries on this build)", "float": "none on this build" } },
+  "kinds": { "items.manaCost": { "sint32": "proven (138 entries on this build)", "float": "none on this build",
+                                 "notInWorld": "3 entries not in the lab's world (no edit reaches them on this build)" } },
   "regmapDigest": "<sha256>",                              // the regmap/common it was proven on (rows enabled only on it)
+  "provenBy": "lab",                                       // lab (kilnctl regproof on lab evidence) | mirror (client, --mirror)
   "aliases": { "renames": [], "removals": [], "suffixes": [] } }
 ```
 
@@ -104,8 +109,9 @@ exe> --game-build <b> --out <dir>` (both exes read as data) writes the client re
 when the same row is `ok` in the verified server record AND the client exe's reflection gives the row the same layout as the
 server exe's (the members its paths walk, their types and offsets, the enum values it maps, and the registry's entry
 members). Every other mapped row is `unproven`: with the server's reason where the server proof left it unproven, else
-"layout differs from the proven server build". The mirror is `verified` only when the server record is verified and of the
-same game build and both reflections are of the two exes; its layouts and aliases are the client exe's own (regmap_check.py,
+"layout differs from the proven server build". The mirror is `verified` only when the server record is verified, lab-proven
+(`"provenBy": "lab"`, which kilnctl regproof writes only when it judged fresh lab evidence: the gate copy's reflection-only
+candidate never qualifies; review3 S5) and of the same game build and both reflections are of the two exes; its layouts and aliases are the client exe's own (regmap_check.py,
 the aliases carried from the tree's record of that exe). Commit `regmap-client-<sha>.json` from `<dir>` as
 `regmap/client/<sha>.json`, and mirror again whenever the server record changes.
 
@@ -169,15 +175,23 @@ what the proof writes). kilnctl sets aside every suite whose digest is not the t
 of another mapping, and with an instance refuses to judge a tree whose regmap/common differs from the deployed
 `<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`. The record carries the
 digest it was proven on (`"regmapDigest"`); kiln.content computes the deployed regmap/common's digest when it loads the
-regmap and enables no row of a record whose digest differs, or that has none ("Unproven: ... its record was proven for
-another Kiln mapping than the one installed"): an edit of regmap/common needs a new proof (and a new client mirror).
+regmap and enables no row of a record whose digest differs, or that has none, and does not call that record verified
+(registry.json's `regmap.verified`, the registry capabilities: "unverified regmap record"). The refusal says why
+(review3 S4): "regmap/common differs from the one this build's record was proven on; a Kiln update is needed"; with files
+in regmap/common that are not a registry's own `<registry>.json` (a copy left beside one), it names them and says to remove
+them or repair or reinstall Kiln; for a server's own record (`"markedLocally": true`, which `kilnctl regproof --mark` adds
+to the instance's copy only, never to the `--out` copy that is committed) it says to run kilnctl regproof again. An edit of
+regmap/common needs a new proof (and a new client mirror).
+`regmap_check.py` without `--exe` (tools/check.sh's registry step) fails when a committed verified record has no digest or
+not this tree's, so such an edit cannot pass the checks unproven.
 
 `registry-roundtrip`, one file per side and generation:
 ```jsonc
 { "format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": "<sha256>", "generation": "live",  // live | boot
   "regmapDigest": "<sha256>",                                        // the regmap/common the run used (below)
   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
-  "kinds": { "items.manaCost": { "sint32": 141, "float": 0, "unknown": 0 } },   // live: impact config kinds per row
+  "kinds": { "items.manaCost": { "sint32": 138, "float": 0, "unknown": 0, "notInWorld": 55 } },   // live: impact config kinds per row
+  "notInWorld": { "items.manaCost": ["game:...", ...] },             // live: the entries counted notInWorld
   "unsampled": { "drops.entries": "no drop table was loaded in the lab's world (...)" },  // live: why, in Kiln words
   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,     // element: a list element's index
                  "read": 20, "probe": 21, "readBack": 21,                            // through the schema
@@ -189,8 +203,14 @@ name, a bitmask's list of game names, an optional enum's [switch, name]. A probe
 read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
 
 For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value, and
-counts every entry of the id table per config kind (the suite's `"kinds": {"items.manaCost": {"sint32": 141, "float": 0,
-"unknown": 0}}`; `unknown`: the entry holds the value but its kind cannot be read). Evidence is required only for the kinds
+counts every entry of the id table per config kind (the suite's `"kinds": {"items.manaCost": {"sint32": 138, "float": 0,
+"unknown": 0, "notInWorld": 55}}`; `unknown`: the entry holds the value but its kind cannot be read; `notInWorld`: the entry
+is in the id table but not in the lab's world, so nothing reads it, and its id is listed under `"notInWorld"`). kilnctl
+compares the counts with the values export (review3 S1): every entry the export holds the value for must be counted in a
+kind or listed as not in the world. Entries not in the world do not block a live row (no edit reaches them on this build;
+the record says how many, e.g. `"notInWorld": "3 entries not in the lab's world ..."`), but do block a boot row; any other
+difference between the counts and the export, a kind name kilnctl does not know, or a missing export counts as unknown and
+leaves the row unproven. Evidence is required only for the kinds
 the build has (coordinator ruling, 2026-11-23): Sint32 configs need a Sint32 whole-number round trip and a fractional Sint32
 probe refused without changing the value or bytes; float configs need a float-config fractional round trip. A kind with no
 entry is recorded in the record's `"kinds"` as "none on this build" and does not block the row (a later build that has it

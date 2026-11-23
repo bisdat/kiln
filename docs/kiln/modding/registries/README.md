@@ -34,7 +34,7 @@ matched. `schema/registry/ids.lock.json` keeps every field's contract and every 
 | `balance` | the balance table: experience, levels, flame, durability, sockets, perk costs | [balance.md](balance.md) |
 
 The per-registry pages are generated from `schema/registry/<registry>.json` by `tools/registrygen/registrygen.py`; edit
-the schema, never the page.
+the schema, never the page. Kiln maintainers adding a registry: [adding-a-registry.md](../../adding-a-registry.md).
 
 ## C# authoring (API 0.2.17)
 

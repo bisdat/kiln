@@ -11,18 +11,22 @@ using Xunit;
 public class ProducerTests
 {
     // Coordinator ruling (2026-11-23): evidence only for the config kinds the build has, so the producer counts them; an
-    // entry that holds the value but whose kind cannot be read counts as "unknown", never as absent.
+    // entry that holds the value but whose kind cannot be read counts as "unknown", never as absent. review3 S1: an entry
+    // of the id table the lab's world does not hold (nothing reads it) is "notInWorld", never "no config".
     [Theory]
-    [InlineData(ContentValueType.Int, true, "sint32")]
-    [InlineData(ContentValueType.Float, true, "float")]
-    [InlineData(ContentValueType.Int, false, "sint32")]
-    [InlineData(ContentValueType.Bool, true, "unknown")]
-    [InlineData(null, true, "unknown")]
-    [InlineData(null, false, null)]
-    public void Config_kinds_are_counted_and_unreadable_ones_are_unknown(ContentValueType? type, bool holds, string? expected)
+    [InlineData(ContentValueType.Int, true, true, "sint32")]
+    [InlineData(ContentValueType.Float, true, true, "float")]
+    [InlineData(ContentValueType.Int, false, true, "sint32")]
+    [InlineData(ContentValueType.Bool, true, true, "unknown")]
+    [InlineData(null, true, true, "unknown")]
+    [InlineData(null, false, true, null)]
+    [InlineData(null, false, false, "notInWorld")]
+    [InlineData(ContentValueType.Int, false, false, "sint32")]
+    [InlineData(null, true, false, "unknown")]
+    public void Config_kinds_are_counted_and_unreadable_ones_are_unknown(ContentValueType? type, bool holds, bool inWorld, string? expected)
     {
         var method = typeof(RegistryProofTestMod).GetMethod("ConfigKind", BindingFlags.Static | BindingFlags.NonPublic)!;
-        Assert.Equal(expected, (string?)method.Invoke(null, new object?[] { type, holds }));
+        Assert.Equal(expected, (string?)method.Invoke(null, new object?[] { type, holds, inWorld }));
     }
 
     // review2 S6: refusals that show a mapping disagreeing with the build are an error sample (changed); guard, range and
@@ -42,6 +46,18 @@ public class ProducerTests
     {
         var method = typeof(RegistryProofTestMod).GetMethod("IsDisagreement", BindingFlags.Static | BindingFlags.NonPublic)!;
         Assert.Equal(expected, (bool)method.Invoke(null, new object[] { reason })!);
+    }
+
+    // review3 N1/N2: the producer's unsampled reasons become the record's, shown inside kiln.content's parentheses: no
+    // nested parentheses, and an all-empty field says so (not "no lab round trip").
+    [Theory]
+    [InlineData("NoDropTables")]
+    [InlineData("NoValue")]
+    public void Unsampled_reasons_read_inside_parentheses(string name)
+    {
+        var text = (string)typeof(RegistryProofTestMod).GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        Assert.DoesNotContain("(", text);
+        Assert.DoesNotContain("no lab round trip", text);
     }
 
     // review2 N5: an impact config is compared raw; a raw read that fails stays null, never the resource digest
