@@ -11,7 +11,7 @@ public sealed class RegistryEntriesTestMod : Mod
 {
     private const string Wood = "game:material_t1_wood_logs", Parent = "registry-entries-test:logs", Child = "registry-entries-test:logs_child", Recipe = "registry-entries-test:recipe";
     private bool _ran;
-    private int _pass, _fail;
+    private int _pass, _fail, _loadedTicks;
     private string Mode => File.Exists(Path.Combine(Context.DataDirectory, "incompatible")) ? "incompatible" : File.Exists(Path.Combine(Context.DataDirectory, "corrupt")) ? "corrupt" : File.Exists(Path.Combine(Context.DataDirectory, "item-only")) ? "item-only" : "normal";
     private void Check(bool ok, string message)
     {
@@ -52,7 +52,10 @@ public sealed class RegistryEntriesTestMod : Mod
     {
         Context.Tick.Pre += (in TickInfo _) =>
         {
-            if (_ran || !Content.Ready || !Saves.WorldDataReady) return;
+            if (_ran || !Content.Ready || !Saves.WorldDataReady || Saves.Status?.State != "running") return;
+            // WorldDataReady precedes the game's load by about ten seconds. Give MissingContent's 100-tick pass a real
+            // loaded-world turn before a lab stop can save the fixture, rather than observing an empty pre-load bundle.
+            if (++_loadedTicks < 120) return;
             _ran = true;
             try { Run(); }
             catch (Exception e) { Check(false, e.ToString()); }

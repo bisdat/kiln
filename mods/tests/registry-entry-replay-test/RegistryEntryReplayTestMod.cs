@@ -8,7 +8,7 @@ namespace RegistryEntryReplayTest;
 public sealed class RegistryEntryReplayTestMod : Mod
 {
     private bool _ran;
-    private int _pass, _fail;
+    private int _pass, _fail, _loadedTicks;
     private void Check(bool ok, string message)
     {
         if (ok) ++_pass; else ++_fail;
@@ -18,7 +18,9 @@ public sealed class RegistryEntryReplayTestMod : Mod
     {
         Context.Tick.Pre += (in TickInfo _) =>
         {
-            if (_ran || !Content.Ready || !Saves.WorldDataReady) return;
+            if (_ran || !Content.Ready || !Saves.WorldDataReady || Saves.Status?.State != "running") return;
+            // The saved bundles arrive with WorldLoaded, then MissingContent polls every 100 ticks.
+            if (++_loadedTicks < 120) return;
             _ran = true;
             try
             {
