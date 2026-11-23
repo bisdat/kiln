@@ -32,11 +32,13 @@
 #include "scale.h"
 #include "gems.h"
 #include "stations.h"
+#include "dyes.h"
 #include "instances.h"
 #include "moves.h"
 #include "names.h"
 #include "rename.h"
 #include "pide.h"
+#include "qualified_code.h"
 #include "sets.h"
 #include "setsvc.h"
 #include "toolwear.h"
@@ -93,7 +95,8 @@ static_assert(offsetof(KilnItemsApi, gear_scale) == 344 && offsetof(KilnItemsApi
               offsetof(KilnItemsApi, scale_status) == 360);
 // v9 (0.2.0-dev.30.3): renaming a container, appended after the scales (a v8 table ends at 368)
 static_assert(offsetof(KilnItemsApi, container_rename) == 368 && offsetof(KilnItemsApi, rename_status) == 376 &&
-              sizeof(KilnItemsApi) == 384);
+              offsetof(KilnItemsApi, give_equip) == 384 && sizeof(KilnItemsApi) == 392);
+static_assert(sizeof(KilnItemsGiveEquipRequest) == 24 && offsetof(KilnItemsEquipResult, reserved) == 80);
 static_assert(sizeof(KilnItemsRenameRequest) == 272 && offsetof(KilnItemsRenameRequest, text) == 16);
 static_assert(sizeof(KilnItemsRenameResult) == 192 && offsetof(KilnItemsRenameResult, game_error) == 20 &&
               offsetof(KilnItemsRenameResult, changed) == 28 && offsetof(KilnItemsRenameResult, message) == 32);
@@ -1467,6 +1470,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
+    craft_sources_cancel_owner(owner);
 }
 
 KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnItemsSlot* slots, uint32_t capacity,
@@ -1725,6 +1729,9 @@ KilnResult KILN_CALL t_container_rename(KilnOwner owner, const KilnItemsRenameRe
 }
 KilnResult KILN_CALL t_rename_status(KilnItemsRenameStatus* out) { return rename_status(out); }
 
+KilnResult KILN_CALL t_give_equip(KilnOwner owner, const KilnItemsGiveEquipRequest* r, KilnItemsEquipDoneFn done,
+                                void* user, uint64_t* ticket) { return give_equip_submit(owner,r,done,user,ticket); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1741,6 +1748,7 @@ const KilnItemsApi kTable = {
     &t_gear_upgrade,
     &t_gear_scale, &t_gear_scale_read, &t_scale_status,
     &t_container_rename, &t_rename_status,
+    &t_give_equip,
 };
 
 // ============================================================================================= self-test =======
@@ -2179,6 +2187,8 @@ void resolve() {
                  static_cast<unsigned long long>(E.tx_guard_flags), static_cast<unsigned long long>(E.tx_empty_state),
                  static_cast<unsigned long long>(E.tx_touched_count));
     }
+    E.give_equip_ok=E.sets_ok && E.move_ok && feat("items.give_equip") && sym("items/SelectEquipment",&E.select_equipment) &&
+        qualified_code(kiln::hooks_v2(g_api), reinterpret_cast<uintptr_t>(E.select_equipment), kSelectEquipmentCode);
     if (E.tx_ok) {
         g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE,
                                                   PAGE_READWRITE));
@@ -2198,6 +2208,7 @@ void resolve() {
     xfer_init();  // after every symbol above: a lab switch may install the hooks right now
     gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
     stations_resolve();  // kiln.stations: bases, stations, the game's fill (after the transaction symbols)
+    dyes_resolve();      // registered sources in the tinting screen and Tint's own transaction
     gear_resolve();      // v8: gear writes (after the tracked writes and the item instances)
     scale_resolve(g_api, g_owner);  // v8 (P7): power and armour scales (hooks only at the first scale)
 }
@@ -2212,6 +2223,7 @@ void KILN_CALL on_ready(void*) {
     equip_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);
     gems_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // gem wave G3: kiln_items_gems
     stations_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // kiln.stations: kiln_items_stations
+    dyes_register();
     gear_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);      // v8: kiln_items_gear
 }
 

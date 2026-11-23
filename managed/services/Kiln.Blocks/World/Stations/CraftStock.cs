@@ -230,6 +230,7 @@ internal static class CraftStock
                 .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
                     static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
                     NetDirection.ToClient);
+            DyeStock.Attach(_channel);
         }
         catch (Exception e)
         {
@@ -484,17 +485,26 @@ internal static class CraftStock
     internal static CraftStockRows? Build(EntityId player)
     {
         if (BuildHook is { } hook) return hook(player);
-        if (!Capabilities.Is(Stations.CraftSourcesCapability) || !Capabilities.Is(Stations.OutputSourcesCapability)) return null;
-        if (!Stations.Available || !Players.Available || !StationsCore.Backend.HasCraftStock) return null;
+        var outputsOn = Capabilities.Is(Stations.CraftSourcesCapability) && Capabilities.Is(Stations.OutputSourcesCapability) && Stations.Available;
+        var linkedOn = Capabilities.Is(Crafting.SourcesCapability) && CraftingCore.HasSources;
+        if ((!outputsOn && !linkedOn) || !Players.Available || !StationsCore.Backend.HasCraftStock) return null;
         if (Players.Find(player) is not { InGame: true } who) return null;
         var mayAccess = StationsCore.CanAccessInventories(who);
-        var home = mayAccess is true ? Bases.Of(player) : null;  // a visitor's base is not even read
+        var home = mayAccess is true && Stations.Available ? Bases.Of(player) : null;  // a visitor's base is not even read
         var lent = new Dictionary<uint, long>();
-        if (home is not null)
+        if (outputsOn && home is not null)
             foreach (var station in Stations.OutputSources(home.Id))
                 if (Stations.Read(station) is { } info)
                     foreach (var slot in info.Outputs)
                         if (slot.Item.Value != 0 && slot.Count > 0) lent[slot.Item.Value] = lent.GetValueOrDefault(slot.Item.Value) + slot.Count;
+        var registered = false;
+        if (linkedOn)
+        {
+            var extra = CraftingCore.ExtraStock(player);
+            if (extra.Rc != StationsNative.Ok) return null; // never publish a cut or unvalidated linked snapshot
+            registered = extra.Rows.Length != 0;
+            foreach (var row in extra.Rows) lent[row.Item] = lent.GetValueOrDefault(row.Item) + row.Count;
+        }
         var rows = From(mayAccess, home is not null, lent, StationsCore.Backend.CraftItems, () =>
         {
             var bag = new Dictionary<uint, long>();
@@ -504,13 +514,14 @@ internal static class CraftStock
             return bag;
         }, () =>
         {
-            if (!StockCache.TryGetValue(home!.Id, out var stock)) StockCache[home.Id] = stock = Bases.Stock(home.Id);
+            if (home is null) return new Dictionary<uint, long>();
+            if (!StockCache.TryGetValue(home.Id, out var stock)) StockCache[home.Id] = stock = Bases.Stock(home.Id);
             var chests = new Dictionary<uint, long>();
             foreach (var (item, count) in stock) chests[item.Value] = count;
             return chests;
-        }, out var tooMany);
+        }, out var tooMany, registered);
         if (tooMany && Interlocked.Exchange(ref _warned, 1) == 0)
-            ModLog.Warn($"kiln.stations: base {home!.Id}'s crafting stock names more than {MaxRows} items: its crafting menus show the game's counts");
+            ModLog.Warn($"kiln.stations: player {player}'s crafting stock names more than {MaxRows} items: its crafting menus show the game's counts");
         return rows;
     }
 
@@ -519,10 +530,10 @@ internal static class CraftStock
     /// opted-in station there holds outputs; then the items craft_items names, counted.</summary>
     internal static CraftStockRows? From(bool? mayAccess, bool inBase, IReadOnlyDictionary<uint, long> lent,
         Func<uint[], (int Rc, uint[] Items)> craftItems, Func<IReadOnlyDictionary<uint, long>> bag,
-        Func<IReadOnlyDictionary<uint, long>> chests, out bool tooMany)
+        Func<IReadOnlyDictionary<uint, long>> chests, out bool tooMany, bool registered = false)
     {
         tooMany = false;
-        if (mayAccess is not true || !inBase || lent.Count == 0) return null;
+        if (lent.Count == 0 || (!registered && (mayAccess is not true || !inBase))) return null;
         var (rc, items) = craftItems([.. lent.Keys.Order()]);
         if (rc != StationsNative.Ok) return null;
         var rows = Compose(items, lent, bag(), chests());
@@ -628,7 +639,7 @@ internal static class CraftStock
     internal static void ClientChanged(GameScreen before, GameScreen now)
     {
         var open = now.Kind == ScreenKind.Crafting && ServerSide() &&
-                   (Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability) || Capabilities.Is(StockUiCapability));
+                   (Capabilities.Is(Crafting.SourceUiCapability) || Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability) || Capabilities.Is(StockUiCapability));
         if (open == _open) return;
         _open = open;
         SwitchTick(open);

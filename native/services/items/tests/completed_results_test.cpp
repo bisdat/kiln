@@ -21,10 +21,11 @@ int main() {
                       offsetof(KilnItemsApi, set_capture) == 240 && offsetof(KilnItemsApi, socket_roll) == 288 &&
                       offsetof(KilnItemsApi, gear_write) == 296 && offsetof(KilnItemsApi, rarity_rolls) == 320 &&
                       offsetof(KilnItemsApi, gear_upgrade) == 336 && offsetof(KilnItemsApi, gear_scale) == 344 &&
-                      offsetof(KilnItemsApi, container_rename) == 368 && sizeof(KilnItemsApi) == 384,
+                      offsetof(KilnItemsApi, container_rename) == 368 && offsetof(KilnItemsApi, rename_status) == 376 &&
+                      offsetof(KilnItemsApi, give_equip) == 384 && sizeof(KilnItemsApi) == 392,
                   "peek appended one row without moving the v3 ABI; v4 appends after it, v5 (equip) after v4, v6 (sets) after v5, "
                   "v7 (socket_roll) after v6, v8 (gear) after v7, then the rarity rolls (P5), gear_upgrade (P3) and the scales (P7), "
-                  "v9 (container_rename, rename_status) after v8");
+                  "v9 (container_rename, rename_status) after v8, then give_equip without moving earlier rows");
     static_assert(sizeof(KilnItemsRequest) == 40 && sizeof(KilnItemsRequestEx) == 56 && offsetof(KilnItemsRequestEx, dye) == 40 &&
                       sizeof(KilnItemsSocketRoll) == 24,
                   "v7: the Ex request appends to the unchanged v1 request; the socket roll is 24 bytes");

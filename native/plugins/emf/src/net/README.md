@@ -2,7 +2,7 @@
 
 These C++ files come from `src/core/net` and `src/core` in
 [matenm/emf-enshrouded v0.6.8](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core) (the wire format and the mod
-check are unchanged through v0.6.14; EMF's changes to its own handling since v0.6.12, some like Kiln's below, are not
+check are unchanged through v0.6.19; EMF's changes to its own handling since v0.6.12, some like Kiln's below, are not
 merged here), under the MIT license
 in `licenses/EMF-LICENSE.txt`. The public C header is in `../../include/emf/emf_api.h`.
 
@@ -16,3 +16,7 @@ in `licenses/EMF-LICENSE.txt`. The public C header is in `../../include/emf/emf_
   core channel `emf/mods`). Unchanged apart from the attribution comments and the include paths.
 
 The game-facing dependencies are in `../api_net.cpp` and `../api_net_client.cpp`.
+
+The 0.6.14 to 0.6.19 net and mod-check files are identical. The separate `emf/markers` JSON payload adds the optional
+bar key `b` with `EMF_MARKER_BAR`; older cores ignore it and a missing key clears that flag. Markers, including this
+payload extension, are not carried by kiln-emf yet.

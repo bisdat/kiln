@@ -144,6 +144,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     terrain_budget_reset();
     vox_world_closed();
     transient_world_closed();
+    block_world_closed();
     std::lock_guard lock(g_mu);
     close_locked();  // independent of the order kiln.saves receives the same event
 }

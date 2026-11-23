@@ -35,7 +35,9 @@ public static partial class Build
         public const string Service = "kiln.build";
 
         /// <summary>The sigdb features kiln.build serves.</summary>
-        public static readonly string[] Features = ["build.read", "build.write", "build.persist", "build.items", "build.zones"];
+        public static readonly string[] Features = ["build.read", "build.write", "build.persist", "build.items", "build.zones",
+            "build.block_info", "build.block_metadata", "build.block_provenance", "build.find_wall", "build.break_building",
+            "build.break_damage", "build.break_drops", "build.break_terrain"];
 
         /// <summary>Kiln.Build's row (since 0.2.0-dev.31): <see cref="Build.BaseLimits"/> reads kiln.base_rules and the world.</summary>
         public const string BaseLimits = "build.base_limits";
@@ -49,12 +51,14 @@ public static partial class Build
     // so it does not start at the first service tick.
     internal static readonly ServiceCapRows Rows = new(Caps.Service, ReportCapabilities);
 
-    private static void ReportCapabilities()
+    private static unsafe void ReportCapabilities()
     {
         ServiceCaps.Static(Caps.BaseLimits, BaseRulesNative.Here && World.Available, CapabilityReason.ServiceMissing,
             BaseRulesNative.Here ? "kiln.world is not running" : "kiln.base_rules is not in this build (kiln.content of 0.2.0-dev.31 or later publishes it)");
-        if (Available) return;
-        ServiceCaps.LowerFeatures(Caps.Service, Caps.Features);
+        if (!Available) { ServiceCaps.LowerFeatures(Caps.Service, Caps.Features); return; }
+        if (T->Header.Size < 184)
+            foreach (var name in Caps.Features.AsSpan(5))
+                ServiceCaps.LowerOff(name, CapabilityReason.ServiceOlder, "kiln.build is older than the block API");
     }
 
     private static KilnUnavailableException Unavailable()

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v46) that need no game and no Windows, so host tests (tests/run.sh) run them with
+// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v47) that need no game and no Windows, so host tests (tests/run.sh) run them with
 // fakes: the table layout per version, mod windows (v24/v26 definitions as EMF copies them), the component policy and
 // the change queue (v23), E-prompt offers (v25) and picture paths (v26). The glue onto Kiln's services is in
 // api_level.cpp, api_components.cpp and api_windows.cpp.
@@ -65,6 +65,8 @@ constexpr uint32_t kApiV43Size = KEMF_FIELD_END(EmfApi, player_permissions);
 constexpr uint32_t kApiV44Size = KEMF_FIELD_END(EmfApi, find_wall);
 constexpr uint32_t kApiV45Size = kApiV44Size;
 constexpr uint32_t kApiV46Size = KEMF_FIELD_END(EmfApi, villager_moving);
+// v47 (EMF 0.6.19): find_wall_ex and spawn_facing; marker bar reuses pad2, no struct grows.
+constexpr uint32_t kApiV47Size = KEMF_FIELD_END(EmfApi, spawn_facing);
 // The smallest `size` each v36-v40 request struct may carry (the end of its last field in the version that added it).
 constexpr uint32_t kRemoveBuildingV36Size = KEMF_FIELD_END(EmfRemoveBuilding, why);
 constexpr uint32_t kPathQueryV37Size = KEMF_FIELD_END(EmfPathQuery, max_nodes);
@@ -101,8 +103,11 @@ static_assert(offsetof(EmfApi, break_blocks) == kApiV43Size && offsetof(EmfApi, 
               "EmfApi v44 appends break_blocks, block_at, find_wall");
 static_assert(kApiV45Size == 1120 && offsetof(EmfApi, villager_move) == kApiV45Size &&
                   offsetof(EmfApi, villager_move_cancel) == 1128 && offsetof(EmfApi, villager_moving) == 1136 &&
-                  kApiV46Size == 1144 && sizeof(EmfApi) == kApiV46Size && EMF_API_VERSION == 46,
+                  kApiV46Size == 1144,
               "EmfApi v45 (the version only) and v46 (villager_move, villager_move_cancel, villager_moving)");
+static_assert(offsetof(EmfApi, find_wall_ex) == kApiV46Size && offsetof(EmfApi, spawn_facing) == 1152 &&
+                  kApiV47Size == 1160 && sizeof(EmfApi) == kApiV47Size && EMF_API_VERSION == 47,
+              "EmfApi v47 appends find_wall_ex and spawn_facing");
 static_assert(offsetof(EmfApi, chat_tell_ex) == 760 && offsetof(EmfApi, hit_rule_add) == 792 &&
                   offsetof(EmfApi, buff_apply) == 840 && offsetof(EmfApi, world_to_screen) == 896,
               "EmfApi v30-v33 slots");
@@ -113,7 +118,7 @@ static_assert(sizeof(EmfBuffType) == 40 && sizeof(EmfBuff) == 40 && sizeof(EmfBu
                   offsetof(EmfBuffEvent, why) == 40,
               "EmfBuffType / EmfBuff / EmfBuffEvent layouts (v32)");
 static_assert(sizeof(EmfMarker) == 80 && offsetof(EmfMarker, text) == 40 && offsetof(EmfMarker, flags) == 64 &&
-                  offsetof(EmfMarker, game_icon) == 72 && sizeof(EmfMapMarkerType) == 64,
+                  offsetof(EmfMarker, game_icon) == 72 && offsetof(EmfMarker, bar) == 76 && sizeof(EmfMapMarkerType) == 64,
               "EmfMarker / EmfMapMarkerType layouts (v33)");
 static_assert(sizeof(EmfMapClick) == 32 && offsetof(EmfMapClick, x) == 16, "EmfMapClick layout (v34)");
 static_assert(sizeof(EmfPlayerView) == 48 && offsetof(EmfPlayerView, heading_deg) == 32 && sizeof(EmfGameMarker) == 40 &&

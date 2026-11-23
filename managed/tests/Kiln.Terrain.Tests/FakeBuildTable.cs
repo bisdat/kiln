@@ -28,7 +28,7 @@ internal static unsafe class FakeBuildTable
         public delegate* unmanaged[Cdecl]<WriteArgs*, ResultArgs*, int> WriteCells;
         // shape_box, shape, prop_place, prop_remove, props_in_box, prop_info, bases, item_material, item_template, keep,
         // release: never reached by these tests
-        public fixed ulong Rest[11];
+        public fixed ulong Rest[17]; // allocate optional block rows, normally advertise the original 136-byte prefix
     }
 
     // KilnBuildWrite (72 bytes)
@@ -72,7 +72,7 @@ internal static unsafe class FakeBuildTable
             if (_table != null) return;
             Assert(sizeof(WriteArgs) == 72 && sizeof(ResultArgs) == 56, "the mirrors of KilnBuildWrite and KilnBuildResult");
             var t = (Table*)NativeMemory.AllocZeroed((nuint)sizeof(Table));
-            t->Size = (uint)sizeof(Table);
+            t->Size = 136;
             t->Version = 1;
             t->GetStatus = &Unavailable1;
             t->GetGrid = &Unavailable1;
@@ -84,6 +84,46 @@ internal static unsafe class FakeBuildTable
             kit.GetMethod("RegisterTable", BindingFlags.Public | BindingFlags.Instance)!.Invoke(backend, ["kiln.build", (nint)t]);
             _table = t;
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Vec { public double X, Y, Z; }
+    public static uint BlockRequestSize, BlockFlags, FindFlags;
+    public static double TerrainScale, TerrainExpiry, SphereRadius, SphereMargin, SphereMinimum;
+    public static byte SelectionFirst;
+    public static uint BreakRefusalCode;
+    public static bool BreakWriterVerified = true;
+    public static void BlockRows(bool enabled)
+    {
+        BreakRefusalCode = 0; BreakWriterVerified = true;
+        Use(); _table->Size = enabled ? 184u : 136u;
+        *((nint*)((byte*)_table + 160)) = (nint)(delegate* unmanaged[Cdecl]<Vec, byte*, int>)&BlockAtFn;
+        *((nint*)((byte*)_table + 168)) = (nint)(delegate* unmanaged[Cdecl]<Vec, Vec, uint, byte*, int>)&FindWallFn;
+        *((nint*)((byte*)_table + 176)) = (nint)(delegate* unmanaged[Cdecl]<byte*, byte*, int>)&BreakBoxFn;
+    }
+    private static int BlockInfoFn(byte* p)
+    {
+        new Span<byte>(p + 4, 60).Clear();
+        *(uint*)(p + 8) = 2; *(uint*)(p + 12) = 143; *(int*)(p + 24) = 2;
+        *(int*)(p + 28) = 500; *(int*)(p + 32) = 7; *(double*)(p + 40) = .25;
+        return 0;
+    }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int BlockAtFn(Vec _, byte* p) => BlockInfoFn(p);
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int FindWallFn(Vec _, Vec __, uint flags, byte* p) { FindFlags = flags; return BlockInfoFn(p); }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int BreakBoxFn(byte* q, byte* r)
+    {
+        BlockRequestSize = *(uint*)q; BlockFlags = *(uint*)(q + 4);
+        TerrainScale = *(double*)(q + 120); TerrainExpiry = *(double*)(q + 128);
+        SphereRadius = *(double*)(q + 160); SphereMargin = *(double*)(q + 168); SphereMinimum = *(double*)(q + 176);
+        var selection = *(byte**)(q + 88); SelectionFirst = selection == null ? (byte)0 : selection[0];
+        new Span<byte>(r + 4, 132).Clear(); *(uint*)(r + 8) = 3;
+        *(ulong*)(r + 16) = 1; *(ulong*)(r + 24) = 1; *(ulong*)(r + 32) = 1;
+        *(uint*)(r + 4) = BreakRefusalCode;
+        *(uint*)(r + 80) = 56; *(uint*)(r + 84) = BreakWriterVerified ? 67u : 65u; *(uint*)(r + 96) = 1;
+        return BreakRefusalCode == 0 ? 0 : 7;
     }
 
     /// <summary>Flat ground again, tiles loaded, no commits counted.</summary>

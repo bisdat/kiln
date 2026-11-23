@@ -98,6 +98,7 @@ struct VoxelWorld {
     uint32_t tile[2] = {0, 0}, tiles[2] = {0, 0};
     bool ok = false;
 };
+void block_world_closed(); // discard session-owned terrain damage; fault latches remain
 void vox_world_closed();  // world teardown: invalidate pointers even when an ECS address is reused
 const VoxelWorld* vox();  // resolves (once per server world); nullptr when unavailable
 KilnResult vox_grid(KilnBuildGrid* out);

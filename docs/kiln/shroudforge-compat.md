@@ -691,7 +691,7 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 
 | Function | Under Kiln | Kiln C# equivalent | Status |
 |---|---|---|---|
-| `shroudforge.settings.get(key, fallback)` | plugin | `Mod.Config<T>()` | lab |
+| `shroudforge.settings.get(key, fallback)` | plugin | `Config.Register<T>()` | lab |
 | `shroudforge.ui.on_action`, `shroudforge.ui.toggle_modloader` | public action request files; toggle event opens installed helper, or Kiln's SF page when hosted without it | `Kiln.Ui` screens | action-file managed tests, event native Wine tests; actual action execution/rendering client check |
 | `shroudforge.notifications.publish` | plugin | Kiln.Ui notices | — |
 | `shroudforge.i18n.get`, `shroudforge.locale`, `shroudforge.clock` | plugin | `Context.Locale`, `Mod.Text`, `Tick` | C# localisation unit tests; SF client text unchecked |
@@ -728,10 +728,10 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 | `game.guid` (GuidHelper) | `from_content_hash`, `to_content_hash`, `hash` | plugin | `ContentHash`, `GuidHash.Of` (`Kiln.Eml`) | plugin; C# unit tests |
 | `buffer` | `create`, `wrap`, Buffer read/write of all scalar types, strings, resources | plugin | `System.Buffers` / `BinaryPrimitives` (C# has it) | plugin |
 | `image` | `create`, `decode`, `decode_texture`, `encode`, `encode_texture`, pixel get/set | plugin | `DataImage` (PNG and RGBA8 pixels), `GameTexture.Decode/DecodeMip/Encode` (game texture formats, BC1 to BC7, the same answers as `decode_texture`/`encode_texture`; since 0.2.0-dev.30.3, [modding/textures.md](modding/textures.md)), `Assets.OverrideTexture` (PNG to existing texture format) | plugin; C# tests on the texture fixtures' goldens |
-| `io` | `read`, `read_to_string`, `list_files`, `exists`, `is_file`, `is_directory`, path helpers, `export*` (exports folder) | plugin (SF's sandbox) | `System.IO` + `Mod.DataDir` | plugin |
+| `io` | `read`, `read_to_string`, `list_files`, `exists`, `is_file`, `is_directory`, path helpers, `export*` (exports folder) | plugin (SF's sandbox) | `System.IO` + `Context.DataDirectory` | plugin |
 | `hasher` | `fnv`, `crc` | plugin | `DataHash.Fnv1a32/Crc32/Crc64` (`Kiln.Eml`) | plugin; C# unit tests |
 | `integer` | 512 helpers (u64/i64 math) | plugin | C# has native 64-bit integers | n/a |
-| `loader` | `has_mod` | plugin | `Mods.Has` | plugin |
+| `loader` | `has_mod` | plugin | `Mods.IsLoaded` | plugin |
 | globals | `typeof`, `require` (package-local) | plugin | — | plugin |
 
 **Kiln C# coverage:** component reflection, attributes, reversible claims, reflected resource lookup and field writes,

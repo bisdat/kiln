@@ -97,12 +97,15 @@ internal static partial class KilnApis
         "M:Kiln.Boss.KilledBy(Kiln.Player)", // Boss.KilledBy(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Boss.get_Killed", // Boss.Killed.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Build.Add(Kiln.BuildShape,System.Byte,Kiln.BuildOptions)", // Build.Add(BuildShape, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
+        "M:Kiln.Build.BlockAt(Kiln.WorldPosition)", // Build.BlockAt(WorldPosition): Services.RequireTickThread
         "M:Kiln.Build.BoxAround(Kiln.WorldPosition,System.Double,System.Double,System.Double)", // Build.BoxAround(WorldPosition, double, double, double): via Build.BoxBetween(WorldPosition, WorldPosition)
         "M:Kiln.Build.BoxBetween(Kiln.WorldPosition,Kiln.WorldPosition)", // Build.BoxBetween(WorldPosition, WorldPosition): via Build.CellOf(WorldPosition)
+        "M:Kiln.Build.BreakBox(Kiln.CellBox,Kiln.BlockBreakOptions)", // Build.BreakBox(CellBox, BlockBreakOptions?): Services.RequireTickThread
         "M:Kiln.Build.CellOf(Kiln.WorldPosition)", // Build.CellOf(WorldPosition): via Build.G.get
         "M:Kiln.Build.CenterOf(Kiln.CellPos)", // Build.CenterOf(CellPos): via Build.G.get
         "M:Kiln.Build.CornerOf(Kiln.CellPos)", // Build.CornerOf(CellPos): via Build.G.get
         "M:Kiln.Build.Dig(Kiln.BuildShape,Kiln.BuildOptions)", // Build.Dig(BuildShape, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
+        "M:Kiln.Build.FindWall(Kiln.WorldPosition,Kiln.WorldPosition,Kiln.FindWallFlags)", // Build.FindWall(WorldPosition, WorldPosition, FindWallFlags): Services.RequireTickThread
         "M:Kiln.Build.Flatten(Kiln.BuildShape,System.Double,System.Byte,Kiln.BuildOptions)", // Build.Flatten(BuildShape, double, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
         "M:Kiln.Build.IsLoaded(Kiln.CellBox)", // Build.IsLoaded(CellBox): via Build.Require(string)
         "M:Kiln.Build.Keep(Kiln.CellBox)", // Build.Keep(CellBox): via Build.Require(string)
@@ -221,6 +224,7 @@ internal static partial class KilnApis
         "M:Kiln.ContentRegistry.get_Fields", // ContentRegistry.Fields.get: via Content.Require(string)
         "M:Kiln.ContentRegistry.get_Item(System.Int32)", // ContentRegistry.this[int].get: via Content.Require(string)
         "M:Kiln.ContentSync.CheckRoundTrip", // ContentSync.CheckRoundTrip(): via Content.Require(string)
+        "M:Kiln.Crafting.AddSource(Kiln.EntityId,Kiln.EntityId,Kiln.CraftSourceOptions)", // Crafting.AddSource(EntityId, EntityId, CraftSourceOptions?): Services.RequireTickThread
         "M:Kiln.Creative.Set(Kiln.EntityId,System.Boolean)", // Creative.Set(EntityId, bool): Game.AssertTickThread
         "M:Kiln.Creative.SetFlight(Kiln.EntityId,Kiln.CharacterFlightMode)", // Creative.SetFlight(EntityId, CharacterFlightMode): Game.AssertTickThread
         "M:Kiln.CreativeTools.Found(Kiln.EntityId)", // CreativeTools.Found(EntityId): Game.AssertTickThread
@@ -432,6 +436,7 @@ internal static partial class KilnApis
         "M:Kiln.Items.GearOf(Kiln.ItemInstanceRef)", // Items.GearOf(ItemInstanceRef): Services.RequireTickThread
         "M:Kiln.Items.Give(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{Kiln.Gear},Kiln.GiveOptions,System.Nullable{Kiln.SlotId})", // Items.Give(EntityId, ItemId, int, Gear?, GiveOptions, SlotId?): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.Give(Kiln.EntityId,System.String,System.Int32,System.Nullable{Kiln.Gear},Kiln.GiveOptions)", // Items.Give(EntityId, string, int, Gear?, GiveOptions): via Items.Give(EntityId, ItemId, int, Gear?, GiveOptions, SlotId?)
+        "M:Kiln.Items.GiveEquip(Kiln.EntityId,Kiln.ItemId,System.Int32,Kiln.EquipmentSlot,Kiln.GiveEquipOptions)", // Items.GiveEquip(EntityId, ItemId, int, EquipmentSlot, GiveEquipOptions?): Services.RequireTickThread
         "M:Kiln.Items.GiveRecipeResult(Kiln.EntityId,System.UInt32,System.Int32,Kiln.GiveOptions)", // Items.GiveRecipeResult(EntityId, uint, int, GiveOptions): via Items.Submit(bool, ItemsNative.Request, string)
         "M:Kiln.Items.Held(Kiln.EntityId)", // Items.Held(EntityId): Services.RequireTickThread
         "M:Kiln.Items.LabEquipSet(Kiln.EntityId,Kiln.EquipmentSet,Kiln.LabSetFault,System.Int32,Kiln.EquipOptions)", // Items.LabEquipSet(EntityId, EquipmentSet, LabSetFault, int, EquipOptions): via Items.ApplySet(EntityId, EquipmentSet, EquipOptions, LabSetFault, int, string)
@@ -914,6 +919,7 @@ internal static partial class KilnApis
         "P:Kiln.Items.GearOptionsAvailable=items.pide_options,kiln.items", // Can("items.pide_options"); via Kiln.Items.Available
         "P:Kiln.Items.GearReadAvailable=items.gear.read", // Can("items.gear.read")
         "P:Kiln.Items.GearWriteAvailable=items.gear.write", // Can("items.gear.write")
+        "P:Kiln.Items.GiveEquipAvailable=items.give_equip", // Can("items.give_equip")
         "P:Kiln.Items.MovesAvailable=items.move", // Can("items.move")
         "P:Kiln.Items.PowerAvailable=items.gear.power,kiln.items", // Can("items.gear.power"); V8Scales != null: Services.Get("kiln.items")
         "P:Kiln.Items.ResultPeekAvailable=kiln.items", // ResultTable != null: Services.Get("kiln.items")
@@ -940,6 +946,8 @@ internal static partial class KilnApis
         "P:Kiln.Time.CanSetSpeed=kiln.time", // via Kiln.Time.HasScale
         "P:Kiln.Time.WeatherChoiceAvailable=kiln.time,time.weather_choose", // T3 != null: Services.Get("kiln.time"); Is("time.weather_choose")
         "P:Kiln.ToolMaterials.Available=tools.material_snapshot", // Is("tools.material_snapshot")
+        "P:Kiln.Ui.AmmoList.Available=ui.ammo.list", // Is("ui.ammo.list")
+        "P:Kiln.Ui.AmmoList.PicksAvailable=ui.ammo.pick", // Is("ui.ammo.pick")
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba

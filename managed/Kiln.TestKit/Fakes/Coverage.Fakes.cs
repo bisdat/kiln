@@ -59,7 +59,8 @@ public static partial class Coverage
             "Items.SetPower, SetArmor and ValuesOf on the kit's scale table (no damage or armour is computed), SetDurabilityMax and " +
             "SetLevel with AnyLevel with kiln.items' rules. Container renames (v9): Items.SetContainerName with kiln.items' rules (the " +
             "game's Rename field's limits and the entity at the call, the name stored at the next step, \"\" clears it; read with " +
-            "KilnHarness.Items.ContainerName). Offline: water, moves, reading container names, transfer " +
+            "KilnHarness.Items.ContainerName). GiveEquip models logical equipment, slot-type checks (SetEquipmentSlotType), " +
+            "Backpack or Take replacement, DryRun and EquipChangedEvent in one step, without modelling the game's page layout. Offline: water, moves, reading container names, transfer " +
             "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
             [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);

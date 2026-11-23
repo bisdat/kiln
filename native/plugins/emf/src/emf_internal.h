@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: loads unmodified EMF (Enshrouded Modding Framework 0.6.14, API v46, MIT) mods on Kiln. Shared state.
+// kiln-emf: loads unmodified EMF (Enshrouded Modding Framework 0.6.19, API v47, MIT) mods on Kiln. Shared state.
 //
 // Layout of the plugin:
 //   plugin.cpp    kiln_plugin_main / on_ready: step aside when the real EMF runs, discover, order and load the mods,
@@ -7,7 +7,9 @@
 //   mods.cpp      mod.json, the legacy folder and kiln.profile, version ranges, dependency order, the load itself
 //   settings.cpp  EMF mod settings: <configDir>/emf/<id>.ini (+ mirror to <game>/emf/config/), schema snapshots
 //   api_core.cpp  the EmfApi table: log, worlds, components, entities, ticks, build, mod info, stubs
-//   api_game.cpp  items, spawn, chat, saves, combat, teleport, world settings, HUD/notify
+//   api_game.cpp  items, destroy, chat, saves, combat, teleport, world settings, HUD/notify
+//   api_spawn.cpp spawn, spawn_ex, spawn_facing through kiln.spawn (creation-time yaw and components)
+//   api_terrain.cpp v44/v45/v47 block queries and queued sphere/column breaks through kiln.build
 //   api_events.cpp on_event and mod programs through kiln.world
 //   api_hooks.cpp resolve / hook / patterns / write_memory, the EMF signature -> sigdb alias table
 //   commands.cpp  EMF commands from players' chat (kiln.chat) and <game>/emf/commands.txt
@@ -16,7 +18,7 @@
 //   api_components.cpp v23 change_component (a kiln.world program) and v25 E prompts (offers)
 //   api_windows.cpp v24 mod windows and v26 pictures through kiln.ui (client); refused on a dedicated server
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
-//   api_v40.cpp   v28-v46: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
+//   api_v40.cpp   v28-v47: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
@@ -40,6 +42,8 @@
 
 #include "emf/emf_api.h"
 #include "kiln_api.h"
+#include "services/kiln_build.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_chat.h"
 #include "services/kiln_client.h"
 #include "services/kiln_combat.h"
@@ -59,7 +63,7 @@ namespace kemf {
 
 constexpr const char* kPluginId = "kiln-emf";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr uint32_t kEmfApiVersion = EMF_API_VERSION;  // 46
+constexpr uint32_t kEmfApiVersion = EMF_API_VERSION;  // 47
 
 // ---------------------------------------------------------------------------------------------- core handles ----
 extern const KilnApi* g_api;
@@ -67,6 +71,8 @@ extern KilnOwner g_owner;
 extern uint32_t g_side;  // KILN_SIDE_*
 
 struct Services {
+    const KilnBuildApi* build = nullptr;
+    const KilnCapsApi* caps = nullptr;
     const KilnWorldApi* world = nullptr;
     const KilnClientApi* client = nullptr;
     const KilnHooksApi* hooks = nullptr;
@@ -210,6 +216,7 @@ void install_ticks();
 const EmfApi* api_table();
 void fill_core(EmfApi* t);    // api_core.cpp
 void fill_game(EmfApi* t);    // api_game.cpp
+void fill_spawn(EmfApi* t);   // api_spawn.cpp (spawn, spawn_ex, v47 spawn_facing)
 void fill_events(EmfApi* t);  // api_events.cpp
 void fill_hooks(EmfApi* t);   // api_hooks.cpp
 void fill_commands(EmfApi* t);  // commands.cpp
@@ -220,7 +227,13 @@ void fill_windows(EmfApi* t);     // api_windows.cpp (v24, v26; it also fills th
 void fill_wheel(EmfApi* t);       // api_wheel.cpp (v10)
 void fill_attributes(EmfApi* t);  // api_attributes.cpp (v18)
 void fill_net(EmfApi* t);  // api_net.cpp (v27, EMF's wire protocol over the game's chat)
-void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v46, without the two chat functions of api_game.cpp)
+void fill_terrain(EmfApi* t); // v44/v45/v47 translation onto kiln.build
+void terrain_server_pre();
+void terrain_after_step(EmfWorld* w, uint8_t kind);
+void terrain_world_stopping(); // cancellations delivered at the next server Post, not on the destroying thread
+void terrain_world_started();
+std::string terrain_status_json();
+void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v47, without the two chat functions of api_game.cpp)
 void net_on_ready();
 void net_server_pre();
 void net_after_step(EmfWorld* w, uint8_t kind);
@@ -276,7 +289,7 @@ bool windows_want_frame();  // a mod window is open (kiln.ui demand)
 // attribute_get / attribute_add of EMF_ATTR_XP* / EMF_ATTR_LEVEL (api_attributes.cpp hands them over)
 bool level_attribute_get(Mod* m, EmfWorld* w, uint32_t entity, uint32_t attr, int32_t* out);
 bool level_attribute_add(Mod* m, EmfWorld* w, uint32_t entity, uint32_t attr, int32_t delta);
-// spawn as EMF's spawn does (api_game.cpp), for spawn_offer
+// spawn as EMF's spawn does (api_spawn.cpp), for spawn_offer
 uint32_t spawn_for(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const char* fn);
 // a listener of kiln-emf itself for an engine event (no mod), before events_on_ready
 bool events_add_internal(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user);

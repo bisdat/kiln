@@ -1,15 +1,16 @@
 // Knowledge: what the character has seen, picked up and unlocked (items, recipes). Pick entries and remove them;
 // removing a high-level material also closes the recipes that need it. Upstream: src/Conhecimento.jsx.
 // On the Deck (env.jsx) the level filter is set on the number pad; the search takes Steam's keyboard.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Modal } from '../../ui';
 import { estadoTexto } from '../shared/knowledge.mjs';
 import map from '../data/conhecimento.json';
-import { items, nomeConhecimento } from '../src/gamedata.js';
-import { t } from '../../i18n';
+import { items, nomeConhecimento, englishKnowledgeName } from '../src/gamedata.js';
+import { t, useLanguage } from '../../i18n';
 import { t as tv, localeAtual } from '../src/i18n.js';
 import { useEditorEnv } from './env.jsx';
 import { readOnly } from './session.js';
+import { gameSearch } from './game-names.js';
 
 const KIND = { i: 'editor.knowledge.kinds.item', r: 'editor.knowledge.kinds.recipe', o: 'editor.knowledge.kinds.misc' };
 // upstream's state words (shared/knowledge.mjs) are Portuguese keys: tv words them in the launcher's language
@@ -27,7 +28,7 @@ const readable = (debug) => {
 
 /** The entry's name and, for an item the game gives no name (its debug name came back), the debug name beside it. */
 const naming = (info, id) => {
-  if (!info) return { name: null, raw: null };
+  if (!info) { const name = nomeConhecimento(info, id); return { name: name === `#${id}` ? null : name, raw: null }; }
   const name = nomeConhecimento(info, id);
   const debug = info.i !== undefined ? items[info.i]?.debug : null;
   return debug && name === debug ? { name: readable(debug), raw: debug } : { name, raw: null };
@@ -35,6 +36,7 @@ const naming = (info, id) => {
 
 export default function Knowledge({ model, setModel }) {
   const env = useEditorEnv();
+  const language = useLanguage();
   const [q, setQ] = useState('');
   const [above, setAbove] = useState('');
   const [kinds, setKinds] = useState('ir');
@@ -43,14 +45,17 @@ export default function Knowledge({ model, setModel }) {
   const disabled = readOnly(model);
   // A selection belongs to the current filter, never to rows the player can no longer see.
   const filter = (setter, value) => { setter(value); setSel(new Set()); setAsk(false); };
+  // Search matches the names in the launcher's language: a language change re-filters the rows, so it drops the
+  // selection as any other filter change does (Remove must never count rows the search no longer shows).
+  useEffect(() => { setSel((p) => p.size ? new Set() : p); setAsk(false); }, [language]);
   const list = useMemo(() => {
-    const n = Number(above), s = q.trim().toLowerCase();
+    const n = Number(above), s = gameSearch(q.trim());
     return (model.knowledge ?? [])
       .map((k) => ({ ...k, info: map[k.id], ...naming(map[k.id], k.id) }))
       .filter((k) => kinds.includes(k.info?.t ?? 'o') && (above === '' || (k.info?.l ?? 0) > n)
-        && (!s || (k.name ?? '').toLowerCase().includes(s) || (k.raw ?? '').toLowerCase().includes(s) || String(k.id).includes(s)))
+        && (!s || gameSearch(k.name).includes(s) || gameSearch(englishKnowledgeName(k.info, k.id)).includes(s) || gameSearch(k.raw).includes(s) || String(k.id).includes(s)))
       .sort((a, b) => (b.info?.l ?? 0) - (a.info?.l ?? 0) || (a.name ?? '').localeCompare(b.name ?? '', localeAtual()));
-  }, [model.knowledge, q, above, kinds]);
+  }, [model.knowledge, q, above, kinds, language]);
   if (!model.knowledge) return <div className="ke-empty"><span className="ke-empty-word">{t('editor.knowledge.noBlock')}</span></div>;
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // All edits still go through the session's one setModel path, ready for session-wide undo/redo.

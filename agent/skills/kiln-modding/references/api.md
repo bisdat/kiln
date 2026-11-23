@@ -65,9 +65,9 @@ if (!r.Ok) c.Reply($"not equipped: {r.Reason}");                                
   simulated players only.
 - **Side and thread markers:** `[ServerOnly]`, `[ClientOnly]`, `[AnyThread]`, `[RenderThread]`, `[WorkerThread]`
   beside `[TickThreadOnly]`. Markers, read by the analyzers; dev.27+ the services' members carry them.
-- **API version:** `Mods.RuntimeApiVersion` is the running Kiln's mod API (0.2.11 on dev.29.19; the table in
+- **API version:** `Mods.RuntimeApiVersion` is the running Kiln's mod API (0.2.15 on dev.30.6; the table in
   [versions.md](versions.md)). `Mods.ApiVersion` is obsolete: a const, copied into your mod at build time. Release
-  builds carry their full version (`0.2.0-dev.29.19`).
+  builds carry their full version (`0.2.0-dev.30.6`).
 - **`[Experimental]` ids:** `KILNX001` lab and test members (hidden; a build error unless the project adds it to
   `NoWarn`), `KILNX002` API not yet proven in a real client, `KILNX003` (dev.29.18+) the task-thread world reads and
   writes (`WorldConcurrent` and its types; opt in with `KILNX003`, not `KILNX001`). dev.28's `KILNX028` (capacity
@@ -482,6 +482,15 @@ reflection: `KilnLanguage` and `KeyInput` are the public members for them (`docs
 text once, on release; else null). Kinds are the mod's own; payloads are text up to 4096 bytes. `SlotClick.Pointer` is
 the press position in the same pixels (`Ui.Inventory.OnClick`). Page `docs/kiln/ui.md`.
 
+**The HUD's ammunition and spell lists (dev.30.6+, mod API 0.2.15, Kiln.Ui; not yet seen in a real game).**
+`Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => rows, new AmmoListOptions { Mode = AmmoListMode.Append })`
+returns an `AmmoListProvider` (`Refresh()`, `Dispose()`; it also ends at unload). The provider runs on the game's UI
+thread when the list's `AmmoListContext` changes (`Kind`, `Held`, `GameRows`, `Session`, `Revision`) and returns
+`AmmoListRow(item, count)` rows in its order; `Replace` hides the game's rows. `Ui.AmmoList.Picked += pick => ...` gets
+a selection wish (`AmmoListPick`: `Kind`, `Item`, `Count`) for this mod's rows the backpack does not hold: send it to the
+server half, which validates it and swaps the stack in. Rows `ui.ammo.list` and `ui.ammo.pick` (`Available`,
+`PicksAvailable`); test kit `kiln.AmmoList`. Page `docs/kiln/ui.md`.
+
 **Looks and themes (dev.29.16+; not yet seen in a real game).** `UiStyle.Player` (the look the player chose) is the
 default for `Ui.Window`, `Ui.Screen` and crafting panels; before, windows had Kiln's ember look. `ui.Palette` reads the
 look's colours by role. `Ui.Themes.Define(name, new UiThemeSpec { ... })` makes a theme for your own windows
@@ -696,7 +705,7 @@ If a hosted engine needs Kiln's hook first, load the DLL late:
   being drawn. It shows nothing until the drawing finishes, then the picture; no retry is needed. Called while the mod's DLL loads, it
   waits (at most 120 s for the whole start). kiln-eml's portrait cache codes: 5 busy and 7 cache I/O error (both tried again at
   the next start), 6 full (delete unused folders in `emf/cache/portraits`). Use kiln-emf and kiln-eml from the same release.
-- EMF: kiln-emf serves EmfApi v46 (EMF 0.6.14) since dev.29.12; v42 since dev.28. Some members answer EMF's documented
+- EMF: kiln-emf serves EmfApi v47 (EMF 0.6.19) since dev.30.6; v46 (EMF 0.6.14) since dev.29.12; v42 since dev.28. Some members answer EMF's documented
   failure on Kiln (`docs/kiln/emf-parity.md`). dev.29+: EMF's `register_program`, `register_program_def` and `on_event`
   with `EMF_WORLD_CLIENT` run in the client world. Wiki [EMF mods](https://frostdev.io/kiln/wiki/emf-mods).
 - ShroudForge and EML mods run unchanged next to Kiln mods (wiki [EML and ShroudForge](https://frostdev.io/kiln/wiki/eml-shroudforge)).

@@ -1,0 +1,183 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Static qualification on client 26430625 and server 26430253. Native mining, exact box clearing and baked-column reads; these are engine anchors, not permission to bypass kiln.build guards. See docs/re/terrain-edit.md.",
+  "symbols": {
+    "build/BuildingConfigFind": {
+      "find": [
+        {
+          "pattern": "48 8B 41 38 48 85 C0 74 3A 44 8B 50 0C 33 C9 4D 85 D2 74 2F 4C 63 48 08 4C 8D 58 08 45 33 C0 90 45 85 C9 75 04 33 C0 EB 04 4B 8D 04 0B 49 03 C0 38 10 74 11 48 FF C1 49 81 C0 B4 00 00 00 49 3B CA 72 DD 33 C0 C3"
+        }
+      ]
+    },
+    "@build/VoxelBoxFillAir.call": {
+      "find": [
+        {
+          "pattern": "0F C6 C0 C9 F3 0F 10 CF 0F C6 C9 C9 0F 29 4D 20 0F 29 4D 60 0F 29 45 10 0F 29 45 50 E8 {build/VoxelBoxFillAir:rel32} F3 0F 10 3D ?? ?? ?? ??"
+        }
+      ]
+    },
+    "build/BlockKernel": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 4C 89 4C 24 20 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 C6 FF FF B8 50 3A 00 00 E8 ?? ?? ?? ?? 48 2B E0 0F 29 B4 24 40 3A 00 00"
+        }
+      ]
+    },
+    "build/VoxelDamageGet": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 57 48 83 EC 30 F2 0F 10 02 48 8B FA 44 8B 4A 08 F2 0F 11 44 24 20 4C 8B 44 24 20 8B 44 24 20 49 C1 E8 20 41 C1 E8 03 C1 E8 03 41 C1 E9 03"
+        }
+      ]
+    },
+    "build/VoxelDamageAdd": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 57 48 83 EC 30 80 7C 24 60 00 49 8B F1 45 8B F8 48 8B DA 48 8B F9 0F 84 37 01 00 00 F2 41 0F 10 01 41 8B 51 08"
+        }
+      ]
+    },
+    "build/BaseColumnAcquire": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 4C 89 4C 24 20 56 57 41 54 41 56 41 57 48 83 EC 30 0F 10 05 ?? ?? ?? ?? 33 F6 45 8B E0 48 89 31 49 8B D9 40 88 71 08 4C 8B FA 48 89 71 10"
+        }
+      ]
+    },
+    "build/BaseColumnSeekBrick": {
+      "find": [
+        {
+          "pattern": "48 83 EC 28 8B 41 4C 48 89 5C 24 30 48 8B D9 48 89 6C 24 38 8D 6A 01 48 89 74 24 40 8B 71 48 3B EE 0F 42 F5 3B C6 0F 83 B4 00 00 00"
+        }
+      ]
+    },
+    "build/BaseBrickDecode": {
+      "find": [
+        {
+          "pattern": "48 89 6C 24 18 48 89 74 24 20 48 89 4C 24 08 57 41 54 41 55 41 56 41 57 49 8B 30 48 8B FA 49 8B 68 08 45 33 D2 45 33 C9 48 8B D1 32 C9"
+        }
+      ]
+    },
+    "build/BaseColumnRelease": {
+      "find": [
+        {
+          "pattern": "4C 8B C9 85 D2 75 05 45 33 C9 EB 5F 48 8B 89 B8 01 00 00 8B C2 25 FF FF FF 00 44 8B C0 49 D3 E8 49 8B 89 C8 01 00 00 48 23 C8 4D 3B 81 98 01 00 00"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "build/block_config.item": {
+      "value": 4
+    },
+    "build/block_config.hardness": {
+      "value": 20
+    },
+    "build/block_config.loot_rate": {
+      "value": 24
+    },
+    "build/block_config.health": {
+      "value": 28
+    },
+    "build/base_column.handle_size": {
+      "value": 160
+    },
+    "build/base_column.ready": {
+      "value": 144
+    },
+    "build/base_column.data": {
+      "value": 32
+    },
+    "build/base_column.loader": {
+      "value": 16
+    },
+    "build/base_column.id": {
+      "value": 24
+    },
+    "build/base_column.lock": {
+      "value": 0
+    },
+    "build/base_column.lock_mode": {
+      "value": 8
+    },
+    "build/base_column.seek": {
+      "value": 48
+    },
+    "build/base_column.uniform": {
+      "value": 128
+    },
+    "build/base_column.material": {
+      "value": 104
+    },
+    "build/base_column.fill": {
+      "value": 112
+    },
+    "build/base_column.compressed": {
+      "value": 80
+    },
+    "build/base_column.end": {
+      "value": 96
+    },
+    "build/base_column.size": {
+      "value": 136
+    },
+    "build/base_column.decode_count": {
+      "value": 512
+    }
+  },
+  "features": {
+    "build.block_metadata": {
+      "symbols": [
+        "build/BuildingConfigFind",
+        "tools/TerrainConfigLookup"
+      ],
+      "constants": [
+        "build/block_config.item",
+        "build/block_config.hardness",
+        "build/block_config.loot_rate",
+        "build/block_config.health"
+      ]
+    },
+    "build.box_fill_air": {
+      "symbols": [
+        "@build/VoxelBoxFillAir.call",
+        "build/VoxelBoxFillAir",
+        "build/VoxelWrite",
+        "build/StoreCommit"
+      ]
+    },
+    "build.block_damage": {
+      "symbols": [
+        "build/BlockKernel",
+        "build/VoxelDamageGet",
+        "build/VoxelDamageAdd"
+      ]
+    },
+    "build.block_provenance": {
+      "symbols": [
+        "build/BaseColumnAcquire",
+        "build/BaseColumnSeekBrick",
+        "build/BaseBrickDecode",
+        "build/BaseColumnRelease"
+      ],
+      "constants": [
+        "build/base_column.handle_size",
+        "build/base_column.ready",
+        "build/base_column.data",
+        "build/base_column.loader",
+        "build/base_column.id",
+        "build/base_column.lock",
+        "build/base_column.lock_mode",
+        "build/base_column.seek",
+        "build/base_column.uniform",
+        "build/base_column.material",
+        "build/base_column.fill",
+        "build/base_column.compressed",
+        "build/base_column.end",
+        "build/base_column.size",
+        "build/base_column.decode_count"
+      ]
+    }
+  }
+}
