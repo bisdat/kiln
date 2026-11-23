@@ -75,9 +75,10 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
 Row states: `ok` (proven on this build), `changed` (the build changed what the row maps, or a lab step disproved it: a
 Kiln update is needed), `unproven` (nothing is wrong that kilnctl can see, but the lab gave no evidence for it yet, for
 example no round-trip sample in its generation; the reason says what is missing), `unmapped` (no mapping on this build).
-Only `ok` is applied. `unproven` and `reasons` are written by `kilnctl regproof` since dev.31; kiln.content's reader
-(regmap.cpp) learns them in registry P2 (it reads ok, changed and unmapped before that, and refuses a whole record with
-any other state, so every field of that build stays off). A record with unproven rows ships only with that reader.
+Only `ok` is applied. An edit of an `unproven` row is refused "Unproven: <field> is not proven for game build <b>
+(<reason>); this edit was not applied" (the reason from `reasons`, else "no lab evidence on this build"); a `changed` or
+`unmapped` one "Unmapped: ... (a Kiln update is needed)". kiln.content reads `unproven` and `reasons` since dev.31; an
+older reader refuses a whole record with any other state than ok, changed or unmapped (every field of that build stays off).
 
 A field is applied only on a build whose record is `verified` and lists its row `ok`; everything else is refused per
 entry with the reason, which names the field and the game build and ends "; this edit was not applied" (BRIEF 6.2:
@@ -119,6 +120,17 @@ folder inside a Kiln tree: tables, entries and values hold the game's names and 
 A row is `ok` when every step proved it, `unproven` when only lab evidence is missing, `changed` otherwise. The lab writes
 its files into `<game>/kiln/data/content/registry/proof/`; kilnctl finds them (and kiln.content's id tables) by content.
 Both formats are format 1; kilnctl refuses another kind or format.
+
+**The producer** (lab only). The lab gate (`kilnctl gate`, whose default tests include `registry-proof-test`) writes
+`content/registry/proof/request.json` into its copy. With that file, and only then: kiln.content
+(`native/services/content/registry/proof.cpp`) writes `roundtrip-<side>-boot.json` and `values-<side>.json` at
+resources-ready, before any boot patch (boot fields round-tripped in memory on a copy of their resource by the boot
+back-end itself; every entry exported through the schema from the base); `mods/tests/registry-proof-test` writes
+`roundtrip-<side>-live.json` at the world's first content ready (each mapped live field of one entry that reads:
+kiln.registry.live begin/submit/commit/read/revert, raw reads by the game's member paths, the resource bytes hashed before
+the write and after the revert; a structured value's raw view is its resource's digest). A field it finds no probe for
+gets no sample and stays unproven. Without the request file neither does anything (kiln.content looks the file up once
+per start). The test mod is never shipped (`tools/package/stage.sh` builds no `mods/tests`).
 
 `regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
 bytes>\n` for each `regmap/common/*.json` of the game's Kiln folder, in name order (build records are left out: they are
