@@ -237,6 +237,7 @@ private:
     std::recursive_mutex m_;
 };
 StoreMutex& store_mutex();
+bool store_locked_here(); // internal admission for first-use work that must run outside the recursive lock
 
 // Where load time goes: inclusive time per phase (nested phases count in both), and the store lock's longest holds.
 enum Phase : uint8_t {

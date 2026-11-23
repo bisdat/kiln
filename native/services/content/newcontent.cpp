@@ -1750,6 +1750,12 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
         note_registered(kind, world, ws);
         return true;
     }
+    // Missing-mod definitions can be the only registry user on a warm start. Resolve their stable references before
+    // construction takes the store lock; a recursive caller defers to the next ordinary world-thread sync pass.
+    for (const DefPtr& dp : defs) {
+        std::string why;
+        if (!registry_live_prepare_entry_identities(dp->registry_fields, &why)) return false;
+    }
     const bool active = active_world() == world;
     bool settled = true;
     uint32_t added_items = 0, added_recipes = 0, listed = 0, unlisted = 0;

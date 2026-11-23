@@ -89,6 +89,8 @@ const registry::Schema& registry_schema();  // the generated schema (schema_ir.h
 
 // The stage hands its result over (S11, resources-ready). Replaces what an earlier start installed.
 void registry_live_install(RegistryLive in);
+// First-use stable perk identities for saved definitions. Cold preparation needs the registration thread, outside store_mutex.
+bool registry_live_prepare_entry_identities(const registry::json& fields, std::string* why);
 // Initialize an unpublished, list-owning content clone with stable fields. No store layers or transactions are created;
 // a failure discards the clone before the game's id map can expose it. Called only on its world's registration thread.
 bool registry_live_initialize_entry(uint32_t kind, const Entry& entry, const std::string& id,

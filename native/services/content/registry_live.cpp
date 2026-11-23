@@ -1477,8 +1477,29 @@ KilnOwner registry_owner() {
     return g.owner;
 }
 
+bool registry_live_prepare_entry_identities(const registry::json& fields, std::string* why) {
+    const auto perks = fields.find("perks");
+    if (perks == fields.end() || !perks->is_array() || perks->empty()) return true;
+    const bool locked = store_locked_here();
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in || !g.in->prepare) return true; // the initializer reports unknown ids after preparation
+        bool missing = false;
+        for (const auto& perk : *perks)
+            if (perk.is_string() && !g.in->ids.count("perks|" + perk.get<std::string>())) missing = true;
+        if (!missing) return true;
+        if (!on_live_thread()) return *why = "stable entry identities need the world registration thread", false;
+        if (locked) return *why = "stable entry identities need preparation outside the store lock", false;
+    }
+    if (!ensure_live_base()) return *why = "stable entry identities could not be prepared", false;
+    std::lock_guard lock(store_mutex());
+    if (!on_live_thread()) return *why = "the world changed during stable entry identity preparation", false;
+    return true;
+}
+
 bool registry_live_initialize_entry(uint32_t kind, const Entry& entry, const std::string& id,
                                     const registry::json& fields, std::string* why, const Schema* native_schema) {
+    if (!registry_live_prepare_entry_identities(fields, why)) return false;
     std::lock_guard lock(store_mutex());
     const std::string registry = kind == KILN_CONTENT_ITEMS ? "items" : kind == KILN_CONTENT_RECIPES ? "recipes" : "";
     if (!g.in || !g.in->schema || !g.in->regmap || registry.empty() || !fields.is_object())

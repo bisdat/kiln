@@ -240,6 +240,7 @@ std::string lock_report(bool reset) {
 }
 
 StoreMutex& store_mutex() { return g_mu; }
+bool store_locked_here() { return tl_depth > 0; }
 uint64_t next_code_seq() { return kCodeSeq | ++g_code_seq; }
 
 std::string owner_label(KilnOwner owner) {

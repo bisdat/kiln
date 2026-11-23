@@ -2,6 +2,7 @@
 #define main registry_live_baseline_main
 #include "registry_live_test.cpp"
 #undef main
+#include <thread>
 
 namespace {
 int review_checks = 0, review_failures = 0;
@@ -60,16 +61,38 @@ void baseline_cases() {
 void lazy_case() {
     world(); stage({}); RegistryLive lazy = *g.in;
     lazy.base = {}; lazy.ids.clear(); lazy.nums.clear();
-    bool prepared = false;
+    bool prepared = false, outside_lock = false;
     lazy.prepare = [&](registry::stage::LiveData* data, std::string*) {
-        prepared = true; data->base = base(); data->ids["perks|game:perk_a"] = guid_text(P1); data->nums["perks|game:perk_a"] = 0x901; return true;
+        prepared = true;
+        std::thread probe([&] { outside_lock = store_mutex().try_lock(); if (outside_lock) store_mutex().unlock(); });
+        probe.join();
+        data->base = base(); data->ids["perks|game:perk_a"] = guid_text(P1); data->nums["perks|game:perk_a"] = 0x901; return true;
     };
     registry_live_install(std::move(lazy));
     Entry clone = *reg(KILN_CONTENT_ITEMS).get(WOOD); clone.addr = A(0x41000);
     std::memcpy(reinterpret_cast<void*>(clone.addr), reinterpret_cast<const void*>(reg(KILN_CONTENT_ITEMS).get(WOOD)->addr), 0x100);
     std::string why;
+    expect(registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"maxStack", 27}, {"perks", registry::json::array()}}, &why) && !prepared,
+           "ordinary warm construction with no perk refs does not prepare the copied base");
+    {
+        std::lock_guard lock(store_mutex());
+        expect(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:perk_a"}}}, &why) && !prepared && why.find("store lock") != std::string::npos,
+               "recursive registration defers cold identity work without decoding under the store lock");
+    }
+    registry_live_world_begin();
+    g.in->on_world_thread = [](uint32_t) { return false; };
+    expect(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:perk_a"}}}, &why) && !prepared,
+           "wrong-thread identity preparation is refused before construction");
+    g.in->on_world_thread = [](uint32_t) { return true; };
     const bool restored = registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:perk_a"}}}, &why);
     expect(restored && prepared, "missing-mod nonempty perk refs trigger lazy identity preparation before construction");
+    expect(outside_lock, "cold identity decoding leaves the store mutex available to other threads");
+    bool again = false;
+    g.in->prepare = [&](registry::stage::LiveData*, std::string*) { again = true; return false; };
+    expect(registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:perk_a"}}}, &why) && !again,
+           "already prepared perk identities do not trigger another decode");
+    expect(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:missing_perk"}}}, &why) && again && why.find("could not be prepared") != std::string::npos,
+           "failed identity preparation refuses the placeholder with a named cause");
 }
 void drop_case() {
     world(); add_drop_table(); stage({}); RegistryLive in = *g.in;
