@@ -36,6 +36,9 @@ internal interface INoClipWorld
     DateTime Now { get; }
 }
 
+/// <summary>What <see cref="NoClipTrack.Rejoined"/> found.</summary>
+internal enum NoClipRejoin { Waiting, Free, Held }
+
 /// <summary>What one step of the tracker asks of the runtime.</summary>
 /// <param name="Trip">A death or a teleport seen while NoClip was on: the runtime uses up the requests that asked for it
 /// and resolves the rules, which reaches <see cref="NoClipTrack.Leaving"/>.</param>
@@ -45,9 +48,6 @@ internal interface INoClipWorld
 /// collision is off again.</param>
 /// <param name="Before">Where the character was at the step before this one, with NoClip on: what a <paramref name="Trip"/>
 /// is spent against (a hold that ends in the same step has forgotten it by the time the runtime asks).</param>
-/// <summary>What <see cref="NoClipTrack.Rejoined"/> found.</summary>
-internal enum NoClipRejoin { Waiting, Free, Held }
-
 internal readonly record struct NoClipStepResult(NoClipEnd? Trip = null, bool Released = false, string? Problem = null, bool Held = false,
     WorldPosition? Before = null);
 

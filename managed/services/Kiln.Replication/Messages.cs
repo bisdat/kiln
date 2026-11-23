@@ -137,7 +137,7 @@ public interface IGameMessage
     static abstract string SchemaName { get; }
 }
 
-/// <summary>One field of a game message schema (<see cref="Replication.MessageSchema"/>).</summary>
+/// <summary>One field of a game message schema (<see cref="Replication.Schema"/>).</summary>
 /// <param name="Name">The field's name.</param>
 /// <param name="Type">The wire type code (0 bool, 1 float, 3..10 integers, 11 string, 12 struct, 13 enum, 14 GUID, 15 bits, 16 varint).</param>
 /// <param name="Element">How one element is stored in the struct (the game's element code).</param>
@@ -147,7 +147,10 @@ public interface IGameMessage
 /// <param name="FixedCount">An inline array's length, or a list's capacity.</param>
 public sealed record MessageField(string Name, int Type, int Element, int Shape, int Offset, int CountOffset, int FixedCount);
 
-/// <summary>A game message schema: its struct's size and fields (<see cref="Replication.MessageSchema"/>).</summary>
+/// <summary>A game message schema: its struct's size and fields (<see cref="Replication.Schema"/>).</summary>
+/// <param name="Name">The schema's name, as passed to <see cref="Replication.Schema"/>.</param>
+/// <param name="Size">The size of the message's struct in bytes.</param>
+/// <param name="Fields">The struct's fields, in the order the game lists them.</param>
 public sealed record MessageSchema(string Name, int Size, IReadOnlyList<MessageField> Fields);
 
 public static partial class Replication

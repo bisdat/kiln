@@ -25,10 +25,13 @@ public static class ModValueCauses
 public sealed class ModValueChangedEvent(CharacterKey character, ModValueKey key,
     ModValueSnapshot? before, ModValueSnapshot? after, string cause, ulong requestId) : KilnEvent
 {
+    /// <summary>The character whose value changed.</summary>
     public CharacterKey Character { get; } = character;
+    /// <summary>Which value changed: the defining mod and the value's id.</summary>
     public ModValueKey Key { get; } = key;
     /// <summary>Null when the value did not exist before (<see cref="ModValueCauses.Initialized"/>).</summary>
     public ModValueSnapshot? Before { get; } = before;
+    /// <summary>The value after the change.</summary>
     public ModValueSnapshot? After { get; } = after;
     /// <summary>One of <see cref="ModValueCauses"/>.</summary>
     public string Cause { get; } = cause;
@@ -41,18 +44,24 @@ public sealed class ModValueChangedEvent(CharacterKey character, ModValueKey key
 public sealed class ModValueSyncedEvent(ModValueKey key, ModValueSnapshot? before,
     ModValueSnapshot? after, string nonce, ulong sequence) : KilnEvent
 {
+    /// <summary>Which value changed in the copy: the defining mod and the value's id.</summary>
     public ModValueKey Key { get; } = key;
+    /// <summary>The copy's value before this update; null for a value that is new.</summary>
     public ModValueSnapshot? Before { get; } = before;
+    /// <summary>The copy's value after this update; null for a value that was removed.</summary>
     public ModValueSnapshot? After { get; } = after;
     /// <summary>The stream's id (new for each server, world and character).</summary>
     public string Nonce { get; } = nonce;
+    /// <summary>The update's sequence number in its stream.</summary>
     public ulong Sequence { get; } = sequence;
 }
 
 /// <summary>A whole update of the client's synced copy is in place (after its <see cref="ModValueSyncedEvent"/>s).</summary>
 public sealed class ModValuesSnapshotPublishedEvent(string nonce, ulong sequence, bool full) : KilnEvent
 {
+    /// <summary>The stream's id (new for each server, world and character).</summary>
     public string Nonce { get; } = nonce;
+    /// <summary>The number of the update now in place, in its stream (as on its <see cref="ModValueSyncedEvent"/>s).</summary>
     public ulong Sequence { get; } = sequence;
     /// <summary>A full replacement (a new stream, a resync) rather than a change.</summary>
     public bool Full { get; } = full;
@@ -62,6 +71,7 @@ public sealed class ModValuesSnapshotPublishedEvent(string nonce, ulong sequence
 /// applied; cancel refuses the whole offer. Not posted when the server refuses imports (characters.json).</summary>
 public sealed class ModValueImportingEvent(CharacterKey character, IReadOnlyList<ModValueKey> offered) : CancelableEvent
 {
+    /// <summary>The character whose carried copy is offered.</summary>
     public CharacterKey Character { get; } = character;
     /// <summary>The keys in the offer (also ones that will be rejected).</summary>
     public IReadOnlyList<ModValueKey> Offered { get; } = offered;
@@ -72,9 +82,13 @@ public sealed class ModValueImportingEvent(CharacterKey character, IReadOnlyList
 /// <summary>A client's carried offer was applied (tick thread): how many values went up, stayed, were rejected.</summary>
 public sealed class ModValueImportedEvent(CharacterKey character, int applied, int unchanged, int rejected) : KilnEvent
 {
+    /// <summary>The character whose carried copy was applied.</summary>
     public CharacterKey Character { get; } = character;
+    /// <summary>How many offered values raised the server's value.</summary>
     public int Applied { get; } = applied;
+    /// <summary>How many offered values were not above the server's value, which stayed as it was.</summary>
     public int Unchanged { get; } = unchanged;
+    /// <summary>How many offered values were refused (unknown, not carried, or not allowed to come in).</summary>
     public int Rejected { get; } = rejected;
 }
 
@@ -82,6 +96,7 @@ public sealed class ModValueImportedEvent(CharacterKey character, int applied, i
 /// change (tick thread for activation and retirement).</summary>
 public sealed class ModValueDefinitionChangedEvent(ModValueKey key, ModValueDefinition? definition, string change) : KilnEvent
 {
+    /// <summary>Which definition changed: the defining mod and the value's id.</summary>
     public ModValueKey Key { get; } = key;
     /// <summary>Null when retired.</summary>
     public ModValueDefinition? Definition { get; } = definition;

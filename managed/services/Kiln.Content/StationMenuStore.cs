@@ -192,13 +192,20 @@ public sealed class StationMenuAppliedEvent : KilnEvent
         Reason = reason;
     }
 
+    /// <summary>The id of the station menu definition (the layout) that was applied or refused.</summary>
     public Guid DefinitionId { get; }
+    /// <summary>The workshop whose menu this is (the game's workshop id).</summary>
     public uint Workshop { get; }
     /// <summary>The server's session of the layout (<see cref="Guid.Empty"/> for a local one).</summary>
     public Guid Session { get; }
+    /// <summary>The generation of the layout collection the menu was built from (the server's when
+    /// <see cref="FromServer"/>, else this game's own).</summary>
     public ulong Generation { get; }
     /// <summary>The layout came from the server (a joined game).</summary>
     public bool FromServer { get; }
+    /// <summary>True when the menu was built from the layout; false when it was refused.</summary>
     public bool Ok { get; }
+    /// <summary>Why the layout was refused (<c>IconSourceMissing</c>, <c>RestartRequired</c>, ...) when not
+    /// <see cref="Ok"/>.</summary>
     public string Reason { get; }
 }
