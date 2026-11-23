@@ -12,6 +12,9 @@ public sealed partial class KilnHarness
 /// <summary>One write an overlay made (a batch, or a single block when a base was in the way).</summary>
 /// <param name="Mod">The mod that applied the patch ("kiln" from code that is not a mod's).</param>
 /// <param name="Label">"terrain &lt;plan&gt; v&lt;version&gt;".</param>
+/// <param name="Box">The cells the write covered.</param>
+/// <param name="CellsChanged">How many cells the write changed.</param>
+/// <param name="Transient">The write is transient: <see cref="HarnessTerrain.Restart"/> puts the cells it changed back.</param>
 /// <param name="Step">The harness step it was made in.</param>
 public readonly record struct FakeTerrainWrite(string Mod, string Label, CellBox Box, long CellsChanged, bool Transient, ulong Step);
 
