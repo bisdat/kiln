@@ -143,7 +143,7 @@ int main(){
  build_fn=&build_palette;build_palette(state.data()+0x90b80);ui_ok.store(true);
  check(grid_hook.install(&fake_api,1,reinterpret_cast<uintptr_t>(&draw_palette),reinterpret_cast<void*>(&hk_grid),"palette"),"palette hook continuation installs");
  hk_grid(state.data());check(drawn==1,"without a supported server announcement the palette hook adds no row");
- dyes_set_stock(1,rows,1);hk_grid(state.data());check(drawn==2&&dyes::id(ui_rows[1])==123&&dyes::key(ui_rows[1])==dyes::token(123)&&dyes::count(ui_rows[1])==2,"palette hook injects a reserved-key source dye and the live row mid supplies its count");
+ dyes_set_stock(1,rows,1);hk_grid(state.data());check(drawn==2&&dyes::id(ui_rows[0])==123&&dyes::key(ui_rows[0])==dyes::token(123)&&dyes::count(ui_rows[0])==2&&dyes::id(ui_rows[1])==999,"palette hook injects a reserved-key source dye, sorts it with the dyes the player has by count (#132), and the live row mid supplies its count");
  dyes_set_stock(0,nullptr,0);hk_grid(state.data());check(drawn==1,"closing or losing the server offer rebuilds the unmodified game palette list");
  std::vector<dyes::Stock> outer_drawing{{999,3}};drawing=&outer_drawing;ui_ok.store(false);modified_state=nullptr;
  hk_grid(state.data());check(dyes::count(ui_rows[0])==0,"an ordinary nested grid cannot inherit an outer source-count offer");
