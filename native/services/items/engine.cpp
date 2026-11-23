@@ -1515,7 +1515,9 @@ void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t
         const Stack* stack=at(pages[0],target);
         bool correct_page=false;
         for(uint32_t i=0;i<pages[0].n;++i)
-            if(pages[0].p[i].entity==KILN_SLOT_INVENTORY(target) && pages[0].cat[i]==category) correct_page=true;
+            if(pages[0].p[i].entity==KILN_SLOT_INVENTORY(target) &&
+               (pages[0].cat[i]==category || (r.equipment_slot>=14 && r.equipment_slot<=16 && pages[0].cat[i]==kLinkGeneric)))
+                correct_page=true; // arrows, spells and bait are equipped where they lie, including Generic cells
         if (!stack || !correct_page) return fail(KILN_ITEMS_SLOT_CHANGED,"the equipment selection does not name an equipment page");
         if (!is_empty(*stack)) old=*stack;
     } else {

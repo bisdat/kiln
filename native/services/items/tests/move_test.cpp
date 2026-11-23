@@ -1668,10 +1668,10 @@ void give_equip_test() {
         ge_commits=ge_rollbacks=ge_frees=0; ge_equip_fail=ge_guard=g_add_fails=false;
         ge_target=0;
     };
-    auto run = [&](uint32_t flags=0, uint8_t slot=10) {
+    auto run = [&](uint32_t flags=0, uint8_t slot=10, uint32_t item=SWORD, uint32_t count=1) {
         alignas(16) uint8_t tx[512]{};
         FakeTx access; Access a; access_from_tx(&access,&a);
-        KilnItemsGiveEquipRequest r{sizeof r,P,SWORD,1,flags,slot,{}};
+        KilnItemsGiveEquipRequest r{sizeof r,P,item,count,flags,slot,{}};
         KilnItemsEquipResult out{};
         give_equip_run(a,r,tx,&out);
         return out;
@@ -1720,6 +1720,13 @@ void give_equip_test() {
     for(int k=0;k<8;++k) put(100,k,WOOD,250);
     const auto full=g_comps; r=run(); check(r.status==KILN_ITEMS_NO_ROOM && g_comps==full && ge_frees==0,
           "give-equip: no empty unselected equipment slot refuses without mutation");
+    reset(); set_item(ARROW,99,false,6,8);
+    const uint64_t arrows=KILN_SLOT_ID(101,0);
+    put(101,0,ARROW,20);
+    std::memcpy(comp(T_SEL,P,216).data()+14*8,&arrows,8);
+    r=run(KILN_ITEMS_GIVE_EQUIP_TAKE,14,ARROW,50);
+    check(r.status==KILN_ITEMS_DONE && r.to==arrows && r.reserved[0]==20 && !r.pide && count_at(101,0)==50,
+          "give-equip: replaces worn arrows where vanilla keeps them in a Generic cell, reports the entire old count");
 }
 
 int main(int argc, char** argv) {
