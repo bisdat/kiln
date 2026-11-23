@@ -280,8 +280,9 @@ public sealed unsafe class AmmoListTests : IDisposable
         FakeAmmo.Contexts[Arrow] = c;
         UiAmmoListBridge.Tick();
         Assert.Equal(1, calls);
-        Assert.True(seen!.Truncated);  // the provider sees that the game had more rows than fit
-        Assert.Equal((UiAmmoNative.ModeAppend, 0), (FakeAmmo.Last(Arrow).Mode, FakeAmmo.Last(Arrow).Rows.Length));  // none fits after them
+        Assert.True(seen!.Truncated);  // the provider sees that rows were cut at 64 (LIMIT)
+        // LIMIT alone (e.g. left from an earlier overfull list) takes no room: the room follows the game's rows seen
+        Assert.Equal([(0x30u, 1u)], FakeAmmo.Last(Arrow).Rows);
     }
 
     [Fact]

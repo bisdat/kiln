@@ -74,8 +74,9 @@ public sealed class AmmoListContext
     public IReadOnlyList<AmmoListRow> GameRows { get; }
     /// <summary>Changes whenever the held weapon, the game's own rows or counts, or the session change.</summary>
     public ulong Revision { get; }
-    /// <summary>The game's own list had more rows than a list holds (64): <see cref="GameRows"/> are its first 64, and in
-    /// <see cref="AmmoListMode.Append"/> no mod row fits after them.</summary>
+    /// <summary>Kiln reported that rows were cut at 64 (the game's own list was longer, so <see cref="GameRows"/> are its
+    /// first 64, or the list shown last was longer than 64). A diagnostic: the room for a provider's rows follows
+    /// <see cref="GameRows"/>.</summary>
     public bool Truncated { get; }
 
     /// <summary>Whether <paramref name="item"/> is among <see cref="GameRows"/>, the game's rows as last built. Whether a
@@ -164,7 +165,7 @@ public static partial class Ui
         /// <para>Rows show in the order returned. Every provider of a list is composed in registration order; the first row
         /// of an item wins (a later row of the same item is left out), rows of item 0 are left out, a negative count shows
         /// as 0, and a list holds 64 rows in all: in Append the mods' rows fit in what the game's rows leave (none when
-        /// <see cref="AmmoListContext.Truncated"/>), in Replace 64 (the rest is left out, and logged). A provider that
+        /// the game shows 64 itself), in Replace 64 (the rest is left out, and logged). A provider that
         /// throws adds no rows that time (logged in the mod's log). When the game refuses a provider's rows (an item that is
         /// not an arrow, or not a spell, for that list), the other providers' rows still show and the refusal is
         /// logged.</para>
@@ -577,9 +578,9 @@ internal static unsafe class UiAmmoListBridge
         var seen = new HashSet<uint>();
         if (mode == UiAmmoNative.ModeAppend)
             foreach (var g in ctx.GameRows) seen.Add(g.Item.Value);
-        var room = mode == UiAmmoNative.ModeAppend
-            ? (ctx.Truncated ? 0 : Math.Max(0, UiAmmoNative.Capacity - ctx.GameRows.Count))
-            : UiAmmoNative.Capacity;
+        // the room follows the game's rows seen (at most 64), never Truncated alone: native's LIMIT may be left from an
+        // earlier overfull list, and a reason by itself changes no serial, so nothing would build the list again
+        var room = mode == UiAmmoNative.ModeAppend ? Math.Max(0, UiAmmoNative.Capacity - ctx.GameRows.Count) : UiAmmoNative.Capacity;
         var rows = new List<AmmoListRow>();
         var owners = new List<(uint, ModContext?)>();
         var cut = false;
@@ -604,9 +605,8 @@ internal static unsafe class UiAmmoListBridge
         var asked = providers.Select(p => (P: p, Rows: Ask(p, ctx))).ToList();
         var composed = Compose(asked, ctx);
         if (composed.Cut)
-            UiEngine.Log(LogLevel.Warn, ctx.Truncated
-                ? $"ui.ammo: the game's own {st.Kind} list has more than 64 rows; no mod row fits after them (Append)"
-                : $"ui.ammo: the {st.Kind} list holds 64 rows in all; the mods' rows past that are left out");
+            UiEngine.Log(LogLevel.Warn, $"ui.ammo: the {st.Kind} list holds 64 rows in all; the mods' rows past that are left out");
+        if (ctx.Truncated) UiEngine.Log(LogLevel.Info, $"ui.ammo: the {st.Kind} list was cut at 64 rows (the game's own or the list shown)");
         var rc = Publish(t, st, c, composed);
         if (rc == UiAmmoNative.InvalidArgument || rc == UiAmmoNative.NotFound)
         {

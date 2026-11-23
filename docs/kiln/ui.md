@@ -500,8 +500,9 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   immutable snapshot, so the HUD may show the previous context's rows for one frame. Keep it a lookup.
 - **Order and composition.** Rows show in the order returned. All providers of a list are composed in registration
   order; the first row of an item wins, item 0 is left out, a negative count shows as 0. A list holds 64 rows in all:
-  in `Append` the mods' rows fit in what the game's rows leave, and none when the game's own list was already longer
-  (`ctx.Truncated`; `GameRows` are then its first 64); in `Replace` the mods have all 64.
+  in `Append` the mods' rows fit in what the game's rows leave (none when the game shows 64 itself); in `Replace` the
+  mods have all 64. `ctx.Truncated` says Kiln cut rows at 64 (the game's own list was longer, so `GameRows` are its first
+  64, or the list shown last was longer).
   `Append` (the default) leaves out an item the game already lists (its row keeps the real count); `Replace` shows only
   the mods' rows, and one provider asking for it replaces the whole list. A provider that throws adds no rows that time;
   rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
