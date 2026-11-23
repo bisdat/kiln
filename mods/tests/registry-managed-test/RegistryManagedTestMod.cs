@@ -44,7 +44,14 @@ public sealed class RegistryManagedTestMod : Mod
         }
         else if (context.EntryPoint == RegistryEntryPoint.WorldLoad)
         {
-            if (context.World is not { Token: not 0, Id: not null }) throw new InvalidOperationException("world/save identity not joined");
+            if (context.World is not { Token: not 0 } world) throw new InvalidOperationException("native world identity missing");
+            if (world.Id is null)
+            {
+                if (!Throws(RegistryContextError.WorldSettingsUnavailable, () => _ = WorldConfig<WorldSettings>().Value))
+                    throw new InvalidOperationException("id-less world settings succeeded");
+                Log.Info("registry-managed-test: id-less world accepted without save settings");
+                return; // adoption reauthors this point before the settings-dependent assertions below
+            }
             var extra = WorldConfig<WorldSettings>().Value.Extra;
             if (!Drop)
             {
