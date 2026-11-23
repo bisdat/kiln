@@ -103,6 +103,78 @@ public sealed class StorageInstanceLifecycleTests
         Assert.Single(v.H.Of<InstanceDataRestoredEvent>());
     }
 
+    private static void ParkedDocument(params int[] items)
+    {
+        // The server copy as Kiln.Saves keeps it: the key parked (its mod is off) with its records, and the key's band.
+        var records = new System.Text.Json.Nodes.JsonArray(items.Select((item, slot) => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+        {
+            ["s"] = slot, ["b64"] = Convert.ToBase64String([(byte)slot, (byte)item, (byte)(item >> 8), 0, 0, 1, 0, 0]), ["item"] = item, ["n"] = 1,
+        }).ToArray());
+        var doc = PlayerStorageDocument.Empty(InstanceHarness.Hero.Id);
+        doc.Data["revision"] = 2;
+        doc.Data["current"]!["witness"] = "xxh3:00000000000000aa";
+        doc.Data["current"]!["parked"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["mod:bag"] = new System.Text.Json.Nodes.JsonObject { ["slots"] = 8, ["records"] = records, ["nativeParkReason"] = 1 },
+        };
+        var bundle = InstanceHarness.Store.GetBundleRaw(PlayerStorageStore.Prefix + InstanceHarness.Hero.Text, PlayerStorageStore.Mod);
+        bundle.Keys[PlayerStorageStore.Key] = new WorldStore.Slot { Json = doc.Write(32, PlayerStorageDocument.ServerMaxBytes) };
+        bundle.Keys["instanceBands"] = new WorldStore.Slot { Json = "{\"mod:bag\":0}" };
+    }
+
+    [Fact]
+    public void Parked_storage_keeps_item_metadata_while_its_records_stay_parked_across_sessions()
+    {
+        // The storage's mod stays off for more world loads than InstanceStore's three missed sessions: the native
+        // records stay parked in the storage document, so their InstanceData must stay too.
+        using var v = new Visit();
+        v.Park();
+        ParkedDocument(123);
+        v.H.Tick();
+        v.H.Save(1);
+        for (uint session = 2; session <= 2 + InstanceStore.MaxMissedSessions; session++)
+        {
+            var world = new FakeInstanceWorld(9000 + 100 * session);
+            world.Join(InstanceHarness.Hero);
+            v.H.Restart(session - 1, world);
+            v.H.Tick();
+            v.H.Save(session);
+        }
+        Assert.Empty(v.H.Of<InstanceDataLostEvent>());
+        Assert.Single(v.H.Parked());
+        // The mod comes back: its storage is rebuilt and the item gets its metadata back.
+        var last = new FakeInstanceWorld(20000);
+        var player = last.Join(InstanceHarness.Hero);
+        var holder = last.Chest(Guid.NewGuid(), default);
+        var rebuilt = last.Give(holder, 3, Fields);
+        v.H.Restart(3 + InstanceStore.MaxMissedSessions, last, tick: false);
+        InstanceHarness.Store.Instances.World = new StorageInstanceWorld(last,
+            p => p.Holder == holder ? new(player, 1024 + p.FlatSlot) : p,
+            p => p == player ? [player, holder] : [p], _ => true);
+        InstanceHarness.Store.Instances.StorageRestored(InstanceHarness.Hero, player);
+        Assert.Equal(77, v.H.Count(rebuilt));
+    }
+
+    [Fact]
+    public void Storage_band_metadata_without_parked_records_still_ages_out()
+    {
+        // Nothing parked holds the item any more (its storage was emptied elsewhere): the ordinary three-session rule.
+        using var v = new Visit();
+        v.Park();
+        ParkedDocument(456);
+        v.H.Tick();
+        v.H.Save(1);
+        for (uint session = 2; session <= 2 + InstanceStore.MaxMissedSessions; session++)
+        {
+            var world = new FakeInstanceWorld(9000 + 100 * session);
+            world.Join(InstanceHarness.Hero);
+            v.H.Restart(session - 1, world);
+            v.H.Tick();
+            v.H.Save(session);
+        }
+        Assert.NotEmpty(v.H.Of<InstanceDataLostEvent>());
+    }
+
     [Fact]
     public void Item_already_moved_out_without_a_tracker_notice_is_not_parked_with_the_old_holder()
     {
