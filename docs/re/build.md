@@ -437,24 +437,24 @@ abandoned ones included; `0x93ea20` and `0x93fea0` write the no-build and playab
 |---|---|---|
 | world save `0x7c3aa0` / `0xe67410` | `0x7c3d99` / `0xe67709` | one base record per entry: BaseId, bounds, voxel blob (`0x83d200`), water blob (C `0x11631a0`); C logs "Failed to save 'ServerSaveGame', while getting base zones" when it fails |
 | step `0x7bbeb0` / `0xe5fa70`, when `0x94a850(bzs)` reports a change | `0x7bc7d5` / `0xe6031d` | the ECS **base-zone list**: `0x68eca0` / `0x9f2b00` ("[ecs] Build zones changed") |
-| ECS callback `0x7b44c0` / `0xe58610` (registered with the ECS world by `0x7af7c0`) | `0x7b4546` / `0xe58696` | bounds (0x20 each) for a per-entity "inside a base" answer (`0x729e70`) |
+| ECS callback `0x7b44c0` / `0xe58610` (registered with the ECS world by `0x7af7c0` / `0xe53a10`) | `0x7b4546` / `0xe58696` | bounds (0x20 each) for a per-entity "inside a base" answer (`0x729e70`) |
 
 The same step publishes its other lists right before and after (`0x69ca70` no-build `ecs+0x15f5a40`, `0x68fc10`
 build zones `ecs+0x15f8a68` from `0x941d30`, `0x69ce20` playable area `ecs+0x15fba88`).
 
 **The ECS base-zone list** (`ecs+0x15fa278`, inline capacity 255, FNV hash of all bounds `+0x15f5a38`, version
 `+0x15fd29c`) **[dec]**:
-- every changed bound (added or gone) goes to `0x67a2c0`, which walks the spatial grid cells (`ecs+0xe17bd0`,
-  `+0xe17cb0`) under it, so entities there are looked at again;
+- every changed bound (added or gone) goes to `0x67a2c0`, which walks the ECS spatial grid cells (`ecs+0xe17bd0`,
+  `+0xe17cb0`) under it (what it does per cell was not traced);
 - `0x61a780` sends the three zone lists to each peer, each count as one byte; `0x6776e0` reads them on the client;
 - accessor `0x657e30` / C `0x9bbfa0` feeds the base grouping `0x206510` / C `0x46dda0` (callers `0x20bd70`,
-  `0x20be40` / C `0x473470`, `0x473540`): overlapping zones become one base area. Its users: the bases info (per base
-  counts of beds, animals, NPCs: the journal's `basesInfo*` labels) and C `0x3bf7f0`, which assigns each production
-  station to the base area around it ("[factory_info] couldn't find base for factory", "found outside base, but list
-  is full"; lookup `0x46fd00`). The grouping has 16 area slots of 0x130 bytes (`+0x30`..`+0x1330`, the zone span right
-  after them), merges only zones with index < 16, seeds a new area with `0x2072e0` without a bound check, and builds its
-  mask as `(1 << (n & 31)) - 1`. The game never has more than 16 bases; with more zones the areas are wrong, and a 17th
-  area would be written over the zone span.
+  `0x20be40` / C `0x473470`, `0x473540`): overlapping zones become one base area. Its users: per-area counts of
+  entities by kind and flags (`0x20be40`, [inferred] the journal's `basesInfo*` beds and animals) and C `0x3bf7f0`,
+  which assigns each factory to the base area containing it ("[factory_info] couldn't find base for factory", "found
+  outside base, but list is full"; lookup `0x46fd00`). The grouping has 16 area slots of 0x130 bytes
+  (`+0x30`..`+0x1330`, the zone span right after them), merges only zones with index < 16, seeds a new area with
+  `0x2072e0` without a bound check, and builds its mask as `(1 << (n & 31)) - 1`. The game never has more than 16
+  bases; with more zones the areas are wrong, and a 17th area would be written over the zone span.
 
 **The serializer's rule** **[dec 0x83d200]**: for each level-6 key of the store map (x/y/z i16 cells, multiples of 32)
 the chunk box is `key * 0.5` m to `+ 16` m, and the whole chunk is written when `chunkMin <= max && min <= chunkMax` on

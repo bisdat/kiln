@@ -35,7 +35,8 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   16 m chunk it touches. An edit outside every base adds a box (neighbouring chunks share one), and the world list
   shows it as one more altar: the save has no other place for terrain ([RE notes](../../re/build.md) §12). The box is
   only in the save: the base areas the game groups stations, storage and beds by, and sends to every client, are the
-  real bases alone. Kiln decides at each save from the regions of that same save, so a save right after a load, when
+  real bases alone. (While a world loads, the game briefly treats every saved record, a box too, as a build zone,
+  until the altars' own zones replace them.) Kiln decides at each save from the regions of that same save, so a save right after a load, when
   an altar's zone is still its first size, still keeps every edit. When a base shrinks, moves, is abandoned or goes,
   its kept chunks get boxes again at the next save; the JSON keeps every chunk either way. A world saved by 30.8 or
   earlier shows its extra altars until its next save. Up to 0.2.0-dev.30.8 every kept chunk had a box in every save,
@@ -350,6 +351,9 @@ the base 780 m away, visible at once after the teleport, gone after undo). 4 and
 ## Limits
 - An edit outside every base shows as an extra Flame Altar in the world list (one per box) as long as Kiln keeps it;
   `Build.Release(box)` drops it. Edits inside bases add none.
+- If the game's region list cannot take Kiln's boxes in a save (its growth fails, or appending faults), that save
+  keeps only the game's own regions and logs it: edits outside bases are back in the next save that succeeds, but a
+  restart right after such a save loses them. Failing the save instead could stop the world from saving at all.
 - Hosted worlds on a game client: the definitions resolve offline on client build 26404966 (one region file per world
   GUID); not run in a hosted world yet.
 - Building blocks are written as cells; the game's own blueprint path (item shape + inventory) is not called.

@@ -32,7 +32,9 @@ bool grow_into_fresh(kb::GameArray* a, int64_t neg_required, uint8_t) {
     a->capacity = 64;
     return true;
 }
+int g_grow_calls = 0;
 bool grow_faults(kb::GameArray*, int64_t, uint8_t) {
+    ++g_grow_calls;
     *reinterpret_cast<volatile uint8_t*>(g_noaccess) = 1;  // the game's grow faulting while Kiln appends
     return true;
 }
@@ -83,9 +85,12 @@ int main() {
     }
     {   // the base zones the game's systems use are never read or changed, even when they would fault
         kb::GameArray a{g_noaccess, 1, 1, &grow_faults};
+        const int errors = kb::errors, warnings = kb::warnings, grows = g_grow_calls;
         kb::after_save_regions(0x2000, ok, &a, sites);
         kb::after_save_regions(0x3000, ok, &a, sites);
         check(a.count == 1 && a.data == g_noaccess, "base zones / base query: the list is not read or changed");
+        check(g_grow_calls == grows && kb::errors == errors && kb::warnings == warnings,
+              "base zones / base query: no grow, no fault, nothing reported");
     }
     {   // the ordinary save, natively
         std::vector<uint8_t> store;
