@@ -29,6 +29,7 @@
 #include "seh.h"
 #include "state.h"
 #include "mode.h"
+#include "local.h"
 
 namespace {
 
@@ -118,11 +119,8 @@ KilnResult KILN_CALL t_subscribe(KilnOwner owner, KilnCameraChanged fn, void* us
 
 KilnResult KILN_CALL t_unsubscribe(KilnHandle handle) { return g_core.unsubscribe(handle); }
 
-// The frame snapshot and the transport bridge are not in this build yet: their rows are off and say so.
-KilnResult KILN_CALL t_get_visual(KilnCameraVisual* out, uint32_t* out_reason) {
-    if (!out || !out_reason || out->size < sizeof(KilnCameraVisual)) return KILN_ERR_INVALID_ARGUMENT;
-    return KILN_ERR_UNAVAILABLE;
-}
+KilnResult KILN_CALL t_get_visual(KilnCameraVisual* out, uint32_t* out_reason) { return kcam::local_get_visual(out, out_reason); }
+// The transport bridge is not in this build yet: its row is off and says so.
 KilnResult KILN_CALL t_bind_transport(KilnOwner, const KilnCameraTransport*) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_unbind_transport(KilnOwner) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_transport_ended(KilnOwner, KilnCameraLease, uint64_t, uint32_t, uint32_t, KilnStr) { return KILN_ERR_UNAVAILABLE; }
@@ -159,7 +157,10 @@ void KILN_CALL on_server_pre(const KilnTickInfo* tick, void*) {
     const uint64_t mode = g_mode.caps();
     if (mode != g_reported_mode) { g_reported_mode = mode; report_rows(); }
 }
-void KILN_CALL on_client_pre(const KilnTickInfo*, void*) { g_core.pre(kcam::kClient); }
+void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
+    if (kcam::local_pre(tick)) report_rows();  // the client side's own step (local.h) comes before the core's
+    g_core.pre(kcam::kClient);
+}
 
 // Any thread (the one that revoked the owner; kiln.core calls it holding no lock of its own). Closes the gate for the
 // owner's callbacks and waits, bounded and holding no lock, for those already running on other threads; each world
@@ -190,6 +191,7 @@ void report_rows() {
         if (have & bit) row(name, true, 0, "");
         else if (client_only && !g_client_side) row(name, false, KILN_CAP_REASON_WRONG_SIDE, kClientOnly);
         else if (!writes) row(name, false, KILN_CAP_REASON_SERVICE_OLDER, kNoObserver);
+        else if (uint32_t why = 0; const char* text = client_only ? kcam::local_why(bit, &why) : nullptr) row(name, false, why, text);
         else row(name, false, KILN_CAP_REASON_SERVICE_MISSING, kNoBackend);
     };
     if (!(mode & KILN_CAMERA_CAP_SERVER_MODE) && writes && g_mode.down() != kcam::ModeBackend::kUp) {
@@ -215,6 +217,7 @@ void report_rows() {
     write_row("camera.remote", remote, KILN_CAMERA_CAP_REMOTE, false);
     if (local & KILN_CAMERA_CAP_RENDERED_SNAPSHOT) row("camera.rendered_snapshot", true, 0, "");
     else if (!g_client_side) row("camera.rendered_snapshot", false, KILN_CAP_REASON_WRONG_SIDE, kClientOnly);
+    else if (uint32_t why = 0; const char* text = kcam::local_why(KILN_CAMERA_CAP_RENDERED_SNAPSHOT, &why)) row("camera.rendered_snapshot", false, why, text);
     else row("camera.rendered_snapshot", false, KILN_CAP_REASON_SERVICE_MISSING, kNoBackend);
     row("camera.resource_profile", false, KILN_CAP_REASON_POLICY, "reserved: stock camera resource profiles are not part of kiln.camera v1");
 }
@@ -250,6 +253,7 @@ void KILN_CALL on_ready(void*) {
     if (!declared) logf(KILN_LOG_WARN, "camera: maintained Mode unavailable (tracked writes, player records, or NCC declaration missing)");
 
     if (!observer) logf(KILN_LOG_WARN, "camera: kiln.hooks has no owner-retiring observer (hooks.owner_cleanup): no camera write is admitted");
+    kcam::local_start(g_api, g_owner, &g_core, g_client_side);  // the client side: render hooks, snapshot, local backend
     report_rows();
     uint64_t mode = 0, local = 0;
     g_core.capabilities(KILN_CAMERA_SERVER_MODE, 0, &mode);

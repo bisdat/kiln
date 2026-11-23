@@ -338,6 +338,7 @@ Kiln.CameraVisualSnapshot.NearPlane.get -> float
 Kiln.CameraVisualSnapshot.NearPlane.init -> void
 Kiln.CameraVisualSnapshot.Pose.get -> Kiln.CameraPose!
 Kiln.CameraVisualSnapshot.Pose.init -> void
+Kiln.CameraVisualSnapshot.Project(Kiln.WorldPosition point, System.Numerics.Vector2 viewportOrigin, System.Numerics.Vector2 viewportSize) -> Kiln.CameraProjection!
 Kiln.CameraVisualSnapshot.SessionGeneration.get -> uint
 Kiln.CameraVisualSnapshot.SessionGeneration.init -> void
 Kiln.CameraVisualSnapshot.TargetSampleStep.get -> ulong
@@ -393,6 +394,7 @@ static Kiln.Camera.Set(Kiln.EntityId player, Kiln.CameraOverride! request) -> Sy
 static Kiln.Camera.SetLocal(Kiln.CameraOverride! request) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
 static Kiln.Camera.SetMode(Kiln.EntityId player, Kiln.CameraMode mode, System.TimeSpan duration, Kiln.CameraTransitionOverride transition = Kiln.CameraTransitionOverride.None, int priority = 0) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
 static Kiln.Camera.Update(Kiln.CameraLease lease, Kiln.CameraOverride! replacement, Kiln.CameraUpdateTiming timing = Kiln.CameraUpdateTiming.Preserve) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.CameraPose.LookAt(Kiln.WorldPosition position, Kiln.WorldPosition target, System.Numerics.Vector3 up) -> Kiln.CameraPose!
 static Kiln.CameraBlend.operator !=(Kiln.CameraBlend? left, Kiln.CameraBlend? right) -> bool
 static Kiln.CameraBlend.operator ==(Kiln.CameraBlend? left, Kiln.CameraBlend? right) -> bool
 static Kiln.CameraChange.operator !=(Kiln.CameraChange? left, Kiln.CameraChange? right) -> bool
