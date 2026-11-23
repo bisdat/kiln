@@ -1105,13 +1105,13 @@ public sealed class UiBlockTests : IDisposable
     [Fact]
     public void The_UiBlocks_samples_camp_key_opens_and_closes_the_camp_window_also_while_it_has_the_keyboard()
     {
-        // The guided check 09-ui-blocks closes and reopens Camp with Ctrl+F9 (review M2): its key toggles the window, and it
-        // fires while the open window takes the keyboard (whileCapturing).
+        // The guided check 09-ui-blocks closes and reopens Camp with Ctrl+F9 (review M2): its key toggles the window. A key
+        // fires while a mod's own window has the input anyway, so it needs no whileCapturing (that would add the Kiln menu).
         var file = Path.Combine(SampleDir(), "blocks", "camp.json");
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
         var key = Json<KeyBindingBlock>(doc.RootElement.GetProperty("keyBindings").GetProperty("open-camp").GetRawText());
         Assert.Equal("Ctrl+F9", key.Key);
-        Assert.True(key.WhileCapturing);
+        Assert.False(key.WhileCapturing);
         var mod = Define("camp", new WindowBlock { Title = "Camp", Rows = [Text("x")] });
         Define("open-camp", key, mod);
         var camp = Assert.Single(_game.Surfaces);

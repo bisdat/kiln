@@ -1877,7 +1877,7 @@ What a button or a key does: exactly one of command, toggle, set, castAbility, a
 | `set` | [uiSet](#uiset) |  |  |
 | `toast` | [uiText](#uitext) |  | A short message in the corner of the screen. |
 | `toggle` | [uiBind](#uibind) |  | Flips a true/false config entry. |
-| `toggleWindow` | [ref](#ref) |  | Opens a window block when it is closed, closes it when it is open (since 0.2.0-dev.31). A key that toggles an interactive window needs whileCapturing to close it. |
+| `toggleWindow` | [ref](#ref) |  | Opens a window block when it is closed, closes it when it is open (since 0.2.0-dev.31). A key fires while a mod's window has the input (not while its text field has the keyboard), so it also closes the window; whileCapturing only adds firing over the Kiln menu. |
 
 ## uiBind
 

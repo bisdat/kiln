@@ -317,9 +317,9 @@ public sealed record UiAction
     public EffectRef? ApplyEffect { get; init; }
     public WindowRef? OpenWindow { get; init; }
     public WindowRef? CloseWindow { get; init; }
-    /// <summary>Opens the window when it is closed and closes it when it is open (since 0.2.0-dev.31): one key for both.
-    /// A key that toggles an interactive window needs <see cref="KeyBindingBlock.WhileCapturing"/> to close it, since the
-    /// open window takes the keyboard.</summary>
+    /// <summary>Opens the window when it is closed and closes it when it is open (since 0.2.0-dev.31): one key for both. A
+    /// key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so it also
+    /// closes the window it opened; <see cref="KeyBindingBlock.WhileCapturing"/> only adds firing over the Kiln menu.</summary>
     public WindowRef? ToggleWindow { get; init; }
     /// <summary>A short message in the corner of the screen.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]

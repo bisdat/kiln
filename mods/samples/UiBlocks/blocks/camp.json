@@ -209,7 +209,6 @@
     "open-camp": {
       "key": "Ctrl+F9",
       "description": "Open or close the camp window (UI blocks sample)",
-      "whileCapturing": true,
       "does": {
         "toggleWindow": "camp"
       }
