@@ -106,7 +106,7 @@ struct NativeRegionStability {
         ++observations;
         return observations >= 2 && now - since >= settle;
     }
-}
+};
 
 #ifndef KILN_REGIONS_HOST_TEST
 kiln::RawHook g_hook;
