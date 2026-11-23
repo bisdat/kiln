@@ -112,7 +112,9 @@ in `kiln/data/<id>` and `kiln/config`, which this does not touch.
 - **Kiln**: the apply writes `probation/kiln.json` as `applied`, and the proxy sets it to `booting` just before it
   loads the new kiln-core. Kiln.Host removes it after the mods have loaded. With `"clr": false`, kiln-core removes it
   at the end of its boot. If the next start finds `booting`, it rolls Kiln back. That covers a crash, a failed boot,
-  safe idle, and also a stop before the mods load (the server world's first step).
+  safe idle, and also a stop before the mods load (the server world's first step): a restart while the world still
+  loads, and Kiln's own deliberate stops before any world loads (a required boot mod, the NPC roster, the native
+  content build: exit codes 19201 to 19203), even when a mod caused them.
 - The version an automatic rollback goes back to has no probation, so it never loops.
 
 ## Limits
