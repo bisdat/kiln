@@ -65,6 +65,23 @@ test('Deck storage and return confirmation use controller focus targets', async 
   await expect(page.getByRole('region', { name: 'Player storage' })).toContainText('Returned 3 stacks');
 });
 
+test('controller can inspect and scroll every read-only storage row, even when return is disabled', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/?deck=steamdeck&storage=many#/deck/editor');
+  await expect(page.locator('.dke-name')).toContainText('Aldric');
+  await page.getByRole('button', { name: 'Storage', exact: true }).click();
+  await page.evaluate(() => (window as any).__kilnMock.startOutside(5));
+  await expect(page.getByRole('button', { name: 'Return to character' })).toBeDisabled();
+  const region = page.getByRole('region', { name: 'Player storage' });
+  const rows = region.getByRole('listitem');
+  await expect(rows).toHaveCount(64);
+  for (let i = 0; i < 64; i++) {
+    await pad(page, 'down');
+    await expect(rows.nth(i)).toBeFocused();
+  }
+  expect(await region.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+});
+
 test('running game disables return without touching either file', async ({ page }) => {
   await page.goto('/?storage=sample#/editor');
   await expect(page.locator('.k-page-title')).toContainText('Aldric');

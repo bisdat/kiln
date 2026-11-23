@@ -229,9 +229,9 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
     await make("character0.ksd", aldric(know), 0);
     if (storageMode) {
       const character = "01010101-0101-0101-0101-010101010101";
-      const rows = [0, 1, 2].map((s) => ({ s, item: ITEM.steelArrow, n: 3, b64: writeItemRecord({ slot: s, itemId: ITEM.steelArrow, count: 3 }).toString('base64') }));
+      const rows = Array.from({ length: storageMode === "many" ? 64 : 3 }, (_, s) => ({ s, item: ITEM.steelArrow, n: 3, b64: writeItemRecord({ slot: s, itemId: ITEM.steelArrow, count: 3 }).toString('base64') }));
       const current = { witness: await inventoryWitness(readExactCharacter(characterBlock(aldric(know)), 5)), worldRev: 10,
-        source: storageMode === "server" ? "server" : "local", storages: { "sample:bag": { slots: 8, records: rows } }, parked: {} };
+        source: storageMode === "server" ? "server" : "local", storages: { "sample:bag": { slots: Math.max(8, rows.length), records: rows } }, parked: {} };
       storageTexts.set(`${saveDir}/character0.ksd`, JSON.stringify({ format: 1, character, revision: 10,
         mods: { "kiln-items": { storage: { v: 1, character, revision: 5, current, history: [], quarantine: [] } } } }));
     }

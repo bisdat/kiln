@@ -226,4 +226,5 @@
 .ke-storage > .k-hint { margin-block: 10px; max-width: 76ch; }
 .ke-storage-group { margin-top: 20px; }
 .ke-storage-group ul { padding-left: 22px; }
-.ke-storage-group li { padding-block: 8px; border-bottom: 1px solid var(--k-line); }
+.ke-storage-group li { padding-block: 8px; border-bottom: 1px solid var(--k-line); scroll-margin: 8px; }
+.ke-storage-group li:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }

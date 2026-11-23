@@ -56,7 +56,8 @@ export default function Storage({ model }) {
       <StorageAction id="storage-return" disabled={disabled} onClick={() => setAsk(true)}>{t('playerStorage.return')}</StorageAction>
       {(storage.groups ?? []).map((group) => <section key={`${group.parked}:${group.key}`} className="ke-storage-group">
         <h3 className="k-sub">{group.key}{group.parked ? ` · ${t('playerStorage.parked')}` : ''}</h3>
-        <ul>{group.records.map((record, i) => <li key={`${record.slot}:${i}`}>
+        <ul>{group.records.map((record, i) => <li key={`${record.slot}:${i}`} tabIndex={0}
+          data-deck-id={env.deck ? `storage-record-${group.parked}:${group.key}:${record.slot}` : undefined}>
           <strong>{itemName(record.itemId) || `0x${Number(record.itemId).toString(16)}`}</strong> ×{record.count}
           <span className="k-mono"> · {Object.entries(record).filter(([key, value]) => !['itemId', 'count'].includes(key) && value !== undefined).map(([key, value]) => `${key}: ${value}`).join(' · ')}</span>
         </li>)}</ul>
