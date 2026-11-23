@@ -4,7 +4,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useAdminCall, useAdminQuery, useHasOp } from "../../api/admin";
-import type { Json, SchemaSnapshot, ValidationError } from "../../api/commands";
+import type { Json, SchemaSnapshot, ValidationError } from "../../api/shared";
 import { rich, t as tr, useT } from "../../i18n";
 import { NeedsOp, useServerId, withAdmin } from "../common";
 import { OfflineNote } from "../ConnectionBar";

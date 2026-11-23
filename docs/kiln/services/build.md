@@ -26,10 +26,25 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   (`BuildOptions.LoadTimeout`, default 20 s). Sync calls on a tile that is not loaded throw `BuildException` (and ask
   for it).
 - **Saving.** The game saves terrain **only inside player-base build zones**; everything else regrows at the next
-  restart. Kiln remembers the 16 m chunks its own writes touch and adds them to the region list the game's save
-  writes, so Kiln's edits are saved like a base (`kiln/data/kiln.build/regions/<world GUID>.json`). Inside a Kiln
-  region the players' own digging is kept too. `Build.Release(box)` forgets regions (the terrain there reverts at the
-  next restart).
+  restart. Kiln remembers the 16 m chunks its own writes touch (`kiln/data/kiln.build/regions/<world GUID>.json`).
+  When the game saves the world, Kiln adds boxes to the list of regions that save writes, for the kept chunks the
+  bases do not save whole already, so Kiln's edits are saved like a base. Inside a Kiln region the players' own
+  digging is kept too. `Build.Release(box)` forgets regions (the terrain there reverts at the next restart).
+- **Kiln's boxes, bases and Flame Altars** (kiln#136, thanks bisdat). The save writes one record per region, and the
+  world list counts the records as Flame Altars. A base's own record keeps the terrain of the 4 m blocks its zone
+  touches, so a kept 16 m chunk wholly inside a base adds no box, unless the base's zone touches more than 4,096 chunks
+  (below, Limits). A kept chunk outside every base adds a box
+  (neighbouring chunks share one), and so does a kept chunk on a base's edge that reaches outside it, since the base's
+  record drops the part outside its zone and Kiln knows only which 16 m chunks its edits touched, not where in them.
+  The world list shows each box as one more altar: the save has no other place for terrain
+  ([RE notes](../../re/build.md) §12). The box is only in the save: the base areas the game groups stations, storage
+  and beds by, and sends to every client, are the real bases alone. (While a world loads, the game briefly treats
+  every saved record, a box too, as a build zone, until the altars' own zones replace them.) Kiln decides at each save
+  from the regions of that same save, so a save right after a load, when an altar's zone is still its first size,
+  still keeps every edit. When a base shrinks, moves, is abandoned or goes,
+  its kept chunks get boxes again at the next save; the JSON keeps every chunk either way. A world saved by 30.8 or
+  earlier shows its extra altars until its next save. Up to 0.2.0-dev.30.8 every kept chunk had a box in every save,
+  and the boxes were also base zones for the game's systems.
 - **Transient edits** (`BuildFlags.Transient`) add no region and are gone after the next restart, also where the game's
   save writes them anyway (inside a player base, or in a 32-cell chunk another edit keeps): every transient write
   journals the cells it changed, their value before and after, on disk before it commits them: appended to
@@ -433,6 +448,31 @@ the base 780 m away, visible at once after the teleport, gone after undo). 4 and
 (`canAccessInventories`/`canEditWorld` false: no prompt at the chest); they need a Friend or Admin login.
 
 ## Limits
+- An edit outside every base shows as an extra Flame Altar in the world list (one per box) as long as Kiln keeps it;
+  `Build.Release(box)` drops it. Edits inside bases add none, except in the 16 m chunks along a base's edge that reach
+  outside it.
+- If the game's region list cannot take all of Kiln's boxes in a save, that save keeps the game's own regions and
+  only the boxes that fit (when its growth fails), or none of Kiln's (when appending faults), and Kiln logs it: the edits
+  left out are back in the next save that succeeds, but a restart right after such a save loses them. Failing the save
+  instead could stop the world from saving at all.
+- Kiln tells the save-region builder's three callers apart by their call sites, which sigdb finds on each game build
+  (`build/RetSaveRegionsWorldSave`, `build/RetSaveRegionsBaseZones`, `build/RetSaveRegionsBaseQuery`). On a build
+  where the world save's call site is not found, Kiln's boxes go into every caller's list, as up to 0.2.0-dev.30.8, so
+  that no edit goes unsaved: each box is then also a base zone the game's systems and clients use, and past 16 zones
+  the game's base areas go wrong. Where only the base-zone or base-query call site is not found, the world save alone
+  still gets them. Either way kiln.log has a warning when kiln.build starts, naming the missing names and what Kiln
+  does instead, and so does the text of the kiln.caps row `build.persist_callers`: unavailable (`symbol-missing`)
+  when every caller gets the boxes, available otherwise. Another mod's hook in front of Kiln's changes the return
+  address Kiln sees; Kiln then looks at up to 8 return addresses below it for a known call site. A call it still cannot
+  place gets the boxes, as it may be the world save, when another module's code is on the stack or the stack cannot be
+  walked (kiln.log names the module once); only a call whose frames are all the game's own gets none. Windows' (or
+  Wine's) own modules and the C runtime's, where every thread starts, are not another module: the look ends there.
+- The game's voxel writer keeps at most 4,096 stored 16 m chunks per save record and skips the rest, scattered over
+  the whole record ([RE notes](../../re/build.md) §12: the writer server `0x83d200` with its 4,096-key array set up at
+  `0x83d2f8`, client `0x10b89b0` and `0x10b8aa8`). A base whose zone touches more than 4,096 chunk positions (a side
+  over 240 m, which only a mod that enlarges zones makes, or exactly 240 m with a face on the 16 m grid) loses some of
+  its terrain at every save, players' own building included; Kiln does not change that. Since 0.2.0-dev.30.9 Kiln's kept chunks inside such a base get boxes of their own (each box
+  one more Flame Altar), and no Kiln box covers more than 4,096 chunks: a larger one is cut into several.
 - Hosted worlds on a game client: the definitions resolve offline on client build 26404966 (one region file per world
   GUID); not run in a hosted world yet.
 - Building blocks are written as cells; the game's own blueprint path (item shape + inventory) is not called.

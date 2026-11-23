@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import type { AdminCombatDeath, AdminPos, AdminState } from "../api/admin";
 import { onAdminState } from "../api/admin";
-import type { ServerId } from "../api/commands";
+import type { ServerId } from "../api/shared";
 import { t } from "../i18n";
 
 export interface SeenPlayer {

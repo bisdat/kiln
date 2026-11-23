@@ -92,9 +92,9 @@ pub fn status(dir: Option<PathBuf>) -> Result<i32> {
     Ok(if st.running { 0 } else { 3 })
 }
 
-pub fn install(zip: &Path, dir: Option<PathBuf>, components: Option<Vec<String>>, sf: bool, real: bool) -> Result<i32> {
+pub fn install(bundle: &Path, dir: Option<PathBuf>, components: Option<Vec<String>>, sf: bool, real: bool) -> Result<i32> {
     let g = client_at(dir.as_deref(), real)?;
-    crate::bundle::install_into(&g, zip, components, sf)?;
+    crate::bundle::install_into(&g, bundle, components, sf)?;
     Ok(0)
 }
 

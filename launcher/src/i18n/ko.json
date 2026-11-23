@@ -3373,7 +3373,13 @@
     "checkNow": "지금 확인",
     "testBuild": "{current}의 테스트 빌드 {beta}입니다.",
     "switchBack": "릴리스로 되돌리기",
-    "followBeta": "베타를 따르는 중: 다음 테스트 빌드가 업데이트로 옵니다."
+    "followBeta": "베타를 따르는 중: 다음 테스트 빌드가 업데이트로 옵니다.",
+    "checkingNow": "업데이트 확인 중…",
+    "upToDateLine": "Kiln 최신 버전 ({version})",
+    "availableLine": "Kiln {version} 있음",
+    "failedLine": "확인 실패: {reason}",
+    "checkedAt": "확인: {time}",
+    "noAnswer": "응답한 업데이트 서버 없음"
   },
   "nav": {
     "play": "플레이",

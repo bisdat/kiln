@@ -3441,7 +3441,13 @@
     "checkNow": "Verificar agora",
     "testBuild": "Versão de teste {beta} de {current}.",
     "switchBack": "Voltar para a versão estável",
-    "followBeta": "Seguindo o beta: a próxima versão de teste chega como atualização."
+    "followBeta": "Seguindo o beta: a próxima versão de teste chega como atualização.",
+    "checkingNow": "Procurando atualizações…",
+    "upToDateLine": "O Kiln está atualizado ({version})",
+    "availableLine": "Kiln {version} disponível",
+    "failedLine": "A verificação falhou: {reason}",
+    "checkedAt": "verificado: {time}",
+    "noAnswer": "nenhum servidor de atualização respondeu"
   },
   "nav": {
     "play": "Jogar",

@@ -44,8 +44,9 @@
 //      puts those bytes back and jumps there, so the chained DLL's patch runs next and unwinds to the real entry
 //      (last in, first out).
 // The gate runs on the main thread after the loader lock is released and before any game code: it restores the entry
-// bytes, loads <game>\kiln\kiln-core.dll (or %KILN_CORE%), calls kiln_boot with KilnBootInfo v3 and continues into the
-// entry point. The bytes go back before the core starts, so a DLL the core loads (a [late] entry, a native mod) that
+// bytes, applies a staged Kiln update on a dedicated server (kiln/staged, core/src/staged.h: the update, a requested
+// rollback, or the automatic rollback of an update the last start did not confirm), loads <game>\kiln\kiln-core.dll (or
+// %KILN_CORE%), calls kiln_boot with KilnBootInfo v3 and continues into the entry point. The bytes go back before the core starts, so a DLL the core loads (a [late] entry, a native mod) that
 // patches the entry point saves the right bytes and its patch runs first when the gate continues: last in, first out
 // again. If anything fails the game starts vanilla.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -58,7 +59,12 @@
 #include <cstdint>
 #include <cstring>
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "../core/abi/kiln_api.h"
+#include "../core/src/staged.h"
 #include "image_match.h"
 #include "kiln_version.h"
 
@@ -1347,6 +1353,47 @@ bool entry_patch_is_dead() {
     return !executable(target);
 }
 
+// kiln/staged on a dedicated server (core/src/staged.h): a staged Kiln update, its rollback or its automatic rollback,
+// before kiln-core.dll loads, so this start runs the Kiln that is in place now. Outside the loader lock (the gate), so the
+// CRT and std::filesystem are fine here. What it did goes to proxy.log and, through kiln/staged/proxy-lines.json, to
+// kiln-core, which writes it into kiln.log. Nothing escapes: a transaction it could not finish stays for the next start.
+void apply_staged() {
+    if (!g_server) return;
+    using kiln::staged::Level;
+    std::vector<std::pair<Level, std::string>> lines;
+    const uint64_t pid = GetCurrentProcessId();
+    try {
+        kiln::staged::Env env;
+        env.game = g_game;
+        env.by = "proxy";
+        env.kiln = KILN_VERSION;
+        env.pid = pid;
+        env.log = [&lines](Level level, const std::string& text) { lines.emplace_back(level, text); };
+        kiln::staged::boot_kiln(env);
+    } catch (const std::exception& e) {
+        lines.emplace_back(Level::Error, std::string("staged: the Kiln update step stopped: ") + e.what() + " (the next start tries again)");
+    } catch (...) {
+        lines.emplace_back(Level::Error, "staged: the Kiln update step stopped (the next start tries again)");
+    }
+    if (lines.empty()) return;
+    wchar_t path[kPath];
+    lstrcpynW(path, g_kiln, kPath - 32);
+    lstrcatW(path, L"\\logs\\proxy.log");
+    g_log = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    for (const auto& [level, text] : lines) {
+        const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+        std::wstring w(static_cast<size_t>(n > 0 ? n : 0), L'\0');
+        if (n > 0) MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), w.data(), n);
+        plog(L"%s%s", level == Level::Error ? L"ERROR " : level == Level::Warn ? L"WARN " : L"", w.c_str());
+    }
+    if (g_log != INVALID_HANDLE_VALUE) CloseHandle(g_log);
+    g_log = INVALID_HANDLE_VALUE;
+    try {
+        kiln::staged::save_proxy_lines(g_game, pid, lines);
+    } catch (...) {
+    }
+}
+
 // Reached by a jmp from the exe's entry point, so the stack looks like a call to the entry: return its value.
 int __cdecl gate_entry() {
     if (g_log != INVALID_HANDLE_VALUE) {  // the core writes kiln.log from here on
@@ -1358,6 +1405,7 @@ int __cdecl gate_entry() {
     // [late], a native mod) that patches the entry point then saves the real bytes instead of Kiln's jump. Saved over
     // the jump, its patch could only be dropped: chaining to it would run this gate a second time.
     if (!restore_entry()) ExitProcess(ERROR_DLL_INIT_FAILED);  // the entry point would jump back here for ever
+    apply_staged();
     boot_core();
     if (memcmp(g_entry, g_original, sizeof g_original) != 0) {
         if (entry_patch_is_dead()) {

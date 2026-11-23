@@ -10,7 +10,8 @@ cxx=${CXX:-$(command -v clang++ || command -v g++)}
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer ${KILN_TEST_DEFINES:-} \
     -o "$out/transient_journal_test" "$here/transient_journal_test.cpp" "$here/../transient_journal.cpp"
 "$out/transient_journal_test"
-# The region lifecycle regression runs through this existing build-service gate entry point too.
+# The region lifecycle and save-list regressions run through this existing build-service gate entry point too (the
+# guarded paths natively on Windows: CMake target build-regions-win).
 "$cxx" -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer ${KILN_TEST_DEFINES:-} \
     -o "$out/regions_test" "$here/regions_test.cpp"
 "$out/regions_test"

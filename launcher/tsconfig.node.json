@@ -13,6 +13,7 @@
   "include": [
     "vite.config.ts",
     "playwright.config.ts",
+    "vite.admin-ui.config.ts",
     "scripts"
   ]
 }

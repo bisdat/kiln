@@ -8,7 +8,7 @@ import { useDistribution, useNexusEnabled, useSettings } from "../../../api/hook
 import { useUpdate, useUpdateStore } from "../../../api/update";
 import { setCommunity, useCommunitySettings } from "../../../community/state";
 import { NexusCard } from "../../../components/NexusSettings";
-import { NexusTestBuildsLink, NexusVersionsLink, updateWords, useCheckNow } from "../../../components/UpdateSettings";
+import { CheckLineText, NexusTestBuildsLink, NexusVersionsLink, useCheckNow } from "../../../components/UpdateSettings";
 import { useCrucibleOn } from "../../../crucible/state";
 import { saveSettings } from "../../../deck/mode";
 import { rich, useT } from "../../../i18n";
@@ -81,7 +81,7 @@ function SelfUpdates() {
         control={<Select id="st-upd-channel" value={s.channel} onChange={setChannel} style={{ width: 200 }} options={channelOptions(s.channel)} />} />
       <SettingRow id="updates.state"
         hint={<span role="status">
-          {updateWords(s)}
+          <span data-testid="update-line"><CheckLineText s={s} busy={check.busy} error={check.error} /></span>
           {s.phase === "skipped" && <>{" · "}<button type="button" className="k-link" onClick={undo}>{t("common.undo")}</button></>}
         </span>}
         control={<Button size="s" loading={busy} onClick={check.run}>{t("updateSettings.checkNow")}</Button>} />

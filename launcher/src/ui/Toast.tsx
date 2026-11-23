@@ -10,7 +10,7 @@
 import { X } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
-import { toKilnError, type PlacementCleanup } from "../api/commands";
+import { toKilnError, type PlacementCleanup } from "../api/shared";
 import { t, useT } from "../i18n";
 
 export type ToastKind = "ok" | "err" | "info";

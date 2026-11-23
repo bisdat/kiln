@@ -1,5 +1,5 @@
 // Small formatters.
-import { toKilnError } from "../api/commands";
+import { toKilnError } from "../api/shared";
 import { formatLocale, t } from "../i18n";
 
 export function fmtBytes(n: number | null | undefined): string {
