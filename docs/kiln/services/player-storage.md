@@ -130,8 +130,9 @@ reports degraded persistence rather than deleting items to fit.
 There is one parked bag per key, holding at most 64 records in this document version. If a key has both live storage
 and a held bag when it is unregistered or shrunk, the held records and stricter reason win. Live records are renumbered
 into free parked slots; records beyond 64 are preserved byte-for-byte in quarantine with reason `parked storage full`,
-counted as quarantined and logged with the player and key. They are not silently deleted, but the orphan-return command
-cannot release quarantine. A future multi-bag format is needed to make that excess directly releasable.
+counted as quarantined and logged with the player and key. The native reason is `KIS_QUARANTINE_PARKED_FULL = 6`.
+These bytes are kept, not deleted, but `/playerstorage release` cannot release quarantine in 30.7. A future multi-bag
+format is needed to make that excess directly releasable.
 
 Server configuration is `kiln/config/characters.json`:
 
