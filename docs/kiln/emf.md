@@ -1,10 +1,10 @@
 # EMF mods on Kiln (kiln-emf)
 
-Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.19 / v47)
-through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v47 table built on Kiln's services:
+Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.20 / v48)
+through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v48 table built on Kiln's services:
 of 144 C slots, 80 are full, 19 partial, and 45 (functions EMF added between 0.6.3 and 0.6.19)
-answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0619)). v41, v42 and v45
-(EMF 0.6.10, 0.6.11 and 0.6.14) added no function. API coverage is not a guarantee for every mod
+answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0620)). v41, v42, v45 and
+v48 (EMF 0.6.10, 0.6.11, 0.6.14 and 0.6.20) added no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
 DLL mods and EMF's Lua mods; you do not need EMF's own `dinput8.dll` or `emf_core.dll`.
 
@@ -52,7 +52,7 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 ### Which mods load
 - **Switch:** `enabled` in the ini decides. Without a value, `mod.json`'s `"enabled"` decides (default on). A
   profile entry with `enabled: false` is always off.
-- **API version:** `"emf": N` above 47 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
+- **API version:** `"emf": N` above 48 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
 - **Side:** `"side": "client"` mods do nothing on a dedicated server, so the server skips them (clock). Everything
   else loads everywhere, as in EMF.
 - **Dependencies:** `depends` / `dependencies` take EMF's version ranges (`^1.2`, `~1.2`, `>=1.0 <2`, `1.2.x`,
@@ -77,7 +77,9 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 
 <a id="mods-built-for-emf-063-to-0614"></a>
 
-### Mods built for EMF 0.6.3 to 0.6.19
+<a id="mods-built-for-emf-063-to-0619"></a>
+
+### Mods built for EMF 0.6.3 to 0.6.20
 A mod built with EMF's SDK does not start on a host whose table is smaller than the one it was built with. Kiln
 served EMF 0.6.0's table until 0.2.0-dev.26, so every EMF DLL built since 0.6.3 stayed off ("this mod was built for
 EMF API v40; the core is v27"), and with EMF's `lua` mod every Lua mod of a current EMF. Since 0.2.0-dev.27 the table
@@ -117,6 +119,16 @@ requests in the step. This follows EMF 0.6.19 `src/core/block_glue.cpp:447-535` 
 `src/core/block_service.cpp:83-105` (only a kernel fault fails the remaining batch). A full terrain damage map reports
 `EMF_BREAK_FAILED` for that request without disabling later breaks; earlier successful hits/removals remain counted. See
 [the v47 table](emf-parity.md#v47-emf-0619).
+
+EMF 0.6.20 (API v48) only raised the version: the table stays 1160 bytes. Path queries gained `as_entity` (plan the
+path as a given creature walks, `EmfPathQuery` 52 to 56 bytes) and results the values the search planned with
+(`EmfPathResult.moves`, `jump_up`, `jump_down`, `width`, `height`; 32 to 48 bytes); EMF's `lua` mod 1.41 gives them as
+`emf.path_find`'s option `as` and `result.used`. Since 0.2.0-dev.30.8 kiln-emf says version 48, so a `mod.json` that
+says `"emf": 48` loads and `emf::has_v48()` answers true; mods built with EMF 0.6.19's and 0.6.20's SDK both start (the
+table size is the same). `path_find` is still not carried, so the new fields change nothing: a query of either size,
+with or without `as_entity`, gets 0 and no callback, and no result is handed to a mod. A Lua script that passes `as`
+now gets `nil` from `emf.path_find`, as any path query on Kiln, where a v47 table made the `lua` mod raise "as needs
+EMF 0.6.20 or newer". See [the v48 section](emf-parity.md#v48-emf-0620).
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
@@ -249,9 +261,10 @@ plain detour and the log says `outside the game exe`. `kiln-emf`'s own hooks (Ch
 v27 client chat bridge) are links too, `ChatLogAdd` after `kiln.chat`'s.
 
 ## Compatibility by function
-The full table for EmfApi v47 (144 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
+The full table for EmfApi v48 (144 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
 in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068), v43 to v46 in
-[another](emf-parity.md#v43-to-v46-emf-0613-to-0614), and [v47 here](emf-parity.md#v47-emf-0619). v22-v27 in short:
+[another](emf-parity.md#v43-to-v46-emf-0613-to-0614), [v47 here](emf-parity.md#v47-emf-0619) and
+[v48 here](emf-parity.md#v48-emf-0620). v22-v27 in short:
 player level and XP through `kiln.progression`; `change_component` and E-prompt offers through kiln-emf's own
 `kiln.world` program; mod windows and pictures through `kiln.ui` in the game client (refused on a dedicated server, as
 in EMF). API v27 adds mod messaging on the official `#!emf1` wire; joined-client handshake and gameplay still need checks.
@@ -300,7 +313,7 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 | `wheel_open` | full | radial wheel through `kiln.ui`; host checks pass, client drawing/input still need a player |
 
 ## Client checklist (needs a joined player)
-- A mod of a current EMF runs with no EMF installed: put EMF 0.6.19's `lua` mod (1.40.0) and a Lua mod (Kill Counter) in
+- A mod of a current EMF runs with no EMF installed: put EMF 0.6.20's `lua` mod (1.41.0) and a Lua mod (Kill Counter) in
   `emf/mods`, start through Kiln, and kill something: the counter's line shows. `kiln.log` has
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - Turned spawns: on a disposable world, ask a v47 mod to spawn a door/target at yaw 0 and 90 degrees with the

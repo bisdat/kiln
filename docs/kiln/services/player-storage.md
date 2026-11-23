@@ -195,6 +195,17 @@ Check `PlayerStorage.Available` or `Capabilities.Why(PlayerStorage.Capability)`.
 wrong side, missing service, or a fault refuse storage instead of guessing engine state. See [caps.md](caps.md).
 The native `items.storage.persist` rows are exclusively for Kiln.Saves, not mod persistence APIs.
 
+Storage needs its client inventory guard: a link in Kiln's hook registry after `gameplay/DeliverEvents` that refuses
+every client action of `PlayerInput.fromClient` naming a storage holder, page or item (found through the game's
+reflection; the nine inventory-addressed actions must all be there). Without it `items.storage` is unavailable
+(`symbol-missing`) and the text says which check failed: the sigdb feature `players.client_action_hold`, the symbol, the
+live code, the reflected action or field that did not resolve, or the hook registry's result. A `DeliverEvents` that
+another Kiln component already linked is fine: the guard joins that chain. One that another module hooked or patched
+outside Kiln's registry (before Kiln started, or under Kiln's own detour) is refused: the text names the module its jump
+leads to (through a hook's relay), says to remove that mod or loader and restart, and ends with the bytes Kiln saw.
+shroudlink's own core (`steam_api64.dll` on a server, `shroudlink_core.dll` next to a client) hooks `DeliverEvents`
+itself; Kiln runs shroudlink mods without it ([shroudlink](../engines/shroudlink.md)).
+
 Server storage availability does not imply a joined client can read it: the client copy below is a separate row.
 
 ## The client copy and the HUD's ammunition lists
@@ -267,3 +278,10 @@ copy, server passes and pick checks, and the HUD half on the kit's fake `kiln.ui
 Real-game unverified: holder exclusion from world snapshots/restarts; exact capture/rebuild and travel pairing; live
 parked-return metadata tracking/cleanup; death transfers; external-cell ammunition debit and cycling; the client copy
 over a real connection; HUD rows from storage and their picks; `Activate` in a running game.
+
+## Changelog
+
+- **0.2.0-dev.30.8:** storage no longer switches itself off at start ("client inventory guard is unavailable"): the
+  guard's reading of `PlayerInput.fromClient` stopped at its first member that is not an action (an enum), on dedicated
+  servers and hosted worlds alike. The capability text now names the check that failed, and for a game function another
+  mod hooked first, which module and what to do. Thanks Fuzen777 (kiln#135).

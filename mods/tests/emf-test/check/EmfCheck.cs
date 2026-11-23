@@ -44,7 +44,7 @@ public sealed class EmfCheckMod : Mod
         var state = JsonNode.Parse(File.ReadAllText(Path.Combine(kiln, "state", "emf.json")))!;
         var mods = state["mods"]!.AsArray().ToDictionary(m => (string)m!["id"]!, m => m!);
         string Status(string id) => mods.TryGetValue(id, out var m) ? (string)m["status"]! : "absent";
-        Check((bool)state["steppedAside"]! == false && (int)state["emfApi"]! == 47, "state/emf.json: kiln-emf runs, EmfApi v47");
+        Check((bool)state["steppedAside"]! == false && (int)state["emfApi"]! == 48, "state/emf.json: kiln-emf runs, EmfApi v48");
         var blocks = state["blocks"];
         Check(blocks is JsonObject && new[] { "accepted", "waiting", "callbacksPending", "completed", "cancelled", "failed", "partial" }
                   .All(key => blocks[key] is not null && (long)blocks[key]! >= 0) && blocks["faulted"] is not null && !(bool)blocks["faulted"]! && (long)blocks["partial"]! == 0,
@@ -57,7 +57,7 @@ public sealed class EmfCheckMod : Mod
         }
         if (Status("clock") == "absent") Log.Info("SKIP state/emf.json: clock is not installed in this lab");
         else Check(Status("clock") == "rejected", $"state/emf.json: clock (side client) is not loaded on a server ({Status("clock")})");
-        Check(Status("emf_probe") == "loaded", $"state/emf.json: emf_probe (built for EmfApi v47) loaded ({Status("emf_probe")})");
+        Check(Status("emf_probe") == "loaded", $"state/emf.json: emf_probe (built for EmfApi v48) loaded ({Status("emf_probe")})");
 
         // big_stacks through Kiln's registry: every stackable item x4, at most 9999 (its defaults)
         if (Status("big_stacks") == "loaded")

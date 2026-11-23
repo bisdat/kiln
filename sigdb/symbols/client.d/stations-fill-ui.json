@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "GitHub #68, Kiln clients: the station screen's fill buttons. The game's UI action query UiActionStatus(gameUi, u32 station, u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*) -> u32 is a cached status (0 not run yet, 1 ok, else the dry run's code: 2 no room, 4 missing materials, 5 no inventory); the client program player_ui runs the dry runs (type 3: AutoTransferRecipe on the bag and the Magic chests). A production station's screen enables its '+1' and '+10' fill when the type-3 query answers 1. kiln-items raises a 4 to 1 only when the server said its fill with opted-in station outputs covers that many crafts. Not authority: the press is the game's own action, which the server's Kiln.Blocks runs as Kiln's fill. Found on client 26430625 (5d9ef2f1...) only. docs/re/stations.md section 10.3. Since 0.2.0-dev.29.19 (second step): the ingredient rows' 'available' count of the crafting menu and the station screen (one widget, C 0xbb1850) is UiAvailableCount(u32 item, const PlayerInventoryView*, const HashMap* stock) = the bag's stacks of the item plus, while the player stands in a base (G38UiPlayData+0x828), the u16 count of the base's Magic-chest cache that player_ui copies to G38UiPlayData+0x2000 from PlayerBasesSystemClient+0x1610 (built by the client program cache_crafting_stock). Feature stations.stock_ui: at those two call sites only, a Kiln client shows the greater of the game's count and the server's snapshot (bag, Magic chests and opted-in outputs).",
+  "comment": "GitHub #68, Kiln clients: the station screen's fill buttons. The game's UI action query UiActionStatus(gameUi, u32 station, u32 recipe, u32 item, u16 amount, u32 type, const RecipeInputCategorySelections*) -> u32 is a cached status (0 not run yet, 1 ok, else the dry run's code: 2 no room, 4 missing materials, 5 no inventory); the client program player_ui runs the dry runs (type 3: AutoTransferRecipe on the bag and the Magic chests). A production station's screen enables its '+1' and '+10' fill when the type-3 query answers 1. kiln-items raises a 4 to 1 only when the server said its fill with opted-in station outputs covers that many crafts. Not authority: the press is the game's own action, which the server's Kiln.Blocks runs as Kiln's fill. Found on client 26430625 (5d9ef2f1...) only. docs/re/stations.md section 10.3. Since 0.2.0-dev.29.19 (second step): the ingredient rows' 'available' count of the crafting menu and the station screen (one widget, C 0xbb1850) is UiAvailableCount(u32 item, const PlayerInventoryView*, const HashMap* stock) = the bag's stacks of the item plus, while the player stands in a base (G38UiPlayData+0x828), the u16 count of the base's Magic-chest cache that player_ui copies to G38UiPlayData+0x2000 from PlayerBasesSystemClient+0x1610 (built by the client program cache_crafting_stock). Feature stations.stock_ui: at those two call sites only, a Kiln client shows the greater of the game's count and the server's snapshot (bag, Magic chests and opted-in outputs). Since GitHub #132 (0.2.0-dev.30.8): the crafting menu does not draw its ingredient rows with that widget. Its ingredient list (C 0xbf4a90) counts each row itself: when the list's flag +0x25 is set, UiAvailableCount(item, the bag's view, G38UiPlayData+0x2000) (return 0xbf5095) plus the game's count of the view's fixed slot table (C 0xd39430, UiFixedSlotsCount(u32 item, view*): +0x290 set, 24 view indices at +0x230, 16 of them counted); otherwise the bag alone, inline. Its ingredient row (C 0xbf1ea0) counts each category option with UiAvailableCount behind the same flag (return 0xbf352c). stations.stock_ui raises those two calls too; the list's call answers max(game, snapshot - fixed slots), so the row shows the greater of the game's total and the snapshot's. The category option picker (C 0xbf39b0) counts inline and keeps the game's counts. Client-only UI code: the dedicated server build has none of these sites.",
   "symbols": {
     "stations/client.UiActionStatus": {
       "comment": "the key: +0 type ([rbp+0x38]), +4 station (edx), +0x1c recipe (r8d), +0x20 item (r9d), +0x24 u16 amount ([rbp+0x30]), +0x2c the 32-byte selections ([rbp+0x40]); the cache at gameUi+0x14f70 (its offset is not used). Client 26430625 0xb2dbe0",
@@ -44,6 +44,32 @@
           "offset": 22
         }
       ]
+    },
+    "stations/client.AvailableListRet": {
+      "comment": "the crafting menu's ingredient list (C 0xbf4a90): cmp byte [r12+0x25],0; the bag's view (rsi) and G38UiPlayData+0x2000 (r8); call UiAvailableCount; mov edi,eax (the return address); then, behind the bag-only branch, mov rdx,rsi; mov ecx,ebx; call UiFixedSlotsCount (the same view and item); add edi,eax. Client 26430625 0xbf5095",
+      "find": [
+        {
+          "pattern": "41 80 7C 24 25 00 74 ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 D0 00 00 00 48 8B 01 48 85 C0 75 ?? 45 33 C0 EB ?? 4C 8B 40 38 49 8B 34 24 49 81 C0 00 20 00 00 48 8B D6 8B CB E8 {stations/client.UiAvailableCount:rel32} 8B F8 EB ?? 49 8B 34 24 33 FF 48 85 F6 74 ?? 4C 8B 46 10 4D 85 C0 74 ?? 4C 8B 8E D8 02 00 00 48 8B 4E 08 0F 1F 84 00 00 00 00 00 8B 01 48 8D 14 C0 41 39 5C D1 08 75 ?? 41 03 7C D1 10 48 83 C1 04 49 83 E8 01 75 ?? 48 8B D6 8B CB E8 {stations/client.UiFixedSlotsCount:rel32} 48 8B 54 24 ?? 49 8B CE 03 F8",
+          "offset": 60
+        }
+      ]
+    },
+    "stations/client.AvailableOptionRet": {
+      "comment": "the crafting menu's ingredient row (C 0xbf1ea0), per category option: cmp byte [rdx+0x25],0; r8 = G38UiPlayData+0x2000; rdx = the bag's view; ecx = the option's item; call UiAvailableCount; mov edi,eax (the return address), compared with the line's count. Client 26430625 0xbf352c",
+      "find": [
+        {
+          "pattern": "48 8B 95 ?? ?? ?? ?? 48 8B 35 ?? ?? ?? ?? 80 7A 25 00 74 ?? 48 8B 86 D0 00 00 00 4C 8B C7 48 8B 08 48 85 C9 74 ?? 4C 8B 41 38 48 8B 12 49 81 C0 00 20 00 00 8B 0B E8 {stations/client.UiAvailableCount:rel32} 8B F8 EB",
+          "offset": 59
+        }
+      ]
+    },
+    "stations/client.UiFixedSlotsCount": {
+      "comment": "u32 UiFixedSlotsCount(u32 item, inventory view*): 0 without a view or when +0x290 is clear; else the item's count over the view's fixed slot table (24 view indices at +0x230, positions 12, 14, 15, 17 to 20 left out; 72-byte views at +0x2d8, count +0x2e0). The crafting menu's list adds it to UiAvailableCount; also captured from that call (stations/client.AvailableListRet). Client 26430625 0xd39430",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 55 48 8B EC 48 83 EC 70 48 8B DA 44 8B C1 48 85 D2 0F 84 ?? ?? ?? ?? 80 BA 90 02 00 00 00 0F 84 ?? ?? ?? ?? 0F 10 82 30 02 00 00 45 33 DB C7 45 90 11 0C 0E 0F"
+        }
+      ]
     }
   },
   "features": {
@@ -57,7 +83,10 @@
       "symbols": [
         "stations/client.UiAvailableCount",
         "stations/client.AvailableRowRet1",
-        "stations/client.AvailableRowRet2"
+        "stations/client.AvailableRowRet2",
+        "stations/client.AvailableListRet",
+        "stations/client.AvailableOptionRet",
+        "stations/client.UiFixedSlotsCount"
       ]
     }
   }
