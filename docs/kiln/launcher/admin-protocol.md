@@ -6,6 +6,9 @@ Kiln.Admin (`mods/Kiln.Admin`) serves server administration over two transports 
 - **KAP/1** over TCP on 127.0.0.1, described here. The launcher's `kiln_manage::admin` client speaks it directly, or
   through an SSH tunnel for remote servers, and falls back to the file bridge.
 
+A web page (Kiln Web Admin's panel) gets the same KAP/1 frames as JSON over a WebSocket from its host, which holds the
+admin token and speaks TCP KAP/1 to Kiln.Admin (section 12).
+
 Rust types: `kiln_manage::admin::protocol`
 (`Frame`, `KapErrorCode`, `Endpoint`, `Limits`). Test vector: `schema/fixtures/kap/handshake.json`.
 
@@ -398,3 +401,32 @@ number, true/false, text, an enum value in lower case, a duration in seconds). P
   and below `admin` the source is no admin. `commands_describe` with a level lists only what it may run.
 - With `steamId` the line runs as that player, with the player's permissions, capped at `level` when given.
 - Without both: as before, the remote "dashboard" with admin rights (the launcher's console).
+
+## 12. KAP/1 over a WebSocket (web pages, 0.2.0-dev.30.9)
+The admin pages also run in a browser, outside the launcher (the `@kiln/admin-ui` package, [admin-pages.md](admin-pages.md)).
+There the page talks to its host over a WebSocket, and the host (Kiln Web Admin, inside the server) speaks TCP KAP/1 to
+Kiln.Admin with the admin token. The browser never sees the token and never authenticates in KAP: signing in is the host
+page's job (a session cookie, or a one-time ticket in the socket's URL), and the socket it hands to the page is already
+signed in. The page side is `launcher/src/api/adminWs.ts` (`createWebSocketTransport({url})`); the host decides which
+ops and topics a user may have.
+
+- **Messages:** one frame per WebSocket message: the frame's JSON object (section 2's payload) as a text message, with no
+  length prefix. A binary message holds the same UTF-8 JSON. Section 2's limits apply: the page never sends a request
+  larger than `ready.limits.maxClientFrame` (it refuses it itself, `invalid_argument`).
+- **Opening:** after the upgrade the host sends `hello` (optional; `proto`, `kiln`, `admin`, `server {id, name}`; no
+  `nonce` or `auth` needed) and then `ready` (`ops`, `topics`, `limits`, `restart`; `session` is the host's id, `mac`
+  is left out). Nothing comes from the page before `ready`, and the page never sends `auth`. A `hello` with another
+  `proto` than `kap/1` is refused. An `error` frame before `ready` refuses the connection (`auth_failed`/`auth_required`
+  as `auth_failed`, other codes as in section 6); the page waits at most 10 s for `ready`.
+- **Then:** sections 4 to 6 unchanged: `req`/`res` by id, `sub`/`unsub`/`push`, `ping`/`pong` (the page pings after
+  `limits.pingS` without sending, answers the host's pings, and drops a host silent for `limits.idleS`), `error`,
+  `bye`. Ids are per socket. Unknown frame types are ignored.
+- **Closing:** close codes 4401 (not signed in, or the sign-in expired) and 4403 (not allowed) are final: the page shows
+  "not connected" and does not retry. Any other close, a `bye` or a silent host is retried with backoff (1, 2, 4 ... 30
+  s); after a reconnect the page subscribes its topics again. A browser cannot read an HTTP status from a refused
+  upgrade, so a host that refuses one should accept it and close with 4401 or 4403 instead.
+- **Sessions:** as the launcher's hub: one per server, its id stable across reconnects; events `closed {retry}` and
+  `ready` as in the launcher's `kiln://admin`.
+- **Restart:** the op `server_restart` (section 11, Kiln.Admin stops the server it runs in) is a `req` like any other.
+  The launcher's own restart of a server it manages is a launcher command, never a KAP op, and a web page cannot reach
+  it.
