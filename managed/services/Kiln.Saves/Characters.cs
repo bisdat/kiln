@@ -14,8 +14,10 @@ namespace Kiln;
 /// <param name="Id">The game's CharacterId. <see cref="Guid.Empty"/>: the build gave none, so <see cref="IsAccountOnly"/>.</param>
 public readonly record struct CharacterKey(ulong Account, Guid Id)
 {
+    /// <summary>The key of no character (the default value).</summary>
     public static CharacterKey None => default;
 
+    /// <summary>True for <see cref="None"/>: no account and no character id.</summary>
     public bool IsNone => Id == Guid.Empty && Account == 0;
 
     /// <summary>The game's character id is unknown on this build: this key stands for the account, so every character of
@@ -25,6 +27,7 @@ public readonly record struct CharacterKey(ulong Account, Guid Id)
     /// <summary>The text used in storage scopes: "&lt;account hex&gt;.&lt;id&gt;".</summary>
     public string Text => Id == Guid.Empty ? $"{Account:x16}.account" : $"{Account:x16}.{Id:N}";
 
+    /// <summary>The character id as text; <c>(no character)</c> for <see cref="None"/> and <c>account &lt;hex&gt;</c> for an account-only key.</summary>
     public override string ToString() => IsNone ? "(no character)" : Id == Guid.Empty ? $"account {Account:x16}" : Id.ToString();
 
     /// <summary>The person behind a character, as a <see cref="PlayerRef"/> with the character id only: no Steam id (the
@@ -77,24 +80,34 @@ public static class CharacterData
     [TickThreadOnly]
     public static T Get<T>(EntityId player, string key) where T : class, new() => Get<T>(CharacterStore.Need(player), key);
 
+    /// <summary>Reads the object stored under <paramref name="key"/> for the character without creating one.</summary>
+    /// <returns>True when the key holds a value; <paramref name="value"/> is then the live object. False when there is none.</returns>
+    /// <exception cref="ArgumentException">The character is <see cref="CharacterKey.None"/>, or the key is empty or longer than 200 characters.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool TryGet<T>(CharacterKey character, string key, [NotNullWhen(true)] out T? value) where T : class =>
         CharacterStore.TryGet(WorldPrefix, character, key, "CharacterData.TryGet", out value);
 
+    /// <summary>Stores <paramref name="value"/> for the character under <paramref name="key"/> (replacing what was there).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    /// <exception cref="ArgumentException">The character is <see cref="CharacterKey.None"/>, or the key is empty or longer than 200 characters.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static void Set<T>(CharacterKey character, string key, T value) where T : class =>
         CharacterStore.Set(WorldPrefix, character, key, value, "CharacterData.Set");
 
+    /// <summary>Removes the character's key (from the next save on).</summary>
+    /// <returns>True when the key existed.</returns>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Remove(CharacterKey character, string key) => CharacterStore.Remove(WorldPrefix, character, key, "CharacterData.Remove");
 
+    /// <summary>Whether the character has a value under <paramref name="key"/>.</summary>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Contains(CharacterKey character, string key) => CharacterStore.Contains(WorldPrefix, character, key, "CharacterData.Contains");
 
+    /// <summary>The calling mod's keys for the character, a snapshot.</summary>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static IReadOnlyList<string> Keys(CharacterKey character) => CharacterStore.KeysOf(WorldPrefix, character, "CharacterData.Keys");
@@ -126,37 +139,50 @@ public static class CharacterData
     /// <see cref="CharacterData"/>.</remarks>
     public static class Carried
     {
+        /// <summary>The object carried by the character under <paramref name="key"/>, created with <c>new T()</c> if there is none.</summary>
+        /// <exception cref="InvalidDataException">The stored JSON does not read as <typeparamref name="T"/> (it is kept).</exception>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static T Get<T>(CharacterKey character, string key) where T : class, new() =>
             CharacterStore.Get<T>(CarriedPrefix, character, key, "CharacterData.Carried.Get");
 
+        /// <summary><see cref="Get{T}(CharacterKey, string)"/> for a player in game. Throws <see cref="ArgumentException"/> when the
+        /// player has no character (no account either).</summary>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static T Get<T>(EntityId player, string key) where T : class, new() => Get<T>(CharacterStore.Need(player), key);
 
+        /// <summary>Reads the object carried by the character under <paramref name="key"/> without creating one.</summary>
+        /// <returns>True when the key holds a value; <paramref name="value"/> is then the live object. False when there is none.</returns>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static bool TryGet<T>(CharacterKey character, string key, [NotNullWhen(true)] out T? value) where T : class =>
             CharacterStore.TryGet(CarriedPrefix, character, key, "CharacterData.Carried.TryGet", out value);
 
+        /// <summary>Stores <paramref name="value"/> for the character to carry under <paramref name="key"/> (replacing what was there).</summary>
+        /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static void Set<T>(CharacterKey character, string key, T value) where T : class =>
             CharacterStore.Set(CarriedPrefix, character, key, value, "CharacterData.Carried.Set");
 
+        /// <summary>Removes the carried key (from the next save on).</summary>
+        /// <returns>True when the key existed.</returns>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static bool Remove(CharacterKey character, string key) => CharacterStore.Remove(CarriedPrefix, character, key, "CharacterData.Carried.Remove");
 
+        /// <summary>Whether the character carries a value under <paramref name="key"/>.</summary>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static bool Contains(CharacterKey character, string key) => CharacterStore.Contains(CarriedPrefix, character, key, "CharacterData.Carried.Contains");
 
+        /// <summary>The calling mod's carried keys for the character, a snapshot.</summary>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static IReadOnlyList<string> Keys(CharacterKey character) => CharacterStore.KeysOf(CarriedPrefix, character, "CharacterData.Carried.Keys");
 
+        /// <summary>Characters the calling mod has carried data for in this world.</summary>
         [TickThreadOnly]
         [RequiresCapability("kiln.saves")]
         public static IReadOnlyList<CharacterKey> Characters => CharacterStore.Characters(CarriedPrefix, "CharacterData.Carried.Characters");
@@ -179,6 +205,17 @@ public static class CharacterData
 }
 
 /// <summary>The transport's counters.</summary>
+/// <param name="Started">The transport started (<see cref="CharacterData.EnsureStarted"/> ran).</param>
+/// <param name="ChannelOpen">The <c>kiln:character</c> channel is open (Kiln.Network is available).</param>
+/// <param name="ImportsAllowed">This server takes carried data from clients (<c>importProgress</c> in <c>characters.json</c>).</param>
+/// <param name="Sessions">Characters in game that the transport tracks now.</param>
+/// <param name="Imports">Offers the server took.</param>
+/// <param name="Refused">Offers the server refused: the setting is off, a cap was passed, or a handler canceled the import.</param>
+/// <param name="Kept">Mods whose offered data was stored unread because the mod is not loaded here.</param>
+/// <param name="Dropped">Offered values left out because they were broken or over a limit.</param>
+/// <param name="Updates">Updates made to send a character's changes back to its client.</param>
+/// <param name="UpdateBytes">Bytes of JSON values in those updates.</param>
+/// <param name="SidecarWrites">Times a client-side sidecar file was written (a hosted game's own player, or an update received).</param>
 public sealed record CharacterSyncStatus(bool Started, bool ChannelOpen, bool ImportsAllowed, int Sessions, long Imports, long Refused, long Kept,
     long Dropped, long Updates, long UpdateBytes, long SidecarWrites);
 
@@ -187,6 +224,7 @@ public sealed record CharacterSyncStatus(bool Started, bool ChannelOpen, bool Im
 public sealed class CharacterImportingEvent(CharacterKey character, EntityId player, long revision, long serverRevision,
     IReadOnlyDictionary<string, IReadOnlyList<string>> mods) : CancelableEvent
 {
+    /// <summary>The character whose data the client offered.</summary>
     public CharacterKey Character { get; } = character;
 
     /// <summary>The player, none for a lab peer.</summary>
@@ -195,6 +233,7 @@ public sealed class CharacterImportingEvent(CharacterKey character, EntityId pla
     /// <summary>The client's revision and the server's.</summary>
     public long Revision { get; } = revision;
 
+    /// <summary>The revision the server holds for this character.</summary>
     public long ServerRevision { get; } = serverRevision;
 
     /// <summary>Mod id -> its keys in the offer.</summary>
@@ -208,10 +247,13 @@ public sealed class CharacterImportingEvent(CharacterKey character, EntityId pla
 /// Check them here, as the game checks a character at login (the data is client-side and editable). Not cancelable.</summary>
 public sealed class CharacterImportedEvent(CharacterKey character, EntityId player, long revision, IReadOnlyList<string> applied, IReadOnlyList<string> kept) : KilnEvent
 {
+    /// <summary>The character whose carried data was replaced.</summary>
     public CharacterKey Character { get; } = character;
 
+    /// <summary>The player, none for a lab peer.</summary>
     public EntityId Player { get; } = player;
 
+    /// <summary>The revision the server now holds, taken from the client's offer.</summary>
     public long Revision { get; } = revision;
 
     /// <summary>Mods loaded here whose data came in.</summary>

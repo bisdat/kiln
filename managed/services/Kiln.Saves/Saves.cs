@@ -64,18 +64,23 @@ public sealed class WorldSavingEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>Why the game saved the world.</summary>
     public SaveReason Reason { get; }
 
     /// <summary>The revision the world file will have (+0x1C of its header) once this save is written.</summary>
     public uint Revision { get; }
 
+    /// <summary>The world's GUID as text; null before a new world's first save.</summary>
     public string? WorldId { get; }
+    /// <summary>The world file's path; null when it is not known yet.</summary>
     public string? WorldFile { get; }
 
     /// <summary>True when handlers run inside the game's request, before its snapshot (the normal case).</summary>
     public bool BeforeSnapshot { get; }
 
+    /// <summary>The sim step the save request was seen in.</summary>
     public ulong Step { get; }
+    /// <summary>A short description for logs: the reason and the revision.</summary>
     public override string ToString() => $"saving ({Reason}, revision {Revision})";
 }
 
@@ -100,13 +105,17 @@ public sealed class WorldSavedEvent : KilnEvent
         TimedOut = timedOut;
     }
 
+    /// <summary>Why the game saved the world.</summary>
     public SaveReason Reason { get; }
+    /// <summary>True when the world file was written. False for a failed write or a request that timed out.</summary>
     public bool Success { get; }
 
     /// <summary>The world file's revision after the write.</summary>
     public uint Revision { get; }
 
+    /// <summary>The world's GUID as text; null when it is not known.</summary>
     public string? WorldId { get; }
+    /// <summary>The world file's path; null when it is not known.</summary>
     public string? WorldFile { get; }
 
     /// <summary>From the game accepting the request to the file being complete.</summary>
@@ -118,6 +127,7 @@ public sealed class WorldSavedEvent : KilnEvent
     /// <summary>A Kiln request the game did not accept within 60 s (nothing was written).</summary>
     public bool TimedOut { get; }
 
+    /// <summary>A short description for logs: success with the revision and duration, or the failure.</summary>
     public override string ToString() => Success ? $"saved ({Reason}, revision {Revision}, {Duration.TotalMilliseconds:F0} ms)"
         : $"save failed ({Reason}, result {Result}{(TimedOut ? ", timed out" : "")})";
 }
@@ -137,21 +147,30 @@ public sealed class WorldLoadedEvent : KilnEvent
         Data = data;
     }
 
+    /// <summary>The world's GUID as text; null before a new world's first save.</summary>
     public string? WorldId { get; }
+    /// <summary>The world file's revision at load.</summary>
     public uint Revision { get; }
 
     /// <summary>No world file existed: a new world (its file and id appear with the first save).</summary>
     public bool NewWorld { get; }
 
+    /// <summary>The world file's path; null when it is not known.</summary>
     public string? WorldFile { get; }
 
     /// <summary>Which sidecar generation was loaded for this world file.</summary>
     public DataMatch Data { get; }
 
+    /// <summary>A short description for logs: the world id, the revision and which data generation was loaded.</summary>
     public override string ToString() => $"loaded {WorldId} revision {Revision} (data {Data})";
 }
 
 /// <summary>The outcome of <see cref="Saves.Request"/>.</summary>
+/// <param name="Success">The world file was written.</param>
+/// <param name="Reason">The reason of the save.</param>
+/// <param name="Revision">The world file's revision after the write (0 when nothing was written).</param>
+/// <param name="Duration">From the game accepting the request to the file being complete.</param>
+/// <param name="Error">Why nothing was written; null on success.</param>
 public sealed record SaveResult(bool Success, SaveReason Reason, uint Revision, TimeSpan Duration, string? Error) : IKilnResult
 {
     /// <summary>The save was written: <see cref="Success"/> (the contract's name for it).</summary>
@@ -160,6 +179,7 @@ public sealed record SaveResult(bool Success, SaveReason Reason, uint Revision, 
     // IKilnResult's reason is null when the save was written; this record's own Reason is what asked for the save.
     string? IKilnResult.Reason => Success ? null : Error ?? "not saved";
 
+    /// <summary>A short description for logs: the revision and the time taken, or why nothing was saved.</summary>
     public override string ToString() => Success ? $"saved revision {Revision} in {Duration.TotalMilliseconds:F0} ms" : $"not saved: {Error}";
 }
 
@@ -201,6 +221,16 @@ public sealed record SaveStatus(
     bool CanObserveWrites);
 
 /// <summary>A backup made by <see cref="Saves.Backup"/>: the world file and the matching Kiln sidecar generation.</summary>
+/// <param name="Name">The name given to the backup.</param>
+/// <param name="Directory">The backup's folder.</param>
+/// <param name="Created">When the backup was made (UTC).</param>
+/// <param name="WorldId">The world's GUID as text.</param>
+/// <param name="Revision">The world file's revision in the backup.</param>
+/// <param name="WorldUnix">The save time in the world file's header (UTC seconds, 0 when unknown).</param>
+/// <param name="Reason">The reason of the save the backup was made from.</param>
+/// <param name="Files">How many files the backup holds.</param>
+/// <param name="Bytes">The total size of those files in bytes.</param>
+/// <param name="DataBundles">How many mod data bundles of the matching sidecar generation the backup holds.</param>
 public sealed record BackupInfo(
     string Name,
     string Directory,
@@ -213,6 +243,7 @@ public sealed record BackupInfo(
     long Bytes,
     int DataBundles)
 {
+    /// <summary>A short description for logs: the backup's name, the world, the revision, the file count and the size.</summary>
     public override string ToString() => $"{Name}: world {WorldId} revision {Revision}, {Files} files, {Bytes / 1024} KB";
 }
 

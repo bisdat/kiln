@@ -20,20 +20,50 @@ using System.Text.Json.Nodes;
 
 namespace Kiln;
 
+/// <summary>Server to client, sent when the player is in game: which character this is and whether the server takes carried data.</summary>
+/// <param name="Character">The game's character id.</param>
+/// <param name="World">The world's id, or null when it is not known.</param>
+/// <param name="Imports">The server takes carried data from clients (<c>importProgress</c> in <c>characters.json</c>).</param>
+/// <param name="MaxBytes">The largest offer the server takes, in bytes of JSON values.</param>
+/// <param name="Revision">The server's revision of this character's carried data.</param>
 public sealed record CharHello(Guid Character, string? World, bool Imports, int MaxBytes, long Revision);
 
+/// <summary>Client to server: the character's carried data as the client's sidecar holds it.</summary>
+/// <param name="Character">The game's character id.</param>
+/// <param name="Revision">The client's revision of the carried data.</param>
+/// <param name="Mods">The data, by mod id and then key, as JSON values.</param>
 public sealed record CharOffer(Guid Character, long Revision, Dictionary<string, Dictionary<string, JsonElement>> Mods);
 
+/// <summary>Server to client: what happened to an offer.</summary>
+/// <param name="Character">The game's character id.</param>
+/// <param name="Accepted">The server took the offer.</param>
+/// <param name="Reason">Why: <c>taken</c>, or the reason the offer was not taken.</param>
+/// <param name="Revision">The server's revision of the carried data after the answer.</param>
+/// <param name="Applied">Mod ids loaded on the server whose data came in.</param>
+/// <param name="Kept">Mod ids not loaded on the server: their data is stored and passed on, nothing reads it.</param>
+/// <param name="Dropped">Entries left out of the offer: a mod id that is not valid, or <c>mod/key</c> of a value that was broken or too big.</param>
 public sealed record CharResult(Guid Character, bool Accepted, string Reason, long Revision, List<string> Applied, List<string> Kept, List<string> Dropped);
 
 /// <summary>A null value removes the key.</summary>
+/// <param name="Character">The game's character id.</param>
+/// <param name="Revision">The revision the client has after applying the changes.</param>
+/// <param name="Changes">The changed values by mod id and then key, as JSON; null removes the key.</param>
+/// <param name="Final">True for the last update of a session: the character left, or the server is shutting down.</param>
 public sealed record CharUpdate(Guid Character, long Revision, Dictionary<string, Dictionary<string, JsonElement?>> Changes, bool Final);
 
+/// <summary>Client to server: an update was written to the client's sidecar.</summary>
+/// <param name="Character">The game's character id.</param>
+/// <param name="Revision">The revision the client wrote.</param>
 public sealed record CharAck(Guid Character, long Revision);
 
 /// <summary>Lab peers (tools/nettest) have no player: they say which character they pretend to be.</summary>
+/// <param name="Character">The character the lab peer pretends to be.</param>
+/// <param name="Account">The account key it pretends to play under.</param>
+/// <param name="Local">True to act as the local player of a hosted game, whose sidecar is read and written directly.</param>
 public sealed record CharLabJoin(Guid Character, ulong Account, bool Local = false);
 
+/// <summary>A lab peer (tools/nettest) leaves: its character is no longer in game.</summary>
+/// <param name="Character">The character that left.</param>
 public sealed record CharLabLeave(Guid Character);
 
 internal static class CharacterSync

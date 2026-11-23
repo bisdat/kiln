@@ -19,6 +19,13 @@ public sealed record SystemInfo(string Name, int Index, WorldKind World, uint Fl
     IReadOnlyList<string> Writes, IReadOnlyList<WrapInfo> Wraps);
 
 /// <summary>One managed stage on a program.</summary>
+/// <param name="Mod">The id of the mod that made the wrap ("kiln" outside mod code).</param>
+/// <param name="Program">The name of the program the stage is on.</param>
+/// <param name="World">The world the wrap targets.</param>
+/// <param name="Stage">Where the stage runs relative to the game's update.</param>
+/// <param name="Priority">The stage's priority; higher runs first among the Befores.</param>
+/// <param name="State">Where the stage is in its lifetime.</param>
+/// <param name="PerEntity">True for a per-entity stage, false for a slice stage.</param>
 public sealed record WrapInfo(string Mod, string Program, WorldKind World, WrapStage Stage, int Priority, WrapState State,
     bool PerEntity);
 
@@ -70,6 +77,13 @@ public sealed record WrapOptions
 public sealed record WrapResult<TWrap>(bool Ok, string? Reason, TWrap? Wrap) : IKilnResult where TWrap : class;
 
 /// <summary>What a stage did so far, summed over its stages.</summary>
+/// <param name="Slices">How many slices the stages ran in.</param>
+/// <param name="Entities">How many entities were in those slices.</param>
+/// <param name="Microseconds">The time spent in the stages, in microseconds.</param>
+/// <param name="Faults">How many times a stage faulted or threw.</param>
+/// <param name="Overruns">How many slices ran over the stage's budget (1 ms per slice).</param>
+/// <param name="Threads">How many distinct threads the stages ran on (counted up to 16; the highest of any one
+/// stage).</param>
 public sealed record WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads)
 {
     /// <summary>Slices a <see cref="ProgramWrap.WhenArchetype"/> filter left to the game because the entity map changed
@@ -79,10 +93,21 @@ public sealed record WrapStats(long Slices, long Entities, double Microseconds, 
 
 /// <summary>A stage was turned off: it faulted, overran its budget 10 slices in a row, threw, or native SET came.
 /// Raised on the tick thread.</summary>
+/// <param name="Program">The name of the program the stage is on.</param>
+/// <param name="Mod">The id of the mod that made the wrap ("kiln" outside mod code).</param>
+/// <param name="Stage">The stage that was turned off.</param>
+/// <param name="Reason">Why, in words: a fault (with its exception code), "budget", the exception the stage threw,
+/// "native SET loaded", or the reason the stage was refused.</param>
 public sealed record WrapDisabledEvent(string Program, string Mod, WrapStage Stage, string Reason);
 
 /// <summary>What a slice filter sees (<see cref="ProgramWrap.When"/>). <paramref name="Layout"/> is the slice's
 /// archetype key (0 when not known).</summary>
+/// <param name="Program">The program's name.</param>
+/// <param name="World">The world the slice is in.</param>
+/// <param name="Count">Entities in the slice (0 for a SYSTEM program).</param>
+/// <param name="Step">The world's step.</param>
+/// <param name="OnWorldThread">True on the world's own thread, false on a game task worker.</param>
+/// <param name="Layout">The slice's archetype key; 0 when not known.</param>
 public readonly record struct SliceInfo(string Program, WorldKind World, int Count, ulong Step, bool OnWorldThread, nint Layout);
 
 /// <summary>A slice stage: runs once per slice of the program, on the thread that runs the slice.</summary>

@@ -15,6 +15,12 @@ public sealed partial class KilnHarness
 /// <see cref="Rarity"/> and <see cref="Level"/> as the game draws them (VisibleSlot.Rarity / Level). A slot with a Holder
 /// and an ItemEntity also carries it as VisibleSlot.ServerEntity (the fake takes every holder for the player or the open
 /// container, the two Kiln proves in a game).</summary>
+/// <param name="Item">The item's id.</param>
+/// <param name="Count">The stack size (default 1).</param>
+/// <param name="ItemEntity">The server's entity id of the item: what <c>SlotClick.ItemEntity</c> carries (0: none).</param>
+/// <param name="Holder">The entity of the inventory that holds the item (0: none).</param>
+/// <param name="InventoryPage">The inventory page the slot is on (an entity id; 0: none).</param>
+/// <param name="SlotIndex">The slot's index on its page.</param>
 public readonly record struct FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0,
     byte SlotIndex = 0)
 {
@@ -26,6 +32,8 @@ public readonly record struct FakeInventorySlot(uint Item, uint Count = 1, uint 
 
 /// <summary>What a <see cref="HarnessUiInventory.Click"/> did: how many handlers got it, and whether the game would not
 /// have seen the press (a handler asked to take it).</summary>
+/// <param name="Delivered">How many handlers got the click.</param>
+/// <param name="Taken">True when a handler asked to take the press, so the game would not have seen it.</param>
 public readonly record struct FakeSlotClickResult(int Delivered, bool Taken);
 
 /// <summary>

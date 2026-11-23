@@ -104,16 +104,21 @@ public sealed record ItemDefinition
 /// <summary>The texts of an item in one language. Null: not given (the next fallback, or the base item's).</summary>
 public sealed record ItemTexts
 {
+    /// <summary>The item's name.</summary>
     public string? Name { get; init; }
     /// <summary>The line under the name (the item's kind, e.g. "One-Handed Sword").</summary>
     public string? Caption { get; init; }
+    /// <summary>The item's description.</summary>
     public string? Description { get; init; }
+    /// <summary>The item's lore text.</summary>
     public string? Lore { get; init; }
     /// <summary>Where to get it (shown for items the player does not have yet). Not given in any language: none, not the base item's.</summary>
     public string? AcquisitionHint { get; init; }
     /// <summary>The action hints (e.g. "Attack", "Block").</summary>
     public string? PrimaryAction { get; init; }
+    /// <summary>The hint for the secondary action.</summary>
     public string? SecondaryAction { get; init; }
+    /// <summary>The hint for the tertiary action.</summary>
     public string? TertiaryAction { get; init; }
 }
 
@@ -123,7 +128,9 @@ public sealed record ItemLoot
 {
     /// <summary>The game item whose loot entry is copied (null: the definition's base).</summary>
     public string? Like { get; init; }
+    /// <summary>The fewest items of a rolled stack; null: the copied entry's.</summary>
     public int? StackMin { get; init; }
+    /// <summary>The most items of a rolled stack; null: the copied entry's.</summary>
     public int? StackMax { get; init; }
 }
 
@@ -132,7 +139,9 @@ public sealed record ItemLoot
 /// drops that item (the new stack goes next to it).</param>
 public sealed record ItemDrop(string Table)
 {
+    /// <summary>The fewest items the stack drops (default 1).</summary>
     public int CountMin { get; init; } = 1;
+    /// <summary>The most items the stack drops (default 1).</summary>
     public int CountMax { get; init; } = 1;
     /// <summary>spawnProbability, 0..1.</summary>
     public double Chance { get; init; } = 1;
@@ -156,10 +165,16 @@ public enum RecipeUnlock
 /// <param name="Item">Item (debug name, <c>"0x…"</c> id, GUID, or the <see cref="ItemDefinition.Name"/> of a new item).</param>
 /// <param name="Category">Inputs only: an input category id (<c>RecipeStack.Category</c> of a game recipe), "any item of
 /// that category"; then <paramref name="Item"/> is null.</param>
+/// <param name="Count">How many.</param>
 public readonly record struct RecipeIngredient(string? Item, int Count, uint Category = 0)
 {
+    /// <summary>An ingredient: <paramref name="count"/> of the item <paramref name="item"/>.</summary>
     public static RecipeIngredient Of(string item, int count) => new(item, count);
+    /// <summary>An input: <paramref name="count"/> of any item of the input category
+    /// <paramref name="category"/>.</summary>
     public static RecipeIngredient OfCategory(uint category, int count) => new(null, count, category);
+    /// <summary>An ingredient from an <c>(item, count)</c> pair, so <c>Inputs = [("Material_T1_Wood_Logs", 2)]</c>
+    /// works.</summary>
     public static implicit operator RecipeIngredient((string Item, int Count) x) => new(x.Item, x.Count);
 }
 
@@ -204,7 +219,9 @@ public sealed record RecipeDefinition
     /// <c>Trigger = KnowledgeTrigger.Craft</c> puts it there). False (the default): no tracking, the query is cleared. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public bool TrackCrafted { get; init; }
 
+    /// <summary>What a craft takes.</summary>
     public required IReadOnlyList<RecipeIngredient> Inputs { get; init; }
+    /// <summary>What a craft makes.</summary>
     public required IReadOnlyList<RecipeIngredient> Outputs { get; init; }
 
     /// <summary>The crafting duration (timed stations). Null: the template's.</summary>
@@ -234,6 +251,7 @@ public sealed record RecipeDefinition
     /// </code></example>
     public int? Water { get; init; }
 
+    /// <summary>How the recipe is unlocked in the crafting UI (default <see cref="RecipeUnlock.Always"/>).</summary>
     public RecipeUnlock Unlock { get; init; } = RecipeUnlock.Always;
 
     /// <summary>A recipe name (most recipes show their result's name). Null: none.</summary>
@@ -246,10 +264,13 @@ public sealed record RecipeDefinition
     /// <c>requiredPropsMask</c>). A prop of a mod's own is in kiln.worldtables' table: <c>WorldTables.CraftingProps</c>.</summary>
     public IReadOnlyList<RecipeProp>? Props { get; init; }
 
+    /// <summary>The recipe id this definition gets (FNV-1a of the GUID).</summary>
     public uint Id => NewContent.IdOf(Guid);
 }
 
 /// <summary>A crafting prop a recipe asks for: its <see cref="Id"/> (<c>keen::CraftingPropId</c>, FNV-1a of its GUID) and its <see cref="Index"/>, the bit in the mask (0..63).</summary>
+/// <param name="Id">The prop's id.</param>
+/// <param name="Index">The prop's place in the game's table of crafting props, 0..63.</param>
 public readonly record struct RecipeProp(uint Id, int Index);
 
 /// <summary>A registered definition, as kiln.content reports it.</summary>
@@ -258,6 +279,12 @@ public readonly record struct RecipeProp(uint Id, int Index);
 /// (its owner went away: kept until restart), <c>error</c>.</param>
 /// <param name="Worlds">The worlds whose registries hold it (<c>server</c>, <c>client</c>).</param>
 /// <param name="Problem">Why it is not (yet) in a world, if it is not.</param>
+/// <param name="Kind">Whether it is an item or a recipe.</param>
+/// <param name="Guid">The definition's GUID.</param>
+/// <param name="Id">The id it has in the game: the item's or the recipe's id.</param>
+/// <param name="Name">The definition's name.</param>
+/// <param name="Owner">The owner that registered it, as kiln.content reports it; null right after
+/// <c>Register</c>.</param>
 public sealed record ContentDefinition(ContentKind Kind, Guid Guid, uint Id, string Name, string State,
     IReadOnlyList<string> Worlds, string? Owner, string? Problem)
 {
@@ -273,6 +300,7 @@ public sealed record ContentDefinition(ContentKind Kind, Guid Guid, uint Id, str
     /// <summary>The normalized definition (the data-pack form).</summary>
     public string? DefinitionJson { get; init; }
 
+    /// <summary>The kind, the name, the id, the state and the worlds, for logs.</summary>
     public override string ToString() => $"{Kind} {Name} (0x{Id:x8}, {State}{(Worlds.Count > 0 ? " in " + string.Join("+", Worlds) : "")})";
 }
 

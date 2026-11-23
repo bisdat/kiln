@@ -12,6 +12,9 @@ using System.Runtime.CompilerServices;
 namespace Kiln;
 
 /// <summary>A field of a reflected struct.</summary>
+/// <param name="Name">The field's name.</param>
+/// <param name="Type">The field's type.</param>
+/// <param name="Offset">Where the field starts, in bytes, in the struct that declares it.</param>
 public readonly record struct GameField(string Name, GameType Type, int Offset);
 
 /// <summary>One of the game's reflected types (about 11,000 on the server, 12,600 in the game).</summary>
@@ -40,14 +43,19 @@ public sealed unsafe class GameType
     private readonly void* _inner;
     private readonly byte[]? _defaults;
 
+    /// <summary>The type's position in the game's type table.</summary>
     public int Index { get; }
     /// <summary>"Health".</summary>
     public string Name { get; }
     /// <summary>"keen::ecs::Health".</summary>
     public string QualifiedName { get; }
+    /// <summary>The type's size in bytes.</summary>
     public int Size { get; }
+    /// <summary>The type's alignment in bytes.</summary>
     public int Alignment { get; }
+    /// <summary>The game's primitive kind of the type.</summary>
     public GameTypeKind Kind { get; }
+    /// <summary>The game's flags byte for the type.</summary>
     public byte Flags { get; }
     /// <summary>FNV-1a-32 of <see cref="QualifiedName"/>: the key of the game's component and event lookups.</summary>
     public uint Hash { get; }
@@ -162,6 +170,7 @@ public sealed unsafe class GameType
         return name is not null && byName.TryGetValue(name, out var found) ? found : null;
     }
 
+    /// <summary>The <see cref="QualifiedName"/>.</summary>
     public override string ToString() => QualifiedName;
 
     private GameField[] LoadFields()
@@ -206,6 +215,7 @@ public static unsafe class GameTypes
     /// <summary>Whether the type table was found on this build.</summary>
     public static bool Available { get { var table = Table; return table != null && table->TypeCount() > 0; } }
 
+    /// <summary>The number of types in the table; 0 when kiln.types is not running.</summary>
     public static int Count { get { var table = Table; return table == null ? 0 : (int)table->TypeCount(); } }
 
     internal static GameType? Of(void* handle) => Of(Table, handle);
@@ -307,6 +317,8 @@ public static unsafe class GameTypes
     /// <summary>Whether <paramref name="type"/> is one of the game's ECS event types (a set lookup).</summary>
     internal static bool IsEvent(TypesNative.Table* t, GameType type) => EventList(t).Handles.Contains((nint)type.Handle);
 
+    /// <summary>The type whose <see cref="GameType.Hash"/> is <paramref name="hash"/>; null when there is none or
+    /// kiln.types is not running.</summary>
     public static GameType? ByHash(uint hash)
     {
         var table = Table;
@@ -485,6 +497,14 @@ public static unsafe class GameTypes
 }
 
 /// <summary>One of the game's ECS systems, with its profiler numbers.</summary>
+/// <param name="Index">The system's position in the list, which is sorted by name.</param>
+/// <param name="Name">The system's name (<c>stamina_depletion_sprint</c>).</param>
+/// <param name="Rva">Where the system's update function is, relative to the image base.</param>
+/// <param name="Enabled">False while the system is switched off (the game skips it).</param>
+/// <param name="Calls">How many times it ran since the profiler started.</param>
+/// <param name="Milliseconds">CPU time since the profiler started, summed over every thread.</param>
+/// <param name="World">Where it ran while profiling: <c>"server"</c>, <c>"client"</c> or <c>"both"</c>; empty when it
+/// has no calls.</param>
 public sealed record GameSystem(int Index, string Name, ulong Rva, bool Enabled, ulong Calls, double Milliseconds, string World);
 
 /// <summary>The game's ECS systems (the code it runs every step: stamina drain, durability loss, fall damage,
@@ -550,6 +570,7 @@ public static unsafe class GameSystems
         return All.Where(s => w.All(x => s.Name.Contains(x, StringComparison.OrdinalIgnoreCase)));
     }
 
+    /// <summary>The system with this name; null when there is none, or kiln.types is not running.</summary>
     public static GameSystem? Find(string name)
     {
         var t = Table;
@@ -674,6 +695,7 @@ public static unsafe class GameSystems
         if (t == null || t->Profile(on) != 0) throw new NotSupportedException("the system profiler is unavailable on this build");
     }
 
+    /// <summary>True while the profiler runs.</summary>
     public static bool Profiling => StatusOf().Profiling != 0;
 
     /// <summary>How long the profiler has run (or ran), seconds.</summary>
@@ -886,6 +908,7 @@ public sealed unsafe class ReflectedValue
     internal static ReflectedValue OfComponent(uint entity, GameType t) => new(t, entity, t.Hash, null);
     internal static ReflectedValue Owned(GameType t, byte[] bytes) => new(t, 0, 0, bytes);
 
+    /// <summary>The type of the value.</summary>
     public GameType Type { get; }
     /// <summary>The entity of a component view (0 for copies).</summary>
     public EntityId Entity => new(_entity);
@@ -939,6 +962,8 @@ public sealed unsafe class ReflectedValue
         }
     }
 
+    /// <summary>The scalar field at <paramref name="path"/>, converted to <typeparamref name="T"/> (invariant culture).
+    /// Tick thread.</summary>
     [TickThreadOnly]
     public T Get<T>(string path) => (T)Convert.ChangeType(this[path]!, typeof(T), System.Globalization.CultureInfo.InvariantCulture);
 
@@ -1118,6 +1143,8 @@ internal unsafe struct WorldPrefix
 /// <c>Log</c>.</summary>
 public static class KilnLog
 {
+    /// <summary>Writes an <see cref="LogLevel.Info"/> line to <c>kiln.log</c> as Kiln itself.</summary>
     public static void Info(string text) => Backend.Current.Log(0, LogLevel.Info, text);
+    /// <summary>Writes a <see cref="LogLevel.Warn"/> line to <c>kiln.log</c> as Kiln itself.</summary>
     public static void Warn(string text) => Backend.Current.Log(0, LogLevel.Warn, text);
 }

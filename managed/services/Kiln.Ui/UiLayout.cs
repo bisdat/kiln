@@ -9,6 +9,7 @@ namespace Kiln;
 [Flags]
 public enum UiChildFlags : uint
 {
+    /// <summary>No flags.</summary>
     None = 0,
     /// <summary>An outline (and the window padding).</summary>
     Border = 1u << 0,
@@ -26,10 +27,15 @@ public enum UiChildFlags : uint
 [Flags]
 public enum UiWindowFlags : uint
 {
+    /// <summary>No flags.</summary>
     None = 0,
+    /// <summary>No scrollbar (the region still scrolls with the mouse wheel).</summary>
     NoScrollbar = 1u << 3,
+    /// <summary>The mouse wheel does not scroll the region.</summary>
     NoScrollWithMouse = 1u << 4,
+    /// <summary>No background.</summary>
     NoBackground = 1u << 7,
+    /// <summary>The vertical scrollbar is always shown.</summary>
     AlwaysVerticalScrollbar = 1u << 14,
 }
 
@@ -37,9 +43,13 @@ public enum UiWindowFlags : uint
 [Flags]
 public enum UiSelectableFlags : uint
 {
+    /// <summary>No flags.</summary>
     None = 0,
+    /// <summary>The row spans every column of a table.</summary>
     SpanAllColumns = 1u << 1,
+    /// <summary>A double click counts as a click too.</summary>
     AllowDoubleClick = 1u << 2,
+    /// <summary>The row is greyed out and takes no clicks.</summary>
     Disabled = 1u << 3,
     /// <summary>Widgets drawn over it later take their own clicks.</summary>
     AllowOverlap = 1u << 4,
@@ -61,7 +71,27 @@ public enum UiLayer : uint
 /// <summary>A colour of the current look (<see cref="UiDraw.PushColor"/>).</summary>
 public enum UiColorSlot : uint
 {
-    Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, FrameBgActive, Button, ButtonHovered,
+    /// <summary>Text.</summary>
+    Text,
+    /// <summary>Disabled (greyed) text.</summary>
+    TextDisabled,
+    /// <summary>A window's background.</summary>
+    WindowBg,
+    /// <summary>A child region's background.</summary>
+    ChildBg,
+    /// <summary>Borders.</summary>
+    Border,
+    /// <summary>The background of a framed widget (a check box, a slider, a text field).</summary>
+    FrameBg,
+    /// <summary>The frame's background while hovered.</summary>
+    FrameBgHovered,
+    /// <summary>The frame's background while held.</summary>
+    FrameBgActive,
+    /// <summary>A button.</summary>
+    Button,
+    /// <summary>A button while hovered.</summary>
+    ButtonHovered,
+    /// <summary>A button while held.</summary>
     ButtonActive,
     /// <summary>Selectables: selected.</summary>
     Header,
@@ -69,17 +99,32 @@ public enum UiColorSlot : uint
     HeaderHovered,
     /// <summary>Selectables: held.</summary>
     HeaderActive,
-    Separator, ScrollbarBg, ScrollbarGrab,
+    /// <summary>Separator lines.</summary>
+    Separator,
+    /// <summary>A scrollbar's background.</summary>
+    ScrollbarBg,
+    /// <summary>A scrollbar's handle.</summary>
+    ScrollbarGrab,
     /// <summary>The gamepad / keyboard focus outline.</summary>
     NavCursor,
-    CheckMark, SliderGrab,
+    /// <summary>The tick of a check box.</summary>
+    CheckMark,
+    /// <summary>A slider's handle.</summary>
+    SliderGrab,
     /// <summary>A title bar (since 0.2.0-dev.29.16, as are the slots below; an older Kiln ignores them).</summary>
     TitleBg,
     /// <summary>The focused window's title bar.</summary>
     TitleBgActive,
     /// <summary>Drop-downs and tooltips.</summary>
     PopupBg,
-    Tab, TabHovered, TabSelected, TableHeaderBg,
+    /// <summary>A tab.</summary>
+    Tab,
+    /// <summary>A tab while hovered.</summary>
+    TabHovered,
+    /// <summary>The selected tab.</summary>
+    TabSelected,
+    /// <summary>The header row of a table.</summary>
+    TableHeaderBg,
     /// <summary>Selected text in a text field.</summary>
     TextSelectedBg,
 }
@@ -88,35 +133,114 @@ public enum UiColorSlot : uint
 /// <see cref="UiDraw.Scale"/>), the <c>Align</c> ones 0..1.</summary>
 public enum UiStyleVar : uint
 {
-    WindowPadding, FramePadding, ItemSpacing, ItemInnerSpacing, FrameRounding, FrameBorderSize, ChildRounding,
-    ChildBorderSize, SelectableTextAlign, ButtonTextAlign, ScrollbarSize, WindowBorderSize,
+    /// <summary>The padding inside a window (x, y).</summary>
+    WindowPadding,
+    /// <summary>The padding inside a framed widget such as a button or a text field (x, y).</summary>
+    FramePadding,
+    /// <summary>The space between widgets (x, y).</summary>
+    ItemSpacing,
+    /// <summary>The space between the parts of one widget, such as a check box and its label (x, y).</summary>
+    ItemInnerSpacing,
+    /// <summary>The corner rounding of framed widgets.</summary>
+    FrameRounding,
+    /// <summary>The border width of framed widgets.</summary>
+    FrameBorderSize,
+    /// <summary>The corner rounding of child regions.</summary>
+    ChildRounding,
+    /// <summary>The border width of child regions.</summary>
+    ChildBorderSize,
+    /// <summary>Where a selectable's text sits inside it, 0 to 1 along each axis (x, y).</summary>
+    SelectableTextAlign,
+    /// <summary>Where a button's label sits inside it, 0 to 1 along each axis (x, y).</summary>
+    ButtonTextAlign,
+    /// <summary>The width of a scrollbar.</summary>
+    ScrollbarSize,
+    /// <summary>The border width of windows.</summary>
+    WindowBorderSize,
 }
 
 /// <summary>Keys for <see cref="UiDraw.KeyPressed"/> (keyboard and gamepad).</summary>
 public enum UiKey : uint
 {
-    Tab = 1, Left, Right, Up, Down, PageUp, PageDown, Home, End, Enter, Escape, Backspace,
+    /// <summary>The Tab key.</summary>
+    Tab = 1,
+    /// <summary>The left arrow.</summary>
+    Left,
+    /// <summary>The right arrow.</summary>
+    Right,
+    /// <summary>The up arrow.</summary>
+    Up,
+    /// <summary>The down arrow.</summary>
+    Down,
+    /// <summary>Page Up.</summary>
+    PageUp,
+    /// <summary>Page Down.</summary>
+    PageDown,
+    /// <summary>Home.</summary>
+    Home,
+    /// <summary>End.</summary>
+    End,
+    /// <summary>Enter.</summary>
+    Enter,
+    /// <summary>Escape.</summary>
+    Escape,
+    /// <summary>Backspace.</summary>
+    Backspace,
     /// <summary>The letter F (Ctrl+F: find).</summary>
     F,
-    GamepadLB, GamepadRB,
+    /// <summary>The gamepad's left shoulder button.</summary>
+    GamepadLB,
+    /// <summary>The gamepad's right shoulder button.</summary>
+    GamepadRB,
     /// <summary>The left face button (Xbox X).</summary>
     GamepadX,
     /// <summary>The top face button (Xbox Y).</summary>
     GamepadY,
-    GamepadStart, GamepadBack,
+    /// <summary>The gamepad's Start button.</summary>
+    GamepadStart,
+    /// <summary>The gamepad's Back button.</summary>
+    GamepadBack,
 }
 
 /// <summary>Where the next widget goes (<see cref="UiDraw.Cursor"/>). X/Y are window-local (for
 /// <see cref="UiDraw.SetCursor"/>), ScreenX/ScreenY screen pixels (for the Draw calls).</summary>
+/// <param name="X">Where the next widget goes, x, window-local (scrolling included).</param>
+/// <param name="Y">Where the next widget goes, y, window-local (scrolling included).</param>
+/// <param name="ScreenX">The same position's x in screen pixels.</param>
+/// <param name="ScreenY">The same position's y in screen pixels.</param>
+/// <param name="AvailWidth">The width left in the current window or child region, from the cursor.</param>
+/// <param name="AvailHeight">The height left in the current window or child region, from the cursor.</param>
+/// <param name="WindowX">The current window's (or child region's) left edge in screen pixels.</param>
+/// <param name="WindowY">The current window's (or child region's) top edge in screen pixels.</param>
+/// <param name="WindowWidth">The current window's (or child region's) width in pixels.</param>
+/// <param name="WindowHeight">The current window's (or child region's) height in pixels.</param>
+/// <param name="FontSize">The current font size in pixels, the UI scale applied.</param>
+/// <param name="LineHeight">The height of one text line plus the item spacing, in pixels.</param>
+/// <param name="ScrollY">The vertical scroll position.</param>
+/// <param name="ScrollMaxY">The largest vertical scroll position.</param>
 public readonly record struct UiCursor(float X, float Y, float ScreenX, float ScreenY, float AvailWidth, float AvailHeight,
     float WindowX, float WindowY, float WindowWidth, float WindowHeight, float FontSize, float LineHeight, float ScrollY,
     float ScrollMaxY);
 
 /// <summary>The widget drawn last (<see cref="UiDraw.LastItem"/>), in screen pixels.</summary>
+/// <param name="MinX">The widget's left edge.</param>
+/// <param name="MinY">The widget's top edge.</param>
+/// <param name="MaxX">The widget's right edge.</param>
+/// <param name="MaxY">The widget's bottom edge.</param>
+/// <param name="Hovered">The mouse is over it.</param>
+/// <param name="Active">It is held: the mouse is down on it, or a text field is being edited.</param>
+/// <param name="Focused">It has the gamepad or keyboard navigation focus.</param>
+/// <param name="Clicked">The left button went down over it this frame.</param>
+/// <param name="Visible">It is not clipped away.</param>
+/// <param name="Edited">Its value changed this frame.</param>
+/// <param name="Activated">It became active this frame.</param>
+/// <param name="Deactivated">It stopped being active this frame.</param>
 public readonly record struct UiItem(float MinX, float MinY, float MaxX, float MaxY, bool Hovered, bool Active, bool Focused,
     bool Clicked, bool Visible, bool Edited, bool Activated, bool Deactivated)
 {
+    /// <summary>The widget's width in pixels.</summary>
     public float Width => MaxX - MinX;
+    /// <summary>The widget's height in pixels.</summary>
     public float Height => MaxY - MinY;
 }
 
@@ -137,8 +261,11 @@ public sealed unsafe partial class UiDraw
         return new FontScope(true);
     }
 
+    /// <summary>The scope <see cref="FontSize"/> returns; dispose it to go back to the earlier size.</summary>
+    /// <param name="pushed">Whether a size was pushed (false on an older kiln.ui, where nothing changes).</param>
     public readonly struct FontScope(bool pushed) : IDisposable
     {
+        /// <summary>Ends the font size scope.</summary>
         public void Dispose()
         {
             if (pushed) UiNative.T3->PopFontSize();
@@ -278,6 +405,7 @@ public sealed unsafe partial class UiDraw
     /// <summary>Ends a <see cref="PushColor"/> (kind 1) or <see cref="PushVar"/> (kind 2).</summary>
     public readonly struct PopScope(int kind) : IDisposable
     {
+        /// <summary>Takes the colour or spacing off again.</summary>
         public void Dispose()
         {
             if (kind == 1) UiNative.T3->PopColor(1);
@@ -333,10 +461,14 @@ public sealed unsafe partial class UiDraw
         return new FontChoice(t != null && t->PushFont((uint)font) != 0);
     }
 
+    /// <summary>The scope <see cref="Font"/> returns; dispose it to go back to the earlier font.</summary>
+    /// <param name="pushed">Whether the font was pushed.</param>
     public readonly struct FontChoice(bool pushed) : IDisposable
     {
+        /// <summary>True when the font was pushed; false when it is not loaded or kiln.ui is older than v4.</summary>
         public bool Pushed => pushed;
 
+        /// <summary>Ends the font scope, if it was pushed.</summary>
         public void Dispose()
         {
             if (pushed) UiNative.T4->PopFont();

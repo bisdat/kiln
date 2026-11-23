@@ -23,10 +23,12 @@ public sealed class QuestBook
 /// <summary>A holder's state in one quest, as stored.</summary>
 public sealed class QuestRecord
 {
+    /// <summary>Where the quest stands for this holder (it starts as <see cref="QuestStatus.Active"/>).</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<QuestStatus>))]
     public QuestStatus Status { get; set; } = QuestStatus.Active;
     /// <summary>The current step (an id, so a changed definition keeps its place); null when not active.</summary>
     public string? StepId { get; set; }
+    /// <summary>The 0-based index of the current step in the quest's steps.</summary>
     public int StepIndex { get; set; }
     /// <summary>"&lt;step&gt;#&lt;objective&gt;" -> count.</summary>
     public Dictionary<string, int> Counters { get; set; } = new(StringComparer.Ordinal);
@@ -35,8 +37,11 @@ public sealed class QuestRecord
     /// <summary>When the step started (not saved): a step the player already fulfils stays on screen a moment before it passes.</summary>
     [JsonIgnore]
     public long EnteredAt { get; set; }
+    /// <summary>When it started, in Unix seconds (UTC).</summary>
     public long StartedAt { get; set; }
+    /// <summary>When it was completed or failed, in Unix seconds (UTC); 0 while it runs.</summary>
     public long FinishedAt { get; set; }
+    /// <summary>How many times it has been completed.</summary>
     public int Completions { get; set; }
     /// <summary>Rewards still to pay (the player was offline when an admin completed it).</summary>
     public bool RewardsPending { get; set; }
@@ -45,6 +50,8 @@ public sealed class QuestRecord
     [JsonIgnore]
     internal int Moves { get; set; }
 
+    /// <summary>The key of an objective's counter in <see cref="Counters"/>: <c>&lt;step&gt;#&lt;objective&gt;</c> (the
+    /// objective's index in the step).</summary>
     public static string CounterKey(string step, int objective) => $"{step}#{objective}";
 }
 
@@ -72,6 +79,7 @@ public static partial class Quests
     /// <summary>Text language of chat lines (vanilla clients do not tell the server theirs).</summary>
     public static string ChatLanguage { get; set; } = "en";
 
+    /// <summary>Always true: the quest engine is part of Kiln.Quests (see <see cref="Status"/> for what it holds).</summary>
     public static bool Available => true;
 
     /// <summary>Maps a talk objective's <c>line</c> to a line id when the knowledge names do not know it (modId, text):
@@ -82,6 +90,7 @@ public static partial class Quests
     /// runs. A client joined to a server only shows what its server sends.</summary>
     internal static bool ServerSide => Lifecycle.IsServerRunning;
 
+    /// <summary>What the engine holds and has done.</summary>
     public static QuestEngineStatus Status
     {
         get

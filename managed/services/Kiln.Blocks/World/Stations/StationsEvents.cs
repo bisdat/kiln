@@ -33,15 +33,25 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
         ByMod = byMod;
     }
 
+    /// <summary>The station.</summary>
     public EntityId Station { get; }
+    /// <summary>The station's workshop: which recipes it runs.</summary>
     public uint Workshop { get; }
+    /// <summary>The station's state before the change.</summary>
     public StationState Before { get; }
+    /// <summary>The station's state after the change.</summary>
     public StationState After { get; }
+    /// <summary>The stop flag before the change.</summary>
     public bool StoppedBefore { get; }
+    /// <summary>The stop flag after the change.</summary>
     public bool StoppedAfter { get; }
+    /// <summary>The recipe the station repeated before the change, or 0 for none.</summary>
     public uint SelectedBefore { get; }
+    /// <summary>The recipe the station repeats after the change, or 0 for none.</summary>
     public uint SelectedAfter { get; }
+    /// <summary>The recipe in progress before the change, or 0 for none.</summary>
     public uint RunningBefore { get; }
+    /// <summary>The recipe in progress after the change, or 0 for none.</summary>
     public uint RunningAfter { get; }
     /// <summary>The base's record index this session; -1 when the station stands in none.</summary>
     public int BaseIndex { get; }
@@ -60,8 +70,10 @@ public sealed class StationStateChangedEvent : KilnEvent, IEntityEvent
     /// <summary>The stop flag went off.</summary>
     public bool Resumed => StoppedBefore && !StoppedAfter;
 
+    /// <summary>True when <paramref name="entity"/> is the station.</summary>
     public bool Involves(EntityId entity) => entity == Station;
 
+    /// <summary>The change in one line, for a log.</summary>
     public override string ToString() =>
         $"station {Station}: {Before} -> {After}{(Stopped ? " (stopped)" : Resumed ? " (resumed)" : "")} selected 0x{SelectedAfter:x8}{(ByMod is null ? "" : $" by {ByMod}")}{(Player is { } p ? $" by player {p}" : "")}";
 }
@@ -81,13 +93,19 @@ public sealed class StationPlacedEvent : KilnEvent, IEntityEvent
         BaseIndex = baseIndex;
     }
 
+    /// <summary>The station.</summary>
     public EntityId Station { get; }
+    /// <summary>The station's workshop: which recipes it runs.</summary>
     public uint Workshop { get; }
+    /// <summary>Where it stands.</summary>
     public WorldPosition Position { get; }
+    /// <summary>The record index this session of the base it stands in; -1 when it stands in none.</summary>
     public int BaseIndex { get; }
     /// <summary>The base it stands in; <see cref="BaseId.None"/> when none.</summary>
     public BaseId Base { get; }
+    /// <summary>True when <paramref name="entity"/> is the station.</summary>
     public bool Involves(EntityId entity) => entity == Station;
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"station {Station} placed (workshop 0x{Workshop:x8}, base #{BaseIndex})";
 }
 
@@ -106,13 +124,19 @@ public sealed class StationRemovedEvent : KilnEvent, IEntityEvent
         BaseIndex = baseIndex;
     }
 
+    /// <summary>The station.</summary>
     public EntityId Station { get; }
+    /// <summary>The station's workshop: which recipes it ran.</summary>
     public uint Workshop { get; }
+    /// <summary>Where it stood.</summary>
     public WorldPosition Position { get; }
+    /// <summary>The record index this session of the base it stood in; -1 when it stood in none.</summary>
     public int BaseIndex { get; }
     /// <summary>The base it stood in; <see cref="BaseId.None"/> when none.</summary>
     public BaseId Base { get; }
+    /// <summary>True when <paramref name="entity"/> is the station.</summary>
     public bool Involves(EntityId entity) => entity == Station;
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"station {Station} removed (workshop 0x{Workshop:x8}, base #{BaseIndex})";
 }
 
@@ -148,6 +172,7 @@ public sealed class BasesChangedEvent : KilnEvent
     public IReadOnlyList<BaseIdChange> Changed { get; }
     /// <summary>Bases whose id is the same before and after (their altars may have changed).</summary>
     public IReadOnlyList<BaseId> Kept { get; }
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"bases changed: {Count} (+{Added.Count} -{Removed.Count} ~{Changed.Count} ={Kept.Count})";
 }
 
@@ -167,14 +192,19 @@ public sealed class StationCraftedEvent : KilnEvent, IEntityEvent
         Outputs = outputs;
     }
 
+    /// <summary>The station.</summary>
     public EntityId Station { get; }
+    /// <summary>The recipe the cycle ran.</summary>
     public uint Recipe { get; }
+    /// <summary>The station's workshop: which recipes it runs.</summary>
     public uint Workshop { get; }
     /// <summary>What the cycle made.</summary>
     public IReadOnlyList<StationStack> Outputs { get; }
     /// <summary>The base the station stands in; <see cref="BaseId.None"/> when none.</summary>
     public BaseId Base { get; }
+    /// <summary>True when <paramref name="entity"/> is the station.</summary>
     public bool Involves(EntityId entity) => entity == Station;
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"station {Station} crafted recipe 0x{Recipe:x8}: {string.Join(", ", Outputs)}";
 }
 
@@ -220,19 +250,25 @@ public sealed class StationPlayerActionEvent : CancelableEvent, IEntityEvent
         CanCancel = canCancel;
     }
 
+    /// <summary>The player who pressed the button.</summary>
     public EntityId Player { get; }
+    /// <summary>The station, or the workbench for a <see cref="StationPlayerAction.Craft"/>.</summary>
     public EntityId Station { get; }
+    /// <summary>Which button.</summary>
     public StationPlayerAction Action { get; }
     /// <summary>Select, Fill, Craft: the recipe.</summary>
     public uint Recipe { get; }
     /// <summary>Fill, Craft: how many crafts.</summary>
     public int Amount { get; }
+    /// <summary>The category choices made for the recipe.</summary>
     public IReadOnlyList<CategoryChoice> Choices { get; }
     /// <summary>UseAllOptions: the new value.</summary>
     public bool UseAllOptions { get; }
     /// <summary>True: the game has not run it and a cancel stops it.</summary>
     public bool CanCancel { get; }
+    /// <summary>True when <paramref name="entity"/> is the player or the station.</summary>
     public bool Involves(EntityId entity) => entity == Player || entity == Station;
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"player {Player} at station {Station}: {Action} recipe 0x{Recipe:x8} x{Amount}";
 }
 
@@ -250,11 +286,15 @@ public sealed class StationChangedEvent : KilnEvent, IEntityEvent
 
     /// <summary>What the call did.</summary>
     public StationResult Result { get; }
+    /// <summary>The station that changed.</summary>
     public EntityId Station => Result.Station;
+    /// <summary>Which call changed it: fill, stop, resume, select or collect.</summary>
     public StationAction Action => Result.Action;
     /// <summary>The mod that called; null for Kiln itself.</summary>
     public string? ByMod { get; }
+    /// <summary>True when <paramref name="entity"/> is the station.</summary>
     public bool Involves(EntityId entity) => entity == Station;
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"station changed: {Result}{(ByMod is null ? "" : $" by {ByMod}")}";
 }
 

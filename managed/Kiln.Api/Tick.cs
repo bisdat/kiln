@@ -39,6 +39,8 @@ public readonly struct TickInfo
     public TimeSpan WallDelta => TimeSpan.FromMilliseconds(WallDeltaMs);
 }
 
+/// <summary>A handler of <see cref="TickEvents.Pre"/> or <see cref="TickEvents.Post"/>; it gets the step's
+/// <see cref="TickInfo"/>.</summary>
 public delegate void TickHandler(in TickInfo tick);
 
 /// <summary>Server-world tick events of one mod.</summary>

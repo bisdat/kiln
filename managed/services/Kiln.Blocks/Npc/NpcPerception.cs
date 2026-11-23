@@ -18,6 +18,7 @@ public enum NpcOcclusionMode
 /// it was spawned with.</summary>
 public sealed record NpcPerceptionPolicy
 {
+    /// <summary>What stands between the brain and what it sees. Default: <see cref="NpcOcclusionMode.DistanceAndFaction"/>.</summary>
     public NpcOcclusionMode Occlusion { get; init; } = NpcOcclusionMode.DistanceAndFaction;
     /// <summary>Added to the creature's position: where it looks from. Metres along the world's axes (Y up), each within 32.</summary>
     public WorldPosition FromOffset { get; init; } = new(0, 1.5, 0);
@@ -31,6 +32,18 @@ public sealed record NpcPerceptionPolicy
 /// <see cref="OutOfRange"/> (farther than a ray reaches), <see cref="EntityGone"/>, <see cref="OtherRefused"/>; a look
 /// while <c>queries.line_of_sight</c> is off counts in <see cref="CapabilityUnavailableUpdates"/> and sees nothing.
 /// <see cref="LastRefusal"/> is the latest look's last refusal, or null.</summary>
+/// <param name="Updates">How many looks the brain made (four a second).</param>
+/// <param name="Checks">How many candidates were put to the line-of-sight question, in <see cref="NpcOcclusionMode.Voxels"/>.</param>
+/// <param name="Visible">Candidates the line of sight found clear: they are seen.</param>
+/// <param name="Occluded">Candidates the line of sight found blocked by terrain or a building.</param>
+/// <param name="NotLoaded">Candidates whose line could not be checked because the terrain there was not loaded.</param>
+/// <param name="OutOfGrid">Candidates whose line could not be checked because it left the grid the query covers.</param>
+/// <param name="BudgetExceeded">Candidates whose line could not be checked because the step's ray budget was used up.</param>
+/// <param name="OutOfRange">Candidates farther than a ray reaches, counted without asking the query.</param>
+/// <param name="EntityGone">Candidates that had left the world when the line was checked.</param>
+/// <param name="OtherRefused">Candidates whose line was refused for any other reason, or whose ray was degenerate (no length, or not a number).</param>
+/// <param name="CapabilityUnavailableUpdates">Looks made while <c>queries.line_of_sight</c> was off. Such a look sees nothing.</param>
+/// <param name="LastRefusal">The latest look's last refusal, such as <c>OutOfGrid</c>, or null.</param>
 public sealed record NpcPerceptionStats(ulong Updates, ulong Checks, ulong Visible, ulong Occluded, ulong NotLoaded, ulong OutOfGrid, ulong BudgetExceeded,
     ulong OutOfRange, ulong EntityGone, ulong OtherRefused, ulong CapabilityUnavailableUpdates, string? LastRefusal);
 

@@ -99,6 +99,7 @@ public sealed unsafe class HookModule
     /// <summary>"creative.dll+0x15F5F7" for an address in the module.</summary>
     public string Describe(nuint address) => $"{Name}+0x{address - Base:X}";
 
+    /// <summary>The module's name and base address, like <c>creative.dll at 0x7FFB83A70000</c>.</summary>
     public override string ToString() => $"{Name} at 0x{Base:X}";
 }
 

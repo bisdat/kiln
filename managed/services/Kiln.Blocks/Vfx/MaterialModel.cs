@@ -106,9 +106,13 @@ public enum MaterialKind
 }
 
 /// <summary>A normal map: a PNG (<c>"n.png"</c>), or with a <see cref="Strength"/>.</summary>
+/// <param name="Map">The PNG, tangent space, in the mod's folder.</param>
+/// <param name="Strength">How strongly the map bends the surface (glTF's normal <c>scale</c>). Null: the builder's default.</param>
+/// <param name="YDown">True for a map whose green points down (a DirectX map). Null: green up, as in glTF and Blender.</param>
 [JsonConverter(typeof(NormalMapConverter))]
 public sealed record NormalMap(string Map, float? Strength = null, bool? YDown = null)
 {
+    /// <summary>A normal map from a PNG: the same as <c>new NormalMap(map)</c>.</summary>
     public static implicit operator NormalMap(string map) => new(map);
 }
 
@@ -125,6 +129,7 @@ public sealed record EmissiveBlock
     /// <summary>0 to 1: how much it follows the camera's exposure correction. Default 0.75.</summary>
     public float? Exposure { get; init; }
 
+    /// <summary>A map or a colour: a string that starts with <c>#</c> is the colour, any other is the map's path.</summary>
     public static implicit operator EmissiveBlock(string mapOrColour) => mapOrColour.StartsWith('#') ? new() { Color = mapOrColour } : new() { Map = mapOrColour };
 }
 
@@ -143,6 +148,7 @@ public sealed record DissolveBlock
 
     internal bool? Plain { get; init; }
 
+    /// <summary>The short form: <c>true</c> is a dissolve with the default settings, <c>false</c> says there is none.</summary>
     public static implicit operator DissolveBlock(bool on) => new() { Plain = on };
 }
 
@@ -154,6 +160,7 @@ public readonly record struct MaterialReflectance
 
     /// <summary>Read it from the alpha of <see cref="MaterialBlock.Params"/>.</summary>
     public static readonly MaterialReflectance FromParams = default;
+    /// <summary>A reflectance of this value, 0 to 1.</summary>
     public static implicit operator MaterialReflectance(float value) => new() { Value = value };
 }
 
@@ -164,23 +171,32 @@ public readonly record struct MaterialAlphaTest
     internal float? Cutoff { get; private init; }
     internal bool On { get; private init; }
 
+    /// <summary><c>true</c> cuts where the albedo's alpha is under 0.5, <c>false</c> does not cut.</summary>
     public static implicit operator MaterialAlphaTest(bool on) => new() { On = on };
+    /// <summary>Cuts where the albedo's alpha is under this value.</summary>
     public static implicit operator MaterialAlphaTest(float cutoff) => new() { Cutoff = cutoff, On = true };
 }
 
 /// <summary>A number, or <c>(u, v)</c>.</summary>
+/// <param name="U">Repeats of every map along u.</param>
+/// <param name="V">Repeats of every map along v.</param>
 [JsonConverter(typeof(UvScaleConverter))]
 public readonly record struct MaterialUvScale(float U, float V)
 {
+    /// <summary>The same number of repeats along both axes.</summary>
     public static implicit operator MaterialUvScale(float value) => new(value, value);
+    /// <summary>Repeats along u and v, as a tuple.</summary>
     public static implicit operator MaterialUvScale((float U, float V) scale) => new(scale.U, scale.V);
 }
 
 /// <summary>A material of this mod: its name, or the handle from <see cref="Blocks.Define(string, MaterialBlock)"/>.</summary>
+/// <param name="Name">The material's block name in this mod.</param>
 [JsonConverter(typeof(MaterialRefConverter))]
 public readonly record struct MaterialRef(string Name)
 {
+    /// <summary>A material of this mod by its name.</summary>
     public static implicit operator MaterialRef(string name) => new(name);
+    /// <summary>A material by the handle <see cref="Blocks.Define(string, MaterialBlock)"/> gave back.</summary>
     public static implicit operator MaterialRef(BlockHandle<MaterialBlock> handle) => new(handle.Name);
 }
 

@@ -40,11 +40,16 @@ public enum PointOutcome
 }
 
 /// <summary>The answer of <see cref="Point{TIn,TOut}.Decide"/>.</summary>
+/// <param name="Outcome">What the links did to the owner's answer.</param>
+/// <param name="Value">The answer after the links; when a link refused, the answer at that moment.</param>
+/// <param name="DecidedBy">The id of the mod whose link last changed the answer, or refused; null when no link
+/// did.</param>
 public readonly record struct PointDecision<TOut>(PointOutcome Outcome, TOut Value, string? DecidedBy)
 {
     /// <summary>The answer, or <paramref name="refused"/> when a link refused.</summary>
     public TOut ValueOr(TOut refused) => Outcome == PointOutcome.Refused ? refused : Value;
 
+    /// <summary>True when <see cref="PointDecision{TOut}.Outcome"/> is <see cref="PointOutcome.Refused"/>.</summary>
     public bool IsRefused => Outcome == PointOutcome.Refused;
 }
 
@@ -52,6 +57,7 @@ public readonly record struct PointDecision<TOut>(PointOutcome Outcome, TOut Val
 /// after the links of the named mods. Ties go by mod id, so every start orders links the same way.</summary>
 public sealed record PointOrder
 {
+    /// <summary>Lower runs first. Default 0.</summary>
     public int Priority { get; init; }
 
     /// <summary>Mods whose links run after this one.</summary>
@@ -60,6 +66,7 @@ public sealed record PointOrder
     /// <summary>Mods whose links run before this one.</summary>
     public IReadOnlyList<string> After { get; init; } = [];
 
+    /// <summary>The default order: priority 0, no before or after constraints.</summary>
     public static PointOrder Default { get; } = new();
 }
 
@@ -96,18 +103,21 @@ public sealed class PointLink : IDisposable
     /// <summary>True for a link attached with Observe: it never changes the answer.</summary>
     public bool Observer { get; }
 
+    /// <summary>Where the link runs among the point's links.</summary>
     public PointOrder Order { get; }
 
     /// <summary>False when the link was switched off, threw, or does not match the point's types.</summary>
     public bool Enabled => OffReason == null;
 
-    /// <summary>Why the link does not run, or null.</summary>
     private string? _offReason;
+
+    /// <summary>Why the link does not run, or null.</summary>
     public string? OffReason { get => Volatile.Read(ref _offReason); internal set => Volatile.Write(ref _offReason, value); }
 
     /// <summary>Detaches the link.</summary>
     public void Dispose() => Registry.Detach(this);
 
+    /// <summary>The owner and the point, marked when it only observes or is off, for logs.</summary>
     public override string ToString() => $"{Owner} -> {Point}{(Observer ? " (observe)" : "")}{(OffReason is { } r ? $" [off: {r}]" : "")}";
 }
 
@@ -128,8 +138,12 @@ public sealed class Point<TIn, TOut>
     /// <summary>"&lt;owner id&gt;:&lt;name&gt;".</summary>
     public string Name { get; }
 
+    /// <summary>The id of the mod that defined the point.</summary>
     public string Owner { get; }
+    /// <summary>How links act on the answer.</summary>
     public PointMode Mode { get; }
+    /// <summary>Whether a link may refuse: a <see cref="PointVerdict.Refuse"/> then ends the chain with
+    /// <see cref="PointOutcome.Refused"/>.</summary>
     public bool AllowRefuse { get; }
 
     /// <summary>The links that run, in order.</summary>

@@ -24,8 +24,10 @@ namespace Kiln;
 /// <param name="Build">The game build the catalog was made from ("26430625 (svn 1287369)"), or null.</param>
 /// <param name="Seconds">How long the load took.</param>
 /// <param name="Reason">Why there is no table ("" when loaded).</param>
+/// <param name="Count">How many texts the table holds.</param>
 public sealed record TextsStatus(bool Loaded, string? Source, string? Build, int Count, double Seconds, string Reason)
 {
+    /// <summary>How many texts were loaded, from where and how fast; or why there are none.</summary>
     public override string ToString() => Loaded ? $"{Count} texts from {Source} (game build {Build}) in {Seconds:0.00} s" : $"no texts: {Reason}";
 }
 
@@ -102,7 +104,9 @@ public static class Texts
 
     /// <summary>As <see cref="Get(uint)"/> with the game's markup tags (<c>&lt;b&gt;</c>, <c>&lt;lorename&gt;</c>, ...) removed.</summary>
     public static string? GetPlain(uint tag) => Plain(Get(tag));
+    /// <summary>As <see cref="GetPlain(uint)"/>, for a LocaTag's GUID.</summary>
     public static string? GetPlain(Guid tag) => Plain(Get(tag));
+    /// <summary>As <see cref="GetPlain(uint)"/>, for a tag given as <c>"0x..."</c>, a GUID or a decimal id.</summary>
     public static string? GetPlain(string tag) => Plain(Get(tag));
 
     /// <summary>The tag id of a LocaTag reference: FNV-1a-32 of the GUID's 16 bytes in the game's order (.NET's
