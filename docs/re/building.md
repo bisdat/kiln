@@ -178,6 +178,30 @@ Outside that scope it must call the vanilla continuation unchanged. The per-play
 magic-chest observations remains missing: aggregate selector counts must not be represented as separate-source data.
 Static qualification and portable fixtures do not establish actual menu rendering or real-game behavior.
 
+#### HUD ammunition and spell lists on the same selector (0.2.0-dev.30.6, `kiln.ui.ammo`) **[dec]**
+
+Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no client run. Served by kiln-tools as
+`kiln.ui.ammo` (`native/core/abi/services/kiln_ui_ammo.h`; managed `Ui.AmmoList`).
+
+- The existing builder `0x40e5d0` is extended (no second detour on it). Mod rows enter only as owned copies of a
+  published snapshot; the builder never calls managed code.
+- The raw finalizer `0x40dfe0` (checked) keeps a provider row's item identity after the parent's re-finalization, so
+  the selection stays on its item when rows change.
+- The raw pick `0x40c150` (checked) is where the native selection wishes converge: the actions `0x40cf00` and the cycle
+  `0x40c320` read the selected index at +0x628, and seven recovered direct wish sites all reach `0x40c150`. For a
+  virtual row (a mod row with no backpack stack) it suppresses the `inventoryStockCycleAction` write (version +0x98,
+  item +0x9c) and the local pending selector (+0x63c / +0x640), then queues a pick for the publisher. Automatic
+  selection (the equipped item absent from a replaced list) also goes through it, so a pick is a selection wish, not a
+  click.
+- Item catalog: lookup `0xe94470` -> the unique captured rel32 map `0xe86770` (a bare generic-map prefix has 16 hits; the
+  target comes from the unique `ItemLookup` signature). Only `ItemInfo` category 8 with subtype 1 (arrows) or 2 (spells)
+  is admitted for the list of that kind; any other item is refused at publish.
+- Backpack membership (is a row virtual?) comes from the stable client ECS snapshot: `InventorySetup` (84 bytes; linked
+  entities +0, categories +64; Generic 4, Virtual 5) and `Inventory` (96 bytes; eight 12-byte stacks, id +0, count +4).
+  A read failure suppresses the wish without an event.
+
+Real menu behaviour, the server half of a swap and controller cycling remain the owner's in-game check.
+
 ### 1.3 Hardness **[dec] [data] [rt]**
 ```
 config   = registry lookup by id               0x9464b0 terrain, 0x933af0 building: a linear scan over the resident resource, stride 184 / 180
