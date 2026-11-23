@@ -1352,7 +1352,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | File | Command | Arguments | Returns |
 |---|---|---|---|
 | app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage), sandbox?: `SandboxInfo` (Linux, dev.29.18), preview?: string[] (dev.29)} |
-| app | `app_render_frame` | painted: boolean, visible: boolean | string \| null (visibility updates alone are not success; two consecutive visible animation frames in a shown, non-minimized main window confirm startup; the first automatic recovery attempt returns its explanation once) |
+| app | `app_render_frame` | painted: boolean, visible: boolean | string \| null (visibility updates alone are not success; two consecutive visible animation frames in a shown, non-minimized main window confirm startup; the first automatic recovery attempt returns its explanation once; not sent while the data folder is held, see the data folder's commands) |
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_render_force_set` | on: boolean | `RenderInfo` (dev.30.7; NVIDIA shared-memory drawing, off on clean starts; explicit off vetoes automatic recovery; `state/force-dmabuf.json`, next start; startup failure disables it; `unsupported` off Linux) |
@@ -1609,7 +1609,9 @@ or removes an unfinished copy, only `app_info`, `task_*`, `data_folder_get`, `_r
 `deck_fullscreen`, `deck_gamepad`, `app_open_path` and `app_open_url` (the others: `busy`). New tasks fail at once
 with `busy` then, except the move, the removal of an old copy and the removal of an unfinished copy.
 `app_started` (the page's ready call for the render watchdog, which writes nothing) answers in all three states, so a
-window that shows only the data folder's dialog is not taken for a black one.
+window that shows only the data folder's dialog is not taken for a black one. `app_render_frame` (the renderer keeps its
+startup state in the data folder) is refused in all three: the page sends it only once the data folder gate lets the
+launcher mount, and the backend writes no renderer state into a held folder.
 
 `--selftest`: the binary runs headless, exercises the Rust side (data dir, crate calls with temp
 folders) and exits 0/1; used under Wine for the NSIS build. Its report has `distribution` ("direct" or "nexus"; also

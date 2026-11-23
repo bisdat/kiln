@@ -670,7 +670,10 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
     remember SHM. Once visible, the recovery attempt explains why it was chosen. A process-held
     `state/render-startup.lock` keeps a second launcher from treating a live attempt as a crash or changing its markers;
     if that lock is unavailable, this start applies no SHM override or marker changes. A blank default start may still
-    restart once in software using only its restart variable, even when the state folder cannot be written.
+    restart once in software using only its restart variable, even when the state folder cannot be written. A data
+    folder that is held at the start (a pointer to a folder that cannot be used, another launcher's move, an unfinished
+    move's copy that this start removes first) is treated the same way: no lock, no guard, no recovery read from its
+    files, nothing written there in that run.
   - The SHM attempt has a different guard, `state/force-dmabuf-pending.json`, written before either variable is set or
     WebKit is used (including the sandbox probe). If it cannot write that guard, it forces nothing. If this attempt
     also dies or times out, the next start forces nothing, turns the switch off, and writes
@@ -678,7 +681,10 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   - `app_started` is only page readiness. `app_render_frame` reports visibility separately and confirms startup only
     after two consecutive visible animation frames, checking the native window is shown and not minimized as well as
     the document. Hiding between callbacks resets that confirmation; the IPC independently rejects a hidden window.
-    Hidden/minimized starts are not considered failed visible attempts. A
+    Hidden/minimized starts are not considered failed visible attempts. While the data folder is held (its dialog over
+    the window, or a move) the page sends no `app_render_frame` and the backend writes no renderer state: once the hold
+    ends, the page reports its visibility and two fresh visible frames, and that confirmation clears the guards as
+    usual; a hold that does not end in that run (a committed move, Quit) leaves them as they were. A
     successful frame clears the pending guards after 10 seconds (or on a clean exit). Successful automatic SHM recovery
     is remembered in `state/force-dmabuf-recovered.json`, separately from a manual opt-in, keyed by the stable executable
     or AppImage path and GTK display backend. That working automatic renderer is used on subsequent matching starts.

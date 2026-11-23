@@ -425,6 +425,29 @@ fn confirmed_frame(path: &Path, context: &str) -> bool {
         .is_some_and(|g| g.marker.format == 1 && g.context == context && g.visible)
 }
 
+/// The data folder is held now (crate::folder: a pointer to a folder that cannot be used, another launcher's move, this
+/// launcher's move or its way out, an unfinished move's removal): the renderer writes nothing there, not even its own
+/// breadcrumbs, and a frame reported meanwhile is no confirmation. What waits goes once the hold ends; a hold that does
+/// not end in this run leaves the renderer state as it was.
+fn folder_held() -> bool {
+    crate::folder::current().held_error().is_some()
+}
+
+/// Waits while the data folder is held (a move begun before a frame settled): a hold that ends lets the settle go on.
+fn wait_until_free() {
+    while folder_held() {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Before the window: the folder is held now, or this start holds it to remove an unfinished move's partial copy
+/// (crate::commands::data_folder). Its renderer state is then read for nothing and written never in this run.
+#[cfg(target_os = "linux")]
+fn held_at_start() -> bool {
+    let f = crate::folder::current();
+    f.held_error().is_some() || crate::commands::data_folder::undo_waits(&f)
+}
+
 /// Keep the lock for this process's lifetime. A second launcher must neither mistake a live attempt for a crash nor
 /// overwrite/clear its breadcrumbs. The OS releases this lock on a crash or exec; the lock file itself stays put.
 #[cfg(target_os = "linux")]
@@ -1065,6 +1088,7 @@ pub fn force() -> Option<&'static ForceDmabuf> {
 
 /// Removes the guard this forced start wrote (the page started and settled, a clean exit, a restart).
 fn clear_force_pending(when: &str) {
+    if folder_held() { return; }
     let Some(p) = FORCE_PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
     match clear_marker_file(&p) {
         Ok(()) => log(&format!("forced DMA-BUF start guard cleared ({when}): {}", p.display())),
@@ -1101,6 +1125,7 @@ fn x11_note(note: Option<X11Note>, gate: bool) {
 
 /// Removes the pending marker this start wrote (the page started and settled, a clean exit, a restart).
 fn clear_pending(when: &str) {
+    if folder_held() { return; }
     let Some(p) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
     match clear_marker_file(&p) {
         Ok(()) => log(&format!("DMA-BUF start guard cleared ({when}): {}", p.display())),
@@ -1175,6 +1200,8 @@ pub fn leaving() {
 pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
     choice()?; // Only Linux has renderer startup guards.
     if RENDER_OWNER.get() == Some(&false) { return None; }
+    // a held folder: no visibility update and no confirmation; the page reports its frames again once the hold ends
+    if folder_held() { return None; }
     if let Some(context) = RENDER_CONTEXT.get() {
         for pending in [&NORMAL_PENDING, &FORCE_PENDING] {
             let pending = pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -1187,6 +1214,7 @@ pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
     WATCH.page_started();
     std::thread::Builder::new().name("kiln-render-settle".into()).spawn(|| {
         std::thread::sleep(SETTLE);
+        wait_until_free();
         clear_pending("a visible frame settled");
         finish_frame("a visible frame settled");
     }).ok();
@@ -1196,7 +1224,7 @@ pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
 }
 
 fn finish_frame(when: &str) {
-    if RENDER_OWNER.get() == Some(&false) { return; }
+    if RENDER_OWNER.get() == Some(&false) || folder_held() { return; }
     let Ok(dirs) = crate::state::dirs() else { return };
     if force().is_some_and(|f| matches!(f.why, ForceWhy::Recovery | ForceWhy::Recovered))
         && force_setting(&force_choice(&dirs)).is_none()
@@ -1729,7 +1757,13 @@ fn prepare_for_driver(args: &[String], nvidia: bool) {
     // Ubuntu WebKit's NVIDIA block: Settings' switch; a forced start before this one that died (its guard was left) or
     // whose page was late (the watchdog's restart) forces nothing now and turns the switch off once the data folder opens;
     // the user's own variables (ours were taken back above) always win
-    let owns_state = dirs.as_ref().is_some_and(|dd| match own_renderer_state(dd) {
+    // A held folder (another launcher moves it, or this start first removes an unfinished move's partial copy) is no
+    // renderer state of this start: no lock, no breadcrumb, no recovery from its guards, as without the lock.
+    let held = dirs.is_some() && held_at_start();
+    if held {
+        log("not changing renderer startup state: the data folder is held (a move, or an unfinished move's copy is removed first)");
+    }
+    let owns_state = !held && dirs.as_ref().is_some_and(|dd| match own_renderer_state(dd) {
         Ok(()) => true,
         Err(e) => { log(&format!("not changing renderer startup state: {}", e.message)); false }
     });
@@ -1917,7 +1951,7 @@ pub fn watch() {
     let Some(c) = choice().cloned() else { return };
     let d = dmabuf().cloned().unwrap_or(Dmabuf { on: false, why: DmabufWhy::Software, ignored: None });
     let f = force().cloned().unwrap_or(ForceDmabuf { step: Force::Off, why: ForceWhy::Unused });
-    if RENDER_OWNER.get() != Some(&false) && guarded(&d, &f)
+    if RENDER_OWNER.get() != Some(&false) && guarded(&d, &f) && !folder_held()
         && let Some(dirs) = crate::folder::found_dirs()
     {
         // read-only use of the folder before the beta copy's gate, except this one file of our own
@@ -2786,6 +2820,39 @@ mod tests {
         std::fs::remove_dir_all(&t).unwrap();
     }
 
+    /// Every folder and file below `root` with its bytes: what a held folder must still hold afterwards.
+    #[cfg(target_os = "linux")]
+    fn data_tree(root: &Path) -> Vec<(PathBuf, Option<String>)> {
+        let mut out = Vec::new();
+        let mut dirs = vec![root.to_path_buf()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    dirs.push(p.clone());
+                    out.push((p, None));
+                } else {
+                    let text = String::from_utf8_lossy(&std::fs::read(&p).unwrap()).into_owned();
+                    out.push((p, Some(text)));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Waits for the watchdog thread's line once the page started (it appends to launcher.log at once), so that line is
+    /// written before the folder is held or removed, never during.
+    #[cfg(target_os = "linux")]
+    fn watchdog_logged(root: &Path) {
+        let log = root.join("logs/launcher.log");
+        for _ in 0..500 {
+            if std::fs::read_to_string(&log).is_ok_and(|l| l.contains("render: the page started")) { return; }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the watchdog never said that the page started");
+    }
+
     /// Run prepare before any renderer or sandbox initialization, with no other tests sharing its environment or
     /// OnceLocks. folder::process_env gives each child a fresh synthetic data folder, never the player's settings.
     #[cfg(target_os = "linux")]
@@ -2799,7 +2866,7 @@ mod tests {
             if ["manual-off", "recovered-off"].contains(&case.as_str()) { force_switch_files(&dirs, false).unwrap(); }
             let context = startup_context(false);
             let fixture_context = if case == "other-backend" { "another installation|x11" } else { &context };
-            if !manual_on && case != "fresh" {
+            if !manual_on && !["fresh", "hold-never-ends"].contains(&case.as_str()) {
                 write_startup_guard(&normal_pending(&dirs), fixture_context, case != "hidden", "synthetic normal start never painted").unwrap();
             }
             if ["shm-failed", "failed-recovered"].contains(&case.as_str()) {
@@ -2822,8 +2889,76 @@ mod tests {
                 Some(file)
             } else { None };
             let args = if case == "software" { args(&[ARG_SOFTWARE]) } else if ["escape", "unwritable-escape"].contains(&case.as_str()) { args(&[ARG_NO_DMABUF]) } else { args(&[]) };
+            // another launcher holds the folder exclusively (it is moving it): what folder::Folder::open finds then
+            if case == "held-elsewhere" { crate::folder::current().set_hold(crate::folder::Hold::Elsewhere); }
+            let before = data_tree(&dirs.root);
             prepare_for_driver(&args, case != "non-nvidia");
             match case.as_str() {
+                "held-elsewhere" => {
+                    // an earlier start's guard is evidence, but a held folder is neither read for recovery nor written
+                    assert_eq!(RENDER_OWNER.get(), Some(&false), "a held folder's renderer state is not this start's");
+                    assert_eq!(force().unwrap().step, Force::Off, "a held folder starts no recovery");
+                    assert!(std::env::var_os(FORCE_VAR).is_none());
+                    assert_eq!(when_late_forced(choice().unwrap(), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Restart,
+                        "a held start keeps the stateless software escape");
+                    page_started();
+                    watch();
+                    WATCH.window_created();
+                    frame_painted(false, true);
+                    assert!(frame_painted(true, true).is_none());
+                    after_gate();
+                    before_restart(&Relaunch::software_fallback());
+                    leaving();
+                    assert_eq!(data_tree(&dirs.root), before, "nothing of the renderer goes into a held folder");
+                }
+                "hold-ends" => {
+                    // the start owned the free folder and armed its recovery; then the folder is held (an unfinished
+                    // move's copy is removed, a move runs), and the page reports frames only after the hold ends
+                    assert_eq!(force().unwrap().why, ForceWhy::Recovery);
+                    assert!(force_pending(&dirs).is_file());
+                    crate::folder::current().set_hold(crate::folder::Hold::Undoing);
+                    let held = data_tree(&dirs.root);
+                    WATCH.window_created();
+                    page_started();
+                    frame_painted(false, true);
+                    assert!(frame_painted(true, true).is_none(), "no explanation and no confirmation while held");
+                    frame_painted(false, false);
+                    assert!(!WATCH.has_painted(), "a frame while held is not the start's confirmation");
+                    after_gate();
+                    finish_frame("while held");
+                    clear_pending("while held");
+                    assert_eq!(data_tree(&dirs.root), held, "nothing is written while the folder is held");
+                    assert!(expected_frame(&force_pending(&dirs), &context));
+                    crate::folder::current().set_hold(crate::folder::Hold::Free);
+                    assert!(frame_painted(true, true).is_some(), "the first painted frame after the hold explains the recovery");
+                    leaving();
+                    assert!(confirmed_frame(&force_recovered(&dirs), &context), "the working recovery is remembered");
+                    assert_eq!(force_setting(&force_choice(&dirs)), None);
+                    assert!(!force_pending(&dirs).exists());
+                    assert!(!normal_pending(&dirs).exists());
+                }
+                "hold-never-ends" => {
+                    // a normal start painted, then a move held the folder before the settle: it ends in this run
+                    // (the move is committed, the launcher restarts): nothing changes in the old folder
+                    assert_eq!(force().unwrap().step, Force::Off);
+                    assert!(normal_pending(&dirs).is_file());
+                    page_started();
+                    watch();
+                    assert!(dmabuf_pending(&dirs).is_file());
+                    WATCH.window_created();
+                    assert!(frame_painted(true, true).is_none());
+                    watchdog_logged(&dirs.root);
+                    crate::folder::current().set_hold(crate::folder::Hold::Moving);
+                    let held = data_tree(&dirs.root);
+                    frame_painted(false, false);
+                    frame_painted(true, true);
+                    after_gate();
+                    finish_frame("while held");
+                    crate::folder::current().set_hold(crate::folder::Hold::Moved);
+                    before_restart(&Relaunch::software_fallback());
+                    leaving();
+                    assert_eq!(data_tree(&dirs.root), held, "a hold that does not end leaves the renderer state untouched");
+                }
                 "never-shown" => {
                     frame_painted(true, true);
                     assert!(!WATCH.has_painted(), "a page cannot prove a window painted before one exists");
@@ -2868,6 +3003,7 @@ mod tests {
                         let before = std::fs::read(normal_pending(&dirs)).unwrap();
                         page_started();
                         watch();
+                        watchdog_logged(&dirs.root);
                         frame_painted(true, true);
                         after_gate();
                         leaving();
@@ -2904,7 +3040,7 @@ mod tests {
             return;
         }
         let mut failures = Vec::new();
-        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing", "never-shown"] {
+        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing", "never-shown", "held-elsewhere", "hold-ends", "hold-never-ends"] {
             let mut cmd = Command::new(std::env::current_exe().unwrap());
             cmd.args(["--exact", "render::tests::forced_startup_is_guarded_before_any_webkit_use", "--nocapture"])
                 .env(CASE, case);
