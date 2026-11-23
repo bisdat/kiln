@@ -29,6 +29,7 @@ describe("untrusted registry report", () => {
     expect(() => parseRegistryReport(text)).toThrow();
   });
   test("rejects oversized input before JSON parsing", () => expect(() => parseRegistryReport(" ".repeat(REPORT_LIMITS.bytes + 1))).toThrow("8 MiB"));
+  test("an oversized report says where to read it in full", () => expect(() => parseRegistryReport(" ".repeat(REPORT_LIMITS.bytes + 1))).toThrow("kiln/state/registry.json"));
   test("a native-shaped 5,000-field report (about 1.4 MiB) parses", () => {
     const text = JSON.stringify(nativeShapedReport(5000));
     expect(text.length).toBeGreaterThan(1024 * 1024);

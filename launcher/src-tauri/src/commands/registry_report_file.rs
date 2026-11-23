@@ -2,6 +2,8 @@
 use std::{fs, io::{self, Read}, path::Path};
 
 pub const MAX_REPORT_BYTES: u64 = 8 * 1024 * 1024;
+// The native writer caps rows, not bytes, so a very large mod set can pass this: say where the whole file is.
+const TOO_LARGE: &str = "Registry report exceeds the 8 MiB limit this view reads. Open kiln/state/registry.json in the game folder to read it in full.";
 
 pub fn read_report(game: &Path) -> io::Result<Option<String>> {
     let root = game.canonicalize()?;
@@ -24,13 +26,13 @@ pub fn read_report(game: &Path) -> io::Result<Option<String>> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "Registry report is not a regular file."));
     }
     if meta.len() > MAX_REPORT_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Registry report exceeds the 8 MiB limit."));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, TOO_LARGE));
     }
     // Bound the actual read as well: the producer may replace or grow the file after metadata was read.
     let mut bytes = Vec::new();
     file.take(MAX_REPORT_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_REPORT_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Registry report exceeds the 8 MiB limit."));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, TOO_LARGE));
     }
     String::from_utf8(bytes).map(Some).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Registry report is not UTF-8."))
 }
@@ -62,7 +64,8 @@ mod tests {
     #[test] fn caps_before_reading_large_files() {
         let root = Root::new("huge");
         fs::File::create(root.file()).unwrap().set_len(MAX_REPORT_BYTES + 1).unwrap();
-        assert!(read_report(&root.0).unwrap_err().to_string().contains("8 MiB"));
+        let err = read_report(&root.0).unwrap_err().to_string();
+        assert!(err.contains("8 MiB") && err.contains("kiln/state/registry.json"), "{err}");
     }
     #[test] fn rejects_invalid_utf8() {
         let root = Root::new("utf8");

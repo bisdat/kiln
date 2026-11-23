@@ -21,7 +21,9 @@ The page refreshes the snapshot periodically and also offers an explicit refresh
 normal structured error on I/O failure. The caller cannot supply a path. The native reader resolves the known game
 folder, refuses non-regular files and paths outside it, and caps both the metadata size and actual read at **8 MiB**.
 The frontend separately caps bytes before parsing, JSON nesting at 48, and containers (objects and lists) at one per 16 bytes of the byte cap (524,288); separators are not counted, so any real report up to 8 MiB parses.
-Unknown format-1 members are ignored; unsupported formats and malformed consumed rows are errors.
+Unknown format-1 members are ignored; unsupported formats and malformed consumed rows are errors. The native writer
+caps rows, not bytes, so a very large mod set (towards 20,000 fields with long writer chains) can write a report over
+8 MiB: the page then says so and points to `kiln/state/registry.json` in the game folder, which holds it in full.
 
 The view retains at most 500 rows per report section, 64 final writers per field, 2,048 characters per text value,
 and bounded list/record previews (16 members, depth 4, 128 visited values). Both native omission counts and launcher

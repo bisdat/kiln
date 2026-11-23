@@ -82,8 +82,11 @@ function value(x: unknown, leftOut: unknown = 0): string {
   return result + (n ? ` (${n} omitted)` : "");
 }
 
+// The native writer caps rows, not bytes (report.cpp: 20,000 fields x 64 writers x 64-entry lists can pass 8 MiB): say
+// where the whole file is, rather than only that it is too large.
+const TOO_LARGE = "Registry report exceeds the 8 MiB limit this view reads. Open kiln/state/registry.json in the game folder to read it in full.";
 function checkEnvelope(input: string) {
-  if (input.length > REPORT_LIMITS.bytes || new TextEncoder().encode(input).length > REPORT_LIMITS.bytes) throw new Error("Registry report exceeds the 8 MiB limit.");
+  if (input.length > REPORT_LIMITS.bytes || new TextEncoder().encode(input).length > REPORT_LIMITS.bytes) throw new Error(TOO_LARGE);
   // Work is bounded by the byte cap: JSON.parse is linear in it. What costs memory beyond the text are containers (each
   // object/list is an allocation), so those are capped in proportion to the byte cap: one per 16 bytes. A native report
   // spends far more than that per container (about 60 bytes for a field row), so any real report up to 8 MiB passes, while
