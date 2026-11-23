@@ -2293,8 +2293,12 @@ fn block_relations(out: &mut Out, file: &str, n: &Node, kind: &str, ptr: &str) {
         "loot" => {
             check("stackMax", number("stackMax").zip(number("stackMin")).is_some_and(|(hi, lo)| hi < lo), "stackMax must be at least stackMin".into());
         }
-        "entries" | "tables" => {
+        "entries" => {
             check("countMax", number("countMax").is_some_and(|hi| hi < number("countMin").unwrap_or(1.0)), "countMax must be at least countMin".into());
+        }
+        "tables" => {
+            // DropPlace defaults countMax to 1; a LootEntry instead defaults it to countMin.
+            check("countMax", number("countMax").unwrap_or(1.0) < number("countMin").unwrap_or(1.0), "countMax (default 1) must be at least countMin".into());
         }
         _ => {}
     }

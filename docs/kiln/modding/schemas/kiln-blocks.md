@@ -211,7 +211,7 @@ Animations mixed by an input.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `circular` | boolean |  |  |
-| `clips` | object | yes |  |
+| `clips` | object | yes | Finite numeric input positions (decimal or scientific notation) mapped to clip names. kiln lint checks finite values. |
 | `input` | string |  | moveDirection, hitDirection, lookYaw, ..., or a name of your own. |
 
 ## animClip
@@ -527,7 +527,7 @@ How a spell or an ability is cast: animation, timing, costs.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `height` | number |  | Metres, a capsule's caps included. min 0 |
+| `height` | number |  | Metres, a capsule's caps included. At least 0; a capsule must be at least 2 * radius high (checked by kiln lint). min 0 |
 | `radius` | number |  | Metres. |
 | `shape` | `"capsule"` \| `"sphere"` |  |  |
 
@@ -736,7 +736,7 @@ A place in the game's drop tables: table or dropsLike, one of them.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `chance` | number |  | min 0 max 1 |
-| `countMax` | integer |  | min 1 |
+| `countMax` | integer |  | At least countMin; default 1 (checked by kiln lint). min 1 |
 | `countMin` | integer |  | min 1 |
 | `dropsLike` | [itemRef](#itemref) |  | Every table that drops this item, next to it. |
 | `table` | string |  | A table's GUID or a glob over GUIDs. |
@@ -949,7 +949,7 @@ Where it can be found, besides being made.
 |---|---|---|---|
 | `like` | [itemRef](#itemref) |  | It is rolled in chests and world pickups where this item is, with its chances. |
 | `rolled` | boolean |  | Gear only: a roll gives it a level and rarity of its own. The opposite of the crafted-item rule, so it refuses a recipe (KL406). |
-| `stackMax` | integer |  | min 1 |
+| `stackMax` | integer |  | At least 1 and at least stackMin when both are supplied (checked by kiln lint). min 1 |
 | `stackMin` | integer |  | min 1 |
 | `tables` | array of [dropPlace](#dropplace) |  | The game's own drop tables it goes into: what enemies and fixed chests hold. A table of your own is a lootTables block. |
 
@@ -1002,7 +1002,7 @@ One move. At least one field: a move with none changes nothing.
 |---|---|---|---|
 | `animation` | [moveAnimation](#moveanimation) |  |  |
 | `followUps` | array of [moveFollowUp](#movefollowup) |  | Where the motion's follow-up windows lead, when not where the class has them. A weapon with any applies all its moves at once or none (Blocks.MovesStatus). Needs blocks.move_followups. max items 64 |
-| `hitAt` | number |  | Seconds into the move its blow lands: the first damage event moves here. |
+| `hitAt` | number |  | Seconds into the move its blow lands: more than 0 and strictly less than length when supplied (checked by kiln lint). |
 | `length` | number |  | Seconds the whole move lasts. |
 | `like` | string |  | The game sequence it starts from: a sub-sequence name or a sequence GUID. Default: the class's in this slot. min length 1 |
 
@@ -1010,7 +1010,7 @@ One move. At least one field: a move with none changes nothing.
 
 The state it plays: a state of this mod by name, a game state ("State" or "Machine/State"), its GUID or its 0x id; or a list, one per state event of the motion (null keeps one).
 
-Type: string or array of string \| null
+Type: string or array of string or null
 
 ## moveChain
 
