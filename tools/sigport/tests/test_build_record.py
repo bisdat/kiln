@@ -67,7 +67,10 @@ class Synthetic(unittest.TestCase):
         return json.loads(self.path.read_text())
 
     def check(self):
-        return run(["check", "server"] + self.common)
+        # the repository's must-port names are not in this fixture's sigdb: an empty list (test_must_port.py has its own)
+        empty = self.d / "no-must-port.json"
+        empty.write_text(json.dumps({"format": 1, "names": []}))
+        return run(["check", "server"] + self.common + ["--must-port", str(empty)])
 
     def lab_result(self, rec, services, failed=0):
         """A result file as collect writes it, with the values the core would report for this record."""

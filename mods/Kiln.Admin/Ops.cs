@@ -24,6 +24,7 @@ internal static partial class Ops
     static partial void RegisterConfig(Bridge bridge, Logger log);
     static partial void RegisterMods(Bridge bridge, Logger log);
     static partial void StateMods(JsonObject state);
+    static partial void RegisterUpdates(Bridge bridge, Logger log);
 
     /// <summary>Kiln.Admin's own data directory (kiln/data/kiln-admin), set before RegisterAll.</summary>
     internal static string DataDirectory { get; set; } = "";
@@ -42,6 +43,7 @@ internal static partial class Ops
         RegisterContent(bridge, log);
         RegisterConfig(bridge, log);
         RegisterMods(bridge, log);
+        RegisterUpdates(bridge, log);
     }
 
     public static void AddState(JsonObject state)

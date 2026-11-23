@@ -15,8 +15,10 @@ Files (each a zip: Nexus takes archives; the zip keeps the AppImage's executable
   launcher-windows  main      "Kiln Launcher (Windows)"   the NSIS setup of the Nexus build (nexus/windows/)
   launcher-linux    main      "Kiln Launcher (Linux)"     the AppImage of the Nexus build (nexus/linux/)
   launcher-deb      optional  "Kiln Launcher (Linux .deb)"  the .deb of the Nexus build (nexus/linux/)
-  runtime           optional  "Kiln runtime (manual install)"  kiln-runtime zip, kilnctl, kilnctl.exe, INSTALL-RUNTIME.txt,
-                                                               kilnctl's systemd units
+  runtime           optional  "Kiln runtime (manual install)"  the runtime bundle unpacked in kiln-runtime-<v>/ (never its
+                                                               zip: Nexus cannot scan an archive inside an archive), kilnctl,
+                                                               kilnctl.exe, the Nexus INSTALL-RUNTIME.txt (its commands take
+                                                               the folder), kilnctl's systemd units
   server            optional  "Kiln server pack"          runtime/kiln-server-<v>.zip as it is (no zip around it: it is
                                                           the archive server owners unzip into the server folder);
                                                           skipped for a folder without it (releases before the pack)
@@ -25,7 +27,11 @@ The launchers are always the Nexus build: the same launcher without its self-upd
 programs that update themselves); a folder without nexus/ is refused. Their zips and the SDK's carry nexus/README.txt
 (no self-update, new versions on the Kiln page), never the folder's README.txt. A new launcher version archives the
 file's previous one (archive_existing_file). The main files set the page's version to the release version
-(update_mod_version).
+(update_mod_version). No zip goes up with an archive inside it (.zip, .7z, .rar, .tar*, .gz, or such an archive by its
+first bytes under another name; .nupkg, .vsix, .deb and the launcher's installers excepted): Nexus cannot scan those
+and holds the file in review, as it held 0.2.0-dev.30.8's runtime file. The runtime file is built only when the
+release's kilnctl takes a bundle folder (0.2.0-dev.30.9 and later): an older one could not run the commands of the
+file's INSTALL-RUNTIME.txt.
 
 The first release creates the files (POST /mod-files); later ones add versions to them (POST /mod-files/{id}/versions).
 Their ids are kept in the state file (default ~/.config/kiln-release/nexus-state.json); a missing id is looked up on
@@ -44,6 +50,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -52,6 +59,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 API = "https://api.nexusmods.com/v3"
 MOD_ID = "24958054957357"  # Enshrouded (game 5811), game-scoped id 301
 PAGE = "https://www.nexusmods.com/enshrouded/mods/301"
@@ -190,8 +199,9 @@ def members(folder, kind, version):
     if kind == "launcher-deb":
         return [(one(lin, r".*_amd64\.deb"), None, False), (readme, "README.txt", False)]
     if kind == "runtime":
-        out = [(os.path.join(rt, f"kiln-runtime-{version}.zip"), None, False), (os.path.join(rt, "INSTALL-RUNTIME.txt"), None, False),
-               (os.path.join(rt, "kilnctl"), None, True)]
+        # the files at the top; the bundle goes in unpacked (add_runtime_bundle) and the install text is the Nexus one
+        # (install_text): never runtime/kiln-runtime-<v>.zip or runtime/INSTALL-RUNTIME.txt, which name the zip
+        out = [(os.path.join(rt, "kilnctl"), None, True)]
         if os.path.isfile(os.path.join(rt, "kilnctl.exe")):
             out.append((os.path.join(rt, "kilnctl.exe"), None, False))
         # kilnctl's systemd user units (kiln@.service, kiln-backup@.service, kiln-backup@.timer)
@@ -211,6 +221,174 @@ def server_pack(folder, version):
     return os.path.join(folder, "runtime", f"kiln-server-{version}.zip")
 
 
+def runtime_bundle(folder, version):
+    return os.path.join(folder, "runtime", f"kiln-runtime-{version}.zip")
+
+
+def runtime_folder(version):
+    """The folder the runtime file holds the bundle in: what kilnctl bundle verify/install take there."""
+    return f"kiln-runtime-{version}/"
+
+
+def sources(folder, kind, version):
+    """What a kind's zip is made from, for the dry run's report."""
+    out = [os.path.relpath(src, folder) for src, _, _ in members(folder, kind, version)]
+    if kind == "runtime":
+        out = [f"{os.path.relpath(runtime_bundle(folder, version), folder)} (unpacked as {runtime_folder(version)})",
+               f"INSTALL-RUNTIME.txt from {os.path.relpath(INSTALL_TEMPLATE, REPO)}"] + out
+    return out
+
+
+# Nexus Mods cannot scan an archive inside an archive and holds such a file in review: 0.2.0-dev.30.8's runtime file,
+# which carried kiln-runtime-<v>.zip, stayed in review while every other file was available. A .nupkg and a .vsix are
+# zips too, but Nexus takes them (the SDK file has always carried them and is available), so they are not listed; nor is
+# a .deb (launcher-deb). ".tar*" is a .tar, plain or compressed: System.Formats.Tar.dll (.NET, in the runtime) is no archive.
+NESTED_ARCHIVE = re.compile(r"\.(zip|7z|rar|gz|tgz|tar|tar\.(bz2|xz|zst|lz|lzma|lz4|z))$", re.IGNORECASE)
+
+
+# archives Nexus takes inside a file: the SDK's packages and VS Code extension (zips), the launcher's .deb (an ar
+# archive), its setup .exe and AppImage (installers that carry their payload compressed)
+NESTED_OK = re.compile(r"\.(nupkg|vsix|deb|exe|appimage)$", re.IGNORECASE)
+# an archive by its first bytes, whatever its name says (Nexus's scanner reads the bytes): zip, 7z, rar, gzip, xz,
+# bzip2, zstd, cab, lz4; a tar has "ustar" at 257. None of the files of a release's runtime or server pack starts so
+# (0.2.0-dev.30.8: 710 and 633 files).
+ARCHIVE_MAGIC = ((b"PK\x03\x04", "zip"), (b"PK\x05\x06", "zip"), (b"7z\xbc\xaf\x27\x1c", "7z"), (b"Rar!\x1a\x07", "rar"),
+                 (b"\x1f\x8b\x08", "gzip"), (b"\xfd7zXZ\x00", "xz"), (b"\x28\xb5\x2f\xfd", "zstd"), (b"MSCF\x00\x00\x00\x00", "cab"),
+                 (b"\x04\x22\x4d\x18", "lz4"))
+
+
+def archive_kind(head):
+    """What archive `head` (a file's first 262 bytes or fewer) begins, or None."""
+    for magic, kind in ARCHIVE_MAGIC:
+        if head.startswith(magic):
+            return kind
+    if head[:3] == b"BZh" and head[3:4].isdigit() and head[4:10] == b"\x31\x41\x59\x26\x53\x59":
+        return "bzip2"
+    if head[257:262] == b"ustar":
+        return "tar"
+    return None
+
+
+def nested_archives(path):
+    """The entries of the zip at `path` that are archives themselves: by name (NESTED_ARCHIVE) or by their first bytes
+    (archive_kind; a renamed archive is still one to Nexus), but for the kinds Nexus takes (NESTED_OK)."""
+    found = []
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            name = info.filename
+            if info.is_dir() or NESTED_OK.search(name):
+                continue
+            if NESTED_ARCHIVE.search(name):
+                found.append(name)
+                continue
+            with z.open(info) as f:
+                kind = archive_kind(f.read(262))
+            if kind:
+                found.append(f"{name} (a {kind} archive by its bytes)")
+    return found
+
+
+def refuse_nested_archives(path):
+    found = nested_archives(path)
+    if found:
+        more = f" and {len(found) - 5} more" if len(found) > 5 else ""
+        raise Fail(f"{os.path.basename(path)} holds an archive inside the archive ({', '.join(found[:5])}{more}): Nexus Mods "
+                   "cannot scan those and holds the file in review; not uploaded")
+
+
+# what a kilnctl that takes a bundle folder prints after `bundle verify` of one (runner/kilnctl/src/bundle.rs, verify):
+# kilnctl 0.2.0-dev.30.8 and older take only the zip, so the runtime file of their release cannot hold a folder
+KILNCTL_FOLDER_MARK = b"the folder holds nothing else"
+
+
+def refuse_old_kilnctl(folder, version):
+    """The runtime file's kilnctl and kilnctl.exe must take the kiln-runtime-<v>/ folder its INSTALL-RUNTIME.txt
+    names."""
+    for src, _, _ in members(folder, "runtime", version):
+        if os.path.basename(src) in ("kilnctl", "kilnctl.exe") and os.path.isfile(src):
+            with open(src, "rb") as f:
+                if KILNCTL_FOLDER_MARK not in f.read():
+                    raise Fail(f"{os.path.relpath(src, folder)} does not take a bundle folder (kilnctl before 0.2.0-dev.30.9): "
+                               "the runtime file's install steps would fail with it; not built")
+
+
+RUNTIME_MANIFEST = "kiln-runtime.json"
+# bundle::EXECUTABLE_HELPER and its component (crates/kiln-manage/src/bundle.rs): the one runtime file packed and
+# installed 0755 (bundle::executable); every other one is 0644
+EXECUTABLE_HELPER = ("kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect", "eml")
+INSTALL_TEMPLATE = os.path.join(REPO, "tools", "release", "templates", "INSTALL-RUNTIME-nexus.txt")
+
+
+def safe_rel_path(name):
+    """bundle::safe_rel_path: relative, '/' separated, no empty, . or .. part, no part ending in a dot or a space, no
+    backslash, drive letter, stream name or control character."""
+    if not name or name.startswith("/") or "\\" in name or any(ord(c) < 32 or c == ":" for c in name):
+        return False
+    return all(p not in ("", ".", "..") and not p.endswith((".", " ")) for p in name.split("/"))
+
+
+def add_runtime_bundle(z, bundle, folder):
+    """Writes the runtime bundle's entries into `z` below `folder` (kiln-runtime-<v>/), unpacked: the same names and
+    bytes. Each is checked as kilnctl bundle verify checks the zip (a safe name, no link, listed in kiln-runtime.json
+    with its size and sha256, nothing unlisted or missing) and gets its mode by bundle::executable (0755 for the
+    archive inspector, 0644 for the rest; a bundle whose modes say otherwise is refused). Returns the manifest."""
+    with zipfile.ZipFile(bundle) as inner:
+        try:
+            manifest = json.loads(inner.read(RUNTIME_MANIFEST))
+            listed = {f["path"]: f for f in manifest["files"]}
+            if not isinstance(manifest["version"], str):
+                raise TypeError("version is not a string")
+        except (KeyError, ValueError, TypeError) as e:
+            raise Fail(f"{bundle}: no readable {RUNTIME_MANIFEST} ({e!r})") from None
+        seen = set()
+        for info in sorted(inner.infolist(), key=lambda i: i.filename.encode()):
+            name, mode = info.filename, info.external_attr >> 16
+            if not safe_rel_path(name.rstrip("/") if info.is_dir() else name):
+                raise Fail(f"{bundle}: unsafe entry name {name!r}")
+            if info.is_dir():
+                continue
+            if stat.S_IFMT(mode) not in (0, stat.S_IFREG):
+                raise Fail(f"{bundle}: {name} is a link or a special entry")
+            f = listed.get(name)
+            if name != RUNTIME_MANIFEST and f is None:
+                raise Fail(f"{bundle}: {name} is not in {RUNTIME_MANIFEST}")
+            if name in seen:
+                raise Fail(f"{bundle}: {name} is there twice")
+            seen.add(name)
+            exe = f is not None and (name, f.get("component")) == EXECUTABLE_HELPER
+            if bool(mode & 0o111) != exe:
+                raise Fail(f"{bundle}: {name} is packed {mode & 0o777:o}, but bundle::executable says "
+                           f"{'0755' if exe else '0644'} (nexus.py's EXECUTABLE_HELPER and bundle.rs disagree?)")
+            out = zipfile.ZipInfo(folder + name, date_time=info.date_time)
+            out.create_system = 3
+            out.external_attr = ((0o755 if exe else 0o644) | 0o100000) << 16
+            out.compress_type = zipfile.ZIP_DEFLATED
+            h, size = hashlib.sha256(), 0
+            with inner.open(info) as src, z.open(out, "w") as dst:
+                while chunk := src.read(1 << 20):
+                    h.update(chunk)
+                    size += len(chunk)
+                    dst.write(chunk)
+            if f is not None and (size != f.get("size") or h.hexdigest() != f.get("sha256")):
+                raise Fail(f"{bundle}: {name} does not match {RUNTIME_MANIFEST} (size {size}, sha256 {h.hexdigest()})")
+        missing = sorted(set(listed) - seen, key=str.encode)
+        if missing or RUNTIME_MANIFEST not in seen:
+            raise Fail(f"{bundle}: listed but not in the zip: {', '.join(missing[:5]) or RUNTIME_MANIFEST}")
+    return manifest
+
+
+def install_text(version, runtime_version):
+    """The runtime file's INSTALL-RUNTIME.txt: tools/release/templates/INSTALL-RUNTIME-nexus.txt of the checkout
+    nexus.py runs in, its commands on the kiln-runtime-<v>/ folder (the GitHub and frostdev.io downloads keep the zip
+    and runtime/INSTALL-RUNTIME.txt)."""
+    with open(INSTALL_TEMPLATE, encoding="utf-8") as f:
+        text = f.read().replace("@VERSION@", version).replace("@RUNTIME_VERSION@", runtime_version)
+    left = sorted(set(re.findall(r"@[A-Z_]+@", text)))
+    if left:
+        raise Fail(f"{INSTALL_TEMPLATE}: no value for {', '.join(left)}")
+    return text
+
+
 def make_zip(folder, kind, version, out_dir):
     if kind == "server":
         # already the archive to unzip into a server folder: it goes up as it is, never inside another zip
@@ -222,16 +400,32 @@ def make_zip(folder, kind, version, out_dir):
         return path
     name = f"kiln-{'runtime-standalone' if kind == 'runtime' else kind}-{version}.zip"
     path = os.path.join(out_dir, name)
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-        for src, arc, exe in members(folder, kind, version):
-            if not os.path.isfile(src):
-                raise Fail(f"missing {src}")
-            info = zipfile.ZipInfo(arc or os.path.basename(src), date_time=(2026, 1, 1, 0, 0, 0))
-            info.external_attr = ((0o755 if exe else 0o644) | 0o100000) << 16
-            info.compress_type = zipfile.ZIP_STORED if src.endswith((".AppImage", ".zip", ".nupkg", ".vsix", ".exe")) else zipfile.ZIP_DEFLATED
-            with open(src, "rb") as f, z.open(info, "w") as dst:
-                while chunk := f.read(1 << 20):
-                    dst.write(chunk)
+    tmp = path + ".tmp"
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            if kind == "runtime":
+                bundle = runtime_bundle(folder, version)
+                if not os.path.isfile(bundle):
+                    raise Fail(f"missing {bundle}")
+                refuse_old_kilnctl(folder, version)
+                manifest = add_runtime_bundle(z, bundle, runtime_folder(version))
+                info = zipfile.ZipInfo("INSTALL-RUNTIME.txt", date_time=(2026, 1, 1, 0, 0, 0))
+                info.external_attr = (0o644 | 0o100000) << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(info, install_text(version, manifest["version"]).encode("utf-8"))
+            for src, arc, exe in members(folder, kind, version):
+                if not os.path.isfile(src):
+                    raise Fail(f"missing {src}")
+                info = zipfile.ZipInfo(arc or os.path.basename(src), date_time=(2026, 1, 1, 0, 0, 0))
+                info.external_attr = ((0o755 if exe else 0o644) | 0o100000) << 16
+                info.compress_type = zipfile.ZIP_STORED if src.endswith((".AppImage", ".zip", ".nupkg", ".vsix", ".exe")) else zipfile.ZIP_DEFLATED
+                with open(src, "rb") as f, z.open(info, "w") as dst:
+                    while chunk := f.read(1 << 20):
+                        dst.write(chunk)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return path
 
 
@@ -364,8 +558,7 @@ def notes_for(folder, version):
 
 
 def run(argv=None):
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.abspath(os.path.join(here, "..", ".."))
+    repo = REPO
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folder")
     ap.add_argument("--publish", action="store_true", help="really upload and post (default: a dry run with GET calls only)")
@@ -435,6 +628,7 @@ def run(argv=None):
         for k in kinds:
             category, name, desc = KINDS[k]
             z = make_zip(folder, k, version, work)
+            refuse_nested_archives(z)
             if k in LAUNCHER_KINDS:
                 validate_launcher_archive(z, repo)
             # the page's own listing first: its ids are the ones /mod-files/{id} takes (POST /mod-files answers with
@@ -451,7 +645,7 @@ def run(argv=None):
             target = f"new version of file {fid}" if fid else "a new file"
             if fid and k in LAUNCHER_KINDS:
                 target += ", archiving its previous version"
-            inside = ", ".join(os.path.relpath(src, folder) for src, _, _ in members(folder, k, version))
+            inside = ", ".join(sources(folder, k, version))
             log(f"{k}: {os.path.basename(z)} ({size / 1048576:.1f} MB, {how}, md5 {md5_of(z).hexdigest()}) -> {target}, "
                 f"{category}, name {name!r}, version {version!r}" + (", sets the page version" if category == "main" else ""))
             log(f"  from {inside}")

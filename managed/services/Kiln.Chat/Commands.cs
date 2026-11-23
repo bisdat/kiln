@@ -70,6 +70,24 @@ public sealed class CommandSource
 
     internal bool DeclaredAdmin => _admin;
 
+    /// <summary>The highest command level this source may use, whatever its rights say (Kiln.Admin's
+    /// <c>command_run</c> with a <c>level</c>: a web panel's moderator runs as <c>web:&lt;user&gt;</c> capped at
+    /// Everyone). <see cref="CommandPermission.Console"/> = no cap.</summary>
+    internal CommandPermission Cap { get; private init; } = CommandPermission.Console;
+
+    /// <summary>This source, capped at <paramref name="cap"/> (never above its current cap): commands, subcommands and
+    /// permission nodes above that level are refused, and below Admin it is no admin.</summary>
+    internal CommandSource WithCap(CommandPermission cap)
+    {
+        if (cap >= Cap) return this;
+        return new CommandSource(Kind, Player, Name, _admin && cap >= CommandPermission.Admin, _steamId, IsHostConsole) { Cap = cap };
+    }
+
+    /// <summary>A remote tool called <paramref name="name"/> that may use commands up to <paramref name="cap"/>:
+    /// Everyone = a non-admin remote, Admin = admin commands but not Console ones, Console = <see cref="Remote"/>.</summary>
+    internal static CommandSource RemoteCapped(string name, CommandPermission cap) =>
+        Remote(name, admin: cap >= CommandPermission.Admin).WithCap(cap);
+
     /// <summary>The player's SteamID64 (looked up through Kiln.Players for online players); 0 when unknown or not a
     /// player.</summary>
     public ulong SteamId
@@ -115,7 +133,9 @@ public sealed class CommandSource
     public static CommandSource Remote(string name, bool admin = true) => new(CommandSourceKind.Remote, EntityId.None, name, admin);
 
     /// <summary>The source as Kiln.Permissions sees it.</summary>
-    public PermissionSubject Subject => Kind switch
+    public PermissionSubject Subject => Cap == CommandPermission.Console ? Uncapped : Uncapped with { LevelCap = (PermissionLevel)(int)Cap };
+
+    private PermissionSubject Uncapped => Kind switch
     {
         _ when IsHostConsole => PermissionSubject.Console,
         CommandSourceKind.Console => PermissionSubject.Console,
@@ -134,9 +154,9 @@ public sealed class CommandSource
     public bool Has(string node) => Permissions.Has(Subject, node);
 
     /// <summary>A short description for logs: kind and name, with the entity or Steam id for a player.</summary>
-    public override string ToString() => Kind == CommandSourceKind.Player
+    public override string ToString() => (Kind == CommandSourceKind.Player
         ? IsHostConsole ? $"console as {Name} (entity {Player})" : SteamOnly ? $"{Name} (steam {_steamId})" : $"{Name} (entity {Player})"
-        : $"{Kind.ToString().ToLowerInvariant()} {Name}";
+        : $"{Kind.ToString().ToLowerInvariant()} {Name}") + (Cap == CommandPermission.Console ? "" : $" (up to {Cap.ToString().ToLowerInvariant()})");
 }
 
 /// <summary>A registered command.</summary>
@@ -851,6 +871,7 @@ public static class Commands
     /// (default: their user group may kick and ban) or a permissions.json group with <c>"admin": true</c>.</summary>
     public static bool IsAdmin(CommandSource source)
     {
+        if (source.Cap < CommandPermission.Admin) return false;
         if (source.Kind != CommandSourceKind.Player || source.IsHostConsole) return source.DeclaredAdmin;
         var basic = BaseAdmin(source);
         if (basic == true) return true;
@@ -897,6 +918,7 @@ public static class Commands
     /// <paramref name="level"/> (Kiln.Permissions decides for players; without it, the level does).</summary>
     internal static bool Allowed(CommandSource source, string node, CommandPermission level)
     {
+        if (level > source.Cap) return false;  // a capped source (command_run's level), whatever its rights
         if (source.IsHostConsole) return true;
         switch (source.Kind)
         {

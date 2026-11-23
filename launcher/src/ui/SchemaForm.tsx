@@ -7,7 +7,7 @@
 // The form never writes: it calls onChange(path, value) / onReset(path) and the page saves (config_set).
 import { Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Json, SchemaSnapshot, SnapshotEntry, ValidationError } from "../api/commands";
+import type { Json, SchemaSnapshot, SnapshotEntry, ValidationError } from "../api/shared";
 import { rich, t as tr, useT } from "../i18n";
 import { IconButton } from "./Button";
 import { NumberInput, Select, Slider, TextInput, Toggle } from "./Form";

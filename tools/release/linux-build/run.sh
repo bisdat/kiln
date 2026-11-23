@@ -66,7 +66,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 # --init: signals (Ctrl-C) reach the build; /tmp is a tmpfs that allows exec (linuxdeploy extracts and runs itself there)
-docker run --rm --init --platform linux/amd64 --name "$name" \
+# --nice: the container runs in docker's system.slice, outside the caller's user scopes, where cgroup v2 weighs CPU and IO
+# by slice before nice applies; the lowest weights keep it below a game (owner 2026-11-23: Enshrouded lagged at load 56)
+weights=()
+((nice)) && weights=(--cpu-shares 2 --blkio-weight 10)
+docker run --rm --init --platform linux/amd64 --name "$name" "${weights[@]}" \
   --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
   --tmpfs /tmp:rw,exec,nosuid,size=8g \
   -v "$glibc:$glibc" "${mounts[@]}" \

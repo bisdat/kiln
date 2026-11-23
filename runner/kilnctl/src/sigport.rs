@@ -86,6 +86,11 @@ pub struct PortReport {
     /// "sig needs review: <symbol>: was [...], is [...]": described functions whose code changed, or whose descriptor
     /// the core would refuse on the new build (port.py's summary.sig_review; matching descriptors can remain on)
     pub sig_review: Vec<String>,
+    /// "must-port <section> <name>: ..." lines: listed names (tools/sigport/must_port.json) the port could not take to
+    /// the new exe (port.py's summary.must_port.failed); each makes the port incomplete
+    pub must_port: Vec<String>,
+    /// The same for warn-level names (port.py's summary.must_port.warned): said, but the port stays complete
+    pub must_port_warn: Vec<String>,
 }
 
 impl PortReport {
@@ -117,6 +122,12 @@ impl PortReport {
         for l in &self.sig_review {
             println!("          {l}");
         }
+        for l in &self.must_port {
+            println!("          {l}");
+        }
+        for l in &self.must_port_warn {
+            println!("          warning: {l}");
+        }
         println!("          report {}", self.out.join("report.txt").display());
     }
 }
@@ -146,6 +157,8 @@ pub fn parse_report(text: &str, out: PathBuf) -> Result<PortReport> {
         changed: s["strategies_changed"].as_array().map(|a| a.len()).unwrap_or(0),
         unverified_fixed: strings(s, &["unverified_fixed"]),
         sig_review: strings(s, &["sig_review"]),
+        must_port: strings(s, &["must_port", "failed"]),
+        must_port_warn: strings(s, &["must_port", "warned"]),
     })
 }
 
@@ -223,6 +236,41 @@ mod tests {
         assert_eq!(r.record(), PathBuf::from("/o/builds/server/ab.json"));
         assert!(parse_report("{", PathBuf::new()).is_err());
         assert!(r.sig_review.is_empty()); // a report of a port.py without descriptors
+        assert!(r.must_port.is_empty()); // nor must-port names
+    }
+
+    /// A port incomplete only because of a must-port name says which, in its print and in NEXT.txt's reason.
+    #[test]
+    fn must_port_failures_are_named() {
+        let j = r#"{"new": {"sha256": "ab"}, "summary": {"complete": false, "defs_unchanged": true,
+            "symbols": {"resolved_old": 3, "ported": 3, "low_confidence": [], "lost": []},
+            "must_port": {"checked": ["build/RetSaveRegionsWorldSave"], "not_declared": [],
+                          "failed": ["must-port symbol build/RetSaveRegionsWorldSave: does not resolve on the new exe (no match). kiln.build: ..."]}}}"#;
+        let r = parse_report(j, PathBuf::from("/o")).unwrap();
+        assert!(!r.complete);
+        assert_eq!(r.must_port.len(), 1);
+        assert!(r.must_port[0].starts_with("must-port symbol build/RetSaveRegionsWorldSave: does not resolve"));
+        let reason = crate::ops::incomplete_reason(&r);
+        assert!(reason.contains("must-port symbol build/RetSaveRegionsWorldSave"), "{reason}");
+        assert!(reason.contains("low confidence []") && reason.contains("lost []"), "{reason}");
+        assert!(r.must_port_warn.is_empty());
+        assert!(crate::ops::must_port_warnings(&r).is_empty());
+    }
+
+    /// A warn-level must-port name the port could not take: the port stays complete (it can be marked), and NEXT.txt
+    /// still says so.
+    #[test]
+    fn must_port_warnings_leave_the_port_complete() {
+        let j = r#"{"new": {"sha256": "ab"}, "summary": {"complete": true, "defs_unchanged": true,
+            "must_port": {"checked": ["build/RetSaveRegionsBaseZones"], "not_declared": [], "failed": [],
+                          "warned": ["must-port symbol build/RetSaveRegionsBaseZones (warning only): does not resolve on the new exe (no match). kiln.build: ..."]}}}"#;
+        let r = parse_report(j, PathBuf::from("/o")).unwrap();
+        assert!(r.complete && r.must_port.is_empty());
+        assert_eq!(r.must_port_warn.len(), 1);
+        let lines = crate::ops::must_port_warnings(&r);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("warning: must-port symbol build/RetSaveRegionsBaseZones (warning only)"), "{lines:?}");
+        assert!(lines[0].contains("the build can still be marked verified"), "{lines:?}");
     }
 
     #[test]

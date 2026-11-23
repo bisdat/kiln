@@ -4,6 +4,8 @@
 //   justUpdated("0.2.0-dev.42")           as after a restart into an update this launcher installed (`?justUpdated=<from>`:
 //                                         from the first status on, as the backend's start says it)
 //   failNextInstall([{source, step, message}])  the next download fails at these sources
+//   failNextCheck([{source, step, message}])    the next check fails at these sources (phase "failed", as update.rs)
+//   checkDelay(ms)                        how long a check takes (500 ms by default)
 //   set({...})                            any part of the status, then kiln://update
 //   calls()                               the update_* commands called so far (the Nexus build's UI calls none)
 //   beta(3, "0.2.0-dev.43")               (dev.29) this build is test build 3 of that version (with a "before beta" copy)
@@ -52,6 +54,8 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
   const refuse = (): never => { throw { code: "unsupported", message: noSelfUpdate, detail: NEXUS_PAGE } satisfies KilnError; };
   let offer: UpdateStatus["available"] = null;
   let failNext: UpdateFailure[] | null = null;
+  let failCheck: UpdateFailure[] | null = null;
+  let checkMs = 500;
   let seq = 0;
   const send = () => emit("kiln://update", structuredClone(withChannel()));
   const put = (p: Partial<UpdateStatus>) => { status = { ...status, ...p }; send(); return structuredClone(status); };
@@ -60,7 +64,11 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
   const check = async () => {
     if (status.phase === "downloading" || status.phase === "ready") return status;
     put({ phase: "checking" });
-    await sleep(500);
+    await sleep(checkMs);
+    const failures = failCheck;
+    failCheck = null;
+    // no source answered: the backend keeps what it knew of an update and says why in `failures`
+    if (failures?.length) return put({ phase: "failed", checked: now(), failures, error: null });
     if (!offer) return put({ phase: "upToDate", available: null, checked: now(), failures: [] });
     return put({ phase: status.skipped === offer.version ? "skipped" : "available", available: offer, checked: now(), failures: [] });
   };
@@ -115,6 +123,8 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
       justUpdated: { from, to: status.current, at: now(), source: "frostdev.io", notes }, phase: "upToDate", available: null, ready: null,
     }),
     failNextInstall: (f: UpdateFailure[]) => { failNext = f; },
+    failNextCheck: (f: UpdateFailure[]) => { failCheck = f; },
+    checkDelay: (ms: number) => { checkMs = ms; },
     calls: () => [...calls],
     beta: (n: number, version = "0.2.0-dev.43") => put({
       current: version, buildChannel: "beta", beta: n,

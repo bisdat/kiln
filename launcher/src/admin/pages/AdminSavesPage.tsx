@@ -3,8 +3,7 @@
 // backup_cancel_restore). Server-folder backups while the server is stopped are the Servers → Backups page's.
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { invalidateAdmin, useAdminCall, useAdminQuery, useAdminState } from "../../api/admin";
-import { serverRestart } from "../../api/commands";
+import { adminHost, invalidateAdmin, useAdminCall, useAdminQuery, useAdminState } from "../../api/admin";
 import { rich, t as tr, useT } from "../../i18n";
 import { BACKUP_NAME, NeedsOp, useServerId, withAdmin } from "../common";
 import { OfflineNote } from "../ConnectionBar";
@@ -59,10 +58,13 @@ function SavesPage() {
     });
     if (ok) restore.mutate({ name: b.folder || b.name });
   };
+  // the launcher restarts a server it manages (its own command; a web host has none: no button)
+  const restartManaged = adminHost().restartManagedServer;
   const restart = async () => {
+    if (!restartManaged) return;
     if (!(await confirm({ title: t("admin.saves.restartTitle"), body: <p>{n ? t("admin.saves.restartOnline", { count: n }) : ""}{pending ? t("admin.saves.restartBodyRestore", { name: pending }) : t("admin.saves.restartBody")}</p>, ok: t("admin.saves.restart"), danger: true }))) return;
     try {
-      await serverRestart(id);
+      await restartManaged(id);
       toastOk(t("admin.saves.restarting"));
     } catch (e) {
       toastError(e, t("admin.saves.restartFailed"));
@@ -76,7 +78,7 @@ function SavesPage() {
       <OfflineNote />
       <NeedsOp ops={["save_status", "save_now", "backup_list", "backup_create", "backup_restore"]} what={t("admin.saves.what")}>
         {pending ? (
-          <Banner tone="warn" title={t("admin.saves.stagedTitle", { name: pending })} actions={<><Button size="s" loading={cancel.isPending} onClick={() => cancel.mutate({})}>{t("admin.saves.cancelRestore")}</Button><Button size="s" variant="danger" onClick={restart}>{t("admin.saves.restartNow")}</Button></>}>
+          <Banner tone="warn" title={t("admin.saves.stagedTitle", { name: pending })} actions={<><Button size="s" loading={cancel.isPending} onClick={() => cancel.mutate({})}>{t("admin.saves.cancelRestore")}</Button>{restartManaged ? <Button size="s" variant="danger" onClick={restart}>{t("admin.saves.restartNow")}</Button> : null}</>}>
             {t("admin.saves.stagedBody")}
           </Banner>
         ) : null}

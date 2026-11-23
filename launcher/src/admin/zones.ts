@@ -1,7 +1,7 @@
 // Protection zones, shared by the Zones page and the map. The op is Kiln.Admin's zones_add (kiln.gameplay; kept in kiln/data/kiln-admin/zones.json).
 import { create } from "zustand";
 import type { AdminPos } from "../api/admin";
-import type { Json } from "../api/commands";
+import type { Json } from "../api/shared";
 import { t } from "../i18n";
 import { steamIdError } from "./common";
 

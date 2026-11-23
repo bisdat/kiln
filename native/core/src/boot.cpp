@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // kiln_boot: called by the dinput8 proxy on the main thread, at the game's entry point, before any game code ran.
-//   paths, log, kiln.json, profile (kiln.profile), image + side, build record, compat's early rules, the ShroudForge
+//   paths, log, staged mod updates (kiln/staged, staged.h), kiln.json, profile (kiln.profile), image + side, build record, compat's early rules, the ShroudForge
 //   backend frozen (kiln.launch), other loaders' byte scans (foreign_scan.h), native mods "early", sigdb, hooks,
 //   in-core services, service DLLs + plugins, native mods "boot", native "world" armed, .NET host, chain DLLs named in
 //   chain.ini [late], state/boot.json, state/hooks.json.
@@ -27,6 +27,7 @@
 #include "profile.h"
 #include "progress_state.h"
 #include "sigdb.h"
+#include "staged.h"
 #include "stop_facts.h"
 #include "tick.h"
 #include "services/hooks_internal.h"
@@ -470,6 +471,36 @@ const char* side_by_name() {
     return n.find(L"server") != std::wstring::npos ? "server" : "client";
 }
 
+// kiln/staged (staged.h) on a dedicated server, before kiln.json, the profile or any mod is read: the proxy's lines about
+// a staged Kiln update (it applied that before this core loaded), then every staged mod update, requested rollback and
+// automatic rollback (a mod Kiln.Host saw fail to load right after its update). Nothing escapes: kiln_boot's catch would
+// end Kiln's whole boot, and an unfinished transaction is the next start's to finish or put back.
+void staged_boot() {
+    namespace st = kiln::staged;
+    const auto level_of = [](st::Level l) { return l == st::Level::Error ? KILN_LOG_ERROR : l == st::Level::Warn ? KILN_LOG_WARN : KILN_LOG_INFO; };
+    try {
+        const uint64_t pid = GetCurrentProcessId();
+        const auto proxy = st::take_proxy_lines(paths().game, pid);
+        for (const auto& [level, text] : proxy) log::writef(level_of(level), "kiln", "proxy: %s", text.c_str());
+        const bool server = std::string_view(side_by_name()) == "server";
+        if (server && proxy.empty() && st::kiln_update_waiting(paths().game))
+            KLOG_W("staged: a Kiln update is staged, but this start's dinput8.dll did not apply it (a Kiln proxy older than "
+                   "0.2.0-dev.30.9 does not): update Kiln with kilnctl or the launcher, or cancel it (Kiln.Admin's update_cancel)");
+        st::Env env;
+        env.game = paths().game;
+        env.server = server;
+        env.by = "core";
+        env.kiln = std::string(kVersion) + KILN_BUILD;
+        env.pid = pid;
+        env.log = [&level_of](st::Level l, const std::string& text) { log::writef(level_of(l), "kiln", "%s", text.c_str()); };
+        st::boot_mods(env);
+    } catch (const std::exception& e) {
+        KLOG_E("staged: the staged mod updates stopped: %s (the next start tries again)", e.what());
+    } catch (...) {
+        KLOG_E("staged: the staged mod updates stopped (the next start tries again)");
+    }
+}
+
 const char* game_label(uint32_t side) {
     return side == KILN_SIDE_CLIENT ? "The game is loading its main menu" : "The server is starting its world";
 }
@@ -572,6 +603,7 @@ void boot() {
     log::start();
     KLOG_I("Kiln %.*s%s starting (pid %lu)", static_cast<int>(kVersion.size()), kVersion.data(), KILN_BUILD, GetCurrentProcessId());
     log_proxy();
+    staged_boot();  // before kiln.json, the profile and every mod: kiln/mods/<folder> is the new version from here on
     load_config();
     profile::load();
     compat::init();  // compat-rules.json (shipped, then the player's); adds overlaps and rules to state/hooks.json
@@ -705,6 +737,13 @@ void boot() {
     caps::boot_complete();  // capabilities.json, then a write after each change (at most one a second)
     hooks::boot_complete();  // state/hooks.json + the foreign-hook check (kiln.hooks v2)
     compat::boot_done();
+    // Without .NET no mod loads, so Kiln.Host never confirms a Kiln update this start booted: done here instead.
+    if (!config().clr && side == KILN_SIDE_SERVER) {
+        try {
+            if (staged::confirm_kiln(paths().game)) KLOG_I("staged: the Kiln update is confirmed (.NET is off: at the end of the boot)");
+        } catch (...) {
+        }
+    }
     KLOG_I("boot complete; handing control to the game");
     // progress.json: safe idle ends the file here; so does a .NET host that did not start (no managed mod will load);
     // otherwise the game goes on loading, and Kiln.Host (mods, content), kiln-ui (the main menu) or the server's start

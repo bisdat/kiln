@@ -168,6 +168,16 @@ The process then exits with a code that says so; restarting gives the same stop,
 - Kiln's own tools never restart on it: `kilnctl run` passes the status on and starts nothing again, `kilnctl start`
   waits for the world and reports the failed start, and the Kiln Launcher restarts a server only when you press Restart.
 
+### Restarts from an admin tool
+
+Since 0.2.0-dev.30.9 an admin tool (Kiln Web Admin, through Kiln.Admin's `server_restart`) can restart the server: a
+countdown in chat, a save, then the same stop as Ctrl-C. Whether the server comes back depends on what runs it:
+- **kilnctl's systemd unit** (`kiln@.service`): yes. `kilnctl run` exits 75 after such a stop, and the unit restarts the
+  server 15 s later. A unit of your own needs `RestartForceExitStatus=75` for that, and `SuccessExitStatus=75` so it is
+  not counted as a failure (`Restart=on-failure` alone also restarts on 75, but marks each one failed).
+- **Anything else** (the Kiln Launcher, a hosting panel, a script): the server stops and exits 0, as after Ctrl-C. The
+  admin tool says "restart: unknown" there and offers a stop instead. Start the server again from your host.
+
 ### What a slow start is doing
 
 Since 0.2.0-dev.27 Kiln keeps `kiln/state/progress.json` up to date while the server starts: the step it is in, what
@@ -346,6 +356,29 @@ With the server pack:
 With kilnctl: `kilnctl stop myserver`, `kilnctl deploy myserver --bundle kiln-runtime-<new version>.zip`, `kilnctl
 start myserver`. kilnctl removes files the new version no longer has, keeps your `kiln/kiln.json`, and backs up
 anything it overwrites.
+
+### Staged updates (0.2.0-dev.30.9)
+
+An admin tool can also stage a mod or Kiln update while the server is running. Kiln Web Admin does this through
+Kiln.Admin. The update is applied at the next start, before anything loads it:
+- **Kiln** is applied by `dinput8.dll` before it loads `kiln/kiln-core.dll`.
+- **Mods** (`kiln/mods/<folder>`) are applied by Kiln before it reads any mod.
+
+Checksums are checked when the update is applied. A crash or a power cut leaves either the old version or the new one,
+never a mix. The replaced version is kept in `kiln/staged/previous/`, so a rollback can be requested for the next
+start. Kiln also rolls back on its own, once:
+- a mod that fails to load right after its update;
+- a Kiln update whose first start doesn't reach the point where the mods load.
+
+After you update Kiln with kilnctl or the launcher, the version a staged update kept can no longer be rolled back:
+the kept files and the new install would mix. `kiln.log` says what happened in lines that start with `staged:`. A start that stops before the mods load (a crash, or
+a stop within the first seconds) counts as a failed start after a Kiln update. Your mods' data (`kiln/data`) and
+settings (`kiln/config`) are never touched. Details: [staged-updates.md](staged-updates.md).
+
+Restart the server to apply what is staged. To get rid of a staged update without an admin tool, delete its folder:
+`kiln/staged/mods/<folder>/` or `kiln/staged/kiln/`. To ask for a rollback by hand (for example when the server no
+longer starts), stop the server, create `kiln/staged/rollback/kiln.json` or `kiln/staged/rollback/mod.<folder>.json`
+with the content `{}`, and start it again.
 
 ## Removing Kiln
 

@@ -78,11 +78,20 @@ public abstract class CommandNode
             ["executable"] = Executable,
         };
         if (Description is { Length: > 0 }) o["description"] = Description;
-        if (RequiredNode is { Length: > 0 }) o["permission"] = RequiredNode;
+        if (RequiredNode is { Length: > 0 })
+        {
+            o["permission"] = RequiredNode;
+            o["level"] = RequiredLevel.ToString().ToLowerInvariant();
+        }
         var children = new JsonArray();
         foreach (var c in ChildList)
             if (visibleTo is null || CommandTree.Permitted(visibleTo, c))
-                children.Add(c.ToJson(visibleTo));
+            {
+                var child = c.ToJson(visibleTo);
+                // an argument the line may stop before: this node already runs the command (with the default, if any)
+                if (c is ArgumentNode) child["optional"] = Executable;
+                children.Add(child);
+            }
         if (children.Count > 0) o["children"] = children;
         return o;
     }
@@ -166,6 +175,11 @@ public sealed class ArgumentNode : CommandNode
 
     /// <summary>The argument's type: how its text is parsed.</summary>
     public ArgumentType Type { get; }
+
+    /// <summary>The value the handler gets when the line ends before this argument (a [Command] method's parameter
+    /// default); <see cref="HasDefault"/> says whether there is one. For the dashboard's command forms only.</summary>
+    internal object? Default { get; set; }
+    internal bool HasDefault { get; set; }
     /// <summary>The node as shown in usage lines: <c>&lt;name&gt;</c>.</summary>
     public override string Display => $"<{Name}>";
 
@@ -201,8 +215,25 @@ public sealed class ArgumentNode : CommandNode
     {
         var o = base.ToJson(visibleTo);
         foreach (var (k, v) in Type.ToJson()) o[k] = v?.DeepClone();
+        if (HasDefault) o["default"] = DefaultJson(Default);
         return o;
     }
+
+    /// <summary>A default as the line would spell it: numbers, true/false, text, an enum's name in lower case.</summary>
+    internal static JsonNode? DefaultJson(object? value) => value switch
+    {
+        null => null,
+        bool b => b,
+        int i => i,
+        long l => l,
+        short sh => sh,
+        double d when double.IsFinite(d) => d,
+        float f when float.IsFinite(f) => f,
+        string str => str,
+        System.Enum e => e.ToString().ToLowerInvariant(),
+        TimeSpan ts => ts.TotalSeconds,
+        _ => value.ToString(),
+    };
 }
 
 /// <summary>Completion of a partly typed line: replace the text from <see cref="Start"/> with one of

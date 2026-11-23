@@ -27,6 +27,7 @@
     <InternalsVisibleTo Include="Kiln.Spawn" />
     <InternalsVisibleTo Include="Kiln.Settings" />
     <InternalsVisibleTo Include="Kiln.Admin" />
+    <InternalsVisibleTo Include="Kiln.Admin.Tests" />
     <InternalsVisibleTo Include="Kiln.Example" />
     <!-- Services -->
     <InternalsVisibleTo Include="Kiln.Combat" />

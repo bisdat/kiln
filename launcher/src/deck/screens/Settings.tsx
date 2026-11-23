@@ -1,8 +1,8 @@
 // Deck Settings: the desktop UI (now, and which UI to start in), button glyphs, the launcher's language (A steps
 // through System and every language the launcher has a file for, as Settings, Language does on the desktop), launcher
-// updates, fullscreen, the loaded profile (a background feature: the Mods screen shows its switches), the notes about
-// mod folders (the switch, and the last activation's notes to read again: components/FolderNotes.tsx), the data folder
-// (../DataFolder.tsx), Quit.
+// updates (the row says when the last check was and why one failed; Check toasts the answer), fullscreen, the loaded
+// profile (a background feature: the Mods screen shows its switches), the notes about mod folders (the switch, and the
+// last activation's notes to read again: components/FolderNotes.tsx), the data folder (../DataFolder.tsx), Quit.
 // The last line names what the Deck detection saw (for testers' reports).
 // (dev.29.18) For a client with Kiln in it: the upscaler behind the game's FSR 3 option, what runs, and the vendor
 // files with their licence screen, progress and Remove (../Upscaler.tsx).
@@ -31,6 +31,7 @@ import { usePads } from "../input";
 import { saveSettings, saveUiMode, switchUi } from "../mode";
 import { DeckButton, Dialog, Row, Screen, Word } from "../ui";
 import { FolderNotesList, useGameFolderNotes } from "../../components/FolderNotes";
+import { checkFailure, checkToast, checkedTime } from "../../components/UpdateSettings";
 import { folderNotesCount } from "../../shell/notices";
 import { languageName, languages, t, useT } from "../../i18n";
 import { applyLanguage } from "../../i18n/LanguageSync";
@@ -104,8 +105,13 @@ export default function Settings() {
   const mode: UiMode = settings.data?.uiMode === "deck" || settings.data?.uiMode === "desktop" ? settings.data.uiMode : "auto";
   const d = info.data?.deck;
   const u = up.data;
+  // the answer in a toast as well as on the row (an update found shows on the row: Install)
   const check = async () => {
-    try { qc.setQueryData(["update_status"], await api.updateCheck()); } catch (e) { toast.error(e); }
+    try {
+      const s = await api.updateCheck();
+      qc.setQueryData(["update_status"], s);
+      checkToast(s);
+    } catch (e) { toast.error(e, t("updateSettings.failed")); }
   };
   const install = async () => {
     try { qc.setQueryData(["update_status"], await runTask<UpdateStatus>(() => api.updateInstall(), { failed: t("deck.settings.updateFailed") })); } catch { /* toasted */ }
@@ -127,6 +133,13 @@ export default function Settings() {
     else if (u.phase === "failed") { upWord = t("deck.settings.checkFailed"); upTone = "warn"; }
     else if (u.checked) { upWord = t("deck.settings.upToDate"); upTone = "ok"; }
   }
+  // under the row's title: the launcher's version, why the last check failed, and when it was (local time)
+  const upParts = !u ? [] : [
+    t("deck.settings.launcherVersion", { version: u.current }),
+    ...(u.phase === "failed" ? [t("updateSettings.failedLine", { reason: checkFailure(u) })] : []),
+    ...(u.checked && u.phase !== "checking" ? [t("updateSettings.checkedAt", { time: checkedTime(u.checked) })] : []),
+  ];
+  const upSub = !u ? undefined : u.phase === "failed" ? <span className="deck-wrap">{upParts.join(" · ")}</span> : upParts.join(" · ");
   const pad = Object.values(pads.native)[0]?.name ?? pads.browser[0] ?? null;
   // the launcher's language: System, then each language with a file (a saved one without a file goes back to System)
   const language = settings.data?.language || "system";
@@ -166,7 +179,7 @@ export default function Settings() {
         )}
         {selfUpdates && (
           <Row id="set-update" title={t("deck.settings.updates")} a={u?.ready ? t("deck.dataFolder.restart") : u?.available && u.install.inPlace ? t("common.install") : t("deck.settings.check")}
-            sub={u ? t("deck.settings.launcherVersion", { version: u.current }) : undefined} end={upWord ? <Word tone={upTone}>{upWord}</Word> : undefined}
+            sub={upSub} end={upWord ? <Word tone={upTone}>{upWord}</Word> : undefined}
             disabled={upBusy || u?.phase === "checking" || u?.phase === "downloading"}
             onClick={() => void update()} />
         )}

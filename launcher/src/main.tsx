@@ -5,6 +5,8 @@ import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import App from "./App";
 import { isTauri, loadMock } from "./api/commands";
+// the admin pages talk to Kiln.Admin through the launcher's backend (Tauri commands); the hub gets that transport here
+import "./api/adminTauri";
 import { UiModeGate } from "./deck/mode";
 import { SnapshotGate } from "./shell/SnapshotGate";
 import { DataFolderGate } from "./shell/DataFolderGate";

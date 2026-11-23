@@ -3,8 +3,7 @@
 // through the launcher's logs_crash_reports.
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAdminQuery, useAdminState, useHasOp } from "../../api/admin";
-import { logsCrashReports } from "../../api/commands";
+import { adminHost, useAdminQuery, useAdminState, useHasOp } from "../../api/admin";
 import { useT } from "../../i18n";
 import { useServerId, withAdmin } from "../common";
 import { OfflineNote } from "../ConnectionBar";
@@ -17,8 +16,9 @@ function CrashesPage() {
   const st = useAdminState();
   const has = useHasOp("crash_reports");
   const live = useAdminQuery<CrashReportInfo[]>("crash_reports", {}, { refetchInterval: 20_000 });
-  // stopped (or an older Kiln.Admin): the launcher reads the folder itself
-  const disk = useQuery({ queryKey: ["logs_crash_reports", id], queryFn: () => logsCrashReports({ server: id }), enabled: !st.session || !has, retry: false });
+  // stopped (or an older Kiln.Admin): the launcher reads the folder itself (the host's crashReportsFromDisk)
+  const fromDisk = adminHost().crashReportsFromDisk;
+  const disk = useQuery({ queryKey: ["logs_crash_reports", id], queryFn: () => fromDisk!(id), enabled: !!fromDisk && (!st.session || !has), retry: false });
   const viaOp = !!st.session && has;
   const list: CrashReportInfo[] = viaOp ? live.data ?? [] : (disk.data ?? []).map((c) => ({ name: c.name, bytes: c.size, time: c.created }));
   const [open, setOpen] = useState<string | null>(null);

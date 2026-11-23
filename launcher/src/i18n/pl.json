@@ -3577,7 +3577,13 @@
     "checkNow": "Sprawdź teraz",
     "testBuild": "Wersja testowa {beta} wydania {current}.",
     "switchBack": "Wróć do wydania",
-    "followBeta": "Śledzisz betę: następna wersja testowa przyjdzie jako aktualizacja."
+    "followBeta": "Śledzisz betę: następna wersja testowa przyjdzie jako aktualizacja.",
+    "checkingNow": "Szukanie aktualizacji…",
+    "upToDateLine": "Kiln jest aktualny ({version})",
+    "availableLine": "Dostępna wersja Kiln {version}",
+    "failedLine": "Sprawdzanie nie powiodło się: {reason}",
+    "checkedAt": "sprawdzono: {time}",
+    "noAnswer": "żaden serwer aktualizacji nie odpowiedział"
   },
   "nav": {
     "play": "Graj",
