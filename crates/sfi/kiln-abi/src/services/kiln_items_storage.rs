@@ -41,6 +41,7 @@ pub const KIS_PARK_HELD: i32 = 16;
 pub const KIS_PARK_LOCKED: i32 = 18;
 pub const KIS_PARK_OVERFLOW: i32 = 2;
 pub const KIS_PARK_REQUESTED: i32 = 16;
+pub const KIS_PARK_RETURNED: i32 = 19;
 pub const KIS_PARK_STALE: i32 = 17;
 pub const KIS_PARK_UNREGISTERED: i32 = 1;
 pub const KIS_QUARANTINE_COUNT: i32 = 2;

@@ -272,6 +272,31 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
     }
 
     [Fact]
+    public void ReturnedOutsideKilnReasonSurvivesRestoreEventsAndFreeze()
+    {
+        const uint returned = 19;
+        Assert.Equal(returned, StorageNative.ParkReturned);
+        Assert.Equal(returned, (uint)PlayerStorageParkReason.ReturnedOutsideKiln);
+        Bind();
+        var join = _fake.JoinRead(0, Account, Character, 7);
+        Assert.Equal(StorageNative.InvalidArgument, Restore(0, join, 0, StorageNative.SourceServer, 4, Account, Character,
+            Parked("gone:bag", 8, 20, (0, 0x77, 10))));
+        Assert.Equal(StorageNative.Ok, Restore(0, join, 0, StorageNative.SourceServer, 4, Account, Character,
+            Parked("gone:bag", 8, returned, (0, 0x77, 10))));
+        _fake.JoinApply(0, 1);
+        Assert.Contains(Events(), e => e.Kind == StorageNative.EventParked && e.Reason == returned);
+        Register(ModA, "gone:bag", 8);  // registration must not automatically release this held copy
+        _fake.Step();
+        var contents = _fake.Contents(0, "gone:bag");
+        Assert.Empty(contents.Live);
+        Assert.Equal((returned, 10), (Assert.Single(contents.Parked).Reason, contents.Parked[0].Record.Count));
+        _fake.CaptureOf(0, 7);
+        var frozen = Take(_fake.CapturesDone());
+        var parked = Assert.Single(frozen.Entries.Where(e => e.Entry.Kind == StorageNative.EntryParked));
+        Assert.Equal(("gone:bag", returned, 10u), (parked.Key, parked.Entry.Reason, Assert.Single(parked.Records).Count));
+    }
+
+    [Fact]
     public void ARestoreIsCheckedAndTakenOncePerJoin()
     {
         Bind();

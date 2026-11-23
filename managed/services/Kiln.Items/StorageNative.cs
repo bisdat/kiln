@@ -33,7 +33,7 @@ internal static unsafe class StorageNative
     public const uint EntryLive = 1, EntryParked = 2, EntryQuarantine = 3;
     // KIS_PARK_*
     public const uint ParkUnregistered = 1, ParkOverflow = 2, ParkFilter = 3, ParkHeld = 16, ParkRequested = 16, ParkStale = 17,
-        ParkLocked = 18;
+        ParkLocked = 18, ParkReturned = 19;
     // KIS_QUARANTINE_*
     public const byte QuarantineUnknownItem = 1, QuarantineCount = 2, QuarantineSlot = 3, QuarantineDecode = 4,
         QuarantineRebuild = 5;

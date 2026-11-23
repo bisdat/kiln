@@ -154,6 +154,8 @@ enum {
     KIS_PARK_STALE = 17,       /* changed elsewhere since this server's copy (the server does not trust the client's
                                   copy, which is newer): kept, never instantiated, until an admin releases it */
     KIS_PARK_LOCKED = 18,      /* the document is from a newer Kiln: kept as it is */
+    KIS_PARK_RETURNED = 19,    /* server copy held: character items were likely returned outside Kiln. An admin should
+                              * release it only if that is wrong, through the orphan return path. */
 };
 
 /* KilnStorageRecord.reason of a record in a KIS_ENTRY_QUARANTINE entry */

@@ -222,6 +222,9 @@ public enum PlayerStorageParkReason
     Stale = 17,
     /// <summary>Held back: saved by a newer Kiln.</summary>
     Locked = 18,
+    /// <summary>The server held its copy because the character's items were likely returned outside Kiln. An admin
+    /// should release it only if that is wrong, through <see cref="Items.PlayerStorages.ReturnOrphans"/>.</summary>
+    ReturnedOutsideKiln = 19,
 }
 
 /// <summary>One player's storage of one key (<see cref="PlayerStorage.Status"/>). Since 0.2.0-dev.30.7 (mod API 0.2.16).</summary>

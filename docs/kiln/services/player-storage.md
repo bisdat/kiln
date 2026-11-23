@@ -93,7 +93,9 @@ Tick-thread events are:
   kept.
 
 Unregistered, overflow, and filter parking may restore automatically when the key becomes usable. Requested, stale,
-and locked parking is held back; registration alone does not release it. Records from a newer document version remain
+and locked parking is held back; registration alone does not release it. `PlayerStorageParkReason.ReturnedOutsideKiln`
+means the server held its copy because character items were likely returned outside Kiln; an admin should release it
+only if that is wrong, through `Items.PlayerStorages.ReturnOrphans`. Records from a newer document version remain
 read-only. Unknown items, invalid counts/slots, and failed decodes/rebuilds remain quarantined, with their bytes.
 
 `Items.PlayerStorages.ReturnOrphans(player, fullKey, OrphanTarget.Backpack)` returns parked records into the backpack;

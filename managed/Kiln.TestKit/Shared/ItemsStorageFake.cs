@@ -757,7 +757,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             if (e.Size < (uint)sizeof(StorageNative.Entry) || !KeyRule.IsMatch(key) || e.Kind is not (StorageNative.EntryLive or StorageNative.EntryParked) ||
                 (ulong)e.First + e.Count > doc->RecordCount || e.Slots > StorageNative.MaxSlots ||
                 (e.Kind == StorageNative.EntryLive && !liveKeys.Add(key)) ||
-                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkLocked)))
+                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkReturned)))
                 return StorageNative.InvalidArgument;
             keys.Add(key);
             var recs = new List<StorageFakeRecord>();
