@@ -17,6 +17,11 @@
 #           committed type dumps hold none of the registries' resource types, so no row resolves against them here; the
 #           full proof is regmap_check.py --exe against a copy of each game exe (regmap/README.md)
 #   pytests the Python rule tests of tools/replinspect (python3 -m unittest)
+#   bundle  tools/release/test_stage_bundle.py: tools/package/stage.sh's sigdb + regmap step run on a minimal stage (no
+#           build, well under a second), judged by kilnctl bundle create's rule: every bundle path in exactly one
+#           component, regmap/common in core only, each side's regmap beside its sigdb, and every side's install
+#           holding regmap/common, regmap/<side> and sigdb/<side>.json. KILNCTL=<built kilnctl> adds the real
+#           kilnctl bundle create on that stage
 #   drift   tools/docs-site/drift.py: the skill and docs/kiln against the code, no build needed (a second or two): every
 #           `Type.Member` they name is public API (inherited and C# 14 extension members count; tools/docs-site/drift-allow.txt
 #           lists the false positives, a reason each), no "since 0.2.0-dev.N" claim is earlier than managed/api-history.tsv's
@@ -140,6 +145,15 @@ else
   result pytests FAILED $((SECONDS - t)) "tools/replinspect rule tests:"
   grep -E -A8 '^(FAIL|ERROR):' "$work/pytests.log" | head -40
   failed+=(pytests)
+fi
+# bundle
+t=$SECONDS
+if python3 -I "$repo/tools/release/test_stage_bundle.py" >"$work/bundle.log" 2>&1; then
+  result bundle OK $((SECONDS - t)) "stage.sh: one component per bundle path, every side's regmap and sigdb complete ($(grep -oE '^Ran [0-9]+ tests' "$work/bundle.log" | sed 's/^Ran //')$(grep -q 'skipped=' "$work/bundle.log" && echo ", kilnctl not run: KILNCTL unset"))"
+else
+  result bundle FAILED $((SECONDS - t)) "tools/release/test_stage_bundle.py (kilnctl bundle create would refuse the stage, or a side's install is incomplete):"
+  grep -E -A14 '^(FAIL|ERROR):' "$work/bundle.log" | head -50
+  failed+=(bundle)
 fi
 # drift
 t=$SECONDS
