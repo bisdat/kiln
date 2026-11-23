@@ -15,13 +15,18 @@ public sealed class NetWriter
     private byte[] _buf;
     private int _len;
 
+    /// <summary>Creates a writer with room for <paramref name="capacity"/> bytes (at least 16); it grows as needed.</summary>
+    /// <param name="capacity">The starting buffer size in bytes.</param>
     public NetWriter(int capacity = 256) => _buf = new byte[Math.Max(16, capacity)];
 
     /// <summary>Bytes written so far.</summary>
     public int Length => _len;
 
+    /// <summary>The bytes written so far, as a view of the writer's own buffer. It is only valid until the next write.</summary>
     public ReadOnlySpan<byte> WrittenSpan => _buf.AsSpan(0, _len);
+    /// <summary>Copies the bytes written so far into a new array.</summary>
     public byte[] ToArray() => _buf.AsSpan(0, _len).ToArray();
+    /// <summary>Forgets everything written so far, so the writer can be reused. The buffer keeps its size.</summary>
     public void Clear() => _len = 0;
 
     private Span<byte> Grow(int n)
@@ -32,15 +37,45 @@ public sealed class NetWriter
         return s;
     }
 
+    /// <summary>Writes one byte.</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Byte(byte v) { Grow(1)[0] = v; return this; }
+    /// <summary>Writes a boolean as one byte: 1 for true, 0 for false.</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Bool(bool v) => Byte(v ? (byte)1 : (byte)0);
+    /// <summary>Writes an unsigned 16-bit integer (2 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter UInt16(ushort v) { BinaryPrimitives.WriteUInt16LittleEndian(Grow(2), v); return this; }
+    /// <summary>Writes a signed 16-bit integer (2 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Int16(short v) { BinaryPrimitives.WriteInt16LittleEndian(Grow(2), v); return this; }
+    /// <summary>Writes an unsigned 32-bit integer (4 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter UInt32(uint v) { BinaryPrimitives.WriteUInt32LittleEndian(Grow(4), v); return this; }
+    /// <summary>Writes a signed 32-bit integer (4 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Int32(int v) { BinaryPrimitives.WriteInt32LittleEndian(Grow(4), v); return this; }
+    /// <summary>Writes an unsigned 64-bit integer (8 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter UInt64(ulong v) { BinaryPrimitives.WriteUInt64LittleEndian(Grow(8), v); return this; }
+    /// <summary>Writes a signed 64-bit integer (8 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Int64(long v) { BinaryPrimitives.WriteInt64LittleEndian(Grow(8), v); return this; }
+    /// <summary>Writes a 32-bit float (4 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Single(float v) { BinaryPrimitives.WriteSingleLittleEndian(Grow(4), v); return this; }
+    /// <summary>Writes a 64-bit float (8 bytes, little-endian).</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Double(double v) { BinaryPrimitives.WriteDoubleLittleEndian(Grow(8), v); return this; }
 
     /// <summary>Unsigned LEB128 (1 byte below 128).</summary>
@@ -57,6 +92,10 @@ public sealed class NetWriter
     /// <summary>Zig-zag signed varint.</summary>
     public NetWriter VarInt(long v) => VarUInt((ulong)((v << 1) ^ (v >> 63)));
 
+    /// <summary>Writes a string: a varint byte count followed by the UTF-8 bytes. Read it back with
+    /// <see cref="NetReader.String"/>.</summary>
+    /// <param name="v">The text; null is written as an empty string.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter String(string? v)
     {
         v ??= "";
@@ -81,13 +120,23 @@ public sealed class NetWriter
         return this;
     }
 
+    /// <summary>Writes a GUID as its 16 bytes.</summary>
+    /// <param name="v">The value.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Guid(Guid v)
     {
         v.TryWriteBytes(Grow(16));
         return this;
     }
 
+    /// <summary>Writes a world position as three 64-bit floats (X, Y, Z; 24 bytes). Read it back with
+    /// <see cref="NetReader.Position3"/>.</summary>
+    /// <param name="p">The position.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Position(WorldPosition p) => Double(p.X).Double(p.Y).Double(p.Z);
+    /// <summary>Writes an entity id as its 32-bit value. Read it back with <see cref="NetReader.Entity"/>.</summary>
+    /// <param name="e">The entity id.</param>
+    /// <returns>This writer, so calls can be chained.</returns>
     public NetWriter Entity(EntityId e) => UInt32(e.Value);
 }
 
@@ -98,6 +147,9 @@ public ref struct NetReader
     private readonly ReadOnlySpan<byte> _data;
     private int _pos;
 
+    /// <summary>Creates a reader over <paramref name="data"/>, positioned at its start. The reader only views the span; it
+    /// copies nothing.</summary>
+    /// <param name="data">The message body to read.</param>
     public NetReader(ReadOnlySpan<byte> data)
     {
         _data = data;
@@ -107,8 +159,11 @@ public ref struct NetReader
     /// <summary>Strings longer than this (bytes) are refused.</summary>
     public const int MaxString = 1 << 20;
 
+    /// <summary>How many bytes have been read so far (the offset of the next read).</summary>
     public int Position => _pos;
+    /// <summary>How many bytes are left to read.</summary>
     public int Remaining => _data.Length - _pos;
+    /// <summary>True when every byte has been read.</summary>
     public bool End => _pos >= _data.Length;
 
     private ReadOnlySpan<byte> Take(int n)
@@ -119,17 +174,39 @@ public ref struct NetReader
         return s;
     }
 
+    /// <summary>Reads one byte.</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public byte Byte() => Take(1)[0];
+    /// <summary>Reads a boolean (one byte; any non-zero value is true).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public bool Bool() => Byte() != 0;
+    /// <summary>Reads an unsigned 16-bit integer (2 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public ushort UInt16() => BinaryPrimitives.ReadUInt16LittleEndian(Take(2));
+    /// <summary>Reads a signed 16-bit integer (2 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public short Int16() => BinaryPrimitives.ReadInt16LittleEndian(Take(2));
+    /// <summary>Reads an unsigned 32-bit integer (4 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public uint UInt32() => BinaryPrimitives.ReadUInt32LittleEndian(Take(4));
+    /// <summary>Reads a signed 32-bit integer (4 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public int Int32() => BinaryPrimitives.ReadInt32LittleEndian(Take(4));
+    /// <summary>Reads an unsigned 64-bit integer (8 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public ulong UInt64() => BinaryPrimitives.ReadUInt64LittleEndian(Take(8));
+    /// <summary>Reads a signed 64-bit integer (8 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public long Int64() => BinaryPrimitives.ReadInt64LittleEndian(Take(8));
+    /// <summary>Reads a 32-bit float (4 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public float Single() => BinaryPrimitives.ReadSingleLittleEndian(Take(4));
+    /// <summary>Reads a 64-bit float (8 bytes, little-endian).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public double Double() => BinaryPrimitives.ReadDoubleLittleEndian(Take(8));
 
+    /// <summary>Reads an unsigned LEB128 varint, as written by <see cref="NetWriter.VarUInt"/>.</summary>
+    /// <exception cref="NetFormatException">The message is truncated, or the varint is longer than 64 bits.</exception>
     public ulong VarUInt()
     {
         ulong v = 0;
@@ -142,12 +219,18 @@ public ref struct NetReader
         throw new NetFormatException("varint too long");
     }
 
+    /// <summary>Reads a zig-zag signed varint, as written by <see cref="NetWriter.VarInt"/>.</summary>
+    /// <exception cref="NetFormatException">The message is truncated, or the varint is longer than 64 bits.</exception>
     public long VarInt()
     {
         var u = VarUInt();
         return (long)(u >> 1) ^ -(long)(u & 1);
     }
 
+    /// <summary>Reads a string written by <see cref="NetWriter.String"/>: a varint byte count, then UTF-8.</summary>
+    /// <param name="maxBytes">The longest string to accept, in bytes. It never raises the limit above <see cref="MaxString"/>.</param>
+    /// <returns>The text.</returns>
+    /// <exception cref="NetFormatException">The message is truncated, or the string is longer than the limit.</exception>
     public string String(int maxBytes = MaxString)
     {
         var n = VarUInt();
@@ -155,6 +238,10 @@ public ref struct NetReader
         return Encoding.UTF8.GetString(Take((int)n));
     }
 
+    /// <summary>Reads a length-prefixed byte array, as written by <see cref="NetWriter.Bytes"/>.</summary>
+    /// <param name="maxBytes">The longest array to accept, in bytes (default 16 MiB).</param>
+    /// <returns>A new array with a copy of the bytes.</returns>
+    /// <exception cref="NetFormatException">The message is truncated, or the array is longer than the limit.</exception>
     public byte[] Bytes(int maxBytes = 1 << 24)
     {
         var n = VarUInt();
@@ -162,10 +249,22 @@ public ref struct NetReader
         return Take((int)n).ToArray();
     }
 
+    /// <summary>Reads <paramref name="n"/> bytes with no length prefix (the counterpart of <see cref="NetWriter.Raw"/>).</summary>
+    /// <param name="n">How many bytes to take.</param>
+    /// <returns>A view of those bytes in the message; no copy is made.</returns>
+    /// <exception cref="NetFormatException">The message has fewer than <paramref name="n"/> bytes left.</exception>
     public ReadOnlySpan<byte> Raw(int n) => Take(n);
+    /// <summary>Reads everything that is left. After this call <see cref="End"/> is true.</summary>
+    /// <returns>A view of the remaining bytes in the message; no copy is made.</returns>
     public ReadOnlySpan<byte> Rest() => Take(Remaining);
+    /// <summary>Reads a GUID (16 bytes).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public Guid Guid() => new(Take(16));
+    /// <summary>Reads a world position written by <see cref="NetWriter.Position"/>: three 64-bit floats (X, Y, Z).</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public WorldPosition Position3() => new(Double(), Double(), Double());
+    /// <summary>Reads an entity id (a 32-bit value) written by <see cref="NetWriter.Entity"/>.</summary>
+    /// <exception cref="NetFormatException">The message is truncated.</exception>
     public EntityId Entity() => new(UInt32());
 }
 
