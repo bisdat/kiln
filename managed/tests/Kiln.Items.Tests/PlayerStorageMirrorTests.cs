@@ -800,6 +800,38 @@ public sealed class PlayerStorageMirrorTests
     }
 
     [Fact]
+    public void APlayerWhoLeavesTakesTheMemoryOfTheirActivatedStackAlong()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Give(q, r.Ada, r.Arrow, 30);
+        r.Give(q, r.Ada, r.FireArrow, 6);
+        r.Link.See(r.Ada);
+        var holder = r.Holder(q, r.Ada);
+        var steps = new Steps();
+        void Activate(int index, SlotId cell, ItemId item, int n)
+        {
+            var from = r.Kiln.Run(() => q.Slot(r.Ada.Entity, index));
+            var task = r.Kiln.Run(() => As(r.Quivers, () => q.Activate(r.Ada.Entity, index)));
+            r.Kiln.Run(() => steps.MoveWaits.Dequeue().SetResult(Moved(holder, from, r.Ada.Entity, cell, item, n)));
+            DrainUntil(r, r.Quivers, () => steps.EquipWaits.Count > 0);
+            r.Kiln.Run(() => steps.EquipWaits.Dequeue().SetResult(Equipped(r.Ada.Entity, cell, item)));
+            DrainUntil(r, r.Quivers, () => task.IsCompleted || steps.MoveWaits.Count > 0);
+        }
+        Activate(0, BackpackStack(r, r.Ada, r.Arrow, 30), r.Arrow, 30);
+        Assert.Equal(1, steps.MoveCount);
+        r.Pass();
+        r.Link.Now.Clear();  // Ada leaves: her session ends
+        r.Pass();
+        // the next session in that slot (the kit keeps her inventory): no stack of the last one is taken back
+        Activate(1, BackpackStack(r, r.Ada, r.FireArrow, 6), r.FireArrow, 6);
+        Assert.Equal(2, steps.MoveCount);
+    }
+
+    [Fact]
     public void RefusalsAreLoggedOncePerReasonAndAnIdlePlayersPickRateIsForgotten()
     {
         using var r = new Run();
