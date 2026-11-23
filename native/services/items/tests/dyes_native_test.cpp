@@ -25,10 +25,26 @@ void* returned_storage=storage;
 uint16_t types[kitems::A_COUNT]{1,2,3,4,5,6,7};
 void* job=reinterpret_cast<void*>(1);uint64_t ctx[2]{reinterpret_cast<uint64_t>(&job),1};
 uint64_t iterator[64]{};
-KilnApi fake_api{};KilnHooksApi fake_hooks{};
+KilnApi fake_api{};KilnHooksApi fake_hooks{};KilnCapsApi fake_caps{},other_caps{};
+KilnCapsApi* caps_provider=nullptr;KilnOwner owner=1;
+uintptr_t server_world=100,local_world=200;uint64_t server_session=1,local_session=1;
+int cap_lookups=0,cap_reports=0;bool fail_report=false;
+struct CapRow {uint32_t state=0,reason=0;std::string text;};
+std::map<std::string,CapRow> cap_rows;
+KilnResult KILN_CALL cap_report(KilnOwner,KilnStr name,uint32_t state,uint32_t reason,KilnStr text){
+ ++cap_reports;if(fail_report){fail_report=false;return KILN_ERR_UNAVAILABLE;}
+ cap_rows[std::string(name.ptr,name.len)]={state,reason,std::string(text.ptr,text.len)};return KILN_OK;
+}
+uintptr_t KILN_CALL world(uint32_t kind){return kind==KILN_WORLD_SERVER?server_world:local_world;}
+KilnResult KILN_CALL session(KilnSessionInfo* s){
+ s->sessions[KILN_WORLD_SERVER]=server_session;s->sessions[KILN_WORLD_CLIENT]=local_session;return KILN_OK;
+}
 void check(bool b,const char* s){++checks;std::printf("%s %s\n",b?"PASS":"FAIL",s);failures+=!b;}
 uint32_t KILN_CALL side(){return KILN_SIDE_CLIENT;}
-const void* KILN_CALL service(KilnStr name,uint32_t){return std::string(name.ptr,name.len)==KILN_HOOKS_SERVICE?&fake_hooks:nullptr;}
+const void* KILN_CALL service(KilnStr name,uint32_t){
+ const std::string s(name.ptr,name.len);if(s==KILN_CAPS_SERVICE){++cap_lookups;return caps_provider;}
+ return s==KILN_HOOKS_SERVICE?&fake_hooks:nullptr;
+}
 KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** next,KilnHandle* h){++installs;if(fail_entry&&target==0x1000)return KILN_ERR_UNAVAILABLE;*next=reinterpret_cast<void*>(target);*h=1;return KILN_OK;}
 KilnResult KILN_CALL revoke(KilnHandle){return KILN_OK;}
 uintptr_t KILN_CALL caller(KilnHandle){return kitems::pay_ret;}
@@ -74,7 +90,7 @@ Engine E;
 const uint32_t kAccHashes[A_COUNT]{1,2,3,4,5,6,7};
 const char* const kAccNames[A_COUNT]{"Fuel","Inventory","InventoryEmptyState","InventorySetup","ItemState","OwnerRelationship","SlotSelection"};
 const KilnApi* items_api(){return &fake_api;}
-KilnOwner items_owner(){return 1;}
+KilnOwner items_owner(){return owner;}
 std::vector<CraftSource> craft_sources_copy(uint32_t player){if(player!=1||!registered||!generation)return {};CraftSource s{};s.player=1;s.container=2000;s.deny=!deny;s.items=deny?std::vector<uint32_t>{}:std::vector<uint32_t>{};return {s};}
 bool craft_source_access(void*,uint32_t player,uint32_t container){return allowed&&player==1&&container==2000;}
 bool craft_source_access(uint32_t player,uint32_t container){return craft_source_access(nullptr,player,container);}
@@ -162,5 +178,57 @@ int main(){
  check(client_code(),"file-qualified client grid builder and both count seams permit palette hooks");
  live_code=KILN_CODE_FOREIGN;check(!client_code(),"foreign client palette code is refused");live_code=KILN_CODE_ORIGINAL;
  originals[row_at][0]^=1;check(!client_code(),"a changed client count instruction is refused");
+ fake_api.world=&world;fake_api.session=&session;fake_caps.header={sizeof fake_caps,1};fake_caps.report=&cap_report;
+ other_caps=fake_caps;caps_provider=&fake_caps;faulted.store(false);server_ok.store(true);ui_ok.store(true);offer={};
+ server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);
+ check(cap_reports==2&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_AVAILABLE&&cap_rows["crafting.dye_ui_session"].state==KILN_CAP_PENDING,"initial dye ticks report both session capabilities");
+ int reports=cap_reports,lookups=cap_lookups;server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);
+ check(cap_reports==reports&&cap_lookups==lookups+2,"unchanged dye ticks report nothing and look up caps once per tick");
+ server_ok.store(false);server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_PENDING,"server hook uninstall changes its session capability");
+ reports=cap_reports;server_ok.store(true);server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_AVAILABLE,"server hook install restores its session capability");
+ reports=cap_reports;++server_session;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1,"replacement server session re-reports even with the same world and state");
+ reports=cap_reports;server_pre(nullptr,nullptr);check(cap_reports==reports,"replacement server session settles without repeated reports");
+ reports=cap_reports;++server_world;server_pre(nullptr,nullptr);check(cap_reports==reports+1,"replacement server world re-reports even with the same session id");
+ reports=cap_reports;server_world=0;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_PENDING,"server world stopping makes its session capability pending");
+ server_world=100;server_pre(nullptr,nullptr);reports=cap_reports;faulted.store(true);lookups=cap_lookups;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+2&&cap_lookups==lookups+1&&cap_rows["crafting.dye_sources"].reason==KILN_CAP_REASON_FAULTED,"faulted server reports the fault and session change with one caps lookup");
+ reports=cap_reports;server_pre(nullptr,nullptr);check(cap_reports==reports,"a server payment fault is reported once, not every tick");
+ faulted.store(false);server_ok.store(true);server_pre(nullptr,nullptr);reports=cap_reports;
+ server_ok.store(false);fail_report=true;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_AVAILABLE,"a rejected session report is not delivered");
+ reports=cap_reports;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources_session"].state==KILN_CAP_PENDING,"a rejected session report is retried next tick");
+ reports=cap_reports;server_pre(nullptr,nullptr);check(cap_reports==reports,"a successful retry stops further session reports");
+ ++owner;server_pre(nullptr,nullptr); // A new owner has not received the earlier fault.
+ fail_report=true;faulted.store(true);server_pre(nullptr,nullptr);reports=cap_reports;server_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_sources"].reason==KILN_CAP_REASON_FAULTED,"a rejected fault report is retried once successfully");
+ reports=cap_reports;server_pre(nullptr,nullptr);check(cap_reports==reports,"a delivered fault retry is not repeated");
+ check(dyes_set_stock(1,rows,1)==KILN_OK,"capability test publishes a live client offer");
+ reports=cap_reports;client_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_ui_session"].state==KILN_CAP_AVAILABLE,"a live offer and installed UI hooks make the client session available");
+ reports=cap_reports;client_pre(nullptr,nullptr);check(cap_reports==reports,"unchanged supported client session reports nothing");
+ reports=cap_reports;ui_ok.store(false);client_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_ui_session"].state==KILN_CAP_PENDING,"client hook uninstall updates its session capability");
+ reports=cap_reports;ui_ok.store(true);client_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_ui_session"].state==KILN_CAP_AVAILABLE,"client hook install restores its session capability");
+ reports=cap_reports;++local_session;client_pre(nullptr,nullptr);
+ check(cap_reports==reports+1,"replacement client session re-reports even with the same world and state");
+ reports=cap_reports;++local_world;client_pre(nullptr,nullptr);
+ check(cap_reports==reports+1&&cap_rows["crafting.dye_ui_session"].state==KILN_CAP_PENDING,"replacement client world clears the offer and reports pending");
+ reports=cap_reports;client_pre(nullptr,nullptr);check(cap_reports==reports,"replacement client world settles without repeated reports");
+ reports=cap_reports;caps_provider=&other_caps;server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);
+ check(cap_reports==reports+3,"replacement caps provider receives both session rows and the fault");
+ reports=cap_reports;++owner;server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);
+ check(cap_reports==reports+3,"replacement report owner receives both session rows and the fault");
+ caps_provider=nullptr;server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);caps_provider=&other_caps;reports=cap_reports;
+ server_pre(nullptr,nullptr);client_pre(nullptr,nullptr);check(cap_reports==reports+3,"caps returning after an outage receives all current dye reports");
+ KilnWorldEvent stopped{};stopped.event=KILN_WORLD_STOPPING;stopped.kind=KILN_WORLD_SERVER;world_event(&stopped,nullptr);reports=cap_reports;
+ world_event(&stopped,nullptr);check(cap_reports==reports,"duplicate server stop events do not repeat an identical capability report");
+ stopped.kind=KILN_WORLD_CLIENT;world_event(&stopped,nullptr);reports=cap_reports;world_event(&stopped,nullptr);
+ check(cap_reports==reports,"duplicate client stop events do not repeat an identical capability report");
  std::printf("%d checks, %d failures\n",checks,failures);return failures?1:0;
 }
