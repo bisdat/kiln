@@ -133,7 +133,22 @@ void registry_entries_prepare(RegistryLive* target) {
                 else defined[ref] = body; // a refusal can remove a later field edit from an otherwise valid queued definition
             }
         }
-        if (failures.empty()) { in.entry_bodies = std::move(bodies); break; }
+        if (failures.empty()) {
+            in.entry_bodies = std::move(bodies);
+            // Recipe construction owns these fields outside registryFields. Keep a separate stable-field baseline for
+            // report()/save/sync overlays without feeding their eventual Alter/Final values back into construction.
+            for (auto& [ref, body] : in.entry_bodies) if (ref.registry == "recipes") {
+                const auto& values = in.result.definitions.at(ref).constructor_values;
+                for (const char* field : {"inputs", "outputs", "duration", "unlock"}) {
+                    const auto value = values.find(field);
+                    std::string why;
+                    if (value != values.end() && value->second.kind != registry::Value::None &&
+                        in.regmap->mapping(ref.registry, field, &why) == registry::map::Mapping::Mapped)
+                        body["registryFields"][field] = value->second.to_json();
+                }
+            }
+            break;
+        }
         for (const auto& [ref, why] : failures) refuse_definition(in, ref, why);
         in.result = registry::compose(*in.schema, in.base, in.old, in.mods);
         for (const auto& [ref, field] : in.boot_fields) in.result.fields[ref] = field;
