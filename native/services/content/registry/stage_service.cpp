@@ -25,6 +25,7 @@
 #include "kiln_boot_collector.hpp"
 #include "pristine.h"
 #include "entry_compat.h"
+#include "visibility.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_launch.h"
@@ -224,6 +225,7 @@ Env make_env() {
     e.write_report = [](const std::string& text) { return write_whole(u8(api_path(KILN_PATH_STATE)) / u8"registry.json", text); };
     e.write_data = [](const std::string& rel, const std::string& text) { return write_whole(data_root() / u8(rel), text); };
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
+    e.entry_support = &nc_registry_supports;
     e.log = [](int level, const std::string& line) {
         if (level >= 2) LOGE("%s", line.c_str());
         else if (level == 1) LOGW("%s", line.c_str());
@@ -555,6 +557,39 @@ void bind_service() {
         in.mods = *h.inputs;
         in.decoded = *h.decoded;
         in.added_guid = &model::added_guid;
+        in.define_entry = &registry_entry_define_native;
+        in.forget_entry = &registry_entry_forget_native;
+        in.pin_definition = &pin_definition;
+        in.entry_registered = [](const EntryRef& ref, std::string* why) {
+            return nc_registry_registered(ref.registry == "items" ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES, ref.id, why);
+        };
+        in.prepare_visibility = [](const Result& result, const std::map<std::string, uint32_t>& nums) {
+            static uint64_t generation = 0; // store lock, world's registration thread
+            auto view = std::make_shared<Visibility>(); view->generation = ++generation;
+            std::map<EntryRef, std::string> failed;
+            for (const auto& ref : result.removed) {
+                const auto number = nums.find(ref.registry + "|" + ref.id);
+                if (number == nums.end() || !number->second) { failed[ref] = "entry visibility has no stable numeric identity on this build"; continue; }
+                if (ref.registry == "items") view->items.insert(number->second);
+                else if (ref.registry == "recipes") view->recipes.insert(number->second);
+                else if (ref.registry == "loot") view->loot.insert(number->second);
+            }
+            nc_registry_visibility(std::move(view));
+            std::string why;
+            if (!nc_registry_apply_visibility(&why))
+                for (const auto& ref : result.removed)
+                    if (ref.registry == "items" || ref.registry == "recipes") failed[ref] = why;
+            // A dependent recipe cannot be excluded separately while claiming its item removal succeeded.
+            if (std::any_of(failed.begin(), failed.end(), [](const auto& row) { return row.first.registry == "recipes"; }))
+                for (const auto& ref : result.removed)
+                    if (ref.registry == "items") failed[ref] = "dependent recipe visibility failed; item removal was not applied";
+            return failed;
+        };
+        in.verify_visibility = &nc_registry_verify_visibility;
+        in.publish_visibility = &nc_registry_publish_visibility;
+        in.record_entry = [](const EntryRef& ref, const json& fields) {
+            nc_registry_record(ref.registry == "items" ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES, ref.id, fields.dump());
+        };
         if (h.pre_refused) in.pre_refused = *h.pre_refused;
         if (h.boot_fields) in.boot_fields = *h.boot_fields;
         in.check = h.check;
@@ -562,7 +597,10 @@ void bind_service() {
         in.changed = h.changed;
         in.prepare = h.prepare;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
+        if (!in.result.definitions.empty()) registry_entries_prepare(&in);
+        const Result reconciled = in.result;
         registry_live_install(std::move(in));
+        if (h.report) h.report(reconciled, false); // same start generation; failed definitions must never stay reported as added
     });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);
     const KilnResult b = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_HOST_SERVICE, sizeof(KILN_REGISTRY_HOST_SERVICE) - 1}, &kHostTable);

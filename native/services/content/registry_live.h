@@ -57,6 +57,10 @@ struct RegistryLive {
     std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> define_entry;
     std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> pin_definition;
     std::function<void(const registry::EntryRef&, const registry::json&)> record_entry;
+    std::function<bool(const registry::EntryRef&, std::string*)> entry_registered;
+    std::function<std::map<registry::EntryRef, std::string>(const registry::Result&, const std::map<std::string, uint32_t>&)> prepare_visibility;
+    std::function<std::string(const std::vector<uintptr_t>&)> verify_visibility;
+    std::function<void()> publish_visibility;
     std::function<void(const registry::EntryRef&)> forget_entry;
     std::map<registry::EntryRef, registry::json> entry_bodies;
     // registry.json (S11 writes it): a world load or pack reload passes true for a new application.

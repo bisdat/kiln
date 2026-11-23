@@ -69,6 +69,7 @@ static BaseModel base() {
     bal.fields["altarsPerFlameLevel"] = ints({1, 1, 2, 2, 3, 3});
     bal.fields["flameLevelMax"] = Value::integer(5);
     b.registries["balance"] = {bal};
+    b.registries["drops"] = {}; // this synthetic copied model read an empty drop registry; it did not omit the safety read
     return b;
 }
 
@@ -196,10 +197,12 @@ int main() {
         BaseModel::Entry table;
         table.id = "game:table1";
         Value w;
-        w.kind = Value::Struct, w.keys = {"chance", "item"}, w.list = {Value::number(0.5), Value::text("game:wood")};
+        w.kind = Value::Struct, w.keys = {"chance", "count.max", "item", "weight"};
+        w.list = {Value::number(0.5), Value::integer(1), Value::text("game:wood"), Value::number(1)};
         Value f2 = w;
-        f2.list = {Value::number(0.5), Value::text("game:flint")};
+        f2.list[2] = Value::text("game:flint");
         table.fields["entries"] = Value::of_list({w, f2});
+        table.drop_groups = {{0, 2}};
         bb.registries["drops"] = {table};
         std::vector<Refusal> rf;
         const Batch d = batch(s, "dropper", "alter", R"([
@@ -217,9 +220,15 @@ int main() {
         rm.batches = {batch(s, "remover", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])", &rr)};
         const Result dr = compose(s, bb, {}, {dm, rm});
         const FieldOutcome* en = field(dr, "drops", "game:table1", "entries");
-        CHECK(en && en->result.list.size() == 2 && en->result.list[0].leaf("item")->t == "game:flint" && en->result.list[1].leaf("item")->t == "game:plank");
-        CHECK(en && en->result.list[0].leaf("chance")->d == 1.0);
-        CHECK(!has_ref(dr, dr.removed, "drops", "game:table1") && has_ref(dr, dr.removed, "recipes", "game:plank_recipe"));  // drops never removed: the element goes
+        CHECK(en && en->result.list.size() == 3 && en->result.list[0].leaf("item")->t == "game:wood" && en->result.list[2].leaf("item")->t == "game:plank");
+        CHECK(en && en->result.list[1].leaf("chance")->d == 1.0);
+        CHECK(refused_with(dr.refused, 0, "grouping") && !has_ref(dr, dr.removed, "items", "game:wood") && !has_ref(dr, dr.removed, "recipes", "game:plank_recipe")); // structural append invalidated copied group spans: refuse removal whole
+        auto fixed = dm; fixed.batches.front().edits.erase(fixed.batches.front().edits.begin()); // only the existing-slot chance edit
+        const auto safe = compose(s, bb, {}, {fixed, rm});
+        const auto* inert = field(safe, "drops", "game:table1", "entries");
+        CHECK(inert && inert->result.list.size() == 2 && inert->result.list[0].leaf("item")->t == "game:wood" && inert->result.list[1].leaf("item")->t == "game:flint");
+        CHECK(inert && inert->result.list[0].leaf("chance")->as_double() == 0 && inert->result.list[0].leaf("weight")->as_double() == 0 && inert->result.list[1].leaf("chance")->as_double() == 1);
+        CHECK(!has_ref(safe, safe.removed, "drops", "game:table1") && has_ref(safe, safe.removed, "recipes", "game:plank_recipe")); // retained physical slot, dependent recipe hidden
         // a mod's recipe whose output item was refused before the stage is refused, with the chain
         Refusal pre;
         pre.mod = "newstuff", pre.stage = Stage::Add, pre.entry = "items|newstuff:lantern", pre.reason = "Unmapped: items.power is not mapped for game build 1287369 yet";

@@ -17,9 +17,15 @@ public sealed class RegistryAuthoringTests
         kiln.Registry.Seed("items", "game:wood", "maxStack", "10");
         var text = kiln.Registry.Author(mod);
         var ir = JsonNode.Parse(text!)!;
-        Assert.Equal(15, ir["edits"]![0]!["op"]!.GetValue<int>());
+        Assert.Equal("remove", ir["edits"]![0]!["entry"]!.GetValue<string>());
+        Assert.Equal("loot", ir["edits"]![0]!["registry"]!.GetValue<string>());
+        Assert.Equal(15, ir["edits"]![1]!["op"]!.GetValue<int>());
         Assert.Equal("alter", ir["stage"]!.GetValue<string>());
-        Assert.Null(kiln.Registry.Author(mod, phase: RegistryPhase.Add));
+        var add = JsonNode.Parse(kiln.Registry.Author(mod, phase: RegistryPhase.Add)!)!;
+        Assert.Equal("add", add["stage"]!.GetValue<string>());
+        Assert.Equal("tk-registry:logs", add["edits"]![0]!["id"]!.GetValue<string>());
+        Assert.Equal("game:wood", add["edits"]![0]!["like"]!.GetValue<string>());
+        Assert.Equal(17, add["edits"]![0]!["fields"]!["maxStack"]!.GetValue<int>());
         Assert.False(DataRegistry.Available);
         Assert.Contains(Coverage.All, row => row.Area == "Registry authoring" && row.Kind == CoverageKind.RecordingFake && row.Capabilities.Count == 0);
         kiln.Unload(mod); // the mod verifies that a retained cell failed closed and releases it

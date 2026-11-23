@@ -188,7 +188,7 @@ Result compose_after(const Schema& schema, const BaseModel& base, const Result& 
 // Prepared immutable base for repeated stable field/list-only turns (no entry operations, raw edits or code).
 // Build once when the copied base is installed; later turns use overlays rather than re-walking/copying that base.
 struct PreparedBase;
-std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base);
+std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base, const Result* entries = nullptr);
 Result compose_after(const Schema& schema, const BaseModel& base, const PreparedBase& prepared,
                      const Result& previous, const std::vector<ModInput>& mods);
 

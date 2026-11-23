@@ -106,7 +106,7 @@
   "entry": {
     "add": true,
     "remove": "hidden",
-    "removeDoc": "A removed recipe is taken out of every station's list."
+    "removeDoc": "GameStart only. Hides the recipe from station lists and the all-recipes/crafting view. Keeps the recipe record, id lookup and already-running crafts."
   },
   "raw": "allowed"
 }

@@ -1249,6 +1249,9 @@ def render_doc(model, lock, reg):
     e = d["entry"]
     out += ["## Entries", ""]
     out.append(f"- Add (stage add, id {code('<your mod id>:<name>')}): {'yes' if e.get('add') else 'no'}.")
+    if e.get("add"):
+        out.append("- Add requires GameStart and an explicit present Kiln `like` id; clone chains end at a game entry. "
+                   "Kiln retains the stable identity and pins the structural base install-wide. Use a new id for an incompatible base.")
     out.append(f"- Remove ({e['remove']}): {e.get('removeDoc') or 'yes'}" if e.get("remove") else "- Remove: no.")
     out.append(f"- Raw game paths in edits (the Advanced tier): {d.get('raw')}.")
     retired = lr.get("retired") or {}

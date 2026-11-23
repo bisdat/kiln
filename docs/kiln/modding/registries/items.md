@@ -76,5 +76,6 @@ Selectors ask for these with `has` / `hasNot`.
 ## Entries
 
 - Add (stage add, id `<your mod id>:<name>`): yes.
-- Remove (hidden): A removed item stays in the game's tables (saves keep their copies) but is hidden from loot, drops and recipes.
+- Add requires GameStart and an explicit present Kiln `like` id; clone chains end at a game entry. Kiln retains the stable identity and pins the structural base install-wide. Use a new id for an incompatible base.
+- Remove (hidden): GameStart only. Retains records and usable saved copies in inventory, equipment and containers; hides random loot and dependent recipes, and disables direct-drop slots without resizing. Whole removal is refused for unproven drop/recipe dependencies, missing group metadata or a group with no surviving spawnable stack. Removal wins later registry chance/weight conflicts.
 - Raw game paths in edits (the Advanced tier): allowed.

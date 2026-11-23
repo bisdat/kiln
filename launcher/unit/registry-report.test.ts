@@ -14,6 +14,19 @@ describe("untrusted registry report", () => {
     expect(r.baseOrigin).toBe("live");
   });
   test("empty is a valid report, not a missing file", () => expect(parse(emptyRegistryFixture()).empty).toBe(true));
+  test("entry outcomes retain bounded Kiln provenance and distinguish pending intent from applied visibility", () => {
+    const r = parse({ ...emptyRegistryFixture(),
+      added: [{ registry: "items", id: "maker:logs", state: "pendingWorld", mod: "maker", source: "content/entries.json", like: "game:wood", base: "game:wood", address: "0xDEADBEEF" }],
+      removed: [{ registry: "loot", id: "game:wood", state: "disabled", mod: "hide", source: "content/hide.json", reason: "hidden by hide" }],
+      counts: { fields: 0, conflicts: 0, refused: 0, added: 1, removed: 1 },
+    });
+    expect(r.entries[0]).toMatchObject({ state: "pendingWorld", owner: "maker", source: "content/entries.json" });
+    expect(r.entries[1]).toMatchObject({ state: "disabled", owner: "hide", reason: "hidden by hide" });
+    expect(JSON.stringify(r)).not.toContain("DEADBEEF");
+    const future = parse({ ...emptyRegistryFixture(), added: [{ registry: "items", id: "maker:logs", state: "future", mod: "x".repeat(10000) }] });
+    expect(future.entries[0].state).toBe("");
+    expect(future.entries[0].owner.length).toBeLessThanOrEqual(REPORT_LIMITS.text + 1);
+  });
   test("refusals retain RestartRequired and Unproven reasons", () => {
     expect(parse(registryFixture()).refused.map(x => x.reason)).toEqual(registryFixture().refused.map(x => x.reason));
   });

@@ -30,6 +30,8 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
     std::erase(name, '-');
     json body = {{"guid", guid}, {"name", name}, {"base", base->second}, {"registryId", ref.id},
                  {"registryKind", ref.registry}, {"registryFields", json::object()}};
+    std::set<std::string> dependencies;
+    if (!d.like.starts_with("game:")) dependencies.insert(ref.registry + "|" + d.like);
     const auto* spec = in.schema->registry(ref.registry);
     if (!spec) return fail("unknown registry " + ref.registry);
     for (const auto& [field, value] : d.values) {
@@ -59,6 +61,7 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
                     auto found = in.ids.find("items|" + item->t);
                     if (found == in.ids.end() || found->second.empty()) return fail("item " + item->t + " has no definition GUID");
                     out["item"] = found->second;
+                    if (!item->t.starts_with("game:")) dependencies.insert("items|" + item->t);
                 } else if (list[0] == 'i' && category && category->kind == registry::Value::Text) {
                     const auto found = in.nums.find("inputCategories|" + category->t);
                     if (found == in.nums.end() || !found->second) return fail("input category " + category->t + " is unknown");
@@ -74,6 +77,7 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
         // Recipe construction already owns these lists/values, including during early registration before RL is populated.
         for (const char* field : {"inputs", "outputs", "duration", "unlock"}) body["registryFields"].erase(field);
     }
+    if (!dependencies.empty()) body["registryDependencies"] = dependencies;
     return body;
 }
 
@@ -120,7 +124,8 @@ void registry_entries_prepare(RegistryLive* target) {
             else bodies[ref] = std::move(body);
         }
         if (failures.empty()) {
-            for (const auto& [ref, body] : bodies) {
+            for (const auto& ref : in.result.added) {
+                const auto& body = bodies.at(ref); // stage order, so a clone's like entry is queued before its dependents
                 if (defined.count(ref)) continue;
                 std::string why;
                 if (!in.define_entry || !in.define_entry(ref, body, &why))
@@ -131,6 +136,7 @@ void registry_entries_prepare(RegistryLive* target) {
         if (failures.empty()) { in.entry_bodies = std::move(bodies); break; }
         for (const auto& [ref, why] : failures) refuse_definition(in, ref, why);
         in.result = registry::compose(*in.schema, in.base, in.old, in.mods);
+        for (const auto& [ref, field] : in.boot_fields) in.result.fields[ref] = field;
         in.result.refused.insert(in.result.refused.begin(), in.pre_refused.begin(), in.pre_refused.end());
         for (auto it = defined.begin(); it != defined.end();) {
             if (in.result.definitions.count(*it)) { ++it; continue; }

@@ -145,16 +145,27 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     }
     doc["refused"] = std::move(refused);
 
-    auto entries = [&](const std::vector<EntryRef>& list) {
+    auto entries = [&](const std::vector<EntryRef>& list, bool adding) {
         json a = json::array();
         for (const EntryRef& e : list) {
             if (a.size() >= caps.entries) break;
-            a.push_back({{"registry", e.registry}, {"id", e.id}});
+            json row = {{"registry", e.registry}, {"id", e.id},
+                {"state", meta.world_load ? (adding ? "registered" : e.registry == "loot" ? "disabled" : "hidden") : "pendingWorld"}};
+            if (adding) {
+                if (const auto d = r.definitions.find(e); d != r.definitions.end()) {
+                    row["mod"] = d->second.mod; row["source"] = d->second.source; row["n"] = d->second.n;
+                    row["like"] = d->second.like; row["base"] = d->second.base;
+                }
+            } else if (const auto removal = r.removals.find(e); removal != r.removals.end()) {
+                row["mod"] = removal->second.mod; row["source"] = removal->second.source;
+                row["n"] = removal->second.n; row["reason"] = removal->second.reason;
+            }
+            a.push_back(std::move(row));
         }
         return a;
     };
-    doc["added"] = entries(r.added);
-    doc["removed"] = entries(r.removed);
+    doc["added"] = entries(r.added, true);
+    doc["removed"] = entries(r.removed, false);
 
     doc["counts"] = {{"fields", r.fields.size()}, {"conflicts", r.lines.size()}, {"refused", r.refused.size()}, {"added", r.added.size()}, {"removed", r.removed.size()}};
     doc["truncated"] = {{"fields", r.fields.size() - doc["fields"].size()},

@@ -1418,9 +1418,22 @@ static State base_state(const BaseModel& base) {
     return s;
 }
 
-std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base) {
+std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base, const Result* entries) {
     auto prepared = std::make_shared<PreparedBase>();
     prepared->state = base_state(base);
+    if (entries) {
+        for (const auto& [ref, definition] : entries->definitions) {
+            if (prepared->state.entry(ref.registry, ref.id)) continue;
+            EntryState entry; entry.id = ref.id; entry.added = true; entry.like = definition.like;
+            entry.base = definition.values; entry.traits = definition.traits;
+            prepared->state.add_entry(ref.registry, std::move(entry));
+        }
+        for (const auto& ref : entries->removed) if (auto* entry = prepared->state.entry(ref.registry, ref.id)) {
+            entry->removed = true;
+            const auto removal = entries->removals.find(ref);
+            entry->removed_by = removal == entries->removals.end() ? "the reference check" : removal->second.mod;
+        }
+    }
     return prepared;
 }
 

@@ -355,6 +355,17 @@ void full_live_base_uses_cache(const std::string& dir) {
     check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "41",
           "changed resource bytes invalidate the full-model cache");
 }
+void entry_backend_admission_and_inherited_reads(const std::string& dir) {
+    TreeView view = world(); Files files;
+    auto env = env_of(&view, &files, dir, &no_sections);
+    env.entry_support = [](const auto&, bool, auto*) { return true; };
+    env.data = [](const Schema& schema) { return stage::read_sections("late", "1", {{"content/entries.json", R"({"registry":{"add":[{"registry":"items","entry":"add","id":"late:plank","like":"game:plank"}],"alter":[{"registry":"recipes","entry":"remove","select":"game:craft_planks"},{"registry":"loot","entry":"remove","select":"game:plank"}]}})"}}, schema); };
+    stage::Runner runner(std::move(env)); runner.run({}); runner.finish({});
+    const auto report = json::parse(files.report);
+    check(report["added"].size() == 1 && report["removed"].size() == 2 && report["refused"].empty(), "the installed entry backend admits supported GameStart operations");
+    std::string value;
+    check(runner.read(2, "items", "late:plank", "maxStack", &value) == KILN_OK && value == "20", "stage resolved reads expose inherited fields of a new stable id");
+}
 void cache_without_entry_metadata_is_rejected(const std::string& dir) {
     TreeView first = world(); Files files;
     auto env = env_of(&first, &files, dir, &items_only); env.prepare_live = true;
@@ -816,6 +827,7 @@ int main(int argc, char** argv) {
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
         {"P2 cache_without_entry_metadata_is_rejected", [&] { cache_without_entry_metadata_is_rejected(dir); }},
+        {"P2 entry_backend_admission_and_inherited_reads", [&] { entry_backend_admission_and_inherited_reads(dir); }},
         {"P2 full_live_cache_keeps_boot_targets", [&] { full_live_cache_keeps_boot_targets(dir); }},
         {"P2 lazy_base_waits_for_live_handoff", [&] { lazy_base_waits_for_live_handoff(dir); }},
         {"P2 lazy_base_keeps_pre_patch_resource_bytes", [&] { lazy_base_keeps_pre_patch_resource_bytes(dir); }},

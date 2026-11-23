@@ -742,6 +742,7 @@ struct Def {
     json fields = json::object();
     std::string registry_id;               // Kiln-internal stable entry identity, retained by sync/placeholders
     json registry_fields = json::object(); // Kiln fields, translated before publishing each private clone
+    std::vector<std::string> registry_dependencies; // stable identities that must register before this definition
     json kitbash = json::object();  // items: reference keys (model, icon, perks, weaponType, refs, ...): refs.cpp
     json distribution = json::object();  // items: loot / drops / knowledge (distribution.cpp)
     std::vector<StackSpec> inputs, outputs;
@@ -869,6 +870,26 @@ struct WorldState {
     bool find_late_said = false; // ... and the one for an item defined while this world runs
     size_t find_items = 0;       // items mods defined when that line went out
 };
+bool registry_dependencies_ready(const Def& definition, const WorldState& world, std::string* why) {
+    std::lock_guard lock(store_mutex());
+    for (const auto& dependency : definition.registry_dependencies) {
+        const auto bar = dependency.find('|');
+        if (bar == std::string::npos) return *why = "a registry dependency is malformed", false;
+        const uint32_t kind = dependency.substr(0, bar) == "items" ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES;
+        const auto found = std::find_if(g_defs.begin(), g_defs.end(), [&](const auto& candidate) {
+            return candidate->kind == kind && candidate->registry_id == dependency.substr(bar + 1);
+        });
+        if (found == g_defs.end()) return *why = "dependency " + dependency + " is not defined", false;
+        const auto& parent = **found;
+        const bool registered = kind == KILN_CONTENT_ITEMS ? world.items.count(parent.id) != 0 : world.recipes.count(parent.id) != 0;
+        if (!registered || !parent.error.empty()) {
+            const auto reason = parent.error.empty() ? "not registered in this world" : parent.error;
+            *why = "dependency " + dependency + " refused: " + reason.substr(0, 700);
+            return false;
+        }
+    }
+    return true;
+}
 WorldState g_ws[KILN_WORLD_KINDS];
 std::mutex g_ui_mu;  // the recipe-UI hook reads the client / server state from the UI thread
 
@@ -1741,6 +1762,8 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
             fail_once(ws, kind, d, d.lab_refuse);
             continue;
         }
+        std::string dependency;
+        if (!registry_dependencies_ready(d, ws, &dependency)) { fail_once(ws, kind, d, dependency); continue; }
         uintptr_t clone = 0;
         {
             std::lock_guard lock(store_mutex());
@@ -1799,6 +1822,7 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
             continue;
         }
         ws.items[d.id] = clone;
+        d.error.clear();
         build_names(ws);
         ws.names[lower(d.name)] = NameRec{d.id, {}, clone};
         std::memcpy(ws.names[lower(d.name)].guid, d.guid, 16);
@@ -1826,6 +1850,8 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
                 fail_once(ws, kind, d, d.lab_refuse);
                 continue;
             }
+            std::string dependency;
+            if (!registry_dependencies_ready(d, ws, &dependency)) { fail_once(ws, kind, d, dependency); continue; }
             uintptr_t info = 0;
             {
                 std::lock_guard lock(store_mutex());
@@ -1864,12 +1890,13 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
                 }
                 std::lock_guard lock(g_ui_mu);
                 ws.recipes[d.id] = info;
+                d.error.clear();
                 if (active) add_kc_entry(KILN_CONTENT_RECIPES, d, info);
                 ++added_recipes;
             }
             // the workshop list: listed while the definition's owner is there
             auto lit = ws.listed.find(d.id);
-            const bool want = !d.orphan && !std::atomic_load(&g_visibility)->recipes.count(d.id);
+            const bool want = !d.orphan; // registry visibility owns list layers; never mutate its compacted view here
             if (lit != ws.listed.end() && (!want || lit->second != info || ws.recipe_ws[d.id] != wid)) {
                 if (const uintptr_t arr = ws_array(ws.rreg, ws.recipe_ws[d.id])) ws_swap(arr, lit->second, 0);
                 std::lock_guard lock(g_ui_mu);
@@ -4241,6 +4268,19 @@ extern "C" __declspec(dllexport) void kc_nc_set_texts(uint32_t tag, const char* 
     if (tag && json && len) set_texts(tag, cm_texts(std::string(json, len)));
 }
 
+bool nc_registry_registered(uint32_t kind, const std::string& id, std::string* why) {
+    std::lock_guard lock(store_mutex());
+    const uint32_t world = active_kind();
+    if (world >= KILN_WORLD_KINDS || !active_world()) return *why = "entry registration waits for a world", false;
+    for (const auto& definition : g_defs) {
+        if (definition->kind != kind || definition->registry_id != id) continue;
+        const auto& registered = kind == KILN_CONTENT_ITEMS ? g_ws[world].items : g_ws[world].recipes;
+        if (definition->error.empty() && registered.count(definition->id)) return true;
+        return *why = definition->error.empty() ? "entry did not register in this world" : definition->error, false;
+    }
+    return *why = "entry has no queued content definition", false;
+}
+
 void nc_registry_record(uint32_t kind, const std::string& id, const std::string& fields_json) {
     std::lock_guard lock(store_mutex());
     const auto fields = json::parse(fields_json, nullptr, false);
@@ -4257,30 +4297,60 @@ void nc_registry_record(uint32_t kind, const std::string& id, const std::string&
 bool nc_registry_supports(const std::string& registry, bool add, std::string* why) {
     const bool client = g_api && g_api->side() == KILN_SIDE_CLIENT;
     if (!N.on || !layouts()) return *why = "content definitions are unavailable on this build", false;
-    if (add && (registry == "items" || registry == "recipes")) return true;
+    if (add && (registry == "items" || (registry == "recipes" && E.recipes))) return true;
     if (!add && registry == "loot" && N.loot) return true;
     if (!add && registry == "recipes" && E.recipes && (!client || N.recipe_ui)) return true;
     if (!add && registry == "items" && N.loot && E.recipes && E.drops && (!client || N.recipe_ui)) return true;
     return *why = registry + (add ? " add" : " remove") + " has no complete visibility backend on this build", false;
 }
 
-namespace { KilnOwner g_visibility_owner = 0; }
+namespace {
+KilnOwner g_visibility_owner = 0;
+std::shared_ptr<const registry::Visibility> g_pending_visibility;
+std::set<uintptr_t> g_visibility_slots;
+uintptr_t g_visibility_world = 0;
+uint32_t g_visibility_session = 0;
+}
 void nc_registry_visibility(std::shared_ptr<const registry::Visibility> visibility) {
     std::lock_guard lock(store_mutex());
-    const auto before = std::atomic_load(&g_visibility);
-    if (before->items == visibility->items && before->recipes == visibility->recipes && before->loot == visibility->loot) return;
+    // A private desired view: hooks keep the last verified view until every workshop write lands.
+    // Rebuild the layers over their original values, not an already compacted list.
     if (g_visibility_owner) store_drop_owner(g_visibility_owner);
-    std::atomic_store(&g_visibility, std::move(visibility));
-    g_version.fetch_add(1);
+    const auto before = std::atomic_load(&g_visibility);
+    const bool same = before->items == visibility->items && before->recipes == visibility->recipes && before->loot == visibility->loot;
+    g_pending_visibility = same ? before : std::move(visibility); // unrelated field commits must not invalidate immutable hook arrays
+}
+
+void nc_registry_publish_visibility() {
+    std::lock_guard lock(store_mutex());
+    if (!g_pending_visibility) return;
+    std::atomic_store(&g_visibility, std::move(g_pending_visibility)); // hook caches key the visibility generation
+}
+
+std::string nc_registry_verify_visibility(const std::vector<uintptr_t>& unwritten) {
+    std::lock_guard lock(store_mutex());
+    if (!g_pending_visibility || g_pending_visibility->recipes.empty()) return {};
+    for (const auto address : g_visibility_slots) {
+        Slot slot;
+        if (!store_slot_copy(address, &slot)) continue;
+        if (std::find(unwritten.begin(), unwritten.end(), address) != unwritten.end()) return "recipe visibility write failed; removal was not applied";
+        uint8_t now[kSlotBytes]{};
+        if (slot.foreign || !rd(address, now, slot.n) || std::memcmp(now, slot.current, slot.n) != 0)
+            return "another writer changed a recipe visibility slot; removal was not applied";
+    }
+    return {};
 }
 
 bool nc_registry_apply_visibility(std::string* why) {
     std::lock_guard lock(store_mutex());
-    const auto visibility = std::atomic_load(&g_visibility);
+    const auto visibility = g_pending_visibility ? g_pending_visibility : std::atomic_load(&g_visibility);
     if (visibility->recipes.empty()) return true;
     const uint32_t kind = active_kind();
     if (kind >= KILN_WORLD_KINDS || !active_world()) return *why = "recipe visibility waits for a world", false;
     const auto& ws = g_ws[kind];
+    if (g_visibility_world != ws.world || g_visibility_session != ws.session) {
+        g_visibility_slots.clear(); g_visibility_world = ws.world; g_visibility_session = ws.session;
+    }
     if (!ws.rreg || !recipes_loaded(ws.rreg)) return *why = "recipe visibility waits for the world's recipe lists", false;
     std::set<uintptr_t> lists;
     for (const auto id : visibility->recipes) {
@@ -4298,9 +4368,10 @@ bool nc_registry_apply_visibility(std::string* why) {
     uint32_t ordinal = 0;
     for (const auto list : lists) {
         uint16_t count = 0;
-        if (!rdv(list + N.ws_count, count) || count > N.ws_max) return *why = "recipe visibility list is unreadable", false;
+        if (!store_effective(list + N.ws_count, 2, reinterpret_cast<uint8_t*>(&count)) || count > N.ws_max) return *why = "recipe visibility list is unreadable", false;
         std::vector<uint64_t> before(count);
-        if (count && !rd(list, before.data(), count * sizeof(uint64_t))) return *why = "recipe visibility list is unreadable", false;
+        for (size_t i = 0; i < count; ++i)
+            if (!store_effective(list + i * 8, 8, reinterpret_cast<uint8_t*>(&before[i]))) return *why = "recipe visibility list is unreadable", false;
         std::map<uintptr_t, uint32_t> ids;
         for (const auto recipe : before) {
             uint32_t id = 0;
@@ -4314,10 +4385,12 @@ bool nc_registry_apply_visibility(std::string* why) {
         for (size_t i = 0; i < count; ++i) {
             if (after[i] == before[i]) continue;
             uint8_t bytes[8]; std::memcpy(bytes, &after[i], 8);
+            g_visibility_slots.insert(list + i * 8);
             if (!store_put(g_visibility_owner, registry_seq(0xFFF00000u + ++ordinal), KILN_CONTENT_RECIPES, 0, -1, -1,
                            list + i * 8, 8, bytes, "registry hidden recipes")) return *why = "recipe visibility list could not be layered", false;
         }
         uint8_t bytes[2]; std::memcpy(bytes, &remaining, 2);
+        g_visibility_slots.insert(list + N.ws_count);
         if (!store_put(g_visibility_owner, registry_seq(0xFFF00000u + ++ordinal), KILN_CONTENT_RECIPES, 0, -1, -1,
                        list + N.ws_count, 2, bytes, "registry hidden recipes")) return *why = "recipe visibility count could not be layered", false;
     }
@@ -4480,6 +4553,13 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
         if (d->registry_id.find(':') == std::string::npos || (!d->mod.empty() && d->mod != mod))
             return fail("registryId does not belong to the definition's mod");
         d->registry_fields = j["registryFields"];
+        if (j.contains("registryDependencies")) {
+            if (!j["registryDependencies"].is_array() || j["registryDependencies"].size() > 4096) return fail("registryDependencies is a bounded list of stable identities");
+            for (const auto& dependency : j["registryDependencies"]) {
+                if (!dependency.is_string()) return fail("registryDependencies contains a non-identity");
+                d->registry_dependencies.push_back(dependency.get<std::string>());
+            }
+        }
     }
     d->source = source;
     d->pack = pack;

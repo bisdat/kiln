@@ -40,5 +40,6 @@ Selectors ask for these with `has` / `hasNot`.
 ## Entries
 
 - Add (stage add, id `<your mod id>:<name>`): yes.
-- Remove (hidden): A removed recipe is taken out of every station's list.
+- Add requires GameStart and an explicit present Kiln `like` id; clone chains end at a game entry. Kiln retains the stable identity and pins the structural base install-wide. Use a new id for an incompatible base.
+- Remove (hidden): GameStart only. Hides the recipe from station lists and the all-recipes/crafting view. Keeps the recipe record, id lookup and already-running crafts.
 - Raw game paths in edits (the Advanced tier): allowed.

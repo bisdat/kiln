@@ -14,6 +14,27 @@ Owner revocation removes queued work and callbacks. Already-taken start-time edi
 Callbacks already in flight are not waited for; their function and user state must remain valid until they return.
 A faulted stage turn is dropped; a fault in either callback kind removes its subscription.
 
+### GameStart entries
+
+The stage supports `items`/`recipes` add and `items`/`recipes`/`loot` remove; `loot` add and `drops`/`balance` entry
+operations are unsupported. C# uses `RegistryStage.Add` with typed `AddLike` extensions, and typed `Remove(pattern)` in
+Alter/Final. Each addition clones a present Kiln `like` chain, with stable identity, inherited fields and checked overrides.
+Definitions register through the existing content path; per-world registration failures refuse dependent additions too.
+
+Removal retains game records and id lookup, never deletes saves or already-owned copies. Removed items remain usable in
+inventory, equipped slots and containers. Recipe removal hides station/all-recipes views; loot removal filters random-loot
+candidates without changing direct drops. Item removal also hides dependent recipes and disables affected physical drop
+slots (`chance=0`, `weight=0`, no resize). Unproven required drop/recipe rows, unsafe all-zero groups or failed visibility
+bindings refuse the item removal whole, not just one exclusion path. Later registry chance/weight conflicts cannot reactivate
+removed-item slots. Current build records keep drop rows unproven, so item removal is explicitly refused on those builds.
+
+GameStart intent is retained until restart, even across code-owner retirement and changed/deleted pack entry operations.
+Kiln pins each mod/id/registry's GUID and terminal game-base GUID in `kiln/data/registry/entry-compat.json`, outside per-build
+caches and saves. Incompatible id reuse, corrupt records or failed atomic storage refuse the affected definition. MissingContent
+persists flattened effective item definitions and restores the same identity without missing clone ancestors, recipes or
+distribution. Returning mods adopt that identity; restarting without a removing mod restores original game visibility.
+The [entry guide](../modding/registries/README.md#entry-add-and-remove-gamestart-only) documents the exact refusal and lifetime rules.
+
 ## Native live changes: kiln.registry.live v1
 
 Since mod API **0.2.17**, this is a separate 56-byte table, not an extension of the stage table. Its header is
@@ -61,8 +82,10 @@ another. Native retirement only marks an owner dead; live layers are removed on 
 publication. No game calls run on the owner-retiring notification thread.
 
 A later entry point refuses each restart-only field with `RestartRequired`; it does not silently alter boot data or
-quietly discard unrelated mapped live edits. Entry add/remove and raw game paths are refused by this stable live API;
-the existing Advanced `Content.*` and raw paths keep their previous behavior.
+quietly discard unrelated mapped live edits. Entry add/remove are GameStart-only; later requests report `RestartRequired`.
+Automatic later passes keep unrelated valid field edits, but a Manual draft containing an entry-operation refusal commits
+none of its valid fields. Raw game paths remain refused by this stable live API; the existing Advanced `Content.*` and raw
+paths keep their previous behavior.
 
 ### Results, safety, reports and bounds
 
@@ -73,8 +96,10 @@ cannot take effect uses the result outcome. Mod load, world load and hot reload 
 stage: a selected entry that cannot take an edit (an exclusive conflict, an entry missing in this world, a config it
 lacks, an inexact whole-number value) is refused alone and counted, the rest applies, and the result is Applied with
 `refused > 0` and the first reason; an entry refused at binding is left out for that world only. A **Manual** transaction
-is all-or-nothing: a binding or evaluation refusal of any entry takes the whole candidate back. A candidate's own failed
-write takes it back too; an unproved take-back is **Unverified**, not success.
+has two refusal boundaries: any entry-operation refusal commits none of its valid fields, and a binding or evaluation
+refusal of any field takes the whole candidate back. Field-only parse/mapping/composition-conflict/restart-field refusals
+remain per edit: valid live fields in that draft may still commit. A candidate's own failed write takes it back too;
+an unproved take-back is **Unverified**, not success.
 
 Cost storage is checked per entry on the running build. A fractional mana/stamina cost for an entry with whole-number
 storage is refused, never rounded; float-config entries keep fractional values. A Manual transaction's result uses

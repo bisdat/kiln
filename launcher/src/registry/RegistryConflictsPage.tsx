@@ -62,7 +62,11 @@ function RegistryFor({ gameId }: { gameId: string }) {
             <WellInput label={t("registry.filter")} value={filter} onChange={e => setFilter(e.target.value.slice(0, 256))} onClear={() => setFilter("")} />
             <Rows key={filter} rows={fields} empty={filter ? t("registry.noMatch") : t("registry.noFields")} render={x => <FieldChain key={x.key} field={x} />} />
           </Card>
-          {r.entries.length > 0 && <Card title={t("registry.entries")}><Rows rows={r.entries} empty={t("registry.noEntries")} render={(x, i) => <p key={i}>{x.kind} · {x.registry} · {x.id}</p>} /></Card>}
+          {r.entries.length > 0 && <Card title={t("registry.entries")}><Rows rows={r.entries} empty={t("registry.noEntries")} render={(x, i) => <article key={i} className="registry-line">
+            <p>{x.kind} · {x.registry} · {x.id}{x.state && ` · ${x.state}`}</p>
+            {(x.owner || x.source) && <p className="k-mono">{[x.owner, x.source].filter(Boolean).join(" · ")}</p>}
+            {x.reason && <p>{x.reason}</p>}
+          </article>} /></Card>}
         </>}
       </>}
   </Page>;

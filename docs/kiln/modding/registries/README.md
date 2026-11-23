@@ -13,7 +13,8 @@ registry replaces raw data paths, not services.
 catalog (`Kiln.Registry.RegistrySchema`) and these pages ship, and the registry stage reads a data pack's `registry` section at
 start (fields that apply now or at world load also follow a pack's hot reload). Since mod API **0.2.17**, C# mods can author
 through `Mod.OnRegistry(RegistryContext)` and use explicit owner-scoped live changes through `Kiln.Registry.Registry.Change`.
-Entry add and remove remain refused, each with its reason in kiln.log and registry.json, until their back-end ships.
+GameStart entry operations add items/recipes through Kiln's content definitions and hide items/recipes/loot without deleting game records.
+Unsupported or unproven operations are refused with their reason in kiln.log and registry.json.
 Until a registry is marked stable its shape may change in any
 release; from API 1.0.0 the stable registries' contract is frozen (additive only).
 
@@ -99,7 +100,7 @@ pass's commits and authors the same point again on a later tick (the next tick f
 after ten tries it is logged as a fault with the real error. An exception from the author's own code is always a fault, a
 `KilnUnavailableException` from a read inside `OnRegistry` (an unmapped field, an entry without that config) included.
 `Select(pattern)` returns entries by Kiln id; list properties use the generated clear/append/remove/index APIs.
-All three passes are invoked even though entry creation is not yet exposed. Runtime points wait for the host tick;
+All three passes are invoked; entry operations are accepted only at GameStart. Runtime points wait for the host tick;
 native resources-ready callbacks never execute runtime authors inline. Layers from distinct declared points compose:
 for example, a WorldLoad append stacks on a retained GameStart append. Prefer absolute assignments or list replacement
 when the same intended value is authored at several points.
@@ -114,6 +115,70 @@ they return/report `RestartRequired` rather than silently applying them.
 Keep copied values, not contexts/entries/lists. Their operations fail with `RegistryContextException.Code` after return
 (`Closed`), unload (`Unloaded`), on another thread (`WrongThread`), or a world switch (`WorldChanged`). Metadata and copied
 results remain snapshots. A resolved `Registry.Read(view => ...)` frame is expiring and read-only.
+
+### Entry add and remove (GameStart only)
+
+| Registry | Add | Remove |
+|---|---|---|
+| `items` | `Items.AddLike(id, like, configure)` | Hide from random-loot candidates and recipes; disable direct-drop slots that name the item. |
+| `recipes` | `Recipes.AddLike(id, like, configure)` | Hide from station lists and the all-recipes/crafting view. |
+| `loot` | Not supported | `Loot.Remove(pattern)` excludes random-loot candidates; it does not remove the item, its recipes or direct drops. |
+| `drops`, `balance` | Not supported | Not supported; ordinary mapped field/list edits remain separate. |
+
+```csharp
+if (context.EntryPoint == RegistryEntryPoint.GameStart)
+{
+    registry.Add(view => view.Items.AddLike(new("my-mod:logs"), new("game:material_t1_wood_logs"),
+        item => item.MaxStack = 100));
+    registry.Alter(view => view.Loot.Remove("game:material_t1_wood_logs"));
+}
+```
+
+AddLike requires an explicit present Kiln `like` id; clone chains end at a game entry. A recipe inherits its base's station,
+inputs, outputs, duration and unlock rule. Configure uses the ordinary typed fields/lists, buffered as one add; a throwing
+configure publishes nothing. New ids belong to the bound mod, are lower case, and cannot use a game's clash suffix.
+Identity reuses Kiln's deterministic registry GUID rule; zero/colliding native ids are refused, never silently reminted.
+Later stages can read/select the added id and later field-only changes can target it. An unmapped explicit override or
+inexact whole-number config refuses the definition before its private clone is published. A native registration failure
+refuses the entry for that world and propagates its root reason to dependent definitions; process intent retries next world.
+
+**Removal hides; it never deletes.** Item and recipe records and id lookups stay intact. Already-owned removed items remain
+usable in inventory, equipped slots and containers, including after save/load. Removing a recipe does not cancel an existing
+crafting job. Existing game recipes needing or producing a removed item are hidden, not converted into input-free recipes.
+A new entry depending on a removed/refused entry is refused whole, to a fixed point. A field edit introducing a bad reference
+is refused for that target without dropping unrelated valid edits.
+
+Direct-drop arrays keep their physical slots and indices: removal layers set affected `chance` and `weight` to zero rather
+than resizing the list. Every required drop row and recipe dependency row must be proven on the running build; otherwise
+item removal is refused **whole**, with no partial loot/recipe hiding. In particular, `drop tables not proven on this build`
+means no item removal was applied. The current shipped build records leave the drop rows unproven. Missing/invalid group
+metadata, or removing the last safely spawnable stack in a selector group, also refuses the whole item removal. A later
+registry chance/weight edit cannot reactivate a disabled slot: removal wins and the conflicting edit is reported.
+
+These are process decisions, not world settings. ModLoad, WorldLoad, HotReload and Manual entry requests report
+`RestartRequired`; automatic later passes retain unrelated valid field edits. A **Manual draft containing any entry-operation
+refusal writes none of its valid field edits**. Field-only drafts keep the existing filtering behavior: parse, mapping,
+composition-conflict and restart-field refusals can coexist with accepted live field edits. A binding/evaluation refusal or
+the candidate's own failed write, however, rolls back the whole Manual candidate; a failed rollback is `Unverified`.
+A pack reload preserves the original GameStart adds/removes, including changed/deleted operations and deleted files, while
+reporting `RestartRequired` for changed entry intent. Live field reloads continue normally. A runtime owner retiring does not
+remove a committed GameStart definition; restart without the mod to change process intent.
+
+**Compatibility and missing mods.** Before publishing an addition Kiln pins its registry kind, stable GUID and terminal game
+base in the install-wide, Kiln-owned `kiln/data/registry/entry-compat.json`, keyed by mod id and Kiln entry id (one record across
+worlds). This is separate from per-build content caches and the game's own files/saves. Reusing an id with another structural
+base is refused; choose a new Kiln id instead. Corrupt/unwritable records fail closed per affected entry and are not pruned when
+a mod disappears. Definitions saved through Kiln.Content retain flattened canonical game bases and normalized effective fields.
+Without the adding mod, MissingContent restores the same item identity and shape without requiring missing clone ancestors;
+placeholder replay adds no recipes or distribution. Returning mods adopt that identity. Restart without a removing mod restores
+the game's original visibility; no save tombstone or equipment/storage migration is written.
+
+The report's added/removed rows include Kiln ids and author/source provenance. `pendingWorld` is intent, not a claim that native
+bytes changed; `registered`, `hidden` and `disabled` describe reconciled world outcomes. Refused entries are not also counted as successful
+additions/removals. Hidden recipes use compared store layers; failed/foreign visibility writes refuse the related removal
+rather than claiming an unapplied hide. Dedicated-server and synthetic-memory tests do not establish real-client menu behavior,
+already-equipped save round trips or multiplayer parity. Existing content synchronization/look-alike rules still apply; vanilla
+clients do not acquire Kiln registry views merely by joining a Kiln server.
 
 ### Explicit changes and ready
 
