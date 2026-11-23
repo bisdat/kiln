@@ -66,7 +66,7 @@ std::deque<Death> deaths;
 struct Return {
     KilnOwner owner = 0;
     uint64_t ticket = 0, join = 0, submitted = 0;
-    uint32_t slot = 0, target = 0, phase = 0, original_slots = 0;
+    uint32_t slot = 0, target = 0, phase = 0, original_slots = 0, reason = 0;
     std::string key, internal_key;
     KilnStorageReturnFn done = nullptr;
     void* user = nullptr;
@@ -333,7 +333,7 @@ bool build_bindings(const Access& a) {
     }
     return true;
 }
-void group_entries(std::vector<Entry>*);
+std::vector<Full> group_entries(std::vector<Entry>*);
 Return* return_for(const std::string& key) {
     for (auto& q : returns)
         if (q.internal_key == key)
@@ -341,7 +341,8 @@ Return* return_for(const std::string& key) {
     return nullptr;
 }
 bool freeze_return(Return& q, void* attrs, void* bind, EntityRef* entity, Entry* out) {
-    *out = entry_for(q.key, KIS_ENTRY_PARKED, std::max(q.original_slots, 64u), KIS_PARK_REQUESTED);
+    // the records keep the reason they were parked with (a held bag stays held while it is being returned)
+    *out = entry_for(q.key, KIS_ENTRY_PARKED, std::max(q.original_slots, 64u), q.reason);
     if (!freeze_holder(q.holder, attrs, bind, entity, out))
         return false;
     for (auto& r : out->records) {
@@ -1036,7 +1037,8 @@ bool slot_free(const Holder& h, uint32_t index) {
     return component_copy(api->server_world(), kHashInventory, h.pages[index / 8], slots, 96) &&
            slots[(index % 8) * 3] == 0 && slots[(index % 8) * 3 + 1] == 0 && slots[(index % 8) * 3 + 2] == 0;
 }
-void group_entries(std::vector<Entry>* entries) {
+std::vector<Full> group_entries(std::vector<Entry>* entries) {
+    auto full = bound_parked(entries);
     std::vector<Entry> out;
     for (auto& e : *entries) {
         auto found = std::find_if(out.begin(), out.end(), [&](const Entry& v) {
@@ -1054,6 +1056,23 @@ void group_entries(std::vector<Entry>* entries) {
         e.row.count = static_cast<uint32_t>(e.records.size());
     }
     *entries = std::move(out);
+    return full;
+}
+// Groups a player's entries under the per-key parked bound; records that no longer fit are quarantined (event).
+void settle(Player& p) {
+    for (const auto& f : group_entries(&p.entries)) {
+        model.event(KIS_EVENT_QUARANTINED, &p, f.key, 0, KIS_QUARANTINE_PARKED_FULL);
+        model.events.back().stacks = f.stacks;
+        model.events.back().items = f.items;
+        items_log(KILN_LOG_WARN, "player-storage: %s: parked storage full, %u stacks quarantined (slot %u)",
+                  f.key.c_str(), f.stacks, p.witness.slot);
+    }
+}
+uint32_t parked_reason(const Player& p, const std::string& key, uint32_t reason = 0) {
+    for (const auto& e : p.entries)
+        if (e.row.kind == KIS_ENTRY_PARKED && key == e.row.key)
+            reason = std::max(reason, e.row.reason);
+    return reason;
 }
 void finish_return(Return& q, Player* p, uint32_t status_code, const char* message) {
     q.result.status = status_code;
@@ -1104,7 +1123,7 @@ void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) 
             }
             p.holders.erase(q.internal_key);
             q.holder = {};
-            group_entries(&p.entries);
+            settle(p);
             if (q.all_moved && q.result.done < q.result.requested && step - q.submitted < 250)
                 q.phase = 0;
             else {
@@ -1132,6 +1151,7 @@ void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) 
             Entry keep = e;
             keep.records.clear();
             q.original_slots = std::max(q.original_slots, e.row.slots);
+            q.reason = std::max(q.reason, e.row.reason);
             for (auto record : e.records) {
                 if (inserted >= 64) {
                     keep.records.push_back(record);
@@ -1261,6 +1281,8 @@ bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t wh
     auto h = p.holders.find(key);
     if (h == p.holders.end())
         return true;
+    // a park never lowers a reason: live records that join a held bag become held with it
+    why = parked_reason(p, key, why);
     Entry e = entry_for(key, KIS_ENTRY_PARKED, h->second.slots, why);
     EntityRef ref{p.witness.player, 0, 0, 0, a.storage, nullptr};
     if (!freeze_holder(h->second, a.attributes, bindings.data(), &ref, &e)) {
@@ -1284,6 +1306,7 @@ bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t wh
         return false;
     }
     p.holders.erase(h);
+    settle(p);
     return true;
 }
 void post_body() {
@@ -1317,11 +1340,13 @@ void post_body() {
         bool had_holder = p.holders.count(q.key) != 0;
         if (!park_holder(a, p, q.key, q.reason, lock))
             return;
+        // Never lower a reason: an unload must not turn a held bag into one that restores by itself.
         for (auto& e : p.entries)
             if (q.key == e.row.key && e.row.kind == KIS_ENTRY_PARKED)
-                e.row.reason = q.reason;
+                e.row.reason = std::max(e.row.reason, q.reason);
+        settle(p);
         if (!had_holder)
-            model.event(KIS_EVENT_PARKED, &p, q.key, 0, q.reason);
+            model.event(KIS_EVENT_PARKED, &p, q.key, 0, parked_reason(p, q.key, q.reason));
     }
     for (auto& [slot, p] : model.players) {
         if (!model.build_ready(slot) || !model.bound())
@@ -1335,6 +1360,8 @@ void post_body() {
                 e.row.reason = KIS_PARK_UNREGISTERED;
                 model.event(KIS_EVENT_PARKED, &p, e.row.key, 0, KIS_PARK_UNREGISTERED);
             }
+        if (!p.build_pass_completed)
+            settle(p); // a live copy of an unregistered key joins that key's parked records
         if (!p.build_pass_completed)
             for (const auto& entry : p.entries)
                 if (entry.row.kind == KIS_ENTRY_PARKED) {
@@ -1416,7 +1443,9 @@ void post_body() {
                         record.reason = static_cast<uint8_t>(why);
                     part.records.push_back(record);
                     kept.push_back(std::move(part));
-                    if (e.row.kind != kind || e.row.reason != why)
+                    // one event when a record changes kind, or first finds its reason after the key registered
+                    if (e.row.kind != kind ||
+                        (e.row.reason == KIS_PARK_UNREGISTERED && why != KIS_PARK_UNREGISTERED))
                         model.event(kind == KIS_ENTRY_PARKED ? KIS_EVENT_PARKED : KIS_EVENT_QUARANTINED, &p, key, 0,
                                     why);
                 }
@@ -1453,7 +1482,7 @@ void post_body() {
             }
         }
         p.build_pass_completed = true;
-        group_entries(&p.entries);
+        settle(p);
     }
     return_post(a, lock);
 }

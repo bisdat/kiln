@@ -147,7 +147,13 @@ enum {
 
 /* KilnStorageEntry.reason of a KIS_ENTRY_PARKED entry; KilnStorageEvent.reason of KIS_EVENT_PARKED; park(reason).
  * Below KIS_PARK_HELD Kiln restores the records by itself when they can go back (the key registers, the storage has
- * room, the filter takes them). From KIS_PARK_HELD on they stay parked until unpark() or return_parked(). */
+ * room, the filter takes them). From KIS_PARK_HELD on they stay parked until unpark() or return_parked().
+ * A key has at most one PARKED entry of at most KIS_MAX_SLOTS records in distinct cells 0..63. When parked records of
+ * one key come together (a restore, an unregistered or shrunk storage, a held bag beside a live storage), the records
+ * of held entries come first, in entry and record order, then the others; the entry's reason is the highest one; a
+ * record keeps its cell when it is free, else takes the lowest free cell (slot and the record's first byte change);
+ * with no free cell it goes unchanged to the key's quarantine with KIS_QUARANTINE_PARKED_FULL. A park never lowers a
+ * reason; only unpark() releases held records. */
 enum {
     KIS_PARK_UNREGISTERED = 1, /* no loaded mod registered the key (or its owner went away while the player was on) */
     KIS_PARK_OVERFLOW = 2,     /* the slot is beyond the registration's slot count, or the cell was taken */
@@ -168,6 +174,7 @@ enum {
     KIS_QUARANTINE_SLOT = 3,         /* slot out of range for the record format, or two records for one slot */
     KIS_QUARANTINE_DECODE = 4,       /* the game's record reader refused the bytes */
     KIS_QUARANTINE_REBUILD = 5,      /* the game refused to create the item from the record */
+    KIS_QUARANTINE_PARKED_FULL = 6,  /* parked storage full: the key's parked entry holds KIS_MAX_SLOTS records */
 };
 
 /* KilnStorageEntry.refs / KilnStorageState.refs: a player's four reference slots (keen::EquipmentSlot RangedWeapon 12,
@@ -311,7 +318,7 @@ typedef struct KilnStorageEntry {
     uint32_t slots;            /* LIVE: the registration's slots; PARKED: the slots it had when it was parked */
     uint32_t first;            /* index of its first record */
     uint32_t count;            /* records */
-    uint32_t reason;           /* PARKED: KIS_PARK_* (a key may have one PARKED entry per reason); else 0 */
+    uint32_t reason;           /* PARKED: KIS_PARK_* (a key has at most one PARKED entry); else 0 */
     uint16_t refs[KIS_REF_COUNT]; /* LIVE: storage index per KIS_REF_*, KIS_REF_NONE */
 } KilnStorageEntry;
 

@@ -239,6 +239,90 @@ inline uint64_t entries_hash(const std::vector<Entry>& entries) {
     }
     return witness(bytes);
 }
+struct Full {
+    std::string key;
+    uint32_t stacks = 0, items = 0;
+};
+// One PARKED entry per key, at most KIS_MAX_SLOTS records in distinct cells (kiln_items_storage.h, park reasons):
+// held entries first, the highest reason, free cells kept, collisions to the lowest free cell, the rest unchanged to
+// the key's quarantine (KIS_QUARANTINE_PARKED_FULL). Other entries keep their order. Returns what went to quarantine.
+inline std::vector<Full> bound_parked(std::vector<Entry>* entries) {
+    std::vector<Full> full;
+    std::vector<Entry> out;
+    std::vector<bool> taken(entries->size(), false);
+    for (size_t i = 0; i < entries->size(); ++i) {
+        if (taken[i])
+            continue;
+        auto& head = (*entries)[i];
+        if (head.row.kind != KIS_ENTRY_PARKED) {
+            out.push_back(std::move(head));
+            continue;
+        }
+        std::vector<size_t> group;
+        for (size_t k = i; k < entries->size(); ++k) {
+            const auto& e = (*entries)[k];
+            if (!taken[k] && e.row.kind == KIS_ENTRY_PARKED && !std::strncmp(e.row.key, head.row.key, KIS_KEY_MAX)) {
+                taken[k] = true;
+                group.push_back(k);
+            }
+        }
+        std::stable_partition(group.begin(), group.end(),
+                              [&](size_t k) { return (*entries)[k].row.reason >= KIS_PARK_HELD; });
+        Entry merged;
+        merged.row = (*entries)[group.front()].row;
+        Entry overflow;
+        overflow.row = merged.row;
+        overflow.row.kind = KIS_ENTRY_QUARANTINE;
+        overflow.row.reason = 0;
+        std::fill(std::begin(overflow.row.refs), std::end(overflow.row.refs), uint16_t(KIS_REF_NONE));
+        uint32_t reason = 0, slots = 0;
+        std::array<bool, KIS_MAX_SLOTS> used{};
+        for (auto k : group) {
+            auto& e = (*entries)[k];
+            reason = std::max(reason, e.row.reason);
+            slots = std::max(slots, std::min<uint32_t>(e.row.slots, KIS_MAX_SLOTS));
+            for (const auto& r : e.records) {
+                uint32_t cell = r.slot;
+                if (cell >= KIS_MAX_SLOTS || used[cell]) {
+                    cell = 0;
+                    while (cell < KIS_MAX_SLOTS && used[cell])
+                        ++cell;
+                }
+                if (cell >= KIS_MAX_SLOTS) {
+                    auto kept = r;
+                    kept.reason = KIS_QUARANTINE_PARKED_FULL;
+                    overflow.records.push_back(kept);
+                    continue;
+                }
+                used[cell] = true;
+                auto placed = r;
+                if (placed.slot != cell) {
+                    placed.slot = static_cast<uint16_t>(cell);
+                    if (placed.length)
+                        placed.data[0] = static_cast<uint8_t>(cell);
+                }
+                slots = std::max(slots, cell + 1);
+                merged.records.push_back(placed);
+            }
+        }
+        merged.row.kind = KIS_ENTRY_PARKED;
+        merged.row.reason = reason;
+        merged.row.slots = std::max(slots, 1u);
+        merged.row.first = 0;
+        merged.row.count = static_cast<uint32_t>(merged.records.size());
+        out.push_back(std::move(merged));
+        if (!overflow.records.empty()) {
+            Full f{overflow.row.key, static_cast<uint32_t>(overflow.records.size()), 0};
+            for (const auto& r : overflow.records)
+                f.items += r.count;
+            full.push_back(std::move(f));
+            overflow.row.count = static_cast<uint32_t>(overflow.records.size());
+            out.push_back(std::move(overflow));
+        }
+    }
+    *entries = std::move(out);
+    return full;
+}
 struct Player {
     KilnStorageWitness witness{};
     uint64_t contents_hash = 0;
@@ -426,8 +510,10 @@ class Model {
         }
         if (std::count(used.begin(), used.end(), true) != d.record_count)
             return KILN_ERR_INVALID_ARGUMENT;
+        // The document as given: a bound that changed it shows as a change at the first capture.
+        p.contents_hash = entries_hash(entries);
+        bound_parked(&entries);
         p.entries = std::move(entries);
-        p.contents_hash = entries_hash(p.entries);
         p.restored = true;
         p.locked = d.flags & KIS_DOC_LOCKED;
         p.source = d.source;

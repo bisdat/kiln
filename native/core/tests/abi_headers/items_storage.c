@@ -231,8 +231,10 @@ KILN_TEST_ASSERT(KIS_EVENT_JOINED == 1 && KIS_EVENT_CAPTURED == 2 && KIS_EVENT_R
                      KIS_EVENT_BATCH == 9, "event kinds");
 KILN_TEST_ASSERT(KIS_EVENT_PAIRED == 1u && KIS_EVENT_LIVE == 2u, "event flags");
 /* persistence-only stage hints: never a raw event kind */
-KILN_TEST_ASSERT(KIS_STAGE_PARKED == 0x100u && KIS_STAGE_RESTORED == 0x101u && KIS_STAGE_PARKED > KIS_EVENT_BATCH &&
-                     KIS_STAGE_PARKED != KIS_EVENT_PARKED && KIS_STAGE_RESTORED != KIS_EVENT_RESTORED,
+KILN_TEST_ASSERT(KIS_STAGE_PARKED == 0x100u && KIS_STAGE_RESTORED == 0x101u &&
+                     (unsigned)KIS_STAGE_PARKED > (unsigned)KIS_EVENT_BATCH &&
+                     (unsigned)KIS_STAGE_PARKED != (unsigned)KIS_EVENT_PARKED &&
+                     (unsigned)KIS_STAGE_RESTORED != (unsigned)KIS_EVENT_RESTORED,
                  "stage hints");
 /* the two kiln.items values: past kiln.items' own (find flags 0x01-0x08, result status 0-9) */
 KILN_TEST_ASSERT(KILN_ITEMS_FIND_PLAYER_STORAGE == 0x10u &&
