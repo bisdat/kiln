@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 
 #include "../registry/boot_hooks.h"
 #include "../registry/schema_ir.h"
@@ -477,21 +478,138 @@ void worldload_snapshot_revoke(const std::string& dir) {
     publish(result, true);  // revocation does not discard already committed stage edits
     check(r.counts().edits != 0, "committed registry edits remain after subscriber revocation");
 }
+// Callback lifetime/replay: cancelled turns retain neither edits nor executable author state.
+void callback_cancellation_is_not_replayed(const std::string& dir, int mode) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t handle = 0; int calls = 0;
+    r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
+        ++calls;
+        if (s != Stage::Alter) return true;
+        check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":{"add":5}}]})",
+                       nullptr, nullptr, nullptr) == KILN_OK, "submit a valid turn before cancellation");
+        if (mode == 0) return false;
+        if (mode == 1) r.owner_gone(77);
+        else { std::thread retiring([&] { r.owner_gone(77); }); retiring.join(); }
+        return true;
+    }, &handle);
+    std::vector<ModInput> kept; BaseModel base;
+    r.set_live([&](const stage::LiveHandoff& h) { kept = *h.inputs; base = *h.base; });
+    r.run({}); r.finish({});
+    std::string value;
+    check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "20", "cancelled turn leaves the start value untouched");
+    check(calls == 2 && r.unsubscribe(handle) == KILN_ERR_NOT_FOUND, "fault/revoke removes the later final turn");
+    const auto replay = compose(generated_schema(), base, {}, kept);
+    const auto field = replay.fields.find({"items", "game:plank", "maxStack"});
+    check(field == replay.fields.end() || field->second.result == Value::integer(20), "faulted or revoked turns are absent from live replay");
+    for (const auto& mod : kept) {
+        check(!mod.code, "the handoff keeps no function into the author");
+        for (const auto& batch : mod.batches) check(batch.edits.empty(), "no cancelled callback edit was recorded");
+    }
+}
+
+void stage_cross_removal(const std::string& dir, bool revoke) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t first = 0, second = 0; std::vector<Stage> calls;
+    r.subscribe_stage(1, "oldmod", [&](Stage s, const View&) {
+        if (s == Stage::Alter) {
+            if (revoke) r.owner_gone(2);
+            else check(r.unsubscribe(second) == KILN_OK, "an earlier stage callback unsubscribes a later one");
+        }
+        return true;
+    }, &first);
+    r.subscribe_stage(2, "bigmod", [&](Stage s, const View&) {
+        calls.push_back(s);
+        if (s == Stage::Alter)
+            r.submit(2, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})", nullptr, nullptr, nullptr);
+        return true;
+    }, &second);
+    r.run({}); r.finish({});
+    check(calls == std::vector<Stage>{Stage::Add}, "a removed later subscriber gets neither alter nor final");
+    std::string value;
+    check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "20", "the skipped stage subscriber cannot write");
+}
+
+void stage_self_unsubscribe(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t handle = 0; std::vector<Stage> calls;
+    r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
+        calls.push_back(s);
+        if (s == Stage::Alter) {
+            check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":{"add":5}}]})", nullptr, nullptr, nullptr) == KILN_OK, "self-unsubscribing turn submits");
+            check(r.unsubscribe(handle) == KILN_OK, "a callback can unsubscribe itself");
+        }
+        return true;
+    }, &handle);
+    std::vector<ModInput> kept; BaseModel base;
+    r.set_live([&](const stage::LiveHandoff& h) { kept = *h.inputs; base = *h.base; });
+    r.run({}); r.finish({});
+    check(calls == std::vector<Stage>{Stage::Add, Stage::Alter}, "self-unsubscribe removes final but does not revoke the in-flight turn");
+    std::string value;
+    check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "25", "the successful in-flight turn stays");
+    const auto replay = compose(generated_schema(), base, {}, kept);
+    check(replay.fields.at({"items", "game:plank", "maxStack"}).result == Value::integer(25), "self-unsubscribe retains one successful replay, not zero or two");
+}
+
+void core_dead_admission_all(const std::string& dir) {
+    TreeView view = world(); Files files;
+    auto env = env_of(&view, &files, dir, &no_sections);
+    env.owner_alive = [](uint64_t) { return false; };
+    stage::Runner r(std::move(env));
+    uint64_t h = 0; uint32_t accepted = 99;
+    check(r.subscribe_stage(77, "bigmod", [](Stage, const View&) { return true; }, &h) == KILN_ERR_REVOKED, "stage admission checks the core before notification");
+    check(r.subscribe_ready(77, [](stage::Phase, uint64_t) { return true; }, &h) == KILN_ERR_REVOKED, "ready admission checks the core before notification");
+    check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[]})", &accepted, nullptr, nullptr) == KILN_ERR_REVOKED && accepted == 0,
+          "submit admission checks the core before notification");
+}
+
+void cancelled_turn_keeps_other_owner_refusal(const std::string& dir) {
+    for (bool revoke : {false, true}) {
+        TreeView view = world(); Files files;
+        stage::Runner r(env_of(&view, &files, dir, &no_sections));
+        uint64_t handle = 0;
+        r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
+            if (s != Stage::Alter) return true;
+            check(r.submit(78, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","source":"other-owner","edits":[{"registry":"items","select":"game:plank","field":"notAField","op":99}]})", nullptr, nullptr, nullptr) == KILN_OK,
+                  "a different live owner of the same mod submits a refusal");
+            if (revoke) r.owner_gone(77);
+            return revoke;
+        }, &handle);
+        r.run({}); r.finish({});
+        check(files.report.find("other-owner") != std::string::npos && files.report.find("notAField") != std::string::npos,
+              "fault and revoke both preserve the other live owner's refusal diagnostics");
+    }
+}
+
 void callback_batches_survive_handoff(const std::string& dir) {
     TreeView view = world(); Files files;
     stage::Runner r(env_of(&view, &files, dir, &no_sections));
-    uint64_t h = 0;
+    uint64_t h = 0; int calls = 0;
     r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
-        if (s == Stage::Alter)
-            check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})", nullptr, nullptr, nullptr) == KILN_OK, "callback submit");
+        if (s == Stage::Alter) {
+            ++calls;
+            check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":{"add":5}}]})", nullptr, nullptr, nullptr) == KILN_OK, "callback submit");
+        }
         return true;
     }, &h);
     std::vector<ModInput> kept; BaseModel base;
     r.set_live([&](const stage::LiveHandoff& x) { kept = *x.inputs; base = *x.base; });
     r.run({}); r.finish({});
-    const Result replay = compose(generated_schema(), base, {}, kept);
-    const auto it = replay.fields.find({"items", "game:plank", "maxStack"});
-    check(it != replay.fields.end() && it->second.result == Value::integer(99), "a live recompose must retain the successful stage callback's edits");
+    std::string value;
+    check(calls == 1 && r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "25", "start applies the relative callback once");
+    size_t edits = 0;
+    for (const auto& mod : kept) {
+        check(!mod.code, "the successful handoff retains no author callback");
+        for (const auto& batch : mod.batches) edits += batch.edits.size();
+    }
+    check(edits == 1, "exactly one successful callback edit is recorded");
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        const Result replay = compose(generated_schema(), base, {}, kept);
+        const auto it = replay.fields.find({"items", "game:plank", "maxStack"});
+        check(it != replay.fields.end() && it->second.result == Value::integer(25), "replay applies the relative callback once without accumulating it");
+    }
 }
 }  // namespace
 
@@ -518,7 +636,15 @@ int main(int argc, char** argv) {
         {"P2 owner_notification_bridge", [&] { owner_notification_bridge(dir); }},
         {"P2 core_dead_before_notification", [&] { core_dead_before_notification(dir); }},
         {"P2 worldload_snapshot_revoke", [&] { worldload_snapshot_revoke(dir); }},
-        {"P2 callback_batches_survive_handoff", [&] { callback_batches_survive_handoff(dir); }}};
+        {"P2 callback_batches_survive_handoff", [&] { callback_batches_survive_handoff(dir); }},
+        {"P2 faulted_callback_not_replayed", [&] { callback_cancellation_is_not_replayed(dir, 0); }},
+        {"P2 revoked_callback_not_replayed", [&] { callback_cancellation_is_not_replayed(dir, 1); }},
+        {"P2 concurrent_revoke_not_replayed", [&] { callback_cancellation_is_not_replayed(dir, 2); }},
+        {"P2 stage_cross_unsubscribe", [&] { stage_cross_removal(dir, false); }},
+        {"P2 stage_cross_revoke", [&] { stage_cross_removal(dir, true); }},
+        {"P2 stage_self_unsubscribe", [&] { stage_self_unsubscribe(dir); }},
+        {"P2 core_dead_admission_all", [&] { core_dead_admission_all(dir); }},
+        {"P2 cancelled_turn_keeps_other_owner_refusal", [&] { cancelled_turn_keeps_other_owner_refusal(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
