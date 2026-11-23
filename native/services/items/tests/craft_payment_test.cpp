@@ -153,6 +153,18 @@ int main() {
     reset();fixture::fail_take=true;
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==4); // caller must rollback this transaction
     fixture::fail_take=false;
+    // #132: a craft at a crafting station (the decoration table's menu sends the same CraftRecipe; kiln.gameplay's craft
+    // hook names the station for the call) pays from the player's linked source the same way, all or nothing
+    reset();t_craft_station=3000;
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0 && fixture::paid==std::vector<uint32_t>({1,2000}));
+    // the station being crafted at is never a source, even when a mod linked it
+    fixture::inventory={{1,{{7,1}}},{2000,{{7,0}}},{3000,{{7,5}}}};fixture::paid.clear();code=99;
+    uint64_t station_link=0;KilnCraftSourceRequest at_station{sizeof at_station,1,3000,0,0,0,nullptr};
+    CHECK(t_add_source(10,&at_station,&station_link)==KILN_OK && station_link!=0);
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+    t_craft_station=0;
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0 && fixture::paid==std::vector<uint32_t>({1,3000}));
+    g_registered.remove(10,station_link);
     reset();g_registered.remove(10,handle);
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
     std::printf("craft payment: %d checks, %d failed\n",checks,failed);return failed?1:0;

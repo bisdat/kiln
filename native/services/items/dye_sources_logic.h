@@ -33,6 +33,16 @@ inline void merge(std::vector<View>* rows,const std::vector<Stock>& stock){
   else {put(it->data(),0,token(s.item));put(it->data(),16,available(count(*it),s.count));}
  }
 }
+// The game's palette order (builder C 0xd14ce0, GitHub #132): its empty "no dye" row first (item 0), then every row by
+// count, most first (the dyes the player has), then the palettes the player has none of (count 0) in the game's own
+// order. After merge() a source dye still sits where the game put it (among the ones the player has none of) or at the
+// end; this puts it with the dyes the player has, by its count with the sources', as the game orders a dye it sees in
+// the bag. Stable: equal counts and the count-0 rows keep the game's order.
+inline void order_with_sources(std::vector<View>* rows){
+ auto first=rows->begin();
+ while(first!=rows->end()&&id(*first)==0)++first;
+ std::stable_sort(first,rows->end(),[](const View& a,const View& b){return count(a)>count(b);});
+}
 // No palette mutation is reachable until this returns success. The caller's own Tint failure branch rolls back the
 // game's transaction for every error, shortfall or exception, including a take that faulted after queuing its op.
 template<class Allowed,class Take,class Guards>

@@ -76,6 +76,10 @@ add_executable(items-craft-payment-test tests/craft_payment_test.cpp)
 target_include_directories(items-craft-payment-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(items-craft-payment-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
 
+add_executable(items-stock-ui-test tests/stock_ui_native_test.cpp)
+target_include_directories(items-stock-ui-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(items-stock-ui-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
 add_executable(items-dye-sources-test tests/dye_sources_test.cpp)
 target_include_directories(items-dye-sources-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-dye-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
