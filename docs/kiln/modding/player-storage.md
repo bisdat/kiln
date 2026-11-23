@@ -20,7 +20,8 @@ public override void OnLoad()
 Kiln prefixes the key with your mod id: a mod named `example-quiver` gets `example-quiver:quiver`. A key has 1–32
 lowercase letters, digits, `.`, `_`, or `-`, starting with a letter or digit. Changing the full key makes the old key an
 orphan, not an empty replacement for the same save. A storage has 1–64 logical slots; a mod may register 8 storages,
-with at most 256 slots across all loaded registrations per player.
+with a 256-slot page-rounded budget across all registrations per player: each registration counts its slots rounded
+up to 8, for at most 32 physical pages. Its logical slot count stays unchanged.
 
 Registration can happen on any thread. It does not mean a player's storage is ready yet: wait for
 `PlayerStorageRestoredEvent`, or check readiness on each operation. A registration after a player joined can restore

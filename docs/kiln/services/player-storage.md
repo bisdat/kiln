@@ -27,7 +27,9 @@ mod id and key stable: saved records belong to that full key, not to the current
 
 - A key is 1–32 lowercase letters, digits, `.`, `_`, or `-`, starting with a letter or digit.
 - A storage has 1–64 slots, backed by 8-slot pages. The final page's padding is not extra public storage capacity.
-- Each mod may register at most 8 storages; all loaded registrations together may reserve at most 256 slots per player.
+- Each mod may register at most 8 storages; all registrations together have a 256-slot page-rounded budget per player:
+  each counts its slots rounded up to 8, so at most 32 physical pages. Sixteen 9-slot storages fill that budget even
+  though they expose only 144 logical slots; a seventeenth is refused. Logical storage capacity does not change.
 - A character document has at most 32 distinct storage keys, including keys parked from absent mods.
 - A filter's explicit or compiled allow list has at most 1024 distinct item ids.
 - Registration is allowed on any thread. A `StorageFilter.Where` needing an unloaded catalog waits for it, then compiles
@@ -113,6 +115,10 @@ nonmatching copy; among matches the highest revision wins. If nothing matches, t
 `PlayerStorageStatus.Paired` is false. This fallback cannot guarantee no duplication or loss after an old character
 backup outside retained history, or an offline edit combined with later storage moves. Surface the unpaired state
 rather than treating it as proof of an exact save match.
+
+If the join witness signals more main Generic pages than the game itself creates for a character (native defines that
+baseline), an unpaired arrival without a client copy resolving the uncertainty parks the server copy: a likely return
+outside Kiln is a conservative hold, never a delete.
 
 History retains at most 8 carried pairs and 32 server pairs, also bounded by encoded UTF-8 size: 64 KiB carried and
 256 KiB server. Equal contents can share witness aliases within those bounds. Byte trimming protects current contents,

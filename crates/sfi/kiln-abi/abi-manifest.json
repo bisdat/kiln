@@ -4193,7 +4193,7 @@
           "size": 80
         }
       },
-      "sha256": "81310e76ea45d1f0c1990cc366d3ae47d15307ffe7b1579d89e36c6ada6cb953"
+      "sha256": "c44611c8587646ce7d662040770fe502810c3e85b2d485d20a05f21a20b75828"
     },
     "native/core/abi/services/kiln_launch.h": {
       "function_macros": [
@@ -8888,7 +8888,7 @@
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
     "src/services/kiln_items.rs": "997cdc279dc7704128c8d47efff8cd395652e0b93679a9c34848d6c54b6d5519",
-    "src/services/kiln_items_storage.rs": "fc0e582b49d79ef7e563472ffeb2e4f628d7838e8b951eb42d2f2b505980f287",
+    "src/services/kiln_items_storage.rs": "28142d875852d2695df50b727f8c4565cf155115f0fc792f4903468101cf8667",
     "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_net.rs": "a80d9ff754549a78c03fdc6423f97a582bacbcc11a114ce68a75ecefd873b9ca",

@@ -51,7 +51,7 @@ internal static unsafe class StorageNative
     // KIS_BATCH_*
     public const uint BatchComplete = 1, BatchRefused = 2;
     // KIS_WITNESS_*
-    public const uint WitnessRead = 1, WitnessApplied = 2, WitnessRestored = 4, WitnessLeft = 8;
+    public const uint WitnessRead = 1, WitnessApplied = 2, WitnessRestored = 4, WitnessLeft = 8, WitnessExtraMainPages = 0x10;
     // KIS_EVENT_*
     public const uint EventJoined = 1, EventCaptured = 2, EventRestored = 3, EventParked = 4, EventQuarantined = 5,
         EventDeath = 6, EventLeft = 7, EventReturned = 8, EventBatch = 9;

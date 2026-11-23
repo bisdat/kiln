@@ -69,6 +69,7 @@ pub const KIS_STATE_PARKED: i32 = 3;
 pub const KIS_STATE_READY: i32 = 2;
 pub const KIS_STATE_WAITING: i32 = 1;
 pub const KIS_WITNESS_APPLIED: i32 = 2;
+pub const KIS_WITNESS_EXTRA_MAIN_PAGES: i32 = 16;
 pub const KIS_WITNESS_LEFT: i32 = 8;
 pub const KIS_WITNESS_READ: i32 = 1;
 pub const KIS_WITNESS_RESTORED: i32 = 4;

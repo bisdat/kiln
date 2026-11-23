@@ -231,6 +231,31 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
     }
 
     [Fact]
+    public void RegistrationChargesWholeEightSlotPagesAcrossMods()
+    {
+        // Sixteen 9-slot storages use 32 pages, although they expose only 144 logical slots.
+        for (var i = 0; i < 8; i++) Register(ModA, $"a:bag{i}", 9);
+        for (var i = 0; i < 8; i++) Register(ModB, $"b:bag{i}", 9);
+        Assert.Equal(StorageNative.Unavailable, RegisterRc(ModB + 1, "c:bag", 9));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExtraMainPagesIsAScriptedWitnessSignalForThisJoin(bool extraMainPages)
+    {
+        Bind();
+        Assert.Equal(0x10u, StorageNative.WitnessExtraMainPages);
+        _fake.JoinRead(3, Account, Character, 0xABCDEF, extraMainPages: extraMainPages);
+        var flags = StorageNative.WitnessRead | (extraMainPages ? StorageNative.WitnessExtraMainPages : 0);
+        Assert.Equal(flags, Witness(3).Flags);
+        _fake.JoinApply(3, 4);
+        Assert.Equal(flags | StorageNative.WitnessApplied, Witness(3).Flags);
+        _fake.JoinRead(3, Account, Character, 0x1234);  // a later join does not inherit the signal
+        Assert.Equal(StorageNative.WitnessRead, Witness(3).Flags);
+    }
+
+    [Fact]
     public void AJoinGivesTheWitnessAndTheIdentity()
     {
         Bind();
