@@ -266,4 +266,17 @@ public sealed class PlayerStorageDocumentTests
         Assert.Single(active["mod:bag"]!["records"]!.AsArray());
         Assert.Empty(parked);
     }
+    [Fact]
+    public void Empty_ready_storage_does_not_release_the_same_keys_held_records()
+    {
+        var live = Storages();
+        live["mod:bag"]!["records"] = new JsonArray();
+        var parked = Storages();
+        parked["mod:bag"]!["parkReason"] = "returned outside Kiln";
+        var (active, held) = PlayerStorageDocument.Partition(live, parked, new Dictionary<string, int> { ["mod:bag"] = 8 });
+        Assert.Empty(active["mod:bag"]!["records"]!.AsArray());
+        Assert.Single(held["mod:bag"]!["records"]!.AsArray());
+        Assert.Equal("returned outside Kiln", held["mod:bag"]!["parkReason"]!.GetValue<string>());
+    }
+
 }

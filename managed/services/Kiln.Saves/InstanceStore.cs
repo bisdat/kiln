@@ -275,8 +275,9 @@ internal sealed partial class InstanceStore
     {
         // What still waits to be told (the bus refused it earlier) is told now, about the world it happened in. What
         // cannot be told now either is dropped: it must not arrive in the next world.
-        if (_passes == 0 && !_draining) Drain();
+        if (_passes == 0 && !_draining && _housekeeping == 0) Drain();
         _afterPass.Clear();
+        _housekeepingEvents = false;
         _cleared++;
         foreach (var l in _live.Values) Unfollow(l);
         foreach (var p in _pending) Unfollow(p.Item);
@@ -722,8 +723,8 @@ internal sealed partial class InstanceStore
     // record claimed during staging was in neither half of the save), and broke loops over the records. So the events of
     // a pass wait until the outermost pass is finished, and then go out in order: a handler finds the store as the pass
     // left it. What it changes then belongs to the next pass (for a save: the next save).
-    private int _passes;
-    private bool _draining;
+    private int _passes, _housekeeping;
+    private bool _draining, _housekeepingEvents;
     private readonly Queue<Action> _afterPass = new();
     private int _cleared;  // counts Clear(): a handler that closed the world emptied the queue under the loop below
 
@@ -731,7 +732,7 @@ internal sealed partial class InstanceStore
 
     private void EndPass()
     {
-        if (--_passes > 0 || _draining) return;
+        if (--_passes > 0 || _draining || _housekeeping != 0 || _housekeepingEvents) return;
         Drain();
     }
 
@@ -768,7 +769,8 @@ internal sealed partial class InstanceStore
     private void Post<T>(T ev) where T : KilnEvent
     {
         _afterPass.Enqueue(() => Events.Post(ev));
-        if (_passes == 0 && !_draining) Drain();
+        if (_housekeeping != 0) _housekeepingEvents = true;
+        if (_passes == 0 && !_draining && _housekeeping == 0 && !_housekeepingEvents) Drain();
     }
 
     // ------------------------------------------------------------------------------------------- the tick ----
@@ -787,6 +789,7 @@ internal sealed partial class InstanceStore
     /// the match window.</summary>
     public void Tick()
     {
+        _housekeepingEvents = false; // Only the ordinary tick may release native-housekeeping notices.
         BeginPass();
         try
         {

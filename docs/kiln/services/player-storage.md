@@ -127,6 +127,12 @@ History retains at most 8 carried pairs and 32 server pairs, also bounded by enc
 parked records, quarantine, and the newest history entry. Irreducible excess preserves the previous durable copy and
 reports degraded persistence rather than deleting items to fit.
 
+There is one parked bag per key, holding at most 64 records in this document version. If a key has both live storage
+and a held bag when it is unregistered or shrunk, the held records and stricter reason win. Live records are renumbered
+into free parked slots; records beyond 64 are preserved byte-for-byte in quarantine with reason `parked storage full`,
+counted as quarantined and logged with the player and key. They are not silently deleted, but the orphan-return command
+cannot release quarantine. A future multi-bag format is needed to make that excess directly releasable.
+
 Server configuration is `kiln/config/characters.json`:
 
 ```json

@@ -268,6 +268,7 @@ internal static class CharacterSync
         s.StorageJoined = true;
         if (SavesRuntime.Store.Storage.Notice(s.Key) is { } notice)
         {
+            TellStorageNotice(s.Entity, notice); // Plain server chat also reaches vanilla peers without kiln:character.
             if (s.Local) ShowStorageNotice(notice);
             else if (s.Peer is not null && _channel is not null) _channel.SendTo(s.Peer, Answer(s, false, "player-storage: " + notice));
         }
@@ -541,6 +542,22 @@ internal static class CharacterSync
         }
         SavesRuntime.Log(m.Accepted ? LogLevel.Info : LogLevel.Debug, $"characters: the server {(m.Accepted ? "took" : "did not take")} the offer: {m.Reason} (revision {m.Revision}" +
             $"{(m.Kept.Count > 0 ? $", kept unread: {string.Join(", ", m.Kept)}" : "")}{(m.Dropped.Count > 0 ? $", dropped: {string.Join(", ", m.Dropped)}" : "")})");
+    }
+
+    private static void TellStorageNotice(EntityId player, string text)
+    {
+        SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player.Value}: {text}");
+        try
+        {
+            var chat = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Kiln.Chat")?.GetType("Kiln.Chat");
+            var tell = chat?.GetMethod("Tell", [typeof(EntityId), typeof(string)]);
+            if (tell?.Invoke(null, [player, text]) is not true)
+                SavesRuntime.Log(LogLevel.Warn, $"player-storage: chat notice for player {player.Value} unavailable; notice retained in kiln.log");
+        }
+        catch (Exception e) when (e is System.Reflection.TargetInvocationException or ArgumentException or TypeLoadException)
+        {
+            SavesRuntime.Log(LogLevel.Warn, "player-storage: chat notice unavailable: " + e.Message);
+        }
     }
 
     private static void ShowStorageNotice(string text)

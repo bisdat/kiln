@@ -188,7 +188,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         Restore(visit, choice?.Paired ?? true, choice?.Source ?? "new");
         if (visit.Withheld)
             foreach (var (key, bag) in visit.Document.Data["current"]!["parked"]!.AsObject())
-                SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player.Value}, character {character}, key {key}: {bag!["records"]!.AsArray().Count} stacks held ({visit.HeldReason}); admin release: /playerstorage release {player.Value} {key}");
+                SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player.Value}, character {character}, key {key}: {bag!["records"]!.AsArray().Count} stacks held ({bag["parkReason"]}); admin release: /playerstorage release {player.Value} {key}");
         return choice;
     }
 
@@ -198,9 +198,14 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         var current = visit.Document.Data["current"]!.AsObject();
         EnsureBands(visit);
         var (active, parked) = PlayerStorageDocument.Partition(current["storages"]!.AsObject(), current["parked"]!.AsObject(),
-            visit.Withheld ? new Dictionary<string, int>() : Native.Registrations);
+            visit.Withheld ? new Dictionary<string, int>() : Native.Registrations, visit.Document.Data["quarantine"]!.AsArray(), visit.Player.Value);
         if (visit.Withheld)
-            foreach (var bag in parked.Select(x => x.Value).OfType<JsonObject>()) bag["parkReason"] = visit.HeldReason;
+            foreach (var bag in parked.Select(x => x.Value).OfType<JsonObject>())
+                if (PlayerStorageDocument.ParkReason(bag) <= (visit.HeldReason == "returned outside Kiln" ? 19 : 17))
+                {
+                    bag["parkReason"] = visit.HeldReason;
+                    bag["nativeParkReason"] = visit.HeldReason == "returned outside Kiln" ? 19 : 17;
+                }
         Native.Restore(visit.Player, active, paired, source, visit.Document.Revision);
         Native.Park(visit.Player, parked);
         current["storages"] = active;
@@ -263,9 +268,12 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             static string Bytes(JsonNode? record) => record?["b64"]?.GetValue<string>() ?? "";
             var same = before.Select(Bytes).SequenceEqual(after.Select(Bytes));
             var merged = (JsonObject)old.DeepClone();
+            merged["slots"] = now["slots"]!.DeepClone();
             if (!same) merged["records"] = new JsonArray(after.Select(r => before.FirstOrDefault(o => Bytes(o) == Bytes(r))?.DeepClone() ?? r!.DeepClone()).ToArray());
             if (now["parkReason"] is { } held) merged["parkReason"] = held.DeepClone();
             else merged.Remove("parkReason");
+            if (now["nativeParkReason"] is { } reason) merged["nativeParkReason"] = reason.DeepClone();
+            else merged.Remove("nativeParkReason");
             kept[key] = merged;
         }
         foreach (var (key, value) in previous)
@@ -314,6 +322,21 @@ internal sealed class PlayerStorageStore(WorldStore owner)
                     yield return (visit, row.Key, row.Holder, offset);
                 }
         }
+    }
+
+    internal void Housekeeping(CharacterKey character, EntityId player, string key, EntityId holder, bool parked)
+    {
+        if (holder.IsNone || !_visits.TryGetValue(character, out var visit) || visit.Player != player || visit.Document.ReadOnly) return;
+        EnsureBands(visit);
+        if (!visit.Bands.TryGetValue(key, out var band)) return;
+        var offset = 1024 + band * 128;
+        // A retired ordinary holder has handle0 too. Its cached band wins; only an actual temporary row adds 64.
+        if (_instanceOwners.TryGetValue(holder.Value, out var cached) && cached.Player == player) offset = cached.Offset;
+        else if (Native?.InstanceHolders(player).Any(row => row.Holder == holder && row.Temporary) == true) offset += 64;
+        _instanceOwners[holder.Value] = (player, offset);
+        _ordinaryHolders.Remove(holder.Value);
+        if (parked) owner.Instances.StorageParked(character, player, holder, offset, key);
+        else owner.Instances.StorageRestored(character, player);
     }
 
     internal InstancePlace NormalizeInstance(InstancePlace place)

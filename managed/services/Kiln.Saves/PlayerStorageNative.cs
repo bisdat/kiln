@@ -46,15 +46,15 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnStage(uint kind, void* user)
     {
-        try { _bound?.Drain(); }
+        try { _bound?.Drain(kind); }
         catch (Exception e)
         {
-            try { SavesRuntime.Store.Storage.Failed("captures-done stage failed: " + e.Message); }
+            try { SavesRuntime.Store.Storage.Failed("storage stage failed: " + e.Message); }
             catch { /* No exception may cross the unmanaged callback. */ }
         }
     }
 
-    private void Drain()
+    private void Drain(uint kind)
     {
         var outer = ModContext.CurrentMod;
         ModContext.CurrentMod = null;
@@ -65,7 +65,11 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
                 var ev = new StorageNative.Event { Size = (uint)sizeof(StorageNative.Event) };
                 if (_table->NextEvent(_seq, &ev) != StorageNative.Ok) break;
                 _seq = ev.Seq;
-                if (ev.Kind == StorageNative.EventBatch) StageBatch(ev.Tag);
+                if (kind == StorageNative.EventBatch && ev.Kind == StorageNative.EventBatch) StageBatch(ev.Tag);
+                else if (ev.Target != 0 && ((kind == StorageNative.StageParked && ev.Kind == StorageNative.EventParked)
+                    || (kind == StorageNative.StageRestored && ev.Kind == StorageNative.EventRestored)))
+                    SavesRuntime.Store.Storage.Housekeeping(new(ev.Account, StorageNative.CharacterOf(ev.Character)), new(ev.Player),
+                        StorageNative.Text(ev.Key, StorageNative.KeyMax), new(ev.Target), kind == StorageNative.StageParked);
             }
         }
         finally { ModContext.CurrentMod = outer; }
@@ -128,7 +132,7 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
                 var encoded = Convert.ToBase64String(new ReadOnlySpan<byte>(record->Data, record->Length));
                 if (entry->Kind == StorageNative.EntryQuarantine)
                 {
-                    quarantine.Add(new JsonObject { ["storage"] = key, ["record"] = encoded, ["reason"] = "native: " + QuarantineReason(record->Reason) });
+                    quarantine.Add(new JsonObject { ["storage"] = key, ["record"] = encoded, ["reason"] = QuarantineReason(record->Reason) });
                     continue;
                 }
                 var bytes = new ReadOnlySpan<byte>(record->Data, record->Length).ToArray();
@@ -144,30 +148,34 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
             }
             if (entry->Kind == StorageNative.EntryQuarantine) continue;
             var target = entry->Kind == StorageNative.EntryLive ? live : parked;
-            if (target[key] is not JsonObject bag)
-            {
-                bag = new JsonObject { ["slots"] = entry->Slots, ["records"] = new JsonArray(), ["refs"] = new JsonObject() };
-                target[key] = bag;
-            }
-            foreach (var row in rows) bag["records"]!.AsArray().Add(row?.DeepClone());
+            var bag = new JsonObject { ["slots"] = entry->Slots, ["records"] = rows, ["refs"] = new JsonObject() };
             for (var j = 0; j < StorageNative.RefCount; j++)
                 if (entry->Refs[j] != StorageNative.RefNone) bag["refs"]![RefNames[j]] = entry->Refs[j];
             if (entry->Kind == StorageNative.EntryParked)
             {
                 bag["nativeParkReason"] = entry->Reason;
                 if (entry->Reason >= StorageNative.ParkHeld)
-                    bag["parkReason"] = entry->Reason == StorageNative.ParkStale ? "changed elsewhere since this server's copy" : "held";
+                    bag["parkReason"] = entry->Reason switch
+                    {
+                        StorageNative.ParkRequested => "requested", StorageNative.ParkStale => "changed elsewhere since this server's copy",
+                        StorageNative.ParkLocked => "locked", StorageNative.ParkReturned => "returned outside Kiln", _ => "held",
+                    };
+                target[key] = target[key] is JsonObject previous
+                    ? PlayerStorageDocument.MergeParked(key, quarantine, capture->Player, previous, bag)
+                    : PlayerStorageDocument.MergeParked(key, quarantine, capture->Player, bag);
             }
+            else target[key] = bag;
         }
         return new("xxh3:" + capture->Witness.ToString("x16"), live, parked, quarantine);
     }
 
-    private static string QuarantineReason(byte reason) => reason switch
+    // KIS_QUARANTINE_FULL=6 is the bounded parked merge diagnostic (no new ABI row/layout).
+    private static string QuarantineReason(byte reason) => reason == 6 ? "parked storage full" : "native: " + (reason switch
     {
         StorageNative.QuarantineUnknownItem => "unknown item", StorageNative.QuarantineCount => "invalid stack count",
         StorageNative.QuarantineSlot => "invalid slot", StorageNative.QuarantineDecode => "item record decode failed",
         StorageNative.QuarantineRebuild => "item rebuild failed", _ => "invalid item record",
-    };
+    });
 
     public StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation) => _frozen.GetValueOrDefault((character, generation));
 
@@ -187,6 +195,8 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
         _listingPlayer = player.Value;
         return Witness(player) is { } w ? "xxh3:" + w.Value.ToString("x16") : null;
     }
+
+    public bool ExtraMainPages(EntityId player) => Witness(player) is { } w && (w.Flags & StorageNative.WitnessExtraMainPages) != 0;
 
     private IReadOnlyList<StorageNative.State> States(EntityId player)
     {
@@ -283,7 +293,13 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
         {
             var bag = value!.AsObject();
             var reason = U(bag["nativeParkReason"]);
-            if (bag["parkReason"] is not null) reason = StorageNative.ParkStale;
+            if (bag["parkReason"] is { } held)
+                reason = held.GetValue<string>() switch
+                {
+                    "requested" => StorageNative.ParkRequested, "changed elsewhere since this server's copy" => StorageNative.ParkStale,
+                    "locked" => StorageNative.ParkLocked, "returned outside Kiln" => StorageNative.ParkReturned,
+                    _ => reason >= StorageNative.ParkHeld ? reason : StorageNative.ParkHeld,
+                };
             if (reason == 0) reason = StorageNative.ParkUnregistered;
             var entry = new StorageNative.Entry { Size = (uint)sizeof(StorageNative.Entry), Kind = kind, Slots = U(bag["slots"]), First = (uint)records.Count,
                 Reason = kind == StorageNative.EntryParked ? reason : 0 };

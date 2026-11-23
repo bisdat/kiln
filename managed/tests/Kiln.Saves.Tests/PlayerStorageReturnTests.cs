@@ -155,4 +155,22 @@ public sealed partial class PlayerStorageStoreTests
         }
         finally { store.Native = null; }
     }
+    [Fact]
+    public void Newer_untrusted_offer_does_not_downgrade_an_existing_return_hold_to_stale()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+        var server = PlayerStorageDocumentTests.Doc("old", 1000);
+        var held = server.Data["current"]!["storages"]!.DeepClone();
+        held["mod:bag"]!["parkReason"] = "returned outside Kiln";
+        server.Data["current"]!["storages"] = new JsonObject();
+        server.Data["current"]!["parked"] = held;
+        InstanceHarness.Store.GetBundleRaw(PlayerStorageStore.Prefix + character.Text, "kiln-items").Keys["storage"] = new WorldStore.Slot { Json = server.Write(32) };
+        store.Join(character, new EntityId(1), "elsewhere", PlayerStorageDocumentTests.Doc("client", 1001).Write(8), false);
+        Assert.Equal("returned outside Kiln", persist.Parked!["mod:bag"]!["parkReason"]!.GetValue<string>());
+    }
+
 }

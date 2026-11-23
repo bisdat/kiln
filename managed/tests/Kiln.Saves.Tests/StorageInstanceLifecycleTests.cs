@@ -86,4 +86,31 @@ public sealed class StorageInstanceLifecycleTests
         Assert.Equal(77, v.H.Count(rebuilt));
         Assert.Empty(v.H.Of<InstanceDataLostEvent>());
     }
+    [Fact]
+    public void Housekeeping_events_wait_for_regular_tick_even_if_a_world_stage_runs_first()
+    {
+        using var v = new Visit();
+        v.Park();
+        v.H.Tick();
+        v.H.Events.Clear();
+        v.Holder = v.H.World.Chest(Guid.NewGuid(), default);
+        v.H.World.Give(v.Holder, 3, Fields);
+        v.Visible = true;
+        InstanceHarness.Store.Instances.StorageRestored(InstanceHarness.Hero, v.Player);
+        v.H.StageOnly(1);
+        Assert.Empty(v.H.Events);
+        v.H.Tick();
+        Assert.Single(v.H.Of<InstanceDataRestoredEvent>());
+    }
+
+    [Fact]
+    public void Item_already_moved_out_without_a_tracker_notice_is_not_parked_with_the_old_holder()
+    {
+        using var v = new Visit();
+        v.H.World.Move(v.Item, v.Player, 1, seen: false);
+        InstanceHarness.Store.Instances.StorageParked(InstanceHarness.Hero, v.Player, v.Holder, 1024, "mod:bag");
+        Assert.Equal(77, v.H.Count(v.Item));
+        Assert.Empty(v.H.Parked());
+    }
+
 }

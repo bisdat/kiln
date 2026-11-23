@@ -34,6 +34,7 @@ internal sealed class StorageInstanceWorld : IInstanceWorld
         }
         return items.OrderBy(i => i.Place.FlatSlot).ToArray();
     }
+    internal IReadOnlyList<InstanceItem> ReadPhysical(EntityId holder, out bool initialized) => _inner.ReadHolder(holder, out initialized);
     public IDisposable Follow(ItemInstanceRef item) => _inner.Follow(item);
     public event Action<ItemInstanceRef, InstancePlace, InstancePlace>? Moved;
     public event Action<ItemInstanceRef, InstancePlace, ulong>? Gone;

@@ -249,6 +249,57 @@ internal sealed class PlayerStorageDocument
         return mirror;
     }
 
+    internal static long ParkReason(JsonObject bag) => Text(bag["parkReason"]) switch
+    {
+        "requested" => 16, "changed elsewhere since this server's copy" => 17, "locked" => 18, "returned outside Kiln" => 19,
+        "" => Number(bag["nativeParkReason"]), _ => Math.Max(16, Number(bag["nativeParkReason"])),
+    };
+
+    // One parked bag per key in v1. Held entries go first, preserving their slots and refs. Overflow keeps its
+    // original bytes in quarantine; rewriting byte0 is permitted only when assigning a record a real free cell.
+    internal static JsonObject MergeParked(string key, JsonArray? quarantine, uint player, params JsonObject[] bags)
+    {
+        var ordered = bags.OrderByDescending(b => ParkReason(b) >= 16).ToArray(); // Stable entry order within each class.
+        var merged = (JsonObject)ordered[0].DeepClone();
+        var rows = new JsonArray();
+        var used = new HashSet<int>();
+        foreach (var bag in ordered)
+            foreach (var node in bag["records"]!.AsArray())
+            {
+                var record = node!.AsObject();
+                var slot = checked((int)Number(record["s"]));
+                if (slot is < 0 or >= 64 || used.Contains(slot)) slot = Enumerable.Range(0, 64).FirstOrDefault(i => !used.Contains(i), -1);
+                if (slot < 0)
+                {
+                    if (quarantine is null) throw new InvalidDataException("parked storage full; quarantine destination required");
+                    var isolated = new JsonObject { ["storage"] = key, ["record"] = record["b64"]!.DeepClone(), ["raw"] = record.ToJsonString(), ["reason"] = "parked storage full" };
+                    if (!quarantine.Any(old => JsonNode.DeepEquals(old, isolated))) quarantine.Add(isolated);
+                    SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player}, key {key}: parked storage full; record bytes preserved in quarantine");
+                    continue;
+                }
+                var copy = (JsonObject)record.DeepClone();
+                if (slot != Number(copy["s"]))
+                {
+                    var bytes = Convert.FromBase64String(Text(copy["b64"]));
+                    bytes[0] = (byte)slot;
+                    copy["s"] = slot;
+                    copy["b64"] = Convert.ToBase64String(bytes);
+                }
+                used.Add(slot);
+                rows.Add(copy);
+            }
+        merged["records"] = rows;
+        merged["slots"] = Math.Max(bags.Select(b => Math.Clamp(Number(b["slots"]), 1, 64)).Max(), used.DefaultIfEmpty(-1).Max() + 1);
+        var reason = bags.Select(ParkReason).Max();
+        merged["nativeParkReason"] = reason;
+        if (reason >= 16) merged["parkReason"] = reason switch
+        {
+            16 => "requested", 17 => "changed elsewhere since this server's copy", 18 => "locked", 19 => "returned outside Kiln", _ => "held",
+        };
+        else merged.Remove("parkReason");
+        return merged;
+    }
+
     internal static void ValidateRecord(byte[] b, int slot)
     {
         if (b.Length < 8 || b[0] != slot || (b[7] & 0xc0) != 0) throw new InvalidDataException("invalid game item record");
@@ -410,7 +461,7 @@ internal sealed class PlayerStorageDocument
         return json;
     }
 
-    internal static (JsonObject Active, JsonObject Parked) Partition(JsonObject storages, JsonObject parked, IReadOnlyDictionary<string, int> registrations)
+    internal static (JsonObject Active, JsonObject Parked) Partition(JsonObject storages, JsonObject parked, IReadOnlyDictionary<string, int> registrations, JsonArray? quarantine = null, uint player = 0)
     {
         var active = new JsonObject();
         var waiting = new JsonObject();
@@ -420,6 +471,13 @@ internal sealed class PlayerStorageDocument
             var merged = (JsonObject)first.DeepClone();
             if (storages[key] is JsonObject live && parked[key] is JsonObject overflow)
             {
+                // A ready (possibly empty) holder may coexist with explicitly held records of the same key.
+                // Never merge those held records into the usable payload just because the registration exists.
+                if (overflow["parkReason"] is not null)
+                {
+                    waiting[key] = overflow.DeepClone();
+                    overflow = new JsonObject { ["slots"] = live["slots"]!.DeepClone(), ["records"] = new JsonArray(), ["refs"] = new JsonObject() };
+                }
                 merged["slots"] = Math.Max(Number(live["slots"]), Number(overflow["slots"]));
                 merged["records"] = new JsonArray(live["records"]!.AsArray().Concat(overflow["records"]!.AsArray()).Select(r => r!.DeepClone()).ToArray());
                 var refs = live["refs"] as JsonObject ?? new JsonObject();
@@ -429,7 +487,13 @@ internal sealed class PlayerStorageDocument
                         if (!allRefs.ContainsKey(name)) allRefs[name] = value?.DeepClone();
                 merged["refs"] = allRefs;
             }
-            if (merged["parkReason"] is not null || !registrations.TryGetValue(key, out var slots)) { waiting[key] = merged; continue; }
+            if (merged["parkReason"] is not null || !registrations.TryGetValue(key, out var slots))
+            {
+                if (waiting[key] is JsonObject held)
+                    waiting[key] = MergeParked(key, quarantine, player, held, merged);
+                else waiting[key] = merged;
+                continue;
+            }
             var usable = (JsonObject)merged.DeepClone();
             var excess = (JsonObject)merged.DeepClone();
             usable["slots"] = slots;
@@ -443,7 +507,12 @@ internal sealed class PlayerStorageDocument
                     (Number(index) < slots ? usable : excess)["refs"]!.AsObject()[name] = index?.DeepClone();
             }
             active[key] = usable;
-            if (excess["records"]!.AsArray().Count != 0) waiting[key] = excess;
+            if (excess["records"]!.AsArray().Count != 0)
+            {
+                if (waiting[key] is JsonObject held)
+                    waiting[key] = MergeParked(key, quarantine, player, held, excess);
+                else waiting[key] = excess;
+            }
         }
         return (active, waiting);
     }
