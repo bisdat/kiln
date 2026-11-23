@@ -3,7 +3,9 @@
 """Must-port names: sigdb names a game update may not take away quietly (tools/sigport/must_port.json).
 
 A listed name is one whose loss changes what Kiln does by itself, with a fallback players see (kiln.build's three
-save-region callers are the first). Where the re-port and check flow meets one (docs/kiln/sigport.md):
+save-region callers are the first). Each entry has a level: "fail" (the default) stops the flow below, "warn" only says
+so (a clear warning line; the check passes and a port stays complete, so the build can still be verified). Where the
+re-port and check flow meets one (docs/kiln/sigport.md):
 
   port.py                 a listed name the input definitions declare must resolve on the new exe at --min-confidence
                           or better; otherwise the port is incomplete (exit 1), report.json has the reason under
@@ -16,7 +18,8 @@ save-region callers are the first). Where the re-port and check flow meets one (
 
     python3 -I tools/sigport/must_port.py check [server] [client]
 
-Exit status of check: 0 every listed name is declared and resolved, 1 one is not, 2 the list itself is malformed.
+Exit status of check: 0 every fail-level name is declared and resolved (warn-level ones that are not get a warning
+line), 1 a fail-level one is not, 2 the list itself is malformed.
 """
 import argparse
 import json
@@ -28,6 +31,7 @@ sys.path.insert(0, str(HERE))
 LIST = HERE / "must_port.json"
 SIDES = ("server", "client")
 SECTIONS = ("symbols", "constants", "features")
+LEVELS = ("fail", "warn")
 
 
 class ListError(ValueError):
@@ -35,7 +39,7 @@ class ListError(ValueError):
 
 
 def load(path=LIST):
-    """[{"name", "section", "sides", "why"}] in the list's order; ListError when the list is malformed."""
+    """[{"name", "section", "sides", "level", "why"}] in the list's order; ListError when the list is malformed."""
     path = Path(path)
     try:
         doc = json.loads(path.read_text())
@@ -53,12 +57,15 @@ def load(path=LIST):
             raise ListError(f"{where} ({name}): section {section!r} is not one of {', '.join(SECTIONS)}")
         if not isinstance(sides, list) or not sides or any(s not in SIDES for s in sides):
             raise ListError(f"{where} ({name}): sides {sides!r} is not a list of {', '.join(SIDES)}")
+        level = e.get("level", "fail")
+        if level not in LEVELS:
+            raise ListError(f"{where} ({name}): level {level!r} is not one of {', '.join(LEVELS)}")
         if not isinstance(e.get("why"), str) or not e["why"].strip():
             raise ListError(f"{where} ({name}): no why (what Kiln falls back to without it)")
         if (section, name) in seen:
             raise ListError(f"{where}: {section[:-1]} {name} is listed twice")
         seen.add((section, name))
-        out.append({"name": name, "section": section, "sides": list(sides), "why": e["why"].strip()})
+        out.append({"name": name, "section": section, "sides": list(sides), "level": level, "why": e["why"].strip()})
     return out
 
 
@@ -67,16 +74,23 @@ def for_side(entries, side):
 
 
 def label(e):
-    return f"{e['section'][:-1]} {e['name']}"
+    """"symbol build/X", with " (warning only)" for a warn-level entry."""
+    return f"{e['section'][:-1]} {e['name']}" + (" (warning only)" if e.get("level") == "warn" else "")
 
 
-def record_failures(entries, side, declarer, rec, tag):
-    """Lines for the listed names of `side` that sigdb no longer declares, or that `rec` (the side's newest build
-    record, named `tag` in the lines) does not resolve. declarer: build_record.declared(side)."""
-    bad = []
+def warns(e):
+    return e.get("level") == "warn"
+
+
+def record_check(entries, side, declarer, rec, tag):
+    """-> (fails, warnings): lines for the listed names of `side` that sigdb no longer declares, or that `rec` (the
+    side's newest build record, named `tag` in the lines) does not resolve; warn-level entries go to warnings.
+    declarer: build_record.declared(side)."""
+    fails, warnings = [], []
     for e in for_side(entries, side):
+        out = warnings if warns(e) else fails
         if e["name"] not in declarer[e["section"]]:
-            bad.append(f"must-port {label(e)}: sigdb no longer declares it for the {side}. {e['why']}")
+            out.append(f"must-port {label(e)}: sigdb no longer declares it for the {side}. {e['why']}")
             continue
         level, reason = None, ""
         for s in rec.get("services", {}).values():
@@ -84,27 +98,34 @@ def record_failures(entries, side, declarer, rec, tag):
                 level, reason = s[e["section"]][e["name"]], s.get("unresolved", {}).get(e["name"], "")
                 break
         if level is None:
-            bad.append(f"must-port {label(e)}: not listed in {tag}. {e['why']}")
+            out.append(f"must-port {label(e)}: not listed in {tag}. {e['why']}")
         elif level == "unresolved":
-            bad.append(f"must-port {label(e)}: does not resolve on {tag} ({reason}). {e['why']}")
-    return bad
+            out.append(f"must-port {label(e)}: does not resolve on {tag} ({reason}). {e['why']}")
+    return fails, warnings
+
+
+def record_failures(entries, side, declarer, rec, tag):
+    """The fail-level lines of record_check."""
+    return record_check(entries, side, declarer, rec, tag)[0]
 
 
 def port_check(entries, side, rsyms, rconsts, feats, min_conf):
-    """port.py's summary.must_port: {"checked", "not_declared", "failed"}. A listed name the input definitions declare
-    fails when it does not resolve on the new exe, or only below min_conf; a feature fails when it is off there. Names
-    the input definitions do not declare (an older Kiln's) are listed under not_declared and fail nothing here:
-    build_record.py check is where sigdb losing one fails."""
-    checked, absent, failed = [], [], []
+    """port.py's summary.must_port: {"checked", "not_declared", "failed", "warned"}. A listed name the input definitions
+    declare fails when it does not resolve on the new exe, or only below min_conf; a feature fails when it is off there.
+    A warn-level name goes to "warned" instead: the port stays complete. Names the input definitions do not declare (an
+    older Kiln's) are listed under not_declared and fail nothing here: build_record.py check is where sigdb losing one
+    fails."""
+    checked, absent, failed, warned = [], [], [], []
     for e in for_side(entries, side):
         name = e["name"]
+        out = warned if warns(e) else failed
         if e["section"] == "features":
             if name not in feats:
                 absent.append(name)
                 continue
             checked.append(name)
             if not feats[name]:
-                failed.append(f"must-port {label(e)}: off on the new exe. {e['why']}")
+                out.append(f"must-port {label(e)}: off on the new exe. {e['why']}")
             continue
         table = rsyms if e["section"] == "symbols" else rconsts
         if name not in table:
@@ -113,12 +134,12 @@ def port_check(entries, side, rsyms, rconsts, feats, min_conf):
         checked.append(name)
         r = table[name]
         if not r.get("ok_new"):
-            failed.append(f"must-port {label(e)}: does not resolve on the new exe ({r.get('error') or 'no match'}). "
-                          f"{e['why']}")
+            out.append(f"must-port {label(e)}: does not resolve on the new exe ({r.get('error') or 'no match'}). "
+                       f"{e['why']}")
         elif r.get("confidence", 0.0) < min_conf:
-            failed.append(f"must-port {label(e)}: ported only at confidence {r.get('confidence', 0.0):.2f}, below "
-                          f"{min_conf}. {e['why']}")
-    return {"checked": checked, "not_declared": absent, "failed": failed}
+            out.append(f"must-port {label(e)}: ported only at confidence {r.get('confidence', 0.0):.2f}, below "
+                       f"{min_conf}. {e['why']}")
+    return {"checked": checked, "not_declared": absent, "failed": failed, "warned": warned}
 
 
 def check(sides=SIDES, symbols_dir=None, builds_dir=None, list_path=LIST):
@@ -136,14 +157,18 @@ def check(sides=SIDES, symbols_dir=None, builds_dir=None, list_path=LIST):
             continue
         top_path, top = br.newest([(p, json.loads(p.read_text())) for p in files])
         tag = f"{side} {top_path.stem[:8]}… (steam build {top.get('steam_build', '?')})"
-        bad = record_failures(entries, side, br.declared(side, symbols_dir), top, tag)
+        bad, warn = record_check(entries, side, br.declared(side, symbols_dir), top, tag)
         n = len(for_side(entries, side))
         if bad:
             ok = False
             lines.append(f"FAIL {tag}: {len(bad)} of {n} must-port name(s) dropped or unresolved")
             lines += [f"  {b}" for b in bad]
+        elif warn:
+            lines.append(f"ok   {tag}: {n - len(warn)} of {n} must-port name(s) declared and resolved; "
+                         f"{len(warn)} warn-level one(s) not (a warning, not a failure)")
         else:
             lines.append(f"ok   {tag}: {n} must-port name(s) declared and resolved")
+        lines += [f"  warning: {w}" for w in warn]
     return ok, lines
 
 

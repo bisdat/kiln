@@ -192,8 +192,8 @@ start (adds `gameSettings`). kilnctl never edits an existing file; change the po
   systemd), `KILN_RESTART=kilnctl`; Kiln.Admin then tells admin tools that a restart comes back. Kiln.Admin's
   `server_restart` saves, writes `kiln/data/kiln-admin/restart.json` (with that run id) and stops the server like a
   Ctrl-C. After the server has exited, `run` reads that file and deletes it; when it is this run's (same `runId`,
-  written after the run started) and the server exited 0, `run` exits **75**, so the unit's `Restart=on-failure`
-  starts it again. Any other marker (another run's, an old one, not JSON) is deleted and changes nothing; one left
+  written after the run started) and the server exited 0, `run` exits **75**, which the unit counts as a clean exit
+  that restarts anyway (`SuccessExitStatus=75`, `RestartForceExitStatus=75`, below). Any other marker (another run's, an old one, not JSON) is deleted and changes nothing; one left
   from an earlier run is also deleted before the server starts. Admin protocol: docs/kiln/launcher/admin-protocol.md
   section 11.
 

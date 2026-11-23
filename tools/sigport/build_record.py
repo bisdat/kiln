@@ -538,8 +538,8 @@ def newest(records):
 
 def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS, must_port_list=must_port.LIST):
     """-> (ok, lines). The newest record of each side must list every declared name once, each with a valid level, and
-    every must-port name of the side (tools/sigport/must_port.json) must be declared and resolved. A malformed must-port
-    list raises must_port.ListError."""
+    every fail-level must-port name of the side (tools/sigport/must_port.json) must be declared and resolved; a warn-level
+    one that is not only adds a "  warning: must-port ..." line. A malformed must-port list raises must_port.ListError."""
     ok, lines = True, []
     entries = must_port.load(must_port_list)
     for side in sides:
@@ -589,7 +589,7 @@ def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS, mu
             for name, svc in listed[section].items():
                 if name not in declarer[section]:
                     bad.append(f"{section[:-1]} {name} is listed under {svc} but sigdb no longer declares it")
-        must = must_port.record_failures(entries, side, declarer, top, tag)
+        must, must_warn = must_port.record_check(entries, side, declarer, top, tag)
         counts = "; ".join(count_text(declarer, captured, s, sum(1 for n in declarer[s] if n in listed[s])) for s in SECTIONS)
         lv = ", ".join(f"{k} {levels[k]}" for k in NAME_LEVELS if k in levels)
         if bad or must:
@@ -603,7 +603,10 @@ def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS, mu
                              "pattern to this build (tools/sigport/port.py), then refresh the record")
         else:
             n = len(must_port.for_side(entries, side))
-            lines.append(f"ok   {tag}: {counts}; each once, levels {lv}; {n} must-port name(s) resolved")
+            lines.append(f"ok   {tag}: {counts}; each once, levels {lv}; {n - len(must_warn)} of {n} must-port name(s) resolved"
+                         + (f", {len(must_warn)} warn-level one(s) not (a warning, not a failure)" if must_warn else ""))
+        # a warn-level must-port name that is dropped or unresolved: said, never a failure
+        lines += [f"  warning: {w}" for w in must_warn]
     return ok, lines
 
 

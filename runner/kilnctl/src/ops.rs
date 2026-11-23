@@ -741,6 +741,7 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         next.push(incomplete_reason(&rep));
     }
     next.extend(next_for_sigs(&rep));
+    next.extend(must_port_warnings(&rep));
     if !rep.defs_unchanged {
         next.push(format!("the definitions need changes: review and apply {} to the Kiln tree (git apply), redeploy \
                            (kilnctl deploy {}), then run kilnctl port {} --mark", rep.patch().display(), inst.name, inst.name));
@@ -795,6 +796,14 @@ pub fn incomplete_reason(rep: &sigport::PortReport) -> String {
         s.push_str(l);
     }
     s
+}
+
+/// NEXT.txt lines for warn-level must-port names the port could not take to the new exe (tools/sigport/must_port.json):
+/// they do not stop a mark, but a human should port them.
+pub fn must_port_warnings(rep: &sigport::PortReport) -> Vec<String> {
+    rep.must_port_warn.iter()
+        .map(|l| format!("warning: {l}; the build can still be marked verified, but port the name (tools/sigport/port.py)"))
+        .collect()
 }
 
 /// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark. A review can also flag changed code

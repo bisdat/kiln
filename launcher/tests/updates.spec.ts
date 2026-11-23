@@ -68,8 +68,10 @@ test("three mods: an update, no source, a stale answer; the notice opens a page 
   await row(page, "New Items").getByRole("button", { name: /Update 1\.1\.0 for New Items: open its page/ }).click();
   await expect.poll(() => opened(page)).toEqual(["https://github.com/example-org/new-items/releases/tag/v1.1.0"]);
   await page.waitForTimeout(600);
-  // what the page polls by itself (found_scan: every 10 s, GameFolder.tsx) is not something the click called
-  const after = (await commands(page)).slice(before).filter((c) => !["game_status", "launch_state", "task_list", "found_scan"].includes(c));
+  // what the page polls or reports by itself (found_scan: every 10 s, GameFolder.tsx; app_render_report: the shell's
+  // drawing facts, shell/renderReport.ts, which a loaded machine sends late) is not something the click called
+  const after = (await commands(page)).slice(before)
+    .filter((c) => !["game_status", "launch_state", "task_list", "found_scan", "app_render_report"].includes(c));
   expect(after).toEqual(["app_open_url"]);
   // the same link from the mod's dialog
   const dialog = await openUpdates(page, "New Items");
