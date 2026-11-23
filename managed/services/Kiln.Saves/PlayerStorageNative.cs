@@ -192,8 +192,10 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
 
     public string? WitnessOf(EntityId player)
     {
+        if (Witness(player) is not { } w) return null;
+        // Registrations lists through this player: only a connected one answers list() (InstancesReady asks about chests).
         _listingPlayer = player.Value;
-        return Witness(player) is { } w ? "xxh3:" + w.Value.ToString("x16") : null;
+        return "xxh3:" + w.Value.ToString("x16");
     }
 
     public CharacterKey? CharacterOf(EntityId player) =>
@@ -218,14 +220,40 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
     {
         get
         {
-            var result = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var row in States(new EntityId(_listingPlayer)))
+            // list() starts from the registrations, the same for every connected player: ask the player last asked about,
+            // else (gone) any player in game now. None in game: no registrations to restore into.
+            if (RegistrationsOf(_listingPlayer) is { } known) return known;
+            for (var slot = 0u; slot < 16; slot++)
             {
-                var state = row;
-                if (state.Handle != 0 && state.Slots != 0) result[StorageNative.Text(state.Key, StorageNative.KeyMax)] = (int)state.Slots;
+                var witness = new StorageNative.Witness { Size = (uint)sizeof(StorageNative.Witness) };
+                if (_table->WitnessOf(0, slot, &witness) != StorageNative.Ok || witness.Player == 0 || witness.Player == _listingPlayer
+                    || (witness.Flags & StorageNative.WitnessLeft) != 0) continue;
+                if (RegistrationsOf(witness.Player) is not { } found) continue;
+                _listingPlayer = witness.Player;
+                return found;
             }
-            return result;
+            return new Dictionary<string, int>(StringComparer.Ordinal);
         }
+    }
+
+    // The registered keys as list() reports them for one connected player; null when it answers nothing for that entity.
+    private Dictionary<string, int>? RegistrationsOf(uint player)
+    {
+        if (player == 0) return null;
+        var rows = new StorageNative.State[StorageNative.MaxEntries];
+        uint count = 0;
+        fixed (StorageNative.State* p = rows)
+        {
+            p->Size = (uint)sizeof(StorageNative.State);
+            if (_table->List(player, p, (uint)rows.Length, &count) != StorageNative.Ok || count > rows.Length) return null;
+        }
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var row in rows.Take((int)count))
+        {
+            var state = row;
+            if (state.Handle != 0 && state.Slots != 0) result[StorageNative.Text(state.Key, StorageNative.KeyMax)] = (int)state.Slots;
+        }
+        return result;
     }
 
     public IReadOnlyDictionary<string, EntityId> Holders(EntityId player)

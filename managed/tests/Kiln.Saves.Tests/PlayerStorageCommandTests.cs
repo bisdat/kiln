@@ -68,6 +68,59 @@ public sealed partial class PlayerStorageStoreTests
             store.Native = null;
         }
     }
+    [Fact]
+    public void A_name_two_characters_of_one_account_share_reaches_the_one_in_game()
+    {
+        // One account's characters share its platform name, and a visit stays after its character left. Hero played a
+        // first character on entity 3 and left; the second plays on entity 8 with a hold. The command the notice prints
+        // must reach the second, not the first (whose listing has nothing held and who is not in game).
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var first = new CharacterKey(1, Guid.Parse("00000000-0000-4000-8000-000000000111"));
+        var second = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+        var persist = new Persist { ExtraPages = true };
+        store.Native = persist;
+        var released = new List<(EntityId Player, string Key)>();
+        var oldRelease = PlayerStorageCommand.Release;
+        Commands.Unregister(PlayerStorageCommand.Name);
+        PlayerStorageCommand.ResetForTests();
+        try
+        {
+            Assert.True(PlayerStorageCommand.TryRegister(final: true));
+            PlayerStorageCommand.Release = (player, key, target) =>
+            {
+                released.Add((player, key));
+                return Task.FromResult(new MoveResult(ItemsStatus.Done, MoveKind.All, player, player, 1, 1, 1, [], "", 0, false, 1, false));
+            };
+            persist.Who = e => e.Value == 3 ? first : null;
+            store.Join(first, new EntityId(3), "join", null, true, name: "Hero");
+            Assert.Null(store.Notice(first));
+            InstanceHarness.Store.GetBundleRaw(PlayerStorageStore.Prefix + second.Text, "kiln-items").Keys["storage"] =
+                new WorldStore.Slot { Json = PlayerStorageDocumentTests.Doc("old", 1000).Write(32) };
+            persist.Who = e => e.Value == 8 ? second : null;  // the first character left; the second plays on entity 8
+            store.Join(second, new EntityId(8), "vanilla-returned", null, true, name: "Hero");
+            Assert.Contains("/playerstorage release Hero <key>", store.Notice(second)!);
+
+            Assert.Equal(new EntityId(8), store.FindPlayer("Hero"));
+            var list = Commands.Execute(CommandSource.Console, "/playerstorage list Hero");
+            Assert.True(list.Ok, list.Text);
+            Assert.Contains(list.Output, l => l.Contains(second.ToString()));
+            var release = Commands.Execute(CommandSource.Console, "/playerstorage release Hero mod:bag");
+            Assert.True(release.Ok, release.Error);
+            Assert.Equal([(new EntityId(8), "mod:bag")], released);
+            // The first character's own id still names it (not in game: refused, nothing released).
+            Assert.False(Commands.Execute(CommandSource.Console, $"/playerstorage release {first.Id} mod:bag").Ok);
+            Assert.Single(released);
+        }
+        finally
+        {
+            PlayerStorageCommand.Release = oldRelease;
+            Commands.Unregister(PlayerStorageCommand.Name);
+            PlayerStorageCommand.ResetForTests();
+            store.Native = null;
+        }
+    }
+
     private sealed class LogTap(IKilnBackend inner) : IKilnBackend
     {
         public readonly List<string> Lines = [];

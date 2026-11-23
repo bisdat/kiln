@@ -227,7 +227,6 @@ internal static class CharacterSync
         var at = (Mod: PlayerStorageStore.Mod, Key: PlayerStorageStore.Key);
         if ((s.Sent is not null && s.Sent.TryGetValue(at, out var sent) && sent == storage) || (s.Acked.TryGetValue(at, out var acked) && acked == storage)) return;
         var revision = CharacterStore.RevisionOf(s.Key) + 1;
-        CharacterStore.SetRevision(s.Key, revision);
         var changes = new Dictionary<string, Dictionary<string, JsonElement?>>(StringComparer.Ordinal)
         { [at.Mod] = new(StringComparer.Ordinal) { [at.Key] = Parse(storage) } };
         (s.Sent ??= new())[at] = storage;
@@ -235,6 +234,7 @@ internal static class CharacterSync
         _updateBytes += storage.Length;
         if (s.Local)
         {
+            CharacterStore.SetRevision(s.Key, revision);
             CharacterSidecar.Apply(s.Key.Id, revision, changes, SavesRuntime.WorldId);
             _sidecarWrites++;
             s.Acked[at] = storage;
@@ -243,6 +243,10 @@ internal static class CharacterSync
         }
         if (s.Peer is null || _channel is null) return;
         var delivered = _channel.SendTo(s.Peer, new CharUpdate(s.Key.Id, revision, changes, true));
+        // Only an update that went out moves this server's counter. One the player never got must not make this server's
+        // copy look as new as theirs: their next server's first update would tie it, and on the way back this server's
+        // older progress would win over what they made there (Decide keeps the server's copy on a tie).
+        if (delivered) CharacterStore.SetRevision(s.Key, revision);
         SavesRuntime.Log(delivered ? LogLevel.Info : LogLevel.Warn,
             $"characters: {s}: its leave save's storage {(delivered ? "sent after the session closed" : "could not be sent: the player is gone; the server keeps its copy")}");
     }
