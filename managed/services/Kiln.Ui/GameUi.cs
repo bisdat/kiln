@@ -400,6 +400,19 @@ public static class Screens
         }
     }
 
+    /// <summary>The screen read now, once for a render frame (RenderFrameEvent): false, <see cref="GameScreen.None"/>, when it is
+    /// not known (no game-UI integration on this build, or kiln.ui could not read it).</summary>
+    internal static bool TryRead(out GameScreen screen)
+    {
+        screen = GameScreen.None;
+        if (!UiNative.HasGameUi) return false;
+        UiNative.Screen s = default;
+        s.Size = (uint)sizeof(UiNative.Screen);
+        if (UiNative.T->GetScreen(&s) != UiNative.Ok) return false;
+        screen = GameScreen.From(s);
+        return true;
+    }
+
     /// <summary>The game-UI integration runs on this build (feature ui.screens).</summary>
     public static bool Available
     {
