@@ -191,7 +191,9 @@ fn build_sidecar(text: &str, old: &Value, planned: &Value, r: &ReturnRequest) ->
     let revision = rev(&doc["revision"])?;
     let marker = serde_json::json!({ "revision": revision, "fromWitness": r.old_witness, "toWitness": r.new_witness });
     doc["returns"] = Value::Array(bounded_returns(std::iter::once(marker).chain(markers(d)?).collect()));
-    let envelope = rev(&old["revision"])?.max(revision) + 1;
+    // CharacterSync's own counter: it decides whether a server takes the other mods' progress from this copy, so it
+    // rises by one. The storage document's revision is unrelated (storage never follows this one).
+    let envelope = rev(&old["revision"])? + 1;
     rev(&envelope.into())?;
     let root = span::ws(text.as_bytes(), 0);
     let mods = member(text, root, "mods")?;
@@ -425,7 +427,7 @@ mod tests {
         let returns = side["mods"]["kiln-items"]["storage"]["returns"].as_array().unwrap().clone();
         assert_eq!(returns[0], json!({"revision": 20, "fromWitness": "xxh3:0000000000000001", "toWitness": "xxh3:0000000000000002"}));
         assert_eq!(returns[1..], old_markers.iter().rev().take(7).cloned().collect::<Vec<_>>()[..]);
-        assert_eq!(side["revision"], 21);
+        assert_eq!(side["revision"], 11); // CharacterSync's counter: one more than before, not the storage revision
     }
 
     #[test]

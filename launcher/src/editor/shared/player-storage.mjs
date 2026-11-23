@@ -213,7 +213,8 @@ export async function planStorageReturn(c, sidecar, id, maxStackOf) {
     history.push(entry);
   }
   nextDoc.history = history;
-  copy.revision = Math.max(sidecar.revision, nextRevision) + 1;
+  // CharacterSync's counter decides whether a server takes the other mods' progress: one more, not the storage revision.
+  copy.revision = sidecar.revision + 1;
   revision(copy.revision);
   let bytes = Buffer.byteLength(JSON.stringify(nextDoc), 'utf8'), droppedPairs = 0;
   while (bytes > 65536 && trimOldestHistoryPair(history)) {
