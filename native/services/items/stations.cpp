@@ -1227,27 +1227,49 @@ uint32_t __fastcall hk_ui_status(void* ui, uint32_t station, uint32_t recipe, ui
 }
 
 // The ingredient rows' "available" count (stations/client.UiAvailableCount, the game's UI thread): u32 (u32 item,
-// inventory view*, stock map*). Hooked on demand with the fill query; at the row's two call sites the greater of the
-// game's count and the snapshot's. docs/re/stations.md §10.3.
+// inventory view*, stock map*). Hooked on demand with the fill query. At the production station's row widget (two calls)
+// and, since GitHub #132, at the crafting menu's own two (its ingredient list, its row's options): the greater of the
+// game's count and the snapshot's. The list adds the game's count of the view's fixed slots right after its call
+// (stations/client.UiFixedSlotsCount, u32 (u32 item, inventory view*)), which the snapshot already holds, so there Kiln
+// asks that count first and leaves it out. docs/re/stations.md §10.3.
 kiln::RawHook h_avail;
 std::atomic<bool> g_avail_hooked{false};
 bool g_avail_failed = false;  // the client world's thread only
 bool g_avail_feat = false;    // stations.stock_ui with its symbols (stations_resolve)
-uintptr_t g_avail_fn = 0, g_avail_row1 = 0, g_avail_row2 = 0;
-std::atomic<uint32_t> g_avail_raised{0};
+uintptr_t g_avail_fn = 0;
+AvailSites g_avail_sites;     // set once by avail_resolve, before the hook can go in
+using FixedSlotsFn = uint32_t(__fastcall*)(uint32_t item, const void* view);
+FixedSlotsFn g_avail_fixed = nullptr;
+std::atomic<uint32_t> g_avail_raised{0}, g_avail_faults{0};
 LogLimit g_log_avail{12};
+
+// The game's own count of the view's fixed slots, as the list asks it next (the same item and view). False: it faulted.
+bool fixed_slots(uint32_t item, const void* view, uint32_t* out) {
+    __try {
+        *out = g_avail_fixed(item, view);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 uint32_t __fastcall hk_avail(uint32_t item, const void* view, const void* stock) {
     const uintptr_t ret = h_avail.caller();  // the game's call site (read before the original runs)
     const uint32_t game = h_avail.call<uint32_t>(item, view, stock);
-    if ((ret != g_avail_row1 && ret != g_avail_row2) || !g_craft_on.load(std::memory_order_acquire)) return game;
+    const uint32_t site = stock_ui_site(ret, g_avail_sites);
+    if (site == kAvailOther || !g_craft_on.load(std::memory_order_acquire)) return game;
     bool named = false;
     uint64_t have = 0;
     {
         std::lock_guard lock(g_craft_mu);
         if (const auto it = g_craft_have.find(item); it != g_craft_have.end()) named = true, have = it->second;
     }
-    const uint32_t out = stock_ui_count(game, ret, g_avail_row1, g_avail_row2, named, have);
+    uint32_t fixed = 0;
+    if (stock_ui_needs_fixed(site, named, have, game) && (!g_avail_fixed || !fixed_slots(item, view, &fixed))) {
+        g_avail_faults.fetch_add(1, std::memory_order_relaxed);
+        return game;
+    }
+    const uint32_t out = stock_ui_site_count(game, site, named, have, fixed);
     if (out != game) {
         g_avail_raised.fetch_add(1, std::memory_order_relaxed);
         static std::mutex mu;
@@ -1263,7 +1285,8 @@ uint32_t __fastcall hk_avail(uint32_t item, const void* view, const void* stock)
         }
         if (fresh)
             if (const uint32_t n = g_log_avail.take())
-                LOGI("stations: an ingredient's available count for item 0x%08x shown %u -> %u with station outputs%s", item, game, out,
+                LOGI("stations: an ingredient's available count for item 0x%08x shown %u -> %u (%s) with the server's crafting stock%s",
+                     item, game, out, site == kAvailFactoryRow ? "station screen" : site == kAvailMenuList ? "crafting menu" : "crafting menu option",
                      n > 1 ? " (more held back)" : "");
     }
     return out;
@@ -1280,8 +1303,8 @@ void avail_hook_on_demand() {
         return;
     }
     g_avail_hooked.store(true, std::memory_order_release);
-    LOGI("stations: the ingredient rows' available count %p hooked (station outputs counted where the server's snapshot names them)",
-         reinterpret_cast<void*>(g_avail_fn));
+    LOGI("stations: the ingredient rows' available count %p hooked (the station screen and the crafting menu count what the "
+         "server's snapshot names)", reinterpret_cast<void*>(g_avail_fn));
 }
 
 // The client world's Pre: the hook, the first time the snapshot is on.
@@ -3126,7 +3149,9 @@ KilnResult KILN_CALL t_collect(KilnOwner owner, const KilnStationCollect* c, Kil
     return KILN_OK;
 }
 
-// The client's snapshot of what it may count. Any thread. Not consulted by the server's payment.
+// The client's snapshot of what it may count. Any thread. Not consulted by the server's payment. A row with count 0 names
+// its item with none (since 0.2.0-dev.30.8): a production station's screen names every item so (GitHub #132), which raises
+// no count there and keeps the snapshot on for the fill buttons' answers.
 KilnResult KILN_CALL t_set_craft_stock(const KilnStationStack* rows, uint32_t count) {
     if (count > KILN_STATIONS_MAX_CRAFT_STOCK || (count && !rows)) return KILN_ERR_INVALID_ARGUMENT;
     size_t kept = 0;
@@ -3136,7 +3161,7 @@ KilnResult KILN_CALL t_set_craft_stock(const KilnStationStack* rows, uint32_t co
         was = g_craft_on.load(std::memory_order_relaxed);
         g_craft_have.clear();
         for (uint32_t i = 0; i < count; ++i)
-            if (rows[i].item && rows[i].count) g_craft_have[rows[i].item] = rows[i].count;
+            if (rows[i].item) g_craft_have[rows[i].item] = rows[i].count;
         kept = g_craft_have.size();
         g_craft_on.store(kept != 0, std::memory_order_release);
     }
@@ -3391,6 +3416,25 @@ bool sym(const char* name, F* out) {
 bool cst(const char* name, int64_t* out) { return g_api->constant(str(name), out) == KILN_OK; }
 bool feat(const char* name) { return g_api->feature(str(name)); }
 
+// stations_resolve, on a client with stations.stock_ui: the count, its four call sites and the list's fixed-slot count.
+// Each one is required; without them the feature is lowered and nothing is hooked.
+bool avail_resolve() {
+    AvailSites s;
+    uintptr_t fixed = 0;
+    g_avail_feat = sym("stations/client.UiAvailableCount", &g_avail_fn) && sym("stations/client.AvailableRowRet1", &s.row1) &&
+                   sym("stations/client.AvailableRowRet2", &s.row2) && sym("stations/client.AvailableListRet", &s.list) &&
+                   sym("stations/client.AvailableOptionRet", &s.option) && sym("stations/client.UiFixedSlotsCount", &fixed) &&
+                   g_avail_fn && s.row1 && s.row2 && s.list && s.option && fixed;
+    if (!g_avail_feat) {
+        lower("stations.stock_ui", KILN_CAP_REASON_SYMBOL_MISSING,
+              "stations/client.UiAvailableCount, its call sites or the crafting menu's fixed-slot count did not resolve");
+        return false;
+    }
+    g_avail_sites = s;
+    g_avail_fixed = reinterpret_cast<FixedSlotsFn>(fixed);
+    return true;
+}
+
 // kiln.rules' hooks that carry the craft half (its payment hook) or the client half (its crafting-count hook): checked
 // once, at the first Pre of a world, after kiln.rules armed them at that world's start. Without them the row says why.
 bool rules_hook(uint32_t bit, std::string* why, uint32_t* reason) {
@@ -3554,12 +3598,7 @@ void stations_resolve() {
             lower("stations.fill_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiActionStatus did not resolve");
     }
     // The ingredient rows' "available" count (the same snapshot). Hooked on demand.
-    if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) {
-        g_avail_feat = sym("stations/client.UiAvailableCount", &g_avail_fn) && sym("stations/client.AvailableRowRet1", &g_avail_row1) &&
-                       sym("stations/client.AvailableRowRet2", &g_avail_row2) && g_avail_fn && g_avail_row1 && g_avail_row2;
-        if (!g_avail_feat)
-            lower("stations.stock_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiAvailableCount or its row call sites did not resolve");
-    }
+    if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) avail_resolve();
     G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);

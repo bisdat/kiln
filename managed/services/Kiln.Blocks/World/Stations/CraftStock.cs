@@ -16,6 +16,9 @@
 //    about those (station, recipe, choices), the server answers how many more crafts its own fill with station outputs
 //    covers (StationsCore.FillCrafts, the rules the press itself runs with), and the client's query says "can fill" for
 //    up to that many. The press is the game's own; StationsCore.OnSourceFill runs it as Kiln's fill. docs/re/stations.md §10.3.
+//  - A production station's screen (0.2.0-dev.30.8, GitHub #132): its ingredient rows count only what their transfer
+//    buttons move (the game's item transfer: the bag and the Magic chests), so the client names every item with none
+//    there (View): the rows keep the game's counts and the snapshot stays on for the fill buttons above.
 // docs/kiln/services/stations.md, "What each client shows".
 using System.Collections.Concurrent;
 using System.Text;
@@ -564,6 +567,17 @@ internal static class CraftStock
         return b.ToString();
     }
 
+    /// <summary>What a screen counts of a snapshot (GitHub #132). A crafting menu counts all of it: its craft's payment
+    /// takes from the opted-in outputs and the linked sources too. A production station's screen counts only what its
+    /// rows' transfer buttons move, the game's own item transfer from the bag and the Magic chests, which is the game's
+    /// own count: there every item is named with none, so no row is raised and the snapshot stays on for the "+1" / "+10"
+    /// answers (the fill takes the outputs; those buttons do not read the rows).</summary>
+    internal static CraftStockRows View(CraftStockRows rows, bool factory) =>
+        factory ? new CraftStockRows([.. rows.Rows.Select(r => r with { Count = 0 })]) : rows;
+
+    /// <summary>A production station's screen (keen::HudScreenType FactoryCrafting).</summary>
+    internal static bool IsFactory(GameScreen s) => s.Hud == HudScreen.FactoryCrafting || s.Crafting is { IsFactory: true };
+
     // To the player's Kiln client: in this process for the hosting player, else over the channel to a peer that has it.
     private static bool Deliver(EntityId player, CraftStockRows rows)
     {
@@ -584,6 +598,11 @@ internal static class CraftStock
             _lastStep = 0;
             _warned = 0;
             _open = _ticking = false;
+        }
+        lock (ViewGate)
+        {
+            _rows = Off;
+            _factory = false;
         }
         while (Inbox.TryDequeue(out _)) { }
         while (AskInbox.TryDequeue(out _)) { }
@@ -611,6 +630,12 @@ internal static class CraftStock
 
     private static volatile bool _open, _ticking;
     private static long _lastHello;
+    // The last snapshot as the server sent it, and whether the open screen is a production station's: what native counts
+    // is View(_rows, _factory), applied again when either changes (any thread: the UI thread, the client's main thread,
+    // the hosting server's tick).
+    private static readonly object ViewGate = new();
+    private static CraftStockRows _rows = Off;
+    private static bool _factory;
 
     /// <summary>Test hooks: whether the server takes hellos (hosting, or Kiln there); a hello sent; a snapshot applied.</summary>
     internal static Func<bool>? ServerSideHook;
@@ -638,6 +663,7 @@ internal static class CraftStock
     /// or closed (the server is told, the counts go back to the game's).</summary>
     internal static void ClientChanged(GameScreen before, GameScreen now)
     {
+        Factory(IsFactory(now));
         var open = now.Kind == ScreenKind.Crafting && ServerSide() &&
                    (Capabilities.Is(Crafting.SourceUiCapability) || Capabilities.Is(Stations.CraftUiCapability) || Capabilities.Is(FillUiCapability) || Capabilities.Is(StockUiCapability));
         if (open == _open) return;
@@ -757,15 +783,37 @@ internal static class CraftStock
         Apply(m);
     }
 
-    /// <summary>Hands a snapshot to kiln.stations (native logs its arrival); an empty one clears it.</summary>
+    /// <summary>Hands a snapshot to kiln.stations as the open screen counts it (<see cref="View"/>; native logs its
+    /// arrival); an empty one clears it.</summary>
     internal static bool Apply(CraftStockRows rows)
     {
-        if (ApplyHook is { } hook) return hook(rows);
         if (rows.Rows.Length > 0 && !_open) rows = Off;  // the hosting player's menu closed meanwhile
+        lock (ViewGate)
+        {
+            _rows = rows;
+            return Push(View(rows, _factory));
+        }
+    }
+
+    // The screen changed between a production station's and a crafting menu (the game's UI thread): the snapshot again,
+    // as the new screen counts it.
+    private static void Factory(bool factory)
+    {
+        lock (ViewGate)
+        {
+            if (_factory == factory) return;
+            _factory = factory;
+            if (_rows.Rows.Length > 0) Push(View(_rows, factory));
+        }
+    }
+
+    private static bool Push(CraftStockRows view)
+    {
+        if (ApplyHook is { } hook) return hook(view);
         if (!StationsCore.Backend.HasCraftStock) return false;
-        var stacks = new StationsNative.Stack[rows.Rows.Length];
+        var stacks = new StationsNative.Stack[view.Rows.Length];
         for (var i = 0; i < stacks.Length; i++)
-            stacks[i] = new StationsNative.Stack { Item = rows.Rows[i].Item, Count = rows.Rows[i].Count };
+            stacks[i] = new StationsNative.Stack { Item = view.Rows[i].Item, Count = view.Rows[i].Count };
         return StationsCore.Backend.SetCraftStock(stacks) == StationsNative.Ok;
     }
 }

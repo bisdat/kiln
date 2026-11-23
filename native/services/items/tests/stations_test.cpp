@@ -968,6 +968,39 @@ int main() {
         CHECK(stock_ui_count(0, ROW1, ROW1, ROW2, true, 0x1'0000'0005ull) == 0xffffffffu);
     }
 
+    {  // GitHub #132: the crafting menu counts at its own two sites (its list and its row's options), not the factory row's
+        constexpr uintptr_t ROW1 = 0x140bb19b8, ROW2 = 0x140bb280a, LIST = 0x140bf5095, OPTION = 0x140bf352c,
+                            OTHER = 0x140c7eeb4;
+        const AvailSites s{ROW1, ROW2, LIST, OPTION};
+        CHECK(stock_ui_site(ROW1, s) == kAvailFactoryRow && stock_ui_site(ROW2, s) == kAvailFactoryRow);
+        CHECK(stock_ui_site(LIST, s) == kAvailMenuList);
+        CHECK(stock_ui_site(OPTION, s) == kAvailMenuOption);
+        CHECK(stock_ui_site(OTHER, s) == kAvailOther);
+        CHECK(stock_ui_site(0, s) == kAvailOther);
+        CHECK(stock_ui_site(LIST, AvailSites{ROW1, ROW2, 0, 0}) == kAvailOther);  // a site that did not resolve never matches
+        CHECK(stock_ui_site(0, AvailSites{}) == kAvailOther);
+        // the list adds the game's count of the view's fixed slots after this call; the snapshot already holds those
+        // stacks, so the list's call answers max(game, have - fixed) and the row shows max(game + fixed, have)
+        CHECK(stock_ui_site_count(5, kAvailMenuList, true, 20, 3) == 17);   // the row: 17 + 3 = the snapshot's 20
+        CHECK(stock_ui_site_count(18, kAvailMenuList, true, 20, 3) == 18);  // the game's 18 + 3 is more: the game's
+        CHECK(stock_ui_site_count(0, kAvailMenuList, true, 2, 3) == 0);     // a snapshot below the fixed slots: the game's
+        CHECK(stock_ui_site_count(0, kAvailMenuList, true, 20, 0) == 20);
+        CHECK(stock_ui_site_count(5, kAvailMenuList, false, 20, 0) == 5);   // an item the snapshot does not name
+        CHECK(stock_ui_needs_fixed(kAvailMenuList, true, 20, 5));
+        CHECK(!stock_ui_needs_fixed(kAvailMenuList, true, 5, 5));            // the game's count wins anyway
+        CHECK(!stock_ui_needs_fixed(kAvailMenuList, false, 20, 5));
+        CHECK(!stock_ui_needs_fixed(kAvailMenuOption, true, 20, 5));         // only the list adds the fixed slots
+        CHECK(!stock_ui_needs_fixed(kAvailFactoryRow, true, 20, 5));
+        // the row's options and the factory rows: the greater of the game's count and the snapshot's
+        CHECK(stock_ui_site_count(5, kAvailMenuOption, true, 20, 0) == 20);
+        CHECK(stock_ui_site_count(5, kAvailFactoryRow, true, 20, 0) == 20);
+        CHECK(stock_ui_site_count(25, kAvailMenuOption, true, 20, 0) == 25);
+        CHECK(stock_ui_site_count(5, kAvailMenuOption, false, 20, 0) == 5);
+        CHECK(stock_ui_site_count(5, kAvailOther, true, 20, 0) == 5);
+        CHECK(stock_ui_site_count(0, kAvailMenuOption, true, 0x1'0000'0005ull, 0) == 0xffffffffu);
+        CHECK(stock_ui_site_count(0, kAvailMenuList, true, 0x1'0000'0005ull, 4) == 0xffffffffu);
+    }
+
     std::printf("stations: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;
 }
