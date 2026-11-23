@@ -552,3 +552,14 @@ fn lab_session_stays_open() {
     assert!(closes.is_empty(), "the session closed: {closes:?}");
     assert!(pushes as u64 >= secs / 2, "pushes kept coming ({pushes})");
 }
+
+#[test]
+fn op_budgets_are_kiln_admins() {
+    // TcpAdmin.BudgetMs: a client never gives up on an op before the server does
+    let s = |op: &str| protocol::op_budget(op).as_secs();
+    assert_eq!(s("update_stage"), 180, "update_stage copies and hashes a mod or a whole Kiln bundle");
+    for op in ["update_list", "update_cancel", "update_rollback"] {
+        assert_eq!(s(op), 30, "{op}");
+    }
+    assert_eq!((s("mod_test"), s("backup_create"), s("save_now"), s("mod_reload"), s("ping")), (180, 90, 60, 45, 30));
+}

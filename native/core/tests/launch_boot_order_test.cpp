@@ -4,7 +4,8 @@
 // "early" and a fake early plugin read kiln.launch through the core's table (src/launch.cpp, as it is) and must see it
 // frozen; in the safe idle of an image that cannot be parsed the record is frozen before the chain's [late] DLLs load.
 // LP1b: they also read build_verified, which is boot's own build_verified answer handed to the freeze (0 for backend
-// none), under each verified x policy combination, hosted and kiln.
+// none), under each verified x policy combination, hosted and kiln. Staged mod updates (staged.h) are applied once
+// kiln.log is open and before kiln.json, the profile or any native mod is read, in safe idle too.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -81,7 +82,8 @@ void init_paths() {}
 double now_ms() { return 0; }
 std::string utc_now() { return "now"; }
 void log_proxy() {}
-void load_config() {}
+void staged_boot() { calls.push_back("staged"); }
+void load_config() { calls.push_back("kiln.json"); }
 bool init_image() { return g_image_ok; }
 const char* side_by_name() { return "client"; }
 std::vector<std::string> start_plan() { return {}; }
@@ -93,13 +95,13 @@ bool build_verified(uint32_t, const std::string&, std::string* note) {
     *note = "not in the build records";
     return g_verified;
 }
-namespace log { void start() {} }
+namespace log { void start() { calls.push_back("kiln.log"); } }
 namespace profile {
 struct State {
     uint32_t mode = KILN_PROFILE_ACTIVE;
     std::string file, error;
 };
-void load() {}
+void load() { calls.push_back("profile"); }
 const State& state() {
     static State s;
     return s;
@@ -174,6 +176,9 @@ void run_case(const char* name, bool image_ok, bool verified, bool policy_any, b
     check(g_freezes == 1, std::string(name) + ": frozen exactly once");
     std::string seen;
     for (const auto& c : calls) seen += "[" + c + "] ";
+    check(at("kiln.log") < at("staged") && at("staged") < at("kiln.json") && at("staged") < at("profile") &&
+              at("staged") < at("discover") && at("staged") < at("freeze"),
+          std::string(name) + ": staged mod updates after kiln.log opens, before kiln.json, the profile and native mods: " + seen);
     if (!image_ok) {
         check(at("freeze") < at("chain [late]: frozen none, verified 0"), std::string(name) + ": frozen before chain [late]: " + seen);
         check(g_safe_idle_seen == "the game image cannot be parsed", std::string(name) + ": with the safe-idle reason");

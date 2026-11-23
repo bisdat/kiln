@@ -60,6 +60,10 @@ internal sealed class ModManagerOptions
     public string? ModsJsonFile { get; init; }
 
     public TimeSpan TestTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>kiln/staged/probation: mod folders updated at this start are watched while they load (server only; null:
+    /// nothing is watched).</summary>
+    public StagedProbation? Probation { get; init; }
 }
 
 /// <summary>One collectible context per loaded mod instance. Assemblies load from bytes, so the files on disk stay
@@ -382,6 +386,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             PublishSnapshot(writeFile: false);
             if (r.State == ModState.Skipped) _host.Log(LogLevel.Info, $"mod {r.Candidate} skipped: {reason}");
             else _host.Log(LogLevel.Error, $"mod {r.Candidate} not loaded: {reason}");
+            if (r.State == ModState.Failed) _options.Probation?.Failed(r.Candidate.Directory, reason);
         }
         var loaded = new List<string>();
         var position = 0UL;
@@ -416,11 +421,14 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                 _host.Log(LogLevel.Warn, $"mod {m.Id} not loaded: {why}");
                 continue;
             }
+            _options.Probation?.Loading(c.Directory);
             if (!LoadCore(c.Directory, m, out var error))
             {
                 SetRecord(c, ModState.Failed, error);
+                _options.Probation?.Failed(c.Directory, error);
                 continue;
             }
+            _options.Probation?.Loaded(c.Directory);
             loaded.Add(m.Id);
             var shared = Find(m.Id)!.ResolvedDependencies;
             var (check, code, onLoad) = _loadSplit;

@@ -352,6 +352,29 @@ With kilnctl: `kilnctl stop myserver`, `kilnctl deploy myserver --bundle kiln-ru
 start myserver`. kilnctl removes files the new version no longer has, keeps your `kiln/kiln.json`, and backs up
 anything it overwrites.
 
+### Staged updates (0.2.0-dev.30.9)
+
+An admin tool can also stage a mod or Kiln update while the server is running. Kiln Web Admin does this through
+Kiln.Admin. The update is applied at the next start, before anything loads it:
+- **Kiln** is applied by `dinput8.dll` before it loads `kiln/kiln-core.dll`.
+- **Mods** (`kiln/mods/<folder>`) are applied by Kiln before it reads any mod.
+
+Checksums are checked when the update is applied. A crash or a power cut leaves either the old version or the new one,
+never a mix. The replaced version is kept in `kiln/staged/previous/`, so a rollback can be requested for the next
+start. Kiln also rolls back on its own, once:
+- a mod that fails to load right after its update;
+- a Kiln update whose first start doesn't reach the point where the mods load.
+
+After you update Kiln with kilnctl or the launcher, the version a staged update kept can no longer be rolled back:
+the kept files and the new install would mix. `kiln.log` says what happened in lines that start with `staged:`. A start that stops before the mods load (a crash, or
+a stop within the first seconds) counts as a failed start after a Kiln update. Your mods' data (`kiln/data`) and
+settings (`kiln/config`) are never touched. Details: [staged-updates.md](staged-updates.md).
+
+Restart the server to apply what is staged. To get rid of a staged update without an admin tool, delete its folder:
+`kiln/staged/mods/<folder>/` or `kiln/staged/kiln/`. To ask for a rollback by hand (for example when the server no
+longer starts), stop the server, create `kiln/staged/rollback/kiln.json` or `kiln/staged/rollback/mod.<folder>.json`
+with the content `{}`, and start it again.
+
 ## Removing Kiln
 
 With the server pack:

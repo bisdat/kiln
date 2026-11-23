@@ -68,14 +68,16 @@ target_include_directories(kiln-safetyhook PUBLIC third_party/safetyhook)
 target_compile_definitions(kiln-safetyhook PUBLIC ZYDIS_STATIC_BUILD ZYCORE_STATIC_BUILD)
 target_compile_options(kiln-safetyhook PRIVATE -w)
 
-add_library(kiln-proxy SHARED proxy/dinput8.cpp)
+# The proxy applies a staged Kiln update before it loads kiln-core.dll (core/src/staged.h; the core builds the same file
+# for staged mod updates).
+add_library(kiln-proxy SHARED proxy/dinput8.cpp core/src/staged.cpp)
 set_target_properties(kiln-proxy PROPERTIES OUTPUT_NAME dinput8)
-target_include_directories(kiln-proxy PRIVATE "${KILN_GENERATED_DIR}")
+target_include_directories(kiln-proxy PRIVATE "${KILN_GENERATED_DIR}" core/abi core/src third_party)
 target_link_libraries(kiln-proxy PRIVATE user32)
 
 # Production proxy chain regression host (no game): proxy/tests/test-chain.sh.
-add_executable(proxy-chain-test proxy/tests/chain_test.cpp)
-target_include_directories(proxy-chain-test PRIVATE "${KILN_GENERATED_DIR}")
+add_executable(proxy-chain-test proxy/tests/chain_test.cpp core/src/staged.cpp)
+target_include_directories(proxy-chain-test PRIVATE "${KILN_GENERATED_DIR}" core/abi core/src third_party)
 target_link_libraries(proxy-chain-test PRIVATE user32)
 add_library(proxy-test-addon SHARED proxy/tests/addon.cpp)
 add_library(proxy-test-plain SHARED proxy/tests/addon.cpp)
@@ -97,6 +99,7 @@ add_library(kiln-core SHARED
     core/src/log.cpp
     core/src/registry.cpp
     core/src/sigdb.cpp
+    core/src/staged.cpp
     core/src/tick.cpp
     core/src/worldinfo.cpp)
 # Services: every core/src/services/*.cpp is part of the core (one file or prefix per service; see service.h).

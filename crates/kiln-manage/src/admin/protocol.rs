@@ -192,9 +192,10 @@ pub const TOPICS: &[&str] = &["state", "log"];
 /// How long a server takes at most to answer `op` (admin-protocol.md section 4).
 pub fn op_budget(op: &str) -> std::time::Duration {
     let s = match op {
-        "mod_test" => 180,
+        "mod_test" | "update_stage" => 180,
         "backup_create" => 90,
         "save_now" => 60,
+        "update_list" | "update_cancel" | "update_rollback" => 30,
         o if o.starts_with("mod_") => 45,
         _ => 30,
     };
