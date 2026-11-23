@@ -18,6 +18,14 @@ internal sealed class BlockContext(ModBlocks mod, string block)
     /// <summary>What this block lowers to, for what a field adds on the way: a VFX's carrier template.</summary>
     public Lowered? Low { get; set; }
 
+    /// <summary>What is wrong with the block but loaded in 0.2.0-dev.30.6 without harm: it still loads, as it did then, and says so in
+    /// one warning when it is committed (BlockCompat). <c>kiln lint</c> and the schema report each as an error.</summary>
+    public List<(string Field, string Problem)> Tolerated { get; } = new();
+
+    /// <summary>Notes a field that loaded in 0.2.0-dev.30.6 and still loads, as it did then. <paramref name="problem"/>: what is wrong,
+    /// and what the value does.</summary>
+    public void Tolerate(string field, string problem) => Tolerated.Add((field, problem));
+
     public EffectBlock Effect(EffectRef r, string path)
     {
         if (r.Name == null) return r.Inline!;
@@ -181,6 +189,7 @@ internal static partial class Compiler
             _ => DefineItemBlock(ctx, low, name, block) ?? DefineAbilityBlock(ctx, low, name, block) ?? DefineScreenBlock(ctx, low, name, block) ?? DefineNpcBlock(ctx, low, name, block) ?? DefineQuestBlock(ctx, low, name, block) ?? DefineUiBlock(ctx, low, name, block) ?? throw new BlockError(label, null, $"{typeof(T).Name} is not a block Kiln can compile yet"),
         };
         if (block is ITweakable { Tweak.Count: > 0 } tweak) low.Tweak(label, block is StatusBlock ? "buffs" : block is PerkBlock ? "perks" : "items", handle.GameName, tweak.Tweak);
+        low.Tolerated.AddRange(ctx.Tolerated);
         return (handle, low, label);
     }
 
@@ -404,6 +413,9 @@ internal sealed class Lowered(ModBlocks mod)
     private readonly HashSet<Guid> _carriers = new();
 
     public JsonObject Json { get; } = new();
+
+    /// <summary>The block's fields that loaded in 0.2.0-dev.30.6 and still load with a warning (<see cref="BlockContext.Tolerated"/>).</summary>
+    public List<(string Field, string Problem)> Tolerated { get; } = new();
 
     private JsonArray Arr(string key) => (Json[key] ??= new JsonArray()).AsArray();
 
