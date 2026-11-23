@@ -403,6 +403,13 @@ pub async fn app_started() -> Result<(), Error> {
     Ok(())
 }
 
+/// Visibility and two visible animation frames, distinct from navigation/hidden-page readiness. A first automatic
+/// recovery attempt returns its explanation once, only when it has become visible.
+#[tauri::command]
+pub async fn app_render_frame(painted: bool, visible: bool) -> Result<Option<String>, Error> {
+    Ok(crate::render::frame_painted(painted, visible))
+}
+
 /// What the page measured about its drawing (launcher/src/shell/renderReport.ts): whether WebKit composites, WebGL, the
 /// window, a frame sample on Play. One line in launcher.log each, at most two a start (crate::render::page_report).
 #[tauri::command]

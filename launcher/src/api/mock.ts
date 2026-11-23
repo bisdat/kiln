@@ -1133,7 +1133,7 @@ if (X11_Q) render = { ...render, x11: { on: X11_Q === "restart" || X11_Q === "ma
 // it off after a forced start died
 const NVIDIA_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("nvidia") : null;
 const TURNED_OFF = "The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z (Kiln Launcher 0.2.0-dev) with GPU drawing forced on NVIDIA ended before its page had started (2026-11-22T21:04:30Z)";
-render = { ...render, force: NVIDIA_Q === "blocked" ? { on: false, step: "off", why: "off", blocked: true }
+render = { ...render, force: NVIDIA_Q === "recovery" ? { on: true, step: "shm", why: "recovery", blocked: false } : NVIDIA_Q === "blocked" ? { on: false, step: "off", why: "off", blocked: true }
   : NVIDIA_Q === "on" ? { on: true, step: "shm", why: "on", blocked: false }
   : NVIDIA_Q === "failed" ? { on: false, step: "off", why: "off", blocked: true, failedWhy: TURNED_OFF }
   : { on: false, step: "off", why: "off", blocked: false } };
@@ -1264,6 +1264,7 @@ const handlers: Record<string, Handler> = {
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
     ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
+  app_render_frame: (a) => a.painted && a.visible && NVIDIA_Q === "recovery" ? "The previous normal NVIDIA startup never confirmed a visible frame. Kiln is trying shared-memory GPU drawing." : null,
   app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };

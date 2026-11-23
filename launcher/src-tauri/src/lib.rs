@@ -270,6 +270,7 @@ pub fn run() {
             commands::data_folder::data_folder_notice_ack,
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
+            commands::app::app_render_frame,
             commands::app::app_render_set,
             commands::app::app_render_x11_set,
             commands::app::app_render_force_set,

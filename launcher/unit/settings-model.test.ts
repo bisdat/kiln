@@ -121,7 +121,7 @@ test("Force GPU drawing on NVIDIA: found by NVIDIA, off by default, and it says 
     turnedOff: forceHint({ on: false, step: "off", why: "off", blocked: true, failedWhy: turnedOff }),
   };
   for (const h of Object.values(hints)) {
-    expect(h).toContain("It is off by default");
+    expect(h).toContain("It is off on clean starts");
     expect(h).toContain("WEBKIT_DMABUF_RENDERER_FORCE_SHM=1");
     // never the other way round, never root
     expect(h).not.toMatch(/WEBKIT_DISABLE_DMABUF_RENDERER|chmod|sudo|\broot\b/);

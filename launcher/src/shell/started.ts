@@ -5,9 +5,12 @@
 //
 // A hidden page (the window minimized or on another workspace at the start) gets no frames until it is shown, so it
 // says it started at once, or when it is hidden before its frames came: there is no black window anyone looks at, and
-// waiting would make the watchdog switch a working GPU off.
+// waiting would make the watchdog switch a working GPU off. This readiness does NOT confirm a painted frame:
+// app_render_frame reports visibility separately and acknowledges two visible frames, even after a hidden startup.
 import { useEffect } from "react";
 import * as api from "../api/commands";
+import { t } from "../i18n";
+import { toast } from "../ui";
 
 /** A function that sends the ready call the first time it runs, after two frames (at once when `hidden()`, or when
  *  `onHidden` reports the page hidden before them), and never again. */
@@ -16,6 +19,7 @@ export function startedReporter(
   frame: (cb: () => void) => void,
   hidden: () => boolean = () => false,
   onHidden: (cb: () => void) => void = () => {},
+  painted: () => Promise<unknown> = async () => {},
 ): () => void {
   let told = false;
   let sent = false;
@@ -27,12 +31,17 @@ export function startedReporter(
   return () => {
     if (told) return;
     told = true;
-    if (hidden()) {
-      go();
-      return;
-    }
+    if (hidden()) go();
     onHidden(go);
-    frame(() => frame(go));
+    const first = () => {
+      if (hidden()) { frame(first); return; }
+      frame(() => {
+        if (hidden()) { frame(first); return; }
+        go();
+        painted().catch(() => {});
+      });
+    };
+    frame(first);
   };
 }
 
@@ -44,11 +53,16 @@ export const tellStarted = startedReporter(
   pageHidden,
   (cb) => {
     const on = () => {
-      if (!pageHidden()) return;
-      document.removeEventListener("visibilitychange", on);
-      cb();
+      const hidden = pageHidden();
+      api.appRenderFrame(false, !hidden).catch(() => {});
+      if (hidden) cb();
     };
     document.addEventListener("visibilitychange", on);
+    on();
+  },
+  async () => {
+    const reason = await api.appRenderFrame(true, true);
+    if (reason) toast.info(t("settings.render.recoveryTitle"), reason);
   },
 );
 

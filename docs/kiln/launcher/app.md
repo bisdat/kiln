@@ -660,19 +660,26 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
     `state/force-dmabuf.json`), **off by default** (`render::FORCE_DEFAULT`, one constant: real NVIDIA driver bugs sit
     behind the patch's guard): on sets `WEBKIT_FORCE_DMABUF_RENDERER=1` with `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`
     (shared-memory buffers, no GBM buffers between WebKit's processes) from the next start. The plain forced renderer is
-    not offered: on the reporting player's RTX 5080 (KDE Plasma Wayland, driver 620.70.06) it showed a black window for
-    about half a second and then ended the launcher ("Gdk-Message: Error 71 (Protocol error) dispatching to Wayland
-    display"); with shared memory the same machine composited (policy Always) and drew at its best. Shared memory is the
-    variant on X11 too (no report there either way).
-  - The crash guard: a forced start writes `state/force-dmabuf-pending.json` before the window and WebKit start and
-    removes it 10 s after its page started, at a clean exit or before a restart (the DMA-BUF guard above does not run in a
-    forced start). Left behind (the start died), or the page late (`KILN_LAUNCHER_FORCE_DMABUF_RESTARTED=off` on the
-    watchdog's restart, which takes this step before X11 and DMA-BUF): the next start forces nothing, says so on stderr
-    and in a PROBLEM line, and once the data folder opens turns the switch off and writes
-    `state/force-dmabuf-failed.json` with why and when; the switch's hint in Settings shows that sentence. So a setting
-    that ends the launcher at its start never locks the player out of it. Turning the switch off or on removes the note;
-    on also removes `dmabuf-off.json` (without the DMA-BUF renderer there is nothing to force) and `x11.json` (with the
-    GPU the window stays sharp on Wayland; the X11 switch still acts if WebKit composites nothing).
+    not offered: it can fail with a Wayland protocol error before its page starts. Shared memory is the variant on X11
+    too; wider hardware coverage is still needed.
+  - Clean starts leave this off. On Linux with the NVIDIA kernel driver loaded and no explicit preference, a normal
+    GPU start writes `state/nvidia-frame-pending.json`. If that start expected a visible window but never confirmed a
+    painted frame, the **next** start tries both SHM variables once. Internal DMA-BUF fallback markers do not prevent
+    this attempt; explicit software/no-DMA-BUF flags, environment overrides, a manual off choice, and non-NVIDIA
+    machines do. Once visible, the recovery attempt explains why it was chosen.
+  - The SHM attempt has a different guard, `state/force-dmabuf-pending.json`, written before either variable is set or
+    WebKit is used (including the sandbox probe). If it cannot write that guard, it forces nothing. If this attempt
+    also dies or times out, the next start forces nothing, turns the switch off, and writes
+    `state/force-dmabuf-failed.json` with why and when. It does not alternate indefinitely between failed renderers.
+  - `app_started` is only page readiness. `app_render_frame` reports visibility separately and confirms startup only
+    after two visible animation frames. Hidden/minimized starts are not considered failed visible attempts. A
+    successful frame clears the pending guards after 10 seconds (or on a clean exit). Successful automatic SHM recovery
+    is remembered in `state/force-dmabuf-recovered.json`, separately from a manual opt-in, keyed by the stable executable
+    or AppImage path and GTK display backend. That working automatic renderer is used on subsequent matching starts.
+    An explicit manual off clears that memory and vetoes further automatic retries; manual on permits another try.
+  - Turning the switch off or on removes the failure note and automatic memory. On also removes `dmabuf-off.json`
+    (without that renderer there is nothing to force) and `x11.json` (the X11 switch can still act if WebKit composites
+    nothing). The switch's More text explains automatic recovery and how to disable it.
   - The user's own `WEBKIT_FORCE_DMABUF_RENDERER` or `WEBKIT_DMABUF_RENDERER_FORCE_SHM` always wins; software mode and a
     DMA-BUF renderer that is off force nothing. The launcher never suggests `WEBKIT_DISABLE_DMABUF_RENDERER=1`, chmod or
     root for this. Both variables the launcher sets are named in `KILN_LAUNCHER_RENDER_SET`, so kiln-manage's host

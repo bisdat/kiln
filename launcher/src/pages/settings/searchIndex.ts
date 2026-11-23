@@ -93,6 +93,9 @@ export function forceHint(f: ForceInfo): string {
   const now = f.why === "yours" ? t("settings.render.forceYours")
     : f.why === "on" ? t("settings.render.forceOn")
     : f.why === "failed" ? t("settings.render.forceFailed")
+    : f.why === "recovery" ? t("settings.render.forceRecovery")
+    : f.why === "recovered" ? t("settings.render.forceRecovered")
+    : f.why === "unguarded" ? t("settings.render.forceUnguarded")
     : f.why === "unused" ? t("settings.render.forceUnused")
     : f.blocked ? t("settings.render.forceBlocked")
     : t("settings.render.forceOff");

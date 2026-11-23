@@ -178,13 +178,13 @@ export interface RenderInfo {
   force?: ForceInfo;
 }
 export interface ForceInfo {
-  /** Settings' switch (off unless the player turned it on). */
+  /** Effective switch: manual choice or remembered automatic NVIDIA recovery; off on clean starts. */
   on: boolean;
   /** This start: nothing forced, or WEBKIT_FORCE_DMABUF_RENDERER=1 with WEBKIT_DMABUF_RENDERER_FORCE_SHM=1. */
   step: "off" | "shm";
   /** Why: the switch off or on; the start before with it failed (the launcher turns the switch off); the user's own
    *  variables; no DMA-BUF renderer in this start (software mode, its off switch). */
-  why: "off" | "on" | "failed" | "yours" | "unused";
+  why: "off" | "on" | "failed" | "recovery" | "recovered" | "unguarded" | "yours" | "unused";
   /** Why the launcher turned the switch off by itself, and when. */
   failedWhy?: string;
   /** This start found Ubuntu WebKit's NVIDIA block behind WebKit drawing without the GPU. */
@@ -1449,6 +1449,8 @@ export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
 /** The first screen is up (once per start: shell/started.ts). */
 export const appStarted = () => call<null>("app_started");
+/** Visibility alone does not prove painting. Two visible animation frames can confirm a renderer startup. */
+export const appRenderFrame = (painted: boolean, visible: boolean) => call<string | null>("app_render_frame", { painted, visible });
 /** What the page measured about its drawing (shell/renderReport.ts), into launcher.log: at most two lines a start. */
 export const appRenderReport = (report: PageRender) => call<null>("app_render_report", { report });
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
@@ -2506,7 +2508,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
+  "app_started", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

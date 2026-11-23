@@ -45,7 +45,7 @@ test("a page hidden at the start says it started at once, without waiting for fr
   tell(); tell();
   await Promise.resolve();
   expect(sent).toEqual([1]);
-  expect(frames.length).toBe(0);
+  expect(frames.length).toBe(1);
 });
 
 test("a page hidden before its frames came says it started then, and only once", async () => {
@@ -72,4 +72,39 @@ test("a failed ready call is not retried and does not throw", async () => {
   expect(() => { tell(); tell(); }).not.toThrow();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toBe(1);
+});
+
+
+test("a hidden ready call does not acknowledge a painted frame; two visible frames do", async () => {
+  const frames: (() => void)[] = [];
+  const ready: string[] = [];
+  let hidden = true;
+  const tell = startedReporter(async () => { ready.push("ready"); }, (cb) => frames.push(cb), () => hidden, () => {},
+    async () => { ready.push("painted"); });
+  tell();
+  expect(ready).toEqual(["ready"]);
+  hidden = false;
+  frames.shift()?.();
+  expect(ready).toEqual(["ready"]);
+  frames.shift()?.();
+  await Promise.resolve();
+  expect(ready).toEqual(["ready", "painted"]);
+});
+
+
+test("frames while hidden are not painting success and confirmation waits for two visible frames", async () => {
+  const frames: (() => void)[] = [];
+  const events: string[] = [];
+  let hidden = true;
+  const tell = startedReporter(async () => { events.push("ready"); }, (cb) => frames.push(cb), () => hidden, () => {}, async () => { events.push("painted"); });
+  tell();
+  frames.shift()?.();
+  expect(events).toEqual(["ready"]);
+  hidden = false;
+  frames.shift()?.();
+  expect(events).toEqual(["ready"]);
+  frames.shift()?.();
+  expect(events).toEqual(["ready", "painted"]);
+  tell();
+  expect(frames).toEqual([]);
 });

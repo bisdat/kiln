@@ -107,7 +107,7 @@ test("Force GPU drawing on NVIDIA is off by default, names the block, turns on, 
   await expect(sw).not.toBeChecked();
   const card = await rowOf(page, sw);
   await expect(card).toContainText("The Linux launcher bundles Ubuntu's WebKit, which draws without the GPU on every NVIDIA card.");
-  await expect(card).toContainText("It is off by default");
+  await expect(card).toContainText("It is off on clean starts");
   await expect(card).toContainText("This start draws without the GPU because of that block: turn this on to try the GPU.");
   await card.locator(".k-toggle").click();
   await expect(sw).toBeChecked();
@@ -121,3 +121,12 @@ test("Force GPU drawing on NVIDIA is off by default, names the block, turns on, 
   await expect(await rowOf(page, page.getByRole("switch", { name }))).toContainText("The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z");
 });
 
+
+test("automatic NVIDIA recovery explains itself after visible frames and remains manually controllable", async ({ page }) => {
+  await page.goto("/?nvidia=recovery#/settings/advanced");
+  await expect(page.locator(".k-toasts")).toContainText("previous normal NVIDIA startup never confirmed a visible frame");
+  const sw = page.getByRole("switch", { name: "Force GPU drawing on NVIDIA" });
+  await expect(sw).toBeChecked();
+  await page.locator(".k-st-row", { has: sw }).locator(".k-toggle").click();
+  await expect(sw).not.toBeChecked();
+});
