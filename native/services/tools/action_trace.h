@@ -36,13 +36,13 @@ enum class ActionExit : uint8_t {
     OutsideBase,       // the whole brush is not inside one base area
     NoMemory,          // Kiln could not allocate or lock what the stroke needs (its policy scope or impact copy)
     ContinuationFault, // the game's terraform faulted; tool actions are off until restart
-    GameStopped,       // ran: the game's terraform stopped before carving (its own cursor, permission, range or zone checks)
+    GameStopped,       // ran: the game's terraform stopped before carving or adding (its own cursor, permission, range or zone checks)
     NoUndoRecord,      // ran: no undo record could be created for a stroke inside a base, so the game cancelled it
     NotRemovable,      // ran: the brush reached the terrain, but no allowed cell can be mined by it
     NothingMatched,    // ran: the brush reached the terrain, and none of its allowed cells were under it
     Carved,            // ran: the brush reached the terrain; how much it removed could not be read
     Removed,           // ran: allowed terrain was removed
-    Added,             // ran: the game accepted an Add stroke
+    Added,             // ran: the game finished an Add stroke
     Count
 };
 
@@ -100,13 +100,13 @@ inline const char* action_exit_meaning(ActionExit exit) noexcept {
     case ActionExit::OutsideBase: return "the whole brush is not inside one base area";
     case ActionExit::NoMemory: return "Kiln could not allocate or lock what the stroke needs (its policy scope or impact copy)";
     case ActionExit::ContinuationFault: return "the game's terraform faulted; tool actions stay off until the game restarts";
-    case ActionExit::GameStopped: return "the game's terraform ran but stopped before carving (its own cursor, permission, range or zone checks)";
+    case ActionExit::GameStopped: return "the game's terraform ran but stopped before carving or adding (its own cursor, permission, range or zone checks)";
     case ActionExit::NoUndoRecord: return "no undo record could be created for a stroke inside a base, so the game cancelled it";
     case ActionExit::NotRemovable: return "the brush reached the terrain, but no allowed cell can be mined by it";
     case ActionExit::NothingMatched: return "the brush reached the terrain, and none of its allowed cells were under it";
     case ActionExit::Carved: return "the brush reached the terrain; how much it removed could not be read";
     case ActionExit::Removed: return "allowed terrain was removed";
-    case ActionExit::Added: return "the game accepted the Add stroke";
+    case ActionExit::Added: return "the game finished the Add stroke";
     default: return "unknown";
     }
 }
@@ -141,10 +141,13 @@ inline void note_kernel(bool removable, int removed) noexcept {
 inline void note_brush_fault() noexcept { if(auto* t = stroke_tally) { ++t->kernels; t->brush_fault = true; } }
 inline void note_no_undo_record() noexcept { if(auto* t = stroke_tally) t->no_undo_record = true; }
 
-// The outcome of a stroke whose continuation returned. game: the impact's result code (0 success, 6 cancelled,
-// 0x11 internal, 0x18 missing argument; 0xff unread).
-inline ActionExit stroke_outcome(uint32_t mode, const StrokeTally& t, uint8_t game) noexcept {
-    if(mode==KILN_TOOL_POLICY_ADD) return game==0 ? ActionExit::Added : ActionExit::GameStopped;
+// The outcome of a stroke whose continuation returned. The impact's result is {code, done}: game is the code (0, 6
+// cancelled, 0x11 internal, 0x18 missing argument; 0xff unread), done its value byte (1 the game's building operation
+// finished, 0 it stopped; 0xff unread). A stroke the game's building cursor refuses ends with code 0 and done 0
+// (TerraformImpact S 0x18ea6d, docs/re/rules.md 2.1), so only both together are an accepted Add.
+inline ActionExit stroke_outcome(uint32_t mode, const StrokeTally& t, uint8_t game, uint8_t done) noexcept {
+    if(mode==KILN_TOOL_POLICY_ADD) return game==0 && done==1 ? ActionExit::Added :
+        t.no_undo_record ? ActionExit::NoUndoRecord : ActionExit::GameStopped;
     if(t.brush_fault) return ActionExit::ReadFault;
     if(!t.kernels) return t.no_undo_record ? ActionExit::NoUndoRecord : ActionExit::GameStopped;
     if(t.removed) return ActionExit::Removed;
@@ -152,11 +155,12 @@ inline ActionExit stroke_outcome(uint32_t mode, const StrokeTally& t, uint8_t ga
     return t.measured ? ActionExit::NothingMatched : ActionExit::Carved;
 }
 
-// Facts about the last recorded stroke, for the log line. Zero when unknown.
+// Facts about the last recorded stroke, for the log line. Zero (0xff for the result) when unknown.
 struct ActionDetail {
     uint32_t program = 0, item = 0;
     float radius = 0;
-    uint8_t game = 0xff;
+    uint8_t game = 0xff;  // the impact's result code
+    uint8_t done = 0xff;  // the impact's result value: 1 the game's operation finished, 0 it stopped
 };
 
 class ActionTrace {
@@ -165,7 +169,7 @@ class ActionTrace {
     std::atomic<uint64_t> others_{}, changes_{}, published_changes_{};
     std::atomic<uint8_t> last_{uint8_t(n)};
     std::atomic<uint32_t> program_{}, item_{}, radius_bits_{};
-    std::atomic<uint8_t> game_{0xff};
+    std::atomic<uint8_t> game_{0xff}, done_{0xff};
 public:
     // Hot path: the impact hook. Never allocates, locks or logs.
     void record(ActionExit exit, const ActionDetail& detail = {}) noexcept {
@@ -176,6 +180,7 @@ public:
         uint32_t bits = 0; std::memcpy(&bits, &detail.radius, sizeof bits);
         radius_bits_.store(bits, std::memory_order_relaxed);
         game_.store(detail.game, std::memory_order_relaxed);
+        done_.store(detail.done, std::memory_order_relaxed);
         if(last_.exchange(uint8_t(i), std::memory_order_relaxed)!=uint8_t(i)) changes_.fetch_add(1, std::memory_order_relaxed);
     }
     // A terrain impact of a program no family binds here (vanilla terraforming): counted, never a state of the trace.
@@ -188,7 +193,7 @@ public:
     ActionDetail detail() const noexcept {
         ActionDetail d; d.program = program_.load(std::memory_order_relaxed); d.item = item_.load(std::memory_order_relaxed);
         const uint32_t bits = radius_bits_.load(std::memory_order_relaxed); std::memcpy(&d.radius, &bits, sizeof bits);
-        d.game = game_.load(std::memory_order_relaxed); return d;
+        d.game = game_.load(std::memory_order_relaxed); d.done = done_.load(std::memory_order_relaxed); return d;
     }
     // The publisher's cheap check: a change of state that no take has reported yet.
     bool pending() const noexcept { return changes_.load(std::memory_order_relaxed)!=published_changes_.load(std::memory_order_relaxed); }
@@ -213,7 +218,7 @@ public:
         if(const auto o = others()) text += "; other programs " + std::to_string(o);
         return text;
     }
-    // " (program 0x..., UsedItem 0x..., radius 0.50 m, game result 6)" for the last stroke, the facts it has.
+    // " (program 0x..., UsedItem 0x..., radius 0.50 m, game result 0 done)" for the last stroke, the facts it has.
     std::string detail_text() const {
         const auto d = detail();
         char buffer[160]; int used = 0;
@@ -225,7 +230,8 @@ public:
         if(d.program) add("%sprogram 0x%08x", used ? ", " : "", d.program);
         if(d.item) add("%sUsedItem 0x%08x", used ? ", " : "", d.item);
         if(d.item && d.radius>0) add("%sradius %.2f m", used ? ", " : "", double(d.radius));
-        if(d.game!=0xff) add("%sgame result %u", used ? ", " : "", unsigned(d.game));
+        if(d.game!=0xff) add("%sgame result %u%s", used ? ", " : "", unsigned(d.game),
+                             d.game || d.done==0xff ? "" : d.done ? " done" : " not done");
         if(used<=0) return {};
         if(size_t(used)>=sizeof buffer) used = int(sizeof buffer)-1;
         return std::string(" (")+std::string(buffer, size_t(used))+")";
@@ -233,7 +239,7 @@ public:
     void reset() noexcept {
         for(auto& c : counts_) c.store(0, std::memory_order_relaxed);
         others_.store(0); changes_.store(0); published_changes_.store(0);
-        last_.store(uint8_t(n)); program_.store(0); item_.store(0); radius_bits_.store(0); game_.store(0xff);
+        last_.store(uint8_t(n)); program_.store(0); item_.store(0); radius_bits_.store(0); game_.store(0xff); done_.store(0xff);
     }
 };
 } // namespace kiln::tools

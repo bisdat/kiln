@@ -111,17 +111,21 @@ ActionExit prepare(const kab::NativeCtx* ctx,const kab::ArgSlice* args,uint32_t 
     } __except(EXCEPTION_EXECUTE_HANDLER) { return ActionExit::ReadFault; }
 #endif
 }
-// The game's own result code of the impact it ran (0 success, 6 cancelled, 0x11 internal, 0x18 missing argument).
-uint8_t result_code(uintptr_t result) {
-    uint8_t code=0xff;
+// The game's own result of the impact it ran: its code (+0: 0, 6 cancelled, 0x11 internal, 0x18 missing argument) and,
+// with code 0, its value (+8: 1 the building operation finished, 0 it stopped, as on a cursor refusal). The result is
+// the NativeResult the caller passed (args[0]); 0xff when it cannot be read.
+void read_result(uintptr_t result,uint8_t* code,uint8_t* done) {
+    *code=*done=0xff;
 #ifdef _WIN32
     __try {
 #endif
-        if (result) code=*reinterpret_cast<const uint8_t*>(result);
+        if (result) {
+            *code=*reinterpret_cast<const uint8_t*>(result);
+            *done=*reinterpret_cast<const uint8_t*>(result+offsetof(kab::NativeResult,value));
+        }
 #ifdef _WIN32
-    } __except(EXCEPTION_EXECUTE_HANDLER) { code=0xff; }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { *code=*done=0xff; }
 #endif
-    return code;
 }
 bool continue_guarded(KilnHookCall2* call,uintptr_t* result) {
 #ifdef _WIN32
@@ -287,8 +291,8 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
             return refuse(call,ActionExit::ContinuationFault,detail);
         }
         dispatched.fetch_add(1,std::memory_order_relaxed);
-        detail.game=result_code(result);
-        action_trace.record(kiln::tools::stroke_outcome(binding->policy.mode,tally,detail.game),detail);
+        read_result(result,&detail.game,&detail.done);
+        action_trace.record(kiln::tools::stroke_outcome(binding->policy.mode,tally,detail.game,detail.done),detail);
         return result;
     } catch (...) {return refuse(call,ActionExit::NoMemory,detail);}
 }

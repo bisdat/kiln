@@ -22,18 +22,24 @@ void names() {
 void outcomes() {
     StrokeTally t;
     // Remove: the kernel never ran (the game's own checks stopped the stroke), or ran without an undo record inside a base.
-    CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::GameStopped);
-    CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,6)==ActionExit::GameStopped);
-    t.no_undo_record=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,6)==ActionExit::NoUndoRecord);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::GameStopped);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,6,0)==ActionExit::GameStopped);
+    t.no_undo_record=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,6,0)==ActionExit::NoUndoRecord);
     // The kernel ran: no allowed cell minable; allowed cells minable but none under the brush; something removed.
-    t={};t.kernels=2;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::NotRemovable);
-    t.removable=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::NothingMatched);
-    t.measured=false;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::Carved);
-    t.removed=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::Removed);
-    t.brush_fault=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0)==ActionExit::ReadFault);
-    // Add: the game's result decides; the kernel tally does not apply.
-    t={};CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0)==ActionExit::Added);
-    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,6)==ActionExit::GameStopped);
+    t={};t.kernels=2;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::NotRemovable);
+    t.removable=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::NothingMatched);
+    t.measured=false;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::Carved);
+    t.removed=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::Removed);
+    t.brush_fault=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_REMOVE,t,0,1)==ActionExit::ReadFault);
+    // Add: the game's result decides; the kernel tally does not apply. The impact's result is {code, done}: a stroke the
+    // building cursor refuses (no permission, missing materials) ends with code 0 and done 0, so code 0 alone is no Add.
+    t={};CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0,1)==ActionExit::Added);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0,0)==ActionExit::GameStopped);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0,0xff)==ActionExit::GameStopped);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,6,1)==ActionExit::GameStopped);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0xff,0xff)==ActionExit::GameStopped);
+    t.no_undo_record=true;CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0,0)==ActionExit::NoUndoRecord);
+    CHECK(stroke_outcome(KILN_TOOL_POLICY_ADD,t,0,1)==ActionExit::Added);
 }
 void tally() {
     // Notes outside a stroke go nowhere; inside, they add up; a nested stroke has its own tally and restores the outer one.
@@ -68,9 +74,18 @@ void trace() {
     // Vanilla terraforming is counted but never changes the state.
     for(int i=0;i<5;++i)t.other();
     CHECK(t.others()==5&&!t.pending()&&t.last()==ActionExit::NotServerWorld);
-    t.record(ActionExit::Removed,{0x1234,0xb00b0001,0.5f,0});
+    t.record(ActionExit::Removed,{0x1234,0xb00b0001,0.5f,0,1});
     CHECK(t.take(&state,&covered)&&state==ActionExit::Removed&&covered==1);
-    CHECK(t.detail_text()==" (program 0x00001234, UsedItem 0xb00b0001, radius 0.50 m, game result 0)");
+    CHECK(t.detail_text()==" (program 0x00001234, UsedItem 0xb00b0001, radius 0.50 m, game result 0 done)");
+    {   // The result's value byte is named with code 0 only: a refusal also carries code 0.
+        ActionTrace r;
+        r.record(ActionExit::GameStopped,{0x1234,0xb00b0001,0.5f,0,0});
+        CHECK(r.detail_text()==" (program 0x00001234, UsedItem 0xb00b0001, radius 0.50 m, game result 0 not done)");
+        r.record(ActionExit::GameStopped,{0x1234,0xb00b0001,0.5f,6,0});
+        CHECK(r.detail_text()==" (program 0x00001234, UsedItem 0xb00b0001, radius 0.50 m, game result 6)");
+        r.record(ActionExit::GameStopped,{0x1234,0xb00b0001,0.5f,0,0xff});
+        CHECK(r.detail_text()==" (program 0x00001234, UsedItem 0xb00b0001, radius 0.50 m, game result 0)");
+    }
     // Faster than the publisher: three changes become one publication that says so, naming the state now.
     t.record(ActionExit::NoUsedItem);t.record(ActionExit::RadiusMismatch,{0x1234,0xb00b0002,1.5f,0xff});t.record(ActionExit::OutsideBase);
     CHECK(t.take(&state,&covered)&&state==ActionExit::OutsideBase&&covered==3);

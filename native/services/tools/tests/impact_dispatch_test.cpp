@@ -13,11 +13,14 @@
 #include <string_view>
 
 namespace {
-int calls=0,checks=0; bool allow_area=true,nest=false,fault=false;
+int calls=0,checks=0; bool allow_area=true,nest=false,fault=false,retire_in_area=false;
 using kiln::tools::ActionExit;
 // What the fake game does inside an admitted stroke: the terrain kernel's notes, a missing undo record, its result code.
 struct KernelPlan {bool active=false,removable=false;int removed=0;} kernel_plan;
 bool undo_missing=false; uint8_t game_code=0;
+// The impact's result value byte (+8): 1 when the game's building operation finished, 0 when it stopped (its cursor
+// refused the stroke, BuildFinish failed). A refusal still carries code 0 (TerraformImpact S 0x18ea6d).
+uint8_t game_done=1;
 uint8_t expected_type=0; uint32_t expected_policy=100;
 KilnHooksApi hooks{};
 uint32_t live_code=KILN_CODE_ORIGINAL;
@@ -39,6 +42,7 @@ constexpr uintptr_t server_world=0x10000000;
 constexpr int64_t job_storage=0x30,world_storage=0xe179c0;
 bool constants_missing=false;
 KilnResult KILN_CALL watch(KilnOwner,KilnOwnerRetiringFn fn,void*,KilnHandle* out){retiring=fn;*out=2;return KILN_OK;}
+KilnOwnerRetiringFn retiring_fn(){return retiring;}
 KilnResult KILN_CALL unwatch(KilnHandle){return KILN_OK;}
 struct Fixture {
     std::array<kab::ImpactVariable,7> layout{};
@@ -68,7 +72,13 @@ struct Fixture {
 };
 void check_at(bool b,int line){if(!b){std::fprintf(stderr,"impact dispatch: check failed at line %d\n",line);std::abort();}++checks;}
 #define check(x) check_at((x),__LINE__)
-bool area(uintptr_t zones,uint32_t actor,const double p[3],double radius){check(zones==0x5678&&actor==7&&p[0]==0&&radius==2);return allow_area;}
+KilnOwnerRetiringFn retiring_fn();
+// The family's owner retiring while its stroke is checked: the binding the stroke pinned is no longer live.
+bool area(uintptr_t zones,uint32_t actor,const double p[3],double radius){
+    check(zones==0x5678&&actor==7&&p[0]==0&&radius==2);
+    if(retire_in_area){retire_in_area=false;retiring_fn()(2,nullptr);}
+    return allow_area;
+}
 uintptr_t KILN_CALL original(KilnHookCall2* call) {
     ++calls;auto* c=reinterpret_cast<kab::NativeCtx*>(call->args[2]);
     if(!c){check(!kiln_tools_active_policy());return call->args[0];} // a vanilla impact passed through unread
@@ -85,7 +95,7 @@ uintptr_t KILN_CALL original(KilnHookCall2* call) {
     const bool removing=kiln_tools_active_policy()&&kiln_tools_active_policy()->mode==KILN_TOOL_POLICY_REMOVE;
     if(removing&&kernel_plan.active)kiln::tools::note_kernel(kernel_plan.removable,kernel_plan.removed);
     if(removing&&undo_missing)kiln::tools::note_no_undo_record();
-    reinterpret_cast<uint8_t*>(call->args[0])[0]=game_code;
+    reinterpret_cast<uint8_t*>(call->args[0])[0]=game_code;reinterpret_cast<uint8_t*>(call->args[0])[8]=game_done;
     return call->args[0];
 }
 KilnResult KILN_CALL detour(KilnOwner,uintptr_t,const KilnHookOrder*,uint32_t count,KilnDetourFn2 fn,void*,KilnHandle* out){check(count==3&&fn==&kiln_tools_impact_detour);*out=1;return KILN_OK;}
@@ -151,7 +161,12 @@ int main(){
     expected_policy=101;expected_type=1;
     // The engine's iterator layout (kiln#133): this stroke reaches the game's terraform, which accepts the Add.
     check(exited(ActionExit::Added,[&]{Fixture f;f.ctx.program_id=101;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&!kiln_tools_active_policy());}));
-    check(trace.detail().program==101&&trace.detail().item==42&&trace.detail().radius==2&&trace.detail().game==0);
+    check(trace.detail().program==101&&trace.detail().item==42&&trace.detail().radius==2&&trace.detail().game==0&&trace.detail().done==1);
+    // The game's cursor refused the Add (code 0, not done): the trace must not call it added.
+    game_done=0;
+    check(exited(ActionExit::GameStopped,[&]{Fixture f;f.ctx.program_id=101;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&f.result[0]==0&&f.result[8]==0);}));
+    check(trace.detail().game==0&&trace.detail().done==0);
+    game_done=1;
     expected_policy=100;expected_type=0;
     check(!kiln_tools_actions_faulted());
     // Another world's program, a missing program context or iterator: refused before anything is switched.
@@ -170,6 +185,7 @@ int main(){
     check(exited(ActionExit::Marker,[&]{Fixture f;f.data[80]=0;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18);}));
     check(exited(ActionExit::NoActor,[&]{Fixture f;uint32_t none=0;std::memcpy(f.data.data(),&none,4);int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18);}));
     check(exited(ActionExit::Layout,[&]{Fixture f;f.layout[1].size=8;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18);}));
+    check(exited(ActionExit::Aliased,[&]{Fixture f;f.layout[4].offset=96;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18);}));
     // A Remove stroke the game ran: the terrain kernel's tally names its outcome.
     {Fixture f;int before=calls;auto args=f.call.args[1],ctx=f.call.args[2];
      check(exited(ActionExit::GameStopped,[&]{kiln_tools_impact_detour(&f.call,nullptr);}));
@@ -187,8 +203,11 @@ int main(){
     {const auto others=trace.others();check(exited(ActionExit::NothingMatched,[&]{Fixture f;nest=true;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+2&&!kiln_tools_active_policy());}));
      check(trace.others()==others+1);}
     kernel_plan={};
+    // The family removed while its stroke was being checked: refused before the game's terraform, then rebound.
+    check(exited(ActionExit::Retired,[&]{Fixture f;retire_in_area=true;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18&&!kiln_tools_active_policy());}));
+    check(kiln_tools_bound_programs()==0&&kiln_tools_bind_programs(2,family)&&kiln_tools_bound_programs()==2);
 #ifdef _WIN32
-    {Fixture f;f.ctx.layout=reinterpret_cast<const uint8_t*>(1);int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18&&!kiln_tools_active_policy());}
+    check(exited(ActionExit::ReadFault,[&]{Fixture f;f.ctx.layout=reinterpret_cast<const uint8_t*>(1);int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18&&!kiln_tools_active_policy());}));
 #endif
     kiln_tools_unbind_programs(3,99);{Fixture f;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1);}
     kiln_tools_unbind_programs(2,99);expected_policy=0;expected_type=255;{Fixture f;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&!kiln_tools_active_policy());}
