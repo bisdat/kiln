@@ -13,6 +13,8 @@ struct counts as one when Equals(T), Equals(object), GetHashCode, == and != all 
 struct with exactly that gap is skipped too); its ToString then counts as the compiler's as well.
 With --baseline it prints only the uids that are not in the file (one uid per line, # comments allowed) and exits 3 if
 there are any. Exit 0 means no new names (or no baseline); other non-zero codes mean the check failed.
+A delegate's constructor, Invoke, BeginInvoke and EndInvoke are the compiler's too (CS1591 does not ask for them); a
+generic record struct is told the same way (its own type reads Kiln.Foo{`0} in the members' parameters).
 The game types tools/typegen/typegen.py generates into the class Kiln.Ecs at build time are left out too, with
 their members (2,578 names on dev.26, mostly enum values): a type nested in Kiln.Ecs counts as generated when its
 summary has the shape the generator writes ("<c>keen::X</c>: an ECS component|an ECS event|a game struct, N bytes,
@@ -37,6 +39,7 @@ GENERATED = re.compile(r"^(<code>[^<]+</code>: (an ECS component|an ECS event|a 
                        r"|Game (enum|bitmask) <code>|A game <code>StaticArray</code> of \d+ elements"
                        r"|The game's ECS programs? )")
 RECORD = re.compile(r"\brecord (struct |class )?[A-Za-z_]")
+DELEGATE_MEMBERS = re.compile(r"\.(#ctor\(System\.Object,System\.IntPtr\)|Invoke\(.*\)|BeginInvoke\(.*\)|EndInvoke\(.*\))$")
 RECORD_MEMBERS = re.compile(r"\.(Equals\([^,]*\)|GetHashCode|ToString|op_Equality\(.*\)|op_Inequality\(.*\)"
                             r"|Deconstruct\(.*\)|PrintMembers\(System\.Text\.StringBuilder\)|EqualityContract)$")
 
@@ -102,10 +105,13 @@ def items(path):
     return out
 
 
-def generated(item, records):
-    """A member the compiler writes: a record's equality members, or the parameterless constructor of a class that
-    declares none (the metadata cannot tell it from a hand-written one, so an undocumented one is skipped too)."""
+def generated(item, records, delegates=frozenset()):
+    """A member the compiler writes: a record's equality members, a delegate's constructor, Invoke, BeginInvoke and
+    EndInvoke, or the parameterless constructor of a class that declares none (the metadata cannot tell it from a
+    hand-written one, so an undocumented one is skipped too)."""
     uid = item["uid"]
+    if item.get("parent") in delegates and DELEGATE_MEMBERS.search(uid):
+        return True
     if item.get("type") == "Constructor" and uid.endswith(".#ctor"):
         return True
     if item.get("parent") not in records:
@@ -132,18 +138,26 @@ def undocumented(api, xml_dir=None):
         inherit = inherited(xml_dir)
         every = [i for i in every if i.get("commentId") not in inherit]
     records = {i["uid"] for i in every if i.get("record")}
+    delegates = {i["uid"] for i in every if i.get("type") == "Delegate"}
     # a record struct reads as a plain struct in the metadata: it is one when it has the whole undocumented set of
     # members the compiler writes for a record
     bare = {i["uid"] for i in every if not i["summary"]}
     for t in every:
         u = t["uid"]
-        if t.get("type") == "Struct" and {f"{u}.Equals({u})", f"{u}.Equals(System.Object)", f"{u}.GetHashCode",
-                                          f"{u}.op_Equality({u},{u})", f"{u}.op_Inequality({u},{u})"} <= bare:
+        s = self_ref(u)
+        if t.get("type") == "Struct" and {f"{u}.Equals({s})", f"{u}.Equals(System.Object)", f"{u}.GetHashCode",
+                                          f"{u}.op_Equality({s},{s})", f"{u}.op_Inequality({s},{s})"} <= bare:
             records.add(u)
     gen = generated_types(every)
     return sorted({i["uid"] for i in every
-                   if i.get("type") not in (None, "Namespace") and not i["summary"] and not generated(i, records)
+                   if i.get("type") not in (None, "Namespace") and not i["summary"] and not generated(i, records, delegates)
                    and i["uid"] not in gen and i.get("parent") not in gen})
+
+
+def self_ref(uid):
+    """The type as a parameter of its own members: Kiln.Foo -> Kiln.Foo; Kiln.Foo`2 -> Kiln.Foo{`0,`1}."""
+    m = re.match(r"^(.*)`(\d+)$", uid)
+    return uid if not m else m.group(1) + "{" + ",".join(f"`{n}" for n in range(int(m.group(2)))) + "}"
 
 
 def generated_types(every):

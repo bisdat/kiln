@@ -6,7 +6,7 @@ enum: None, Instant, Drops, WorldBuildings, PlayerTerrain
 ## BlockBreakOptions `0.2.15` — One exact, loaded cell box, optionally selected by a cell mask.
 - `Build { get; init; } -> BuildOptions` — The existing build permissions, actor, journal and label.
 - `Damage { get; init; } -> int[]` — Five nonnegative damage values, by hardness (up to 100000).
-- `Flags { get; init; } -> BlockBreakFlags`
+- `Flags { get; init; } -> BlockBreakFlags` — The break mode and protection choices.
 - `Materials { get; init; } -> byte[]` — Raw voxel material ids to include.
 - `ProtectedSphere { get; init; } -> BlockBreakSphere?` — Optional sphere.
 - `Selection { get; init; } -> bool[]?` — Optional mask in x,y,z order, with exactly the box's cell count.
@@ -15,53 +15,53 @@ enum: None, Instant, Drops, WorldBuildings, PlayerTerrain
 
 ## BlockBreakResult `0.2.15` — Counts and refusal of a controlled break.
 - `BlockBreakResult(BlockRefusal Refusal, ulong Considered, ulong Damaged, ulong Removed, ulong Dropped, ulong ProtectedCells, ulong UnknownCells, ulong UnbreakableCells, ulong ExcludedCells, bool MayHaveChanged, bool Verified, uint BlocksWritten, bool Kept)`
-- `BlocksWritten { get; init; } -> uint`
-- `Considered { get; init; } -> ulong`
-- `Damaged { get; init; } -> ulong`
-- `Dropped { get; init; } -> ulong`
-- `ExcludedCells { get; init; } -> ulong`
-- `Kept { get; init; } -> bool`
-- `MayHaveChanged { get; init; } -> bool`
-- `Ok { get; } -> bool`
-- `ProtectedCells { get; init; } -> ulong`
-- `Reason { get; } -> string?`
-- `Refusal { get; init; } -> BlockRefusal`
-- `Removed { get; init; } -> ulong`
-- `UnbreakableCells { get; init; } -> ulong`
-- `UnknownCells { get; init; } -> ulong`
-- `Verified { get; init; } -> bool`
+- `BlocksWritten { get; init; } -> uint` — 8x8x8 blocks the writer committed; can be partial after a fault.
+- `Considered { get; init; } -> ulong` — Selected cells that were not air.
+- `Damaged { get; init; } -> ulong` — Cells whose damage rose.
+- `Dropped { get; init; } -> ulong` — How many drops were granted.
+- `ExcludedCells { get; init; } -> ulong` — Considered cells left alone by the selection rules: outside the `BlockBreakOptions.ProtectedSphere`, terrain without...
+- `Kept { get; init; } -> bool` — The writer reported the touched chunks in Kiln's save regions.
+- `MayHaveChanged { get; init; } -> bool` — The writer or damage mutator was entered, so changes may have happened (also after a fault).
+- `Ok { get; } -> bool` — True when the break was not refused (`BlockBreakResult.Refusal` is `BlockRefusal.None`).
+- `ProtectedCells { get; init; } -> ulong` — Considered cells spared because their provenance is Natural: natural buildings (unless...
+- `Reason { get; } -> string?` — Why the break was refused or failed, in words; null when `BlockBreakResult.Ok`.
+- `Refusal { get; init; } -> BlockRefusal` — `BlockRefusal.None` when the call went ahead; otherwise why it was refused or failed.
+- `Removed { get; init; } -> ulong` — Selected cells read back as air.
+- `UnbreakableCells { get; init; } -> ulong` — Considered cells spared because their material is `BlockHardness.Unbreakable`.
+- `UnknownCells { get; init; } -> ulong` — Considered cells spared because their material facts are unknown or their provenance is Unknown (buildings only when...
+- `Verified { get; init; } -> bool` — The readback behind `Removed` completed (also set when nothing was selected).
 
 ## BlockBreakSphere `0.2.15` — Sphere selection with a caller-controlled protection margin and minimum radius.
 - `BlockBreakSphere(WorldPosition Center, double Radius, double Margin = 0, double MinimumRadius = 0)`
-- `Center { get; init; } -> WorldPosition`
-- `Margin { get; init; } -> double`
-- `MinimumRadius { get; init; } -> double`
-- `Radius { get; init; } -> double`
+- `Center { get; init; } -> WorldPosition` — The sphere's centre in world metres.
+- `Margin { get; init; } -> double` — The protection margin in metres, zero or more; default 0.
+- `MinimumRadius { get; init; } -> double` — Metres, zero or more; default 0.
+- `Radius { get; init; } -> double` — The sphere's radius in metres; finite and greater than zero, or the call is refused as `BlockRefusal.InvalidArgument`.
 
 ## BlockHardness `0.2.15` — The material's mining hardness class.
 enum: Soft, SlightlyHard, ModeratelyHard, Hard, VeryHard, Unbreakable
 
 ## BlockInfo `0.2.15` — Loaded cell facts.
 - `BlockInfo(BuildBlockKind Kind, byte Material, byte Fill, BlockProvenance Provenance, BlockHardness? Hardness, int? Health, int? Damage, WorldPosition Center)`
-- `Center { get; init; } -> WorldPosition`
-- `Damage { get; init; } -> int?`
-- `Fill { get; init; } -> byte`
-- `Hardness { get; init; } -> BlockHardness?`
-- `Health { get; init; } -> int?`
-- `Kind { get; init; } -> BuildBlockKind`
-- `Material { get; init; } -> byte`
-- `Provenance { get; init; } -> BlockProvenance`
+- `Center { get; init; } -> WorldPosition` — The centre of the cell in world metres.
+- `Damage { get; init; } -> int?` — The cell's current damage, 0-255.
+- `Fill { get; init; } -> byte` — The raw fill byte.
+- `Hardness { get; init; } -> BlockHardness?` — The material's mining hardness class; null when unknown (never guessed) or for an air cell.
+- `Health { get; init; } -> int?` — The material's raw health points from its config, not scaled by damage; null when unknown or for an air cell.
+- `Kind { get; init; } -> BuildBlockKind` — What occupies the cell: air, terrain or a building block.
+- `Material { get; init; } -> byte` — The raw voxel material id.
+- `Provenance { get; init; } -> BlockProvenance` — Comparison with the shipped world: `BlockProvenance.Natural`, `BlockProvenance.PlayerPlaced` or...
 
 ## BlockProvenance `0.2.15` — Comparison with the shipped world, not ownership or execution side.
 enum: Unknown, PlayerPlaced, Natural
 
 ## BlockQueryResult `0.2.15` — A successful query may have no hit.
 - `BlockQueryResult(BlockInfo? Info, BlockRefusal Refusal)`
-- `Found { get; } -> bool`
-- `Info { get; init; } -> BlockInfo?`
-- `Ok { get; } -> bool`
-- `Reason { get; } -> string?`
-- `Refusal { get; init; } -> BlockRefusal`
+- `Found { get; } -> bool` — True when the query hit a cell: `BlockQueryResult.Info` is not null.
+- `Info { get; init; } -> BlockInfo?` — The facts of the cell that was read or hit; null when a query that ran found nothing (a clear line), or when it was...
+- `Ok { get; } -> bool` — True when the query ran (`BlockQueryResult.Refusal` is `BlockRefusal.None`), whether or not it found a cell.
+- `Reason { get; } -> string?` — Why the query was refused, in words; null when `BlockQueryResult.Ok`.
+- `Refusal { get; init; } -> BlockRefusal` — `BlockRefusal.None` when the query ran, even with no hit; otherwise why it did not.
 
 ## BlockRefusal `0.2.15` — A block operation's explicit refusal.
 enum: None, SymbolMissing, ServiceMissing, ServiceOlder, WrongSide, Offline, NoSession, InvalidArgument, WrongThread, NotLoaded, Zone, Base, Faulted, Unverified, Canceled, DamageMapFull
@@ -92,7 +92,7 @@ enum: None, SymbolMissing, ServiceMissing, ServiceOlder, WrongSide, Offline, NoS
 - `static PlacedOnce { get; } -> IReadOnlyList<PlaceOnceRecord>` — The calling mod's PlaceOnce records in this world.
 - `static PlaceOnce(string key, Schematic schematic, WorldPosition at, PasteOptions? options = null) -> Task<PlaceOnceResult>` — Pastes `schematic` at `at` unless the calling mod already placed `key` in this world.
 - `static PlaceOnce(string key, Func<Task<bool>> edit) -> Task<PlaceOnceResult>` — Runs `edit` (any Kiln.Build edits; return true when it worked) unless the calling mod already placed `key` in this...
-- `static PlaceProp(Guid template, WorldPosition position, Quaternion? rotation = null, uint itemId = 0, BuildOptions? options = null) -> EntityId` — Places a prop the way the game's building helper does (CurrentTransform, DisableRandomLootOnDestroy, UsedItem).
+- `static PlaceProp(Guid template, WorldPosition position, Quaternion? rotation = null, uint itemId = 0, BuildOptions? options = null) -> EntityId` — Places a prop by the GUID of its template; see `Build.PlaceProp`.
 - `static PlaceProp(string template, WorldPosition position, Quaternion? rotation = null, uint itemId = 0, BuildOptions? options = null) -> EntityId` — Places a prop the way the game's building helper does (CurrentTransform, DisableRandomLootOnDestroy, UsedItem).
 - `static Prop(EntityId entity) -> PlacedProp?` — The prop's template, transform and UsedItem; null when it does not exist.
 - `static Props(CellBox box, PropFilter filter = PropFilter.Placed) -> IReadOnlyList<PlacedProp>` — Props inside a cell box (positions within its world-space bounds).
@@ -124,22 +124,22 @@ enum: Air, Terrain, Building
 - `static SchematicPath(string name) -> string` — The path of a schematic by name (letters, digits, `- _ .`).
 
 ## BuildEditEvent — Posted after a Kiln edit changed the world (or was refused by the world: zone, base, not loaded; or `Build.WriteIfUnchanged` found the cells changed).
-- `Actor { get; } -> EntityId`
-- `Box { get; } -> CellBox`
-- `Changed { get; } -> bool`
+- `Actor { get; } -> EntityId` — The player the edit was for, or none (Kiln itself).
+- `Box { get; } -> CellBox` — The cells the edit covered (props: the cell of the prop's position).
+- `Changed { get; } -> bool` — True when cells changed (`BuildResult.Changed`) or the edit placed or removed props.
 - `JournalId { get; } -> long` — The journal entry (0 = not journaled).
-- `Kind { get; } -> BuildEditKind`
-- `Label { get; } -> string?`
-- `Origin { get; } -> string`
-- `PropsPlaced { get; } -> IReadOnlyList<EntityId>`
-- `PropsRemoved { get; } -> IReadOnlyList<EntityId>`
+- `Kind { get; } -> BuildEditKind` — What kind of edit it was.
+- `Label { get; } -> string?` — The label of the edit (`BuildOptions.Label`); null when it has none.
+- `Origin { get; } -> string` — The mod that asked for it.
+- `PropsPlaced { get; } -> IReadOnlyList<EntityId>` — The props the edit placed.
+- `PropsRemoved { get; } -> IReadOnlyList<EntityId>` — The props the edit removed.
 - `Result { get; } -> BuildResult?` — The voxel part (null for prop-only edits).
 
 ## BuildEditingEvent — Posted before a Kiln edit (managed API, schematics, commands) changes the world.
 - `Actor { get; } -> EntityId` — The player the edit is for, or none (Kiln itself).
 - `Box { get; } -> CellBox` — The cells the edit may change (props: the cell of the prop's position).
-- `Kind { get; } -> BuildEditKind`
-- `Label { get; } -> string?`
+- `Kind { get; } -> BuildEditKind` — What kind of edit is about to run.
+- `Label { get; } -> string?` — The label of the edit (`BuildOptions.Label`); null when it has none.
 - `Origin { get; } -> string` — The mod that asked for it.
 
 ## BuildEditKind — What a Kiln edit is.
@@ -147,15 +147,15 @@ enum: Write, Dig, Add, Flatten, Smooth, Paint, Replace, Paste, PlaceProp, Remove
 
 ## BuildException — An edit Kiln could not run at all (service unavailable, bad box, engine fault).
 - `BuildException(string message, int code = 0)`
-- `Code { get; } -> int`
+- `Code { get; } -> int` — The kiln.build result code behind the failure; 0 when the exception did not come from one.
 
 ## BuildFlags — How a Kiln edit may act.
 enum: None, RespectZones, InBases, AllowAltars, Unloaded, DryRun, Transient
 
 ## BuildOptions — Optional settings of an edit.
 - `Actor { get; init; } -> EntityId` — The player the edit is for (zones with `BuildFlags.RespectZones`, journal owner, events); none = Kiln itself.
-- `static Default { get; } -> BuildOptions`
-- `Flags { get; init; } -> BuildFlags`
+- `static Default { get; } -> BuildOptions` — The options a call uses when it is given none: no flags, no actor, journaled, the default load timeout and no label.
+- `Flags { get; init; } -> BuildFlags` — How the edit may act (`BuildFlags`).
 - `Journal { get; init; } -> bool` — Record the edit in the session journal so `Build.Undo` can revert it.
 - `Label { get; init; } -> string?` — Shown in the journal and events ("paste outpost", "/build dig").
 - `LoadTimeout { get; init; } -> TimeSpan` — How long an async edit waits for the voxel tiles to stream in.
@@ -168,210 +168,210 @@ enum: None, Zone, Base, NotLoaded, DryRun, Canceled, Changed `0.2.3`
 - `BlocksWritten { get; init; } -> int` — 8x8x8 blocks the engine committed.
 - `Box { get; init; } -> CellBox` — The cells the edit covered.
 - `CellsChanged { get; init; } -> long` — Cells whose value changed.
-- `Changed { get; } -> bool`
+- `Changed { get; } -> bool` — True when cells changed and the edit was not refused or a dry run (`BuildResult.CellsChanged` is above zero and...
 - `Kept { get; init; } -> bool` — The touched chunks are in Kiln's save regions (the game saves them).
-- `Milliseconds { get; init; } -> double`
+- `Milliseconds { get; init; } -> double` — The time the engine's writer took, in milliseconds.
 - `Ok { get; } -> bool` `0.2.2` — The edit was not refused (`BuildResult.Refused` is false): it ran, or was a dry run.
 - `Reason { get; } -> string?` `0.2.2` — Why the edit was refused, in words (`BuildResult.Refusal` is the code); null when `BuildResult.Ok`.
-- `Refusal { get; init; } -> BuildRefusal`
-- `Refused { get; } -> bool`
+- `Refusal { get; init; } -> BuildRefusal` — Why the edit changed nothing; `BuildRefusal.None` when it was not refused.
+- `Refused { get; } -> bool` — True when the edit was refused: `BuildResult.Refusal` is anything but `BuildRefusal.None` or `BuildRefusal.DryRun`.
 - `Verified { get; init; } -> bool` — The cells read back equal to what was written.
 - `Zone { get; init; } -> uint` — The denying zone (`BuildRefusal.Zone`) or base altar (`BuildRefusal.Base`).
 
 ## BuildShape — A region for shape edits, in world metres.
 - `BuildShape()`
 - `BuildShape(ShapeKind Kind, WorldPosition Center, Vector3 Half)`
-- `static Box(WorldPosition center, double halfX, double halfY, double halfZ) -> BuildShape`
-- `Center { get; init; } -> WorldPosition`
-- `static Cylinder(WorldPosition center, double radius, double halfHeight) -> BuildShape`
+- `static Box(WorldPosition center, double halfX, double halfY, double halfZ) -> BuildShape` — A box around `center` with these half extents (metres).
+- `Center { get; init; } -> WorldPosition` — The centre of the shape in world metres.
+- `static Cylinder(WorldPosition center, double radius, double halfHeight) -> BuildShape` — A vertical cylinder around `center` with this radius and half height (metres).
 - `Half { get; init; } -> Vector3` — Box: half extents.
-- `Kind { get; init; } -> ShapeKind`
-- `static Sphere(WorldPosition center, double radius) -> BuildShape`
+- `Kind { get; init; } -> ShapeKind` — The geometry of the shape.
+- `static Sphere(WorldPosition center, double radius) -> BuildShape` — A sphere around `center` with this radius (metres).
 
 ## BuildStatus — kiln.build's state (any thread).
 - `BuildStatus(bool Read, bool Write, bool Props, bool World, bool Persist, ulong Reads, ulong Writes, ulong CellsRead, ulong CellsWritten, ulong BlocksWritten, ulong PropsPlaced, ulong PropsRemoved, ulong Refused, ulong KeptChunks, ulong SavesSeen, string Detail)`
-- `BlocksWritten { get; init; } -> ulong`
-- `CellsRead { get; init; } -> ulong`
-- `CellsWritten { get; init; } -> ulong`
-- `Detail { get; init; } -> string`
-- `KeptChunks { get; init; } -> ulong`
-- `Persist { get; init; } -> bool`
-- `Props { get; init; } -> bool`
-- `PropsPlaced { get; init; } -> ulong`
-- `PropsRemoved { get; init; } -> ulong`
-- `Read { get; init; } -> bool`
-- `Reads { get; init; } -> ulong`
-- `Refused { get; init; } -> ulong`
-- `SavesSeen { get; init; } -> ulong`
-- `World { get; init; } -> bool`
-- `Write { get; init; } -> bool`
-- `Writes { get; init; } -> ulong`
+- `BlocksWritten { get; init; } -> ulong` — 8x8x8 blocks committed since kiln.build started.
+- `CellsRead { get; init; } -> ulong` — Cells read since kiln.build started.
+- `CellsWritten { get; init; } -> ulong` — Cells whose value a write changed since kiln.build started.
+- `Detail { get; init; } -> string` — A note on why something is off, in words (for example that the voxel world is not initialized yet).
+- `KeptChunks { get; init; } -> ulong` — The 16 m chunks in Kiln's save regions.
+- `Persist { get; init; } -> bool` — Kiln's save regions are hooked into the game's save, so Kiln's edits are saved.
+- `Props { get; init; } -> bool` — Prop placement works on this build.
+- `PropsPlaced { get; init; } -> ulong` — Props placed since kiln.build started.
+- `PropsRemoved { get; init; } -> ulong` — Props removed since kiln.build started.
+- `Read { get; init; } -> bool` — Voxel reads work on this build.
+- `Reads { get; init; } -> ulong` — Voxel reads served since kiln.build started.
+- `Refused { get; init; } -> ulong` — Edits and prop placements that were refused or failed since kiln.build started.
+- `SavesSeen { get; init; } -> ulong` — World saves whose region list Kiln extended.
+- `World { get; init; } -> bool` — The server world runs and the voxel world was found.
+- `Write { get; init; } -> bool` — Voxel writes work on this build.
+- `Writes { get; init; } -> ulong` — Voxel writes done since kiln.build started.
 
 ## CaptureOptions — Capture settings.
 - `Anchor { get; init; } -> CellPos?` — The paste point, in cells from the low corner.
-- `Author { get; init; } -> string?`
-- `Description { get; init; } -> string?`
-- `LoadTimeout { get; init; } -> TimeSpan`
-- `Name { get; init; } -> string?`
+- `Author { get; init; } -> string?` — The schematic's author.
+- `Description { get; init; } -> string?` — The schematic's description.
+- `LoadTimeout { get; init; } -> TimeSpan` — How long `Schematic.CaptureAsync` waits for the voxel tiles to stream in.
+- `Name { get; init; } -> string?` — The schematic's name.
 - `Props { get; init; } -> PropFilter` — Which props to keep.
 
 ## CellBox — A box of cells: low corner `(X, Y, Z)` and size.
 - `CellBox()`
 - `CellBox(int X, int Y, int Z, int SizeX, int SizeY, int SizeZ)`
-- `Contains(CellPos p) -> bool`
-- `Count { get; } -> long`
+- `Contains(CellPos p) -> bool` — Whether the cell `p` (cell coordinates) lies inside the box.
+- `Count { get; } -> long` — The number of cells in the box: `SizeX * SizeY * SizeZ`.
 - `End { get; } -> CellPos` — The cell just outside the high corner.
 - `static FromCorners(CellPos a, CellPos b) -> CellBox` — The box spanning two corner cells (both included, any order).
-- `Index(int x, int y, int z) -> int`
-- `IsEmpty { get; } -> bool`
-- `Min { get; } -> CellPos`
-- `Offset(CellPos d) -> CellBox`
-- `SizeX { get; init; } -> int`
-- `SizeY { get; init; } -> int`
-- `SizeZ { get; init; } -> int`
-- `X { get; init; } -> int`
-- `Y { get; init; } -> int`
-- `Z { get; init; } -> int`
+- `Index(int x, int y, int z) -> int` — Where the cell at `x`, `y`, `z` sits in an array of the box's cells (x fastest, then y, then z).
+- `IsEmpty { get; } -> bool` — True when a size is zero or negative, so the box holds no cells.
+- `Min { get; } -> CellPos` — The low corner cell, `(X, Y, Z)`.
+- `Offset(CellPos d) -> CellBox` — The same box moved by `d` cells; the size stays.
+- `SizeX { get; init; } -> int` — The number of cells along x.
+- `SizeY { get; init; } -> int` — The number of cells along y.
+- `SizeZ { get; init; } -> int` — The number of cells along z.
+- `X { get; init; } -> int` — The x index of the low corner cell.
+- `Y { get; init; } -> int` — The y index of the low corner cell.
+- `Z { get; init; } -> int` — The z index of the low corner cell.
 
 ## CellPos — Cell coordinates (integer index into the voxel grid; see `Build.CellOf`).
 - `CellPos()`
 - `CellPos(int X, int Y, int Z)`
-- `static operator +(CellPos a, CellPos b) -> CellPos`
-- `static operator -(CellPos a, CellPos b) -> CellPos`
-- `X { get; init; } -> int`
-- `Y { get; init; } -> int`
-- `Z { get; init; } -> int`
+- `static operator +(CellPos a, CellPos b) -> CellPos` — Adds two cell positions component by component.
+- `static operator -(CellPos a, CellPos b) -> CellPos` — Subtracts `b` from `a` component by component.
+- `X { get; init; } -> int` — The cell index along x.
+- `Y { get; init; } -> int` — The cell index along y, the vertical axis.
+- `Z { get; init; } -> int` — The cell index along z.
 
 ## FindWallFlags `0.2.15` — Additional terrain hits for a wall search.
 enum: None, PlayerTerrain, Terrain
 
 ## JournalInfo — One recorded edit.
 - `JournalInfo(long Id, string Owner, string Label, BuildEditKind Kind, DateTimeOffset At, long Cells, int PropsPlaced, int PropsRemoved)`
-- `At { get; init; } -> DateTimeOffset`
-- `Cells { get; init; } -> long`
-- `Id { get; init; } -> long`
-- `Kind { get; init; } -> BuildEditKind`
-- `Label { get; init; } -> string`
-- `Owner { get; init; } -> string`
-- `PropsPlaced { get; init; } -> int`
-- `PropsRemoved { get; init; } -> int`
+- `At { get; init; } -> DateTimeOffset` — When the entry was started.
+- `Cells { get; init; } -> long` — How many cells it recorded.
+- `Id { get; init; } -> long` — The entry's id (`Build.UndoEntry`).
+- `Kind { get; init; } -> BuildEditKind` — What kind of edit it was.
+- `Label { get; init; } -> string` — The label of the edit.
+- `Owner { get; init; } -> string` — The owner: the mod id, or `player:<entity>` for an edit made for a player.
+- `PropsPlaced { get; init; } -> int` — How many props it placed.
+- `PropsRemoved { get; init; } -> int` — How many props it removed.
 
 ## PasteMode — How a paste writes cells.
 enum: Replace, Merge
 
 ## PasteOptions — Paste settings.
-- `Actor { get; init; } -> EntityId`
+- `Actor { get; init; } -> EntityId` — The player the paste is for (zones with `BuildFlags.RespectZones`, journal owner, events); none = Kiln itself.
 - `ClearProps { get; init; } -> bool` — Remove building props (UsedItem) already inside the target box first.
-- `Flags { get; init; } -> BuildFlags`
-- `Journal { get; init; } -> bool`
-- `Label { get; init; } -> string?`
-- `LoadTimeout { get; init; } -> TimeSpan`
-- `Mode { get; init; } -> PasteMode`
+- `Flags { get; init; } -> BuildFlags` — How the paste may act (`BuildFlags`), as for `BuildOptions.Flags`.
+- `Journal { get; init; } -> bool` — Record the paste as one journal entry so `Build.Undo` can revert it.
+- `Label { get; init; } -> string?` — Shown in the journal and events.
+- `LoadTimeout { get; init; } -> TimeSpan` — How long the paste waits for the voxel tiles to stream in.
+- `Mode { get; init; } -> PasteMode` — Whether the schematic's air overwrites the world: `PasteMode.Replace` (the default) or `PasteMode.Merge`.
 - `Offset { get; init; } -> CellPos` — Extra offset in cells after rotation.
 - `Props { get; init; } -> bool` — Place the schematic's props.
 - `Rotation { get; init; } -> int` — Quarter turns about +Y (yaw +90 degrees each): 0..3.
 
 ## PasteResult — What a paste did.
 - `PasteResult(CellBox Box, BuildResult Cells, int PropsPlaced, int PropsFailed, int PropsCleared, long JournalId, IReadOnlyList<EntityId> Props)`
-- `Box { get; init; } -> CellBox`
-- `Cells { get; init; } -> BuildResult`
-- `JournalId { get; init; } -> long`
-- `Ok { get; } -> bool`
-- `Props { get; init; } -> IReadOnlyList<EntityId>`
-- `PropsCleared { get; init; } -> int`
-- `PropsFailed { get; init; } -> int`
-- `PropsPlaced { get; init; } -> int`
+- `Box { get; init; } -> CellBox` — The cells the paste covered.
+- `Cells { get; init; } -> BuildResult` — The result of the cell write, with its refusal if there was one.
+- `JournalId { get; init; } -> long` — The id of the journal entry (`Build.UndoEntry`); 0 when the paste was not journaled or recorded nothing.
+- `Ok { get; } -> bool` — The paste was not refused and every prop was placed: `PasteResult.Cells` is not refused and...
+- `Props { get; init; } -> IReadOnlyList<EntityId>` — The entities of the props that were placed.
+- `PropsCleared { get; init; } -> int` — How many building props `PasteOptions.ClearProps` removed first.
+- `PropsFailed { get; init; } -> int` — How many props could not be placed.
+- `PropsPlaced { get; init; } -> int` — How many props were placed.
 - `Reason { get; } -> string?` `0.2.2` — Why the paste is not ok: the cells' refusal (`BuildResult.Reason`), else how many props could not be placed; null...
 
 ## PlacedProp — A prop in the world.
 - `PlacedProp(EntityId Entity, Guid Template, string TemplateName, WorldPosition Position, Quaternion Rotation, Vector3 Scale, uint ItemId, TemplateKind Kind, PropFlags Flags)`
-- `Entity { get; init; } -> EntityId`
-- `Flags { get; init; } -> PropFlags`
-- `ItemId { get; init; } -> uint`
-- `Kind { get; init; } -> TemplateKind`
-- `Position { get; init; } -> WorldPosition`
-- `Rotation { get; init; } -> Quaternion`
-- `Scale { get; init; } -> Vector3`
-- `Template { get; init; } -> Guid`
-- `TemplateName { get; init; } -> string`
+- `Entity { get; init; } -> EntityId` — The prop's entity.
+- `Flags { get; init; } -> PropFlags` — What the prop is: placed, a flame altar, saved by the game.
+- `ItemId { get; init; } -> uint` — The item its UsedItem names, which dismantling gives back; 0 when it has none.
+- `Kind { get; init; } -> TemplateKind` — The template's kind (kiln.spawn's).
+- `Position { get; init; } -> WorldPosition` — The prop's position in world metres.
+- `Rotation { get; init; } -> Quaternion` — The prop's orientation.
+- `Scale { get; init; } -> Vector3` — The prop's scale along x, y and z.
+- `Template { get; init; } -> Guid` — The GUID of the prop's template.
+- `TemplateName { get; init; } -> string` — The name of the prop's template.
 
 ## PlaceOnceRecord — A PlaceOnce record (one per key, per mod, per world).
-- `At { get; set; } -> double[]`
-- `Box { get; set; } -> int[]`
-- `Cells { get; set; } -> long`
-- `Hash { get; set; } -> string`
-- `Key { get; set; } -> string`
-- `KilnVersion { get; set; } -> string`
-- `PlacedAt { get; set; } -> DateTimeOffset`
-- `Props { get; set; } -> int`
-- `Rotation { get; set; } -> int`
-- `Schematic { get; set; } -> string`
+- `At { get; set; } -> double[]` — The position it was pasted at: `[x, y, z]` in world metres.
+- `Box { get; set; } -> int[]` — The cells the paste covered: `[x, y, z, sizeX, sizeY, sizeZ]` in cells.
+- `Cells { get; set; } -> long` — How many cells the paste changed.
+- `Hash { get; set; } -> string` — The hash of the schematic (`Schematic.Hash`).
+- `Key { get; set; } -> string` — The key the mod gave to `PlaceOnce`.
+- `KilnVersion { get; set; } -> string` — The Kiln version that placed it.
+- `PlacedAt { get; set; } -> DateTimeOffset` — When it was placed (UTC).
+- `Props { get; set; } -> int` — How many props the paste placed.
+- `Rotation { get; set; } -> int` — The quarter turns the paste used (`PasteOptions.Rotation`).
+- `Schematic { get; set; } -> string` — The name of the schematic (`Schematic.Name`).
 
 ## PlaceOnceResult — What `Build.PlaceOnce` did.
 - `PlaceOnceResult(bool Placed, bool AlreadyPlaced, PlaceOnceRecord? Record, PasteResult? Paste, string? Error = null)`
-- `AlreadyPlaced { get; init; } -> bool`
-- `Error { get; init; } -> string?`
+- `AlreadyPlaced { get; init; } -> bool` — True when the calling mod had already placed this key in this world, so nothing was placed now.
+- `Error { get; init; } -> string?` — Why it failed, in words; null when it did not fail.
 - `Ok { get; } -> bool` `0.2.2` — The structure is in the world: placed now, or by an earlier call.
-- `Paste { get; init; } -> PasteResult?`
+- `Paste { get; init; } -> PasteResult?` — The paste's result; null when it did not paste (already placed, the world never started, or the edit overload was used).
 - `Placed { get; init; } -> bool` — True when it placed now; false when the world already had it (`PlaceOnceResult.Record`) or the edit failed...
 - `Reason { get; } -> string?` `0.2.2` — Why it is not (`PlaceOnceResult.Error`, else the paste's reason); null when `PlaceOnceResult.Ok`.
-- `Record { get; init; } -> PlaceOnceRecord?`
+- `Record { get; init; } -> PlaceOnceRecord?` — The record: the new one when `Placed`, the earlier one when `AlreadyPlaced`, otherwise null.
 
 ## PlayerBase — A player base: the game's own build zone around a flame altar (BuildZoneSystem).
 - `PlayerBase(EntityId Altar, WorldPosition Center, Vector3 Half, bool Abandoned)`
-- `Abandoned { get; init; } -> bool`
-- `Altar { get; init; } -> EntityId`
-- `Center { get; init; } -> WorldPosition`
-- `Contains(WorldPosition p) -> bool`
-- `Half { get; init; } -> Vector3`
+- `Abandoned { get; init; } -> bool` — True when the game marks the base as abandoned.
+- `Altar { get; init; } -> EntityId` — The flame altar entity that owns the zone.
+- `Center { get; init; } -> WorldPosition` — The centre of the build zone in world metres.
+- `Contains(WorldPosition p) -> bool` — Whether a world position lies inside the zone: within `PlayerBase.Half` of `PlayerBase.Center` on all three axes...
+- `Half { get; init; } -> Vector3` — Half the zone's size along x, y and z, in metres.
 
 ## PropFilter — Which entities `Build.Props` returns.
 enum: Static, Placed, Saved, All
 
-## PropFlags
+## PropFlags — What a prop is (`PlacedProp.Flags`).
 enum: None, Placed, Altar, Saved
 
 ## Schematic — A captured region: cells (x fastest, then y, then z) and props.
-- `Schematic(int sizeX, int sizeY, int sizeZ, Voxel[] cells, IReadOnlyList<SchematicProp>? props = null, CellPos? anchor = null, double cellSize = 0.5)`
+- `Schematic(int sizeX, int sizeY, int sizeZ, Voxel[] cells, IReadOnlyList<SchematicProp>? props = null, CellPos? anchor = null, double cellSize = 0.5)` — Builds a schematic from cells (x fastest, then y, then z).
 - `Anchor { get; } -> CellPos` — The paste point in cells from the low corner (a paste puts this cell at the target position).
-- `Author { get; init; } -> string`
+- `Author { get; init; } -> string` — The schematic's author, saved in the file.
 - `static Capture(CellBox box, CaptureOptions? options = null) -> Schematic` — Captures the cells of `box` and the props in it (tiles must be loaded; see `Schematic.CaptureAsync`).
 - `static CaptureAsync(CellBox box, CaptureOptions? options = null) -> Task<Schematic>` — Loads the tiles under the box, then `Schematic.Capture`s.
-- `Cells { get; } -> ReadOnlySpan<Voxel>`
+- `Cells { get; } -> ReadOnlySpan<Voxel>` — The cells, x fastest, then y, then z: `index = (z * SizeY + y) * SizeX + x`.
 - `CellsEqual(Schematic other) -> bool` — True when both hold the same cells (and sizes).
-- `CellSize { get; } -> double`
-- `Count { get; } -> long`
-- `Description { get; init; } -> string`
-- `const FormatVersion = 1 -> int`
-- `static FromBytes(byte[] data) -> Schematic`
+- `CellSize { get; } -> double` — The cell edge in metres (the grid it was captured on; 0.5 by default).
+- `Count { get; } -> long` — The number of cells: `SizeX * SizeY * SizeZ`.
+- `Description { get; init; } -> string` — A description, saved in the file.
+- `const FormatVersion = 1 -> int` — The version of the .kschem format that Kiln writes and reads.
+- `static FromBytes(byte[] data) -> Schematic` — Reads a .kschem from bytes.
 - `Hash { get; } -> string` — SHA-256 of the cells and props (hex): what `Build.PlaceOnce` records.
 - `static Load(string path) -> Schematic` — Reads a .kschem file.
-- `Name { get; init; } -> string`
+- `Name { get; init; } -> string` — The schematic's name, saved in the file.
 - `Paste(WorldPosition at, PasteOptions? options = null) -> Task<PasteResult>` — Pastes at `at` (the anchor cell lands on its cell), turned and offset as asked.
 - `PasteAt(CellPos corner, PasteOptions? options = null) -> Task<PasteResult>` — Pastes with the low corner at a cell (no rotation is applied here: rotate first with `Schematic.Rotated`).
-- `Props { get; } -> IReadOnlyList<SchematicProp>`
-- `static Read(Stream input) -> Schematic`
+- `Props { get; } -> IReadOnlyList<SchematicProp>` — The props, each with its position relative to the low corner.
+- `static Read(Stream input) -> Schematic` — Reads a .kschem from a stream, from its current position.
 - `Rotated(int quarterTurns) -> Schematic` — The schematic turned `quarterTurns` times 90 degrees about +Y (yaw +90 each): cell (x, z) of a box sizeX x sizeZ...
 - `Save(string path) -> void` — Writes the schematic as .kschem (atomically: temp file, then rename).
-- `SizeX { get; } -> int`
-- `SizeY { get; } -> int`
-- `SizeZ { get; } -> int`
+- `SizeX { get; } -> int` — The number of cells along x.
+- `SizeY { get; } -> int` — The number of cells along y.
+- `SizeZ { get; } -> int` — The number of cells along z.
 - `SolidCount { get; } -> long` — Cells that hold matter (fill > 0).
 - `Source { get; init; } -> Json.Nodes.JsonObject?` — Where it was captured (null for built or loaded ones without it).
 - `TargetBox(WorldPosition at, int rotation = 0, CellPos offset = default(CellPos)) -> CellBox` — The cell box a paste at `at` covers (the anchor cell lands on the cell of `at`).
-- `this[int x, int y, int z] { get; } -> Voxel`
-- `ToBytes() -> byte[]`
-- `Write(Stream output) -> void`
+- `this[int x, int y, int z] { get; } -> Voxel` — The cell at `x`, `y`, `z`, counted from the low corner.
+- `ToBytes() -> byte[]` — The schematic as .kschem bytes (what `Schematic.Save` writes to a file).
+- `Write(Stream output) -> void` — Writes the schematic as .kschem to a stream.
 
 ## SchematicProp — A prop in a schematic: template, position relative to the schematic's low corner (metres), rotation and the item dismantling gives back (0 = the item that places the...
 - `SchematicProp(Guid Template, string Name, Vector3 Offset, Quaternion Rotation, uint ItemId)`
-- `ItemId { get; init; } -> uint`
-- `Name { get; init; } -> string`
-- `Offset { get; init; } -> Vector3`
-- `Rotation { get; init; } -> Quaternion`
-- `Template { get; init; } -> Guid`
+- `ItemId { get; init; } -> uint` — The item dismantling gives back: 0 is the item that places the template, `UInt32.MaxValue` is none.
+- `Name { get; init; } -> string` — The name of the template when the prop was captured (a label: a paste uses `Template`).
+- `Offset { get; init; } -> Vector3` — The prop's position in metres from the schematic's low corner.
+- `Rotation { get; init; } -> Quaternion` — The prop's orientation as a quaternion.
+- `Template { get; init; } -> Guid` — The GUID of the prop's template; a paste places the prop by it.
 
-## ShapeKind
+## ShapeKind — The geometry of a `BuildShape`.
 enum: Box, Sphere, Cylinder
 
 ## ShapeOp — The shape operations of `Build`.
@@ -381,31 +381,31 @@ enum: Dig, Add, Flatten, Smooth, Paint, Replace
 - `UndoResult(long Id, string Label, long CellsRestored, long CellsKept, int PropsRemoved, int PropsRestored, bool Complete)`
 - `CellsKept { get; init; } -> long` — Cells that changed again after the edit (left alone).
 - `CellsRestored { get; init; } -> long` — Cells set back to their old value.
-- `Complete { get; init; } -> bool`
-- `Id { get; init; } -> long`
-- `Label { get; init; } -> string`
-- `PropsRemoved { get; init; } -> int`
-- `PropsRestored { get; init; } -> int`
+- `Complete { get; init; } -> bool` — True when every restored write read back as written, every removed prop was put back and no cell was left alone...
+- `Id { get; init; } -> long` — The id of the journal entry that was reverted.
+- `Label { get; init; } -> string` — The label of that entry.
+- `PropsRemoved { get; init; } -> int` — Props the edit had placed that the undo removed.
+- `PropsRestored { get; init; } -> int` — Props the edit had removed that the undo put back.
 
 ## Voxel — One voxel cell as the game stores it (a 0.5 m cube on svn 1285601): `Voxel.Material` and `Voxel.Fill` 0..255 (255 = solid; values between place the surface inside the...
 - `Voxel()`
 - `Voxel(ushort Raw)`
-- `static Air { get; } -> Voxel`
-- `Fill { get; } -> byte`
-- `IsAir { get; } -> bool`
+- `static Air { get; } -> Voxel` — The empty cell: material 0 and fill 0 (`Voxel.Raw` 0).
+- `Fill { get; } -> byte` — How much matter the cell holds (the high byte of `Voxel.Raw`): 255 is solid, 0 is none, and values between place the...
+- `IsAir { get; } -> bool` — True when `Voxel.Fill` is 0, whatever the material (the game leaves a surface's material on the air cells next to it).
 - `IsBuilding { get; } -> bool` — A building-block material (128..255).
-- `IsSolid { get; } -> bool`
-- `Material { get; } -> byte`
+- `IsSolid { get; } -> bool` — True when `Voxel.Fill` is 255, a fully solid cell.
+- `Material { get; } -> byte` — The material id (the low byte of `Voxel.Raw`): 1..127 terrain, 128..255 a building-block material; 0 is no material.
 - `static Of(byte material, byte fill = 255) -> Voxel` — A cell of `material` filled to `fill` (255 solid).
-- `Raw { get; init; } -> ushort`
+- `Raw { get; init; } -> ushort` — The engine's own 16-bit cell value: the material in the low byte and the fill in the high byte (`material | fill << 8`).
 
 ## VoxelGrid — The voxel grid's geometry: world metres of cell (0,0,0)'s low corner and the cell size.
 - `VoxelGrid(double CellSize, WorldPosition Origin, int CellsX, int CellsZ, int TileCells, int Level)`
-- `CellSize { get; init; } -> double`
-- `CellsX { get; init; } -> int`
-- `CellsZ { get; init; } -> int`
-- `Level { get; init; } -> int`
-- `Origin { get; init; } -> WorldPosition`
-- `SizeX { get; } -> double`
-- `SizeZ { get; } -> double`
-- `TileCells { get; init; } -> int`
+- `CellSize { get; init; } -> double` — The edge length of a cell in metres (0.5 on the current build).
+- `CellsX { get; init; } -> int` — The grid's extent in cells along x: valid cells are below it (20480 on the current builds).
+- `CellsZ { get; init; } -> int` — The grid's extent in cells along z: valid cells are below it (20480 on the current builds).
+- `Level { get; init; } -> int` — The engine's edit level of the voxel pyramid that the cells belong to (6 on the current build, which makes them 0.5 m).
+- `Origin { get; init; } -> WorldPosition` — The world position of cell (0, 0, 0)'s low corner, in metres.
+- `SizeX { get; } -> double` — The grid's extent along x in metres: `VoxelGrid.CellsX` times `VoxelGrid.CellSize`.
+- `SizeZ { get; } -> double` — The grid's extent along z in metres: `VoxelGrid.CellsZ` times `VoxelGrid.CellSize`.
+- `TileCells { get; init; } -> int` — The size of a streaming tile in cells along x (the game streams 128 m tiles around players and bases).

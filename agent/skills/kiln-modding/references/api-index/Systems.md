@@ -132,12 +132,12 @@
 ## SliceInfo `0.2.4` — What a slice filter sees (`ProgramWrap.When`).
 - `SliceInfo()`
 - `SliceInfo(string Program, WorldKind World, int Count, ulong Step, bool OnWorldThread, nint Layout)`
-- `Count { get; init; } -> int`
-- `Layout { get; init; } -> nint`
-- `OnWorldThread { get; init; } -> bool`
-- `Program { get; init; } -> string`
-- `Step { get; init; } -> ulong`
-- `World { get; init; } -> WorldKind`
+- `Count { get; init; } -> int` — Entities in the slice (0 for a SYSTEM program).
+- `Layout { get; init; } -> nint` — The slice's archetype key; 0 when not known.
+- `OnWorldThread { get; init; } -> bool` — True on the world's own thread, false on a game task worker.
+- `Program { get; init; } -> string` — The program's name.
+- `Step { get; init; } -> ulong` — The world's step.
+- `World { get; init; } -> WorldKind` — The world the slice is in.
 
 ## SystemInfo `0.2.4` — One of the game's ECS programs in one world's program table.
 - `SystemInfo(string Name, int Index, WorldKind World, uint Flags, ulong UpdateRva, bool Runs, IReadOnlyList<string> Writes, IReadOnlyList<WrapInfo> Wraps)`
@@ -160,20 +160,20 @@
 
 ## WrapDisabledEvent `0.2.4` — A stage was turned off: it faulted, overran its budget 10 slices in a row, threw, or native SET came.
 - `WrapDisabledEvent(string Program, string Mod, WrapStage Stage, string Reason)`
-- `Mod { get; init; } -> string`
-- `Program { get; init; } -> string`
-- `Reason { get; init; } -> string`
-- `Stage { get; init; } -> WrapStage`
+- `Mod { get; init; } -> string` — The id of the mod that made the wrap ("kiln" outside mod code).
+- `Program { get; init; } -> string` — The name of the program the stage is on.
+- `Reason { get; init; } -> string` — Why, in words: a fault (with its exception code), "budget", the exception the stage threw, "native SET loaded", or...
+- `Stage { get; init; } -> WrapStage` — The stage that was turned off.
 
 ## WrapInfo `0.2.4` — One managed stage on a program.
 - `WrapInfo(string Mod, string Program, WorldKind World, WrapStage Stage, int Priority, WrapState State, bool PerEntity)`
-- `Mod { get; init; } -> string`
-- `PerEntity { get; init; } -> bool`
-- `Priority { get; init; } -> int`
-- `Program { get; init; } -> string`
-- `Stage { get; init; } -> WrapStage`
-- `State { get; init; } -> WrapState`
-- `World { get; init; } -> WorldKind`
+- `Mod { get; init; } -> string` — The id of the mod that made the wrap ("kiln" outside mod code).
+- `PerEntity { get; init; } -> bool` — True for a per-entity stage, false for a slice stage.
+- `Priority { get; init; } -> int` — The stage's priority; higher runs first among the Befores.
+- `Program { get; init; } -> string` — The name of the program the stage is on.
+- `Stage { get; init; } -> WrapStage` — Where the stage runs relative to the game's update.
+- `State { get; init; } -> WrapState` — Where the stage is in its lifetime.
+- `World { get; init; } -> WorldKind` — The world the wrap targets.
 
 ## WrapOptions `0.2.4` — Which world a wrap targets.
 - `Priority { get; init; } -> int` — The priority of the stages whose call gives none.
@@ -194,9 +194,9 @@ enum: Pending, Active, Removed, Refused
 ## WrapStats `0.2.4` — What a stage did so far, summed over its stages.
 - `WrapStats(long Slices, long Entities, double Microseconds, long Faults, long Overruns, int Threads)`
 - `ArchetypeSkips { get; init; } -> long` — Slices a `ProgramWrap.WhenArchetype` filter left to the game because the entity map changed under its archetype read...
-- `Entities { get; init; } -> long`
-- `Faults { get; init; } -> long`
-- `Microseconds { get; init; } -> double`
-- `Overruns { get; init; } -> long`
-- `Slices { get; init; } -> long`
-- `Threads { get; init; } -> int`
+- `Entities { get; init; } -> long` — How many entities were in those slices.
+- `Faults { get; init; } -> long` — How many times a stage faulted or threw.
+- `Microseconds { get; init; } -> double` — The time spent in the stages, in microseconds.
+- `Overruns { get; init; } -> long` — How many slices ran over the stage's budget (1 ms per slice).
+- `Slices { get; init; } -> long` — How many slices the stages ran in.
+- `Threads { get; init; } -> int` — How many distinct threads the stages ran on (counted up to 16; the highest of any one stage).

@@ -22,7 +22,7 @@ class Build(unittest.TestCase):
         self.here = self.root / "repo/tools/docs-site"
         self.here.mkdir(parents=True)
         for name in ("build.sh", "docfx.json", "index.md", "toc.yml", "filterConfig.yml", "annotate.py", "apiids.py", "docxml.py",
-                     "samples.py", "services.json", "services.py", "since.py", "undocumented.py", "undocumented-dev24.txt",
+                     "samples.py", "services.json", "services.py", "since.py", "undocumented.py", "undocumented-baseline.txt",
                      "stage-guide.py", "check-links.py"):
             shutil.copy2(HERE / name, self.here / name)
         # since.py reads the release tooling's ordering of releases; the ledger and Mods.cs are what annotate.py --repo reads
@@ -75,7 +75,7 @@ elif sys.argv[1] == "exec":
         dest = pathlib.Path(config["metadata"][0]["dest"])
         dest.mkdir(parents=True, exist_ok=True)
         typed = os.environ["MOCK_METADATA"] == "typed"
-        if dest.name == "api" or (typed and dest.name == "api-raw"):
+        if dest.name == "api" or (dest.name == "api-raw" and (typed or os.environ.get("MOCK_RAW"))):
             text = "items:\\n- uid: Kiln.Mock\\n  type: Class\\n"
             if typed:
                 text += "  commentId: T:Kiln.Mock\\n  name: Mock\\n  namespace: Kiln\\n  assemblies:\\n  - Kiln.Api\\n  summary: A summary.\\n"
@@ -100,11 +100,14 @@ else:
         self.env.pop("KILN_DOCS_BASELINE", None)
         self.env.pop("KILN_DOCS_TRACKED", None)
 
-    def build(self, metadata, strict=False):
-        return subprocess.run(["bash", str(self.here / "build.sh")],
-                              env={**self.env, "MOCK_METADATA": metadata,
-                                   "KILN_DOCS_STRICT": "1" if strict else "0"},
-                              text=True, capture_output=True)
+    def build(self, metadata, strict=False, args=(), **extra):
+        """strict: False -> KILN_DOCS_STRICT=0, True -> 1, None -> not set (the default is strict)."""
+        env = {**self.env, "MOCK_METADATA": metadata, **extra}
+        if strict is not None:
+            env["KILN_DOCS_STRICT"] = "1" if strict else "0"
+        else:
+            env.pop("KILN_DOCS_STRICT", None)
+        return subprocess.run(["bash", str(self.here / "build.sh"), *args], env=env, text=True, capture_output=True)
 
     def test_the_reference_gets_a_table_of_contents_by_assembly_and_an_overview(self):
         result = self.build("documented")
@@ -159,6 +162,35 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("KILN_DOCS_STRICT=1: failing on them", result.stderr)
         self.assertFalse((self.out / "docs-site/index.html").exists())
+
+    def test_the_gate_is_strict_unless_it_is_switched_off(self):
+        result = self.build("missing", strict=None)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Kiln.Mock", result.stderr)
+        self.assertIn("KILN_DOCS_STRICT=1: failing on them", result.stderr)
+        self.assertFalse((self.out / "docs-site/index.html").exists())
+
+    def test_the_baseline_in_the_repository_names_nothing(self):
+        names = [l for l in (HERE / "undocumented-baseline.txt").read_text().splitlines() if l.strip() and not l.startswith("#")]
+        self.assertEqual(names, [])
+
+    def test_gate_only_checks_the_first_pass_and_builds_no_site(self):
+        failed = self.build("missing", strict=None, args=["--gate-only"], MOCK_RAW="1")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("Kiln.Mock", failed.stderr)
+        passed = self.build("documented", strict=None, args=["--gate-only"], MOCK_RAW="1")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        self.assertIn("undocumented: none", passed.stdout)
+        self.assertFalse((self.out / "docs-site").exists())
+        self.assertFalse((self.out / "docs-work").exists())         # the release build's folder is left alone
+        self.assertTrue((self.out / "docs-gate-work/api-raw/Kiln.Mock.yml").is_file())
+
+    def test_gate_only_takes_the_stage_it_is_given_and_needs_its_xml(self):
+        empty = self.root / "empty-stage"
+        empty.mkdir()
+        result = self.build("documented", args=["--gate-only"], MOCK_RAW="1", KILN_DOCS_STAGE=str(empty))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("no Kiln.Api.xml", result.stderr)
 
     def test_documented_members_pass_with_strict(self):
         result = self.build("documented", strict=True)
@@ -232,7 +264,7 @@ else:
         api.mkdir()
         (api / "Mock.yml").write_text("items:\n- uid: Kiln.Mock\n  type: Class\n")
         command = ["python3", "-I", str(HERE / "undocumented.py"), "--baseline",
-                   str(HERE / "undocumented-dev24.txt")]
+                   str(HERE / "undocumented-baseline.txt")]
         found = subprocess.run(command + [str(api)], capture_output=True, text=True)
         self.assertEqual(found.returncode, 3, found.stderr)
         self.assertEqual(found.stdout, "Kiln.Mock\n")

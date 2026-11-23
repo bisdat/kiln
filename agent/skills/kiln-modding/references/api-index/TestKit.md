@@ -167,18 +167,18 @@ enum: Queued, Held, Applied, Dropped
 ## TestKit.FakeInventorySlot `0.2.12` — A slot as the game would draw it: the item, the stack, the item's entity (the server's id of it: what `SlotClick.ItemEntity` carries), the inventory that holds it...
 - `FakeInventorySlot()`
 - `FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0, byte SlotIndex = 0)`
-- `Count { get; init; } -> uint`
+- `Count { get; init; } -> uint` — The stack size (default 1).
 - `Deconstruct(out uint Item, out uint Count, out uint ItemEntity, out uint Holder, out uint InventoryPage, out byte SlotIndex) -> void`
 - `Equals(TestKit.FakeInventorySlot other) -> bool`
-- `Holder { get; init; } -> uint`
-- `InventoryPage { get; init; } -> uint`
-- `Item { get; init; } -> uint`
-- `ItemEntity { get; init; } -> uint`
+- `Holder { get; init; } -> uint` — The entity of the inventory that holds the item (0: none).
+- `InventoryPage { get; init; } -> uint` — The inventory page the slot is on (an entity id; 0: none).
+- `Item { get; init; } -> uint` — The item's id.
+- `ItemEntity { get; init; } -> uint` — The server's entity id of the item: what `SlotClick.ItemEntity` carries (0: none).
 - `Level { get; init; } -> int` `0.2.14` — The item's level as drawn.
 - `static operator !=(TestKit.FakeInventorySlot left, TestKit.FakeInventorySlot right) -> bool`
 - `static operator ==(TestKit.FakeInventorySlot left, TestKit.FakeInventorySlot right) -> bool`
 - `Rarity { get; init; } -> ItemRarity?` `0.2.14` — The item's rarity as drawn (null: none).
-- `SlotIndex { get; init; } -> byte`
+- `SlotIndex { get; init; } -> byte` — The slot's index on its page.
 
 ## TestKit.FakeItemsCall `0.2.2` — One give or take a mod asked for (`HarnessItems.Calls`), as it ran.
 - `Done { get; } -> int` — How many were given or taken (a dry run: would be).
@@ -220,13 +220,13 @@ enum: GameFirst, ModsFirst, Off
 
 ## TestKit.FakePathRequest `0.2.3` — A path request a mod made (`Queries.RequestPath`, `FindPath`, `CanReach`).
 - `FakePathRequest(EntityId Anchor, WorldPosition From, WorldPosition To, double HorizontalSpace, double VerticalSpace, uint MaxIterations, bool ClosestFallback)`
-- `Anchor { get; init; } -> EntityId`
-- `ClosestFallback { get; init; } -> bool`
-- `From { get; init; } -> WorldPosition`
-- `HorizontalSpace { get; init; } -> double`
-- `MaxIterations { get; init; } -> uint`
-- `To { get; init; } -> WorldPosition`
-- `VerticalSpace { get; init; } -> double`
+- `Anchor { get; init; } -> EntityId` — The entity the game's path query was made for.
+- `ClosestFallback { get; init; } -> bool` — Whether the closest node may be used when the target has none.
+- `From { get; init; } -> WorldPosition` — Where the route starts.
+- `HorizontalSpace { get; init; } -> double` — The free space the route needs sideways, in metres.
+- `MaxIterations { get; init; } -> uint` — The search's iteration limit.
+- `To { get; init; } -> WorldPosition` — Where the route should end.
+- `VerticalSpace { get; init; } -> double` — The free space the route needs upwards, in metres.
 
 ## TestKit.FakePlayer `0.2.1` — A player the test joined (`HarnessPlayers.Join`).
 - `Chat { get; } -> IReadOnlyList<TestKit.FakeChatLine>` `0.2.2` — What this player's chat showed, in order: server lines mods sent them (`Chat.Tell`, `Chat.Broadcast`, command...
@@ -290,8 +290,8 @@ enum: GameFirst, ModsFirst, Off
 ## TestKit.FakeSlotClickResult `0.2.12` — What a `HarnessUiInventory.Click` did: how many handlers got it, and whether the game would not have seen the press (a handler asked to take it).
 - `FakeSlotClickResult()`
 - `FakeSlotClickResult(int Delivered, bool Taken)`
-- `Delivered { get; init; } -> int`
-- `Taken { get; init; } -> bool`
+- `Delivered { get; init; } -> int` — How many handlers got the click.
+- `Taken { get; init; } -> bool` — True when a handler asked to take the press, so the game would not have seen it.
 
 ## TestKit.FakeSpawnCall `0.2.2` — One call a mod made to kiln.spawn that changes the world (`HarnessSpawn.Calls`), with its answer.
 - `Code { get; } -> int` — The native answer: 0 ok, 1 invalid argument, 2 not found (an unknown template, no such entity), 3 unavailable.
@@ -326,12 +326,12 @@ enum: Entity, Item, Destroy, Cleanup
 ## TestKit.FakeTerrainWrite `0.2.3` — One write an overlay made (a batch, or a single block when a base was in the way).
 - `FakeTerrainWrite()`
 - `FakeTerrainWrite(string Mod, string Label, CellBox Box, long CellsChanged, bool Transient, ulong Step)`
-- `Box { get; init; } -> CellBox`
-- `CellsChanged { get; init; } -> long`
+- `Box { get; init; } -> CellBox` — The cells the write covered.
+- `CellsChanged { get; init; } -> long` — How many cells the write changed.
 - `Label { get; init; } -> string` — "terrain \<plan> v\<version>".
 - `Mod { get; init; } -> string` — The mod that applied the patch ("kiln" from code that is not a mod's).
 - `Step { get; init; } -> ulong` — The harness step it was made in.
-- `Transient { get; init; } -> bool`
+- `Transient { get; init; } -> bool` — The write is transient: `HarnessTerrain.Restart` puts the cells it changed back.
 
 ## TestKit.FakeTimeCall `0.2.2` — A change to the clock a mod made (`HarnessTime.Calls`).
 - `ModId { get; } -> string?` — The mod that asked; null for a call outside any mod.
@@ -342,39 +342,39 @@ enum: Entity, Item, Destroy, Cleanup
 ## TestKit.FakeUiBar `0.2.3` — A drawn value: the fraction, the numbers and the label (null: the game's own).
 - `FakeUiBar()`
 - `FakeUiBar(float Fraction, uint Current, uint Max, string? Label = null)`
-- `Current { get; init; } -> uint`
+- `Current { get; init; } -> uint` — The current number.
 - `Deconstruct(out float Fraction, out uint Current, out uint Max, out string? Label) -> void`
 - `Equals(TestKit.FakeUiBar other) -> bool`
-- `Fraction { get; init; } -> float`
-- `Label { get; init; } -> string?`
-- `Max { get; init; } -> uint`
+- `Fraction { get; init; } -> float` — How full the bar is, as a fraction.
+- `Label { get; init; } -> string?` — The label text; null leaves the game's own.
+- `Max { get; init; } -> uint` — The maximum number.
 - `static operator !=(TestKit.FakeUiBar left, TestKit.FakeUiBar right) -> bool`
 - `static operator ==(TestKit.FakeUiBar left, TestKit.FakeUiBar right) -> bool`
 
 ## TestKit.FakeUiDecision `0.2.3` — What one provider did with a value: `Result` is its native result (0 ok), `Edit` the fields it committed (KilnUiEditFlags), `Invalid` when the fake refused the edit...
 - `FakeUiDecision()`
 - `FakeUiDecision(uint Kind, int Result, uint Edit, bool Invalid)`
-- `Edit { get; init; } -> uint`
-- `Invalid { get; init; } -> bool`
-- `Kind { get; init; } -> uint`
-- `Result { get; init; } -> int`
+- `Edit { get; init; } -> uint` — The fields the provider committed, as the native edit flags (0 when it changed nothing or its edit was refused).
+- `Invalid { get; init; } -> bool` — True when the fake refused the provider's edit as the game would, counting it as a fault.
+- `Kind { get; init; } -> uint` — The kind of value the provider was asked about (the numbering of `UiValueKind`: detail, slot, held, health, stamina...
+- `Result { get; init; } -> int` — The provider's native result; 0 is ok.
 
 ## TestKit.FakeUiItem `0.2.3` — An item as the game's UI would show it to a provider (the fields of `UiItemView` a test sets).
 - `FakeUiItem()`
 - `FakeUiItem(uint Item, uint Fuel = 0, uint FuelMax = 0, uint Count = 1, uint InventoryPage = 0, byte SlotIndex = 0, uint ClientEntity = 0, uint Flags = 0, uint UnitsPerCharge = 1)`
-- `ClientEntity { get; init; } -> uint`
-- `Count { get; init; } -> uint`
+- `ClientEntity { get; init; } -> uint` — The stack's client-world entity; valid with flag 1.
+- `Count { get; init; } -> uint` — The stack size (default 1).
 - `Deconstruct(out uint Item, out uint Fuel, out uint FuelMax, out uint Count, out uint InventoryPage, out byte SlotIndex, out uint ClientEntity, out uint Flags, out uint UnitsPerCharge) -> void`
 - `Equals(TestKit.FakeUiItem other) -> bool`
-- `Flags { get; init; } -> uint`
-- `Fuel { get; init; } -> uint`
-- `FuelMax { get; init; } -> uint`
-- `InventoryPage { get; init; } -> uint`
-- `Item { get; init; } -> uint`
+- `Flags { get; init; } -> uint` — Which identity fields are valid: 1 client entity, 4 inventory slot, 8 detail copy, 16 synthetic.
+- `Fuel { get; init; } -> uint` — The item's fuel, in raw fuel units.
+- `FuelMax { get; init; } -> uint` — The item's largest fuel, in raw fuel units.
+- `InventoryPage { get; init; } -> uint` — The inventory page of the slot (an entity id); valid with flag 4.
+- `Item { get; init; } -> uint` — The item's id.
 - `static operator !=(TestKit.FakeUiItem left, TestKit.FakeUiItem right) -> bool`
 - `static operator ==(TestKit.FakeUiItem left, TestKit.FakeUiItem right) -> bool`
-- `SlotIndex { get; init; } -> byte`
-- `UnitsPerCharge { get; init; } -> uint`
+- `SlotIndex { get; init; } -> byte` — The slot's index on its page; valid with flag 4.
+- `UnitsPerCharge { get; init; } -> uint` — The detail view's divisor for fuel (at least 1; default 1).
 
 ## TestKit.FakeVoxelAnswer `0.2.3` — What the fake answers a voxel ray: `FakeVoxelAnswer.Clear`, `FakeVoxelAnswer.Hit`, or `FakeVoxelAnswer.Refused` with one of the service's reasons (`NotLoaded`...
 - `static Clear { get; } -> TestKit.FakeVoxelAnswer` — Loaded, and nothing on the segment.
@@ -387,9 +387,9 @@ enum: Entity, Item, Destroy, Cleanup
 ## TestKit.FakeVoxelRay `0.2.3` — A voxel ray a mod asked for (`Queries.RaycastVoxels`, `GroundBelow`, `VoxelLineOfSight`, a brain's sight).
 - `FakeVoxelRay()`
 - `FakeVoxelRay(WorldPosition From, WorldPosition To, byte Realm)`
-- `From { get; init; } -> WorldPosition`
-- `Realm { get; init; } -> byte`
-- `To { get; init; } -> WorldPosition`
+- `From { get; init; } -> WorldPosition` — Where the ray starts.
+- `Realm { get; init; } -> byte` — The realm the ray was cast in (0: the overworld).
+- `To { get; init; } -> WorldPosition` — Where the ray ends.
 
 ## TestKit.FakeWorld `0.2.2` — The fake world of a harness (`KilnHarness.Entities`): entities with components laid out by Kiln.Game's types, under the real Kiln.World.
 - `All { get; } -> IReadOnlyList<EntityId>` — Every entity made here (and every fake player's entity that was given a component), by id.
@@ -601,15 +601,15 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 - `Save(int maxSteps = 100) -> uint` — Saves the world now, as an admin's "save now": asks the game for a save and steps the server until the world file is...
 
 ## TestKit.HarnessWorldTables `0.2.4` — Scripted process boot data, not a game or renderer.
-- `Dependency(string mod, string dependency) -> void`
-- `GameMaterial(string name, uint item, bool roof = false, bool terrain = false) -> void`
+- `Dependency(string mod, string dependency) -> void` — Declares that `mod` depends on `dependency`, as if its manifest listed it.
+- `GameMaterial(string name, uint item, bool roof = false, bool terrain = false) -> void` — Scripts a game (vanilla) material that a pool entry may name as its `gameMaterial`.
 - `Material(string mod, string key, uint item, bool roof = false, bool live = true, bool terrain = false) -> void` — Configures a live or retained building/terrain material and its block item.
-- `PendingCount { get; } -> int`
+- `PendingCount { get; } -> int` — How many accepted pool and brush definitions are pending: `HarnessWorldTables.PendingToolDefinitionsJson` copies them.
 - `PendingToolDefinitionsJson(string mod) -> string` `0.2.14` — A copy of the accepted pending policy-pool and computed brush descriptors, in world-table JSON form.
-- `Readiness { get; set; } -> CapacityReadiness`
+- `Readiness { get; set; } -> CapacityReadiness` — The readiness the fake's boot tables report.
 - `ReservePoolId(uint id) -> void` — Models an occupied foreign pool ID so collision refusal can be tested without searching for an FNV collision.
 - `ServePool(string mod, string key, BuildingMaterialPoolBlock block) -> void` — Configures one actual served boot row.
-- `StorageFails { get; set; } -> bool`
+- `StorageFails { get; set; } -> bool` — When true, the fake refuses new pool and brush definitions with a storage failure, as if it could not persist them.
 - `TerrainBrushCells(string mod, string key) -> byte[]?` `0.2.14` — A copy of a pending sphere descriptor's raw fill bytes (x fastest, then y, then z), sampled at half-metre voxel...
 - `TerrainItem(string name, uint item, byte cell) -> void` `0.2.14` — Scripts a placeable terrain item's item-to-cell mapping.
 

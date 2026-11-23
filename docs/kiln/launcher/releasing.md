@@ -570,6 +570,62 @@ contained in ...)`) has its own, dated by the change. The `const Kiln.Mods.ApiVe
 
 Tests: `python3 -I tools/release/test_apihistory.py`.
 
+### The agent API index, the doc gate and the drift checks
+Three generated or gated things follow the public API from `tools/check.sh` to the release, so a gap stops at the commit
+that makes it, and the release only repeats the check.
+
+**The agent API index** (`agent/skills/kiln-modding/references/api-index/`, `tools/docs-site/api_index.py`) is generated from
+the PublicAPI record, the XML docs of a Release build and the ledger above, and committed.
+- `tools/check.sh` stage `index` regenerates it in memory from the build it made and fails when the committed copy
+  differs (a changed API line, doc comment or ledger row makes it stale). The fix is the command the failure prints:
+  `python3 -I tools/docs-site/api_index.py --xml <KILN_OUT>/dotnet/bin`, then commit.
+- `release.sh` runs the generator before the export (step "agent API index"). A release builds a commit, so when the
+  index was out of date the release stops at once, says so, and wants the regenerated files committed
+  (`skill: regenerate the API index`) before it runs again. After the checks, `promote` moves the Unshipped lines and
+  appends their ledger rows; release.sh then regenerates the index once more from the same XML docs, and the closing text
+  lists the API record, `managed/api-history.tsv` and the index as one commit (`api: ship the API of <version>`). Test
+  builds (`--beta`, `--worktree`, `--launcher-only`) skip both runs and export the committed index.
+
+**The doc gate**: every public type and member has an XML summary, a positional record has a documented property for each
+parameter, and `undocumented-baseline.txt` is empty.
+- `tools/check.sh` stage `docs` runs `tools/docs-site/record_params.py` (the compiler's CS1591 never asks for the
+  properties of `record Pair(int Left, int Right)`; each needs a `<param name="Left">` on the record) and
+  `tools/docs-site/build.sh --gate-only` (docfx metadata over the build's DLLs and XML docs, then `undocumented.py`
+  strict). It takes about a minute and installs the docfx tool into `$KILN_OUT/tools` on first use (NuGet);
+  `tools/check.sh --no-docfx` leaves the docfx half out when offline, and the last line says so.
+- `release.sh` builds the modding site with `KILN_DOCS_STRICT=1`: `tools/docs-site/build.sh` fails before `docfx build` on a
+  name that has no summary and is not in `tools/docs-site/undocumented-baseline.txt`. The baseline names nothing (it had
+  4,777 names at dev.24): write the doc comment, do not add the name. `KILN_DOCS_STRICT=0` makes the gate a warning, only
+  for looking at a tree that has gaps.
+- Not gaps (left out by `undocumented.py`, as the compiler leaves them out): a record's `Equals`, `GetHashCode`,
+  `ToString`, `==`, `Deconstruct` and copy constructor, a delegate's constructor and `Invoke`/`BeginInvoke`/`EndInvoke`, the
+  generated `Kiln.Ecs` types. Experimental (`[KILNX...]`) members are checked like any other.
+- Tests: `python3 -I tools/docs-site/test_undocumented.py`, `test_record_params.py` and `test_build.py`.
+
+**The drift checks** (`tools/docs-site/drift.py`, `tools/check.sh` stage `drift`, a second or two, no build) hold the docs and
+the skill to the code:
+- `names`: every `Type.Member` in backticks (and in a C# code fence) of `agent/skills/kiln-modding/**` and `docs/kiln/**`
+  is public API: a member, nested type or enum value of the type, an inherited member, a C# 14 `extension(...)` member or a
+  classic extension method. Release notes, generated pages, schema pages and the `*-plan.md` design plans are not read.
+- `versions`: a "since 0.2.0-dev.N", "dev.N+" or "mod API 0.2.N" mark before (or after) a backticked name must not be earlier
+  than the ledger's first release of that name; a name still in `PublicAPI.Unshipped.txt` is later than every release.
+- `facts`: `SKILL.md`, `references/setup.md` and `references/api*.md` pin no build or mod API older than the current
+  `Kiln.Mods.ApiVersion` (`Kiln.Sdk/<version>`, a version on a "this release" line, "(0.2.N on dev.X)"), and
+  `references/versions.md` has a row for the current mod API and for every mod API from its first row on.
+- `map`: every repository page and sample `references/docs-map.md` names exists, every wiki page it names exists in
+  frostdev.io's `src/content/kiln-wiki` (`$KILN_WIKI_DIR`; skipped when that folder is not there), and the skill's relative
+  links, `#anchors` and `docs/kiln/...` pages resolve.
+- A false positive (a sample name, a csproj name, a placeholder, a deliberate "do not do this" or "there is no such member"
+  text) goes into `tools/docs-site/drift-allow.txt`, four tab-separated cells: check, name, file glob, reason. A real
+  mistake is fixed in the text. An entry that matches nothing any more fails the check.
+- `python3 -I tools/docs-site/drift.py [names|versions|facts|map] [--warn <check>]` runs it by hand;
+  `python3 -I tools/docs-site/test_drift.py` tests it (`KILN_DRIFT_REAL=1` runs it over this tree too).
+
+**The status page** `docs/kiln/status.generated.md` (`tools/docs-site/status-tables.py`) is the one generated page that
+cannot be made from the repository: it reads the `kiln/state/capabilities.json` of a booted server (and a client boot) and
+the `client-checks.json` ledger, which only a running Kiln writes. After a release's lab run, regenerate it from those
+files (the command is in the page's own header) and commit it; release.sh's closing text names the step.
+
 ### Cutting a beta (a test build for the Discord testers)
 A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta
 channel. Nothing of it announces a release: no Nexus Mods build or upload, no notes page or download page entry, no

@@ -1,11 +1,11 @@
 # Hooks (Kiln.Hooks)
 
 ## BytePattern — Byte patterns in the common "48 8B ??
-- `static Parse(string pattern) -> short[]`
+- `static Parse(string pattern) -> short[]` — Parses `pattern` into one entry per byte: 0-255 for a byte, -1 for a wildcard.
 
 ## Constants — sigdb layout constants for advanced mods.
 - `static Get(string name) -> long` — The sigdb constant `name` (core, or "\<modid>/name").
-- `static TryGet(string name, out long value) -> bool`
+- `static TryGet(string name, out long value) -> bool` — Looks up the sigdb constant `name` like `Constants.Get` but returns false instead of throwing when it is unresolved...
 
 ## DetourHandler — A detour handler: returns the value the hooked function should yield.
 - `Invoke(HookCall call) -> nuint`
@@ -17,7 +17,7 @@
 - `this[int i] { get; set; } -> nuint` — Argument `i` (0..3): rcx, rdx, r8, r9.
 
 ## HookHandle — A handle to an installed hook or patch; removing it is idempotent.
-- `Dispose() -> void`
+- `Dispose() -> void` — Removes the hook or patch, like `HookHandle.Remove`.
 - `Reason { get; } -> string?` `0.2.4` — The late installation refusal, or null.
 - `Remove() -> void` — Removes this hook/patch.
 - `State { get; } -> HookRegistrationState` `0.2.4` — Pending until the next safe tick; Installed, Refused, or Removed afterwards.
@@ -64,12 +64,12 @@ enum: Pending, Installed, Refused, Removed
 ## HooksStats — Snapshot of what kiln.hooks has installed.
 - `HooksStats()`
 - `HooksStats(int DetourTargets, int MidTargets, int Handlers, int Patches, ulong DetourCalls, ulong MidCalls)`
-- `DetourCalls { get; init; } -> ulong`
-- `DetourTargets { get; init; } -> int`
-- `Handlers { get; init; } -> int`
-- `MidCalls { get; init; } -> ulong`
-- `MidTargets { get; init; } -> int`
-- `Patches { get; init; } -> int`
+- `DetourCalls { get; init; } -> ulong` — Detour dispatches since the game started.
+- `DetourTargets { get; init; } -> int` — Distinct addresses that have at least one detour handler.
+- `Handlers { get; init; } -> int` — Live handlers of every kind across all chains.
+- `MidCalls { get; init; } -> ulong` — Mid-hook dispatches since the game started, counted the same way as `DetourCalls`.
+- `MidTargets { get; init; } -> int` — Distinct addresses that have at least one mid-hook handler.
+- `Patches { get; init; } -> int` — Live byte patches (`Memory.Patch`).
 
 ## Keep — Zeroed native memory that outlives a mod's reload: the same block for the same key for the life of the process (the first call with a key decides the size).
 - `static Block(string key, int size) -> nint` — The block for `key`; `size` bytes, zeroed, on first use.
@@ -79,7 +79,7 @@ enum: Pending, Installed, Refused, Removed
 - `static Patch(nuint address, params byte[] bytes) -> HookHandle` — Overwrites bytes at `address`, remembering the originals; restored when the handle is removed or the mod unloads.
 - `static Read<T>(nuint address) -> T` — Reads `T` from `address`.
 - `static ReadBytes(nuint address, int count) -> byte[]` — Copies `count` bytes from `address`.
-- `static TryRead<T>(nuint address, out T value) -> bool`
+- `static TryRead<T>(nuint address, out T value) -> bool` — Reads `T` from `address` like `Memory.Read` but returns false instead of throwing when the memory is unreadable.
 - `static Write<T>(nuint address, T value) -> void` — Writes `T` to `address` (not restored on unload; use `Memory.Patch` for reversible code edits).
 
 ## MidHandler — A mid-hook handler: reads and writes the registers in place.
@@ -95,8 +95,8 @@ enum: Pending, Installed, Refused, Removed
 - `FindUnique(ReadOnlySpan<short> pattern, out int count) -> long` — The RVA of the single match of `pattern` (see `BytePattern`), or -1.
 - `static Parse(ReadOnlySpan<byte> file, ulong loadedBase) -> PeCode` — Parses an x64 PE32+ image.
 - `static Parse(ReadOnlySpan<byte> file, ulong loadedBase, ReadOnlySpan<byte> mappedHeaders) -> PeCode` — Like `PeCode.Parse`, requiring all mapped PE headers to match the file before using its bytes.
-- `Text { get; } -> byte[]`
-- `TextRva { get; } -> uint`
+- `Text { get; } -> byte[]` — The .text section's bytes, with the image's base relocations applied for the base it is loaded at.
+- `TextRva { get; } -> uint` — The RVA (offset from the image base) of the start of the .text section.
 - `TryRead(ulong rva, Span<byte> dst) -> bool` — The bytes at `rva` (relative to the image base); false outside .text.
 
 ## Registers — Full CPU register context at a mid hook.
@@ -121,14 +121,14 @@ enum: Pending, Installed, Refused, Removed
 - `TrampolineRsp -> nuint` — safetyhook's rule: starts at `Rsp - 8` (it points at `Registers.Rip`); the game resumes with `rsp = TrampolineRsp; ret`.
 - `Xmm(int n) -> Span<byte>` — xmm register `n` (0..15) as a 16-byte span.
 - `XmmD(int n) -> double` — The low 8 bytes of xmm`n` as a double (a float argument/return).
-- `XmmF(int n) -> float`
+- `XmmF(int n) -> float` — The low 4 bytes of xmm`n` (0..15) as a float (a float argument/return).
 
 ## SigArg `0.2.4` — One declared parameter of a descriptor.
 - `SigArg()`
 - `SigArg(string Name, SigKind Kind, uint Size)`
-- `Kind { get; init; } -> SigKind`
-- `Name { get; init; } -> string`
-- `Size { get; init; } -> uint`
+- `Kind { get; init; } -> SigKind` — The parameter's type.
+- `Name { get; init; } -> string` — The parameter's name in the descriptor.
+- `Size { get; init; } -> uint` — The size in bytes.
 
 ## SigCall `0.2.4` — A typed call in flight, as the generated `Call` wraps it.
 - `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now, and stores its result.
@@ -181,12 +181,12 @@ enum: Void, S8, U8, S16, U16, S32, U32, S64, U64, F32, F64, Bool, Ptr, ByVal, St
 ## SigSummary — Result of resolving a mod's shipped symbol fragment.
 - `SigSummary()`
 - `SigSummary(int Symbols, int SymbolsOk, int Constants, int ConstantsOk, int Features, int FeaturesOk)`
-- `Constants { get; init; } -> int`
-- `ConstantsOk { get; init; } -> int`
-- `Features { get; init; } -> int`
-- `FeaturesOk { get; init; } -> int`
-- `Symbols { get; init; } -> int`
-- `SymbolsOk { get; init; } -> int`
+- `Constants { get; init; } -> int` — How many constants the fragment declares.
+- `ConstantsOk { get; init; } -> int` — How many of those constants resolved on this build.
+- `Features { get; init; } -> int` — How many features the fragment declares.
+- `FeaturesOk { get; init; } -> int` — How many of those features are on for this build.
+- `Symbols { get; init; } -> int` — How many symbols the fragment declares.
+- `SymbolsOk { get; init; } -> int` — How many of those symbols resolved on this build.
 
 ## Symbols — sigdb symbol lookup and image scanning for advanced mods: core symbols, the mod's own shipped fragment, and ad-hoc pattern scans in the running executable.
 - `static Find(string pattern) -> nuint` — The single address matching `pattern` (sigdb syntax; holes act as wildcards).
@@ -196,7 +196,7 @@ enum: Void, S8, U8, S16, U16, S32, U32, S64, U64, F32, F64, Bool, Ptr, ByVal, St
 - `static ImageBase { get; } -> nuint` — The image base of the running executable.
 - `static ImageSize { get; } -> nuint` — The image size in bytes.
 - `static LoadShipped() -> SigSummary` — Loads the calling mod's shipped symbol fragment (`<modDir>/sigdb/server.json`) against the running exe, so its...
-- `static TryGet(string name, out nuint address) -> bool`
+- `static TryGet(string name, out nuint address) -> bool` — Looks up the sigdb symbol `name` like `Symbols.Get` but returns false instead of throwing when it is unresolved on...
 
 ## TypedHooks `0.2.4` — What the generated classes call: install a typed hook, call a described function.
 - `static Detour(SigDescriptor sig, SigHandler handler, int priority = 0) -> HookResult` — Installs a typed hook on `sig`'s symbol.

@@ -1,7 +1,7 @@
 # Time (Kiln.Time)
 
 ## DayStartedEvent — The day phase began (the clock passed `DayTimeState.DayStart`, also by a set or sleeping).
-- `Hours { get; } -> double`
+- `Hours { get; } -> double` — The time of day when Kiln noticed (hours, 0..24; `DayTimeState.Hours`).
 - `State { get; } -> DayTimeState` — The clock when Kiln noticed.
 
 ## DayTimeState — A snapshot of the server's day/night clock.
@@ -24,21 +24,21 @@
 - `WeatherLayers { get; init; } -> int` — Number of weather layers (0 = unknown).
 
 ## NightStartedEvent — The night phase began (see `DayStartedEvent`).
-- `Hours { get; } -> double`
-- `State { get; } -> DayTimeState`
+- `Hours { get; } -> double` — The time of day when Kiln noticed (hours, 0..24; `DayTimeState.Hours`).
+- `State { get; } -> DayTimeState` — The clock when Kiln noticed.
 
 ## Time — The server world's time of day (service `kiln.time`).
 - `static Available { get; } -> bool` — True when the native service is loaded and usable on this game build (capability `kiln.time`).
 - `static CanSetSpeed { get; } -> bool` — True when this build can hold the clock's speed (`Time.SetSpeed`, `Time.SetCycle`; capability `time.speed`).
 - `static Cycle { get; } -> TimeCycle` — The day and night cycle as the held speed shows it.
-- `static DayLength { get; } -> TimeSpan`
+- `static DayLength { get; } -> TimeSpan` — Real time the day phase lasts (game setting `dayTimeDuration`; `DayTimeState.DayLength`).
 - `static readonly FastCycle -> TimeSpan` — A whole day and night takes this long in `TimeCycle.Fast`.
 - `static FastSpeed(TimeSpan day, TimeSpan night) -> double` — The speed `TimeCycle.Fast` uses for a cycle of `day` + `night`: one cycle in `Time.FastCycle`, at least 2.
 - `static Format(double hours) -> string` — "HH:mm" for hours 0..24.
 - `static HeldSpeed { get; } -> double?` — The clock speed Kiln holds (0 = stopped, 1 = the game's normal speed), or null when the game decides (1, faster...
-- `static IsDay { get; } -> bool`
+- `static IsDay { get; } -> bool` — True in the day phase, as of the last step (`DayTimeState.IsDay`).
 - `static readonly MaxWeatherDuration -> TimeSpan` `0.2.2` — The longest duration `Time.SetWeather` takes (game time).
-- `static NightLength { get; } -> TimeSpan`
+- `static NightLength { get; } -> TimeSpan` — Real time the night phase lasts (game setting `nightTimeDuration`; `DayTimeState.NightLength`).
 - `static OfDay { get; set; } -> double` — Time of day in hours, 0..24 (e.g. 13.5 = 13:30).
 - `static Ready { get; } -> bool` — True once the server world exists and its clock can be read.
 - `static ReleaseWeather(int? layer = null, bool now = false) -> Task<WeatherResult>` `0.2.2` — Hands the weather back to the game: Kiln's holds end on `layer` (null: every layer).
@@ -64,7 +64,7 @@ enum: Normal, Stopped, Fast
 - `Before { get; } -> double` — Time of day before (hours; NaN when it could not be read).
 - `By { get; } -> string` — Id of the mod whose code set it ("kiln" for Kiln itself).
 - `Hours { get; } -> double` — The time set (hours, 0..24).
-- `Mode { get; } -> TimeSetMode`
+- `Mode { get; } -> TimeSetMode` — How the clock was moved.
 
 ## TimeSetMode — How `Time.Set` moves the clock.
 enum: Forward, GameReset

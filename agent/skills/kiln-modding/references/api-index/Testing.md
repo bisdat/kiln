@@ -1,19 +1,19 @@
 # Testing (Kiln.Testing)
 
 ## Testing.Assert — Checks for test methods.
-- `static Contains(string expected, string? actual, string? message = null) -> void`
-- `static Equal<T>(T expected, T actual, string? message = null) -> void`
-- `static Fail(string message) -> void`
-- `static False(bool condition, string? message = null) -> void`
-- `static InRange(double actual, double low, double high, string? message = null) -> void`
-- `static NotEqual<T>(T unexpected, T actual, string? message = null) -> void`
-- `static NotNull<T>(T? value, string? message = null) -> T`
-- `static Null(object? value, string? message = null) -> void`
-- `static Same(object? expected, object? actual, string? message = null) -> void`
+- `static Contains(string expected, string? actual, string? message = null) -> void` — Fails unless `actual` contains the text `expected` (ordinal, case-sensitive).
+- `static Equal<T>(T expected, T actual, string? message = null) -> void` — Fails unless `actual` equals `expected` (the default equality of `T`); the failure names both values.
+- `static Fail(string message) -> void` — Fails the test with `message`.
+- `static False(bool condition, string? message = null) -> void` — Fails when `condition` is true, with `message` or "expected false".
+- `static InRange(double actual, double low, double high, string? message = null) -> void` — Fails unless `actual` is between `low` and `high`, both included.
+- `static NotEqual<T>(T unexpected, T actual, string? message = null) -> void` — Fails when `actual` equals `unexpected` (the default equality of `T`).
+- `static NotNull<T>(T? value, string? message = null) -> T` — Fails when `value` is null; otherwise returns it, so a test can go on with the non-null value.
+- `static Null(object? value, string? message = null) -> void` — Fails unless `value` is null.
+- `static Same(object? expected, object? actual, string? message = null) -> void` — Fails unless `actual` is the very same instance as `expected` (reference equality).
 - `static Skip(string reason) -> void` — Ends the test as skipped (e.g. a feature is unavailable on this build).
-- `static Throws<TException>(Action action, string? message = null) -> TException`
-- `static ThrowsAsync<TException>(Func<Task> action, string? message = null) -> Task<TException>`
-- `static True(bool condition, string? message = null) -> void`
+- `static Throws<TException>(Action action, string? message = null) -> TException` — Runs `action` and returns the `TException` it throws (or a type derived from it).
+- `static ThrowsAsync<TException>(Func<Task> action, string? message = null) -> Task<TException>` — Awaits `action` and returns the `TException` it throws (or a type derived from it).
+- `static True(bool condition, string? message = null) -> void` — Fails when `condition` is false, with `message` or "expected true".
 
 ## Testing.AssertionException — A failed check.
 - `AssertionException(string message)`
@@ -70,7 +70,7 @@ enum: Hosted, Joined, Server
 enum: Pass, Fail, Skip
 
 ## Testing.KilnTestAttribute — Marks a test method.
-- `KilnTestAttribute(string? name = null)`
+- `KilnTestAttribute(string? name = null)` — Marks a method as a test.
 - `Name { get; } -> string?` — Display name (default `Class.Method`).
 - `Order { get; init; } -> int` — Lower runs first; equal orders run in declaration order.
 - `Skip { get; init; } -> string?` — When set, the test is reported as skipped with this reason.
@@ -82,7 +82,7 @@ enum: Pass, Fail, Skip
 ## Testing.TestContext — What a running test gets (optional parameter of a test method).
 - `Cancellation { get; } -> CancellationToken` — Signalled when the test timed out; awaits on this context then throw.
 - `Delay(TimeSpan time) -> Task` — Waits wall time, coming back on the tick thread.
-- `Log { get; } -> Logger`
+- `Log { get; } -> Logger` — The log of the mod under test.
 - `Mod { get; } -> ModContext` — The context of the mod under test.
 - `Name { get; } -> string` — The test's display name.
 - `Ticks(int count = 1) -> Task` — Continues on the tick thread after `count` server-world steps.
@@ -93,24 +93,24 @@ enum: Pass, Fail, Skip, Timeout
 
 ## Testing.TestReport — Results of one run (also written to `kiln/logs/tests/<mod>.json`).
 - `TestReport(string Mod, string Version, DateTime Started, double Ms, IReadOnlyList<Testing.TestResult> Results)`
-- `Failed { get; } -> int`
+- `Failed { get; } -> int` — How many tests failed or timed out.
 - `File { get; init; } -> string?` — Where the JSON report was written, if anywhere.
-- `Mod { get; init; } -> string`
-- `Ms { get; init; } -> double`
-- `Ok { get; } -> bool`
-- `Passed { get; } -> int`
-- `Results { get; init; } -> IReadOnlyList<Testing.TestResult>`
-- `Skipped { get; } -> int`
-- `Started { get; init; } -> DateTime`
-- `Version { get; init; } -> string`
+- `Mod { get; init; } -> string` — The id of the mod that was tested.
+- `Ms { get; init; } -> double` — How long the whole run took, in milliseconds.
+- `Ok { get; } -> bool` — True when no test failed or timed out (skipped tests do not count against it).
+- `Passed { get; } -> int` — How many tests passed.
+- `Results { get; init; } -> IReadOnlyList<Testing.TestResult>` — One result per test, in the order they ran.
+- `Skipped { get; } -> int` — How many tests were skipped.
+- `Started { get; init; } -> DateTime` — When the run started.
+- `Version { get; init; } -> string` — The mod's version, from its manifest.
 
-## Testing.TestResult
+## Testing.TestResult — Outcome of one test.
 - `TestResult(string Name, Testing.TestOutcome Outcome, double Ms, string? Message, string? Stack)`
-- `Message { get; init; } -> string?`
-- `Ms { get; init; } -> double`
-- `Name { get; init; } -> string`
-- `Outcome { get; init; } -> Testing.TestOutcome`
-- `Stack { get; init; } -> string?`
+- `Message { get; init; } -> string?` — The failure message or the skip reason; null for a pass.
+- `Ms { get; init; } -> double` — How long it ran, in milliseconds.
+- `Name { get; init; } -> string` — The test's display name.
+- `Outcome { get; init; } -> Testing.TestOutcome` — How it ended.
+- `Stack { get; init; } -> string?` — The stack trace of a failure, with the `Kiln.Testing.Assert` frames left out for a failed check; null when there is...
 
 ## Testing.Tests — Runs a loaded mod's tests from code (a chat command, a dashboard op).
 - `static RunAsync(string modId, string? filter = null) -> Task<Testing.TestReport>` — Runs the `KilnTestAttribute` methods of `modId` (those whose name contains `filter`), starting at the next step.

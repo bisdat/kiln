@@ -1,14 +1,13 @@
 # Assets (Kiln.Assets)
 
 ## AssetKey — A game content key: a resource GUID, a type and a part index.
-- `AssetKey()` — A key by a reflection type name (e.g. "keen::RenderModel"); the hash is FNV-1a-32.
 - `AssetKey(Guid guid, string typeName, uint part = 0)` — A key by a reflection type name (e.g. "keen::RenderModel"); the hash is FNV-1a-32.
-- `AssetKey(Guid guid, uint type, uint part = 0)` — A key by a reflection type name (e.g. "keen::RenderModel"); the hash is FNV-1a-32.
-- `Guid { get; } -> Guid`
-- `const ItemInfoType = 3050211173 -> uint`
-- `Part { get; } -> uint`
-- `Type { get; } -> uint`
-- `const UiTextureType = 4192758167 -> uint`
+- `AssetKey(Guid guid, uint type, uint part = 0)` — A key from a resource GUID, an already hashed type and a part index.
+- `Guid { get; } -> Guid` — The resource's GUID, in the game's byte order (the same as `Guid.ToByteArray`).
+- `const ItemInfoType = 3050211173 -> uint` — The type hash of `keen::ItemInfo` (an item's data resource).
+- `Part { get; } -> uint` — The part index; usually 0.
+- `Type { get; } -> uint` — The type hash: FNV-1a-32 of the qualified reflection type name (like `keen::ItemInfo`).
+- `const UiTextureType = 4192758167 -> uint` — The type hash of `keen::UiTextureResource` (an item or UI icon texture).
 
 ## Assets — Mod resources, overrides, icons and retextures (`kiln.assets`).
 - `static AddBlob(byte[] bytes) -> ContentHash` — Add a new blob; the returned hash goes into a resource's content reference. kiln.assets records it as a managed...
@@ -30,7 +29,7 @@
 - `static Register(AssetKey key, byte[] bytes, bool? mustBeNew = null) -> void` — Serve 'bytes' for 'key'. mode: null = either, true = must be new, false = must override a game resource.
 - `static RegisterIcon(Guid itemGuid, byte[] png) -> void` — Register a PNG as the inventory / crafting icon of the item with this GUID.
 - `static RegisterIcon(Guid itemGuid, string pngPath) -> void` — Register an icon from a PNG file (absolute, or relative to \<game>/kiln).
-- `static RemoveBlob(ContentHash hash) -> void`
+- `static RemoveBlob(ContentHash hash) -> void` — Takes the calling mod's blob or override of `hash` off.
 - `static RemoveIcon(Guid itemGuid) -> void` — Remove this mod's icon for a GUID.
 - `static RemoveResource(AssetKey key) -> void` — Remove this mod's resource / override for a key.
 - `static Status() -> string` — A JSON status string (hooks, counts, container, reads).
@@ -98,13 +97,13 @@ enum: Added, Override
 enum: None, Game, Manifest, Managed, NativeApi
 
 ## ContentHash — A content blob hash (keen::ContentHash): the identity of a streamed blob (texture pixels, mesh data).
-- `Equals(ContentHash other) -> bool`
-- `H0 { get; } -> uint`
-- `H1 { get; } -> uint`
-- `H2 { get; } -> uint`
-- `static operator !=(ContentHash a, ContentHash b) -> bool`
-- `static operator ==(ContentHash a, ContentHash b) -> bool`
-- `Size { get; } -> uint`
+- `Equals(ContentHash other) -> bool` — True when size and all three hash words are equal.
+- `H0 { get; } -> uint` — The first 32-bit word of the blob's hash.
+- `H1 { get; } -> uint` — The second 32-bit word of the blob's hash.
+- `H2 { get; } -> uint` — The third 32-bit word of the blob's hash.
+- `static operator !=(ContentHash a, ContentHash b) -> bool` — True when the hashes differ.
+- `static operator ==(ContentHash a, ContentHash b) -> bool` — True when both hashes are equal.
+- `Size { get; } -> uint` — The blob's size in bytes.
 
 ## IconState — The UI state of a registered icon (see `Assets.IconStateOf`).
 enum: None, Pending, Served, Failed

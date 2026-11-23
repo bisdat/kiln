@@ -49,15 +49,15 @@ enum: DedicatedServer, HostedServer, Client
 ## BootThreadOnlyAttribute `0.2.3` — Call this only inside `Mod.OnBoot`, on the boot thread, before the game's entry point (a boot-author frame); no tick, world or player exists there.
 
 ## CancelableEvent — An event whose default outcome a handler can stop by setting `CancelableEvent.Canceled`.
-- `Cancel() -> void`
+- `Cancel() -> void` — Cancels the event: sets `CancelableEvent.Canceled`.
 - `Canceled { get; set; } -> bool` — Set by a handler to stop the default outcome.
 - `CanceledBy { get; } -> string?` — Who canceled it: the id of the mod whose handler set `CancelableEvent.Canceled` ("kiln" for Kiln's own handlers)...
 
 ## CancelableResultEvent — A `CancelableEvent` that also carries an `EventResult`.
-- `Allow() -> void`
-- `Decide(bool vanilla) -> bool`
-- `Deny() -> void`
-- `Result { get; set; } -> EventResult`
+- `Allow() -> void` — Sets `CancelableResultEvent.Result` to `EventResult.Allow`.
+- `Decide(bool vanilla) -> bool` — The decision, with `vanilla` for `EventResult.Default`.
+- `Deny() -> void` — Sets `CancelableResultEvent.Result` to `EventResult.Deny`.
+- `Result { get; set; } -> EventResult` — The decision so far; `EventResult.Default` until a handler sets one.
 
 ## Capabilities — What works in this process, on this game build and side, and why something does not: one row per capability name, filled by the Kiln core (every sigdb feature, every...
 - `static All { get; } -> IReadOnlyList<Capability>` — Every row, sorted by name (ordinal).
@@ -136,7 +136,7 @@ enum: Server, Client
 
 ## CommentAttribute — Text written above a config entry or section (several lines: use \n).
 - `CommentAttribute(string text)`
-- `Text { get; } -> string`
+- `Text { get; } -> string` — The text; several lines separated by `\n`.
 
 ## Config — The registry of every loaded mod's configs (Forge's `ModLoadingContext.registerConfig` + `ConfigTracker`).
 - `static All { get; } -> IReadOnlyList<ConfigFile>` — Every registered config, by id.
@@ -148,30 +148,30 @@ enum: Server, Client
 
 ## ConfigChangedEvent — A config's values changed while the server runs (not raised for the first load).
 - `Changed { get; } -> IReadOnlyList<string>` — Key paths ("pvp.enabled") whose running value changed.
-- `Config { get; } -> ConfigFile`
-- `Has(string path) -> bool`
-- `ModId { get; } -> string`
+- `Config { get; } -> ConfigFile` — The config that changed.
+- `Has(string path) -> bool` — True when the key path (compared without regard to case) is in `ConfigChangedEvent.Changed`.
+- `ModId { get; } -> string` — The id of the mod that registered the config ("kiln" for Kiln's own).
 - `PendingRestart { get; } -> IReadOnlyList<string>` — Key paths marked `RequiresRestartAttribute` whose file value changed: the running value stays until the mod reloads.
-- `Source { get; } -> ConfigChangeSource`
+- `Source { get; } -> ConfigChangeSource` — What changed the config.
 
 ## ConfigChangeSource — What changed a config.
 enum: File, Api, Server, World
 
 ## ConfigEntry — One entry of a config, as of now.
 - `ConfigEntry(string Path, string Type, string? Comment, object? Default, object? Value, object? FileValue, double? Min, double? Max, IReadOnlyList<string> Options, bool RequiresRestart, bool Synced)`
-- `Comment { get; init; } -> string?`
-- `Default { get; init; } -> object?`
-- `FileValue { get; init; } -> object?`
+- `Comment { get; init; } -> string?` — The text of the entry's `CommentAttribute`; null when it has none.
+- `Default { get; init; } -> object?` — The default value.
+- `FileValue { get; init; } -> object?` — The value in the file; it differs from `Value` while a restart is pending.
 - `FromServer { get; init; } -> bool` — The running value came from the server (client side, while connected; see `ConfigFile.IsFromServer`).
-- `Max { get; init; } -> double?`
-- `Min { get; init; } -> double?`
-- `Options { get; init; } -> IReadOnlyList<string>`
-- `Path { get; init; } -> string`
-- `PendingRestart { get; } -> bool`
-- `RequiresRestart { get; init; } -> bool`
-- `Synced { get; init; } -> bool`
-- `Type { get; init; } -> string`
-- `Value { get; init; } -> object?`
+- `Max { get; init; } -> double?` — The highest allowed value; null when there is none.
+- `Min { get; init; } -> double?` — The lowest allowed value of a number or duration (its `RangeAttribute`); null when there is none.
+- `Options { get; init; } -> IReadOnlyList<string>` — The names an enum entry (or a list of enums) accepts; empty for any other entry.
+- `Path { get; init; } -> string` — The dotted key path ("pvp.enabled").
+- `PendingRestart { get; } -> bool` — True when the file's value differs from the running one, so the change waits for a reload or restart.
+- `RequiresRestart { get; init; } -> bool` — The entry has `RequiresRestartAttribute`.
+- `Synced { get; init; } -> bool` — The entry is marked `SyncedAttribute` (or sits in a section that is).
+- `Type { get; init; } -> string` — "bool", "int", "float", "string", "enum", "duration" or "list\<...>".
+- `Value { get; init; } -> object?` — The running value.
 
 ## ConfigFile — A registered config file (see `Config`).
 - `Changed -> Action<ConfigChangedEvent>?` — Raised on the tick thread after values changed (file edit or `ConfigFile.Set`), in the context of the mod that added...
@@ -180,7 +180,7 @@ enum: File, Api, Server, World
 - `Get(string path) -> object?` — The running value at `path`. unknown path
 - `Id { get; } -> string` — The file name without ".json": "\<modid>", "\<modid>-server", "\<modid>-\<name>".
 - `IsFromServer(string path) -> bool` — Whether `path`'s running value is the server's (see `ConfigFile.ServerValues`).
-- `Kind { get; } -> ConfigKind`
+- `Kind { get; } -> ConfigKind` — The kind of config: where it applies and which file it is.
 - `LastError { get; } -> string?` — Why the last read of the file was refused (bad JSON), or null.
 - `LastWriteError { get; } -> string?` `0.2.3` — Why the last write of the file failed ("cannot write", the file and the reason: a read-only folder, a full disk), or...
 - `LoadedAt { get; } -> DateTime?` — When the file was last read (UTC); null before.
@@ -190,7 +190,7 @@ enum: File, Api, Server, World
 - `Reload() -> void` — Reads the file now (Kiln also does this by itself when the file changes).
 - `Save() -> void` — Writes the running values into the file (after the mod changed its `Value` in code).
 - `Schema() -> Json.Nodes.JsonObject` — The schema and values as JSON (for the dashboard and an in-game editor).
-- `SchemaJson(bool indented = true) -> string`
+- `SchemaJson(bool indented = true) -> string` — `ConfigFile.Schema` as JSON text, indented unless `indented` is false.
 - `SchemaSnapshot() -> Json.Nodes.JsonObject` — The offline schema snapshot (schema/config-schema.schema.json): `ConfigFile.Schema` without values, for the launcher...
 - `ServerValues { get; } -> IReadOnlyList<string>` — Client side: the key paths whose running value is the server's ([Synced] entries of a server or common config, while...
 - `Set(string path, object? value) -> void` — Like `ConfigFile.TrySet`, but throws `ArgumentException` when the value is refused.
@@ -206,7 +206,7 @@ enum: File, Api, Server, World
 
 ## ConfigKeyAttribute — The JSON key of an entry (default: the member name in camelCase).
 - `ConfigKeyAttribute(string key)`
-- `Key { get; } -> string`
+- `Key { get; } -> string` — The JSON key.
 
 ## ConfigKind — Where a config applies (Forge's `ModConfig.Type`).
 enum: Common, Server, Client
@@ -288,7 +288,7 @@ enum: RequireRegistered, AllowNextStart
 
 ## EcsProgramContext — Access declared by this program.
 - `EmitEvent(string name, ReadOnlySpan<byte> data) -> bool` — Sends an exact event payload through a declared output stream.
-- `Entity { get; } -> EntityId`
+- `Entity { get; } -> EntityId` — The entity the callback runs for; none for a system program.
 - `QueueAdd(EntityId entity, string component, ReadOnlySpan<byte> data) -> bool` — Adds component bytes at the end of this step.
 - `QueueRemove(EntityId entity, string component) -> bool` — Removes a component at the end of this step.
 - `ReadEvents(string name) -> byte[][]` — A copy of each event in this declared input stream, in queue order.
@@ -320,10 +320,10 @@ enum: RequireRegistered, AllowNextStart
 ## EntityId — A server-world entity id.
 - `EntityId()`
 - `EntityId(uint Value)`
-- `IsNone { get; } -> bool`
-- `IsPlayer { get; } -> bool`
-- `static readonly None -> EntityId`
-- `Value { get; init; } -> uint`
+- `IsNone { get; } -> bool` — True for `EntityId.None`.
+- `IsPlayer { get; } -> bool` — True for ids 1 to 1023, the engine's range for player entities.
+- `static readonly None -> EntityId` — No entity (0).
+- `Value { get; init; } -> uint` — The id; 0 is none.
 
 ## EntityRef — An entity as it was when it was captured: its id and the spawn serial it had then.
 - `EntityRef()`
@@ -355,21 +355,21 @@ enum: RequireRegistered, AllowNextStart
 
 ## EventHandlerInfo — A row of `Diagnostics.Handlers`.
 - `EventHandlerInfo(string Event, string Owner, string Handler, EventPriority Priority, bool ReceiveCanceled, EventHandlerStats Stats)`
-- `Event { get; init; } -> string`
-- `Handler { get; init; } -> string`
-- `Owner { get; init; } -> string`
-- `Priority { get; init; } -> EventPriority`
-- `ReceiveCanceled { get; init; } -> bool`
-- `Stats { get; init; } -> EventHandlerStats`
+- `Event { get; init; } -> string` — The event type's full name.
+- `Handler { get; init; } -> string` — "Type.Method" of the handler.
+- `Owner { get; init; } -> string` — The id of the mod that subscribed ("kiln" for Kiln's own code).
+- `Priority { get; init; } -> EventPriority` — Where the handler runs.
+- `ReceiveCanceled { get; init; } -> bool` — Whether it also runs for canceled events.
+- `Stats { get; init; } -> EventHandlerStats` — The time it has used.
 
 ## EventHandlerStats — Time spent in one handler since it subscribed (or since `Diagnostics.ResetStats`).
 - `EventHandlerStats()`
 - `EventHandlerStats(long Calls, double TotalMs, double MaxMs, int Faults)`
-- `AverageMs { get; } -> double`
-- `Calls { get; init; } -> long`
-- `Faults { get; init; } -> int`
-- `MaxMs { get; init; } -> double`
-- `TotalMs { get; init; } -> double`
+- `AverageMs { get; } -> double` — `EventHandlerStats.TotalMs` divided by `EventHandlerStats.Calls`; 0 before the first call.
+- `Calls { get; init; } -> long` — How many times the handler ran.
+- `Faults { get; init; } -> int` — The exceptions it threw.
+- `MaxMs { get; init; } -> double` — The longest single call, in milliseconds.
+- `TotalMs { get; init; } -> double` — The time spent in it, in milliseconds.
 
 ## EventPriority — Order in which handlers run.
 enum: Highest, High, Normal, Low, Lowest, Monitor
@@ -398,21 +398,21 @@ enum: Default, Allow, Deny
 - `static ResetStats() -> void` — Zeroes every handler's timing (not the fault counts).
 
 ## EventSubscription — One handler on the bus.
-- `Active { get; } -> bool`
-- `Dispose() -> void`
+- `Active { get; } -> bool` — False once the subscription was removed: disposed, its mod unloaded, or too many faults.
+- `Dispose() -> void` — Unsubscribes the handler.
 - `Filter { get; } -> EventFilter?` `0.2.2` — What this handler receives (`Events.On`); null: every event of its type.
 - `Name { get; } -> string` — "Type.Method" of the handler (diagnostics).
 - `Owner { get; } -> string` — Id of the mod that subscribed ("kiln" for Kiln's own code).
-- `Priority { get; } -> EventPriority`
-- `ReceiveCanceled { get; } -> bool`
-- `Stats { get; } -> EventHandlerStats`
-- `Type { get; } -> Type`
+- `Priority { get; } -> EventPriority` — Where the handler runs among the handlers of the event.
+- `ReceiveCanceled { get; } -> bool` — Whether it also runs for events an earlier handler canceled.
+- `Stats { get; } -> EventHandlerStats` — The time this handler has used.
+- `Type { get; } -> Type` — The event type the handler subscribed to; a handler of a base class also receives derived events.
 
 ## Game — Process-wide facts about the running server and Kiln.
 - `static AssertTickThread() -> void` — Throws unless this is the tick thread.
 - `static HasFeature(string name) -> bool` — Whether a Kiln capability (e.g. `"tick"`, `"log.mirror"`, `"items.fuel"`) works here: `Capabilities.Is`, which also...
 - `static IsTickThread { get; } -> bool` — True on the server-world tick thread, where game state may be touched.
-- `static KilnVersion { get; } -> string`
+- `static KilnVersion { get; } -> string` — The version of the Kiln that is running.
 - `static Language { get; } -> string` — The language mod texts are shown in, as a lower-case tag: `"en-us"`, `"de-de"`, `"pt-br"` (the game's own language...
 
 ## GameEvents — The game's ECS events of one step, and posting events into its queue (kiln.types).
@@ -424,9 +424,9 @@ enum: Default, Allow, Deny
 ## GameField — A field of a reflected struct.
 - `GameField()`
 - `GameField(string Name, GameType Type, int Offset)`
-- `Name { get; init; } -> string`
-- `Offset { get; init; } -> int`
-- `Type { get; init; } -> GameType`
+- `Name { get; init; } -> string` — The field's name.
+- `Offset { get; init; } -> int` — Where the field starts, in bytes, in the struct that declares it.
+- `Type { get; init; } -> GameType` — The field's type.
 
 ## GameLogEvents — Lines of the game's own log.
 - `Line -> Action<LogLevel, string>?` — One game log line (without trailing newline), on the tick thread, a step or so after it was written.
@@ -436,22 +436,22 @@ enum: None, R4G4UnormPack8, R4G4B4A4UnormPack16, B4G4R4A4UnormPack16, R5G6B5Unor
 
 ## GameSystem — One of the game's ECS systems, with its profiler numbers.
 - `GameSystem(int Index, string Name, ulong Rva, bool Enabled, ulong Calls, double Milliseconds, string World)`
-- `Calls { get; init; } -> ulong`
-- `Enabled { get; init; } -> bool`
-- `Index { get; init; } -> int`
-- `Milliseconds { get; init; } -> double`
-- `Name { get; init; } -> string`
-- `Rva { get; init; } -> ulong`
-- `World { get; init; } -> string`
+- `Calls { get; init; } -> ulong` — How many times it ran since the profiler started.
+- `Enabled { get; init; } -> bool` — False while the system is switched off (the game skips it).
+- `Index { get; init; } -> int` — The system's position in the list, which is sorted by name.
+- `Milliseconds { get; init; } -> double` — CPU time since the profiler started, summed over every thread.
+- `Name { get; init; } -> string` — The system's name (`stamina_depletion_sprint`).
+- `Rva { get; init; } -> ulong` — Where the system's update function is, relative to the image base.
+- `World { get; init; } -> string` — Where it ran while profiling: `"server"`, `"client"` or `"both"`; empty when it has no calls.
 
 ## GameSystems — The game's ECS systems (the code it runs every step: stamina drain, durability loss, fall damage, spawners...) and their profiling data (kiln.types).
 - `static All { get; } -> IReadOnlyList<GameSystem>` — Every system, sorted by name.
 - `static Available { get; } -> bool` — Whether switching and profiling work on this build.
-- `static Find(string name) -> GameSystem?`
+- `static Find(string name) -> GameSystem?` — The system with this name; null when there is none, or kiln.types is not running.
 - `static Hook(string name, Action? before = null, Action? after = null) -> IDisposable` — Runs callbacks immediately before and after a game's system update, once per slice.
 - `static Profile(bool on) -> void` — On: starts the profiler from zero.
 - `static ProfileSeconds { get; } -> double` — How long the profiler has run (or ran), seconds.
-- `static Profiling { get; } -> bool`
+- `static Profiling { get; } -> bool` — True while the profiler runs.
 - `static Search(string words) -> IEnumerable<GameSystem>` — Systems whose name holds every word: `Search("fall damage")` finds fall_damage_infliction.
 - `static SetEnabled(string name, bool enabled) -> void` — Claims or releases this caller's disabling switch.
 - `static Stats() -> IReadOnlyList<GameSystem>` — The systems that ran while profiling, costliest first.
@@ -465,7 +465,7 @@ enum: None, R4G4UnormPack8, R4G4B4A4UnormPack16, B4G4R4A4UnormPack16, R5G6B5Unor
 - `static MipOffset(GamePixelFormat format, int width, int height, int mip) -> int` — Where level `mip` of a mip chain starts: the sum of `GameTexture.ByteSize` of the larger levels.
 
 ## GameType — One of the game's reflected types (about 11,000 on the server, 12,600 in the game).
-- `Alignment { get; } -> int`
+- `Alignment { get; } -> int` — The type's alignment in bytes.
 - `AllFields { get; } -> IEnumerable<GameField>` — Every field, base classes first.
 - `ArrayLength { get; } -> int` — A static array's element count (0 for other kinds).
 - `Base { get; } -> GameType?` — A struct's base class, or null.
@@ -474,16 +474,16 @@ enum: None, R4G4UnormPack8, R4G4B4A4UnormPack16, B4G4R4A4UnormPack16, R5G6B5Unor
 - `Field(string name) -> GameField?` — A field by name, base classes included (a derived class's field hides a base class's of the same name).
 - `FieldCount { get; } -> int` — Own fields (struct) or values (enum, bitmask).
 - `Fields { get; } -> IReadOnlyList<GameField>` — Own fields, in the game's order.
-- `Flags { get; } -> byte`
+- `Flags { get; } -> byte` — The game's flags byte for the type.
 - `Hash { get; } -> uint` — FNV-1a-32 of `GameType.QualifiedName`: the key of the game's component and event lookups.
 - `ImpactName { get; } -> string?` `0.2.3` — The name Impact scripts use for this type: `"ecs.Health"` for `keen::ecs::Health`, `"float32"` for `keen::float32`...
-- `Index { get; } -> int`
+- `Index { get; } -> int` — The type's position in the game's type table.
 - `Inner { get; } -> GameType?` — A struct's base class; an array's, optional's or typedef's element or target; else null.
-- `Kind { get; } -> GameTypeKind`
+- `Kind { get; } -> GameTypeKind` — The game's primitive kind of the type.
 - `Name { get; } -> string` — "Health".
 - `QualifiedName { get; } -> string` — "keen::ecs::Health".
 - `Resolved { get; } -> GameType` — The type a typedef names (followed to the end), else this type.
-- `Size { get; } -> int`
+- `Size { get; } -> int` — The type's size in bytes.
 
 ## GameTypeKind — The game's primitive kinds (kiln_types.h KILN_TYPE_*).
 enum: None, Bool, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8, Bitmask16, Bitmask32, Bitmask64, Typedef, Struct, StaticArray, DsArray, DsString, DsOptional, DsVariant, BlobArray, BlobString, BlobOptional, BlobVariant, ObjectReference, Guid
@@ -491,10 +491,10 @@ enum: None, Bool, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8
 ## GameTypes — The game's reflected types: every name, size, field, base class, enum value and default value of the running build, read from the game itself (kiln.types).
 - `static All { get; } -> IEnumerable<GameType>` — Every type, in the game's order (read-only, built once per type table).
 - `static Available { get; } -> bool` — Whether the type table was found on this build.
-- `static ByHash(uint hash) -> GameType?`
+- `static ByHash(uint hash) -> GameType?` — The type whose `GameType.Hash` is `hash`; null when there is none or kiln.types is not running.
 - `static ByImpactName(string impactName) -> GameType?` `0.2.3` — The one type whose `GameType.ImpactName` is `impactName` exactly (ordinal, case-sensitive; a short or qualified name...
 - `static Components { get; } -> IReadOnlyList<GameType>` — The game's ECS component types (read-only, built once per type table).
-- `static Count { get; } -> int`
+- `static Count { get; } -> int` — The number of types in the table; 0 when kiln.types is not running.
 - `static Events { get; } -> IReadOnlyList<GameType>` — The game's ECS event types (read-only, built once per type table).
 - `static Find(string name) -> GameType?` — By name: "keen::ecs::Health" exactly, or a short name ("Health", "ItemInfo") that is unique.
 - `static FindAllByImpactName(string impactName) -> IReadOnlyList<GameType>` `0.2.3` — Every type whose `GameType.ImpactName` is `impactName` exactly (ordinal), in the game's order; empty when none.
@@ -532,8 +532,8 @@ enum: None, Bool, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8
 - `Reason { get; } -> string?` — Why it did not happen; null when `IKilnResult.Ok`.
 
 ## ImcMessage — One inter-mod message.
-- `Method { get; } -> string`
-- `Payload { get; } -> object?`
+- `Method { get; } -> string` — What the sender asks for; the receiver decides what the names mean.
+- `Payload { get; } -> object?` — The data that goes with it; null when there is none.
 - `PayloadAs<T>() -> T?` — The payload as `T`, or default when it is something else.
 - `Sender { get; } -> string` — The sending mod's id (`kiln` when Kiln or a service sent it).
 
@@ -541,15 +541,15 @@ enum: None, Bool, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8
 - `Read(string key) -> BootDataResult` — One record: `item:<debugName>`, `template:<debugName>`, `skill:0x<8 hex digits>`...
 
 ## IResultEvent — An event with an `EventResult`; see `ResultEvent`.
-- `Result { get; set; } -> EventResult`
+- `Result { get; set; } -> EventResult` — The decision so far; `EventResult.Default` until a handler sets one.
 
 ## ItemId — An item type: FNV-1a-32 of the item's 16 GUID bytes, as the game computes it (and the dashboard catalog uses).
 - `ItemId()`
 - `ItemId(uint Value)`
 - `static FromGuidBytes(ReadOnlySpan<byte> guid) -> ItemId` — The id the game gives the item with these GUID bytes (as stored in the game's data).
-- `IsNone { get; } -> bool`
-- `static readonly None -> ItemId`
-- `Value { get; init; } -> uint`
+- `IsNone { get; } -> bool` — True for `ItemId.None`.
+- `static readonly None -> ItemId` — No item (0).
+- `Value { get; init; } -> uint` — The id; 0 is none.
 
 ## ItemInstanceRef — One particular item in the world (not an item type, which is `ItemId`, and not `Kiln.Blocks`' `ItemRef`, which names an item for a recipe): the item's entity and its...
 - `ItemInstanceRef()`
@@ -569,8 +569,8 @@ enum: None, Bool, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8
 - `static Setting { get; } -> string` — kiln.json `ui.language` as set: `"auto"` or the tag the player chose.
 
 ## KilnLog — kiln.log lines written as Kiln itself (no mod name), for Kiln's own tool assemblies.
-- `static Info(string text) -> void`
-- `static Warn(string text) -> void`
+- `static Info(string text) -> void` — Writes an `LogLevel.Info` line to `kiln.log` as Kiln itself.
+- `static Warn(string text) -> void` — Writes a `LogLevel.Warn` line to `kiln.log` as Kiln itself.
 
 ## KilnTask `0.2.10` — A task a mod started with `KilnTasks`: its state, its fault, a way to cancel it and to await it.
 - `AsTask() -> Task` — A `Task` that ends as this task does (the same one on every call), for composition.
@@ -659,18 +659,18 @@ enum: None, Queued, Running, Completed, Faulted, Cancelled
 ## Lifecycle — Current lifecycle state, for mods that load late (hot reload) and missed the events.
 - `static IsServerRunning { get; } -> bool` — True while the world is live (`ServerPhase.Running`).
 - `static ModsLoaded { get; } -> bool` — True once `ModsLoadedEvent` fired (all mods found at start-up are loaded).
-- `static Phase { get; } -> ServerPhase`
+- `static Phase { get; } -> ServerPhase` — Where the server is in its life now.
 - `static StartedAtStep { get; } -> ulong` — Server-world step at which `ServerStartedEvent` fired (0 before).
 
 ## Logger — Writes to `kiln/logs/kiln.log`, tagged with the mod's id.
-- `Debug(string message) -> void`
-- `Error(Exception e, string message) -> void`
-- `Error(string message) -> void`
-- `Info(string message) -> void`
-- `Warn(string message) -> void`
-- `Write(LogLevel level, string message) -> void`
+- `Debug(string message) -> void` — Writes a `LogLevel.Debug` line.
+- `Error(Exception e, string message) -> void` — Writes an `LogLevel.Error` line: the message, then the exception (its type, message and stack).
+- `Error(string message) -> void` — Writes an `LogLevel.Error` line.
+- `Info(string message) -> void` — Writes an `LogLevel.Info` line.
+- `Warn(string message) -> void` — Writes a `LogLevel.Warn` line.
+- `Write(LogLevel level, string message) -> void` — Writes a line at `level`.
 
-## LogLevel
+## LogLevel — How severe a log line is: from `LogLevel.Error` (1, the most severe) to `LogLevel.Trace` (5, the finest detail).
 enum: Error, Warn, Info, Debug, Trace
 
 ## LoopWait — A wait of the engine's event loop, about to happen (`Pacing.OnLoopWait`).
@@ -702,9 +702,9 @@ enum: Handles, Messages
 ## ModContext — Everything a mod gets from Kiln.
 - `DataDirectory { get; } -> string` — Per-mod persistent directory (`kiln/data/<id>`), created on first use.
 - `GameLog { get; } -> GameLogEvents` — Lines of the game's own log, delivered on the tick thread.
-- `Info { get; } -> ModInfo`
+- `Info { get; } -> ModInfo` — The mod's identity and metadata (its `kiln.mod.json`).
 - `Locale { get; } -> ModLocale` — The mod's strings from `locales/<language>.json` (see `Mod.Text`).
-- `Log { get; } -> Logger`
+- `Log { get; } -> Logger` — The mod's logger: lines go to `kiln.log` tagged with the mod's id.
 - `Messages { get; } -> ModMessages` — Inter-mod messages sent to this mod with `Mods.Send` (Forge's InterModComms).
 - `Scheduler { get; } -> Scheduler` — Run work on the tick thread from anywhere; await the next tick.
 - `Tasks { get; } -> KilnTasks` `0.2.10` — Run heavy work off the tick, on Kiln's own worker threads, attributed to this mod (`KilnTasks`).
@@ -718,40 +718,40 @@ enum: Handles, Messages
 
 ## ModDisabledEvent — The fault policy disabled a mod (too many exceptions within the window; kiln.json `mods.fault_limit`, `mods.fault_window_s`).
 - `CrashReport { get; } -> string?` — Path of the crash report, when one was written.
-- `Faults { get; } -> int`
-- `Id { get; } -> string`
+- `Faults { get; } -> int` — The exceptions the mod threw since it was loaded.
+- `Id { get; } -> string` — The disabled mod's id.
 - `Reason { get; } -> string` — The last exception's message.
 
 ## ModEntry — One mod Kiln knows about (loaded or not).
-- `Dependencies { get; } -> IReadOnlyList<ModDependency>`
-- `Directory { get; } -> string`
+- `Dependencies { get; } -> IReadOnlyList<ModDependency>` — The dependencies the mod declared, in manifest order.
+- `Directory { get; } -> string` — The mod's folder.
 - `Error { get; } -> string?` — Why the mod is not loaded (or was disabled); null otherwise.
-- `Id { get; } -> string`
+- `Id { get; } -> string` — The mod's id.
 - `Info { get; } -> ModInfo?` — The full manifest metadata, when the manifest could be read.
-- `IsLoaded { get; } -> bool`
+- `IsLoaded { get; } -> bool` — True when `ModEntry.State` is `ModState.Loaded`.
 - `LoadIndex { get; } -> int` — Position in the load order (0 = first), -1 when not loaded.
-- `Name { get; } -> string`
-- `Side { get; } -> ModSide`
-- `State { get; } -> ModState`
+- `Name { get; } -> string` — The mod's display name.
+- `Side { get; } -> ModSide` — Where the mod runs.
+- `State { get; } -> ModState` — What became of the mod.
 - `Stats { get; } -> ModStats` — Live stats (tick time, faults) of the running instance; zero when not loaded.
-- `Version { get; } -> string`
+- `Version { get; } -> string` — The mod's version.
 
 ## ModInfo — Identity and metadata of a loaded mod, from its `kiln.mod.json`.
 - `ModInfo(string Id, string Name, string Version, string Directory)`
 - `Advanced { get; init; } -> bool` — The mod opted into the advanced tier (raw hooks, symbols, coremod-style patches).
 - `ApiVersion { get; init; } -> string` — The Kiln API range the mod declared (`apiVersion`).
-- `Authors { get; init; } -> IReadOnlyList<string>`
+- `Authors { get; init; } -> IReadOnlyList<string>` — The mod's authors from `kiln.mod.json`.
 - `Dependencies { get; init; } -> IReadOnlyList<ModDependency>` — Declared dependencies (required and optional), in manifest order.
-- `Description { get; init; } -> string`
+- `Description { get; init; } -> string` — The mod's description from `kiln.mod.json`; empty when it has none.
 - `Directory { get; init; } -> string` — The mod's folder (`kiln/mods/<folder>`).
 - `Exports { get; init; } -> IReadOnlyList<string>` — Assemblies (file names) that dependent mods compile against and share at run time.
 - `Features { get; init; } -> IReadOnlyList<string>` — Kiln features the mod requires (`Game.HasFeature`).
 - `Id { get; init; } -> string` — Unique id (`[a-z0-9][a-z0-9._-]*`, at most 64 characters).
-- `License { get; init; } -> string?`
+- `License { get; init; } -> string?` — The license the manifest names; null when it names none.
 - `Name { get; init; } -> string` — Display name.
 - `Side { get; init; } -> ModSide` — Where the mod runs: `server` (default), `client` or `both`.
 - `SteamMessages { get; init; } -> bool` `0.2.13` — The mod talks to Steam users directly: its kiln.mod.json says `"steamMessages": true`, so it may open its own Steam...
-- `Url { get; init; } -> string?`
+- `Url { get; init; } -> string?` — The web address the manifest names; null when it names none.
 - `Version { get; init; } -> string` — The mod's version (semantic versioning).
 
 ## ModLocale — A mod's strings in the languages it ships: one JSON file per language in `locales/` beside `kiln.mod.json` (`en.json`, `de.json`, `pt-BR.json`).
@@ -783,7 +783,7 @@ enum: Handles, Messages
 
 ## ModReloadedEvent — A mod was hot-reloaded (control command `reload`, `Mods.ReloadAsync`).
 - `Cascade { get; } -> IReadOnlyList<string>` — Dependents that were unloaded and loaded again with it, in load order.
-- `Id { get; } -> string`
+- `Id { get; } -> string` — The reloaded mod's id.
 - `Ok { get; } -> bool` — False when the mod or one of its dependents failed to load again.
 - `Version { get; } -> string` — The version now on disk (it may have changed).
 
@@ -793,7 +793,7 @@ enum: Handles, Messages
 - `static BootState(string modId) -> BootModReport` `0.2.3` — A mod's part in this process's boot generation (Mod.OnBoot, chapter 08): its state, its committed definitions...
 - `static Current { get; } -> ModEntry?` — The mod whose code is running on this thread (null outside mod code).
 - `static Get(string id) -> ModEntry?` — The mod with `id`, loaded or not; null when Kiln never saw it.
-- `static IsLoaded(string id) -> bool`
+- `static IsLoaded(string id) -> bool` — True when the mod with this id is loaded.
 - `static Load(string folder, Action<ModOperationResult> done) -> void` — Callback forms for code without a synchronization context (services, chat commands): the operation runs at the start...
 - `static LoadAsync(string folder) -> Task<ModOperationResult>` — Loads the mod folder `kiln/mods/<folder>` at the start of the next step.
 - `static Reload(string id, Action<ModOperationResult> done) -> void` — Callback forms for code without a synchronization context (services, chat commands): the operation runs at the start...
@@ -817,15 +817,15 @@ enum: Pending, Loaded, Disabled, Failed, Skipped, Unloaded
 ## ModStats — Time and faults of one mod since it was loaded.
 - `ModStats()`
 - `ModStats(long Steps, double TotalMs, double PreMsPerStep, double PostMsPerStep, double MaxMs, int Faults, int RecentFaults, DateTime? LastFault, string? LastFaultMessage)`
-- `Faults { get; init; } -> int`
-- `LastFault { get; init; } -> DateTime?`
-- `LastFaultMessage { get; init; } -> string?`
-- `MaxMs { get; init; } -> double`
-- `PostMsPerStep { get; init; } -> double`
-- `PreMsPerStep { get; init; } -> double`
-- `RecentFaults { get; init; } -> int`
-- `Steps { get; init; } -> long`
-- `TotalMs { get; init; } -> double`
+- `Faults { get; init; } -> int` — The exceptions it has thrown since it was loaded.
+- `LastFault { get; init; } -> DateTime?` — When the last fault happened (UTC); null when there was none.
+- `LastFaultMessage { get; init; } -> string?` — The exception type, its message and where it was thrown, for the last fault; null when there was none.
+- `MaxMs { get; init; } -> double` — The longest single run of its handlers, in milliseconds.
+- `PostMsPerStep { get; init; } -> double` — The average time its Post handlers took per step, in milliseconds.
+- `PreMsPerStep { get; init; } -> double` — The average time its Pre handlers took per step, in milliseconds.
+- `RecentFaults { get; init; } -> int` — The faults inside the fault policy's time window (`mods.fault_window_s`); the mod is disabled when this reaches...
+- `Steps { get; init; } -> long` — The steps the mod's Pre handlers have run in since it was loaded.
+- `TotalMs { get; init; } -> double` — The time spent in its handlers, Pre and Post together, in milliseconds.
 
 ## OverrideInfo — One claim in force (`Overrides.Active`).
 - `OverrideInfo(string Mod, string Target, string Detail)`
@@ -837,7 +837,7 @@ enum: Pending, Loaded, Disabled, Failed, Skipped, Unloaded
 - `OverrideResult(OverrideStatus Status, string Message, string? HeldBy = null)`
 - `HeldBy { get; init; } -> string?` — For `OverrideStatus.Conflict`: the id of the mod that holds the thing.
 - `Message { get; init; } -> string` — A sentence for the log or the player.
-- `Ok { get; } -> bool`
+- `Ok { get; } -> bool` — True when `OverrideResult.Status` is `OverrideStatus.Applied`.
 - `Status { get; init; } -> OverrideStatus` — What happened.
 
 ## Overrides — Changes a mod makes to shared things, each with a way back.
@@ -866,7 +866,7 @@ enum: Applied, Conflict, NotFound, Unavailable
 - `static TaskWorkersStarted { get; } -> bool` — The task system has started its worker pools: caps come too late.
 
 ## PacingHandler — A pacing handler a mod registered.
-- `Dispose() -> void`
+- `Dispose() -> void` — Removes the handler.
 - `Faulted { get; } -> bool` — The handler threw too often and was removed (see `Pacing`).
 - `Found { get; } -> bool` — This build has the wait the handler is for (it will be called).
 
@@ -894,28 +894,28 @@ enum: None, LoopWait, MessageWait, ServerWait, TaskWorkers
 - `SteamId { get; init; } -> ulong` — SteamID64; 0 when unknown.
 
 ## `Point<TIn, TOut>` — A point a mod defined: it asks it with `Point.Decide` whenever its rule applies.
-- `AllowRefuse { get; } -> bool`
+- `AllowRefuse { get; } -> bool` — Whether a link may refuse: a `PointVerdict.Refuse` then ends the chain with `PointOutcome.Refused`.
 - `Decide(TIn input, TOut answer) -> PointDecision<TOut>` — Asks the point: `answer` is the owner's own answer; each link follows in order and sees the answer as the links...
 - `Links { get; } -> IReadOnlyList<PointLink>` — The links that run, in order.
-- `Mode { get; } -> PointMode`
+- `Mode { get; } -> PointMode` — How links act on the answer.
 - `Name { get; } -> string` — "\<owner id>:\<name>".
-- `Owner { get; } -> string`
+- `Owner { get; } -> string` — The id of the mod that defined the point.
 
 ## `PointDecision<TOut>` — The answer of `Point.Decide`.
 - `PointDecision()`
 - `PointDecision(PointOutcome Outcome, TOut Value, string? DecidedBy)`
-- `DecidedBy { get; init; } -> string?`
-- `IsRefused { get; } -> bool`
-- `Outcome { get; init; } -> PointOutcome`
-- `Value { get; init; } -> TOut`
+- `DecidedBy { get; init; } -> string?` — The id of the mod whose link last changed the answer, or refused; null when no link did.
+- `IsRefused { get; } -> bool` — True when `PointDecision.Outcome` is `PointOutcome.Refused`.
+- `Outcome { get; init; } -> PointOutcome` — What the links did to the owner's answer.
+- `Value { get; init; } -> TOut` — The answer after the links; when a link refused, the answer at that moment.
 - `ValueOr(TOut refused) -> TOut` — The answer, or `refused` when a link refused.
 
 ## PointLink — One link on a point, for diagnostics and for switching it off.
 - `Dispose() -> void` — Detaches the link.
 - `Enabled { get; } -> bool` — False when the link was switched off, threw, or does not match the point's types.
 - `Observer { get; } -> bool` — True for a link attached with Observe: it never changes the answer.
-- `OffReason { get; } -> string?`
-- `Order { get; } -> PointOrder`
+- `OffReason { get; } -> string?` — Why the link does not run, or null.
+- `Order { get; } -> PointOrder` — Where the link runs among the point's links.
 - `Owner { get; } -> string` — The mod that attached the link.
 - `Point { get; } -> string` — The point's full name.
 
@@ -925,8 +925,8 @@ enum: Observe, Advise, Override
 ## PointOrder — Where a link runs among the other links of a point: lower `PointOrder.Priority` first, then before or after the links of the named mods.
 - `After { get; init; } -> IReadOnlyList<string>` — Mods whose links run before this one.
 - `Before { get; init; } -> IReadOnlyList<string>` — Mods whose links run after this one.
-- `static Default { get; } -> PointOrder`
-- `Priority { get; init; } -> int`
+- `static Default { get; } -> PointOrder` — The default order: priority 0, no before or after constraints.
+- `Priority { get; init; } -> int` — Lower runs first.
 
 ## PointOutcome — What asking a point came to.
 enum: Kept, Changed, Refused
@@ -952,8 +952,8 @@ enum: Pass, Set, Refuse
 
 ## RangeAttribute — Allowed range of a number (config entry, command argument).
 - `RangeAttribute(double min, double max)`
-- `Max { get; } -> double`
-- `Min { get; } -> double`
+- `Max { get; } -> double` — The highest allowed value (for a `TimeSpan`, in seconds).
+- `Min { get; } -> double` — The lowest allowed value (for a `TimeSpan`, in seconds).
 
 ## Reflected — Components by name with the game's own field layout, and checked writes (kiln.world + kiln.types).
 - `static All(string component) -> IReadOnlyList<EntityId>` — Every entity that has the component (loaded entities only).
@@ -990,9 +990,9 @@ enum: Pass, Set, Refuse
 - `Bytes { get; } -> byte[]` — A copy of the current bytes.
 - `Describe(int maxArray = 16) -> string` — Every scalar field with its value, one per line (`dataStorage[0] = 20`).
 - `Entity { get; } -> EntityId` — The entity of a component view (0 for copies).
-- `Get<T>(string path) -> T`
+- `Get<T>(string path) -> T` — The scalar field at `path`, converted to `T` (invariant culture).
 - `this[string path] { get; set; } -> object?` — A scalar field by path: bool, long, ulong or double; a nested struct as a `ReflectedValue` copy.
-- `Type { get; } -> GameType`
+- `Type { get; } -> GameType` — The type of the value.
 
 ## RenderThreadAttribute — Call this on the game's render thread only (client).
 
@@ -1003,26 +1003,28 @@ enum: Pass, Set, Refuse
 ## RequiresRestartAttribute — A change of this entry only applies after the mod reloads (or the server restarts): a live edit is written to the file and reported as pending, and the running value...
 
 ## ResultEvent — An event that asks handlers for a decision: Allow, Deny or Default (Forge's `@HasResult`).
-- `Allow() -> void`
+- `Allow() -> void` — Sets `ResultEvent.Result` to `EventResult.Allow`.
 - `Decide(bool vanilla) -> bool` — The decision, with `vanilla` for `EventResult.Default`.
-- `Deny() -> void`
-- `Result { get; set; } -> EventResult`
+- `Deny() -> void` — Sets `ResultEvent.Result` to `EventResult.Deny`.
+- `Result { get; set; } -> EventResult` — The decision so far; `EventResult.Default` until a handler sets one.
 
 ## Scheduler — Gets work onto the tick thread.
 - `NextTick() -> Scheduler.NextTickAwaitable` — `await Scheduler.NextTick()` continues on the tick thread at the next step.
 - `Post(Action action) -> void` — Runs `action` on the tick thread before the next step's Pre handlers.
 - `SynchronizationContext { get; } -> SynchronizationContext` — The context Kiln installs while the mod's code runs on the tick thread: `await` without `ConfigureAwait(false)`...
 
-## Scheduler.NextTickAwaitable
+## Scheduler.NextTickAwaitable — What `Scheduler.NextTick` returns: `await` it to continue on the tick thread at the next step.
+- `NextTickAwaitable()`
 - `NextTickAwaitable(Scheduler scheduler)`
-- `GetAwaiter() -> Scheduler.NextTickAwaitable.Awaiter`
+- `GetAwaiter() -> Scheduler.NextTickAwaitable.Awaiter` — The awaiter the `await` uses.
 
-## Scheduler.NextTickAwaitable.Awaiter
+## Scheduler.NextTickAwaitable.Awaiter — The awaiter of `NextTickAwaitable`.
+- `Awaiter()`
 - `Awaiter(Scheduler scheduler)`
-- `GetResult() -> void`
-- `IsCompleted { get; } -> bool`
-- `OnCompleted(Action continuation) -> void`
-- `UnsafeOnCompleted(Action continuation) -> void`
+- `GetResult() -> void` — Returns nothing: the await has no value.
+- `IsCompleted { get; } -> bool` — Always false: the continuation is posted to the tick thread (`Scheduler.Post`).
+- `OnCompleted(Action continuation) -> void` — Posts `continuation` to the tick thread.
+- `UnsafeOnCompleted(Action continuation) -> void` — Posts `continuation` to the tick thread.
 
 ## ServerOnlyAttribute — Works on the server only (a dedicated server, or the host of a local game).
 
@@ -1031,21 +1033,21 @@ enum: Booting, Starting, Running, Stopping, Idle
 
 ## ServerStartedEvent — The world is live (Forge's `ServerStartedEvent`): the game switched from `LoadEcsScene` to `Run` and the server world steps.
 - `Source { get; } -> string` — How Kiln knew: `game-log` (the Run switch was seen), `first-step` (no log mirror), `timeout` (the switch line never...
-- `Step { get; } -> ulong`
+- `Step { get; } -> ulong` — The server-world step it fired on.
 
 ## ServerStartingEvent — The server is starting: mods are loaded and the server world steps (Forge's `ServerStartingEvent`: register commands and world hooks here).
 - `Step { get; } -> ulong` — The server-world step it fired on.
 
 ## ServerStoppingEvent — The server is shutting down (Forge's `ServerStoppingEvent`).
 - `Reason { get; } -> string` — What triggered it: `SIGINT` (console Ctrl-C), `SIGTERM`, `SIGHUP`, `SIGQUIT`, `game-log` (the game's own shutdown...
-- `Step { get; } -> ulong`
+- `Step { get; } -> ulong` — The server-world step it fired on.
 
 ## ServerWaitHandler — Runs on the thread that waits (the server loop, once a pass): `waitNanoseconds` is what the loop picked; set it to change it.
 - `Invoke(ref long waitNanoseconds) -> void`
 
 ## SubscribeAttribute — Marks a method of a `Mod` (or of an object passed to `Events.Register`) as an event handler.
-- `SubscribeAttribute(EventPriority priority = EventPriority.Normal)`
-- `Priority { get; } -> EventPriority`
+- `SubscribeAttribute(EventPriority priority = EventPriority.Normal)` — Marks the method as a handler that runs at `priority`.
+- `Priority { get; } -> EventPriority` — Where the handler runs among the handlers of the event.
 - `ReceiveCanceled { get; init; } -> bool` — Also run for events an earlier handler canceled.
 
 ## SyncedAttribute — Marks an entry (or a whole section) of a server or common config that clients must know (Forge: a server config synced at login).
@@ -1062,7 +1064,7 @@ enum: Booting, Starting, Running, Stopping, Idle
 - `Post -> TickHandler?` — After the sim step, once the world's jobs have finished.
 - `Pre -> TickHandler?` — Before the world's sim step.
 
-## TickHandler
+## TickHandler — A handler of `TickEvents.Pre` or `TickEvents.Post`; it gets the step's `TickInfo`.
 - `Invoke(in TickInfo tick) -> void`
 
 ## TickInfo — One server-world sim step.
@@ -1087,9 +1089,9 @@ enum: Server, Prediction, Client, Menu `0.2.12`
 ## WorldPosition — A world position in metres (x east, y up, z north).
 - `WorldPosition()`
 - `WorldPosition(double X, double Y, double Z)`
-- `DistanceTo(WorldPosition o) -> double`
-- `static From(Vector3 v) -> WorldPosition`
-- `ToVector3() -> Vector3`
-- `X { get; init; } -> double`
-- `Y { get; init; } -> double`
-- `Z { get; init; } -> double`
+- `DistanceTo(WorldPosition o) -> double` — The straight-line distance to `o`, in metres.
+- `static From(Vector3 v) -> WorldPosition` — A position from a `Vector3` (metres).
+- `ToVector3() -> Vector3` — This position as a `Vector3` (single precision).
+- `X { get; init; } -> double` — Metres east.
+- `Y { get; init; } -> double` — Metres up.
+- `Z { get; init; } -> double` — Metres north.

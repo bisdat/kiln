@@ -71,6 +71,8 @@
 #   docs built elsewhere, and managed/api-history.tsv). A release exports a commit, so when the index changed the release stops at
 #   once and says to commit it; run again then. After the promote below it is generated once more from the same XML docs and goes
 #   into the same closing commit as the API record and the ledger. Test builds (--beta, --worktree, --launcher-only) skip both.
+# The doc gate: the API reference build (tools/docs-site/build.sh, in the assemble step) runs with KILN_DOCS_STRICT=1: a public name with no XML
+#   summary fails the release (undocumented-baseline.txt names none). tools/check.sh holds it current in every commit (stage `docs`).
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
@@ -854,6 +856,9 @@ cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script
 if [[ -f $src/tools/docs-site/build.sh ]]; then
   export KILN_DOCS_TRACKED=$work/src-files
+  # strict: a public type or member without an XML summary (undocumented.py against undocumented-baseline.txt, which names
+  # none) stops the release here; the same gate runs in tools/check.sh (stage `docs`), so it is found before the release
+  export KILN_DOCS_STRICT=1
   quiet low "$src/tools/docs-site/build.sh" "$out/sdk/api"   # the modding site: guide + API reference (DocFX)
 else
   note "no tools/docs-site/build.sh in the export: the API reference (sdk/api/) is left out"
@@ -1064,7 +1069,9 @@ Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
   tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
                                             then the roadmap: $version as released on frostdev.io/kiln/roadmap
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+  python3 -I tools/docs-site/status-tables.py --server <game>/kiln/state/capabilities.json --checks <game>/kiln/state/client-checks.json \\
+      -o docs/kiln/status.generated.md      the status page, from the state files of this release's lab run (a build boots no game)"
 fi
 step "done"
 du -sh "$out" | tee -a "$log"
