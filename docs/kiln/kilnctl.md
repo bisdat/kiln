@@ -205,8 +205,9 @@ Files in `runner/systemd/`:
   `RestartPreventExitStatus=1 2 3`: exit status 1 (kiln.boot stopped the start, 0x4B01), 2 (the NPC roster cannot be
   held, 0x4B02) and 3 (the mods' NPCs and quests could not be built at all, 0x4B03) mean the mod list cannot run, so
   the unit stays down until it is fixed (`kilnctl run` passes the server's status on; Wine gives the low byte).
-  Exit status 75 is `kilnctl run`'s own: an admin tool asked for a restart (Process model, above), so the unit
-  restarts the server after 15 s; these restarts count toward the 5 starts in 10 minutes.
+  Exit status 75 is `kilnctl run`'s own: an admin tool asked for a restart (Process model, above).
+  `SuccessExitStatus=75` makes it a clean exit (no failed state, no `OnFailure=` hooks), and `RestartForceExitStatus=75`
+  restarts the server after 15 s anyway. These restarts still count toward the 5 starts in 10 minutes.
 - `kiln-backup@.service` + `kiln-backup@.timer`: `kilnctl backup %i` daily (randomised by 30 min, `Persistent=true`).
 
 A release ships the three units next to kilnctl (`runtime/`; on GitHub as `kiln-systemd-units-<version>.tar.gz`):

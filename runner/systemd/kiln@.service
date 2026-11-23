@@ -32,7 +32,10 @@ RestartSec=15
 # (docs/kiln/dedicated-servers.md).
 RestartPreventExitStatus=1 2 3
 # 75 is kilnctl run's own exit after a restart an admin tool asked for (Kiln.Admin's server_restart): the server saved
-# and stopped, and Restart=on-failure brings it back (docs/kiln/kilnctl.md).
+# and stopped. It counts as a success (no failed state, no OnFailure= hooks) and still restarts the unit
+# (docs/kiln/kilnctl.md). Restarts still count toward StartLimitBurst, like every start.
+SuccessExitStatus=75
+RestartForceExitStatus=75
 SyslogIdentifier=kiln@%i
 
 [Install]

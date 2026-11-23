@@ -863,8 +863,8 @@ fn _unused(_: &Path) {}
 //   with 75 when Kiln.Admin asked for a restart (restart.json; docs/kiln/launcher/admin-protocol.md, "Restart").
 
 /// What `kilnctl run` exits with when the server stopped because Kiln.Admin's `server_restart` asked for it
-/// (EX_TEMPFAIL). Not one of kiln@.service's `RestartPreventExitStatus=1 2 3`, so `Restart=on-failure` starts the
-/// server again.
+/// (EX_TEMPFAIL). kiln@.service lists it in `SuccessExitStatus=` (a clean exit, no failed state) and
+/// `RestartForceExitStatus=`, so the unit starts the server again.
 pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// `<server>/kiln/data/kiln-admin/restart.json`: Kiln.Admin writes it right before it raises the server's stop for a
