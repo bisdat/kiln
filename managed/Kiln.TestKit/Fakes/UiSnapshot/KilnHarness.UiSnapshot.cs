@@ -11,12 +11,27 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>The local player's health, stamina and mana and their maxima, as the game has them.</summary>
+/// <param name="Health">Current health.</param>
+/// <param name="HealthMax">Maximum health.</param>
+/// <param name="Stamina">Current stamina.</param>
+/// <param name="StaminaMax">Maximum stamina.</param>
+/// <param name="Mana">Current mana.</param>
+/// <param name="ManaMax">Maximum mana.</param>
 public readonly record struct FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0);
 
 /// <summary>The local player's position, in metres (the publication carries it in 32.32 fixed point).</summary>
+/// <param name="X">The X coordinate, in metres.</param>
+/// <param name="Y">The Y coordinate, in metres.</param>
+/// <param name="Z">The Z coordinate, in metres.</param>
 public readonly record struct FakeWorldPosition(double X, double Y, double Z);
 
 /// <summary>One nonempty slot of the local player's own inventory.</summary>
+/// <param name="Item">The item in the slot, by the game's item id.</param>
+/// <param name="Count">How many of the item the slot holds.</param>
+/// <param name="InventoryPage">The inventory page the slot is on (part of the slot's binding key).</param>
+/// <param name="SlotIndex">The slot's index on its page.</param>
+/// <param name="Pide">The id of the item's own per-item data in the game (gear: level, rarity, gems); 0 for an item
+/// without any.</param>
 public readonly record struct FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0);
 
 /// <summary>

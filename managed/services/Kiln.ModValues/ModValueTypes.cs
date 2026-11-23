@@ -101,9 +101,24 @@ public sealed record ModValueOptions(ModValueKind Kind, UiText Label,
 
 /// <summary>A value's revision in one world: for compare-and-set. Revision 0 is a real revision (a fresh value), so
 /// pass the world too: revision 0 of another world never matches.</summary>
+/// <param name="World">The world the revision belongs to (a provisional session id until a new world's first save).</param>
+/// <param name="ValueRevision">The value's revision in that world; it rises with every accepted change.</param>
 public readonly record struct ModValueVersion(Guid World, ulong ValueRevision);
 
 /// <summary>One value of one character, as of one moment (a copy: changing nothing).</summary>
+/// <param name="World">The world the value is from (a provisional session id until a new world's first save).</param>
+/// <param name="Character">The character the value belongs to.</param>
+/// <param name="Key">Which value: the defining mod and the value's id.</param>
+/// <param name="Value">The raw value; with <paramref name="Scale"/> 2, 1234 means 12.34.</param>
+/// <param name="Level">Experience: how many thresholds the value reached; 0 for counters and currencies.</param>
+/// <param name="Scale">Fixed decimal places of <paramref name="Value"/>, 0 to 6.</param>
+/// <param name="Kind">Counter, currency or experience.</param>
+/// <param name="Persistence">World, or Carried to other worlds with the character.</param>
+/// <param name="DefinitionVersion">The definition version the saved value was last converted to.</param>
+/// <param name="CarryEpoch">Carried values: the carry epoch the value belongs to.</param>
+/// <param name="ValueRevision">This value's revision in the world, for compare-and-set (see <see cref="Version"/>).</param>
+/// <param name="PartitionRevision">The revision of the character's whole record for this mod and persistence (World
+/// or Carried): it rises with a change to any value in it.</param>
 public sealed record ModValueSnapshot(Guid World, CharacterKey Character, ModValueKey Key, long Value, int Level, int Scale,
     ModValueKind Kind, ModValuePersistence Persistence, uint DefinitionVersion, uint CarryEpoch,
     ulong ValueRevision, ulong PartitionRevision)
@@ -113,30 +128,62 @@ public sealed record ModValueSnapshot(Guid World, CharacterKey Character, ModVal
 }
 
 /// <summary>A definition as Kiln knows it (described or active): what a UI needs to show a value.</summary>
+/// <param name="Key">The value's name: the defining mod and the value's id.</param>
+/// <param name="Kind">Counter, currency or experience.</param>
+/// <param name="Label">The name players see, in the game's languages.</param>
+/// <param name="NumberFormat">How the number shows (N0-N6, F0-F6, "0" or "0." with zeros), per language.</param>
+/// <param name="Min">Lowest raw value.</param>
+/// <param name="Max">Highest raw value.</param>
+/// <param name="Initial">The raw value a character starts with.</param>
+/// <param name="Scale">Fixed decimal places, 0 to 6.</param>
+/// <param name="Thresholds">Experience: the raw values where levels start; empty for other kinds.</param>
+/// <param name="Persistence">World, or Carried to other worlds with the character.</param>
+/// <param name="Version">The definition's version: saved values convert when it rises.</param>
+/// <param name="CarryEpoch">Carried values: raising it resets carried progress everywhere.</param>
+/// <param name="ReadPolicy">Which mods may read the value.</param>
+/// <param name="ReadMods">With <see cref="ModValueReadPolicy.AllowList"/>: the mods that may read it; else empty.</param>
+/// <param name="Sync">What the owning player's client receives.</param>
+/// <param name="Active">True when the defining mod activated it in this load; false when it is only described.</param>
 public sealed record ModValueDefinition(ModValueKey Key, ModValueKind Kind, UiText Label, UiText NumberFormat, long Min, long Max,
     long Initial, int Scale, IReadOnlyList<long> Thresholds, ModValuePersistence Persistence, uint Version, uint CarryEpoch,
     ModValueReadPolicy ReadPolicy, IReadOnlyList<string> ReadMods, ModValueSyncPolicy Sync, bool Active);
 
 /// <summary>Result of <see cref="ModValues.Read"/> and <see cref="ModValues.Synced"/>.</summary>
+/// <param name="Ok">True when the value was read.</param>
+/// <param name="Reason">Why not: one of <see cref="ModValueReasons"/>; null when <see cref="Ok"/>.</param>
+/// <param name="Value">The value as of the read; null when refused.</param>
 public sealed record ModValueReadResult(bool Ok, string? Reason, ModValueSnapshot? Value) : IKilnResult;
 
 /// <summary>Result of <see cref="ModValues.Describe"/> and <see cref="ModValues.Define"/>.</summary>
+/// <param name="Ok">True when the definition was accepted.</param>
+/// <param name="Reason">Why not: one of <see cref="ModValueReasons"/>; null when <see cref="Ok"/>.</param>
+/// <param name="Key">The definition's key (when refused, null if the options did not name one).</param>
 public sealed record ModValueDefinitionResult(bool Ok, string? Reason, ModValueKey? Key) : IKilnResult;
 
 /// <summary>Result of a change. Accepted: <see cref="Before"/> and <see cref="After"/> (equal for a no-op such as adding
 /// 0). Refused: <see cref="Reason"/> (one of <see cref="ModValueReasons"/>), and nothing changed.</summary>
+/// <param name="Ok">True when the change was accepted.</param>
+/// <param name="Reason">Why not: one of <see cref="ModValueReasons"/>; null when <see cref="Ok"/>.</param>
+/// <param name="Before">The value before the change; null when refused.</param>
+/// <param name="After">The value after the change; null when refused.</param>
 public sealed record ModValueResult(bool Ok, string? Reason, ModValueSnapshot? Before, ModValueSnapshot? After) : IKilnResult;
 
 /// <summary>The reasons a mod value call is refused (<see cref="IKilnResult.Reason"/>). The native facade's KMV_*
 /// reasons have the same names.</summary>
 public static class ModValueReasons
 {
+    /// <summary>A spend asked for more than the value holds (it would go below the minimum).</summary>
     public const string InsufficientFunds = "InsufficientFunds";
+    /// <summary>A compare-and-set gave a version that is no longer current (another change came first, or the world got
+    /// its id at its first save).</summary>
     public const string StaleRevision = "StaleRevision";
     /// <summary>No live per-character identity: an account-only key, a character not in game (writes), no world.</summary>
     public const string CharacterUnavailable = "CharacterUnavailable";
+    /// <summary>The change would take the value past its minimum or maximum, or overflow: nothing changed.</summary>
     public const string BoundExceeded = "BoundExceeded";
+    /// <summary>No definition with this key is known.</summary>
     public const string Undefined = "Undefined";
+    /// <summary>The caller may not do this: only the defining mod writes a value, and reads follow its read policy.</summary>
     public const string AccessDenied = "AccessDenied";
     /// <summary>The client has no synced copy of this value (not received, sync none, another world).</summary>
     public const string NotSynced = "NotSynced";
@@ -145,6 +192,7 @@ public static class ModValueReasons
     /// <summary>The saved value needs a higher definition version, or its kind/partition changed without the policy
     /// that allows it: it is held unchanged.</summary>
     public const string MigrationRequired = "MigrationRequired";
+    /// <summary>The server refused a carried import (the server takes none, or a handler canceled the offer).</summary>
     public const string ImportRefused = "ImportRefused";
     /// <summary>Carried progress only grows.</summary>
     public const string NonMonotonic = "NonMonotonic";
