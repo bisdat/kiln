@@ -143,6 +143,16 @@ public sealed class RegistryContextTests
         Assert.Null(context.CaptureIr()); context.Close();
     }
     [Fact]
+    public void ManualFinalHelperWritesOneAlterTransaction()
+    {
+        var context = Frame(Mod(), RegistryEntryPoint.Manual, world: new RegistryWorld(1, WorldKind.Server, "a"));
+        using var scope = context.Enter();
+        DataRegistry.For(context).Final(view => view.Items["game:wood"].MaxStack = 20);
+        var ir = JsonNode.Parse(context.CaptureIr()!)!;
+        Assert.Equal("alter", ir["stage"]!.GetValue<string>()); Assert.Single(ir["edits"]!.AsArray());
+        context.Close();
+    }
+    [Fact]
     public void ResolvedViewsCannotWriteEvenInTheAlterPass()
     {
         var owner = Mod();

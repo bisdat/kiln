@@ -106,6 +106,9 @@ var reverted = change.Revert();
 if (!reverted.Ok) Log.Warn(reverted.Reason ?? "registry revert not applied");
 ```
 
+Inside `Registry.Change`, `Final(...)` is an ordinary Alter edit in that one transaction; it does not schedule a
+separate all-mod Final pass. The transaction still applies in commit order over earlier retained changes.
+
 `RegistryChangeResult` copies outcome, accepted/refused/skipped counts, world token, generation and reason. `Ok` means
 Applied or Reverted with no refused edits or skipped foreign bytes. PendingWorld/PendingResource do not claim bytes were
 changed. RestartRequired, WorldRequired, Refused, Skipped and Unverified stay distinct. A change is not disposable:

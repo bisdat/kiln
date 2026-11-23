@@ -44,7 +44,8 @@ public sealed class RegistryStage
     public BalanceEntry Balance { get { Context.Ensure(); return new(new("game:balance"), Cells("balance", "game:balance")); } }
     /// <summary>Authors ordinary field edits, once in the alter pass.</summary>
     public void Alter(Action<RegistryStage> edits) { ArgumentNullException.ThrowIfNull(edits); In(RegistryPhase.Alter, () => edits(this)); }
-    /// <summary>Authors final edits, once in the final pass. Other mods' final edits are not in its read view.</summary>
+    /// <summary>Authors final edits, once in the final automatic pass. Other mods' final edits are not in its read view.
+    /// Inside Registry.Change this is an ordinary Alter edit in that single transaction, not a global Final pass.</summary>
     public void Final(Action<RegistryStage> edits) { ArgumentNullException.ThrowIfNull(edits); In(RegistryPhase.Final, () => edits(this)); }
 
     internal void In(RegistryPhase target, Action action)
