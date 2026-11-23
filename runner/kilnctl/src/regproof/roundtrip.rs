@@ -49,6 +49,11 @@ pub struct Suite {
     pub regmap_digest: String,
     #[serde(default)]
     pub constants: BTreeMap<String, f64>,
+    /// impactConfig rows: how many of the build's entries hold the config in each kind (`sint32`, `float`) and how many hold
+    /// it in a kind the lab could not read (`unknown`); only the kinds the build has need evidence (coordinator ruling,
+    /// 2026-11-23 ~1:20 PM)
+    #[serde(default)]
+    pub kinds: BTreeMap<String, BTreeMap<String, u64>>,
     #[serde(default)]
     pub samples: Vec<Sample>,
 }
@@ -127,7 +132,22 @@ pub struct FieldResult {
     pub problems: Vec<String>,
     /// evidence the lab did not give (no sample in the field's generation): the field is unproven, not wrong
     pub missing: Vec<String>,
+    /// impactConfig rows: per config kind, what the proof holds ("proven", "none on this build", "not proven")
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub kinds: BTreeMap<String, String>,
 }
+
+/// The impact-config kinds a proof knows, as the producer names them.
+pub const CONFIG_KINDS: [&str; 2] = ["sint32", "float"];
+/// A kind with no entry on the build: recorded, never a gap (a later build that has it must prove it).
+pub const NONE_ON_THIS_BUILD: &str = "none on this build";
+/// The `missing` texts of impactConfig rows (mod.rs turns them into the record's reasons).
+pub const MISSING_SINT32: &str = "impact config: the build has Sint32 configs, but no Sint32 whole round trip and named fractional refusal";
+pub const MISSING_FLOAT: &str = "impact config: the build has float configs, but no float fractional round trip";
+pub const MISSING_UNKNOWN: &str = "impact config: the lab could not read the config kind of some entries that hold it";
+pub const MISSING_NONE: &str = "impact config: no entry of the build holds it";
+pub const MISSING_KINDS: &str = "impact config: the lab did not count the config kinds of the build; need a Sint32 whole round trip, a named \
+                                 fractional refusal, and a float-config fractional round trip";
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Report {
@@ -383,10 +403,41 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         } else if !in_generation && problems.is_empty() {
             missing.push(format!("no round-trip sample{where_} (only in another generation): the field is not proven on this build"));
         }
-        if row.conv == "impactConfig" && !(sint_whole && sint_refusal && float_fraction) {
-            missing.push("no complete impact-config evidence: need a Sint32 whole round trip, a named fractional refusal, and a float-config fractional round trip".into());
+        let mut kinds = BTreeMap::new();
+        if row.conv == "impactConfig" {
+            // the producer's count of the build's entries per config kind, from a suite of the row's generation
+            let counts = good.iter().filter(|s| want.is_none_or(|g| g == s.generation)).find_map(|s| s.kinds.get(&q));
+            match counts {
+                None => {
+                    if !(sint_whole && sint_refusal && float_fraction) {
+                        missing.push(MISSING_KINDS.into());
+                    }
+                }
+                Some(c) => {
+                    let n = |k: &str| c.get(k).copied().unwrap_or(0);
+                    let proven = [("sint32", sint_whole && sint_refusal, MISSING_SINT32), ("float", float_fraction, MISSING_FLOAT)];
+                    for (kind, have, gap) in proven {
+                        let state = if n(kind) == 0 {
+                            NONE_ON_THIS_BUILD.to_string()
+                        } else if have {
+                            format!("proven ({} entries on this build)", n(kind))
+                        } else {
+                            missing.push(gap.into());
+                            format!("not proven ({} entries on this build)", n(kind))
+                        };
+                        kinds.insert(kind.to_string(), state);
+                    }
+                    if n("unknown") > 0 {
+                        missing.push(format!("{MISSING_UNKNOWN} ({} entries)", n("unknown")));
+                        kinds.insert("unknown".into(), format!("{} entries", n("unknown")));
+                    }
+                    if CONFIG_KINDS.iter().all(|k| n(k) == 0) && n("unknown") == 0 {
+                        missing.push(MISSING_NONE.into());
+                    }
+                }
+            }
         }
-        r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing });
+        r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing, kinds });
     }
     r
 }
@@ -651,6 +702,56 @@ pub(crate) mod tests {
         let mut unnamed = refused;
         unnamed["refusalReason"] = json!("");
         assert!(!run(vec![whole, float, unnamed]).ok, "refusals must name their reason");
+    }
+
+    /// Coordinator ruling (2026-11-23 ~1:20 PM): evidence is required only for the config kinds the build has; a kind with
+    /// no entry is recorded "none on this build" and does not block the row.
+    #[test]
+    fn impact_configs_need_evidence_only_for_the_kinds_the_build_has() {
+        let mut map = map_with_float_cap();
+        map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().conv = "impactConfig".into();
+        map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().backend = "live".into();
+        let bytes = "ab".repeat(32);
+        let mk = |extra: Value| {
+            let mut s = json!({"field": "plans.cap", "entry": "game:cost", "read": 2, "rawBefore": [2],
+                               "reverted": true, "bytesBefore": bytes, "bytesAfter": bytes});
+            s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            s
+        };
+        let whole = mk(json!({"configKind": "sint32", "probe": 3, "readBack": 3, "rawAfter": [3]}));
+        let float = mk(json!({"configKind": "float", "probe": 2.5, "readBack": 2.5, "rawAfter": [2.5]}));
+        let refused = mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true,
+                                "refusalReason": "not_exact: value cannot be represented exactly", "refusalCode": "not_exact", "readBack": 2, "rawAfter": [2]}));
+        let run = |samples: Vec<Value>, kinds: Value| {
+            let suite = parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": "live",
+                                     "regmapDigest": DIGEST, "kinds": {"plans.cap": kinds}, "samples": samples}).to_string()).unwrap();
+            check(&map, "server", SHA, DIGEST, &[suite]).fields.remove("plans.cap").unwrap()
+        };
+        // a build with Sint32 configs only (f0d824be): the float kind is recorded, not required
+        let f = run(vec![whole.clone(), refused.clone()], json!({"sint32": 141, "float": 0, "unknown": 0}));
+        assert!(f.ok, "{f:?}");
+        assert_eq!(f.kinds["float"], NONE_ON_THIS_BUILD);
+        assert!(f.kinds["sint32"].starts_with("proven"), "{f:?}");
+        // the build has float configs too: their fractional round trip is required
+        let f = run(vec![whole.clone(), refused.clone()], json!({"sint32": 141, "float": 3, "unknown": 0}));
+        assert!(!f.ok && f.problems.is_empty() && f.missing.contains(&MISSING_FLOAT.to_string()), "{f:?}");
+        // a float-only build needs no Sint32 evidence
+        let f = run(vec![float.clone()], json!({"sint32": 0, "float": 4}));
+        assert!(f.ok && f.kinds["sint32"] == NONE_ON_THIS_BUILD, "{f:?}");
+        // Sint32 configs present: the whole round trip alone does not prove the row (the refusal is required)
+        let f = run(vec![whole.clone()], json!({"sint32": 2, "float": 0}));
+        assert!(!f.ok && f.missing.contains(&MISSING_SINT32.to_string()), "{f:?}");
+        // entries whose config kind the lab could not read: never assumed absent
+        let f = run(vec![whole.clone(), refused.clone()], json!({"sint32": 141, "float": 0, "unknown": 3}));
+        assert!(!f.ok && f.missing.iter().any(|m| m.starts_with(MISSING_UNKNOWN)), "{f:?}");
+        // no entry holds the config: nothing proves it
+        let f = run(vec![], json!({"sint32": 0, "float": 0}));
+        assert!(!f.ok && f.missing.contains(&MISSING_NONE.to_string()), "{f:?}");
+        // a suite without counts: every kind is required, as before
+        let suite = parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": "live",
+                                  "regmapDigest": DIGEST, "samples": [whole, refused]}).to_string()).unwrap();
+        let f = check(&map, "server", SHA, DIGEST, &[suite]).fields.remove("plans.cap").unwrap();
+        assert!(!f.ok && f.missing.contains(&MISSING_KINDS.to_string()), "{f:?}");
     }
 
     #[test]

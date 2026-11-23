@@ -4,11 +4,39 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
+using Kiln;
 using RegistryProofTest;
 using Xunit;
 
 public class ProducerTests
 {
+    // Coordinator ruling (2026-11-23): evidence only for the config kinds the build has, so the producer counts them; an
+    // entry that holds the value but whose kind cannot be read counts as "unknown", never as absent.
+    [Theory]
+    [InlineData(ContentValueType.Int, true, "sint32")]
+    [InlineData(ContentValueType.Float, true, "float")]
+    [InlineData(ContentValueType.Int, false, "sint32")]
+    [InlineData(ContentValueType.Bool, true, "unknown")]
+    [InlineData(null, true, "unknown")]
+    [InlineData(null, false, null)]
+    public void Config_kinds_are_counted_and_unreadable_ones_are_unknown(ContentValueType? type, bool holds, string? expected)
+    {
+        var method = typeof(RegistryProofTestMod).GetMethod("ConfigKind", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Equal(expected, (string?)method.Invoke(null, new object?[] { type, holds }));
+    }
+
+    // review2 N4: an impactConfig row naming a config Kiln has no id for gets no probe, never StaminaCost's id.
+    [Theory]
+    [InlineData("ManaCost", "0xaf236ece")]
+    [InlineData("StaminaCost", "0x727d7f78")]
+    [InlineData("HealthCost", null)]
+    [InlineData(null, null)]
+    public void Config_ids_refuse_unknown_names(string? config, string? expected)
+    {
+        var method = typeof(RegistryProofTestMod).GetMethod("ConfigId", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Equal(expected, (string?)method.Invoke(null, new object?[] { config }));
+    }
+
     [Theory]
     [InlineData(2.0)]
     [InlineData(2.5)]

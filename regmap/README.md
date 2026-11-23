@@ -172,9 +172,13 @@ Raw values: the number of an int, float or bool member (a bool may be 0/1), a ti
 name, a bitmask's list of game names, an optional enum's [switch, name]. A probe must differ from the value before; a
 read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
 
-For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value.
-The row needs a Sint32 whole-number round trip, a fractional Sint32 probe refused without changing the value or bytes,
-and a float-config fractional round trip. Refusal samples carry `configKind: "sint32"`, `expectRefused: true`,
+For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value, and
+counts every entry of the id table per config kind (the suite's `"kinds": {"items.manaCost": {"sint32": 141, "float": 0,
+"unknown": 0}}`; `unknown`: the entry holds the value but its kind cannot be read). Evidence is required only for the kinds
+the build has (coordinator ruling, 2026-11-23): Sint32 configs need a Sint32 whole-number round trip and a fractional Sint32
+probe refused without changing the value or bytes; float configs need a float-config fractional round trip. A kind with no
+entry is recorded in the record's `"kinds"` as "none on this build" and does not block the row (a later build that has it
+must prove it); an `unknown` entry, or a suite without counts (all three cases are then required), leaves the row unproven. Refusal samples carry `configKind: "sint32"`, `expectRefused: true`,
 `refused: true`, `refusalCode: "not_exact"` and `refusalReason`; the code is emitted only for a native REFUSED outcome
 whose reason starts with the stable `not_exact: ` token. Accepting or rounding the fractional probe makes the row
 `changed`; missing any of these cases leaves it `unproven`. Whole-only evidence cannot prove the row.

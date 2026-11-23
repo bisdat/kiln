@@ -171,6 +171,33 @@ public sealed unsafe class RegistryProofTestMod : Mod
 
     private static JsonNode? ConfigRaw(ContentEntry e, string path) => ConfigValue(e, path) is { } v ? RawValue(v) : null;
 
+    /// <summary>The config of an id table entry Content's enumeration does not list: kiln.gamedata by the table's GUID text in
+    /// either byte order (kiln.content's guid_text and .NET's).</summary>
+    private static ContentValue? ConfigValueOf(string guidText, string path)
+    {
+        try
+        {
+            var keys = new List<string> { guidText };
+            var hex = guidText.Replace("-", "", StringComparison.Ordinal);
+            if (hex.Length == 32) keys.Add(new Guid(Convert.FromHexString(hex)).ToString());
+            foreach (var k in keys)
+                if (Content.ItemData.Get(k) is { } g) return g.Get(path);
+        }
+        catch (Exception) { }
+        return null;
+    }
+
+    /// <summary>The kind of an entry's impact config (coordinator ruling, 2026-11-23: evidence only for the kinds the build
+    /// has): "sint32", "float", "unknown" (the entry holds the value, but its config kind cannot be read), or null (the entry
+    /// has no such config).</summary>
+    private static string? ConfigKind(ContentValueType? type, bool holdsValue) => type switch
+    {
+        ContentValueType.Int => "sint32",
+        ContentValueType.Float => "float",
+        null when !holdsValue => null,
+        _ => "unknown",
+    };
+
     /// <summary>The paths a member is read raw by, in order: the path itself, and for "<c>x.isSet</c>" also "<c>x</c>",
     /// where reflection exposes a struct whose only scalar is that flag (GemSlotOverride {isSet}, items.socket), as
     /// kiln.registry.live binds it.</summary>
@@ -309,6 +336,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         var ids = JsonNode.Parse(File.ReadAllText(idsFile))!["registries"]!.AsObject();
         Check(exe.Length == 64, $"the running build {exe}");
         var samples = new JsonArray();
+        var kinds = new JsonObject();
         foreach (var registry in Live)
         {
             var map = JsonNode.Parse(File.ReadAllText(Path.Combine(_kiln, "regmap", "common", registry + ".json")))!;
@@ -330,6 +358,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 var paths = row["paths"]?.AsArray().Select(p => (string)p!).ToList() ?? new List<string>();
                 if ((string?)row["state"] == "unmapped" || paths.Count == 0) continue;
                 var backend = (string?)row["backend"] ?? "";
+                if ((string?)row["conv"] == "impactConfig")
+                    kinds[$"{registry}.{field}"] = CountKinds(registry, field, row, paths, entries, table);
                 // Never infer the config's representation from whether its current value is whole.
                 foreach (var mode in (string?)row["conv"] == "impactConfig" ? new[] { "sint32", "sint32-refusal", "float" } : new[] { "" })
                 {
@@ -339,13 +369,50 @@ public sealed unsafe class RegistryProofTestMod : Mod
             }
         }
         var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = side, ["exeSha256"] = exe, ["generation"] = "live",
-            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["samples"] = samples };
+            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["samples"] = samples };
         Directory.CreateDirectory(proof);
         var path = Path.Combine(proof, $"roundtrip-{side}-live.json");
         File.WriteAllText(path + ".tmp", doc.ToJsonString());
         File.Move(path + ".tmp", path, true);
         Log.Info($"registry-proof-test: {(samples.Count == 0 ? "unproven: no evidence; " : "")}wrote {samples.Count} live samples to {path}");
     }
+
+    /// <summary>How many of the build's entries (every entry of the id table, also those Content's enumeration does not list)
+    /// hold an impact config in each kind: { "sint32": n, "float": n, "unknown": n }. kilnctl requires evidence only for the
+    /// kinds present; an entry that holds the value but whose kind cannot be read is "unknown" (never assumed absent).</summary>
+    private JsonObject CountKinds(string registry, string field, JsonObject row, List<string> paths, List<(ContentEntry E, string Id)> entries, JsonObject table)
+    {
+        var counts = new SortedDictionary<string, int>(StringComparer.Ordinal) { ["sint32"] = 0, ["float"] = 0, ["unknown"] = 0 };
+        if (ConfigId((string?)row["config"]) is not { } configId)
+        {
+            Log.Info($"registry-proof-test: {registry}.{field}: Kiln has no config id for {(string?)row["config"]}: its kinds are not counted");
+            return new JsonObject { ["unknown"] = table.Count };
+        }
+        var path = paths[0] + "." + configId + ".value";
+        var byKey = new Dictionary<string, ContentEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (e, _) in entries) { byKey[e.Guid.ToString()] = e; byKey[BytesText(e.Guid)] = e; }
+        foreach (var (key, idNode) in table)
+        {
+            if ((string?)idNode is not { } id) continue;
+            var text = Read(registry, id, field);
+            var holds = text != null && JsonNode.Parse(text) is JsonValue jv && jv.TryGetValue<double>(out _);
+            var value = byKey.TryGetValue(key, out var e) ? ConfigValue(e, path) : ConfigValueOf(key, path);
+            if (ConfigKind(value?.Type, holds) is { } kind) counts[kind]++;
+        }
+        Log.Info($"registry-proof-test: {registry}.{field}: config kinds over {table.Count} entries: " + string.Join(", ", counts.Select(p => $"{p.Key} {p.Value}")));
+        var o = new JsonObject();
+        foreach (var (k, v) in counts) o[k] = v;
+        return o;
+    }
+
+    /// <summary>The game's config id of a Kiln impact config name (Kiln's translation, docs/kiln/services/gamedata.md); null for
+    /// a name Kiln has no id for (no probe, never another config's id).</summary>
+    private static string? ConfigId(string? config) => config switch
+    {
+        "ManaCost" => "0xaf236ece",
+        "StaminaCost" => "0x727d7f78",
+        _ => null,
+    };
 
     private JsonObject Constants(JsonObject ids)
     {
@@ -371,8 +438,13 @@ public sealed unsafe class RegistryProofTestMod : Mod
         // the table a reference names (the schema's target): items, input categories, perks; others get no probe
         var table = conv is "ref" or "refList" ? leafName switch { "item" => "items", "category" => "inputCategories", "perks" => "perks", _ => "" } : "";
         var ids = table.Length > 0 ? idTables[table]?.AsObject().Select(p => (string?)p.Value).Where(v => v != null).Cast<string>().Take(64).ToList() ?? new() : new List<string>();
-        var config = (string?)row["config"];
-        var configPath = paths[0] + "." + (config == "ManaCost" ? "0xaf236ece" : "0x727d7f78") + ".value";
+        var configId = ConfigId((string?)row["config"]);
+        if (conv == "impactConfig" && configId is null)
+        {
+            Log.Info($"registry-proof-test: no sample of {q}: Kiln has no config id for {(string?)row["config"]}");
+            return null;
+        }
+        var configPath = paths[0] + "." + configId + ".value";
         // a structured value (list, reference, unlock...) is not one scalar member: its raw view is the entry's resource bytes;
         // a scalar of a recipe's list element (outputs[].count), which Content.Get does not address, from the game's stacks
         JsonArray RawOf(ContentEntry e, AssetKey? key) =>

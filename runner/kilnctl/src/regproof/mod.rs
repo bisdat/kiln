@@ -345,8 +345,21 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
 /// An unproven row's reason as players and mod authors read it (kiln.content: "Unproven: <field> is not proven for game
 /// build <b> (<reason>)"): Kiln words, no game names.
 fn unproven_reason(missing: &[String]) -> String {
-    let no_sample = missing.iter().any(|m| m.contains("no round-trip sample"));
-    if !no_sample && missing.iter().any(|m| m.contains("constants")) {
+    let has = |what: &str| missing.iter().any(|m| m.contains(what));
+    let no_sample = has("no round-trip sample");
+    // impact configs (costs): what of the build's config kinds the lab did not prove (review2 S3: never "no lab round trip"
+    // when the lab did round-trip the value)
+    let config = [
+        (roundtrip::MISSING_NONE, "no entry holds this value on this build"),
+        (roundtrip::MISSING_UNKNOWN, "the lab could not tell how this build stores some of these values"),
+        (roundtrip::MISSING_SINT32, "whole-number values and the refusal of fractions are not proven on this build yet"),
+        (roundtrip::MISSING_FLOAT, "fractional values are not proven on this build yet: no lab round trip of a fractional cost"),
+        (roundtrip::MISSING_KINDS, "the lab did not count how this build stores these values yet"),
+    ];
+    if let Some((_, why)) = config.iter().find(|(m, _)| has(m)).filter(|_| !no_sample) {
+        return (*why).into();
+    }
+    if !no_sample && has("constants") {
         "its formula's constants were not read on this build yet".into()
     } else {
         "no lab round trip of it on this build yet".into()
@@ -426,6 +439,15 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
             o.remove("reasons");
         } else {
             o.insert("reasons".into(), Value::Object(reasons));
+        }
+        // per impact-config row, what the proof holds of each config kind ("none on this build" for a kind the build lacks:
+        // a later build that has it must prove it)
+        let kinds: serde_json::Map<String, Value> = p.roundtrip.fields.iter().filter(|(_, f)| !f.kinds.is_empty())
+            .map(|(q, f)| (q.clone(), serde_json::to_value(&f.kinds).unwrap_or_default())).collect();
+        if kinds.is_empty() {
+            o.remove("kinds");
+        } else {
+            o.insert("kinds".into(), Value::Object(kinds));
         }
         o.insert("verified".into(), Value::Bool(p.verified));
         o.insert("proof".into(), Value::String(p.summary()));
@@ -1461,6 +1483,46 @@ mod tests {
         // a record without unproven rows has no reasons member
         let all = prove(&with_power_samples(inputs()), "T");
         assert!(record(&all, &candidate()).get("reasons").is_none());
+    }
+
+    /// review2 S3: a cost row the lab did round-trip is never "no lab round trip of it"; its reason says which kind of
+    /// config is not proven; a kind the build lacks goes into the record as "none on this build".
+    #[test]
+    fn impact_config_rows_name_what_is_not_proven_and_record_absent_kinds() {
+        let mut inp = with_power_samples(inputs());
+        let cap = inp.map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap();
+        cap.conv = "impactConfig".into();
+        cap.backend = "live".into();
+        let bytes = "ab".repeat(32);
+        let mk = |extra: Value| {
+            let mut s = json!({"field": "plans.cap", "entry": "game:cost", "read": 2, "rawBefore": [2], "reverted": true,
+                               "bytesBefore": bytes, "bytesAfter": bytes});
+            s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<roundtrip::Sample>(s).unwrap()
+        };
+        let whole = mk(json!({"configKind": "sint32", "probe": 3, "readBack": 3, "rawAfter": [3]}));
+        let refused = mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true, "refusalCode": "not_exact",
+                                "refusalReason": "not_exact: plans.cap is a whole number on this build", "readBack": 2, "rawAfter": [2]}));
+        inp.suites[1].samples.retain(|x| x.field != "plans.cap");
+        inp.suites[0].samples.extend([whole, refused]);
+        // the old producer (no counts): unproven, and the reason is not "no lab round trip"
+        let p = prove(&inp, "T");
+        let r = &p.rows["plans.cap"];
+        assert_eq!(r.state, "unproven", "{r:?}");
+        assert!(!r.reason.as_deref().unwrap_or_default().contains("no lab round trip"), "{r:?}");
+        // the build has float configs the lab did not round-trip
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 2)].into());
+        let r = prove(&inp, "T").rows["plans.cap"].clone();
+        assert_eq!(r.state, "unproven");
+        assert_eq!(r.reason.as_deref(), Some("fractional values are not proven on this build yet: no lab round trip of a fractional cost"));
+        // no float config on this build: ok, and the record says the float kind is absent
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 0)].into());
+        let p = prove(&inp, "T");
+        assert_eq!(p.rows["plans.cap"].state, "ok", "{:?}", p.rows["plans.cap"]);
+        let rec = record(&p, &candidate());
+        assert_eq!(rec["kinds"]["plans.cap"]["float"], roundtrip::NONE_ON_THIS_BUILD, "{rec}");
+        assert!(rec["kinds"]["plans.cap"]["sint32"].as_str().is_some_and(|s| s.starts_with("proven")), "{rec}");
+        assert!(record(&prove(&with_power_samples(inputs()), "T"), &candidate()).get("kinds").is_none());
     }
 
     #[test]
