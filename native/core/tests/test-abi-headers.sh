@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Compile-only: kiln_world.h and kiln_abilities.h together in both orders (C11 and C++20), and each alone (C++):
 # each header's program-info struct has its own name (KilnWorldProgramInfo, KilnImpactProgramInfo), KilnProgramInfo stays
-# an alias of the first one's. Also the layouts of kiln_tasks.h, tasks_host.h, kiln_launch.h, launch_internal.h,
+# an alias of the first one's. Also the layouts of kiln_tasks.h, tasks_host.h, kiln_items_storage.h, kiln_launch.h, launch_internal.h,
 # kiln_hooks.h, kiln_client.h, kiln_eml_startup.h, kiln_net.h and kiln_build.h, and the Kiln-internal hooks_protect_internal.h. Output: $KILN_OUT/core-tests (KILN_OUT
 # default native/build).
 set -euo pipefail
@@ -23,6 +23,15 @@ done
 "$cc" -std=c11 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/tasks_abi_test.c"; n=$((n + 1))
 "$cxx" -std=c++20 -x c++ -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/tasks_abi_test.c"; n=$((n + 1))
 "$cxx" -std=c++20 -x c++ -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" -I"$here/../src" -include tasks_host.h /dev/null; n=$((n + 1))
+# kiln.items.storage v1: every size/offset/value as C11 and C++20, with kiln_items.h first, and for Windows x64 (clang)
+"$cc" -std=c11 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/abi_headers/items_storage.c"; n=$((n + 1))
+"$cxx" -std=c++20 -x c++ -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" "$here/abi_headers/items_storage.c"; n=$((n + 1))
+if [[ $("$cc" --version) == *clang* ]]; then
+  "$cc" --target=x86_64-pc-windows-msvc -ffreestanding -std=c11 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" \
+      "$here/abi_headers/items_storage.c"; n=$((n + 1))
+  "$cc" --target=x86_64-pc-windows-msvc -ffreestanding -x c++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" \
+      "$here/abi_headers/items_storage.c"; n=$((n + 1))
+fi
 # kiln.launch v1 (Kiln-internal, not in the SDK's headers): its layout asserts as C11 and C++20
 "$cc" -std=c11 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" -include services/kiln_launch.h -x c /dev/null; n=$((n + 1))
 "$cxx" -std=c++20 -Wall -Wextra -Werror -fsyntax-only "${inc[@]}" -include services/kiln_launch.h -x c++ /dev/null; n=$((n + 1))
@@ -101,4 +110,4 @@ if grep -l -E 'kiln-internal (begin|end)' "$here/../abi"/*.h "$here/../abi"/serv
 fi
 n=$((n + 1))
 rm -rf "$pub"
-echo "abi headers: PASS $n checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone; kiln_tasks.h, tasks_host.h; kiln_launch.h, launch_internal.h; kiln_hooks.h, hooks_protect_internal.h; kiln_eml_startup.h run as C and C++, Windows x64 layout; kiln_build.h as C11 and C++20; kiln_client.h and kiln_net.h whole in the core's view and the SDK's)"
+echo "abi headers: PASS $n checks (kiln_world.h and kiln_abilities.h together in both orders, C and C++; each alone; kiln_tasks.h, tasks_host.h; kiln_items_storage.h as C and C++, Windows x64; kiln_launch.h, launch_internal.h; kiln_hooks.h, hooks_protect_internal.h; kiln_eml_startup.h run as C and C++, Windows x64 layout; kiln_build.h as C11 and C++20; kiln_client.h and kiln_net.h whole in the core's view and the SDK's)"
