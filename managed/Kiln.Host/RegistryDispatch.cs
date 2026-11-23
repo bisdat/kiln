@@ -122,6 +122,9 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         Game.AssertTickThread();
         if (_closed || _flushing) return;
         DrainSignals();
+        // review4 nit: with no runtime author and no world-bound manual change there is nothing to poll on this tick (the
+        // stage/store locks and Kiln.Saves' world folder stay untouched); a later Loaded record polls again.
+        if (_runtime.Count == 0 && _scopedChanges.Count == 0) return;
         if (!_native.LiveAvailable || _native.StageStatus().Phase < 4) return; // a menu load can precede resources-ready
         _flushing = true;
         try

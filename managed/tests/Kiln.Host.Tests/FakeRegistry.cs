@@ -18,7 +18,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal readonly KilnRegistryHostApi* Internal;
     internal uint Phase = 4;
     internal ulong World = 1, Generation;
-    internal int PassReads;
+    internal int PassReads, StatusCalls;
     internal int Submits, StageError, ReadyError, StatusFailures, WorldRequiredCommits, BeginUnavailable, ReadUnavailable;
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
@@ -70,9 +70,9 @@ internal sealed unsafe class FakeRegistry : IDisposable
         bytes.CopyTo(new Span<byte>(output, bytes.Length)); output[bytes.Length] = 0; return 0;
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int StageStatus(RegistryStageStatus* value) { if (Current.StageError != 0) return Current.StageError; value->Phase = Current.Phase; value->Generation = Current.Generation; return 0; }
+    private static int StageStatus(RegistryStageStatus* value) { ++Current.StatusCalls; if (Current.StageError != 0) return Current.StageError; value->Phase = Current.Phase; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int Status(RegistryLiveStatus* value) { if (Current.StatusFailures > 0) { --Current.StatusFailures; return KilnAbi.ErrUnavailable; } value->World = Current.World; value->Kind = (uint)WorldKind.Server; value->Generation = Current.Generation; return 0; }
+    private static int Status(RegistryLiveStatus* value) { ++Current.StatusCalls; if (Current.StatusFailures > 0) { --Current.StatusFailures; return KilnAbi.ErrUnavailable; } value->World = Current.World; value->Kind = (uint)WorldKind.Server; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ReadStage(uint view, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length) => Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

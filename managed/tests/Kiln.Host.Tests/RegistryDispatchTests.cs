@@ -470,6 +470,26 @@ public sealed class RegistryDispatchTests : ModsFixture
         dispatch.FlushLoads(); Assert.Equal(2, calls);
         owner.Retire(); Assert.Equal(10, native.Value);
     }
+    // review4 nit: with no runtime author a host tick neither polls the registry's locks nor looks its tables up again.
+    [Fact(Timeout = 30_000)]
+    public async Task ATickWithoutRuntimeAuthorsDoesNotPollTheRegistry()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        dispatch.FlushLoads();
+        var (status, lookups) = (native.StatusCalls, native.Host.ServiceLookups);
+        for (var i = 0; i < 10; ++i) dispatch.FlushLoads();
+        Assert.Equal(status, native.StatusCalls);
+        Assert.Equal(lookups, native.Host.ServiceLookups);
+        var owner = Owner(native, "late"); var calls = 0;
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) { ++calls; Edit(c, 30); } }), owner, Root, false);
+        dispatch.FlushLoads(); Assert.Equal(1, calls); Assert.Equal(30, native.Value);
+        var before = native.Host.ServiceLookups;
+        dispatch.FlushLoads(); dispatch.FlushLoads();
+        Assert.True(native.Host.ServiceLookups - before < 6, $"tables are cached ({native.Host.ServiceLookups - before} lookups in two ticks)");
+        owner.Retire();
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {

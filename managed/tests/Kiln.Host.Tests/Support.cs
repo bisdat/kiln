@@ -15,7 +15,8 @@ internal sealed class FakeHost : IHostServices, IKilnBackend
     public bool HasFeature(string name) => name != "no.such.feature";
     public void Log(ulong owner, LogLevel level, string text) => Log(level, text);
     public readonly Dictionary<string, nint> Services = [];
-    public nint Service(string name, uint minVersion) => Services.GetValueOrDefault(name);
+    public int ServiceLookups;
+    public nint Service(string name, uint minVersion) { ++ServiceLookups; return Services.GetValueOrDefault(name); }
     public readonly List<string> Lines = [];
     public readonly HashSet<ulong> Revoked = [];
     private ulong _next = 1;

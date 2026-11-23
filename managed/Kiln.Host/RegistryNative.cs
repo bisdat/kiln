@@ -70,9 +70,13 @@ internal unsafe struct RegistryLiveTable
 
 internal sealed unsafe class RegistryNative(IHostServices host)
 {
-    private RegistryStageTable* Stage => (RegistryStageTable*)host.Service("kiln.registry", 1);
-    private RegistryLiveTable* Live => (RegistryLiveTable*)host.Service("kiln.registry.live", 1);
-    private KilnRegistryHostApi* Internal => (KilnRegistryHostApi*)host.Service(KilnRegistryHostApi.Name, KilnRegistryHostApi.Version2);
+    // review4 nit: one lookup per table, not dozens per tick. kiln-content's tables live as long as the process; a missing
+    // table is asked for again next time (it may load later).
+    private nint _stage, _live, _internal;
+    private RegistryStageTable* Stage => (RegistryStageTable*)(_stage != 0 ? _stage : _stage = host.Service("kiln.registry", 1));
+    private RegistryLiveTable* Live => (RegistryLiveTable*)(_live != 0 ? _live : _live = host.Service("kiln.registry.live", 1));
+    private KilnRegistryHostApi* Internal => (KilnRegistryHostApi*)(_internal != 0 ? _internal
+        : _internal = host.Service(KilnRegistryHostApi.Name, KilnRegistryHostApi.Version2));
     internal bool Available => Stage != null && Stage->Size >= 88 && Stage->Version >= 1 && Stage->Status != null &&
         Stage->Subscribe != null && Stage->Submit != null && Stage->Read != null && Stage->Select != null &&
         Stage->Ready != null && Stage->Unsubscribe != null;
