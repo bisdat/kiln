@@ -11,12 +11,15 @@ static int backpack_fixture(uint32_t,uint32_t){return backpack_answer;}
 static unsigned equip_calls,finalizer_calls;
 static void KILN_CALL equip_fixture(SelectorGroup*,void*,uint8_t,uint32_t,uint32_t){++equip_calls;}
 static void KILN_CALL finalizer_fixture(SelectorGroup* g,void*,void*,void*,void*,void*){++finalizer_calls;g[0].selected=0;g[0].has_selected=1;}
+static bool game_lists_555; // the arrow group also lists 555, with this count (0: a stack used up, its row kept)
+static uint64_t game_555_count;
 static void vanilla_selector(SelectorGroup* groups,void*,uint8_t) {
     for(unsigned i=0;i<7;++i) {
         groups[i]={};groups[i].data=groups[i].inline_rows;groups[i].capacity=64;groups[i].count=2;
         groups[i].data[0].item=999;groups[i].data[0].count=9;groups[i].data[1].item=1257792166u;groups[i].data[1].count=3;
         groups[i].has_selected=1;groups[i].selected=0;
     }
+    if(game_lists_555){groups[0].data[2].item=555;groups[0].data[2].count=game_555_count;groups[0].count=3;}
 }
 static uint32_t held_ammo_item;
 static uint32_t KILN_CALL ammo_held(){return held_ammo_item;}
@@ -131,6 +134,30 @@ int main() {
     pub.serial=context.game_serial;CHECK(ammo::publish(7,&pub)==KILN_OK);
     for(uintptr_t key=1;key<=16;++key){ammo::Binding stale{};stale.original.value.session=8;ammo::bindings.emplace(key,stale);}
     selector(groups,acc,0);CHECK(groups[0].data[0].item==555&&ammo::bindings.size()<=16);
+    // GitHub issue 131: vanilla keeps the row of a stack the player used up, at count 0. That row is no stock: the
+    // backpack at the pick decides whether the mod's row of the same item is the game's own.
+    auto republish=[&](uint32_t mode) {
+        selector(groups,acc,0);CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK&&context.ok);
+        pub.mode=mode;pub.serial=context.game_serial;CHECK(ammo::publish(7,&pub)==KILN_OK);selector(groups,acc,0);
+    };
+    game_lists_555=true;game_555_count=0;republish(KUA_MODE_REPLACE);
+    CHECK(context.game_count==3&&context.game_rows[2].item==555&&context.game_rows[2].count==0);
+    CHECK(groups[0].count==2&&groups[0].data[0].item==555&&groups[0].data[0].count==12);
+    equip_calls=0;backpack_answer=0;ammo::pick(groups,nullptr,0,555,400);CHECK(equip_calls==0);
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].count==12&&picks[0].row==3);
+    backpack_answer=-1;ammo::pick(groups,nullptr,0,555,401);CHECK(equip_calls==0); // Unreadable: no equip, no event.
+    backpack_answer=1;ammo::pick(groups,nullptr,0,555,402);CHECK(equip_calls==1); // The player carries it again: vanilla.
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    republish(KUA_MODE_APPEND); // Append shows the game's row (count 0), and its pick is decided the same way.
+    CHECK(groups[0].count==3&&groups[0].data[2].item==555&&groups[0].data[2].count==0);
+    backpack_answer=0;ammo::pick(groups,nullptr,0,555,403);CHECK(equip_calls==1);
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555);
+    game_555_count=4;republish(KUA_MODE_REPLACE); // A row the game lists with stock stays the game's own.
+    CHECK(groups[0].data[0].item==555&&groups[0].data[0].count==12);
+    backpack_answer=0;ammo::pick(groups,nullptr,0,555,404);CHECK(equip_calls==2);
+    backpack_answer=-1;ammo::pick(groups,nullptr,0,555,405);CHECK(equip_calls==3);
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    game_lists_555=false;
     ammo::retire(7);CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
     CHECK(kiln_tools_remove_family(7,tool_handle)==KILN_OK);kiln_tools_presentation_set_held_provider(nullptr);
     ammo::stop();ammo::backpack_probe=nullptr;api=nullptr;child=retiring=0;
