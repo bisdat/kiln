@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frostdev.io/kiln/schema/camera-override.schema.json",
+  "title": "Kiln camera override (since mod API 0.2.17)",
+  "description": "The CameraOverride authored record. Times are integer milliseconds, enum names are exact, positions/vectors/quaternions are arrays. CameraOverride.FromJson also checks semantic rules that JSON Schema cannot express: unit quaternions, vector norms, increasing key times, last key <= duration, falloff <= duration and total blends <= duration. Runtime pose safety uses the local player's current sample and a 250 metre bound; this is not a collision system.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/mode" }] },
+    "profile": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/profile" }] },
+    "path": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/path" }] },
+    "lens": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/lens" }] },
+    "shake": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/shake" }] },
+    "duration": { "$ref": "#/$defs/time", "default": 0, "description": "Zero or absent is the C# record's ten-second default; a nonzero duration is 1 to 120000 ms." },
+    "priority": { "type": "integer", "minimum": -1000, "maximum": 1000, "default": 0 },
+    "blend": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/blend" }] },
+    "inputPolicy": { "enum": ["VisualOnly", "StockMode", "AimToo"], "default": "VisualOnly", "description": "AimToo is reserved: a valid request with that policy is refused, never silently remapped." }
+  },
+  "anyOf": [
+    { "required": ["mode"], "properties": { "mode": { "type": "object" } } },
+    { "required": ["profile"], "properties": { "profile": { "type": "object" } } },
+    { "required": ["path"], "properties": { "path": { "type": "object" } } },
+    { "required": ["lens"], "properties": { "lens": { "type": "object" } } },
+    { "required": ["shake"], "properties": { "shake": { "type": "object" } } }
+  ],
+  "allOf": [
+    {
+      "if": { "required": ["mode"], "properties": { "mode": { "type": "object" } } },
+      "then": {
+        "required": ["inputPolicy"],
+        "properties": {
+          "profile": { "type": "null" }, "path": { "type": "null" }, "lens": { "type": "null" }, "shake": { "type": "null" },
+          "inputPolicy": { "enum": ["StockMode", "AimToo"] },
+          "blend": { "anyOf": [{ "type": "null" }, { "properties": { "in": { "const": 0 }, "out": { "const": 0 } } }] }
+        }
+      },
+      "else": { "properties": { "inputPolicy": { "enum": ["VisualOnly", "AimToo"] } } }
+    },
+    { "not": { "required": ["profile", "path"], "properties": { "profile": { "type": "object" }, "path": { "type": "object" } } } },
+    {
+      "if": {
+        "required": ["path"],
+        "properties": { "path": { "type": "object", "required": ["keys"], "properties": { "keys": { "contains": { "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "type": "number" } } } } } } }
+      },
+      "then": { "properties": { "lens": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "time": { "type": "integer", "minimum": 0, "maximum": 120000 },
+    "fov": { "type": "number", "minimum": 5, "maximum": 160, "description": "Vertical degrees." },
+    "quaternion": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number" }, "description": "Finite [x,y,z,w]; norm squared must be nonzero and within 0.001 of one. Accepted native copies are normalized." },
+    "position": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -1000000, "maximum": 1000000 }, "description": "World metres [x,y,z]; the runtime checks the 250 metre local-player separation too." },
+    "offset": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -100, "maximum": 100 }, "description": "Target-local unscaled physical metres [x,y,z], vector norm at most 100." },
+    "pose": { "type": "object", "additionalProperties": false, "required": ["position", "rotation"], "properties": { "position": { "$ref": "#/$defs/position" }, "rotation": { "$ref": "#/$defs/quaternion" } } },
+    "lens": { "type": "object", "additionalProperties": false, "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "$ref": "#/$defs/fov" } } },
+    "blend": { "type": "object", "additionalProperties": false, "required": ["in", "out"], "properties": { "in": { "$ref": "#/$defs/time" }, "out": { "$ref": "#/$defs/time" } }, "description": "Whole-request blends; in + out must fit the effective duration. Mode takes only zero blends." },
+    "profile": {
+      "type": "object", "additionalProperties": false, "required": ["follow", "distance", "offsetLocal"],
+      "properties": {
+        "follow": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Kiln entity id; zero means the local player, never a stock camera's incidental target." },
+        "distance": { "type": "number", "minimum": 0.25, "maximum": 200, "description": "Absolute unscaled metres, not an addition to the natural boom." },
+        "offsetLocal": { "$ref": "#/$defs/offset" },
+        "offsetWorldY": { "type": "number", "minimum": -100, "maximum": 100, "default": 0 },
+        "rotationMode": { "enum": ["FreeOrbit", "FollowHeading", "FixedWorld"], "default": "FreeOrbit" },
+        "rotation": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/quaternion" }], "description": "Null means identity. FreeOrbit requires identity; FollowHeading uses a heading-local offset; FixedWorld uses an absolute quaternion." },
+        "collision": { "const": "None", "default": "None", "description": "No collision queries; authored views may clip terrain and objects." }
+      }
+    },
+    "shake": {
+      "type": "object", "additionalProperties": false, "required": ["amplitudeMetres", "frequencyHz", "falloff"],
+      "properties": {
+        "amplitudeMetres": { "type": "number", "minimum": 0, "maximum": 0.5, "description": "Maximum vector displacement, not per-axis amplitude; translation only." },
+        "frequencyHz": { "type": "number", "minimum": 0.1, "maximum": 30 },
+        "falloff": { "$ref": "#/$defs/time", "description": "Fade over the last falloff milliseconds; zero holds full amplitude. Must not exceed duration." },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0 }
+      }
+    },
+    "key": {
+      "type": "object", "additionalProperties": false, "required": ["at", "pose"],
+      "properties": { "at": { "$ref": "#/$defs/time" }, "pose": { "$ref": "#/$defs/pose" }, "fieldOfViewDegrees": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/fov" }] } }
+    },
+    "path": {
+      "type": "object", "additionalProperties": false, "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array", "minItems": 1, "maxItems": 256,
+          "prefixItems": [{ "allOf": [{ "$ref": "#/$defs/key" }, { "properties": { "at": { "const": 0 } } }] }],
+          "items": { "$ref": "#/$defs/key" },
+          "if": { "contains": { "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "type": "number" } } } },
+          "then": { "items": { "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "type": "number" } } }, "prefixItems": [{ "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "type": "number" } } }] },
+          "description": "Times strictly increase from zero and the last must fit duration; pose positions interpolate linearly, quaternions shortest-arc slerp. Either every key has FOV or none does. No splines or looping."
+        }
+      }
+    },
+    "mode": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": {
+        "mode": { "enum": [
+          "EntityCamera", "PlayerCameraSpawning", "PlayerCameraSpawningDolly", "PlayerCameraRespawning", "PlayerCameraDefault", "PlayerCameraDefaultTarget", "PlayerCameraSprintingTarget", "PlayerCameraSprinting", "PlayerCameraRangedBowDefault", "PlayerCameraRangedBowSneaking", "PlayerCameraRangedStaffDefault", "PlayerCameraRangedStaffSneaking", "PlayerCameraHipfire", "PlayerCameraHipfireStaffChanneling", "PlayerCameraHipfireStaffChannelingTarget", "PlayerCameraExecute", "PlayerCameraIdle", "PlayerCameraSneaking", "PlayerCameraSitting", "PlayerCameraCooking", "PlayerCameraClimbing", "PlayerCameraHookShot", "PlayerCameraGlider", "PlayerCameraSwimming", "PlayerCameraDiving", "PlayerCameraHeadDivingStart", "PlayerCameraHeadDivingDefault", "PlayerCameraDialogue", "PlayerCameraAltar", "PlayerCameraMotherFlame", "PlayerCameraObelisk", "PlayerCameraShroudForge", "PlayerCameraBuildingAltar", "PlayerCameraBuildingAreaDepositProp", "PlayerCameraBuildingFirstPerson", "PlayerCameraBuildingFirstPersonSneak", "PlayerCameraBuildingThirdPerson", "PlayerCameraBuildingFlySparkMode", "PlayerCameraBuildingFlySparkModeSprinting", "PlayerCameraFishing", "PlayerCameraFishingHardFocusFloat", "PlayerCameraFishingSoftFocusFloat", "PlayerCameraFishingVictory", "PlayerCameraFreeAimWandDefault", "PlayerCameraFreeAimWandSprinting", "PlayerCameraFreeAimWandSneaking"
+        ] },
+        "transition": { "enum": ["None", "BlinkLerpSpeed", "CameraTransitionLerpSpeed"], "default": "None" }
+      }
+    }
+  }
+}

@@ -425,3 +425,6 @@ static Kiln.CameraVisualSnapshot.operator !=(Kiln.CameraVisualSnapshot? left, Ki
 static Kiln.CameraVisualSnapshot.operator ==(Kiln.CameraVisualSnapshot? left, Kiln.CameraVisualSnapshot? right) -> bool
 ~override Kiln.CameraLease.Equals(object obj) -> bool
 ~override Kiln.CameraLease.ToString() -> string
+Kiln.CameraOverride.ToJson() -> string!
+static Kiln.CameraOverride.FromJson(string! json) -> Kiln.CameraOverride!
+static Kiln.CameraOverride.FromJson(System.Text.Json.JsonElement json) -> Kiln.CameraOverride!

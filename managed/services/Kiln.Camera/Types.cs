@@ -237,7 +237,7 @@ public sealed record CameraModeRequest(CameraMode Mode, CameraTransitionOverride
 /// <param name="Priority">-1000 to 1000. Another mod's request replaces this one only with a higher number.</param>
 /// <param name="Blend">Fade in and out; null: none.</param>
 /// <param name="InputPolicy">What the request may touch besides the picture.</param>
-public sealed record CameraOverride(CameraModeRequest? Mode = null, CameraProfile? Profile = null,
+public sealed partial record CameraOverride(CameraModeRequest? Mode = null, CameraProfile? Profile = null,
     CameraPath? Path = null, CameraLens? Lens = null, CameraShake? Shake = null,
     TimeSpan Duration = default, int Priority = 0, CameraBlend? Blend = null,
     CameraInputPolicy InputPolicy = CameraInputPolicy.VisualOnly);
