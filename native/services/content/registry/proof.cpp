@@ -87,7 +87,10 @@ json roundtrip_doc(const Env& e, const std::string& generation, const std::strin
 
 }  // namespace
 
-bool requested(const Env& e) { return e.read_data && e.read_data(kRequest).has_value(); }
+bool requested(const Env& e) {
+    if (e.exists) return e.exists(kRequest);
+    return e.read_data && e.read_data(kRequest).has_value();
+}
 
 std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files) {
     std::sort(files.begin(), files.end());
@@ -136,6 +139,11 @@ std::optional<Value> probe_for(const FieldSpec& spec, const Value& v) {
         }
         default: return std::nullopt;
     }
+}
+
+bool disagreement(const std::string& why) {
+    return why.find("is not a scalar member") != std::string::npos || why.find("no such member") != std::string::npos ||
+           why.find("has no member") != std::string::npos;
 }
 
 json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
@@ -207,6 +215,10 @@ json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std:
     std::vector<std::string> notes;
     boothook::write(key, type, &copy, rb, &out, &notes);
     if (out.size() != 1 || !out[0].ok) {
+        if (copy == base && out.size() == 1 && disagreement(out[0].why)) {
+            s["error"] = "the boot back-end refused the probe: " + out[0].why;  // the mapping disagrees with the build
+            return s;
+        }
         if (copy == base) return missing("the boot back-end refused this entry's probe");
         s["error"] = "the boot back-end changed bytes but did not finish the probe";
         return s;

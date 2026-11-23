@@ -22,6 +22,7 @@
 //! repository; id tables and values exports are kept per build in the maintainer folder ([`ids::Store`]).
 pub mod formula;
 pub mod ids;
+pub mod mirror;
 pub mod refl;
 pub mod regmap;
 pub mod roundtrip;
@@ -85,7 +86,13 @@ pub struct Proof {
     pub side: String,
     pub exe_sha256: String,
     pub old_exe_sha256: Option<String>,
+    /// a client record mirrored from this server build's proof ([`mirror`]), not proven by a lab of its own
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_of: Option<String>,
     pub first_build: bool,
+    /// the regmap/common the proof judged ([`regmap::digest`]): the record carries it as `regmapDigest`, and kiln.content
+    /// enables no row of a record whose digest is not the deployed common's (review2 S1)
+    pub regmap_digest: String,
     pub refl: Option<refl::ReflDiff>,
     pub formula: formula::Report,
     pub roundtrip: roundtrip::Report,
@@ -116,6 +123,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         exe_sha256: inp.new_exe_sha.clone(),
         old_exe_sha256: inp.old_exe_sha.clone(),
         first_build: inp.first_build,
+        regmap_digest: inp.regmap_digest.clone(),
         ..Default::default()
     };
     p.blockers.extend(inp.problems.iter().cloned());
@@ -259,11 +267,13 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                         Some(None) => hard.push("reflection: not diffed".into()),
                         _ => {}
                     }
+                    let mut lab_reason = None;
                     match p.roundtrip.fields.get(&q) {
                         Some(f) if f.ok => {}
                         Some(f) => {
                             hard.extend(f.problems.iter().map(|x| format!("round trip: {x}")));
                             missing.extend(f.missing.iter().map(|x| format!("round trip: {x}")));
+                            lab_reason = f.lab_reason.clone();
                         }
                         None => hard.push("round trip: not checked".into()),
                     }
@@ -289,7 +299,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                         reason = Some(r);
                         "unproven"
                     } else if !missing.is_empty() {
-                        reason = Some(unproven_reason(&missing));
+                        reason = Some(lab_reason.unwrap_or_else(|| unproven_reason(&missing)));
                         why = missing;
                         "unproven"
                     } else {
@@ -341,8 +351,21 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
 /// An unproven row's reason as players and mod authors read it (kiln.content: "Unproven: <field> is not proven for game
 /// build <b> (<reason>)"): Kiln words, no game names.
 fn unproven_reason(missing: &[String]) -> String {
-    let no_sample = missing.iter().any(|m| m.contains("no round-trip sample"));
-    if !no_sample && missing.iter().any(|m| m.contains("constants")) {
+    let has = |what: &str| missing.iter().any(|m| m.contains(what));
+    let no_sample = has("no round-trip sample");
+    // impact configs (costs): what of the build's config kinds the lab did not prove (review2 S3: never "no lab round trip"
+    // when the lab did round-trip the value)
+    let config = [
+        (roundtrip::MISSING_NONE, "no entry holds this value on this build"),
+        (roundtrip::MISSING_UNKNOWN, "the lab could not tell how this build stores some of these values"),
+        (roundtrip::MISSING_SINT32, "whole-number values and the refusal of fractions are not proven on this build yet"),
+        (roundtrip::MISSING_FLOAT, "fractional values are not proven on this build yet: no lab round trip of a fractional cost"),
+        (roundtrip::MISSING_KINDS, "the lab did not count how this build stores these values yet"),
+    ];
+    if let Some((_, why)) = config.iter().find(|(m, _)| has(m)).filter(|_| !no_sample) {
+        return (*why).into();
+    }
+    if !no_sample && has("constants") {
         "its formula's constants were not read on this build yet".into()
     } else {
         "no lab round trip of it on this build yet".into()
@@ -360,6 +383,22 @@ impl Proof {
     /// One line: what the proof covered (the record's "proof").
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
+        if let Some(server) = &self.mirror_of {
+            parts.push(format!("mirrors the server proof of {} (owner ruling: no client is run for a proof)", short(server)));
+            if let Some(r) = &self.refl {
+                let n = |s: refl::Status| r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status == s).count();
+                parts.push(format!("layout {} rows the same as the server build's, {} differ", n(refl::Status::Same),
+                                   r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status != refl::Status::Same).count()));
+            }
+            let (ok, n) = self.ok_rows();
+            let unproven = self.rows.values().filter(|r| r.state == "unproven").count();
+            parts.push(format!("rows ok {ok}/{n}{}", if unproven > 0 { format!(" ({unproven} unproven)") } else { String::new() }));
+            let mut s = format!("kilnctl regproof --mirror ({}): {}", self.when, parts.join("; "));
+            if !self.verified {
+                s.push_str(&format!("; NOT verified: {}", self.blockers.first().map(String::as_str).unwrap_or("?")));
+            }
+            return s;
+        }
         match &self.refl {
             Some(r) => {
                 let n = |s: refl::Status| r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status == s).count();
@@ -407,8 +446,22 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
         } else {
             o.insert("reasons".into(), Value::Object(reasons));
         }
+        // per impact-config row, what the proof holds of each config kind ("none on this build" for a kind the build lacks:
+        // a later build that has it must prove it)
+        let kinds: serde_json::Map<String, Value> = p.roundtrip.fields.iter().filter(|(_, f)| !f.kinds.is_empty())
+            .map(|(q, f)| (q.clone(), serde_json::to_value(&f.kinds).unwrap_or_default())).collect();
+        if kinds.is_empty() {
+            o.remove("kinds");
+        } else {
+            o.insert("kinds".into(), Value::Object(kinds));
+        }
         o.insert("verified".into(), Value::Bool(p.verified));
         o.insert("proof".into(), Value::String(p.summary()));
+        if p.regmap_digest.is_empty() {
+            o.remove("regmapDigest");
+        } else {
+            o.insert("regmapDigest".into(), Value::String(p.regmap_digest.clone()));
+        }
     }
     r
 }
@@ -543,6 +596,10 @@ pub struct Gather {
     pub steam_build: Option<String>,
     pub first_build: bool,
     pub accept: Vec<String>,
+    /// a client record mirrored from this server record ([`mirror`]); the server exe (or its reflection dump) beside it
+    pub mirror: Option<PathBuf>,
+    pub server_exe: Option<PathBuf>,
+    pub server_refl: Option<PathBuf>,
 }
 
 fn read_json(p: &Path) -> Result<Value> {
@@ -631,15 +688,24 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 /// writes can be the candidate.
 fn run_record(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>,
               notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
+    run_record_with(g, exe, new_sha, previous, prev_ids, true, problems, notes)
+}
+
+/// [`run_record`]; without `with_entries` (a mirrored client record) the previous record's aliases are carried as they are.
+#[allow(clippy::too_many_arguments)]
+fn run_record_with(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, prev_ids: Option<&ids::IdTable>, with_entries: bool,
+                   problems: &mut Vec<String>, notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
     let root = g.out.join("root");
     let _ = std::fs::remove_dir_all(&root);
     copy_tree(&g.tree.join("regmap/common"), &root.join("regmap/common"))?;
     copy_tree(&g.tree.join("schema"), &root.join("schema"))?;
     let entries = g.out.join("entries.json");
-    let st = python(&g.tree, "tools/registrygen/regmap_entries.py", &["--exe".as_ref(), exe.as_os_str(), "--out".as_ref(), entries.as_os_str()],
-                    &g.out, "entries.log");
-    let have_entries = matches!(&st, Ok(s) if s.success()) && entries.is_file();
-    if !have_entries {
+    let have_entries = with_entries && {
+        let st = python(&g.tree, "tools/registrygen/regmap_entries.py", &["--exe".as_ref(), exe.as_os_str(), "--out".as_ref(), entries.as_os_str()],
+                        &g.out, "entries.log");
+        matches!(&st, Ok(s) if s.success()) && entries.is_file()
+    };
+    if with_entries && !have_entries {
         problems.push(format!("regmap_entries.py did not read the new build's entries (the .kfc must be beside the exe; {})",
                               g.out.join("entries.log").display()));
     }
@@ -913,6 +979,49 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     Ok(inp)
 }
 
+/// Makes and finds what a mirrored client record needs: the server record, both exes' reflections, the client exe's candidate
+/// record (its aliases carried from the tree's record of that exe). Never writes into the Kiln tree.
+pub fn gather_mirror(g: &Gather) -> Result<mirror::MirrorInputs> {
+    ids::guard(&g.out, &g.tree)?;
+    std::fs::create_dir_all(&g.out).with_context(|| format!("creating {}", g.out.display()))?;
+    let server_path = g.mirror.as_ref().context("--mirror names the server record")?;
+    let map = regmap::load(&g.tree)?;
+    let mut inp = mirror::MirrorInputs { regmap_digest: regmap::digest(&g.tree)?, server: Some(read_json(server_path)?), ..Default::default() };
+    let client_sha = match (&g.new_exe, &g.new_refl) {
+        (Some(e), _) => crate::util::sha256(e)?,
+        (None, Some(d)) => refl::TypeDb::parse(&std::fs::read_to_string(d)?)?.exe_sha256,
+        _ => bail!("which client build? pass --new-exe (or --new-refl)"),
+    };
+    inp.client_sha = client_sha.to_ascii_lowercase();
+    let mut dump = |dump: &Option<PathBuf>, exe: &Option<PathBuf>, which: &str| -> Option<refl::TypeDb> {
+        let r = match (dump, exe) {
+            (Some(p), _) => std::fs::read_to_string(p).map_err(anyhow::Error::from).and_then(|t| refl::TypeDb::parse(&t)).with_context(|| format!("{}", p.display())),
+            (None, Some(e)) => dump_refl(g, &map, e, which),
+            _ => return None,
+        };
+        r.map_err(|e| inp.problems.push(format!("the {which} reflection: {e:#}"))).ok()
+    };
+    let server_refl = dump(&g.server_refl, &g.server_exe, "server");
+    let client_refl = dump(&g.new_refl, &g.new_exe, "client");
+    inp.server_refl = server_refl;
+    inp.client_refl = client_refl;
+    match (&g.record, &g.new_exe) {
+        (Some(r), _) => inp.candidate = Some(read_json(r)?),
+        (None, Some(exe)) => {
+            let previous = g.tree.join("regmap/client").join(format!("{}.json", inp.client_sha));
+            let previous = previous.is_file().then_some(previous);
+            if previous.is_none() {
+                inp.notes.push("the tree has no record of this client exe: the candidate carries no aliases".into());
+            }
+            let (rec, _) = run_record_with(g, exe, &inp.client_sha, previous.as_deref(), None, false, &mut inp.problems, &mut inp.notes)?;
+            inp.candidate = rec;
+        }
+        _ => {}
+    }
+    inp.map = map;
+    Ok(inp)
+}
+
 impl ids::Store {
     pub fn values_path(&self, side: &str, exe_sha256: &str) -> PathBuf {
         self.dir.join(side).join(format!("values-{side}-{exe_sha256}.json"))
@@ -1010,6 +1119,9 @@ pub struct CliArgs {
     pub accept: Vec<String>,
     pub mark: bool,
     pub replace: bool,
+    pub mirror: Option<PathBuf>,
+    pub server_exe: Option<PathBuf>,
+    pub server_refl: Option<PathBuf>,
 }
 
 /// A server instance's Kiln data folder and its gate copy's (where a lab boot of the new exe wrote its outputs).
@@ -1067,6 +1179,9 @@ pub fn cli(a: CliArgs) -> Result<i32> {
     if a.side != "server" && a.side != "client" {
         bail!("--side is server or client");
     }
+    if a.mirror.is_some() {
+        return mirror_cli(a);
+    }
     let inst = a.name.as_deref().map(crate::config::load).transpose()?;
     if inst.is_some() && a.side != "server" {
         bail!("an instance is a server; for the client side pass --tree and the client's exe and lab outputs");
@@ -1078,7 +1193,7 @@ pub fn cli(a: CliArgs) -> Result<i32> {
     let mut g = Gather {
         side: a.side.clone(), tree, deployed: inst.as_ref().map(crate::kiln::kiln_dir), out: PathBuf::new(), store: None, new_exe: a.new_exe, old_exe: a.old_exe, new_refl: a.new_refl,
         old_refl: a.old_refl, record: a.record, ids: a.ids, prev_ids: a.prev_ids, evidence: a.evidence, game_build: a.game_build,
-        steam_build: a.steam_build, first_build: a.first_build, accept: a.accept,
+        steam_build: a.steam_build, first_build: a.first_build, accept: a.accept, ..Default::default()
     };
     if let Some(i) = &inst {
         if g.new_exe.is_none() && g.new_refl.is_none() && g.record.is_none() {
@@ -1107,6 +1222,33 @@ pub fn cli(a: CliArgs) -> Result<i32> {
         println!("          - {b}");
     }
     Ok(if p.verified && (!a.mark || inst.is_some()) { 0 } else { 1 })
+}
+
+/// `kilnctl regproof --side client --mirror <server record>`: the client record from the server lab proof (owner ruling,
+/// [`mirror`]). Writes the record into `--out` (commit it as regmap/client/<exe sha256>.json); exit 0 when verified.
+fn mirror_cli(a: CliArgs) -> Result<i32> {
+    if a.side != "client" || a.name.is_some() || a.mark {
+        bail!("--mirror makes a client record from a server record: --side client, no instance, no --mark (commit the record from --out)");
+    }
+    let tree = a.tree.clone().context("which Kiln tree? pass --tree")?;
+    let mut g = Gather {
+        side: "client".into(), tree, new_exe: a.new_exe, new_refl: a.new_refl, record: a.record, game_build: a.game_build,
+        steam_build: a.steam_build, mirror: a.mirror, server_exe: a.server_exe, server_refl: a.server_refl, ..Default::default()
+    };
+    g.out = match a.out {
+        Some(o) => o,
+        None => default_out("client-mirror", g.new_exe.as_deref()),
+    };
+    let inp = gather_mirror(&g)?;
+    let p = mirror::mirror(&inp, &crate::util::fmt_utc(std::time::SystemTime::now()));
+    let rec = inp.candidate.as_ref().map(|c| record(&p, c));
+    write_outputs(&p, rec.as_ref(), &g.out)?;
+    println!("{}", p.summary());
+    for b in &p.blockers {
+        println!("          - {b}");
+    }
+    println!("regproof  {} (report {})", if p.verified { "VERIFIED" } else { "not verified" }, g.out.join("report.txt").display());
+    Ok(if p.verified { 0 } else { 1 })
 }
 
 /// The registry proof inside `kilnctl update` / `kilnctl port`, right after the lab gate (whose copy holds the lab's
@@ -1224,6 +1366,7 @@ mod tests {
         assert_eq!(rec["rows"]["plans.cap"], "ok");
         assert_eq!(rec["aliases"], candidate()["aliases"], "the candidate's aliases are kept");
         assert_eq!(rec["layouts"], candidate()["layouts"]);
+        assert_eq!(rec["regmapDigest"], crate::regproof::regmap::tests::DIGEST, "the record is bound to the mapping it was proven on");
         let s = rec["proof"].as_str().unwrap();
         assert!(s.starts_with("kilnctl regproof (T): reflection 7 same"), "{s}");
         assert!(s.contains("rows ok 7/7"), "{s}");
@@ -1352,6 +1495,62 @@ mod tests {
         // a record without unproven rows has no reasons member
         let all = prove(&with_power_samples(inputs()), "T");
         assert!(record(&all, &candidate()).get("reasons").is_none());
+    }
+
+    /// review2 S3: a cost row the lab did round-trip is never "no lab round trip of it"; its reason says which kind of
+    /// config is not proven; a kind the build lacks goes into the record as "none on this build".
+    #[test]
+    fn impact_config_rows_name_what_is_not_proven_and_record_absent_kinds() {
+        let mut inp = with_power_samples(inputs());
+        let cap = inp.map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap();
+        cap.conv = "impactConfig".into();
+        cap.backend = "live".into();
+        let bytes = "ab".repeat(32);
+        let mk = |extra: Value| {
+            let mut s = json!({"field": "plans.cap", "entry": "game:cost", "read": 2, "rawBefore": [2], "reverted": true,
+                               "bytesBefore": bytes, "bytesAfter": bytes});
+            s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<roundtrip::Sample>(s).unwrap()
+        };
+        let whole = mk(json!({"configKind": "sint32", "probe": 3, "readBack": 3, "rawAfter": [3]}));
+        let refused = mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true, "refusalCode": "not_exact",
+                                "refusalReason": "not_exact: plans.cap is a whole number on this build", "readBack": 2, "rawAfter": [2]}));
+        inp.suites[1].samples.retain(|x| x.field != "plans.cap");
+        inp.suites[0].samples.extend([whole, refused]);
+        // the old producer (no counts): unproven, and the reason is not "no lab round trip"
+        let p = prove(&inp, "T");
+        let r = &p.rows["plans.cap"];
+        assert_eq!(r.state, "unproven", "{r:?}");
+        assert!(!r.reason.as_deref().unwrap_or_default().contains("no lab round trip"), "{r:?}");
+        // the build has float configs the lab did not round-trip
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 2)].into());
+        let r = prove(&inp, "T").rows["plans.cap"].clone();
+        assert_eq!(r.state, "unproven");
+        assert_eq!(r.reason.as_deref(), Some("fractional values are not proven on this build yet: no lab round trip of a fractional cost"));
+        // no float config on this build: ok, and the record says the float kind is absent
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 0)].into());
+        let p = prove(&inp, "T");
+        assert_eq!(p.rows["plans.cap"].state, "ok", "{:?}", p.rows["plans.cap"]);
+        let rec = record(&p, &candidate());
+        assert_eq!(rec["kinds"]["plans.cap"]["float"], roundtrip::NONE_ON_THIS_BUILD, "{rec}");
+        assert!(rec["kinds"]["plans.cap"]["sint32"].as_str().is_some_and(|s| s.starts_with("proven")), "{rec}");
+        assert!(record(&prove(&with_power_samples(inputs()), "T"), &candidate()).get("kinds").is_none());
+    }
+
+    /// review2 S3/S5: a field the producer could not sample carries the producer's reason (drop tables the lab's world never
+    /// loaded), not "no lab round trip of it".
+    #[test]
+    fn an_unsampled_field_carries_the_producers_reason() {
+        let mut inp = with_power_samples(inputs());
+        inp.suites[0].samples.retain(|x| x.field != "gadgets.size");
+        inp.suites[0].unsampled.insert("gadgets.size".into(), "no gadget was loaded in the lab's world".into());
+        let p = prove(&inp, "T");
+        assert_eq!(p.rows["gadgets.size"].state, "unproven");
+        assert_eq!(p.rows["gadgets.size"].reason.as_deref(), Some("no gadget was loaded in the lab's world"));
+        // a reason for a field that has a sample changes nothing
+        let mut inp = with_power_samples(inputs());
+        inp.suites[0].unsampled.insert("gadgets.tier".into(), "x".into());
+        assert_eq!(prove(&inp, "T").rows["gadgets.tier"].state, "ok");
     }
 
     #[test]

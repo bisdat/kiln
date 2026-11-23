@@ -144,7 +144,7 @@ pub fn verdict(r: &GateResult, baseline: Option<&GateResult>) -> (bool, Vec<Stri
     for (t, x) in &r.tests {
         // Evidence production is not a self-test of the sigdb build. regproof judges every row fail-closed;
         // missing evidence (including an older/broken producer) must not prevent sigport marking a new build.
-        if t == "registry-proof-test" { continue; }
+        if evidence_only(t) { continue; }
         if !x.summary {
             why.push(format!("{t}: no summary line (did not finish, or did not load)"));
             continue;
@@ -182,6 +182,12 @@ fn random_password() -> Result<String> {
     let mut b = [0u8; 12];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// A test that produces registry proof evidence and is no self-test of the build: its results and its build never block
+/// the gate (regproof judges its evidence fail-closed).
+fn evidence_only(test: &str) -> bool {
+    test == "registry-proof-test"
 }
 
 fn toml_str(s: &str) -> String {
@@ -257,13 +263,15 @@ fn proof_candidate(source: &Path, copy: &Path) -> Result<()> {
     std::fs::write(root.join("regmap_check.log"), [&output.stdout[..], &output.stderr[..]].concat())?;
     if !matches!(output.status.code(), Some(0 | 1)) { bail!("regmap_check.py failed ({})", output.status); }
     let candidate = root.join("regmap/server").join(format!("{sha}.json"));
-    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
+    let mut record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
     if record["verified"] != true || record["side"] != "server" || record["exeSha256"] != sha {
         bail!("regmap_check.py produced no verified candidate for the gate copy's exe");
     }
+    // bound to the copy's deployed regmap/common, or kiln.content enables none of its rows (a record of another mapping)
+    record["regmapDigest"] = serde_json::Value::String(crate::regproof::regmap::digest(&kiln)?);
     let dst = kiln.join("regmap/server");
     std::fs::create_dir_all(&dst)?;
-    std::fs::copy(candidate, dst.join(format!("{sha}.json")))?;
+    std::fs::write(dst.join(format!("{sha}.json")), serde_json::to_string_pretty(&record)? + "\n")?;
     Ok(())
 }
 
@@ -384,7 +392,16 @@ pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
         println!("gate: registry proof unproven: no candidate in the copy ({e:#})");
     }
     for t in &o.tests {
-        let built = build_test(inst, t)?;
+        let built = match build_test(inst, t) {
+            Ok(b) => b,
+            // evidence production never blocks the gate or sigport's mark (as the verdict skips its results): a producer that
+            // does not build leaves every registry row without lab evidence (regproof: unproven), nothing more (review2 N3)
+            Err(e) if evidence_only(t) => {
+                println!("gate: {t} did not build ({e:#}): no live registry evidence from this gate (regproof keeps those rows unproven)");
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         install_mod(&built, &gdir.join("kiln/mods").join(t))?;
     }
     std::fs::create_dir_all(config::instances_dir())?;
@@ -487,6 +504,7 @@ mod tests {
     #[test]
     fn the_registry_proof_runs_in_the_gate_by_default() {
         assert!(DEFAULT_TESTS.contains(&"registry-proof-test"));
+        assert!(evidence_only("registry-proof-test") && !evidence_only("content-test"), "only the producer's build failure is tolerated");
         let with: Vec<String> = DEFAULT_TESTS.iter().map(|s| s.to_string()).collect();
         let (rel, text) = proof_request(&with).expect("requested with the producer");
         assert_eq!(rel, "kiln/data/content/registry/proof/request.json");
@@ -548,6 +566,9 @@ d.mkdir(parents=True)
         std::fs::write(&request, "{}").unwrap();
         proof_candidate(&source, &copy).unwrap();
         assert!(target.is_file());
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(written["regmapDigest"], crate::regproof::regmap::digest(&copy.join("kiln")).unwrap(),
+                   "the candidate is bound to the copy's mapping, or kiln.content would enable none of its rows");
         assert!(!source.join("regmap/server").exists(), "no candidate in the source tree or instance");
         std::fs::remove_dir_all(&copy).unwrap();
         assert!(!target.exists(), "candidate expires with the gate copy");

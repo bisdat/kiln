@@ -118,6 +118,13 @@ void nothing_without_the_request() {
     looked = 0;
     check(proof::run(e).empty(), "no request file: nothing written");
     check(looked == 1 && other == 0, "no request file: one lookup and nothing else (no base read, no regmap, no file, no log)");
+    // review2 N1: with an existence check the request is never read (one file-system lookup at every start)
+    int exists = 0;
+    looked = 0;
+    e.exists = [&](const std::string& rel) { return check(rel == proof::kRequest, "only the request: " + rel), ++exists, false; };
+    check(!proof::requested(e) && exists == 1 && looked == 0, "the existence check alone, the request file not read");
+    e.exists = [&](const std::string&) { return ++exists, true; };
+    check(proof::requested(e) && looked == 0, "a request file there is requested without reading it");
 }
 
 void digest_contract() {
@@ -196,6 +203,16 @@ void byte_array_lists() {
     check(!s.contains("error"), "the list round-trips in the boot generation: " + s.dump());
     check(s["read"].size() == 21 && s["read"][0] == 1 && s["probe"][0] == 2 && s["readBack"] == s["probe"], "read, probe, read back: " + s.dump());
     check(s["rawAfter"][0][0] == 2 && s["rawBefore"][0][0] == 1 && s["bytesBefore"] == s["bytesAfter"], "raw before and after, bytes back");
+}
+
+// review2 S6: a boot write refused because the row's path is not a scalar member (or has no such member) is a disagreement
+// (an error sample, kilnctl: changed); a refusal for anything else stays missing evidence.
+void structural_refusals_are_disagreements() {
+    check(proof::disagreement("\"objectId\" is not a scalar member of the resource"), "not a scalar member");
+    check(proof::disagreement("\"playerLevelCapp\": no such member"), "no such member");
+    check(proof::disagreement("\"a.b\": keen::X has no member b"), "has no member");
+    check(!proof::disagreement("\"playerLevelCap\": 70000 is outside the member's range"), "a range refusal is not a disagreement");
+    check(!proof::disagreement(""), "no reason, no disagreement");
 }
 
 void empty_boot_list_is_missing_evidence() {
@@ -295,6 +312,7 @@ int main() {
                                                        {"boot_sample_on_bytes", boot_sample_on_bytes},
                                                        {"byte_array_lists", byte_array_lists},
                                                        {"empty_boot_list_is_missing_evidence", empty_boot_list_is_missing_evidence},
+                                                       {"structural_refusals_are_disagreements", structural_refusals_are_disagreements},
                                                        {"with_the_request", with_the_request}};
     for (const auto& [name, fn] : groups) {
         try {
