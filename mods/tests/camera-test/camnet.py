@@ -11,7 +11,7 @@ nettest name (a lab peer has no game player):
 A and N answer as a Kiln client's receiver does: Hello until Welcome, an Ack for each Apply/Update/End of their binding
 (frame 4242; a part they did not offer is refused ClientCapability), the cached Ack again for a repeated serial, Status for
 each Heartbeat. An Apply of exactly 3333 ms is ended by the client right after its Ack (Ended, Expired), as a client
-whose lease ran out. Needs "labPort" in kiln/config/network.json.
+whose lease ran out; an Update of exactly 4444 ms is never answered, as a client that hangs. Needs "labPort" in kiln/config/network.json.
 
     camnet.py --port P [--until FILE] [--seconds N]
 
@@ -50,7 +50,7 @@ class Peer(nt.Client):
         self.highest = 0
         self.active = (0, 0)
         self.last_hello = 0.0
-        self.seen = {"Welcome": 0, "Apply": 0, "Update": 0, "End": 0, "Heartbeat": 0, "Ack": 0, "Ended": 0, "Refused": 0, "Replayed": 0}
+        self.seen = {"Welcome": 0, "Apply": 0, "Update": 0, "End": 0, "Heartbeat": 0, "Ack": 0, "Ended": 0, "Refused": 0, "Replayed": 0, "Withheld": 0}
 
     def set_table(self, table):
         self.table = table
@@ -100,6 +100,11 @@ class Peer(nt.Client):
                 at = HEADER + (1 if mid == UPDATE else 0)
                 parts = struct.unpack_from("<I", body, at)[0]
                 duration = struct.unpack_from("<I", body, at + 5)[0]
+                if mid == UPDATE and duration == 4444:
+                    # a client that never answers (a hitch, a loading screen): no Ack, also not for the resends of this
+                    # serial; the server times out and ends the lease, and its End (a higher serial) is answered
+                    self.seen["Withheld"] += 1
+                    return
                 need = 0
                 for part, row in PART_NEEDS:
                     if parts & part:

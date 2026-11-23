@@ -136,4 +136,24 @@ public sealed class CameraTestMod : Mod
         Assert.True(e.Ok, "End(low)");
         c.Log.Info("camera-test PASS remote_supersede (AlreadyOwned for the same owner; ended)");
     }
+
+    // review S8 M1: an Update the client never answers is refused TransportTimeout (MayHaveApplied) after 3 s, the lease ends
+    // TransportTimeout (the client was told to let go), and the player's camera is free again (camnet withholds the answer
+    // to an update of 4444 ms).
+    [KilnTest("remote_update_timeout", Order = 13, TimeoutSeconds = 60)]
+    public async Task RemoteUpdateTimeout(TestContext c)
+    {
+        var r = await Await(c, Camera.Set(A, Lens(20000)), "Set(A)");
+        Assert.True(r.Ok, $"Set(A) refused: {r.ReasonCode} {r.Reason}");
+        var u = await Await(c, Camera.Update(r.Lease, Lens(4444), CameraUpdateTiming.Restart), "Update(A) never answered", 15);
+        Assert.Equal((false, CameraReason.TransportTimeout, true), (u.Ok, u.ReasonCode, u.MayHaveApplied), "a timed-out update");
+        await c.Until(() => Change(r.Lease, CameraChangeKind.Ended) is not null, TimeSpan.FromSeconds(5), "Ended after the timeout");
+        Assert.Equal(CameraEndReason.TransportTimeout, Change(r.Lease, CameraChangeKind.Ended)!.EndReason, "end reason");
+        var e = await Await(c, Camera.End(r.Lease), "End after the timeout");
+        Assert.True(e.Ok && e.AlreadyEnded, "End of the timed-out lease: Ok, AlreadyEnded");
+        var again = await Await(c, Camera.Set(A, Lens(20000)), "Set(A) again");
+        Assert.True(again.Ok, $"the player's camera is free again: {again.ReasonCode} {again.Reason}");
+        await Await(c, Camera.End(again.Lease), "End(again)");
+        c.Log.Info("camera-test PASS remote_update_timeout (TransportTimeout with MayHaveApplied, Ended TransportTimeout, slot free)");
+    }
 }
