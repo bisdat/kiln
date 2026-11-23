@@ -319,6 +319,68 @@ void unavailable_preparation_remains_retryable() {
           "a later preparation can succeed and release its loader closure");
     RegistryLiveReply reply; registry_live_revert(71, h, &reply);
 }
+size_t impact_at(const std::string& field) { return SWORD_AT + (field == "manaCost" ? 0x40 : 0x48); }
+void use_integer_impact(const std::string& field) {
+    g_integer_impacts.insert(field);
+    mem<int32_t>(impact_at(field), 10); mem<int32_t>(impact_at(field) + 4, 10);
+}
+std::string cost_edit(const std::string& field, const std::string& value) {
+    return "{\"registry\":\"items\",\"select\":\"game:sword_t2\",\"field\":\"" + field + "\",\"op\":" + value + "}";
+}
+void fractional_integer_cost_is_refused(const std::string& field) {
+    for (const std::string value : {"67.5", "2.5"}) {
+        fresh_live(); use_integer_impact(field); RegistryLiveReply reply;
+        const auto h = change(71, "a", "[{" + wood + "\"op\":75}," + cost_edit(field, value) + "]");
+        registry_live_commit(71, h, &reply);
+        check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.reason.rfind("not_exact: ", 0) == 0,
+              field + ": fractional integer-storage refusal has the stable not_exact token, never Applied");
+        check(reply.reason.find("items." + field + " of game:sword_t2 is a whole number on this build; " + value + " was not written") != std::string::npos,
+              "the refusal names the stable field, item and unrounded value");
+        check(at<int32_t>(impact_at(field)) == 10 && at<uint32_t>(WOOD_AT) == 10,
+              "neither the fractional integer value nor another field in its transaction is written");
+    }
+}
+void whole_and_float_costs_still_work() {
+    for (const std::string field : {"manaCost", "staminaCost"}) {
+        fresh_live(); use_integer_impact(field); RegistryLiveReply reply;
+        auto h = change(71, "a", "[" + cost_edit(field, "67") + "]"); registry_live_commit(71, h, &reply);
+        check(reply.outcome == RegistryLiveOutcome::Applied && at<int32_t>(impact_at(field)) == 67, "whole cost values remain writable to integer storage");
+        registry_live_revert(71, h, &reply);
+        check(at<int32_t>(impact_at(field)) == 10, "whole integer cost values revert exactly");
+        for (const std::string value : {"67.5", "2.5"}) {
+            fresh_live();
+            h = change(71, "a", "[" + cost_edit(field, value) + "]"); registry_live_commit(71, h, &reply);
+            check(reply.outcome == RegistryLiveOutcome::Applied && at<float>(impact_at(field)) == std::stof(value),
+                  "float-config entries keep fractional values");
+            registry_live_revert(71, h, &reply);
+            check(at<float>(impact_at(field)) == 10.0f, "float-config fractions revert exactly");
+        }
+    }
+}
+void staged_fractional_integer_cost_is_refused() {
+    for (const std::string field : {"manaCost", "staminaCost"}) {
+        world(); g_files.clear(); use_integer_impact(field);
+        g_files["a/content/cost.json"] = "{\"registry\":{\"alter\":[" + cost_edit(field, "2.5") + "]}}";
+        const auto files = files_of({{"a", "a/content/cost.json"}});
+        stage(files); registry_live_world_begin(); apply_registry_files(files);
+        check(at<int32_t>(impact_at(field)) == 10, "a start-time edit cannot round a fractional cost at world-load binding");
+        bool exact = false;
+        for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
+        check(exact, "the start-time/world-load refusal also carries the stable reason token");
+    }
+}
+void pending_fractional_integer_cost_is_refused() {
+    world(); g_files.clear(); use_integer_impact("manaCost"); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[" + cost_edit("manaCost", "67.5") + "]", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld, "a copied cost waits for its actual per-entry storage type");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<int32_t>(impact_at("manaCost")) == 10 && registry_live_status().active == 0,
+          "world-load preflight deactivates the complete pending fractional integer change");
+    bool exact = false;
+    for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
+    check(exact, "a pending change's rejection preserves the stable reason token");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -431,6 +493,11 @@ int main() {
         {"begin_prepares_copied_base_once", begin_prepares_copied_base_once},
         {"read_can_be_first_registry_use", read_can_be_first_registry_use},
         {"unavailable_preparation_remains_retryable", unavailable_preparation_remains_retryable},
+        {"fractional_integer_mana_refused", [] { fractional_integer_cost_is_refused("manaCost"); }},
+        {"fractional_integer_stamina_refused", [] { fractional_integer_cost_is_refused("staminaCost"); }},
+        {"whole_and_float_costs_still_work", whole_and_float_costs_still_work},
+        {"staged_fractional_integer_cost_is_refused", staged_fractional_integer_cost_is_refused},
+        {"pending_fractional_integer_cost_is_refused", pending_fractional_integer_cost_is_refused},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

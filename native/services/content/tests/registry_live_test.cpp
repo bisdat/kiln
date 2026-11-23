@@ -34,6 +34,7 @@ Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
 std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
 std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -107,12 +108,16 @@ uint32_t fnv1a(const void* data, size_t n) {
     for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 16777619u;
     return h;
 }
-// kiln.gamedata's item configs: the sword has a ManaCost config (float at +0x40) with a tooltip row (+0x44, Normal format)
+// The made-up sword has mana/stamina configs and tooltip rows; each can use actual integer or float storage.
 bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
-    if (e.id != 0x222 || path != "impactValues.0xaf236ece") return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
-    out->addr = e.addr + 0x40, out->kind = 1000, out->id = e.id, out->field = 7;
-    out->f.path = "impactValues.0xaf236ece.value", out->f.offset = 0, out->f.bytes = 4, out->f.vt = KILN_CV_FLOAT, out->f.writable = true;
-    out->tip = e.addr + 0x44, out->tip_format = 0;
+    const bool mana = path == "impactValues.0xaf236ece", stamina = path == "impactValues.0x727d7f78";
+    if (e.id != 0x222 || (!mana && !stamina)) return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    const size_t offset = mana ? 0x40 : 0x48;
+    const bool integer = g_integer_impacts.count(mana ? "manaCost" : "staminaCost") != 0;
+    out->addr = e.addr + offset, out->kind = 1000, out->id = e.id, out->field = mana ? 7 : 8;
+    out->f.path = path + ".value", out->f.offset = 0, out->f.bytes = 4;
+    out->f.vt = integer ? KILN_CV_INT : KILN_CV_FLOAT, out->f.is_signed = integer, out->f.writable = true;
+    out->tip = e.addr + offset + 4, out->tip_format = 0;
     return true;
 }
 bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
@@ -195,7 +200,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
-    g_write_limits.clear(); g_before_write = {};
+    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);
@@ -226,6 +231,7 @@ void world() {
     mem<uint32_t>(WOOD_AT, 10);
     std::memcpy(g_arena + WOOD_AT + 0x30, P1, 16), mem<uint32_t>(WOOD_AT + 0x80, 0x901);  // perk slot 0: perk_a
     mem<float>(SWORD_AT + 0x40, 10.0f), mem<int32_t>(SWORD_AT + 0x44, 10);            // ManaCost 10, its tooltip 10
+    mem<float>(SWORD_AT + 0x48, 10.0f), mem<int32_t>(SWORD_AT + 0x4C, 10);            // StaminaCost 10, its tooltip 10
     Registry& L = g_regs[KILN_CONTENT_LOOT];
     L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
     add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
@@ -279,6 +285,7 @@ registry::BaseModel base() {
         registry::formulas::armor_read(1, 10, registry::formulas::constants_of({})));
     s.fields["maxStack"] = registry::Value::integer(1);
     s.fields["manaCost"] = registry::Value::number(10);
+    s.fields["staminaCost"] = registry::Value::number(10);
     items.push_back(s);
     registry::BaseModel::Entry st;
     st.id = "game:material_stone";

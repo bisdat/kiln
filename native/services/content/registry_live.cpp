@@ -14,6 +14,7 @@
 
 #include "registry/formulas.h"
 #include "registry/stage.h"
+#include "services/kiln_registry_live.h"
 
 namespace kc {
 
@@ -26,6 +27,8 @@ using registry::FieldSpec;
 using registry::FieldType;
 using registry::Value;
 namespace rmap = registry::map;
+constexpr char kNotExact[] = KILN_REGISTRY_LIVE_REASON_NOT_EXACT ": ";
+bool not_exact_reason(const std::string& reason) { return reason.rfind(kNotExact, 0) == 0; }
 
 using SlotBytes = std::array<uint8_t, kSlotBytes>;
 struct LiveSlot {
@@ -132,7 +135,7 @@ void refuse_rows(const registry::FieldRef& fr, const std::string& mod, const std
     registry::Refusal r;
     r.mod = mod, r.source = source, r.stage = stage, r.n = n;
     const bool said = why.size() >= 11 && why.compare(why.size() - 11, 11, "not applied") == 0;
-    r.reason = fr.text() + ": " + why + (said ? "" : "; this edit was not applied");
+    r.reason = not_exact_reason(why) ? why : fr.text() + ": " + why + (said ? "" : "; this edit was not applied");
     g.refused.push_back(std::move(r));
 }
 void refuse(const registry::FieldRef& fr, const std::vector<const ChainRow*>& rows, const std::string& why) {
@@ -631,6 +634,9 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
     const Field vf = s.f;
     LayerEval ev = [b, vf](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const Value v = registry::evaluate(b->rows, to_kiln(vf, nullptr, b->spec, below), b->spec);
+        if (vf.vt == KILN_CV_INT && v.numeric() && std::isfinite(v.as_double()) && std::trunc(v.as_double()) != v.as_double())
+            return fail(b, *why = std::string(kNotExact) + b->ref.registry + "." + b->ref.field + " of " + b->ref.id +
+                " is a whole number on this build; " + v.text_of() + " was not written");
         if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why)) return fail(b, *why);
         return true;
     };
@@ -972,8 +978,10 @@ bool reject_unbound_changes(uint64_t candidate, const std::string& write_error, 
         if (why.empty() && foreign_slots(change_slots(handle))) why = "another writer's bytes were preserved";
         if (why.empty()) why = write_error;
         if (why.empty()) continue;
-        rejected->push_back({change.mod, "live:" + std::to_string(handle) + ":", registry::Stage::Alter, 0,
-            "live change " + std::to_string(handle) + " not applied in this world: " + why + "; the whole change was removed", ""});
+        const std::string reason = not_exact_reason(why)
+            ? why + "; live change " + std::to_string(handle) + " not applied in this world; the whole change was removed"
+            : "live change " + std::to_string(handle) + " not applied in this world: " + why + "; the whole change was removed";
+        rejected->push_back({change.mod, "live:" + std::to_string(handle) + ":", registry::Stage::Alter, 0, reason, ""});
         drop.push_back(handle);
     }
     for (uint64_t handle : drop) g.changes.erase(handle);
@@ -1435,7 +1443,8 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                     std::string rollback;
                     apply_changes(&rollback);
                     reply.outcome = rollback.empty() ? (reply.skipped ? RegistryLiveOutcome::Skipped : RegistryLiveOutcome::Refused) : RegistryLiveOutcome::Unverified;
-                    reply.accepted = 0; ++reply.refused; reply.reason = "the live transaction was not committed: " + why;
+                    reply.accepted = 0; ++reply.refused;
+                    reply.reason = not_exact_reason(why) ? why : "the live transaction was not committed: " + why;
                     if (!rollback.empty()) reply.reason += "; rollback unverified: " + rollback;
                     g.refused.push_back({mod, "live:" + std::to_string(handle), registry::Stage::Alter, 0, reply.reason, ""});
                     queue_change_report();

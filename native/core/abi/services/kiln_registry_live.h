@@ -40,6 +40,9 @@ extern "C" {
 #endif
 #define KILN_REGISTRY_LIVE_SERVICE "kiln.registry.live"
 #define KILN_REGISTRY_LIVE_VERSION 1u
+/* Stable reason token: REFUSED + reason beginning "not_exact: " means a valid numeric value cannot be represented
+ * by this entry's whole-number cost storage. Float-config entries retain floats. Never infer this from human text. */
+#define KILN_REGISTRY_LIVE_REASON_NOT_EXACT "not_exact"
 
 enum { KILN_REGISTRY_LIVE_MOD_LOAD = 1, KILN_REGISTRY_LIVE_WORLD_LOAD = 2,
        KILN_REGISTRY_LIVE_HOT_RELOAD = 3, KILN_REGISTRY_LIVE_MANUAL = 4 };

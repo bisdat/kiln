@@ -67,6 +67,13 @@ counts and a reason accompany it. A native argument/owner/thread/handle error us
 cannot take effect uses the result outcome. A binding or write failure takes the candidate back; an unproved take-back
 is **Unverified**, not success.
 
+Cost storage is checked per entry on the running build. A fractional mana/stamina cost for an entry with whole-number
+storage is refused, never rounded; float-config entries keep fractional values. The result uses `Refused` and its reason
+begins with the stable token **`not_exact: `**, followed by `items.<field> of <item> is a whole number on this build;
+<value> was not written`. Tools may match that token together with the refused outcome, rather than parsing human text;
+it is distinct from Unproven mapping refusals and transport errors. The native header exposes
+`KILN_REGISTRY_LIVE_REASON_NOT_EXACT` (`not_exact`). The token is also kept on start-time/world-load refusal rows.
+
 Both writes and reverts compare with Kiln's last applied bytes. If another writer has changed a slot, Kiln leaves that
 slot to it for the rest of that world and names the skipped operation in the report. The current wording is “another
 writer”; naming a ShroudForge runtime package needs the later owner-write journal integration. This is not a promise to

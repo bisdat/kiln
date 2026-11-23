@@ -5222,7 +5222,7 @@
           "size": 32
         }
       },
-      "sha256": "ff2cabcb4c73cbc4aa3edd2eeaad939e4f3e1a5d641e12bf4f6daf2d47a4d035"
+      "sha256": "665f961a2a0e90017ddb32d6224d340e3ab4415961c1baaba18ff780c0e9d34a"
     },
     "native/core/abi/services/kiln_render.h": {
       "function_macros": [],
@@ -9461,7 +9461,7 @@
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
     "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
-    "src/services/kiln_registry_live.rs": "e79af4ae1b3ceeed8b76c72adf868751e222e2e29f73adfba7161e3ba51a2d30",
+    "src/services/kiln_registry_live.rs": "da9a69836002b7be3e9ae74260cc342c848da7ff6a71b1c6ca9ef8424f079805",
     "src/services/kiln_render.rs": "0d63717bf1a2388f2bf5e03ad5ffe2fc5be815c9522ff4fa124151c4853ccb91",
     "src/services/kiln_repl.rs": "49a43d82f7481a93068e9f63735be39c0420ad3b8945338ed84369debc2689e1",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
