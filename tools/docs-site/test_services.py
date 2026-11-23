@@ -57,29 +57,47 @@ class Pages(unittest.TestCase):
         self.json.write_text(json.dumps({"format": 1, "services": [
             {"assembly": "Kiln.Build", "name": "Build", "summary": "Voxels and props.", "guides": ["docs/kiln/services/build.md", "docs/kiln/modding/blocks.md"],
              "capabilities": [{"name": "kiln.build", "members": 40}], "samples": ["OreVein"]},
-            {"assembly": "Kiln.Api", "name": None, "summary": "The API mods compile against.", "guides": [], "capabilities": [], "samples": []},
+            {"assembly": "Kiln.Api", "name": None, "summary": "The API mods compile against (Kiln.Ecs.*, not Kiln.GameTypes.*).", "guides": [], "capabilities": [], "samples": []},
             {"assembly": "Kiln.TestKit", "name": None, "summary": "Tests.", "guides": [], "capabilities": [], "samples": []}]}))
-        self.by = services.build(self.api, self.stage, self.json)
+        self.wiki = root / "wiki.json"
+        self.wiki.write_text(json.dumps({"format": 1, "base": "https://frostdev.io/kiln/wiki/",
+                                         "assemblies": {"Kiln.Build": [["world-edits", "World edits"], ["a|b", "Pipes | here"]]}}))
+        self.by = services.build(self.api, self.stage, self.json, self.wiki)
 
     def toc(self):
         return (self.api / "toc.yml").read_text()
+
+    def group(self, asm):
+        return json.loads((self.api / "toc" / f"{asm}.json").read_text())
 
     def test_the_table_of_contents_has_a_group_for_each_assembly(self):
         names = [l[len("- name: "):].strip('"') for l in self.toc().splitlines() if l.startswith("- name: ")]
         # the overview, the core in its own order, the services A-Z, the namespaces
         self.assertEqual(names, ["Overview", "Kiln.Api", "Kiln.Game", "Kiln.TestKit", "Kiln.Abilities", "Kiln.Build", "Kiln.NotListed", "Namespaces"])
-        self.assertIn("- name: \"Kiln.Build\"\n  href: services/Kiln.Build.md\n  items:\n  - uid: \"Kiln.Build\"", self.toc())
+        self.assertIn("- name: \"Kiln.Build\"\n  href: services/Kiln.Build.md\n- name: \"Kiln.NotListed\"", self.toc())
+
+    def test_the_table_of_contents_holds_no_types(self):
+        # 4,000 of them were drawn on every page: they are in api/toc/<assembly>.json, loaded when a group is opened
+        groups = self.toc().split("- name: Namespaces")[0]
+        self.assertNotIn("uid:", groups)
+        self.assertNotIn("items:", groups)
 
     def test_types_are_sorted_by_name_and_keep_their_docfx_names(self):
-        toc = self.toc()
-        api = toc[toc.index('- name: "Kiln.Api"'):toc.index('- name: "Kiln.Game"')]
-        self.assertLess(api.index('name: "Apple<T>"'), api.index('name: "Zebra"'))
-        self.assertIn('- uid: "Kiln.Apple`1"', api)
-        self.assertIn('name: "Abilities.Natives"', toc)
+        api = self.group("Kiln.Api")
+        self.assertEqual(api, {"v": 1, "assembly": "Kiln.Api", "types": [["Apple<T>", "Kiln.Apple-1.html", "s"], ["Zebra", "Kiln.Zebra.html", "c"]]})
+        self.assertEqual(self.group("Kiln.Abilities")["types"], [["Abilities.Natives", "Kiln.Abilities.Natives.html", "c"]])
+        self.assertEqual([t[2] for t in self.group("Kiln.NotListed")["types"]], ["e"])
 
     def test_a_type_of_a_sub_namespace_says_where_it_is(self):
-        self.assertIn('name: "Xunit.Fact"', self.toc())
-        self.assertIn('name: "Harness"', self.toc())
+        self.assertEqual([t[0] for t in self.group("Kiln.TestKit")["types"]], ["Harness", "Xunit.Fact"])
+
+    def test_the_group_index_has_pages_counts_services_and_summaries(self):
+        index = json.loads((self.api / "toc/index.json").read_text())
+        self.assertEqual([g["name"] for g in index["groups"]], ["Kiln.Api", "Kiln.Game", "Kiln.TestKit", "Kiln.Abilities", "Kiln.Build", "Kiln.NotListed"])
+        build = index["groups"][4]
+        self.assertEqual(build, {"name": "Kiln.Build", "href": "services/Kiln.Build.html", "service": "Build", "summary": "Voxels and props", "types": 1})
+        self.assertEqual(index["groups"][0]["service"], None)
+        self.assertEqual(index["groups"][1]["types"], 2)
 
     def test_the_namespaces_follow_the_services(self):
         toc = self.toc()
@@ -88,9 +106,10 @@ class Pages(unittest.TestCase):
         self.assertIn('- uid: "Kiln.TestKit"', tail)
 
     def test_every_type_is_in_exactly_one_group(self):
-        uids = [l.split('"')[1] for l in self.toc().split("- name: Namespaces")[0].splitlines() if l.startswith('  - uid: "')]
-        self.assertEqual(sorted(uids), sorted(set(uids)))
-        self.assertEqual(len(uids), 9)
+        pages = [t[1] for f in (self.api / "toc").glob("Kiln.*.json") for t in json.loads(f.read_text())["types"]]
+        self.assertEqual(sorted(pages), sorted(set(pages)))
+        self.assertEqual(len(pages), 9)
+        self.assertEqual(len(list((self.api / "toc").glob("*.json"))), 7)      # six groups and the index
 
     def test_a_service_page_has_facts_capabilities_samples_and_types(self):
         page = (self.api / "services/Kiln.Build.md").read_text()
@@ -104,6 +123,12 @@ class Pages(unittest.TestCase):
         self.assertIn("- [OreVein](https://github.com/frostdev-ops/kiln/tree/main/mods/samples/OreVein)", page)
         self.assertIn("- [Build](../Kiln.Build.yml) (class): Builds Foo cells | fast.", page)
         self.assertIn("- [Apple&lt;T&gt;](../Kiln.Apple-1.yml) (struct)", (self.api / "services/Kiln.Api.md").read_text())
+
+    def test_a_service_page_links_its_wiki_pages_and_opens_its_group(self):
+        page = (self.api / "services/Kiln.Build.md").read_text()
+        self.assertIn('---\ntitle: "Kiln.Build"\nkilnAsm: "Kiln.Build"\n---\n', page)
+        self.assertIn("- **Wiki:** [World edits](https://frostdev.io/kiln/wiki/world-edits), [Pipes \\| here](https://frostdev.io/kiln/wiki/a|b)", page)
+        self.assertNotIn("**Wiki:**", (self.api / "services/Kiln.Api.md").read_text())
 
     def test_the_core_has_no_service_name_and_the_test_kit_is_a_package(self):
         self.assertIn("none: every mod has it", (self.api / "services/Kiln.Api.md").read_text())
@@ -126,6 +151,7 @@ class Pages(unittest.TestCase):
             self.assertIn(f"[{asm}](services/{asm}.md)", index)
         self.assertIn("| [Kiln.Build](services/Kiln.Build.md) | `Build` | Voxels and props | [build.md](https://", index)
         self.assertIn("[blocks.md](../modding/blocks.md)", index)
+        self.assertIn("| The API mods compile against (Kiln.Ecs.\\*, not Kiln.GameTypes.\\*) |", index)    # no emphasis between the two
 
     def test_a_list_not_a_table_holds_the_types(self):
         # DocFX's Markdown parser fails on a table of a few hundred rows ("too deeply nested")
@@ -211,6 +237,16 @@ class Checked(unittest.TestCase):
     def test_the_checked_in_services_json_is_what_the_repository_gives(self):
         r = subprocess.run([sys.executable, "-I", str(HERE / "gen-services.py"), "--check", str(REPO)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_wiki_pages_name_known_assemblies(self):
+        wiki = json.loads((HERE / "wiki.json").read_text())
+        names = {s["assembly"] for s in json.loads((HERE / "services.json").read_text())["services"]}
+        self.assertEqual(wiki["base"], "https://frostdev.io/kiln/wiki/")
+        for asm, pages in wiki["assemblies"].items():
+            self.assertIn(asm, names)
+            for slug, title in pages:
+                self.assertRegex(slug, r"^[a-z0-9]+(-[a-z0-9]+)*$")
+                self.assertTrue(title.strip(), slug)
 
     def test_every_assembly_of_the_reference_has_an_entry_with_a_summary(self):
         doc = json.loads((HERE / "services.json").read_text())
