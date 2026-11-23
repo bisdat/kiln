@@ -161,7 +161,10 @@ void KILN_CALL on_server_pre(const KilnTickInfo* tick, void*) {
 }
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) { g_core.pre(kcam::kClient); }
 
-// Any thread (the one that revoked the owner). Marks only: each world drops the owner's leases at its next Pre.
+// Any thread (the one that revoked the owner; kiln.core calls it holding no lock of its own). Closes the gate for the
+// owner's callbacks and waits, bounded and holding no lock, for those already running on other threads; each world
+// drops the owner's leases at its next Pre. kiln_hooks.h asks an observer not to wait: this one does, by the
+// coordinator's ruling (DECISIONS.md "Camera owner-retiring barrier"; state.h says how).
 void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) { g_core.owner_retiring(retiring); }
 
 // ---- rows --------------------------------------------------------------------------------------------------------------

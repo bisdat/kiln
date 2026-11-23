@@ -22,3 +22,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthrea
 "$out/service-test" old-world
 "$out/service-test" declare-refused
 "$out/service-test" program-off
+# across threads: the owner-retiring barrier, and world stops and retirements against the tick thread (TSan, then ASan)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=thread -pthread \
+    -I"$abi" "$here/threads_test.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/threads-tsan"
+"$out/threads-tsan" 3000
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
+    -I"$abi" "$here/threads_test.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/threads-asan"
+"$out/threads-asan" 6000

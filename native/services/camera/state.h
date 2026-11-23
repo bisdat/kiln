@@ -14,10 +14,21 @@
 // reports from its own step (committed, rejected, released, ended), before Core::pre of that world.
 // owner_retiring and world_stopping may come on any thread: they change the model first and call backends only
 // through world_stopped (atomics only).
+//
+// The owner-retiring barrier (DECISIONS.md "Camera owner-retiring barrier", a deviation from chapter 03 4.6's
+// "the observer never waits"): every callback into an owner is reserved under the lock (a per-owner count) before it
+// is called outside it, and released after it returned. owner_retiring closes the gate first (no reservation for the
+// owner from then on), then waits, holding no lock, until the owner's calls on other threads have returned, so a host
+// that frees the owner's code after the observer returned never frees code that runs. A retirement from inside one of
+// the owner's own callbacks does not wait for that call (it returns before its host frees anything; the owner's state
+// is cleaned up at each world's next Pre in any case). The wait is bounded (set_retire_wait_ms, 2 s): on a timeout it
+// logs an error and returns; the owner stays retired, and kiln.camera frees nothing those calls can reach (they hold
+// copies of their delivery and subscriber).
 #ifndef KILN_CAMERA_STATE_H
 #define KILN_CAMERA_STATE_H
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -115,11 +126,14 @@ public:
     bool writes() const { return writes_.load(std::memory_order_acquire); }
     // A bit that does not come from a backend (RENDERED_SNAPSHOT), for LOCAL_VISUAL.
     void set_local_read_caps(uint64_t bits) { local_read_caps_.store(bits, std::memory_order_release); }
+    // How long owner_retiring waits for the owner's running callbacks on other threads (default 2000 ms).
+    void set_retire_wait_ms(uint32_t ms) { retire_wait_ms_.store(ms, std::memory_order_relaxed); }
 
     // ---- lifecycle ----
     void world_started(World world, uint32_t epoch);   // that world's thread, before its first Pre
     void world_stopping(World world, uint32_t epoch);  // any thread: ends everything of that world and delivers it here
-    void owner_retiring(KilnOwner owner);              // any thread: no callback into `owner` starts from now on
+    // Any thread: no callback into `owner` starts from now on, and on return none runs on another thread (bounded wait).
+    void owner_retiring(KilnOwner owner);
     void pre(World world);                             // that world's Pre, after the backends' own step
 
     // ---- the table ----
@@ -142,6 +156,8 @@ public:
     uint32_t live_leases() const;
     // The active revision of a live lease, 0 when it has none (not applied yet, or not live).
     uint64_t active_revision(KilnCameraLease lease) const;
+    // Callbacks into `owner` that are reserved and have not returned yet.
+    uint32_t calls_in(KilnOwner owner) const;
 
 private:
     struct Op {
@@ -192,6 +208,7 @@ private:
     };
     struct Dead {
         bool cleaned[kWorlds] = {false, false};
+        bool timed_out = false;  // owner_retiring returned while calls into it still ran (never pruned)
     };
 
     static uint64_t slot_key(uint32_t endpoint, uint32_t player) {
@@ -216,6 +233,10 @@ private:
     void stop_world(World world);
     void fault(KilnOwner owner, World world, const char* what);
     void deliver(World world);
+    // The barrier (the lock is held for reserve): false when the owner is dead (the gate is closed).
+    bool reserve(KilnOwner owner);
+    void unreserve(KilnOwner owner);  // takes the lock
+    uint32_t mine(KilnOwner owner) const;  // calls into `owner` this thread is inside
 
     Env* env_;
     Backend* backends_[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -233,6 +254,9 @@ private:
     std::vector<Subscriber> subs_;
     std::map<KilnOwner, Dead> dead_;
     std::deque<Delivery> queue_[kWorlds];
+    std::map<KilnOwner, uint32_t> calls_;  // reserved callbacks per owner (owner 0, Kiln's own, is not counted)
+    std::condition_variable drained_;      // a count went down
+    std::atomic<uint32_t> retire_wait_ms_{2000};
 };
 
 }  // namespace kcam

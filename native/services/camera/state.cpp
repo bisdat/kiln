@@ -2,6 +2,8 @@
 // kiln.camera's lease model: state.h says what it is and which thread may do what.
 #include "state.h"
 
+#include <chrono>
+
 #include <cmath>
 #include <cstring>
 
@@ -365,10 +367,67 @@ void Core::world_stopping(World w, uint32_t epoch) {
 
 void Core::owner_retiring(KilnOwner owner) {
     if (!owner) return;
-    std::lock_guard<std::mutex> lock(m_);
-    dead_.emplace(owner, Dead{});  // from here no callback into it starts; each world drops its leases at its next Pre
+    std::unique_lock<std::mutex> lock(m_);
+    dead_.emplace(owner, Dead{});  // the gate: from here no callback into it is reserved; each world drops its leases at its next Pre
     for (auto& [id, lease] : leases_)
         if (lease.owner == owner) lease.alive->store(false, std::memory_order_release);
+    // Calls into it that started before the gate closed: wait (the lock is let go while waiting) until those of other
+    // threads returned. This thread's own (a retirement from inside the owner's callback) are not waited for.
+    const uint32_t own = mine(owner);
+    const auto drained = [&] {
+        const auto it = calls_.find(owner);
+        return it == calls_.end() || it->second <= own;
+    };
+    const uint32_t ms = retire_wait_ms_.load(std::memory_order_relaxed);
+    if (drained_.wait_for(lock, std::chrono::milliseconds(ms), drained)) return;
+    const uint32_t left = calls_[owner] - own;
+    dead_[owner].timed_out = true;
+    lock.unlock();
+    env_->log(KILN_LOG_ERROR, "camera: owner " + std::to_string(owner) + " retires while " + std::to_string(left) +
+                                  " camera callback(s) into it still run on other threads after " + std::to_string(ms) +
+                                  " ms: returning without them; the owner stays retired and kiln.camera frees nothing those calls hold");
+}
+
+// ---- the barrier ------------------------------------------------------------------------------------------------------
+
+namespace {
+// The callbacks this thread is inside, as (core, owner): a retirement from inside one does not wait for it.
+thread_local std::vector<std::pair<const void*, KilnOwner>> t_inside;
+}  // namespace
+
+bool Core::reserve(KilnOwner owner) {
+    if (dead(owner)) return false;
+    if (owner) ++calls_[owner];
+    t_inside.emplace_back(this, owner);
+    return true;
+}
+
+void Core::unreserve(KilnOwner owner) {
+    for (size_t i = t_inside.size(); i-- > 0;)
+        if (t_inside[i].first == this && t_inside[i].second == owner) {
+            t_inside.erase(t_inside.begin() + static_cast<std::ptrdiff_t>(i));
+            break;
+        }
+    if (!owner) return;
+    {
+        std::lock_guard<std::mutex> lock(m_);
+        const auto it = calls_.find(owner);
+        if (it != calls_.end() && --it->second == 0) calls_.erase(it);
+    }
+    drained_.notify_all();
+}
+
+uint32_t Core::mine(KilnOwner owner) const {
+    uint32_t n = 0;
+    for (const auto& [core, o] : t_inside)
+        if (core == this && o == owner) ++n;
+    return n;
+}
+
+uint32_t Core::calls_in(KilnOwner owner) const {
+    std::lock_guard<std::mutex> lock(m_);
+    const auto it = calls_.find(owner);
+    return it == calls_.end() ? 0 : it->second;
 }
 
 void Core::cleanup_owner(KilnOwner owner, World w) {
@@ -431,13 +490,15 @@ void Core::deliver(World w) {
                 subs = subs_;
             } else {
                 if (pending_) --pending_;
-                if (!d.done || dead(d.owner)) continue;
+                if (!d.done || !reserve(d.owner)) continue;  // a retired owner gets nothing
             }
         }
-        // author code from here: no lock
+        // author code from here: no lock. A reserved call is released after it returned.
         if (!d.change) {
             d.result.reason = KilnStr{d.text.data(), d.text.size()};
-            if (!env_->call_done(d.done, d.result, d.user)) fault(d.owner, w, "done");
+            const bool ok = env_->call_done(d.done, d.result, d.user);
+            unreserve(d.owner);
+            if (!ok) fault(d.owner, w, "done");
             continue;
         }
         d.event.reason = KilnStr{d.text.data(), d.text.size()};
@@ -447,9 +508,11 @@ void Core::deliver(World w) {
                 bool here = false;
                 for (const Subscriber& now : subs_)
                     if (now.handle == s.handle) here = true;
-                if (!here || dead(s.owner)) continue;  // unsubscribed or retired since the event was taken
+                if (!here || !reserve(s.owner)) continue;  // unsubscribed or retired since the event was taken
             }
-            if (!env_->call_changed(s.fn, d.event, s.user)) fault(s.owner, w, "change");
+            const bool ok = env_->call_changed(s.fn, d.event, s.user);
+            unreserve(s.owner);
+            if (!ok) fault(s.owner, w, "change");
         }
     }
 }
