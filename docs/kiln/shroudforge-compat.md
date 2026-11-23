@@ -184,18 +184,22 @@ Found 0.16.1 on a Steam Deck) ran the pass into "cannot create a Lua reference, 
 1000194 slots)", and the game started without its asset mods. A walk over 350,000 plain recipe records, with no mod
 code, reproduces that count; upstream 1.8.1 has the same code. The fork keeps such values in Lua's registry
 (`modules/mod-runtime/lua/stored_lua_value.rs`) and loads one for each operation: the same Lua object every time, so
-identity and edits hold; nil, booleans and numbers stay plain; a released tree is collected as before. Not changed: the
-type metadata `game.types` hands out still holds mlua values, bounded by the game's type table, not by any data.
-Tests (host and Wine): a walk over and a mod-made copy of 350,000 recipes (red before, with the player's panic), the
-references a walk holds (red before: 3002 for 1,000 recipes, 150002 for 50,000; now under 64 at any size, and the
-registry back to its count once the tree is released), identity, edits, copies and removal.
+identity and edits hold; nil, booleans and numbers stay plain; a released tree is collected as before. The type
+metadata `game.types` hands out, which lives as long as the session, is held the same way (each type, its
+`struct_fields`, `enum_fields` and `attributes`): read whole for the game's 12,658 types it held about 695,000 of the
+million slots. Tests (host and Wine): a walk over and a mod-made copy of 350,000 recipes (red before, with the player's
+panic), the references a walk holds (red before: 3002 for 1,000 recipes, 150002 for 50,000; now under 64 at any size,
+and the registry back to its count once the tree is released), identity, edits, copies and removal; all the metadata of
+2,000 struct types read (red before: 254,037 references; now under 64), its values, order and identity.
 
 **A panic in the startup pass** (fork branch `kiln-30.7`, 0.2.0-dev.30.7). The pass logged "Rust panic during startup
 asset preparation: " and the panic's message, which named no mod and could run over several lines. Now kiln.log's
 `[sf]` error line, and the pass's recorded error, read `ShroudForge stopped preparing mod assets because of an internal
 error while running <name>`: the name of the package whose entrypoint ran, when the panic came from there, on one line,
 at most 80 characters, with no version, path or message. The panic's message follows on an info line
-(`Internal error detail, for a bug report: ...`, one line). A panic is SF's own failure, so the pass is not run again
+(`Internal error detail, for a bug report: ...`, one line, each absolute path in it cut to its last two components,
+such as `state/extra.rs:287`, so no folder of the player's or of the build machine reaches a shared kiln.log). A panic
+is SF's own failure, so the pass is not run again
 without the package; the recovery is upstream's (the saved baseline back, the game starts without asset mods). Tests
 (host and Wine): `name_failing_mod`, `report_startup_panic`, `kiln_retry_tests`.
 
