@@ -19,12 +19,22 @@ struct Key {
     }
 };
 
+uint64_t fingerprint(const uint8_t* data, size_t size) {
+    uint64_t hash = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < size; ++i) hash = (hash ^ data[i]) * 0x100000001b3ull;
+    return hash;
+}
+struct Captured : Before { Bytes bytes; };  // private compile snapshot only; released after this mod's preparation
+
+bool same_bytes(const Before& a, const Before& b) {
+    return a.present == b.present && (!a.present || (a.size == b.size && a.fingerprint == b.fingerprint));
+}
 bool current_matches(const Before& before, const GameData& game) {
     const uint8_t* data = nullptr;
     size_t size = 0;
     const bool present = game.read(before.guid, before.type, &data, &size);
-    return present == before.present && (!present || (size == before.bytes.size() &&
-        (!size || (data && std::memcmp(data, before.bytes.data(), size) == 0))));
+    return present == before.present && (!present || (size == before.size &&
+        (!size || (data && fingerprint(data, size) == before.fingerprint))));
 }
 
 std::vector<Resource> resources(const PackOut& pack) {
@@ -70,6 +80,10 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
     Result out;
     ojson manifest_mods = ojson::array();
     std::set<std::string> failed;
+    Guid knowledge_guid{};
+    parse_guid(kGuidKnowledge, &knowledge_guid);
+    Before last_knowledge;
+    size_t knowledge_prefix = 0;
     const auto refuse = [&](const std::string& mod, const std::string& why) {
         const std::string text = "bootpack:" + mod + ": " + why;
         out.errors.push_back(text);
@@ -117,7 +131,7 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
             if (mod.authored_body) { refuse(mod.id, "authored roster-body lowering is not installed; no part of this native pack was published"); continue; }
 
             for (int attempt = 0; attempt != 2; ++attempt) {
-                std::map<Key, Before> reads;
+                std::map<Key, Captured> reads;
                 GameData snapshot = backend.game;
                 snapshot.read = [&](const Guid& guid, uint32_t type, const uint8_t** data, size_t* size) {
                     auto [it, fresh] = reads.try_emplace(Key{guid, type});
@@ -131,6 +145,8 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                             if (!bytes) throw std::runtime_error("a resource read returned null bytes");
                             captured.bytes.assign(bytes, bytes + count);
                         }
+                        captured.size = captured.bytes.size();
+                        captured.fingerprint = fingerprint(captured.bytes.data(), captured.bytes.size());
                     }
                     *data = captured.bytes.data(); *size = captured.bytes.size();
                     return captured.present;
@@ -152,7 +168,18 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
 
                 std::vector<Resource> wanted;
                 std::string refusal;
+                size_t next_knowledge_prefix = pack.knowledge_source_size;
                 try {
+                    if (pack.knowledge_source_size) {
+                        const auto& source = reads.at(Key{knowledge_guid, kTypeKnowledge});
+                        // Trim only our own known tail. An unrelated writer's different effective blob starts a new
+                        // retained prefix, including its unknown fields and appended data.
+                        if (last_knowledge.present && same_bytes(source, last_knowledge)) {
+                            next_knowledge_prefix = knowledge_prefix;
+                            if (!compact_knowledge(&pack.res_knowledge, knowledge_prefix, &refusal))
+                                refusal = "knowledge compaction failed: " + refusal;
+                        }
+                    }
                     wanted = resources(pack);
                     // Capture every overwritten key, not only the keys the compiler happened to read. New keys must be absent.
                     for (const auto& resource : wanted) {
@@ -202,6 +229,11 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                     }
                     refuse(mod.id, refusal);
                     break;
+                }
+                if (pack.knowledge_source_size) {
+                    knowledge_prefix = next_knowledge_prefix;
+                    last_knowledge = {knowledge_guid, kTypeKnowledge, true, pack.res_knowledge.size(),
+                        fingerprint(pack.res_knowledge.data(), pack.res_knowledge.size())};
                 }
                 out.applied.push_back(std::move(applied));
                 out.manifest = pack.manifest;

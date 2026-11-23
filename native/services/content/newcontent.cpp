@@ -3764,6 +3764,12 @@ uintptr_t __fastcall hk_itemupdate(uintptr_t ireg, uintptr_t a, uintptr_t b, uin
 
 // A world's first step, before its first Pre. Last chance for the prediction world's first step, and the log line.
 void world_started(const KilnWorldEvent& ev) {
+    {
+        std::lock_guard lock(g_text_mu);
+        // The private helper refuses every operation once a world has run: no boot generation can abort now.
+        // Only the undo records go; published text entries/maps and content definitions keep their existing lifetimes.
+        g_boot_text_undo.clear();
+    }
     g_first_step_ms[ev.kind] = GetTickCount64();
     if (ev.kind == KILN_WORLD_SERVER || g_api->side() != KILN_SIDE_CLIENT) return;
     const uintptr_t cw = ev.kind == KILN_WORLD_CLIENT ? ev.world : g_early_world.load();

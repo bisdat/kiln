@@ -1015,6 +1015,7 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         return out;
     };
     if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err);
+    out.knowledge_source_size = n;
     if (!rebuild_knowledge(p, n, out.knowledge, &out.res_knowledge, &err)) return fail(err);
     uint32_t cw = 0, cp = 0;
     if (knowledge_counts(out.res_knowledge.data(), out.res_knowledge.size(), &cw, &cp) && (cw > kReservedWorld || cp > kReservedPlayer))

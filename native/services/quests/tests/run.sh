@@ -23,6 +23,11 @@ ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initiali
   -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \
   "$here/bootpack_native_test.cpp" "$here/../bootpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_native_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_native_test" "$out"
+# The real compiler over synthetic knowledge maps: bounded per-pack resources and compact rollback records.
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
+  -I"$here/.." -I"$here/../../../third_party" \
+  "$here/bootpack_memory_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_memory_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_memory_test"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
   "$here/../../content/tests/boot_text_undo_test.cpp" -o "$out/boot_text_undo_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/boot_text_undo_test"

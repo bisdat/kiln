@@ -75,6 +75,12 @@ Native packs compile separately in dependency order against the surviving effect
 only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
 earlier successful packs intact. Failed required native dependencies are excluded before their dependants compile.
 An invariant failure stops startup through the existing named fault/notice path rather than continuing with a partial pack.
+Rollback records retain resource presence, length and a local 64-bit fingerprint, not full resource copies. The private
+compile snapshots are released after each pack. Repeated Kiln knowledge-map tails are compacted to the original input
+prefix plus the latest maps; a different effective blob from another writer starts a new prefix so its unknown data
+is preserved. Text undo records are discarded at the first world start, when the helper can no longer abort a pack.
+The assets store still retains published immutable layers: knowledge storage is one bounded blob per pack, not one
+blob containing every earlier map copy. Journal/NPC builders retain their existing append-only layout.
 Without the private helper, ordinary legacy packs retain their old path and whole body-dependent packs are excluded.
 This is rollback behind the existing startup barrier, **not** an unpublished snapshot or an epoch: an independently
 started native-plugin worker reading GameKnowledge during publication could see it before the pack's item definitions.

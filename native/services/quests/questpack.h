@@ -57,6 +57,7 @@ struct PackOut {
     std::vector<JournalQuestDef> quests;
     std::vector<NpcDef> npcs;
     Bytes res_knowledge, res_journal, res_npcs;
+    size_t knowledge_source_size = 0;  // input length before this compile appended tables; private compaction provenance
     std::vector<TemplateOut> templates;
     std::vector<TextOut> texts;
     std::vector<std::string> content_items, content_recipes;  // definitions for kiln.content's define()

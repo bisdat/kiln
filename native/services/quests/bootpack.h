@@ -15,7 +15,8 @@ struct Before {
     Guid guid{};
     uint32_t type = 0;
     bool present = false;
-    Bytes bytes;
+    size_t size = 0;
+    uint64_t fingerprint = 0;  // local rollback invariant, not a mod/content identity or cryptographic digest
 };
 struct Resource {
     Guid guid{};

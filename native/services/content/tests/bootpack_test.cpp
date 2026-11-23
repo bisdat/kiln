@@ -79,7 +79,20 @@ int main() {
     CHECK(result.find("42") != std::string::npos);
     CHECK(entry(42) == foreign && entry(43) == added); // no shard was partly restored
 
+    CHECK(call(Begin, 15, R"({"mod":"published"})") == KILN_OK);
+    CHECK(call(Define, 15, definition, KILN_CONTENT_ITEMS) == KILN_OK);
+    CHECK(call(Finish, 15) == KILN_OK);
+    const auto* published_text = entry(tag);
+    CHECK(kc::g_boot_text_undo.count(15) == 1);
     boot_session.sessions[KILN_WORLD_SERVER] = 1;
+    KilnWorldEvent started{};
+    started.kind = KILN_WORLD_SERVER;
+    started.event = KILN_WORLD_STARTED;
+    kc::on_world(&started, nullptr);
+    CHECK(kc::g_boot_text_undo.empty());
+    CHECK(kc::g_defs.size() == 1 && kc::g_defs.front()->owner == 15);
+    CHECK(entry(tag) == published_text && entry(42) == foreign);
+    CHECK(call(Abort, 15) == KILN_ERR_UNAVAILABLE);
     CHECK(call(Begin, 14, R"({"mod":"too-late"})") == KILN_ERR_UNAVAILABLE);
     CHECK(!kc::g_boot_text_undo.count(14));
     std::printf("boot content: %d checks, %d failed\n", boot_checks, failures);
