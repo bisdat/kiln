@@ -64,8 +64,10 @@ bool write_rows(SelectorGroup* group,const SelectorRow* rows,uint32_t count,uint
 void fault(SelectorGroup* group) {
     if(group)clear_selector_view(group);faulted.store(true,std::memory_order_release);
 }
+// Bindings outlive the session: vanilla enumeration keeps unmatched rows (count zeroed), so a synthetic row stays in
+// its group until that group's next build removes it, and its pick stays suppressed (stale: no event) until then.
 void clear_session() {
-    for(auto& o:observations)o={};for(auto& p:publications)p.reset();bindings.clear();pending.clear();
+    for(auto& o:observations)o={};for(auto& p:publications)p.reset();pending.clear();
     catalog[0].clear();catalog[1].clear();catalog_session=0;
 }
 void KILN_CALL lifecycle(const KilnWorldEvent* e,void*) {
@@ -143,7 +145,12 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         if(!known||!p||p!=publications[i]||p->serial!=next.value.game_serial||p->session!=next.value.session)continue;
         auto composed=compose_ammo(next.rows.data(),next.value.game_count,p->rows.data(),p->count,p->mode,frame.selected[i]?frame.selected[i]:selection(groups+i));
         if(composed.count>capacity){composed.count=uint32_t(std::min<uint64_t>(capacity,KUA_CAPACITY));composed.truncated=true;}
-        if(bindings.size()>=16){previous.value.reason=KUA_REASON_LIMIT;continue;}
+        if(bindings.size()>=16) {
+            // Only an earlier session's binding may make room; a current one still guards rows drawn this session.
+            const auto stale=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.second.original.value.session!=before.client_session;});
+            if(stale==bindings.end()){previous.value.reason=KUA_REASON_LIMIT;continue;}
+            bindings.erase(stale);
+        }
         // Reserve suppression bookkeeping before the first game write. Allocation failure must leave vanilla
         // rows, never a synthetic row whose later equip request has no binding to intercept.
         const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{next,p,std::move(composed)});
@@ -207,7 +214,8 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
         if(b!=bindings.end())for(uint32_t i=0;i<b->second.composed.count;++i)if(b->second.composed.rows[i].item==item) {
             p=b->second.publication;original=b->second.original;
             for(uint32_t j=0;j<p->count;++j)if(p->rows[j].item==item){picked=p->rows[j];injected=true;break;}
-            if(p->mode==KUA_MODE_APPEND)for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item)injected=false;
+            // A row the game listed itself is the game's own in either mode (vanilla equips it), whatever a probe says.
+            for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item)injected=false;
             break;
         }
     }
@@ -227,6 +235,7 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
 }
 catch(...) {fault(nullptr);}
 void KILN_CALL finalizer(SelectorGroup* groups,void* a,void* b,void* c,void* d,void* e) {
+    kt::ToolPolicyScope no_impact_policy(nullptr);
     uint32_t selected[2]{};
     if(groups&&!builder_depth) {std::lock_guard lock(mutex);for(unsigned i=0;i<2;++i)if(bindings.contains(reinterpret_cast<uintptr_t>(groups+i)))selected[i]=selection(groups+i);}
     finalizer_hook.call<void>(groups,a,b,c,d,e);

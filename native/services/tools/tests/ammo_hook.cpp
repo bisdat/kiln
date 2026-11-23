@@ -24,7 +24,9 @@ static bool bad_rows;
 static SelectorRow* readonly_rows;
 static bool nested_ammo;
 static SelectorGroup nested_groups[7];
+static bool entry_synthetic; // vanilla enumeration retains unmatched rows, so a synthetic row must be gone at entry
 static void KILN_CALL ammo_selector_fixture(SelectorGroup* groups,void* access,uint8_t current) {
+    entry_synthetic=false;for(uint64_t r=0;groups[0].data&&r<groups[0].count;++r)if(groups[0].data[r].item==555)entry_synthetic=true;
     vanilla_selector(groups,access,current);
     if(bad_rows)groups[0].data=reinterpret_cast<SelectorRow*>(1);
     if(readonly_rows)groups[0].data=readonly_rows;
@@ -109,6 +111,25 @@ int main() {
     CHECK(guarded_ammo(groups,const_cast<void*>(static_cast<const void*>(access)))&&ammo::failed()&&groups[0].count==0);
     readonly_rows=nullptr;CHECK(VirtualFree(page,0,MEM_RELEASE));ammo::faulted.store(false);
 #endif
+    auto* const acc=const_cast<void*>(static_cast<const void*>(access));
+    selector(groups,acc,0);CHECK(groups[0].count==2&&groups[0].data[0].item==555&&groups[0].data[1].item==999); // Replace {555,999}
+    // A row the game itself lists is the game's own in Replace too, whatever the backpack probe says.
+    equip_calls=0;backpack_answer=-1;ammo::pick(groups,nullptr,0,999,301);CHECK(equip_calls==1);
+    backpack_answer=0;ammo::pick(groups,nullptr,0,999,302);CHECK(equip_calls==2);
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    // A world event forgets the session, not the rows already written: the old binding keeps its synthetic row from the
+    // game's equip (no event), and the group's next build takes the row out before vanilla enumeration retains it.
+    KilnWorldEvent world_event{};world_event.size=sizeof world_event;world_event.kind=KILN_WORLD_CLIENT;
+    ammo::lifecycle(&world_event,nullptr);
+    ammo::pick(groups,nullptr,0,555,303);CHECK(equip_calls==2);
+    CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    selector(groups,acc,0);CHECK(!entry_synthetic&&groups[0].count==2&&groups[0].data[0].item==999);
+    // Stale sessions' bindings never starve the current one of the bounded binding table.
+    ammo::catalog[0]={999,1257792166u,555};ammo::catalog[1]=ammo::catalog[0];ammo::catalog_session=9;
+    selector(groups,acc,0);CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK&&context.ok);
+    pub.serial=context.game_serial;CHECK(ammo::publish(7,&pub)==KILN_OK);
+    for(uintptr_t key=1;key<=16;++key){ammo::Binding stale{};stale.original.value.session=8;ammo::bindings.emplace(key,stale);}
+    selector(groups,acc,0);CHECK(groups[0].data[0].item==555&&ammo::bindings.size()<=16);
     ammo::retire(7);CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
     CHECK(kiln_tools_remove_family(7,tool_handle)==KILN_OK);kiln_tools_presentation_set_held_provider(nullptr);
     ammo::stop();ammo::backpack_probe=nullptr;api=nullptr;child=retiring=0;

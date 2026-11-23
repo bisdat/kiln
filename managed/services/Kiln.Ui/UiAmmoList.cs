@@ -169,9 +169,9 @@ public static partial class Ui
         /// throws adds no rows that time (logged in the mod's log). When the game refuses a provider's rows (an item that is
         /// not an arrow, or not a spell, for that list), the other providers' rows still show and the refusal is
         /// logged.</para>
-        /// <para>The game keeps its selection on the same item when the rows change. A pick of a row whose item the player
-        /// carries is the game's own (it equips it); a pick of any other mod row raises <see cref="Picked"/> for the mod that
-        /// provided it.</para>
+        /// <para>The game keeps its selection on the same item when the rows change. A pick of a row whose item the game
+        /// lists itself (in Replace too) or the player carries is the game's own (it equips it); a pick of any other mod row
+        /// raises <see cref="Picked"/> for the mod that provided it.</para>
         /// </remarks>
         /// <exception cref="KilnUnavailableException">The row <c>ui.ammo.list</c> is off (an unmeasured game build, a
         /// server, an older kiln-tools).</exception>
