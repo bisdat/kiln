@@ -671,6 +671,10 @@
           "members": 4
         },
         {
+          "name": "items.give_equip",
+          "members": 1
+        },
+        {
           "name": "items.instances",
           "members": 3
         },
@@ -1167,6 +1171,14 @@
         "docs/kiln/services/ui.md"
       ],
       "capabilities": [
+        {
+          "name": "ui.ammo.list",
+          "members": 1
+        },
+        {
+          "name": "ui.ammo.pick",
+          "members": 1
+        },
         {
           "name": "ui.gemforge.inspect",
           "members": 2

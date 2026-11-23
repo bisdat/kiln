@@ -1,5 +1,26 @@
 # Ui (Kiln.Ui): part 2 of 2
 
+## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
+- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
+- `Current { get; init; } -> uint?` — The current number; null keeps it.
+- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
+- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
+- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
+- `static readonly None -> UiBarEdit` — Changes nothing.
+
+## UiBarProvider `0.2.3` — A value provider.
+- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
+
+## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
+- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
+- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
+- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
+- `LabelOverride { get; init; } -> UiText?` — The label.
+- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.
+
+## UiChildFlags — Flags of `UiDraw.BeginChild`.
+enum: None, Border, Padding, AutoHeight, FrameStyle, NavFlattened
+
 ## UiColorSlot — A colour of the current look (`UiDraw.PushColor`).
 enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, FrameBgActive, Button, ButtonHovered, ButtonActive, Header, HeaderHovered, HeaderActive, Separator, ScrollbarBg, ScrollbarGrab, NavCursor, CheckMark, SliderGrab, TitleBg `0.2.8`, TitleBgActive `0.2.8`, PopupBg `0.2.8`, Tab `0.2.8`, TabHovered `0.2.8`, TabSelected `0.2.8`, TableHeaderBg `0.2.8`, TextSelectedBg `0.2.8`
 

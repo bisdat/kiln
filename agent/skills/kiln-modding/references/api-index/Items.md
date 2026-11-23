@@ -167,7 +167,9 @@ enum: None, DryRun
 - `Reason { get; } -> string?` — Why it did not happen; null when `EquipResult.Ok`.
 - `Ref { get; init; } -> ItemInstanceRef` — The item as one particular item (`ItemInstanceRef.None` for a plain stack, or when the capability `items.instances`...
 - `Replaced { get; init; } -> ItemId` — An equip: what the equipment slot held before; none when it was empty.
+- `ReplacedCount { get; init; } -> int` `0.2.15` — GiveEquip: the number in the old stack (also on DryRun); 0 for ordinary Equip and Unequip.
 - `ReplacedEntity { get; init; } -> EntityId` — The item entity of `Replaced`.
+- `ReplacedItem { get; } -> ItemId` `0.2.15` — The stack replaced by GiveEquip; an alias of Replaced.
 - `ReplacedRef { get; init; } -> ItemInstanceRef` — `EquipResult.Replaced` as one particular item.
 - `ReplacedTo { get; init; } -> SlotId` — Where `Replaced` went; none when not found.
 - `Slot { get; init; } -> EquipmentSlot?` — The equipment slot: the one asked for, or after an equip into the item's own slot the one it went to; null when unknown.
@@ -351,6 +353,10 @@ enum: Done, Stale, Full
 - `Durability { get; init; } -> DurabilityRule` — What happens to durability (default `DurabilityRule.KeepRatio`).
 - `RefuseEquipped { get; init; } -> bool` — Refuse (`GearStatus.Equipped`) when a player wears or holds the item.
 
+## GiveEquipOptions `0.2.15` — Options of Items.GiveEquip.
+- `DryRun { get; init; } -> bool` — Run the transaction and roll it back, creating no item entity and changing nothing.
+- `Replaced { get; init; } -> Replaced` — Where the old stack goes; defaults to Backpack.
+
 ## GiveOptions — Options of `Items.Give` and the calls like it.
 enum: None, Notify, AllOrNothing, NoMerge, DryRun
 
@@ -493,6 +499,8 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static Get(ItemId id) -> ItemInfo?` — The item with this id, or null.
 - `static Give(EntityId target, ItemId item, int count = 1, Gear? gear = null, GiveOptions options = GiveOptions.None, SlotId? slot = null) -> Task<ItemsResult>` — Puts `count` x `item` into `target`'s inventory (a player, chest, villager): stacks are topped up first, then empty...
 - `static Give(EntityId target, string item, int count = 1, Gear? gear = null, GiveOptions options = GiveOptions.None) -> Task<ItemsResult>` — Give by name or id (see `Items.Lookup`); an unknown name completes with `ItemsStatus.UnknownItem`.
+- `static GiveEquip(EntityId player, ItemId item, int count, EquipmentSlot slot, GiveEquipOptions? options = null) -> Task<EquipResult>` `0.2.15` — Creates one stack straight into an empty or occupied equipment slot, atomically.
+- `static GiveEquipAvailable { get; } -> bool` `0.2.15` — Whether give-and-equip can run in this server session.
 - `static GiveRecipeResult(EntityId target, uint recipeId, int count = 1, GiveOptions options = GiveOptions.None) -> Task<ItemsResult>` — Creates the outputs of a recipe in `target`'s inventory through the game's own recipe result function, exactly as...
 - `static Held(EntityId player) -> ItemInstanceRef` — The item in `player`'s hand: what the running action uses, else the selected action-bar slot (as the game picks it).
 - `static Lookup(string nameOrId) -> ItemInfo?` — Finds an item by id ("0x2b0cf1d5", "722268629"), debug name ("Material_T1_Wood_Logs") or display name ("Wood Logs")...
@@ -663,6 +671,9 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `Max { get; init; } -> ItemRarity` — The highest rarity it upgrades to (default Legendary, the game's highest).
 - `Socket { get; init; } -> SocketRule` — What happens about a gem socket (default `SocketRule.Keep`).
 - `Steps { get; init; } -> IDictionary<ItemRarity, UpgradeStep>` — The steps, by the rarity each reaches (Uncommon ..
+
+## Replaced `0.2.15` — Where GiveEquip puts the equipment slot's previous stack.
+enum: Backpack, Take
 
 ## SetEquipmentChange `0.2.4` — A Kiln set request (chapter 10): one decision for the whole set, never one per slot.
 - `SetEquipmentChange(ulong ItemsTicket, InventorySnapshotToken Snapshot, EquipmentSet Set, bool DryRun)`

@@ -231,6 +231,12 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_ui.h `KilnCraftMenuApi.remove` @32 — removes a set / tab / subscription
 - kiln_ui.h `KilnCraftMenuApi.describe` @40 — JSON: per workshop the tabs and subcategories (labels as tag ids, recipe counts) and Kiln's additions
 
+## services/kiln_ui_ammo.h — service `kiln.ui.ammo`
+### KilnUiAmmoApi — 32 bytes
+- kiln_ui_ammo.h `KilnUiAmmoApi.publish` @8 `0.2.15` — Client main/UI thread.
+- kiln_ui_ammo.h `KilnUiAmmoApi.context` @16 `0.2.15` — Any thread, owned copy, set out->size.
+- kiln_ui_ammo.h `KilnUiAmmoApi.take_picks` @24 `0.2.15` — Client main/UI thread.
+
 ## services/kiln_ui_inventory.h — service `kiln.ui.inventory`
 ### KilnUiInventoryApi — 48 bytes
 - kiln_ui_inventory.h `KilnUiInventoryApi.subscribe_clicks` @8 `0.2.12` — fn(click) for presses matching filter.

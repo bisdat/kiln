@@ -109,7 +109,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_hooks.h `KilnHooksApi.module_scan` @320 `0.2.11`
 
 ## services/kiln_items.h — service `kiln.items`
-### KilnItemsApi — 384 bytes
+### KilnItemsApi — 392 bytes
 - kiln_items.h `KilnItemsApi.give` @8 — Queues a give / take. *out_ticket (optional) = the request's ticket (never 0).
 - kiln_items.h `KilnItemsApi.take` @16
 - kiln_items.h `KilnItemsApi.cancel` @24 — Drops a request's callback (the transaction may still run if it already started).
@@ -157,6 +157,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_items.h `KilnItemsApi.scale_status` @360 `0.2.12` — any thread
 - kiln_items.h `KilnItemsApi.container_rename` @368 `0.2.13` — Checks the request now and queues the rename for the next Pre, where it runs through the game's own rename.
 - kiln_items.h `KilnItemsApi.rename_status` @376 `0.2.13` — any thread
+- kiln_items.h `KilnItemsApi.give_equip` @384 `0.2.15` — Since 0.2.0-dev.30.6; appended at 384, table end 392.
 
 ## services/kiln_launch.h — service `kiln.launch`
 ### KilnLaunchApi — 24 bytes

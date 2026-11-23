@@ -4765,6 +4765,26 @@ managed	Kiln.Blocks	Kiln.CraftGoal.Item.get -> Kiln.ItemRef?	<=0.2.0-dev.26	<=0.
 managed	Kiln.Blocks	Kiln.CraftGoal.Item.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.CraftGoal.Recipe.get -> string?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.CraftGoal.Recipe.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	Kiln.CraftSourceFilter	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceFilter.Allow = 1 -> Kiln.CraftSourceFilter	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceFilter.Deny = 0 -> Kiln.CraftSourceFilter	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceHandle	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceHandle.Container.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceHandle.Dispose() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceHandle.IsDisposed.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceHandle.Player.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.CraftSourceOptions() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Filter.get -> Kiln.CraftSourceFilter	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Filter.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Items.get -> System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Items.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Order.get -> Kiln.CraftSourceOrder	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOptions.Order.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOrder	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOrder.AfterStationOutputs = 1 -> Kiln.CraftSourceOrder	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.CraftSourceOrder.BeforeStationOutputs = 0 -> Kiln.CraftSourceOrder	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	Kiln.Crafting	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Blocks	Kiln.CreatureBlock	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.CreatureBlock.<Clone>$() -> Kiln.CreatureBlock!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.CreatureBlock.AI.get -> Kiln.PartRef<Kiln.AIBlock!>?	<=0.2.0-dev.26	<=0.2.1
@@ -8017,6 +8037,8 @@ managed	Kiln.Blocks	const Kiln.Affixes.DataKey = "affixes" -> string!	0.2.0-dev.
 managed	Kiln.Blocks	const Kiln.Affixes.DataMod = "kiln-affixes" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.Blocks	const Kiln.Affixes.MaxPerItem = 8 -> int	0.2.0-dev.27	0.2.2
 managed	Kiln.Blocks	const Kiln.Bases.Capability = "stations.read" -> string!	0.2.0-dev.29.14	0.2.6
+managed	Kiln.Blocks	const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Blocks	const Kiln.Crafting.SourcesCapability = "crafting.sources" -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Blocks	const Kiln.Stations.ControlCapability = "stations.control" -> string!	0.2.0-dev.29.14	0.2.6
 managed	Kiln.Blocks	const Kiln.Stations.CraftSourcesCapability = "stations.craft_sources" -> string!	0.2.0-dev.29.17	0.2.9
 managed	Kiln.Blocks	const Kiln.Stations.CraftUiCapability = "stations.craft_ui" -> string!	0.2.0-dev.29.17	0.2.9
@@ -9024,6 +9046,7 @@ managed	Kiln.Blocks	static Kiln.CosmeticBlock.operator !=(Kiln.CosmeticBlock? le
 managed	Kiln.Blocks	static Kiln.CosmeticBlock.operator ==(Kiln.CosmeticBlock? left, Kiln.CosmeticBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.CraftGoal.operator !=(Kiln.CraftGoal? left, Kiln.CraftGoal? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.CraftGoal.operator ==(Kiln.CraftGoal? left, Kiln.CraftGoal? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static Kiln.Crafting.AddSource(Kiln.EntityId player, Kiln.EntityId container, Kiln.CraftSourceOptions? options = null) -> Kiln.CraftSourceHandle!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Blocks	static Kiln.CreatureBlock.operator !=(Kiln.CreatureBlock? left, Kiln.CreatureBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.CreatureBlock.operator ==(Kiln.CreatureBlock? left, Kiln.CreatureBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.CreatureStats.operator !=(Kiln.CreatureStats? left, Kiln.CreatureStats? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -9821,7 +9844,144 @@ managed	Kiln.Blocks	~static Kiln.BootDefinitionResult<T>.operator !=(Kiln.BootDe
 managed	Kiln.Blocks	~static Kiln.BootDefinitionResult<T>.operator ==(Kiln.BootDefinitionResult<T>? left, Kiln.BootDefinitionResult<T>? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Blocks	~static Kiln.ResolvedBlock<T>.operator !=(Kiln.ResolvedBlock<T>? left, Kiln.ResolvedBlock<T>? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Blocks	~static Kiln.ResolvedBlock<T>.operator ==(Kiln.ResolvedBlock<T>? left, Kiln.ResolvedBlock<T>? right) -> bool	0.2.0-dev.28	0.2.3
+managed	Kiln.Build	Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakFlags.Drops = 2 -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakFlags.Instant = 1 -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakFlags.None = 0 -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakFlags.PlayerTerrain = 8 -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakFlags.WorldBuildings = 4 -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.<Clone>$() -> Kiln.BlockBreakOptions!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.BlockBreakOptions() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Build.get -> Kiln.BuildOptions!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Build.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Damage.get -> int[]!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Damage.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Equals(Kiln.BlockBreakOptions? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Flags.get -> Kiln.BlockBreakFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Flags.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Materials.get -> byte[]!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Materials.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.ProtectedSphere.get -> Kiln.BlockBreakSphere?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.ProtectedSphere.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Selection.get -> bool[]?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.Selection.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.TerrainHealAfter.get -> System.TimeSpan	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.TerrainHealAfter.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.TerrainHealthScale.get -> double	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakOptions.TerrainHealthScale.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.<Clone>$() -> Kiln.BlockBreakResult!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.BlockBreakResult(Kiln.BlockRefusal Refusal, ulong Considered, ulong Damaged, ulong Removed, ulong Dropped, ulong ProtectedCells, ulong UnknownCells, ulong UnbreakableCells, ulong ExcludedCells, bool MayHaveChanged, bool Verified, uint BlocksWritten, bool Kept) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.BlocksWritten.get -> uint	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.BlocksWritten.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Considered.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Considered.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Damaged.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Damaged.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Deconstruct(out Kiln.BlockRefusal Refusal, out ulong Considered, out ulong Damaged, out ulong Removed, out ulong Dropped, out ulong ProtectedCells, out ulong UnknownCells, out ulong UnbreakableCells, out ulong ExcludedCells, out bool MayHaveChanged, out bool Verified, out uint BlocksWritten, out bool Kept) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Dropped.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Dropped.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Equals(Kiln.BlockBreakResult? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.ExcludedCells.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.ExcludedCells.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Kept.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Kept.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.MayHaveChanged.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.MayHaveChanged.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Ok.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.ProtectedCells.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.ProtectedCells.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Reason.get -> string?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Refusal.get -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Refusal.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Removed.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Removed.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.UnbreakableCells.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.UnbreakableCells.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.UnknownCells.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.UnknownCells.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Verified.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakResult.Verified.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.<Clone>$() -> Kiln.BlockBreakSphere!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.BlockBreakSphere(Kiln.WorldPosition Center, double Radius, double Margin = 0, double MinimumRadius = 0) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Center.get -> Kiln.WorldPosition	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Center.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Deconstruct(out Kiln.WorldPosition Center, out double Radius, out double Margin, out double MinimumRadius) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Equals(Kiln.BlockBreakSphere? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Margin.get -> double	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Margin.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.MinimumRadius.get -> double	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.MinimumRadius.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Radius.get -> double	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockBreakSphere.Radius.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.Hard = 3 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.ModeratelyHard = 2 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.SlightlyHard = 1 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.Soft = 0 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.Unbreakable = 5 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockHardness.VeryHard = 4 -> Kiln.BlockHardness	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.<Clone>$() -> Kiln.BlockInfo!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.BlockInfo(Kiln.BuildBlockKind Kind, byte Material, byte Fill, Kiln.BlockProvenance Provenance, Kiln.BlockHardness? Hardness, int? Health, int? Damage, Kiln.WorldPosition Center) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Center.get -> Kiln.WorldPosition	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Center.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Damage.get -> int?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Damage.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Deconstruct(out Kiln.BuildBlockKind Kind, out byte Material, out byte Fill, out Kiln.BlockProvenance Provenance, out Kiln.BlockHardness? Hardness, out int? Health, out int? Damage, out Kiln.WorldPosition Center) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Equals(Kiln.BlockInfo? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Fill.get -> byte	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Fill.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Hardness.get -> Kiln.BlockHardness?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Hardness.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Health.get -> int?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Health.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Kind.get -> Kiln.BuildBlockKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Kind.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Material.get -> byte	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Material.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Provenance.get -> Kiln.BlockProvenance	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockInfo.Provenance.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockProvenance	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockProvenance.Natural = 1 -> Kiln.BlockProvenance	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockProvenance.PlayerPlaced = 0 -> Kiln.BlockProvenance	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockProvenance.Unknown = -1 -> Kiln.BlockProvenance	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.<Clone>$() -> Kiln.BlockQueryResult!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.BlockQueryResult(Kiln.BlockInfo? Info, Kiln.BlockRefusal Refusal) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Deconstruct(out Kiln.BlockInfo? Info, out Kiln.BlockRefusal Refusal) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Equals(Kiln.BlockQueryResult? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Found.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Info.get -> Kiln.BlockInfo?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Info.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Ok.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Reason.get -> string?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Refusal.get -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockQueryResult.Refusal.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Base = 20 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Canceled = 23 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.DamageMapFull = 24 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Faulted = 21 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.InvalidArgument = 16 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.NoSession = 9 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.None = 0 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.NotLoaded = 18 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Offline = 8 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.ServiceMissing = 2 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.ServiceOlder = 3 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.SymbolMissing = 1 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Unverified = 22 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.WrongSide = 4 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.WrongThread = 17 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BlockRefusal.Zone = 19 -> Kiln.BlockRefusal	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	Kiln.Build	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	Kiln.BuildBlockKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BuildBlockKind.Air = 0 -> Kiln.BuildBlockKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BuildBlockKind.Building = 2 -> Kiln.BuildBlockKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.BuildBlockKind.Terrain = 1 -> Kiln.BuildBlockKind	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	Kiln.BuildCommands	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.BuildEditEvent	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.BuildEditEvent.Actor.get -> Kiln.EntityId	<=0.2.0-dev.26	<=0.2.1
@@ -10005,6 +10165,10 @@ managed	Kiln.Build	Kiln.CellPos.Y.get -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.CellPos.Y.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.CellPos.Z.get -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.CellPos.Z.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	Kiln.FindWallFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.FindWallFlags.None = 0 -> Kiln.FindWallFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.FindWallFlags.PlayerTerrain = 1 -> Kiln.FindWallFlags	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	Kiln.FindWallFlags.Terrain = 2 -> Kiln.FindWallFlags	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	Kiln.JournalInfo	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.JournalInfo.<Clone>$() -> Kiln.JournalInfo!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.JournalInfo.At.get -> System.DateTimeOffset	<=0.2.0-dev.26	<=0.2.1
@@ -10264,6 +10428,21 @@ managed	Kiln.Build	Kiln.VoxelGrid.TileCells.get -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.VoxelGrid.TileCells.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	Kiln.VoxelGrid.VoxelGrid(double CellSize, Kiln.WorldPosition Origin, int CellsX, int CellsZ, int TileCells, int Level) -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	const Kiln.Schematic.FormatVersion = 1 -> int	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	override Kiln.BlockBreakOptions.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakOptions.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakOptions.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakResult.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakResult.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakResult.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakSphere.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakSphere.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockBreakSphere.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockInfo.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockInfo.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockInfo.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockQueryResult.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockQueryResult.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	override Kiln.BlockQueryResult.ToString() -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	override Kiln.BuildResult.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	override Kiln.BuildResult.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	override Kiln.BuildResult.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -10301,15 +10480,28 @@ managed	Kiln.Build	override Kiln.Voxel.ToString() -> string!	<=0.2.0-dev.26	<=0.
 managed	Kiln.Build	override Kiln.VoxelGrid.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	override Kiln.VoxelGrid.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	override Kiln.VoxelGrid.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	static Kiln.BlockBreakOptions.operator !=(Kiln.BlockBreakOptions? left, Kiln.BlockBreakOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockBreakOptions.operator ==(Kiln.BlockBreakOptions? left, Kiln.BlockBreakOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockBreakResult.operator !=(Kiln.BlockBreakResult? left, Kiln.BlockBreakResult? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockBreakResult.operator ==(Kiln.BlockBreakResult? left, Kiln.BlockBreakResult? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockBreakSphere.operator !=(Kiln.BlockBreakSphere? left, Kiln.BlockBreakSphere? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockBreakSphere.operator ==(Kiln.BlockBreakSphere? left, Kiln.BlockBreakSphere? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockInfo.operator !=(Kiln.BlockInfo? left, Kiln.BlockInfo? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockInfo.operator ==(Kiln.BlockInfo? left, Kiln.BlockInfo? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockQueryResult.operator !=(Kiln.BlockQueryResult? left, Kiln.BlockQueryResult? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Build	static Kiln.BlockQueryResult.operator ==(Kiln.BlockQueryResult? left, Kiln.BlockQueryResult? right) -> bool	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	static Kiln.Build.Add(Kiln.BuildShape shape, byte material, Kiln.BuildOptions? options = null) -> System.Threading.Tasks.Task<Kiln.BuildResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.Available.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.Bases.get -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerBase!>!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	static Kiln.Build.BlockAt(Kiln.WorldPosition position) -> Kiln.BlockQueryResult!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	static Kiln.Build.BoxAround(Kiln.WorldPosition center, double halfX, double halfY, double halfZ) -> Kiln.CellBox	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.BoxBetween(Kiln.WorldPosition a, Kiln.WorldPosition b) -> Kiln.CellBox	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	static Kiln.Build.BreakBox(Kiln.CellBox box, Kiln.BlockBreakOptions? options = null) -> Kiln.BlockBreakResult!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	static Kiln.Build.CellOf(Kiln.WorldPosition p) -> Kiln.CellPos	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.CenterOf(Kiln.CellPos c) -> Kiln.WorldPosition	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.CornerOf(Kiln.CellPos c) -> Kiln.WorldPosition	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.Dig(Kiln.BuildShape shape, Kiln.BuildOptions? options = null) -> System.Threading.Tasks.Task<Kiln.BuildResult!>!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Build	static Kiln.Build.FindWall(Kiln.WorldPosition from, Kiln.WorldPosition to, Kiln.FindWallFlags flags = Kiln.FindWallFlags.None) -> Kiln.BlockQueryResult!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Build	static Kiln.Build.Flatten(Kiln.BuildShape shape, double levelY, byte material = 0, Kiln.BuildOptions? options = null) -> System.Threading.Tasks.Task<Kiln.BuildResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.ForgetPlaced(string! key) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Build	static Kiln.Build.Grid.get -> Kiln.VoxelGrid?	<=0.2.0-dev.26	<=0.2.1
@@ -14633,8 +14825,11 @@ managed	Kiln.Items	Kiln.EquipResult.Ref.get -> Kiln.ItemInstanceRef	0.2.0-dev.27
 managed	Kiln.Items	Kiln.EquipResult.Ref.init -> void	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	Kiln.EquipResult.Replaced.get -> Kiln.ItemId	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	Kiln.EquipResult.Replaced.init -> void	0.2.0-dev.27	0.2.2
+managed	Kiln.Items	Kiln.EquipResult.ReplacedCount.get -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.EquipResult.ReplacedCount.init -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	Kiln.EquipResult.ReplacedEntity.get -> Kiln.EntityId	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	Kiln.EquipResult.ReplacedEntity.init -> void	0.2.0-dev.27	0.2.2
+managed	Kiln.Items	Kiln.EquipResult.ReplacedItem.get -> Kiln.ItemId	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	Kiln.EquipResult.ReplacedRef.get -> Kiln.ItemInstanceRef	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	Kiln.EquipResult.ReplacedRef.init -> void	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	Kiln.EquipResult.ReplacedTo.get -> Kiln.SlotId	0.2.0-dev.27	0.2.2
@@ -15101,6 +15296,14 @@ managed	Kiln.Items	Kiln.GearWriteOptions.Equals(Kiln.GearWriteOptions? other) ->
 managed	Kiln.Items	Kiln.GearWriteOptions.GearWriteOptions() -> void	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.GearWriteOptions.RefuseEquipped.get -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.GearWriteOptions.RefuseEquipped.init -> void	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	Kiln.GiveEquipOptions	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.<Clone>$() -> Kiln.GiveEquipOptions!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.DryRun.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.DryRun.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.Equals(Kiln.GiveEquipOptions? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.GiveEquipOptions() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.Replaced.get -> Kiln.Replaced	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.GiveEquipOptions.Replaced.init -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	Kiln.GiveOptions	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.GiveOptions.AllOrNothing = 2 -> Kiln.GiveOptions	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.GiveOptions.DryRun = 8 -> Kiln.GiveOptions	<=0.2.0-dev.26	<=0.2.1
@@ -15507,6 +15710,9 @@ managed	Kiln.Items	Kiln.RarityUpgradeRule.Socket.get -> Kiln.SocketRule	0.2.0-de
 managed	Kiln.Items	Kiln.RarityUpgradeRule.Socket.init -> void	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.RarityUpgradeRule.Steps.get -> System.Collections.Generic.IDictionary<Kiln.ItemRarity, Kiln.UpgradeStep!>!	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.RarityUpgradeRule.Steps.init -> void	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	Kiln.Replaced	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.Replaced.Backpack = 0 -> Kiln.Replaced	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	Kiln.Replaced.Take = 1 -> Kiln.Replaced	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	Kiln.SetEquipmentChange	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.SetEquipmentChange.Deconstruct(out ulong ItemsTicket, out Kiln.InventorySnapshotToken Snapshot, out Kiln.EquipmentSet! Set, out bool DryRun) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.SetEquipmentChange.DryRun.get -> bool	0.2.0-dev.29	0.2.4
@@ -15804,6 +16010,9 @@ managed	Kiln.Items	override Kiln.GearValuesResult.ToString() -> string!	0.2.0-de
 managed	Kiln.Items	override Kiln.GearWriteOptions.Equals(object? obj) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.GearWriteOptions.GetHashCode() -> int	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.GearWriteOptions.ToString() -> string!	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	override Kiln.GiveEquipOptions.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	override Kiln.GiveEquipOptions.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	override Kiln.GiveEquipOptions.ToString() -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	override Kiln.InstanceEquipment.<Clone>$() -> Kiln.InstanceEquipment!	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	override Kiln.InstanceEquipment.Equals(object? obj) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	override Kiln.InstanceEquipment.GetHashCode() -> int	0.2.0-dev.29	0.2.4
@@ -15942,6 +16151,8 @@ managed	Kiln.Items	static Kiln.GearValuesResult.operator ==(Kiln.GearValuesResul
 managed	Kiln.Items	static Kiln.GearWriteOptions.Default.get -> Kiln.GearWriteOptions!	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.GearWriteOptions.operator !=(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.GearWriteOptions.operator ==(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	static Kiln.GiveEquipOptions.operator !=(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	static Kiln.GiveEquipOptions.operator ==(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	static Kiln.InstanceEquipment.operator !=(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	static Kiln.InventoryContents.operator !=(Kiln.InventoryContents? left, Kiln.InventoryContents? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -15991,6 +16202,8 @@ managed	Kiln.Items	static Kiln.Items.GearWriteAvailable.get -> bool	0.2.0-dev.30
 managed	Kiln.Items	static Kiln.Items.Get(Kiln.ItemId id) -> Kiln.ItemInfo?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Give(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None, Kiln.SlotId? slot = null) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Give(Kiln.EntityId target, string! item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	static Kiln.Items.GiveEquip(Kiln.EntityId player, Kiln.ItemId item, int count, Kiln.EquipmentSlot slot, Kiln.GiveEquipOptions? options = null) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Items	static Kiln.Items.GiveEquipAvailable.get -> bool	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Items	static Kiln.Items.GiveRecipeResult(Kiln.EntityId target, uint recipeId, int count = 1, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Held(Kiln.EntityId player) -> Kiln.ItemInstanceRef	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Lookup(string! nameOrId) -> Kiln.ItemInfo?	<=0.2.0-dev.26	<=0.2.1
@@ -23254,6 +23467,23 @@ managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.Result.get -> int	0.2.0-dev.28
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.Result.init -> void	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.Step.get -> ulong	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.Step.init -> void	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.<Clone>$() -> Kiln.TestKit.FakeCraftSourceRegistration!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Container.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Container.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Deconstruct(out ulong Owner, out Kiln.EntityId Player, out Kiln.EntityId Container, out Kiln.CraftSourceOrder Order, out Kiln.CraftSourceFilter Filter, out System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! Items) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Equals(Kiln.TestKit.FakeCraftSourceRegistration? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.FakeCraftSourceRegistration(ulong Owner, Kiln.EntityId Player, Kiln.EntityId Container, Kiln.CraftSourceOrder Order, Kiln.CraftSourceFilter Filter, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! Items) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Filter.get -> Kiln.CraftSourceFilter	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Filter.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemId>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Items.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Order.get -> Kiln.CraftSourceOrder	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Order.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Owner.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Owner.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Player.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Player.init -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall.Deconstruct(out string! Native, out uint Site) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall.Equals(Kiln.TestKit.FakeEcall other) -> bool	0.2.0-dev.29	0.2.4
@@ -23673,6 +23903,22 @@ managed	Kiln.TestKit	Kiln.TestKit.FakeWorldWrite.Status.get -> Kiln.WorldWriteSt
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorldWrite.Status.init -> void	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorldWrite.Step.get -> ulong	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorldWrite.Step.init -> void	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Hold(Kiln.AmmoListKind kind, Kiln.ItemId weapon, params Kiln.AmmoListRow[]! gameRows) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.KnownItems(Kiln.AmmoListKind kind, params Kiln.ItemId[]! items) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.ModeOf(Kiln.AmmoListKind kind) -> Kiln.AmmoListMode?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.NewSession() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Pick(Kiln.AmmoListKind kind, Kiln.ItemId item) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Player.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Player.set -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Provided(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Publishes.get -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Select(Kiln.AmmoListKind kind, Kiln.ItemId item) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Selected(Kiln.AmmoListKind kind) -> Kiln.ItemId?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Session.get -> uint	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.SetGameRows(Kiln.AmmoListKind kind, params Kiln.AmmoListRow[]! gameRows) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Shown(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessAmmoList.Unhold(Kiln.AmmoListKind kind) -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.HarnessAssets	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessAssets.AddGameBlob(byte[]! bytes) -> string!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessAssets.CatalogGeneration.get -> ulong	0.2.0-dev.28	0.2.3
@@ -23704,6 +23950,10 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessComponentChanges.QueueOverflows.get -> 
 managed	Kiln.TestKit	Kiln.TestKit.HarnessComponentChanges.QueuedFrames.get -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessComponentChanges.SetAttribute(Kiln.EntityId entity, Kiln.ObservedAttribute attribute, int current, int maximum) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessComponentChanges.Watches.get -> int	0.2.0-dev.29	0.2.4
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrafting	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrafting.Dyes(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrafting.Sources.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCraftSourceRegistration!>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrafting.Stock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeControlCall!>!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl.IsControlled(Kiln.EntityId body) -> bool	0.2.0-dev.28	0.2.3
@@ -23730,6 +23980,7 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.IdOf(string! name) -> Kiln.ItemId
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.Of(Kiln.EntityId entity) -> Kiln.TestKit.FakeInventory?	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.PlayerInventories.get -> int	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.PlayerInventories.set -> void	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.SetEquipmentSlotType(Kiln.ItemId item, Kiln.EquipmentSlot slot) -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void	0.2.0-dev.30	0.2.12
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void	0.2.0-dev.30	0.2.12
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void	0.2.0-dev.30	0.2.12
@@ -23859,6 +24110,7 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessWorldTables.StorageFails.set -> void	0.
 managed	Kiln.TestKit	Kiln.TestKit.HarnessWorldTables.TerrainBrushCells(string! mod, string! key) -> byte[]?	0.2.0-dev.30.5	0.2.14
 managed	Kiln.TestKit	Kiln.TestKit.HarnessWorldTables.TerrainItem(string! name, uint item, byte cell) -> void	0.2.0-dev.30.5	0.2.14
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness	0.2.0-dev.26	0.2.1
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.AmmoList.get -> Kiln.TestKit.HarnessAmmoList!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.As(Kiln.TestKit.ModHandle! mod, System.Action! action) -> void	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.As<T>(Kiln.TestKit.ModHandle! mod, System.Func<T>! func) -> T	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Assets.get -> Kiln.TestKit.HarnessAssets!	0.2.0-dev.28	0.2.3
@@ -23870,6 +24122,7 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Combat.get -> Kiln.TestKit.Harness
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ConfigDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ControlDirectory.get -> string!	0.2.0-dev.26	0.2.1
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Crafting.get -> Kiln.TestKit.HarnessCrafting!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.CreatureControl.get -> Kiln.TestKit.HarnessCreatureControl!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.CurrentStep.get -> ulong	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.DataDirectory.get -> string!	0.2.0-dev.26	0.2.1
@@ -24090,6 +24343,9 @@ managed	Kiln.TestKit	override Kiln.TestKit.FakeChatMessage.ToString() -> string!
 managed	Kiln.TestKit	override Kiln.TestKit.FakeControlCall.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	override Kiln.TestKit.FakeControlCall.GetHashCode() -> int	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	override Kiln.TestKit.FakeControlCall.ToString() -> string!	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	override Kiln.TestKit.FakeCraftSourceRegistration.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	override Kiln.TestKit.FakeCraftSourceRegistration.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	override Kiln.TestKit.FakeCraftSourceRegistration.ToString() -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	override Kiln.TestKit.FakeEcall.GetHashCode() -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	override Kiln.TestKit.FakeHealth.ToString() -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	override Kiln.TestKit.FakeHit.ToString() -> string!	0.2.0-dev.27	0.2.2
@@ -24147,6 +24403,8 @@ managed	Kiln.TestKit	static Kiln.TestKit.FakeBlobRegistration.operator !=(Kiln.T
 managed	Kiln.TestKit	static Kiln.TestKit.FakeBlobRegistration.operator ==(Kiln.TestKit.FakeBlobRegistration left, Kiln.TestKit.FakeBlobRegistration right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	static Kiln.TestKit.FakeControlCall.operator !=(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	static Kiln.TestKit.FakeControlCall.operator ==(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	static Kiln.TestKit.FakeCraftSourceRegistration.operator !=(Kiln.TestKit.FakeCraftSourceRegistration? left, Kiln.TestKit.FakeCraftSourceRegistration? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	static Kiln.TestKit.FakeCraftSourceRegistration.operator ==(Kiln.TestKit.FakeCraftSourceRegistration? left, Kiln.TestKit.FakeCraftSourceRegistration? right) -> bool	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	static Kiln.TestKit.FakeEcall.operator !=(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	static Kiln.TestKit.FakeEcall.operator ==(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	static Kiln.TestKit.FakeImpactArg.Bool(bool value) -> Kiln.TestKit.FakeImpactArg!	0.2.0-dev.29	0.2.4
@@ -24613,6 +24871,53 @@ managed	Kiln.Tools	static Kiln.ToolMaterialStock.operator !=(Kiln.ToolMaterialSt
 managed	Kiln.Tools	static Kiln.ToolMaterialStock.operator ==(Kiln.ToolMaterialStock? left, Kiln.ToolMaterialStock? right) -> bool	0.2.0-dev.30.5	0.2.14
 managed	Kiln.Tools	static Kiln.ToolMaterials.Available.get -> bool	0.2.0-dev.30.5	0.2.14
 managed	Kiln.Tools	static Kiln.ToolMaterials.TrySnapshot(Kiln.EntityId actor, Kiln.ItemId tool, out Kiln.ToolMaterialSnapshot? snapshot) -> bool	0.2.0-dev.30.5	0.2.14
+managed	Kiln.Ui	Kiln.AmmoListContext	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.GameLists(Kiln.ItemId item) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.GameRows.get -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Held.get -> Kiln.ItemId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Kind.get -> Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Player.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Revision.get -> ulong	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Session.get -> uint	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListContext.Truncated.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListKind.Arrow = 1 -> Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListKind.Spell = 2 -> Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListMode	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListMode.Append = 1 -> Kiln.AmmoListMode	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListMode.Replace = 2 -> Kiln.AmmoListMode	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions.<Clone>$() -> Kiln.AmmoListOptions!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions.AmmoListOptions() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions.Equals(Kiln.AmmoListOptions? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions.Mode.get -> Kiln.AmmoListMode	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListOptions.Mode.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.<Clone>$() -> Kiln.AmmoListPick!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.AmmoListPick(Kiln.AmmoListKind Kind, Kiln.ItemId Item, int Count) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Count.get -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Count.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Deconstruct(out Kiln.AmmoListKind Kind, out Kiln.ItemId Item, out int Count) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Equals(Kiln.AmmoListPick? other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Item.get -> Kiln.ItemId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Item.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Kind.get -> Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListPick.Kind.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider.Active.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider.Dispose() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider.Kinds.get -> Kiln.AmmoListKind	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider.Mode.get -> Kiln.AmmoListMode	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListProvider.Refresh() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.AmmoListRow() -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.AmmoListRow(Kiln.ItemId Item, int Count) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Count.get -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Count.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Deconstruct(out Kiln.ItemId Item, out int Count) -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Equals(Kiln.AmmoListRow other) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Item.get -> Kiln.ItemId	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	Kiln.AmmoListRow.Item.init -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	Kiln.Color	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.Color.A.get -> byte	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.Color.A.init -> void	<=0.2.0-dev.26	<=0.2.1
@@ -25224,6 +25529,7 @@ managed	Kiln.Ui	Kiln.TooltipPlace	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	Kiln.TooltipPlace.AfterStats = 1 -> Kiln.TooltipPlace	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	Kiln.TooltipPlace.End = 0 -> Kiln.TooltipPlace	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	Kiln.Ui	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.Ui.AmmoList	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	Kiln.Ui.Crafting	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.Ui.Inventory	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	Kiln.Ui.Menus	<=0.2.0-dev.26	<=0.2.1
@@ -26114,6 +26420,8 @@ managed	Kiln.Ui	Kiln.WorldOutline.Entity.get -> Kiln.EntityId	0.2.0-dev.30.3	0.2
 managed	Kiln.Ui	Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.WorldOutline.State.get -> Kiln.OutlineState	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Ui	const Kiln.Ui.AmmoList.ListCapability = "ui.ammo.list" -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	const Kiln.Ui.AmmoList.PickCapability = "ui.ammo.pick" -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!	0.2.0-dev.30	0.2.12
@@ -26135,6 +26443,13 @@ managed	Kiln.Ui	const Kiln.UiWheel.HoldCtrl = 17 -> uint	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	const Kiln.UiWheel.HoldShift = 16 -> uint	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	const Kiln.UiWheel.MaxEntries = 64 -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	const Kiln.UiWheel.PageEntries = 8 -> int	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	override Kiln.AmmoListOptions.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListOptions.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListOptions.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListPick.Equals(object? obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListPick.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListPick.ToString() -> string!	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	override Kiln.AmmoListRow.GetHashCode() -> int	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	override Kiln.Color.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.CraftingPanelOptions.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.CraftingPanelOptions.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
@@ -26238,6 +26553,12 @@ managed	Kiln.Ui	override Kiln.VisibleSlotsResult.ToString() -> string!	0.2.0-dev
 managed	Kiln.Ui	override Kiln.VisibleSlotsSnapshot.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	override Kiln.VisibleSlotsSnapshot.GetHashCode() -> int	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	override Kiln.VisibleSlotsSnapshot.ToString() -> string!	0.2.0-dev.28	0.2.3
+managed	Kiln.Ui	static Kiln.AmmoListOptions.operator !=(Kiln.AmmoListOptions? left, Kiln.AmmoListOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.AmmoListOptions.operator ==(Kiln.AmmoListOptions? left, Kiln.AmmoListOptions? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.AmmoListPick.operator !=(Kiln.AmmoListPick? left, Kiln.AmmoListPick? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.AmmoListPick.operator ==(Kiln.AmmoListPick? left, Kiln.AmmoListPick? right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.AmmoListRow.operator !=(Kiln.AmmoListRow left, Kiln.AmmoListRow right) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.AmmoListRow.operator ==(Kiln.AmmoListRow left, Kiln.AmmoListRow right) -> bool	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	static Kiln.Color.FromRgba(uint rgba) -> Kiln.Color	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Color.operator !=(Kiln.Color left, Kiln.Color right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Color.operator ==(Kiln.Color left, Kiln.Color right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -26310,6 +26631,10 @@ managed	Kiln.Ui	static Kiln.StatusLines.WriteToLog(Kiln.Logger? log = null) -> v
 managed	Kiln.Ui	static Kiln.TooltipLine.operator !=(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	static Kiln.TooltipLine.operator ==(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	static Kiln.Ui.AddConfigPage(string! modId, System.Action<Kiln.UiDraw!>! draw) -> System.IDisposable!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	static Kiln.Ui.AmmoList.Available.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.Ui.AmmoList.Picked -> System.Action<Kiln.AmmoListPick!>?	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.Ui.AmmoList.PicksAvailable.get -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	static Kiln.Ui.AmmoList.Provide(Kiln.AmmoListKind kinds, System.Func<Kiln.AmmoListContext!, System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!>! rows, Kiln.AmmoListOptions? options = null) -> Kiln.AmmoListProvider!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	static Kiln.Ui.Available.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Ui.Crafting.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.CraftingScreen>! draw, Kiln.CraftingPanelOptions? options = null) -> System.IDisposable!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Ui.Crafting.AddSubcategory(uint workshop, int tab, Kiln.UiText! label, System.Collections.Generic.IEnumerable<uint>! recipes) -> Kiln.CraftingMenuAddition?	<=0.2.0-dev.26	<=0.2.1
@@ -26464,6 +26789,8 @@ managed	Kiln.Ui	virtual Kiln.UiBarProvider.Invoke(in Kiln.UiValueContext context
 managed	Kiln.Ui	virtual Kiln.UiTooltipLinesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipLines!	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	virtual Kiln.UiTooltipProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipDecision!	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipScale!	0.2.0-dev.30	0.2.12
+managed	Kiln.Ui	~override Kiln.AmmoListRow.Equals(object obj) -> bool	0.2.0-dev.30.6	0.2.15
+managed	Kiln.Ui	~override Kiln.AmmoListRow.ToString() -> string	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	~override Kiln.Color.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	~override Kiln.Color.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	~override Kiln.CraftingScreen.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -27638,6 +27965,9 @@ native	services/kiln_boot.h	services/kiln_boot.h:KilnBootApiV1:stage	0.2.0-dev.2
 native	services/kiln_boot.h	services/kiln_boot.h:KilnBootApiV1:status	0.2.0-dev.28	0.2.3
 native	services/kiln_boot.h	services/kiln_boot.h:KilnBootApiV1:stop_start	0.2.0-dev.29	0.2.4
 native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:bases	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:block_at	0.2.0-dev.30.6	0.2.15
+native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:break_box	0.2.0-dev.30.6	0.2.15
+native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:find_wall	0.2.0-dev.30.6	0.2.15
 native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:grid	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:grid_for_session	0.2.0-dev.30.3	0.2.13
 native	services/kiln_build.h	services/kiln_build.h:KilnBuildApi:item_material	<=0.2.0-dev.10	<=0.2.0
@@ -27977,6 +28307,7 @@ native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:gear_status	0.2.
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:gear_upgrade	0.2.0-dev.30	0.2.12
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:gear_write	0.2.0-dev.30	0.2.12
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:give	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:give_equip	0.2.0-dev.30.6	0.2.15
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:instances_status	0.2.0-dev.26	0.2.1
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:item_at	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:item_count	<=0.2.0-dev.10	<=0.2.0
@@ -28191,6 +28522,7 @@ native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:tracked_at	<=0.2
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:tracked_count	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:world_key	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:world_state	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:add_source	0.2.0-dev.30.6	0.2.15
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_at	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_at_position	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_count	0.2.0-dev.29.14	0.2.6
@@ -28200,6 +28532,7 @@ native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_st
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_storage	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:base_water	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:cancel	0.2.0-dev.29.14	0.2.6
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:cancel_sources	0.2.0-dev.30.6	0.2.15
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:category	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:category_at	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:collect	0.2.0-dev.29.17	0.2.9
@@ -28212,9 +28545,12 @@ native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:output_
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:plan	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:recipe	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:recipe_inputs	0.2.0-dev.29.14	0.2.6
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:remove_source	0.2.0-dev.30.6	0.2.15
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:set_craft_stock	0.2.0-dev.29.17	0.2.9
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:set_dye_stock	0.2.0-dev.30.6	0.2.15
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:set_fill_answers	0.2.0-dev.29.19	0.2.11
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:set_output_source	0.2.0-dev.29.17	0.2.9
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:source_stock	0.2.0-dev.30.6	0.2.15
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:station_read	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:stations	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:status	0.2.0-dev.29.14	0.2.6
@@ -28424,6 +28760,9 @@ native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:window_rect	<=0.2.0-dev.1
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:in_menu	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:subscribe	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:unsubscribe	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_ui_ammo.h	services/kiln_ui_ammo.h:KilnUiAmmoApi:context	0.2.0-dev.30.6	0.2.15
+native	services/kiln_ui_ammo.h	services/kiln_ui_ammo.h:KilnUiAmmoApi:publish	0.2.0-dev.30.6	0.2.15
+native	services/kiln_ui_ammo.h	services/kiln_ui_ammo.h:KilnUiAmmoApi:take_picks	0.2.0-dev.30.6	0.2.15
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:mapping	0.2.0-dev.30	0.2.12
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:screen_view	0.2.0-dev.30	0.2.12
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:slot_at	0.2.0-dev.30	0.2.12

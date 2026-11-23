@@ -1,5 +1,43 @@
 # Ui (Kiln.Ui): part 1 of 2
 
+## AmmoListContext `0.2.15` — What a list is built for now: handed to a provider of `AmmoList.Provide`, which is asked again whenever any of it changes (`AmmoListContext.Revision`).
+- `GameLists(ItemId item) -> bool` — Whether `item` is among `AmmoListContext.GameRows`, the game's rows as last built.
+- `GameRows { get; } -> IReadOnlyList<AmmoListRow>` — The game's own rows, in its order, with their counts, as the game last built them (up to 64; a picture, not proof...
+- `Held { get; } -> ItemId` — The weapon the list is built for (the bow, the staff); default when the game did not say.
+- `Kind { get; } -> AmmoListKind` — The list (one kind).
+- `Player { get; } -> EntityId` — The local player.
+- `Revision { get; } -> ulong` — Changes whenever the held weapon, the game's own rows or counts, or the session change.
+- `Session { get; } -> uint` — The client world session the list belongs to (`Client.ClientWorldSession`).
+- `Truncated { get; } -> bool` — Kiln reported that rows were cut at 64 (the game's own list was longer, so `AmmoListContext.GameRows` are its first...
+
+## AmmoListKind `0.2.15` — Which of the HUD's lists (`AmmoList`).
+enum: Arrow, Spell
+
+## AmmoListMode `0.2.15` — How a provider's rows go into the game's list.
+enum: Append, Replace
+
+## AmmoListOptions `0.2.15` — How `AmmoList.Provide` composes a provider's rows.
+- `Mode { get; init; } -> AmmoListMode` — After the game's rows (default) or instead of them.
+
+## AmmoListPick `0.2.15` — The player picked a mod's row the game cannot equip itself (the item is not in the backpack): the game did nothing, so the mod's server half can do the swap.
+- `AmmoListPick(AmmoListKind Kind, ItemId Item, int Count)`
+- `Count { get; init; } -> int` — The count the row showed (a picture, not inventory authority).
+- `Item { get; init; } -> ItemId` — The item of the row the mod provided.
+- `Kind { get; init; } -> AmmoListKind` — The list the row was picked in: `AmmoListKind.Arrow` or `AmmoListKind.Spell`.
+
+## AmmoListProvider `0.2.15` — A provider of `AmmoList.Provide`: dispose it to take its rows out (the game's own list shows again once no provider is left).
+- `Active { get; } -> bool` — False once disposed or its mod unloaded.
+- `Dispose() -> void` — Takes the rows out at the next UI frame.
+- `Kinds { get; } -> AmmoListKind` — The lists it provides rows for.
+- `Mode { get; } -> AmmoListMode` — Its mode.
+- `Refresh() -> void` — Asks for the rows again at the next UI frame: for rows that depend on the mod's own data (what its server sent)...
+
+## AmmoListRow `0.2.15` — A row of an ammunition or spell list: the item and the count shown next to it (a picture: the count is not inventory).
+- `AmmoListRow()`
+- `AmmoListRow(ItemId Item, int Count)`
+- `Count { get; init; } -> int` — The number shown next to it, a picture, not inventory; a negative count shows as 0.
+- `Item { get; init; } -> ItemId` — The item the row shows.
+
 ## Color — An RGBA colour.
 - `Color()`
 - `Color(byte R, byte G, byte B, byte A = 255)`
@@ -440,6 +478,14 @@ enum: End, AfterStats
 - `static Status { get; } -> UiStatus` — Overlay diagnostics.
 - `static Window(string title, Action<UiDraw> draw, UiWindowOptions? options = null) -> UiWindow` — Creates a window drawn by `draw` every frame while open.
 
+## Ui.AmmoList `0.2.15` — The HUD's ammunition (arrows) and spell lists: rows a mod adds or puts in place of the game's, and picks of rows the game cannot equip itself (`AmmoList.Picked`).
+- `static Available { get; } -> bool` — Whether `AmmoList.Provide` works on this game build (capability `ui.ammo.list`)...
+- `const ListCapability = "ui.ammo.list" -> string` — The capability row of `AmmoList.Provide`: the game build's list builder is measured.
+- `const PickCapability = "ui.ammo.pick" -> string` — The capability row of `AmmoList.Picked`: the build's pick of a list row is measured, so Kiln can keep the game from...
+- `static Picked -> Action<AmmoListPick>?` — One of this mod's rows that the game cannot equip itself (the item is not in the backpack) was selected: the game...
+- `static PicksAvailable { get; } -> bool` — Whether `AmmoList.Picked` works on this game build (capability `ui.ammo.pick`).
+- `static Provide(AmmoListKind kinds, Func<AmmoListContext, IReadOnlyList<AmmoListRow>> rows, AmmoListOptions? options = null) -> AmmoListProvider` — Adds rows to the lists in `kinds` (or puts them in place of the game's rows, `AmmoListOptions.Mode`) until the...
+
 ## Ui.Crafting — The game's crafting menus: `Ui.Crafting.Current`, `AddPanel`, `AddTab`, `AddSubcategory`.
 - `static AddPanel(UiText title, Action<UiDraw, CraftingScreen> draw, CraftingPanelOptions? options = null) -> IDisposable` — A panel drawn next to every open crafting menu (or those `CraftingPanelOptions.When` picks), with the menu's...
 - `static AddSubcategory(uint workshop, int tab, UiText label, IEnumerable<uint> recipes) -> CraftingMenuAddition?` — A new subcategory with its own label at the end of tab `tab` (index, -1 = the last) of `workshop`'s crafting menu.
@@ -520,24 +566,3 @@ enum: End, AfterStats
 - `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
 - `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
 - `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
-
-## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
-- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
-- `Current { get; init; } -> uint?` — The current number; null keeps it.
-- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
-- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
-- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
-- `static readonly None -> UiBarEdit` — Changes nothing.
-
-## UiBarProvider `0.2.3` — A value provider.
-- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
-
-## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
-- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
-- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
-- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
-- `LabelOverride { get; init; } -> UiText?` — The label.
-- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.
-
-## UiChildFlags — Flags of `UiDraw.BeginChild`.
-enum: None, Border, Padding, AutoHeight, FrameStyle, NavFlattened
