@@ -3,7 +3,9 @@
 // validate body_layout() against the running type registry before calling lower_body, then apply TemplateEdit
 // to the returned bytes. Cooked rig/slot/closure and material admission belong to that adapter, not this serializer.
 #pragma once
+#include <functional>
 #include <span>
+#include "nlohmann/json.hpp"
 
 #include "questbuild.h"
 
@@ -32,4 +34,14 @@ struct BodySpec {
 // Failure leaves out and the input unchanged. Payloads remain at their original absolute offsets; only component
 // variant headers move. Old headers and removed payloads remain unreachable bytes, not live components.
 bool lower_body(const uint8_t* res, size_t len, const BodySpec& spec, Bytes* out, std::string* err);
+// G2: renderer admission, separate from source-derived identity. Servers do not ask for a renderer or borrow
+// author-side output hashes. read_source is bound to a contained, bounded mod-file reader by the boot adapter.
+struct BodyMaterialContext {
+    bool server = false;
+    std::function<bool(const std::string& file, Bytes* bytes, std::string* why)> read_source;
+    std::function<bool(nlohmann::ordered_json* report, std::string* why)> build_status;
+    std::function<bool(const Guid& guid, uint32_t type)> served;
+};
+bool check_body_materials(const std::string& mod, const nlohmann::ordered_json& materials,
+    const BodyMaterialContext& context, std::string* why);
 }  // namespace kiln::qb

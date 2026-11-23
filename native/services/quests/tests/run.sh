@@ -20,8 +20,11 @@ ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initiali
 ASAN_OPTIONS=detect_leaks=0 "$out/native_pack_test" "$out"
 # Fisher's portable body serializer: argument and finite-value boundaries (full roundtrips in tools/kfc/tests).
 ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
-  -I"$here/.." "$here/bodypack_test.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/bodypack_test"
+  -I"$here/.." -I"$here/../../../third_party" "$here/bodypack_test.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/bodypack_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/bodypack_test"
+${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
+  -I"$here/.." -I"$here/../../../third_party" "$here/body_material_test.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/body_material_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/body_material_test"
 # per-mod native boot rollback (16f): the real publisher with failure injection and isolated owners
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
   -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \

@@ -689,6 +689,27 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                             raise CP.Refused(f"{file}: {uri!r}: an NPC dependency must belong to this mod")
                         relative = Path(*parts).as_posix()
                         sources[relative] = hashlib.sha256(CP.source(recipe_path, relative).read_bytes()).hexdigest()
+        # Materials are source dependencies even when this machine has no renderer/model metadata. Keep these
+        # hashes identical on a server and client; local output hashes never enter cross-machine identity.
+        material_sources = []
+        def texture_sources(value):
+            if isinstance(value, dict):
+                for child in value.values():
+                    texture_sources(child)
+            elif isinstance(value, str) and value.lower().endswith(".png"):
+                checked = CP.source(recipe_path, value)
+                sources[checked.relative_to(root).as_posix()] = hashlib.sha256(checked.read_bytes()).hexdigest()
+        for material_file in sorted((Path(root) / "blocks").glob("*.json")):
+            relative = material_file.relative_to(root).as_posix()
+            raw = CP.source(recipe_path, relative).read_bytes()
+            document = object_value(json.loads(_relaxed(raw.decode("utf-8"))), material_file.name)
+            material_blocks = object_value(document.get("materials") or {}, f"{material_file.name}.materials")
+            if material_blocks:
+                sources[relative] = hashlib.sha256(raw).hexdigest()
+            for key, block in material_blocks.items():
+                block = object_value(block, f"{material_file.name}.materials.{key}")
+                material_sources.append((relative, key, block))
+                texture_sources(block)
         source_hash = hashlib.sha256(json.dumps({"specs": specs, "sources": sources}, sort_keys=True,
                                                 separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         selected = set(selected) if selected is not None else {e["file"] for e in entries} if specs else set()
@@ -751,23 +772,23 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                 if file.is_file():
                     dependency(file.relative_to(root).as_posix())
             from .graphgen import derive
-            for material_file in sorted((Path(root) / "blocks").glob("*.json")):
-                document = object_value(json.loads(_relaxed(CP.source(recipe_path, material_file.relative_to(root).as_posix()).read_text())), material_file.name)
-                material_blocks = object_value(document.get("materials") or {}, f"{material_file.name}.materials")
-                for key, block in material_blocks.items():
-                    block = object_value(block, f"{material_file.name}.materials.{key}")
-                    if not model or derive(graph["mod"] if graph else _manifest_id(root), "material", block.get("was") or key) not in model.get("materials", []):
-                        continue
-                    item = dependency(material_file.relative_to(root).as_posix())
-                    if item not in materials:
-                        materials.append(item)
-                    def textures(value):
-                        if isinstance(value, dict):
-                            for v in value.values():
-                                textures(v)
-                        elif isinstance(value, str) and value.lower().endswith(".png"):
-                            dependency(value)
-                    textures(block)
+            material_mod = _manifest_id(root) if model and model.get("materials") and material_sources else None
+            for file, key, block in material_sources:
+                if material_mod is None:
+                    continue
+                guid = block.get("replaces") or derive(material_mod, "material", block.get("was") or key)
+                if guid not in model.get("materials", []):
+                    continue
+                if block.get("replaces"):
+                    raise BlocksError(f"npcs.{name}.body.materials[{key}]: a material replacement is not an owned body dependency")
+                materials.append(dict(dependency(file), mod=material_mod, name=key, guid=guid))
+                def textures(value):
+                    if isinstance(value, dict):
+                        for child in value.values():
+                            textures(child)
+                    elif isinstance(value, str) and value.lower().endswith(".png"):
+                        dependency(value)
+                textures(block)
             if model and model_current:
                 if not model.get("boundingBox"):
                     raise BlocksError(f"npcs.{name}.body.size: the cooked model has no bounds; cook again")
@@ -779,8 +800,9 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                             "graph": graph.get("guid") if graph else None, "skeleton": graph.get("skeleton") if graph else None,
                             "bindings": bindings, "materialBlocks": materials, "files": [dependencies[k] for k in sorted(dependencies)],
                             "complete": bool(model and graph and bindings and anim_current and model_current and wanted and
-                                             all(e.get("sha256") and e.get("sourceHash") == source_hash for e in wanted) and not materials)}
-        doc = {"format": 1, "sourceHash": source_hash, "entries": wanted, "bodies": bodies}
+                                             all(e.get("sha256") and e.get("sourceHash") == source_hash for e in wanted))}
+        doc = {"format": 1, "sourceHash": source_hash, "sources": [{"file": file, "sha256": sources[file]} for file in sorted(sources)],
+               "entries": wanted, "bodies": bodies}
         have = {(e["kind"], e["file"]): e for e in old_entries}
         missing = [e for e in deferred if (e["kind"], e["file"]) not in have]
         mismatch = [e for e in deferred if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]

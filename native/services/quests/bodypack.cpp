@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // The selected Fisher contract, chapter 16f section 5.2. Layout metadata only, never copied game defaults.
 #include "bodypack.h"
+#include "../../core/abi/services/kiln_capacity_util.hpp"
 
 #include <algorithm>
 #include <array>
@@ -213,5 +214,82 @@ bool lower_body(const uint8_t* res, size_t len, const BodySpec& spec, Bytes* out
     *out = std::move(b);
     if (err) err->clear();
     return true;
+}
+bool check_body_materials(const std::string& mod, const nlohmann::ordered_json& materials,
+                         const BodyMaterialContext& context, std::string* why) {
+    const auto fail = [&](const std::string& detail) { if (why) *why = "body.materials: " + detail; return false; };
+    if (why) why->clear();
+    if (context.server) return true;  // no renderer on this side; source identity is checked by the body admission
+    try {
+        if (!materials.is_array() || materials.size() > 512) return fail("a list of at most 512 same-mod materials is required; cook again");
+        if (materials.empty()) return true;
+        if (!context.read_source || !context.build_status || !context.served)
+            return fail("kiln.vfx material build status and kiln.assets material reads are required on clients");
+        nlohmann::ordered_json report;
+        std::string reason;
+        std::map<std::string, std::string> source_hashes;
+        std::set<std::string> names;
+        std::set<std::string> guids;
+        struct Material { std::string name; Guid guid; };
+        std::vector<Material> wanted;
+        for (const auto& row : materials) {
+            if (!row.is_object()) return fail("each material must record its mod, block name, GUID, source file and SHA-256; cook again");
+            for (const char* key : {"mod", "name", "guid", "file", "sha256"})
+                if (!row.contains(key) || !row[key].is_string()) return fail(std::string("missing material ") + key + "; cook again");
+            const auto name = row["name"].get<std::string>(), file = row["file"].get<std::string>(), digest = row["sha256"].get<std::string>();
+            if (row["mod"].get<std::string>() != mod) return fail(name + ": cross-mod material dependencies are not supported");
+            if (name.empty() || name.size() > 256 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+                })) return fail("invalid material block name");
+            Guid guid;
+            if (!parse_guid(row["guid"].get<std::string>(), &guid) || guid.zero()) return fail(name + ": a nonzero material GUID is required");
+            if (!names.insert(name).second || !guids.insert(guid_text(guid)).second) return fail(name + ": duplicate material identity");
+            if (!file.starts_with("blocks/") || file.find('\\') != std::string::npos || file.find('\0') != std::string::npos)
+                return fail(name + ": the source must be a contained blocks file");
+            for (size_t at = 0; at < file.size();) {
+                const size_t end = file.find('/', at);
+                const std::string part = file.substr(at, end == std::string::npos ? end : end - at);
+                if (part.empty() || part == "." || part == "..") return fail(name + ": the source must be a contained blocks file");
+                if (end == std::string::npos) break;
+                at = end + 1;
+                if (at == file.size()) return fail(name + ": the source must name a file");
+            }
+            if (digest.size() != 64 || !std::all_of(digest.begin(), digest.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+                return fail(name + ": the source SHA-256 is invalid; cook again");
+            auto [source, fresh] = source_hashes.try_emplace(file);
+            if (fresh) {
+                Bytes bytes;
+                if (!context.read_source(file, &bytes, &reason)) return fail(name + ": " + reason);
+                if (bytes.size() > (16u << 20)) return fail(name + ": the material source exceeds 16 MiB");
+                const char* data = bytes.empty() ? "" : reinterpret_cast<const char*>(bytes.data());
+                const auto hash = kiln::capacity::sha256(std::string_view(data, bytes.size()));
+                kiln::capacity::detail::hex(source->second, hash.data(), hash.size());
+            }
+            if (source->second != digest) return fail(name + ": source file SHA-256 changed; cook again");
+            wanted.push_back({name, guid});
+        }
+        if (!context.build_status(&report, &reason)) return fail("kiln.vfx build status unavailable: " + reason);
+        if (!report.is_object() || !report.contains("materials") || !report["materials"].is_array() || report["materials"].size() > 16384)
+            return fail("kiln.vfx returned an invalid material build report");
+        // A report row is emitted only for a built/carried material. Global ok is neither sufficient (a missing
+        // row must refuse) nor necessary (an unrelated VFX may have failed). Replacements never satisfy ownership.
+        for (const auto& material : wanted) {
+            size_t matches = 0;
+            for (const auto& built : report["materials"]) {
+                if (!built.is_object() || !built.contains("mod") || built["mod"] != mod ||
+                    !built.contains("name") || built["name"] != material.name || !built.contains("guid") || !built["guid"].is_string()) continue;
+                Guid guid;
+                if (!parse_guid(built["guid"].get<std::string>(), &guid) || !(guid == material.guid)) continue;
+                if (built.contains("replaces") && (!built["replaces"].is_boolean() || built["replaces"].get<bool>()))
+                    return fail(material.name + ": a material replacement is not an owned body dependency");
+                ++matches;
+            }
+            if (matches != 1) return fail(material.name + ": kiln.vfx did not build exactly one same-mod material with this block name and GUID");
+            if (!context.served(material.guid, hash("keen::RenderMaterialResource")))
+                return fail(material.name + ": kiln.assets does not serve the built material resource");
+        }
+        return true;
+    } catch (const std::exception& error) { return fail(std::string("material admission failed: ") + error.what()); }
+    catch (...) { return fail("material admission failed with an unknown error"); }
 }
 }  // namespace kiln::qb

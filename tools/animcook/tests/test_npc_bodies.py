@@ -107,6 +107,45 @@ class NpcBodies(unittest.TestCase):
         (self.mod / "kiln.mod.json").write_text('{ // material id\n "id": "npc-mod", }')
         self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True))
 
+    def test_material_admission_records_each_block_identity_not_just_a_shared_JSON_file(self):
+        import hashlib
+        from anicook.graphgen import derive
+        file = self.mod / "blocks/skin.json"
+        file.write_text(json.dumps({"format": 1, "materials": {"skin": {"roughness": .5}, "tint": {"was": "stable-tint", "roughness": .7}}}))
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        entries = self.stage_model()
+        side = self.mod / "assets/cooked/models_golem.model.json"
+        model = json.loads(side.read_text())
+        guids = {"skin": derive("npc-mod", "material", "skin"), "tint": derive("npc-mod", "material", "stable-tint")}
+        model["materials"] = list(guids.values())
+        side.write_text(json.dumps(model))
+        B.body_manifest(self.recipe, entries, True)
+        body = json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())["bodies"]["tobin"]
+        self.assertEqual({"skin", "tint"}, {m["name"] for m in body["materialBlocks"]})
+        for material in body["materialBlocks"]:
+            self.assertEqual("npc-mod", material["mod"])
+            self.assertEqual(guids[material["name"]], material["guid"])
+            self.assertEqual("blocks/skin.json", material["file"])
+            self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(), material["sha256"])
+        self.assertTrue(body["complete"], "prepared for native admission, not a claim that materials were published or that the body is Ready")
+
+    def test_material_sources_and_textures_remain_in_source_identity_without_renderer_metadata(self):
+        import hashlib
+        texture = self.mod / "models/skin.png"
+        texture.write_bytes(b"synthetic texture source")
+        material = self.mod / "blocks/skin.json"
+        material.write_text(json.dumps({"format": 1, "materials": {"skin": {"albedo": "models/skin.png"}}}))
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        cache = self.mod / "assets/cooked/npc-bodies.v1.json"
+        before = json.loads(cache.read_text())
+        self.assertEqual([], before["bodies"]["tobin"]["materialBlocks"], "no renderer metadata has selected materials")
+        sources = {row["file"]: row["sha256"] for row in before["sources"]}
+        for file in (texture, material):
+            self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(), sources[file.relative_to(self.mod).as_posix()])
+        texture.write_bytes(b"changed synthetic source")
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        self.assertNotEqual(before["sourceHash"], json.loads(cache.read_text())["sourceHash"])
+
     def test_a_shared_creature_rig_is_refused_before_its_manifest_changes(self):
         import copy
         npc = copy.deepcopy(self.doc["npcs"]["tobin"])

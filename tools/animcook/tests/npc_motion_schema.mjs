@@ -33,3 +33,36 @@ const wrongRole = structuredClone(fixture.npcMotions["explicit-key"]);
 wrongRole.bindings[0].interactionKey = wrongRole.bindings.find(row => row.role === "interaction").interactionKey;
 check(wrongRole, false, "a non-interaction role cannot take a key");
 console.log(`NPC motion schema: ${count} cases passed`);
+
+// The local cache records per-block material identity and source hashes, not an assertion of runtime Ready.
+const vector = JSON.parse(readFileSync(join(root, "mods/tests/npc-motion-contract/vector.json"), "utf8"));
+const hash = "0".repeat(64);
+const cache = {
+    format: 1, sourceHash: hash, sources: [{ file: "models/rig.gltf", sha256: hash }], entries: [],
+    bodies: { tobin: {
+        key: "tobin", sourceHash: hash, model: vector.model.guid, graph: vector.graph.guid, skeleton: vector.model.skeleton,
+        spec: { key: "tobin", body: vector.body, animation: vector.animation, motions: vector.motions,
+            skeletonName: "rig", graphName: vector.graph.name, modelName: "models/rig" },
+        bindings: vector.expected, files: [], complete: true,
+        materialBlocks: [{ mod: vector.mod, name: "skin", guid: vector.model.guid, file: "blocks/skin.json", sha256: hash }],
+    } },
+};
+const validateCache = ajv.getSchema("npc-bodies.schema.json");
+let cacheCount = 0;
+function checkCache(value, expected, name) {
+    assert.equal(validateCache(value), expected, `${name}: ${JSON.stringify(validateCache.errors)}`);
+    cacheCount++;
+}
+checkCache(cache, true, "prepared body with one material");
+for (const [field, value] of [["mod", false], ["guid", "bad-guid"], ["sha256", "bad-hash"], ["file", 3], ["extra", true]]) {
+    const bad = structuredClone(cache);
+    bad.bodies.tobin.materialBlocks[0][field] = value;
+    checkCache(bad, false, `invalid material ${field}`);
+}
+const anonymous = structuredClone(cache);
+delete anonymous.bodies.tobin.materialBlocks[0].name;
+checkCache(anonymous, false, "file hash alone does not identify a material block");
+const noSources = structuredClone(cache);
+delete noSources.sources;
+checkCache(noSources, false, "old cache requires a recook to record sources");
+console.log(`NPC body cache schema: ${cacheCount} cases passed`);
