@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+# Pure NPC motion phase retiming (16f), with no game memory or resource files.
+"$here/run-motionpack.sh"
 out=${KILN_OUT:?set KILN_OUT}/flame-host
 mkdir -p "$out"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
