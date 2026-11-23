@@ -281,7 +281,6 @@ void missing_lowerer_and_collection_refusals() {
 struct Mod {
     std::map<std::string, std::string> files;
     bool client = true;
-    std::set<std::pair<std::string, uint32_t>> served;
     ojson cache, spec;
     std::string closure = std::string(64, 'c');
     Mod() {
@@ -336,7 +335,6 @@ struct Mod {
             return true;
         };
         e.layout = [](std::string*) { return true; };
-        e.served = [this](const Guid& g, uint32_t type) { return served.count({guid_text(g), type}) != 0; };
         e.materials.server = !client;
         return e;
     }
@@ -415,27 +413,29 @@ void admission_of_the_local_cache() {
         CHECK(why.rfind("npcs.tobin: ", 0) == 0);
     }
     {
-        std::printf("-- 16f S3 admission: a body defined in code needs its cooked resources served (the model only on clients)\n");
+        // review3 M2: a body defined in code (Kiln.Blocks' NPC files) has no cooked source identity and skips G2's material check: v1
+        // refuses it, on a client and on a server, with the way to define it (blocks/*.json), and never asks for its resources
+        std::printf("-- 16f admission: a body defined in code is refused (no source identity, no material check): blocks/*.json\n");
         Mod m;
+        bool asked = false;
+        auto env = m.env();
+        env.materials.build_status = [&](ojson*, std::string* why) { asked = true; *why = "not asked"; return false; };
         ModInput in;
         in.id = "code-mod";
         in.authored_body = true;
         const ojson code_body = {{"model", kModel}, {"graph", kGraph}, {"skeleton", kSkeleton}, {"size", {{"radius", .5}, {"height", 1.5}}}};
         const ojson npc = {{"template", kBodyChassis}, {"body", code_body}};
         in.documents = {ojson{{"npcs", {{"bram", npc}}}}};
-        ojson assets; std::string why;
-        ModInput first = in;
-        CHECK(!bodyadmit::admit(&first, m.env(), &assets, &why));
-        CHECK(why.find("graph is not served") != std::string::npos);
-        m.served.insert({kGraph, kGraphTypeHash});
-        ModInput second = in;
-        CHECK(!bodyadmit::admit(&second, m.env(), &assets, &why));
-        CHECK(why.find("model is not served on this game client") != std::string::npos);
-        m.client = false;
-        ModInput server = in;
-        CHECK(bodyadmit::admit(&server, m.env(), &assets, &why));
-        CHECK(assets["entries"].empty());  // its resources are the mod's ordinary assets.json entries
-        CHECK(server.documents[0]["npcs"]["bram"]["body"].value("model", "") == kModel);
+        for (const bool client : {true, false}) {
+            env.client = client;
+            ModInput copy = in;
+            ojson assets; std::string why;
+            CHECK(!bodyadmit::admit(&copy, env, &assets, &why));
+            if (why.find("blocks/*.json") == std::string::npos) std::printf("admission said: %s\n", why.c_str());
+            CHECK(why.rfind("npcs.bram: ", 0) == 0);
+            CHECK(why.find("defined in C#") != std::string::npos && why.find("blocks/*.json") != std::string::npos);
+        }
+        CHECK(!asked);
     }
     {
         std::printf("-- 16f S3 admission: the type registry refusal names the chassis\n");

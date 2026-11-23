@@ -810,11 +810,6 @@ qb::bootpack::Backend pack_backend(const qb::GameData& game, kc::bootpack::Call 
                 return read_mod_file(dir, file, max, out, reason);
             };
             env.layout = &body_layout_ok;
-            env.served = [](const qb::Guid& guid, uint32_t type) {
-                const uint8_t* data = nullptr;
-                size_t size = 0;
-                return res_read(guid, type, &data, &size);
-            };
             if (client) env.materials = material_context(mod->dir);
             return qb::bodyadmit::admit(mod, env, assets, why);
         };

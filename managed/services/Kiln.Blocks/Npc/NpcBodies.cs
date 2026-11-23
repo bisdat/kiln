@@ -2,8 +2,9 @@
 // Whether an NPC block's body of its own is in the game (package 16f, chapter 16f §5.4). The game builds roster NPCs once, at start,
 // before any mod's code runs: kiln-quests' boot build lowers each authored body (native_pack.cpp) and reports one row per body in its
 // manifest (Kiln.Network's NpcBodyRows: ready, failed with the refusal, removed since the last start). What happens later in this
-// process is managed: a body defined from C# after that build waits for the next start (PendingRestart), and a mod unloaded while its
-// body is Ready leaves the body in the game until the process ends (RemovalPendingRestart). NpcBodyBuildChangedEvent says each change
+// process is managed: a body defined from C# is refused in this version (it would have no cooked source identity for the join check and
+// no material check: review3 M2), and a mod unloaded while its body is Ready leaves the body in the game until the process ends
+// (RemovalPendingRestart). NpcBodyBuildChangedEvent says each change
 // once: on a dedicated server at the first service tick after it, on a game client on the main thread before the client world's next
 // step (Client.Post).
 namespace Kiln;
@@ -11,8 +12,8 @@ namespace Kiln;
 /// <summary>Where an NPC block's body of its own stands (<see cref="NpcBodies.Status(string)"/>).</summary>
 public enum NpcBodyBuildState
 {
-    /// <summary>Defined from code after this start's boot build: the game builds roster bodies only at start, so it is there from the
-    /// next start. A handle never means Ready.</summary>
+    /// <summary>Defined after this start's boot build, to be built at the next start. Not reported in this version: a body defined from
+    /// code is <see cref="Failed"/> (define it in blocks/*.json).</summary>
     PendingRestart,
     /// <summary>This start's boot build published it: the NPC has this body.</summary>
     Ready,
@@ -40,7 +41,10 @@ public static class NpcBodies
 {
     // the reason of a well-formed key that has no build record
     internal const string NoDefinition = "NoDefinition";
-    internal const string StagedReason = "definition staged; restart required";
+    /// <summary>The refusal of a body defined from C# (the native admission's bodyadmit.h kCodeBody says the same).</summary>
+    internal const string CodeReason =
+        "an authored roster body defined in C# is not built in this version (it has no cooked source identity for the join check and no material " +
+        "check): define the NPC block in blocks/*.json";
     internal const string UnloadedReason = "removal staged; restart required: the mod was unloaded, its body stays in the game until the process ends";
     internal const string RemovedReason = "removed: the body was built at the previous start and is not any more";
 
@@ -72,10 +76,8 @@ public static class NpcBodies
 
     // ---- inside ------------------------------------------------------------------------------------------------------------
 
-    private sealed record Staged(string Mod, string Name, string Key, Guid Template, Guid Model, Guid Graph);
-
     private static readonly object Gate = new();
-    private static readonly Dictionary<string, Staged> Late = new(StringComparer.Ordinal);          // mod:block -> code definition
+    private static readonly Dictionary<string, (string Mod, string Name)> Code = new(StringComparer.Ordinal);  // mod:block -> defined from code
     private static readonly HashSet<string> SeenLoaded = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Unloaded = new(StringComparer.Ordinal);
     private static readonly Dictionary<(string Mod, string Name), NpcBodyBuildResult> Published = new();
@@ -122,29 +124,25 @@ public static class NpcBodies
 
     private static Guid G(string s) => Guid.TryParse(s, out var g) ? g : Guid.Empty;
 
-    /// <summary>The status now: the boot build's row with what this process did since (a late definition, an unload).</summary>
+    /// <summary>The status now: the boot build's row with what this process did since (a definition from code, an unload).</summary>
     private static NpcBodyBuildResult Current(string mod, string name, string? key = null) => Compute(mod, name, NpcBodyRows.All, key);
 
-    /// <summary><paramref name="key"/>: the block's key (its Was, else its name), what a definition from code is written under and so what
-    /// the build's row may name instead of the block.</summary>
+    /// <summary><paramref name="key"/>: the block's key (its Was, else its name), what the build's row may name instead of the block.</summary>
     private static NpcBodyBuildResult Compute(string mod, string name, IReadOnlyList<NpcBodyRow> rows, string? key = null)
     {
         var blockKey = $"{mod}:{name}";
-        Staged? late;
-        bool unloaded;
+        bool code, unloaded;
         lock (Gate)
         {
-            Late.TryGetValue(blockKey, out late);
+            code = Code.ContainsKey(blockKey);
             unloaded = Unloaded.Contains(mod);
         }
-        key ??= late?.Key ?? name;
+        // a body defined from C# is not built in this version, whatever the start built under that name (review3 M2)
+        if (code) return new(false, CodeReason, NpcBodyBuildState.Failed, mod, blockKey, Guid.Empty, Guid.Empty, Guid.Empty, 0);
+        key ??= name;
         var row = rows.FirstOrDefault(r => r.Mod == mod && r.Npc == name) ?? rows.FirstOrDefault(r => r.Mod == mod && r.Key == key);
         var built = row == null ? null : new NpcBodyBuildResult(false, null, NpcBodyBuildState.Failed, row.Mod, row.BlockKey, G(row.Template), G(row.Model),
             G(row.Graph), row.Generation);
-        // A definition from code after the boot build waits for the next start, unless the start built that very body (the file
-        // written for an earlier start: the same model and graph).
-        if (late != null && !(built != null && row!.State == NpcBodyRow.Ready && built.Model == late.Model && built.Graph == late.Graph))
-            return new(false, StagedReason, NpcBodyBuildState.PendingRestart, mod, blockKey, late.Template, late.Model, late.Graph, built?.Generation ?? 0);
         if (built == null) return NoRecord(mod, name);
         return row!.State switch
         {
@@ -156,18 +154,16 @@ public static class NpcBodies
         };
     }
 
-    /// <summary>NpcCompiler: an NPC block with a body of its own was defined from code (after the boot build).</summary>
-    internal static void StagedFromCode(string mod, string name, string blockKey, Guid template, Guid model, Guid graph)
+    /// <summary>NpcCompiler: an NPC block with a body of its own was defined from code. Refused in this version (<see cref="CodeReason"/>):
+    /// NpcCompiler writes no file for it, and nothing waits for a restart.</summary>
+    internal static void DefinedFromCode(string mod, string name)
     {
         var key = $"{mod}:{name}";
-        var staged = new Staged(mod, name, blockKey, template, model, graph);
         lock (Gate)
         {
-            if (Late.TryGetValue(key, out var had) && had == staged) return;
-            Late[key] = staged;
+            if (!Code.TryAdd(key, (mod, name))) return;
             _version++;
         }
-        NpcBodyRows.SetLate(key, Current(mod, name).State == NpcBodyBuildState.PendingRestart);
         Kick();
     }
 
@@ -177,10 +173,9 @@ public static class NpcBodies
         var key = $"{mod}:{name}";
         lock (Gate)
         {
-            if (!Late.Remove(key)) return;
+            if (!Code.Remove(key)) return;
             _version++;
         }
-        NpcBodyRows.SetLate(key, false);
         Kick();
     }
 
@@ -253,7 +248,7 @@ public static class NpcBodies
             var keys = new SortedSet<(string Mod, string Name)>(Comparer<(string Mod, string Name)>.Create((a, b) =>
                 string.CompareOrdinal(a.Mod, b.Mod) is var c and not 0 ? c : string.CompareOrdinal(a.Name, b.Name)));
             foreach (var r in rows) keys.Add((r.Mod, r.Npc));
-            foreach (var s in Late.Values) keys.Add((s.Mod, s.Name));
+            foreach (var s in Code.Values) keys.Add(s);
             foreach (var k in Published.Keys) keys.Add(k);
             foreach (var key in keys)
             {
@@ -278,17 +273,11 @@ public static class NpcBodies
 
     private static IReadOnlyList<NpcBodyRow>? _flushedRows;
 
-    /// <summary>The bodies this process has defined late from code, as "mod:block".</summary>
-    internal static IReadOnlyList<string> LateKeys()
-    {
-        lock (Gate) return Late.Keys.Order(StringComparer.Ordinal).ToList();
-    }
-
     internal static void ResetForTests()
     {
         lock (Gate)
         {
-            Late.Clear();
+            Code.Clear();
             SeenLoaded.Clear();
             Unloaded.Clear();
             Published.Clear();

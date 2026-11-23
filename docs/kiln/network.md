@@ -139,7 +139,7 @@ all, would see another body or none, so the server compares what each side's sta
 | `kiln.npcbodies` | SHA-256, lower-case hex, over the sorted lines `<mod>:<npc block>:<closure hash>` of this side's Ready bodies, joined with `\n`; empty when there are none |
 | `kiln.npcbodies.count` | how many Ready bodies |
 | `kiln.npcbodies.list` | the lines themselves, comma-separated, as many whole lines as fit 2048 bytes (at most 64), so a refusal can name the first body that differs; the hash and the count still cover every body |
-| `kiln.npcbodies.pending` | only from a game with a body defined in C# after its start (`PendingRestart`): those `mod:block` keys, cut the same way |
+| `kiln.npcbodies.pending` | only from a game with bodies waiting for its restart (`PendingRestart`; this version sends none, since a body defined in C# is refused): those `mod:block` keys, cut the same way |
 
 The closure hash is the boot build's per-body hash (the canonical body and motion spec, the owned files' hashes, the
 chassis layout); the rows come from kiln.knowledge's `native_manifest` (`"bodies"`). A peer that sends no

@@ -345,8 +345,8 @@ Events.On<NpcBodyBuildChangedEvent>(e => Log.Info($"{e.After.BlockKey}: {e.Befor
 | `State` | `Ok` | Meaning |
 |---|---|---|
 | `Ready` | true | this start's boot build published the body; `Template`, `Model`, `Graph` and `Generation` say what it built |
-| `Failed` | false | the boot build refused it, and `Reason` is the refusal (layout, dependency, ownership, roster, network clearance). A well-formed key with no build record at all is `Failed` with the reason `NoDefinition` |
-| `PendingRestart` | false | defined from C# after the start's build (below); `Reason` is `definition staged; restart required` |
+| `Failed` | false | the boot build refused it, and `Reason` is the refusal (layout, dependency, ownership, roster, network clearance), or it was defined in C# (below). A well-formed key with no build record at all is `Failed` with the reason `NoDefinition` |
+| `PendingRestart` | false | not reported in this version (a body defined in C# is `Failed`, below) |
 | `RemovalPendingRestart` | false | the mod was unloaded while the body was Ready. What the game built stays until the process ends; nothing live is taken away |
 | `Removed` | false | Ready at the previous start (the native ledger `kiln-quests/native/npc-bodies.ledger.json`) and gone now |
 
@@ -360,20 +360,21 @@ dedicated server it is posted on the tick thread at the first service tick after
 (`ClientSide` true) on the main thread before the client world's next step, so a handler there must not assume the
 server's tick. Observe only.
 
-#### Pending restart
+#### A body defined in C#
 
-An NPC block with a body of its own defined in C# (`Blocks.Define` in `OnLoad`) is known only after the start's build
-has run. Kiln writes it for the next start (as every NPC block from code, above) and reports it `PendingRestart`
-until then. If the start already built that very body (the same model and graph, from the file an earlier start
-wrote) it is `Ready`. Put authored bodies in `blocks/*.json` to have them on the first start.
+An NPC block with a body of its own defined in C# (`Blocks.Define` in `OnLoad`) is not built in this version. Its
+definition is checked as any block's (a bad one is still a `BlockError`), but Kiln writes no file for the next start, the
+status is `Failed` with the reason *an authored roster body defined in C# is not built in this version (...): define the
+NPC block in blocks/\*.json*, and `kiln.log` says the same. Such a body would have no cooked source identity for the join
+check and skip the client's material check. Put authored bodies in `blocks/*.json`: they are built at the first start.
 
 #### The join check
 
 Players need the same bodies as the server, built the same way: having the mod installed is not enough. HELLO and
 WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure hash ([network.md](../network.md#npc-bodies-at-the-join)),
-and the server refuses a player whose bodies differ, naming the first body that does. A player whose game defined a body
-after its start (`PendingRestart`) is refused with a restart-required reason. `modSync: off` waives this check, as it
-waives the player animation graph's: such a player joins (also with a late `PendingRestart` body) and the server only logs
+and the server refuses a player whose bodies differ, naming the first body that does. A player whose game says a body
+waits for its restart (the handshake's `pending` key; this version sends none) is refused with a restart-required reason.
+`modSync: off` waives this check, as it waives the player animation graph's: such a player joins and the server only logs
 a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies.
 
 Not verified in a real game yet: the server's model GUID from the body manifest against a player's cooked model, the

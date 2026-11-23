@@ -161,21 +161,6 @@ bool admit_block(const ModInput& mod, const Env& env, const std::string& name, o
     return true;
 }
 
-bool admit_code(const Env& env, const std::string& name, ojson* body, std::string* why) {
-    const auto fail = [&](const std::string& detail) { *why = "npcs." + name + ": " + detail; return false; };
-    Guid model, graph;
-    const ojson size = member(*body, "size");
-    if (!parse_guid(text(*body, "model"), &model) || model.zero() || !parse_guid(text(*body, "graph"), &graph) || graph.zero() ||
-        !size.is_object() || !member(size, "radius").is_number() || !member(size, "height").is_number())
-        return fail("a body defined in code needs its cooked model, graph and size");
-    if (!env.served) return fail("kiln.assets cannot be asked for the body's cooked resources");
-    if (!env.served(graph, fnv1a(kGraphType, std::strlen(kGraphType)))) return fail("its cooked graph is not served; cook the mod");
-    if (env.client && !env.served(model, fnv1a(kModelType, std::strlen(kModelType)))) return fail("its cooked model is not served on this game client; cook the mod");
-    const ojson bindings = member(*body, "bindings");
-    *body = {{"model", guid_text(model)}, {"graph", guid_text(graph)}, {"size", size},
-             {"bindings", bindings.is_array() ? bindings : ojson::array()}, {"closure", ""}, {"block", name}};
-    return true;
-}
 }  // namespace
 
 bool contained(const std::string& file) {
@@ -228,12 +213,12 @@ bool admit(ModInput* mod, const Env& env, ojson* assets, std::string* why) {
                     }
                     layout_checked = true;
                 }
-                if (body.contains("block")) {
-                    if (!admit_block(*mod, env, name, &body, &cache, &cache_read, why)) return false;
-                    from_blocks = true;
-                } else if (!admit_code(env, name, &body, why)) {
+                if (!body.contains("block")) {  // review3 M2: no cooked source identity and no G2 material check for these in v1
+                    *why = "npcs." + name + ": " + kCodeBody;
                     return false;
                 }
+                if (!admit_block(*mod, env, name, &body, &cache, &cache_read, why)) return false;
+                from_blocks = true;
             }
         }
     } catch (const std::exception& error) {

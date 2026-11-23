@@ -1043,12 +1043,16 @@ internal static class NpcCompiler
             }
             def.ModId = mod;
             Quests.DefineNpc(def);
-            // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for the next start
-            if (!fromData) NpcFiles.Put(mod, key, file);
+            // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for
+            // the next start, and never one with a body of its own: this version builds those from blocks/*.json only (NpcBodies.CodeReason, its status)
+            if (!fromData && ownBody == null) NpcFiles.Put(mod, key, file);
             else NpcFiles.Forget(mod, key);
-            // a body of its own from code is built at the next start: PendingRestart until then (NpcBodies.Status)
             if (ownBody == null || fromData) NpcBodies.FromData(mod, name);
-            else NpcBodies.StagedFromCode(mod, name, key, cloneGuid, Guid.Parse((string)ownBody["model"]!), Guid.Parse((string)ownBody["graph"]!));
+            else
+            {
+                NpcBodies.DefinedFromCode(mod, name);
+                BlocksBridge.Log(LogLevel.Warn, $"blocks: {mod}: npc {name}: {NpcBodies.CodeReason}");
+            }
         });
         return new BlockHandle<NpcBlock>(mod, name, cloneGuid, cloneName, n);
     }

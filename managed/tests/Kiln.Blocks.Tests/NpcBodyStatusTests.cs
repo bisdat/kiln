@@ -122,9 +122,11 @@ public sealed class NpcBodyStatusTests
         var npc = new NpcBlock { Name = "Tobin", Was = "tobin", Body = Bodies.Fisher };
         var handle = new BlockHandle<NpcBlock>(Mod, "tobin-renamed", BlockIds.Derive(Mod, "npc", "tobin"), $"Kiln_{Mod}_tobin", npc);
         Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status(handle).State);
-        // the same body defined from code under that key: the start built it, so it is not late
-        NpcBodies.StagedFromCode(Mod, "tobin-renamed", "tobin", Template, Model, Graph);
-        Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status($"{Mod}:tobin-renamed").State);
+        // the same body defined from code: v1 builds authored bodies from data files only, so it is refused whatever the start built
+        // (review3 M2), and nothing waits for a restart
+        NpcBodies.DefinedFromCode(Mod, "tobin-renamed");
+        Assert.Equal(NpcBodyBuildState.Failed, NpcBodies.Status($"{Mod}:tobin-renamed").State);
+        Assert.Contains("blocks/*.json", NpcBodies.Status($"{Mod}:tobin-renamed").Reason);
         Assert.Empty(NpcBodyRows.Late);
     }
 
@@ -239,32 +241,32 @@ public sealed class NpcBodyStatusTests
     }
 
     [Fact]
-    public void A_code_definition_after_the_boot_build_is_PendingRestart_and_a_handle_never_implies_Ready()
+    public void A_body_defined_from_code_is_Failed_with_the_way_to_define_it_and_a_handle_never_implies_Ready()
     {
+        // review3 M2: a body from C# has no cooked source identity for the join check and no material check: v1 refuses it and says to
+        // define it in blocks/*.json; nothing waits for a restart, so the handshake sends no pending key
         using var s = new Scope();
-        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);
+        NpcBodies.DefinedFromCode(Mod, "tobin");
         var r = NpcBodies.Status($"{Mod}:tobin");
-        Assert.Equal((false, "definition staged; restart required", NpcBodyBuildState.PendingRestart), (r.Ok, r.Reason, r.State));
-        Assert.Equal((Template, Model, Graph), (r.Template, r.Model, r.Graph));
-        Assert.Equal([$"{Mod}:tobin"], NpcBodyRows.Late);
-        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);  // the same definition again (a reload): no second event
+        Assert.Equal((false, NpcBodyBuildState.Failed), (r.Ok, r.State));
+        Assert.Contains("defined in C#", r.Reason);
+        Assert.Contains("blocks/*.json", r.Reason);
+        Assert.Equal((Guid.Empty, Guid.Empty, Guid.Empty, 0UL), (r.Template, r.Model, r.Graph, r.Generation));
+        Assert.Empty(NpcBodyRows.Late);
+        NpcBodies.DefinedFromCode(Mod, "tobin");  // the same definition again (a reload): no second event
         var e = Assert.Single(s.Events);
-        Assert.Equal((NpcBodyBuildState.Failed, NpcBodyBuildState.PendingRestart), (e.Before.State, e.After.State));
+        Assert.Equal((NpcBodyBuildState.Failed, "NoDefinition", NpcBodyBuildState.Failed, r.Reason), (e.Before.State, e.Before.Reason, e.After.State, e.After.Reason));
         NpcBodies.FromData(Mod, "tobin");  // now from a data file: the boot build's record is the status
         Assert.Equal("NoDefinition", NpcBodies.Status($"{Mod}:tobin").Reason);
-        Assert.Empty(NpcBodyRows.Late);
     }
 
     [Fact]
-    public void A_code_definition_the_boot_build_already_made_is_Ready_and_a_changed_one_waits()
+    public void A_body_defined_from_code_is_Failed_even_where_the_start_built_one_under_that_name()
     {
         using var s = new Scope(Row("tobin", "ready"));
-        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);
-        Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status($"{Mod}:tobin").State);
+        NpcBodies.DefinedFromCode(Mod, "tobin");
+        Assert.Equal(NpcBodyBuildState.Failed, NpcBodies.Status($"{Mod}:tobin").State);
         Assert.Empty(NpcBodyRows.Late);
-        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Guid.NewGuid(), Graph);
-        Assert.Equal(NpcBodyBuildState.PendingRestart, NpcBodies.Status($"{Mod}:tobin").State);
-        Assert.Equal([$"{Mod}:tobin"], NpcBodyRows.Late);
     }
 
     [Fact]

@@ -19,7 +19,7 @@ public sealed partial class KilnHarness
 /// <para><b>Modelled.</b> The rows a start's boot build reports, one per NPC block (<c>mod</c>, block name): Ready with the clone, model,
 /// graph, closure hash and generation it built, Failed with the refusal, Removed (built at the previous start, gone now).
 /// <c>NpcBodies.Status</c> answers from them as in a game, with what the harness's mods did since: a body defined from code is
-/// PendingRestart, a Ready body of a mod that unloads is RemovalPendingRestart. <c>NpcBodyBuildChangedEvent</c> comes once per change at
+/// Failed (this version builds authored bodies from blocks/*.json only), a Ready body of a mod that unloads is RemovalPendingRestart. <c>NpcBodyBuildChangedEvent</c> comes once per change at
 /// the next step. The row <c>blocks.npc_body</c> switched off (<c>Capabilities.Override</c>) makes <c>Status</c> throw.</para>
 /// <para><b>Not modelled</b> (offline): the boot build itself (cooking, admission, the motion closure and its hash): nothing is built
 /// from a mod's files, the test says what was.</para>

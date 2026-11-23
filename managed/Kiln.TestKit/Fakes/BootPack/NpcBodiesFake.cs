@@ -50,7 +50,7 @@ internal sealed class NpcBodiesFake : IKitFake
 
     public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("NPC bodies (NpcBodies.Status)", CoverageKind.RecordingFake, [Row],
         "the boot build's rows of NPC blocks with a body of their own, scripted with KilnHarness.NpcBodies (Ready, Failed with a reason, " +
-        "Removed): NpcBodies.Status by handle and by mod:block key, PendingRestart for a body defined from code, RemovalPendingRestart " +
+        "Removed): NpcBodies.Status by handle and by mod:block key, Failed for a body defined from code (built from blocks/*.json only), RemovalPendingRestart " +
         "after the mod unloads, one NpcBodyBuildChangedEvent per change at the next step, and the handshake's kiln.npcbodies. Not modelled: " +
         "the native boot build itself (cooking, admission, the closure hash: the test gives them), the rest of kiln.knowledge"));
 

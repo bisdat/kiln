@@ -9,9 +9,9 @@
 //    machine's cook cache assets/cooked/npc-bodies.v1.json to describe exactly that spec, re-hashes every authored
 //    source and every cooked output it lists, and returns the cooked resources for publication under the mod's own
 //    bootpack owner. A server has no renderer output: its model id comes from the cook's RenderModel entry.
-//  - an NPC defined in code at an earlier start (Kiln.Blocks NpcFiles, kiln-quests/native/<mod>.blocks.json): its body
-//    names cooked ids {model, graph, size}; its resources are the mod's ordinary assets.json entries, which kiln.assets
-//    serves already. Admission checks they are served (the model on clients only).
+//  - an NPC defined in code (Kiln.Blocks NpcFiles, kiln-quests/native/<mod>.blocks.json, written by a Kiln before 16f's
+//    review3): its body names only cooked ids, with no source identity for the join check and no G2 material check, so v1
+//    refuses it (kCodeBody). Kiln.Blocks no longer writes one: it reports the same reason as the body's status.
 // Every admitted body becomes {"model", "graph", "size": {radius, height}, "bindings", "closure"} for compile_pack.
 // A refusal names the NPC and the reason and the whole mod is refused (nothing of it is published).
 #pragma once
@@ -27,6 +27,10 @@ inline constexpr size_t kMaxCache = 4u << 20;
 inline constexpr size_t kMaxFile = 64u << 20;
 inline constexpr const char* kModelType = "keen::RenderModel";
 inline constexpr const char* kGraphType = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0";
+// The refusal of a body defined in C# (Kiln.Blocks NpcBodies.CodeReason says the same).
+inline constexpr const char* kCodeBody =
+    "an authored roster body defined in C# is not built in this version (it has no cooked source identity for the join check and no material "
+    "check): define the NPC block in blocks/*.json";
 
 struct Env {
     bool client = false;
@@ -36,8 +40,6 @@ struct Env {
     std::function<bool(std::string* why)> layout;
     // Clients: kiln.vfx's material build report and kiln.assets' served resources (bodypack.h check_body_materials).
     BodyMaterialContext materials;
-    // A resource the game is served now (a code-defined body's ordinary assets.json entries).
-    std::function<bool(const Guid& guid, uint32_t type)> served;
 };
 
 // A mod-relative path the cooker may name: forward slashes, no empty, "." or ".." part, no drive or root.
