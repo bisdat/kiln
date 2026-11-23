@@ -80,6 +80,8 @@ public enum LootPick
 }
 
 /// <summary>What a roll gave: an item, by the name the game and <c>Items.Give</c> know it by, and how many.</summary>
+/// <param name="Item">The item's name in the game.</param>
+/// <param name="Count">How many, 1..65535.</param>
 public readonly record struct LootStack(string Item, int Count);
 
 /// <summary>What <see cref="Blocks.Define{T}"/> gives back for a loot table: roll it, drop it, give it.</summary>
