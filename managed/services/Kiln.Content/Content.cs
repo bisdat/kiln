@@ -86,6 +86,9 @@ public static unsafe partial class Content
     /// <summary>Drop tables (default inventories of enemies and fixed chests), as the game has used them so far.</summary>
     public static ContentRegistry Drops { get; } = new(ContentKind.Drops);
 
+    /// <summary>The registry of <paramref name="kind"/>: <see cref="Items"/>, <see cref="Recipes"/>,
+    /// <see cref="Loot"/> or <see cref="Drops"/>. Throws <see cref="ArgumentOutOfRangeException"/> for another
+    /// value.</summary>
     public static ContentRegistry Registry(ContentKind kind) => kind switch
     {
         ContentKind.Items => Items,
@@ -460,6 +463,7 @@ public sealed unsafe class ContentRegistry : IReadOnlyList<ContentEntry>
 
     internal ContentRegistry(ContentKind kind) => Kind = kind;
 
+    /// <summary>Which registry this is.</summary>
     public ContentKind Kind { get; }
 
     /// <summary>Entries in the registry (0 until <see cref="Content.Ready"/>).</summary>
@@ -474,6 +478,8 @@ public sealed unsafe class ContentRegistry : IReadOnlyList<ContentEntry>
         }
     }
 
+    /// <summary>The entry at <paramref name="index"/>, 0 to <see cref="Count"/> - 1. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for an index outside the registry.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public ContentEntry this[int index]
@@ -502,10 +508,12 @@ public sealed unsafe class ContentRegistry : IReadOnlyList<ContentEntry>
         return rc == ContentNative.Ok ? new ContentEntry(this, e) : null;
     }
 
+    /// <summary>The entry with this id (an item's id, a recipe's id), or null.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public ContentEntry? Get(uint id) => Get("0x" + id.ToString("x8"));
 
+    /// <summary>The entry of this item, or null.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public ContentEntry? Get(ItemId item) => Get(item.Value);
@@ -555,6 +563,7 @@ public sealed unsafe class ContentRegistry : IReadOnlyList<ContentEntry>
         return _byPath != null && _byPath.TryGetValue(path, out var f) ? f : null;
     }
 
+    /// <summary>Every entry of the registry, in order. It reads each one from the game as you go.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public IEnumerator<ContentEntry> GetEnumerator()
@@ -581,14 +590,19 @@ public sealed unsafe class ContentEntry
         fixed (byte* g = e.Guid) Guid = new Guid(new ReadOnlySpan<byte>(g, 16));
     }
 
+    /// <summary>The registry the entry belongs to.</summary>
     public ContentKind Kind => _registry.Kind;
+    /// <summary>The entry's id: the item's id for items and loot, the recipe's id for recipes.</summary>
     public uint Id { get; }
+    /// <summary>The entry's debug name.</summary>
     public string Name { get; }
+    /// <summary>The entry's GUID.</summary>
     public Guid Guid { get; }
 
     /// <summary>At least one field differed from the game's original when this handle was made.</summary>
     public bool Modified { get; }
 
+    /// <summary>The kind, the name and the id, for logs.</summary>
     public override string ToString() => $"{Kind} {Name} (0x{Id:x8})";
 
     // ---- values ----
@@ -603,6 +617,8 @@ public sealed unsafe class ContentEntry
     [RequiresCapability("kiln.content")]
     public ContentValue Original(string path) => Read(path, original: true);
 
+    /// <summary>The current value of a field as a number: <see cref="Get(string)"/> read as
+    /// <see cref="ContentValue.AsDouble"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public double GetNumber(string path) => Get(path).AsDouble;
@@ -614,20 +630,24 @@ public sealed unsafe class ContentEntry
     public void Set(string path, double value) =>
         Write(path, new ContentNative.Value { Type = (uint)ContentValueType.Float, F = value, I = (long)value });
 
+    /// <summary>As <see cref="Set(string, double)"/>, with an integer value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public void Set(string path, long value) =>
         Write(path, new ContentNative.Value { Type = (uint)ContentValueType.Int, I = value, F = value });
 
+    /// <summary>As <see cref="Set(string, double)"/>, with an integer value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public void Set(string path, int value) => Set(path, (long)value);
 
+    /// <summary>As <see cref="Set(string, double)"/>, with a boolean value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public void Set(string path, bool value) =>
         Write(path, new ContentNative.Value { Type = (uint)ContentValueType.Bool, I = value ? 1 : 0, F = value ? 1 : 0 });
 
+    /// <summary>As <see cref="Set(string, double)"/>, with a time (written in seconds).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.content")]
     public void Set(string path, TimeSpan value) =>

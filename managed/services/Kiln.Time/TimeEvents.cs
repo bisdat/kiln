@@ -21,11 +21,13 @@ public sealed class TimeSetEvent : KilnEvent
     /// <summary>The time set (hours, 0..24).</summary>
     public double Hours { get; }
 
+    /// <summary>How the clock was moved.</summary>
     public TimeSetMode Mode { get; }
 
     /// <summary>Id of the mod whose code set it ("kiln" for Kiln itself).</summary>
     public string By { get; }
 
+    /// <summary>A one-line description: the old and new time, the mode and who set it.</summary>
     public override string ToString() => $"time set {Time.Format(Before)} -> {Time.Format(Hours)} ({Mode}) by {By}";
 }
 
@@ -55,6 +57,8 @@ public sealed class TimeSpeedChangedEvent : KilnEvent
     /// <summary>Id of the mod whose code set it ("kiln" for Kiln itself).</summary>
     public string By { get; }
 
+    /// <summary>A one-line description: the old and new held speed ("game" when the game decides) and who set
+    /// it.</summary>
     public override string ToString() => $"clock speed {Before?.ToString("0.###") ?? "game"} -> {After?.ToString("0.###") ?? "game"} by {By}";
 }
 
@@ -70,6 +74,7 @@ public sealed class DayStartedEvent : KilnEvent
     /// <summary>The clock when Kiln noticed.</summary>
     public DayTimeState State { get; }
 
+    /// <summary>The time of day when Kiln noticed (hours, 0..24; <see cref="DayTimeState.Hours"/>).</summary>
     public double Hours => State.Hours;
 }
 
@@ -80,7 +85,10 @@ public sealed class NightStartedEvent : KilnEvent
 
     internal NightStartedEvent(DayTimeState state) => State = state;
 
+    /// <summary>The clock when Kiln noticed.</summary>
     public DayTimeState State { get; }
+
+    /// <summary>The time of day when Kiln noticed (hours, 0..24; <see cref="DayTimeState.Hours"/>).</summary>
     public double Hours => State.Hours;
 }
 

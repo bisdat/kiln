@@ -9,34 +9,56 @@ namespace Kiln;
 /// <summary>A game content key: a resource GUID, a type and a part index.</summary>
 public readonly struct AssetKey
 {
+    /// <summary>The resource's GUID, in the game's byte order (the same as <see cref="Guid.ToByteArray()"/>).</summary>
     public Guid Guid { get; }
+    /// <summary>The type hash: FNV-1a-32 of the qualified reflection type name (like <c>keen::ItemInfo</c>).</summary>
     public uint Type { get; }
+    /// <summary>The part index; usually 0.</summary>
     public uint Part { get; }
+    /// <summary>A key from a resource GUID, an already hashed type and a part index.</summary>
     public AssetKey(Guid guid, uint type, uint part = 0) { Guid = guid; Type = type; Part = part; }
     /// <summary>A key by a reflection type name (e.g. "keen::RenderModel"); the hash is FNV-1a-32.</summary>
     public AssetKey(Guid guid, string typeName, uint part = 0) : this(guid, Assets.TypeHash(typeName), part) { }
+    /// <summary>The type hash of <c>keen::UiTextureResource</c> (an item or UI icon texture).</summary>
     public const uint UiTextureType = AssetsNative.TypeUiTexture;
+    /// <summary>The type hash of <c>keen::ItemInfo</c> (an item's data resource).</summary>
     public const uint ItemInfoType = AssetsNative.TypeItemInfo;
 }
 
 /// <summary>A content blob hash (keen::ContentHash): the identity of a streamed blob (texture pixels, mesh data).</summary>
 public readonly struct ContentHash : IEquatable<ContentHash>
 {
+    /// <summary>The blob's size in bytes.</summary>
     public uint Size { get; }
+    /// <summary>The first 32-bit word of the blob's hash.</summary>
     public uint H0 { get; }
+    /// <summary>The second 32-bit word of the blob's hash.</summary>
     public uint H1 { get; }
+    /// <summary>The third 32-bit word of the blob's hash.</summary>
     public uint H2 { get; }
     internal ContentHash(uint size, uint h0, uint h1, uint h2) { Size = size; H0 = h0; H1 = h1; H2 = h2; }
+    /// <summary>The hash as <c>size-h0-h1-h2</c>, with the three words in lower-case hex.</summary>
     public override string ToString() => $"{Size}-{H0:x8}-{H1:x8}-{H2:x8}";
+    /// <summary>True when size and all three hash words are equal.</summary>
     public bool Equals(ContentHash other) => Size == other.Size && H0 == other.H0 && H1 == other.H1 && H2 == other.H2;
+    /// <summary>True when <paramref name="obj"/> is a <see cref="ContentHash"/> equal to this one.</summary>
     public override bool Equals(object? obj) => obj is ContentHash other && Equals(other);
+    /// <summary>A hash code built from the size and the three hash words.</summary>
     public override int GetHashCode() => HashCode.Combine(Size, H0, H1, H2);
+    /// <summary>True when both hashes are equal.</summary>
     public static bool operator ==(ContentHash a, ContentHash b) => a.Equals(b);
+    /// <summary>True when the hashes differ.</summary>
     public static bool operator !=(ContentHash a, ContentHash b) => !a.Equals(b);
 }
 
 /// <summary>How a mod supplied a content blob: new bytes under a new hash, or bytes served instead of the game's blob.</summary>
-public enum BlobKind { Added = 0, Override = 1 }
+public enum BlobKind
+{
+    /// <summary>New bytes under a new hash (<see cref="Assets.AddBlob"/>).</summary>
+    Added = 0,
+    /// <summary>Bytes served instead of the game's blob of that hash (<see cref="Assets.OverrideBlob"/>).</summary>
+    Override = 1,
+}
 
 /// <summary>A content blob a mod supplied through <see cref="Assets"/> (see <see cref="Assets.ListBlobs"/>).</summary>
 /// <param name="Hash">The blob's content hash.</param>
@@ -45,7 +67,17 @@ public enum BlobKind { Added = 0, Override = 1 }
 public readonly record struct BlobEntry(ContentHash Hash, BlobKind Kind, string Mod);
 
 /// <summary>The UI state of a registered icon (see <see cref="Assets.IconStateOf"/>).</summary>
-public enum IconState { None = 0, Pending = 1, Served = 2, Failed = 3 }
+public enum IconState
+{
+    /// <summary>No icon is registered for this GUID (or this is a dedicated server).</summary>
+    None = 0,
+    /// <summary>Registered, but the UI texture cache does not know the key yet.</summary>
+    Pending = 1,
+    /// <summary>The cache knows the key and kiln.assets serves it.</summary>
+    Served = 2,
+    /// <summary>Registered but unusable (a bad PNG, or the client parts are off).</summary>
+    Failed = 3,
+}
 
 /// <summary>Mod resources, overrides, icons and retextures (<c>kiln.assets</c>). Every member may be called from any
 /// thread (the native functions copy what they are given); the ones that register something must be called from mod
@@ -369,6 +401,7 @@ public static unsafe partial class Assets
         RecordBlob(owner, ModContext.CurrentMod!.Info.Id, hash, BlobKind.Override);
     }
 
+    /// <summary>Takes the calling mod's blob or override of <paramref name="hash"/> off.</summary>
     [RequiresCapability(Caps.Service)]
     public static void RemoveBlob(ContentHash hash)
     {

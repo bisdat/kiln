@@ -12,12 +12,14 @@ public abstract class CommandNode
 {
     private protected CommandNode(string name) => Name = name;
 
+    /// <summary>The node's word (a literal) or argument name.</summary>
     public string Name { get; }
 
     /// <summary>One line for help.</summary>
     public string? Description { get; private protected set; }
 
     internal readonly List<CommandNode> ChildList = new();
+    /// <summary>The nodes that can follow this one.</summary>
     public IReadOnlyList<CommandNode> Children => ChildList;
 
     internal CommandHandler? Handler;
@@ -96,7 +98,9 @@ public sealed class LiteralNode : CommandNode
         if (!Commands.ValidName(Name)) throw new ArgumentException($"invalid command word '{name}'", nameof(name));
     }
 
+    /// <summary>The other words for this subcommand.</summary>
     public IReadOnlyList<string> Aliases => _aliases;
+    /// <summary>The node as shown in usage lines: its word.</summary>
     public override string Display => Name;
 
     internal bool Matches(string token) =>
@@ -116,6 +120,7 @@ public sealed class LiteralNode : CommandNode
         return this;
     }
 
+    /// <summary>Sets the one-line help text of this node.</summary>
     public LiteralNode Describe(string description)
     {
         Description = description;
@@ -159,27 +164,33 @@ public sealed class ArgumentNode : CommandNode
         Type = type ?? throw new ArgumentNullException(nameof(type));
     }
 
+    /// <summary>The argument's type: how its text is parsed.</summary>
     public ArgumentType Type { get; }
+    /// <summary>The node as shown in usage lines: <c>&lt;name&gt;</c>.</summary>
     public override string Display => $"<{Name}>";
 
+    /// <summary>Adds a child node (subcommand or argument).</summary>
     public ArgumentNode Then(CommandNode child)
     {
         AddChild(child);
         return this;
     }
 
+    /// <summary>Runs <paramref name="handler"/> when the line ends here.</summary>
     public ArgumentNode Executes(CommandHandler handler)
     {
         SetHandler(handler);
         return this;
     }
 
+    /// <summary>Sets the one-line help text of this argument.</summary>
     public ArgumentNode Describe(string description)
     {
         Description = description;
         return this;
     }
 
+    /// <summary>Going through this node needs <paramref name="node"/> (default <c>&lt;mod&gt;.command.&lt;path&gt;</c>), which <paramref name="level"/> has by default.</summary>
     public ArgumentNode Requires(CommandPermission level, string? node = null)
     {
         SetRequirement(level, node);
@@ -196,6 +207,8 @@ public sealed class ArgumentNode : CommandNode
 
 /// <summary>Completion of a partly typed line: replace the text from <see cref="Start"/> with one of
 /// <see cref="Suggestions"/>.</summary>
+/// <param name="Start">Where in the line the replacement starts.</param>
+/// <param name="Suggestions">The words that can replace the text from <paramref name="Start"/>.</param>
 public sealed record CommandCompletion(int Start, IReadOnlyList<string> Suggestions);
 
 internal static class CommandTree

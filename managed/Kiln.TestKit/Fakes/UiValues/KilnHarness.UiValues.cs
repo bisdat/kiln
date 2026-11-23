@@ -15,15 +15,32 @@ public sealed partial class KilnHarness
 
 /// <summary>An item as the game's UI would show it to a provider (the fields of <c>UiItemView</c> a test sets).
 /// <paramref name="Flags"/>: 1 client entity, 4 inventory slot, 8 detail copy, 16 synthetic.</summary>
+/// <param name="Item">The item's id.</param>
+/// <param name="Fuel">The item's fuel, in raw fuel units.</param>
+/// <param name="FuelMax">The item's largest fuel, in raw fuel units.</param>
+/// <param name="Count">The stack size (default 1).</param>
+/// <param name="InventoryPage">The inventory page of the slot (an entity id); valid with flag 4.</param>
+/// <param name="SlotIndex">The slot's index on its page; valid with flag 4.</param>
+/// <param name="ClientEntity">The stack's client-world entity; valid with flag 1.</param>
+/// <param name="Flags">Which identity fields are valid: 1 client entity, 4 inventory slot, 8 detail copy, 16 synthetic.</param>
+/// <param name="UnitsPerCharge">The detail view's divisor for fuel (at least 1; default 1).</param>
 public readonly record struct FakeUiItem(uint Item, uint Fuel = 0, uint FuelMax = 0, uint Count = 1, uint InventoryPage = 0,
     byte SlotIndex = 0, uint ClientEntity = 0, uint Flags = 0, uint UnitsPerCharge = 1);
 
 /// <summary>A drawn value: the fraction, the numbers and the label (null: the game's own).</summary>
+/// <param name="Fraction">How full the bar is, as a fraction.</param>
+/// <param name="Current">The current number.</param>
+/// <param name="Max">The maximum number.</param>
+/// <param name="Label">The label text; null leaves the game's own.</param>
 public readonly record struct FakeUiBar(float Fraction, uint Current, uint Max, string? Label = null);
 
 /// <summary>What one provider did with a value: <paramref name="Result"/> is its native result (0 ok), <paramref name="Edit"/>
 /// the fields it committed (KilnUiEditFlags), <paramref name="Invalid"/> when the fake refused the edit as the game would
 /// (a fault).</summary>
+/// <param name="Kind">The kind of value the provider was asked about (the numbering of <c>UiValueKind</c>: detail, slot, held, health, stamina, mana).</param>
+/// <param name="Result">The provider's native result; 0 is ok.</param>
+/// <param name="Edit">The fields the provider committed, as the native edit flags (0 when it changed nothing or its edit was refused).</param>
+/// <param name="Invalid">True when the fake refused the provider's edit as the game would, counting it as a fault.</param>
 public readonly record struct FakeUiDecision(uint Kind, int Result, uint Edit, bool Invalid);
 
 /// <summary>

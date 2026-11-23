@@ -85,6 +85,10 @@ public sealed record GemSourceOptions
 }
 
 /// <summary>One gem an offer listed: its token (Kiln's, unguessable), the gem, its slot and level when offered.</summary>
+/// <param name="Token">Kiln's token for the offered gem; it cannot be guessed.</param>
+/// <param name="Gem">The gem item.</param>
+/// <param name="Slot">Its slot in the container that was offered from.</param>
+/// <param name="Level">Its level when it was offered.</param>
 public sealed record OfferedGem(ulong Token, ItemInstanceRef Gem, SlotId Slot, int Level);
 
 /// <summary>What <see cref="Gems.OfferChestGems"/> did.</summary>

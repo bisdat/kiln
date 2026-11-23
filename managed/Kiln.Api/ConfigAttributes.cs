@@ -19,6 +19,7 @@ public enum ConfigKind
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Class | AttributeTargets.Parameter)]
 public sealed class CommentAttribute(string text) : Attribute
 {
+    /// <summary>The text; several lines separated by <c>\n</c>.</summary>
     public string Text { get; } = text;
 }
 
@@ -27,7 +28,9 @@ public sealed class CommentAttribute(string text) : Attribute
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter)]
 public sealed class RangeAttribute(double min, double max) : Attribute
 {
+    /// <summary>The lowest allowed value (for a <see cref="TimeSpan"/>, in seconds).</summary>
     public double Min { get; } = min;
+    /// <summary>The highest allowed value (for a <see cref="TimeSpan"/>, in seconds).</summary>
     public double Max { get; } = max;
 }
 
@@ -52,5 +55,6 @@ public sealed class ConfigIgnoreAttribute : Attribute;
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
 public sealed class ConfigKeyAttribute(string key) : Attribute
 {
+    /// <summary>The JSON key.</summary>
     public string Key { get; } = key;
 }

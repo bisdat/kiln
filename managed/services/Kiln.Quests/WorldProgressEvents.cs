@@ -21,8 +21,11 @@ public abstract class WorldProgressEvent : KilnEvent
 
     /// <summary>None: the world's knowledge changed; else the player whose knowledge changed.</summary>
     public EntityId Target { get; }
+    /// <summary>True when the world's knowledge changed (<see cref="Target"/> is None).</summary>
     public bool IsWorld => Target.IsNone;
+    /// <summary>The player whose knowledge changed; null for the world, or when they left in the meantime.</summary>
     public Player? Player => Target.IsNone || !Players.Available ? null : Players.Find(Target);
+    /// <summary>The server-world step of the change.</summary>
     public ulong Step { get; }
 }
 
@@ -38,9 +41,13 @@ public sealed class FlameLevelChangedEvent : KilnEvent
         Flame = flame;
     }
 
+    /// <summary>The level before the change.</summary>
     public int OldLevel { get; }
+    /// <summary>The level after the change.</summary>
     public int NewLevel => Flame.Level;
+    /// <summary>The flame as it stands after the change.</summary>
     public FlameStatus Flame { get; }
+    /// <summary>The old and the new level.</summary>
     public override string ToString() => $"flame level {OldLevel} -> {NewLevel}";
 }
 
@@ -56,9 +63,11 @@ public sealed class SpireUnlockedEvent : WorldProgressEvent
         TopReached = top;
     }
 
+    /// <summary>The spire.</summary>
     public Spire Spire { get; }
     /// <summary>The character's own "top reached" knowledge, not the unlock.</summary>
     public bool TopReached { get; }
+    /// <summary>Who, the spire and whether it was unlocked or its top reached.</summary>
     public override string ToString() => $"{(IsWorld ? "world" : $"player {Target}")}: spire {Spire.Id} {(TopReached ? "top reached" : "unlocked")}";
 }
 
@@ -69,7 +78,9 @@ public sealed class ShrineFoundEvent : WorldProgressEvent
 
     internal ShrineFoundEvent(FlameShrine shrine, EntityId target, ulong step) : base(target, step) => Shrine = shrine;
 
+    /// <summary>The shrine or sanctum that was found.</summary>
     public FlameShrine Shrine { get; }
+    /// <summary>Who found which shrine.</summary>
     public override string ToString() => $"{(IsWorld ? "world" : $"player {Target}")}: found {Shrine}";
 }
 
@@ -80,7 +91,9 @@ public sealed class ShroudRootDestroyedEvent : WorldProgressEvent
 
     internal ShroudRootDestroyedEvent(ShroudRoot root, EntityId target, ulong step) : base(target, step) => Root = root;
 
+    /// <summary>The root that was destroyed.</summary>
     public ShroudRoot Root { get; }
+    /// <summary>Who destroyed which root.</summary>
     public override string ToString() => $"{(IsWorld ? "world" : $"player {Target}")}: destroyed {Root}";
 }
 
@@ -110,11 +123,15 @@ public sealed class BossKilledEvent : KilnEvent
     public EntityId Entity { get; }
     /// <summary>Who dealt the killing blow (a player or a creature), when Kiln saw it.</summary>
     public EntityId Killer { get; }
+    /// <summary>The killer as a player; null when the killer is not a player, is not known, or left.</summary>
     public Player? KillerPlayer => Killer.IsNone || !Players.Available ? null : Players.Find(Killer);
+    /// <summary>Where the boss died; null when only the kill record was seen.</summary>
     public WorldPosition? Position { get; }
     /// <summary>The game's kill record (knowledge) changed for this boss with the kill.</summary>
     public bool Recorded { get; internal set; }
+    /// <summary>The server-world step of the event.</summary>
     public ulong Step { get; }
+    /// <summary>The boss, who killed it and whether the game recorded it.</summary>
     public override string ToString() => $"boss {Boss?.Id ?? Template ?? "?"} killed{(Killer.IsNone ? "" : $" by {Killer}")}{(Recorded ? " (recorded)" : "")}";
 }
 
@@ -130,8 +147,11 @@ public sealed class ChestLootedEvent : KilnEvent
         NearestPlayer = nearest;
     }
 
+    /// <summary>The chest that was emptied.</summary>
     public ChestStatus Chest { get; }
+    /// <summary>The player nearest to the chest at that time. A guess: it need not be who looted it.</summary>
     public EntityId NearestPlayer { get; }
+    /// <summary>The chest.</summary>
     public override string ToString() => $"looted {Chest}";
 }
 
@@ -152,12 +172,19 @@ public sealed class QuestStatusChangedEvent : KilnEvent
 
     /// <summary>The player (None for a Kiln world quest).</summary>
     public EntityId PlayerEntity { get; }
+    /// <summary>The player; null for a world quest, or when they left.</summary>
     public Player? Player => PlayerEntity.IsNone || !Players.Available ? null : Players.Find(PlayerEntity);
+    /// <summary>The quest as it stands after the change.</summary>
     public QuestEntry Quest { get; }
+    /// <summary>The status before the change.</summary>
     public QuestStatus OldStatus { get; }
+    /// <summary>The status after the change.</summary>
     public QuestStatus NewStatus => Quest.Status;
+    /// <summary>The 0-based step before the change; -1 when the quest had not started.</summary>
     public int OldStep { get; }
+    /// <summary>The 0-based step after the change; -1 when the quest has not started.</summary>
     public int NewStep => Quest.Step;
+    /// <summary>The player, the quest, the status change and the step change.</summary>
     public override string ToString() => $"{(PlayerEntity.IsNone ? "holder without a player" : $"player {PlayerEntity}")} {Quest.Name ?? Quest.Id}: {OldStatus} -> {NewStatus}" +
                                          (OldStep != NewStep ? $", step {(OldStep < 0 ? "-" : OldStep + 1)} -> {(NewStep < 0 ? "-" : NewStep + 1)}" : "");
 }

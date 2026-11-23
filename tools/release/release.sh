@@ -66,6 +66,13 @@
 # The API gate (tools/release/api-gate.sh), before any build: no shipped public API removed since the previous v* tag,
 #   new API only with a raised Kiln.Mods.ApiVersion; after a release whose checks passed, the Unshipped.txt lines move
 #   into Shipped.txt in the working tree (to commit). The builds get the full version (VERSION in the export).
+# The agent API index (agent/skills/kiln-modding/references/api-index/, tools/docs-site/api_index.py), before the export: regenerated
+#   from the checked-out tree (its PublicAPI record, the XML docs of a Release build in $work/api-index, KILN_API_XML=DIR to use
+#   docs built elsewhere, and managed/api-history.tsv). A release exports a commit, so when the index changed the release stops at
+#   once and says to commit it; run again then. After the promote below it is generated once more from the same XML docs and goes
+#   into the same closing commit as the API record and the ledger. Test builds (--beta, --worktree, --launcher-only) skip both.
+# The doc gate: the API reference build (tools/docs-site/build.sh, in the assemble step) runs with KILN_DOCS_STRICT=1: a public name with no XML
+#   summary fails the release (undocumented-baseline.txt names none). tools/check.sh holds it current in every commit (stage `docs`).
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
@@ -200,6 +207,33 @@ step() { printf '\n== %s (%ss)\n' "$*" $(($(date +%s) - t0)) | tee -a "$log"; }
 note() { echo "$*" | tee -a "$log"; }
 die() { echo "release: $*" | tee -a "$log" >&2; exit 1; }
 quiet() { "$@" >>"$log" 2>&1 || { tail -40 "$log" >&2; die "failed: $*"; }; }
+
+# ---------------------------------------------------------------- 0. the agent API index
+# Generated before the export so the export carries it. A release exports a commit: the index has to be committed, so a release
+# whose index changed stops here (the files are regenerated in the working tree: commit them, then run again). Only for a
+# release of the checked-out commit with committed inputs; a test build, a launcher-only build and --commit of another revision
+# export the committed index as it is (tools/check.sh's `index` stage holds it current in every commit).
+api_index=$repo/agent/skills/kiln-modding/references/api-index api_index_xml=""
+if ((!launcher_only)) && ((!worktree)) && [[ $channel != beta ]] && [[ -f $repo/tools/docs-site/api_index.py ]]; then
+  step "agent API index"
+  if [[ $(git -C "$repo" rev-parse HEAD) != "$(git -C "$repo" rev-parse --verify "$commit^{commit}" 2>/dev/null)" ]]; then
+    note "API index: $commit is not the checked-out commit: not regenerated, the committed index is exported"
+  elif ! git -C "$repo" diff --quiet HEAD -- managed native/core/abi crates/sfi/kiln-abi agent/skills/kiln-modding tools/docs-site/api_index.py; then
+    die "the working tree has uncommitted changes in the API inputs or the agent API index (git status): a release builds a commit, commit them first"
+  else
+    api_index_xml=${KILN_API_XML:-$work/api-index/artifacts/bin}
+    if [[ -n ${KILN_API_XML:-} ]]; then
+      quiet low python3 -I "$repo/tools/docs-site/api_index.py" --xml "$KILN_API_XML"
+    else
+      quiet low python3 -I "$repo/tools/docs-site/api_index.py" --build-dir "$work/api-index"
+    fi
+    if [[ -n $(git -C "$repo" status --porcelain -- "$api_index") ]]; then
+      git -C "$repo" status --short -- "$api_index" | head -20 | tee -a "$log"
+      die "the agent API index was out of date and is regenerated in $repo (above): commit it (git commit -m 'skill: regenerate the API index' -- agent/skills/kiln-modding/references/api-index) and run the release again"
+    fi
+    note "API index: current"
+  fi
+fi
 
 # ---------------------------------------------------------------- 1. export
 src=$work/src
@@ -822,6 +856,9 @@ cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script
 if [[ -f $src/tools/docs-site/build.sh ]]; then
   export KILN_DOCS_TRACKED=$work/src-files
+  # strict: a public type or member without an XML summary (undocumented.py against undocumented-baseline.txt, which names
+  # none) stops the release here; the same gate runs in tools/check.sh (stage `docs`), so it is found before the release
+  export KILN_DOCS_STRICT=1
   quiet low "$src/tools/docs-site/build.sh" "$out/sdk/api"   # the modding site: guide + API reference (DocFX)
 else
   note "no tools/docs-site/build.sh in the export: the API reference (sdk/api/) is left out"
@@ -994,11 +1031,16 @@ if ((worktree)); then
 elif [[ $channel == beta ]]; then
   note "API record: a test build ($name) ships no API; the Unshipped.txt lines stay for the release"
 elif ((!checks)) || printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then
-  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote"
+  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote --release $version"
 else
   step "API record: Unshipped.txt lines into Shipped.txt"
-  if "$here/api-gate.sh" promote --if-same-as "$full" 2>&1 | tee -a "$log"; then
-    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' | wc -l)
+  if "$here/api-gate.sh" promote --if-same-as "$full" --release "$version" 2>&1 | tee -a "$log"; then
+    # the index again, with the ledger's new rows (the same bytes when the API version is the one the Unshipped lines carried)
+    if [[ -n $api_index_xml ]]; then
+      python3 -I "$repo/tools/docs-site/api_index.py" --xml "$api_index_xml" >>"$log" 2>&1 ||
+        note "API index: not regenerated after the promote (see the log); run python3 -I tools/docs-site/api_index.py --xml $api_index_xml"
+    fi
+    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv "$api_index" | wc -l)
   else
     note "API record: not promoted (above); the release itself is fine"
   fi
@@ -1027,7 +1069,9 @@ Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
   tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
                                             then the roadmap: $version as released on frostdev.io/kiln/roadmap
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+  python3 -I tools/docs-site/status-tables.py --server <game>/kiln/state/capabilities.json --checks <game>/kiln/state/client-checks.json \\
+      -o docs/kiln/status.generated.md      the status page, from the state files of this release's lab run (a build boots no game)"
 fi
 step "done"
 du -sh "$out" | tee -a "$log"
@@ -1043,8 +1087,9 @@ if ((!api_compat)); then
 fi
 if ((api_moved)); then
   cat <<EOF | tee -a "$log"
-  The API record: $api_moved PublicAPI file(s) changed in $repo (this release's API moved from Unshipped.txt into
-  Shipped.txt). Commit them: git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt'
+  The API record: $api_moved file(s) changed in $repo (this release's API moved from Unshipped.txt into Shipped.txt, its rows
+  went into the API history ledger, and the agent API index is generated from them). Commit them:
+  git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv agent/skills/kiln-modding/references/api-index
 EOF
 fi
 if printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then exit 1; fi

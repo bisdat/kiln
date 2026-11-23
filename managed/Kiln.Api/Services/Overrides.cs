@@ -26,7 +26,9 @@ public enum OverrideStatus
 /// <param name="HeldBy">For <see cref="OverrideStatus.Conflict"/>: the id of the mod that holds the thing.</param>
 public sealed record OverrideResult(OverrideStatus Status, string Message, string? HeldBy = null)
 {
+    /// <summary>True when <see cref="Status"/> is <see cref="OverrideStatus.Applied"/>.</summary>
     public bool Ok => Status == OverrideStatus.Applied;
+    /// <summary>The status and the message.</summary>
     public override string ToString() => $"{Status}: {Message}";
 }
 

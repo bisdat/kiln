@@ -42,11 +42,15 @@ public sealed class UiValueChangedEvent(UiValueIdentity identity, UiBarValue? be
 {
     static UiValueChangedEvent() => UiValueEvents.EnsureFeed();
 
+    /// <summary>What the value is a value of.</summary>
     public UiValueIdentity Identity { get; } = identity;
+    /// <summary>The value shown before; null for <see cref="UiValueChangeKind.Added"/>.</summary>
     public UiBarValue? Before { get; } = before;
+    /// <summary>The value shown now; null for <see cref="UiValueChangeKind.Removed"/>.</summary>
     public UiBarValue? After { get; } = after;
     /// <summary>The completed game UI frame it was published at.</summary>
     public ulong Frame { get; } = frame;
+    /// <summary>How the value changed.</summary>
     public UiValueChangeKind ChangeKind { get; } = changeKind;
 }
 
@@ -56,14 +60,18 @@ public sealed class UiValuesResetEvent(UiValuesResetReason reason, ulong oldSess
 {
     static UiValuesResetEvent() => UiValueEvents.EnsureFeed();
 
+    /// <summary>Why they were forgotten.</summary>
     public UiValuesResetReason Reason { get; } = reason;
+    /// <summary>The session that ended (<see cref="UiValueIdentity.Session"/> of the forgotten values).</summary>
     public ulong OldSession { get; } = oldSession;
+    /// <summary>The session that began.</summary>
     public ulong NewSession { get; } = newSession;
 }
 
 /// <summary>How a value provider's registration changed.</summary>
 public enum UiValueProviderChange
 {
+    /// <summary>Registered.</summary>
     Added = 0,
     /// <summary>Disposed, or its mod unloaded.</summary>
     Removed = 1,
@@ -76,11 +84,13 @@ public enum UiValueProviderChange
 public sealed class UiValueProviderChangedEvent(UiValueKind kind, ItemId item, string mod, UiValueProviderChange change)
     : KilnEvent
 {
+    /// <summary>The kind of value the provider replaces.</summary>
     public UiValueKind Kind { get; } = kind;
     /// <summary>The provider's item filter (<see cref="ItemId"/> 0: every item).</summary>
     public ItemId Item { get; } = item;
     /// <summary>The id of the mod that registered it ("kiln" for Kiln's own).</summary>
     public string Mod { get; } = mod;
+    /// <summary>What happened to the registration.</summary>
     public UiValueProviderChange Change { get; } = change;
 }
 
@@ -89,8 +99,11 @@ public sealed class UiValueProviderChangedEvent(UiValueKind kind, ItemId item, s
 [ClientOnly]
 public sealed class UiValueProviderRefusedEvent(UiValueKind kind, string mod, ulong frame, string reason) : KilnEvent
 {
+    /// <summary>The kind of value the provider replaces.</summary>
     public UiValueKind Kind { get; } = kind;
+    /// <summary>The id of the mod that registered the provider ("kiln" for Kiln's own).</summary>
     public string Mod { get; } = mod;
+    /// <summary>The game UI frame in which it refused.</summary>
     public ulong Frame { get; } = frame;
     /// <summary>The provider's reason, cut at 256 characters.</summary>
     public string Reason { get; } = reason;

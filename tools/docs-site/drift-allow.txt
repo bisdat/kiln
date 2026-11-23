@@ -1,0 +1,17 @@
+# Known false positives of tools/docs-site/drift.py (docs/skill drift checks, run by tools/check.sh stage `drift`).
+# One line per entry, four cells separated by TABS: check, name as the finding prints it, file (a glob, from the repository
+# root), reason. A reason is required. An entry that matches nothing any more is an error: remove it when the text is fixed.
+# Allowed here: sample names, csproj names, placeholders, and deliberate "do not do this" or "there is no such member" text.
+# A real mistake in a doc is fixed in the doc, not listed here.
+names	GameTree.Lab	agent/skills/kiln-modding/references/pitfalls.md	a wildcard in prose (`GameTree.Lab*`: every lab helper of GameTree), not a member name
+names	ModContext.Owner	agent/skills/kiln-modding/references/pitfalls.md	deliberate: a Kiln internal that a mod must not read by reflection (the row is the warning)
+names	ModContext.Owner	docs/kiln/ui.md	internal member, named in the table of what the native calls became so the maintainer can find the old code
+names	ModContext.CurrentMod	docs/kiln/services/README.md	internal member (Mod.cs), named in the service author's guide for the code that tracks the calling mod
+names	Config.AnyChanged	docs/kiln/sync.md	internal event of Kiln.Api, described in the sync design page for maintainers
+names	ConfigFile.ApplyServerValues	docs/kiln/sync.md	internal method of Kiln.Api, described in the sync design page for maintainers
+names	UiWindow.Retitle	docs/kiln/translating-game.md	internal method of Kiln.Ui, named in the guide for Kiln's own windows (a mod cannot call it)
+names	Nearby.Tests	docs/kiln/engines/shroudlink.md	a csproj name (native/plugins/shroudlink/tests/nearby/Nearby.Tests.csproj), not an API name
+names	PlayerStateId.X	docs/kiln/modding/player-states.md	a placeholder: X stands for any state's name
+names	AffixBlock.OnHit	docs/kiln/modding/affixes.md	deliberate: the row says an affix block's OnHit WOULD run an effect, which is not built (the 'not yet' list)
+names	Build.CarveTerrain	docs/kiln/services/terrain-tool-carving.md	deliberate: the page says there is no such entry point
+names	UiDraw.ItemDetail	docs/kiln/ui.md	deliberate: the page says there is no such panel
