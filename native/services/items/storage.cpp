@@ -43,6 +43,14 @@ thread_local int read_slot = -1;
 thread_local bool in_post = false;
 Access structural_access{};
 std::vector<Holder> garbage;
+struct HolderRetry {
+    uint64_t join;
+    uintptr_t world;
+    void* storage;
+    uint32_t registration;
+};
+// At most one deferred pre-create attempt per live join/key/registration. No native failure enters this map.
+std::map<std::pair<uint32_t, std::string>, HolderRetry> holder_retries;
 struct Ref {
     uint32_t slot;
     uint64_t join;
@@ -146,6 +154,34 @@ void off(uint32_t why, const std::string& text) {
     detail = text;
     items_log(KILN_LOG_ERROR, "player-storage: %s", text.c_str());
     report("items.storage", KILN_CAP_UNAVAILABLE, why, text.c_str());
+}
+const char* holder_stage(HolderStage stage) {
+    switch (stage) {
+    case HolderStage::Preconditions: return "preconditions";
+    case HolderStage::Gate: return "gate";
+    case HolderStage::RootCreate: return "root-create";
+    case HolderStage::PageCreate: return "page-create";
+    case HolderStage::SetupLookup: return "setup-lookup";
+    case HolderStage::SetupCopy: return "setup-copy";
+    default: return "none";
+    }
+}
+std::string holder_failure(const HolderBuild& b) {
+    char text[640]{};
+    const auto& c = b.cleanup;
+    std::snprintf(text, sizeof text,
+                  "items.storage: holder/page creation failed stage=%s page=%d root=%u pages=%u "
+                  "native=%s raw=%u native_error=0x%08x setup_size=%llu stage_error=0x%08x "
+                  "cleanup=%s cleanup_calls=%u/%u cleanup_last_raw=%u cleanup_last_error=0x%08x "
+                  "cleanup_failed_entity=%u cleanup_failed_raw=%u cleanup_failed_error=0x%08x",
+                  holder_stage(b.stage), b.page == UINT32_MAX ? -1 : static_cast<int>(b.page), b.root, b.pages,
+                  !b.native.called ? "not-called" : b.native.error ? "fault" : "returned", b.native.value,
+                  b.native.error, static_cast<unsigned long long>(b.setup_size), b.error,
+                  !c.attempted ? (b.native.called ? "not-attempted-unverified" : "not-needed")
+                               : c.reported_ok ? "reported-ok-unverified" : "failed-unverified",
+                  c.succeeded, c.calls, c.last.value, c.last.error, c.failed_entity, c.first_failed.value,
+                  c.first_failed.error);
+    return text;
 }
 void resolve_main_baseline() {
     const uint32_t old_baseline = main_baseline.load();
@@ -1139,9 +1175,17 @@ void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) 
         if (q.phase != 0)
             continue;
         auto& p = *found;
-        if (!create_holder(a, p.witness.player, 64, &q.holder)) {
+        HolderBuild build;
+        if (!create_holder(a, p.witness.player, 64, &q.holder, &build)) {
+            const auto failure = holder_failure(build);
             finish_return(q, &p, KILN_ITEMS_UNAVAILABLE, "cannot create a temporary return inventory");
-            continue;
+            if (build.retryable()) {
+                // No automatic retry for a return request. The caller receives an unavailable result.
+                items_log(KILN_LOG_WARN, "%s (temporary return; no retry)", failure.c_str());
+                continue;
+            }
+            off(KILN_CAP_REASON_FAULTED, failure + " (temporary return; no retry)");
+            return;
         }
         uint32_t inserted = 0;
         std::vector<Entry> remaining;
@@ -1359,6 +1403,22 @@ void post_body() {
     if (!enabled || !structural_gate() || !structural_access.storage || !death_wrap_ready())
         return;
     const Access& a = structural_access;
+    for (auto i = holder_retries.begin(); i != holder_retries.end();) {
+        const auto& [slot, key] = i->first;
+        const auto& retry = i->second;
+        auto registration = model.registrations.find(key);
+        if (!joined(slot, retry.join) || registration == model.registrations.end() ||
+            registration->second.handle != retry.registration) {
+            i = holder_retries.erase(i);
+            continue;
+        }
+        if (retry.world != api->server_world() || retry.storage != a.storage) {
+            off(KILN_CAP_REASON_FAULTED, "items.storage: holder retry cancelled: world/access changed; no native call");
+            holder_retries.clear();
+            return;
+        }
+        ++i;
+    }
     if (!build_bindings(a)) {
         off(KILN_CAP_REASON_SYMBOL_MISSING, "items.storage: cannot rebuild converter component bindings");
         return;
@@ -1428,10 +1488,20 @@ void post_body() {
                 if (keys.size() >= KIS_MAX_STORAGES && !keys.count(key))
                     continue;
                 Holder created;
-                if (!create_holder(a, p.witness.player, r.slots, &created)) {
-                    off(KILN_CAP_REASON_FAULTED, "items.storage: holder/page creation failed");
+                HolderBuild build;
+                const auto retry_key = std::make_pair(slot, key);
+                if (!create_holder(a, p.witness.player, r.slots, &created, &build)) {
+                    const auto failure = holder_failure(build);
+                    if (build.retryable() && !holder_retries.count(retry_key)) {
+                        holder_retries.emplace(retry_key, HolderRetry{join, api->server_world(), a.storage, r.handle});
+                        items_log(KILN_LOG_WARN, "%s (slot %u; one retry at next safe Post)", failure.c_str(), slot);
+                        continue; // this holder stays Waiting; do not consume its rows or emit RESTORED
+                    }
+                    holder_retries.erase(retry_key);
+                    off(KILN_CAP_REASON_FAULTED, failure + " (no retry)");
                     return;
                 }
+                holder_retries.erase(retry_key);
                 model.mark_built(slot, key, created.entity, created.pages);
                 h = p.holders.find(key);
             }
@@ -1976,6 +2046,13 @@ void retire_owner_locked(KilnOwner owner) {
         for (const auto& [key, r] : model.registrations)
             if (r.owner == owner && p.holders.count(key))
                 parks.push_back({slot, p.witness.join, key, KIS_PARK_UNREGISTERED, false, true});
+    for (auto i = holder_retries.begin(); i != holder_retries.end();) {
+        auto r = model.registrations.find(i->first.second);
+        if (r != model.registrations.end() && r->second.owner == owner)
+            i = holder_retries.erase(i);
+        else
+            ++i;
+    }
     model.revoke(owner);
 }
 void KILN_CALL storage_owner_retiring(KilnOwner owner, void*) {
@@ -2001,6 +2078,7 @@ void storage_reset() {
     }
     returns.clear();
     model.reset_session();
+    holder_retries.clear();
     structural_access = {};
     refs.clear();
     parks.clear();

@@ -11,38 +11,56 @@ template <class T> T read(const void* p, size_t at) {
     return v;
 }
 template <class T> void put(void* p, size_t at, T v) { std::memcpy(static_cast<uint8_t*>(p) + at, &v, sizeof v); }
-bool copy(void* out, const void* in, size_t n) {
+// Exception codes are captured in the filter (the documented, compiler-independent place for GetExceptionCode), never
+// read back in the handler block; the handler only reports the fail-closed result.
+int capture(unsigned long code, uint32_t* error) {
+    if (error)
+        *error = static_cast<uint32_t>(code);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+__declspec(noinline) bool copy(void* out, const void* in, size_t n, uint32_t* error = nullptr) {
     __try {
         if (!in)
             return false;
         std::memcpy(out, in, n);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (capture(GetExceptionCode(), error)) {
         return false;
     }
 }
-void* component(uintptr_t world, uint32_t hash, uint32_t entity, size_t size) {
+void* component(uintptr_t world, uint32_t hash, uint32_t entity, size_t size, uint32_t* error = nullptr,
+                uint64_t* actual_size = nullptr) {
     PtrSize p{};
     __try {
         E.get_component(&p, world, hash, entity);
+        if (actual_size)
+            *actual_size = p.size;
         return p.size >= size ? p.ptr : nullptr;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (capture(GetExceptionCode(), error)) {
         return nullptr;
     }
 }
-uint32_t make(void* storage, const CreateDesc* d) {
+NativeCall make(void* storage, const CreateDesc* d) {
+    NativeCall result{};
+    result.called = true;
     __try {
-        return S.create(storage, d);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return 0;
+        result.value = S.create(storage, d);
+    } __except (capture(GetExceptionCode(), &result.error)) {
+        result.value = 0;
     }
+    return result;
 }
-bool remove(void* storage, uint32_t entity) {
+bool remove(void* storage, uint32_t entity, NativeCall* out = nullptr) {
+    NativeCall result{};
+    result.called = true;
     __try {
-        return S.destroy(storage, entity, 1, 0) != 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
+        result.value = S.destroy(storage, entity, 1, 0);
+    } __except (capture(GetExceptionCode(), &result.error)) {
+        result.value = 0;
     }
+    if (out)
+        *out = result;
+    return !result.error && result.value != 0;
 }
 bool write_record(const uint8_t record[56], uint8_t* out, uint8_t* length) {
     __try {
@@ -191,11 +209,24 @@ bool character_witness(const void* p, uint64_t* out, uint32_t baseline, uint32_t
         *flags = KIS_WITNESS_READ | (inv.main_pages > baseline ? KIS_WITNESS_EXTRA_MAIN_PAGES : 0u);
     return true;
 }
-bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out) {
+bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out, HolderBuild* diagnostic) {
+    HolderBuild result{};
     *out = {};
-    if (!S.structural_gate || !S.structural_gate() || !S.create || !S.destroy || !player || !slots ||
-        slots > KIS_MAX_SLOTS)
+    auto failed = [&] {
+        if (out->entity) {
+            destroy_holder(a, out, &result.cleanup);
+            *out = {};
+        }
+        if (diagnostic)
+            *diagnostic = result;
         return false;
+    };
+    result.stage = HolderStage::Preconditions;
+    if (!S.structural_gate || !S.create || !S.destroy || !a.storage || !player || !slots || slots > KIS_MAX_SLOTS)
+        return failed();
+    result.stage = HolderStage::Gate;
+    if (!S.structural_gate())
+        return failed(); // the only retryable case: no native call has run
     uint8_t setup[84]{};
     setup[81] = static_cast<uint8_t>((slots + 7) / 8 * 8);
     setup[82] = setup[81];
@@ -207,41 +238,62 @@ bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out
     d.flags = 4;
     d.components = cs;
     d.count = 2;
-    uint32_t root = make(a.storage, &d);
-    if (!root || root <= kMaxPlayer || root == UINT32_MAX)
-        return false;
+    result.stage = HolderStage::RootCreate;
+    result.native = make(a.storage, &d);
+    uint32_t root = result.native.value;
+    if (result.native.error || !root || root <= kMaxPlayer || root == UINT32_MAX)
+        return failed(); // never try to delete a reserved/unknown id
+    result.root = root;
     out->entity = root;
     out->slots = slots;
     owner = root;
     for (uint32_t i = 0; i < (slots + 7) / 8; ++i) {
         uint8_t inv[96]{};
         cs[0] = {kHashInventory, 0, inv, 96};
-        uint32_t id = make(a.storage, &d);
-        if (!id || id <= kMaxPlayer || id == UINT32_MAX) {
-            destroy_holder(a, out);
-            *out = {};
-            return false;
-        }
+        result.stage = HolderStage::PageCreate;
+        result.page = i; // zero based; pages counts only accepted ids
+        result.native = make(a.storage, &d);
+        uint32_t id = result.native.value;
+        if (result.native.error || !id || id <= kMaxPlayer || id == UINT32_MAX)
+            return failed();
         out->pages.push_back(id);
+        ++result.pages;
         put(setup, i * 4, id);
         setup[64 + i] = 4;
     }
     const auto world = reinterpret_cast<uintptr_t>(a.storage) - E.world_storage;
-    auto p = component(world, kHashInventorySetup, root, 84);
-    if (!p || !copy(p, setup, 84)) {
-        destroy_holder(a, out);
-        *out = {};
-        return false;
-    }
+    result.stage = HolderStage::SetupLookup;
+    result.page = UINT32_MAX;
+    auto p = component(world, kHashInventorySetup, root, 84, &result.error, &result.setup_size);
+    if (!p)
+        return failed();
+    result.stage = HolderStage::SetupCopy;
+    if (!copy(p, setup, 84, &result.error))
+        return failed();
+    result.stage = HolderStage::None;
+    if (diagnostic)
+        *diagnostic = result;
     return true;
 }
-bool destroy_holder(const Access& a, const Holder* h) {
+static bool destroy_holder_impl(const Access& a, const Holder* h, HolderCleanup* result) {
     if (!S.structural_gate || !S.structural_gate() || !S.destroy)
         return false;
     // Cleanup is only for exact native holders, never a player or a player's own Generic pages.
     if (!h || h->entity <= kMaxPlayer || h->entity == UINT32_MAX)
         return false;
     bool ok = true;
+    auto destroy = [&](uint32_t entity) {
+        NativeCall call{};
+        const bool removed = remove(a.storage, entity, &call);
+        ++result->calls;
+        result->succeeded += removed ? 1u : 0u;
+        result->last = call;
+        if (!removed && !result->failed_entity) {
+            result->failed_entity = entity;
+            result->first_failed = call;
+        }
+        return removed;
+    };
     uintptr_t world = reinterpret_cast<uintptr_t>(a.storage) - E.world_storage;
     uint8_t setup[84]{};
     const bool root_present = component_copy(world, kHashInventorySetup, h->entity, setup, sizeof setup);
@@ -267,12 +319,20 @@ bool destroy_holder(const Access& a, const Holder* h) {
         if (component_copy(world, kHashInventory, page, inv, 96))
             for (unsigned i = 0; i < 8; ++i)
                 if (inv[3 * i + 2] && inv[3 * i + 2] != UINT32_MAX)
-                    ok = remove(a.storage, inv[3 * i + 2]) && ok;
-        ok = remove(a.storage, page) && ok;
+                    ok = destroy(inv[3 * i + 2]) && ok;
+        ok = destroy(page) && ok;
     }
     if (root_present)
-        ok = remove(a.storage, h->entity) && ok;
+        ok = destroy(h->entity) && ok;
     return ok;
+}
+bool destroy_holder(const Access& a, const Holder* h, HolderCleanup* diagnostic) {
+    HolderCleanup result{};
+    result.attempted = true;
+    result.reported_ok = destroy_holder_impl(a, h, &result);
+    if (diagnostic)
+        *diagnostic = result;
+    return result.reported_ok;
 }
 bool insert_record(const Access& a, const Holder& h, const KilnStorageRecord& input, uint32_t* reason) {
     *reason = KIS_QUARANTINE_DECODE;
