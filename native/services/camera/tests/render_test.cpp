@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "../cam_math.h"
+#include "../profile.h"
 #include "../render_tx.h"
+#include "../shake.h"
 #include "../timeline.h"
 
 static int checks;
@@ -276,6 +278,7 @@ struct Rig {
         uint32_t t[kSampleSlots];
         const uint32_t n = backend.targets(t, kSampleSlots - 1);
         sampler.sample(frames.epoch(), ++step, world.local_player(), t, n);
+        frames.set_sample_step(step);
         const bool changed = backend.step();
         core.pre(kClient);
         return changed;
@@ -677,6 +680,238 @@ void test_world_owner_and_fault() {
     CHECK(g.backend.caps() != 0);
 }
 
+
+// ---- S6: the follow profile, the shake, the sampler -----------------------------------------------------------------------
+
+Quat yaw_q(double a) { return {0, std::sin(a / 2), 0, std::cos(a / 2)}; }
+Quat pitch_q(double a) { return {std::sin(a / 2), 0, 0, std::cos(a / 2)}; }
+
+KilnCameraProfile profile_of(uint32_t follow, float distance, uint32_t mode, Quat rotation = {}) {
+    KilnCameraProfile p{};
+    p.size = sizeof p;
+    p.follow_entity = follow;
+    p.distance = distance;
+    p.rotation_mode = mode;
+    p.rotation[0] = static_cast<float>(rotation.x), p.rotation[1] = static_cast<float>(rotation.y), p.rotation[2] = static_cast<float>(rotation.z),
+    p.rotation[3] = static_cast<float>(rotation.w);
+    return p;
+}
+
+void test_profile_geometry() {
+    const Quat id{}, yaw90 = yaw_q(kPi / 2);
+    // reference: a target at (10,0,0) turned +90 degrees about Y, distance 5, offset (0,0,2) in its axes, 3 m up, the
+    // stock orientation identity (free orbit): camera at (12, 3, -5); absolute metres
+    KilnCameraProfile pr = profile_of(9, 5, KILN_CAMERA_FREE_ORBIT);
+    pr.offset_local[2] = 2;
+    pr.offset_world_y = 3;
+    HeadingMemory m;
+    Vec3 pos;
+    Quat rot;
+    CHECK(profile_view(pr, {10, 0, 0}, yaw90, id, &m, &pos, &rot) == ProfileResult::Ok);
+    CHECK(near(pos, {12, 3, -5}, 1e-9) && rot.w == 1);
+    // free orbit follows the game's orientation: behind the pivot along the stock forward
+    CHECK(profile_view(pr, {10, 0, 0}, yaw90, yaw90, &m, &pos, &rot) == ProfileResult::Ok && near(pos, {12 - 5, 3, 0}, 1e-9) && near(rot.y, yaw90.y, 1e-12));
+
+    // the heading drops pitch and roll and keeps the yaw
+    Quat h;
+    const Quat banked = mul(mul(yaw_q(0.8), pitch_q(0.6)), Quat{0, 0, std::sin(0.2), std::cos(0.2)});
+    CHECK(heading_of(banked, &h));
+    CHECK(near(rotate(h, {0, 0, 1}).y, 0, 1e-12) && near(rotate(h, {0, 1, 0}).y, 1, 1e-12));
+    CHECK(near(h.y, std::sin(0.4), 1e-9) && near(h.w, std::cos(0.4), 1e-9));
+    // follow heading with the flyer's 12 degrees down: behind, above the pivot, looking down; pitch of the target ignored
+    KilnCameraProfile fh = profile_of(9, 10, KILN_CAMERA_FOLLOW_HEADING, pitch_q(12 * kPi / 180));
+    fh.offset_world_y = 4;
+    HeadingMemory mh;
+    CHECK(profile_view(fh, {0, 0, 0}, mul(yaw90, pitch_q(-1.0)), id, &mh, &pos, &rot) == ProfileResult::Ok);
+    const Vec3 fwd = rotate(rot, {0, 0, 1});
+    CHECK(fwd.x > 0.97 && near(fwd.y, -std::sin(12 * kPi / 180), 1e-6) && pos.x < 0 && pos.y > 4);  // the rotation crossed the ABI as floats
+    CHECK(near(length(pos - Vec3{0, 4, 0}), 10, 1e-9));  // exactly the distance from the pivot
+    // straight up: no heading of its own; the last one stays, and a first frame has none
+    Vec3 pos2;
+    Quat rot2;
+    CHECK(profile_view(fh, {0, 0, 0}, pitch_q(-kPi / 2), id, &mh, &pos2, &rot2) == ProfileResult::Ok && near(rot2.y, rot.y, 1e-12));
+    HeadingMemory fresh;
+    CHECK(profile_view(fh, {0, 0, 0}, pitch_q(-kPi / 2), id, &fresh, &pos2, &rot2) == ProfileResult::NoHeading);
+    // fixed world: the rotation as given, the target's turning ignored
+    KilnCameraProfile fw = profile_of(9, 2, KILN_CAMERA_FIXED_WORLD, yaw90);
+    CHECK(profile_view(fw, {1, 1, 1}, yaw_q(2.5), id, &fresh, &pos2, &rot2) == ProfileResult::Ok && near(pos2, {-1, 1, 1}, 1e-6));
+}
+
+void test_shake() {
+    KilnCameraShake sh{0.5f, 7.0f, 2000, 123};
+    // the reference model's own numbers (shake(.5, 7, 123, t, 10, 2), seconds there)
+    const Vec3 a = shake_offset(sh, 1000, 10000);
+    CHECK(near(a, {0.013374902915747337, -0.11353465475813093, 0.019346954361648922}, 1e-7));
+    const Vec3 b = shake_offset(sh, 9500, 10000);  // in the falloff: a quarter strength
+    CHECK(near(b, {-0.003343725728937576, 0.028383663689534877, -0.004836738590411489}, 1e-7));
+    KilnCameraShake zero{0.25f, 3.0f, 0, 0};  // seed 0 is 0x9e3779b9
+    CHECK(near(shake_offset(zero, 400, 10000), {-0.015021416250746041, 0.0660985061110754, -0.1318466855854053}, 1e-7));
+    const ShakePhases p0 = shake_phases(0), pg = shake_phases(0x9e3779b9u);
+    CHECK(p0.phi[0] == pg.phi[0] && p0.phi[1] == pg.phi[1] && p0.phi[2] == pg.phi[2]);
+    // never above the amplitude, equal for equal seeds, zero at the end
+    for (int i = 0; i <= 200; ++i) {
+        const Vec3 v = shake_offset(sh, i * 50.0, 10000);
+        CHECK(length(v) <= 0.5 + 1e-12);
+        const Vec3 w = shake_offset(sh, i * 50.0, 10000);
+        CHECK(v.x == w.x && v.y == w.y && v.z == w.z);
+    }
+    KilnCameraShake other = sh;
+    other.seed = 124;
+    CHECK(!near(shake_offset(other, 1000, 10000), a, 1e-6));
+    CHECK(shake_offset(sh, 10000, 10000).x == 0 && length(shake_offset(sh, 10000, 10000)) == 0);
+    CHECK(shake_gain(9000, 10000, 2000) == 0.5 && shake_gain(5000, 10000, 2000) == 1 && shake_gain(9999, 10000, 0) == 1 && shake_gain(10000, 10000, 0) == 0);
+}
+
+void test_sampler() {
+    FakeClock c;
+    SampleBoard board;
+    FakeSource src;
+    Sampler s(&src, &board, &c);
+    src.put(1, 1, 2, 3, yaw_q(0.5));
+    src.put(5, -4, 0, 9);
+    const uint32_t targets[] = {5, 0, 1, 5, 7, 8};
+    s.sample(3, 9, 1, targets, 6);
+    SampleSet set;
+    CHECK(board.try_read(&set));
+    CHECK(set.s[0].entity == 1 && set.s[0].state == kSamplePresent && set.s[0].step == 9 && set.s[0].epoch == 3 && set.s[0].ns == c.now);
+    CHECK(near(Vec3{set.s[0].position[0], set.s[0].position[1], set.s[0].position[2]}, {1, 2, 3}) && near(set.s[0].rotation[1], std::sin(0.25), 1e-6));
+    // targets once each, never the local player again, 0 skipped; a missing one is "absent"
+    CHECK(set.s[1].entity == 5 && set.s[1].state == kSamplePresent && set.s[2].entity == 7 && set.s[2].state == kSampleAbsent && set.s[3].entity == 8);
+    CHECK(set.find(0) == &set.s[0] && set.find(5)->position[0] == -4 && set.find(7)->state == kSampleAbsent && !set.find(99));
+    // a fault: the sampler stops (nothing usable) until the next world
+    src.fault = true;
+    s.sample(3, 10, 1, targets, 1);
+    CHECK(s.faulted() && board.try_read(&set) && set.s[0].state == kSampleNone);
+    src.fault = false;
+    s.sample(3, 11, 1, targets, 1);
+    CHECK(set.s[0].state == kSampleNone);
+    s.world_started();
+    s.sample(4, 12, 1, targets, 1);
+    CHECK(!s.faulted() && board.try_read(&set) && set.s[0].state == kSamplePresent && set.s[0].epoch == 4);
+}
+
+constexpr uint64_t kAllLocal = KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
+
+KilnCameraRequest follow_request(Rig& g, const KilnCameraProfile& pr, uint32_t duration = 10000) {
+    KilnCameraRequest q = g.lens(0, duration);
+    q.parts = KILN_CAMERA_PROFILE;
+    q.lens_source = KILN_CAMERA_LENS_NONE;
+    q.fov_y_degrees = 0;
+    q.profile = pr;
+    return q;
+}
+
+void test_follow_camera() {
+    Rig g(kAllLocal);
+    g.source.put(5, 10, 0, 0, yaw_q(kPi / 2));  // its scale is 2: no distance changes with it
+    KilnCameraProfile pr = profile_of(5, 4, KILN_CAMERA_FOLLOW_HEADING);
+    pr.offset_world_y = 2;
+    Result r;
+    const KilnCameraLease lease = g.apply(30, follow_request(g, pr), &r);
+    uint32_t t[4];
+    CHECK(g.backend.targets(t, 3) == 1 && t[0] == 5);  // the sampler copies the target from the next Pre
+    g.pre();
+    g.frame(0);
+    CHECK(near(g.position(), {6, 2, 0}, 1e-6));  // 4 m behind the pivot (10, 2, 0) along the heading +X
+    CHECK(near(g.pose().rotation[1], std::sin(kPi / 4), 1e-6));
+    g.pre();
+    CHECK(r.seen && r.r.ok);
+    // one completed step of latency: the frame uses the newest Pre's copy, not where the target is now
+    g.source.put(5, 12, 0, 0, yaw_q(kPi / 2));
+    g.frame(0);
+    CHECK(near(g.position(), {6, 2, 0}, 1e-6));
+    g.later(16);
+    CHECK(near(g.position(), {8, 2, 0}, 1e-6));
+    // the snapshot says which step's samples the frame was built from
+    KilnCameraVisual v{};
+    v.size = sizeof v;
+    CHECK(g.frames.get_visual(&v) == 0 && v.target_sample_step == g.step);
+    // the target points straight up: its heading is kept
+    g.source.put(5, 12, 0, 0, pitch_q(-kPi / 2));
+    g.later(16);
+    CHECK(near(g.position(), {8, 2, 0}, 1e-6) && near(g.pose().rotation[1], std::sin(kPi / 4), 1e-6));
+    // a Preserve update with the same target and mode keeps the heading; a Restart forgets it
+    KilnCameraRequest q2 = follow_request(g, pr);
+    Result u;
+    CHECK(g.core.update(30, lease, KILN_CAMERA_PRESERVE_TIMELINE, &q2, &on_done, &u, kOnClient) == KILN_OK);
+    g.later(16);
+    g.pre();
+    CHECK(u.seen && u.r.ok && near(g.pose().rotation[1], std::sin(kPi / 4), 1e-6));
+    Result u2;
+    CHECK(g.core.update(30, lease, KILN_CAMERA_RESTART_TIMELINE, &q2, &on_done, &u2, kOnClient) == KILN_OK);
+    g.later(16);
+    g.pre(1001);
+    CHECK(u2.seen && !u2.r.ok && u2.r.reason_code == KILN_CAMERA_REASON_TARGET_UNAVAILABLE && g.core.active_revision(lease) == 2);
+    // the target is gone: TargetLost
+    g.source.put(5, 12, 0, 0, yaw_q(kPi / 2));
+    g.later(16);
+    g.source.at.erase(5);
+    g.later(16);
+    CHECK(g.pose_is_stock());
+    g.pre();
+    CHECK(g.env.lines.back().find("end=3 code=10") != std::string::npos);
+}
+
+void test_follow_refusals() {
+    Rig g(kAllLocal);
+    // a target the client world does not have: TargetUnavailable from the Pre that asked for it
+    Result r;
+    g.apply(30, follow_request(g, profile_of(77, 4, KILN_CAMERA_FIXED_WORLD)), &r);
+    g.pre();
+    g.pre();
+    CHECK(r.seen && !r.r.ok && r.r.reason_code == KILN_CAMERA_REASON_TARGET_UNAVAILABLE);
+    // a follow-heading target that points straight up on the first frame: TargetUnavailable
+    g.source.put(6, 0, 0, 5, pitch_q(kPi / 2));
+    Result r2;
+    g.apply(30, follow_request(g, profile_of(6, 4, KILN_CAMERA_FOLLOW_HEADING)), &r2);
+    g.pre();
+    g.frame(0);
+    CHECK(g.pose_is_stock());
+    g.pre();
+    CHECK(r2.seen && r2.r.reason_code == KILN_CAMERA_REASON_TARGET_UNAVAILABLE);
+    // follow 0 is the local player; a stale target sample after it was shown ends the lease SafetyRejected
+    g.source.put(1, 0, 0, 0, yaw_q(0));
+    Result r3;
+    g.apply(30, follow_request(g, profile_of(0, 3, KILN_CAMERA_FOLLOW_HEADING)), &r3);
+    g.pre();
+    g.frame(0);
+    CHECK(near(g.position(), {0, 0, -3}, 1e-9));
+    g.pre();
+    CHECK(r3.r.ok);
+    g.frame(251);
+    CHECK(g.pose_is_stock());
+    g.pre();
+    CHECK(g.env.lines.back().find("end=11") != std::string::npos);
+}
+
+void test_shake_through_the_transaction() {
+    // a shake alone moves the game's own pose in the camera's axes, never turns it, and two clients agree
+    std::vector<Vec3> seen[2];
+    for (int run = 0; run < 2; ++run) {
+        Rig g(kAllLocal);
+        g.set_stock(3, 2, 1, yaw_q(kPi / 2));
+        KilnCameraRequest q = g.lens(0, 1000);
+        q.parts = KILN_CAMERA_SHAKE;
+        q.lens_source = KILN_CAMERA_LENS_NONE;
+        q.fov_y_degrees = 0;
+        q.shake = KilnCameraShake{0.5f, 2.0f, 0, 9};
+        Result r;
+        g.apply(30, q, &r);
+        g.pre();
+        for (int i = 0; i < 20; ++i) {
+            g.later(i ? 37 : 0);
+            const Vec3 d = g.position() - Vec3{3, 2, 1};
+            CHECK(length(d) <= 0.5 + 1e-6);
+            CHECK(near(g.pose().rotation[1], g.stock.rotation[1], 1e-6) && near(g.pose().rotation[3], g.stock.rotation[3], 1e-6) && g.pose().rotation[0] == 0);
+            const Vec3 want = rotate(yaw_q(kPi / 2), shake_offset(q.shake, 37.0 * i, 1000));
+            CHECK(near(d, want, 1e-6));
+            seen[run].push_back(d);
+        }
+        CHECK(r.r.ok);
+    }
+    for (size_t i = 0; i < seen[0].size(); ++i) CHECK(seen[0][i].x == seen[1][i].x && seen[0][i].y == seen[1][i].y && seen[0][i].z == seen[1][i].z);
+}
+
 }  // namespace
 
 int main() {
@@ -691,5 +926,11 @@ int main() {
     test_supersession();
     test_limits_and_safety();
     test_world_owner_and_fault();
+    test_profile_geometry();
+    test_shake();
+    test_sampler();
+    test_follow_camera();
+    test_follow_refusals();
+    test_shake_through_the_transaction();
     std::printf("camera render: PASS (%d checks)\n", checks);
 }

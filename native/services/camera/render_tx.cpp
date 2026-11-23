@@ -231,7 +231,13 @@ bool LocalBackend::step() {
         if (staged_) {
             Plan& s = *staged_;
             const bool shown = s.first_selection.load(std::memory_order_acquire) != 0;
-            const uint32_t refusal = s.refusal.load(std::memory_order_acquire);
+            uint32_t refusal = s.refusal.load(std::memory_order_acquire);
+            if (const uint32_t follow = s.follow(); follow && !shown && !refusal) {
+                // this Pre's sampler asked for the target and the client world does not have it: TargetUnavailable
+                SampleSet set;
+                const Sample* t = samples_->try_read(&set) ? set.find(follow == s.request.req.player_entity ? 0 : follow) : nullptr;
+                if (t && t->epoch == epoch && t->state == kSampleAbsent) refusal = KILN_CAMERA_REASON_TARGET_UNAVAILABLE;
+            }
             if (refusal || now - s.staged_ns > kFrameDeadlineNs) {
                 // refused by the render path, or no frame confirmed it in time; a frame may have shown it already
                 reports.push_back({Report::Rejected, s.lease, s.revision, refusal ? refusal : static_cast<uint32_t>(KILN_CAMERA_REASON_NO_CAMERA_FRAME), 0,
@@ -293,7 +299,16 @@ void LocalBackend::flush(std::vector<Report>& reports) {
     }
 }
 
-uint32_t LocalBackend::targets(uint32_t*, uint32_t) const { return 0; }
+uint32_t LocalBackend::targets(uint32_t* out, uint32_t max) const {
+    std::lock_guard<std::mutex> lock(m_);
+    uint32_t n = 0;
+    for (const std::shared_ptr<Plan>* p : {&active_, &staged_}) {
+        if (!*p || n >= max) continue;
+        const uint32_t follow = (*p)->follow();
+        if (follow && follow != (*p)->request.req.player_entity) out[n++] = follow;
+    }
+    return n;
+}
 
 LocalBackend::Counters LocalBackend::counters() const {
     return Counters{c_frames_.load(), c_pose_.load(), c_fov_.load(), c_faults_.load()};
@@ -328,8 +343,13 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
         // its first frame: blend in from what was on screen (the natural view on a fresh apply)
         r = Run{};
         r.gen = p.gen;
+        r.lease = p.lease;
+        r.follow = p.follow();
+        r.mode = q.profile.rotation_mode;
         r.commit_ns = now;
         r.from = natural_had_override ? last_out_ : natural;
+        // a Preserve update of the same lease with the same target and rotation mode keeps the heading it had
+        if (p.update && !p.restart && run_active_.lease == p.lease && run_active_.follow == r.follow && run_active_.mode == r.mode) r.heading = run_active_.heading;
     }
     int64_t t0 = p.first_ns.load(std::memory_order_acquire);
     if (!t0) t0 = p.restart || !p.t0_ns ? now : p.t0_ns;
@@ -371,6 +391,28 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
             a.position = pp.position;
             a.rotation = pp.rotation;
             if (q.lens_source == KILN_CAMERA_LENS_KEYS) a.fov = radians(pp.fov_degrees);
+        }
+        if (const uint32_t follow = p.follow()) {
+            // the target's copy from the newest client Pre: one completed step behind, never older than 250 ms
+            const Sample* t = samples.find(follow == q.player_entity ? 0 : follow);
+            const bool usable = t && t->state == kSamplePresent && t->epoch == p.epoch && now >= t->ns && now - t->ns <= kSampleValidNs;
+            if (!usable) {
+                if (!shown) return Eval::Nothing;  // not yet: the client Pre refuses a target that is not there
+                const bool gone = t && t->state == kSampleAbsent && t->epoch == p.epoch;
+                *end_reason = gone ? KILN_CAMERA_END_TARGET_LOST : KILN_CAMERA_END_SAFETY_REJECTED;
+                *code = gone ? KILN_CAMERA_REASON_TARGET_UNAVAILABLE : KILN_CAMERA_REASON_NONE;
+                return Eval::Ended;
+            }
+            const Vec3 pt{t->position[0], t->position[1], t->position[2]};
+            const Quat qt{t->rotation[0], t->rotation[1], t->rotation[2], t->rotation[3]};
+            if (profile_view(q.profile, pt, qt, natural.rotation, &r.heading, &a.position, &a.rotation) != ProfileResult::Ok) {
+                *code = KILN_CAMERA_REASON_TARGET_UNAVAILABLE;  // straight up or down, and no heading yet
+                return Eval::Refused;
+            }
+        }
+        if (q.parts & KILN_CAMERA_SHAKE) {
+            // after the path, the profile or the game's pose; Q stays
+            a.position = a.position + rotate(a.rotation, shake_offset(q.shake, elapsed, q.duration_ms));
         }
         if (q.lens_source == KILN_CAMERA_LENS_CONSTANT) a.fov = radians(q.fov_y_degrees);
         const View in = mix(r.from, a, blend_in_weight(static_cast<double>(now - r.commit_ns) / 1e6, q.blend_in_ms));

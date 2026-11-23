@@ -272,14 +272,15 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     g_sampling = g_client && g_client->header.size >= offsetof(KilnClientApi, state) + sizeof(void*) && g_client->state &&
                  api->symbol(str("GetComponent"), &get_component) == KILN_OK && get_component && render_transform_layout(&layout_why);
     if (g_sampling) g_source.fn = reinterpret_cast<GetComponentFn>(get_component);
-    else logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no pose, path, follow or shake", layout_why.empty() ? "no GetComponent or kiln.client" : layout_why.c_str());
+    else logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no path, follow profile or shake", layout_why.empty() ? "no GetComponent or kiln.client" : layout_why.c_str());
 
     KilnHandle h = 0;
     const bool lifecycle = api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;
     const bool snapshot_row = api->feature(str("camera.rendered_snapshot"));
     const bool fov_row = api->feature(str("camera.local_fov")), pose_row = api->feature(str("camera.local_pose"));
+    const bool profile_row = api->feature(str("camera.local_profile")), shake_row = api->feature(str("camera.local_shake"));
     bool selection = false, captured = false;
-    if (laid_out && mid2 && lifecycle && (snapshot_row || fov_row || pose_row)) {
+    if (laid_out && mid2 && lifecycle && (snapshot_row || fov_row || pose_row || profile_row || shake_row)) {
         // the selection: a selection id per frame, and the one place a visual request is written
         selection = install(hooks, "camera/RenderFovSelected", &mid_select, "camera/RenderFovSelected");
         g_frames.set_selection_hooked(selection);
@@ -292,6 +293,8 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     if (selection && captured) {
         if (fov_row) g_serving |= KILN_CAMERA_CAP_LOCAL_FOV;
         if (pose_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_POSE;
+        if (profile_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_PROFILE;  // and its target through the same sampler
+        if (shake_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_SHAKE;
     }
     g_backend = std::make_unique<LocalBackend>(core, &g_frames, &g_board, &g_clock, &g_world);
     g_backend->set_serving(g_serving);

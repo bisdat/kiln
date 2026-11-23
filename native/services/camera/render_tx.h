@@ -36,7 +36,9 @@
 #include <string>
 #include <vector>
 
+#include "profile.h"
 #include "sampler.h"
+#include "shake.h"
 #include "snapshot.h"
 #include "state.h"
 #include "timeline.h"
@@ -70,6 +72,11 @@ struct Plan {
 
     bool pose() const { return (request.req.parts & (KILN_CAMERA_PATH | KILN_CAMERA_PROFILE | KILN_CAMERA_SHAKE)) != 0; }
     bool lens() const { return (request.req.parts & KILN_CAMERA_LENS) != 0; }
+    // A profile's target: its follow entity, or the local player for 0. 0 when the plan has no profile.
+    uint32_t follow() const {
+        if (!(request.req.parts & KILN_CAMERA_PROFILE)) return 0;
+        return request.req.profile.follow_entity ? request.req.profile.follow_entity : request.req.player_entity;
+    }
 
     // ---- set by the render path, read by the client Pre ----
     std::atomic<int64_t> first_ns{0};          // T0 actually used (set with the first frame written)
@@ -119,6 +126,9 @@ private:
     // the render path's own state for one plan
     struct Run {
         uint64_t gen = 0;
+        KilnCameraLease lease = 0;
+        uint32_t follow = 0, mode = 0;  // the profile's target and rotation mode (the heading's memory goes with them)
+        HeadingMemory heading;
         int64_t commit_ns = 0;  // its first frame
         View from;              // blend-in origin
         bool releasing = false;

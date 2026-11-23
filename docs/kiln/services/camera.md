@@ -64,8 +64,8 @@ thread. Since mod API 0.2.17.
 ## The local visual camera: SetLocal
 
 On a game client, `Camera.SetLocal(request)` (the client world's thread) sets a render-only camera for this client's
-own player: a keyed `Path` (`camera.local_pose`) and/or a `Lens` (`camera.local_fov`); a lens alone needs only
-`camera.local_fov`. Kiln writes it in one place, the renderer's camera selection: the selected pose's position and
+own player: a keyed `Path` (`camera.local_pose`) or a follow `Profile` (`camera.local_profile`) or neither, plus a
+`Lens` (`camera.local_fov`) and/or a `Shake` (`camera.local_shake`); a lens alone needs only `camera.local_fov`. Kiln writes it in one place, the renderer's camera selection: the selected pose's position and
 rotation (its scale stays the game's) and/or the field of view the game is about to store. The player's input camera,
 aim, the game's camera object and every component stay as they are, so movement, aim and `Render.Camera` do not
 change. A request is `Ok` (`ClientFrame`) only after a frame showed it; the result names that frame. When something
@@ -83,8 +83,19 @@ was on screen (the game's view on a fresh request, the previous visual on an upd
 the duration's last part toward the game's fresh view; `Camera.End` blends the last shown view out to the game's view
 and completes after that. Parts a replacement drops go back to the game's view at once.
 
+A follow `Profile` follows `Follow` (`EntityId.None`: the local player) at `Distance` metres from a pivot `OffsetLocal`
+metres away in the target's axes and `OffsetWorldY` metres up. The metres are absolute: not added to the game's own
+distance and not scaled with the target. `FreeOrbit` keeps the game's orientation (the player keeps turning the view),
+`FollowHeading` takes the target's upright heading (yaw only: a banking or climbing target does not tilt the view)
+turned by `Rotation`, `FixedWorld` uses `Rotation` as it is. Kiln copies the target's position in each client step
+before the step runs, so the camera follows one completed step behind, without extrapolation. A target the client
+world does not have is refused `TargetUnavailable` (so is a heading camera whose target points straight up or down on
+its first frame); one that disappears later ends the lease `TargetLost`, one not copied for 250 ms `SafetyRejected`.
+A `Shake` moves the camera without turning it, in the camera's own axes, never further than `AmplitudeMetres`; equal
+seeds give equal shakes whatever the frame rate, `Falloff` fades it over the duration's last part, and `End` stops it.
+
 Limits: every key and every derived camera position must stay within 250 m of the local player, whose position Kiln
-copies each client step; a path request whose player sample is missing or older than 250 ms writes nothing (and ends
+copies each client step; a path, profile or shake request whose player sample is missing or older than 250 ms writes nothing (and ends
 `SafetyRejected` once it was shown), a lens alone does not need it. A value out of bounds is refused `Bounds` before the
 first frame and ends the lease `SafetyRejected` after it. Kiln leaves the game's view alone when it is one v1 does not
 take (a scaled camera, a lens outside 0.01 to pi - 0.01 rad). A write that faults turns visual writes off for the rest
