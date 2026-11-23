@@ -309,6 +309,41 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         bundle.Keys["instanceBands"] = new WorldStore.Slot { Json = System.Text.Json.JsonSerializer.Serialize(assigned) };
     }
 
+    internal const int BandBase = 1024, BandWidth = 128;
+
+    /// <summary>Whether a character's InstanceData record in a storage band belongs to an item whose game record still
+    /// waits in the storage document: parked (its mod is off, a hold) or quarantined. Such metadata must not age out
+    /// with InstanceStore's missed sessions while the record it belongs to is kept.</summary>
+    internal bool HoldsParked(CharacterKey character, int slot, ItemId item)
+    {
+        if (slot < BandBase || character.IsNone || character.IsAccountOnly) return false;
+        var visit = _visits.GetValueOrDefault(character);
+        var document = visit?.Document ?? Read(character);
+        if (document is null) return false;
+        if (document.ReadOnly) return true; // parked whole by an unsupported version: everything in it waits
+        IReadOnlyDictionary<string, int>? bands = visit is { Bands.Count: > 0 } ? visit.Bands : null;
+        if (bands is null && owner.FindBundle(Prefix + character.Text)?.Keys.GetValueOrDefault("instanceBands")?.Json is { } json)
+        {
+            try { bands = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(json); }
+            catch (System.Text.Json.JsonException) { bands = null; }
+        }
+        var band = (slot - BandBase) / BandWidth;
+        // Without a usable band map any parked key may be the item's: keep rather than lose.
+        bool KeyOf(string key) => bands is null || !bands.ContainsKey(key) || bands[key] == band;
+        static uint ItemOf(string? b64)
+        {
+            try { return b64 is null ? 0 : Convert.FromBase64String(b64) is { Length: >= 5 } b ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(1)) : 0; }
+            catch (FormatException) { return 0; }
+        }
+        if (document.Data["current"]?["parked"] is JsonObject parked)
+            foreach (var (key, bag) in parked)
+                if (KeyOf(key) && bag?["records"] is JsonArray records && records.OfType<JsonObject>().Any(r => ItemOf(r["b64"]?.GetValue<string>()) == item.Value))
+                    return true;
+        return document.Data["quarantine"] is JsonArray quarantine && quarantine.OfType<JsonObject>().Any(q =>
+            q["storage"]?.GetValueKind() == System.Text.Json.JsonValueKind.String && KeyOf(q["storage"]!.GetValue<string>())
+            && q["record"]?.GetValueKind() == System.Text.Json.JsonValueKind.String && ItemOf(q["record"]!.GetValue<string>()) == item.Value);
+    }
+
     private IEnumerable<(Visit Visit, string Key, EntityId Holder, int Offset)> InstanceHolders()
     {
         if (Native is null) yield break;
@@ -317,7 +352,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             foreach (var row in Native.InstanceHolders(visit.Player))
                 if (!row.Holder.IsNone && visit.Bands.TryGetValue(row.Key, out var band))
                 {
-                    var offset = 1024 + band * 128 + (row.Temporary ? 64 : 0);
+                    var offset = BandBase + band * BandWidth + (row.Temporary ? 64 : 0);
                     _instanceOwners[row.Holder.Value] = (visit.Player, offset);
                     yield return (visit, row.Key, row.Holder, offset);
                 }
@@ -329,7 +364,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         if (holder.IsNone || !_visits.TryGetValue(character, out var visit) || visit.Player != player || visit.Document.ReadOnly) return;
         EnsureBands(visit);
         if (!visit.Bands.TryGetValue(key, out var band)) return;
-        var offset = 1024 + band * 128;
+        var offset = BandBase + band * BandWidth;
         // A retired ordinary holder has handle0 too. Its cached band wins; only an actual temporary row adds 64.
         if (_instanceOwners.TryGetValue(holder.Value, out var cached) && cached.Player == player) offset = cached.Offset;
         else if (Native?.InstanceHolders(player).Any(row => row.Holder == holder && row.Temporary) == true) offset += 64;

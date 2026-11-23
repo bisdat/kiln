@@ -1135,12 +1135,15 @@ internal sealed partial class InstanceStore
                     break;
                 case MatchKind.Parked:
                     r.Reason = o.Reason;
-                    if (r.MissSession != _session)
+                    // A stored item whose record waits parked in the player's storage (its mod is off, or the copy is
+                    // held) is not missing: it comes back when its key does, and its metadata must come back with it.
+                    var storageParked = h.Key.Kind == HolderKind.Player && _owner.Storage.HoldsParked(h.Key.Character, r.Slot, r.Fields.Item);
+                    if (r.MissSession != _session && !storageParked)
                     {
                         r.MissSession = _session;
                         r.Missed++;
                     }
-                    if (r.Missed >= MaxMissedSessions)
+                    if (r.Missed >= MaxMissedSessions && !storageParked)
                     {
                         h.Records.Remove(r);
                         Lost(r.Values, r.Fields.Item, ItemInstanceRef.None, InstanceLossReason.Unmatched,
