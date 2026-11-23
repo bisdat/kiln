@@ -31,8 +31,9 @@ mkdir -p "$WINEPREFIX"
 unset DISPLAY
 export WAYLAND_DISPLAY=kiln-no-display WINEDLLOVERRIDES=winedbg.exe=d WINEDEBUG=-all
 [[ -f $WINEPREFIX/system.reg ]] || timeout 120s wine wineboot -i >/dev/null 2>&1
+fixture=$(winepath -w "$here/../../../schema/fixtures/staged/paths.json" 2>/dev/null)
 set +e
-( cd "$out" && timeout 600s wine staged_test.exe ) 2>"$out/stderr.txt"
+( cd "$out" && KILN_STAGED_FIXTURE=$fixture timeout 600s wine staged_test.exe ) 2>"$out/stderr.txt"
 rc=$?
 timeout 60s wineserver -w
 set -e

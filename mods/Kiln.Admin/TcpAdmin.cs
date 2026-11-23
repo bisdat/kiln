@@ -665,6 +665,7 @@ internal sealed class TcpAdmin : IDisposable
     internal static int BudgetMs(string op) => op switch
     {
         "mod_test" => 180_000,
+        "update_stage" => 180_000,  // copies and hashes a mod or a whole Kiln bundle
         "backup_create" => 90_000,
         "save_now" => 60_000,
         _ when op.StartsWith("mod_", StringComparison.Ordinal) => 45_000,

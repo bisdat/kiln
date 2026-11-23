@@ -31,6 +31,7 @@ public sealed class AdminMod : Mod
         _bridge.Register("ping", _ => new JsonObject { ["pong"] = true, ["clock"] = _step / 24.5, ["kiln"] = Game.KilnVersion });
         _bridge.Register("status", _ => Status());
         Ops.DataDirectory = Context.DataDirectory;
+        Ops.UpdatesCancel = new CancellationTokenSource();
         Ops.TickScheduler = Context.Scheduler;  // the writes after a guard request hop onto the tick thread (OpsTick.cs)
         Ops.AdminVersion = Context.Info.Version;
         Ops.LoadedAt = Environment.TickCount64;
@@ -55,6 +56,7 @@ public sealed class AdminMod : Mod
         var reason = Lifecycle.Phase == ServerPhase.Stopping ? "shutdown" : "unload";
         _tcp?.Stop(reason);
         _tcp = null;
+        Ops.UpdatesCancel.Cancel();  // a staging copy in progress stops (its .stage-* folder is removed)
         Ops.Tcp = null;
         _bridge.Abandon();
     }

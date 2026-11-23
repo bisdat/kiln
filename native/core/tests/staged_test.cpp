@@ -383,6 +383,29 @@ static void test_paths() {
     CHECK(!mod_folder_ok(long_name) && mod_folder_ok(long_name.substr(1)));
 }
 
+// schema/fixtures/staged/paths.json: the cases Kiln.Admin's Staging (C#) answers the same way (StagingTests).
+static void test_paths_fixture() {
+    const char* file = std::getenv("KILN_STAGED_FIXTURE");
+    CHECK_MSG(file && *file, "KILN_STAGED_FIXTURE is not set (the test scripts set it)");
+    if (!file || !*file) return;
+    const json f = json::parse(read(fs::path(file)), nullptr, false);
+    CHECK_MSG(f.is_object() && f.contains("rel") && f.contains("kiln") && f.contains("folder"), file);
+    if (!f.is_object()) return;
+    std::string why;
+    int n = 0;
+    for (const char* kind : {"rel", "kiln", "folder"}) {
+        for (const char* verdict : {"ok", "bad"}) {
+            for (const auto& c : f[kind][verdict]) {
+                const std::string path = c.get<std::string>();
+                const bool got = std::string(kind) == "rel" ? rel_path_ok(path, &why) : std::string(kind) == "kiln" ? kiln_path_ok(path, &why) : mod_folder_ok(path);
+                CHECK_MSG(got == (std::string(verdict) == "ok"), std::string(kind) + " " + verdict + ": " + path);
+                ++n;
+            }
+        }
+    }
+    CHECK(n > 60);
+}
+
 static void test_mod_update_and_rollbacks() {
     const fs::path g = fresh("mod-update");
     write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
@@ -928,6 +951,7 @@ int main(int argc, char** argv) {
     fs::create_directories(g_scratch);
 
     test_paths();
+    test_paths_fixture();
     test_mod_update_and_rollbacks();
     test_mod_loading_state_and_new_mod();
     test_disabled_carried_over();

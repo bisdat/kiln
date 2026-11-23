@@ -13,4 +13,4 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/kiln-staged-test.XXXXXX")
 trap 'chmod -R u+w "$scratch" 2>/dev/null; rm -rf "$scratch"' EXIT
 "${CXX:-clang++}" -std=c++20 -O1 -g -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined \
   -I"$src" -I"$here/../abi" -I"$here/../../third_party" "$here/staged_test.cpp" "$src/staged.cpp" -o "$out/staged_test"
-KILN_STAGED_SCRATCH=$scratch/run "$out/staged_test"
+KILN_STAGED_SCRATCH=$scratch/run KILN_STAGED_FIXTURE=$here/../../../schema/fixtures/staged/paths.json "$out/staged_test"
