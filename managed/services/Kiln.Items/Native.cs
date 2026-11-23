@@ -876,4 +876,19 @@ internal static unsafe class ItemsNative
 
     // KilnResult
     public const int Ok = 0, InvalidArgument = 1, NotFound = 2, Unavailable = 3, WrongThread = 4, BufferTooSmall = 5, InternalError = 7;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GiveEquipRequest
+    {
+        public uint Size, Player, Item, Count, Flags;
+        public byte EquipmentSlot;
+        public fixed byte Reserved[3];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableWithGiveEquip
+    {
+        public TableV9 V9;
+        public delegate* unmanaged[Cdecl]<ulong, GiveEquipRequest*, delegate* unmanaged[Cdecl]<EquipResult*, void*, void>, void*, ulong*, int> GiveEquip;
+    }
+
 }

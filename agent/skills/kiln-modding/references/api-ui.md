@@ -35,6 +35,15 @@ reflection: `KilnLanguage` and `KeyInput` are the public members for them (`docs
 text once, on release; else null). Kinds are the mod's own; payloads are text up to 4096 bytes. `SlotClick.Pointer` is
 the press position in the same pixels (`Ui.Inventory.OnClick`). Page `docs/kiln/ui.md`.
 
+**The HUD's ammunition and spell lists (dev.30.6+, mod API 0.2.15, Kiln.Ui; not yet seen in a real game).**
+`Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => rows, new AmmoListOptions { Mode = AmmoListMode.Append })`
+returns an `AmmoListProvider` (`Refresh()`, `Dispose()`; it also ends at unload). The provider runs on the game's UI
+thread when the list's `AmmoListContext` changes (`Kind`, `Held`, `GameRows`, `Session`, `Revision`) and returns
+`AmmoListRow(item, count)` rows in its order; `Replace` hides the game's rows. `Ui.AmmoList.Picked += pick => ...` gets
+a selection wish (`AmmoListPick`: `Kind`, `Item`, `Count`) for this mod's rows the backpack does not hold: send it to the
+server half, which validates it and swaps the stack in. Rows `ui.ammo.list` and `ui.ammo.pick` (`Available`,
+`PicksAvailable`); test kit `kiln.AmmoList`. Page `docs/kiln/ui.md`.
+
 **Looks and themes (dev.29.16+; not yet seen in a real game).** `UiStyle.Player` (the look the player chose) is the
 default for `Ui.Window`, `Ui.Screen` and crafting panels; before, windows had Kiln's ember look. `ui.Palette` reads the
 look's colours by role. `Ui.Themes.Define(name, new UiThemeSpec { ... })` makes a theme for your own windows

@@ -35,6 +35,16 @@ the item's own), `await Items.Unequip(player, slot)` takes one off into a free b
 on the server with all its checks; `EquipResult` says what moved where or why not. `EquipOptions.DryRun` asks without
 changing anything; `EquipChangedEvent` follows each change. Capability `items.equip`. Sample `Loadouts`.
 
+dev.30.6+ (mod API 0.2.15) **give straight into equipment:** `await Items.GiveEquip(player, item, count, EquipmentSlot.Ring1,
+new GiveEquipOptions { Replaced = Replaced.Take })` creates one stack in an empty or
+occupied equipment slot and equips it in one game transaction (server, tick thread; no free backpack slot is needed for an
+empty slot or `Replaced.Take`). `Replaced.Backpack` (default) keeps the old stack in a free backpack slot (`NoRoom`, nothing
+changed, when none is free); `Replaced.Take` **destroys** the old stack and its item entity. `count` is 1 to 65535 and one stack
+(1 for gear); the item's equipment slot type must fit; a backpack item cannot be given into the bag slot yet. The
+`EquipResult` has `From` None and reports the old stack in `ReplacedItem` and `ReplacedCount` (also on `DryRun`; 0 for
+`Equip` and `Unequip`). `Items.GiveEquipAvailable`, capability `items.give_equip`. Page `docs/kiln/services/items.md`
+"Give straight into equipment"; test kit `kiln.Items.SetEquipmentSlotType`.
+
 ## Persistent data
 `WorldData.Get<T>(key)` (live object: change it in place; saved with the world), `PlayerData.Get<T>(steamId, key)`,
 `EntityData.Get<T>(entity, key)` / `Set`. Tick thread. JSON via System.Text.Json. Keys are per mod. Kept across hot

@@ -184,6 +184,8 @@ dev.30+ (pages in the repository's `docs/kiln/`):
 | dev.30.5+: a mod's item or recipe tracked as game knowledge (`KnowledgeBlock`) | `modding/item-blocks.md` "Tracking"; reads and changes: `services/knowledge.md` |
 | dev.30.6+: block queries and controlled breaking (`Build.BlockAt`, `FindWall`, `BreakBox`) | `services/build-blocks.md` |
 | dev.30.6+: player crafting from linked chests, dye sources (`Crafting.AddSource`, #125) | `services/stations.md` "Player crafting sources"; [api-items.md](api-items.md#crafting-from-linked-containers-306-mod-api-0215) |
+| dev.30.6+: create and equip one stack in one step (`Items.GiveEquip`, #126) | `services/items.md` "Give straight into equipment"; [api-items.md](api-items.md#inventory-transfers-dev20) |
+| dev.30.6+: mods' rows in the HUD's arrow and spell lists (`Ui.AmmoList`, #127; client) | `ui.md` "The HUD's ammunition and spell lists"; `services/ui.md` "kiln.ui.ammo"; [api-ui.md](api-ui.md#game-ui-hud-keys) |
 
 dev.30+ samples: GearValues, RarityAnvil, SlotMarks.
 
