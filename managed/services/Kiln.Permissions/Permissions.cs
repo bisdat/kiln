@@ -18,10 +18,14 @@ public enum PermissionLevel
     Console = 2,
 }
 
+/// <summary>What kind of party a <see cref="PermissionSubject"/> is.</summary>
 public enum PermissionSubjectKind
 {
+    /// <summary>The server console.</summary>
     Console = 0,
+    /// <summary>A player, online or not.</summary>
     Player = 1,
+    /// <summary>A remote tool (an admin connection or dashboard).</summary>
     Remote = 2,
 }
 
@@ -30,7 +34,9 @@ public enum PermissionSubjectKind
 /// converts itself).</summary>
 public readonly record struct PermissionSubject
 {
+    /// <summary>What kind of party this is.</summary>
     public PermissionSubjectKind Kind { get; init; }
+    /// <summary>A name to show in logs and messages: the player's name, "console", or the remote tool's name.</summary>
     public string Name { get; init; }
     /// <summary>The player entity (online players); none for offline players and non-players.</summary>
     public EntityId Entity { get; init; }
@@ -46,11 +52,17 @@ public readonly record struct PermissionSubject
     /// <summary>The game's user-group id when known.</summary>
     public uint? UserGroupId { get; init; }
 
+    /// <summary>The server console: it has every node.</summary>
     public static PermissionSubject Console => new() { Kind = PermissionSubjectKind.Console, Name = "console", DeclaredAdmin = true };
 
+    /// <summary>A remote tool called <paramref name="name"/>. It has the nodes of
+    /// <see cref="PermissionLevel.Everyone"/>, and those above only when <paramref name="admin"/> is true
+    /// (<see cref="DeclaredAdmin"/>).</summary>
     public static PermissionSubject Remote(string name, bool admin = true) =>
         new() { Kind = PermissionSubjectKind.Remote, Name = name, DeclaredAdmin = admin };
 
+    /// <summary>A player from its <see cref="Player"/>: its name, entity and Steam id, and its user group's rights
+    /// when they are known.</summary>
     public static PermissionSubject ForPlayer(Player player)
     {
         ArgumentNullException.ThrowIfNull(player);
@@ -92,20 +104,36 @@ public readonly record struct PermissionSubject
             UserGroupId = userGroupId,
         };
 
+    /// <summary>A short description for logs: the name with its Steam id or entity, or the kind with the
+    /// name.</summary>
     public override string ToString() => Kind == PermissionSubjectKind.Player
         ? $"{Name}{(SteamId != 0 ? $" (steam {SteamId})" : Entity.IsNone ? "" : $" (entity {Entity})")}"
         : $"{Kind.ToString().ToLowerInvariant()} {Name}";
 }
 
 /// <summary>A registered node.</summary>
+/// <param name="Node">The node's name, lower-case (like <c>mymod.fly</c>).</param>
+/// <param name="DefaultLevel">Who has it when no rule in permissions.json mentions it.</param>
+/// <param name="Description">What the node allows, in words; "" when none was given.</param>
+/// <param name="Owner">The id of the mod that registered it ("kiln" outside mod code).</param>
 public sealed record PermissionNode(string Node, PermissionLevel DefaultLevel, string Description, string Owner);
 
 /// <summary>The answer of <see cref="Permissions.Explain"/>: allowed or not, and which rule decided. <c>Rule</c> is the
 /// rule that matched ("kiln.*", "-mymod.fly"), null when the default level decided; <c>From</c> is "console",
 /// "remote", "player", "group:&lt;name&gt;" or "default:&lt;level&gt;"; <c>Groups</c> the player's Kiln groups.</summary>
+/// <param name="Allowed">True when the subject has the node.</param>
+/// <param name="Node">The node that was asked.</param>
+/// <param name="Level">The node's default level.</param>
+/// <param name="Rule">The rule that decided (like <c>kiln.*</c> or <c>-mymod.fly</c>); null when the default level
+/// decided.</param>
+/// <param name="From">Who decided: <c>console</c>, <c>remote</c>, <c>player</c>, <c>group:&lt;name&gt;</c> or
+/// <c>default:&lt;level&gt;</c>.</param>
+/// <param name="Groups">The player's Kiln groups; empty for the console and remote tools.</param>
 public sealed record PermissionDecision(bool Allowed, string Node, PermissionLevel Level, string? Rule, string From,
     IReadOnlyList<string> Groups)
 {
+    /// <summary>A one-line description: allow or deny, the node, who decided and the rule that matched, if
+    /// any.</summary>
     public override string ToString() => $"{(Allowed ? "allow" : "deny")} {Node} ({From}{(Rule is null ? "" : $" rule {Rule}")})";
 }
 
@@ -188,6 +216,8 @@ public static class Permissions
         }
     }
 
+    /// <summary>The registered node named <paramref name="node"/>, or null when there is none or the name is not a
+    /// valid node name.</summary>
     public static PermissionNode? Find(string node)
     {
         var n = PermissionRules.Normalize(node);
@@ -270,6 +300,7 @@ public static class Permissions
             if (!p.Groups.Contains(group, StringComparer.OrdinalIgnoreCase)) p.Groups.Add(group);
         }, $"player {steamId}: + group {group}");
 
+    /// <summary>Takes a player out of a Kiln group; nothing happens when they are not in it.</summary>
     [TickThreadOnly]
     public static void RemovePlayerFromGroup(ulong steamId, string group) =>
         PermissionStore.Edit(m =>

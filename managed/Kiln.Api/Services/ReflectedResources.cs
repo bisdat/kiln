@@ -155,6 +155,7 @@ public sealed class ReflectedResource
     /// <summary>The resource's reflected type.</summary>
     public GameType Type { get; }
 
+    /// <summary>The resource's type name and GUID, and its part when that is not 0.</summary>
     public override string ToString() => _id.Describe(Type);
 
     /// <summary>Whether the game (or a mod) still serves this resource.</summary>

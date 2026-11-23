@@ -74,11 +74,22 @@ public unsafe struct Registers
 
     /// <summary>The low 8 bytes of xmm<paramref name="n"/> as a double (a float argument/return).</summary>
     public double XmmD(int n) => BitConverter.ToDouble(Xmm(n));
+    /// <summary>The low 4 bytes of xmm<paramref name="n"/> (0..15) as a float (a float argument/return).</summary>
     public float XmmF(int n) => BitConverter.ToSingle(Xmm(n));
 }
 
 /// <summary>The lifecycle of a hook request.</summary>
-public enum HookRegistrationState { Pending, Installed, Refused, Removed }
+public enum HookRegistrationState
+{
+    /// <summary>The request was accepted and installs at the next safe tick.</summary>
+    Pending,
+    /// <summary>The hook or patch is live.</summary>
+    Installed,
+    /// <summary>The installation was refused (<see cref="HookHandle.Reason"/> says why), so nothing is installed.</summary>
+    Refused,
+    /// <summary>The handle was removed (or its mod unloaded); nothing of it is installed any more.</summary>
+    Removed,
+}
 
 /// <summary>A handle to an installed hook or patch; removing it is idempotent.</summary>
 public sealed class HookHandle : IDisposable
@@ -119,6 +130,7 @@ public sealed class HookHandle : IDisposable
             Hooks.Remove(this, ref _cookie);
         }
     }
+    /// <summary>Removes the hook or patch, like <see cref="Remove"/>. Calling it again does nothing.</summary>
     public void Dispose() => Remove();
 }
 
@@ -420,5 +432,13 @@ public static unsafe partial class Hooks
 }
 
 /// <summary>Snapshot of what kiln.hooks has installed.</summary>
+/// <param name="DetourTargets">Distinct addresses that have at least one detour handler.</param>
+/// <param name="MidTargets">Distinct addresses that have at least one mid-hook handler.</param>
+/// <param name="Handlers">Live handlers of every kind across all chains.</param>
+/// <param name="Patches">Live byte patches (<see cref="Memory.Patch"/>).</param>
+/// <param name="DetourCalls">Detour dispatches since the game started. Each thread counts its own and the sum is read
+/// when <see cref="Hooks.Stats"/> is called.</param>
+/// <param name="MidCalls">Mid-hook dispatches since the game started, counted the same way as
+/// <paramref name="DetourCalls"/>.</param>
 public readonly record struct HooksStats(int DetourTargets, int MidTargets, int Handlers, int Patches,
     ulong DetourCalls, ulong MidCalls);

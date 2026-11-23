@@ -135,6 +135,8 @@ public static class OriginalCode
 /// byte, spaces optional between bytes. Entries are 0-255, or -1 for a wildcard.</summary>
 public static class BytePattern
 {
+    /// <summary>Parses <paramref name="pattern"/> into one entry per byte: 0-255 for a byte, -1 for a
+    /// wildcard.</summary>
     public static short[] Parse(string pattern)
     {
         ArgumentNullException.ThrowIfNull(pattern);
@@ -158,7 +160,10 @@ public static class BytePattern
 /// DIR64 base relocations applied for the difference between the preferred and the actual base.</summary>
 public sealed class PeCode
 {
+    /// <summary>The RVA (offset from the image base) of the start of the .text section.</summary>
     public uint TextRva { get; }
+    /// <summary>The .text section's bytes, with the image's base relocations applied for the base it is loaded
+    /// at.</summary>
     public byte[] Text { get; }
 
     PeCode(uint rva, byte[] text) { TextRva = rva; Text = text; }

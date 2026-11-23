@@ -48,12 +48,15 @@ public sealed class NpcControl
     internal readonly List<EntityId> SeenList = [];
     internal long NextLook;
 
+    /// <summary>The creature's entity.</summary>
     public EntityId Entity { get; }
     /// <summary>The creature block's name.</summary>
     public string Name => Block.Name;
     /// <summary>The creature as rules see it: health, phase, position.</summary>
     public NpcView View => new(Entity);
+    /// <summary>Where the creature is in metres, or null when it does not exist or has no transform.</summary>
     public WorldPosition? Position => World.Position(Entity);
+    /// <summary>True while the creature exists and is not dead. A creature with no health reading counts as alive.</summary>
     public bool Alive => World.Exists(Entity) && (Creatures.Of(Entity).Inspect() is not { } i || i.HealthMax <= 0 || i.Health > 0);
 
     /// <summary>Enemies within its sight, nearest first, looked for four times a second. Its own perception: the game's stops with its AI.</summary>

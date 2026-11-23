@@ -9,6 +9,10 @@ using System.Runtime.InteropServices;
 namespace Kiln;
 
 /// <summary>A rectangle (game UI units or pixels, as the property says).</summary>
+/// <param name="X">The left edge.</param>
+/// <param name="Y">The top edge.</param>
+/// <param name="Width">The width.</param>
+/// <param name="Height">The height.</param>
 public readonly record struct UiRect(float X, float Y, float Width, float Height);
 
 /// <summary>One slot draw of a frame. <see cref="Occurrence"/> is the draw order, not an identity; a page/slot can be drawn
@@ -23,13 +27,31 @@ public readonly record struct UiRect(float X, float Y, float Width, float Height
 /// (since 0.2.0-dev.30.5), so it equals the server's <c>InventorySlot.ItemEntity</c> for the player's and an open chest's
 /// slots; <see cref="EntityId.None"/> for a plain stack (no item entity) and any other holder. <see cref="Rarity"/> and
 /// <see cref="Level"/> are the item's as the game drew the slot (since 0.2.0-dev.30.5).</summary>
+/// <param name="Occurrence">The draw order of this slot in the frame; not an identity.</param>
+/// <param name="InventoryPage">The inventory page entity the slot is on.</param>
+/// <param name="SlotIndex">The slot's index on its page.</param>
+/// <param name="Item">The item's id; 0 for an empty slot.</param>
+/// <param name="Count">How many items are in the stack.</param>
+/// <param name="ClientEntity">The item's entity in the client's world; none for an empty slot or a plain stack.</param>
+/// <param name="ServerEntity">The item's entity in the server's world for a slot of a proven holder; none otherwise (see above).</param>
+/// <param name="ViewFlags">The game's flags of the item view the slot was drawn from.</param>
+/// <param name="OuterUi">The slot's outer rectangle in the game's UI units; null when the game gave none usable.</param>
+/// <param name="InnerUi">The slot's inner rectangle in the game's UI units; null when the game gave none usable.</param>
+/// <param name="NativeState">The slot record's 16 state bytes.</param>
+/// <param name="Availability">Bit flags of what this record holds: 1 the outer rectangle, 2 the inner, 4 the native state, 8 the viewport, 16 a verified pixel mapping, 32 level and rarity.</param>
+/// <param name="OuterPixels">The outer rectangle in pixels; null until the pixel mapping is verified.</param>
+/// <param name="InnerPixels">The inner rectangle in pixels; null until the pixel mapping is verified.</param>
 public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte SlotIndex, ItemId Item, uint Count,
     EntityId ClientEntity, EntityId ServerEntity, uint ViewFlags, UiRect? OuterUi, UiRect? InnerUi,
     IReadOnlyList<byte> NativeState, uint Availability, UiRect? OuterPixels, UiRect? InnerPixels)
 {
+    /// <summary>The client entity whose inventory holds the page (the player, a chest).</summary>
     public EntityId Holder { get; init; }
+    /// <summary>Kiln's lifetime serial of the holder in this process; a destroyed and recreated holder gets a new one, never reused.</summary>
     public ulong HolderSerial { get; init; }
+    /// <summary>The page's position among the holder's pages, in the game's model order (not proven to be the saved inventory's page ordinal).</summary>
     public uint PageOrdinal { get; init; }
+    /// <summary>Bit flags of the holder: 1 known, 2 the local player, 4 <see cref="PageOrdinal"/> set, 8 proven to be the server's entity.</summary>
     public uint HolderFlags { get; init; }
 
     /// <summary>The item's rarity as the game drew the slot (the value its tooltip shows), captured on the game's main/UI
@@ -50,11 +72,23 @@ public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte S
 
 /// <summary>One completed frame's slots. <see cref="CaptureMs"/> is <c>Environment.TickCount64</c>'s clock
 /// (GetTickCount64). <see cref="TransformFlags"/>: 8 the viewport numbers are sane, 16 the pixel mapping is verified.</summary>
+/// <param name="Session">The client session the frame belongs to.</param>
+/// <param name="Frame">The game UI frame the slots were drawn in.</param>
+/// <param name="CaptureMs">When the frame was captured, on the <c>Environment.TickCount64</c> clock.</param>
+/// <param name="LocalPlayer">The local player's entity.</param>
+/// <param name="Screen">The game screen of the frame.</param>
+/// <param name="ViewportPixels">The viewport in pixels.</param>
+/// <param name="PixelsPerUnit">Pixels per game UI unit.</param>
+/// <param name="TransformFlags">Bit flags of the unit-to-pixel transform: 8 the viewport numbers are sane, 16 the pixel mapping is verified.</param>
+/// <param name="Slots">The slots drawn in the frame, in draw order.</param>
 public sealed record VisibleSlotsSnapshot(ulong Session, ulong Frame, ulong CaptureMs, EntityId LocalPlayer, GameScreen Screen,
     UiRect ViewportPixels, float PixelsPerUnit, uint TransformFlags, IReadOnlyList<VisibleSlot> Slots);
 
 /// <summary>A slots read: Ok false with a reason when there is no frame yet, the frame is older than 1000 ms, or it had more
 /// than 4096 slot draws (no partial list).</summary>
+/// <param name="Ok">True when a frame was read.</param>
+/// <param name="Reason">Why not; null when <see cref="Ok"/>.</param>
+/// <param name="Snapshot">The frame's slots; null when not <see cref="Ok"/>.</param>
 public sealed record VisibleSlotsResult(bool Ok, string? Reason, VisibleSlotsSnapshot? Snapshot) : IKilnResult;
 
 public static partial class Ui

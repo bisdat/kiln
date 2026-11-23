@@ -639,4 +639,12 @@ internal sealed class Lowered(ModBlocks mod)
 }
 
 /// <summary>What a mod asks of players' games, lowest first: nothing, Kiln (definitions by the content sync), the mod itself (its own assets).</summary>
-public enum ClientsLevel { None, Kiln, Mod }
+public enum ClientsLevel
+{
+    /// <summary>Nothing is asked of players' games: the server does it all.</summary>
+    None,
+    /// <summary>Kiln: Kiln clients get the mod's definitions from the server by the content sync. Vanilla clients cannot join.</summary>
+    Kiln,
+    /// <summary>The mod itself: every player needs the mod, for its own assets (a cue, a PNG icon, a model, a key, talents).</summary>
+    Mod,
+}

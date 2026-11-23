@@ -197,6 +197,7 @@ public sealed record PlayerRules
     public static PlayerRules FromJson(string json) =>
         JsonSerializer.Deserialize<PlayerRules>(json, Json) ?? throw new JsonException("empty rules");
 
+    /// <summary>These rules as indented JSON with camelCase members; members that are not set are left out. <see cref="FromJson"/> reads it back.</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
     /// <summary>These rules with every member <paramref name="other"/> sets taking its place.</summary>
@@ -267,22 +268,31 @@ public sealed record WaterRule
     /// ids (<c>0x8ec15337</c>). Null or empty: every container that holds water.</summary>
     public IReadOnlyList<string>? Items { get; init; }
 
+    /// <summary>True when the water never runs out: <see cref="ChargesPerSecond"/> is infinite.</summary>
     [JsonIgnore]
     public bool KeepsFull => double.IsPositiveInfinity(ChargesPerSecond);
 
+    /// <summary>A rule that keeps the containers full.</summary>
+    /// <param name="items">The items to refill, as in <see cref="Items"/>; none means every container that holds water.</param>
     public static WaterRule KeepFull(params string[] items) => new() { Items = items.Length == 0 ? null : items };
 
+    /// <summary>A rule that gives water back at a fixed rate.</summary>
+    /// <param name="chargesPerSecond">Charges per second of game time.</param>
+    /// <param name="items">The items to refill, as in <see cref="Items"/>; none means every container that holds water.</param>
     public static WaterRule Rate(double chargesPerSecond, params string[] items) =>
         new() { ChargesPerSecond = chargesPerSecond, Items = items.Length == 0 ? null : items };
 
+    /// <summary>Whether both rules have the same rate and the same items (the order of the items does not matter).</summary>
     public bool Equals(WaterRule? other) =>
         other is not null && ChargesPerSecond.Equals(other.ChargesPerSecond) && SameItems(Items, other.Items);
 
+    /// <summary>A hash of the rate and the number of items.</summary>
     public override int GetHashCode() => HashCode.Combine(ChargesPerSecond, Items?.Count ?? 0);
 
     private static bool SameItems(IReadOnlyList<string>? a, IReadOnlyList<string>? b) =>
         (a is null || a.Count == 0) ? b is null || b.Count == 0 : b is not null && a.OrderBy(x => x).SequenceEqual(b.OrderBy(x => x));
 
+    /// <summary>The rule as text: <c>keep full</c> or the rate, then the items in brackets.</summary>
     public override string ToString() =>
         (KeepsFull ? "keep full" : $"{ChargesPerSecond:0.##} charges/s") + (Items is { Count: > 0 } ? $" ({string.Join(", ", Items)})" : "");
 }
@@ -317,8 +327,10 @@ public sealed record GlideBoostRule
     /// as the speed it trades.</summary>
     public double Climb { get; init; } = 15;
 
+    /// <summary>The default boost: every value at its default.</summary>
     public static GlideBoostRule Default { get; } = new();
 
+    /// <summary>The boost's values as text, for logs.</summary>
     public override string ToString() =>
         $"boost {Thrust:0.#} m/s² up to {MaxSpeed:0.#} m/s" + (Lift > 0 ? $", lift {Lift:0.#} m/s²" : "") + $", coast {Coast:0.#} m/s²" +
         (Climb > 0 ? $", climbs up to {Climb:0.#} m/s" : ", no climbing");
@@ -343,40 +355,69 @@ public sealed record GlideSteerRule
     /// own glider never goes above 5 degrees nose down.</summary>
     public double MaxClimbAngle { get; init; } = AngleLimit;
 
+    /// <summary>The default steering: <see cref="MaxClimbAngle"/> at its default.</summary>
     public static GlideSteerRule Default { get; } = new();
 
+    /// <summary>The steering as text, for logs.</summary>
     public override string ToString() => $"S raises the nose up to {MaxClimbAngle:0.#}°, centred holds, W dives";
 }
 
 /// <summary>A player's rules after every rule set that applies was combined, and the server's limits held.</summary>
 public sealed record EffectiveRules
 {
+    /// <summary>The player entity these rules are for.</summary>
     public EntityId Player { get; init; }
+    /// <summary>The building fly mode works outside bases too (<see cref="PlayerRules.FlyAnywhere"/>).</summary>
     public bool FlyAnywhere { get; init; }
+    /// <summary>The character goes where the player flew and is put on the ground when the flight ends (<see cref="PlayerRules.FlightCarriesBody"/>).</summary>
     public bool FlightCarriesBody { get; init; }
+    /// <summary>The player may build outside bases (<see cref="PlayerRules.BuildOutsideBases"/>).</summary>
     public bool BuildOutsideBases { get; init; }
+    /// <summary>The player may build inside the game's no-build zones (<see cref="PlayerRules.IgnoreNoBuildZones"/>).</summary>
     public bool IgnoreNoBuildZones { get; init; }
+    /// <summary>The player may build with enemies nearby (<see cref="PlayerRules.IgnoreEnemiesNearby"/>).</summary>
     public bool IgnoreEnemiesNearby { get; init; }
+    /// <summary>The player may build inside the Shroud (<see cref="PlayerRules.BuildInShroud"/>).</summary>
     public bool BuildInShroud { get; init; }
+    /// <summary>The player may build in other players' bases without their permission (<see cref="PlayerRules.IgnoreBasePermissions"/>).</summary>
     public bool IgnoreBasePermissions { get; init; }
+    /// <summary>What the player builds outside bases is kept in the save (<see cref="PlayerRules.KeepBuildsOutsideBases"/>).</summary>
     public bool KeepBuildsOutsideBases { get; init; }
+    /// <summary>The multiplier on what placing takes from the inventory (<see cref="PlayerRules.BuildCost"/>). 1 is the game's own cost.</summary>
     public double BuildCost { get; init; } = 1;
+    /// <summary>The multiplier on what dismantling and undo give back (<see cref="PlayerRules.BuildRefund"/>). 1 is the game's own refund.</summary>
     public double BuildRefund { get; init; } = 1;
+    /// <summary>Crafting takes no input costs (<see cref="PlayerRules.FreeCrafting"/>).</summary>
     public bool FreeCrafting { get; init; }
+    /// <summary>Used consumables are not removed (<see cref="PlayerRules.KeepConsumables"/>).</summary>
     public bool KeepConsumables { get; init; }
+    /// <summary>The multiplier on the damage the player's tools deal to terrain and building blocks (<see cref="PlayerRules.DigDamage"/>). 1 is the game's own damage.</summary>
     public double DigDamage { get; init; } = 1;
+    /// <summary>The player takes no damage from hits (<see cref="PlayerRules.Invulnerable"/>).</summary>
     public bool Invulnerable { get; init; }
+    /// <summary>The player takes no damage from falls (<see cref="PlayerRules.NoFallDamage"/>).</summary>
     public bool NoFallDamage { get; init; }
+    /// <summary>The fraction of maximum health the player is kept at least at, 0 to 1 (<see cref="PlayerRules.MinHealth"/>). 0 keeps nothing.</summary>
     public double MinHealth { get; init; }
+    /// <summary>The fraction of maximum stamina the player is kept at least at, 0 to 1 (<see cref="PlayerRules.MinStamina"/>). 0 keeps nothing.</summary>
     public double MinStamina { get; init; }
+    /// <summary>The fraction of maximum mana the player is kept at least at, 0 to 1 (<see cref="PlayerRules.MinMana"/>). 0 keeps nothing.</summary>
     public double MinMana { get; init; }
+    /// <summary>The Shroud timer does not go down in the Shroud (<see cref="PlayerRules.FreezeShroudTimer"/>).</summary>
     public bool FreezeShroudTimer { get; init; }
+    /// <summary>The fraction of its maximum the Shroud timer never drops below, 0 to 1 (<see cref="PlayerRules.MinShroudTime"/>). 0 keeps nothing.</summary>
     public double MinShroudTime { get; init; }
+    /// <summary>The glider never forces the player down for a gameplay reason (<see cref="PlayerRules.UnlimitedGliding"/>).</summary>
     public bool UnlimitedGliding { get; init; }
+    /// <summary>The multiplier on how fast the glider sinks (<see cref="PlayerRules.GlideSink"/>). 1 is the game's own; 0 holds altitude.</summary>
     public double GlideSink { get; init; } = 1;
+    /// <summary>The glider boost in force (<see cref="PlayerRules.GlideBoost"/>); null when no rule set asks for one.</summary>
     public GlideBoostRule? GlideBoost { get; init; }
+    /// <summary>The glider steering in force (<see cref="PlayerRules.GlideSteer"/>); null when no rule set asks for it.</summary>
     public GlideSteerRule? GlideSteer { get; init; }
+    /// <summary>The water refill in force (<see cref="PlayerRules.Water"/>); null when no rule set asks for one.</summary>
     public WaterRule? Water { get; init; }
+    /// <summary>The character flight mode in force (<see cref="PlayerRules.CharacterFlight"/>); <see cref="CharacterFlightMode.Off"/> when none.</summary>
     public CharacterFlightMode CharacterFlight { get; init; }
 
     /// <summary>The character flies without collision (<see cref="PlayerRules.NoClip"/>). False again after a death or
@@ -392,6 +433,8 @@ public sealed record EffectiveRules
     /// <summary>What the server's limits or unavailable features took away, when they did.</summary>
     public IReadOnlyList<string> Denied { get; init; } = Array.Empty<string>();
 
+    /// <summary>Rules that change nothing for <paramref name="player"/>: the game's own rules.</summary>
+    /// <param name="player">The player entity.</param>
     public static EffectiveRules None(EntityId player) => new() { Player = player };
 
     /// <summary>True when nothing differs from the game's own rules.</summary>
@@ -417,6 +460,7 @@ public sealed record EffectiveRules
     /// <summary>The same values, ignoring <see cref="From"/>.</summary>
     public bool SameAs(EffectiveRules o) => this with { From = o.From, Denied = o.Denied } == o;
 
+    /// <summary>A short description of what differs from the game's own rules; <c>the game's rules</c> when nothing does.</summary>
     public override string ToString()
     {
         if (IsDefault) return "the game's rules";

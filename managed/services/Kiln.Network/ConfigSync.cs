@@ -11,23 +11,31 @@ namespace Kiln;
 /// <summary><c>kiln/config/sync.json</c>: what Kiln's server-to-client sync (content and configs) does.</summary>
 public sealed class SyncSettings
 {
+    /// <summary>Server: whether to send this server's content changes (items and recipes) to Kiln clients. Default true.</summary>
     [Comment("Server: send this server's content changes (items and recipes: data packs and mods' code changes) to Kiln\n" +
              "clients when they join and whenever they change.")]
     public bool SendContent { get; set; } = true;
 
+    /// <summary>Server: whether to send the <c>[Synced]</c> entries of server and common configs to Kiln clients. Default true.</summary>
     [Comment("Server: send the [Synced] entries of server and common configs to Kiln clients.")]
     public bool SendConfigs { get; set; } = true;
 
+    /// <summary>Client: whether to apply a server's content changes while connected. They come off again on leave. Default true.</summary>
     [Comment("Client: apply a server's content changes while connected (taken off again on leave).")]
     public bool AcceptContent { get; set; } = true;
 
+    /// <summary>Client: whether to use a server's <c>[Synced]</c> config values while connected. The local values come back on leave. Default true.</summary>
     [Comment("Client: use a server's [Synced] config values while connected (local values come back on leave).")]
     public bool AcceptConfigs { get; set; } = true;
 
+    /// <summary>Client: whether to also put back, while connected, what this game changed on its own (local mods and data
+    /// packs) where the server has the game's original value, so the registries match the server's exactly. Default true.</summary>
     [Comment("Client: while connected, also put back what this game changed on its own (local mods and data packs) where\n" +
              "the server has the game's original value, so the registries match the server's exactly.")]
     public bool MatchServer { get; set; } = true;
 
+    /// <summary>The largest content document a server sends or a client accepts, in KiB of uncompressed JSON. Range 16 to
+    /// 65536; default 8192.</summary>
     [Comment("Largest content document (uncompressed JSON, KiB) a server sends or a client accepts.")]
     [Range(16, 65536)]
     public int MaxContentKiB { get; set; } = 8192;
@@ -77,7 +85,9 @@ public sealed class ConfigSyncedEvent : KilnEvent
         Restored = restored;
     }
 
+    /// <summary>The config file whose values were applied or restored.</summary>
     public ConfigFile Config { get; }
+    /// <summary>The id of the mod that owns <see cref="Config"/>.</summary>
     public string ModId => Config.ModId;
 
     /// <summary>Key paths whose running value changed.</summary>
@@ -94,7 +104,9 @@ public sealed class ConfigSyncedEvent : KilnEvent
 /// <see cref="ConfigFile.ServerValues"/> or subscribe to <see cref="ConfigSyncedEvent"/>.</summary>
 public static class ConfigSync
 {
+    /// <summary>The name of Kiln's own config sync channel (<c>kiln:config</c>).</summary>
     public const string ChannelName = "kiln:config";
+    /// <summary>The version of the config sync channel.</summary>
     public const string ChannelVersion = "1";
     internal const ushort Format = 1;
     private const ushort MsgState = 0, MsgAck = 1;

@@ -195,15 +195,27 @@ public enum GameDataSection
 /// <param name="Owner"><c>pack:&lt;mod&gt;</c> for data packs, <c>mod:&lt;mod&gt;</c> for <see cref="Content.Apply"/>, <c>sync</c> for the content sync.</param>
 /// <param name="Source">The pack file (<c>&lt;mod&gt;/content/&lt;file&gt;.json</c>) or the Apply source.</param>
 /// <param name="Reload">Part of a re-application of every pack.</param>
+/// <param name="Section">The name of the section.</param>
+/// <param name="Generation">The content generation: +1 per application of the packs
+/// (<see cref="ContentReadyEvent.Generation"/>).</param>
 public sealed record ContentSectionCall(string Section, string Json, string Owner, string Source, ulong Generation, bool Reload);
 
 /// <summary>What a pack section handler did.</summary>
+/// <param name="Applied">How many changes the handler applied.</param>
+/// <param name="Errors">What went wrong, one message each.</param>
+/// <param name="Warnings">What was skipped or looked wrong, one message each.</param>
 public sealed record ContentSectionResult(int Applied, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
 {
+    /// <summary>A result with <paramref name="applied"/> changes and no errors or warnings.</summary>
     public static ContentSectionResult Ok(int applied) => new(applied, [], []);
 }
 
 /// <summary>One leaf below an entry (from the game's reflection).</summary>
+/// <param name="Path">The leaf's path below the entry.</param>
+/// <param name="Type">The game's type of the leaf.</param>
+/// <param name="Value">The current value, as JSON.</param>
+/// <param name="Writable">True when a mod can set it.</param>
+/// <param name="Original">The game's original value, as JSON.</param>
 public sealed record GameDataField(string Path, string Type, JsonNode? Value, bool Writable, JsonNode? Original);
 
 public static unsafe partial class Content
@@ -258,6 +270,8 @@ public static unsafe partial class Content
     /// <c>sequences[0].triggeredBy</c>. Same entries as <see cref="Items"/>.</summary>
     public static GameDataRegistry ItemData { get; } = new(GameDataSection.Items);
 
+    /// <summary>The kiln.gamedata registry of <paramref name="section"/>. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for another value.</summary>
     public static GameDataRegistry GameData(GameDataSection section) => section switch
     {
         GameDataSection.Templates => Templates,
@@ -421,8 +435,10 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
 {
     internal GameDataRegistry(GameDataSection section) => Section = section;
 
+    /// <summary>Which registry this is.</summary>
     public GameDataSection Section { get; }
 
+    /// <summary>How many entries the registry holds.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public int Count
@@ -434,6 +450,8 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
         }
     }
 
+    /// <summary>The entry at <paramref name="index"/>, 0 to <see cref="Count"/> - 1. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for an index outside the registry.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public GameDataEntry this[int index]
@@ -461,10 +479,12 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
         return t->Find((uint)Section, k.Str, &e) == ContentNative.Ok ? new GameDataEntry(Section, e) : null;
     }
 
+    /// <summary>The entry with this id, or null.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public GameDataEntry? Get(uint id) => Get("0x" + id.ToString("x8"));
 
+    /// <summary>The entry with this GUID, or null.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public GameDataEntry? Get(Guid guid) => Get(guid.ToString());
@@ -666,6 +686,7 @@ public sealed unsafe class GameDataRegistry : IReadOnlyList<GameDataEntry>
         return text;
     }
 
+    /// <summary>Every entry of the registry, in order. It reads each one from the game as you go.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public IEnumerator<GameDataEntry> GetEnumerator()
@@ -692,16 +713,23 @@ public sealed unsafe partial class GameDataEntry
         fixed (byte* g = e.Guid) Guid = new Guid(new ReadOnlySpan<byte>(g, 16));
     }
 
+    /// <summary>The registry the entry belongs to.</summary>
     public GameDataSection Section { get; }
+    /// <summary>The entry's id.</summary>
     public uint Id { get; }
+    /// <summary>The entry's name.</summary>
     public string Name { get; }
+    /// <summary>The entry's GUID.</summary>
     public Guid Guid { get; }
+    /// <summary>At least one leaf differs from the game's original.</summary>
     public bool Modified { get; }
+    /// <summary>The entry is a clone (an <c>"add"</c> definition), not one of the game's.</summary>
     public bool IsClone { get; }
 
     /// <summary>The struct in game memory (diagnostics).</summary>
     public ulong Address { get; }
 
+    /// <summary>The section, the name and the id, for logs.</summary>
     public override string ToString() => $"{Section} {Name} (0x{Id:x8})";
 
     /// <summary>The current value of a leaf.</summary>
@@ -714,6 +742,8 @@ public sealed unsafe partial class GameDataEntry
     [RequiresCapability("kiln.gamedata")]
     public ContentValue Original(string path) => Read(path, true);
 
+    /// <summary>The current value of a leaf as a number: <see cref="Get(string)"/> read as
+    /// <see cref="ContentValue.AsDouble"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public double GetNumber(string path) => Get(path).AsDouble;
@@ -732,18 +762,23 @@ public sealed unsafe partial class GameDataEntry
         return JsonNode.Parse(text);
     }
 
+    /// <summary>Sets a leaf as the calling mod (a layer over the original, reverted when the mod unloads).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, double value) => SetJson(path, JsonSerializer.Serialize(value));
+    /// <summary>As <see cref="Set(string, double)"/>, with an integer value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, long value) => SetJson(path, JsonSerializer.Serialize(value));
+    /// <summary>As <see cref="Set(string, double)"/>, with an integer value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, int value) => SetJson(path, JsonSerializer.Serialize(value));
+    /// <summary>As <see cref="Set(string, double)"/>, with a boolean value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, bool value) => SetJson(path, value ? "true" : "false");
+    /// <summary>As <see cref="Set(string, double)"/>, with a time (written in seconds).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, TimeSpan value) => SetJson(path, JsonSerializer.Serialize(value.TotalSeconds));
@@ -753,6 +788,7 @@ public sealed unsafe partial class GameDataEntry
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, string value) => SetJson(path, JsonSerializer.Serialize(value));
 
+    /// <summary>As <see cref="Set(string, string)"/>, with the GUID of a referenced resource.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string path, Guid value) => SetJson(path, JsonSerializer.Serialize(value.ToString()));
@@ -848,6 +884,7 @@ public sealed class GameDataConfig
         Path = path;
     }
 
+    /// <summary>The config value's path in the entry, such as <c>impactValues.ManaCost</c>.</summary>
     public string Path { get; }
 
     /// <summary>The entry has this config (else <see cref="Set(double)"/> adds it).</summary>
@@ -855,24 +892,31 @@ public sealed class GameDataConfig
     [RequiresCapability("kiln.gamedata")]
     public bool Exists => _entry.GetJson(Path)?["absent"] is null;
 
+    /// <summary>The config value now.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public ContentValue Get() => _entry.Get(Path);
+    /// <summary>The game's original config value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public ContentValue Original() => _entry.Original(Path);
+    /// <summary>Sets the config value as the calling mod; adds the config when the entry does not have it.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(double value) => _entry.Set(Path, value);
+    /// <summary>As <see cref="Set(double)"/>, with an integer value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(long value) => _entry.Set(Path, value);
+    /// <summary>As <see cref="Set(double)"/>, with a name or other text value.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void Set(string value) => _entry.Set(Path, value);
+    /// <summary>Takes the calling mod's change of the value off. False when it had none.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public bool Reset() => _entry.Reset(Path);
+    /// <summary>The entry's name and the path, for logs.</summary>
     public override string ToString() => $"{_entry.Name}.{Path}";
 }
 
@@ -887,8 +931,10 @@ public sealed class GameDataEvent
         Path = path;
     }
 
+    /// <summary>The event's path in the entry.</summary>
     public string Path { get; }
 
+    /// <summary>The event's <c>time</c> field.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public TimeSpan Time
@@ -897,6 +943,7 @@ public sealed class GameDataEvent
         set => _entry.Set(Path + ".time", value);
     }
 
+    /// <summary>The event's <c>duration</c> field.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public TimeSpan Duration
@@ -905,12 +952,16 @@ public sealed class GameDataEvent
         set => _entry.Set(Path + ".duration", value);
     }
 
+    /// <summary>The current value of a field of the event.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public ContentValue Get(string field) => _entry.Get(Path + "." + field);
+    /// <summary>Sets a field of the event from a JSON value, as <see cref="GameDataEntry.SetJson(string, string)"/>
+    /// does.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.gamedata")]
     public void SetJson(string field, string json) => _entry.SetJson(Path + "." + field, json);
+    /// <summary>The entry's name and the event's path, for logs.</summary>
     public override string ToString() => $"{_entry.Name}.{Path}";
 }
 
@@ -933,6 +984,8 @@ public static class GameDataItemExtensions
 }
 
 /// <summary>Texts of a perk or buff clone in one language.</summary>
+/// <param name="Name">The shown name; null: not given.</param>
+/// <param name="Description">The shown description; null: not given.</param>
 public sealed record GameDataTexts(string? Name = null, string? Description = null);
 
 /// <summary>
@@ -941,6 +994,7 @@ public sealed record GameDataTexts(string? Name = null, string? Description = nu
 /// </summary>
 public sealed class GameDataClone
 {
+    /// <summary>The clone's fixed GUID.</summary>
     public required Guid Guid { get; init; }
 
     /// <summary>The clone's name (letters, digits, <c>_ - .</c>): templates and perks get it as their debug name;
@@ -950,6 +1004,7 @@ public sealed class GameDataClone
     /// <summary>The entry to copy: a name, GUID or <c>0x</c> id of the same section (a clone too).</summary>
     public required string Base { get; init; }
 
+    /// <summary>Field values by path, as the JSON values a data pack writes.</summary>
     public Dictionary<string, JsonNode?> Fields { get; init; } = new();
 
     /// <summary><see cref="Fields"/> by typed path: <c>Values = { { GameFields.Templates.LifeTime.LifeTime, TimeSpan.FromSeconds(5) } }</c>.</summary>
@@ -957,11 +1012,13 @@ public sealed class GameDataClone
 
     /// <summary>Perks, buffs: the shown name / description in every language (<see cref="Texts"/> per language win).</summary>
     public string? DisplayName { get; init; }
+    /// <summary>Perks, buffs: the shown description in every language.</summary>
     public string? Description { get; init; }
 
     /// <summary>Perks, buffs: texts per language key ("en", "de", "pt-BR"; "*" = every language).</summary>
     public Dictionary<string, GameDataTexts> Texts { get; init; } = new();
 
+    /// <summary>The clone as the data pack's <c>"add"</c> object.</summary>
     public JsonObject ToJson()
     {
         var o = new JsonObject { ["guid"] = Guid.ToString("D"), ["name"] = Name, ["base"] = Base };
@@ -994,6 +1051,18 @@ public sealed class GameDataClone
 /// <param name="State"><c>registered</c>, <c>pending</c> (waiting for a world), <c>waiting</c> (the world's registry is
 /// not loaded yet), <c>error</c>, <c>orphaned</c> (its data pack went away; it stays registered).</param>
 /// <param name="DefinitionJson">The definition as given (what Kiln clients get through the content sync).</param>
+/// <param name="Section">The registry the clone is in.</param>
+/// <param name="Guid">The clone's GUID.</param>
+/// <param name="Id">The clone's id.</param>
+/// <param name="Name">The clone's name.</param>
+/// <param name="Base">The entry it was copied from.</param>
+/// <param name="Owner">The owner that defined it, as kiln.gamedata reports it.</param>
+/// <param name="Mod">The id of the mod that defined it (its code or its data pack); for a placeholder, the missing
+/// mod's. Null when there is none.</param>
+/// <param name="IsPlaceholder">True for a placeholder "[Missing: mod:name]" that keeps saved items and buffs of a
+/// clone whose mod is gone.</param>
+/// <param name="Error">Why the clone is not in the registry, if it is not.</param>
+/// <param name="Warnings">Parts of the definition that were skipped.</param>
 public sealed record GameDataDefinition(GameDataSection Section, Guid Guid, uint Id, string Name, string Base, string State,
     string Owner, string? Mod, bool IsPlaceholder, string? Error, IReadOnlyList<string> Warnings, string DefinitionJson)
 {

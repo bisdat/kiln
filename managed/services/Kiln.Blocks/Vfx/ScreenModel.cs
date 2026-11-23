@@ -36,10 +36,15 @@ public sealed record ScreenEffectBlock : ScreenEffect, IBlock
 public sealed class ScreenRef : IBlockRef<ScreenEffectBlock>
 {
     internal ScreenRef(ScreenEffectBlock? inline, string? name) { Inline = inline; Name = name; }
+    /// <summary>The effect itself: written in place, or taken from a handle. Null for a reference by name.</summary>
     public ScreenEffectBlock? Inline { get; }
+    /// <summary>The effect's block name (<c>name</c>, or <c>other-mod:name</c>): set for a name and for a handle. Null for an effect written in place.</summary>
     public string? Name { get; }
+    /// <summary>An effect written in place.</summary>
     public static implicit operator ScreenRef(ScreenEffectBlock block) => new(block, null);
+    /// <summary>An effect from the handle <see cref="Blocks.Define{T}"/> gave back, by its block and its name.</summary>
     public static implicit operator ScreenRef(BlockHandle<ScreenEffectBlock> handle) => new(handle.Block, handle.ToString());
+    /// <summary>An effect by its block name.</summary>
     public static implicit operator ScreenRef(string name) => new(null, name);
     static IBlockRef<ScreenEffectBlock> IBlockRef<ScreenEffectBlock>.Make(ScreenEffectBlock? inline, string? name) => new ScreenRef(inline, name);
 }

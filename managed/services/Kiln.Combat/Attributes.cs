@@ -42,6 +42,7 @@ public readonly record struct AttributeReading(uint Id, GameAttribute Kind, int 
 {
     /// <summary>Current / maximum, 0 without a positive maximum.</summary>
     public double Fraction => Max is > 0 ? (double)Current / Max.Value : 0;
+    /// <summary>The reading as <c>current/maximum (kind)</c>, with <c>?</c> when there is no maximum.</summary>
     public override string ToString() => $"{Current}/{(Max is { } m ? m.ToString() : "?")} ({Kind})";
 }
 

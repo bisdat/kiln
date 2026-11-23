@@ -68,6 +68,8 @@ Wiki [stations](https://frostdev.io/kiln/wiki/stations); page `docs/kiln/service
   `stations.stock_ui`, `stations.fill_ui`; their hooks go in only once the server's craft-stock snapshot is on); the
   server checks every press again. Not yet seen in a real game.
 - dev.29.14+: an automated station's craft fires `ItemCraftedEvent` once, at its end.
+- dev.30.6+: `Crafting.AddSource(player, container, options)` makes a player's crafts (and dye tinting) pay from a linked
+  container in any base: [api-items.md](api-items.md#crafting-from-linked-containers-306-mod-api-0215).
 
 ## Gems and the Shroud Forge (Kiln.Abilities, dev.29.11+)
 Wiki [gems](https://frostdev.io/kiln/wiki/gems); pages `docs/kiln/services/gems.md`, `gems-new.md`, `gems-forge.md`,
