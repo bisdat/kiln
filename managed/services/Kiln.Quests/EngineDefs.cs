@@ -10,8 +10,11 @@ public enum QuestStatus
     Locked = 0,
     /// <summary>It can be started.</summary>
     Available = 1,
+    /// <summary>It was started and is running; the holder is on a step (see <see cref="QuestProgress.StepId"/>).</summary>
     Active = 2,
+    /// <summary>It was completed (the rewards are paid or owed).</summary>
     Done = 3,
+    /// <summary>It failed (<see cref="Quests.Fail"/> or a <c>fail</c> action) or was given up.</summary>
     Failed = 4,
 }
 
@@ -43,13 +46,19 @@ public sealed class QuestDefinition
 {
     /// <summary>Letters, digits, '_' and '-'. Unique within the mod.</summary>
     public required string Id { get; init; }
+    /// <summary>The quest's name in the journal.</summary>
     public UiText Name { get; set; } = "";
+    /// <summary>A longer description of the quest. Null for none.</summary>
     public UiText? Description { get; set; }
     /// <summary>The NPC who offers it (an id of the same mod's <c>npcs</c>, or <c>mod:npc</c>). A quest with a giver can only be
     /// started through that NPC, or by an action or code.</summary>
     public string? Giver { get; set; }
+    /// <summary>Who owns the quest's progress (default <see cref="QuestScope.Player"/>).</summary>
     public QuestScope Scope { get; set; } = QuestScope.Player;
+    /// <summary>For a <see cref="QuestScope.Party"/> quest: the radius in metres within which players share credit
+    /// (default 60).</summary>
     public double PartyRadius { get; set; } = 60;
+    /// <summary>Marks it as a main quest (JSON <c>main</c>): the game's journal entry gets its main-quest flag.</summary>
     public bool Main { get; set; }
     /// <summary>Starts by itself as soon as it is available (a world quest when the world runs, a player quest while
     /// the player is in game).</summary>
@@ -62,29 +71,40 @@ public sealed class QuestDefinition
     public bool Abandonable { get; set; } = true;
     /// <summary>Not listed until it is active.</summary>
     public bool Hidden { get; set; }
+    /// <summary>Where the quest is shown: the game's own journal (the default) or chat lines.</summary>
     public QuestJournalMode Journal { get; set; } = QuestJournalMode.Native;
     /// <summary>The game's journal: the portrait (keen::QuestSourceType: None, Flame, Blacksmith, Alchemist, ...).</summary>
     public string? Source { get; set; }
     /// <summary>The game's journal: its place in the list (the game uses 40..100; default 50).</summary>
     public int? Priority { get; set; }
+    /// <summary>Conditions that must all hold before the quest can start. Empty: always available.</summary>
     public List<QuestCondition> Requires { get; set; } = new();
+    /// <summary>The steps, in order. The quest needs at least one.</summary>
     public List<QuestStep> Steps { get; set; } = new();
+    /// <summary>Actions that run when the quest is completed (items, experience, knowledge...). A failing one is logged
+    /// and the rest still run.</summary>
     public List<QuestAction> Rewards { get; set; } = new();
+    /// <summary>Actions that run when the quest starts.</summary>
     public List<QuestAction> OnStart { get; set; } = new();
+    /// <summary>Actions that run when the quest fails.</summary>
     public List<QuestAction> OnFail { get; set; } = new();
 
     /// <summary>The mod that defined it ("" for code outside a mod).</summary>
     public string ModId { get; internal set; } = "";
     /// <summary><c>&lt;modId&gt;:&lt;id&gt;</c>.</summary>
     public string FullId => ModId.Length > 0 ? $"{ModId}:{Id}" : Id;
+    /// <summary>The step with this id (case-sensitive); null when there is none.</summary>
     public QuestStep? Step(string id) => Steps.Find(s => s.Id.Equals(id, StringComparison.Ordinal));
+    /// <summary>The full id, the scope and the number of steps.</summary>
     public override string ToString() => $"{FullId} ({Scope}, {Steps.Count} steps)";
 }
 
 /// <summary>One step of a quest. It is done when all its objectives are.</summary>
 public sealed class QuestStep
 {
+    /// <summary>The step's id. Unique within its quest.</summary>
     public required string Id { get; init; }
+    /// <summary>The step's text: the paragraph in the journal.</summary>
     public UiText Text { get; set; } = "";
     /// <summary>The game's journal: the step's short name (default its text).</summary>
     public UiText? Title { get; set; }
@@ -92,6 +112,7 @@ public sealed class QuestStep
     public string? Voice { get; set; }
     /// <summary>The game's journal: the recommended level shown with the step.</summary>
     public int RecommendedLevel { get; set; }
+    /// <summary>What to do in this step. The step is done when all its objectives are.</summary>
     public List<QuestObjective> Objectives { get; set; } = new();
     /// <summary>The map marker and waypoint of the step. Null: one is made anyway when the step has a place (a site, a spawn, a
     /// reach or kill place, an NPC to talk to or deliver to). See <see cref="NoMarker"/>.</summary>
@@ -102,13 +123,18 @@ public sealed class QuestStep
     public QuestPlace? Site { get; set; }
     /// <summary>Creatures the step brings into the world. Kiln verifies they exist, and spawns them again when the game removed them.</summary>
     public List<QuestSpawn> Spawns { get; set; } = new();
+    /// <summary>Actions that run when the step becomes the current one.</summary>
     public List<QuestAction> OnEnter { get; set; } = new();
+    /// <summary>Actions that run when the step is done.</summary>
     public List<QuestAction> OnDone { get; set; } = new();
 }
 
-/// <summary>A step's map marker. <paramref name="At"/>: a fixed place (null: the step's other place decides).
-/// <paramref name="Waypoint"/>: also write the player's waypoint, the game's own map and compass pin.
-/// <paramref name="Name"/>: the marker's name on the map (default the step's text). <paramref name="Base"/>: the marker template to copy.</summary>
+/// <summary>A step's map marker.</summary>
+/// <param name="At">A fixed place (null: the step's other place decides).</param>
+/// <param name="Radius">The marker's radius in metres; 0 when none is given.</param>
+/// <param name="Waypoint">Also write the player's waypoint, the game's own map and compass pin (default true).</param>
+/// <param name="Name">The marker's name on the map (default the step's text).</param>
+/// <param name="Base">The marker template to copy.</param>
 public sealed record QuestMarker(WorldPosition? At = null, double Radius = 0, bool Waypoint = true, UiText? Name = null, string? Base = null);
 
 /// <summary>A place found at run time: on real ground (the voxel surface), outside every player base, not too steep. Kiln keeps
@@ -123,6 +149,7 @@ public sealed class QuestPlace
     public bool NearPlayer { get; set; }
     /// <summary>Metres from the centre of the search. It widens by itself until a good spot is found, so a base in the way never fails it.</summary>
     public double MinDistance { get; set; }
+    /// <summary>Metres from the centre of the search, at most.</summary>
     public double MaxDistance { get; set; }
     /// <summary>Metres to keep from a base's build zone (default 20).</summary>
     public double BaseMargin { get; set; } = 20;
@@ -135,7 +162,9 @@ public sealed class QuestPlace
 /// <summary>Creatures a step brings into the world.</summary>
 public sealed class QuestSpawn
 {
+    /// <summary>The template name of the creature to spawn.</summary>
     public required string Template { get; init; }
+    /// <summary>How many to spawn (default 1).</summary>
     public int Count { get; set; } = 1;
     /// <summary>Default the step's <see cref="QuestStep.Site"/>; without one, near the player at 30..60 m.</summary>
     public QuestPlace? Place { get; set; }
@@ -149,22 +178,34 @@ public sealed class QuestSpawn
     public int Retries { get; set; } = 5;
 }
 
+/// <summary>What an objective asks for. Which fields of <see cref="QuestObjective"/> count depends on it.</summary>
 public enum QuestObjectiveKind
 {
+    /// <summary>Kill creatures, by template, family or <c>Kiln.Spawn</c> tag.</summary>
     Kill,
+    /// <summary>Hold items in the inventory.</summary>
     Collect,
+    /// <summary>Hand items over to an NPC.</summary>
     Deliver,
+    /// <summary>Be at a place.</summary>
     Reach,
+    /// <summary>Talk to an NPC, say a game dialogue line, or reach a node of a chat conversation.</summary>
     Talk,
+    /// <summary>Craft an item or recipe.</summary>
     Craft,
+    /// <summary>Place a build piece.</summary>
     Build,
+    /// <summary>Have a game knowledge name set.</summary>
     Knowledge,
+    /// <summary>A counter that code or a <c>signal</c> action raises (<see cref="Quests.Signal"/>), or a C#
+    /// <see cref="QuestObjective.Progress"/> function.</summary>
     Custom,
 }
 
 /// <summary>One thing to do in a step. Which fields count depends on <see cref="Kind"/>; the factories set them.</summary>
 public sealed class QuestObjective
 {
+    /// <summary>What this objective asks for.</summary>
     public required QuestObjectiveKind Kind { get; init; }
     /// <summary>How many (kills, items, crafts, signals). Reach, talk, knowledge: 1.</summary>
     public int Count { get; set; } = 1;
@@ -215,36 +256,58 @@ public sealed class QuestObjective
     /// <summary>Custom, C#: polled about once a second, returns the current count.</summary>
     public Func<QuestContext, int>? Progress { get; set; }
 
+    /// <summary>A kill objective: <paramref name="count"/> kills, matched by exact <paramref name="template"/>, part of
+    /// the template name (<paramref name="family"/>) or a <c>Kiln.Spawn</c> <paramref name="tag"/>.</summary>
     public static QuestObjective Kill(string? template = null, string? family = null, string? tag = null, int count = 1) =>
         new() { Kind = QuestObjectiveKind.Kill, Template = template, Family = family, Tag = tag, Count = count };
+    /// <summary>A collect objective: hold <paramref name="count"/> of <paramref name="item"/> (name or id).</summary>
     public static QuestObjective Collect(string item, int count = 1) => new() { Kind = QuestObjectiveKind.Collect, Item = item, Count = count };
+    /// <summary>A deliver objective: hand <paramref name="count"/> of <paramref name="item"/> to the NPC
+    /// <paramref name="to"/>.</summary>
     public static QuestObjective Deliver(string item, int count, string to) =>
         new() { Kind = QuestObjectiveKind.Deliver, Item = item, Count = count, To = to };
+    /// <summary>A reach objective: come within <paramref name="radius"/> metres of <paramref name="at"/>.</summary>
     public static QuestObjective Reach(WorldPosition at, double radius = 10) => new() { Kind = QuestObjectiveKind.Reach, At = at, Radius = radius };
+    /// <summary>A talk objective: talk to <paramref name="npc"/>, optionally reaching a conversation
+    /// <paramref name="node"/> or saying a dialogue <paramref name="line"/>.</summary>
     public static QuestObjective Talk(string npc, string? node = null, string? line = null) =>
         new() { Kind = QuestObjectiveKind.Talk, Npc = npc, Node = node, Line = line };
+    /// <summary>A custom objective: a counter that <see cref="Quests.Signal"/> calls with <paramref name="signal"/> raise
+    /// to <paramref name="count"/>.</summary>
     public static QuestObjective Custom(string signal, int count = 1) => new() { Kind = QuestObjectiveKind.Custom, Signal = signal, Count = count };
+    /// <summary>A knowledge objective: done while the game's knowledge <paramref name="name"/> holds.</summary>
     public static QuestObjective HasKnowledge(string name) => new() { Kind = QuestObjectiveKind.Knowledge, Knowledge = name };
 
     internal bool IsLevel => Kind is QuestObjectiveKind.Collect or QuestObjectiveKind.Reach or QuestObjectiveKind.Knowledge || Progress is not null;
 }
 
+/// <summary>What a <see cref="QuestCondition"/> tests.</summary>
 public enum QuestConditionKind
 {
+    /// <summary>A game knowledge name holds.</summary>
     Knowledge,
+    /// <summary>The holder's level is at least a number.</summary>
     Level,
+    /// <summary>Another quest is in a given state.</summary>
     Quest,
+    /// <summary>A step of a quest is in a given state.</summary>
     Step,
+    /// <summary>The holder's inventory has at least a number of an item.</summary>
     Item,
+    /// <summary>Every child condition holds.</summary>
     All,
+    /// <summary>At least one child condition holds.</summary>
     Any,
+    /// <summary>Not all child conditions hold (the negation of <see cref="All"/>).</summary>
     Not,
+    /// <summary>A C# function (or one registered by name with <c>Quests.RegisterPredicate</c>) decides.</summary>
     Predicate,
 }
 
 /// <summary>A condition on a holder, checked on the server: a quest's <c>requires</c>, an option's <c>if</c>.</summary>
 public sealed class QuestCondition
 {
+    /// <summary>What this condition tests.</summary>
     public required QuestConditionKind Kind { get; init; }
     /// <summary>Knowledge name, quest id, "quest.step", item, or predicate name.</summary>
     public string? Name { get; set; }
@@ -252,43 +315,75 @@ public sealed class QuestCondition
     public string? Is { get; set; }
     /// <summary>Level: at least this level. Item: at least this many.</summary>
     public int Count { get; set; } = 1;
+    /// <summary>All, Any, Not: the conditions it combines.</summary>
     public List<QuestCondition> Children { get; set; } = new();
+    /// <summary>Predicate, C#: the function that decides. Null with a <see cref="Name"/>: the predicate registered under
+    /// that name.</summary>
     public Func<QuestContext, bool>? Predicate { get; set; }
 
+    /// <summary>Holds while the game's knowledge <paramref name="name"/> holds.</summary>
     public static QuestCondition HasKnowledge(string name) => new() { Kind = QuestConditionKind.Knowledge, Name = name };
+    /// <summary>Holds when the holder is at least <paramref name="level"/>.</summary>
     public static QuestCondition Level(int level) => new() { Kind = QuestConditionKind.Level, Count = level };
+    /// <summary>Holds when quest <paramref name="quest"/> is in <paramref name="state"/> (locked, available, active,
+    /// done, failed or started).</summary>
     public static QuestCondition Quest(string quest, string state) => new() { Kind = QuestConditionKind.Quest, Name = quest, Is = state };
+    /// <summary>Holds when step <paramref name="questDotStep"/> (written <c>quest.step</c>) is in
+    /// <paramref name="state"/> (pending, active or done).</summary>
     public static QuestCondition QuestStep(string questDotStep, string state) => new() { Kind = QuestConditionKind.Step, Name = questDotStep, Is = state };
+    /// <summary>Holds when the holder's inventory has at least <paramref name="count"/> of <paramref name="item"/>.</summary>
     public static QuestCondition HasItem(string item, int count = 1) => new() { Kind = QuestConditionKind.Item, Name = item, Count = count };
+    /// <summary>Holds when <paramref name="predicate"/> returns true.</summary>
     public static QuestCondition When(Func<QuestContext, bool> predicate) => new() { Kind = QuestConditionKind.Predicate, Predicate = predicate };
 }
 
+/// <summary>What a <see cref="QuestAction"/> does. Which fields of the action count depends on it.</summary>
 public enum QuestActionKind
 {
+    /// <summary>Give items to the holder (what does not fit lands at the player's feet).</summary>
     Give,
+    /// <summary>Take items from the holder.</summary>
     Take,
+    /// <summary>Give experience (as a quest reward, through kiln.progression).</summary>
     Xp,
+    /// <summary>Set a game knowledge name (a flag, or a counter amount).</summary>
     Knowledge,
+    /// <summary>Clear a game knowledge id. Only that id is cleared: what the game did because of it stays.</summary>
     Revoke,
+    /// <summary>Start another quest.</summary>
     Start,
+    /// <summary>Complete another quest.</summary>
     Complete,
+    /// <summary>Fail another quest.</summary>
     Fail,
+    /// <summary>Advance a quest past a step.</summary>
     Advance,
+    /// <summary>Reset another quest: forget the holder's record of it, as if it was never started.</summary>
     Reset,
+    /// <summary>Spawn a creature or NPC in the world.</summary>
     Spawn,
+    /// <summary>Remove the spawned entities that carry a tag.</summary>
     Despawn,
+    /// <summary>Move the player to a place.</summary>
     Teleport,
+    /// <summary>Send the player a chat line.</summary>
     Chat,
+    /// <summary>The same as <see cref="Chat"/> today: the game has no free-text notification.</summary>
     Toast,
+    /// <summary>Set or clear the player's waypoint pin on the map and compass.</summary>
     Waypoint,
+    /// <summary>Open a chat conversation.</summary>
     Talk,
+    /// <summary>Feed <see cref="QuestObjectiveKind.Custom"/> objectives with a signal.</summary>
     Signal,
+    /// <summary>Run C# code (<see cref="QuestAction.Run"/>, or a function registered by name).</summary>
     Call,
 }
 
 /// <summary>A reward or side effect (a quest's rewards and hooks, a conversation option's <c>do</c>).</summary>
 public sealed class QuestAction
 {
+    /// <summary>What this action does.</summary>
     public required QuestActionKind Kind { get; init; }
     /// <summary>Item, knowledge name, quest id, "quest.step", template, dialogue, signal or action name.</summary>
     public string? Name { get; set; }
@@ -296,11 +391,13 @@ public sealed class QuestAction
     public int Count { get; set; } = 1;
     /// <summary>Xp: the amount. Knowledge: the counter amount or flag number. Revoke: the flag number + 1 (0 = all).</summary>
     public uint Value { get; set; } = 1;
+    /// <summary>Chat, toast: the line to send.</summary>
     public UiText? Text { get; set; }
     /// <summary>Spawn, teleport, waypoint: the place.</summary>
     public WorldPosition? At { get; set; }
     /// <summary>Spawn, teleport, waypoint: an offset in metres from the player, instead of <see cref="At"/>.</summary>
     public WorldPosition? Offset { get; set; }
+    /// <summary>Spawn: the entity's facing in degrees about the up axis.</summary>
     public double Yaw { get; set; }
     /// <summary>Spawn: the Kiln.Spawn tag.</summary>
     public string? Tag { get; set; }
@@ -323,21 +420,36 @@ public sealed class QuestAction
     /// <summary>Call, C#: the code to run.</summary>
     public Func<QuestActionContext, Task>? Run { get; set; }
 
+    /// <summary>A give action: <paramref name="count"/> of <paramref name="item"/> to the holder.</summary>
     public static QuestAction Item(string item, int count = 1) => new() { Kind = QuestActionKind.Give, Name = item, Count = count };
+    /// <summary>An experience action: <paramref name="amount"/> experience.</summary>
     public static QuestAction Experience(uint amount) => new() { Kind = QuestActionKind.Xp, Value = amount };
+    /// <summary>A knowledge action: sets the game knowledge <paramref name="name"/>. <paramref name="target"/> is "world"
+    /// or "player" (null: the player's object if the id has one, else the world's).</summary>
     public static QuestAction GrantKnowledge(string name, string? target = null) => new() { Kind = QuestActionKind.Knowledge, Name = name, Target = target };
+    /// <summary>A call action: runs <paramref name="run"/> as the owning mod.</summary>
     public static QuestAction Code(Func<QuestActionContext, Task> run) => new() { Kind = QuestActionKind.Call, Run = run };
 }
 
 /// <summary>What a condition or a custom objective is asked about.</summary>
+/// <param name="Holder">Whose state is asked about (a player, a character, or the world).</param>
+/// <param name="Quest">The quest being checked; null outside a quest (for example a dialogue option).</param>
+/// <param name="Npc">The NPC entity being talked to; <see cref="EntityId.None"/> when there is none.</param>
+/// <param name="ModId">The id of the mod whose definition is asked.</param>
 public sealed record QuestContext(QuestHolder Holder, QuestDefinition? Quest, EntityId Npc, string ModId)
 {
+    /// <summary>The holder's player in game; null when the holder has no entity or kiln.players is unavailable.</summary>
     public Player? Player => Holder.Entity.IsNone || !Players.Available ? null : Players.Find(Holder.Entity);
 }
 
 /// <summary>What an action runs for.</summary>
+/// <param name="Holder">Whom the action runs for (a player, a character, or the world).</param>
+/// <param name="Quest">The quest the action belongs to; null outside a quest (for example a dialogue option).</param>
+/// <param name="Npc">The NPC entity involved; <see cref="EntityId.None"/> when there is none.</param>
+/// <param name="ModId">The id of the mod that defined the action.</param>
 public sealed record QuestActionContext(QuestHolder Holder, QuestDefinition? Quest, EntityId Npc, string ModId)
 {
+    /// <summary>The holder's player in game; null when the holder has no entity or kiln.players is unavailable.</summary>
     public Player? Player => Holder.Entity.IsNone || !Players.Available ? null : Players.Find(Holder.Entity);
     internal QuestContext Condition => new(Holder, Quest, Npc, ModId);
 }
@@ -346,8 +458,11 @@ public sealed record QuestActionContext(QuestHolder Holder, QuestDefinition? Que
 /// every choice again.</summary>
 public sealed class DialogueDefinition
 {
+    /// <summary>The dialogue's id. Unique within its mod.</summary>
     public required string Id { get; init; }
+    /// <summary>The id of the node the conversation opens at (default <c>start</c>).</summary>
     public string Start { get; set; } = "start";
+    /// <summary>The conversation's nodes by id.</summary>
     public Dictionary<string, DialogueNode> Nodes { get; set; } = new(StringComparer.Ordinal);
     /// <summary>The default: its lines are in the game's own NPC menu, with the game's voice playback. False: a chat conversation
     /// through <c>/talk</c>, for a mod that vanilla clients join.</summary>
@@ -362,29 +477,39 @@ public sealed class DialogueDefinition
     public List<UiText> Farewell { get; set; } = new();
     /// <summary>The game's menu: replaces the line between topics.</summary>
     public List<UiText> Transition { get; set; } = new();
+    /// <summary>The mod that defined it ("" for code outside a mod).</summary>
     public string ModId { get; internal set; } = "";
+    /// <summary><c>&lt;modId&gt;:&lt;id&gt;</c>, or just the id outside a mod.</summary>
     public string FullId => ModId.Length > 0 ? $"{ModId}:{Id}" : Id;
+    /// <summary>The full id and the number of nodes.</summary>
     public override string ToString() => $"{FullId} ({Nodes.Count} nodes)";
 }
 
 /// <summary>A greeting that wins over the plain one while its condition holds.</summary>
 public sealed class DialogueGreeting
 {
+    /// <summary>The greeting line.</summary>
     public UiText Text { get; set; } = "";
+    /// <summary>Shown only while this holds. Null: always.</summary>
     public QuestCondition? If { get; set; }
+    /// <summary>A voice-over line for it: a name in the mod's cooked audio, or a GUID.</summary>
     public string? Voice { get; set; }
+    /// <summary>The marker over the NPC's head on this greeting (Hint, Attention, MainQuest).</summary>
     public string? Hint { get; set; }
 }
 
+/// <summary>One node of a conversation: some text from the NPC and the options the player can pick.</summary>
 public sealed class DialogueNode
 {
     /// <summary>Overrides the NPC's name for this node.</summary>
     public UiText? Speaker { get; set; }
+    /// <summary>What the NPC says at this node.</summary>
     public UiText Text { get; set; } = "";
     /// <summary>A voice-over line, played by the game's dialogue: a name in the mod's cooked audio, or a GUID (any line of the game).</summary>
     public string? Voice { get; set; }
     /// <summary>The game's menu: the marker over the NPC's head on this node's greeting.</summary>
     public string? Hint { get; set; }
+    /// <summary>The choices the player can pick at this node.</summary>
     public List<DialogueOption> Options { get; set; } = new();
     /// <summary>A node without options: where "Continue" goes (default: the conversation ends).</summary>
     public string? Goto { get; set; }
@@ -392,11 +517,15 @@ public sealed class DialogueNode
     public List<QuestAction> Do { get; set; } = new();
 }
 
+/// <summary>One choice the player can pick at a node.</summary>
 public sealed class DialogueOption
 {
+    /// <summary>The option's line.</summary>
     public UiText Text { get; set; } = "";
     /// <summary>Shown only while this holds; checked again when chosen.</summary>
     public QuestCondition? If { get; set; }
+    /// <summary>Actions that run when the option is chosen. The first one that fails stops the rest, and the player gets
+    /// the reason in chat.</summary>
     public List<QuestAction> Do { get; set; } = new();
     /// <summary>The next node; "end" or null ends the conversation.</summary>
     public string? Goto { get; set; }
@@ -416,6 +545,7 @@ public sealed class DialogueOption
 /// placed in the world (<see cref="Place"/>).</summary>
 public sealed class QuestNpcDefinition
 {
+    /// <summary>The NPC's id. Unique within its mod.</summary>
     public required string Id { get; init; }
     /// <summary>Template name of the entity (of a clone: the base).</summary>
     public string? Template { get; set; }
@@ -429,12 +559,15 @@ public sealed class QuestNpcDefinition
     public QuestPlace? Place { get; set; }
     /// <summary>The conversation it opens.</summary>
     public string? Dialogue { get; set; }
+    /// <summary>The NPC's display name. Null: the template's own.</summary>
     public UiText? Name { get; set; }
     /// <summary>Where it stands (the JSON's <c>place.at</c>): with no entity found, this spot still counts as the NPC.</summary>
     public WorldPosition? At { get; set; }
     /// <summary>How close a player must be to talk (metres).</summary>
     public double TalkRange { get; set; } = 8;
+    /// <summary>The mod that defined it ("" for code outside a mod).</summary>
     public string ModId { get; internal set; } = "";
+    /// <summary><c>&lt;modId&gt;:&lt;id&gt;</c>, or just the id outside a mod.</summary>
     public string FullId => ModId.Length > 0 ? $"{ModId}:{Id}" : Id;
 }
 
@@ -448,8 +581,11 @@ public readonly record struct QuestHolder(string Key, ulong Account, EntityId En
     /// <summary>The character whose book this is; none for the world, synthetic holders and builds without character ids.</summary>
     public CharacterKey Character { get; init; }
 
+    /// <summary>The holder of the world's own state: what world-scope quests use.</summary>
     public static QuestHolder World { get; } = new("world", 0, EntityId.None);
+    /// <summary>True for <see cref="World"/>.</summary>
     public bool IsWorld => Key == "world";
+    /// <summary>True for the default value (no key): no holder at all.</summary>
     public bool IsNone => string.IsNullOrEmpty(Key);
 
     /// <summary>The save key of the hosting player of a local game when the game gives no Steam or account id.</summary>
@@ -463,6 +599,8 @@ public readonly record struct QuestHolder(string Key, ulong Account, EntityId En
         return p is null ? new QuestHolder($"session:{player.Value}", 0, player) : Of(p);
     }
 
+    /// <summary>The holder of a player in game: keyed by their character when the game gives one, else by their account,
+    /// else by their session.</summary>
     public static QuestHolder Of(Player p)
     {
         var account = p.SteamId != 0 ? p.SteamId : p.AccountId != 0 ? p.AccountId
@@ -502,6 +640,7 @@ public readonly record struct QuestHolder(string Key, ulong Account, EntityId En
         return p is { InGame: true } ? Of(p) : throw new ArgumentException($"'{who}' is not \"world\", \"synthetic:<name>\" or a player in game");
     }
 
+    /// <summary>The holder's key, with the entity when there is one.</summary>
     public override string ToString() => Entity.IsNone ? Key : $"{Key} (entity {Entity})";
 
     /// <summary>This holder as a <see cref="PlayerRef"/>. With an entity: <see cref="PlayerRef.Of"/> of it (the session
@@ -528,25 +667,52 @@ public readonly record struct QuestHolder(string Key, ulong Account, EntityId En
 }
 
 /// <summary>One holder's standing in one quest.</summary>
+/// <param name="Quest">The quest's definition.</param>
+/// <param name="Holder">Whose standing this is. For a world quest, the world.</param>
+/// <param name="Status">Where the quest stands for the holder.</param>
+/// <param name="StepId">The id of the current step; null when the quest is not active.</param>
+/// <param name="StepIndex">The current step's 0-based index in <see cref="QuestDefinition.Steps"/>; meaningful while the
+/// quest is active.</param>
+/// <param name="Counters">A copy of the objective counters, keyed <c>&lt;step&gt;#&lt;objective&gt;</c> (see
+/// <see cref="QuestRecord.CounterKey"/>). Use <see cref="Counter"/> for the current step.</param>
+/// <param name="Completions">How many times the holder has completed the quest.</param>
 public sealed record QuestProgress(QuestDefinition Quest, QuestHolder Holder, QuestStatus Status, string? StepId, int StepIndex,
     IReadOnlyDictionary<string, int> Counters, int Completions)
 {
     /// <summary>The counter of an objective of the current step.</summary>
     public int Counter(int objective = 0) => StepId is not null && Counters.TryGetValue(QuestRecord.CounterKey(StepId, objective), out var v) ? v : 0;
+    /// <summary>The quest's full id, its status and the current step.</summary>
     public override string ToString() => $"{Quest.FullId}: {Status}{(StepId is null ? "" : $" at {StepId}")}";
 }
 
 /// <summary>The answer to a quest change. Refusals are not exceptions: <see cref="Reason"/> says why.</summary>
+/// <param name="Ok">True when the change happened; false when it was refused.</param>
+/// <param name="Reason">Why it was refused; empty when <paramref name="Ok"/>.</param>
+/// <param name="Status">The quest's status after the call (when it was refused: the status it kept).</param>
 public sealed record QuestResult(bool Ok, string Reason, QuestStatus Status) : IKilnResult
 {
     // IKilnResult's reason is null when the action happened; this record's own Reason keeps its text ("" then).
     string? IKilnResult.Reason => Ok ? null : Reason;
 
     internal static QuestResult No(string why, QuestStatus status = QuestStatus.Locked) => new(false, why, status);
+    /// <summary>"ok" and the status, or "refused:" and the reason.</summary>
     public override string ToString() => Ok ? $"ok ({Status})" : $"refused: {Reason}";
 }
 
 /// <summary>What the engine holds and has done.</summary>
+/// <param name="Started">The engine has started (<see cref="Quests.EnsureStarted"/> ran).</param>
+/// <param name="ServerSide">This process runs the quests: a dedicated server, or a client hosting a world while it runs.</param>
+/// <param name="Quests">The number of quest definitions held.</param>
+/// <param name="Dialogues">The number of dialogue definitions held.</param>
+/// <param name="Npcs">The number of NPC definitions held.</param>
+/// <param name="Conversations">The number of chat conversations open now.</param>
+/// <param name="Errors">The number of load errors (see <paramref name="LoadErrors"/>).</param>
+/// <param name="Transitions">The number of quest state changes since the engine started.</param>
+/// <param name="Actions">The number of actions run since the engine started.</param>
+/// <param name="ActionFailures">The number of those actions that failed.</param>
+/// <param name="Waypoints">The player-waypoint writer (kiln.questmark) is loaded and its program runs in this world, so
+/// waypoints can be set.</param>
+/// <param name="LoadErrors">The load errors as text lines.</param>
 public sealed record QuestEngineStatus(bool Started, bool ServerSide, int Quests, int Dialogues, int Npcs, int Conversations,
     int Errors, ulong Transitions, ulong Actions, ulong ActionFailures, bool Waypoints, IReadOnlyList<string> LoadErrors)
 {
