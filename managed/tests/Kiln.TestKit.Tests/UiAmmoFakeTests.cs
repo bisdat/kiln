@@ -107,6 +107,24 @@ public sealed unsafe class UiAmmoFakeTests
     }
 
     [Fact]
+    public void TheHudShowsAtMost64RowsAndAContextSaysWhenTheGamesOwnWereCut()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var truncated = new List<bool>();
+        kiln.AmmoList.Hold(AmmoListKind.Arrow, Bow, Enumerable.Range(1, 63).Select(i => R((uint)i, 1)).ToArray());
+        using var p = kiln.Run(() => Ui.AmmoList.Provide(AmmoListKind.Arrow, c => { truncated.Add(c.Truncated); return [R(0x100, 1), R(0x101, 1)]; }));
+        kiln.Step();
+        Assert.Equal(64, kiln.AmmoList.Shown(AmmoListKind.Arrow).Count);
+        Assert.Equal([R(0x100, 1)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        kiln.AmmoList.SetGameRows(AmmoListKind.Arrow, Enumerable.Range(1, 70).Select(i => R((uint)i, 1)).ToArray());
+        kiln.Step();
+        Assert.Equal([false, true], truncated);
+        Assert.Equal(64, kiln.AmmoList.Shown(AmmoListKind.Arrow).Count);
+        Assert.Empty(kiln.AmmoList.Provided(AmmoListKind.Arrow));
+    }
+
+    [Fact]
     public void WithThePickRowOffPickedRefusesAndWithTheListRowOffProvideRefuses()
     {
         using var kiln = new KilnHarness();

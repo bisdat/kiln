@@ -496,10 +496,12 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
 
 - **When the rows are asked for.** The provider runs as your mod on the game's UI thread, never inside the game's own
   code: once when the list is first built, then whenever its `AmmoListContext` changes (the held weapon `Held`, the
-  game's own rows or counts `GameRows`, the session) or `Refresh()` is called. Kiln copies the rows and hands the game an
+  game's own rows or counts `GameRows`, as the game last built them, the session) or `Refresh()` is called. Kiln copies the rows and hands the game an
   immutable snapshot, so the HUD may show the previous context's rows for one frame. Keep it a lookup.
 - **Order and composition.** Rows show in the order returned. All providers of a list are composed in registration
-  order; the first row of an item wins, item 0 is left out, a negative count shows as 0, a list holds at most 64 rows.
+  order; the first row of an item wins, item 0 is left out, a negative count shows as 0. A list holds 64 rows in all:
+  in `Append` the mods' rows fit in what the game's rows leave, and none when the game's own list was already longer
+  (`ctx.Truncated`; `GameRows` are then its first 64); in `Replace` the mods have all 64.
   `Append` (the default) leaves out an item the game already lists (its row keeps the real count); `Replace` shows only
   the mods' rows, and one provider asking for it replaces the whole list. A provider that throws adds no rows that time;
   rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.

@@ -183,13 +183,15 @@ internal sealed unsafe class UiAmmoFake : IKitFake
         return FakeTables.Ok;
     }
 
-    /// <summary>The list as the HUD shows it: the game's rows, then (Append) or instead (Replace) the snapshot's.</summary>
+    /// <summary>The list as the HUD shows it: the game's rows, then (Append) or instead (Replace) the snapshot's; 64 rows
+    /// in all (native's capacity counts the game's rows and the mods' together).</summary>
     internal static (uint Item, uint Count, bool Mod)[] Shown(UiAmmoFakeState.List list)
     {
-        if (list.Owner == 0 || list.Mode == UiAmmoNative.ModeGame) return list.Game.Select(g => (g.Item, g.Count, false)).ToArray();
-        var shown = list.Mode == UiAmmoNative.ModeAppend ? list.Game.Select(g => (g.Item, g.Count, false)).ToList() : [];
+        var game = list.Game.Take(UiAmmoNative.Capacity).Select(g => (g.Item, g.Count, false));
+        if (list.Owner == 0 || list.Mode == UiAmmoNative.ModeGame) return game.ToArray();
+        var shown = list.Mode == UiAmmoNative.ModeAppend ? game.ToList() : [];
         foreach (var r in list.Rows)
-            if (!shown.Any(s => s.Item == r.Item)) shown.Add((r.Item, r.Count, true));
+            if (shown.Count < UiAmmoNative.Capacity && !shown.Any(s => s.Item == r.Item)) shown.Add((r.Item, r.Count, true));
         return shown.ToArray();
     }
 }

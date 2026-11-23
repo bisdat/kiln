@@ -50,8 +50,9 @@ public sealed record AmmoListOptions
 public sealed class AmmoListContext
 {
     internal AmmoListContext(AmmoListKind kind, uint session, EntityId player, ItemId held, IReadOnlyList<AmmoListRow> gameRows,
-        ulong revision)
+        ulong revision, bool truncated = false)
     {
+        Truncated = truncated;
         Kind = kind;
         Session = session;
         Player = player;
@@ -68,13 +69,18 @@ public sealed class AmmoListContext
     public EntityId Player { get; }
     /// <summary>The weapon the list is built for (the bow, the staff); default when the game did not say.</summary>
     public ItemId Held { get; }
-    /// <summary>The game's own rows, in its order: the items it found in the backpack, with their counts.</summary>
+    /// <summary>The game's own rows, in its order, with their counts, as the game last built them (up to 64; a picture,
+    /// not proof that a stack is still there).</summary>
     public IReadOnlyList<AmmoListRow> GameRows { get; }
     /// <summary>Changes whenever the held weapon, the game's own rows or counts, or the session change.</summary>
     public ulong Revision { get; }
+    /// <summary>The game's own list had more rows than a list holds (64): <see cref="GameRows"/> are its first 64, and in
+    /// <see cref="AmmoListMode.Append"/> no mod row fits after them.</summary>
+    public bool Truncated { get; }
 
-    /// <summary>Whether the game lists <paramref name="item"/> itself (the player carries it, so a pick of it is the
-    /// game's own and raises no <see cref="Ui.AmmoList.Picked"/>).</summary>
+    /// <summary>Whether <paramref name="item"/> is among <see cref="GameRows"/>, the game's rows as last built. Whether a
+    /// pick of it is the game's own or raises <see cref="Ui.AmmoList.Picked"/> is decided at the pick, against the
+    /// backpack then (it may have changed since).</summary>
     public bool GameLists(ItemId item)
     {
         foreach (var r in GameRows)
@@ -157,9 +163,11 @@ public static partial class Ui
         /// returns, so the HUD may show the rows of the previous context for one frame. Keep it a lookup.</para>
         /// <para>Rows show in the order returned. Every provider of a list is composed in registration order; the first row
         /// of an item wins (a later row of the same item is left out), rows of item 0 are left out, a negative count shows
-        /// as 0, and a list holds at most 64 rows (the rest is left out, and logged). A provider that throws adds no rows
-        /// that time (logged in the mod's log). When the game refuses a provider's rows (an item that is not an arrow, or not
-        /// a spell, for that list), the other providers' rows still show and the refusal is logged.</para>
+        /// as 0, and a list holds 64 rows in all: in Append the mods' rows fit in what the game's rows leave (none when
+        /// <see cref="AmmoListContext.Truncated"/>), in Replace 64 (the rest is left out, and logged). A provider that
+        /// throws adds no rows that time (logged in the mod's log). When the game refuses a provider's rows (an item that is
+        /// not an arrow, or not a spell, for that list), the other providers' rows still show and the refusal is
+        /// logged.</para>
         /// <para>The game keeps its selection on the same item when the rows change. A pick of a row whose item the player
         /// carries is the game's own (it equips it); a pick of any other mod row raises <see cref="Picked"/> for the mod that
         /// provided it.</para>
@@ -520,7 +528,9 @@ internal static unsafe class UiAmmoListBridge
         if (rc != UiAmmoNative.Ok || c.Ok == 0)
         {
             st.Session = 0;
-            st.Refusal = rc == UiAmmoNative.Ok ? UiAmmoNative.ReasonText(c.Reason)
+            // NO_SESSION, NO_CONTEXT and STALE come as NOT_FOUND with ok 0, CATALOG as OK with ok 0 (kiln_ui_ammo.h)
+            st.Refusal = (rc == UiAmmoNative.Ok || rc == UiAmmoNative.NotFound) && c.Reason != UiAmmoNative.ReasonNone
+                ? UiAmmoNative.ReasonText(c.Reason)
                 : rc == UiAmmoNative.NotFound ? "the game has not built the list yet" : $"kiln.ui.ammo context refused ({rc})";
             if (dirty) lock (Lock) st.Dirty = true;  // build when there is a context
             return;
@@ -542,7 +552,8 @@ internal static unsafe class UiAmmoListBridge
             var r = c->GameRows[i];
             rows[i] = new AmmoListRow(new ItemId(r.Item), (int)Math.Min(r.Count, int.MaxValue));
         }
-        return new AmmoListContext(kind, c->Session, new EntityId(c->LocalPlayer), new ItemId(c->HeldItem), rows, c->GameSerial);
+        return new AmmoListContext(kind, c->Session, new EntityId(c->LocalPlayer), new ItemId(c->HeldItem), rows, c->GameSerial,
+            c->Reason == UiAmmoNative.ReasonLimit || c->GameCount > UiAmmoNative.Capacity);
     }
 
     /// <summary>A provider's rows for one context, as Kiln keeps them: in order, item 0 left out, counts at least 0.</summary>
@@ -557,7 +568,8 @@ internal static unsafe class UiAmmoListBridge
     }
 
     /// <summary>The list a set of providers' rows makes: their rows in registration order, the first row of an item wins,
-    /// in Append the game's own items left out, at most 64.</summary>
+    /// in Append the game's own items left out. A list holds 64 rows in all: in Append the mods' rows fit in what the
+    /// game's rows leave (none when the game's own were cut), in Replace 64.</summary>
     internal static (uint Mode, AmmoListRow[] Rows, (uint Item, ModContext? Mod)[] Owners, bool Cut) Compose(
         IReadOnlyList<(Provider P, List<AmmoListRow> Rows)> asked, AmmoListContext ctx)
     {
@@ -565,6 +577,9 @@ internal static unsafe class UiAmmoListBridge
         var seen = new HashSet<uint>();
         if (mode == UiAmmoNative.ModeAppend)
             foreach (var g in ctx.GameRows) seen.Add(g.Item.Value);
+        var room = mode == UiAmmoNative.ModeAppend
+            ? (ctx.Truncated ? 0 : Math.Max(0, UiAmmoNative.Capacity - ctx.GameRows.Count))
+            : UiAmmoNative.Capacity;
         var rows = new List<AmmoListRow>();
         var owners = new List<(uint, ModContext?)>();
         var cut = false;
@@ -572,7 +587,7 @@ internal static unsafe class UiAmmoListBridge
             foreach (var r in list)
             {
                 if (!seen.Add(r.Item.Value)) continue;
-                if (rows.Count == UiAmmoNative.Capacity)
+                if (rows.Count == room)
                 {
                     cut = true;
                     continue;
@@ -588,7 +603,10 @@ internal static unsafe class UiAmmoListBridge
         var ctx = ContextOf(st.Kind, c);
         var asked = providers.Select(p => (P: p, Rows: Ask(p, ctx))).ToList();
         var composed = Compose(asked, ctx);
-        if (composed.Cut) UiEngine.Log(LogLevel.Warn, $"ui.ammo: the {st.Kind} list holds 64 rows; the rest are left out");
+        if (composed.Cut)
+            UiEngine.Log(LogLevel.Warn, ctx.Truncated
+                ? $"ui.ammo: the game's own {st.Kind} list has more than 64 rows; no mod row fits after them (Append)"
+                : $"ui.ammo: the {st.Kind} list holds 64 rows in all; the mods' rows past that are left out");
         var rc = Publish(t, st, c, composed);
         if (rc == UiAmmoNative.InvalidArgument || rc == UiAmmoNative.NotFound)
         {

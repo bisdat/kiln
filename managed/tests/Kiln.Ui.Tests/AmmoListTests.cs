@@ -21,6 +21,7 @@ internal static unsafe class FakeAmmo
     public static readonly Dictionary<uint, UiAmmoNative.Context> Contexts = [];
     public static readonly Queue<UiAmmoNative.Pick> Picks = new();
     public static int ContextRc;
+    public static uint ContextReason;  // with ContextRc: the diagnostic native writes with ok 0
     public static HashSet<uint> Refused = [];  // items the game refuses (not of the list's kind)
     public static int PublishRc;
     public static int RefuseSetsFromCall;  // 0: off; else the n-th publish call on refuses every set
@@ -38,6 +39,7 @@ internal static unsafe class FakeAmmo
         Contexts.Clear();
         Picks.Clear();
         ContextRc = 0;
+        ContextReason = 0;
         PublishRc = 0;
         RefuseSetsFromCall = 0;
         Refused = [];
@@ -85,7 +87,11 @@ internal static unsafe class FakeAmmo
     private static int GetContext(ulong owner, uint kind, UiAmmoNative.Context* o)
     {
         ContextReads.Add(kind);
-        if (ContextRc != 0) return ContextRc;
+        if (ContextRc != 0)
+        {
+            *o = new UiAmmoNative.Context { Size = (uint)sizeof(UiAmmoNative.Context), Kind = kind, Reason = ContextReason };
+            return ContextRc;
+        }
         if (!Contexts.TryGetValue(kind, out var c)) return UiAmmoNative.NotFound;
         *o = c;
         return 0;
@@ -255,6 +261,51 @@ public sealed unsafe class AmmoListTests : IDisposable
         FakeAmmo.Context(Arrow, 5);
         UiAmmoListBridge.Tick();
         Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void A_missing_context_says_natives_reason_and_a_truncated_one_still_builds()
+    {
+        var calls = 0;
+        AmmoListContext? seen = null;
+        using var p = Ui.AmmoList.Provide(AmmoListKind.Arrow, x => { calls++; seen = x; return [R(0x30, 1)]; });
+        FakeAmmo.ContextRc = UiAmmoNative.NotFound;
+        FakeAmmo.ContextReason = UiAmmoNative.ReasonNoSession;  // NO_SESSION, NO_CONTEXT, STALE: NOT_FOUND with ok 0
+        UiAmmoListBridge.Tick();
+        Assert.Equal("no client session", UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Refusal);
+        FakeAmmo.ContextRc = 0;
+        FakeAmmo.Context(Arrow, 3);
+        var c = FakeAmmo.Contexts[Arrow];
+        c.Reason = UiAmmoNative.ReasonLimit;  // ok 1 with LIMIT: the game's first 64 rows, a usable context
+        FakeAmmo.Contexts[Arrow] = c;
+        UiAmmoListBridge.Tick();
+        Assert.Equal(1, calls);
+        Assert.True(seen!.Truncated);  // the provider sees that the game had more rows than fit
+        Assert.Equal((UiAmmoNative.ModeAppend, 0), (FakeAmmo.Last(Arrow).Mode, FakeAmmo.Last(Arrow).Rows.Length));  // none fits after them
+    }
+
+    [Fact]
+    public void In_Append_the_mods_rows_fit_in_what_the_games_rows_leave_of_64()
+    {
+        FakeAmmo.Context(Arrow, 1, game: Enumerable.Range(1, 63).Select(i => ((uint)i, 1u)).ToArray());
+        AmmoListContext? seen = null;
+        using var p = Ui.AmmoList.Provide(AmmoListKind.Arrow, x => { seen = x; return [R(0x100, 1), R(0x101, 1)]; });
+        UiAmmoListBridge.Tick();
+        Assert.False(seen!.Truncated);
+        Assert.Equal([(0x100u, 1u)], FakeAmmo.Last(Arrow).Rows);  // 63 + 1: what the HUD shows
+        Assert.Equal([0x100u], UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Keys.Select(k => k.Item));
+        // the game's 64 (it had more: LIMIT) leave none; Replace still holds 64 of the mods'
+        FakeAmmo.Context(Arrow, 2, game: Enumerable.Range(1, 64).Select(i => ((uint)i, 1u)).ToArray());
+        var c = FakeAmmo.Contexts[Arrow];
+        c.Reason = UiAmmoNative.ReasonLimit;
+        FakeAmmo.Contexts[Arrow] = c;
+        UiAmmoListBridge.Tick();
+        Assert.True(seen!.Truncated);
+        Assert.Empty(FakeAmmo.Last(Arrow).Rows);
+        using var r = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => Enumerable.Range(0x200, 70).Select(i => R((uint)i, 1)).ToArray(),
+            new AmmoListOptions { Mode = AmmoListMode.Replace });
+        UiAmmoListBridge.Tick();
+        Assert.Equal((UiAmmoNative.ModeReplace, 64), (FakeAmmo.Last(Arrow).Mode, FakeAmmo.Last(Arrow).Rows.Length));
     }
 
     [Fact]

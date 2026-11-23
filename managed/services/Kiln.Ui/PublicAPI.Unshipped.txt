@@ -9,6 +9,7 @@ Kiln.AmmoListContext.Kind.get -> Kiln.AmmoListKind
 Kiln.AmmoListContext.Player.get -> Kiln.EntityId
 Kiln.AmmoListContext.Revision.get -> ulong
 Kiln.AmmoListContext.Session.get -> uint
+Kiln.AmmoListContext.Truncated.get -> bool
 Kiln.AmmoListKind
 Kiln.AmmoListKind.Arrow = 1 -> Kiln.AmmoListKind
 Kiln.AmmoListKind.Spell = 2 -> Kiln.AmmoListKind
