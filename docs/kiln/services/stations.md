@@ -311,7 +311,9 @@ truncated: over 1024 rows the menu keeps the game's counts.
 sources; an already-running payment may finish. Sources are session-only and cleared when the world closes. They
 survive a restart **only if the mod re-registers them**; save the links in the mod's own data, not the disposable handles.
 The native registration is also bound to the player login handle: a new player reusing the same entity slot cannot inherit it.
-Mods should dispose links when a player leaves and re-register for the new player session.
+Mods should dispose links when a player leaves and re-register for the new player session. A registration for the
+player's new login also frees that player's links from earlier logins (they can no longer pay), so a mod that only
+re-registers cannot exhaust the shared 4096-registration limit; their old handles then dispose as no-ops.
 
 | Capability | Side and refusal |
 | --- | --- |

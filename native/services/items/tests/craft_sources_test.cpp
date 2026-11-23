@@ -42,6 +42,17 @@ int main() {
     merge_craft_sources(registry.copy(1),1,0,{1},{7},[](uint32_t,uint32_t) {return true;},have,&disposed);
     CHECK(disposed.by[7] == std::vector<uint32_t>({3000}));
     registry.cancel_owner(10); CHECK(registry.copy(1).empty());
+    // A new login of the same player frees that player's dead registrations; other players' stay.
+    CraftSourceRegistry logins;
+    CHECK(logins.add(10, 1, 2000, false, true, {}, 5) && logins.add(10, 1, 2001, false, true, {}, 5) && logins.add(10, 2, 2002, false, true, {}, 9));
+    const auto relog = logins.add(10, 1, 2003, false, true, {}, 6);
+    CHECK(relog && logins.copy(1).size() == 1 && logins.copy(1)[0].container == 2003 && logins.copy(1)[0].player_session == 6);
+    CHECK(logins.copy(2).size() == 1);
+    CraftSourceRegistry full;
+    for (uint32_t i = 0; i < 4096; ++i) full.add(10, 1, 2000 + i, false, true, {}, 5);
+    CHECK(!full.add(10, 2, 9000, false, true, {}, 1));  // still capped for live registrations
+    CHECK(full.add(10, 1, 9001, false, true, {}, 6));   // a re-login re-registration is never starved by dead links
+    CHECK(full.copy(1).size() == 1 && full.add(10, 2, 9000, false, true, {}, 1));
     std::vector<uint32_t> order;
     CHECK(craft_order(0,1,nullptr,0,&order) && order == std::vector<uint32_t>({1}));
     CHECK(source_identity_ok(1,2000,false,true));
