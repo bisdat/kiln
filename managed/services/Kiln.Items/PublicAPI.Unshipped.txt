@@ -173,3 +173,27 @@ static Kiln.StorageFilter.Where(System.Func<Kiln.ItemInfo!, bool>! pick) -> Kiln
 ~override Kiln.PlayerStorageRow.Equals(object obj) -> bool
 ~override Kiln.PlayerStorageRow.ToString() -> string
 ~override Kiln.StorageFilter.Equals(object obj) -> bool
+Kiln.PlayerStorage.Activate(Kiln.EntityId player, int index) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
+Kiln.PlayerStorageAmmoOptions
+Kiln.PlayerStorageAmmoOptions.Activate.get -> bool
+Kiln.PlayerStorageAmmoOptions.Activate.init -> void
+Kiln.PlayerStorageAmmoOptions.<Clone>$() -> Kiln.PlayerStorageAmmoOptions!
+Kiln.PlayerStorageAmmoOptions.Equals(Kiln.PlayerStorageAmmoOptions? other) -> bool
+Kiln.PlayerStorageAmmoOptions.PlayerStorageAmmoOptions() -> void
+Kiln.PlayerStorageAmmoOptions.Replace.get -> bool
+Kiln.PlayerStorageAmmoOptions.Replace.init -> void
+Kiln.PlayerStorageAmmoProvider
+Kiln.PlayerStorageAmmoProvider.Active.get -> bool
+Kiln.PlayerStorageAmmoProvider.Dispose() -> void
+Kiln.PlayerStorageAmmoProvider.FullKey.get -> string!
+Kiln.PlayerStorageAmmoProvider.Kinds.get -> Kiln.AmmoKinds
+Kiln.PlayerStorageAmmoProvider.Options.get -> Kiln.PlayerStorageAmmoOptions!
+Kiln.PlayerStorageAmmoProvider.Shown.get -> bool
+Kiln.PlayerStorageAmmoProvider.WhyNotShown.get -> string?
+override Kiln.PlayerStorageAmmoOptions.Equals(object? obj) -> bool
+override Kiln.PlayerStorageAmmoOptions.GetHashCode() -> int
+override Kiln.PlayerStorageAmmoOptions.ToString() -> string!
+override Kiln.PlayerStorageAmmoProvider.ToString() -> string!
+static Kiln.PlayerStorageAmmoOptions.operator !=(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool
+static Kiln.PlayerStorageAmmoOptions.operator ==(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool
+static Kiln.PlayerStorage.Client.ProvideAmmo(string! fullKey, Kiln.AmmoKinds kinds, Kiln.PlayerStorageAmmoOptions? options = null) -> Kiln.PlayerStorageAmmoProvider!

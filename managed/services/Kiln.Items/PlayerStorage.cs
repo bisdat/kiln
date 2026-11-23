@@ -395,6 +395,42 @@ public sealed class PlayerStorage
             : Items.Move(holder, slot, target, count);
     }
 
+    /// <summary>
+    /// Makes the arrows or spell in slot <paramref name="index"/> the player's active ammunition through the backpack: the
+    /// stack moves into the backpack (<see cref="Items.Move"/>) and is equipped there (<see cref="Items.Equip"/>), and the
+    /// stack this storage activated before for that slot goes back into the storage. For a game that does not fire from a
+    /// stack outside the backpack; where it does, equip the storage slot itself (<see cref="Items.Equip"/> with
+    /// <see cref="Slot"/>), which moves nothing. <see cref="PlayerStorageAmmoOptions.Activate"/> makes the HUD's picks use
+    /// this. Since 0.2.0-dev.30.7 (mod API 0.2.16).
+    /// </summary>
+    /// <returns>The equip's result, one step after the last move: <see cref="ItemsStatus.NoInventory"/> while the storage is
+    /// not ready, <see cref="ItemsStatus.SlotChanged"/> for an empty slot, <see cref="ItemsStatus.Refused"/> for an item
+    /// that is no arrow or spell, a failed move's status (nothing equipped; <see cref="ItemsStatus.NoRoom"/>: the backpack
+    /// is full), or the equip's. A stack that cannot go back (the storage is full, its filter refuses it) stays in the
+    /// backpack.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is outside the storage.</exception>
+    /// <exception cref="KilnUnavailableException">The row <c>items.move</c> or <c>items.equip</c> is off.</exception>
+    [ServerOnly, TickThreadOnly, RequiresCapability(Items.Caps.Move), RequiresCapability(Items.Caps.Equip)]
+    public Task<EquipResult> Activate(EntityId player, int index)
+    {
+        var slot = Slot(player, index);
+        if (slot.IsNone)
+            return Task.FromResult(EquipResult.Fail(ItemsStatus.NoInventory, player, null, false, slot, NotReady(player), false));
+        var stack = Read(player)?.Slots.FirstOrDefault(s => s.Slot == slot);
+        if (stack is null || stack.IsEmpty)
+            return Task.FromResult(EquipResult.Fail(ItemsStatus.SlotChanged, player, null, false, slot, $"slot {index} of {FullKey} holds nothing", false));
+        var kind = PlayerStorageMirror.KindOf(stack.Item);
+        if (kind == 0)
+            return Task.FromResult(EquipResult.Fail(ItemsStatus.Refused, player, null, false, slot, $"{stack.Item} is no arrow or spell", false));
+        foreach (var row in (string[])[Items.Caps.Move, Items.Caps.Equip])
+            if (!Capabilities.Is(row)) throw ServiceCaps.Unavailable(row);
+        var holder = EntityOf(player);
+        return PlayerStorageActivation.Run(this, player, holder, slot, stack, kind);
+    }
+
+    // the stack Activate last moved into the backpack, per player and kind: it goes back at the next Activate
+    internal readonly Dictionary<(uint Player, AmmoKinds Kind), (SlotId Cell, ItemId Item)> Activated = [];
+
     /// <summary>Where the storage stands for <paramref name="player"/>. Any thread.</summary>
     [AnyThread]
     public PlayerStorageStatus Status(EntityId player) => PlayerStorageRuntime.StatusOf(this, player);
@@ -406,44 +442,103 @@ public sealed class PlayerStorage
     public override string ToString() => $"player storage {FullKey} ({Slots} slots, {Filter}, death {Death})";
 
     /// <summary>
-    /// The player's own read-only copy of their storages on a game client: rows Kiln sends to the owner when a storage
-    /// changes, so a mod's client half can show them (a HUD, a menu). Since 0.2.0-dev.30.7 (mod API 0.2.16), capability
+    /// The player's own read-only copy of their storages on their game: rows the server sends the storage's owner (never
+    /// another player) when a storage changes, so a mod's client half can show them (a HUD, a menu), and the HUD's
+    /// ammunition lists fed from them (<see cref="ProvideAmmo"/>). Since 0.2.0-dev.30.7 (mod API 0.2.16), capability
     /// <c>items.storage.client</c>.
     /// </summary>
-    /// <remarks>Not in this version of Kiln: <see cref="Available"/> is false, <see cref="Rows"/> throws and
-    /// <see cref="PlayerStorageClientChangedEvent"/> never fires. The shape is here so mods can be written against it.</remarks>
+    /// <remarks>
+    /// <para>Kiln's channel <c>kiln:storage</c> v1 carries the copy (not required: a game without it joins as before and
+    /// gets nothing). The server is the authority: the copy is a picture of what the server holds, a message from a game
+    /// never changes a storage, and a game cannot ask for another player's rows. The server sends the whole set of the
+    /// player's ready storages (any mod's) about four times a second at most, and only when it changed. A hosting game
+    /// fills its own player's copy directly.</para>
+    /// <para>The copy is empty until the server restored the player's storages, on a server without Kiln, without the
+    /// storage's mod, or where player storage is off; it empties when the game leaves the world.</para>
+    /// </remarks>
     [ClientOnly]
     public static class Client
     {
         /// <summary>The capability row of the client copy: <c>items.storage.client</c>.</summary>
         public const string Capability = "items.storage.client";
 
-        /// <summary>Whether the client copy works here (capability <c>items.storage.client</c>).</summary>
+        /// <summary>Whether the client copy works here (capability <c>items.storage.client</c>: Kiln's network channel is
+        /// open).</summary>
         [AnyThread]
-        public static bool Available => Capabilities.Is(Capability);
+        public static bool Available
+        {
+            get
+            {
+                PlayerStorageMirror.Start();
+                return Capabilities.Is(Capability);
+            }
+        }
 
-        /// <summary>The local player's rows of storage <paramref name="fullKey"/>, by slot.</summary>
+        /// <summary>The local player's rows of storage <paramref name="fullKey"/> (<see cref="PlayerStorage.FullKey"/>), by
+        /// slot: one per slot that holds something. Empty while the copy has none of that storage.</summary>
         /// <exception cref="KilnUnavailableException">The row <c>items.storage.client</c> is off.</exception>
         [AnyThread, RequiresCapability(Capability)]
         public static IReadOnlyList<PlayerStorageRow> Rows(string fullKey)
         {
             ArgumentException.ThrowIfNullOrEmpty(fullKey);
             Items.Rows.Ensure();
-            throw ServiceCaps.Unavailable(Capability);
+            PlayerStorageMirror.Start();
+            if (!PlayerStorageMirror.Open) throw ServiceCaps.Unavailable(Capability);
+            return PlayerStorageMirror.Store.Rows(fullKey);
         }
+
+        /// <summary>
+        /// Shows the arrows and spells of your mod's storage <paramref name="fullKey"/> in the HUD's ammunition and spell
+        /// lists (<c>Ui.AmmoList</c>, GitHub issue 127), and takes the player's pick of such a row on the server: it equips
+        /// the stack from its storage slot (<see cref="Items.Equip"/>), or with <see cref="PlayerStorageAmmoOptions.Activate"/>
+        /// swaps it into the backpack first (<see cref="PlayerStorage.Activate"/>). Both halves of the common case in one
+        /// call: make it on both sides, in <c>OnLoad</c> of a mod with side <c>both</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>On a game client the rows come from the client copy: one row per item (the counts of its slots added up),
+        /// in slot order, only items the game equips into that list's slot. They follow the copy as it changes. The HUD's
+        /// rules apply (<c>Ui.AmmoList.Provide</c>): in Append a row for an item the game lists itself is left out, and
+        /// a pick of an item the player carries is the game's own. Every other pick goes to the server as a wish.</para>
+        /// <para>On the server (a dedicated server, or a game hosting the world) the pick is checked like any request from
+        /// a game: the storage is the sender's own, the item is in it, it is ammunition of the list's kind; at most 4 picks
+        /// a second per player. Then the first slot holding the item is equipped as the storage's mod. A pick that does not
+        /// check out is dropped (logged). Nothing else a game sends changes the storage.</para>
+        /// <para>One provider per storage at a time. Where there is no HUD (a dedicated server) or <c>ui.ammo.list</c> is off,
+        /// only the server half runs (<see cref="PlayerStorageAmmoProvider.Shown"/> is false and says why).</para>
+        /// </remarks>
+        /// <param name="fullKey">The storage's full key, one of the calling mod's (<c>"&lt;your mod id&gt;:&lt;key&gt;"</c>).
+        /// On a game that joined another's world the storage is not registered there; its key is enough.</param>
+        /// <param name="kinds">The lists: <see cref="AmmoKinds.Arrow"/>, <see cref="AmmoKinds.Spell"/> or both.</param>
+        /// <param name="options">Replace the game's rows, or activate on a pick (<see cref="PlayerStorageAmmoOptions"/>).</param>
+        /// <returns>The provider; dispose it to end both halves. It ends with the mod.</returns>
+        /// <exception cref="ArgumentException">A bad key, a key of another mod, or no kind.</exception>
+        /// <exception cref="InvalidOperationException">Outside mod code, or the storage provides its ammunition already.</exception>
+        /// <exception cref="KilnUnavailableException">The row <c>items.storage.client</c> is off.</exception>
+        /// <example><code>
+        /// // OnLoad, both sides
+        /// _ammo = PlayerStorage.Client.ProvideAmmo("quiversample:quiver", AmmoKinds.Arrow | AmmoKinds.Spell);
+        /// Log.Info(_ammo.ToString());
+        /// </code></example>
+        [AnyThread, RequiresCapability(Capability)]
+        public static PlayerStorageAmmoProvider ProvideAmmo(string fullKey, AmmoKinds kinds, PlayerStorageAmmoOptions? options = null) =>
+            PlayerStorageAmmo.Provide(fullKey, kinds, options);
     }
 
     // a key's name part: lowercase letters, digits, '.', '_', '-'; 32 at most
     internal static readonly Regex NameRule = new("^[a-z0-9][a-z0-9._-]{0,31}$", RegexOptions.CultureInvariant);
+
+    // a full key: "<mod id>:<name>" (kiln_items_storage.h: mod id 1-64, name 1-32 of the same characters)
+    internal static readonly Regex FullKeyRule = new("^[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,31}$", RegexOptions.CultureInvariant);
 }
 
-/// <summary>One slot of a storage in the client copy (<see cref="PlayerStorage.Client.Rows"/>). Since 0.2.0-dev.30.7.</summary>
+/// <summary>One slot of a storage in the client copy (<see cref="PlayerStorage.Client.Rows"/>): a picture of what the
+/// server holds, never authority. Since 0.2.0-dev.30.7.</summary>
 /// <param name="Key">The storage's full key.</param>
-/// <param name="Index">The slot (0 to slots - 1).</param>
+/// <param name="Index">The slot (0 to slots - 1), as <see cref="PlayerStorage.Slot"/> counts them.</param>
 /// <param name="Item">The item.</param>
-/// <param name="Count">How many.</param>
+/// <param name="Count">How many (at least 1).</param>
 /// <param name="Level">Gear's level (0 for a plain stack).</param>
-/// <param name="Flags">Reserved: 0.</param>
+/// <param name="Flags">Reserved: 0 in this version.</param>
 public readonly record struct PlayerStorageRow(string Key, int Index, ItemId Item, int Count, int Level, uint Flags);
 
 /// <summary>Kiln restored a player's storage of one key at the join (or when a mod registered it while the player was on):
@@ -548,8 +643,10 @@ public sealed class PlayerStorageDeathEvent : KilnEvent
         Moved == 0 ? $"player storage {Key} of {Player} kept its items at death ({Rule})" : $"player storage {Key} of {Player}: {Moved} stack(s) to tombstone {To} ({Rule})";
 }
 
-/// <summary>The local player's client copy of a storage changed (<see cref="PlayerStorage.Client"/>). Posted on the game's
-/// main thread. Not raised in this version of Kiln (capability <c>items.storage.client</c>). Since 0.2.0-dev.30.7.</summary>
+/// <summary>The local player's client copy of a storage changed (<see cref="PlayerStorage.Client"/>): the server sent other
+/// rows, the storage went (its rows are then empty), or the game left the world. One event per storage. On the tick thread
+/// (a joined game: the main thread; a hosting game: the server thread). Capability <c>items.storage.client</c>. Since
+/// 0.2.0-dev.30.7.</summary>
 [ClientOnly]
 public sealed class PlayerStorageClientChangedEvent : KilnEvent
 {
@@ -563,6 +660,43 @@ public sealed class PlayerStorageClientChangedEvent : KilnEvent
     public string Key { get; }
     /// <summary>Its rows now.</summary>
     public IReadOnlyList<PlayerStorageRow> Rows { get; }
+}
+
+// Activate's steps (outside the unsafe Items class: C# allows no await in an unsafe context). Each runs on the tick thread
+// one step after the one before, as the storage's mod.
+internal static class PlayerStorageActivation
+{
+    public static async Task<EquipResult> Run(PlayerStorage storage, EntityId player, EntityId holder, SlotId slot, InventorySlot stack, AmmoKinds kind)
+    {
+        var equipSlot = kind == AmmoKinds.Arrow ? EquipmentSlot.Arrow : EquipmentSlot.Spell;
+        var mod = ModContext.CurrentMod;
+        var moved = await As(mod, () => Items.Move(holder, slot, player));
+        if (!moved.Succeeded || moved.Changes.Count == 0)
+            return EquipResult.Fail(moved.Succeeded ? ItemsStatus.Refused : moved.Status, player, equipSlot, false, slot,
+                $"the stack did not move into the backpack: {(moved.Message.Length > 0 ? moved.Message : moved.Status.ToString())}", false);
+        var cell = moved.Changes[0].To;
+        var equipped = await As(mod, () => Items.Equip(player, cell, equipSlot));
+        if (!equipped.Ok) return equipped;
+        var key = (player.Value, kind);
+        if (storage.Activated.TryGetValue(key, out var before) && before.Cell != cell && before.Item != stack.Item &&
+            Items.Read(player)?.Slots.FirstOrDefault(s => s.Slot == before.Cell) is { IsEmpty: false } old && old.Item == before.Item)
+        {
+            var back = await As(mod, () => Items.Move(player, before.Cell, holder, 0, MoveOptions.Equipped));
+            if (!back.Succeeded)
+                Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {storage.FullKey}: the stack activated before stays in the backpack ({back})");
+        }
+        storage.Activated[key] = (cell, stack.Item);
+        return equipped;
+    }
+
+    // a step's request as the mod that asked (an await continuation runs with no mod on the thread)
+    private static Task<T> As<T>(ModContext? mod, Func<Task<T>> request)
+    {
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = mod;
+        try { return request(); }
+        finally { ModContext.CurrentMod = outer; }
+    }
 }
 
 public static unsafe partial class Items

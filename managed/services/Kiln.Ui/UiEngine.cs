@@ -1052,5 +1052,6 @@ internal static class UiStartup
     {
         UiCaps.Rows.Ensure();
         UiEngine.EnsureStarted();
+        PlayerStorageAmmoUi.Install();  // the HUD half of PlayerStorage.Client.ProvideAmmo (0.2.0-dev.30.7)
     }
 }

@@ -994,6 +994,7 @@ internal sealed unsafe partial class ItemsFake
         out_->LevelMin = (uint)i.LevelMin;
         out_->LevelMax = (uint)i.LevelMax;
         out_->Gear = i.Gear ? (byte)1 : (byte)0;
+        out_->EquipSlot = i.EquipmentSlotType;  // ItemInfo.EquipSlot (the game's EquipmentSlotType), as SetEquipmentSlotType set it
         out_->Name = new NativeStr { Ptr = (byte*)i.NameUtf8, Len = (nuint)i.NameLength };
     }
 

@@ -28,6 +28,11 @@
     <!-- the test kit names the upgrades' rolls (HarnessItems.SetUpgradeRolls: ItemUpgrades.Roller) -->
     <InternalsVisibleTo Include="Kiln.TestKit" />
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- player storage's client copy (since 0.2.0-dev.30.7): the channel kiln:storage, the players in game, a hosting game's
+         own player (PlayerStorageMirror.cs) -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Players/Kiln.Players.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
     <EmbeddedResource Include="Data/items.tsv" LogicalName="Kiln.Items.items.tsv" />
     <None Include="Data/ITEMS-LICENSE.txt" />
   </ItemGroup>

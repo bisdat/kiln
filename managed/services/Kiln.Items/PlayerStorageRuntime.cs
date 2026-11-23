@@ -195,6 +195,12 @@ internal static unsafe class PlayerStorageRuntime
         }
     }
 
+    /// <summary>The live registration of <paramref name="fullKey"/> that kiln.items.storage took; null when there is none.</summary>
+    internal static PlayerStorage? Find(string fullKey)
+    {
+        lock (Gate) return Registered.FirstOrDefault(s => s.FullKey == fullKey && s.Handle != 0 && s.Mod is not { Alive: false });
+    }
+
     private static StorageNative.Table* Require(string api)
     {
         Services.RequireTickThread(api);
@@ -356,12 +362,12 @@ internal static unsafe class PlayerStorageRuntime
 
     // ---- capability rows ----
 
-    /// <summary>Kiln.Items' rows for player storage (ItemsCapabilities' start): the client copy is not in this Kiln; without
-    /// the kiln.items.storage table the sigdb feature and the persist row are lowered.</summary>
+    /// <summary>Kiln.Items' rows for player storage (ItemsCapabilities' start): the client copy follows the kiln:storage
+    /// channel (PlayerStorageMirror); without the kiln.items.storage table the sigdb feature and the persist row are
+    /// lowered.</summary>
     internal static void ReportCapabilities()
     {
-        ServiceCaps.Report(PlayerStorage.Client.Capability, CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
-            "the kiln:storage mirror is not in this Kiln");
+        PlayerStorageMirror.ReportCapability();
         if (StorageNative.T != null) return;
         var (reason, text) = ServiceCaps.Cause(CapabilityReason.ServiceMissing, "kiln.items.storage is not loaded", StorageNative.Service);
         ServiceCaps.Lower(PlayerStorage.Capability, reason, text);
@@ -379,5 +385,7 @@ internal static unsafe class PlayerStorageRuntime
             _after = 0;
         }
         lock (ReturnGate) Returns.Clear();
+        PlayerStorageMirror.ResetForTests();
+        PlayerStorageAmmo.ResetForTests();
     }
 }

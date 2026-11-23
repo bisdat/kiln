@@ -459,7 +459,7 @@ public sealed class PlayerStorageTests
         Assert.Equal(ItemsStatus.Done, give.Result.Status);
     }
 
-    // ---- the client copy (not in this Kiln) ----
+    // ---- the client copy: off without kiln.net (the kit has none; PlayerStorageMirrorTests puts a loopback in its place) ----
 
     [Fact]
     public void TheClientCopyIsOffAndSaysSo()
