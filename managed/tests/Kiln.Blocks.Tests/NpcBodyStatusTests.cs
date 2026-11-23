@@ -114,6 +114,20 @@ public sealed class NpcBodyStatusTests
         Assert.Equal($"{Mod}:tobin2", NpcBodies.Status($"{Mod}:tobin").BlockKey);
     }
 
+    [Fact]
+    public void A_handle_of_a_renamed_block_finds_the_row_the_build_keyed_by_Was()
+    {
+        // a definition from code is written under its key (Was, or the name) and the native row then names that key
+        using var s = new Scope(Row("tobin", "ready"));
+        var npc = new NpcBlock { Name = "Tobin", Was = "tobin", Body = Bodies.Fisher };
+        var handle = new BlockHandle<NpcBlock>(Mod, "tobin-renamed", BlockIds.Derive(Mod, "npc", "tobin"), $"Kiln_{Mod}_tobin", npc);
+        Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status(handle).State);
+        // the same body defined from code under that key: the start built it, so it is not late
+        NpcBodies.StagedFromCode(Mod, "tobin-renamed", "tobin", Template, Model, Graph);
+        Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status($"{Mod}:tobin-renamed").State);
+        Assert.Empty(NpcBodyRows.Late);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("tobin")]
@@ -228,12 +242,12 @@ public sealed class NpcBodyStatusTests
     public void A_code_definition_after_the_boot_build_is_PendingRestart_and_a_handle_never_implies_Ready()
     {
         using var s = new Scope();
-        NpcBodies.StagedFromCode(Mod, "tobin", Template, Model, Graph);
+        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);
         var r = NpcBodies.Status($"{Mod}:tobin");
         Assert.Equal((false, "definition staged; restart required", NpcBodyBuildState.PendingRestart), (r.Ok, r.Reason, r.State));
         Assert.Equal((Template, Model, Graph), (r.Template, r.Model, r.Graph));
         Assert.Equal([$"{Mod}:tobin"], NpcBodyRows.Late);
-        NpcBodies.StagedFromCode(Mod, "tobin", Template, Model, Graph);  // the same definition again (a reload): no second event
+        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);  // the same definition again (a reload): no second event
         var e = Assert.Single(s.Events);
         Assert.Equal((NpcBodyBuildState.Failed, NpcBodyBuildState.PendingRestart), (e.Before.State, e.After.State));
         NpcBodies.FromData(Mod, "tobin");  // now from a data file: the boot build's record is the status
@@ -245,10 +259,10 @@ public sealed class NpcBodyStatusTests
     public void A_code_definition_the_boot_build_already_made_is_Ready_and_a_changed_one_waits()
     {
         using var s = new Scope(Row("tobin", "ready"));
-        NpcBodies.StagedFromCode(Mod, "tobin", Template, Model, Graph);
+        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Model, Graph);
         Assert.Equal(NpcBodyBuildState.Ready, NpcBodies.Status($"{Mod}:tobin").State);
         Assert.Empty(NpcBodyRows.Late);
-        NpcBodies.StagedFromCode(Mod, "tobin", Template, Guid.NewGuid(), Graph);
+        NpcBodies.StagedFromCode(Mod, "tobin", "tobin", Template, Guid.NewGuid(), Graph);
         Assert.Equal(NpcBodyBuildState.PendingRestart, NpcBodies.Status($"{Mod}:tobin").State);
         Assert.Equal([$"{Mod}:tobin"], NpcBodyRows.Late);
     }

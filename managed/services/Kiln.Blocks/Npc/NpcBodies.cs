@@ -54,7 +54,7 @@ public static class NpcBodies
         if (npc.Block is not { } block || npc.Mod.Length == 0 || npc.Name.Length == 0 || npc.Guid != BlockIds.Derive(npc.Mod, "npc", block.Was ?? npc.Name))
             throw new ArgumentException($"{npc} is not a handle of an NPC block", nameof(npc));
         RequireCapability();
-        return Current(npc.Mod, npc.Name);
+        return Current(npc.Mod, npc.Name, block.Was ?? npc.Name);
     }
 
     /// <summary>The status of the NPC block <paramref name="qualifiedBlockKey"/>, <c>mod:block</c>: also for a block whose definition
@@ -72,7 +72,7 @@ public static class NpcBodies
 
     // ---- inside ------------------------------------------------------------------------------------------------------------
 
-    private sealed record Staged(string Mod, string Name, Guid Template, Guid Model, Guid Graph);
+    private sealed record Staged(string Mod, string Name, string Key, Guid Template, Guid Model, Guid Graph);
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, Staged> Late = new(StringComparer.Ordinal);          // mod:block -> code definition
@@ -118,26 +118,28 @@ public static class NpcBodies
     private static Guid G(string s) => Guid.TryParse(s, out var g) ? g : Guid.Empty;
 
     /// <summary>The status now: the boot build's row with what this process did since (a late definition, an unload).</summary>
-    private static NpcBodyBuildResult Current(string mod, string name) => Compute(mod, name, NpcBodyRows.All);
+    private static NpcBodyBuildResult Current(string mod, string name, string? key = null) => Compute(mod, name, NpcBodyRows.All, key);
 
-    private static NpcBodyBuildResult Compute(string mod, string name, IReadOnlyList<NpcBodyRow> rows)
+    /// <summary><paramref name="key"/>: the block's key (its Was, else its name), what a definition from code is written under and so what
+    /// the build's row may name instead of the block.</summary>
+    private static NpcBodyBuildResult Compute(string mod, string name, IReadOnlyList<NpcBodyRow> rows, string? key = null)
     {
-        var row = rows.FirstOrDefault(r => r.Mod == mod && r.Npc == name) ?? rows.FirstOrDefault(r => r.Mod == mod && r.Key == name);
-        var key = $"{mod}:{name}";
+        var blockKey = $"{mod}:{name}";
         Staged? late;
         bool unloaded;
         lock (Gate)
         {
-            Late.TryGetValue(key, out late);
+            Late.TryGetValue(blockKey, out late);
             unloaded = Unloaded.Contains(mod);
         }
-        if (row != null) key = row.BlockKey;
+        key ??= late?.Key ?? name;
+        var row = rows.FirstOrDefault(r => r.Mod == mod && r.Npc == name) ?? rows.FirstOrDefault(r => r.Mod == mod && r.Key == key);
         var built = row == null ? null : new NpcBodyBuildResult(false, null, NpcBodyBuildState.Failed, row.Mod, row.BlockKey, G(row.Template), G(row.Model),
             G(row.Graph), row.Generation);
         // A definition from code after the boot build waits for the next start, unless the start built that very body (the file
         // written for an earlier start: the same model and graph).
         if (late != null && !(built != null && row!.State == NpcBodyRow.Ready && built.Model == late.Model && built.Graph == late.Graph))
-            return new(false, StagedReason, NpcBodyBuildState.PendingRestart, mod, key, late.Template, late.Model, late.Graph, built?.Generation ?? 0);
+            return new(false, StagedReason, NpcBodyBuildState.PendingRestart, mod, blockKey, late.Template, late.Model, late.Graph, built?.Generation ?? 0);
         if (built == null) return NoRecord(mod, name);
         return row!.State switch
         {
@@ -150,13 +152,14 @@ public static class NpcBodies
     }
 
     /// <summary>NpcCompiler: an NPC block with a body of its own was defined from code (after the boot build).</summary>
-    internal static void StagedFromCode(string mod, string name, Guid template, Guid model, Guid graph)
+    internal static void StagedFromCode(string mod, string name, string blockKey, Guid template, Guid model, Guid graph)
     {
         var key = $"{mod}:{name}";
+        var staged = new Staged(mod, name, blockKey, template, model, graph);
         lock (Gate)
         {
-            if (Late.TryGetValue(key, out var had) && had == new Staged(mod, name, template, model, graph)) return;
-            Late[key] = new Staged(mod, name, template, model, graph);
+            if (Late.TryGetValue(key, out var had) && had == staged) return;
+            Late[key] = staged;
             _version++;
         }
         NpcBodyRows.SetLate(key, Current(mod, name).State == NpcBodyBuildState.PendingRestart);
