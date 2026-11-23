@@ -171,6 +171,8 @@ of another mapping, and with an instance refuses to judge a tree whose regmap/co
 digest it was proven on (`"regmapDigest"`); kiln.content computes the deployed regmap/common's digest when it loads the
 regmap and enables no row of a record whose digest differs, or that has none ("Unproven: ... its record was proven for
 another Kiln mapping than the one installed"): an edit of regmap/common needs a new proof (and a new client mirror).
+`regmap_check.py` without `--exe` (tools/check.sh's registry step) fails when a committed verified record has no digest or
+not this tree's, so such an edit cannot pass the checks unproven.
 
 `registry-roundtrip`, one file per side and generation:
 ```jsonc
