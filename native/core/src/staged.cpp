@@ -340,6 +340,8 @@ struct Tx {
     json probation;  // update: written on commit
 };
 
+constexpr const char* kReceipt = "kiln/.install.json";
+
 struct FileEntry {
     std::string path, sha256;
     uint64_t size = 0;
@@ -401,8 +403,27 @@ void drop_staged(Ctx& c, const Unit& u) {
 }
 
 // ---- checks ----
-// Every folder that exists from the server folder down to `rel`'s parent is a real folder: no link or junction leads a
-// rename somewhere else.
+// Windows also reaches an existing file or folder by another name: its 8.3 short name (CRASH-~1 for crash-reports, where
+// the volume makes them, as on most system drives). The path rules look at names (kiln/crash-reports, a folder Kiln's
+// receipt lists), so an existing part of a path must be named by its own name; letter case does not count. True on
+// POSIX, where a name has no other spelling.
+bool own_name(const fs::path& p, std::string& real) {
+#ifdef _WIN32
+    WIN32_FIND_DATAW fd{};
+    const HANDLE h = FindFirstFileW(p.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return real = "(its name cannot be read)", false;
+    FindClose(h);
+    real = s8(fs::path(fd.cFileName));
+    return lower(real) == lower(s8(p.filename()));
+#else
+    (void)p;
+    (void)real;
+    return true;
+#endif
+}
+
+// Every folder that exists from the server folder down to `rel`'s parent is a real folder, named by its own name: no
+// link or junction leads a rename somewhere else, and no short name stands for a folder the rules keep out.
 bool ancestors_plain(const Ctx& c, const std::string& rel, std::string& why) {
     fs::path p = c.env.game;
     const fs::path parent = p8(rel).parent_path();
@@ -410,6 +431,9 @@ bool ancestors_plain(const Ctx& c, const std::string& rel, std::string& why) {
         p /= seg;
         if (!present(p)) return true;
         if (is_link(p) || !is_dir(p)) return why = s8(p8(rel).parent_path()) + " leads through a link or a file (" + s8(p) + ")", false;
+        std::string real;
+        if (!own_name(p, real))
+            return why = rel + ": " + s8(seg) + " is the folder " + real + " by another name (a Windows short name): use its own name", false;
     }
     return true;
 }
@@ -548,6 +572,8 @@ bool target_ok(const Ctx& c, const Unit& u, const std::string& target, std::stri
     if (!present(t)) return true;
     if (is_link(t)) return why = target + " is a link", false;
     if (u.kiln ? !is_file(t) : !is_dir(t)) return why = target + (u.kiln ? " is not a file" : " is not a folder"), false;
+    std::string real;
+    if (!own_name(t, real)) return why = target + " is " + real + " by another name (a Windows short name): use its own name", false;
     return true;
 }
 
@@ -606,7 +632,15 @@ bool plan_update(Ctx& c, const Unit& u, const Staged& s, Tx& tx, std::string& wh
 struct Kept {
     std::string version, replaced_by;
     std::vector<std::pair<std::string, bool>> entries;  // target, present before
+    bool has_receipt = false;  // Kiln: the change that kept it said which receipt it left in place
+    std::string receipt;       // its SHA-256, "" when there was none
 };
+
+// The SHA-256 of kiln/.install.json now, "" when there is none.
+std::string receipt_now(const Ctx& c) {
+    const fs::path r = c.abs(kReceipt);
+    return present(r) ? file_sha256(r) : std::string();
+}
 
 bool read_kept(Ctx& c, const Unit& u, const fs::path& file, Kept& k, std::string& why) {
     json doc;
@@ -614,6 +648,11 @@ bool read_kept(Ctx& c, const Unit& u, const fs::path& file, Kept& k, std::string
     if (!is_one(doc, "format") || str(doc, "unit") != u.key()) return why = "kept.json is not this unit's", false;
     k.version = str(doc, "version");
     k.replaced_by = str(doc, "replacedBy");
+    if (const auto r = doc.find("receipt"); u.kiln && r != doc.end()) {
+        if (!r->is_string()) return why = "kept.json: receipt is not text", false;
+        k.has_receipt = true;
+        k.receipt = r->get<std::string>();
+    }
     const auto e = doc.find("entries");
     if (e == doc.end() || !e->is_array() || e->empty() || e->size() > kMaxFiles) return why = "kept.json: no entries", false;
     std::set<std::string> seen;
@@ -634,6 +673,11 @@ bool plan_rollback(Ctx& c, const Unit& u, const std::string& op, Tx& tx, std::st
     if (!present(c.abs(prev) / "kept.json")) return why = "no earlier version is kept (" + prev + ")", false;
     Kept k;
     if (!read_kept(c, u, c.abs(prev) / "kept.json", k, why)) return false;
+    // The kept version holds only the files its change changed: put back over a Kiln that kilnctl or the launcher
+    // installed since (a new receipt), it would make a mix of two versions.
+    if (u.kiln && k.has_receipt && receipt_now(c) != k.receipt)
+        return why = "Kiln changed since this version was kept (kiln/.install.json is not the one the change to " + version_text(k.replaced_by) +
+                     " left; kilnctl or the launcher installed Kiln since): a rollback would mix two versions", false;
     tx.op = op;
     tx.version = k.version;
     tx.from = k.replaced_by;
@@ -784,8 +828,14 @@ Outcome execute(Ctx& c, const Unit& u, Tx& tx, std::string& why) {
     tx.phase = "applying";
     json entries = json::array();
     for (const auto& s : tx.steps) entries.push_back({{"path", s.target}, {"before", s.had ? "present" : "absent"}});
-    const json kept = {{"format", kFormat}, {"unit", u.key()},  {"version", tx.from}, {"replacedBy", tx.version},
-                       {"kept", tx.started}, {"reason", tx.op}, {"entries", entries}};
+    json kept = {{"format", kFormat}, {"unit", u.key()},  {"version", tx.from}, {"replacedBy", tx.version},
+                 {"kept", tx.started}, {"reason", tx.op}, {"entries", entries}};
+    if (u.kiln) {  // the receipt this change leaves in place: a later rollback checks Kiln is still that install
+        std::string after = receipt_now(c);
+        for (const auto& s : tx.steps)
+            if (lower(s.target) == kReceipt) after = s.source.empty() ? std::string() : file_sha256(c.abs(s.source));
+        kept["receipt"] = after;
+    }
     std::string err;
     if (!write_json(txd / "prev" / "kept.json", kept, err) || !write_json(txd / "journal.json", journal_of(u, tx), err)) {
         remove_tree(txd);

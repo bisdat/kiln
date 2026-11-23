@@ -356,7 +356,8 @@ start. Kiln also rolls back on its own, once:
 - a mod that fails to load right after its update;
 - a Kiln update whose first start doesn't reach the point where the mods load.
 
-`kiln.log` says what happened in lines that start with `staged:`. A start that stops before the mods load (a crash, or
+After you update Kiln with kilnctl or the launcher, the version a staged update kept can no longer be rolled back:
+the kept files and the new install would mix. `kiln.log` says what happened in lines that start with `staged:`. A start that stops before the mods load (a crash, or
 a stop within the first seconds) counts as a failed start after a Kiln update. Your mods' data (`kiln/data`) and
 settings (`kiln/config`) are never touched. Details: [staged-updates.md](staged-updates.md).
 

@@ -798,6 +798,121 @@ static void test_kiln_data_untouched() {
     fs::remove_all(g);
 }
 
+// kilnctl or the launcher changed Kiln after a staged change (a reinstall after a failed start, an update of their own):
+// the kept version holds only the files that change changed, so putting it back now would mix two versions. Neither the
+// automatic rollback nor a requested one does that; both are refused and say why, and nothing changes.
+static void test_kiln_rollback_after_an_outside_change() {
+    static const std::string kReceipt3 = R"({"format":1,"runtime":{"version":"0.2.0-dev.30.11"},"installer":"kilnctl","files":[]})";
+    const Tree outside = {{"dinput8.dll", "proxy 3"},          {"kiln/kiln-core.dll", "core 3"}, {"kiln/host/new.dll", "new 3"},
+                          {"kiln/services/b.dll", "b 1 edited"}, {"kiln/.install.json", kReceipt3}};
+    const fs::path g = fresh("kiln-outside-change");
+    setup_kiln(g);
+    Log log;
+    Summary s = boot(Kind::Kiln, g, &log);
+    CHECK_MSG(s.applied == 1 && kiln_view(g) == kiln_new(), log.all());
+    // the kept version says which receipt the change left in place
+    CHECK(read_json(staged(g) / "previous" / "kiln" / "kept.json").value("receipt", "") == sha(kReceipt2));
+    // the start crashed; the admin reinstalled Kiln with kilnctl before the next start
+    for (const auto& [rel, text] : outside) put(g / rel, text);
+    CHECK(kiln_view(g) == outside);
+    Log l2;
+    s = boot(Kind::Kiln, g, &l2);
+    CHECK_MSG(s.rolled_back == 0 && s.failed == 1, l2.all());
+    CHECK_MSG(kiln_view(g) == outside, "the automatic rollback mixed two versions: " + l2.all());
+    CHECK_MSG(l2.has("cannot be rolled back") && l2.has("Kiln changed since"), l2.all());
+    CHECK(!there(staged(g) / "probation" / "kiln.json"));  // once: never again for this update
+    CHECK(!results(g).empty() && results(g).back().value("op", "") == "auto-rollback" && !results(g).back().value("ok", true));
+    check_data(g, "outside change, automatic");
+    // a rollback asked for by hand: refused the same way
+    put(staged(g) / "rollback" / "kiln.json", "{}");
+    Log l3;
+    s = boot(Kind::Kiln, g, &l3);
+    CHECK_MSG(s.rolled_back == 0 && s.failed == 1 && l3.has("the requested rollback is refused") && l3.has("Kiln changed since"), l3.all());
+    CHECK_MSG(kiln_view(g) == outside, "the requested rollback mixed two versions: " + l3.all());
+    CHECK(!there(staged(g) / "rollback" / "kiln.json"));
+    // the kept version is still there for a later look; a receipt that is the change's own again allows the rollback
+    put(g / "kiln" / ".install.json", kReceipt2);
+    put(staged(g) / "rollback" / "kiln.json", "{}");
+    Log l4;
+    s = boot(Kind::Kiln, g, &l4);
+    CHECK_MSG(s.rolled_back == 1 && read(g / "kiln" / ".install.json") == kReceipt1, l4.all());
+    // a rollback's kept version names the receipt it put back
+    CHECK(read_json(staged(g) / "previous" / "kiln" / "kept.json").value("receipt", "x") == sha(kReceipt1));
+    fs::remove_all(g);
+
+    // a server pack install (no receipt): its first update writes one; the rollback removes it again, and back
+    const fs::path g2 = fresh("kiln-pack-rollback");
+    setup_kiln(g2);
+    fs::remove(g2 / "kiln" / ".install.json");
+    json doc = read_json(staged(g2) / "kiln" / "staged.json");
+    doc["base"]["receipt"] = nullptr;
+    put(staged(g2) / "kiln" / "staged.json", doc.dump());
+    Log l5;
+    s = boot(Kind::Kiln, g2, &l5);
+    CHECK_MSG(s.applied == 1 && read(g2 / "kiln" / ".install.json") == kReceipt2, l5.all());
+    CHECK(read_json(staged(g2) / "previous" / "kiln" / "kept.json").value("receipt", "x") == sha(kReceipt2));
+    put(staged(g2) / "rollback" / "kiln.json", "{}");
+    Log l6;
+    s = boot(Kind::Kiln, g2, &l6);
+    CHECK_MSG(s.rolled_back == 1 && !there(g2 / "kiln" / ".install.json") && read(g2 / "dinput8.dll") == "proxy 1", l6.all());
+    CHECK(read_json(staged(g2) / "previous" / "kiln" / "kept.json").value("receipt", "x").empty());
+    put(staged(g2) / "rollback" / "kiln.json", "{}");
+    Log l7;
+    s = boot(Kind::Kiln, g2, &l7);
+    CHECK_MSG(s.rolled_back == 1 && read(g2 / "kiln" / ".install.json") == kReceipt2 && read(g2 / "dinput8.dll") == "proxy 2", l7.all());
+    check_data(g2, "server pack rollback");
+    fs::remove_all(g2);
+}
+
+#ifdef _WIN32
+// The 8.3 short name of an existing folder (CRASH-~1 for crash-reports), or "" when the volume makes none.
+static std::string short_name_of(const fs::path& p) {
+    wchar_t buf[4096];
+    const DWORD n = GetShortPathNameW(p.c_str(), buf, 4096);
+    if (n == 0 || n >= 4096) return {};
+    const std::string s = fs::path(buf).filename().string();
+    return _stricmp(s.c_str(), p.filename().string().c_str()) == 0 ? std::string() : s;
+}
+// Windows reaches a folder by its 8.3 short name too: a rule checked on names (kiln/crash-reports, a folder Kiln's receipt
+// lists) must not be passed by that other name of the same folder.
+static void test_short_names() {
+    const fs::path g = fresh("short-names");
+    write_tree(g / "kiln" / "mods" / "kiln-admin-console", mod_files("kiln-admin", "1.0.0"));
+    const std::string alias = short_name_of(g / "kiln" / "mods" / "kiln-admin-console");
+    if (alias.empty()) {
+        std::printf("  short names: none on this volume, not checked\n");
+        fs::remove_all(g);
+        return;
+    }
+    std::printf("  short names: kiln-admin-console is also %s\n", alias.c_str());
+    // a mod unit named by the short name of another folder
+    stage_mod(g, alias, "kiln-admin", "2.0.0", mod_files("kiln-admin", "2.0.0"));
+    Log log;
+    Summary s = boot(Kind::Mods, g, &log);
+    CHECK_MSG(s.applied == 0 && s.failed == 1, log.all());
+    CHECK_MSG(mod_view(g, "kiln-admin-console") == mod_files("kiln-admin", "1.0.0"), "replaced through its short name: " + log.all());
+    CHECK_MSG(log.has("another name"), log.all());
+    // a Kiln update that writes into kiln/crash-reports through its short name
+    const fs::path g2 = fresh("short-names-kiln");
+    setup_kiln(g2);
+    put(g2 / "kiln" / "crash-reports" / "report.txt", "a report");
+    const std::string cr = short_name_of(g2 / "kiln" / "crash-reports");
+    CHECK(!cr.empty());
+    json doc = read_json(staged(g2) / "kiln" / "staged.json");
+    const std::string planted = "kiln/" + cr + "/planted.txt";
+    doc["files"].push_back({{"path", planted}, {"sha256", sha("planted")}, {"size", 7}});
+    put(staged(g2) / "kiln" / "files" / planted, "planted");
+    put(staged(g2) / "kiln" / "staged.json", doc.dump());
+    Log l2;
+    s = boot(Kind::Kiln, g2, &l2);
+    CHECK_MSG(s.applied == 0 && s.failed == 1 && l2.has("another name"), l2.all());
+    CHECK_MSG(!there(g2 / "kiln" / "crash-reports" / "planted.txt"), "written into kiln/crash-reports through " + cr + ": " + l2.all());
+    CHECK(kiln_view(g2).count("kiln/crash-reports/report.txt") == 1 && read(g2 / "dinput8.dll") == "proxy 1");
+    fs::remove_all(g);
+    fs::remove_all(g2);
+}
+#endif
+
 static void test_interrupted_three_times() {
     const fs::path g = fresh("thrice");
     write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
@@ -962,6 +1077,10 @@ int main(int argc, char** argv) {
 #endif
     test_kiln_update();
     test_kiln_data_untouched();
+    test_kiln_rollback_after_an_outside_change();
+#ifdef _WIN32
+    test_short_names();
+#endif
     test_interrupted_three_times();
     test_bad_journals();
     test_misc();

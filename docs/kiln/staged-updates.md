@@ -56,8 +56,13 @@ rollback touches it, and no plan, kept version or journal that names a path unde
   write `kiln/staged`, `kiln/data`, `kiln/config`, `kiln/logs`, `kiln/state`, `kiln/backups`, `kiln/control` or
   `kiln/crash-reports`. The comparison ignores letter case. The shared cases are in
   `schema/fixtures/staged/paths.json`, and the C# and the native tests both check them.
+- A part of a path that exists must be named by its own name. Windows also reaches a file or folder by its 8.3 short
+  name (`CRASH-~1` for `crash-reports`, `KILN-A~1` for `kiln-admin-console`, on volumes that make them, as most system
+  drives do), which would pass the rules above. Such a path is refused when the update is applied, and Kiln.Admin
+  refuses a mod folder named that way.
 - `kept.json`: `{format, unit, version (the kept one; "" = it was not installed), replacedBy, kept, reason
-  (update|rollback|auto-rollback), entries: [{path, before: "present"|"absent"}]}`.
+  (update|rollback|auto-rollback), entries: [{path, before: "present"|"absent"}], receipt (Kiln only: the SHA-256 of
+  the kiln/.install.json the change left in place, "" when it left none)}`.
 - `results/<id>.json`: `{format, id, unit, op (update|rollback|auto-rollback), ok, version, from, error?, note?,
   finished, by (proxy|core), kiln, pid}`.
 
@@ -93,6 +98,10 @@ in `kiln/data/<id>` and `kiln/config`, which this does not touch.
 ## Rollback, and the automatic one
 - `update_rollback` writes `rollback/<unit>.json`. The next start swaps the current version with the kept one, so the
   version it rolled away from becomes the kept one.
+- A Kiln rollback, requested or automatic, needs Kiln to be the install the change left: `kiln/.install.json` must
+  still be the receipt `kept.json` names. The kept version holds only the files its change changed, so put back over a
+  Kiln that kilnctl or the launcher installed since, it would make a mix of two versions. Such a rollback is refused
+  (Kiln.Admin refuses the request; the start logs why and drops the request or the probation).
 - **A mod**: kiln-core writes `probation/mod.<folder>.json` as `pending`. When the folder loads, Kiln.Host sets it to
   `loading` right before the mod's code runs. If the mod loaded, Kiln.Host removes the record. If it did not, Kiln.Host
   sets `failed` with the reason. Only the mod's own failure counts: `dependency X ... did not load` does not. The next
@@ -115,7 +124,11 @@ in `kiln/data/<id>` and `kiln/config`, which this does not touch.
   does: `kiln/dotnet`, `kiln/host`, `kiln/services` and `kiln/sigdb` end up exactly the new version's. It also writes
   `kiln/.install.json`. Its `dinput8.dll` must carry a Kiln proxy marker.
 - The proxy grew from about 130 KB to about 1.1 MB in 30.9 (std::filesystem, JSON and SHA-256 for this step).
+- The automatic rollback of a Kiln update runs in the new `dinput8.dll`. A new proxy that cannot start at all rolls
+  nothing back: copy `kiln/staged/previous/kiln/files/dinput8.dll` over `dinput8.dll` (copy, don't move), and the next
+  start rolls the rest back.
 
 Tests: `native/core/tests/test-staged.sh` (host, ASan+UBSan: every crash point of five scenarios in forked children,
 a second crash while putting back, refusals, rollbacks, `kiln/data` byte for byte), `test-staged-wine.sh` (the same
-on the Win32 code path under Wine), `managed/tests/Kiln.Host.Tests` `StagedProbationTests` and `StagingTests`.
+on the Win32 code path under Wine; the same binary runs natively on Windows, where 8.3 short names are checked
+against a real NTFS volume), `managed/tests/Kiln.Host.Tests` `StagedProbationTests` and `StagingTests`.
