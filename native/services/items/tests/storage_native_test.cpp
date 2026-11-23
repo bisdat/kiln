@@ -778,6 +778,52 @@ KilnResult KILN_CALL record_caps(KilnOwner, KilnStr name, uint32_t, uint32_t, Ki
     return KILN_OK;
 }
 // items.storage.client belongs to the managed kiln:storage mirror; the native service must not report it as well.
+KilnPlayersApi fake_players{};
+bool leaving_player_gone = false;
+KilnResult KILN_CALL leaving_player_get(KilnEntity entity, KilnPlayer* out) {
+    if (leaving_player_gone || entity != 1)
+        return KILN_ERR_NOT_FOUND;
+    out->state = KILN_PLAYER_LEAVING;
+    return KILN_OK;
+}
+// The leave timeout: a leaving player whose entity still exists keeps its holders past 250 steps (the game's leave save
+// can still capture it); once the entity is gone they go, and the slot is marked left.
+void leave_timeout_tests() {
+    using namespace kitems;
+    using namespace kitems::storage;
+    kitems::api = &fake_api;
+    kitems::world_api = nullptr;
+    kitems::model = Model{};
+    kitems::garbage.clear();
+    kitems::enabled = true;
+    kitems::baseline_authored = true;
+    fake_players.get = &leaving_player_get;
+    kitems::players_api = &fake_players;
+    uint32_t handle = 0;
+    KilnStorageDef d{};
+    d.size = sizeof d;
+    d.slots = 8;
+    d.key = {"mod:bag", 7};
+    d.filter.size = sizeof d.filter;
+    CHECK(kitems::model.register_def(10, d, &handle) == KILN_OK);
+    kitems::model.join(0, 55, {}, 1, 1);
+    kitems::model.applied(0, 1);
+    kitems::model.mark_built(0, "mod:bag", 4100, {4101});
+    components[{1, kHashInventorySetup}].assign(84, 0);
+    kitems::storage_pre(1000); // LEAVING: the leave starts here
+    CHECK(kitems::model.players.at(0).leaving && kitems::garbage.empty());
+    kitems::storage_pre(1300); // past 250 steps, the entity still exists: kept
+    CHECK(kitems::garbage.empty() && kitems::model.players.at(0).holders.count("mod:bag") &&
+          !(kitems::model.players.at(0).witness.flags & KIS_WITNESS_LEFT));
+    components.erase({1, kHashInventorySetup});
+    leaving_player_gone = true;
+    kitems::storage_pre(1302); // the entity is gone: torn down
+    CHECK(kitems::garbage.size() == 1 && kitems::model.players.at(0).holders.empty() &&
+          (kitems::model.players.at(0).witness.flags & KIS_WITNESS_LEFT));
+    kitems::garbage.clear();
+    kitems::players_api = nullptr;
+    leaving_player_gone = false;
+}
 void init_caps_test() {
     fake_caps.header = {sizeof fake_caps, 1};
     fake_caps.report = &record_caps;
@@ -966,6 +1012,7 @@ int main() {
     CHECK(!character_witness(reinterpret_cast<void*>(1), &hash));
     service_tests();
     review_tests();
+    leave_timeout_tests();
     init_caps_test(); // last: storage_init replaces the structural gate the tests above use
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
