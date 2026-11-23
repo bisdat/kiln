@@ -20,7 +20,9 @@ std::vector<std::pair<KilnOwner, std::string>> definitions;
 std::map<uint32_t, std::string> texts;
 std::map<KilnOwner, std::map<uint32_t, std::string>> before_texts;
 KilnOwner next_owner = 100;
-std::string refused_mod;
+std::string refused_mod, abort_failure;
+bool existing_template = false, missing_override = false;
+unsigned put_calls = 0;
 bool fail_legacy = false, broken_rollback = false;
 KilnOwner broken_owner = 0;
 const uint8_t base_npcs[] = {5, 0};
@@ -35,6 +37,11 @@ KilnOwner KILN_CALL create_owner(KilnStr label) {
 }
 KilnResult KILN_CALL layered_data(const KilnAssetKey* key, const void** data, size_t* size) {
     if (!t_service_up) return KILN_ERR_NOT_FOUND;
+    if (existing_template && key->type == kiln::qb::kTypeTemplate) {
+        static const uint8_t occupied[] = {7, 8};
+        *data = occupied; *size = sizeof occupied; return KILN_OK;
+    }
+    if (missing_override && key->type == kiln::qb::kTypeNpcs) return KILN_ERR_NOT_FOUND;
     for (auto it = layers.rbegin(); it != layers.rend(); ++it)
         if (key_equal(it->key, *key)) { *data = it->bytes.data(); *size = it->bytes.size(); return KILN_OK; }
     if (key->type == kiln::qb::kTypeKnowledge) { *data = t_res; *size = sizeof t_res; return KILN_OK; }
@@ -42,6 +49,7 @@ KilnResult KILN_CALL layered_data(const KilnAssetKey* key, const void** data, si
     return KILN_ERR_NOT_FOUND;
 }
 KilnResult KILN_CALL layered_put(KilnOwner owner, const KilnAssetKey* key, const void* data, size_t size, uint32_t) {
+    ++put_calls;
     const bool target = owners[owner] == "bootpack:" + refused_mod || (fail_legacy && owner == g_owner);
     if (target && ++puts[owner] == 2) return KILN_ERR_UNAVAILABLE;
     for (auto& layer : layers)
@@ -94,6 +102,8 @@ KilnResult KILN_CALL boot_content(uint32_t op, KilnOwner owner, uint32_t kind, c
         const auto value = kiln::qb::ojson::parse(std::string(json, len));
         texts[value["tag"].get<uint32_t>()] = value["texts"].dump();
     } else if (op == 5) {
+        if (owners[owner] == "bootpack:" + abort_failure)
+            return reply("injected content rollback invariant: text tag 42 changed", out, capacity, size, KILN_ERR_INTERNAL);
         forget(owner);
         texts = before_texts.at(owner);
         before_texts.erase(owner);
@@ -112,6 +122,7 @@ void reset(const char* name) {
     layers.clear(); puts.clear(); definitions.clear(); before_texts.clear(); reverted.clear();
     texts = {{42, "original text"}};
     refused_mod.clear(); fail_legacy = false; broken_rollback = false; broken_owner = 0;
+    abort_failure.clear(); existing_template = false; missing_override = false; put_calls = 0;
     kiln::qb::t_bootpack_test = true;
     t_assets_api.resource_data = &layered_data;
     t_assets_api.resource_put = &layered_put;
@@ -246,11 +257,14 @@ void test_early_abort() {
     boot_and_resource_init();
     CHECK(g_pack_applied.size() == 2);
     CHECK(!layers.empty());
+    std::vector<KilnOwner> expected_reverse;
+    for (auto it = g_pack_applied.rbegin(); it != g_pack_applied.rend(); ++it) expected_reverse.push_back(it->owner);
     auto* plan = new BootPlan;
     plan->built_early = true;
     destroy_boot(plan);
     CHECK(t_stops.empty());
     CHECK(layers.empty() && definitions.empty());
+    CHECK(reverted == expected_reverse);
     CHECK(knowledge() == std::vector<uint8_t>(t_res, t_res + sizeof t_res));
     CHECK(g_names.empty() && !g_built && g_pack_applied.empty());
     CHECK(std::none_of(reverted.begin(), reverted.end(), [](KilnOwner owner) { return owner == g_owner; }));
@@ -262,6 +276,35 @@ void test_early_abort() {
     destroy_boot(plan);
     CHECK(reverted.empty());
     CHECK(t_stops.empty());
+}
+void test_content_rollback_failure_is_named() {
+    reset("16f: content-side Abort failure stops startup with the mod, reason, notice and log");
+    mod("content-rollback-bad", kGood);
+    refused_mod = "content-rollback-bad";
+    abort_failure = refused_mod;
+    boot_and_resource_init();
+    CHECK(content_stop({"content-rollback-bad"}, "injected content rollback invariant"));
+    CHECK(logged("injected content rollback invariant: text tag 42 changed"));
+    if (t_stops.size() == 1) {
+        const auto notice = stop::box(t_stops[0].kind, t_stops[0].why, t_stops[0].mods);
+        CHECK(notice.find("content-rollback-bad") != std::string::npos);
+        CHECK(notice.find("text tag 42 changed") != std::string::npos);
+    }
+}
+void test_preflight_refuses_before_publication() {
+    for (bool new_conflict : {true, false}) {
+        reset(new_conflict ? "16f: a new key already present is refused before publication" :
+                             "16f: a missing override key is refused before publication");
+        mod("preflight", R"({"knowledge":{"met":{}},"template":"collision"})");
+        existing_template = new_conflict;
+        missing_override = !new_conflict;
+        boot_and_resource_init();
+        CHECK(t_stops.empty());
+        CHECK(put_calls == 0);
+        CHECK(layers.empty() && definitions.empty() && before_texts.empty());
+        CHECK(g_pack_applied.empty() && g_names.empty());
+        CHECK(logged(new_conflict ? "new key already exists" : "override key is missing"));
+    }
 }
 void check_plan_deleted(const void* plan) {
 #if defined(__SANITIZE_ADDRESS__)
@@ -335,6 +378,8 @@ int main(int argc, char** argv) {
     test_body_pack_exclusion();
     test_local_body_manifest_excludes_the_whole_pack();
     test_early_abort();
+    test_content_rollback_failure_is_named();
+    test_preflight_refuses_before_publication();
     test_partial_teardown_failure();
     test_disappeared_helper_teardown();
     std::error_code ec;
