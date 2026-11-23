@@ -340,7 +340,14 @@ public sealed class CameraTests
     {
         using var kiln = Started(out var mod);
         Assert.Equal(CameraCapability.Remote, kiln.Run(() => Camera.GetCapabilities(CameraEndpoint.Remote, Player)));
-        var vanilla = kiln.As(mod, () => Camera.Set(Player, Lens()));
+        // nobody of that id is connected: PeerUnavailable, as the bridge says (review S8 N7)
+        var absent = kiln.As(mod, () => Camera.Set(Player, Lens()));
+        kiln.Step();
+        Assert.Equal((false, CameraReason.PeerUnavailable), (absent.Result.Ok, absent.Result.ReasonCode));
+        // a connected player whose client has no Kiln: RequiresKilnClient
+        var guest = kiln.Players.Join("vanilla-guest");
+        kiln.Step();
+        var vanilla = kiln.As(mod, () => Camera.Set(guest.Entity, Lens()));
         kiln.Step();
         Assert.Equal((false, CameraReason.RequiresKilnClient), (vanilla.Result.Ok, vanilla.Result.ReasonCode));
         kiln.Camera.KilnClient(Player, (ulong)CameraCapability.LocalProfile);

@@ -17,7 +17,7 @@ internal static unsafe class CameraAbi
     public const uint EndReleased = 1, EndExpired = 2, EndWorldStopped = 5, EndSuperseded = 6, EndOwnerRetired = 8, EndCancelledBeforeApply = 13;
     public const uint StaleWorld = 12;
     public const uint Busy = 1, AlreadyOwned = 2, UnknownLease = 3, ForeignOwner = 4, WrongEndpoint = 5, InputPolicy = 6, LeaseKind = 23;
-    public const uint RequiresKilnClient = 7, ClientCapability = 25;
+    public const uint RequiresKilnClient = 7, PeerUnavailable = 8, ClientCapability = 25;
     public const ulong CapRemote = 1ul << 6, LocalParts = (1ul << 1) | (1ul << 2) | (1ul << 3) | (1ul << 4);
     public const uint FlagAlreadyEnded = 2;
     public const int Revoked = 6;
@@ -168,8 +168,8 @@ internal sealed unsafe class CameraFake : IKitFake
             "answers and Camera.Changed one step after the call; calls outside mod code (owner 0) are refused, and a mod that unloads has its applied leases end " +
             "OwnerRetired. There is no picture and no clock offline: a request counts as applied the step after it was made, and a lease ends only when the mod " +
             "ends it or the test says so (KilnHarness.Camera.Expire, End, StopWorld; RefuseNext scripts a refusal); blends do nothing. A server's visual request for a " +
-            "player's client (camera.remote) reaches only a player the test made a Kiln client (KilnHarness.Camera.KilnClient, with the local parts it offers): any " +
-            "other is refused RequiresKilnClient, a missing part ClientCapability; there is no wire, ACK or timeout. Not modelled (the row reads offline): the frame " +
+            "player's client (camera.remote) reaches only a player the test made a Kiln client (KilnHarness.Camera.KilnClient, with the local parts it offers): " +
+            "another joined player is refused RequiresKilnClient, a player nobody joined PeerUnavailable, a missing part ClientCapability; there is no wire, ACK or timeout. Not modelled (the row reads offline): the frame " +
             "snapshot (Camera.GetVisual)."));
 
     public static bool EndLease(CameraFakeState state, ulong lease, uint endReason)
@@ -260,11 +260,13 @@ internal sealed unsafe class CameraFake : IKitFake
 
     private static bool On(string row) => KitBackend.Instance.Capabilities.Is(row);
 
-    // A remote visual request: the player's client must run Kiln and offer every part (the bridge's answer). 0: it does.
-    private static uint Recipient(CameraFakeState state, CameraAbi.Request* req)
+    // A remote visual request: the player's client must run Kiln and offer every part (the bridge's answer). 0: it does. A
+    // Kiln client the test named is connected; any other player must be one the test joined, else nobody is there.
+    private static uint Recipient(KilnHarness harness, CameraFakeState state, CameraAbi.Request* req)
     {
         if (req->Endpoint != CameraAbi.Remote || (req->Parts & CameraAbi.PartMode) != 0) return 0;
-        if (!state.KilnClients.TryGetValue(req->Player, out var offered)) return CameraAbi.RequiresKilnClient;
+        if (!state.KilnClients.TryGetValue(req->Player, out var offered))
+            return harness.PlayersFake?.Present.Any(p => p.Entity.Value == req->Player) == true ? CameraAbi.RequiresKilnClient : CameraAbi.PeerUnavailable;
         ulong need = 0;
         if ((req->Parts & CameraAbi.PartPath) != 0) need |= 1ul << 1;
         if ((req->Parts & CameraAbi.PartLens) != 0) need |= 1ul << 2;
@@ -341,7 +343,7 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (holder is not null && holder.Owner == owner) refusal = CameraAbi.AlreadyOwned;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;  // one apply or update per endpoint at a time
                 else if (holder is not null && req->Priority <= holder.Priority) refusal = CameraAbi.Busy;
-                else if (Recipient(state, req) is var recipient and not 0) refusal = recipient;
+                else if (Recipient(harness!, state, req) is var recipient and not 0) refusal = recipient;
                 else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Apply, lease.Id, req->Endpoint, new EntityId(lease.Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));
@@ -401,7 +403,7 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (mode != (lease.Endpoint == CameraAbi.ServerMode)) refusal = CameraAbi.LeaseKind;
                 else if (req->InputPolicy == 2) refusal = CameraAbi.InputPolicy;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;
-                else if (Recipient(state, req) is var recipient and not 0) refusal = recipient;
+                else if (Recipient(harness!, state, req) is var recipient and not 0) refusal = recipient;
                 else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Update, id, req->Endpoint, new EntityId(req->Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));

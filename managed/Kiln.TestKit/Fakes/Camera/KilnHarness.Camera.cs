@@ -51,8 +51,9 @@ public readonly record struct FakeCameraCall(ulong Step, FakeCameraCallKind Kind
 /// step. What a test scripts: a lease that ends by itself (<see cref="End"/>, <see cref="Expire"/>), a stopping world
 /// (<see cref="StopWorld"/>), and refusals the game or the service would give (<see cref="RefuseNext"/>).</para>
 /// <para><b>Remote.</b> A server's visual request for a player's client (<c>camera.remote</c>) reaches only a player the
-/// test made a Kiln client (<see cref="KilnClient"/>, with the local parts its client offers): any other player is refused
-/// <c>RequiresKilnClient</c>, a part the client does not offer <c>ClientCapability</c>, and
+/// test made a Kiln client (<see cref="KilnClient"/>, with the local parts its client offers; such a player counts as
+/// connected): another player the test joined is refused <c>RequiresKilnClient</c>, a player nobody joined
+/// <c>PeerUnavailable</c>, a part the client does not offer <c>ClientCapability</c>, and
 /// <c>Camera.GetCapabilities(Remote, player)</c> answers what that client offered. There is no wire: no ACK, timeout or
 /// negotiation.</para>
 /// <para><b>Not modelled.</b> Any picture: a request is "applied" the step after it was made. Time (a lease ends only
