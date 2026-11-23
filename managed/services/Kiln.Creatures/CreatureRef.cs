@@ -19,6 +19,7 @@ public readonly unsafe struct CreatureRef
         _owner = owner;
     }
 
+    /// <summary>The creature's entity.</summary>
     public EntityId Entity { get; }
 
     /// <summary>The entity exists now.</summary>
@@ -315,15 +316,20 @@ public readonly unsafe struct CreatureRef
     /// <summary>The same creature, with changes owned by a named owner instead of the calling mod (data packs).</summary>
     internal CreatureRef As(Creatures.OwnerKey owner) => new(Entity, owner);
 
+    /// <summary>The creature and its entity, for a log line.</summary>
     public override string ToString() => $"creature {Entity}";
 
     // ---------------------------------------------------------------------------------------------- accessors ----
 
+    /// <summary>Damage susceptibility of one creature, per <see cref="DamageKind"/> (<see cref="Resistance"/>).</summary>
     public sealed class ResistanceAccess
     {
         private readonly CreatureRef _c;
         internal ResistanceAccess(CreatureRef c) => _c = c;
 
+        /// <summary>The creature's susceptibility to this kind of damage: 1 = normal damage taken, 0 = immune, 2 = double.
+        /// The setter is a layer of the calling mod, dropped with <see cref="Reset(DamageKind)"/>. Tick thread.</summary>
+        /// <param name="kind">The kind of damage.</param>
         [TickThreadOnly]
         [RequiresCapability("kiln.creatures")]
         public float this[DamageKind kind]
@@ -338,6 +344,7 @@ public readonly unsafe struct CreatureRef
         public void Reset(DamageKind kind) => _c.ResetField(CreaturesNative.Resist, (uint)kind);
     }
 
+    /// <summary>The random loot of one creature (<see cref="Loot"/>).</summary>
     public sealed class LootAccess
     {
         private readonly CreatureRef _c;
@@ -375,6 +382,7 @@ public readonly unsafe struct CreatureRef
         }
     }
 
+    /// <summary>The enemy AI feature switches of one creature (<see cref="Features"/>).</summary>
     public sealed class FeatureAccess
     {
         private readonly CreatureRef _c;
@@ -384,6 +392,8 @@ public readonly unsafe struct CreatureRef
         [TickThreadOnly]
         [RequiresCapability("kiln.creatures")]
         public EnemyFeatures Enabled => (EnemyFeatures)(uint)_c.GetRaw(CreaturesNative.FeaturesOn).Number;
+
+        /// <summary>The features switched off for this entity, against its template (see <see cref="Enabled"/>).</summary>
         [TickThreadOnly]
         [RequiresCapability("kiln.creatures")]
         public EnemyFeatures Disabled => (EnemyFeatures)(uint)_c.GetRaw(CreaturesNative.FeaturesOff).Number;
@@ -468,9 +478,11 @@ public readonly unsafe struct AiAccess
         Creatures.Changed(_e, $"Ai.{c}.{p}");
     }
 
+    /// <summary>Sets a numeric field (as <see cref="Set(string, string)"/> does, with the number written as text).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public void Set(string path, double value) => Set(path, value.ToString("R", CultureInfo.InvariantCulture));
+    /// <summary>Sets a boolean field (as <see cref="Set(string, string)"/> does, with "true" or "false").</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public void Set(string path, bool value) => Set(path, value ? "true" : "false");
@@ -480,6 +492,9 @@ public readonly unsafe struct AiAccess
     [RequiresCapability("kiln.creatures")]
     public string Get(string path) => Get(path, out _);
 
+    /// <summary>The field as this entity reads it now, and whether it comes from this entity's private copy.</summary>
+    /// <param name="path">The field path (see <see cref="AiAccess"/>).</param>
+    /// <param name="isPrivate">True when the entity reads its own copy of the component, false for the shared template data.</param>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public string Get(string path, out bool isPrivate)
@@ -498,6 +513,8 @@ public readonly unsafe struct AiAccess
         return System.Text.Encoding.UTF8.GetString(buf, (int)len);
     }
 
+    /// <summary>The field as a number: <see cref="Get(string)"/> parsed with the invariant culture. Throws
+    /// <see cref="FormatException"/> when the field is not a number.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public double GetNumber(string path) => double.Parse(Get(path), CultureInfo.InvariantCulture);
