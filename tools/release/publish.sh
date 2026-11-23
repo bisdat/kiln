@@ -154,7 +154,12 @@ latest_api() {
   why=$(python3 -I "$repo_dir/tools/docs-site/latest.py" newer "$name" "$current") || rc=$?
   if ((rc == 1)); then echo "$why: /kiln/api/ stays"; return 0; fi
   ((rc == 0)) || { echo "WARNING: /kiln/api/ not moved: latest.py failed ($rc)" >&2; return 0; }
-  r ssh "$host" "ln -sfn downloads/$name/sdk/api $remote/.api.new && mv -T $remote/.api.new $remote/api"
+  # a failed swap (say $remote/api is a real folder, which mv -T will not replace) is a warning: the release is out by now,
+  # and set -e must not stop publish.sh before GitHub and the roadmap
+  if ! r ssh "$host" "ln -sfn downloads/$name/sdk/api $remote/.api.new && mv -T $remote/.api.new $remote/api"; then
+    echo "WARNING: /kiln/api/ not moved: the link swap on $host failed (above; is $remote/api a folder, not a link?). The release itself is published; once fixed: ssh $host 'ln -sfn downloads/$name/sdk/api $remote/.api.new && mv -T $remote/.api.new $remote/api'" >&2
+    return 0
+  fi
   ((dry)) && return 0
   if curl -fsSI "https://frostdev.io/kiln/api/index.html" >/dev/null; then echo "https://frostdev.io/kiln/api/ is $name"
   else echo "WARNING: $host:$remote/api now names $name, but https://frostdev.io/kiln/api/ is not served: add the nginx location /kiln/api/ (alias $remote/api/)" >&2; fi

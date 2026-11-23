@@ -1255,7 +1255,8 @@ def main(argv=None):
         if bad:
             print("api-index: the committed index is stale (%s):" % out)
             print("\n".join("  " + l for l in bad[:60]))
-            print("api-index: regenerate and commit it: python3 -I tools/docs-site/api_index.py --xml %s" % xml_dir)
+            print("api-index: regenerate and commit it: python3 -I tools/docs-site/api_index.py --xml %s, then git add -A -- %s "
+                  "(new and removed parts too) and commit" % (xml_dir, INDEX_DIR))
             return 1
         print("api-index: %d files, %s, current" % (len(files), total))
         return 0
