@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # tools/check.sh: the check a worker runs before committing managed code. No labs, no native build, no Rust, no pack.
 #   [KILN_OUT=<build dir>] [KILN_API_BASELINE=<last release Kiln.Api, folder or .nupkg>] [KILN_CHECK_JOBS=<n>] \
-#     tools/check.sh [--no-baseline] [-v]
+#     tools/check.sh [--no-baseline] [--no-docfx] [-v]
 # Stages, each with one result line and its wall time:
 #   record  the API record before anything builds (tools/release/api-gate.sh record --worktree): every *REMOVED* line
 #           of a PublicAPI.Unshipped.txt beside its [KILNX...] line (made experimental) or its "(forwarded, contained
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
 #           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
+#   drift   tools/docs-site/drift.py: the skill and docs/kiln against the code, no build needed (a second or two): every
+#           `Type.Member` they name is public API (inherited and C# 14 extension members count; tools/docs-site/drift-allow.txt
+#           lists the false positives, a reason each), no "since 0.2.0-dev.N" claim is earlier than managed/api-history.tsv's
+#           first release of the name, the skill's pinned build and mod API are the current ones (Kiln.Mods.ApiVersion) and
+#           versions.md has a row for each mod API, and every page docs-map.md names exists. A finding fails the stage
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -20,12 +25,18 @@
 #           managed/api-history.tsv, in memory (a couple of seconds, no build of its own), and fails when the committed copy
 #           differs. A changed API line, doc comment or ledger row makes the copy stale: the failure names the command that
 #           regenerates it from this same build
+#   docs    the doc gate, on the XML docs this build just wrote: tools/docs-site/record_params.py (a positional record has a
+#           documented property for each parameter: the compiler's CS1591 never asks) and tools/docs-site/build.sh --gate-only
+#           (docfx metadata over the build's DLLs and XML, then undocumented.py strict against undocumented-baseline.txt, which
+#           names nothing: a public type or member with no summary fails). About a minute; the docfx tool is installed into
+#           $KILN_OUT/tools on first use (NuGet), --no-docfx leaves that half out and says so on the last line
 #   compat  gate 2: tools/release/apicompat.sh against KILN_API_BASELINE (-v lists every addition)
 # On a failure the stage prints the failing diagnostics (record lines, compiler errors, failed tests, BREAK lines), not
 # the whole log; the full logs are in $KILN_OUT/check/*.log. A failed record stage does not stop the build stages.
 # The last line is one of:
 #   check: PASSED in <s>s                                   exit 0
 #   check: PASSED in <s>s without the API compat gate (--no-baseline)   exit 0
+#   check: PASSED in <s>s without the docfx doc gate (--no-docfx)       exit 0 (with --no-baseline: both are named)
 #   check: FAILED (<stages>) in <s>s                        exit 1
 #   check: INCOMPLETE in <s>s: the API compat gate did not run (KILN_API_BASELINE unset); ...   exit 3
 # Exit codes: 0 passed, 1 a stage failed, 2 bad usage or a broken environment, 3 incomplete (no baseline and no
@@ -38,10 +49,11 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 out=${KILN_OUT:-$repo/native/build}
 export KILN_OUT=$out
 jobs=${KILN_CHECK_JOBS:-4}
-no_baseline=0 verbose=()
+no_baseline=0 no_docfx=0 verbose=()
 for a in "$@"; do
   case $a in
     --no-baseline) no_baseline=1 ;;
+    --no-docfx) no_docfx=1 ;;
     -v|--verbose) verbose=(-v) ;;
     -h|--help) sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "check: unknown argument $a (see --help)" >&2; exit 2 ;;
@@ -99,6 +111,20 @@ else
   grep -vE '^ +(server|client) [0-9a-f]+… .*superseded' "$work/records.log" | head -40
   failed+=(records)
 fi
+
+# drift
+t=$SECONDS
+python3 -I "$repo/tools/docs-site/drift.py" >"$work/drift.log" 2>&1
+rc=$?
+case $rc in
+  0) result drift OK $((SECONDS - t)) "names, versions, facts and map: no drift$(grep -q 'no wiki folder' "$work/drift.log" && echo " (wiki page names not checked: no frostdev.io wiki folder)")" ;;
+  1) result drift FAILED $((SECONDS - t)) "the docs or the skill differ from the code (tools/docs-site/drift.py, allow-list drift-allow.txt):"
+     grep -vE '^drift: [a-z]+ +OK' "$work/drift.log" | head -60
+     failed+=(drift) ;;
+  *) result drift FAILED $((SECONDS - t)) "drift.py could not run (exit $rc):"
+     tail -20 "$work/drift.log"
+     failed+=(drift) ;;
+esac
 
 # build
 t=$SECONDS
@@ -165,6 +191,45 @@ if ((built)); then
        tail -20 "$work/index.log"
        failed+=(index) ;;
   esac
+
+  # docs
+  t=$SECONDS docstage=$work/docstage bad=0 docfx_note=""
+  python3 -I "$repo/tools/docs-site/record_params.py" --xml "$out/dotnet/bin" >"$work/docs-records.log" 2>&1
+  rc=$?
+  if ((rc != 0)); then
+    bad=1
+    result docs FAILED $((SECONDS - t)) "$( ((rc == 1)) && echo "a positional record has an undocumented property:" || echo "record_params.py could not run (exit $rc):")"
+    head -30 "$work/docs-records.log"
+  fi
+  if ((no_docfx)); then
+    docfx_note="docfx gate skipped (--no-docfx)"
+  else
+    # the build's DLLs with their XML docs; a project that writes no XML (Kiln.Example) cannot be judged and is left out, as
+    # is Kiln.Host (it only lets docfx resolve Kiln.TestKit's references)
+    rm -rf "$docstage" && mkdir -p "$docstage"
+    noxml=()
+    for p in "${gated[@]}"; do
+      n=$(basename "$p" .csproj) d=$out/dotnet/bin/$n/release
+      if [[ -f $d/$n.dll && -f $d/$n.xml ]]; then cp "$d/$n.dll" "$d/$n.xml" "$docstage/"; else noxml+=("$n"); fi
+    done
+    [[ -f $out/dotnet/bin/Kiln.Host/release/Kiln.Host.dll ]] && cp "$out/dotnet/bin/Kiln.Host/release/Kiln.Host.dll" "$docstage/"
+    KILN_DOCS_STAGE=$docstage KILN_DOCS_STRICT=1 "$repo/tools/docs-site/build.sh" --gate-only >"$work/docs-gate.log" 2>&1
+    rc=$?
+    if ((rc == 0)); then
+      docfx_note="no undocumented public name ($(find "$docstage" -name 'Kiln.*.xml' | wc -l) assemblies${noxml[*]:+; no XML docs for ${noxml[*]}})"
+    else
+      bad=1
+      if grep -q '^undocumented: ' "$work/docs-gate.log"; then
+        result docs FAILED $((SECONDS - t)) "public types or members with no XML summary (write the doc comment; undocumented-baseline.txt stays empty):"
+        sed -n '/^undocumented: /,/^KILN_DOCS_STRICT/p' "$work/docs-gate.log" | head -60
+      else
+        result docs FAILED $((SECONDS - t)) "the docfx gate could not run (exit $rc; offline? --no-docfx skips it):"
+        tail -15 "$work/docs-gate.log"
+      fi
+    fi
+  fi
+  if ((bad)); then failed+=(docs)
+  else result docs OK $((SECONDS - t)) "$(sed 's/^record-params: //' "$work/docs-records.log"); $docfx_note"; fi
 fi
 
 # compat
@@ -187,8 +252,12 @@ fi
 el=$((SECONDS - t0))
 if ((${#failed[@]})); then echo "check: FAILED (${failed[*]}) in ${el}s"; exit 1; fi
 if [[ $compat == skipped ]]; then
-  if ((no_baseline)); then echo "check: PASSED in ${el}s without the API compat gate (--no-baseline)"; exit 0; fi
+  if ((no_baseline)); then
+    echo "check: PASSED in ${el}s without the API compat gate (--no-baseline)$( ((no_docfx)) && echo " and without the docfx doc gate (--no-docfx)")"
+    exit 0
+  fi
   echo "check: INCOMPLETE in ${el}s: the API compat gate did not run (KILN_API_BASELINE unset); set it, or pass --no-baseline"
   exit 3
 fi
+if ((no_docfx)); then echo "check: PASSED in ${el}s without the docfx doc gate (--no-docfx)"; exit 0; fi
 echo "check: PASSED in ${el}s"

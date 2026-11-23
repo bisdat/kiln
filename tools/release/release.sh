@@ -1069,7 +1069,9 @@ Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
   tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
                                             then the roadmap: $version as released on frostdev.io/kiln/roadmap
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+  python3 -I tools/docs-site/status-tables.py --server <game>/kiln/state/capabilities.json --checks <game>/kiln/state/client-checks.json \\
+      -o docs/kiln/status.generated.md      the status page, from the state files of this release's lab run (a build boots no game)"
 fi
 step "done"
 du -sh "$out" | tee -a "$log"
