@@ -1828,8 +1828,6 @@ void storage_init() {
     if (!post_point)
         off(KILN_CAP_REASON_SERVICE_MISSING, "items.storage: no server Post/no-jobs point");
     api->register_service(items_owner(), str(KILN_ITEMS_STORAGE_SERVICE), &table);
-    report("items.storage.client", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING,
-           "kiln:storage mirror is not installed");
     report("items.storage.persistence_health", KILN_CAP_PENDING, KILN_CAP_REASON_SESSION, "waiting for a storage save");
 }
 namespace {
