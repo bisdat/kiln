@@ -259,12 +259,20 @@ internal static class NpcCompiler
         if (a.Chance is < 0 or > 1) throw new BlockError(ctx.Block, Join(path, "chance"), $"{a.Chance} is outside 0..1");
         // NaN fails every comparison: written this way it is refused, not taken for a full circle
         if (!(a.Angle > 0 && a.Angle <= 360)) throw new BlockError(ctx.Block, Join(path, "angle"), $"{a.Angle} must be more than 0 and at most 360 degrees");
-        if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds");
-        if (a.HitAt < 0) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be at least 0 seconds");
-        if (a.Length is { } len && a.HitAt >= len) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be less than the attack's length {len} seconds");
-        if (a.Sequence != null)
+        if (a.Sequence == null)
+        {
+            if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds");
+            if (a.HitAt < 0) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be at least 0 seconds");
+            if (a.Length is { } len && a.HitAt >= len) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be less than the attack's length {len} seconds");
+        }
+        else
         {
             if (a.Plays != null || a.OnHit != null || a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "sequence"), "a game sequence plays as it is: no plays, onHit or delivery with it");
+            // 0.2.0-dev.30.6 returned here before checking them: a game sequence plays as it is and uses neither
+            const string unused = "; a game sequence plays as it is, so it is ignored";
+            if (a.Length is <= 0 or > 30) ctx.Tolerate(Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds{unused}");
+            if (a.HitAt < 0) ctx.Tolerate(Join(path, "hitAt"), $"{a.HitAt} must be at least 0 seconds{unused}");
+            else if (a.Length is { } slen && a.HitAt >= slen) ctx.Tolerate(Join(path, "hitAt"), $"{a.HitAt} must be less than the attack's length {slen} seconds{unused}");
             return;
         }
         if (a.Plays == null) throw new BlockError(ctx.Block, Join(path, "plays"), "the state the attack plays: one of the animation's");
