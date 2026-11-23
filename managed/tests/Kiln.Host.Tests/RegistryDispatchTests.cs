@@ -165,6 +165,60 @@ public sealed class RegistryDispatchTests : ModsFixture
         }
         finally { WorldConfigs.Reset(); }
     }
+    private sealed class WorldInput { public int Count { get; set; } = 3; }
+    [Fact]
+    public void IdlessWorldsDispatchBeforeAdoptionAndRebindWithoutStackingTheirOwnLayers()
+    {
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            var owner = Owner(native, "new-world");
+            var worlds = new List<RegistryWorld>(); var unbound = 0; var bound = 0;
+            void Invoke(RegistryContext context)
+            {
+                if (context.EntryPoint == RegistryEntryPoint.ModLoad)
+                {
+                    if (context.Phase == RegistryPhase.Alter) Edit(context, 20);
+                    return;
+                }
+                if (context.Phase == RegistryPhase.Add) worlds.Add(context.World!.Value);
+                if (context.Phase != RegistryPhase.Alter) return;
+                if (context.World!.Value.Id is null)
+                {
+                    Assert.Equal(RegistryContextError.WorldSettingsUnavailable,
+                        Assert.Throws<RegistryContextException>(() => Config.RegisterWorld<WorldInput>()).Code);
+                    ++unbound; Edit(context, 50);
+                }
+                else
+                {
+                    Assert.Equal(3, Config.RegisterWorld<WorldInput>().Value.Count);
+                    ++bound; Edit(context, 60);
+                }
+            }
+            dispatch.Loaded(new WorldAuthor(Invoke), owner, Root, false);
+            dispatch.FlushLoads();
+            Assert.Equal(new[] { new RegistryWorld(1, WorldKind.Server, null) }, worlds);
+            Assert.Equal(1, unbound); Assert.Equal(50, native.Value); Assert.Equal(2, native.LayerCount);
+            WorldConfigs.Announce(Path.Combine(DataDir, "world-a")); dispatch.FlushLoads();
+            Assert.Equal(new RegistryWorld(1, WorldKind.Server, "world-a"), worlds.Last());
+            Assert.Equal(1, bound); Assert.Equal(60, native.Value); Assert.Equal(2, native.LayerCount);
+            // Native readiness can precede the save signal: the new token must not inherit the previous world's inputs.
+            native.ChangeWorld(2); dispatch.FlushLoads();
+            Assert.Equal(new RegistryWorld(2, WorldKind.Server, null), worlds.Last());
+            Assert.Equal(2, unbound); Assert.Equal(50, native.Value); Assert.Equal(2, native.LayerCount);
+            WorldConfigs.Announce(Path.Combine(DataDir, "world-b")); dispatch.FlushLoads();
+            Assert.Equal(new RegistryWorld(2, WorldKind.Server, "world-b"), worlds.Last());
+            Assert.Equal(2, bound); Assert.Equal(60, native.Value); Assert.Equal(2, native.LayerCount);
+            owner.Retire(); Assert.Equal(10, native.Value);
+            var replacement = Owner(native, "new-world");
+            dispatch.Loaded(new WorldAuthor(Invoke), replacement, Root, true); dispatch.FlushLoads();
+            Assert.Equal(5, worlds.Count); Assert.Equal(3, bound); Assert.Equal(2, native.LayerCount);
+            replacement.Retire();
+        }
+        finally { WorldConfigs.Reset(); }
+    }
     [Fact]
     public void AContextConstructionFailureDoesNotStarveOtherPendingAuthors()
     {

@@ -13,7 +13,7 @@ public enum RegistryEntryPoint
     GameStart = 1,
     /// <summary>After the runtime instance loads, once the registry's base exists. Global inputs only.</summary>
     ModLoad = 2,
-    /// <summary>Each new world, after its settings are bound.</summary>
+    /// <summary>Each new world, including an id-less one. Settings stay unavailable until adoption reauthors the point with a bound id.</summary>
     WorldLoad = 4,
     /// <summary>After the old runtime instance retires and its replacement loads.</summary>
     HotReload = 8,

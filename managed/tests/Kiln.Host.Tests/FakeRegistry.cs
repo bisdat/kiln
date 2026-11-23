@@ -21,7 +21,13 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
     private readonly Dictionary<ulong, (ulong Owner, uint Point, int? Value, bool Restart)> _drafts = [];
-    private readonly Dictionary<ulong, (ulong Owner, int Value)> _layers = [];
+    private readonly Dictionary<ulong, (ulong Owner, int Value, ulong World)> _layers = [];
+    internal int LayerCount => _layers.Count;
+    internal void ChangeWorld(ulong world)
+    {
+        World = world;
+        foreach (var handle in _layers.Where(x => x.Value.World != 0).Select(x => x.Key).ToArray()) _layers.Remove(handle);
+    }
     private readonly Dictionary<ulong, (nint Fn, nint User, bool Ready)> _callbacks = [];
     internal int Subscriptions => _callbacks.Count;
     internal readonly List<uint> Points = [];
@@ -60,7 +66,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int StageStatus(RegistryStageStatus* value) { if (Current.StageError != 0) return Current.StageError; value->Phase = Current.Phase; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int Status(RegistryLiveStatus* value) { if (Current.StatusFailures > 0) { --Current.StatusFailures; return KilnAbi.ErrUnavailable; } value->World = Current.World; value->Kind = 1; value->Generation = Current.Generation; return 0; }
+    private static int Status(RegistryLiveStatus* value) { if (Current.StatusFailures > 0) { --Current.StatusFailures; return KilnAbi.ErrUnavailable; } value->World = Current.World; value->Kind = (uint)WorldKind.Server; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ReadStage(uint view, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length) => Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -102,7 +108,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
         var draft = Current._drafts[handle]; Current._drafts.Remove(handle);
         result->Outcome = draft.Restart ? 3u : 0u; result->Refused = draft.Restart ? 1u : 0u;
         result->Accepted = draft.Restart ? 0u : 1u; result->World = Current.World;
-        if (!draft.Restart) Current._layers.Add(handle, (owner, draft.Value!.Value));
+        if (!draft.Restart) Current._layers.Add(handle, (owner, draft.Value!.Value, draft.Point == 1 ? 0 : Current.World));
         result->Generation = ++Current.Generation;
         return 0;
     }

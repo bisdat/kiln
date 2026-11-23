@@ -38,6 +38,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         internal readonly bool Reload = reload;
         internal bool Pending = true, Faulted;
         internal ulong World;
+        internal string? WorldId;
+        internal readonly HashSet<ulong> WorldChanges = [];
     }
     internal void Prepare(ulong hostOwner)
     {
@@ -195,10 +197,25 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         _dispatchingWorld = true;
         try
         {
-            var world = World(bound: false);
-            if (!_worldBinding.Bind(world) || world is null) return;
-            var records = _runtime.Where(r => !r.Pending && r.Context.Alive && r.World != world.Value.Token && (r.Points & RegistryEntryPoint.WorldLoad) != 0).ToArray();
-            foreach (var record in records) record.World = world.Value.Token; // our own ready notifications cannot recurse
+            var candidate = World(bound: false);
+            if (candidate is null) return;
+            var bound = _worldBinding.Bind(candidate);
+            var world = bound ? candidate.Value : candidate.Value with { Id = null };
+            var records = _runtime.Where(r => !r.Pending && r.Context.Alive && (r.Points & RegistryEntryPoint.WorldLoad) != 0 &&
+                (r.World != world.Token || (bound && r.WorldId is null && world.Id is not null))).ToArray();
+            foreach (var record in records)
+            {
+                // Adoption reauthors this point with its settings, rather than stacking it on the id-less turn.
+                foreach (var handle in record.WorldChanges.ToArray())
+                    try
+                    {
+                        var result = _native.Revert(record.Context.Owner, handle);
+                        if (result.Outcome is 6 or 7) Applied(record.Context, result);
+                        ForgetChange(record.Context, handle); record.WorldChanges.Remove(handle);
+                    }
+                    catch (Exception e) { Log(record.Context.Info.Id + " previous world point cleanup", e); }
+                record.World = world.Token; record.WorldId = world.Id; // our own notifications cannot recurse
+            }
             Apply(records, RegistryEntryPoint.WorldLoad, static _ => true);
         }
         finally { _dispatchingWorld = false; }
@@ -213,7 +230,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         void Remember(Runtime record, RegistryCompletion result)
         {
             Applied(record.Context, result);
-            if (Retained(result)) committed[record].Add(result.Handle);
+            if (Retained(result))
+            {
+                committed[record].Add(result.Handle);
+                if (point == RegistryEntryPoint.WorldLoad) record.WorldChanges.Add(result.Handle);
+            }
         }
         void Fault(Runtime record, Exception error)
         {
@@ -222,11 +243,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 try
                 {
                     Applied(record.Context, _native.Revert(record.Context.Owner, handle));
-                    if (_changes.TryGetValue(record.Context.Owner, out var handles))
-                    {
-                        handles.Remove(handle);
-                        if (handles.Count == 0) _changes.Remove(record.Context.Owner);
-                    }
+                    ForgetChange(record.Context, handle); record.WorldChanges.Remove(handle);
                 }
                 catch (Exception e) { Log(record.Context.Info.Id + " point rollback (owner cleanup will retry)", e); }
             committed[record].Clear();
@@ -298,6 +315,12 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), "resolved", false, new(), readOnly: true);
         using var scope = context.Enter();
         try { action(context); } finally { context.Close(); }
+    }
+    private void ForgetChange(ModContext owner, ulong handle)
+    {
+        if (!_changes.TryGetValue(owner.Owner, out var handles)) return;
+        handles.Remove(handle);
+        if (handles.Count == 0) _changes.Remove(owner.Owner);
     }
     private void RemoveChanges(ModContext owner)
     {
