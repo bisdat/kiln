@@ -145,6 +145,8 @@ source.Dispose();                                        // any thread; unload r
   outputs through `Stations.SetOutputSource`). At 4096 links `InvalidOperationException`.
 - **Access is your policy plus the game's:** you choose which container to link, even one in another player's base; at each
   payment the server checks the link belongs to this player, that the player has the game's inventory access right and a
-  login that matches. A client's count is only UI help. Kiln clients show linked stock on every crafting screen.
+  login that matches. A client's count is only UI help. Kiln clients show linked stock in every crafting menu (craft count
+  and, 30.8+, ingredient rows); a production station's screen leaves it out, since fills and its transfer buttons never take
+  from links. 30.8+: linked dyes sort with the player's own in the tinting palette.
 - Links last for the session only: save them in your own data and add them again, and dispose them when a player leaves.
   Capabilities `crafting.sources`, `crafting.source_ui`, `crafting.dye_sources`. Not seen in a real game yet.

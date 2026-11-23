@@ -275,7 +275,9 @@ registration order. Every container counts once **per item**, even if multiple r
 in the base's own stock. A linked container offers every item the filter allows. Production stations are refused:
 `PayMaterial` cannot separate their queued inputs from their finished outputs. Production stations lend their outputs
 through `Stations.SetOutputSource`, under its existing per-item safety rules. This does not change `Stations.Fill` or
-its fill buttons.
+its fill buttons: a production station's fill, its "+1" / "+10" and the transfer buttons of its ingredient rows take from the
+bag, the base's Magic chests and opted-in station outputs, never from linked containers. Since 0.2.0-dev.30.8 its screen
+counts only what those can take (see below).
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -301,11 +303,20 @@ recipe transaction**. Any fault or remainder returns the game's failure so `Craf
 two-transaction transfer into the bag is used. The existing duplicate-cost-line and 4096-base-stock-list limits below
 still apply.
 
-A **Kiln client** counts the filtered linked stock through `kiln:craftstock` on every `ScreenKind.Crafting` screen:
-station, NPC and inventory crafting, including outside a base. The snapshot includes the bag and any permitted current
-base stock; it de-duplicates linked containers against that stock and opted-in station outputs. It is only UI help:
-the server recounts at payment. A vanilla client keeps the game's menu counts. A missing input snapshot is never
-truncated: over 1024 rows the menu keeps the game's counts.
+A **Kiln client** counts the filtered linked stock through `kiln:craftstock` in every crafting menu: a crafting
+station's (the workbench, the decoration table...), an NPC's and the inventory's, including outside a base. The menu's
+craft count and, since 0.2.0-dev.30.8, its ingredient rows (each ingredient's "available" count and the counts of a
+category ingredient's options) include it; before, the ingredient rows of every crafting menu showed only the bag and the
+base (GitHub #132). The snapshot includes the bag and any permitted current base stock; it de-duplicates linked containers
+against that stock and opted-in station outputs. It is only UI help: the server recounts at payment. A vanilla client
+keeps the game's menu counts. A missing input snapshot is never truncated: over 1024 rows the menu keeps the game's counts.
+
+A **production station's screen** (a mill, a kiln, a smelter: `GameScreen.Crafting.IsFactory`) counts only what its fill
+and its transfer buttons can take: the bag, the base's Magic chests and opted-in station outputs. The server's snapshot
+names, per item, the part only linked containers hold, and that screen leaves it out. Through 0.2.0-dev.30.7 it showed
+linked stock there (9999+ of an ingredient the base did not have) and its transfer buttons offered amounts whose press did
+nothing. A client of 0.2.0-dev.30.8 or later with an older server still shows them: that server does not say which part is
+linked. The category option picker of a crafting menu counts in the game's own code and keeps the game's counts.
 
 **Lifetime:** `CraftSourceHandle.Dispose()` is idempotent and works on any thread. Unloading the mod removes all of its
 sources; an already-running payment may finish. Sources are session-only and cleared when the world closes. They
@@ -333,6 +344,12 @@ There is no second registry or dye opt-in. In a Kiln client's tinting screen, li
 none is in the bag. On confirmation the server pays **one dye from the bag first**, otherwise from an accessible linked
 container, in registration order. The crafting-specific station-output order does not add station outputs to tinting.
 Registered Magic chests count too; dyes do not require the player to stand in their base.
+
+Since 0.2.0-dev.30.8 a dye the links supply is **listed with the dyes the player has**: the game sorts its palette by
+count, most first, and puts the colours the player has none of after them; Kiln sorts again after adding the linked
+counts, so a dye only a link holds moves up among them by its count instead of staying among the empty ones (GitHub #132).
+This is the default, with no switch: it is the game's own order for a dye it can use, and nothing changes while no Kiln
+server offers linked dyes.
 
 The client receives only filtered **item ids and counts**, never chest slots. It offers source dyes only after this
 server explicitly announces dye-source support over `kiln:craftstock`; an older or vanilla server offers none. Closing
@@ -490,10 +507,12 @@ base's inventories). Then:
   [above](#station-outputs-as-crafting-stock)); a press that no longer fits (the outputs were taken meanwhile) runs as
   the game's, which refuses it, and nothing moves.
 
-The ingredient rows' **"available"** counts (row `stations.stock_ui`, the same widget on the station screen and in the
-crafting menu) follow the same snapshot: for an item the server's snapshot names, a Kiln client shows the greater of the
-game's own count (the bag and the Magic chests it sees) and the server's (bag, Magic chests and opted-in outputs). Other
-screens that count items (building costs, for example) keep the game's counts: station outputs do not pay those.
+The ingredient rows' **"available"** counts (row `stations.stock_ui`) follow the same snapshot: for an item the server's
+snapshot names, a Kiln client shows the greater of the game's own count (the bag and the Magic chests it sees) and the
+server's (bag, Magic chests and opted-in outputs; in a crafting menu also linked crafting sources). The station screen's
+rows (the ones with transfer buttons) and the crafting menu's are different widgets; through 0.2.0-dev.30.7 only the
+station screen's were raised, since 0.2.0-dev.30.8 the crafting menu's ingredient list and its rows' category options are
+too. Other screens that count items (building costs, a crafting menu's category option picker) keep the game's counts.
 kiln.log: `stations: the ingredient rows' available count ... hooked` once, then `stations: an ingredient's available
 count for item 0x... shown a -> b with station outputs`. A **vanilla client** keeps the game's buttons and counts.
 
@@ -771,6 +790,9 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.30.8:** crafting menus at a crafting station (and every other crafting menu) count linked sources and
+  opted-in station outputs in their ingredient rows, not only in the craft count; a production station's screen no longer
+  counts linked sources its fill cannot take; linked dyes sort with the dyes the player has. Thanks Fuzen777 (kiln#132).
 - **0.2.0-dev.30.6:** player crafting sources (`Crafting.AddSource`), filtered linked containers in any base or none,
   ordered around opted-in station outputs, disposable/mod-owned lifetime, atomic recipe payment and Kiln-client crafting
   counts, plus the tinting screen and server-authoritative dye payment from the same player sources. Thanks Fuzen777 (#125).
