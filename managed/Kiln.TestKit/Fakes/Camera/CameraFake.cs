@@ -264,7 +264,7 @@ internal sealed unsafe class CameraFake : IKitFake
     {
         try
         {
-            if (outLease == null) return FakeTables.InvalidArgument;
+            if (outLease == null || owner == 0) return FakeTables.InvalidArgument;  // as kiln.camera: a lease belongs to a real owner
             if (Admit(req, out var harness) is var rc and not FakeTables.Ok) return rc;
             var state = KitFakes.State<CameraFakeState>(harness!);
             var lease = new FakeCameraLease { Owner = owner, Endpoint = req->Endpoint, Player = req->Endpoint == CameraAbi.Local ? 0 : req->Player, Priority = req->Priority };
@@ -313,7 +313,7 @@ internal sealed unsafe class CameraFake : IKitFake
     {
         try
         {
-            if (id == 0 || timing > 1) return FakeTables.InvalidArgument;
+            if (id == 0 || owner == 0 || timing > 1) return FakeTables.InvalidArgument;
             if (Admit(req, out var harness) is var rc and not FakeTables.Ok) return rc;
             var state = KitFakes.State<CameraFakeState>(harness!);
             nint fn = (nint)done, u = (nint)user;
@@ -362,7 +362,7 @@ internal sealed unsafe class CameraFake : IKitFake
     {
         try
         {
-            if (id == 0) return FakeTables.InvalidArgument;
+            if (id == 0 || owner == 0) return FakeTables.InvalidArgument;
             if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
             if (FakeTables.Active(CameraAbi.Service) is not { } harness || !On(ServiceRow)) return FakeTables.Unavailable;
             if (harness.EntitiesFake is not { Started: true }) return FakeTables.NotFound;

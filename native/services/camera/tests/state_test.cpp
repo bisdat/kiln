@@ -943,8 +943,27 @@ void test_owner_retiring_cancels_its_work() {
     t.core.pre(kClient);
     CHECK((g_log == std::vector<std::string>{"event sub ended lease=5 rev=1 end=8 gen=1"}));
     CHECK(t.local.calls.back() == "drop 5" && t.core.live_leases() == 1);
-    t.core.owner_retiring(0);  // the core itself never retires
-    CHECK(t.apply(0, mode_request(9), &others, kA) == KILN_OK);
+    t.core.owner_retiring(0);  // owner 0 never retires (and writes refuse it: test_owner_zero_writes_are_refused)
+}
+
+// Owner 0 is "no mod": it never retires, and every owner-0 caller would share one identity (one could update or end
+// another's lease). Writes refuse it as malformed before anything is queued; a subscription of Kiln's own stays.
+void test_owner_zero_writes_are_refused() {
+    Rig t;
+    const KilnCameraLease held = t.applied(kOwnerA, 5, 0, kA);
+    KilnCameraLease lease = 0;
+    CHECK(t.apply(0, mode_request(9), &lease, kA) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(lease == 0);
+    CHECK(t.apply(0, lens_request(), &lease, kA) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t.update(0, held, mode_request(5), kA) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t.end(0, held, kA) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t.end(0, 987654, kA) == KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t.core.pending() == 0 && t.mode.calls.empty() && t.local.calls.empty());
+    KilnHandle h = 0;
+    CHECK(t.core.subscribe(0, &on_changed, kSub, &h) == KILN_OK && h);
+    t.core.pre(kServer);
+    CHECK(g_log.empty());
+    CHECK(t.core.active_revision(held) == 1);  // the mod's lease is untouched
 }
 
 void test_callback_fault_retires_the_owner() {
@@ -1104,6 +1123,7 @@ int main() {
     test_backend_ends();
     test_queue_64_backpressure();
     test_owner_retiring_cancels_its_work();
+    test_owner_zero_writes_are_refused();
     test_callback_fault_retires_the_owner();
     test_unsubscribe();
     test_world_stop_is_terminal_and_epochs_are_separate();

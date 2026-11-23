@@ -53,6 +53,7 @@ public static unsafe class Camera
     /// <param name="transition">How the game moves into the mode.</param>
     /// <param name="priority">-1000 to 1000; another mod's lock replaces this one only with a higher number.</param>
     /// <exception cref="ArgumentException">A value is out of range.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, or called outside mod code.</exception>
     /// <exception cref="KilnUnavailableException"><c>camera.server_mode</c> is off.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability("camera.server_mode")]
     public static Task<CameraResult> SetMode(EntityId player, CameraMode mode, TimeSpan duration,
@@ -67,6 +68,7 @@ public static unsafe class Camera
     /// <summary>A camera request of the server for <paramref name="player"/>: a mode lock (see <see cref="SetMode"/>),
     /// or visual parts for a player whose client runs Kiln.</summary>
     /// <exception cref="ArgumentException">The request is malformed, or there is no player.</exception>
+    /// <exception cref="InvalidOperationException">Not on the tick thread, or called outside mod code.</exception>
     /// <exception cref="KilnUnavailableException">A row the request needs is off: <c>camera.server_mode</c> for a mode
     /// lock, <c>camera.remote</c> for visual parts.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability("camera.server")]
@@ -82,7 +84,7 @@ public static unsafe class Camera
     /// on the client world's thread (<c>Client.Tick</c>, <c>Client.Post</c>). A mode lock is not a local request: it is
     /// answered <see cref="CameraReason.WrongEndpoint"/> (use <see cref="SetMode"/> on the server).</summary>
     /// <exception cref="ArgumentException">The request is malformed.</exception>
-    /// <exception cref="InvalidOperationException">Not on the client world's thread.</exception>
+    /// <exception cref="InvalidOperationException">Not on the client world's thread, or called outside mod code.</exception>
     /// <exception cref="KilnUnavailableException">A part's row is off: <c>camera.local_pose</c> (path),
     /// <c>camera.local_profile</c>, <c>camera.local_fov</c> (lens), <c>camera.local_shake</c>.</exception>
     [ClientOnly, TickThreadOnly, RequiresCapability("camera.local")]
@@ -92,6 +94,7 @@ public static unsafe class Camera
         ArgumentNullException.ThrowIfNull(request);
         if (request.Mode is not null)
         {
+            RequireOwner(api);
             CameraRequests.Build(request, CameraEndpoint.Local, EntityId.None, api);  // a malformed one still throws
             return Task.FromResult(Refused(CameraReason.WrongEndpoint, "a mode lock is the server's: use Camera.SetMode in the server world", CameraEndpoint.Local, EntityId.None));
         }
@@ -104,8 +107,8 @@ public static unsafe class Camera
     /// <param name="replacement">The new request.</param>
     /// <param name="timing">Whether the lease's clock goes on or starts again.</param>
     /// <exception cref="ArgumentException">The request is malformed, or <paramref name="lease"/> is none.</exception>
-    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, or inside a program wrap's
-    /// handler.</exception>
+    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, inside a program wrap's
+    /// handler, or outside mod code.</exception>
     /// <exception cref="KilnUnavailableException">A row the new request needs is off.</exception>
     [TickThreadOnly, RequiresCapability("camera.service")]
     public static Task<CameraResult> Update(CameraLease lease, CameraOverride replacement, CameraUpdateTiming timing = CameraUpdateTiming.Preserve)
@@ -114,6 +117,7 @@ public static unsafe class Camera
         ArgumentNullException.ThrowIfNull(replacement);
         RequireLease(lease, api);
         RequireLeaseThread(lease, api);
+        var owner = RequireOwner(api);
         if (!Enum.IsDefined(timing)) throw new ArgumentException($"{api}: timing {timing} is not Preserve or Restart", nameof(timing));
         var built = CameraRequests.Build(replacement, lease.Endpoint, lease.Player, api);
         CameraCaps.Require(CameraCaps.Service);
@@ -123,7 +127,7 @@ public static unsafe class Camera
         fixed (CameraNative.Key* keys = built.Keys)
         {
             req.Keys = built.Keys.Length == 0 ? null : keys;
-            rc = CameraNative.T->Update(Services.CallerOwner, lease.Value, (uint)timing, &req, &OnDone, (void*)key);
+            rc = CameraNative.T->Update(owner, lease.Value, (uint)timing, &req, &OnDone, (void*)key);
         }
         return Finish(rc, key, pending, api, lease.Endpoint, lease.Player, built.Parts);
     }
@@ -132,17 +136,18 @@ public static unsafe class Camera
     /// waits is cancelled first. Ending a lease that has ended is Ok with <see cref="CameraResult.AlreadyEnded"/>.
     /// The task completes when the camera was let go (after a blend out, if the request had one).</summary>
     /// <exception cref="ArgumentException"><paramref name="lease"/> is none.</exception>
-    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, or inside a program wrap's
-    /// handler.</exception>
+    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, inside a program wrap's
+    /// handler, or outside mod code.</exception>
     [TickThreadOnly, RequiresCapability("camera.service")]
     public static Task<CameraResult> End(CameraLease lease)
     {
         const string api = "Camera.End";
         RequireLease(lease, api);
         RequireLeaseThread(lease, api);
+        var owner = RequireOwner(api);
         CameraCaps.Require(CameraCaps.Service);
         var (key, pending) = Register();
-        var rc = CameraNative.T->End(Services.CallerOwner, lease.Value, &OnDone, (void*)key);
+        var rc = CameraNative.T->End(owner, lease.Value, &OnDone, (void*)key);
         return Finish(rc, key, pending, api, lease.Endpoint, lease.Player, 0);
     }
 
@@ -216,6 +221,7 @@ public static unsafe class Camera
 
     private static Task<CameraResult> Apply(string api, CameraOverride request, CameraEndpoint endpoint, EntityId player)
     {
+        var owner = RequireOwner(api);
         var built = CameraRequests.Build(request, endpoint, player, api);
         foreach (var row in CameraCaps.RowsOf(endpoint, built.Parts)) CameraCaps.Require(row);
         CameraCaps.Require(CameraCaps.Service);
@@ -226,7 +232,7 @@ public static unsafe class Camera
         fixed (CameraNative.Key* keys = built.Keys)
         {
             req.Keys = built.Keys.Length == 0 ? null : keys;
-            rc = CameraNative.T->Apply(Services.CallerOwner, &req, &lease, &OnDone, (void*)key);
+            rc = CameraNative.T->Apply(owner, &req, &lease, &OnDone, (void*)key);
         }
         return Finish(rc, key, pending, api, endpoint, player, built.Parts);
     }
@@ -286,6 +292,11 @@ public static unsafe class Camera
 
     private static CameraResult Refused(CameraReason code, string text, CameraEndpoint endpoint, EntityId player) =>
         new(false, text, code, new CameraLease(0, endpoint, player, 0), 0, CameraCommitScope.None);
+
+    // A lease belongs to a mod: kiln.camera refuses owner 0 (no mod), which never retires and which every caller
+    // outside mod code would share.
+    private static ulong RequireOwner(string api) =>
+        Services.CallerOwner is var owner and not 0 ? owner : throw new InvalidOperationException($"{api}: call it from mod code (a camera lease belongs to a mod)");
 
     private static EntityId RequirePlayer(EntityId player, string api) =>
         player.IsNone ? throw new ArgumentException($"{api}: a player is required", nameof(player)) : player;

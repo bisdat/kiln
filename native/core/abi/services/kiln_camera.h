@@ -14,7 +14,8 @@
  * priority, and then the old lease's ENDED(SUPERSEDED) comes before the new APPLIED. A successful change queues one
  * KilnCameraChange for every subscriber, after that operation's `done`, in operation order.
  *
- * Immediate returns never call `done`: KILN_ERR_INVALID_ARGUMENT (a malformed request), KILN_ERR_WRONG_THREAD (not
+ * Immediate returns never call `done`: KILN_ERR_INVALID_ARGUMENT (a malformed request, or owner 0 in apply, update or
+ * end: a lease belongs to a real owner, one that can retire), KILN_ERR_WRONG_THREAD (not
  * the endpoint's world thread), KILN_ERR_UNAVAILABLE (a part's capability is off), KILN_ERR_NOT_FOUND (the endpoint's
  * world is not running), KILN_ERR_BUFFER_TOO_SMALL (KILN_CAMERA_MAX_PENDING operations wait already: ask again
  * later), KILN_ERR_REVOKED (the owner is gone). A refusal by the game or by the rules above arrives through `done`

@@ -457,7 +457,8 @@ void Core::deliver(World w) {
 // ---- the table --------------------------------------------------------------------------------------------------------
 
 KilnResult Core::apply(KilnOwner owner, const KilnCameraRequest* request, KilnCameraLease* out_lease, KilnCameraDone done, void* user, uint32_t threads) {
-    if (!out_lease) return KILN_ERR_INVALID_ARGUMENT;
+    // owner 0 is no mod: it never retires and every such caller would share one identity
+    if (!out_lease || !owner) return KILN_ERR_INVALID_ARGUMENT;
     if (!writes()) return KILN_ERR_UNAVAILABLE;  // no owner-retiring observer: a `done` could outlive its code
     auto stored = std::make_unique<Stored>();
     if (!validate(request, stored.get())) return KILN_ERR_INVALID_ARGUMENT;
@@ -546,7 +547,7 @@ KilnResult Core::apply(KilnOwner owner, const KilnCameraRequest* request, KilnCa
 }
 
 KilnResult Core::update(KilnOwner owner, KilnCameraLease id, uint32_t timing, const KilnCameraRequest* request, KilnCameraDone done, void* user, uint32_t threads) {
-    if (!id || timing > KILN_CAMERA_RESTART_TIMELINE) return KILN_ERR_INVALID_ARGUMENT;
+    if (!id || !owner || timing > KILN_CAMERA_RESTART_TIMELINE) return KILN_ERR_INVALID_ARGUMENT;
     if (!writes()) return KILN_ERR_UNAVAILABLE;
     auto stored = std::make_unique<Stored>();
     if (!validate(request, stored.get())) return KILN_ERR_INVALID_ARGUMENT;
@@ -620,7 +621,7 @@ KilnResult Core::update(KilnOwner owner, KilnCameraLease id, uint32_t timing, co
 }
 
 KilnResult Core::end(KilnOwner owner, KilnCameraLease id, KilnCameraDone done, void* user, uint32_t threads) {
-    if (!id) return KILN_ERR_INVALID_ARGUMENT;
+    if (!id || !owner) return KILN_ERR_INVALID_ARGUMENT;
     if (!writes()) return KILN_ERR_UNAVAILABLE;  // and so no lease was ever made
     std::lock_guard<std::mutex> lock(m_);
     const auto found = leases_.find(id);
