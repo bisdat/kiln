@@ -79,6 +79,16 @@ test("huge report is rejected without hanging navigation", async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/);
 });
 
+test("a list-element writer shows the element it changed", async ({ page }) => {
+  const r = registryFixture();
+  const row = { ...r.fields[0], registry: "drops", id: "game:fixture_drops", field: "entries",
+    writers: [{ kind: "registry", mod: "loot", stage: "alter", n: 0, element: "entries[3].chance", op: { set: 0.5 }, value: 0.5, certainty: "certain" }] };
+  await report(page, { ...r, fields: [row] });
+  const field = page.locator(".registry-field").first();
+  await field.locator("summary").click();
+  await expect(field).toContainText("Element: entries[3].chance");
+});
+
 test("writer-only truncation still marks the report partial", async ({ page }) => {
   const r = registryFixture();
   await report(page, { ...r, fields: [{ ...r.fields[0], writersLeftOut: 3 }], truncated: { ...r.truncated, writers: 3 } });

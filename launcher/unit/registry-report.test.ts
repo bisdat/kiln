@@ -85,6 +85,17 @@ describe("untrusted registry report", () => {
     const many = { ...r.fields[0], writers: Array.from({ length: 70 }, (_, n) => ({ ...r.fields[0].writers[0], mod: `w${n}` })) };
     expect(parse({ ...r, fields: [many], truncated: { ...r.truncated, writers: 7 } }).writersOmitted).toBe(13);
   });
+  test("a list-element writer keeps the element it changed; an element the lock does not know is hidden", () => {
+    const r = registryFixture();
+    const row = { ...r.fields[0], registry: "drops", id: "game:fixture_drops", field: "entries", writers: [
+      { kind: "registry", mod: "loot", stage: "alter", n: 0, element: "entries[3].chance", op: { set: 0.5 }, value: 0.5, certainty: "certain" },
+      { kind: "registry", mod: "odd", stage: "alter", n: 1, element: "SecretList[2].member", op: { set: 1 }, value: 1, certainty: "certain" },
+      { kind: "registry", mod: "plain", stage: "alter", n: 2, op: 3, value: 3, certainty: "certain" },
+    ] };
+    const out = parse({ ...r, fields: [row] });
+    expect(out.fields[0].writers.map(w => w.element)).toEqual(["entries[3].chance", "element details hidden", ""]);
+    expect(JSON.stringify(out)).not.toContain("SecretList");
+  });
   test("raw paths and native offsets never enter the view model", () => {
     const r = registryFixture();
     const field = { ...r.fields[0], raw: true, field: "SecretSetup.Offset" };

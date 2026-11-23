@@ -92,7 +92,7 @@ function FieldChain({ field: f }: { field: RegistryField }) {
       {f.writersOmitted > 0 && <p className="k-tone-warn">{t("registry.writersOmitted", { count: f.writersOmitted })}</p>}
       <ol>{f.writers.map((w, i) => <li key={i}>
         <div className="registry-line-head"><strong>{w.owner}</strong><StatusPill tone={w.certain ? "ok" : "warn"}>{w.certainty}</StatusPill></div>
-        <p>{w.kind}{w.stage && ` · ${w.stage}`}</p><p className="k-mono">{t("registry.operation", { operation: w.operation })}</p><p className="k-mono">{t("registry.after", { value: w.value })}</p>
+        <p>{w.kind}{w.stage && ` · ${w.stage}`}</p>{w.element && <p className="k-mono">{t("registry.element", { element: w.element })}</p>}<p className="k-mono">{t("registry.operation", { operation: w.operation })}</p><p className="k-mono">{t("registry.after", { value: w.value })}</p>
       </li>)}</ol>
       {!f.writers.length && <p>{t("registry.noWriters")}</p>}
       {f.formulaInputs && <p className="k-mono">{t("registry.formula", { inputs: f.formulaInputs })}</p>}

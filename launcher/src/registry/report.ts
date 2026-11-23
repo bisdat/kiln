@@ -11,7 +11,7 @@ function isKilnField(registry: string, field: string): boolean {
 }
 type ObjectRow = Record<string, unknown>;
 // certainty is the label in the current language; certain says whether Kiln observed it (the page's tone).
-export interface RegistryWriter { owner: string; kind: string; stage: string; operation: string; value: string; certainty: string; certain: boolean }
+export interface RegistryWriter { element: string; owner: string; kind: string; stage: string; operation: string; value: string; certainty: string; certain: boolean }
 export interface RegistryField {
   registry: string; id: string; field: string; applies: string; baseOrigin: string; base: string;
   result: string; winner: string; writers: RegistryWriter[]; writersOmitted: number; formulaInputs: string;
@@ -139,7 +139,10 @@ export function parseRegistryReport(input: string): RegistryReport {
       writersOmitted: omitted(f.writersLeftOut) + skip,
       writers: chain.slice(skip).map(x => {
         const w = object(x);
-        return { owner: optional(w.who) || optional(w.mod) || t("registry.referenceCheck"), kind: text(w.kind), stage: optional(w.stage),
+        // an element edit names its element ("entries[3].chance", report.cpp writer_json): shown when the lock knows the
+        // list and leaf, so a chain says which element an operation changed
+        const element = w.element === undefined || raw ? "" : isKilnField(text(f.registry), text(w.element)) ? text(w.element) : t("registry.elementHidden");
+        return { element, owner: optional(w.who) || optional(w.mod) || t("registry.referenceCheck"), kind: text(w.kind), stage: optional(w.stage),
           operation: w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
           value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty), certain: w.certainty === "certain" };
       }),
