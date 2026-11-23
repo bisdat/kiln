@@ -115,6 +115,7 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `loader-in-folder` | another engine's own loader under a proxy name the game loads (EML's `dbghelp.dll`, SET's `powrprof.dll` ...): a warning on Windows (it always runs), a note under Wine/Proton (only with an override). Left out when that engine's plugin already said it stood aside |
 | `unlisted-mods` | mod folders in the game folder that the active profile does not load (drop-ins off for Kiln's kinds and EML; a `mods.<engine>` list for the compat-hosted engines; ShroudForge and SET always read their folders) and that the profile does not list itself |
 | `sf-startup-failed` | ShroudForge's own record of its startup pass (`shroudforge/state.json` `assets`) says `failed` and is the last start's (`sf_startup::failure`: written in Kiln's last start by ShroudForge hosted or found there, not left by an earlier one): its words (redacted whole, then put on one line and cut), the switched-on mods that need the pass, and for the fault ShroudForge builds without the fix have under Wine and Proton (`os error 5`) what to change. The record's line is in summary.txt under "The last start" |
+| `sf-mod-bundled-newer` | a note (`info` in JSON): a ShroudForge mod in `<game>/mods` has an older semantic version than the same exact, case-sensitive manifest id in `<game>/kiln/plugins/shroudforge/mods`, regardless of folder names. Text: `{mod_id} {installed_version} is older than the {bundled_version} Kiln brings.` Equal or newer versions and mods with no bundled copy are not findings. Missing or unreadable ShroudForge manifests are listed under "Not readable" instead; no mod files or switches are changed |
 | `mod-failed` | `failed` in mods.json, native.json, boot.json's plugins, a chain entry `failed`/`missing`, or a mod in an engine's state file whose state says fail/error/refused; with the reasons |
 | `hosted-mods` | a note: Kiln mods `skipped` in mods.json with `side 'server': loads while this client hosts a world`: they start with the player's own world (single-player or co-op), so `skipped` in the menu is expected (docs/kiln/client.md, "Mods and sides") |
 | `hosted-off` | a warning: the same with kiln.json `"mods": {"hosted": false}`: they never start in this game |
@@ -125,6 +126,17 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `no-game` | the report was made without a game (note) |
 | `webkit-sandbox` | (dev.29.18, from the Linux launcher: `ReportInput.findings`, `sandbox::finding`) the start's probe found that the bwrap WebKit runs cannot start (its line) or is missing: a problem when this start runs WebKit's sandbox (the launcher's page cannot open; turn it off in the launcher's message or with `--no-webkit-sandbox`), a note when it does not (a default start: then it is not why a window stays empty); the AppImage's own missing bwrap (it has none on any system) only when the start runs the sandbox. With the AppArmor value when it restricts user namespaces. summary.txt's system has a `WebKit sandbox:` line in every Linux launcher report ([app.md](app.md), "WebKit's sandbox (Linux)") |
 | `launcher-files-missing` | (dev.29.18, inbox 92, from the Windows launcher: `ReportInput.findings`, `own_files::finding`) a warning: the launcher was installed by its setup (NSIS) and its own `uninstall.exe`, or its exe while it ran, is gone from its folder at this start: an antivirus may have quarantined it. Names the files; launcher.log has a `launcher:` line, and the window says it once |
+
+The bundled-version check uses the shared manifest reader and semantic-version helper. Prereleases compare below
+releases, numeric prerelease parts compare numerically, and build metadata does not affect precedence. Although the
+version helper accepts a `v`/`V` prefix and fills missing minor or patch parts with zero, ShroudForge's manifest reader
+requires three numeric parts without a prefix and accepts at most one prerelease or build suffix. Those refused forms,
+non-semver versions, and numeric parts beyond the helper's signed 32-bit bound produce no version finding.
+
+Only the two fixed folders above are checked, not a configured mods path elsewhere. Folder lookup follows Windows'
+case-insensitive spelling under Proton too; manifest ids remain case-sensitive. Directory links, junctions and
+manifest links are not followed. Identification uses manifests and Lua entry-point names, never INI or DLL contents;
+a native-only package with no explicit ShroudForge manifest metadata is ambiguous and is left out.
 
 ## Privacy
 
@@ -165,7 +177,8 @@ values of such fields line by line.
 
 Never read into the report: saves and world data (`kiln/data/`), `kiln/config/` and the profile's config folder (mod
 settings, `network.json`), `kiln/data/kiln-admin/`, the contents of any mod (only names, sizes and times in the
-listings), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
+listings, and ShroudForge manifest ids and versions in the bundled-version finding; manifests themselves are not
+included), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
 names to replace). `summary.txt` ends with this list.
 
 What redaction cannot catch: a character or server name the player chose that appears in a log line other than the

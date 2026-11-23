@@ -3862,7 +3862,7 @@
       "saves": "Your saves and worlds",
       "settings": "Mod settings and Kiln's config folder (they can hold server passwords)",
       "admin": "Kiln.Admin's token and address",
-      "mods": "What's inside your mods (only file names, sizes and dates)",
+      "mods": "What's inside your mods (only file and folder names, sizes and dates are listed, plus ShroudForge manifest IDs and versions in findings)",
       "steam": "Steam's own files"
     }
   },
