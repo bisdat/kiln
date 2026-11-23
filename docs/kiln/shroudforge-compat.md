@@ -144,7 +144,8 @@ went back over the updated files, and the pass failed with "failed to fill whole
 the end of the resource file). Nothing tied the companion to its header either. Now `check_working_baseline`
 (`modules/mod-runtime/startup/verify_working_baseline.rs`) decides first:
 - it restores only a whole pair that is the source of the game files. Whole: both backups are the pair
-  `<stem>.kfc.baseline.json` recorded when it was made (size, last-write time and SHA-256 of each); a pair from before
+  `<stem>.kfc.baseline.json` recorded when it was made (size and SHA-256 of each; changing the recorded last-write times
+  neither discards the hashes nor invalidates identical bytes); a pair from before
   that record must hold its header's resource data in its companion, and is recorded once restored. Source: the live
   header is the header backup, or was built over it (its containers, resource chunks and contents unchanged, additions
   only after them, as every incremental writer SF, EML and Kiln use writes).
@@ -156,9 +157,14 @@ the end of the resource file). Nothing tied the companion to its header either. 
 - it refuses the pass when no clean copy is left: the game files carry mods built from a pair that is not whole, are
   what SF's last pass left (its record of the pass, read before the pass removes it), or are not whole themselves. The
   error ends "Verify the game files in Steam (or update the server files with SteamCMD's validate), then start again";
-  the recovery after the failed pass refuses the same pair and changes no file.
-Tests (Wine, `cargo xwin test`): `verify_working_baseline` (5), `baseline_record` (3) and two whole startup passes in
-`kiln_baseline_tests.rs` (red before the fix). Not run against a real game update or a real client.
+  the recovery after the failed pass refuses the same pair and changes no file. Missing or incompatible backups pass
+  the same live-file checks before a new pair is taken. A missing backup companion is never borrowed from modded live
+  files, and a refused pass keeps the last-output proof so another start cannot mistake those files for a clean copy.
+- restoration stages both files before publishing either, using SF's recoverable asset transaction. A failed copy
+  leaves the live pair untouched; interrupted publication keeps rollback data for the next start.
+Tests (cross-built with `cargo xwin test --no-run`, executed on native Windows): `verify_working_baseline` (9),
+`baseline_record` (4), and three whole startup passes in `kiln_baseline_tests.rs` (red before the fixes). Not run
+against a real game update or a real client.
 
 **EML manifests with null optional metadata** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). EML reads its manifest
 into a type whose `description`, `license`, `icon` and `dependencies[].optional` are optional, so `null` there means
