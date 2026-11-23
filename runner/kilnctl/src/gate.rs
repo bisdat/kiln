@@ -19,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 /// Self tests that run unattended on a dedicated server without a player (one boot).
 pub const DEFAULT_TESTS: &[&str] = &[
     "world-test", "players-test", "chat-test", "items-test", "settings-test", "gameplay-test", "hooks-test",
-    "combat-test", "spawn-test", "content-test",
+    "combat-test", "spawn-test", "content-test", "registry-proof-test",
 ];
 
 #[derive(Debug, Clone)]
@@ -229,6 +229,14 @@ fn install_mod(built: &Path, dst: &Path) -> Result<()> {
 /// run of the instance's must never stand in for this one's).
 pub const COPY_CLEAN: &[&str] = &["kiln/logs", "kiln/control", "kiln/data/content/registry/proof"];
 
+/// The registry proof's request file for the copy (lab only: kiln.content and registry-proof-test produce the proof's
+/// lab evidence only with it), when the producer is among the tests.
+pub fn proof_request(tests: &[String]) -> Option<(&'static str, String)> {
+    tests.iter().any(|t| t == "registry-proof-test").then(|| {
+        ("kiln/data/content/registry/proof/request.json", "{\"format\": 1, \"by\": \"kilnctl gate\"}\n".to_string())
+    })
+}
+
 /// Lays out `<dir>.gate` and writes the `<name>-gate` instance file. The instance is only read.
 pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
     if !kiln::is_deployed(inst) {
@@ -289,6 +297,12 @@ pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
         let p = gdir.join(d);
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p)?;
+    }
+    // the registry proof's lab evidence (kilnctl regproof): only with its producer among the tests
+    if let Some((rel, text)) = proof_request(&o.tests) {
+        let p = gdir.join(rel);
+        std::fs::create_dir_all(p.parent().context("proof folder")?)?;
+        std::fs::write(&p, text)?;
     }
     let save = save_dir(inst);
     if save.is_dir() {
@@ -433,6 +447,18 @@ mod tests {
 
     fn tests() -> Vec<String> {
         ["settings-test", "spawn-test", "gameplay-test", "world-test", "net-test", "chat-test"].map(String::from).to_vec()
+    }
+
+    /// The registry proof's lab evidence (kilnctl regproof): with registry-proof-test among the tests the copy gets the
+    /// request file kiln.content and the test mod produce for; without it, nothing (no proof work in the copy).
+    #[test]
+    fn the_registry_proof_runs_in_the_gate_by_default() {
+        assert!(DEFAULT_TESTS.contains(&"registry-proof-test"));
+        let with: Vec<String> = DEFAULT_TESTS.iter().map(|s| s.to_string()).collect();
+        let (rel, text) = proof_request(&with).expect("requested with the producer");
+        assert_eq!(rel, "kiln/data/content/registry/proof/request.json");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap()["format"], 1);
+        assert!(proof_request(&["world-test".to_string()]).is_none());
     }
 
     #[test]
