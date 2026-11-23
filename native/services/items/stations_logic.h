@@ -1185,4 +1185,3 @@ inline std::string craft_trace_text(const CraftTrace& t, uint32_t op, uint32_t r
 }
 
 }  // namespace kitems::stations
-
