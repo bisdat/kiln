@@ -199,6 +199,9 @@ public enum ItemsStatus
     Unavailable = 8,
     /// <summary>Not run: the server world did not step.</summary>
     Dropped = 9,
+    /// <summary>An add into a player's storage that the storage's filter does not take (<c>StorageFilter</c>);
+    /// nothing changed. Since 0.2.0-dev.30.7 (mod API 0.2.16).</summary>
+    Filtered = 10,
     /// <summary>Refused before it was queued (bad arguments); nothing happened.</summary>
     Invalid = 100,
 }
@@ -341,6 +344,10 @@ public enum InventoryKinds
     NonEmpty = 8,
     /// <summary>Containers, players and NPCs.</summary>
     All = Containers | Players | Npcs,
+    /// <summary>The holders of players' storages (<c>Items.RegisterPlayerStorage</c>): only when asked for by this
+    /// flag, never as part of <see cref="All"/> or <see cref="Containers"/>, so code that sums every chest does not count a
+    /// player's quiver as well. Since 0.2.0-dev.30.7 (mod API 0.2.16).</summary>
+    PlayerStorage = 16,
 }
 
 /// <summary>State of the kiln.items service.</summary>

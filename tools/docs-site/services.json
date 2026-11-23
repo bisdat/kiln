@@ -639,6 +639,10 @@
       ],
       "capabilities": [
         {
+          "name": "identity.entities",
+          "members": 3
+        },
+        {
           "name": "items.equip",
           "members": 2
         },
@@ -680,7 +684,7 @@
         },
         {
           "name": "items.move",
-          "members": 3
+          "members": 5
         },
         {
           "name": "items.names",

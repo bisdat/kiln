@@ -122,6 +122,8 @@ pub const NAMES: &[&str] = &[
     "editor_list_backups",
     "editor_restore_backup",
     "editor_open_backups",
+    "editor_storage_read",
+    "editor_return_storage",
     "server_list",
     "server_get",
     "server_create",

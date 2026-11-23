@@ -885,6 +885,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
+    /// `sf-mod-bundled-newer`,
     /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`, `launcher-files-missing`.
     pub id: String,
     pub level: Level,
@@ -2191,6 +2192,8 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
 
+    check_sf_mod_bundled_newer(&mut cx, game);
+
     // ---- raw files
     let mut state_files: Vec<String> = std::fs::read_dir(game.join(crate::paths::game::STATE))
         .into_iter()
@@ -2422,6 +2425,119 @@ fn greeneye_logs(cx: &mut Ctx, game: &Path, install: Option<&GameInstall>, dirs:
             "The logs of {} were left out: {} folder is not inside the game's greeneye folder or the launcher's Library \
              (or is reached through a link), and the report reads no other folder.",
             skipped.join(", "), if skipped.len() == 1 { "its" } else { "their" }));
+    }
+}
+
+/// Identify packages without the general detector's INI/DLL probes: a report reads manifests, never native payloads.
+/// Native-only packages without explicit ShroudForge metadata are ambiguous, so leave them out rather than guess.
+fn sf_report_is_mod(folder: &Path) -> std::result::Result<bool, String> {
+    let extended = folder.join("extended.mod.json").is_file(); // both manifests have already passed the link checks
+    let manifest = match head(&folder.join("mod.json"), crate::shroudforge::MAX_FILE_BYTES as u64)? {
+        None if !extended => return Ok(false), // native plugins and unrelated folders need no Lua manifest
+        None => return Err("mod.json is missing".into()),
+        Some((_, true)) => return Err("mod.json is larger than 2 MiB".into()),
+        Some((bytes, false)) => serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| e.to_string())?,
+    };
+    if ["dll", "main", "emf", "emfMin", "emf_api"].iter().any(|k| manifest.get(*k).is_some()) {
+        return Ok(false);
+    }
+    if extended || manifest.get("$schema").and_then(|s| s.as_str()).is_some_and(|s| s.to_ascii_lowercase().contains("shroudforge")) {
+        if !["id", "name", "version"].iter().all(|k| manifest.get(*k).and_then(|v| v.as_str()).is_some()) {
+            return Err("mod.json must name an id, name and version".into());
+        }
+        return Ok(true);
+    }
+    // Legacy Lua packages: inspect names only, and never enumerate a linked src folder.
+    for file in ["mod.lua", "src"] {
+        let path = folder.join(file);
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+            Ok(m) if crate::quick::import_is_link(&m) => return Err(format!("{file}: a link, not followed")),
+            Ok(m) if file == "mod.lua" && m.is_file() => return Ok(true),
+            Ok(m) if file == "src" && m.is_dir() => {
+                for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    if entry.path().extension().is_some_and(|x| x == "lua") {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(_) => {}
+        }
+    }
+    Ok(false)
+}
+
+/// Package metadata only: the shared ShroudForge reader, bounded and without following links into another folder.
+fn sf_report_versions(cx: &mut Ctx, game: &Path, root: &str) -> Vec<(crate::shroudforge::SfMod, crate::semver::SemVersion)> {
+    let mut dir = game.to_path_buf();
+    for part in root.split('/') {
+        dir = crate::sf_paths::ci_child(&dir, part);
+        match std::fs::symlink_metadata(&dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => { cx.err(root, e); return Vec::new(); }
+            Ok(m) if crate::quick::import_is_link(&m) => { cx.err(root, "a link, not followed"); return Vec::new(); }
+            Ok(m) if !m.is_dir() => { cx.err(root, "not a folder"); return Vec::new(); }
+            Ok(_) => {}
+        }
+    }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) => { cx.err(root, e); return Vec::new(); }
+    };
+    let mut folders = Vec::new();
+    for entry in entries {
+        let entry = match entry { Ok(e) => e, Err(e) => { cx.err(root, e); continue; } };
+        let name = format!("{root}/{}", entry.file_name().to_string_lossy());
+        match std::fs::symlink_metadata(entry.path()) {
+            Ok(m) if crate::quick::import_is_link(&m) => cx.err(&name, "a link, not followed"),
+            Ok(m) if m.is_dir() => folders.push((name, entry.path())),
+            Ok(_) => {}
+            Err(e) => cx.err(&name, e),
+        }
+    }
+    folders.sort();
+    let mut mods = Vec::new();
+    'folder: for (name, folder) in folders {
+        for file in ["mod.json", "extended.mod.json"] {
+            let why = match std::fs::symlink_metadata(folder.join(file)) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => Some(e.to_string()),
+                Ok(m) if crate::quick::import_is_link(&m) => Some("a link, not followed".into()),
+                Ok(m) if !m.is_file() => Some("not a file".into()),
+                Ok(_) => None,
+            };
+            if let Some(why) = why {
+                cx.err(&format!("{name}/{file}"), format!("could not read: {why}"));
+                continue 'folder;
+            }
+        }
+        match sf_report_is_mod(&folder) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(e) => { cx.err(&name, format!("could not read: {e}")); continue; }
+        }
+        match crate::shroudforge::read_mod(&folder) {
+            Ok(m) => match crate::semver::SemVersion::parse(&m.version) {
+                Ok(v) => mods.push((m, v)),
+                Err(e) => cx.err(&format!("{name}/mod.json"), e.message),
+            },
+            Err(e) => cx.err(&name, format!("could not read: {}", e.message)),
+        }
+    }
+    mods
+}
+
+/// An older copy in the player's mods folder is context, never a reason to change that copy or its switch.
+fn check_sf_mod_bundled_newer(cx: &mut Ctx, game: &Path) {
+    let own = sf_report_versions(cx, game, "mods");
+    let bundled = sf_report_versions(cx, game, "kiln/plugins/shroudforge/mods");
+    for (m, version) in own {
+        if let Some((newer, _)) = bundled.iter().find(|(b, v)| b.id == m.id && version.compare(v).is_lt()) {
+            cx.find("sf-mod-bundled-newer", Level::Info, format!(
+                "{} {} is older than the {} Kiln brings.", m.id, m.version, newer.version));
+        }
     }
 }
 
@@ -2698,7 +2814,7 @@ pub const NEVER_COLLECTED: [(&str, &str); 5] = [
     ("saves", "your saves and world data (the game's savegame folder, kiln/data/)"),
     ("settings", "mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens"),
     ("admin", "Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint)"),
-    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed)"),
+    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed, plus ShroudForge manifest ids and versions in findings)"),
     ("steam", "Steam's own files, besides the compat tool and launch options shown above"),
 ];
 
@@ -2707,7 +2823,7 @@ pub const LEFT_OUT: &str = "Never collected:
 - your saves and world data (the game's savegame folder, kiln/data/);
 - mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens;
 - Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint);
-- the contents of your mods (only folder and file names, sizes and times are listed);
+- the contents of your mods (only folder and file names, sizes and times are listed, plus ShroudForge manifest ids and versions in findings);
 - Steam's own files, besides the compat tool and launch options shown above.
 Replaced in every file: your home folder (<home>), user name (<user>), computer name (<host>), Steam names and ids
 (<steam-name>, <steamid>), the names of other players in Kiln's and ShroudLink's logs (<player>), IP and MAC addresses

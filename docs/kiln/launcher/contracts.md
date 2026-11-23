@@ -1449,6 +1449,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | editor | `editor_list_backups` | target: string | `EditorBackup[]` |
 | editor | `editor_restore_backup` | src: string, target: string | null |
 | editor | `editor_open_backups` | - | null |
+| editor | `editor_storage_read` | path: string, gameId: string \| null | `{character, gameId, text: string \| null, local: boolean}` \| null; selected install's character sidecar, without changing either file |
+| editor | `editor_return_storage` | request: `EditorStorageReturn` (`path`, `gameId`, `expectedSave`, `expectedSidecar`, `data`, `sidecar`, `oldWitness`, `newWitness`) | `{backup: string}`; LOCAL only, game closed, both originals compared, character and sidecar backed up. Reduced sidecar plus full pre-return historical pair is durable before the character replacement; the frontend returns base-game items only. |
 | server | `server_list` | - | `ServerInstance[]` |
 | server | `server_get` | serverId | `ServerInstance` |
 | server | `server_create` | spec: ServerSpec | `TaskId` -> `ServerInstance` |

@@ -2053,7 +2053,7 @@ Object.assign(handlers, studioMockHandlers({ handlers, startTask, profiles, libr
 // with the mock made every first page of a cold dev server slower
 let editorMock: Promise<Record<string, Handler>> | null = null;
 for (const cmd of ["editor_list_saves", "editor_file_info", "editor_read_file", "editor_zstd_decompress", "editor_game_running", "editor_backup_file",
-  "editor_write_save", "editor_list_backups", "editor_restore_backup", "editor_open_backups"]) {
+  "editor_write_save", "editor_list_backups", "editor_restore_backup", "editor_open_backups", "editor_storage_read", "editor_return_storage"]) {
   handlers[cmd] = async (a) => (await (editorMock ??= import("./mockEditor").then((m) => m.editorMockHandlers(reject, () => Object.values(running).some(Boolean)))))[cmd](a);
 }
 

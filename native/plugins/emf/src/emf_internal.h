@@ -129,6 +129,11 @@ struct Mod {
     std::atomic<uint64_t> tick_ns{0};      // time in this mod's after-step callbacks (on_tick, run_on_world, events)
     std::atomic<uint64_t> tick_calls{0};
     std::atomic<uint64_t> tick_max_ns{0};  // the slowest single callback
+    // What the mod asked kiln-emf for inside its callbacks (Context.api, added when the callback's scope ends; 30.7):
+    std::atomic<uint64_t> api_reads{0};          // get_component / get_template_component
+    std::atomic<uint64_t> api_scans{0};          // for_each_entity
+    std::atomic<uint64_t> api_scan_entities{0};  // the ids those gave
+    std::atomic<uint64_t> api_scan_ns{0};        // kiln-emf's time reading the entity map for them
 };
 // Adds one callback's time to its mod (plugin.cpp writes the totals into state/emf.json).
 void account(Mod* m, uint64_t ns);
@@ -153,11 +158,17 @@ bool valid_mod_id(std::string_view id);
 // read by API functions that EMF allows only inside world callbacks (spawn, destroy, give_item) and by the command
 // functions (command_reply, command_sender).
 struct CommandRun;
+// Plain per-thread counters: get_component runs tens of thousands of times a step for some mods, so it counts here and
+// the mod's atomics get the sum once, when the callback's ContextScope ends.
+struct ApiCounts {
+    uint64_t reads = 0, scans = 0, scan_entities = 0, scan_ns = 0;
+};
 struct Context {
     Mod* mod = nullptr;
     EmfWorld* world = nullptr;  // the world the callback was given (null: emf_mod_load, a program, another thread)
     bool world_cb = false;      // inside on_tick / run_on_world / on_event / a command / a result callback
     std::shared_ptr<CommandRun> cmd;
+    ApiCounts api;  // this scope's calls (an inner scope's calls go to its own mod)
 };
 extern thread_local Context t_ctx;
 
@@ -168,8 +179,20 @@ struct ContextScope {
         t_ctx.world = w;
         t_ctx.world_cb = world_cb;
         t_ctx.cmd = std::move(cmd);
+        t_ctx.api = {};
     }
-    ~ContextScope() { t_ctx = saved; }
+    ~ContextScope() {
+        if (Mod* m = t_ctx.mod) {
+            const ApiCounts& a = t_ctx.api;
+            if (a.reads) m->api_reads.fetch_add(a.reads, std::memory_order_relaxed);
+            if (a.scans) {
+                m->api_scans.fetch_add(a.scans, std::memory_order_relaxed);
+                m->api_scan_entities.fetch_add(a.scan_entities, std::memory_order_relaxed);
+                m->api_scan_ns.fetch_add(a.scan_ns, std::memory_order_relaxed);
+            }
+        }
+        t_ctx = saved;
+    }
 };
 
 // ---------------------------------------------------------------------------------------------- logging ---------
