@@ -112,6 +112,27 @@ describe("untrusted registry report", () => {
     });
     expect(JSON.stringify(out)).not.toContain("SecretSetup");
   });
+  test("live raw bind refusals hide repeated member paths while ordinary unknown-field reasons remain readable", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, refused: [
+      { mod: "advanced-mod", source: "content/raw.json", stage: "alter", n: 9,
+        registry: "items", id: "game:fixture_stack", field: "Missing.Member", raw: true,
+        reason: "items[game:fixture_stack].raw:Missing.Member: the member Missing.Member is not a writable member on this game build; this edit was not applied" },
+      { mod: "advanced-mod", source: "content/raw.json", stage: "alter", n: 10,
+        registry: "items", id: "game:fixture_stack", field: "maxStackSize", raw: true,
+        reason: "items[game:fixture_stack].raw:maxStackSize: the member maxStackSize is not a writable member on this game build; this edit was not applied" },
+      { mod: "typo", source: "content/typo.json", stage: "alter", n: 11,
+        registry: "items", id: "game:fixture_stack", field: "maxStak",
+        reason: "items has no field \"maxStak\"" },
+    ] });
+    expect(out.refused.slice(0, 2).map(row => row.field)).toEqual([
+      "Advanced field (details hidden)", "Advanced field (details hidden)",
+    ]);
+    expect(JSON.stringify(out.refused)).not.toContain("Missing.Member");
+    expect(JSON.stringify(out.refused)).not.toContain("maxStackSize");
+    expect(out.refused[2].reason).toBe("items has no field \"maxStak\"");
+    expect(out.refused[2].field).toContain("maxStak");
+  });
   test("a refusal of a misspelled Kiln field keeps its native reason and is not called Advanced", () => {
     const r = registryFixture();
     const out = parse({ ...r, refused: [{ mod: "typo", source: "content/a.json", stage: "alter", n: 0, registry: "items", id: "game:fixture_stack",

@@ -140,7 +140,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
         if (!x.registry.empty()) row["registry"] = x.registry;
         if (!x.id.empty()) row["id"] = x.id;
         if (!x.field.empty()) row["field"] = x.field;
-        if (x.raw && !x.field.empty()) row["raw"] = true;
+        if (x.raw) row["raw"] = true;
         refused.push_back(std::move(row));
     }
     doc["refused"] = std::move(refused);

@@ -450,6 +450,62 @@ void unlock_foreign_revert_is_skipped() {
     check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint32_t>(PLANK_AT + 0x50) == 123,
           "unlock revert preserves another writer's whole query slot");
 }
+void live_raw_refusals_keep_place_metadata() {
+    fresh_live();
+    // The stage already checked Advanced raw edits. Exercise their world binder, not a public live-submit bypass.
+    auto outcome = [](const std::string& path) {
+        registry::FieldOutcome fo;
+        fo.raw = path;
+        fo.raw_spec = std::make_shared<registry::FieldSpec>(*registry_schema().registry("items")->field("maxStack"));
+        registry::ChainRow row;
+        row.mod = row.who = "advanced-mod"; row.source = "content/raw.json"; row.n = 9; row.raw = path;
+        row.op.set = true; row.op.value = registry::Value::integer(20);
+        fo.chain.push_back(row);
+        return fo;
+    };
+    bind({"items", "game:material_t1_wood_logs", "raw:Missing.Member"}, outcome("Missing.Member"));
+    reg(KILN_CONTENT_ITEMS).schema.fields[0].writable = false;
+    bind({"items", "game:material_t1_wood_logs", "raw:maxStackSize"}, outcome("maxStackSize"));
+    check(g.refused.size() == 2, "both missing and nonwritable raw members produce live refusals");
+    for (const auto& refusal : g.refused) {
+        check(refusal.registry == "items" && refusal.id == "game:material_t1_wood_logs" && !refusal.field.empty() && refusal.raw,
+              "live raw binding refusals retain their place and explicit Advanced-tier marker");
+        check(refusal.mod == "advanced-mod" && refusal.source == "content/raw.json" && refusal.n == 9,
+              "raw refusal retains its author and source edit");
+    }
+    registry::Result result; result.refused = g.refused;
+    const auto report = registry::report_json(registry_schema(), result, {});
+    for (const auto& row : report.at("refused"))
+        check(row.value("raw", false) && row.at("registry") == "items" && row.at("id") == "game:material_t1_wood_logs",
+              "the serialized live refusal lets a launcher hide all raw member details");
+}
+void raw_refusal_marker_does_not_depend_on_place_text() {
+    registry::Result result; registry::Refusal refusal;
+    refusal.mod = "advanced-mod"; refusal.raw = true;
+    refusal.reason = "the member Missing.Member is not writable";
+    result.refused.push_back(refusal);
+    const auto report = registry::report_json(registry_schema(), result, {});
+    check(report.at("refused").at(0).value("raw", false),
+          "an explicit raw refusal stays raw even when its place is unavailable");
+}
+void raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not() {
+    fresh_live();
+    registry::FieldOutcome fo;
+    fo.raw = "maxStackSize";
+    auto spec = std::make_shared<registry::FieldSpec>(*registry_schema().registry("items")->field("maxStack"));
+    spec->max = 15; fo.raw_spec = spec;
+    registry::ChainRow row; row.mod = row.who = "advanced-mod";
+    row.source = "content/raw.json"; row.op.set = true; row.op.value = registry::Value::integer(20);
+    fo.chain.push_back(row);
+    bind({"items", "game:material_t1_wood_logs", "raw:maxStackSize"}, fo);
+    uint8_t bytes[4] = {};
+    check(store_effective(A(WOOD_AT), 4, bytes) && bytes[0] == 10, "an out-of-range raw edit leaves the value below it during evaluation");
+    check(!g.refused.empty() && g.refused.back().raw && g.refused.back().field == "maxStackSize",
+          "evaluation refusals also carry raw place metadata");
+    bind({"items", "game:material_t1_wood_logs", "maxStak"}, fo);
+    check(!g.refused.back().raw && g.refused.back().field == "maxStak" && g.refused.back().reason.find("not a field of the schema") != std::string::npos,
+          "an unknown Kiln field keeps its ordinary diagnostic rather than becoming Advanced");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -573,6 +629,9 @@ int main() {
         {"unlock_read_has_no_write_side_effect", unlock_read_has_no_write_side_effect},
         {"unlock_write_read_revert", unlock_write_read_revert},
         {"unlock_foreign_revert_is_skipped", unlock_foreign_revert_is_skipped},
+        {"live_raw_refusals_keep_place_metadata", live_raw_refusals_keep_place_metadata},
+        {"raw_refusal_marker_does_not_depend_on_place_text", raw_refusal_marker_does_not_depend_on_place_text},
+        {"raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not", raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

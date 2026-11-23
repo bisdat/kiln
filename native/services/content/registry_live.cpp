@@ -135,6 +135,8 @@ void refuse_rows(const registry::FieldRef& fr, const std::string& mod, const std
     if (!g.refused_keys.insert(key).second) return;
     registry::Refusal r;
     r.mod = mod, r.source = source, r.stage = stage, r.n = n;
+    r.registry = fr.registry, r.id = fr.id, r.raw = registry::is_raw_field(fr.field);
+    r.field = r.raw ? fr.field.substr(4) : fr.field;
     const bool said = why.size() >= 11 && why.compare(why.size() - 11, 11, "not applied") == 0;
     r.reason = not_exact_reason(why) ? why : fr.text() + ": " + why + (said ? "" : "; this edit was not applied");
     g.refused.push_back(std::move(r));

@@ -255,7 +255,7 @@
           },
           "raw": {
             "const": true,
-            "description": "Present when field is a raw path (the Advanced tier) rather than a Kiln field. Readers that do not show raw paths hide field for these rows only; a field name that is not raw (a misspelled or newer Kiln field) keeps its reason."
+            "description": "Present for an Advanced-tier raw-path refusal, even when its place is unavailable. Readers that do not show raw paths hide field and reason details for these rows only; a field name that is not raw (a misspelled or newer Kiln field) keeps its reason."
           }
         },
         "additionalProperties": false
