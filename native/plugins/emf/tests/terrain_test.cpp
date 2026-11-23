@@ -43,7 +43,7 @@ static KilnResult KILN_CALL cap(KilnStr name, KilnCapRow* out) {
 }
 static KilnResult query_rc = KILN_OK, break_rc = KILN_OK;
 static uint32_t break_refusal = 0, break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
-static unsigned query_calls = 0, break_calls = 0;
+static unsigned query_calls = 0, break_calls = 0, fail_after_calls = 0;
 static bool stop_on_break = false, change_session_on_break = false;
 static KilnBuildBlockInfo block{};
 static KilnVec3 captured_point{}, captured_from{}, captured_to{};
@@ -76,14 +76,17 @@ static KilnResult KILN_CALL break_box(const KilnBuildBreak* r, KilnBuildBreakRes
     masks.emplace_back(r->selection, r->selection + r->dims[0] * r->dims[1] * r->dims[2]);
     origin.assign(r->origin_mod.ptr, r->origin_mod.len);
     out->damaged = 3; out->removed = 2; out->dropped = r->flags & KILN_BUILD_BREAK_DROPS ? 1 : 0;
-    out->refusal = break_refusal;
-    out->flags = break_result_flags;
+    const bool fails = !fail_after_calls || break_calls > fail_after_calls;
+    out->refusal = fails ? break_refusal : 0;
+    out->flags = fails ? break_result_flags : uint32_t(KILN_BUILD_BREAK_R_VERIFIED);
+    if (out->refusal == KILN_BUILD_BLOCK_DAMAGE_MAP_FULL && !(out->flags & KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED))
+        out->damaged = out->removed = out->dropped = 0;
     if (stop_on_break) {
         stop_on_break = false;
         std::thread destroyer([] { terrain_world_stopping(); }); destroyer.join();
     }
     if (change_session_on_break) { change_session_on_break = false; ++session; }
-    return break_rc;
+    return fails ? break_rc : KILN_OK;
 }
 struct Answer { EmfWorld* world; uint32_t id; EmfBreakResult result; void* user; };
 static std::vector<Answer> answers;
@@ -331,6 +334,32 @@ int main() {
     CHECK(answers.back().result.status == EMF_BREAK_DONE);
     CHECK(answers.back().result.damaged == 0 && answers.back().result.removed == 0 && answers.back().result.dropped == 0);
     break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
+    // Capacity is an EMF FAILED response for this request only, never a process fault or batch failure.
+    for (uint32_t flags : {0u, uint32_t(KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED)}) {
+        r = request(); r.flags = EMF_BREAK_TERRAIN;
+        auto full = t.break_blocks(w, &r, &callback, nullptr);
+        auto later = t.break_blocks(w, &r, &callback, nullptr);
+        break_rc = KILN_ERR_UNAVAILABLE; break_refusal = 24; break_result_flags = flags;
+        before = break_calls; terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+        CHECK(break_calls == before + 2 && answers[answers.size()-2].id == full && answers.back().id == later);
+        CHECK(answers[answers.size()-2].result.status == EMF_BREAK_FAILED && answers.back().result.status == EMF_BREAK_FAILED);
+        CHECK(terrain_status_json().find("\"faulted\":false") != std::string::npos);
+        break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
+        CHECK(t.break_blocks(w, &r, &callback, nullptr));
+        terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+        CHECK(answers.back().result.status == EMF_BREAK_DONE);
+    }
+    // A later full-map sphere keeps the earlier sphere's committed counts, without latching subsequent requests.
+    r = request(); r.flags = EMF_BREAK_TERRAIN; r.height = 1;
+    CHECK(t.break_blocks(w, &r, &callback, nullptr));
+    fail_after_calls = break_calls + 1;
+    break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_DAMAGE_MAP_FULL; break_result_flags = 0;
+    terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.back().result.status == EMF_BREAK_FAILED && answers.back().result.damaged == 3 && answers.back().result.removed == 2);
+    CHECK(terrain_status_json().find("\"faulted\":false") != std::string::npos);
+    fail_after_calls = 0; break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
+    CHECK(t.break_blocks(w, &r, &callback, nullptr)); terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.back().result.status == EMF_BREAK_DONE);
     // Failure after admission: no retries; later requests in the batch fail without running.
     r = request(); auto failed = t.break_blocks(w, &r, &callback, nullptr); auto skipped = t.break_blocks(w, &r, &callback, nullptr);
     break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_SYMBOL_MISSING; before = break_calls;

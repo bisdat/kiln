@@ -122,6 +122,7 @@ Kiln.BlockQueryResult.Refusal.init -> void
 Kiln.BlockRefusal
 Kiln.BlockRefusal.Base = 20 -> Kiln.BlockRefusal
 Kiln.BlockRefusal.Canceled = 23 -> Kiln.BlockRefusal
+Kiln.BlockRefusal.DamageMapFull = 24 -> Kiln.BlockRefusal
 Kiln.BlockRefusal.Faulted = 21 -> Kiln.BlockRefusal
 Kiln.BlockRefusal.InvalidArgument = 16 -> Kiln.BlockRefusal
 Kiln.BlockRefusal.NoSession = 9 -> Kiln.BlockRefusal

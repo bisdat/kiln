@@ -15,7 +15,7 @@ int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknow
 bool writer_verified=true,corrupt_unselected=false;
 std::map<Key,uint8_t> damage;
 bool get_damage(void*,const int32_t* c,uint8_t,uint8_t* out){*out=damage[{c[0],c[1],c[2]}];return true;}
-bool add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return true;}
+uint32_t add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return KILN_BUILD_BLOCK_NONE;}
 KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t) {
     ++reads; if(!loaded) return KILN_ERR_UNAVAILABLE;
     size_t i=0; for(uint32_t z=0;z<d[2];++z) for(uint32_t y=0;y<d[1];++y) for(uint32_t x=0;x<d[0];++x)
@@ -155,7 +155,22 @@ int main() {
     for(int x=0;x<65536;++x)admitted=terrain.add(100,{x,0,0},2,1,20,accumulated) && admitted;
     check(admitted,"terrain map admits its full documented capacity");
     check(!terrain.add(101,{-1,0,0},2,1,20,accumulated),"full live terrain map reports failure instead of silently evicting damage");
-    check(terrain.add(101,{0,0,0},2,1,20,accumulated) && accumulated==2,"full terrain map still accumulates existing cells");
+    // Exercise the real full accumulator through the production break loop, not only its helper.
+    s=source();s.context=&terrain;s.mining_factor=1;
+    s.damage_get=[](void* p,const int32_t* c,uint8_t m,uint8_t* out){*out=static_cast<TerrainDamage*>(p)->get(101,{c[0],c[1],c[2]},m);return true;};
+    s.damage_add=[](void* p,const int32_t* c,uint8_t m,uint8_t n,double expiry,uint8_t* out)->uint32_t{bool full=false;return static_cast<TerrainDamage*>(p)->add(101,{c[0],c[1],c[2]},m,n,expiry,*out,&full)?KILN_BUILD_BLOCK_NONE:full?KILN_BUILD_BLOCK_DAMAGE_MAP_FULL:KILN_BUILD_BLOCK_FAULTED;};
+    q=request();q.flags=KILN_BUILD_BREAK_TERRAIN;q.dims[0]=1;q.origin[0]=-1;q.damage[2]=1;
+    cells.clear();cells[{-1,0,0}]=KILN_VOXEL_MAKE(2,255);before=writes;
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && r.refusal==24,"full terrain damage map is a capacity refusal, not a fault");
+    check(!(r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) && r.damaged==0 && writes==before+1 && cells[{-1,0,0}]!=0,
+        "first-cell capacity refusal has no changes and only the policy dry run");
+    q.origin[0]=0;cells[{0,0,0}]=KILN_VOXEL_MAKE(2,255);
+    check(break_box(s,&q,&r)==KILN_OK && r.damaged==1,"capacity refusal does not disable later damage to tracked cells");
+    check(terrain.add(101,{0,0,0},2,1,20,accumulated) && accumulated==4,"full terrain map still accumulates existing cells");
+    q.origin[0]=65535;q.dims[0]=2;cells[{65535,0,0}]=cells[{65536,0,0}]=KILN_VOXEL_MAKE(2,255);
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && r.refusal==KILN_BUILD_BLOCK_DAMAGE_MAP_FULL && r.damaged==1 &&
+        (r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) && terrain.get(101,{65535,0,0},2)==3,
+        "capacity refusal preserves earlier damage and honestly reports partial state");
     check(terrain.add(20000000101LL,{-1,0,0},2,1,20,accumulated) && accumulated==1,"expired terrain entries release map capacity");
     std::printf("block ops: %d passed, %d failed\n",total-fail,fail);return fail?1:0;
 }

@@ -18,7 +18,8 @@ public:
         if(now>=it->second.expires || material!=it->second.material){cells_.erase(it);return 0;}
         return it->second.damage;
     }
-    bool add(int64_t now,const std::array<int32_t,3>& c,uint8_t material,uint8_t increment,double seconds,uint8_t& out){
+    bool add(int64_t now,const std::array<int32_t,3>& c,uint8_t material,uint8_t increment,double seconds,uint8_t& out,bool* full=nullptr){
+        if(full)*full=false;
         if(now<0 || !std::isfinite(seconds) || seconds<=0 || seconds>86400)return false;
         const double ns=seconds*1e9;
         if(ns<1)return false;
@@ -28,7 +29,7 @@ public:
         if(!increment){out=old;return true;}
         if(cells_.size()>=65536 && cells_.find(c)==cells_.end()){
             for(auto i=cells_.begin();i!=cells_.end();)if(now>=i->second.expires)i=cells_.erase(i);else ++i;
-            if(cells_.size()>=65536)return false;
+            if(cells_.size()>=65536){if(full)*full=true;return false;}
         }
         out=static_cast<uint8_t>(std::min(255,static_cast<int>(old)+increment));
         cells_[c]={material,out,now+duration};return true;

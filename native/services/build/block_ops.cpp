@@ -227,9 +227,11 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
             const int32_t c[3]={q->origin[0]+static_cast<int32_t>(x),q->origin[1]+static_cast<int32_t>(y),q->origin[2]+static_cast<int32_t>(z)};
             uint8_t old_damage=0,new_damage=0;const auto m=KILN_VOXEL_MATERIAL(before[i]);
             if(!s.damage_get(s.context,c,m,&old_damage))return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            const auto why=s.damage_add(s.context,c,m,increments[i],q->terrain_heal_seconds==0?20:q->terrain_heal_seconds,&new_damage);
+            // Capacity admission never enters a mutator. Retain uncertainty from any earlier hits in this box.
+            if(why==KILN_BUILD_BLOCK_DAMAGE_MAP_FULL)return fail(KILN_ERR_UNAVAILABLE,why);
             r.flags|=KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
-            if(!s.damage_add(s.context,c,m,increments[i],q->terrain_heal_seconds==0?20:q->terrain_heal_seconds,&new_damage))
-                return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            if(why!=KILN_BUILD_BLOCK_NONE)return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
             if(new_damage>old_damage)++r.damaged;
             mask[i]=new_damage==255?1:0;
             if(mask[i])++selected;

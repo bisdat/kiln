@@ -13,6 +13,8 @@ public enum BlockRefusal
     None = 0, SymbolMissing = 1, ServiceMissing = 2, ServiceOlder = 3, WrongSide = 4, Offline = 8, NoSession = 9,
     InvalidArgument = 16, WrongThread = 17, NotLoaded = 18, Zone = 19, Base = 20, Faulted = 21, Unverified = 22,
     Canceled = 23,
+    /// <summary>The terrain damage map is full. Retry after damage heals; this is not an engine fault.</summary>
+    DamageMapFull = 24,
 }
 /// <summary>Additional terrain hits for a wall search. Since 0.2.0-dev.30.6.</summary>
 [Flags]
@@ -104,6 +106,7 @@ internal static class BlockReasons
         BlockRefusal.Faulted => "the operation faulted; partial changes may remain; restart required before retrying",
         BlockRefusal.Unverified => "the requested edit could not be verified; partial or neighbouring changes may remain",
         BlockRefusal.Canceled => "a BuildEditingEvent handler canceled the edit",
+        BlockRefusal.DamageMapFull => "the terrain damage map is full; retry after damage heals; earlier hits may remain",
         _ => r.ToString(),
     };
 }

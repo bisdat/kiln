@@ -258,6 +258,7 @@ void terrain_server_pre() {
             KilnBuildGrid grid{}; grid.size = sizeof grid;
             const char* unavailable = mode_unavailable(d.request.spec.flags);
             bool ok = !unavailable && S.build->grid(&grid) == KILN_OK;
+            bool capacity = false;
             if (world_ended(expected)) d.result.status = EMF_BREAK_CANCELLED;
             std::string mod = "emf:" + (d.request.mod ? d.request.mod->id : std::string("unknown"));
             for (const auto& s : d.request.spheres) {
@@ -286,15 +287,17 @@ void terrain_server_pre() {
                 ok = rc == KILN_OK && result.refusal == KILN_BUILD_BLOCK_NONE;
                 const bool partial = (result.flags & KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) &&
                                      (!ok || !(result.flags & KILN_BUILD_BREAK_R_VERIFIED));
-                if (partial || result.refusal == KILN_BUILD_BLOCK_FAULTED || result.refusal == KILN_BUILD_BLOCK_UNVERIFIED) {
+                capacity = result.refusal == KILN_BUILD_BLOCK_DAMAGE_MAP_FULL;
+                if (!capacity && (partial || result.refusal == KILN_BUILD_BLOCK_FAULTED || result.refusal == KILN_BUILD_BLOCK_UNVERIFIED)) {
                     { std::lock_guard lock(g_mutex); g_faulted = true; if (partial) ++g_partial; }
                     refuse(d.request.mod, "break_blocks", "a write may have partially committed; reported removals are a lower bound; not retried", true);
                     ok = false;
                 }
             }
             if (!ok && d.result.status == EMF_BREAK_DONE) {
-                d.result.status = EMF_BREAK_FAILED; failed = true;
-                refuse(d.request.mod, "break_blocks", unavailable ? unavailable : "kiln.build refused the queued break; not retried", true);
+                d.result.status = EMF_BREAK_FAILED; failed = !capacity;
+                refuse(d.request.mod, "break_blocks", capacity ? "terrain damage map is full; this request failed; retry after damage heals" :
+                    unavailable ? unavailable : "kiln.build refused the queued break; not retried", true);
             }
         }
         done.push_back(std::move(d));

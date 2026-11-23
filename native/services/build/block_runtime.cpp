@@ -79,13 +79,17 @@ bool damage_get(void* p,const int32_t* c,uint8_t material,uint8_t* out) {
     if(block_damage_read(damage_get_fn,ctx.damage_store,c,out))return true;
     damage_faulted=true;F.write=false;set_detail("building damage read faulted; restart required");return false;
 }
-bool damage_add(void* p,const int32_t* c,uint8_t material,uint8_t amount,double expiry,uint8_t* out) {
-    if(!clock_valid || damage_faulted)return false;
-    if(material<128)return terrain_damage.add(now_ns,{c[0],c[1],c[2]},material,amount,expiry,*out);
+uint32_t damage_add(void* p,const int32_t* c,uint8_t material,uint8_t amount,double expiry,uint8_t* out) {
+    if(!clock_valid || damage_faulted)return KILN_BUILD_BLOCK_FAULTED;
+    if(material<128) {
+        bool full=false;
+        if(terrain_damage.add(now_ns,{c[0],c[1],c[2]},material,amount,expiry,*out,&full))return KILN_BUILD_BLOCK_NONE;
+        return full?KILN_BUILD_BLOCK_DAMAGE_MAP_FULL:KILN_BUILD_BLOCK_FAULTED;
+    }
     const auto& ctx=*static_cast<Context*>(p);
-    if(!ctx.damage_store || !damage_on || c[0]<0 || c[1]<0 || c[2]<0)return false;
-    if(block_damage_apply(damage_add_fn,ctx.damage_store,now_ns,clock_tick,c,amount,out))return true;
-    damage_faulted=true;F.write=false;set_detail("building damage mutation faulted; restart required");return false;
+    if(!ctx.damage_store || !damage_on || c[0]<0 || c[1]<0 || c[2]<0)return KILN_BUILD_BLOCK_FAULTED;
+    if(block_damage_apply(damage_add_fn,ctx.damage_store,now_ns,clock_tick,c,amount,out))return KILN_BUILD_BLOCK_NONE;
+    damage_faulted=true;F.write=false;set_detail("building damage mutation faulted; restart required");return KILN_BUILD_BLOCK_FAULTED;
 }
 KilnResult prepare(blocks::Source& src,Context& c,uint32_t& why) {
     if(!tick_thread()){why=KILN_BUILD_BLOCK_WRONG_THREAD;return KILN_ERR_WRONG_THREAD;}
