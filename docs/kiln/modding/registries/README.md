@@ -62,7 +62,7 @@ The class attribute is constant metadata; Kiln reads it without running the mod.
 | `GameStart` | A retained author instance, once per Add/Alter/Final pass at resources-ready. Global settings only. It is not the transient `OnBoot` instance. |
 | `ModLoad` | Runtime instance after `OnLoad`, once the base registry exists. Global settings only, even when a world already exists. |
 | `WorldLoad` | Runtime instance for each native world token, after that world's save settings are bound. |
-| `HotReload` | Replacement runtime instance, after the old owner's live changes are removed. |
+| `HotReload` | Replacement runtime instance, after the old owner's live changes are removed. When declared, it replaces `ModLoad` on reload; the two points never both run for the same replacement. |
 | `Manual` | Explicit `Registry.Change`, not an automatic class flag. Requires an active world. |
 
 GameStart authors get the registry context, **not cross-mod runtime exports**. Declared dependencies still order the edits:
@@ -75,6 +75,10 @@ Alter; `registry.Final(...)` and `registry.Items.Final(pattern, ...)` explicitly
 Add+Alter view, never another mod's Final commit. A callback's own pending writes are projected into its typed read view;
 they are submitted only after successful return. A throwing callback submits none of that turn's buffered edits.
 `Select(pattern)` returns entries by Kiln id; list properties use the generated clear/append/remove/index APIs.
+All three passes are invoked even though entry creation is not yet exposed. Runtime points wait for the host tick;
+native resources-ready callbacks never execute runtime authors inline. Layers from distinct declared points compose:
+for example, a WorldLoad append stacks on a retained GameStart append. Prefer absolute assignments or list replacement
+when the same intended value is authored at several points.
 
 Contexts carry `EntryPoint`, `Phase`, `World` (Kiln token, kind and bound save id), and `Identity`. Code, point/pass,
 world identity and settings actually observed in that callback contribute to Identity; no executable plan cache is used.

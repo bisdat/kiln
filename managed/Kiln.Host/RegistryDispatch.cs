@@ -105,7 +105,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         {
             var pending = _runtime.Where(r => r.Pending && r.Context.Alive).ToArray();
             foreach (var record in pending) record.Pending = false;
-            Apply(pending, RegistryEntryPoint.ModLoad, static r => (r.Points & RegistryEntryPoint.ModLoad) != 0);
+            Apply(pending, RegistryEntryPoint.ModLoad, static r => (r.Points & RegistryEntryPoint.ModLoad) != 0 &&
+                (!r.Reload || (r.Points & RegistryEntryPoint.HotReload) == 0));
             Apply(pending, RegistryEntryPoint.HotReload, static r => r.Reload && (r.Points & RegistryEntryPoint.HotReload) != 0);
         }
         finally { _flushing = false; }

@@ -93,7 +93,7 @@ public sealed class RegistryDispatchTests : ModsFixture
         var replacement = Owner(native, "test"); var points = new List<RegistryEntryPoint>();
         dispatch.Loaded(new Author(c => { points.Add(c.EntryPoint); Assert.Equal("10", c.ReadValue("items", "game:wood", "maxStack")); }), replacement, Root, true);
         dispatch.FlushLoads();
-        Assert.Equal(3, points.Count(x => x == RegistryEntryPoint.HotReload));
+        Assert.Equal(new[] { RegistryEntryPoint.HotReload, RegistryEntryPoint.HotReload, RegistryEntryPoint.HotReload }, points);
         Assert.Equal(10, native.Value); replacement.Retire();
     }
     [Fact]
