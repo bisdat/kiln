@@ -161,6 +161,10 @@ def record_problems(root):
                            "(verified-regmap-*.json), or kiln.content tells every player to re-prove their own server")
             if rec.get("verified") is not True:
                 continue
+            want = {"server": ("lab",), "client": ("mirror", "lab")}[side]
+            if rec.get("provenBy") not in want:
+                out.append(f"{name}: a verified {side} record is proven by {' or '.join(want)} (kilnctl regproof writes provenBy), "
+                           f"not {rec.get('provenBy')!r}: a reflection-only candidate proves nothing")
             have = rec.get("regmapDigest")
             if not have:
                 out.append(f"{name}: a verified record names no regmapDigest (kiln.content enables none of its rows)")

@@ -69,7 +69,8 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
   "layouts": { "keen::ItemInfo": "0x07009d37" },          // the reflection's layout hash of each root type
   "rows": { "items.maxStack": "ok" },                      // ok | changed | unproven | unmapped
   "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
-  "kinds": { "items.manaCost": { "sint32": "proven (141 entries on this build)", "float": "none on this build" } },
+  "kinds": { "items.manaCost": { "sint32": "proven (138 entries on this build)", "float": "none on this build",
+                                 "notInWorld": "3 entries not in the lab's world (no edit reaches them on this build)" } },
   "regmapDigest": "<sha256>",                              // the regmap/common it was proven on (rows enabled only on it)
   "provenBy": "lab",                                       // lab (kilnctl regproof on lab evidence) | mirror (client, --mirror)
   "aliases": { "renames": [], "removals": [], "suffixes": [] } }

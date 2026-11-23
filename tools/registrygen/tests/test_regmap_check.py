@@ -279,7 +279,7 @@ class Records(unittest.TestCase):
         t = Tree()
         self.addCleanup(t.close)
         (t.root / "regmap" / "server").mkdir()
-        rec = {"regmap": 1, "side": "server", "exeSha256": "ab" * 32, "verified": True, "rows": {}}
+        rec = {"regmap": 1, "side": "server", "exeSha256": "ab" * 32, "verified": True, "rows": {}, "provenBy": "lab"}
         rec.update(record)
         (t.root / "regmap" / "server" / f"{'ab' * 32}.json").write_text(json.dumps(rec))
         return t
@@ -329,6 +329,16 @@ class Records(unittest.TestCase):
         problems = rc.record_problems(t.root)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("markedLocally", problems[0])
+
+    def test_a_verified_server_record_is_lab_proven(self):
+        # review3 S5: the gate copy's reflection-only candidate (verified, every row ok) must never be committed as a proof
+        t = Tree()
+        self.addCleanup(t.close)
+        for proven_by in (None, "mirror"):
+            t = self.tree_with_record(regmapDigest=rc.common_digest(t.root), provenBy=proven_by)
+            problems = rc.record_problems(t.root)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn("provenBy", problems[0])
 
     def test_an_unverified_record_enables_nothing_and_passes(self):
         t = self.tree_with_record(verified=False, regmapDigest="00" * 32)
