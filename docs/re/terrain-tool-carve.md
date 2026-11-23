@@ -23,6 +23,18 @@ outside the kernel's mutation branch. Building removal is not suppressed by zero
 building helper must be skipped. It returns a success byte to the enclosing operation, so the scoped suppression must
 return 1 without calling its continuation.
 
+The removal helper always returns 1 (S `0x2284a0` [dec]): it runs the wrapper once as a preview into a local report and
+commits only when that report's total is above 1e-20, so the impact's result does not say whether terrain was removed.
+The kernel adds each carved cell's fraction to the report the descriptor names (`+0x80`): per material at report `+0`
+(float array) and in total at report `+0x18` (S `0xa3aab9` / C `0xa901b9`, `rdi` the descriptor). Kiln's action trace
+(0.2.0-dev.30.8, kiln#133) reads that total before and after the filtered kernel, and notes whether an allowed cell kept
+a positive coefficient. It takes both offsets only from sigdb: `@tools/TerrainCarveKernel.report` (scoped in the
+kernel, `sigdb/symbols/server.d/tools_terrain.json`) captures `tools/carve.report` and `tools/carve.report_total` twice
+each from that accumulation on both executables (`native/services/tools/tests/terrain_report_sigdb_test.py`);
+unresolved, disagreeing, or naming the coefficient table, the trace leaves a stroke unmeasured. With the tool damage
+(INT32_MAX per hardness) a coefficient is `healthPoints / damage`, far above the kernel's 1e-20 floor, so an allowed,
+breakable cell under the brush is removed whole.
+
 The terrain brush descriptor occupies 0x90 bytes. Its coefficient pointer is at +0x70, its u64 coefficient count at
 +0x78, its native report pointer at +0x80, and its final flag at +0x88. The native wrapper constructs the descriptor
 on its stack; the kernel reads it synchronously. Geometry, radius, origin, rotation, direction, flags and report pointer

@@ -255,7 +255,7 @@ void hk_grid(void* state){
   if(!load(state,0x90b80,&data)||!load(state,0x90b88,&count)||count>4096||(!data&&count))throw 1;
   std::vector<View> rows(static_cast<size_t>(count));
   if(count&&!read(rows.data(),reinterpret_cast<void*>(data),rows.size()*view_bytes))throw 1;
-  merge(&rows,stock);if(!replace_rows(state,rows,selected))throw 1;
+  merge(&rows,stock);order_with_sources(&rows);if(!replace_rows(state,rows,selected))throw 1;
   modified_state=stock.empty()?nullptr:state;
   draw_grid(state,&stock);
  }catch(...){ui_ok.store(false);CapReporter{}.fail(UiCap,"a dye palette view faulted; source rows are disabled until restart");}

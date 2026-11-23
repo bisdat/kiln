@@ -62,8 +62,8 @@ void tick(EmfWorld* w, void*) {
 }  // namespace
 
 extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* table) {
-    static_assert(EMF_API_VERSION == 47 && sizeof(EmfApi) == 1160);
-    if (!table || table->version != 47 || table->size != sizeof(EmfApi)) return false;
+    static_assert(EMF_API_VERSION == 48 && sizeof(EmfApi) == 1160);
+    if (!table || table->version != 48 || table->size != sizeof(EmfApi)) return false;
     api = table;
     g_main = GetCurrentThreadId();  // EMF loads its mods in on_ready, on the game's main thread
     const bool p = api->register_program("emf_client_probe_sys", EMF_WORLD_CLIENT, &program, nullptr);

@@ -44,6 +44,10 @@ the order the tool lists them (its brush list is a fixed 16-row array). Each bru
 `Building_Overgrowth_Shape_Small`; its radius is that item's own impact config `0x5258131e` (BrushRadius, the value the
 tool's programs read), written as the item rule `impactValues.0x5258131e`. `Identity = BlockIdentity.Legacy(guid)` or
 `Legacy(itemId)` preserves an existing saved item; `Was` preserves the derived identity after a Kiln key rename.
+An input bound to a Remove does not ask the game's build cursor for a selected building material
+(`equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction` / `...OnSecondaryAction` false on each brush): the base
+brush asks on primary, for its Add, and the game refuses the stroke while that check fails. An Add keeps the base's
+setting.
 `Icon` on the root accepts a PNG in the mod's folder.
 
 The pool is an immutable **Kiln policy subset**, not a new game-visible pool row. Root and brush items reference the
@@ -79,7 +83,7 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 
 | Capability | Meaning | Refusal |
 |---|---|---|
-| `tools.actions` | The complete authoritative action pipeline is qualified. | Missing required hook/context, offline or no session. |
+| `tools.actions` | The complete authoritative action pipeline is qualified. Its text (and that of `tools.actions.remove` / `tools.actions.add`) ends with how many tool programs this process bound, the last stroke's state and every stroke counter ("Reading the action trace"). | Missing required hook/context, offline or no session. |
 | `tools.material_lookup` | The installed invocation-scoped lookup refuses terrain cells outside an Add policy's material pool. | Missing lookup hook, offline or hooks disabled; supported on client and server. |
 | `tools.material_picker` | Terrain group2 is filtered only when the owned held-tool observation and the current call's resolved item agree; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
 | `tools.material_snapshot` | A separate per-player backpack/magic-chest observation producer is qualified. | Currently unavailable: aggregate selector counts are never fabricated into two sources. |
@@ -130,23 +134,95 @@ tools: brush picker: patched (the family's brushes were written into the picker)
 
 No line at all while the tool's picker is open means the qualified frame drawer never reached this call.
 
+### Reading the action trace
+
+Since 0.2.0-dev.30.8 (kiln#133) every attempted stroke of a tool's Remove or Add action is traced where the game decides
+it: in the process that runs the **server world**. That is your own game when you play alone or host, and the dedicated
+server when you join one; a joined client's own trace says nothing about the stroke. In the impact hook the trace
+only counts (relaxed atomics and a thread-local tally of what the terrain kernel saw; the trace itself takes no
+allocation, lock or log). The tools service's server tick turns a change of state into **one** `kiln.log` line, at most
+once a second, and keeps the last state and the counters on the `tools.actions`, `tools.actions.remove` and
+`tools.actions.add` capability text (`last stroke: removed; strokes: removed 4, ...`; `Capabilities.Why(...)`,
+`kiln/state/capabilities.json`). When states change faster than that, the line names the state now and how many
+changes it covers. A process without a bound tool family traces nothing: vanilla terraforming passes through unread.
+
+Each process that publishes a family logs it once, when the family's blocks are ready:
+
+```text
+tools: Stone tool: actions bound: primary Add (program 0x5a1c03e2), secondary Remove (program 0x1d0e8c47), 1 brushes; strokes are traced on tools.actions
+```
+
+and every capability text above says `tool programs bound here: 2` (two programs per family with both actions). On the
+server-world process, `tool programs bound here: 0` means the family was never published there: look for a `blocks:`
+error at content ready, or a mod missing on that side. A stroke then looks like this:
+
+```text
+tools: action attempts: removed (allowed terrain was removed) (program 0x1d0e8c47, UsedItem 0x8b3f0d11, radius 0.50 m, game result 0 done); strokes: removed 4; other programs 2
+```
+
+The parenthesis names the last stroke's program, its `UsedItem` and brush radius (when it got that far) and the game's
+own result: code 0 with `done` (the game's building operation finished) or `not done` (it stopped, for example because
+its building cursor refused the stroke), 6 cancelled, 0x11 internal, 0x18 missing argument. "other programs" counts
+terrain impacts of programs no family binds here (pickaxes, explosions, vanilla Overgrowth): they never change the
+state.
+
+| State | What it means | Look at |
+|---|---|---|
+| `unreadable` | A terrain impact's context could not be read while a family is bound; it was refused. | A crash report next to it. |
+| `closed` / `family removed` | The service is shutting down, or the family was removed as the stroke started. | Mod reloads. |
+| `faulted` / `continuation fault` | A stroke faulted inside the game's terraform; tool actions stay off until the game restarts. | The crash report; `tools.actions` says `faulted`. |
+| `not ready` | A hook the action needs is not installed. | `tools.actions.remove` / `.add` reason. |
+| `no access` | The impact has no program access, program context or build zones. | A game update. |
+| `not the server world` | The impact ran in another world than the authoritative server world, or none runs yet. | Possible between a world's start and its first tick; the game runs impacts only in the server world, so anything else is worth a report. |
+| `layout` / `mode marker` / `aliased` | The program's arguments are not the tool program's (another mod rewrote it). | Other mods editing impact programs. |
+| `no actor` | The impact has no acting player. | Only player strokes are admitted. |
+| `no UsedItem` | The action that spawned the impact carried no item. | The brush's sequences (another mod replacing them). |
+| `radius out of range` / `position` | The brush radius is not 0.25–8 m, or the stroke's position is out of range. | The brush's `impactValues.0x5258131e`. |
+| `not a family item` | `UsedItem` (shown) is neither the tool nor one of its brushes. | Another family's brush bound to this program. |
+| `radius mismatch` | `UsedItem` belongs to the family, but no brush has the radius the impact carries (shown). | Another mod editing the brush's radius. |
+| `outside base` | The whole brush is not inside one base area. | Stand inside a Flame Altar area, away from its edge. |
+| `no memory` | Kiln could not allocate or lock what the stroke needs. | Memory pressure. |
+| `game stopped` | Admitted and run, but the game's terraform stopped before carving (a Remove) or did not finish (an Add, `game result 0 not done` or another code): its own cursor (no permission, too far, enemies nearby, missing materials), range or zone checks. | The building cursor's hint while aiming; the game result. |
+| `no undo record` | Inside a base the game needs a per-player undo record for the stroke and none could be created, so it cancelled the stroke. | The game's undo history; mods that change it. |
+| `not removable` | The brush reached the terrain, but no cell the action allows can be mined by it (all its coefficients are zero). | The action's `RemoveMaterials` against the terrain cell ids (unbreakable or unknown cells). |
+| `nothing matched` | The brush reached the terrain, but none of its allowed cells were under it. | What was under the brush; aim at an allowed material. |
+| `carved` | The brush reached the terrain; how much it removed could not be read (the kernel's report layout did not resolve from sigdb, or the game named no report). | Whether the terrain changed. |
+| `removed` | Allowed terrain was removed. | Yields and undo are the game's. |
+| `added` | The game finished an Add stroke (`game result 0 done`). | The game's payment and history. |
+
+No line at all on the server-world process while strokes are attempted (and `tool programs bound here` is above 0)
+means the tool's program never reached the game's terrain impact there: the action did not start (the building
+cursor refused the input), or its sequence spawned another program.
+
+Managed code reads this trace only through the capability text in this release; typed access to the counters
+(`KilnToolsStatus` already carries the totals `dispatched` and `refused`) comes with a later mod API version.
+
 **Still unavailable:** the per-actor producer that separates backpack and magic-chest observations. Static qualification,
 filtering fixtures and native runner tests do not establish actual menu rendering, network behavior or the complete
-real-game tool. **Not yet seen in the real game** (0.2.0-dev.30.7 is the first release that does each of these):
-the picker drawing a family's rows, the rows' icons and names, selecting a brush from them, a stroke with a selected
-brush (the family's Remove/Add action and its radius, `impactValues.0x5258131e`, written for the first time), and the
-brushes' terrain model (`equipment.terrainVoxelObject`, resolved for the first time; vanilla Overgrowth shapes carry
-none, only the game's terrain blueprints do). The item-presentation constructor's traced caller uses the selected
-hotbar model, which need not be the running action's item; its last item must never be cached as evidence of what the
-player holds.
+real-game tool. **Seen in a real game** (0.2.0-dev.30.7): the picker lists a family's brushes. **Not yet seen in the
+real game:** a stroke that changes terrain. Until 0.2.0-dev.30.8 every stroke was refused before the game's terraform
+ran (the binding compared the wrong pointer with the server world), and a Remove on primary also failed the game's
+material check; 0.2.0-dev.30.8 is the first release whose strokes can reach the terrain. Unseen with it: the action
+trace's own lines for a real stroke (its states, the removal report it reads and the result's `done` byte are checked
+statically and on host fixtures only), the sound and effect a Remove on primary plays (the base brush's primary is its
+Add), the brush radius (`impactValues.0x5258131e`), yields, undo, Add payment, and the brushes' terrain model
+(`equipment.terrainVoxelObject`; vanilla Overgrowth shapes carry none, only the game's terrain blueprints do: with one,
+the server cursor's material check takes its voxel-object branch instead of the terraformer one (docs/re/rules.md 2.1),
+which matters only to an input that checks materials, an Add). The item-presentation constructor's traced caller uses
+the selected hotbar model, which need not be the running action's item; its last item must never be cached as
+evidence of what the player holds.
 
 ## Checks without running the game
 
 `native/services/tools/tests/test-ammo.sh` runs the presentation fixtures on the host, among them the brush-frame
-adapter (`brush_frame.cpp`: rows, declared order, every refusal) and its trace (`brush_trace.cpp`). The managed
-`ToolCompilerContentTests` (Kiln.Blocks.Tests) check what `ToolCompiler` emits for a removal-only tool with three
-brushes; kiln.content's host tests check item tags and voxel models (`itemtag_test.cpp`) and served terrain models
-(`refs_test.cpp`).
+adapter (`brush_frame.cpp`: rows, declared order, every refusal) and its trace (`brush_trace.cpp`). `test-impact.sh`
+runs the action trace (`action_trace.cpp`: names, stroke outcomes, publication once per change) and the impact binding
+over the engine's iterator layout, every exit recorded (`impact_dispatch_test.cpp`); `test-terrain-carve.sh` checks
+what the filtered kernel notes for a stroke (minable allowed cells, the removal report, a stroke left unmeasured without
+its layout). `terrain_report_sigdb_test.py --server <exe> --client <exe>` resolves the report layout on both game
+executables (read only). The managed `ToolCompilerContentTests` (Kiln.Blocks.Tests) check what `ToolCompiler` emits for
+a removal-only tool with three brushes; kiln.content's host tests check item tags and voxel models (`itemtag_test.cpp`)
+and served terrain models (`refs_test.cpp`).
 
 `test-tool-content.sh` runs that emitted content through kiln.content's own resolvers with the client's real
 reflection and game data: definition fields and references, item rules, itemdata rules. Its negative controls are the
@@ -171,6 +247,16 @@ entries with backpack-only and magic-chest-only supplies, empty stock, switching
 selection after leaving/rejoining a world, paid placement/removal and the game's normal/remapped undo.
 
 ## Changelog
+
+- **0.2.0-dev.30.8:** a tool stroke reaches the game's terraform. The impact binding took the impact iterator's first
+  qword, the engine's program context, for the world, so every stroke was refused as "not the server world"; it now
+  reads the world from that context's job. A Remove action no longer asks the game's build cursor for a selected
+  building material on its input (the base brush asks on primary, for its Add), which refused every Remove bound to
+  primary. Every tool stroke is traced: one `kiln.log` line per change of state and the `tools.actions` capability
+  text, which also says how many tool programs the process bound ("Reading the action trace"); each published family
+  logs its programs once. An Add counts as added only when the game finished it (a cursor refusal also returns code 0),
+  and the removal report the trace reads is captured from the game's kernel by sigdb on both builds. Thanks bisdat
+  (kiln#133).
 
 - **0.2.0-dev.30.7:** the picker lists a family's own brushes (the game's query scans only its data's
   `terraformingTools` list, so they were never found); brush radii reach the game (`impactValues.0x5258131e`); no root

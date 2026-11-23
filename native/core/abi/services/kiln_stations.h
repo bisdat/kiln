@@ -480,8 +480,9 @@ typedef struct KilnStationsApi {
     /* ---- the crafting menu's snapshot for Kiln clients, GitHub #68 step 2 (header.size tells whether these are here) ---- */
     /* A Kiln client's snapshot of the crafting stock its crafting menu may count: per item, the player's bag, the base's
      * Magic chests and the opted-in stations' Outputs, for the items craft_items names. count 0 clears it (the game's own
-     * counts again). Any thread. The server's payment never reads it. KILN_ERR_INVALID_ARGUMENT: count over
-     * KILN_STATIONS_MAX_CRAFT_STOCK, or rows null with count set. */
+     * counts again). A row whose count is 0 names its item with none: the snapshot stays on and that item keeps the game's
+     * counts (since 0.2.0-dev.30.8; before, such a row was dropped). Any thread. The server's payment never reads it.
+     * KILN_ERR_INVALID_ARGUMENT: count over KILN_STATIONS_MAX_CRAFT_STOCK, or rows null with count set. */
     KilnResult(KILN_CALL* set_craft_stock)(const KilnStationStack* rows, uint32_t count);
     /* The items a Kiln client must have counted to raise a recipe's count with station outputs: every input (an item, or
      * every option of a category input) of every recipe that takes one of `items` (the lent outputs), and `items`
