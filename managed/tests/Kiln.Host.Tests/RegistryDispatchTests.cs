@@ -114,6 +114,57 @@ public sealed class RegistryDispatchTests : ModsFixture
         native.World = 0;
         Assert.Equal(4u, RegistryRuntime.Manual!(owner, _ => throw new Exception("must not run")).Outcome);
     }
+    [RegistryEntryPoints(RegistryEntryPoint.ModLoad | RegistryEntryPoint.WorldLoad)]
+    private sealed class WorldAuthor(Action<RegistryContext> callback) : Mod
+    {
+        public override void OnRegistry(RegistryContext context) => callback(context);
+    }
+    [Fact]
+    public void AFinalFaultRevertsOnlyTheCurrentPointsEarlierCommits()
+    {
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry { World = 0 }; using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            var owner = Owner(native, "faulted-point");
+            dispatch.Loaded(new WorldAuthor(c => {
+                if (c.Phase == RegistryPhase.Alter) Edit(c, c.EntryPoint == RegistryEntryPoint.ModLoad ? 20 : 50);
+                if (c.EntryPoint == RegistryEntryPoint.WorldLoad && c.Phase == RegistryPhase.Final)
+                    throw new InvalidOperationException("final pass failed");
+            }), owner, Root, false);
+            dispatch.FlushLoads(); Assert.Equal(20, native.Value);
+            native.World = 1; WorldConfigs.Announce(Path.Combine(DataDir, "world-a"));
+            dispatch.FlushLoads();
+            Assert.Equal(20, native.Value);
+            owner.Retire(); Assert.Equal(10, native.Value);
+        }
+        finally { WorldConfigs.Reset(); }
+    }
+    [Fact]
+    public void AFailedPointIsRetriedForALaterWorld()
+    {
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry { World = 0 }; using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            var owner = Owner(native, "retry-point"); var calls = 0; var fail = true;
+            dispatch.Loaded(new WorldAuthor(c => {
+                if (c.EntryPoint != RegistryEntryPoint.WorldLoad) return;
+                ++calls;
+                if (fail) { fail = false; throw new InvalidOperationException("first world failed"); }
+                if (c.Phase == RegistryPhase.Alter) Edit(c, 60);
+            }), owner, Root, false);
+            dispatch.FlushLoads();
+            native.World = 1; WorldConfigs.Announce(Path.Combine(DataDir, "world-a")); dispatch.FlushLoads();
+            Assert.Equal(1, calls); Assert.Equal(10, native.Value);
+            native.World = 2; WorldConfigs.Announce(Path.Combine(DataDir, "world-b")); dispatch.FlushLoads();
+            Assert.Equal(4, calls); Assert.Equal(60, native.Value);
+            owner.Retire();
+        }
+        finally { WorldConfigs.Reset(); }
+    }
     [Fact]
     public void AThrowingAutomaticAuthorIsNotCalledInLaterPasses()
     {

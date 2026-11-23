@@ -201,6 +201,30 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         Game.AssertTickThread();
         var ordered = records.Where(r => selected(r) && r.Context.Alive).ToArray();
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
+        var committed = ordered.ToDictionary(r => r, _ => new List<ulong>());
+        foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
+        void Remember(Runtime record, RegistryCompletion result)
+        {
+            Applied(record.Context, result);
+            if (Retained(result)) committed[record].Add(result.Handle);
+        }
+        void Fault(Runtime record, Exception error)
+        {
+            record.Faulted = true;
+            foreach (var handle in committed[record].AsEnumerable().Reverse())
+                try
+                {
+                    Applied(record.Context, _native.Revert(record.Context.Owner, handle));
+                    if (_changes.TryGetValue(record.Context.Owner, out var handles))
+                    {
+                        handles.Remove(handle);
+                        if (handles.Count == 0) _changes.Remove(record.Context.Owner);
+                    }
+                }
+                catch (Exception e) { Log(record.Context.Info.Id + " point rollback (owner cleanup will retry)", e); }
+            committed[record].Clear();
+            Log(record.Context.Info.Id + " OnRegistry " + point, error);
+        }
         foreach (var phase in new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final })
         {
             var finals = new List<(Runtime Record, ulong Handle)>();
@@ -218,21 +242,22 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                     handle = _native.Begin(record.Context.Owner, point);
                     _native.Submit(record.Context.Owner, handle, ir);
                     if (phase == RegistryPhase.Final) finals.Add((record, handle));
-                    else Applied(record.Context, _native.Commit(record.Context.Owner, handle));
+                    else Remember(record, _native.Commit(record.Context.Owner, handle));
                     handle = 0;
                 }
-                catch (Exception e) { context.Close(); record.Faulted = true; Log(record.Context.Info.Id + " OnRegistry " + point, e); }
+                catch (Exception e) { context.Close(); Fault(record, e); }
                 finally { if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { } }
             }
             // Every final handler read the add+alter view, never another mod's final commit.
             foreach (var (record, handle) in finals)
-                try { Applied(record.Context, _native.Commit(record.Context.Owner, handle)); }
-                catch (Exception e) { Log(record.Context.Info.Id + " final commit", e); try { _native.Revert(record.Context.Owner, handle); } catch { } }
+                try { Remember(record, _native.Commit(record.Context.Owner, handle)); }
+                catch (Exception e) { try { _native.Revert(record.Context.Owner, handle); } catch { } Fault(record, e); }
         }
     }
+    private static bool Retained(RegistryCompletion result) => result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0;
     private RegistryCompletion Applied(ModContext owner, RegistryCompletion result)
     {
-        if (result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0)
+        if (Retained(result))
         {
             if (!_changes.TryGetValue(owner.Owner, out var handles)) _changes[owner.Owner] = handles = [];
             handles.Add(result.Handle);

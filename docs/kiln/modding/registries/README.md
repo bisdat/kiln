@@ -73,7 +73,9 @@ Private helper assemblies in the mod's own folder remain loadable; they are not 
 Automatic points run all selected mods' Add, then Alter, then Final in load order. Ordinary property assignments are absolute and target
 Alter; `registry.Final(...)` and `registry.Items.Final(pattern, ...)` explicitly target Final. Final handlers read the
 Add+Alter view, never another mod's Final commit. A callback's own pending writes are projected into its typed read view;
-they are submitted only after successful return. A throwing callback submits none of that turn's buffered edits.
+they are submitted only after successful return. A throwing callback submits none of that turn's buffered edits and
+reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
+can retry the author.
 `Select(pattern)` returns entries by Kiln id; list properties use the generated clear/append/remove/index APIs.
 All three passes are invoked even though entry creation is not yet exposed. Runtime points wait for the host tick;
 native resources-ready callbacks never execute runtime authors inline. Layers from distinct declared points compose:
