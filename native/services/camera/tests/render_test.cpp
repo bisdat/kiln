@@ -1072,6 +1072,26 @@ void test_capability_lost() {
     CHECK(near(g.fov_reg, radians(40), 1e-6) && g.core.live_leases() == 1);
 }
 
+// Should-fix 5: more frames than the outcome ring holds between two Pres: the newest are read, the request is applied.
+void test_outcome_ring_overrun() {
+    Rig g(KILN_CAMERA_CAP_LOCAL_FOV);
+    Result r;
+    g.apply(30, g.lens(40), &r);
+    g.pre();
+    for (int i = 0; i < 40; ++i) g.frame(1);
+    g.pre();
+    CHECK(r.seen && r.r.ok && r.r.frame > 40 - Frames::kOutcomes && r.r.frame <= 40);
+    uint64_t cursor = 0;
+    Frames::Outcome o;
+    uint64_t last = 0;
+    int n = 0;
+    while (g.frames.next_outcome(&cursor, &o)) {
+        CHECK(o.frame > last && o.matched);  // oldest first, the ones overwritten skipped
+        last = o.frame;
+        ++n;
+    }
+    CHECK(n == static_cast<int>(Frames::kOutcomes) && last == 40);
+}
 
 }  // namespace
 
@@ -1083,7 +1103,8 @@ int main(int argc, char** argv) {
     } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre},
                  {"recheck_before_write", test_recheck_before_write},
                  {"capture_fault", test_capture_fault_turns_writes_off},
-                 {"capability_lost", test_capability_lost}};
+                 {"capability_lost", test_capability_lost},
+                 {"outcome_overrun", test_outcome_ring_overrun}};
     if (argc > 1) {
         for (const auto& t : named)
             if (std::strcmp(argv[1], t.name) == 0) {
@@ -1113,4 +1134,5 @@ int main(int argc, char** argv) {
     test_shake_through_the_transaction();
     for (const auto& t : named) t.fn();
     std::printf("camera render: PASS (%d checks)\n", checks);
+    return 0;
 }
