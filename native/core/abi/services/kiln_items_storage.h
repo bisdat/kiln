@@ -49,8 +49,9 @@
  *     the captured characters to their clients (or writes the hosting player's character file), Kiln marks the batch
  *     complete, posts KIS_EVENT_BATCH and calls the persistence owner's stage function synchronously on the server
  *     thread: the captures-done stage, in the pattern of kiln.saves' SNAPSHOT stage (a pump, its kind a hint, the events
- *     read with next_event). There Kiln.Saves takes the batch (take_frozen) and writes the storage part of the pending
- *     generation durably, so the pair is on disk before the world file and before the character leaves the server.
+ *     read with next_event). There Kiln.Saves takes the batch (take_frozen) and queues the storage part of the pending
+ *     generation for its writer; kiln.saves' stage barrier holds the world write, and the publication to clients after
+ *     it, until that part is durable, so the pair is on disk before the world file and before the character leaves.
  *     It releases the batch (release_frozen) once it has it. A leave save runs the same way. On a build without the
  *     captures-done hook items.storage.persist is unavailable ("no captures-done hook on this build") and persist_bind
  *     refuses: no holder is ever built there.
@@ -65,8 +66,10 @@
  *    are copied before the call returns and run in the next sim step (a restore before the join apply: at its end),
  *    inside kiln.items' program.
  *  - KilnStorageStageFn: the server world's thread, inside the game's save, after the world's jobs finished and after
- *    the save's captures (game state may be read as in Post). It must not wait for another thread or call kiln.items'
- *    write rows. A stage function that faults is removed (logged); the batch stays for take_frozen.
+ *    the save's captures (game state may be read as in Post). It must not block on the disk, wait for another thread
+ *    or call kiln.items' write rows: it copies the batch and only queues the pending write; kiln.saves' stage barrier
+ *    (stage_progress) then holds the world write, and with it the publication to clients, until that write is
+ *    durable. A stage function that faults is removed (logged); the batch stays for take_frozen.
  *  - KilnStorageReturnFn: the tick thread, Pre of the step after the return ran.
  *
  * Fail soft: on a game build where a row of sigdb feature items.storage does not resolve, register_storage still
@@ -473,7 +476,9 @@ typedef struct KilnItemsStorageApi {
     /* ---- persist rows (items.storage.persist; Kiln.Saves only) ---- */
 
     /* Claims the persist rows for `owner` and sets its stage function (fn = NULL keeps the claim without one; the
-     * owner's revoke releases it). Returns the newest event seq in *last_seq (events up to it are history).
+     * owner's revoke releases it). Owner 0 (a Kiln service without an owner of its own, as kiln.saves' pump) is taken
+     * too: it is never revoked, so its claim lasts for the run. Returns the newest event seq in *last_seq (events up
+     * to it are history).
      * UNAVAILABLE: items.storage.persist is off (no storage, or no captures-done hook), or another owner holds them. */
     KilnResult(KILN_CALL* persist_bind)(KilnOwner owner, KilnStorageStageFn fn, void* user, uint64_t* last_seq);
     /* Copies batch `tag`: its header, captures, entries and records. Two calls: with too little room
