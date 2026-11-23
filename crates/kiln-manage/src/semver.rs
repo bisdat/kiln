@@ -205,11 +205,12 @@ enum Op {
 struct Comparator {
     op: Op,
     version: SemVersion,
+    explicit_prerelease: bool,
 }
 
 impl Comparator {
     fn new(op: Op, version: SemVersion) -> Comparator {
-        Comparator { op, version }
+        Comparator { op, version, explicit_prerelease: false }
     }
 
     fn test(&self, v: &SemVersion) -> bool {
@@ -315,6 +316,14 @@ impl VersionRange {
         self.sets.iter().any(|set| set.iter().all(|c| c.test(v)))
     }
 
+    /// Only for the Kiln core dependency: a plain alternative also accepts a dev build as its release.
+    /// An alternative mentioning a prerelease must match the actual version; generated -0 upper bounds do not count.
+    pub(crate) fn satisfies_kiln(&self, v: &SemVersion) -> bool {
+        let release = v.release();
+        self.sets.iter().any(|set| set.iter().all(|c| c.test(v)) ||
+            (!set.iter().any(|c| c.explicit_prerelease) && set.iter().all(|c| c.test(&release))))
+    }
+
     pub fn is_any(&self) -> bool {
         self.sets.iter().any(|s| s.is_empty())
     }
@@ -349,7 +358,9 @@ fn parse_comparators(part: &str, set: &mut Vec<Comparator>) -> std::result::Resu
             let (Some(lo), Some(hi)) = (partial(&tokens[i]), partial(&tokens[i + 2])) else {
                 return Err(format!("bad hyphen range '{} - {}'", tokens[i], tokens[i + 2]));
             };
-            set.push(Comparator::new(Op::Ge, lo.floor()));
+            let mut lower = Comparator::new(Op::Ge, lo.floor());
+            lower.explicit_prerelease = !lo.pre.is_empty() || !hi.pre.is_empty();
+            set.push(lower);
             set.push(if hi.count == 3 { Comparator::new(Op::Le, hi.floor()) } else { Comparator::new(Op::Lt, hi.next().lowest()) });
             i += 3;
             continue;
@@ -385,6 +396,7 @@ fn parse_one(token: &str, set: &mut Vec<Comparator>) -> std::result::Result<(), 
     if op.is_empty() && p.wildcard {
         op = "="; // 1.2.x / 1.* mean "any 1.2.z" / "any 1.y.z", not caret
     }
+    let start = set.len();
     match op {
         "" | "^" => {
             set.push(Comparator::new(Op::Ge, p.floor()));
@@ -424,6 +436,10 @@ fn parse_one(token: &str, set: &mut Vec<Comparator>) -> std::result::Result<(), 
         "<=" => set.push(if p.count == 3 { Comparator::new(Op::Le, p.floor()) } else { Comparator::new(Op::Lt, p.next().lowest()) }),
         _ => {}
     }
+    // Keep source syntax on one comparator of the operand, including when expansion replaces its version.
+    if !p.pre.is_empty() {
+        set[start].explicit_prerelease = true;
+    }
     Ok(())
 }
 
@@ -451,7 +467,9 @@ fn parse_intervals(text: &str, sets: &mut Vec<Vec<Comparator>>) -> std::result::
             None => {
                 let exact = SemVersion::try_parse(&body);
                 match exact {
-                    Some(v) if lower_inclusive && upper_inclusive => set.push(Comparator::new(Op::Eq, v)),
+                    Some(v) if lower_inclusive && upper_inclusive => set.push(Comparator {
+                        op: Op::Eq, explicit_prerelease: v.is_prerelease(), version: v,
+                    }),
                     _ => return Err(format!("version range '{text}': '[{body}]' must be an exact version in square brackets")),
                 }
             }
@@ -462,17 +480,19 @@ fn parse_intervals(text: &str, sets: &mut Vec<Vec<Comparator>>) -> std::result::
                     let Some(l) = SemVersion::try_parse(lo) else {
                         return Err(format!("version range '{text}': bad lower bound '{lo}'"));
                     };
-                    set.push(Comparator::new(if lower_inclusive { Op::Ge } else { Op::Gt }, l));
+                    set.push(Comparator {
+                        op: if lower_inclusive { Op::Ge } else { Op::Gt }, explicit_prerelease: l.is_prerelease(), version: l,
+                    });
                 }
                 if !hi.is_empty() {
                     let Some(h) = SemVersion::try_parse(hi) else {
                         return Err(format!("version range '{text}': bad upper bound '{hi}'"));
                     };
-                    set.push(if upper_inclusive {
-                        Comparator::new(Op::Le, h)
-                    } else {
-                        let v = if h.is_prerelease() { h } else { h.lowest() };
-                        Comparator::new(Op::Lt, v)
+                    let explicit_prerelease = h.is_prerelease();
+                    set.push(Comparator {
+                        op: if upper_inclusive { Op::Le } else { Op::Lt },
+                        version: if upper_inclusive || explicit_prerelease { h } else { h.lowest() },
+                        explicit_prerelease,
                     });
                 }
             }

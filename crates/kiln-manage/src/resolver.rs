@@ -31,7 +31,7 @@ impl Candidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Environment {
-    /// Kiln core version (a dev build counts as its release for `kiln` dependencies).
+    /// Kiln core version (a dev build also counts as its release for plain `kiln` dependency alternatives).
     pub kiln: String,
     /// Kiln.Mods.ApiVersion
     pub api: String,
@@ -251,8 +251,7 @@ fn check_dependencies(p: &Parsed, active: &BTreeMap<String, usize>, parsed_of: &
     };
     for (d, range) in &p.deps {
         if d.id == KILN_ID {
-            // a dev build (0.1.0-dev) counts as its release for dependency checks
-            if !range.satisfies(kiln) && !range.satisfies(&kiln.release()) {
+            if !range.satisfies_kiln(kiln) {
                 return Some(format!("needs Kiln {}; this is Kiln {kiln}", d.range));
             }
             continue;
