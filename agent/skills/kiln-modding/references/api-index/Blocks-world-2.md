@@ -137,7 +137,7 @@ enum: Craft, Fill, Select, UseAllOptions, Stop, Water
 - `StationRecipeRef()`
 - `StationRecipeRef(string Value)`
 - `static implicit operator StationRecipeRef(string value) -> StationRecipeRef` — A recipe by its key, or `"other-mod:key"`.
-- `Value { get; init; } -> string`
+- `Value { get; init; } -> string` — The recipe's menu key as written: `"key"` for the station's own mod, `"other-mod:key"` for another mod's.
 
 ## StationRemovedEvent `0.2.6` — A production station is gone (picked up, destroyed).
 - `Base { get; } -> BaseId` — The base it stood in; `BaseId.None` when none.

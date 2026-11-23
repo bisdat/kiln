@@ -12,21 +12,21 @@
 
 ## CameraBlend `0.2.17` — How a visual request fades in and out, in whole milliseconds; both together at most the duration.
 - `CameraBlend(TimeSpan In, TimeSpan Out)`
-- `In { get; init; } -> TimeSpan`
-- `Out { get; init; } -> TimeSpan`
+- `In { get; init; } -> TimeSpan` — The fade from what was on screen to the request, from the lease's start.
+- `Out { get; init; } -> TimeSpan` — The fade back to the game's own view over the duration's last part (and after `Camera.End`).
 
 ## CameraCapability `0.2.17` — What the camera service can do here; one bit per capability row `camera.*`.
 enum: None, ServerMode, LocalPose, LocalFov, LocalProfile, LocalShake, RenderedSnapshot, Remote, ResourceProfile
 
 ## CameraChange `0.2.17` — A lease was applied, updated or ended (`Camera.Changed`).
 - `CameraChange(CameraLease Lease, ulong Revision, CameraChangeKind Kind, CameraEndReason EndReason, CameraReason ReasonCode, string? Reason, ulong Frame)`
-- `EndReason { get; init; } -> CameraEndReason`
+- `EndReason { get; init; } -> CameraEndReason` — Why it ended; `CameraEndReason.None` unless `Kind` is `CameraChangeKind.Ended`.
 - `Frame { get; init; } -> ulong` — The client frame that showed it, when one confirmed it; else 0.
-- `Kind { get; init; } -> CameraChangeKind`
-- `Lease { get; init; } -> CameraLease`
-- `Reason { get; init; } -> string?`
-- `ReasonCode { get; init; } -> CameraReason`
-- `Revision { get; init; } -> ulong`
+- `Kind { get; init; } -> CameraChangeKind` — Applied, updated or ended.
+- `Lease { get; init; } -> CameraLease` — The lease that changed.
+- `Reason { get; init; } -> string?` — The same in words for a log; null when there is none.
+- `ReasonCode { get; init; } -> CameraReason` — The refusal or fault behind an end, to decide by; `CameraReason.None` when there is none.
+- `Revision { get; init; } -> ulong` — The lease's revision in force after the change: 1 after the first apply, higher after each update.
 
 ## CameraChangeKind `0.2.17` — What happened to a lease (`CameraChange`).
 enum: Applied, Updated, Ended
@@ -69,8 +69,8 @@ enum: EntityCamera, PlayerCameraSpawning, PlayerCameraSpawningDolly, PlayerCamer
 
 ## CameraModeRequest `0.2.17` — A stock camera mode lock.
 - `CameraModeRequest(CameraMode Mode, CameraTransitionOverride Transition = CameraTransitionOverride.None)`
-- `Mode { get; init; } -> CameraMode`
-- `Transition { get; init; } -> CameraTransitionOverride`
+- `Mode { get; init; } -> CameraMode` — The game's camera mode the player is held in.
+- `Transition { get; init; } -> CameraTransitionOverride` — How the game moves into it; `CameraTransitionOverride.None`: the mode's own transition.
 
 ## CameraOverride `0.2.17` — One camera request.
 - `CameraOverride(CameraModeRequest? Mode = null, CameraProfile? Profile = null, CameraPath? Path = null, CameraLens? Lens = null, CameraShake? Shake = null, TimeSpan Duration = default(TimeSpan), int Priority = 0, CameraBlend? Blend = null, CameraInputPolicy InputPolicy = CameraInputPolicy.VisualOnly)`
@@ -148,20 +148,20 @@ enum: Preserve, Restart
 
 ## CameraVisualResult `0.2.17` — The answer of `Camera.GetVisual`.
 - `CameraVisualResult(bool Ok, string? Reason, CameraReason ReasonCode, CameraVisualSnapshot? Snapshot)`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `ReasonCode { get; init; } -> CameraReason`
-- `Snapshot { get; init; } -> CameraVisualSnapshot?`
+- `Ok { get; init; } -> bool` — True when `Snapshot` holds a frame's camera.
+- `Reason { get; init; } -> string?` — Why not, in words for a log; null when `Ok`.
+- `ReasonCode { get; init; } -> CameraReason` — Why not, to decide by; `CameraReason.None` when `Ok`.
+- `Snapshot { get; init; } -> CameraVisualSnapshot?` — The newest frame's camera; null when not `Ok`.
 
 ## CameraVisualSnapshot `0.2.17` — The camera a frame was drawn with: after the game's own shake and after any camera override.
 - `CameraVisualSnapshot(CameraPose Pose, float FieldOfViewDegrees, float AspectRatio, float NearPlane, float FarPlane, ulong Frame, ulong TargetSampleStep, uint SessionGeneration, TimeSpan Age)`
 - `Age { get; init; } -> TimeSpan` — How old the snapshot was when it was read; never above 250 ms.
-- `AspectRatio { get; init; } -> float`
-- `FarPlane { get; init; } -> float`
-- `FieldOfViewDegrees { get; init; } -> float`
+- `AspectRatio { get; init; } -> float` — The frame's width divided by its height.
+- `FarPlane { get; init; } -> float` — The distance of the far clipping plane in front of the camera, in metres.
+- `FieldOfViewDegrees { get; init; } -> float` — The frame's vertical field of view, in degrees.
 - `Frame { get; init; } -> ulong` — Counts the frames this was taken from.
-- `NearPlane { get; init; } -> float`
-- `Pose { get; init; } -> CameraPose`
+- `NearPlane { get; init; } -> float` — The distance of the near clipping plane in front of the camera, in metres.
+- `Pose { get; init; } -> CameraPose` — Where the drawn camera was and where it looked.
 - `Project(WorldPosition point, Vector2 viewportOrigin, Vector2 viewportSize) -> CameraProjection` — Where `point` is on the screen of this frame's camera: the logical view the frame was drawn with (no anti-aliasing...
 - `SessionGeneration { get; init; } -> uint` — The client world it belongs to.
 - `TargetSampleStep { get; init; } -> ulong` — The client step whose positions the frame's camera was built from.

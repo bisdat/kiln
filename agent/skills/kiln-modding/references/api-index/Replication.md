@@ -39,7 +39,7 @@ enum: Pass, Drop, Rewrite
 ## MessageDirection `0.2.17` — Which way a hooked message goes.
 enum: Send, Receive
 
-## MessageField `0.2.17` — One field of a game message schema (`Replication.MessageSchema`).
+## MessageField `0.2.17` — One field of a game message schema (`Replication.Schema`).
 - `MessageField(string Name, int Type, int Element, int Shape, int Offset, int CountOffset, int FixedCount)`
 - `CountOffset { get; init; } -> int` — An optional field's present flag, or a list's u32 count.
 - `Element { get; init; } -> int` — How one element is stored in the struct (the game's element code).
@@ -58,11 +58,11 @@ enum: Send, Receive
 - `PeerId { get; } -> uint` — The `NetPeer.Id` on the server side.
 - `PeerUnknown { get; } -> bool` — Whether Kiln could not resolve the message's peer id on the server side.
 
-## MessageSchema `0.2.17` — A game message schema: its struct's size and fields (`Replication.MessageSchema`).
+## MessageSchema `0.2.17` — A game message schema: its struct's size and fields (`Replication.Schema`).
 - `MessageSchema(string Name, int Size, IReadOnlyList<MessageField> Fields)`
-- `Fields { get; init; } -> IReadOnlyList<MessageField>`
-- `Name { get; init; } -> string`
-- `Size { get; init; } -> int`
+- `Fields { get; init; } -> IReadOnlyList<MessageField>` — The struct's fields, in the order the game lists them.
+- `Name { get; init; } -> string` — The schema's name, as passed to `Replication.Schema`.
+- `Size { get; init; } -> int` — The size of the message's struct in bytes.
 
 ## Peers `0.2.17` — The selectors of Kiln's replication rules (`PeerSelector`).
 - `static All { get; } -> PeerSelector` — Every peer.

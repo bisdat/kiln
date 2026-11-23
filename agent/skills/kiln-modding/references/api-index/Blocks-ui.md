@@ -25,9 +25,9 @@
 
 ## InputRow `0.2.17` — A text field (since 0.2.0-dev.31) on a text config entry or a string state entry.
 - `Bind { get; init; } -> string` — `config.<path>` of a text entry, or `state.<key>` of a string state entry.
-- `Commit { get; init; } -> UiInputCommit`
+- `Commit { get; init; } -> UiInputCommit` — When the typed text is written: `UiInputCommit.Blur` (the default) or `UiInputCommit.Enter`.
 - `Id { get; init; } -> string` — The row's id, unique in the window: `[a-z][a-z0-9_-]{0,63}`.
-- `Label { get; init; } -> UiText`
+- `Label { get; init; } -> UiText` — The label shown beside the field.
 - `MaxBytes { get; init; } -> int` — At most this many UTF-8 bytes (2..4096); a longer text is cut at a character before anything is written.
 - `Multiline { get; init; } -> bool` — Several lines (Enter is a new line; the text is committed when the field loses the keyboard).
 
@@ -96,40 +96,40 @@
 
 ## UiBindingValueChangedEvent `0.2.17` — A data source's publication was committed.
 - `UiBindingValueChangedEvent(string mod, string id, ulong oldVersion, ulong newVersion)`
-- `Id { get; } -> string`
-- `Mod { get; } -> string`
-- `NewVersion { get; } -> ulong`
-- `OldVersion { get; } -> ulong`
+- `Id { get; } -> string` — The source's id (windows bind it as `mod.<id>`).
+- `Mod { get; } -> string` — The id of the mod that owns the data source.
+- `NewVersion { get; } -> ulong` — The source's version after it.
+- `OldVersion { get; } -> ulong` — The source's version before this publication.
 
 ## UiBoolState `0.2.17` — A true/false state entry.
 - `UiBoolState(bool Initial = false)`
-- `Initial { get; init; } -> bool`
+- `Initial { get; init; } -> bool` — The value in each new world; false unless given.
 
 ## UiColumn `0.2.17` — A column of a `TableRow`: its id, heading and cell, a template that reads the row's fields as `{row.<field>}` (and any other value).
 - `UiColumn(string Id, UiText Label, UiText Cell)`
-- `Cell { get; init; } -> UiText`
-- `Id { get; init; } -> string`
-- `Label { get; init; } -> UiText`
+- `Cell { get; init; } -> UiText` — What each row's cell in this column shows: a template such as `{row.count}`.
+- `Id { get; init; } -> string` — The column's id, unique in the table.
+- `Label { get; init; } -> UiText` — The column's heading.
 
 ## UiControlState `0.2.17` — What an unbound tab bar or tree of a window holds: the selected tab or node, the expanded branches.
 - `UiControlState(string? Selected, IReadOnlyList<string> Expanded)`
-- `Expanded { get; init; } -> IReadOnlyList<string>`
-- `Selected { get; init; } -> string?`
+- `Expanded { get; init; } -> IReadOnlyList<string>` — A tree's open branches, by node key; empty when none is open.
+- `Selected { get; init; } -> string?` — The selected tab's id or node's key; null when nothing is selected.
 
 ## UiControlStateChangedEvent `0.2.17` — An unbound tab bar or tree of a window changed what it holds (the row's id in `UiControlStateChangedEvent.RowId`).
 - `UiControlStateChangedEvent(WindowRef window, string rowId, UiControlState? before, UiControlState after, UiStateVersion version, UiStateChangeCause cause)`
-- `After { get; } -> UiControlState`
-- `Before { get; } -> UiControlState?`
-- `Cause { get; } -> UiStateChangeCause`
-- `RowId { get; } -> string`
-- `Version { get; } -> UiStateVersion`
-- `Window { get; } -> WindowRef`
+- `After { get; } -> UiControlState` — What it holds after the change.
+- `Before { get; } -> UiControlState?` — What it held before the change; null when it held nothing yet.
+- `Cause { get; } -> UiStateChangeCause` — What made the change.
+- `RowId { get; } -> string` — The id of the tab bar's or tree's row.
+- `Version { get; } -> UiStateVersion` — The window's state version after the change.
+- `Window { get; } -> WindowRef` — The window the tab bar or tree is in.
 
 ## UiDataPublishResult `0.2.17` — What `Bindings.Publish` returned: the source's version after the publication was committed, or why not (`UiStateReasons.Superseded` when a newer one replaced it first).
 - `UiDataPublishResult(bool Ok, string? Reason, ulong Version)`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `Version { get; init; } -> ulong`
+- `Ok { get; init; } -> bool` — True when the publication was committed.
+- `Reason { get; init; } -> string?` — Why not, starting with one of `UiStateReasons`; null when Ok.
+- `Version { get; init; } -> ulong` — The source's version after the publication was committed.
 
 ## UiDataRegistration `0.2.17` — A data source of a mod (`Bindings.Define`).
 - `Dispose() -> void` — Takes the source away; windows bound to it show it as unavailable.
@@ -139,14 +139,14 @@
 
 ## UiDataRow `0.2.17` — One row of a rows source: a unique key (`[A-Za-z0-9._:-]{1,128}`) and its field values.
 - `UiDataRow(string Key, IReadOnlyDictionary<string, UiScalar> Values)`
-- `Key { get; init; } -> string`
-- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>`
+- `Key { get; init; } -> string` — The row's key, unique in the source: `[A-Za-z0-9._:-]{1,128}`.
+- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>` — The row's value for each field of the source's schema, by field id.
 
 ## UiDataSchema `0.2.17` — A data source's shape: a scalar of `UiDataSchema.ScalarType`, or rows / tree nodes with up to 16 `UiDataSchema.Fields` (each required in every row or node).
 - `UiDataSchema(UiDataShape Shape, UiScalarType? ScalarType = null, IReadOnlyList<UiField>? Fields = null)`
-- `Fields { get; init; } -> IReadOnlyList<UiField>?`
-- `ScalarType { get; init; } -> UiScalarType?`
-- `Shape { get; init; } -> UiDataShape`
+- `Fields { get; init; } -> IReadOnlyList<UiField>?` — The fields of each row or node, up to 16, for a rows or tree source; null for a scalar.
+- `ScalarType { get; init; } -> UiScalarType?` — The scalar's type, for a `UiDataShape.Scalar` source; null for the others.
+- `Shape { get; init; } -> UiDataShape` — Whether the source is a scalar, rows or a tree.
 
 ## UiDataShape `0.2.17` — What shape a data source has.
 enum: Scalar, Rows, Tree
@@ -154,24 +154,24 @@ enum: Scalar, Rows, Tree
 ## UiDataSnapshot `0.2.17` — A publication of a data source (`Bindings.Publish`): copied at once, so the caller may change its own collections once Publish has returned.
 - `UiDataSnapshot(UiDataSnapshot original)`
 
-## UiDataSnapshot.Rows `0.2.17`
+## UiDataSnapshot.Rows `0.2.17` — A publication of a rows source.
 - `Rows(IReadOnlyList<UiDataRow> Values)`
-- `Values { get; init; } -> IReadOnlyList<UiDataRow>`
+- `Values { get; init; } -> IReadOnlyList<UiDataRow>` — The rows, in the order a table shows them.
 
-## UiDataSnapshot.Scalar `0.2.17`
+## UiDataSnapshot.Scalar `0.2.17` — A publication of a scalar source.
 - `Scalar(UiScalar Value)`
-- `Value { get; init; } -> UiScalar`
+- `Value { get; init; } -> UiScalar` — The value, of the schema's scalar type.
 
-## UiDataSnapshot.Tree `0.2.17`
+## UiDataSnapshot.Tree `0.2.17` — A publication of a tree source.
 - `Tree(IReadOnlyList<UiTreeDataNode> Values)`
-- `Values { get; init; } -> IReadOnlyList<UiTreeDataNode>`
+- `Values { get; init; } -> IReadOnlyList<UiTreeDataNode>` — The nodes; children keep the order they are given in.
 
 ## UiDecimalState `0.2.17` — A decimal state entry in [`UiDecimalState.Min`, `UiDecimalState.Max`] with at most `UiDecimalState.Scale` digits after the point (0..6); a value with more is refused...
 - `UiDecimalState(decimal Initial, decimal Min = -79228162514264337593543950335, decimal Max = 79228162514264337593543950335, int Scale = 6)`
-- `Initial { get; init; } -> decimal`
-- `Max { get; init; } -> decimal`
-- `Min { get; init; } -> decimal`
-- `Scale { get; init; } -> int`
+- `Initial { get; init; } -> decimal` — The value in each new world, within `Min` and `Max`.
+- `Max { get; init; } -> decimal` — The largest value a write may set; no bound unless given.
+- `Min { get; init; } -> decimal` — The smallest value a write may set; no bound unless given.
+- `Scale { get; init; } -> int` — At most this many digits after the point, 0 to 6 (6 unless given).
 
 ## UiDemandRegistration `0.2.17` — A request that the world collector gather some groups (`BlockUi.DemandWorld`).
 - `Dispose() -> void` — Stops asking.
@@ -181,27 +181,27 @@ enum: Scalar, Rows, Tree
 
 ## UiField `0.2.17` — A data field: its id (as `row.<id>` / `node.<id>` in templates) and type.
 - `UiField(string Id, UiScalarType Type)`
-- `Id { get; init; } -> string`
-- `Type { get; init; } -> UiScalarType`
+- `Id { get; init; } -> string` — The field's id: a template reads it as `{row.<id>}` or `{node.<id>}`.
+- `Type { get; init; } -> UiScalarType` — The type of its values.
 
 ## UiInputCommit `0.2.17` — When a text field writes what was typed: when it loses the keyboard (and on Enter), or on Enter only.
 enum: Blur, Enter
 
 ## UiInt64State `0.2.17` — A whole-number state entry in [`UiInt64State.Min`, `UiInt64State.Max`].
 - `UiInt64State(long Initial, long Min = -9223372036854775808, long Max = 9223372036854775807)`
-- `Initial { get; init; } -> long`
-- `Max { get; init; } -> long`
-- `Min { get; init; } -> long`
+- `Initial { get; init; } -> long` — The value in each new world, within `Min` and `Max`.
+- `Max { get; init; } -> long` — The largest value a write may set; no bound unless given.
+- `Min { get; init; } -> long` — The smallest value a write may set; no bound unless given.
 
 ## UiInventoryValue `0.2.17` — One nonempty slot of the local player's inventory.
 - `UiInventoryValue(string Key, uint Holder, uint InventoryPage, byte SlotIndex, uint Item, uint Count, uint Pide)`
-- `Count { get; init; } -> uint`
-- `Holder { get; init; } -> uint`
-- `InventoryPage { get; init; } -> uint`
-- `Item { get; init; } -> uint`
-- `Key { get; init; } -> string`
-- `Pide { get; init; } -> uint`
-- `SlotIndex { get; init; } -> byte`
+- `Count { get; init; } -> uint` — How many are in the slot.
+- `Holder { get; init; } -> uint` — The entity that owns the inventory: the local player.
+- `InventoryPage { get; init; } -> uint` — The inventory page (one of the player's inventories) the slot is in.
+- `Item { get; init; } -> uint` — The game's item id of what is in the slot.
+- `Key { get; init; } -> string` — The slot's key, `l:` + 8 hex digits of the page + `:` + the slot index: the row key a table tells slots apart by.
+- `Pide { get; init; } -> uint` — The stack's own item entity in this game's world; 0 for a plain stack without one.
+- `SlotIndex { get; init; } -> byte` — The slot's index in its page.
 
 ## UiMenu — An entry in the game's own menus that opens a window.
 - `In { get; init; } -> UiMenuIn` — Which of the game's menus holds the entry.
@@ -221,35 +221,35 @@ enum: Pause, Main, Both
 - `UiScalar(UiScalar original)`
 - `abstract Type { get; } -> UiScalarType` — The type of the value.
 
-## UiScalar.Bool `0.2.17`
+## UiScalar.Bool `0.2.17` — A true/false.
 - `Bool(bool Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> bool`
+- `Value { get; init; } -> bool` — The value.
 
-## UiScalar.Decimal `0.2.17`
+## UiScalar.Decimal `0.2.17` — An exact decimal.
 - `Decimal(decimal Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> decimal`
+- `Value { get; init; } -> decimal` — The number.
 
 ## UiScalar.Float64 `0.2.17` — A finite double (NaN and infinities are refused).
 - `Float64(double Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> double`
+- `Value { get; init; } -> double` — The number.
 
-## UiScalar.Int64 `0.2.17`
+## UiScalar.Int64 `0.2.17` — A signed whole number.
 - `Int64(long Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> long`
+- `Value { get; init; } -> long` — The number.
 
-## UiScalar.String `0.2.17`
+## UiScalar.String `0.2.17` — A text.
 - `String(string Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> string`
+- `Value { get; init; } -> string` — The text.
 
-## UiScalar.UInt64 `0.2.17`
+## UiScalar.UInt64 `0.2.17` — An unsigned whole number.
 - `UInt64(ulong Value)`
 - `override Type { get; } -> UiScalarType`
-- `Value { get; init; } -> ulong`
+- `Value { get; init; } -> ulong` — The number.
 
 ## UiScalarType `0.2.17` — The types a data field or scalar has.
 enum: Bool, Int64, UInt64, Decimal, Float64, String
@@ -260,9 +260,9 @@ enum: Bool, Int64, UInt64, Decimal, Float64, String
 
 ## UiSnapshotStamp `0.2.17` — When a part of a `UiWorldSnapshot` was taken: the world's session and step, and the capture time in milliseconds (Environment.TickCount64).
 - `UiSnapshotStamp(ulong Session, ulong Step, ulong CaptureMs)`
-- `CaptureMs { get; init; } -> ulong`
-- `Session { get; init; } -> ulong`
-- `Step { get; init; } -> ulong`
+- `CaptureMs { get; init; } -> ulong` — When they were taken: Environment.TickCount64, in milliseconds.
+- `Session { get; init; } -> ulong` — The world's session: a world or session change (menu, loading screen, rejoin) gives a new one.
+- `Step { get; init; } -> ulong` — The world's step the values were taken in.
 
 ## UiStateChangeCause `0.2.17` — Why a window's state changed.
 enum: Widget, Action, Api, SelectionInvalidated, Pruned
@@ -272,9 +272,9 @@ enum: Widget, Action, Api, SelectionInvalidated, Pruned
 
 ## UiStateReadResult `0.2.17` — What `BlockUi.State` returned.
 - `UiStateReadResult(bool Ok, string? Reason, UiStateSnapshot? Snapshot)`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `Snapshot { get; init; } -> UiStateSnapshot?`
+- `Ok { get; init; } -> bool` — True when the call succeeded and `Snapshot` is set.
+- `Reason { get; init; } -> string?` — Why not, starting with one of `UiStateReasons`; null when Ok.
+- `Snapshot { get; init; } -> UiStateSnapshot?` — The window's state now; null when not Ok.
 
 ## UiStateReasons `0.2.17` — Why a state or data call was refused (`IKilnResult.Reason` starts with one of these).
 - `const AccessDenied = "AccessDenied" -> string` — The window or data source belongs to another mod.
@@ -290,45 +290,45 @@ enum: Widget, Action, Api, SelectionInvalidated, Pruned
 
 ## UiStateResult `0.2.17` — What `BlockUi.SetState` returned: the snapshot after the write (a write of the same value is accepted and changes nothing), or why it was refused (`UiStateReasons`).
 - `UiStateResult(bool Ok, string? Reason, UiStateSnapshot? Snapshot)`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `Snapshot { get; init; } -> UiStateSnapshot?`
+- `Ok { get; init; } -> bool` — True when the write was accepted and `Snapshot` is set.
+- `Reason { get; init; } -> string?` — Why it was refused, starting with one of `UiStateReasons`; null when Ok.
+- `Snapshot { get; init; } -> UiStateSnapshot?` — The window's state after the write; null when refused.
 
 ## UiStateSnapshot `0.2.17` — A window's whole state at one version: the declared entries and the tab bars' and trees' own state.
 - `UiStateSnapshot(WindowRef Window, UiStateVersion Version, IReadOnlyDictionary<string, UiStateValue> Values, IReadOnlyDictionary<string, UiControlState> Controls)`
-- `Controls { get; init; } -> IReadOnlyDictionary<string, UiControlState>`
-- `Values { get; init; } -> IReadOnlyDictionary<string, UiStateValue>`
-- `Version { get; init; } -> UiStateVersion`
-- `Window { get; init; } -> WindowRef`
+- `Controls { get; init; } -> IReadOnlyDictionary<string, UiControlState>` — The state of the window's unbound tab bars and trees, by row id.
+- `Values { get; init; } -> IReadOnlyDictionary<string, UiStateValue>` — The declared state entries by key.
+- `Version { get; init; } -> UiStateVersion` — The version this state is at; pass it to a write that expects it.
+- `Window { get; init; } -> WindowRef` — The window.
 
 ## UiStateValue `0.2.17` — A state value, of one of the types a `UiStateDefinition` declares.
 - `UiStateValue(UiStateValue original)`
 
 ## UiStateValue.Bool `0.2.17` — A true/false.
 - `Bool(bool Value)`
-- `Value { get; init; } -> bool`
+- `Value { get; init; } -> bool` — The value.
 
 ## UiStateValue.Decimal `0.2.17` — A decimal.
 - `Decimal(decimal Value)`
-- `Value { get; init; } -> decimal`
+- `Value { get; init; } -> decimal` — The number, exact.
 
 ## UiStateValue.Int64 `0.2.17` — A whole number.
 - `Int64(long Value)`
-- `Value { get; init; } -> long`
+- `Value { get; init; } -> long` — The number.
 
 ## UiStateValue.String `0.2.17` — A text.
 - `String(string Value)`
-- `Value { get; init; } -> string`
+- `Value { get; init; } -> string` — The text.
 
 ## UiStateValue.StringSet `0.2.17` — A set of texts; stored unique and in ordinal order.
 - `StringSet(IReadOnlyList<string> Value)`
-- `Value { get; init; } -> IReadOnlyList<string>`
+- `Value { get; init; } -> IReadOnlyList<string>` — The texts, unique and in ordinal order.
 
 ## UiStateVersion `0.2.17` — Which state a write expects to change: the world session's token and the window's revision.
 - `UiStateVersion()`
 - `UiStateVersion(ulong Session, ulong Revision)`
-- `Revision { get; init; } -> ulong`
-- `Session { get; init; } -> ulong`
+- `Revision { get; init; } -> ulong` — The window's revision in that session: it goes up with each committed change.
+- `Session { get; init; } -> ulong` — The world session's token: a new one each time the state is reset for a new world.
 
 ## UiStatImportRegistration `0.2.17` — A declared dependency on another mod's stat for UI blocks (`Blocks.ImportStat`): it names the stat's type for the blocks that show it; whether this game may read it...
 - `Dispose() -> void` — Forgets the import (blocks compiled with it keep it).
@@ -338,80 +338,80 @@ enum: Widget, Action, Api, SelectionInvalidated, Pruned
 
 ## UiStringSetState `0.2.17` — A set of texts (unique, kept in ordinal order): what a tree's expanded branches bind to.
 - `UiStringSetState(IReadOnlyList<string> Initial, int MaxItems = 512, int MaxItemBytes = 128)`
-- `Initial { get; init; } -> IReadOnlyList<string>`
-- `MaxItemBytes { get; init; } -> int`
-- `MaxItems { get; init; } -> int`
+- `Initial { get; init; } -> IReadOnlyList<string>` — The texts in each new world.
+- `MaxItemBytes { get; init; } -> int` — The longest text an item may be, in UTF-8 bytes (128 unless given).
+- `MaxItems { get; init; } -> int` — The most texts the set may hold (512 unless given).
 
 ## UiStringState `0.2.17` — A text state entry of at most `UiStringState.MaxBytes` UTF-8 bytes (up to 4096).
 - `UiStringState(string Initial = "", int MaxBytes = 256)`
-- `Initial { get; init; } -> string`
-- `MaxBytes { get; init; } -> int`
+- `Initial { get; init; } -> string` — The text in each new world; empty unless given.
+- `MaxBytes { get; init; } -> int` — The longest text a write may set, in UTF-8 bytes (up to 4096; 256 unless given).
 
 ## UiTab `0.2.17` — A tab of a `TabsRow`.
 - `UiTab(string Id, UiText Label, IReadOnlyList<UiRow> Rows, string? When = null)`
-- `Id { get; init; } -> string`
-- `Label { get; init; } -> UiText`
-- `Rows { get; init; } -> IReadOnlyList<UiRow>`
-- `When { get; init; } -> string?`
+- `Id { get; init; } -> string` — The tab's id, unique in its row; the selected tab's id is what `TabsRow.Selected` holds.
+- `Label { get; init; } -> UiText` — The tab's name on the tab bar.
+- `Rows { get; init; } -> IReadOnlyList<UiRow>` — The rows shown while the tab is selected.
+- `When { get; init; } -> string?` — Shown only while this is true (see `UiRow.When`); null: always shown.
 
 ## UiTreeDataNode `0.2.17` — One node of a tree source: a key unique in the whole tree, its parent's key (null at a root), its label and field values.
 - `UiTreeDataNode(string Key, string? ParentKey, UiText Label, IReadOnlyDictionary<string, UiScalar> Values)`
-- `Key { get; init; } -> string`
-- `Label { get; init; } -> UiText`
-- `ParentKey { get; init; } -> string?`
-- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>`
+- `Key { get; init; } -> string` — The node's key, unique in the whole tree.
+- `Label { get; init; } -> UiText` — The node's label.
+- `ParentKey { get; init; } -> string?` — The key of the node it is under; null for a root.
+- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>` — The node's value for each field of the source's schema, by field id.
 
 ## UiTreeNodeDefinition `0.2.17` — A node of a tree written in the block (`TreeRow.Roots`).
 - `UiTreeNodeDefinition(string Key, UiText Label, IReadOnlyList<UiTreeNodeDefinition>? Children = null, IReadOnlyDictionary<string, UiScalar>? Values = null)`
-- `Children { get; init; } -> IReadOnlyList<UiTreeNodeDefinition>?`
-- `Key { get; init; } -> string`
-- `Label { get; init; } -> UiText`
-- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>?`
+- `Children { get; init; } -> IReadOnlyList<UiTreeNodeDefinition>?` — The nodes under it, in this order; null or empty for a leaf.
+- `Key { get; init; } -> string` — The node's key, unique in the whole tree: what the tree's selection and expanded branches hold.
+- `Label { get; init; } -> UiText` — The node's label.
+- `Values { get; init; } -> IReadOnlyDictionary<string, UiScalar>?` — Its field values (the tree's `TreeRow.Fields`), shown as `{node.<field>}`; null when it has none.
 
 ## UiWindowStateChangedEvent `0.2.17` — A window's declared state entry changed (one event per changed entry, all at the new version).
 - `UiWindowStateChangedEvent(WindowRef window, string key, UiStateValue? before, UiStateValue? after, UiStateVersion version, UiStateChangeCause cause)`
-- `After { get; } -> UiStateValue?`
-- `Before { get; } -> UiStateValue?`
-- `Cause { get; } -> UiStateChangeCause`
-- `Key { get; } -> string`
-- `Version { get; } -> UiStateVersion`
-- `Window { get; } -> WindowRef`
+- `After { get; } -> UiStateValue?` — The entry's value after the change.
+- `Before { get; } -> UiStateValue?` — The entry's value before the change.
+- `Cause { get; } -> UiStateChangeCause` — What made the change.
+- `Key { get; } -> string` — The state entry's key, as the window declares it.
+- `Version { get; } -> UiStateVersion` — The window's state version after the change.
+- `Window { get; } -> WindowRef` — The window whose state changed.
 
 ## UiWindowStateResetEvent `0.2.17` — A window's state went back to its initial values with a new session token: a new world.
 - `UiWindowStateResetEvent(WindowRef window, UiStateVersion oldVersion, UiStateVersion newVersion)`
-- `NewVersion { get; } -> UiStateVersion`
-- `OldVersion { get; } -> UiStateVersion`
-- `Window { get; } -> WindowRef`
+- `NewVersion { get; } -> UiStateVersion` — The version after the reset, with the new session token.
+- `OldVersion { get; } -> UiStateVersion` — The version before the reset, in the old session.
+- `Window { get; } -> WindowRef` — The window whose state was reset.
 
 ## UiWorldFields `0.2.17` — The groups of live game values a window or a HUD line can ask for.
 enum: None, LocalVitals, LocalPosition, LocalInventory, HostTime
 
 ## UiWorldReadResult `0.2.17` — What `BlockUi.ReadWorld` returned: a snapshot, or why there is none now (no world, no sample yet, expired).
 - `UiWorldReadResult(bool Ok, string? Reason, UiWorldSnapshot? Snapshot)`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `Snapshot { get; init; } -> UiWorldSnapshot?`
+- `Ok { get; init; } -> bool` — True when `Snapshot` is set.
+- `Reason { get; init; } -> string?` — Why there is no snapshot now; null when Ok.
+- `Snapshot { get; init; } -> UiWorldSnapshot?` — The latest publication; null when not Ok.
 
 ## UiWorldSnapshot `0.2.17` — One publication of live game values.
 - `UiWorldSnapshot(ulong Publication, uint AvailableMask, UiSnapshotStamp Local, UiSnapshotStamp Server, uint LocalPlayer, uint Health, uint HealthMax, uint Stamina, uint StaminaMax, uint Mana, uint ManaMax, long XFixed, long YFixed, long ZFixed, decimal ServerHours, IReadOnlyList<UiInventoryValue> Inventory, IReadOnlyList<string?> UnavailableReasons)`
-- `AvailableMask { get; init; } -> uint`
+- `AvailableMask { get; init; } -> uint` — The `UiWorldFields` groups this publication holds; the fields of other groups are not valid.
 - `Has(UiWorldFields fields) -> bool` — Whether every group in `fields` is in this publication.
-- `Health { get; init; } -> uint`
-- `HealthMax { get; init; } -> uint`
-- `Inventory { get; init; } -> IReadOnlyList<UiInventoryValue>`
-- `Local { get; init; } -> UiSnapshotStamp`
-- `LocalPlayer { get; init; } -> uint`
-- `Mana { get; init; } -> uint`
-- `ManaMax { get; init; } -> uint`
-- `Publication { get; init; } -> ulong`
-- `Server { get; init; } -> UiSnapshotStamp`
-- `ServerHours { get; init; } -> decimal`
-- `Stamina { get; init; } -> uint`
-- `StaminaMax { get; init; } -> uint`
-- `UnavailableReasons { get; init; } -> IReadOnlyList<string?>`
-- `XFixed { get; init; } -> long`
-- `YFixed { get; init; } -> long`
-- `ZFixed { get; init; } -> long`
+- `Health { get; init; } -> uint` — The local player's health as the game computed it, before any mod's HUD change (`UiWorldFields.LocalVitals`).
+- `HealthMax { get; init; } -> uint` — The local player's maximum health (`UiWorldFields.LocalVitals`).
+- `Inventory { get; init; } -> IReadOnlyList<UiInventoryValue>` — The local player's nonempty own slots, sorted by page and slot (`UiWorldFields.LocalInventory`).
+- `Local { get; init; } -> UiSnapshotStamp` — When the local player's values were taken, in the game's own world.
+- `LocalPlayer { get; init; } -> uint` — The local player's entity.
+- `Mana { get; init; } -> uint` — The local player's mana (`UiWorldFields.LocalVitals`).
+- `ManaMax { get; init; } -> uint` — The local player's maximum mana (`UiWorldFields.LocalVitals`).
+- `Publication { get; init; } -> ulong` — The publication's id: each publication gets the next one (monotonic for the process).
+- `Server { get; init; } -> UiSnapshotStamp` — When `ServerHours` was taken, in the world this game hosts; all zeros when it hosts none.
+- `ServerHours { get; init; } -> decimal` — The hour of day of the world this game hosts (`UiWorldFields.HostTime`).
+- `Stamina { get; init; } -> uint` — The local player's stamina (`UiWorldFields.LocalVitals`).
+- `StaminaMax { get; init; } -> uint` — The local player's maximum stamina (`UiWorldFields.LocalVitals`).
+- `UnavailableReasons { get; init; } -> IReadOnlyList<string?>` — Why each group is missing (`NoWorld`, `StaleSource`, `LayoutOff`, ...), one entry per group in ascending bit order...
+- `XFixed { get; init; } -> long` — The local player's x position, 32.32 fixed point (`UiWorldFields.LocalPosition`).
+- `YFixed { get; init; } -> long` — The local player's y position, 32.32 fixed point (`UiWorldFields.LocalPosition`).
+- `ZFixed { get; init; } -> long` — The local player's z position, 32.32 fixed point (`UiWorldFields.LocalPosition`).
 
 ## ValueRow — A label and a value that cannot be edited here: `Label: value`.
 - `Bind { get; init; } -> string` — `game.<name>` or `config.<path>` (`config.<config id>/<path>` when two configs have the path).

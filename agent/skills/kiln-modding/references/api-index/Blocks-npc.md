@@ -142,8 +142,8 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 
 ## ClothCapsuleBlock `0.2.17` — A capsule collider of cloth: two spheres and the space between them.
 - `ClothCapsuleBlock(ClothSphereBlock A, ClothSphereBlock B)`
-- `A { get; init; } -> ClothSphereBlock`
-- `B { get; init; } -> ClothSphereBlock`
+- `A { get; init; } -> ClothSphereBlock` — One end: a sphere with its centre, radius and joint.
+- `B { get; init; } -> ClothSphereBlock` — The other end: a sphere at a different centre that follows the same joint as `A`.
 
 ## ClothColliderBlock `0.2.17` — A shape a body's cloth does not pass through: a `ClothSphereBlock` or a `ClothCapsuleBlock`.
 - `ClothColliderBlock(ClothColliderBlock original)`
@@ -260,15 +260,15 @@ Extension members (C# 14): call them on the receiver (`Act.X`, `Blocks.X`), not 
 
 ## NpcBodyBuildResult `0.2.17` — An NPC body's build status.
 - `NpcBodyBuildResult(bool Ok, string? Reason, NpcBodyBuildState State, string ModId, string BlockKey, Guid Template, Guid Model, Guid Graph, ulong Generation)`
-- `BlockKey { get; init; } -> string`
-- `Generation { get; init; } -> ulong`
-- `Graph { get; init; } -> Guid`
-- `Model { get; init; } -> Guid`
-- `ModId { get; init; } -> string`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `State { get; init; } -> NpcBodyBuildState`
-- `Template { get; init; } -> Guid`
+- `BlockKey { get; init; } -> string` — The NPC block's key, `mod:block`.
+- `Generation { get; init; } -> ulong` — The boot build's generation for the body; 0 when none.
+- `Graph { get; init; } -> Guid` — The animation graph the build used; empty when it has none.
+- `Model { get; init; } -> Guid` — The model the build used; empty when it has none.
+- `ModId { get; init; } -> string` — The id of the mod that defines the NPC block.
+- `Ok { get; init; } -> bool` — True only when `State` is `NpcBodyBuildState.Ready`.
+- `Reason { get; init; } -> string?` — Why the body is not ready (the boot build's refusal, `NoDefinition`, or a restart it waits for); null when Ok.
+- `State { get; init; } -> NpcBodyBuildState` — Where the body stands: ready, failed, waiting for a restart, or removed.
+- `Template { get; init; } -> Guid` — The clone the build used; empty when it has none.
 
 ## NpcBodyBuildState `0.2.17` — Where an NPC block's body of its own stands (`NpcBodies.Status`).
 enum: PendingRestart, Ready, Failed, RemovalPendingRestart, Removed
@@ -303,10 +303,10 @@ enum: Target, Self
 
 ## NpcMotionBinding `0.2.17` — Binds one chassis motion to an authored graph state.
 - `NpcMotionBinding(NpcMotionRole Role, int Variant, AnimState State, Guid? InteractionKey = null)`
-- `InteractionKey { get; init; } -> Guid?`
-- `Role { get; init; } -> NpcMotionRole`
-- `State { get; init; } -> AnimState`
-- `Variant { get; init; } -> int`
+- `InteractionKey { get; init; } -> Guid?` — For `NpcMotionRole.Interaction`: the chassis interaction key, null to use the chassis's own (an explicit key must...
+- `Role { get; init; } -> NpcMotionRole` — The motion this binding plays.
+- `State { get; init; } -> AnimState` — The state of the body's authored animation graph that plays it.
+- `Variant { get; init; } -> int` — Which variant of the role: 0, 1 or 2 for Sit, Sleep and Door (see `NpcMotionRole`), 0 for the others.
 
 ## NpcMotionRole `0.2.17` — A roster villager's motion.
 enum: Sit, Sleep, Inspect, Greet, Talk, Reaction0, Reaction1, Refuse, IdleGesture0, IdleGesture1, Interaction, GreetingExtra, Farewell, DialogOption, AttentionGreeting, TurnLeftSmall, TurnLeftBig, TurnRightSmall, TurnRightBig, Jump, Door
@@ -418,16 +418,16 @@ enum: Assigned, ManualSuspended, PendingSpawn, VersionMismatch, Removed
 - `RoutineTask(RoutineTask original)`
 
 ## RoutineTaskChangedEvent `0.2.17` — A task of a villager's routine changed state: chosen at a decision, started, completed, refused by the game (no seat, no bed, sleep not allowed now), or suspended.
-- `From { get; } -> RoutineTaskState`
+- `From { get; } -> RoutineTaskState` — The task's state before the change.
 - `Invocation { get; } -> ulong` — The task's serial: every task a routine starts has its own.
 - `Key { get; } -> string` — The plan's identity, `<mod>:<name>`.
 - `NpcId { get; } -> uint` — The villager.
-- `PlanVersion { get; } -> uint`
+- `PlanVersion { get; } -> uint` — The plan's Version (the one its definition declares) of the assignment the task belongs to.
 - `Reason { get; } -> string?` — Why it was refused or suspended (`NativeSleepNotCurrentlyAllowed`, `TaskFailed`, `NoTransition`, `SafetyInterrupt`...
 - `Revision { get; } -> ulong` — The assignment's revision when the change was reported.
 - `Task { get; } -> RoutineTask?` — The task; null when there is none.
 - `Teardown { get; } -> bool` — The world is stopping.
-- `To { get; } -> RoutineTaskState`
+- `To { get; } -> RoutineTaskState` — The task's state after the change.
 
 ## RoutineTaskState `0.2.17` — Where one task of a routine stands.
 enum: None, Chosen, Started, Completed, Refused, Suspended

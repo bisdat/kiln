@@ -443,14 +443,14 @@ enum: Entity, Item, Destroy, Cleanup
 - `FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0)`
 - `Deconstruct(out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax) -> void`
 - `Equals(TestKit.FakeVitals other) -> bool`
-- `Health { get; init; } -> uint`
-- `HealthMax { get; init; } -> uint`
-- `Mana { get; init; } -> uint`
-- `ManaMax { get; init; } -> uint`
+- `Health { get; init; } -> uint` — Current health.
+- `HealthMax { get; init; } -> uint` — Maximum health.
+- `Mana { get; init; } -> uint` — Current mana.
+- `ManaMax { get; init; } -> uint` — Maximum mana.
 - `static operator !=(TestKit.FakeVitals left, TestKit.FakeVitals right) -> bool`
 - `static operator ==(TestKit.FakeVitals left, TestKit.FakeVitals right) -> bool`
-- `Stamina { get; init; } -> uint`
-- `StaminaMax { get; init; } -> uint`
+- `Stamina { get; init; } -> uint` — Current stamina.
+- `StaminaMax { get; init; } -> uint` — Maximum stamina.
 
 ## TestKit.FakeVoxelAnswer `0.2.3` — What the fake answers a voxel ray: `FakeVoxelAnswer.Clear`, `FakeVoxelAnswer.Hit`, or `FakeVoxelAnswer.Refused` with one of the service's reasons (`NotLoaded`...
 - `static Clear { get; } -> TestKit.FakeVoxelAnswer` — Loaded, and nothing on the segment.
@@ -489,9 +489,9 @@ enum: Entity, Item, Destroy, Cleanup
 ## TestKit.FakeWorldPosition `0.2.17` — The local player's position, in metres (the publication carries it in 32.32 fixed point).
 - `FakeWorldPosition()`
 - `FakeWorldPosition(double X, double Y, double Z)`
-- `X { get; init; } -> double`
-- `Y { get; init; } -> double`
-- `Z { get; init; } -> double`
+- `X { get; init; } -> double` — The X coordinate, in metres.
+- `Y { get; init; } -> double` — The Y coordinate, in metres.
+- `Z { get; init; } -> double` — The Z coordinate, in metres.
 
 ## TestKit.FakeWorldSample `0.2.17` — What a test publishes through `HarnessUiSnapshot.Publish`: each group it gives is in the publication when something demanded it.
 - `HostHours { get; init; } -> double?` — The hour of the world this game hosts (`UiWorldFields.HostTime`).
@@ -504,15 +504,15 @@ enum: Entity, Item, Destroy, Cleanup
 ## TestKit.FakeWorldSlot `0.2.17` — One nonempty slot of the local player's own inventory.
 - `FakeWorldSlot()`
 - `FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0)`
-- `Count { get; init; } -> uint`
+- `Count { get; init; } -> uint` — How many of the item the slot holds.
 - `Deconstruct(out uint Item, out uint Count, out uint InventoryPage, out uint SlotIndex, out uint Pide) -> void`
 - `Equals(TestKit.FakeWorldSlot other) -> bool`
-- `InventoryPage { get; init; } -> uint`
-- `Item { get; init; } -> uint`
+- `InventoryPage { get; init; } -> uint` — The inventory page the slot is on (part of the slot's binding key).
+- `Item { get; init; } -> uint` — The item in the slot, by the game's item id.
 - `static operator !=(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
 - `static operator ==(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
-- `Pide { get; init; } -> uint`
-- `SlotIndex { get; init; } -> uint`
+- `Pide { get; init; } -> uint` — The id of the item's own per-item data in the game (gear: level, rarity, gems); 0 for an item without any.
+- `SlotIndex { get; init; } -> uint` — The slot's index on its page.
 
 ## TestKit.FakeWorldWrite `0.2.2` — One tracked write a mod asked for, as the fake world ran it (`FakeWorld.Writes`).
 - `FakeWorldWrite(ulong Step, string? ModId, EntityId Entity, string Component, int Offset, WorldWriteStatus Status, byte[] Before, byte[] After)`

@@ -204,7 +204,7 @@ enum: Items, Recipes, Loot, Drops
 - `const ChannelName = "kiln:content" -> string` — The name of the Kiln.Network channel the sync uses.
 - `const ChannelVersion = "1" -> string` — The version of the sync protocol on that channel.
 - `static CheckRoundTrip() -> ContentRoundTrip` — A self-check of the sync format on this process's own registries (tick thread; a lab / diagnostic tool, also usable...
-- `static Serving { get; } -> (uint StateId, uint Fields, int Bytes, int Parts)?`
+- `static Serving { get; } -> (uint StateId, uint Fields, int Bytes, int Parts)?` — Server side: the content state being served, or null when none is (not a server, nothing exported yet): its id (the...
 - `static Status { get; } -> ContentSyncStatus` — Client side: what the content sync did last.
 
 ## ContentSyncedEvent — Client: a Kiln server's content changes were applied to this game's registries (`ContentSyncedEvent.Restored` false), or taken off again after leaving (true).
@@ -767,13 +767,13 @@ enum: Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning, Poison, Healing, Wood, S
 enum: Always, LikeBase
 
 ## StationMenuAppliedEvent `0.2.17` — Client: a station's menu was built from its layout, or refused (`StationMenuAppliedEvent.Ok` false, `StationMenuAppliedEvent.Reason`: `IconSourceMissing`...
-- `DefinitionId { get; } -> Guid`
+- `DefinitionId { get; } -> Guid` — The id of the station menu definition (the layout) that was applied or refused.
 - `FromServer { get; } -> bool` — The layout came from the server (a joined game).
-- `Generation { get; } -> ulong`
-- `Ok { get; } -> bool`
-- `Reason { get; } -> string`
+- `Generation { get; } -> ulong` — The generation of the layout collection the menu was built from (the server's when...
+- `Ok { get; } -> bool` — True when the menu was built from the layout; false when it was refused.
+- `Reason { get; } -> string` — Why the layout was refused (`IconSourceMissing`, `RestartRequired`, ...) when not `StationMenuAppliedEvent.Ok`.
 - `Session { get; } -> Guid` — The server's session of the layout (`Guid.Empty` for a local one).
-- `Workshop { get; } -> uint`
+- `Workshop { get; } -> uint` — The workshop whose menu this is (the game's workshop id).
 
 ## StationMenuDefinitionChangedEvent `0.2.17` — A station's menu layout was accepted, replaced or taken off (another layer, or the game's own layout, shows again).
 - `DefinitionId { get; } -> Guid` — The definition (the layer): `BlockIds.Derive(mod, "menu-layout", key)`.
