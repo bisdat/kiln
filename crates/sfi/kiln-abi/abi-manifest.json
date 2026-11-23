@@ -6948,6 +6948,76 @@
       },
       "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
     },
+    "native/core/abi/services/kiln_ui_ammo.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiAmmoApi": {
+          "align": 8,
+          "fields": {
+            "context": 16,
+            "header": 0,
+            "publish": 8,
+            "take_picks": 24
+          },
+          "size": 32
+        },
+        "KilnUiAmmoContext": {
+          "align": 8,
+          "fields": {
+            "game_count": 28,
+            "game_rows": 40,
+            "game_serial": 32,
+            "held_item": 24,
+            "kind": 12,
+            "local_player": 20,
+            "ok": 4,
+            "reason": 8,
+            "session": 16,
+            "size": 0
+          },
+          "size": 1064
+        },
+        "KilnUiAmmoPick": {
+          "align": 8,
+          "fields": {
+            "count": 12,
+            "item": 8,
+            "kind": 4,
+            "row": 16,
+            "session": 20,
+            "size": 0,
+            "step": 24
+          },
+          "size": 32
+        },
+        "KilnUiAmmoPublish": {
+          "align": 8,
+          "fields": {
+            "count": 12,
+            "kind": 4,
+            "mode": 8,
+            "reserved": 20,
+            "rows": 32,
+            "serial": 24,
+            "session": 16,
+            "size": 0
+          },
+          "size": 40
+        },
+        "KilnUiAmmoRow": {
+          "align": 4,
+          "fields": {
+            "count": 4,
+            "flags": 8,
+            "item": 0,
+            "row": 12
+          },
+          "size": 16
+        }
+      },
+      "sha256": "79d470b5b0e25f898ac7b61a9902104d64f6ebceafc00f0faacf7b06d92d1367"
+    },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8517,7 +8587,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "965470ff1cc7e5ea8cd60880ade63ff375042b08ca9eed25b8b81c7b7c3d121b",
+    "src/layout.rs": "3d65c1d64b33f54230f8cb582726671e96dae37f5665569fe28c3978306635f2",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8572,6 +8642,7 @@
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui_ammo.rs": "6533ca816d68b06c9cd461564a7a15fa56df804e22e0f26dc6d590e93171ffa7",
     "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
     "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
@@ -8581,7 +8652,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "f65ab67bd407904be2f23d9e1596ad78fc31e9d1961b57e736f2be326f62bc86"
+    "src/services/mod.rs": "aacd2abadc1ea27e0c9217a772e301b285851e3379b55a1dac33374389a71f94"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
