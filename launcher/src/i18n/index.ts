@@ -185,6 +185,13 @@ export function hasKey(key: string): boolean {
   return rawIn(tables.get(FALLBACK)!.table, key, null, "en") !== undefined;
 }
 
+/** True when the language shown has its own text for `key` (English: en.json has it); false when `t` would show
+ * English's in its place. For a newer text that replaces an older one: the older one, translated, until the newer one is. */
+export function hasOwnText(key: string): boolean {
+  const loc = tables.get(currentLanguage());
+  return !!loc && rawIn(loc.table, key, null, loc.tag) !== undefined;
+}
+
 function subscribe(l: () => void) {
   listeners.add(l);
   return () => {

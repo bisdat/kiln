@@ -32,14 +32,14 @@ async function removeFromList(page: Page, name: string) {
   return page.getByRole("dialog", { name: `Remove ${name}?` });
 }
 async function typingOn(page: Page) {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const toggle = page.getByRole("switch", { name: /Type a mod's name to remove it/ });
   await expect(toggle).not.toBeChecked();
   await page.getByText("Type a mod's name to remove it", { exact: true }).click();
   await expect(toggle).toBeChecked();
 }
 async function cleanUp(page: Page) {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   await page.getByRole("region", { name: "Library" }).getByRole("button", { name: "Clean up" }).click();
 }
 

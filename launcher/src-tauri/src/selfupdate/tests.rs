@@ -484,3 +484,43 @@ fn accepted_restore_choice_is_in_every_status_after_reopening() {
         assert_eq!(serde_json::to_value(status()).unwrap()["restoreRequested"], true);
     }
 }
+
+#[test]
+fn the_first_status_waits_for_the_start() {
+    // the window's first update_status can come before start() read update.json: it waits for it (bounded)
+    let gate = Arc::new(StartGate::new());
+    let g2 = gate.clone();
+    let t = std::thread::spawn(move || g2.wait(Duration::from_secs(5)));
+    std::thread::sleep(Duration::from_millis(50));
+    gate.open();
+    assert!(t.join().unwrap(), "update_status answers once start() has the state");
+    assert!(gate.wait(Duration::from_millis(1)), "and at once after that");
+}
+
+#[test]
+fn when_the_start_never_comes_only_the_first_status_waits() {
+    // the start-up steps never run (the beta copy blocked, a broken data-folder pointer, a move): one wait, then none
+    let gate = StartGate::new();
+    let t0 = Instant::now();
+    assert!(!gate.wait(Duration::from_millis(100)));
+    assert!(t0.elapsed() >= Duration::from_millis(100));
+    let t1 = Instant::now();
+    assert!(!gate.wait(Duration::from_secs(10)));
+    assert!(t1.elapsed() < Duration::from_secs(1), "a later status answers at once");
+    gate.open();
+    assert!(gate.wait(Duration::from_secs(10)), "a late start still counts");
+}
+
+#[test]
+fn the_restart_waits_only_for_a_starting_game() {
+    // a running game does not hold it (the next launcher's own install waits for the game to close)
+    assert_eq!(restart_refusal(true).unwrap().code, ErrorCode::Busy);
+    assert!(restart_refusal(false).is_none());
+}
+
+#[test]
+fn the_status_names_the_shipped_runtime() {
+    // the window installs by itself only this one after an update (shell/UpdateNotice.tsx)
+    let v = serde_json::to_value(status()).unwrap();
+    assert!(v.get("shippedRuntime").is_some(), "{v}");
+}

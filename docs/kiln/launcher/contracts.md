@@ -504,20 +504,26 @@ unchanged. Every record's destination, receipt path, marker identity, and parked
 recovery mutates anything. A publication replacing a currently receipted copy gets its new receipt only while the
 published marker and Library file hashes match `to`; first publications without an old receipt remain unowned.
 A stop after parking puts the old copy back with a directory rename. Parked trees are removed only after receipt
-publication and verification that the replacement still exists and matches; a missing replacement with an old copy
-is preserved and reported. Completed records for a moved game's old root are retained without accessing those paths.
+publication and verification that the replacement still exists and matches. Kiln records the old marker in the
+staging record before deleting the parked contents, then deletes the marker once nothing else is left, then the empty
+folders. A replaced folder that had no marker (only files a mod wrote, adopted with them) has nothing to record: it is
+removed whole, and only while the journal names it. If the journal still names the old copy and the replacement is
+missing, the old copy is preserved and reported. Completed records for a moved game's old root are retained without
+accessing those paths.
 A receipt that moved on or a changed published copy is not adopted. A launcher before dev.29 ignores the file.
 **Staging record (0.2.0-dev.30.3):** a placement stages its copy in a hidden folder beside it (`.kiln-place-<12 hex>`:
 the staged copy in `new`, a parked old copy in `old`). Before that folder is made, `kiln/state/placement-staging.json`
-names it durably (`{format: 1, folders: [{folder, path, marker, gameFolder?}]}`); its entry goes once the folder's
+names it durably (`{format: 1, folders: [{folder, path, marker, gameFolder?, parked?}]}`); its entry goes once the folder's
 removal is on disk (its parent folder flushed on Unix) at the end of the placement, and the file goes with its last
 entry. A record Kiln cannot read, or larger than 1 MiB (never read whole), names no folder. Every placement and
 uninstall, after the journal's recovery, removes only a folder the record names: one of that name, directly beside the
-copy it stages in that copy's engine mod folder, no link, holding nothing but a staged copy without links and with no
-marker or the recorded one. That `new` goes, then the empty folder. A folder that holds `old` or anything else stays as
-it is with its entry, and so does every folder the record does not name; one Windows does not let Kiln remove yet (a
-file held open) stays for the next time, with a note. The journal's format is unchanged: an older launcher reads it as
-before and ignores this file.
+copy it stages in that copy's engine mod folder, with no links. The sweep can remove a `new` with the recorded marker
+or no marker yet. Once the journal no longer names an `old`, the sweep can remove it if its marker matches `parked`,
+or finish removing its empty directory if cleanup already removed the marker. Extra entries in the staging folder
+keep it in place. If Windows holds a file open, the record stays for the next attempt, with a note. The journal's
+format is unchanged: an older launcher reads it as before. A launcher that reads the staging record without `parked`
+(0.2.0-dev.30.3 and 30.4) leaves a folder holding `old` as it is, and drops the field if it rewrites the record; that
+folder then stays.
 **Durability order:** an imported Library tree is flushed (files, then directories), durably renamed, then its
 import record is replaced durably. A staged game copy (including carried settings) is flushed before its intent,
 park, publish and receipt; both source and destination directory entries of these renames are flushed on Unix,
@@ -1831,7 +1837,7 @@ default; the launcher uses `full`. Builds for Linux and `x86_64-pc-windows-msvc`
 | `report` | `build(&ReportInput) -> Report` (never fails; unreadable sections in `errors`), `write_zip(&Report, &Path)` (feature `zip`), `redact(&str, &Redactor)`, `redact_json`, `is_secret_key`, `player_names`, `Redactor::{new, current, add_home, add_word, add_whole_word, add_players_from, add_steam_accounts}`, `file_name`, `os_info`, `os_release`, `folder_mods`, `folder_loaded`, `engine_headline`, `engine_mod_lines`, `host_name`, `LEFT_OUT`; `ReportInput`, `Report`, `Finding`, `Level`, `OsInfo`, `FolderMod` ([support-report.md](support-report.md)) |
 | `control` | `send(&Path, &str, Duration) -> Result<Value>` |
 | `state` | `read_boot`, `read_mods`, `read_native`, `read_last_server`, (dev.29.18) `read_graphics` (implemented); `GraphicsState`, `UpscalerState`, `VendorFilesSeen`, `BootJson` (+ `BootProfile`, `ProfileMode`, `BootChainEntry`, `ChainSource`, `ChainStatus`, `RefusalDetail`, ...), `ModsJson`, `ManagedMod`, `NativeJson`, `NativeModStatus`, `LastServer`, `RequiredMod`, `JoinOutcome`, `ServerRef` |
-| `server` (`instance settings steamcmd run control query backup remote game procs console proton`) | `instance::{list, get, create, import, remove, record}`, `settings::{read, write, validate, schema}`, `steamcmd::{install, update}`, `run::{status, start, stop, restart, pid, headless, ctrl_c}`, `console::{capture_path, open_capture, pick, snapshot, ConsoleFollower::{open, poll, source}, ConsoleLine, ConsoleLevel, ConsoleSource, ConsoleSnapshot, ConsoleUpdate}`, `proton::{plan, SteamLaunch, parse_launch_options}`, `control::{mods, sync, set_enabled}`, `query::query`, `backup::{list, create, restore}`, `remote::{run, read_file}`; `ServerInstance` (+ `runner`, `prefix`, `backupDir`, `kilnctl`, `stopTimeoutS`), `ServerRunner {Kilnctl, Steam, Windows, Remote}`, `ServerSpec` (+ `wine`, `skipSteamcmd`), `ServerStatus`, `ServerState`, `ServerMod` (+ `kind`, `steamMessages` when true), `SourceMarker`, `NetworkModpackConfig`, `RemoteSpec`, `ServerQuery`, `ServerBackup`, `ServerSettings` (+ `schema`, `running`); kilnctl's moved pieces (instance files, game, procs, the foreground runner) |
+| `server` (`instance settings steamcmd run control query backup remote game procs console proton`) | `instance::{list, get, create, import, remove, record}`, `settings::{read, write, validate, schema}`, `steamcmd::{install, update}`, `run::{status, start, stop, restart, pid, headless, ctrl_c}`, `console::{capture_path, open_capture, pick, snapshot, ConsoleFollower::{open, poll, source}, ConsoleLine, ConsoleLevel, ConsoleSource, ConsoleSnapshot, ConsoleUpdate}`, `proton::{plan, SteamLaunch, parse_launch_options}`, `control::{mods, sync, set_enabled}`, `query::query`, `backup::{list, create, restore}`, `remote::{run, read_file}`; `ServerInstance` (+ `runner`, `prefix`, `backupDir`, `kilnctl`, `stopTimeoutS`), `ServerRunner {Kilnctl, Steam, Windows, Remote}`, `ServerSpec` (+ `wine`, `skipSteamcmd`, `resume`), `ServerStatus`, `ServerState`, `ServerMod` (+ `kind`, `steamMessages` when true), `SourceMarker`, `NetworkModpackConfig`, `RemoteSpec`, `ServerQuery`, `ServerBackup`, `ServerSettings` (+ `schema`, `running`); kilnctl's moved pieces (instance files, game, procs, the foreground runner) |
 | `admin` (`protocol client bridge tunnel discover hub`) | `protocol::{encode, decode, decode_known, write_frame, read_payload, parse_token, mac_message, mac, op_budget, error_code, Frame, KapErrorCode, Endpoint, Limits, ServerIdent}` + constants (`MAX_SERVER_FRAME` = 16 MiB), `client::{AdminClient::{connect, connect_dir, connect_ssh, connect_tcp, connect_file, session, call, subscribe, unsubscribe, next_event, is_open, shutdown, close, send_frame}, Transport, AdminSession, AdminEvent, TcpTarget}`, `bridge::FileBridge::{new, locate, alive, call, call_raw, state}`, `tunnel::SshTunnel::{open, close, alive}`, `discover::{endpoint, token, probe, remote_endpoint, remote_token}`, `hub::{AdminHub::{new, connect, call, subscribe, unsubscribe, disconnect, sessions, session_of, shutdown}, HubEvent, Connector}` |
 | `gameart` (feature `gameart`) | `extract_editor`, `extract_map`, `status`, `game_build`, `build_of`, `read_source`, `write_source`, `recipe_of`, `GameData::open`; `SourceInfo`, `GameSource`, `ArtStatus`, `GameBuild`, `EditorOptions`, `MapOptions`, `LayoutSource`; `kfc::Kfc`, `refl::{PeFile, TypeDb}`, `res`, `texture`, `image`, `work` ([gameart.md](gameart.md)) |
 | `modpack` | `inspect`, `download`, `verify`, `extract`, `check_against`, `install`, `build`, `publish`, `publish_state`, `client_mods`, `required`, `server_identity`; `ModpackManifest`, `ModpackMod`, `ModpackServer`, `ModpackSource`, `ModpackPreview`, `ModpackInstallRequest`, `ModpackInstallResult`, `BuiltModpack`, `ModpackPublishState`, `ClientMod` |

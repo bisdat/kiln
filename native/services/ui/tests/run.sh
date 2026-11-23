@@ -77,6 +77,9 @@ bash "$here/run-menu-scroll-host.sh"
 # the middle and side mouse buttons and the wheel as key presses: twins of raw records and messages, notches (mouse_press.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_press_test.cpp" -o "$out/mouse_press_test"
 "$out/mouse_press_test"
+# a game controller's buttons as key presses (0.2.0-dev.30.5): codes, pad modifiers, order, what the game keeps (pad_keys.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_keys_test.cpp" -o "$out/pad_keys_test"
+"$out/pad_keys_test"
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"
@@ -103,6 +106,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$he
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
+# the pad Kiln's screens follow: every poll per user, a stick back at centre included, dead zones (pad_slots.h, kiln#123)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_slots_test.cpp" -o "$out/pad_slots_test"
+"$out/pad_slots_test"
 # Repeat-window configuration on the render thread alongside key events on the window thread.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread "$here/key_hold_thread_test.cpp" -o "$out/key_hold_thread_test"
 "$out/key_hold_thread_test"

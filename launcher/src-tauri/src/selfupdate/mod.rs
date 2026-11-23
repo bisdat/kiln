@@ -36,7 +36,7 @@ use feed::{Channel, Source};
 use kind::InstallInfo;
 use kiln_manage::{Error, ErrorCode};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -163,6 +163,9 @@ pub struct UpdateStatus {
     pub skipped: Option<String>,
     /// This start follows an update this launcher installed (until `update_ack`).
     pub just_updated: Option<Updated>,
+    /// (0.2.0-dev.30.5) The Kiln runtime this launcher ships, once read at the start: the only one that goes into the
+    /// game by itself after an update (the window's "Updated to" notice); null before it is read, or in a build without one.
+    pub shipped_runtime: Option<String>,
     pub task_id: Option<String>,
     /// Why the last download or install failed.
     pub error: Option<Error>,
@@ -220,6 +223,54 @@ struct Inner {
 
 static STATE: OnceLock<Mutex<Inner>> = OnceLock::new();
 
+/// [`start`] has set up this start's state (update.json read, `just_updated` known). The start-up steps run once the data
+/// folder is free, after the window is up, so the window's first `update_status` can come before them: it waits for this
+/// ([`wait_started`]) instead of answering with the placeholder, which has no `just_updated` (the "Updated to" notice then
+/// never opened when automatic checks were off, and waited for the first check when they were on).
+/// When the start-up steps never run (the beta copy blocked, a broken data-folder pointer, another launcher's move), the
+/// first wait gives up and every later one answers at once.
+struct StartGate {
+    /// (start ran, a wait gave up)
+    state: Mutex<(bool, bool)>,
+    cv: Condvar,
+}
+
+impl StartGate {
+    const fn new() -> StartGate {
+        StartGate { state: Mutex::new((false, false)), cv: Condvar::new() }
+    }
+
+    fn open(&self) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).0 = true;
+        self.cv.notify_all();
+    }
+
+    fn is_open(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).0
+    }
+
+    /// Waits up to `max` for [`open`](Self::open) (not at all once a wait gave up); true once it is open.
+    fn wait(&self, max: Duration) -> bool {
+        let g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut g, timeout) = self.cv.wait_timeout_while(g, max, |(started, gave_up)| !*started && !*gave_up).unwrap_or_else(|e| e.into_inner());
+        if timeout.timed_out() && !g.0 {
+            g.1 = true;
+        }
+        g.0
+    }
+}
+
+static STARTED: StartGate = StartGate::new();
+
+fn mark_started() {
+    STARTED.open();
+}
+
+/// Waits up to `max` for [`start`]; true once it ran. After one wait timed out, no later one waits.
+pub fn wait_started(max: Duration) -> bool {
+    STARTED.wait(max)
+}
+
 fn state() -> std::sync::MutexGuard<'static, Inner> {
     STATE.get_or_init(|| Mutex::new(Inner { status: initial_status("0.0.0", kind::classify("", None, None)), pending: None, busy: false, restore: false }))
         .lock()
@@ -248,6 +299,7 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         ready: None,
         skipped: None,
         just_updated: None,
+        shipped_runtime: None,
         task_id: None,
         error: None,
     }
@@ -271,6 +323,7 @@ pub fn status() -> UpdateStatus {
     g.status.auto = auto;
     g.status.channel = channel;
     g.status.before_beta = before;
+    g.status.shipped_runtime = crate::commands::runtime::shipped_version();
     g.status.clone()
 }
 
@@ -301,6 +354,14 @@ fn prepare_switch_restart(root: &std::path::Path, version: &str, target: Channel
     crate::snapshot::plan_leave_beta(root, &to, target.as_str())
 }
 
+/// After the shipped runtime's import (its version is known now): the status goes out again, unless [`start`] has not
+/// run yet (it sends the status itself, with the version).
+pub(crate) fn emit_if_started<R: Runtime>(app: &AppHandle<R>) {
+    if STARTED.is_open() {
+        emit(app);
+    }
+}
+
 fn emit<R: Runtime>(app: &AppHandle<R>) {
     let s = status();
     let _ = app.emit(EVENT, s);
@@ -328,6 +389,9 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
         g.status.auto = auto;
         g.status.channel = channel;
     }
+    mark_started();
+    // a window that is already up hears it at once (the "Updated to" notice and the runtime it brought)
+    emit(&app);
     log(&format!(
         "Kiln Launcher {current} (pid {}, {:?}, {}), channel {}{}, automatic checks {}",
         std::process::id(),
@@ -877,6 +941,12 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some(ready) = ready.filter(|_| phase == Phase::Ready) else {
         return Err(Error::new(ErrorCode::Conflict, "No update is ready."));
     };
+    // never under a game that is starting: the next launcher would not know the start and could put its Kiln into the
+    // game while it loads (a running game is fine: the next launcher's own install waits for it to close)
+    if let Some(e) = restart_refusal(crate::commands::launch::start_tracked()) {
+        log(&format!("restart refused: {}", e.message));
+        return Err(e);
+    }
     if !ready.installed {
         let current = state().status.current.clone();
         let notes = state().pending.as_ref().and_then(|(u, _)| u.body.as_deref().map(|n| feed::short_notes(n, NOTES_MAX)));
@@ -902,6 +972,12 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     log(&format!("installer of {} failed: {e}", update.version));
     state().pending = Some((update, bytes));
     Err(Error::new(ErrorCode::Io, format!("The installer could not start: {e}")))
+}
+
+/// Why the restart into an update waits: a start of this launcher is under way and the game's process is not there yet
+/// (Play pressed, the cook, the warning before Play, Steam asked: commands::launch). A game that runs does not hold it.
+fn restart_refusal(starting: bool) -> Option<Error> {
+    starting.then(|| Error::new(ErrorCode::Busy, "The game is starting: restart into the update once it runs, or once the start is over."))
 }
 
 /// Skips `version` (None: un-skips).

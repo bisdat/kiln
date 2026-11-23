@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Whole-stroke tool building-area guard. TerraformImpact's current program Access supplies BuildZoneSystem; no tick-only singleton or preview snapshot. Independently qualified on server 26430253 and client 26430625: docs/re/build.md section 7. Missing layout leaves the tools EDGE_CHECK requirement unavailable. The game's own TerraformImpact continues to enforce actor/cursor permissions, range and forbidden areas.",
+  "symbols": {
+    "@tools/BuildArea.access": {
+      "find": [
+        {
+          "scope": { "symbol": "gameplay/TerraformImpact", "size": 4096 },
+          "pattern": "49 8B 8D {tools/area.access_zones:d32} 48 8D 95 ?? ?? ?? ?? E8 {tools/BuildAreaIntersects:rel32} 44 8B 85 ?? ?? ?? ?? 44 0F B6 F0"
+        }
+      ]
+    },
+    "@tools/BuildArea.fields": {
+      "find": [
+        {
+          "scope": { "symbol": "tools/BuildAreaIntersects", "size": 160 },
+          "pattern": "48 39 79 {tools/area.count:d8} 0F 86 ?? ?? ?? ?? 66 44 0F 6F 0D ?? ?? ?? ?? 8B F7 F3 44 0F 10 05 ?? ?? ?? ?? 45 0F 57 DB F3 44 0F 10 25 ?? ?? ?? ?? 48 8B 5D {tools/area.bases:d8} 48 03 DE 80 7B {tools/area.abandoned:d8} 00 0F 85 ?? ?? ?? ?? 0F B6 4B {tools/area.owner_kind:d8} B8 01 00 00 00 D2 E0 84 C0 0F 84 ?? ?? ?? ?? 0F B6 4B {tools/area.shape:d8}"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "tools/area.access_zones": { "min_votes": 1 },
+    "tools/area.bases": { "min_votes": 1 },
+    "tools/area.count": { "min_votes": 1 },
+    "tools/area.shape": { "min_votes": 1 },
+    "tools/area.owner_kind": { "min_votes": 1 },
+    "tools/area.abandoned": { "min_votes": 1 }
+  },
+  "features": {
+    "tools.build_area": {
+      "symbols": ["gameplay/TerraformImpact", "@tools/BuildArea.access", "tools/BuildAreaIntersects", "@tools/BuildArea.fields", "@build/BuildZoneAppend.stride"],
+      "constants": ["tools/area.access_zones", "tools/area.bases", "tools/area.count", "tools/area.shape", "tools/area.owner_kind", "tools/area.abandoned", "build/zone.stride", "build/zone.entity"]
+    }
+  }
+}

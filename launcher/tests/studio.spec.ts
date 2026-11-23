@@ -158,6 +158,9 @@ test("publish: signed out asks for the sign-in; link only, then public with cred
   await shot(page, "desktop-studio-published-link");
   await expect(page.getByTestId("studio-version")).toHaveValue("1.0.1");
   await expect(page.getByTestId("studio-version-1.0.0")).toBeVisible();
+  // published: the typed notes went with it and are no unsaved work (which would hold the launcher update's restart)
+  await expect(page.getByTestId("studio-changes")).toHaveValue("");
+  await expect.poll(() => page.evaluate(async () => Object.values((await import("/src/shell/unsaved.ts")).useUnsaved.getState().by))).toEqual([]);
   // public: credits missing and no summary keep Publish off and say why
   await page.getByTestId("studio-vis-public").check();
   await expect(page.getByTestId("studio-needs")).toContainText("credits for");

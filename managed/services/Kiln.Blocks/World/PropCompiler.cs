@@ -500,6 +500,10 @@ internal static partial class Compiler
 
     // ---- recipes ------------------------------------------------------------------------------------------------
 
+    /// <summary>A recipe's GUID: its legacy identity (claimed), or the one derived from its key.</summary>
+    private static Guid RecipeGuid(BlockContext ctx, string key, RecipeBlock r, string path) =>
+        LegacyIdentities.Claim(ctx, "recipe", r.Identity, $"{path}.identity", BlockIds.Derive(ctx.Mod.Id, "recipe", key));
+
     /// <summary>A recipe that makes <paramref name="item"/>. <paramref name="at"/>: the station, when the block's list says it, not the recipe; with a workshop of its own, the item that
     /// places it, which names that workshop in a player's game. <paramref name="needsTime"/>: a workshop of its own has no recipes of the game to take a time from, and a cycle of no
     /// time would run every step. Burns are inputs: fuel is an input in the game's data too.</summary>
@@ -555,18 +559,26 @@ internal static partial class Compiler
             return;
         }
         if (props.Count > 0) low.Json["needsProps"] = new JsonArray(props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
-        var recipe = new RecipeDefinition
+        var def = new RecipeDefinition
         {
-            Guid = BlockIds.Derive(ctx.Mod.Id, "recipe", key), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
+            Guid = RecipeGuid(ctx, key, r, path), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
             Outputs = [new RecipeIngredient(item, r.Makes)], Duration = r.Seconds is { } d ? TimeSpan.FromSeconds(d) : null, Fields = fields.Count > 0 ? fields : null,
-            Props = props.Count > 0 ? props : null,
+            Props = props.Count > 0 ? props : null, MenuGroup = r.MenuGroup, TrackCrafted = r.TrackCrafted,
         };
-        low.Recipe(recipe);
+        if (r.MenuGroup is { } group)
+        {
+            if (group.Group == Guid.Empty) throw new BlockError(ctx.Block, $"{path}.menuGroup", "names no tab: say a CraftingGroups constant");
+            if (NewContent.MenuWorkshop(def) is not { } shown)
+                throw new BlockError(ctx.Block, $"{path}.menuGroup", "a station of this mod has a menu of its own, with no tabs of the game's: menuGroup is for a game workshop's menu");
+            if (shown != group.Workshop)
+                throw new BlockError(ctx.Block, $"{path}.menuGroup", $"{group} is a tab of workshop 0x{group.Workshop:x8}'s menu, and this recipe is crafted at 0x{shown:x8}: name a tab of its station's menu");
+        }
+        low.Recipe(def);
         if (menuWorkshop is { } at2 && r.MenuKey is { } boundKey)
         {
             // the binding table: (the station's own workshop, this mod, the key) -> this recipe, once the block is committed
             var ledger = ctx.Mod;
-            low.AfterCommit(() => StationMenuCompiler.Bind(new StationMenuCompiler.Binding(at2, ledger.Id, boundKey, recipe.Name, recipe.Guid, ledger, ledger.Owner)));
+            low.AfterCommit(() => StationMenuCompiler.Bind(new StationMenuCompiler.Binding(at2, ledger.Id, boundKey, def.Name, def.Guid, ledger, ledger.Owner)));
         }
     }
 }

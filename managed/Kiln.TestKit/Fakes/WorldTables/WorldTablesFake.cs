@@ -11,7 +11,7 @@ namespace Kiln.TestKit;
 
 internal sealed record PoolFakeMember(uint Item,bool Roof,bool Live=true,bool Terrain=false);
 internal sealed record PoolFakeRow(string Mod,string Key,Guid Guid,string Canonical,uint[] Items,bool Roof);
-internal sealed class PoolFakeState
+internal sealed partial class PoolFakeState
 {
     public readonly object Gate=new();
     public readonly Dictionary<string,PoolFakeMember> Materials=new(StringComparer.Ordinal);
@@ -95,13 +95,15 @@ internal sealed class WorldTablesFake:IKitFake
     public void Start(KilnHarness h){WorldTablesEvents.Reset();_ = KitFakes.State<PoolFakeState>(h);}
     public void BeforeStep(KilnHarness h,ulong step)
     {
-        var s=KitFakes.State<PoolFakeState>(h);lock(s.Gate)
+        var s=KitFakes.State<PoolFakeState>(h);
+        if(!s.RecipeSinkInstalled){Lowered._sinkOverride=new PendingToolRecipeSink(Lowered.Sink);s.RecipeSinkInstalled=true;}
+        lock(s.Gate)
             foreach(var (definition,owner) in s.ActiveOwners)if(!h.PoolOwnerActive(owner))
                 foreach(var r in s.Receipts.Values.ToArray())if(r.Definition==definition && r.State==DefinitionRegistrationState.Registered)
                     s.Receipts[r.RegistrationId]=r with {Ok=false,State=DefinitionRegistrationState.Retained,Code=DefinitionRefusalCode.OwnerInactive,Reason="owner is no longer active; the boot row remains in the game",SnapshotRevision=++s.Revision};
     }
     public void End(KilnHarness h)=>WorldTablesEvents.Reset();
-    public void AddCoverage(List<CoverageRow> rows)=>rows.Add(new("WorldTables",CoverageKind.RecordingFake,[Service,"worldtables.budgets","worldtables.material_pools"],"Scripted immutable boot pools, budgets, refusal and receipt semantics. New calls cannot register into the closed boot registry. No game resource ingestion, selector, renderer, save remap, or actual network handshake is modelled."));
+    public void AddCoverage(List<CoverageRow> rows)=>rows.Add(new("WorldTables",CoverageKind.RecordingFake,[Service,"worldtables.budgets","worldtables.material_pools"],"Scripted immutable boot pools, budgets, refusal and receipts; pending tool-policy pools validated against the decoded 56-item vanilla terrain pool and item-to-cell mapping; computed spherical brush descriptors and fill bytes; recorded recipes for pending tools (kiln.content stays unavailable). No extra game-visible tool pool rows or live tool actions. New calls cannot register into the closed boot registry. No game resource ingestion, selector, renderer, save remap, or actual network handshake is modelled."));
 }
 internal static unsafe class WorldTablesFakeTable
 {
@@ -176,7 +178,27 @@ internal static unsafe class WorldTablesFakeTable
     }
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]private static int DefineJson(WorldTablesNative.Str json,byte* b,nuint c,nuint* n)
     {
-        try{var s=State;if(s is null)return 3;var doc=JsonNode.Parse(json.Text())!.AsObject();var mod=(string)doc["mod"]!;var blocks=new JsonArray();var errors=new JsonArray();lock(s.Gate){if(doc["buildingMaterialPools"] is JsonObject pools)foreach(var (key,value) in pools){var block=BlockJson.Parse<BuildingMaterialPoolBlock>(value!.ToJsonString());var check=s.Validate(mod,block);if(check.Code!=DefinitionRefusalCode.None){errors.Add(check.Reason);continue;}var r=s.Prepare(mod,key,block,DefinitionTiming.AllowNextStart,true);r=s.Commit(r,mod,check.Canonical);blocks.Add(new JsonObject {["name"]=key,["kind"]="buildingMaterialPool",["status"]=r.State==DefinitionRegistrationState.Registered?"registered":"pending"});}else errors.Add("the test kit does not model this legacy worldtables definition");return Copy(new JsonObject {["errors"]=errors,["blocks"]=blocks}.ToJsonString(),b,c,n);}}catch(ArgumentException){return 1;}catch{return 7;}
+        try {
+            var s=State;if(s is null)return 3;
+            var doc=JsonNode.Parse(json.Text())!.AsObject();var mod=(string)doc["mod"]!;
+            var blocks=new JsonArray();var errors=new JsonArray();
+            lock(s.Gate) {
+                var modelled=false;
+                if(doc["buildingMaterialPools"] is JsonObject pools) {
+                    modelled=true;
+                    foreach(var (key,value) in pools) {
+                        var block=BlockJson.Parse<BuildingMaterialPoolBlock>(value!.ToJsonString());var check=s.Validate(mod,block);
+                        if(check.Code!=DefinitionRefusalCode.None){errors.Add(check.Reason);continue;}
+                        var r=s.Prepare(mod,key,block,DefinitionTiming.AllowNextStart,true);r=s.Commit(r,mod,check.Canonical);
+                        blocks.Add(new JsonObject {["name"]=key,["kind"]="buildingMaterialPool",["status"]=r.State==DefinitionRegistrationState.Registered?"registered":"pending"});
+                    }
+                }
+                if(doc["toolMaterialPools"] is JsonObject tools) {modelled=true;if((string?)doc["clients"]!="mod")errors.Add("toolMaterialPools: requires clients: mod");else s.DefineToolPools(mod,tools,blocks,errors);}
+                if(doc["toolBrushShapes"] is JsonObject brushes) {modelled=true;if((string?)doc["clients"]!="mod")errors.Add("toolBrushShapes: requires clients: mod");else s.DefineToolBrushes(mod,brushes,blocks,errors);}
+                if(!modelled)errors.Add("the test kit does not model this legacy worldtables definition");
+                return Copy(new JsonObject {["errors"]=errors,["blocks"]=blocks}.ToJsonString(),b,c,n);
+            }
+        }catch(ArgumentException){return 1;}catch{return 7;}
     }
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]private static int Prune_(WorldTablesNative.Str mod,WorldTablesNative.Str names)=>3;
 }

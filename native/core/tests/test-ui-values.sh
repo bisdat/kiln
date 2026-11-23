@@ -9,6 +9,12 @@ out=${KILN_OUT:-$here/../../build}/core-tests
 mkdir -p "$out"
 cxx=${CXX:-$(command -v clang++ || command -v g++)}
 cc=${CC:-$(command -v clang || command -v gcc)}
+printf '#include "services/kiln_ui_item_detail.h"\n' |
+  "$cc" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -I"$here/../abi" -x c -
+echo "kiln_ui_item_detail.h: compiles as C11"
+printf '#include "services/kiln_ui_slots.h"\n' |
+  "$cc" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -I"$here/../abi" -x c -
+echo "kiln_ui_slots.h: compiles as C11"
 # the public header is C: it must compile as C11 on its own
 printf '#include "services/kiln_ui_values.h"\nint kiln_ui_values_header_ok;\n' |
   "$cc" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -I"$here/../abi" -x c -

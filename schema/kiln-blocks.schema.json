@@ -31,6 +31,9 @@
       "propertyNames": { "$ref": "#/$defs/name" },
       "additionalProperties": { "$ref": "#/$defs/materialTweak" }
     },
+    "buildingTools": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/buildingTool"}},
+    "terrainBrushes": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/terrainBrush"}},
+    "toolMaterialPools": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/toolMaterialPool"}},
     "buildingMaterialPools": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/buildingMaterialPool" } },
     "buildingMaterials": {
       "type": "object",
@@ -175,6 +178,7 @@
         "$ref": "#/$defs/quest"
       }
     },
+    "knowledge": {"type": "object", "description": "The game's tracking of the mod's items (found) and recipes (crafted once), as it tracks its own: built into the game's knowledge table at start, from the next start or the first when Kiln.Sdk baked it. Needs \"clients\": \"mod\" (since 0.2.0-dev.30.5).", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/knowledge"}},
     "dialogues": {
       "type": "object",
       "description": "Conversations in the game's own NPC menu, for an NPC block's talk or a quest NPC's dialogue. Needs \"clients\": \"mod\".",
@@ -247,6 +251,10 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "terrainBrush": {"type": "object", "required": ["name", "radius"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": {"type": "string", "maxLength": 16384}, "identity": {"$ref": "#/$defs/identity"}, "was": {"$ref": "#/$defs/name"}, "shape": {"const": "sphere"}, "radius": {"type": "number", "minimum": 0.25, "maximum": 8}}},
+    "toolMaterialPool": {"type": "object", "required": ["name", "entries"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "was": {"$ref": "#/$defs/name"}, "entries": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "object", "required": ["item", "terrainMaterial", "voxelsPerItem"], "additionalProperties": false, "properties": {"item": {"$ref": "#/$defs/ref"}, "terrainMaterial": {"type": "integer", "minimum": 1, "maximum": 127}, "voxelsPerItem": {"type": "integer", "minimum": 1, "maximum": 1000000}}}}}},
+    "terrainToolAction": {"type": "object", "required": ["mode"], "additionalProperties": false, "properties": {"mode": {"enum": ["remove", "add"]}, "removeMaterials": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 127}}, "terrainOnly": {"const": true}}},
+    "buildingTool": {"type": "object", "required": ["name", "brushes", "primary", "secondary"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": {"type": "string", "maxLength": 16384}, "identity": {"$ref": "#/$defs/identity"}, "was": {"$ref": "#/$defs/name"}, "materialPool": {"$ref": "#/$defs/ref"}, "brushes": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/ref"}}, "primary": {"$ref": "#/$defs/terrainToolAction"}, "secondary": {"$ref": "#/$defs/terrainToolAction"}, "icon": {"type": "string", "minLength": 1}}},
     "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
 
     "baseRule": {
@@ -849,7 +857,33 @@
         "sheltered": { "type": "boolean", "description": "A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it." },
         "comfort": { "type": "integer", "minimum": 0, "description": "The comfort level it asks of whoever makes it." },
         "menuKey": { "$ref": "#/$defs/menuKey", "description": "Its name in the menu of a station with tabs of its own (menu.tabs): one recipe of the mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself." },
-        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." }
+        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." },
+        "identity": { "$ref": "#/$defs/identity" },
+        "menuGroup": { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$", "description": "The tab of the game's crafting menu that lists it, one the game has (CraftingGroups in C#): \"0x<workshop>/<tab GUID>\", or with \"/<subcategory GUID>\". Its workshop is the station's (\"hand\": 0x00000000). Default: Kiln picks the place (since 0.2.0-dev.30.5)." },
+        "trackCrafted": { "type": "boolean", "description": "Keeps the game's \"crafted once\" mark of the recipe; a knowledge block with trigger craft puts it in the game's knowledge table (since 0.2.0-dev.30.5)." }
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "description": "A fixed GUID (and so game id) in place of the one Kiln derives, for an item or recipe another loader made: one of legacy and legacyId (since 0.2.0-dev.30.5).",
+      "properties": {
+        "legacy": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "The GUID the other loader gave it; the game id is FNV-1a of it." },
+        "legacyId": { "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 4294967295 }, { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}$" }], "description": "Only the game id, when the GUID is not known." }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false
+    },
+    "knowledge": {
+      "type": "object",
+      "required": ["trigger"],
+      "description": "The game's tracking of one of the mod's items or recipes. One of of and identity.",
+      "properties": {
+        "trigger": { "enum": ["pickup", "craft"], "description": "pickup: an item found (the world's and each player's knowledge); craft: a recipe crafted once (each player's)." },
+        "of": { "type": "string", "minLength": 1, "description": "An item block of this mod (pickup: the item; craft: its own recipe), or a recipe block (craft). The recipe says trackCrafted." },
+        "identity": { "$ref": "#/$defs/identity", "description": "The tracked item's or recipe's identity, in place of of." },
+        "scope": { "enum": ["player", "world", "both"], "description": "Whose knowledge. Default: both for an item, player for a recipe (always player)." }
       },
       "additionalProperties": false
     },
@@ -1271,7 +1305,8 @@
         "flow": { "type": "number", "minimum": 0.25, "maximum": 8, "description": "How fast a water container fills and pours (at a lake, a well or a barrel, onto crops and soil), as a multiple of the game's own: what one step moves, 32 for the can, 16 for the pouch, about 20 steps a second. The game has no rate for filling alone. Default: 1." },
         "recipe": { "$ref": "#/$defs/recipe" },
         "loot": { "$ref": "#/$defs/loot" },
-        "was": { "$ref": "#/$defs/name" }
+        "was": { "$ref": "#/$defs/name" },
+        "identity": { "$ref": "#/$defs/identity" }
       },
       "additionalProperties": false
     },

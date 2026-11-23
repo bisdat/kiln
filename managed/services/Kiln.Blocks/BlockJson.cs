@@ -48,6 +48,7 @@ internal static class BlockJson
     [
         ("statuses", Make<StatusBlock>), ("effects", Make<EffectBlock>), ("spells", Make<SpellBlock>), ("weapons", Make<WeaponBlock>), ("vfx", MakeVfx), ("materials", MakeMaterial), ("screenEffects", Make<ScreenEffectBlock>), ("sounds", Make<SoundBlock>), .. WorldJson.Kinds, .. ItemJson.Kinds, .. AbilityJson.Kinds, .. FurnitureJson.Kinds, .. NpcJson.Kinds, .. QuestBlockJson.Kinds, .. UiJson.Kinds,
         .. RoutineJson.Kinds,
+        ("buildingTools", Make<BuildingToolBlock>), ("terrainBrushes", Make<TerrainBrushBlock>), ("toolMaterialPools", Make<ToolMaterialPoolBlock>),
         ("affixes", Make<AffixBlock>), ("affixPools", Make<AffixPoolBlock>), ("rarityRolls", Make<RarityRollBlock>), ("rarityUpgrades", Make<RarityUpgradeBlock>),
     ];
 

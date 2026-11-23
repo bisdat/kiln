@@ -49,7 +49,9 @@ export function Table<R>({
   const virt = useVirtualizer({ count: sorted.length, getScrollElement: () => scrollRef.current, estimateSize: () => rowHeight, overscan: 8 });
   const template = columns.map((c) => c.width ?? "minmax(0, 1fr)").join(" ");
   const bodyHeight = fill ? undefined : height ?? Math.min(maxHeight, Math.max(sorted.length, 1) * rowHeight);
+  // Enter and Space open the row only when the row itself has focus: a button or field inside it keeps its own keys
   const keyNav = (e: React.KeyboardEvent, row: R) => {
+    if (e.target !== e.currentTarget) return;
     if (onRowClick && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onRowClick(row); }
   };
 

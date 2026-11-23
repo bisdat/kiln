@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LogTarget, PostStatus, ProblemKind, SendFrom, SupportPost } from "../api/commands";
-import { Button, Mark, Toggle, toast, type ButtonProps } from "../ui";
+import { Button, Mark, toast, type ButtonProps } from "../ui";
 import { t, useT } from "../i18n";
 import { qrEncode, qrPath } from "./qr";
 import { DeckButton, Dialog, Row, Word } from "../deck/ui";
@@ -80,18 +80,6 @@ export function NavCount() {
 }
 
 /** Settings: "Show the Community page" (on by default). */
-export function CommunityToggle() {
-  const t = useT();
-  const qc = useQueryClient();
-  const s = useCommunitySettings();
-  return (
-    <div data-testid="community-shown">
-      <Toggle checked={s.data?.shown !== false} disabled={!s.data} onChange={(on) => { setCommunity(qc, { shown: on }).catch((e) => toast.error(e)); }}
-        label={t("community.settings.show")} hint={t("community.settings.showHint")} />
-    </div>
-  );
-}
-
 /** The Deck's Settings row for "Show the Community page". */
 export function DeckCommunityRow() {
   const t = useT();

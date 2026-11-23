@@ -3926,7 +3926,7 @@
           "size": 200
         }
       },
-      "sha256": "fc0f5de476815af5acc88c2f4342ff8f26050743ba2ba0408fb17fbc583bfb10"
+      "sha256": "3b49c0aacae7028197e732e85e4cfcc9ab1d8865c1f77fdb56b334205961156c"
     },
     "native/core/abi/services/kiln_log.h": {
       "function_macros": [],
@@ -5240,16 +5240,19 @@
           "size": 24
         },
         "KilnRenderOutlineInfo": {
-          "align": 4,
+          "align": 8,
           "fields": {
             "entity": 12,
             "group": 16,
             "merged": 20,
+            "position": 32,
+            "position_ok": 24,
+            "position_step": 28,
             "reason": 8,
             "size": 0,
             "state": 4
           },
-          "size": 24
+          "size": 56
         },
         "KilnRenderOutlineStatus": {
           "align": 8,
@@ -5284,7 +5287,7 @@
           "size": 32
         }
       },
-      "sha256": "90b67eca89c6a976aaf7933e30effab746ea71099da5c9e080fb301dc21b3bbe"
+      "sha256": "aee4b15b92066ce49a7640891df92adf30d13cac6767439cdd6049fac21eab34"
     },
     "native/core/abi/services/kiln_repl.h": {
       "function_macros": [],
@@ -6730,6 +6733,172 @@
       },
       "sha256": "31ec32f36ce6fc7e33ff0ede5931f1aa9f5d6490e19cad430fb816dae5037c23"
     },
+    "native/core/abi/services/kiln_tools.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnToolActionCommand": {
+          "align": 4,
+          "fields": {
+            "kind": 4,
+            "size": 0
+          },
+          "size": 8
+        },
+        "KilnToolActionContext": {
+          "align": 8,
+          "fields": {
+            "action": 4,
+            "actor": 24,
+            "brush": 32,
+            "hit": 48,
+            "invocation": 16,
+            "radius": 72,
+            "reserved": 44,
+            "selected_item": 36,
+            "selected_material": 40,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 80
+        },
+        "KilnToolActionDef": {
+          "align": 8,
+          "fields": {
+            "action": 8,
+            "flags": 12,
+            "handler": 24,
+            "program": 16,
+            "sequence": 20,
+            "size": 0,
+            "tool": 4,
+            "user": 32
+          },
+          "size": 40
+        },
+        "KilnToolBrush": {
+          "align": 8,
+          "fields": {
+            "item": 0,
+            "radius": 8,
+            "shape": 4
+          },
+          "size": 16
+        },
+        "KilnToolFamilyAction": {
+          "align": 4,
+          "fields": {
+            "flags": 40,
+            "mode": 0,
+            "program": 4,
+            "remove_cells": 8,
+            "reserved": 44
+          },
+          "size": 48
+        },
+        "KilnToolFamilyDef": {
+          "align": 8,
+          "fields": {
+            "brush_count": 168,
+            "brushes": 160,
+            "description": 128,
+            "identity": 176,
+            "material_count": 152,
+            "materials": 144,
+            "name": 112,
+            "pool": 8,
+            "primary": 16,
+            "reserved": 12,
+            "reserved2": 156,
+            "reserved3": 172,
+            "secondary": 64,
+            "size": 0,
+            "tool": 4
+          },
+          "size": 192
+        },
+        "KilnToolMaterialRow": {
+          "align": 8,
+          "fields": {
+            "backpack": 16,
+            "item": 0,
+            "magic_chests": 24,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 32
+        },
+        "KilnToolMaterialSnapshot": {
+          "align": 8,
+          "fields": {
+            "actor": 24,
+            "count": 4,
+            "revision": 16,
+            "rows": 40,
+            "selected_item": 32,
+            "selected_material": 36,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 2088
+        },
+        "KilnToolPoolMaterial": {
+          "align": 4,
+          "fields": {
+            "item": 0,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 16
+        },
+        "KilnToolPresentationStatus": {
+          "align": 4,
+          "fields": {
+            "brushes": 6,
+            "identity": 7,
+            "picker": 4,
+            "preview": 5,
+            "reason": 8,
+            "reserved": 12,
+            "size": 0
+          },
+          "size": 16
+        },
+        "KilnToolsApi": {
+          "align": 8,
+          "fields": {
+            "define_family": 32,
+            "header": 0,
+            "material_snapshot": 48,
+            "presentation_status": 56,
+            "register_action": 16,
+            "remove_family": 40,
+            "status": 8,
+            "unregister_action": 24
+          },
+          "size": 64
+        },
+        "KilnToolsStatus": {
+          "align": 8,
+          "fields": {
+            "actions": 4,
+            "dispatched": 16,
+            "reason": 8,
+            "refused": 24,
+            "registrations": 12,
+            "reserved": 6,
+            "session": 5,
+            "size": 0
+          },
+          "size": 32
+        }
+      },
+      "sha256": "4d80fe03ee6933c79a1a5a97d30196044b549235c24bd6045d4fb79fcae23e58"
+    },
     "native/core/abi/services/kiln_toolwear.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -7528,7 +7697,7 @@
           "size": 48
         }
       },
-      "sha256": "58a3fe675df2ee6ae263a880b0f81899bcdd71de1b38d18ddd3a23c7750e011e"
+      "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
     },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
@@ -7584,7 +7753,7 @@
             "x": 16,
             "y": 20
           },
-          "size": 200
+          "size": 208
         },
         "KilnUiSlotClickFilter": {
           "align": 4,
@@ -7607,7 +7776,7 @@
             "size": 0,
             "slot": 32
           },
-          "size": 144
+          "size": 152
         },
         "KilnUiSlotMapping": {
           "align": 8,
@@ -7627,7 +7796,76 @@
           "size": 88
         }
       },
-      "sha256": "48d7341f36d8078c6740c845f2fcc8b75c1071161dd600be7f364b70a32bc4cb"
+      "sha256": "1547395134c9227c18afc25b95316ca1323e1072c8e598d1bff57fbd17a90a64"
+    },
+    "native/core/abi/services/kiln_ui_item_detail.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiItemDetailApi": {
+          "align": 8,
+          "fields": {
+            "copy": 8,
+            "header": 0
+          },
+          "size": 16
+        },
+        "KilnUiItemDetailLine": {
+          "align": 4,
+          "fields": {
+            "flags": 4,
+            "size": 0,
+            "text": 16,
+            "text_bytes": 12,
+            "value": 8
+          },
+          "size": 4112
+        },
+        "KilnUiItemDetailQuery": {
+          "align": 4,
+          "fields": {
+            "entity": 4,
+            "item": 8,
+            "level": 12,
+            "rarity": 16,
+            "size": 0
+          },
+          "size": 20
+        },
+        "KilnUiItemDetailSnapshot": {
+          "align": 8,
+          "fields": {
+            "capture_ms": 48,
+            "count": 8,
+            "entity": 16,
+            "frame": 40,
+            "item": 12,
+            "level": 20,
+            "ok": 4,
+            "rarity": 24,
+            "reserved": 28,
+            "session": 32,
+            "size": 0
+          },
+          "size": 56
+        }
+      },
+      "sha256": "b1b97b14a2266733bddeb6bd2ff80db5fd00336c7e3ae582c089d8b22cd0a090"
+    },
+    "native/core/abi/services/kiln_ui_slots.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiSlotsApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "subscribe": 8
+          },
+          "size": 16
+        }
+      },
+      "sha256": "3e9ca881a7dc6538ef28aaa13b276ee7b29ce31f1589f1ce602bbfee012d5746"
     },
     "native/core/abi/services/kiln_ui_values.h": {
       "function_macros": [],
@@ -7990,9 +8228,35 @@
             "view_flags": 36
           },
           "size": 112
+        },
+        "KilnUiVisibleSlotV2": {
+          "align": 8,
+          "fields": {
+            "available": 4,
+            "client_entity": 28,
+            "count": 24,
+            "holder": 88,
+            "holder_flags": 92,
+            "holder_serial": 96,
+            "inner_ui": 56,
+            "inventory_page": 12,
+            "item": 20,
+            "level": 112,
+            "native_state": 72,
+            "occurrence": 8,
+            "outer_ui": 40,
+            "page_ordinal": 104,
+            "rarity": 116,
+            "reserved2": 108,
+            "server_entity": 32,
+            "size": 0,
+            "slot_index": 16,
+            "view_flags": 36
+          },
+          "size": 120
         }
       },
-      "sha256": "a557ebb9072233c1d0f847fb873c7acceb5ef5b08369644e72e3af0e88194868"
+      "sha256": "2be251137cc4d70ebcf0c219d675a06941d79208417035885758421f9292f2b1"
     },
     "native/core/abi/services/kiln_vfx.h": {
       "function_macros": [],
@@ -9004,7 +9268,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "0acc002b1dd808c0c534266db9f8eb1fba34c474ecf5a769f56fc9589421e74a",
+    "src/layout.rs": "1ffadb93b7980dc2f7975c8a161168993c1783e161ee713ea1b67703fc0868ab",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -9033,7 +9297,7 @@
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
     "src/services/kiln_items.rs": "aa910afb12948a34f118f62ca7979704f9f9487e38bd0e76ba6fb8dfba8ef707",
-    "src/services/kiln_launch.rs": "ecd86b5c0fc8c0114eeec411fc3a657e78f803f83aabaace53d82142bd932bb7",
+    "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_markers.rs": "396fba83b17be93970b564b4f5bcd5052795c038d78b54ea80fb6c3e3514c9b9",
     "src/services/kiln_markers_lab.rs": "e03f1722b7550af2260b4c0092d25a8df38d98222faa6d1b5b2980dbb35e0c3e",
@@ -9048,7 +9312,7 @@
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
     "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
-    "src/services/kiln_render.rs": "f0ecd0d1c1af455626438c8e0c40244b07621ce63cfc707856ee158716d54fd0",
+    "src/services/kiln_render.rs": "0d63717bf1a2388f2bf5e03ad5ffe2fc5be815c9522ff4fa124151c4853ccb91",
     "src/services/kiln_repl.rs": "49a43d82f7481a93068e9f63735be39c0420ad3b8945338ed84369debc2689e1",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
     "src/services/kiln_rules.rs": "074b85bf024b8c53bfa21e7744ff4005fe6ebfa78c7aa5ccb3bc077cff3bc37b",
@@ -9063,17 +9327,20 @@
     "src/services/kiln_survivors.rs": "ed6f377e897d0236e33196f19d1be825b230e5d6575129a676ff32da08df2722",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
+    "src/services/kiln_tools.rs": "29589637b553d897c23d3ab438dabb493f4ebe359dba5cc1cec5d5f978b341c9",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
-    "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",
-    "src/services/kiln_ui_inventory.rs": "048065809ffcd982d597cf50b0e342921b8b94c0da06e658ed266ad1162d2165",
-    "src/services/kiln_ui_values.rs": "8d6982dd8643faa01fb82cdf7b8bdd4006920d657c2d4a99173b7d52f3fe6720",
+    "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
+    "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
+    "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
+    "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "4fffa61a5942477d74bc6c4473a5e994f2949d8b86310c4af5557c38f6bc85b0"
+    "src/services/mod.rs": "b516f48a876c58c779e068b6014723ea5a87c82a7b66028a4bf2fa6e9d88243a"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

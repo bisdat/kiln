@@ -20,7 +20,7 @@ pub mod run;
 pub mod settings;
 pub mod steamcmd;
 
-#[cfg(all(test, unix, feature = "server"))]
+#[cfg(all(test, unix))]
 mod tests;
 #[cfg(all(test, windows))]
 mod tests_windows;
@@ -46,6 +46,8 @@ pub struct ServerStatus {
     pub state: ServerState,
     pub pid: Option<u32>,
     pub uptime_s: Option<u64>,
+    /// Whole seconds from process spawn until readiness on the last successful local start.
+    pub last_start_s: Option<u64>,
     pub players: Option<u32>,
     pub kiln: Option<String>,
     /// Kiln in the server folder, running or not: the runtime version of its install receipt (`kiln/.install.json`),

@@ -196,6 +196,9 @@ fn every_file_lock_and_process_of_kiln_eml_goes_through_the_gate() {
         ("kiln-eml/src/progress.rs", "self.inner"),
         ("kiln-eml/src/progress.rs", "self.window"),
         ("kiln-eml/src/progress.rs", "CALLS"),
+        // the startup pass's state (one per process), and its tests' turn on the run lock
+        ("kiln-eml/src/progress.rs", "PASS"),
+        ("kiln-eml/src/progress.rs", "RUN_LOCK"),
         ("kiln-eml/src/archive_service/view.rs", "STATE"),
         ("kiln-eml/src/archive_service/view.rs", "self.replies"),
         ("kiln-eml/src/archive_service/errors.rs", "STORE"),

@@ -75,7 +75,7 @@ use crate::sfi_activation::{self, Begin, Recovered, Staging};
 use crate::sfi_backend::{Backend, Env};
 use crate::sfi_inspection::Inspect;
 use crate::sfi_plan::{Mode, Outcome, PlanRef, ProfileIdentity, Reason};
-use crate::sfi_routing::{Route, Runner};
+use crate::sfi_routing::{Legacy, Route, Runner};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -481,6 +481,12 @@ fn produce(
     // the plan follows the route the operation decided, as placement and render did: a start the interpreter does not
     // run gets no plan, whatever the game folder holds by now (kiln-sfi.dll installed since the decision)
     match d.route {
+        Route::Legacy(Legacy::EmlR(_)) => {
+            return Produced {
+                outcome: crate::sfi_plan::eml_r_blocked(d.selection.clone()),
+                inspection: None,
+            };
+        }
         Route::Interpreter(Runner::EnvOff) => {
             return Produced {
                 outcome: crate::sfi_plan::interpreter_off(d.selection.clone()),
@@ -537,7 +543,7 @@ fn produce(
         inner,
         answer: RefCell::new(None),
     };
-    let outcome = crate::sfi_plan::produce_resolved(
+    let outcome = crate::sfi_plan::produce_routed(
         crate::sfi_plan::Request {
             game,
             side: d.side,
@@ -550,6 +556,7 @@ fn produce(
             carried: &[],
         },
         d.selection.clone(),
+        &d.route,
         write,
     );
     let inspection = match (&outcome, recording.answer.into_inner()) {
@@ -1411,6 +1418,15 @@ pub fn status(dirs: &DataDirs, install: &GameInstall, mode: Mode) -> Status {
         return s;
     }
     match &d.route {
+        Route::Legacy(Legacy::EmlR(_)) => {
+            s.warnings.push(Note {
+                code: crate::sfi_plan::EML_R_LOADER_CODE.into(),
+                message: crate::sfi_routing::EML_R_BLOCK_REASON.into(),
+                severity: "warning".into(),
+                caused_by: Vec::new(),
+            });
+            return s;
+        }
         // ShroudForge's own loader runs them (its own-loader note says so)
         Route::Legacy(_) => return s,
         Route::Interpreter(Runner::EnvOff) => {

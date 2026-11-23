@@ -229,6 +229,7 @@ export interface Task<R = unknown> {
   kind: string;
   title: string;
   state: TaskState;
+  stage?: string | null;
   progress: number | null;
   message: string | null;
   started: string;
@@ -451,7 +452,7 @@ export interface BundlePart {
 }
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
-  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
+  | "eml" | "eml-r" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
   | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders" | "optiscaler";
 export interface ProxyClass {
   kind: ProxyKind;
@@ -783,7 +784,7 @@ export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "run
   | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod"
   | "proxy" | "data" | "save" | "reshade" | "cheat-table" | "asi";
 /** kiln_manage::engines::Engine */
-export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
+export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "eml-r" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
   | "shroudlink" | "ember" | "dllmod" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
   | "chain-loader" | "native-folders" | "optiscaler";
 export interface Detected {
@@ -1091,7 +1092,7 @@ export interface BootState {
 }
 /** What kiln-eml is doing before the game's window exists (kiln/state/eml.json, phase running): `launch_prestart`. */
 export interface PreStart {
-  /** starting | checking | prepare | mods | writing | saving */
+  /** starting | checking | prepare | mods | writing | saving; startup: a kiln-mode start's startup pass (`step` says where) */
   stage: string;
   label: string;
   doneBytes: number;
@@ -1102,7 +1103,12 @@ export interface PreStart {
   file?: string | null;
   /** Milliseconds since a byte was last read (while a file is being read). */
   quietMs: number;
-  /** The sentence for the launch status ("Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB. ..."). */
+  /** Stage startup: checking | mods | verify | write | save, its number and how many steps there are. */
+  step?: string | null;
+  stepNumber?: number;
+  steps?: number;
+  /** The sentence for the launch status ("Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB. ..."), in English:
+   *  shell/startProgress.ts `preStartLine` says a startup pass in the launcher's language. */
   message: string;
 }
 /** One step of a start (`launch_progress`, kiln_manage::start_progress): the launcher's own (`cook`, `profile`,
@@ -1303,6 +1309,7 @@ export interface ServerStatus {
   state: "stopped" | "starting" | "running" | "stopping" | "unknown";
   pid: number | null;
   uptimeS: number | null;
+  lastStartS?: number | null;
   players: number | null;
   kiln: string | null;
   /** Kiln in the server folder, running or not: the installed runtime version ("unknown" for a Kiln put there by
@@ -1523,6 +1530,10 @@ export interface UpdateStatus {
   skipped: string | null;
   /** This start follows an update the launcher installed (until updateAck). */
   justUpdated: { from: string; to: string; at: string; source: string; notes: string | null } | null;
+  /** (0.2.0-dev.30.5) The Kiln runtime this launcher ships, once the backend read it: the only one that goes into the
+   *  game by itself after an update (shell/updateApply.ts). Null before that, in a build without one, and in the Nexus
+   *  build; absent from older backends. */
+  shippedRuntime?: string | null;
   taskId: TaskId | null;
   error: KilnError | null;
   /** (dev.29) The channel this build belongs to: a test build's is "beta" (baked in when it was built), else the
@@ -2075,7 +2086,7 @@ export interface SfBackendCard {
   /** Why Kiln's interpreter cannot be chosen now; absent: it can. */
   interpreterHeld?: string;
   /** With kiln selected for the next start: what it meets in the game folder. */
-  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader";
+  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader" | "eml-r";
   ownLoader?: string;
   /** kiln.json cannot be read: why (nothing is written until it is fixed). */
   unreadable?: string;

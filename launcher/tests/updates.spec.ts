@@ -209,7 +209,7 @@ test("with Nexus Mods off, only GitHub is offered, and a saved Nexus Mods source
 test("the daily check is off by default, and on it runs by itself as an automatic check", async ({ page }) => {
   // the test's clock: the first automatic check 300 ms after the setting is on (the real one waits 2 to 15 minutes)
   await page.addInitScript(() => { (window as unknown as { __kilnDailyMs: number }).__kilnDailyMs = 300; });
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/mods");
   const toggle = page.getByRole("switch", { name: "Check for mod updates once a day" });
   await expect(toggle).not.toBeChecked({ timeout: 10_000 });
   await page.waitForTimeout(1200);

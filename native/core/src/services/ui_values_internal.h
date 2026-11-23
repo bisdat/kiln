@@ -31,6 +31,8 @@
 
 #include "services/kiln_hooks.h"
 #include "services/kiln_ui_inventory.h"
+#include "services/kiln_ui_item_detail.h"
+#include "services/kiln_ui_slots.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -88,6 +90,7 @@ struct Env {
                        void* user, KilnResult* rc) = nullptr;
     bool (*call_slots)(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlot* s, uint32_t n,
                        void* user) = nullptr;
+    bool (*call_slots_v2)(KilnUiSlotsFnV2, const KilnUiSlotsFrame*, const KilnUiVisibleSlotV2*, uint32_t, void*) = nullptr;
     // fn(frame) on the UI thread after every completed game UI frame (kiln.ui's subscribe_ui_tick); false = none
     bool (*subscribe_frames)(void (*fn)(uint64_t frame, void* user), void* user) = nullptr;
     void (*log)(int level, const char* text) = nullptr;
@@ -188,12 +191,12 @@ void lines_reset_for_tests();
 
 // ---- visible slots (ui_values_slots.cpp) ----
 KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expected_frame, KilnUiSlotsFrame* frame,
-                      KilnUiVisibleSlot* slots, uint32_t capacity, uint32_t* required);
+                      KilnUiVisibleSlotV2* slots, uint32_t capacity, uint32_t* required);
 void slots_reset_for_tests();
 // The latest completed slot frame (immutable; null before the first). Any thread.
 struct SlotsSnapshot {
     KilnUiSlotsFrame meta{};
-    std::vector<KilnUiVisibleSlot> slots;
+    std::vector<KilnUiVisibleSlotV2> slots;
 };
 std::shared_ptr<const SlotsSnapshot> slots_latest();
 
@@ -355,7 +358,10 @@ struct NativeLine {
     std::string_view text;  // process-lifetime bytes (the text store, or the probe's static strings)
     uint32_t flags = 0;
 };
+struct ItemDetailCapture;
 struct DetailCopy {
+    std::shared_ptr<ItemDetailCapture> capture;
+    bool suppress_capture = false;
     uint8_t raw[kViewBytes] = {};
     bool ok = false, collected = false;
     uintptr_t record = 0;      // ItemDetail's record (valid while ItemDetail runs)
@@ -367,6 +373,16 @@ struct DetailCopy {
     bool scaled = false;  // the values scale below was computed (once per occurrence)
     float scale = 1.0f;
 };
+bool item_detail_on();
+bool item_detail_stats_install();
+void item_detail_begin(DetailCopy& c);
+void item_detail_end(DetailCopy& c);
+void item_detail_text(DetailCopy& c, const char* text, size_t bytes, bool value, float number);
+void item_detail_stat(DetailCopy& c, float value, void (*draw)(const void*, float), const void* label);
+KilnResult KILN_CALL item_detail_copy(KilnOwner owner, const KilnUiItemDetailQuery* query, KilnUiItemDetailSnapshot* out, KilnUiItemDetailLine* lines, uint32_t capacity);
+const KilnUiItemDetailApi* item_detail_table();
+const KilnUiSlotsApi* slots_table();
+void item_detail_reset_for_tests();
 DetailCopy* current_detail();          // this thread's innermost detail occurrence, or null
 void collect_once(DetailCopy& c);      // runs the lines providers over c once (the details window's snapshot)
 // The ItemDetail link (shared by the lines, the native lines and the values): installed once; false = not possible.

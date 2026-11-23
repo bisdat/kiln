@@ -692,7 +692,17 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
   and Springlands Dirt x12 (chest) and both views said pide 0 **[rt]**. Kiln reports it as the client entity and leaves `server_entity` 0; `ui-hooks.c2` compares it with the
   server world's own inventory in a hosted world. **[dis]**
 - **Hover byte:** ItemSlot's result `+0x10` (`ui/slot.hoverCandidate`) is still only a candidate (mouse hover or gamepad
-  focus). `ui-hooks.c4` logs it next to the cursor's slot (read while the cursor rests on the slot, not at a verdict: Kiln
+  focus). **dev.30.5 static read (client 26430625) [dis]:** ItemSlot calls the focus test `0xa4d2d0` twice (`0xc04800` and
+  `0xc04f12`, both with `dl = 1`) on its slot frame's scope (`rbp-0x70`); `0xa4d2d0` passes the scope's node (`+8`) and the
+  UI's user index (`[[UiApp]+0x10]+0x44`, low 4 bits) to `0x11b95a0`, which compares the node's id (`+0x30`) with the
+  layouter's focused id of that user (`[[node+0x50] + user*8 + 0x68]`), and with `dl = 1` also accepts a focused descendant
+  (`0x11b93a0`, a walk over first child `+0x18` / next sibling `+0x10`); `0x11992b0` clears that focus. So the byte is the
+  layouter's per-user navigation focus, the one the d-pad / stick and keyboard navigation move (section "How an entry
+  works"), not a pointer test of its own. Whether the pointer moves that focus too was not found statically (the writers
+  of `+0x68` were not located in a linear sweep). Kiln's `Ui.Inventory.Selected` (0.2.0-dev.30.5) is the first slot draw of a
+  fresh frame with the byte set; a client check must move selection with the d-pad and then the mouse to confirm which
+  moves the focus. `ui-hooks.c4` logs it next to the cursor's slot (read while the cursor rests on the slot, not at a
+  verdict: Kiln
   then has the input for its check window and the cursor is on that window). A gamepad slot action waits for it. **[hyp]**
 
 ### Slice 2 (dev.30): the chest's entity and panels beside the screens

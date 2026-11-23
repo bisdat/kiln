@@ -95,6 +95,32 @@ struct World {
 
 int main() {
     const uint32_t gold = 0xFFC440FFu, green = 0x46FF6EFFu, blue = 0x3070FFFFu;
+    // ---- through walls (0.2.0-dev.30.5): the position of a through-walls request's entity in outline_info ----
+    {
+        World w;
+        check(KILN_RENDER_OUTLINE_THROUGH_WALLS == 2u && sizeof(KilnRenderOutlineInfo) == 56 &&
+                  offsetof(KilnRenderOutlineInfo, position) == 32,
+              "through walls: the flag, and the record grown by the position (56 bytes)");
+        w.book.add(11, 1001, opts(gold, 0, KILN_RENDER_OUTLINE_THROUGH_WALLS), 0, 1);
+        w.book.add(11, 1002, opts(gold), 0, 2);
+        w.book.add(12, 1001, opts(green, 0, KILN_RENDER_OUTLINE_THROUGH_WALLS | KILN_RENDER_OUTLINE_PULSE), 0, 3);
+        check(w.book.wall_entities() == std::vector<KilnEntity>{1001}, "through walls: the entities to read, once each");
+        check(info(w.book, 1).position_ok == 0, "through walls: no position before the first read");
+        const double at[3] = {512.25, 41.5, 2048.0};
+        w.book.set_position(1001, true, at, 7);
+        const auto i1 = info(w.book, 1), i3 = info(w.book, 3), i2 = info(w.book, 2);
+        check(i1.position_ok == 1 && i1.position[0] == 512.25 && i1.position[1] == 41.5 && i1.position[2] == 2048.0 &&
+                  i1.position_step == 7 && i3.position_ok == 1 && i2.position_ok == 0,
+              "through walls: every through-walls request of the entity has its position; a plain outline none");
+        const double far[3] = {512.25, 9000.0, 2048.0};
+        w.book.set_position(1001, true, far, 8);
+        check(info(w.book, 1).position_ok == 0, "through walls: a position outside the game's range is not one");
+        w.book.set_position(1001, true, at, 9);
+        w.book.remove(1);
+        w.book.remove(3);
+        w.book.keep_positions(w.book.wall_entities());
+        check(w.book.wall_entities().empty() && info(w.book, 1).position_ok == 0, "through walls: an ended request has none");
+    }
     // ---- one mod, one chest: shown, then removed and given back ----
     {
         World w;

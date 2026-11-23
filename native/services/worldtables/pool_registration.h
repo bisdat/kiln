@@ -109,7 +109,9 @@ inline bool pool_envelope(const ojson& envelope,const std::string& mod,PoolDefin
         if(!envelope.is_object() || envelope.value("format",0)!=1 || envelope.value("mod","")!=mod)throw std::runtime_error("invalid envelope owner/format");
         ModFile mf;mf.mod=mod;mf.clients="mod";
         const auto block=envelope.at("block").get<std::string>();
-        read_blocks(ojson{{"buildingMaterialPools",{{block,envelope.at("canonical")}}}},&mf);
+        const auto& canonical = envelope.at("canonical");
+        const char* section = canonical.is_object() && canonical.contains("entries") ? "toolMaterialPools" : "buildingMaterialPools";
+        read_blocks(ojson{{section,{{block,canonical}}}},&mf);
         if(!mf.errors.empty() || mf.pools.size()!=1 || mf.pools[0].guid.text()!=envelope.at("definition").get<std::string>())throw std::runtime_error("invalid canonical pool");
         PoolRegistrations ledger;auto r=ledger.prepare(mf.pools[0],KILN_DEFINE_ALLOW_NEXT_START,false);
         if(r.key()!=envelope.at("registration").get<std::string>())throw std::runtime_error("pool receipt checksum mismatch");

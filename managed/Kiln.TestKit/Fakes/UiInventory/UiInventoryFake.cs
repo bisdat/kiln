@@ -122,6 +122,19 @@ internal sealed unsafe class UiInventoryFake : IKitFake
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int SlotAt(ulong owner, float x, float y, float w, float h, UiInventoryNative.Hit* o)
     {
+        if (owner == 0 || o == null || o->Size < 144) return FakeTables.InvalidArgument;
+        if (o->Size >= sizeof(UiInventoryNative.Hit)) return SlotAtFull(owner, x, y, w, h, o);
+        var size = o->Size;
+        UiInventoryNative.Hit full = new() { Size = (uint)sizeof(UiInventoryNative.Hit) };
+        var rc = SlotAtFull(owner, x, y, w, h, &full);
+        Buffer.MemoryCopy(&full, o, size, size);
+        o->Size = size;
+        o->Slot.Size = 112;
+        return rc;
+    }
+
+    private static int SlotAtFull(ulong owner, float x, float y, float w, float h, UiInventoryNative.Hit* o)
+    {
         if (owner == 0 || o == null || o->Size < (uint)sizeof(UiInventoryNative.Hit)) return FakeTables.InvalidArgument;
         var size = o->Size;
         *o = default;

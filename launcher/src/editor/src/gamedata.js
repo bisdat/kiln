@@ -3,6 +3,7 @@ import skills from '../data/skills.json';
 import extras from '../data/item-extras.json';
 import { campoDeNome, localeAtual, t } from './i18n.js';
 import { copiarEstatisticas } from './itemstats.js';
+import { MAX_ITEM_LEVEL, newItemLevels } from '../kiln/levels.js';
 
 export { items, skills };
 
@@ -177,7 +178,7 @@ const SEM_EXTRAS = new Set(['Glider', 'HookShot', 'Invalid']); // planador, arp�
 export function newEntry(itemId, slot, count, template, nivelPersonagem) {
   if (template) {
     const { slot: _s, count: _c, ...rest } = template;
-    return { ...rest, slot, count: 1, itemId };
+    return newItemLevels({ ...rest, slot, count: 1, itemId });
   }
   const it = items[itemId];
   // Kiln: an item that stacks takes any amount the save holds (65535): a mod may have raised its stack size
@@ -185,9 +186,9 @@ export function newEntry(itemId, slot, count, template, nivelPersonagem) {
   if (it.maxStack > 1) return base;
   // O nível gravado no item é o que o jogo usa para escalar o efeito (as joias, por exemplo, têm
   // uiValues com isScaled e function WeaponPowerCreep). Itens que caem no jogo vêm no nível da
-  // zona, então o padrão é o nível do personagem, preso à faixa que o item aceita; sem ele,
-  // sobra o mínimo do item.
-  const faixa = (n) => Math.min(Math.max(n, it.minLevel || 1), it.maxLevel || 105);
+  // zona, então o padrão é o nível do personagem; sem ele, sobra o mínimo do item.
+  // Kiln: the catalog can predate the game's level ranges; only enforce what the save's byte holds.
+  const faixa = (n) => Math.min(Math.max(Math.floor(Number(n)) || 0, it.minLevel || 1), MAX_ITEM_LEVEL);
   const level = faixa(nivelPersonagem || it.minLevel || 1);
   const rarity = RARIDADE[it.rarity] || 1;
 

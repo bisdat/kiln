@@ -916,7 +916,7 @@ thread_local! {
     static ASSETS_FAMILY: RefCell<Option<Family>> = const { RefCell::new(None) };
     /// The override trackers `plan` made (its cleanup) and their world kind; `families`
     /// takes them for the tracker family.
-    static TRACKERS: RefCell<Option<(Rc<OverrideTrackers>, u32)>> = const { RefCell::new(None) };
+    static TRACKERS: RefCell<Option<Rc<OverrideTrackers>>> = const { RefCell::new(None) };
     /// The types wiring's handle of runtime-create's `plan`; `game_build` reads the archive registry's game
     /// version through it (taken there, so it lives no longer than that runtime-create).
     static TYPES_HANDLE: RefCell<Option<registry_types::TypesHandle>> = const { RefCell::new(None) };
@@ -1037,7 +1037,7 @@ impl KilnPlanSource {
         // The override trackers are both the lifecycle's cleanup and a family.
         let trackers = OverrideTrackers::new();
         TRACKERS.with_borrow_mut(|slot| {
-            *slot = Some((trackers.clone(), session_world_kind(frozen.side)));
+            *slot = Some(trackers.clone());
         });
         Ok(RuntimePlan {
             side: frozen.side,
@@ -1138,7 +1138,7 @@ impl PlanSource for KilnPlanSource {
 
     /// The production registrar's list ([`crate::runtime::registrar`]) over this plan's parts: the types family
     /// when [`Self::plan`] wired `game.types` (the cross-check and `game.version` run there) and the ECS registry family
-    /// on it, the network family, the UI family, the override tracker on the plan side's
+    /// on it, the network family, the UI family, the override tracker on the active ECS
     /// world; the registrar adds the world context, the placement and patch refusals and ShroudForge's
     /// unavailable answers for every member left. Without an archive grant there is no runtime at all (the
     /// runtime-create is refused before any family runs).
@@ -1153,7 +1153,7 @@ impl PlanSource for KilnPlanSource {
             ui: crate::runtime::ui::family(crate::runtime::ui::production_transport(cx)),
             trackers: TRACKERS
                 .with_borrow_mut(Option::take)
-                .map(|(trackers, world_kind)| trackers.family(world_kind)),
+                .map(|trackers| trackers.family()),
         })
     }
 }

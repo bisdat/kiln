@@ -31,6 +31,10 @@ target_link_libraries(ui-addon-harness PRIVATE kiln-safetyhook kiln-imgui user32
 add_executable(ui-window-input-test EXCLUDE_FROM_ALL tests/window_input/harness.cpp input.cpp keys.cpp)
 target_include_directories(ui-window-input-test PRIVATE . ${CMAKE_SOURCE_DIR}/core/abi ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(ui-window-input-test PRIVATE kiln-safetyhook kiln-imgui user32 imm32 dwmapi gdi32)
+# Production outline_info against the released 24-byte, 4-aligned caller record, without a game or renderer.
+add_executable(ui-outline-abi-test EXCLUDE_FROM_ALL tests/outline_abi_test.cpp)
+target_include_directories(ui-outline-abi-test PRIVATE . ${CMAKE_SOURCE_DIR}/core/abi ${CMAKE_SOURCE_DIR}/third_party)
+target_link_libraries(ui-outline-abi-test PRIVATE kiln-safetyhook)
 # Opt-in build targets, never packaged: the LoadLibraryExW hook (load_hook.h) in a Windows process under Wine, with the
 # three libraries it loads (tests/test-load-hook-wine.sh).
 add_executable(ui-load-hook-test EXCLUDE_FROM_ALL tests/load_hook/harness.cpp)

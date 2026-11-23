@@ -342,7 +342,7 @@ impl<'guard> StartupHost<'guard> {
         let generation = staged.completion.generation;
         let commit_guard = guard.again()?;
         let archive = PreparedArchive {
-            archive: staged.writer.prepare()?,
+            archive: staged.writer.prepare().map_err(crate::load::stage_refusal(&self.name))?,
             guard,
             generation,
             origin,
@@ -774,7 +774,7 @@ impl<'guard> StagedArchive<'guard> {
     pub fn prepare(self) -> anyhow::Result<PreparedArchive<'guard>> {
         self.guard.check()?;
         Ok(PreparedArchive {
-            archive: self.patch.prepare()?,
+            archive: self.patch.prepare().map_err(crate::load::stage_refusal(&self.name))?,
             guard: self.guard,
             generation: self.generation,
             origin: self.origin,

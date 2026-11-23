@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 test("a profile menu survives status refetches and scrolling recovery notices", async ({ page }) => {
   // Settings, Profiles: the profile rows' menus
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/mods");
   await page.locator(".k-splash").waitFor({ state: "detached" });
   await page.getByLabel("More for Vanilla plus").click();
   const menu = page.getByRole("menu");
