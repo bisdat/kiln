@@ -661,7 +661,6 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
             in.code = [this, mod, handle](Stage st, const View& v, Batch* out) {
                 StageFn fn;
                 uint64_t owner = 0;
-                size_t refused_before = 0;
                 {
                     std::lock_guard l2(d_->mu);
                     const auto it = d_->stage_subs.find(handle);
@@ -672,7 +671,6 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                     }
                     owner = it->second.owner;
                     fn = it->second.fn;
-                    refused_before = d_->pre_refused.size();
                     d_->turn = Impl::Turn{mod, st, &v, out};
                     out->mod = mod;
                     out->stage = st;
@@ -685,7 +683,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                 if (!d_->alive(owner)) {
                     const size_t dropped = out->edits.size() - before;
                     out->edits.resize(before);
-                    d_->pre_refused.resize(refused_before);
+                    // As on fault, keep refusal diagnostics: another live owner may have submitted them.
                     d_->stage_subs.erase(handle);
                     d_->pre_refused.push_back({mod, "code:" + mod, st, 0,
                         "the stage callback's owner was revoked; its " + std::to_string(dropped) + " edit(s) of this turn were dropped", ""});
