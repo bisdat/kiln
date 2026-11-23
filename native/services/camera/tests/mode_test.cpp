@@ -175,6 +175,10 @@ struct Rig {
         core.world_started(kServer, 1);
         CHECK(core.subscribe(999, &on_changed, nullptr, &sub) == KILN_OK);
     }
+    ~Rig() {
+        core.world_stopping(kServer, core.epoch(kServer));
+        mode.step();  // cancel retained service-owned tickets before the fake world goes away
+    }
     // One server tick: kiln.world's Pre (results), the backend's step, the core's Pre (answers, events), the sim step.
     void tick(int n = 1) {
         for (int i = 0; i < n; ++i) {

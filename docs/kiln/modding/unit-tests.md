@@ -662,4 +662,3 @@ Kiln's services' code and `docs/re/`, never from a lab run of the same test bodi
 
 Not checked: Windows (the package's targets, the harness's temporary folders, the watchdog's stop), macOS, Visual
 Studio's and Rider's test explorers (only `dotnet test` was run), and any SDK other than 10.0.113.
-
