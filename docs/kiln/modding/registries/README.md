@@ -93,9 +93,11 @@ tries it again in the next world. GameStart edits bind per entry the same way at
 still refuses the edit). `Registry.Change` stays all-or-nothing: a binding or evaluation failure of any entry refuses the
 whole transaction with the same reason, and nothing of it is written. A throwing callback submits none of that turn's buffered edits and
 reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
-can retry the author. When the registry itself is not available yet (`KilnUnavailableException`: its live back-end is still
-being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that pass's
-commits and authors the same point again on a later tick (the next tick first, then backing off to 5 s), logged once.
+can retry the author. When Kiln itself cannot take the pass yet (its begin or commit is refused because the live back-end is
+still being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that
+pass's commits and authors the same point again on a later tick (the next tick first, then backing off to 5 s), logged once;
+after ten tries it is logged as a fault with the real error. An exception from the author's own code is always a fault, a
+`KilnUnavailableException` from a read inside `OnRegistry` (an unmapped field, an entry without that config) included.
 `Select(pattern)` returns entries by Kiln id; list properties use the generated clear/append/remove/index APIs.
 All three passes are invoked even though entry creation is not yet exposed. Runtime points wait for the host tick;
 native resources-ready callbacks never execute runtime authors inline. Layers from distinct declared points compose:

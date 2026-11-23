@@ -291,7 +291,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         // read per-world settings (then it is world-scoped and replayed at the next bound world).
         static RegistryEntryPoint NativePoint(Runtime record, RegistryEntryPoint point, bool worldSettings) =>
             point == RegistryEntryPoint.HotReload && record.ReplacesModLoad && !worldSettings ? RegistryEntryPoint.ModLoad : point;
-        void Fault(Runtime record, Exception error)
+        // transport: Kiln's own begin/submit/commit or context setup failed, not the author's code (review4 recheck RM1)
+        void Fault(Runtime record, Exception error, bool transport = false)
         {
             record.Faulted = true;
             captured[record].Clear();
@@ -303,33 +304,37 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 }
                 catch (Exception e) { Log(record.Context.Info.Id + " point rollback (owner cleanup will retry)", e); }
             committed[record].Clear();
-            if (error is KilnUnavailableException)
+            // Only Kiln's own transient states retry (review4 NS4): begin/commit refused during the live install window, a
+            // budget others hold, a lazy base preparation that failed. An UNAVAILABLE read inside the author's OnRegistry (an
+            // unmapped field, an entry without the config) is the author's fault: that pass faults once, logged (recheck RM1).
+            // A transport state that stays unavailable is logged as a fault after MaxRetries tries, with its real error.
+            if (transport && error is KilnUnavailableException && record.Retries < MaxRetries)
             {
-                // Not the author's fault and not permanent: try this point again later, with backoff (review4 NS4).
                 if (record.Retries == 0)
-                    mods.Host.Log(LogLevel.Warn, $"registry: {record.Context.Info.Id} OnRegistry {point}: the registry is not available yet ({error.Message}); retrying on a later tick");
+                    mods.Host.Log(LogLevel.Warn, $"registry: {record.Context.Info.Id} OnRegistry {point}: the registry cannot take the pass yet ({error.Message}); retrying on a later tick");
                 record.RetryAt = Environment.TickCount64 + (record.Retries == 0 ? 0 : Math.Min(5000, 100L << Math.Min(record.Retries, 6)));
                 ++record.Retries; retry.Add(record);
                 return;
             }
-            Log(record.Context.Info.Id + " OnRegistry " + point, error);
+            Log(record.Context.Info.Id + " OnRegistry " + point + (transport && record.Retries >= MaxRetries ? $" (after {record.Retries} tries)" : ""), error);
         }
         var phases = new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final };
         foreach (var phase in phases)
             foreach (var record in ordered)
             {
                 if (!record.Context.Alive || record.Faulted) continue;
-                RegistryContext? context = null;
+                RegistryContext context;
+                try { context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record], pass: true); }
+                catch (Exception e) { Fault(record, e, transport: true); continue; } // Kiln's world/status query, not the author
                 try
                 {
-                    context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record], pass: true);
                     using var scope = context.Enter();
                     record.Instance.OnRegistry(context);
                     var ir = context.CaptureIr(); var native = NativePoint(record, point, context.ReadWorldSettings); context.Close();
                     if (ir is not null) captured[record].Add((phase, native, ir));
                 }
-                catch (Exception e) { Fault(record, e); }
-                finally { context?.Close(); }
+                catch (Exception e) { Fault(record, e); } // the author's code: a fault, whatever the exception
+                finally { context.Close(); }
             }
         // Every callback has read the pre-pass view; the pass's edits land now, phase by phase, in load order.
         foreach (var phase in phases)
@@ -349,7 +354,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                     catch (Exception e)
                     {
                         if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { }
-                        Fault(record, e); break;
+                        Fault(record, e, transport: true); break;
                     }
                 }
             }
@@ -357,6 +362,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             if (!retry.Contains(record)) { record.Retries = 0; record.RetryAt = 0; }
         return retry;
     }
+    private const int MaxRetries = 10; // about 20 s of backoff (0, 100 ms ... 5 s) before a transport fault is logged
     private static bool Retained(RegistryCompletion result) => result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0;
     private RegistryCompletion Applied(ModContext owner, RegistryCompletion result, bool worldScoped = false)
     {

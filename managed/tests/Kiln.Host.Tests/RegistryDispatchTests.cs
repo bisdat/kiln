@@ -446,11 +446,11 @@ public sealed class RegistryDispatchTests : ModsFixture
         dispatch.FlushLoads(); Assert.Equal(10, native.Value); Assert.Equal(1, calls);
         dispatch.FlushLoads(); Assert.Equal(50, native.Value); Assert.Equal(2, calls);
         dispatch.FlushLoads(); Assert.Equal(2, calls); // applied once, never again
-        native.ReadUnavailable = 1; // a read inside the callback can be the first to see the window
+        native.ReadUnavailable = 1; // review4 recheck RM1: an UNAVAILABLE read inside the author's code is its fault, not retried
         var reader = Owner(native, "transient-read");
         dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, int.Parse(c.ReadValue("items", "game:wood", "maxStack"), System.Globalization.CultureInfo.InvariantCulture) + 1); }), reader, Root, false);
         dispatch.FlushLoads(); Assert.Equal(50, native.Value);
-        dispatch.FlushLoads(); Assert.Equal(51, native.Value);
+        dispatch.FlushLoads(); Assert.Equal(50, native.Value);
         owner.Retire(); reader.Retire();
     }
     [Fact(Timeout = 30_000)]
@@ -506,6 +506,23 @@ public sealed class RegistryDispatchTests : ModsFixture
             Assert.Equal(new[] { RegistryReadyPhase.Start, RegistryReadyPhase.WorldLoad }, seen);
         }
         finally { RegistryRuntime.Ready = previous; }
+    }
+    // review4 recheck RM1: an UNAVAILABLE read inside the author's own code (an unmapped field, an entry without the
+    // config) faults that pass once; only Kiln's own transient states (begin/commit refused) are retried.
+    [Fact(Timeout = 30_000)]
+    public void Review4R_PermanentlyUnreadableFieldIsNotRetriedForever()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "unreadable"); var calls = 0;
+        dispatch.Loaded(new Author(c => {
+            if (c.Phase != RegistryPhase.Alter) return;
+            ++calls; _ = c.ReadValue("items", "game:wood", "manaCost"); Edit(c, 70);
+        }), owner, Root, false);
+        native.ReadUnavailable = int.MaxValue;
+        for (var i = 0; i < 4; ++i) { dispatch.FlushLoads(); Thread.Sleep(450); }
+        Assert.Equal(1, calls);
+        owner.Retire();
     }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
