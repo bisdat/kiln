@@ -271,7 +271,7 @@ is 48 bytes). The header is EMF 0.6.20's unchanged MIT header below Kiln's licen
 
 | EMF addition | On Kiln | Status | Tested |
 |---|---|---|---|
-| `EmfPathQuery.as_entity`: plan the path as that creature walks (its `PathWalker` room and node rules, `PathFinder` steps, default moves and costs, read from its templates) | `path_find` is not carried: it answers 0 without reading the query, logs the not-available line once per mod and calls no callback. A 52-byte (v47) and a 56-byte (v48) query get the same answer. | not yet (existing slot) | host; probe (not run in game) |
+| `EmfPathQuery.as_entity`: plan the path as that creature walks (its `PathWalker` room and node rules, `PathFinder` steps, default moves and costs, read from its templates) | `path_find` is not carried: it answers 0 without reading the query, logs the not-available line once per mod and calls no callback. A 52-byte (v47) and a 56-byte (v48) query get the same answer. | not yet (existing slot) | host; probe (not run in a lab yet) |
 | `EmfPathResult.moves`, `jump_up`, `jump_down`, `width`, `height`: what the search planned with | No result is handed to a mod, so neither a 32-byte nor a 48-byte result is written. | not yet (existing slot) | host |
 | Lua 1.41: `emf.path_find`'s option `as = entity` and `result.used` | `emf.path_find` gives `nil`, with or without `as`; `result.used` never arrives. On the v47 table, `as` raised the `lua` mod's error "as needs EMF 0.6.20 or newer". | not yet | not run on Kiln |
 | EMF's console command `path ... as <entity>` | EMF's own console, not part of the API; kiln-emf has no `path` command. | not part of the API | none |

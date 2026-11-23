@@ -17,6 +17,6 @@ in `licenses/EMF-LICENSE.txt`. The public C header is in `../../include/emf/emf_
 
 The game-facing dependencies are in `../api_net.cpp` and `../api_net_client.cpp`.
 
-The 0.6.14 to 0.6.20 net and mod-check files are identical (0.6.20 changed path queries only). The separate `emf/markers` JSON payload adds the optional
+The 0.6.14 to 0.6.20 net and mod-check files are identical (0.6.20's core changes are path queries only). The separate `emf/markers` JSON payload adds the optional
 bar key `b` with `EMF_MARKER_BAR`; older cores ignore it and a missing key clears that flag. Markers, including this
 payload extension, are not carried by kiln-emf yet.

@@ -100,7 +100,7 @@ and unfinished hellos, a beacon worded for servers with content mods or a refusi
 `EmfNetFrom.admin` with `[chat] game_admins=1`, are not in it): [EMF 0.6.8 reference](https://github.com/matenm/emf-enshrouded/blob/v0.6.8/docs/modding/reference.md),
 [public header](https://github.com/matenm/emf-enshrouded/blob/v0.6.8/sdk/include/emf/emf_api.h), and
 [MIT protocol implementation](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core/net).
-Upstream 0.6.14 to 0.6.20 leaves every `src/core/net` and mod-check source file unchanged (0.6.20 changed path queries only). The separate
+Upstream 0.6.14 to 0.6.20 leaves every `src/core/net` and mod-check source file unchanged (0.6.20's core changes are path queries only). The separate
 `emf/markers` payload does grow: optional numeric JSON key `b` carries the bar when `EMF_MARKER_BAR` is set; older
 cores ignore it, and a flag without `b` is cleared. Kiln does not carry marker send/receive or bars yet, so that
 payload extension is not implemented here.
