@@ -279,6 +279,8 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     const bool snapshot_row = api->feature(str("camera.rendered_snapshot"));
     const bool fov_row = api->feature(str("camera.local_fov")), pose_row = api->feature(str("camera.local_pose"));
     const bool profile_row = api->feature(str("camera.local_profile")), shake_row = api->feature(str("camera.local_shake"));
+    // the backend exists before a hook can call it (it serves nothing until set_serving below)
+    g_backend = std::make_unique<LocalBackend>(core, &g_frames, &g_board, &g_clock, &g_world);
     bool selection = false, captured = false;
     if (laid_out && mid2 && lifecycle && (snapshot_row || fov_row || pose_row || profile_row || shake_row)) {
         // the selection: a selection id per frame, and the one place a visual request is written
@@ -296,7 +298,6 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
         if (profile_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_PROFILE;  // and its target through the same sampler
         if (shake_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_SHAKE;
     }
-    g_backend = std::make_unique<LocalBackend>(core, &g_frames, &g_board, &g_clock, &g_world);
     g_backend->set_serving(g_serving);
     core->set_backend(KILN_CAMERA_LOCAL_VISUAL, g_backend.get());
     logf(KILN_LOG_INFO, "camera: client side %s (rendered snapshot %s, local bits 0x%llx, sampler %s)", selection && captured ? "hooked" : "not hooked",
