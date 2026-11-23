@@ -54,6 +54,7 @@ struct Park {
     std::string key;
     uint32_t reason;
     bool unpark;
+    bool retired = false; // the owner went away: tearing its holder down is housekeeping (handle 0)
 };
 std::deque<Ref> refs;
 std::deque<Park> parks;
@@ -1276,7 +1277,7 @@ void deliver_returns() {
     }
 }
 bool death_wrap_ready();
-bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t why,
+bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t why, bool retired,
                  std::unique_lock<std::recursive_mutex>& lock) {
     auto h = p.holders.find(key);
     if (h == p.holders.end())
@@ -1290,6 +1291,9 @@ bool park_holder(const Access& a, Player& p, const std::string& key, uint32_t wh
         return false;
     }
     model.event(KIS_EVENT_PARKED, &p, key, 0, why);
+    // Target is the old holder; a retired owner's teardown stays internal even if the key registered again since
+    if (retired)
+        model.events.back().handle = 0;
     model.events.back().target = h->second.entity;
     model.events.back().stacks = static_cast<uint32_t>(e.records.size());
     for (const auto& r : e.records)
@@ -1338,14 +1342,14 @@ void post_body() {
             continue;
         }
         bool had_holder = p.holders.count(q.key) != 0;
-        if (!park_holder(a, p, q.key, q.reason, lock))
+        if (!park_holder(a, p, q.key, q.reason, q.retired, lock))
             return;
         // Never lower a reason: an unload must not turn a held bag into one that restores by itself.
         for (auto& e : p.entries)
             if (q.key == e.row.key && e.row.kind == KIS_ENTRY_PARKED)
                 e.row.reason = std::max(e.row.reason, q.reason);
         settle(p);
-        if (!had_holder)
+        if (!had_holder && !q.retired)
             model.event(KIS_EVENT_PARKED, &p, q.key, 0, parked_reason(p, q.key, q.reason));
     }
     for (auto& [slot, p] : model.players) {
@@ -1356,9 +1360,9 @@ void post_body() {
             continue;
         for (auto& e : p.entries)
             if (!model.registrations.count(e.row.key) && e.row.kind == KIS_ENTRY_LIVE) {
+                // only before the first build: its PARKED event (Target 0) is the first restore's one below
                 e.row.kind = KIS_ENTRY_PARKED;
                 e.row.reason = KIS_PARK_UNREGISTERED;
-                model.event(KIS_EVENT_PARKED, &p, e.row.key, 0, KIS_PARK_UNREGISTERED);
             }
         if (!p.build_pass_completed)
             settle(p); // a live copy of an unregistered key joins that key's parked records
@@ -1883,7 +1887,7 @@ void retire_owner_locked(KilnOwner owner) {
     for (auto& [slot, p] : model.players)
         for (const auto& [key, r] : model.registrations)
             if (r.owner == owner && p.holders.count(key))
-                parks.push_back({slot, p.witness.join, key, KIS_PARK_UNREGISTERED, false});
+                parks.push_back({slot, p.witness.join, key, KIS_PARK_UNREGISTERED, false, true});
     model.revoke(owner);
 }
 void KILN_CALL storage_owner_retiring(KilnOwner owner, void*) {
