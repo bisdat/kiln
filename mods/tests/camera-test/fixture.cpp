@@ -85,7 +85,7 @@ void KILN_CALL pre(const KilnTickInfo* tick,void*) {
  switch(phase) {
  case 0: {
   KilnWorldWriteInfo info{}; info.size=sizeof info;
-  if(world->write_info(S("kiln.camera.fixture"),0xd2c927b5u,&info)!=KILN_OK || (info.flags & KILN_WORLD_INFO_NOT_READY)) return;
+  if(world->write_info(S("kiln.camera.fixture"),0xd2c927b5u,&info)!=KILN_OK || (info.flags & KILN_WORLD_INFO_NOT_READY) || !(info.flags & KILN_WORLD_WROTE_BITS_KNOWN)) return;
   REQUIRE(info.state==KILN_WORLD_WRITES_READY && info.component_size==3 && info.writers>0);
   REQUIRE((info.flags & KILN_WORLD_WROTE_REPLICATED) && std::strstr(info.writer_names,"network_camera_control"));
   REQUIRE(make(&A,0) && make(&B,1));

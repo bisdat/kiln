@@ -217,8 +217,8 @@ void KILN_CALL on_ready(void*) {
     const auto* players = g_mode_world.players;
     const bool mode_dependencies = world && world->header.size >= offsetof(KilnWorldApi, write_declare) + sizeof(world->write_declare) &&
         world->write_declare && world->write_submit && world->write_cancel && players &&
-        players->header.size >= offsetof(KilnPlayersApi, get) + sizeof(players->get) && players->get &&
-        g_api->feature(KC_STR("world.tracked_writes"));
+        players->header.size >= offsetof(KilnPlayersApi, get) + sizeof(players->get) && players->get;
+    // write_declare itself checks the tracked backend. KilnApi.feature sees only sigdb names, not service rows.
     const KilnStr ncc = KC_STR("NetworkCameraControl");
     const bool declared = mode_dependencies && world->write_declare(g_owner, KC_STR(KILN_CAMERA_SERVICE), &ncc, 1) == KILN_OK;
     g_mode.set_ready(declared);
