@@ -828,11 +828,13 @@ returns to `RecipePaid` like any other, and the adapter above pays it from regis
 out (`exclude`). `craft_payment_test.cpp` covers a station's craft context. What a station's menu lacked was the client's
 ingredient counts (§10.3).
 
-**A production station's screen** counts only what its fill and its row transfers can take: the server's snapshot names
-per item the part only registered sources hold (`kiln:craftstock` message 1, a trailing section an older client does not
-read), and a Kiln client leaves it out while the HUD screen is FactoryCrafting (0.2.0-dev.30.8). Its fill (§3.1, §8, §9)
-and the row transfer (UI command `0x39`; on the server most likely `AutoTransferAction`'s item branch, `AutoTransferItem`
-from the player and base list A [inf]) never take from them.
+**A production station's screen** leaves registered sources out of its counts: the server's snapshot names per item the
+part only registered sources hold (`kiln:craftstock` message 1, a trailing section an older client does not read), and a
+Kiln client leaves it out while the HUD screen is FactoryCrafting (0.2.0-dev.30.8). Its fill (§3.1, §8, §9) and the row
+transfer (UI command `0x39`; on the server most likely `AutoTransferAction`'s item branch, `AutoTransferItem` from the
+player and base list A [inf]) never take from them. Opted-in outputs stay in those counts (§10.3, the fill takes them),
+but the row transfer is an item fill, which Kiln.Blocks leaves to the game (`SourceFill` passes `item != 0`): a row can
+offer a transfer amount only outputs hold, and the press moves what the bag and list A have.
 
 `source_stock(player, flags, ...)` runs on the server tick thread: flags0 returns filtered extra counts excluding
 current base stock and opted-in outputs already counted by `kiln:craftstock`; `KILN_CRAFT_SOURCE_STOCK_ALL` returns

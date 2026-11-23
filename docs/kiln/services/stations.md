@@ -275,9 +275,10 @@ registration order. Every container counts once **per item**, even if multiple r
 in the base's own stock. A linked container offers every item the filter allows. Production stations are refused:
 `PayMaterial` cannot separate their queued inputs from their finished outputs. Production stations lend their outputs
 through `Stations.SetOutputSource`, under its existing per-item safety rules. This does not change `Stations.Fill` or
-its fill buttons: a production station's fill, its "+1" / "+10" and the transfer buttons of its ingredient rows take from the
-bag, the base's Magic chests and opted-in station outputs, never from linked containers. Since 0.2.0-dev.30.8 its screen
-counts only what those can take (see below).
+its fill buttons: a production station's fill and its "+1" / "+10" take from the bag, the base's Magic chests and opted-in
+station outputs, and the transfer buttons of its ingredient rows (the game's own item transfer) from the bag and the Magic
+chests; none of them takes from linked containers. Since 0.2.0-dev.30.8 its screen leaves linked stock out of its counts
+(see below).
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -311,12 +312,21 @@ base (GitHub #132). The snapshot includes the bag and any permitted current base
 against that stock and opted-in station outputs. It is only UI help: the server recounts at payment. A vanilla client
 keeps the game's menu counts. A missing input snapshot is never truncated: over 1024 rows the menu keeps the game's counts.
 
-A **production station's screen** (a mill, a kiln, a smelter: `GameScreen.Crafting.IsFactory`) counts only what its fill
-and its transfer buttons can take: the bag, the base's Magic chests and opted-in station outputs. The server's snapshot
-names, per item, the part only linked containers hold, and that screen leaves it out. Through 0.2.0-dev.30.7 it showed
-linked stock there (9999+ of an ingredient the base did not have) and its transfer buttons offered amounts whose press did
-nothing. A client of 0.2.0-dev.30.8 or later with an older server still shows them: that server does not say which part is
-linked. The category option picker of a crafting menu counts in the game's own code and keeps the game's counts.
+A **production station's screen** (a mill, a kiln, a smelter: `GameScreen.Crafting.IsFactory`) leaves linked stock out:
+nothing on it takes from linked containers. The server's snapshot names, per item, the part only linked containers hold,
+and that screen leaves it out. Through 0.2.0-dev.30.7 it showed linked stock there (9999+ of an ingredient the base did
+not have) and its transfer buttons offered amounts whose press did nothing. A client of 0.2.0-dev.30.8 or later with an
+older server still shows them: that server does not say which part is linked. Opted-in station outputs stay in that
+screen's counts, as since 0.2.0-dev.29.19, because its fill and its "+1" / "+10" take them; a row's transfer button (the
+game's item transfer: the bag and the Magic chests) can therefore still offer an amount that only those outputs hold, and
+its press moves only what the bag and the chests have. The category option picker of a crafting menu counts in the game's
+own code and keeps the game's counts.
+
+Not seen in a real game yet (0.2.0-dev.30.8): the crafting menus' ingredient rows with the snapshot, the production
+station's screen without linked stock, and the dye order below. The crafting menu's ingredient list calls the count Kiln
+raises only when the menu sets a flag (otherwise it counts the bag itself); a player's report puts that flag on in a
+crafting station's menu. In the inventory's and an NPC's menu it was not seen: where it is off, those rows keep the game's
+counts (the craft count still includes the snapshot).
 
 **Lifetime:** `CraftSourceHandle.Dispose()` is idempotent and works on any thread. Unloading the mod removes all of its
 sources; an already-running payment may finish. Sources are session-only and cleared when the world closes. They
@@ -514,7 +524,8 @@ rows (the ones with transfer buttons) and the crafting menu's are different widg
 station screen's were raised, since 0.2.0-dev.30.8 the crafting menu's ingredient list and its rows' category options are
 too. Other screens that count items (building costs, a crafting menu's category option picker) keep the game's counts.
 kiln.log: `stations: the ingredient rows' available count ... hooked` once, then `stations: an ingredient's available
-count for item 0x... shown a -> b with station outputs`. A **vanilla client** keeps the game's buttons and counts.
+count for item 0x... shown a -> b (station screen | crafting menu | crafting menu option) with the server's crafting
+stock`. A **vanilla client** keeps the game's buttons and counts.
 
 ## Stop, resume, select
 ```csharp
