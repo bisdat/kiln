@@ -1701,6 +1701,9 @@ mod tests {
     #[cfg(unix)]
     fn fake_tools(root: &Path, program: &str) -> crate::cooktools::CookTools {
         use crate::cooktools::{CookTools, Python, Source};
+        let program = if matches!(program, "/bin/true" | "/bin/false") && !Path::new(program).is_file() {
+            format!("/usr/bin/{}", Path::new(program).file_name().unwrap().to_string_lossy())
+        } else { program.to_string() };
         std::fs::create_dir_all(root.join("tools/modelcook")).unwrap();
         std::fs::write(root.join("tools/modelcook/modelcook.py"), b"").unwrap();
         CookTools { root: root.to_path_buf(), source: Source::Checkout, sound_helper: None,
