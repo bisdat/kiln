@@ -135,6 +135,19 @@ internal static class BlockJson
                     if (p.Name is "format" or "comment" or "$schema") continue;
                     // resource patches are not blocks: kiln.content reads this section itself, in a boot generation (docs/kiln/modding/resource-patches.md)
                     if (p.Name is "resourcePatches" or "baseRules") continue;  // baseRules (since 0.2.0-dev.31): kiln.content's too
+                    // other mods' stats this mod's UI blocks show (dossier 09 §4.3): a declared type, not a permission
+                    if (p.Name == "statImports")
+                    {
+                        if (p.Value.ValueKind != JsonValueKind.Array) { Fail(mod, $"{rel}: \"statImports\" is a list of \"mod:id\" names"); continue; }
+                        foreach (var item in p.Value.EnumerateArray())
+                        {
+                            var s = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+                            var colon = s?.IndexOf(':') ?? -1;
+                            if (s == null || colon <= 0 || colon == s.Length - 1) { Fail(mod, $"{rel}: statImports: {item.GetRawText()} is not \"mod:id\""); continue; }
+                            UiStats.Import(mod.Id, new ModValueKey(s[..colon], s[(colon + 1)..]));
+                        }
+                        continue;
+                    }
                     var kind = Kinds.FirstOrDefault(k => k.Section == p.Name);
                     // "provider-mod:plural": a kind another mod registered (Blocks.RegisterKind). Its provider is a dependency, so it loaded first.
                     if (kind.Make == null && KindRegistry.IsExternalSection(p.Name))

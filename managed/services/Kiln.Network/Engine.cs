@@ -690,11 +690,21 @@ internal static class NetEngine
     /// <summary>A requirement of NetAdmission came or went: the next tick looks at the gate at once.</summary>
     internal static bool AdmissionChanged;
 
+    /// <summary>Kiln's own consumers (dev.31: Kiln.Blocks' UI command receiver): runs once per server step on the tick thread,
+    /// from Kiln.Network's service tick, never from inside a message handler. kiln.net delivers a step's frames in one pass,
+    /// so every Request and Cancel delivered before this point has been handled when it runs.</summary>
+    internal static event Action? AfterServerDispatch;
+
     private static void ServerTick(in TickInfo tick)
     {
         if (_tableDirty) BroadcastChannelTable();
         if (KicksPending) RunDueKicks(DateTime.UtcNow);
         if (NetAdmission.StepNeeded) AdmissionStep();  // every step while a requirement can hold a peer
+        if (AfterServerDispatch is { } after)
+        {
+            try { after(); }
+            catch (Exception e) { Log(LogLevel.Error, $"after dispatch: {e}"); }
+        }
         if (tick.Step % 25 != 0 && !AdmissionChanged) return;  // ~1 s on a dedicated server
         AdmissionChanged = false;
         NetAdvertise.Tick();
