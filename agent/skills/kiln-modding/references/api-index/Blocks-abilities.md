@@ -46,7 +46,7 @@
 
 ## ConeBlock — Everyone in a cone in front of the caster.
 - `Affects { get; init; } -> AreaAffects` — Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.
-- `Angle { get; init; } -> float` — The cone's whole width, in degrees: 1 to 179.
+- `Angle { get; init; } -> float` — The cone's whole aperture, in degrees: more than 0 and at most 360.
 - `Effects { get; init; } -> IReadOnlyList<EffectRef>` — What each one in the cone gets.
 - `Range { get; init; } -> float` — Metres.
 

@@ -249,6 +249,14 @@ internal static partial class Compiler
         CheckLevel(ctx, s.Level, "level");
         if (s.Physical is < 0) throw new BlockError(ctx.Block, "physical", $"{s.Physical} is less than 0");
         if (s.Magical is < 0) throw new BlockError(ctx.Block, "magical", $"{s.Magical} is less than 0");
+        CheckArmorResist(ctx, s, "resist");
+    }
+
+    private static void CheckArmorResist(BlockContext ctx, ArmorStats stats, string path)
+    {
+        if (stats.Resist is not { } r) return;
+        foreach (var (field, value) in new[] { ("cut", r.Cut), ("pierce", r.Pierce), ("blunt", r.Blunt), ("fire", r.Fire), ("ice", r.Ice), ("shroud", r.Shroud), ("lightning", r.Lightning) })
+            if (value is < 0) ctx.Tolerate($"{path}.{field}", $"{value} must be at least 0; it is used as written: armour below 0 against that kind");
     }
 
     private static void ApplyVisual(Draft d, PartRef<VisualBlock>? part, string path)
@@ -296,6 +304,8 @@ internal static partial class Compiler
         var ctx = d.Ctx;
         if (l.StackMin is < 1) throw new BlockError(ctx.Block, "loot.stackMin", $"{l.StackMin} is less than 1");
         if (l.StackMax < l.StackMin) throw new BlockError(ctx.Block, "loot.stackMax", $"{l.StackMax} is less than stackMin {l.StackMin}");
+        // without stackMin, 0.2.0-dev.30.6 passed it on: the game's roll orders the two bounds (from it up to the copied entry's smallest stack)
+        if (l.StackMax is < 1) ctx.Tolerate("loot.stackMax", $"{l.StackMax} is less than 1; it goes to the game as written: a roll from it up to the copied entry's smallest stack");
         if (l.Like is { } like) d.Loot = new ItemLoot { Like = ctx.ItemName(like, "loot.like"), StackMin = l.StackMin, StackMax = l.StackMax };
         else if (l.StackMin != null || l.StackMax != null) throw new BlockError(ctx.Block, "loot.like", "stack sizes are for random loot: say which item's rolls it joins");
         if (l.Tables is not { Count: > 0 } tables)
@@ -494,6 +504,7 @@ internal static partial class Compiler
         CheckLevel(ctx, stats.Level, "stats.level");
         if (stats.Physical is < 0) throw new BlockError(ctx.Block, "stats.physical", $"{stats.Physical} is less than 0");
         if (stats.Magical is < 0) throw new BlockError(ctx.Block, "stats.magical", $"{stats.Magical} is less than 0");
+        CheckArmorResist(ctx, stats, "stats.resist");
 
         var d = new Draft(ctx, low, key, name, slot.Starter!);
 
