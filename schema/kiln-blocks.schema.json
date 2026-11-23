@@ -1542,7 +1542,7 @@
       "description": "How a body moves: a glTF of the mod with its clips (cooked when the mod builds), the engine's states and your own. Or a premade: \"like\".",
       "properties": {
         "like": { "type": "string", "enum": ["vukah", "scavenger", "fisher", "villager"] },
-        "clips": { "type": "string", "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$", "description": "The glTF file, its path in the mod's folder." },
+        "clips": { "type": "string", "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$", "description": "The glTF file, its path in the mod's folder: not starting with a slash, a backslash or a drive (C:), and without two dots in a row." },
         "skeleton": { "type": "string" },
         "retarget": {
           "type": "object",
@@ -1592,7 +1592,7 @@
       "properties": {
         "like": { "type": "string", "enum": ["vukah", "scavenger", "fisher", "villager"] },
         "template": { "type": "string" },
-        "model": { "type": "string", "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$" },
+        "model": { "type": "string", "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*\\.\\.).*\\.([gG][lL][bB]|[gG][lL][tT][fF])$", "description": "The glTF file, its path in the mod's folder: not starting with a slash, a backslash or a drive (C:), and without two dots in a row." },
         "skeleton": { "type": "string" },
         "scale": { "type": "number", "description": "1 as modelled.", "maximum": 20, "exclusiveMinimum": 0 },
         "colliders": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/collider" } },
