@@ -578,6 +578,48 @@ int main() {
                       kiln_boxes(0x4000, &game, no_save) == 4,
                   "world save site unresolved: game-only and base-zone stacks get the boxes too");
         }
+        {
+            // The system's modules are not another mod's: a worker thread's stack reaches ntdll and kernel32 (its start)
+            // within a few frames, and the walk ends at the first frame in one. A base-zone call whose own site did not
+            // resolve stays out of the boxes; Kiln's boxes among the base zones would break the game's base areas past
+            // 16 zones.
+            check(kb::system_module("ntdll.dll") && kb::system_module("KERNEL32.DLL") && kb::system_module("KernelBase.dll") &&
+                      kb::system_module("ucrtbase.dll") && kb::system_module("msvcrt.dll") &&
+                      kb::system_module("vcruntime140.dll") && kb::system_module("msvcp140.dll"),
+                  "Windows' (and Wine's) thread-start modules and the C runtime are system modules, whatever the case");
+            check(!kb::system_module("mfa.dll") && !kb::system_module("kiln-core.dll") && !kb::system_module("ntdll.dll.bak") &&
+                      !kb::system_module("") && !kb::system_module("enshrouded_server.exe"),
+                  "another mod's DLL, Kiln's, the game and no module are not");
+            const kb::CallSites zones_missing{0x1000, 0, 0x3000};
+            const kb::Frame k32 = frame_in(0x7ffa00011000, Place::System, "kernel32.dll", 0x17614);
+            const kb::Frame nt = frame_in(0x7ffa00022000, Place::System, "ntdll.dll", 0x526f1);
+            const std::vector<kb::Frame> worker{in_game(0x2000), in_game(0x9100), in_game(0x9200), k32, nt};
+            const auto w = kb::judge_caller(0x2000, worker, zones_missing);
+            check(w.kind == kb::Caller::Unknown && w.how == kb::Found::GameOnly && !w.boxes,
+                  "base-zone site unresolved, a worker thread's stack down to ntdll: the game's own frames, no boxes");
+            check(kiln_boxes(0x2000, &worker, zones_missing) == 0, "...and the base zones' list stays the game's");
+            // past the thread's start the walk does not go: a frame in no module there (a stack Wine cannot unwind any
+            // further) does not count, nor does a known site
+            auto beyond = worker;
+            beyond.push_back(frame_in(0x500000, Place::Other, "", 0));
+            beyond.push_back(in_game(0x1000));
+            const auto b = kb::judge_caller(0x2000, beyond, zones_missing);
+            check(b.how == kb::Found::GameOnly && !b.boxes, "frames below the first system frame are not looked at");
+            // another mod's frame above the thread's start still counts: it may be the world save
+            const std::vector<kb::Frame> mod_thread{in_game(0x4000), mfa_frame, k32, nt};
+            const auto f = kb::judge_caller(0x4000, mod_thread, all);
+            check(f.how == kb::Found::Foreign && f.boxes && f.via.module == "mfa.dll",
+                  "another mod's thread calling the game: its frame above the system's counts, boxes");
+            // a known site above the thread's start still places the call
+            const std::vector<kb::Frame> placed{mfa_frame, in_game(0x1000), k32, nt};
+            check(kb::judge_caller(mfa, placed, all).kind == kb::Caller::WorldSave, "a known site above the system's frames places the call");
+            // the builder called straight from a system module: nothing of the game placed it, so it may be the world save
+            const std::vector<kb::Frame> from_system{k32, nt};
+            const auto s = kb::judge_caller(k32.at, from_system, all);
+            check(s.how == kb::Found::Foreign && s.boxes && s.via.module == "kernel32.dll",
+                  "the builder called from a system module itself: Foreign, boxes");
+            check(kb::frame_text(k32) == "kernel32.dll+0x17614", "a system frame is named by module and offset");
+        }
     }
     {
         // The game's voxel writer collects at most 4,096 stored chunks per record and skips the rest without a word, in

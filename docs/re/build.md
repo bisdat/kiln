@@ -506,9 +506,12 @@ Base zones and base query: the list stays as the builder wrote it. Another mod's
 builder, or on a caller of it) changes the return address the hook sees. So while the world save's site is known, a
 return address that is no known site is placed by the stack below it: up to 8 return addresses from it down
 (RtlCaptureStackBackTrace, which unwinds through every frame with unwind data), the first known site among them decides
-(kiln.log notes the first such call once). Without one, the call gets the boxes, as it may be the world save, when a
-frame lies outside the game exe and Kiln's own modules (`kiln-core.dll`, `kiln-*.dll`): another module's code, or a
-relay in no module; kiln.log warns once, naming it. It gets them too when the stack cannot be walked past the return
+(kiln.log notes the first such call once). The look ends at the first frame in one of the system's modules (`ntdll`,
+`kernel32`, `kernelbase`, the C runtime's `ucrtbase`, `msvcrt`, `vcruntime140`, `msvcp140`; the same names under
+Wine): that is a thread's start, never a mod's hook, and a worker thread's stack reaches it within a few frames.
+Without a known site above it, the call gets the boxes, as it may be the world save, when a frame lies outside the
+game exe, Kiln's own modules (`kiln-core.dll`, `kiln-*.dll`) and the system's: another module's code, or a relay in no
+module; kiln.log warns once, naming it. It gets them too when the stack cannot be walked past the return
 address (warned once). Only when all those frames are the game's own does it get none (warned once when all three
 sites resolved). The three return addresses are sigdb names
 (`build/RetSaveRegionsWorldSave`, `build/RetSaveRegionsBaseZones`, `build/RetSaveRegionsBaseQuery`). When the world
