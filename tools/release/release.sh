@@ -229,7 +229,7 @@ if ((!launcher_only)) && ((!worktree)) && [[ $channel != beta ]] && [[ -f $repo/
     fi
     if [[ -n $(git -C "$repo" status --porcelain -- "$api_index") ]]; then
       git -C "$repo" status --short -- "$api_index" | head -20 | tee -a "$log"
-      die "the agent API index was out of date and is regenerated in $repo (above): commit it (git commit -m 'skill: regenerate the API index' -- agent/skills/kiln-modding/references/api-index) and run the release again"
+      die "the agent API index was out of date and is regenerated in $repo (above): commit it, new and removed parts included (git -C $repo add -A -- agent/skills/kiln-modding/references/api-index && git -C $repo commit -m 'skill: regenerate the API index' -- agent/skills/kiln-modding/references/api-index) and run the release again"
     fi
     note "API index: current"
   fi
@@ -1088,8 +1088,10 @@ fi
 if ((api_moved)); then
   cat <<EOF | tee -a "$log"
   The API record: $api_moved file(s) changed in $repo (this release's API moved from Unshipped.txt into Shipped.txt, its rows
-  went into the API history ledger, and the agent API index is generated from them). Commit them:
-  git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv agent/skills/kiln-modding/references/api-index
+  went into the API history ledger, and the agent API index is generated from them). Commit them (add -A: a new or
+  removed index part is a new or deleted file, which a commit with paths alone leaves out):
+  git -C "$repo" add -A -- agent/skills/kiln-modding/references/api-index &&
+    git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv agent/skills/kiln-modding/references/api-index
 EOF
 fi
 if printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then exit 1; fi

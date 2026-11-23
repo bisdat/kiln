@@ -693,6 +693,9 @@ def cmd_bump_api(a):
         write(p, texts[k])
     print(f"api-gate: API version {old} -> {text}: {MODS_CS}, {VERSION_PROPS} (KilnModApiVersion {props_form(new)}), "
           f"{PROFILE_RS}")
+    print(f"api-gate: then regenerate the agent API index (python3 -I tools/docs-site/api_index.py: its titles and the "
+          f"Unshipped lines carry the mod API) and give agent/skills/kiln-modding/references/versions.md a row for {text}; "
+          f"until both are committed tools/check.sh fails (stages index, drift) and release.sh stops at its index step")
     docs = doc_lines(a.repo, old)
     if docs:
         print(f"api-gate: lines that may name the old API version ({old}); fix the ones about Kiln's API by hand:")
