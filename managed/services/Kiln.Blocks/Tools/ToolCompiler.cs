@@ -4,6 +4,8 @@ namespace Kiln;
 
 internal static partial class Compiler
 {
+    /// <summary>The brush radius as an item rule: the base brush's FloatImpactConfig of id 0x5258131e (BrushRadius).</summary>
+    internal const string BrushRadiusRule="impactValues.0x5258131e";
     private static BlockHandle DefineToolPool(BlockContext ctx,Lowered low,string name,ToolMaterialPoolBlock block)
     {
         ctx.Need(ClientsLevel.Mod,null,"a tool pool and its terrain identities must agree in every player's game");
@@ -78,8 +80,13 @@ internal static partial class Compiler
                 var item=new ItemDefinition {Guid=brush.Guid,Name=brush.GameName,BaseOn="Building_Overgrowth_Shape_Small",DisplayName=brush.Block.Name,Description=brush.Block.Description??"",
                     Refs=new Dictionary<string,string>(refs) {["equipment.terrainVoxelObject"]=brush.Guid.ToString()}};
                 low.Item(ApplyToolActions(ctx,low,item,actions));
-                low.ItemRules(brush.GameName,new JsonObject {["0x5258131e"]=brush.Block.Radius});
-                low.AfterCommit(()=>BlockRuntime.AddRules(ctx.Mod,"itemdata",brush.GameName,new JsonObject {["tags[0].tag"]=guid.ToString()}));
+                // The radius is the brush item's own impact config: Building_Overgrowth_Shape_Small carries FloatImpactConfig
+                // 0x5258131e (0.5), the config the tool programs' BrushRadius reads. It is no item field of that name.
+                var radius=new JsonObject {[BrushRadiusRule]=brush.Block.Radius};
+                low.ItemRules(brush.GameName,radius);
+                ((low.Json["toolItemRules"]??=new JsonObject()).AsObject())[brush.GameName]=radius.DeepClone();
+                // No item tag: the picker's query scans only the game data's terraformingTools list, where no runtime brush
+                // is, so the native frame adapter writes the family's rows (brush_frame.h). A root GUID is no ItemTag either.
             }
             low.AfterCommit(()=>BlockRuntime.AddReady(ctx.Mod,problem=>ToolFamilyRuntime.Publish(ctx.Mod,name,guid,pool?.Guid,block,brushes,entries,actions,problem)));
         }

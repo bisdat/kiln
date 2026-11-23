@@ -5,7 +5,7 @@
     <IsTestProject>true</IsTestProject>
     <InvariantGlobalization Condition="'$(InvariantGlobalization)' == ''">true</InvariantGlobalization>
     <OutputType>Exe</OutputType>
-    <NoWarn>$(NoWarn);CS1591;KILNX003</NoWarn>  <!-- the task-thread world reads and writes are experimental -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- FakeWorldParityTests calls the kit's kiln.world table as a native service does (function pointers). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
@@ -40,6 +40,8 @@
     <TkMod Include="mods/TkProgress/TkProgress.csproj" />
     <TkMod Include="mods/TkBoot/TkBoot.csproj" />
     <TkMod Include="mods/TkWatch/TkWatch.csproj" />
+    <TkMod Include="mods/TkRegistry/TkRegistry.csproj" />
+    <ProjectReference Include="../../services/Kiln.Registry/Kiln.Registry.csproj" />
     <ProjectReference Include="@(TkMod)" />
     <!-- Kiln.Hooks beside the kit, as in kiln/host: TkOffline reads it (a service that remembers a missing table). -->
     <ProjectReference Include="../../services/Kiln.Hooks/Kiln.Hooks.csproj" />
@@ -84,6 +86,7 @@
     <TkSample Include="../../../mods/samples/FrostMark/FrostMark.csproj" />
     <!-- The tasks guide's example (docs/kiln/modding/tasks.md): a search in a Kiln task, the items moved on the tick -->
     <TkSample Include="../../../mods/samples/FetchNearby/FetchNearby.csproj" />
+    <TkSample Include="../../../mods/samples/RegistryEdits/RegistryEdits.csproj" />
     <ProjectReference Include="@(TkSample)" ReferenceOutputAssembly="false" />
     <TkSample Include="../../../mods/samples/SampleTests/SampleTests.csproj" />
     <ProjectReference Include="../../../mods/samples/SampleTests/SampleTests.csproj" />

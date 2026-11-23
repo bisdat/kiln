@@ -192,6 +192,7 @@ def generate(db, out):
           "/// <summary>Where a state comes from. The game's own enum names its values.</summary>",
           "public enum PlayerStateSource : byte",
           "{",
+          "    /// <summary>No source in particular: a search asks for a state in any source (<see cref=\"PlayerStates.Find\"/>).</summary>",
           "    None = 0,"]
     for sid, name, _, enum, field, _ in SOURCES:
         p.append(f"    /// <summary><c>{enum}</c> in <c>{field}</c>.</summary>")

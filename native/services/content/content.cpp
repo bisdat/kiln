@@ -152,7 +152,10 @@ void mark_all_pending(uint32_t reason) {
 std::unordered_set<uint64_t> g_modified;
 bool g_modified_stale = true;
 void refresh_modified() {
-    if (!g_modified_stale) return;
+    static uint64_t generation = ~0ull;
+    // Registry transactions write through the shared store, not Content's table setters.
+    if (!g_modified_stale && generation == store_generation()) return;
+    generation = store_generation();
     g_modified.clear();
     store_for_each([](uintptr_t, const Slot& s) {
         if (std::memcmp(s.current, s.original, s.n) != 0) g_modified.insert((uint64_t(s.kind) << 32) | s.id);
@@ -312,6 +315,7 @@ void try_ready(uint64_t step, uint32_t kind, uintptr_t world) {
                  mbi.Type == MEM_PRIVATE ? "MEM_PRIVATE" : mbi.Type == MEM_IMAGE ? "MEM_IMAGE" : "MEM_MAPPED", mbi.BaseAddress,
                  mbi.RegionSize / 1048576.0, mbi.AllocationBase);
     }
+    registry_live_world_begin(kind);
     apply_packs(false);
     g_ready.store(true);
     set_detail("ready");
@@ -374,10 +378,18 @@ std::unordered_set<uintptr_t> g_seen;
 // Takes every layer off (revert: writes the originals back; only while the world is intact) and forgets the snapshot,
 // so the next world (a new hosted session, a join) is read and patched from scratch. Ready subscribers run again then.
 void world_reset(bool revert, const char* why) {
-    nc_world_stopping(g_world.load());
+    uintptr_t w;
+    bool was_ready;
+    {
+        std::lock_guard lock(store_mutex());
+        // Fence live accesses before clearing the core world. An off-thread caller can never observe
+        // core "no world" while the backend still admits writes to that world's slots.
+        registry_live_world_stop();
+        w = g_world.exchange(0);
+        was_ready = g_ready.exchange(false);
+    }
+    nc_world_stopping(w);
     refs_reset();
-    const uintptr_t w = g_world.exchange(0);
-    const bool was_ready = g_ready.exchange(false);
     uint32_t n = 0;
     std::string err;
     {
@@ -469,28 +481,38 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
 // ---- drop tables: the game's DefaultInventoryResource acquire ----
 kiln::RawHook g_acquire_hook;
 
+// A table the game has just loaded, on the thread that acquired it, before that caller walks it: registered and patched
+// (pack rules, new items' stacks) once. A table counts as seen only once its patch is in memory: a second caller of a
+// table another thread is still patching (two job threads rolling it in one step; in a hosted game also the main thread,
+// whose prediction world acquires drop tables) waits for the store lock instead of walking a half-written table.
 void note_table(const uint8_t guid[16], uintptr_t data) {
     {
         std::lock_guard lock(g_seen_mu);
-        if (!g_seen.insert(data).second) return;
+        if (g_seen.count(data)) return;
     }
     const bool job = !g_api->on_world_thread(g_kind.load());
     timing_mark_job_thread(job);
     PhaseTimer pt(PH_DROP_TABLE);
     std::lock_guard lock(store_mutex());
     timing_mark_job_thread(false);
+    if (!g_ready.load()) return;  // the world went away while this caller waited (world_reset): nothing to patch or mark
+    const auto seen = [&] {
+        std::lock_guard l(g_seen_mu);
+        g_seen.insert(data);
+    };
     Registry& D = reg(KILN_CONTENT_DROPS);
     Entry e;
     std::memcpy(e.guid, guid, 16);
     e.id = fnv1a(guid, 16);
     e.addr = data;
     e.name = guid_text(guid);
-    if (D.get(e.id)) return;
+    if (D.get(e.id)) return seen();
     D.add(e);
     drops_table_loaded(D.entries.back());  // old packs' drop rules, new items' stacks, the registry's layers (registry_live.cpp)
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
+    seen();  // after the flush: a caller that finds the table seen walks the patched table
     if (!err.empty()) LOGW("drop table %s: %s", e.name.c_str(), err.c_str());
 }
 

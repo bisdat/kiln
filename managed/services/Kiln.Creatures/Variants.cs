@@ -19,18 +19,45 @@ public sealed class CreatureVariant
     /// <summary>A display name for logs and Kiln clients (vanilla clients show the base template's own name).</summary>
     public string? Name { get; init; }
 
+    /// <summary>Level of each creature (<see cref="CreatureRef.Level"/>); null keeps the base template's.</summary>
     public int? Level { get; init; }
+
+    /// <summary>Faction of each creature (<see cref="CreatureRef.Faction"/>); null keeps the base template's.</summary>
     public Faction? Faction { get; init; }
+
+    /// <summary>Uniform scale (<see cref="CreatureRef.Scale"/>); null keeps the base template's.</summary>
     public float? Scale { get; init; }
+
+    /// <summary>XP factor of a kill (<see cref="CreatureRef.XpFactor"/>); null keeps the base template's.</summary>
     public float? XpFactor { get; init; }
+
+    /// <summary>Factor on all movement speeds (<see cref="CreatureRef.SpeedFactor"/>); null keeps them.</summary>
     public float? SpeedFactor { get; init; }
+
+    /// <summary>Damage multiplier (<see cref="CreatureRef.DamageFactor"/>); null keeps the base template's.</summary>
     public float? DamageFactor { get; init; }
+
+    /// <summary>Damage susceptibility per kind (<see cref="CreatureRef.Resistance"/>: 1 = normal, 0 = immune, 2 = double).
+    /// Kinds not listed keep the base template's. Empty by default.</summary>
     public Dictionary<DamageKind, float> Resistances { get; init; } = [];
+
+    /// <summary>The loot label collection its drops are rolled from (<see cref="CreatureRef.LootAccess.Labels"/>); null keeps the base template's.</summary>
     public Guid? LootLabels { get; init; }
+
+    /// <summary>How many loot slots are rolled, as (min, max) (<see cref="CreatureRef.LootAccess.Slots"/>); null keeps the base template's.</summary>
     public (int Min, int Max)? LootSlots { get; init; }
+
+    /// <summary>True switches random loot off, false switches it on (<see cref="CreatureRef.LootAccess.Disabled"/>); null keeps the base template's.</summary>
     public bool? LootDisabled { get; init; }
+
+    /// <summary>Enemy AI features to switch on for each creature (<see cref="CreatureRef.FeatureAccess.Enable(EnemyFeatures)"/>).
+    /// <see cref="EnemyFeatures.None"/> (the default) changes nothing.</summary>
     public EnemyFeatures EnableFeatures { get; init; }
+
+    /// <summary>Enemy AI features to switch off for each creature (<see cref="CreatureRef.FeatureAccess.Disable(EnemyFeatures)"/>).
+    /// <see cref="EnemyFeatures.None"/> (the default) changes nothing.</summary>
     public EnemyFeatures DisableFeatures { get; init; }
+
     /// <summary>Private AI settings: reflection path (Enemy01BehaviorState by default, or "Component.path") to value
     /// text, e.g. ["aggroSetup.viewRange"] = "30", ["EnemyArsenalReference.arsenal"] = "&lt;guid&gt;".</summary>
     public Dictionary<string, string> Ai { get; init; } = new(StringComparer.OrdinalIgnoreCase);
@@ -38,14 +65,19 @@ public sealed class CreatureVariant
     /// (Kiln.Saves EntityData of the registering mod) and apply it again after a restart. Enemies are DoNotSave.</summary>
     public bool Persist { get; init; }
 
+    /// <summary>The display name when there is one, else the id.</summary>
     public override string ToString() => Name ?? Id;
 }
 
 /// <summary>Options for <see cref="Creatures.Spawn"/>.</summary>
 public sealed class CreatureSpawnOptions
 {
+    /// <summary>A label stored with the tracked spawn record (<see cref="SpawnOptions.Tag"/>), so cleanup can select by it.</summary>
     public string? Tag { get; init; }
+
+    /// <summary>Spawn behaviour switches, passed to the spawn (<see cref="SpawnOptions.Flags"/>).</summary>
     public SpawnFlags Flags { get; init; }
+
     /// <summary>Destroy the creature when the spawning mod unloads (default true; false leaves it, with the
     /// variant's changes reverted).</summary>
     public bool DespawnOnUnload { get; init; } = true;
@@ -53,6 +85,11 @@ public sealed class CreatureSpawnOptions
 
 /// <summary>A natural-spawn rule: creatures of <see cref="Template"/> that random spawners create become
 /// <see cref="Variant"/> with <see cref="Chance"/>.</summary>
+/// <param name="Template">The template the spawners create: its name, display name or GUID text.</param>
+/// <param name="Variant">The id of the registered variant that replaces it.</param>
+/// <param name="Chance">The chance of the replacement, 0 to 1 (a rule outside that range is refused).</param>
+/// <param name="NightOnly">The rule applies at night only.</param>
+/// <param name="DayOnly">The rule applies by day only.</param>
 public sealed record CreatureSpawnRule(string Template, string Variant, double Chance = 1, bool NightOnly = false,
     bool DayOnly = false);
 
@@ -95,6 +132,7 @@ public static class CreatureVariants
     /// <summary>Natural-spawn rules.</summary>
     public static IReadOnlyList<CreatureSpawnRule> SpawnRules => Rules.Select(r => r.Spec).ToList();
 
+    /// <summary>The registered variant with this id (case-insensitive), or null.</summary>
     public static CreatureVariant? Get(string id) => ById.TryGetValue(id, out var e) ? e.Variant : null;
 
     internal static Entry? EntryOf(string id) => ById.TryGetValue(id, out var e) ? e : null;

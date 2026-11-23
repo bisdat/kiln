@@ -26,6 +26,7 @@ Unchanged: `data/*`, `shared/*` except `character.mjs`, and every `src/` file no
 | `src/itemstats.js` | gameart: `copiarEstatisticas(de, para)`: a mod item uses its base item's attribute lines |
 | `src/ui.js` | gameart: `itemIcon` uses an entry's own `icon` (mod items) when it has one |
 | `src/Catalog.jsx` | gameart: the item list is built when the catalog opens (mod items merge after the module loads) |
+| `shared/character-exact.mjs`, `shared/storage-witness.mjs`, `shared/player-storage.mjs` | Kiln's exact inventory codec and KPS1 witness, separate from the heuristic parser. `src/tauri-api.js` reads the selected install's storage sidecar by the character's actual inventory witness and returns storage offline through backed-up, sidecar-first writes; the regular editor parser remains unchanged. `kiln/Storage.jsx` is the read-only mirror and explicit return confirmation. |
 | `shared/character.mjs` | gameart: when no equipment list of at least 4 pieces fits, the search accepts a shorter one (new characters wear fewer; the inventory header and the mask must still close; checked: byte-identical round trips); 2026-11-20 (player report: empty Backpack): the inventory header's first byte is the bag's page count (1-16, not only 05), entry slots must lie in their container's pages, the first header with entries wins over empty ones (a u32 5 matched an empty header), and `_invUnsure` marks a guessed place; `readCharacter` (strict, then any id accepted) and `modDataIn` (Belt Lantern's record) are Kiln's; `buildCharacter` writes no items into an unsure inventory |
 | `src/i18n/en.json` | gameart: "Unknown item (0x{h})", the read-only note for saves with unknown items; Kiln's UI strings (`kiln/`, `deck/`) at the end, with English words for upstream's three messages about a save it cannot read |
 | `src/i18n.js` | without a saved choice, anything but Portuguese defaults to English (upstream: Portuguese); outside Portuguese, `t()` words a Portuguese key listed in `src/i18n/launcher-keys.json` with the launcher's text (`launcher/src/i18n`, "editor.game.*") in the launcher's language, and `localeAtual()` is the launcher's locale |
@@ -63,7 +64,9 @@ moving or duplicating an existing entry. The write check rejects only non-byte i
 above catalog limits; existing saves remain byte-identical if those fields are not edited. The UI speaks the
 launcher's language: Kiln's files call the launcher's `t("editor.…")` (`launcher/src/i18n/*.json`, the `editor` keys, checked
 by `bun scripts/i18n-check.ts --source`), upstream's texts go through `src/i18n.js` and `launcher-keys.json`. Item and skill
-names stay the game's (`definirIdioma('en')`: English outside Portuguese). The Kiln strings at the end of `src/i18n/en.json`
+names come from the locally extracted `names/names.json` in the launcher's language (`kiln/game-names.js`),
+then the game's English, then the vendored Portuguese/English tables. Item and recipe knowledge uses the same cache.
+Without extraction names behave as before. The Kiln strings at the end of `src/i18n/en.json`
 are no longer read (kept for a clean re-vendor diff).
 
 No longer mounted, kept for a clean re-vendor: `src/App.jsx`, `src/Backpack.jsx`, `src/Character.jsx`,

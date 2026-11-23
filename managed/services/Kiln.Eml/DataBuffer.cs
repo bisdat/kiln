@@ -10,7 +10,9 @@ namespace Kiln;
 /// <summary>Byte order of a <see cref="DataBuffer"/>. Game data is little-endian.</summary>
 public enum ByteOrder
 {
+    /// <summary>Least significant byte first (the game's data and the default).</summary>
     Little,
+    /// <summary>Most significant byte first.</summary>
     Big,
 }
 
@@ -26,6 +28,8 @@ public sealed class DataBuffer
     private byte[] _data;
     private int _tail;
 
+    /// <summary>Creates an empty buffer with room for <paramref name="initialCapacity"/> bytes; it grows as needed.</summary>
+    /// <param name="initialCapacity">The starting size of the buffer in bytes (a negative value counts as 0).</param>
     public DataBuffer(int initialCapacity = 64) => _data = new byte[Math.Max(0, initialCapacity)];
 
     private DataBuffer(byte[] data, int tail)
@@ -65,8 +69,10 @@ public sealed class DataBuffer
     /// <summary>Bytes between head and tail.</summary>
     public int Remaining => Tail - Head;
 
+    /// <summary>How many bytes the buffer holds room for before it has to grow.</summary>
     public int Capacity => _data.Length;
 
+    /// <summary>The byte order of the multi-byte reads and writes (default <see cref="ByteOrder.Little"/>). It applies to every read and write after it is set.</summary>
     public ByteOrder Order { get; set; } = ByteOrder.Little;
 
     /// <summary>Head and tail back to 0 (the bytes stay allocated).</summary>
@@ -118,38 +124,92 @@ public sealed class DataBuffer
         return s;
     }
 
+    /// <summary>Appends <paramref name="bytes"/> at the tail.</summary>
+    /// <param name="bytes">The bytes to append.</param>
     public void WriteBytes(ReadOnlySpan<byte> bytes) => bytes.CopyTo(Put(bytes.Length));
+    /// <summary>Reads <paramref name="length"/> bytes from the head and moves the head past them.</summary>
+    /// <param name="length">How many bytes to read.</param>
+    /// <returns>A new array with the bytes.</returns>
+    /// <exception cref="InvalidOperationException">Fewer than <paramref name="length"/> bytes remain.</exception>
     public byte[] ReadBytes(int length) => Take(length).ToArray();
 
     private bool Little => Order == ByteOrder.Little;
 
+    /// <summary>Reads one byte as a boolean (any non-zero value is true).</summary>
+    /// <exception cref="InvalidOperationException">No byte remains.</exception>
     public bool ReadBool() => Take(1)[0] != 0;
+    /// <summary>Reads a signed 8-bit integer.</summary>
+    /// <exception cref="InvalidOperationException">No byte remains.</exception>
     public sbyte ReadI8() => (sbyte)Take(1)[0];
+    /// <summary>Reads an unsigned 8-bit integer.</summary>
+    /// <exception cref="InvalidOperationException">No byte remains.</exception>
     public byte ReadU8() => Take(1)[0];
+    /// <summary>Reads a signed 16-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 2 bytes remain.</exception>
     public short ReadI16() => Little ? BinaryPrimitives.ReadInt16LittleEndian(Take(2)) : BinaryPrimitives.ReadInt16BigEndian(Take(2));
+    /// <summary>Reads an unsigned 16-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 2 bytes remain.</exception>
     public ushort ReadU16() => Little ? BinaryPrimitives.ReadUInt16LittleEndian(Take(2)) : BinaryPrimitives.ReadUInt16BigEndian(Take(2));
+    /// <summary>Reads a signed 32-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 4 bytes remain.</exception>
     public int ReadI32() => Little ? BinaryPrimitives.ReadInt32LittleEndian(Take(4)) : BinaryPrimitives.ReadInt32BigEndian(Take(4));
+    /// <summary>Reads an unsigned 32-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 4 bytes remain.</exception>
     public uint ReadU32() => Little ? BinaryPrimitives.ReadUInt32LittleEndian(Take(4)) : BinaryPrimitives.ReadUInt32BigEndian(Take(4));
+    /// <summary>Reads a signed 64-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 8 bytes remain.</exception>
     public long ReadI64() => Little ? BinaryPrimitives.ReadInt64LittleEndian(Take(8)) : BinaryPrimitives.ReadInt64BigEndian(Take(8));
+    /// <summary>Reads an unsigned 64-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 8 bytes remain.</exception>
     public ulong ReadU64() => Little ? BinaryPrimitives.ReadUInt64LittleEndian(Take(8)) : BinaryPrimitives.ReadUInt64BigEndian(Take(8));
+    /// <summary>Reads a 16-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 2 bytes remain.</exception>
     public Half ReadF16() => Little ? BinaryPrimitives.ReadHalfLittleEndian(Take(2)) : BinaryPrimitives.ReadHalfBigEndian(Take(2));
+    /// <summary>Reads a 32-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 4 bytes remain.</exception>
     public float ReadF32() => Little ? BinaryPrimitives.ReadSingleLittleEndian(Take(4)) : BinaryPrimitives.ReadSingleBigEndian(Take(4));
+    /// <summary>Reads a 64-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <exception cref="InvalidOperationException">Fewer than 8 bytes remain.</exception>
     public double ReadF64() => Little ? BinaryPrimitives.ReadDoubleLittleEndian(Take(8)) : BinaryPrimitives.ReadDoubleBigEndian(Take(8));
 
     /// <summary><paramref name="length"/> bytes as UTF-8 text.</summary>
     public string ReadString(int length) => Encoding.UTF8.GetString(Take(length));
 
+    /// <summary>Appends a boolean as one byte: 1 for true, 0 for false.</summary>
+    /// <param name="v">The value.</param>
     public void WriteBool(bool v) => Put(1)[0] = v ? (byte)1 : (byte)0;
+    /// <summary>Appends a signed 8-bit integer.</summary>
+    /// <param name="v">The value.</param>
     public void WriteI8(sbyte v) => Put(1)[0] = (byte)v;
+    /// <summary>Appends an unsigned 8-bit integer.</summary>
+    /// <param name="v">The value.</param>
     public void WriteU8(byte v) => Put(1)[0] = v;
+    /// <summary>Appends a signed 16-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteI16(short v) { if (Little) BinaryPrimitives.WriteInt16LittleEndian(Put(2), v); else BinaryPrimitives.WriteInt16BigEndian(Put(2), v); }
+    /// <summary>Appends an unsigned 16-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteU16(ushort v) { if (Little) BinaryPrimitives.WriteUInt16LittleEndian(Put(2), v); else BinaryPrimitives.WriteUInt16BigEndian(Put(2), v); }
+    /// <summary>Appends a signed 32-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteI32(int v) { if (Little) BinaryPrimitives.WriteInt32LittleEndian(Put(4), v); else BinaryPrimitives.WriteInt32BigEndian(Put(4), v); }
+    /// <summary>Appends an unsigned 32-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteU32(uint v) { if (Little) BinaryPrimitives.WriteUInt32LittleEndian(Put(4), v); else BinaryPrimitives.WriteUInt32BigEndian(Put(4), v); }
+    /// <summary>Appends a signed 64-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteI64(long v) { if (Little) BinaryPrimitives.WriteInt64LittleEndian(Put(8), v); else BinaryPrimitives.WriteInt64BigEndian(Put(8), v); }
+    /// <summary>Appends an unsigned 64-bit integer in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteU64(ulong v) { if (Little) BinaryPrimitives.WriteUInt64LittleEndian(Put(8), v); else BinaryPrimitives.WriteUInt64BigEndian(Put(8), v); }
+    /// <summary>Appends a 16-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteF16(Half v) { if (Little) BinaryPrimitives.WriteHalfLittleEndian(Put(2), v); else BinaryPrimitives.WriteHalfBigEndian(Put(2), v); }
+    /// <summary>Appends a 32-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteF32(float v) { if (Little) BinaryPrimitives.WriteSingleLittleEndian(Put(4), v); else BinaryPrimitives.WriteSingleBigEndian(Put(4), v); }
+    /// <summary>Appends a 64-bit float in the buffer's <see cref="Order"/>.</summary>
+    /// <param name="v">The value.</param>
     public void WriteF64(double v) { if (Little) BinaryPrimitives.WriteDoubleLittleEndian(Put(8), v); else BinaryPrimitives.WriteDoubleBigEndian(Put(8), v); }
 
     /// <summary>The UTF-8 bytes of <paramref name="text"/> (no length prefix, no terminator).</summary>

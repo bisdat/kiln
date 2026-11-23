@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: MIT
+namespace Kiln.TestKit;
+
+public sealed partial class KilnHarness
+{
+    private HarnessCrafting? _crafting;
+    /// <summary>The linked crafting-source recording fake. Since 0.2.0-dev.30.6.</summary>
+    public HarnessCrafting Crafting => _crafting ??= new HarnessCrafting(this);
+}
+
+/// <summary>A mod's live source registration in the kit. Since 0.2.0-dev.30.6.</summary>
+/// <param name="Owner">The registering native owner.</param>
+/// <param name="Player">The only player it supplies.</param>
+/// <param name="Container">The storage container.</param>
+/// <param name="Order">Its position relative to station outputs.</param>
+/// <param name="Filter">The item-set interpretation.</param>
+/// <param name="Items">A copy of the filter items.</param>
+public sealed record FakeCraftSourceRegistration(ulong Owner, EntityId Player, EntityId Container, CraftSourceOrder Order,
+    CraftSourceFilter Filter, IReadOnlyList<ItemId> Items);
+
+/// <summary>Player-source registrations and their filtered counts in the kit. No base, game payment hook, station
+/// outputs or client screens are simulated. Since 0.2.0-dev.30.6.</summary>
+public sealed class HarnessCrafting
+{
+    private readonly KilnHarness _harness;
+    internal HarnessCrafting(KilnHarness harness) => _harness = harness;
+    /// <summary>Live registrations, in registration order. Disposing a handle or unloading its mod removes it.</summary>
+    public IReadOnlyList<FakeCraftSourceRegistration> Sources => _harness.Run(() =>
+    {
+        var s = KitFakes.State<CraftingState>(_harness);
+        lock (s.Gate) return (IReadOnlyList<FakeCraftSourceRegistration>)[..s.Sources.Select(x=>new FakeCraftSourceRegistration(x.Owner,
+            new EntityId(x.Player),new EntityId(x.Container),(CraftSourceOrder)x.Order,x.Deny?CraftSourceFilter.Deny:CraftSourceFilter.Allow,
+            Array.AsReadOnly(x.Items.Select(i=>new ItemId(i)).ToArray())))];
+    });
+    /// <summary>Registered source counts only (not the bag), with the same per-player allow/deny union and current
+    /// inventory permission check as source_stock. No base restriction is applied.</summary>
+    public IReadOnlyDictionary<ItemId, long> Stock(EntityId player) => _harness.Run(() =>
+        (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value)
+            .ToDictionary(x => new ItemId(x.Key), x => x.Value));
+
+    /// <summary>The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session
+    /// generation and inventory permission. No tint screen or game transaction is simulated. Since 0.2.0-dev.30.6.</summary>
+    public IReadOnlyDictionary<ItemId, long> Dyes(EntityId player) => _harness.Run(() =>
+        (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value)
+            .Where(x => Items.Get(new ItemId(x.Key))?.Category == ItemCategory.ColorPalette)
+            .ToDictionary(x => new ItemId(x.Key), x => x.Value));
+}

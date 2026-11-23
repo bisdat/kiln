@@ -26,6 +26,11 @@ public sealed class AnyThreadAttribute : Attribute;
 [AttributeUsage(AttributeTargets.All)]
 public sealed class BootThreadOnlyAttribute : Attribute;
 
+/// <summary>Use only on the owning registry callback's thread. GameStart is the data-stage thread; later points use
+/// the active world's thread. Retained contexts fail with RegistryContextException after the callback or unload.</summary>
+[AttributeUsage(AttributeTargets.All)]
+public sealed class RegistryThreadOnlyAttribute : Attribute;
+
 /// <summary>Call this on the game's render thread only (client).</summary>
 [AttributeUsage(AttributeTargets.All)]
 public sealed class RenderThreadAttribute : Attribute;

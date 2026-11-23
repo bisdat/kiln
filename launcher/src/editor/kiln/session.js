@@ -232,6 +232,20 @@ export async function saveModel() {
   }
 }
 
+/** Offline storage return shares Save's busy/close/update guards and starts a fresh edit history. */
+export async function returnStorageModel() {
+  const s = useSession.getState();
+  if (!s.model || s.dirty || s.running || mutationsBlocked(s) || readOnly(s.model)) throw new Error(t('playerStorage.saveFirst'));
+  set({ saving: true });
+  try {
+    const result = await api.returnStorage(s.model.path);
+    const m = result.model;
+    set({ model: m, orig: m, history: saveHistory(s.history, m), dirty: false, readAt: m.modified ?? 0, status: null });
+    refreshSaves();
+    return result;
+  } finally { set({ saving: false }); }
+}
+
 /** Restores a backup over the open save and reads it again (the save before it is kept as a backup). */
 export async function restoreBackup(b) {
   const s = useSession.getState();

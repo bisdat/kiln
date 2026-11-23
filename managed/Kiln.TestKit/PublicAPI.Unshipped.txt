@@ -132,6 +132,10 @@ Kiln.TestKit.HarnessRoutines.Queued.get -> int
 Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
 Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
 Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
+[KILNX031]Kiln.TestKit.HarnessRegistry
+[KILNX031]Kiln.TestKit.HarnessRegistry.Author(Kiln.TestKit.ModHandle! mod, Kiln.RegistryEntryPoint point = Kiln.RegistryEntryPoint.GameStart, Kiln.RegistryPhase phase = Kiln.RegistryPhase.Alter, Kiln.RegistryWorld? world = null) -> string?
+[KILNX031]Kiln.TestKit.HarnessRegistry.Seed(string! registry, string! id, string! field, string! valueJson) -> void
+[KILNX031]Kiln.TestKit.KilnHarness.Registry.get -> Kiln.TestKit.HarnessRegistry!
 Kiln.TestKit.FakeVitals
 Kiln.TestKit.FakeVitals.FakeVitals() -> void
 Kiln.TestKit.FakeVitals.FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0) -> void
@@ -260,3 +264,12 @@ static Kiln.TestKit.FakeCameraCall.operator ==(Kiln.TestKit.FakeCameraCall left,
 ~override Kiln.TestKit.FakeCameraCall.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeCameraCall.ToString() -> string
 Kiln.TestKit.HarnessCamera.KilnClient(Kiln.EntityId player, ulong parts = 30) -> void
+Kiln.TestKit.HarnessUiNativeTints
+Kiln.TestKit.HarnessUiNativeTints.HarnessUiNativeTints(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiNativeTints.TintOf(Kiln.TestKit.FakeInventorySlot slot, Kiln.Color background) -> Kiln.Color
+Kiln.TestKit.KilnHarness.UiNativeTints.get -> Kiln.TestKit.HarnessUiNativeTints!
+Kiln.TestKit.HarnessUiChest
+Kiln.TestKit.HarnessUiChest.HarnessUiChest(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiChest.Buttons.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessUiChest.Press(int index) -> bool
+Kiln.TestKit.KilnHarness.UiChest.get -> Kiln.TestKit.HarnessUiChest!

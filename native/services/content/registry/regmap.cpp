@@ -183,8 +183,23 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
         if (s == "ok") out->rows[k] = BuildRow::Ok;
         else if (s == "changed") out->rows[k] = BuildRow::Changed;
         else if (s == "unmapped") out->rows[k] = BuildRow::Unmapped;
-        else errs->push_back("record: rows." + k + " is ok, changed or unmapped");
+        else if (s == "unproven") out->rows[k] = BuildRow::Unproven;
+        else errs->push_back("record: rows." + k + " is ok, changed, unproven or unmapped");
     }
+    const json reasons = doc.value("reasons", json::object());
+    if (!reasons.is_object()) errs->push_back("record: reasons is an object of \"<registry>.<field>\": text");
+    else
+        for (const auto& [k, v] : reasons.items()) {
+            if (v.is_string()) {
+                std::string reason = v.get<std::string>();
+                if (reason.size() > 400) {
+                    size_t end = 400;
+                    while (end && (static_cast<unsigned char>(reason[end]) & 0xc0) == 0x80) --end;
+                    reason.resize(end); // never split a UTF-8 code point in the refusal/state JSON
+                }
+                out->reasons[k] = std::move(reason);
+            } else errs->push_back("record: reasons." + k + " is text");
+        }
     const json a = doc.value("aliases", json::object());
     for (const char* list : {"renames", "suffixes"}) {
         const json items = a.value(list, json::array());
@@ -282,6 +297,12 @@ Mapping RegMap::mapping(const std::string& registry, const std::string& field, s
         return Mapping::Unproven;
     }
     const auto b = build.rows.find(q);
+    if (b != build.rows.end() && b->second == BuildRow::Unproven) {
+        const auto r = build.reasons.find(q);
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (" +
+                  (r != build.reasons.end() && !r->second.empty() ? r->second : std::string("no lab evidence on this build")) + ")" + kNotApplied;
+        return Mapping::Unproven;
+    }
     if (b == build.rows.end() || b->second != BuildRow::Ok) {
         *reason = "Unmapped: " + q + " is not mapped for " + build_name + " yet (a Kiln update is needed)" + kNotApplied;
         return Mapping::Unmapped;

@@ -1,0 +1,14 @@
+{
+  "expectedSidecar": "{\"format\":1,\"character\":\"12812812-8128-4128-8128-128128128128\",\"revision\":17,\"updatedUnixMs\":1763860000000,\"world\":\"world-1\",\"mods\":{\"other-mod\":{\"ticks\":638712345678901234567,\"steam\":76561198000000001,\"ratio\":1.0,\"e\":1E2},\"kiln-items\":{\"storage\":{\"v\":1,\"character\":\"12812812-8128-4128-8128-128128128128\",\"revision\":42,\"current\":{\"witness\":\"xxh3:270ac4274d1058a9\",\"worldRev\":3011,\"storages\":{\"quiver-mod:quiver\":{\"slots\":18,\"records\":[{\"s\":0,\"b64\":\"AEDiAQBAAAA=\",\"item\":123456,\"n\":64},{\"s\":1,\"b64\":\"AQEAAH8DAAA=\",\"item\":2130706433,\"n\":3},{\"s\":2,\"b64\":\"AkHiAQABAAsHKAAAAFoAAAAKCwwN\",\"item\":123457,\"n\":1,\"level\":7,\"durability\":40,\"maxDurability\":90,\"appearance\":\"0a0b0c0d\"}],\"refs\":{\"arrow\":0}}},\"parked\":{},\"source\":\"server\"},\"history\":[{\"witness\":\"xxh3:00000000000000a1\",\"worldRev\":3000,\"storages\":{\"quiver-mod:quiver\":{\"slots\":18,\"records\":[{\"s\":0,\"b64\":\"AEDiAQAUAAA=\",\"item\":123456,\"n\":20}],\"refs\":{}}},\"parked\":{},\"revision\":40,\"source\":\"server\"}],\"quarantine\":[{\"storage\":\"gone:bag\",\"record\":\"AAEAAAABAAA=\",\"raw\":\"{}\",\"reason\":\"unknown item\"}],\"returns\":[{\"revision\":12,\"fromWitness\":\"xxh3:00000000000000b1\",\"toWitness\":\"xxh3:00000000000000b2\"}]},\"note\":1.0}}}",
+  "storage": "{\"v\":1,\"character\":\"12812812-8128-4128-8128-128128128128\",\"revision\":43,\"current\":{\"witness\":\"xxh3:541e386513260e65\",\"worldRev\":3011,\"storages\":{\"quiver-mod:quiver\":{\"slots\":18,\"records\":[{\"s\":1,\"b64\":\"AQEAAH8DAAA=\",\"item\":2130706433,\"n\":3}],\"refs\":{}}},\"parked\":{},\"source\":\"server\"},\"history\":[{\"witness\":\"xxh3:270ac4274d1058a9\",\"worldRev\":3011,\"storages\":{\"quiver-mod:quiver\":{\"slots\":18,\"records\":[{\"s\":0,\"b64\":\"AEDiAQBAAAA=\",\"item\":123456,\"n\":64},{\"s\":1,\"b64\":\"AQEAAH8DAAA=\",\"item\":2130706433,\"n\":3},{\"s\":2,\"b64\":\"AkHiAQABAAsHKAAAAFoAAAAKCwwN\",\"item\":123457,\"n\":1,\"level\":7,\"durability\":40,\"maxDurability\":90,\"appearance\":\"0a0b0c0d\"}],\"refs\":{\"arrow\":0}}},\"parked\":{},\"source\":\"server\",\"revision\":42},{\"witness\":\"xxh3:00000000000000a1\",\"worldRev\":3000,\"storages\":{\"quiver-mod:quiver\":{\"slots\":18,\"records\":[{\"s\":0,\"b64\":\"AEDiAQAUAAA=\",\"item\":123456,\"n\":20}],\"refs\":{}}},\"parked\":{},\"revision\":40,\"source\":\"server\"}],\"quarantine\":[{\"storage\":\"gone:bag\",\"record\":\"AAEAAAABAAA=\",\"raw\":\"{}\",\"reason\":\"unknown item\"}],\"returns\":[{\"revision\":43,\"fromWitness\":\"xxh3:270ac4274d1058a9\",\"toWitness\":\"xxh3:541e386513260e65\"},{\"revision\":12,\"fromWitness\":\"xxh3:00000000000000b1\",\"toWitness\":\"xxh3:00000000000000b2\"}]}",
+  "oldWitness": "xxh3:270ac4274d1058a9",
+  "newWitness": "xxh3:541e386513260e65",
+  "returned": 2,
+  "returnedItems": [
+    123456,
+    123457
+  ],
+  "keptItems": [
+    2130706433
+  ]
+}

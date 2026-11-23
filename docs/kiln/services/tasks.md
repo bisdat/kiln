@@ -7,6 +7,11 @@ through members documented as callable from any thread; anything phase-bound is 
 `post_world`. The public ABI is `native/core/abi/services/kiln_tasks.h`, version 1, 56 bytes on
 Windows x64 (48 before `submit_in` was appended: check `header.size`).
 
+The managed task-thread world reads and compare-exchange writes (`WorldConcurrent`, Kiln.World), and TestKit's
+`FakeWorld.BusyReads` / `BusyWrites`, are normal public API. Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental).
+They first shipped in 0.2.0-dev.29.18 with the `KILNX003` opt-in; that opt-in is no longer needed.
+Threading, bounds, capability checks and refusal behavior are unchanged. See the [managed task guide](../modding/tasks.md).
+
 ## Capability
 
 `tasks.pool`: available on a booted runtime on both sides, the dedicated server and the client. Unavailable in safe

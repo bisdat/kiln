@@ -403,6 +403,16 @@ pub async fn app_started() -> Result<(), Error> {
     Ok(())
 }
 
+/// Visibility and two visible animation frames, distinct from navigation/hidden-page readiness. A first automatic
+/// recovery attempt returns its explanation once, only when it has become visible.
+#[tauri::command]
+pub async fn app_render_frame(window: tauri::WebviewWindow, painted: bool, visible: bool) -> Result<Option<String>, Error> {
+    // WebKit's document visibility alone need not track a hidden/minimized native window.
+    let visible = visible && window.label() == "main" && window.is_visible().unwrap_or(false)
+        && !window.is_minimized().unwrap_or(true);
+    Ok(crate::render::frame_painted(painted, visible))
+}
+
 /// What the page measured about its drawing (launcher/src/shell/renderReport.ts): whether WebKit composites, WebGL, the
 /// window, a frame sample on Play. One line in launcher.log each, at most two a start (crate::render::page_report).
 #[tauri::command]
@@ -423,6 +433,13 @@ pub async fn app_render_set(software: bool) -> Result<crate::render::RenderInfo,
 #[tauri::command]
 pub async fn app_render_x11_set(on: bool) -> Result<crate::render::RenderInfo, Error> {
     crate::state::blocking(move || crate::render::set_x11_auto(on)).await
+}
+
+/// Settings, "Force GPU drawing on NVIDIA": on sets WEBKIT_FORCE_DMABUF_RENDERER=1 from the next start (past Ubuntu
+/// WebKit's NVIDIA block), off leaves the block alone. Linux only (else `unsupported`).
+#[tauri::command]
+pub async fn app_render_force_set(on: bool) -> Result<crate::render::RenderInfo, Error> {
+    crate::state::blocking(move || crate::render::set_force(on)).await
 }
 
 /// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else

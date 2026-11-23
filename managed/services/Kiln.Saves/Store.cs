@@ -100,11 +100,13 @@ internal sealed unsafe class WorldStore
     /// <summary>Data that stays with one item (InstanceData): bundles "instances/&lt;mod&gt;" and
     /// "character-instances/&lt;character&gt;/&lt;mod&gt;" of the same generation.</summary>
     internal readonly InstanceStore Instances;
+    internal readonly PlayerStorageStore Storage;
 
     public WorldStore()
     {
         Entities = new EntityTable();
         Instances = new InstanceStore(this);
+        Storage = new PlayerStorageStore(this);
     }
 
     public string? WorldId { get; private set; }
@@ -237,6 +239,7 @@ internal sealed unsafe class WorldStore
         _bundles.Clear();
         Entities.Clear();
         Instances.Clear();
+        Storage.Clear();
         ServiceEntityData.RaiseWorldChanged();  // services drop what they keep per entity id (Kiln.World's waiting scales)
     }
 
@@ -319,6 +322,27 @@ internal sealed unsafe class WorldStore
         Match = DataMatch.None;
         Instances.OnLoaded(0, DataMatch.None, found.Newer);
         SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({found.Count} manifests, none usable)");
+    }
+
+    internal IReadOnlyList<string> PendingStorageValues(string scope)
+    {
+        if (Root is null || LoadDeferred) return [];
+        var root = Root;
+        // A join during a save's write waits for the next service step instead of reading half-written manifests.
+        if (!Writer.Idle) throw new StorageRestoreDeferredException("the writer is busy; player storage restore deferred");
+        if (!Writer.TryExclusive("reading pending player storage", TimeSpan.Zero, () =>
+        {
+            var values = new List<string>();
+            foreach (var manifest in ListManifests(Path.Combine(root, "manifests")).Where(m => m.Pending))
+                if (TryLoadManifest(manifest.Path, out var bundles, out _))
+                    foreach (var (name, data) in bundles)
+                        if (name == scope && data["keys"]?[PlayerStorageStore.Key] is { } document) values.Add(document.ToJsonString());
+            return values;
+        }, out var result))
+        {
+            throw new StorageRestoreDeferredException("player storage pending candidates are not available yet; restore deferred");
+        }
+        return result;
     }
 
     private bool TryLoadManifest(string path, out List<(string scope, JsonObject doc)> bundles, out string error)
@@ -525,6 +549,7 @@ internal sealed unsafe class WorldStore
             return;
         }
         var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        Storage.Stage(gen);
         var bundles = new List<(string Scope, byte[] Data)>();
         foreach (var b in _bundles.Values)
         {
@@ -543,6 +568,7 @@ internal sealed unsafe class WorldStore
         job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         _stagedGens.Add(gen);
         Generation = gen;
+        Storage.Track(job);
         Writer.Stage(job);
     }
 
@@ -627,6 +653,7 @@ internal sealed unsafe class WorldStore
         if (unix != 0) _loadedUnix = unix;
         job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         Writer.Commit(job);
+        Storage.Committed(rev);
         if (reason == SaveReason.Shutdown)
         {
             Writer.Drain("the shutdown save");

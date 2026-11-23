@@ -43,6 +43,7 @@ public sealed class BlockCompileContext
     public string ModId { get; }
     /// <summary>The block's name in the consumer mod.</summary>
     public string Name { get; }
+    /// <summary>The block's kind: <c>provider-mod:kind</c>.</summary>
     public string KindId { get; }
 
     internal void Close() => _closed = true;

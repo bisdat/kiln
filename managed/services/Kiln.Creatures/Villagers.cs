@@ -11,8 +11,43 @@ namespace Kiln;
 /// <summary>keen::active_npc::State.</summary>
 public enum VillagerState : byte
 {
-    Invalid = 0, Start, FindBed, Idle, DecideTask, FindTarget, GoToTarget, Roam, Sleep, Sitting, Interacting, NpcSocializing,
-    Eating, WaitingCloseToPlayer, AvoidBuildingCursor, AvoidWater, InsideWater, FinishTask,
+    /// <summary>No state: the entity is not a villager, or it is gone.</summary>
+    Invalid = 0,
+    /// <summary>The state machine's first state. NPCs stay here without a player near, and the game ignores a
+    /// <see cref="Villager.GoTo(WorldPosition)"/> while they do.</summary>
+    Start,
+    /// <summary>Looking for a bed.</summary>
+    FindBed,
+    /// <summary>Idle.</summary>
+    Idle,
+    /// <summary>Deciding what to do next.</summary>
+    DecideTask,
+    /// <summary>Looking for a target to go to.</summary>
+    FindTarget,
+    /// <summary>Walking to its target.</summary>
+    GoToTarget,
+    /// <summary>Roaming around its home.</summary>
+    Roam,
+    /// <summary>Sleeping.</summary>
+    Sleep,
+    /// <summary>Sitting.</summary>
+    Sitting,
+    /// <summary>Interacting with something.</summary>
+    Interacting,
+    /// <summary>Socializing with another NPC.</summary>
+    NpcSocializing,
+    /// <summary>Eating.</summary>
+    Eating,
+    /// <summary>Waiting close to a player.</summary>
+    WaitingCloseToPlayer,
+    /// <summary>Stepping out of the way of a player's building cursor.</summary>
+    AvoidBuildingCursor,
+    /// <summary>Moving away from water.</summary>
+    AvoidWater,
+    /// <summary>In water.</summary>
+    InsideWater,
+    /// <summary>Finishing the task it was on.</summary>
+    FinishTask,
 }
 
 /// <summary>A villager's state machine changed (<see cref="Villager.State"/>, the game's <c>DynamicActiveNpcState</c>). Polled about four times a second for villagers
@@ -28,10 +63,15 @@ public sealed class VillagerStateEvent : KilnEvent
         To = to;
     }
 
+    /// <summary>The villager's entity.</summary>
     public EntityId Entity { get; }
+    /// <summary>The villager's roster id: FNV-1a-32 of its template GUID (<see cref="Villager.NpcId"/>).</summary>
     public uint NpcId { get; }
+    /// <summary>The state it left.</summary>
     public VillagerState From { get; }
+    /// <summary>The state it entered.</summary>
     public VillagerState To { get; }
+    /// <summary>The villager, its roster id and the change, for a log line.</summary>
     public override string ToString() => $"villager {Entity} (0x{NpcId:x8}): {From} -> {To}";
 }
 
@@ -44,12 +84,15 @@ public sealed class Villager
         NpcId = npcId;
     }
 
+    /// <summary>The villager's entity.</summary>
     public EntityId Entity { get; }
     /// <summary>FNV-1a-32 of its template GUID, the id of the game's roster.</summary>
     public uint NpcId { get; }
     /// <summary>Its state machine now (Invalid when it is gone). Tick thread.</summary>
     public VillagerState State => World.TryRead<byte>(Entity, "DynamicActiveNpcState", out var s) ? (VillagerState)s : VillagerState.Invalid;
+    /// <summary>Where it stands, null when it is gone.</summary>
     public WorldPosition? Position => World.Position(Entity);
+    /// <summary>A <see cref="Follow"/> is running for it.</summary>
     public bool IsFollowing => Villagers.IsFollowing(Entity);
 
     /// <summary>Walks to <paramref name="target"/> (the game's GoToPosition). It finds its way with the path grid, which
@@ -83,7 +126,10 @@ public sealed class Villager
     /// the target's or the villager's despawn or the calling mod's unload.</summary>
     public void Follow(EntityId target, double distance = 4, double catchUp = 40) => Villagers.StartFollow(this, target, distance, catchUp);
 
+    /// <summary>Ends a <see cref="Follow"/>. The villager stays where it is.</summary>
     public void StopFollowing() => Villagers.StopFollow(Entity);
+
+    /// <summary>The villager, its roster id and its state now, for a log line.</summary>
     public override string ToString() => $"villager {Entity} (0x{NpcId:x8}) {State}";
 }
 

@@ -36,7 +36,9 @@ public sealed unsafe class UiWheel : IDisposable
     /// <summary>The result of a wheel that was cancelled or closed.</summary>
     public const int Cancelled = -1;
 
+    /// <summary>The most entries a wheel takes.</summary>
     public const int MaxEntries = 64;
+    /// <summary>How many entries a page of the wheel shows.</summary>
     public const int PageEntries = 8;
 
     /// <summary>Generic virtual-key codes for <see cref="UiWheelOptions.HoldKey"/>.</summary>
@@ -63,7 +65,9 @@ public sealed unsafe class UiWheel : IDisposable
     /// <summary>The entries, as given.</summary>
     public IReadOnlyList<string> Entries { get; }
 
+    /// <summary>The title shown in the middle of the wheel; null for none (<see cref="UiWheelOptions.Title"/>).</summary>
     public string? Title { get; }
+    /// <summary>The key held while the wheel is open; 0 for none (<see cref="UiWheelOptions.HoldKey"/>).</summary>
     public uint HoldKey { get; }
     internal ModContext? Owner { get; }
 
@@ -188,6 +192,7 @@ public sealed unsafe class UiWheel : IDisposable
         _result.TrySetResult(Cancelled);
     }
 
+    /// <summary>Closes the wheel (the same as <see cref="Close"/>).</summary>
     public void Dispose() => Close();
 
     /// <summary>Forgets the wheel that is open (tests swap the native table under it).</summary>
@@ -250,7 +255,10 @@ public static partial class Ui
 /// <summary>A mouse button for <see cref="UiDraw.ItemClicked"/>.</summary>
 public enum UiMouseButton
 {
+    /// <summary>The left button.</summary>
     Left = 0,
+    /// <summary>The right button.</summary>
     Right = 1,
+    /// <summary>The middle button (the wheel pressed).</summary>
     Middle = 2,
 }

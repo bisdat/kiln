@@ -38,8 +38,11 @@ public sealed record BlockIdentity
 
     internal bool ById => _byId;
 
+    /// <summary>Two identities are equal when their GUIDs are.</summary>
     public bool Equals(BlockIdentity? other) => other is not null && other.Guid == Guid;
+    /// <summary>A hash of the GUID.</summary>
     public override int GetHashCode() => Guid.GetHashCode();
+    /// <summary>A readable form: <c>legacy &lt;guid&gt; (0x&lt;id&gt;)</c>, or <c>legacy id 0x&lt;id&gt;</c> when only the id is known.</summary>
     public override string ToString() => _byId ? $"legacy id 0x{Id:x8}" : $"legacy {Guid:D} (0x{Id:x8})";
 }
 

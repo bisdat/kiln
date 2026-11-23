@@ -57,6 +57,11 @@ struct Env {
     std::function<bool(const std::string& text)> write_report;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
+    // Closes the interval between the core marking an owner dead and delivering its retiring notification.
+    std::function<bool(uint64_t owner)> owner_alive;
+    std::function<void(uint64_t owner)> owner_gone; // queued live-layer cleanup, outside the runner lock
+    bool prepare_live = false; // support a cached full stable base, deferred until the first registry user
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;
@@ -85,6 +90,16 @@ struct BootOutcome {
     std::string why;   // not written: why (each of its registry rows is refused with it)
 };
 
+// Owned stable data returned by a deferred first-use preparation, with the initial writer composition.
+struct LiveData {
+    BaseModel base;
+    std::vector<OldWrite> old;
+    Result result;
+    std::map<std::string, std::string> ids;
+    std::map<std::string, uint32_t> nums;
+    std::set<std::string> decoded;
+};
+
 // What the live back-end takes (lane D: store layers at world load, registry_live.cpp).
 struct LiveHandoff {
     const Schema* schema = nullptr;
@@ -102,6 +117,10 @@ struct LiveHandoff {
     const std::vector<Refusal>* pre_refused = nullptr;
     const std::map<FieldRef, FieldOutcome>* boot_fields = nullptr;
     std::function<void(Batch*, std::vector<Refusal>*)> check;
+    // A transaction snapshot advances the report generation without pretending that another world loaded.
+    std::function<void(const Result&, bool world)> changed;
+    // Empty when the full copied base was prepared during the stage. Serialized and cached otherwise.
+    std::function<bool(LiveData*, std::string*)> prepare;
 };
 
 class Runner {
@@ -117,7 +136,8 @@ class Runner {
     // that turn are dropped, the subscription removed, reported).
     using StageFn = std::function<bool(Stage, const View&)>;
     KilnResult subscribe_stage(uint64_t owner, const std::string& mod, StageFn fn, uint64_t* handle);
-    KilnResult subscribe_ready(uint64_t owner, std::function<void(Phase, uint64_t)> fn, uint64_t* handle);
+    using ReadyFn = std::function<bool(Phase, uint64_t)>;  // false: guarded native callback faulted; remove it
+    KilnResult subscribe_ready(uint64_t owner, ReadyFn fn, uint64_t* handle);
     KilnResult unsubscribe(uint64_t handle);
     // One IR document. Before the stage: queued for its mod; inside that mod's stage callback (stage thread, the running
     // stage): taken into its batch. report: {"accepted", "refused": [{"n", "reason"}]}.
@@ -129,6 +149,8 @@ class Runner {
     // Reads the base, composes, and returns the boot back-end's resources. The caller writes them (with the old documents)
     // and then calls finish() with what each field became. old(): the old paths' writes below the registry (boot patches).
     std::vector<BootResource> run(const OldWritesFn& old);
+    // For deferred preparation, old owns its captures; freeze these resources before legacy boot writers change them.
+    std::vector<BootResource> run(const OldWritesFn& old, const std::vector<std::pair<KilnAssetKey, std::string>>& freeze);
     void finish(const std::vector<BootOutcome>& boot);
     void set_live(std::function<void(const LiveHandoff&)> install) { live_ = std::move(install); }
 
@@ -155,6 +177,8 @@ class Runner {
     bool on_stage_thread() const;
 
    private:
+    bool prepare_live(LiveData* out, std::string* why);
+    void notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation);
     struct Impl;
     std::unique_ptr<Impl> d_;
     std::atomic<Phase> phase_{Phase::None};

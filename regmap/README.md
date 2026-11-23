@@ -75,9 +75,10 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
 Row states: `ok` (proven on this build), `changed` (the build changed what the row maps, or a lab step disproved it: a
 Kiln update is needed), `unproven` (nothing is wrong that kilnctl can see, but the lab gave no evidence for it yet, for
 example no round-trip sample in its generation; the reason says what is missing), `unmapped` (no mapping on this build).
-Only `ok` is applied. `unproven` and `reasons` are written by `kilnctl regproof` since dev.31; kiln.content's reader
-(regmap.cpp) learns them in registry P2 (it reads ok, changed and unmapped before that, and refuses a whole record with
-any other state, so every field of that build stays off). A record with unproven rows ships only with that reader.
+Only `ok` is applied. An edit of an `unproven` row is refused "Unproven: <field> is not proven for game build <b>
+(<reason>); this edit was not applied" (the reason from `reasons`, else "no lab evidence on this build"); a `changed` or
+`unmapped` one "Unmapped: ... (a Kiln update is needed)". kiln.content reads `unproven` and `reasons` since dev.31; an
+older reader refuses a whole record with any other state than ok, changed or unmapped (every field of that build stays off).
 
 A field is applied only on a build whose record is `verified` and lists its row `ok`; everything else is refused per
 entry with the reason, which names the field and the game build and ends "; this edit was not applied" (BRIEF 6.2:
@@ -120,6 +121,26 @@ A row is `ok` when every step proved it, `unproven` when only lab evidence is mi
 its files into `<game>/kiln/data/content/registry/proof/`; kilnctl finds them (and kiln.content's id tables) by content.
 Both formats are format 1; kilnctl refuses another kind or format.
 
+**The producer** (lab only). Registry evidence is diagnostic, not a sigdb self-test: no samples, missing state/ids,
+or a producer failure never blocks the sigport build mark. `regproof` still judges the rows fail-closed; no evidence is
+`unproven`, and a disproof is `changed`, never `ok`. Internal producer breakage remains a FAIL in the log.
+Before boot, the gate runs `regmap_check.py --record` against the **copy's** exe and deployed common mapping and installs
+that reflection-checked candidate only into the disposable copy. This lets the live guard sample a new build without
+requiring an already-proven record. It never copies the candidate into the source instance; it expires with the copy.
+If candidate generation fails, the gate logs no evidence and the live guard stays closed.
+
+**The producer** (lab only). The lab gate (`kilnctl gate`, whose default tests include `registry-proof-test`) writes
+`content/registry/proof/request.json` into its copy. With that file, and only then: kiln.content
+(`native/services/content/registry/proof.cpp`) writes `roundtrip-<side>-boot.json` and `values-<side>.json` at
+resources-ready, before any boot patch (boot fields round-tripped in memory on a copy of their resource by the boot
+back-end itself; the read-only fields of the other registries read from the base, the first entry that reads a value;
+every entry exported through the schema from the base); `mods/tests/registry-proof-test` writes
+`roundtrip-<side>-live.json` at the world's first content ready (each mapped live field of one entry that reads:
+kiln.registry.live begin/submit/commit/read/revert, raw reads by the game's member paths, the resource bytes hashed before
+the write and after the revert; a structured value's raw view is its resource's digest). A field it finds no probe for
+gets no sample and stays unproven (kiln.log says why: "registry-proof-test: no sample of <field>"). Without the request file neither does anything (kiln.content looks the file up once
+per start). The test mod is never shipped (`tools/package/stage.sh` builds no `mods/tests`).
+
 `regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
 bytes>\n` for each `regmap/common/*.json` of the game's Kiln folder, in name order (build records are left out: they are
 what the proof writes). kilnctl sets aside every suite whose digest is not the tree's, refuses a new build's values export
@@ -139,6 +160,13 @@ of another mapping, and with an instance refuses to judge a tree whose regmap/co
 Raw values: the number of an int, float or bool member (a bool may be 0/1), a time member's nanoseconds, an enum's game
 name, a bitmask's list of game names, an optional enum's [switch, name]. A probe must differ from the value before; a
 read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
+
+For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value.
+The row needs a Sint32 whole-number round trip, a fractional Sint32 probe refused without changing the value or bytes,
+and a float-config fractional round trip. Refusal samples carry `configKind: "sint32"`, `expectRefused: true`,
+`refused: true`, `refusalCode: "not_exact"` and `refusalReason`; the code is emitted only for a native REFUSED outcome
+whose reason starts with the stable `not_exact: ` token. Accepting or rounding the fractional probe makes the row
+`changed`; missing any of these cases leaves it `unproven`. Whole-only evidence cannot prove the row.
 
 `registry-values`, one file per side and build: every entry of every registry read through the schema, with the base as
 state/registry.json names it:

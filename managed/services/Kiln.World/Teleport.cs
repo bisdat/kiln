@@ -7,6 +7,7 @@ namespace Kiln;
 /// <summary>Options for <see cref="Teleport"/>.</summary>
 public sealed record TeleportOptions
 {
+    /// <summary>The defaults: no ground search, the orientation is kept, no replication checkpoint.</summary>
     public static readonly TeleportOptions Default = new();
 
     /// <summary>The game's ground search: the nearest walkable spot within about 10 m (up or down) of the target.
@@ -20,6 +21,7 @@ public sealed record TeleportOptions
     public bool Checkpoint { get; init; }
 }
 
+/// <summary>How a teleport ended.</summary>
 public enum TeleportStatus
 {
     /// <summary>Not moved: refused when checked, or given up (see <see cref="TeleportResult.Reason"/>).</summary>
@@ -28,9 +30,11 @@ public enum TeleportStatus
     Moved = 1,
 }
 
+/// <summary>What was different about how a teleport ended; combine with the bitwise or.</summary>
 [Flags]
 public enum TeleportFlags
 {
+    /// <summary>Nothing out of the ordinary.</summary>
     None = 0,
     /// <summary>Ended more than 1 m from the target (25 m when aiming at a spawn point).</summary>
     OffTarget = 0x01,
@@ -41,9 +45,19 @@ public enum TeleportFlags
 }
 
 /// <summary>Outcome of one teleport.</summary>
+/// <param name="Status">Whether the entity was moved.</param>
+/// <param name="Entity">The entity that was asked to move.</param>
+/// <param name="Position">Where the entity is now (when <see cref="TeleportStatus.Failed"/>: its last known position,
+/// or 0).</param>
+/// <param name="Target">The position that was asked for.</param>
+/// <param name="Distance">Metres between <paramref name="Position"/> and <paramref name="Target"/>.</param>
+/// <param name="Flags">What was different about how it ended.</param>
+/// <param name="Steps">Simulation steps from the request to this result.</param>
+/// <param name="Reason">When <see cref="TeleportStatus.Failed"/>: why, in words; otherwise "".</param>
 public sealed record TeleportResult(TeleportStatus Status, EntityId Entity, WorldPosition Position, WorldPosition Target,
     double Distance, TeleportFlags Flags, int Steps, string Reason) : IKilnResult
 {
+    /// <summary>True when the entity was moved (<see cref="Status"/> is <see cref="TeleportStatus.Moved"/>).</summary>
     public bool Moved => Status == TeleportStatus.Moved;
 
     /// <summary>The entity was moved: <see cref="Moved"/> (the contract's name for it).</summary>
@@ -51,6 +65,8 @@ public sealed record TeleportResult(TeleportStatus Status, EntityId Entity, Worl
 
     // IKilnResult's reason is null when the entity was moved; this record's own Reason keeps its text.
     string? IKilnResult.Reason => Moved ? null : Reason;
+    /// <summary>A one-line description: where the entity was moved to and how close it got, or why it was not
+    /// moved.</summary>
     public override string ToString() => Moved
         ? $"moved {Entity} to {Position} ({Distance:F2} m from {Target}, {Steps} steps{(Flags != 0 ? ", " + Flags : "")})"
         : $"{Entity} not moved: {Reason}";

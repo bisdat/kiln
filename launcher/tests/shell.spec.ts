@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 test("shell renders: header navigation, state word, mock flag", async ({ page }) => {
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  for (const item of ["Play", "Runtime", "Logs", "Saves", "Editor", "Servers", "Community"])
+  for (const item of ["Play", "Runtime", "Logs", "Conflicts", "Saves", "Editor", "Servers", "Community"])
     await expect(nav.getByRole("link", { name: item, exact: true })).toBeVisible();
   // mods are seen on Play, profiles in Settings: neither has a header word
   for (const item of ["Profiles", "Library"]) await expect(nav.getByRole("link", { name: item, exact: true })).toHaveCount(0);
@@ -22,7 +22,7 @@ test("keyboard focus shows the gold ring", async ({ page }) => {
 });
 
 test("every button, link and field on the main pages has a name", async ({ page }) => {
-  for (const r of ["/", "/mods/order", "/mods/native", "/mods/engines", "/settings", "/runtime", "/servers/lab/overview", "/servers/lab/admin/items"]) {
+  for (const r of ["/", "/mods/order", "/mods/native", "/mods/engines", "/settings", "/runtime", "/conflicts", "/servers/lab/overview", "/servers/lab/admin/items"]) {
     await page.goto(`/#${r}`);
     await page.locator(".k-splash").waitFor({ state: "detached" });
     await page.waitForTimeout(500);

@@ -58,7 +58,8 @@ KL6xx licences. Findings can carry `fixes`.
 | KILN180 to KILN182 (dev.29+) | a typed-hook descriptor it cannot use, no `Hooks` service, a sigdb file that is not JSON | fix the descriptor |
 
 Experimental ids are errors until the project opts in with `NoWarn`: `KILNX001` lab members (never in a mod players
-install), `KILNX002` not proven in a client (`SteamGuard`), `KILNX003` (dev.29.18+) `WorldConcurrent`.
+install), `KILNX002` not proven in a client (`SteamGuard`). `KILNX003` for `WorldConcurrent` is retired:
+Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental).
 
 KILN001-004 are manifest checks. Build steps: KILN020/021 the layout stamp (`Game`); dev.27+ KILN030 a warning of the
 `"writes"` step or the bake, KILN031 an unreadable input, KILN032 a bake that failed or timed out (names `KilnBake=false`; dev.28+ also an

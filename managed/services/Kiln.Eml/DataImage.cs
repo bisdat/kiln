@@ -8,13 +8,20 @@ using System.IO.Compression;
 namespace Kiln;
 
 /// <summary>One pixel: 8 bits per channel, not premultiplied.</summary>
+/// <param name="R">The red channel, 0 to 255.</param>
+/// <param name="G">The green channel, 0 to 255.</param>
+/// <param name="B">The blue channel, 0 to 255.</param>
+/// <param name="A">The alpha channel, 0 (transparent) to 255 (opaque).</param>
 public readonly record struct Rgba(byte R, byte G, byte B, byte A)
 {
     /// <summary>0xRRGGBBAA.</summary>
     public uint Packed => ((uint)R << 24) | ((uint)G << 16) | ((uint)B << 8) | A;
 
+    /// <summary>Splits a packed <c>0xRRGGBBAA</c> value into a pixel.</summary>
+    /// <param name="rrggbbaa">The packed value: red in the top byte, alpha in the lowest.</param>
     public static Rgba FromPacked(uint rrggbbaa) => new((byte)(rrggbbaa >> 24), (byte)(rrggbbaa >> 16), (byte)(rrggbbaa >> 8), (byte)rrggbbaa);
 
+    /// <summary>The pixel as <c>#rrggbbaa</c> in hexadecimal.</summary>
     public override string ToString() => $"#{R:x2}{G:x2}{B:x2}{A:x2}";
 }
 
@@ -56,7 +63,9 @@ public sealed class DataImage
         _rgba = rgba;
     }
 
+    /// <summary>The width in pixels.</summary>
     public int Width { get; }
+    /// <summary>The height in pixels.</summary>
     public int Height { get; }
 
     /// <summary>The pixel bytes, shared with the image: row-major from the top row, R G B A per pixel.</summary>
@@ -79,6 +88,7 @@ public sealed class DataImage
     /// <summary>The raw RGBA8 bytes (a copy).</summary>
     public byte[] ToRgba8() => (byte[])_rgba.Clone();
 
+    /// <summary>A copy of the image with its own pixel data.</summary>
     public DataImage Clone() => new(Width, Height, (byte[])_rgba.Clone());
 
     private int At(int x, int y) => (y * Width + x) * 4;
@@ -104,6 +114,7 @@ public sealed class DataImage
         _rgba[i + 3] = a;
     }
 
+    /// <summary>Sets a pixel from <paramref name="color"/>. Throws <see cref="ArgumentOutOfRangeException"/> outside the image.</summary>
     public void SetPixel(int x, int y, Rgba color) => SetPixel(x, y, color.R, color.G, color.B, color.A);
 
     /// <summary>The pixel as 0xRRGGBBAA, or null outside the image (EML <c>get_pixel_packed</c>).</summary>

@@ -1,6 +1,6 @@
 ---
 name: kiln-modding
-description: Build, test and debug Enshrouded mods with Kiln.Sdk, C# APIs, JSON blocks, data packs and assets. Use for Kiln mod projects, the kiln CLI, local test servers, hot reload, lint and mod-load failures; not for Kiln launcher or framework internals.
+description: Build, test and debug Enshrouded mods with Kiln.Sdk, C# APIs, JSON blocks, data packs and assets. Use for Kiln mod projects, the kiln.mod.json manifest, the kiln CLI, local test servers, hot reload, lint and mod-load failures, native (C++) plugins and hooks, and porting EMF, ShroudForge or EML mods to Kiln or running them beside it; not for Kiln launcher or framework internals.
 ---
 
 # Kiln modding
@@ -15,11 +15,11 @@ Enshrouded is a trademark of Keen Games GmbH. Kiln is unofficial.
 
 1. Read the page for what you're using: https://frostdev.io/kiln/wiki. [references/docs-map.md](references/docs-map.md) says
    which one.
-2. The current build is **0.2.0-dev.29.19**, with mod API 0.2.11 and the matching 0.2.0-dev.29.19 MDK. A mark like
-   **dev.20+**, **dev.28+** or **dev.29.19+** means that runtime and its MDK or newer; check the installed build
-   (`Mods.RuntimeApiVersion`). Which build added what, and what a real game has shown:
-   [references/versions.md](references/versions.md). Much of dev.28 to dev.29.19 ran only on test servers, in host tests
-   or under Wine: take the verification status from the release notes' "Checked" and "Not yet" text and never claim more.
+2. The current build, its mod API and the MDK to use are in [references/versions.md](references/versions.md), which also
+   says which build added what and what a real game has shown. A mod can read the running Kiln's mod API at run time as
+   `Mods.RuntimeApiVersion`. A mark like **dev.20+**, **dev.28+** or **dev.29.19+** means that runtime and its MDK or
+   newer; check the installed build (`Mods.RuntimeApiVersion`). Much of dev.28 to dev.29.19 ran only on test servers,
+   in host tests or under Wine: take the verification status from the release notes' "Checked" and "Not yet" text and never claim more.
    Server/offline verification does not establish client rendering, input or multiplayer behavior. The official
    launcher has Nexus integration switched off: import downloaded archives by hand.
 3. Decide the side and what players need, before writing code:
@@ -35,17 +35,24 @@ Enshrouded is a trademark of Keen Games GmbH. Kiln is unofficial.
    [references/blocks.md](references/blocks.md) for the block families, then [references/data-packs.md](references/data-packs.md),
    [references/quests-talents-sounds.md](references/quests-talents-sounds.md),
    [references/vfx.md](references/vfx.md),
-   [references/api.md](references/api.md),
+   [references/api.md](references/api.md) (the C# API by area: [contract and threads](references/api-contract.md),
+   [events](references/api-events.md), [items](references/api-items.md), [gear](references/api-gear.md),
+   [content](references/api-content.md), [world](references/api-world.md), [UI](references/api-ui.md),
+   [network](references/api-network.md), [hooks](references/api-hooks.md)),
    [references/gameplay.md](references/gameplay.md) (queries, terrain, refusable events, stations, gems).
    Data the game reads once at start (Flame Altars, experience per level): OnBoot and resource patches,
    [references/boot.md](references/boot.md). Heavy work: Kiln tasks, [references/tasks.md](references/tasks.md).
-3. **Check names**: `kiln catalog search`. Never guess game ids or field paths.
-4. **Build and deploy** to a local test server: `kiln build && kiln deploy`, then `kiln run`.
-5. **Check the log**: `kiln logs --mod <id>` for `mod <id> <version> loaded in … ms`, or the reason it didn't load.
-6. **Hot reload** after each change: `kiln deploy --reload`.
-7. **Test** in the server with `[KilnTest]` methods: `kiln test`. dev.26+: the same methods offline under `dotnet test`
+3. **Find or check an API**: grep [references/api-index/](references/api-index/INDEX.md) for the name or a word of what it does
+   (`grep -rn "BlockAt" references/api-index/`), then open that assembly's file. The file name is the `KilnServices` entry
+   (`Items.md` needs `Items`); a split file (`Blocks.md`) is a map of its parts. Each line has the signature, the mod API that
+   added it and a summary. Never write a signature, an enum value or a result property from memory.
+4. **Check names**: `kiln catalog search`. Never guess game ids or field paths.
+5. **Build and deploy** to a local test server: `kiln build && kiln deploy`, then `kiln run`.
+6. **Check the log**: `kiln logs --mod <id>` for `mod <id> <version> loaded in … ms`, or the reason it didn't load.
+7. **Hot reload** after each change: `kiln deploy --reload`.
+8. **Test** in the server with `[KilnTest]` methods: `kiln test`. dev.26+: the same methods offline under `dotnet test`
    (`Kiln.TestKit`), and `[ClientCheck]` for what a player must see. [references/testing.md](references/testing.md).
-8. **Package**: `kiln pack`. dev.28+: `kiln publish` makes a GitHub release in steps you confirm, and `updates` in the
+9. **Package**: `kiln pack`. dev.28+: `kiln publish` makes a GitHub release in steps you confirm, and `updates` in the
    manifest gives players update notices ([references/devkit.md](references/devkit.md)).
 
 `--json` on any `kiln` command gives one JSON document; exit 0 ok, 1 failure, 2 usage.
@@ -70,7 +77,14 @@ Never deploy to a server players are using. Use a separate local test server.
 - **Item state (dev.20+).** Use `Items.Move` for gear transfers, not take + give. Item-entity `EntityData` is session-only.
   dev.26+: `InstanceData` keeps a value on one item (a player's inventory not yet seen by a player). dev.27+: `Affixes`
   rolls bonuses onto one item; define the kinds and pools as blocks.
-  [references/api.md](references/api.md#persistent-data).
+  [references/api-items.md](references/api-items.md#persistent-data).
+- **Gear (dev.30+).** The rarity, enhancement slots, level, power and armour of one item are `Items.SetRarity`, `SetLevel`,
+  `SetPower`, `UpgradeRarity` (and `UpgradeStation`); a type's numbers are `Content.Gear` or the `gear` pack section. Never
+  `Fields["rarity"]` on a clone or raw component writes. [references/api-gear.md](references/api-gear.md).
+- **Which assembly (`KilnServices`).** A type needs its service listed: `Stations`, `Bases`, `Crafting` and every block type are
+  Kiln.Blocks, `InstanceData` Kiln.Saves, `KeyInput` Kiln.Ui, `TerrainToolAction` Kiln.Tools. `Is.*` and `Act.*` rule helpers
+  are C# 14 extension members (PublicAPI lists them under `AiRulesApi`). The table:
+  [references/api-contract.md](references/api-contract.md#which-assembly-holds-a-type-kilnservices).
 - **Changes are layers.** They come off when the mod unloads. Do content changes in `Content.OnReady(...)`.
 - **Fixed ids.** GUIDs of items, recipes, clones, perks, buffs, tree nodes and NPCs, and ids of quests, steps and talents, never
   change after release. Saves keep them. For native quests and dialogue, names and option order feed the ids too.
@@ -81,7 +95,7 @@ Never deploy to a server players are using. Use a separate local test server.
 - **Player input and Steam (dev.30.3+).** `BuildingInput` sends the local player's own building input (the server
   still checks permissions, resources and range; game client 26430625, not checked in a real game yet). `SteamMessages` is Steam
   peer-to-peer outside the game's connection (`Open` needs `"steamMessages": true` in kiln.mod.json); prefer Kiln.Network
-  channels. Ask `Available` first. [references/api.md](references/api.md#client).
+  channels. Ask `Available` first. [references/api-network.md](references/api-network.md#client).
 - **Read every result (dev.27+).** A refusal by the game is a result with `Ok = false` and a `Reason`, not an exception.
   KILN120 warns when nobody reads one; pass the reason on to the player or the log.
 - **Never ship Kiln assemblies.** Kiln.Sdk references them with `ExcludeAssets=runtime`.
@@ -112,4 +126,4 @@ say so instead of patching game memory. Wrapping one of the game's own ECS progr
 service, not the advanced tier: [references/world-programs.md](references/world-programs.md). Low-level hooks are for mods that opt into the advanced tier (`"advanced": true`);
 the short rules (kiln.hooks v2: link order, `caller()`, link slots, `hooks.json`; dev.29.19+ hooks inside another mod's DLL
 (`Hooks.Module`) and, for native plugins, the game's original code; closed DLL mods and `[late]`; EML, EMF and Enshrouded
-ModLoader notes) are at the end of [api.md](references/api.md).
+ModLoader notes) are in [api-hooks.md](references/api-hooks.md).

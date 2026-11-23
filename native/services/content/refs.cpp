@@ -144,6 +144,10 @@ bool asset_served(const std::string& ref_type, const uint8_t g[16]) {
     uint32_t type = 0;
     if (ref_type == "keen::ObjectReference<keen::Model>") type = 0x177394c7u;  // FNV-1a("keen::RenderModel")
     else if (ref_type == "keen::ObjectReference<keen::VoxelObjectDefinition>") type = 0xe53afbafu;  // a shape's preview: keen::VoxelModelResource
+    // a terrain shape's model (equipment.terrainVoxelObject): keen::TerrainVoxelObjectDefinition is an empty editor type, and
+    // every game item naming one (11 on client 26430625) names a keen::VoxelModelResource of the same GUID, isTerrain set;
+    // kiln.worldtables serves a registered terrain brush's model that way (docs/re/building.md 1.2)
+    else if (ref_type == "keen::ObjectReference<keen::TerrainVoxelObjectDefinition>") type = 0xe53afbafu;
     else if (ref_type == "keen::ecs::TemplateReference") type = 0x39768775u;   // FNV-1a("keen::ecs::TemplateResource")
     else if (ref_type == "keen::PerkReference") type = 0x6084515au;            // FNV-1a("keen::Perk"): kiln.gamedata's perk clones
     else if (ref_type == "keen::ImpactProgramReference") type = 0xd4922d88u;   // FNV-1a("keen::ImpactProgram"): an item's equipment.program (a mod's or Kiln's gem programs)

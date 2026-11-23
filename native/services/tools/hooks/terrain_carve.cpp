@@ -6,8 +6,10 @@
 #endif
 #include "terrain_carve.h"
 #include "../include/kiln_tools_policy.h"
+#include "../action_trace.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_caps.h"
+#include <atomic>
 
 namespace {
 using namespace kiln::tools::carve;
@@ -16,6 +18,8 @@ const KilnApi* carve_api = nullptr;
 const KilnHooksApi* carve_hooks = nullptr;
 const KilnCapsApi* carve_caps = nullptr;
 KilnOwner carve_owner = 0, carve_parent = 0;
+// The removal report's layout for the action trace, from sigdb at install (-1: unresolved, strokes stay unmeasured).
+std::atomic<int64_t> report_at{-1}, report_total_at{-1};
 constexpr KilnStr carve_capability{"build.filtered_terrain", sizeof("build.filtered_terrain") - 1};
 
 void report_capability(const KilnCapsApi* caps, KilnOwner owner, uint32_t state, uint32_t reason, const char* text) {
@@ -42,8 +46,19 @@ bool filtered_kernel(void* brush, void* cells, void* unknown, const int32_t* ori
     if (policy->size < offsetof(KilnToolPolicyView, remove_cells) + sizeof policy->remove_cells) return false;
     BrushCopy owned;
     std::array<float, 256> coefficients;
-    if (!filter_brush(brush, policy->remove_cells, owned, coefficients, &copy_memory)) return false;
-    return kernel_hook.original<Kernel>()(owned.bytes.data(), cells, unknown, origin, dims);
+    bool removable = false;
+    if (!filter_brush(brush, policy->remove_cells, owned, coefficients, &copy_memory, &removable)) {
+        kiln::tools::note_brush_fault();
+        return false;
+    }
+    // The stroke's trace (action_trace.h): whether an allowed cell is minable, and whether the kernel's own removal
+    // report grew. Two guarded 4-byte reads; the report and the cells stay the game's.
+    const ReportLayout layout{report_at.load(std::memory_order_relaxed), report_total_at.load(std::memory_order_relaxed)};
+    float before = 0, after = 0;
+    const bool measured = report_total(owned, layout, &copy_memory, before);
+    const bool result = kernel_hook.original<Kernel>()(owned.bytes.data(), cells, unknown, origin, dims);
+    kiln::tools::note_kernel(removable, measured && report_total(owned, layout, &copy_memory, after) ? (after > before ? 1 : 0) : -1);
+    return result;
 }
 
 bool filtered_dispatch(void* terrain, void* box, void* buffers, const int32_t* begin, const uint32_t* end,
@@ -115,6 +130,8 @@ void kiln_tools_carve_uninstall() {
         carve_api->owner_revoke(carve_owner);
     }
     carve_owner = carve_parent = 0;
+    report_at.store(-1, std::memory_order_relaxed);
+    report_total_at.store(-1, std::memory_order_relaxed);
     carve_api = nullptr;
     carve_hooks = nullptr;
     carve_caps = nullptr;
@@ -150,6 +167,13 @@ void kiln_tools_carve_install(const KilnApi* api, KilnOwner owner) {
         kernel == buildings || kernel == dispatch || dispatch == buildings ||
         !prologue(hooks, kernel, kernel_prologue) || !prologue(hooks, dispatch, dispatch_prologue) ||
         !prologue(hooks, buildings, building_prologue)) return;
+    // Optional: the trace's removal report layout. Unresolved or unqualified, strokes are traced as unmeasured.
+    ReportLayout layout;
+    if (!api->constant || api->constant({"tools/carve.report", sizeof("tools/carve.report") - 1}, &layout.report) != KILN_OK ||
+        api->constant({"tools/carve.report_total", sizeof("tools/carve.report_total") - 1}, &layout.total) != KILN_OK ||
+        !report_layout_ok(layout)) layout = {};
+    report_at.store(layout.report, std::memory_order_relaxed);
+    report_total_at.store(layout.total, std::memory_order_relaxed);
     carve_owner = api->owner_create({"kiln.tools.carve", sizeof("kiln.tools.carve") - 1});
     if (!carve_owner || carve_owner == owner) {
         carve_owner = 0; // Never revoke the parent, even if an invalid owner factory returns it.

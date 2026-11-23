@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf.dll: a Kiln plugin (<game>/kiln/plugins/) that loads unmodified EMF mods (EMF 0.3.3 to 0.6.0, EmfApi v27) on Kiln's
+// kiln-emf.dll: a Kiln plugin (<game>/kiln/plugins/) that loads unmodified EMF mods (EMF 0.3.3 to 0.6.20, EmfApi v48) on Kiln's
 // services. In on_ready, after every service is up and before the game's entry point:
 //   1. step aside when the real EMF runs in this process (emf_core.dll, or EMF's loader chained by Kiln's proxy);
 //   2. find the mods (the active profile's "emf" entries through kiln.profile, and <game>/emf/mods);
@@ -14,8 +14,11 @@
 #include <cstdio>
 
 #include "emf_internal.h"
+#include "mod_cost.h"
 #include "nlohmann/json.hpp"
 #include "slow_parts.h"
+
+#include <map>
 
 #include <psapi.h>
 
@@ -45,6 +48,33 @@ KilnHandle g_aside_tick = 0;
 uint64_t g_aside_steps = 0;
 uint64_t g_last_status = 0;
 uint64_t g_steps = 0;
+uint64_t g_last_cost = 0;
+std::mutex g_cost_mutex;                      // g_costs: the tick thread updates, write_status reads (any thread)
+std::map<const Mod*, CostReporter> g_costs;  // mod_cost.h: each loaded mod's cost over the last minute
+
+CostSample cost_sample(const Mod& m) {
+    CostSample s;
+    s.steps = g_steps;
+    s.tick_ns = m.tick_ns.load(std::memory_order_relaxed);
+    s.reads = m.api_reads.load(std::memory_order_relaxed);
+    s.scans = m.api_scans.load(std::memory_order_relaxed);
+    s.scan_entities = m.api_scan_entities.load(std::memory_order_relaxed);
+    s.scan_ns = m.api_scan_ns.load(std::memory_order_relaxed);
+    return s;
+}
+
+// Once a minute on the server world's Pre: each loaded mod's cost per step; a line for a mod over 2 ms (mod_cost.h).
+void mod_costs_minute(uint64_t now) {
+    for (const auto& m : g_mods) {
+        if (m->status != EMF_MOD_LOADED) continue;
+        std::optional<CostLine> line;
+        {
+            std::lock_guard lock(g_cost_mutex);
+            line = g_costs[m.get()].minute(m->id, cost_sample(*m), now);
+        }
+        if (line) logf(line->warn ? KILN_LOG_WARN : KILN_LOG_INFO, "%s", line->text.c_str());
+    }
+}
 
 std::filesystem::path api_path(int32_t kind) {
     char buf[1024];
@@ -171,13 +201,14 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     if (!e || e->kind >= KILN_WORLD_KINDS) return;
     if (e->event == KILN_WORLD_STARTED) {
         net_world_started(static_cast<uint8_t>(e->kind));
-        if (e->kind == KILN_WORLD_SERVER) components_world_started();
+        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); }
         windows_world_started(static_cast<uint8_t>(e->kind));
         return;
     }
     if (e->event != KILN_WORLD_STOPPING) return;
     net_world_stopping(static_cast<uint8_t>(e->kind));
     if (e->kind == KILN_WORLD_SERVER) {
+        terrain_world_stopping();
         events_world_stopping();
         components_world_stopping();
     }
@@ -214,6 +245,8 @@ void KILN_CALL on_ready(void*) {
     note_chain_lists();
 
     // services (in-core and DLL services are all published by now)
+    S.build = service<KilnBuildApi>(KILN_BUILD_SERVICE, 1);
+    S.caps = service<KilnCapsApi>(KILN_CAPS_SERVICE, 1);
     S.world = service<KilnWorldApi>(KILN_WORLD_SERVICE, 1);
     S.client = service<KilnClientApi>(KILN_CLIENT_SERVICE, 1);
     S.hooks = service<KilnHooksApi>(KILN_HOOKS_SERVICE, 1);
@@ -260,6 +293,7 @@ void KILN_CALL on_ready(void*) {
 }
 
 void KILN_CALL on_unload(void*) {
+    terrain_world_stopping();
     net_shutdown();
     events_shutdown();
     program_hooks_shutdown();
@@ -292,12 +326,18 @@ void install_ticks() {
 // change (a fault, an unsupported call) is written within 5 s either way. A Pre over 100 ms says which part took it.
 void dispatch_server_pre() {
     g_pre_parts.begin(qpc_ns());
+    terrain_server_pre();
+    g_pre_parts.part("blocks", qpc_ns());
     net_server_pre();
     g_pre_parts.part("net", qpc_ns());
     game_server_pre(&g_pre_parts);
     commands_server_pre();
     g_pre_parts.part("commands", qpc_ns());
     const uint64_t now = now_ms();
+    if (g_any_loaded && now - g_last_cost >= 60000) {
+        g_last_cost = now;
+        mod_costs_minute(now);
+    }
     if ((g_dirty.load() && now - g_last_status > 5000) || (g_any_loaded && now - g_last_status > 60000)) {
         g_last_status = now;
         write_status();
@@ -332,6 +372,24 @@ void write_status() {
                   {"tickMsTotal", static_cast<double>(m->tick_ns.load()) / 1e6},
                   {"tickMsPerStep", g_steps ? static_cast<double>(m->tick_ns.load()) / 1e6 / static_cast<double>(g_steps) : 0.0},
                   {"tickMsMax", static_cast<double>(m->tick_max_ns.load()) / 1e6}};
+        if (m->status == EMF_MOD_LOADED) {
+            // mod_cost.h: what the mod asked kiln-emf for, and the last minute per server step
+            CostWindow w;
+            {
+                std::lock_guard lock(g_cost_mutex);
+                if (auto it = g_costs.find(m.get()); it != g_costs.end()) w = it->second.last();
+            }
+            j["cost"] = {{"componentReads", m->api_reads.load()},
+                         {"entityScans", m->api_scans.load()},
+                         {"entityScanEntities", m->api_scan_entities.load()},
+                         {"entityScanMs", static_cast<double>(m->api_scan_ns.load()) / 1e6},
+                         {"lastMinute", {{"steps", w.steps},
+                                         {"msPerStep", w.ms_per_step},
+                                         {"componentReadsPerStep", w.reads_per_step},
+                                         {"entityScansPerStep", w.scans_per_step},
+                                         {"entitiesPerScan", w.entities_per_scan},
+                                         {"entityScanMsPerStep", w.scan_ms_per_step}}}};
+        }
         if (!m->dll.empty()) j["dll"] = path_utf8(m->dll);
         if (!m->main.empty()) j["main"] = m->main;
         if (!m->profile_id.empty()) j["profileId"] = m->profile_id;
@@ -359,6 +417,7 @@ void write_status() {
                 {"mods", mods}};
     if (g_stepped_aside.empty()) {
         try {
+            doc["blocks"] = json::parse(terrain_status_json());
             doc["unsupported"] = json::parse(unsupported_json());
             doc["commands"] = json::parse(commands_json());
             doc["signatures"] = json::parse(aliases_json());

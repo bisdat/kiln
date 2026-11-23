@@ -100,6 +100,8 @@ internal static unsafe class SavesRuntime
             Log(LogLevel.Info, $"Kiln.Saves: started (native events from seq {last + 1}; state {StateText(st?.State ?? 0)}, " +
                                $"world {GuidOf(st)?.ToString() ?? "unknown"} revision {st?.Revision ?? 0})");
             AttachItems();
+            PlayerStorageNative.Attach();
+            Store.Storage.ReportCapability();
             InstanceCapabilities.Refresh();
             InstanceCapabilities.ReportCarried();
             if (st is { } s0 && (s0.Features & SavesNative.CanSnapshotStage) == 0)
@@ -117,7 +119,8 @@ internal static unsafe class SavesRuntime
     {
         try
         {
-            Store.Instances.World ??= new InstanceGame();
+            Store.Instances.World ??= new StorageInstanceWorld(new InstanceGame(), Store.Storage.NormalizeInstance,
+                Store.Storage.InstanceParts, Store.Storage.InstancesReady);
         }
         catch (Exception e) when (e is FileNotFoundException or FileLoadException or TypeLoadException or MissingMethodException)
         {
@@ -358,6 +361,8 @@ internal static unsafe class SavesRuntime
             if (Store.LoadDeferred && Store.RetryLoad()) LoadedAfterAll();
             Store.Entities.Tick();
             Store.Entities.HandOverServiceValues();
+            PlayerStorageNative.Attach();
+            Store.Storage.PollWrites();
             Store.Instances.Tick();
             InstanceCapabilities.Refresh();
         }
@@ -432,6 +437,7 @@ internal static unsafe class SavesRuntime
                 _worldFile = null;
                 if (id != null) Store.AdoptWorld(id);
                 Store.Commit(ev.Revision, ev.WorldUnix, reason);
+                CharacterSync.OnWorldSaving(reason);  // storage is published only by the matching world-written event
                 var dur = TimeSpan.FromMilliseconds(ev.DurationMs);
                 CompleteRequests(ev, true, null);
                 if (Events.HasSubscribers<WorldSavedEvent>())

@@ -1,0 +1,1891 @@
+{
+  "format": "KPS1",
+  "hash": "XXH3_64bits (default secret, seed 0)",
+  "vectors": [
+    {
+      "name": "empty",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 0,
+        "backpackPages": 0,
+        "main": [],
+        "extra": []
+      },
+      "encodedHex": "4b50533100000000000000000000000000000000000000000000000000000000",
+      "witness": "xxh3:c67f6e6f289e71a0"
+    },
+    {
+      "name": "no-options",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b5053310000000000000000000000000000000000000000000000000101000000785634120100000000000000",
+      "witness": "xxh3:8f144ddad39e050c"
+    },
+    {
+      "name": "level-zero",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "level": 0
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b505331000000000000000000000000000000000000000000000000010100000078563412010001000000000000",
+      "witness": "xxh3:cc9e47bdd37167b8"
+    },
+    {
+      "name": "durability-zero",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "durability": 0,
+            "maxDurability": 100
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b50533100000000000000000000000000000000000000000000000001010000007856341201000001000000006400000000000000",
+      "witness": "xxh3:6207a568e5978723"
+    },
+    {
+      "name": "durability-one",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "durability": 1,
+            "maxDurability": 100
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b50533100000000000000000000000000000000000000000000000001010000007856341201000001010000006400000000000000",
+      "witness": "xxh3:070f06bdf6b2e611"
+    },
+    {
+      "name": "liquid",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "liquid": 305419896,
+            "maxLiquid": 4294967295
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b505331000000000000000000000000000000000000000000000000010100000078563412010000000178563412ffffffff000000",
+      "witness": "xxh3:b512882022996176"
+    },
+    {
+      "name": "appearance",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "appearance": "78563412"
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b505331000000000000000000000000000000000000000000000000010100000078563412010000000001785634120000",
+      "witness": "xxh3:ef75b2a96302efe0"
+    },
+    {
+      "name": "upgrades",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "maxUpgrades": 5,
+            "upgrades": 0
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b50533100000000000000000000000000000000000000000000000001010000007856341201000000000001050000",
+      "witness": "xxh3:2bbd19df2efb4022"
+    },
+    {
+      "name": "socket",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "socket": "7856341200"
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b50533100000000000000000000000000000000000000000000000001010000007856341201000000000000017856341200",
+      "witness": "xxh3:637ce90ba32343ce"
+    },
+    {
+      "name": "all-options",
+      "fields": {
+        "equipment": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "references": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "mainPages": 1,
+        "backpackPages": 0,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1,
+            "level": 255,
+            "durability": 30,
+            "maxDurability": 40,
+            "liquid": 50,
+            "maxLiquid": 60,
+            "appearance": "efcdab89",
+            "maxUpgrades": 5,
+            "upgrades": 2,
+            "socket": "67452301ff"
+          }
+        ],
+        "extra": []
+      },
+      "encodedHex": "4b505331000000000000000000000000000000000000000000000000010100000078563412010001ff011e0000002800000001320000003c00000001efcdab890105020167452301ff",
+      "witness": "xxh3:1f7d2308d8dc31e6"
+    },
+    {
+      "name": "sparse-equipment-and-references",
+      "fields": {
+        "equipment": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "slot": 1,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ],
+        "references": [
+          0,
+          1,
+          null,
+          65535
+        ],
+        "mainPages": 1,
+        "backpackPages": 1,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 7,
+            "itemId": 2271560481,
+            "count": 65535
+          }
+        ],
+        "extra": [
+          {
+            "slot": 1,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ]
+      },
+      "encodedHex": "4b50533101800b000100785634120100000000000000000000000000000000000000000001017856341201000000000000000100000101000001ffff01020101007856341201000000000000000721436587ffff00000000000001785634120100000000000000",
+      "witness": "xxh3:4e86adba8c494a3b"
+    },
+    {
+      "name": "list-order-reversed",
+      "fields": {
+        "equipment": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "slot": 1,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ],
+        "references": [
+          0,
+          1,
+          null,
+          65535
+        ],
+        "mainPages": 1,
+        "backpackPages": 1,
+        "main": [
+          {
+            "slot": 7,
+            "itemId": 2271560481,
+            "count": 65535
+          },
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ],
+        "extra": [
+          {
+            "slot": 1,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ]
+      },
+      "encodedHex": "4b50533101800b000100785634120100000000000000000000000000000000000000000001017856341201000000000000000100000101000001ffff010201010721436587ffff0000000000000078563412010000000000000001785634120100000000000000",
+      "witness": "xxh3:af7cf0044813a591"
+    },
+    {
+      "name": "limits-16-plus-16-pages-248-records",
+      "fields": {
+        "equipment": [
+          {
+            "slot": 0,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 1,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 2,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 3,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 4,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 5,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 6,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 7,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 8,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 9,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 10,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 11,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 12,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 13,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 14,
+            "itemId": 305419896,
+            "count": 1
+          },
+          {
+            "slot": 15,
+            "itemId": 305419896,
+            "count": 1
+          }
+        ],
+        "references": [
+          0,
+          1,
+          2,
+          127
+        ],
+        "mainPages": 16,
+        "backpackPages": 16,
+        "main": [
+          {
+            "slot": 0,
+            "itemId": 268435456,
+            "count": 1
+          },
+          {
+            "slot": 1,
+            "itemId": 268435457,
+            "count": 1
+          },
+          {
+            "slot": 2,
+            "itemId": 268435458,
+            "count": 1
+          },
+          {
+            "slot": 3,
+            "itemId": 268435459,
+            "count": 1
+          },
+          {
+            "slot": 4,
+            "itemId": 268435460,
+            "count": 1
+          },
+          {
+            "slot": 5,
+            "itemId": 268435461,
+            "count": 1
+          },
+          {
+            "slot": 6,
+            "itemId": 268435462,
+            "count": 1
+          },
+          {
+            "slot": 7,
+            "itemId": 268435463,
+            "count": 1
+          },
+          {
+            "slot": 8,
+            "itemId": 268435464,
+            "count": 1
+          },
+          {
+            "slot": 9,
+            "itemId": 268435465,
+            "count": 1
+          },
+          {
+            "slot": 10,
+            "itemId": 268435466,
+            "count": 1
+          },
+          {
+            "slot": 11,
+            "itemId": 268435467,
+            "count": 1
+          },
+          {
+            "slot": 12,
+            "itemId": 268435468,
+            "count": 1
+          },
+          {
+            "slot": 13,
+            "itemId": 268435469,
+            "count": 1
+          },
+          {
+            "slot": 14,
+            "itemId": 268435470,
+            "count": 1
+          },
+          {
+            "slot": 15,
+            "itemId": 268435471,
+            "count": 1
+          },
+          {
+            "slot": 16,
+            "itemId": 268435472,
+            "count": 1
+          },
+          {
+            "slot": 17,
+            "itemId": 268435473,
+            "count": 1
+          },
+          {
+            "slot": 18,
+            "itemId": 268435474,
+            "count": 1
+          },
+          {
+            "slot": 19,
+            "itemId": 268435475,
+            "count": 1
+          },
+          {
+            "slot": 20,
+            "itemId": 268435476,
+            "count": 1
+          },
+          {
+            "slot": 21,
+            "itemId": 268435477,
+            "count": 1
+          },
+          {
+            "slot": 22,
+            "itemId": 268435478,
+            "count": 1
+          },
+          {
+            "slot": 23,
+            "itemId": 268435479,
+            "count": 1
+          },
+          {
+            "slot": 24,
+            "itemId": 268435480,
+            "count": 1
+          },
+          {
+            "slot": 25,
+            "itemId": 268435481,
+            "count": 1
+          },
+          {
+            "slot": 26,
+            "itemId": 268435482,
+            "count": 1
+          },
+          {
+            "slot": 27,
+            "itemId": 268435483,
+            "count": 1
+          },
+          {
+            "slot": 28,
+            "itemId": 268435484,
+            "count": 1
+          },
+          {
+            "slot": 29,
+            "itemId": 268435485,
+            "count": 1
+          },
+          {
+            "slot": 30,
+            "itemId": 268435486,
+            "count": 1
+          },
+          {
+            "slot": 31,
+            "itemId": 268435487,
+            "count": 1
+          },
+          {
+            "slot": 32,
+            "itemId": 268435488,
+            "count": 1
+          },
+          {
+            "slot": 33,
+            "itemId": 268435489,
+            "count": 1
+          },
+          {
+            "slot": 34,
+            "itemId": 268435490,
+            "count": 1
+          },
+          {
+            "slot": 35,
+            "itemId": 268435491,
+            "count": 1
+          },
+          {
+            "slot": 36,
+            "itemId": 268435492,
+            "count": 1
+          },
+          {
+            "slot": 37,
+            "itemId": 268435493,
+            "count": 1
+          },
+          {
+            "slot": 38,
+            "itemId": 268435494,
+            "count": 1
+          },
+          {
+            "slot": 39,
+            "itemId": 268435495,
+            "count": 1
+          },
+          {
+            "slot": 40,
+            "itemId": 268435496,
+            "count": 1
+          },
+          {
+            "slot": 41,
+            "itemId": 268435497,
+            "count": 1
+          },
+          {
+            "slot": 42,
+            "itemId": 268435498,
+            "count": 1
+          },
+          {
+            "slot": 43,
+            "itemId": 268435499,
+            "count": 1
+          },
+          {
+            "slot": 44,
+            "itemId": 268435500,
+            "count": 1
+          },
+          {
+            "slot": 45,
+            "itemId": 268435501,
+            "count": 1
+          },
+          {
+            "slot": 46,
+            "itemId": 268435502,
+            "count": 1
+          },
+          {
+            "slot": 47,
+            "itemId": 268435503,
+            "count": 1
+          },
+          {
+            "slot": 48,
+            "itemId": 268435504,
+            "count": 1
+          },
+          {
+            "slot": 49,
+            "itemId": 268435505,
+            "count": 1
+          },
+          {
+            "slot": 50,
+            "itemId": 268435506,
+            "count": 1
+          },
+          {
+            "slot": 51,
+            "itemId": 268435507,
+            "count": 1
+          },
+          {
+            "slot": 52,
+            "itemId": 268435508,
+            "count": 1
+          },
+          {
+            "slot": 53,
+            "itemId": 268435509,
+            "count": 1
+          },
+          {
+            "slot": 54,
+            "itemId": 268435510,
+            "count": 1
+          },
+          {
+            "slot": 55,
+            "itemId": 268435511,
+            "count": 1
+          },
+          {
+            "slot": 56,
+            "itemId": 268435512,
+            "count": 1
+          },
+          {
+            "slot": 57,
+            "itemId": 268435513,
+            "count": 1
+          },
+          {
+            "slot": 58,
+            "itemId": 268435514,
+            "count": 1
+          },
+          {
+            "slot": 59,
+            "itemId": 268435515,
+            "count": 1
+          },
+          {
+            "slot": 60,
+            "itemId": 268435516,
+            "count": 1
+          },
+          {
+            "slot": 61,
+            "itemId": 268435517,
+            "count": 1
+          },
+          {
+            "slot": 62,
+            "itemId": 268435518,
+            "count": 1
+          },
+          {
+            "slot": 63,
+            "itemId": 268435519,
+            "count": 1
+          },
+          {
+            "slot": 64,
+            "itemId": 268435520,
+            "count": 1
+          },
+          {
+            "slot": 65,
+            "itemId": 268435521,
+            "count": 1
+          },
+          {
+            "slot": 66,
+            "itemId": 268435522,
+            "count": 1
+          },
+          {
+            "slot": 67,
+            "itemId": 268435523,
+            "count": 1
+          },
+          {
+            "slot": 68,
+            "itemId": 268435524,
+            "count": 1
+          },
+          {
+            "slot": 69,
+            "itemId": 268435525,
+            "count": 1
+          },
+          {
+            "slot": 70,
+            "itemId": 268435526,
+            "count": 1
+          },
+          {
+            "slot": 71,
+            "itemId": 268435527,
+            "count": 1
+          },
+          {
+            "slot": 72,
+            "itemId": 268435528,
+            "count": 1
+          },
+          {
+            "slot": 73,
+            "itemId": 268435529,
+            "count": 1
+          },
+          {
+            "slot": 74,
+            "itemId": 268435530,
+            "count": 1
+          },
+          {
+            "slot": 75,
+            "itemId": 268435531,
+            "count": 1
+          },
+          {
+            "slot": 76,
+            "itemId": 268435532,
+            "count": 1
+          },
+          {
+            "slot": 77,
+            "itemId": 268435533,
+            "count": 1
+          },
+          {
+            "slot": 78,
+            "itemId": 268435534,
+            "count": 1
+          },
+          {
+            "slot": 79,
+            "itemId": 268435535,
+            "count": 1
+          },
+          {
+            "slot": 80,
+            "itemId": 268435536,
+            "count": 1
+          },
+          {
+            "slot": 81,
+            "itemId": 268435537,
+            "count": 1
+          },
+          {
+            "slot": 82,
+            "itemId": 268435538,
+            "count": 1
+          },
+          {
+            "slot": 83,
+            "itemId": 268435539,
+            "count": 1
+          },
+          {
+            "slot": 84,
+            "itemId": 268435540,
+            "count": 1
+          },
+          {
+            "slot": 85,
+            "itemId": 268435541,
+            "count": 1
+          },
+          {
+            "slot": 86,
+            "itemId": 268435542,
+            "count": 1
+          },
+          {
+            "slot": 87,
+            "itemId": 268435543,
+            "count": 1
+          },
+          {
+            "slot": 88,
+            "itemId": 268435544,
+            "count": 1
+          },
+          {
+            "slot": 89,
+            "itemId": 268435545,
+            "count": 1
+          },
+          {
+            "slot": 90,
+            "itemId": 268435546,
+            "count": 1
+          },
+          {
+            "slot": 91,
+            "itemId": 268435547,
+            "count": 1
+          },
+          {
+            "slot": 92,
+            "itemId": 268435548,
+            "count": 1
+          },
+          {
+            "slot": 93,
+            "itemId": 268435549,
+            "count": 1
+          },
+          {
+            "slot": 94,
+            "itemId": 268435550,
+            "count": 1
+          },
+          {
+            "slot": 95,
+            "itemId": 268435551,
+            "count": 1
+          },
+          {
+            "slot": 96,
+            "itemId": 268435552,
+            "count": 1
+          },
+          {
+            "slot": 97,
+            "itemId": 268435553,
+            "count": 1
+          },
+          {
+            "slot": 98,
+            "itemId": 268435554,
+            "count": 1
+          },
+          {
+            "slot": 99,
+            "itemId": 268435555,
+            "count": 1
+          },
+          {
+            "slot": 100,
+            "itemId": 268435556,
+            "count": 1
+          },
+          {
+            "slot": 101,
+            "itemId": 268435557,
+            "count": 1
+          },
+          {
+            "slot": 102,
+            "itemId": 268435558,
+            "count": 1
+          },
+          {
+            "slot": 103,
+            "itemId": 268435559,
+            "count": 1
+          },
+          {
+            "slot": 104,
+            "itemId": 268435560,
+            "count": 1
+          },
+          {
+            "slot": 105,
+            "itemId": 268435561,
+            "count": 1
+          },
+          {
+            "slot": 106,
+            "itemId": 268435562,
+            "count": 1
+          },
+          {
+            "slot": 107,
+            "itemId": 268435563,
+            "count": 1
+          },
+          {
+            "slot": 108,
+            "itemId": 268435564,
+            "count": 1
+          },
+          {
+            "slot": 109,
+            "itemId": 268435565,
+            "count": 1
+          },
+          {
+            "slot": 110,
+            "itemId": 268435566,
+            "count": 1
+          },
+          {
+            "slot": 111,
+            "itemId": 268435567,
+            "count": 1
+          },
+          {
+            "slot": 112,
+            "itemId": 268435568,
+            "count": 1
+          },
+          {
+            "slot": 113,
+            "itemId": 268435569,
+            "count": 1
+          },
+          {
+            "slot": 114,
+            "itemId": 268435570,
+            "count": 1
+          },
+          {
+            "slot": 115,
+            "itemId": 268435571,
+            "count": 1
+          },
+          {
+            "slot": 116,
+            "itemId": 268435572,
+            "count": 1
+          },
+          {
+            "slot": 117,
+            "itemId": 268435573,
+            "count": 1
+          },
+          {
+            "slot": 118,
+            "itemId": 268435574,
+            "count": 1
+          },
+          {
+            "slot": 119,
+            "itemId": 268435575,
+            "count": 1
+          },
+          {
+            "slot": 120,
+            "itemId": 268435576,
+            "count": 1
+          },
+          {
+            "slot": 121,
+            "itemId": 268435577,
+            "count": 1
+          },
+          {
+            "slot": 122,
+            "itemId": 268435578,
+            "count": 1
+          },
+          {
+            "slot": 123,
+            "itemId": 268435579,
+            "count": 1
+          },
+          {
+            "slot": 124,
+            "itemId": 268435580,
+            "count": 1
+          },
+          {
+            "slot": 125,
+            "itemId": 268435581,
+            "count": 1
+          },
+          {
+            "slot": 126,
+            "itemId": 268435582,
+            "count": 1
+          },
+          {
+            "slot": 127,
+            "itemId": 268435583,
+            "count": 1
+          }
+        ],
+        "extra": [
+          {
+            "slot": 0,
+            "itemId": 536870912,
+            "count": 1
+          },
+          {
+            "slot": 1,
+            "itemId": 536870913,
+            "count": 1
+          },
+          {
+            "slot": 2,
+            "itemId": 536870914,
+            "count": 1
+          },
+          {
+            "slot": 3,
+            "itemId": 536870915,
+            "count": 1
+          },
+          {
+            "slot": 4,
+            "itemId": 536870916,
+            "count": 1
+          },
+          {
+            "slot": 5,
+            "itemId": 536870917,
+            "count": 1
+          },
+          {
+            "slot": 6,
+            "itemId": 536870918,
+            "count": 1
+          },
+          {
+            "slot": 7,
+            "itemId": 536870919,
+            "count": 1
+          },
+          {
+            "slot": 8,
+            "itemId": 536870920,
+            "count": 1
+          },
+          {
+            "slot": 9,
+            "itemId": 536870921,
+            "count": 1
+          },
+          {
+            "slot": 10,
+            "itemId": 536870922,
+            "count": 1
+          },
+          {
+            "slot": 11,
+            "itemId": 536870923,
+            "count": 1
+          },
+          {
+            "slot": 12,
+            "itemId": 536870924,
+            "count": 1
+          },
+          {
+            "slot": 13,
+            "itemId": 536870925,
+            "count": 1
+          },
+          {
+            "slot": 14,
+            "itemId": 536870926,
+            "count": 1
+          },
+          {
+            "slot": 15,
+            "itemId": 536870927,
+            "count": 1
+          },
+          {
+            "slot": 16,
+            "itemId": 536870928,
+            "count": 1
+          },
+          {
+            "slot": 17,
+            "itemId": 536870929,
+            "count": 1
+          },
+          {
+            "slot": 18,
+            "itemId": 536870930,
+            "count": 1
+          },
+          {
+            "slot": 19,
+            "itemId": 536870931,
+            "count": 1
+          },
+          {
+            "slot": 20,
+            "itemId": 536870932,
+            "count": 1
+          },
+          {
+            "slot": 21,
+            "itemId": 536870933,
+            "count": 1
+          },
+          {
+            "slot": 22,
+            "itemId": 536870934,
+            "count": 1
+          },
+          {
+            "slot": 23,
+            "itemId": 536870935,
+            "count": 1
+          },
+          {
+            "slot": 24,
+            "itemId": 536870936,
+            "count": 1
+          },
+          {
+            "slot": 25,
+            "itemId": 536870937,
+            "count": 1
+          },
+          {
+            "slot": 26,
+            "itemId": 536870938,
+            "count": 1
+          },
+          {
+            "slot": 27,
+            "itemId": 536870939,
+            "count": 1
+          },
+          {
+            "slot": 28,
+            "itemId": 536870940,
+            "count": 1
+          },
+          {
+            "slot": 29,
+            "itemId": 536870941,
+            "count": 1
+          },
+          {
+            "slot": 30,
+            "itemId": 536870942,
+            "count": 1
+          },
+          {
+            "slot": 31,
+            "itemId": 536870943,
+            "count": 1
+          },
+          {
+            "slot": 32,
+            "itemId": 536870944,
+            "count": 1
+          },
+          {
+            "slot": 33,
+            "itemId": 536870945,
+            "count": 1
+          },
+          {
+            "slot": 34,
+            "itemId": 536870946,
+            "count": 1
+          },
+          {
+            "slot": 35,
+            "itemId": 536870947,
+            "count": 1
+          },
+          {
+            "slot": 36,
+            "itemId": 536870948,
+            "count": 1
+          },
+          {
+            "slot": 37,
+            "itemId": 536870949,
+            "count": 1
+          },
+          {
+            "slot": 38,
+            "itemId": 536870950,
+            "count": 1
+          },
+          {
+            "slot": 39,
+            "itemId": 536870951,
+            "count": 1
+          },
+          {
+            "slot": 40,
+            "itemId": 536870952,
+            "count": 1
+          },
+          {
+            "slot": 41,
+            "itemId": 536870953,
+            "count": 1
+          },
+          {
+            "slot": 42,
+            "itemId": 536870954,
+            "count": 1
+          },
+          {
+            "slot": 43,
+            "itemId": 536870955,
+            "count": 1
+          },
+          {
+            "slot": 44,
+            "itemId": 536870956,
+            "count": 1
+          },
+          {
+            "slot": 45,
+            "itemId": 536870957,
+            "count": 1
+          },
+          {
+            "slot": 46,
+            "itemId": 536870958,
+            "count": 1
+          },
+          {
+            "slot": 47,
+            "itemId": 536870959,
+            "count": 1
+          },
+          {
+            "slot": 48,
+            "itemId": 536870960,
+            "count": 1
+          },
+          {
+            "slot": 49,
+            "itemId": 536870961,
+            "count": 1
+          },
+          {
+            "slot": 50,
+            "itemId": 536870962,
+            "count": 1
+          },
+          {
+            "slot": 51,
+            "itemId": 536870963,
+            "count": 1
+          },
+          {
+            "slot": 52,
+            "itemId": 536870964,
+            "count": 1
+          },
+          {
+            "slot": 53,
+            "itemId": 536870965,
+            "count": 1
+          },
+          {
+            "slot": 54,
+            "itemId": 536870966,
+            "count": 1
+          },
+          {
+            "slot": 55,
+            "itemId": 536870967,
+            "count": 1
+          },
+          {
+            "slot": 56,
+            "itemId": 536870968,
+            "count": 1
+          },
+          {
+            "slot": 57,
+            "itemId": 536870969,
+            "count": 1
+          },
+          {
+            "slot": 58,
+            "itemId": 536870970,
+            "count": 1
+          },
+          {
+            "slot": 59,
+            "itemId": 536870971,
+            "count": 1
+          },
+          {
+            "slot": 60,
+            "itemId": 536870972,
+            "count": 1
+          },
+          {
+            "slot": 61,
+            "itemId": 536870973,
+            "count": 1
+          },
+          {
+            "slot": 62,
+            "itemId": 536870974,
+            "count": 1
+          },
+          {
+            "slot": 63,
+            "itemId": 536870975,
+            "count": 1
+          },
+          {
+            "slot": 64,
+            "itemId": 536870976,
+            "count": 1
+          },
+          {
+            "slot": 65,
+            "itemId": 536870977,
+            "count": 1
+          },
+          {
+            "slot": 66,
+            "itemId": 536870978,
+            "count": 1
+          },
+          {
+            "slot": 67,
+            "itemId": 536870979,
+            "count": 1
+          },
+          {
+            "slot": 68,
+            "itemId": 536870980,
+            "count": 1
+          },
+          {
+            "slot": 69,
+            "itemId": 536870981,
+            "count": 1
+          },
+          {
+            "slot": 70,
+            "itemId": 536870982,
+            "count": 1
+          },
+          {
+            "slot": 71,
+            "itemId": 536870983,
+            "count": 1
+          },
+          {
+            "slot": 72,
+            "itemId": 536870984,
+            "count": 1
+          },
+          {
+            "slot": 73,
+            "itemId": 536870985,
+            "count": 1
+          },
+          {
+            "slot": 74,
+            "itemId": 536870986,
+            "count": 1
+          },
+          {
+            "slot": 75,
+            "itemId": 536870987,
+            "count": 1
+          },
+          {
+            "slot": 76,
+            "itemId": 536870988,
+            "count": 1
+          },
+          {
+            "slot": 77,
+            "itemId": 536870989,
+            "count": 1
+          },
+          {
+            "slot": 78,
+            "itemId": 536870990,
+            "count": 1
+          },
+          {
+            "slot": 79,
+            "itemId": 536870991,
+            "count": 1
+          },
+          {
+            "slot": 80,
+            "itemId": 536870992,
+            "count": 1
+          },
+          {
+            "slot": 81,
+            "itemId": 536870993,
+            "count": 1
+          },
+          {
+            "slot": 82,
+            "itemId": 536870994,
+            "count": 1
+          },
+          {
+            "slot": 83,
+            "itemId": 536870995,
+            "count": 1
+          },
+          {
+            "slot": 84,
+            "itemId": 536870996,
+            "count": 1
+          },
+          {
+            "slot": 85,
+            "itemId": 536870997,
+            "count": 1
+          },
+          {
+            "slot": 86,
+            "itemId": 536870998,
+            "count": 1
+          },
+          {
+            "slot": 87,
+            "itemId": 536870999,
+            "count": 1
+          },
+          {
+            "slot": 88,
+            "itemId": 536871000,
+            "count": 1
+          },
+          {
+            "slot": 89,
+            "itemId": 536871001,
+            "count": 1
+          },
+          {
+            "slot": 90,
+            "itemId": 536871002,
+            "count": 1
+          },
+          {
+            "slot": 91,
+            "itemId": 536871003,
+            "count": 1
+          },
+          {
+            "slot": 92,
+            "itemId": 536871004,
+            "count": 1
+          },
+          {
+            "slot": 93,
+            "itemId": 536871005,
+            "count": 1
+          },
+          {
+            "slot": 94,
+            "itemId": 536871006,
+            "count": 1
+          },
+          {
+            "slot": 95,
+            "itemId": 536871007,
+            "count": 1
+          },
+          {
+            "slot": 96,
+            "itemId": 536871008,
+            "count": 1
+          },
+          {
+            "slot": 97,
+            "itemId": 536871009,
+            "count": 1
+          },
+          {
+            "slot": 98,
+            "itemId": 536871010,
+            "count": 1
+          },
+          {
+            "slot": 99,
+            "itemId": 536871011,
+            "count": 1
+          },
+          {
+            "slot": 100,
+            "itemId": 536871012,
+            "count": 1
+          },
+          {
+            "slot": 101,
+            "itemId": 536871013,
+            "count": 1
+          },
+          {
+            "slot": 102,
+            "itemId": 536871014,
+            "count": 1
+          },
+          {
+            "slot": 103,
+            "itemId": 536871015,
+            "count": 1
+          },
+          {
+            "slot": 104,
+            "itemId": 536871016,
+            "count": 1
+          },
+          {
+            "slot": 105,
+            "itemId": 536871017,
+            "count": 1
+          },
+          {
+            "slot": 106,
+            "itemId": 536871018,
+            "count": 1
+          },
+          {
+            "slot": 107,
+            "itemId": 536871019,
+            "count": 1
+          },
+          {
+            "slot": 108,
+            "itemId": 536871020,
+            "count": 1
+          },
+          {
+            "slot": 109,
+            "itemId": 536871021,
+            "count": 1
+          },
+          {
+            "slot": 110,
+            "itemId": 536871022,
+            "count": 1
+          },
+          {
+            "slot": 111,
+            "itemId": 536871023,
+            "count": 1
+          },
+          {
+            "slot": 112,
+            "itemId": 536871024,
+            "count": 1
+          },
+          {
+            "slot": 113,
+            "itemId": 536871025,
+            "count": 1
+          },
+          {
+            "slot": 114,
+            "itemId": 536871026,
+            "count": 1
+          },
+          {
+            "slot": 115,
+            "itemId": 536871027,
+            "count": 1
+          },
+          {
+            "slot": 116,
+            "itemId": 536871028,
+            "count": 1
+          },
+          {
+            "slot": 117,
+            "itemId": 536871029,
+            "count": 1
+          },
+          {
+            "slot": 118,
+            "itemId": 536871030,
+            "count": 1
+          },
+          {
+            "slot": 119,
+            "itemId": 536871031,
+            "count": 1
+          }
+        ]
+      },
+      "encodedHex": "4b505331ffff0f000100785634120100000000000000010178563412010000000000000001027856341201000000000000000103785634120100000000000000010478563412010000000000000001057856341201000000000000000106785634120100000000000000010778563412010000000000000001087856341201000000000000000109785634120100000000000000010a785634120100000000000000010b785634120100000000000000010c785634120100000000000000010d785634120100000000000000010e785634120100000000000000010f785634120100000000000000010000010100010200017f0010801078000000001001000000000000000101000010010000000000000002020000100100000000000000030300001001000000000000000404000010010000000000000005050000100100000000000000060600001001000000000000000707000010010000000000000008080000100100000000000000090900001001000000000000000a0a00001001000000000000000b0b00001001000000000000000c0c00001001000000000000000d0d00001001000000000000000e0e00001001000000000000000f0f0000100100000000000000101000001001000000000000001111000010010000000000000012120000100100000000000000131300001001000000000000001414000010010000000000000015150000100100000000000000161600001001000000000000001717000010010000000000000018180000100100000000000000191900001001000000000000001a1a00001001000000000000001b1b00001001000000000000001c1c00001001000000000000001d1d00001001000000000000001e1e00001001000000000000001f1f0000100100000000000000202000001001000000000000002121000010010000000000000022220000100100000000000000232300001001000000000000002424000010010000000000000025250000100100000000000000262600001001000000000000002727000010010000000000000028280000100100000000000000292900001001000000000000002a2a00001001000000000000002b2b00001001000000000000002c2c00001001000000000000002d2d00001001000000000000002e2e00001001000000000000002f2f0000100100000000000000303000001001000000000000003131000010010000000000000032320000100100000000000000333300001001000000000000003434000010010000000000000035350000100100000000000000363600001001000000000000003737000010010000000000000038380000100100000000000000393900001001000000000000003a3a00001001000000000000003b3b00001001000000000000003c3c00001001000000000000003d3d00001001000000000000003e3e00001001000000000000003f3f0000100100000000000000404000001001000000000000004141000010010000000000000042420000100100000000000000434300001001000000000000004444000010010000000000000045450000100100000000000000464600001001000000000000004747000010010000000000000048480000100100000000000000494900001001000000000000004a4a00001001000000000000004b4b00001001000000000000004c4c00001001000000000000004d4d00001001000000000000004e4e00001001000000000000004f4f0000100100000000000000505000001001000000000000005151000010010000000000000052520000100100000000000000535300001001000000000000005454000010010000000000000055550000100100000000000000565600001001000000000000005757000010010000000000000058580000100100000000000000595900001001000000000000005a5a00001001000000000000005b5b00001001000000000000005c5c00001001000000000000005d5d00001001000000000000005e5e00001001000000000000005f5f0000100100000000000000606000001001000000000000006161000010010000000000000062620000100100000000000000636300001001000000000000006464000010010000000000000065650000100100000000000000666600001001000000000000006767000010010000000000000068680000100100000000000000696900001001000000000000006a6a00001001000000000000006b6b00001001000000000000006c6c00001001000000000000006d6d00001001000000000000006e6e00001001000000000000006f6f0000100100000000000000707000001001000000000000007171000010010000000000000072720000100100000000000000737300001001000000000000007474000010010000000000000075750000100100000000000000767600001001000000000000007777000010010000000000000078780000100100000000000000797900001001000000000000007a7a00001001000000000000007b7b00001001000000000000007c7c00001001000000000000007d7d00001001000000000000007e7e00001001000000000000007f7f0000100100000000000000000000002001000000000000000101000020010000000000000002020000200100000000000000030300002001000000000000000404000020010000000000000005050000200100000000000000060600002001000000000000000707000020010000000000000008080000200100000000000000090900002001000000000000000a0a00002001000000000000000b0b00002001000000000000000c0c00002001000000000000000d0d00002001000000000000000e0e00002001000000000000000f0f0000200100000000000000101000002001000000000000001111000020010000000000000012120000200100000000000000131300002001000000000000001414000020010000000000000015150000200100000000000000161600002001000000000000001717000020010000000000000018180000200100000000000000191900002001000000000000001a1a00002001000000000000001b1b00002001000000000000001c1c00002001000000000000001d1d00002001000000000000001e1e00002001000000000000001f1f0000200100000000000000202000002001000000000000002121000020010000000000000022220000200100000000000000232300002001000000000000002424000020010000000000000025250000200100000000000000262600002001000000000000002727000020010000000000000028280000200100000000000000292900002001000000000000002a2a00002001000000000000002b2b00002001000000000000002c2c00002001000000000000002d2d00002001000000000000002e2e00002001000000000000002f2f0000200100000000000000303000002001000000000000003131000020010000000000000032320000200100000000000000333300002001000000000000003434000020010000000000000035350000200100000000000000363600002001000000000000003737000020010000000000000038380000200100000000000000393900002001000000000000003a3a00002001000000000000003b3b00002001000000000000003c3c00002001000000000000003d3d00002001000000000000003e3e00002001000000000000003f3f0000200100000000000000404000002001000000000000004141000020010000000000000042420000200100000000000000434300002001000000000000004444000020010000000000000045450000200100000000000000464600002001000000000000004747000020010000000000000048480000200100000000000000494900002001000000000000004a4a00002001000000000000004b4b00002001000000000000004c4c00002001000000000000004d4d00002001000000000000004e4e00002001000000000000004f4f0000200100000000000000505000002001000000000000005151000020010000000000000052520000200100000000000000535300002001000000000000005454000020010000000000000055550000200100000000000000565600002001000000000000005757000020010000000000000058580000200100000000000000595900002001000000000000005a5a00002001000000000000005b5b00002001000000000000005c5c00002001000000000000005d5d00002001000000000000005e5e00002001000000000000005f5f0000200100000000000000606000002001000000000000006161000020010000000000000062620000200100000000000000636300002001000000000000006464000020010000000000000065650000200100000000000000666600002001000000000000006767000020010000000000000068680000200100000000000000696900002001000000000000006a6a00002001000000000000006b6b00002001000000000000006c6c00002001000000000000006d6d00002001000000000000006e6e00002001000000000000006f6f00002001000000000000007070000020010000000000000071710000200100000000000000727200002001000000000000007373000020010000000000000074740000200100000000000000757500002001000000000000007676000020010000000000000077770000200100000000000000",
+      "witness": "xxh3:85467860a2a37f88"
+    }
+  ]
+}

@@ -11,7 +11,9 @@
 
 namespace kc {
 void logf(int, const char*, ...) {}
+uintptr_t unreadable_test_address = 0;
 bool rd(uintptr_t address, void* out, size_t n) {
+    if (address == unreadable_test_address) return false;
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
 }
@@ -139,6 +141,44 @@ void balance_type() {
     bal.name = "keen::BalancingTable", bal.brief = "BalancingTable", bal.kind = K_STRUCT, bal.size = 8;
     bal.fields = {{"playerLevelCap", reinterpret_cast<uintptr_t>(&u32), 0}, {"skillPointsPerLevel", reinterpret_cast<uintptr_t>(&u32), 4}};
     named()["keen::BalancingTable"] = &bal;
+}
+// keen::ByteTable {altarsPerFlameLevel u8[21] +0, playerLevelCap u32 +24}: the real balance table's per-level counts are byte
+// arrays of more than 16 elements, which the gamedata dumps show as "(21 bytes)"
+void byte_blob_type(uintptr_t unreadable) {
+    using namespace kc::gd;
+    unreadable_test_address = unreadable;
+    static TType u8, blob, tab;
+    u8.kind = K_U8, u8.size = 1;
+    blob.kind = K_BLOBARRAY, blob.size = 8, blob.inner_rec = reinterpret_cast<uintptr_t>(&u8);
+    tab.kind = K_STRUCT, tab.size = 8, tab.name = "test::ByteBlob";
+    tab.fields = {{"values", reinterpret_cast<uintptr_t>(&blob), 0}};
+    named()[tab.name] = &tab;
+}
+// test::Wrapped {id: test::ItemId {value u32} +0, pair: test::Pair {a u32 +0, b u32 +4} +4}: the game's ids (keen::ItemId,
+// keen::RecipeId) are one-scalar structs, which the walker reads as the scalar (gd::leaf_of), not as {"value": n}
+void wrapped_id_type() {
+    using namespace kc::gd;
+    static TType u32, id, pair, w;
+    auto rec = [](const TType& t) { return reinterpret_cast<uintptr_t>(&t); };
+    u32.name = u32.brief = "uint32", u32.kind = K_U32, u32.size = 4;
+    id.name = "test::ItemId", id.brief = "ItemId", id.kind = K_STRUCT, id.size = 4;
+    id.fields = {{"value", rec(u32), 0}};
+    pair.name = "test::Pair", pair.brief = "Pair", pair.kind = K_STRUCT, pair.size = 8;
+    pair.fields = {{"a", rec(u32), 0}, {"b", rec(u32), 4}};
+    w.name = "test::Wrapped", w.brief = "Wrapped", w.kind = K_STRUCT, w.size = 12;
+    w.fields = {{"id", rec(id), 0}, {"pair", rec(pair), 4}};
+    named()[w.name] = &w;
+}
+void byte_table_type() {
+    using namespace kc::gd;
+    static TType u8, u32, arr, tab;
+    auto rec = [](const TType& t) { return reinterpret_cast<uintptr_t>(&t); };
+    u8.name = u8.brief = "uint8", u8.kind = K_U8, u8.size = 1;
+    u32.name = u32.brief = "uint32", u32.kind = K_U32, u32.size = 4;
+    arr.name = arr.brief = "keen::StaticArray<uint8,21>", arr.kind = K_ARRAY, arr.size = 21, arr.count = 21, arr.inner_rec = rec(u8);
+    tab.name = "keen::ByteTable", tab.brief = "ByteTable", tab.kind = K_STRUCT, tab.size = 28;
+    tab.fields = {{"altarsPerFlameLevel", rec(arr), 0}, {"playerLevelCap", rec(u32), 24}};
+    named()["keen::ByteTable"] = &tab;
 }
 }  // namespace rbtest
 }  // namespace kc

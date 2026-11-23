@@ -28,6 +28,8 @@ void equip_world_closed();
 KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnItemsEquipDoneFn done, void* user,
                         uint64_t* out_ticket);
 KilnResult equip_status(KilnItemsEquipStatus* out);
+KilnResult give_equip_submit(KilnOwner owner, const KilnItemsGiveEquipRequest* r, KilnItemsEquipDoneFn done, void* user,
+                            uint64_t* out_ticket);
 bool equip_cancel(uint64_t ticket);    // drops the callback; false: not an equip ticket
 void equip_cancel_owner(KilnOwner owner);
 

@@ -464,8 +464,10 @@ public sealed class TransferRule : IDisposable
     /// <summary>What the rule does, for logs.</summary>
     public string What { get; }
 
+    /// <summary>True until the rule is disposed.</summary>
     public bool IsActive => Volatile.Read(ref _handle) != 0;
 
+    /// <summary>Ends the rule. Calling it again does nothing.</summary>
     public void Dispose()
     {
         var h = Interlocked.Exchange(ref _handle, 0);
@@ -475,20 +477,27 @@ public sealed class TransferRule : IDisposable
         Detach = null;
     }
 
+    /// <summary>What the rule does, and whether it has ended, for logs.</summary>
     public override string ToString() => $"transfer rule: {What}{(IsActive ? "" : " (ended)")}";
 }
 
 /// <summary>What a mod can move: one stack, the game's quick stack, or its move all.</summary>
 public enum MoveKind
 {
+    /// <summary>One stack from one slot to another inventory.</summary>
     Stack = 0,
+    /// <summary>The game's quick stack: stacks the target already holds a stack of.</summary>
     QuickStack = 1,
+    /// <summary>The game's move all: every stack that fits.</summary>
     All = 2,
 }
 
+/// <summary>Options of a move (<see cref="Items.Move"/>, <see cref="Items.QuickStack"/>,
+/// <see cref="Items.MoveAll"/>). Combine them with <c>|</c>.</summary>
 [Flags]
 public enum MoveOptions
 {
+    /// <summary>No options: the defaults of each flag below apply.</summary>
     None = 0,
     /// <summary>Run and roll back: the result says what would move. Transfer rules and native handlers still run,
     /// but no <see cref="InventoryTransferEvent"/> is emitted.</summary>
@@ -504,6 +513,11 @@ public enum MoveOptions
 
 /// <summary>One piece of a move's ledger: <see cref="Amount"/> of <see cref="Item"/> left <see cref="From"/> and arrived
 /// in <see cref="To"/>. Gear carries its <see cref="ItemEntity"/> along (the same one before and after).</summary>
+/// <param name="From">The slot the items left.</param>
+/// <param name="To">The slot they arrived in.</param>
+/// <param name="Item">The item that moved.</param>
+/// <param name="Amount">How many moved.</param>
+/// <param name="ItemEntity">The item entity of a piece of gear that moved whole; none for a plain stack.</param>
 public readonly record struct MoveChange(SlotId From, SlotId To, ItemId Item, int Amount, EntityId ItemEntity)
 {
     /// <summary>The item entity that moved, as one particular item: it moves whole, stamp and all, so this equals its
@@ -520,6 +534,20 @@ public readonly record struct MoveChange(SlotId From, SlotId To, ItemId Item, in
 /// stack holds), <see cref="ItemsStatus.NoInventory"/>, <see cref="ItemsStatus.SlotChanged"/> (the slot is not the
 /// source's, or empty), <see cref="ItemsStatus.Refused"/> (equipped slot; the game refused; a rule or handler canceled
 /// it: <see cref="Canceled"/>), <see cref="ItemsStatus.Unavailable"/>, <see cref="ItemsStatus.Dropped"/>.</summary>
+/// <param name="Status">How the move ended; see the type's summary.</param>
+/// <param name="Kind">Which move it was.</param>
+/// <param name="From">The inventory owner the items left.</param>
+/// <param name="To">The inventory owner they went to.</param>
+/// <param name="Requested">A stack move: the count asked for (the stack's size when none was given). 0 for the other
+/// kinds.</param>
+/// <param name="Done">How many items moved (a dry run: how many would).</param>
+/// <param name="Stacks">How many source stacks gave something.</param>
+/// <param name="Changes">The moves, slot by slot (the first ones only; <see cref="Done"/> counts them all).</param>
+/// <param name="Message">Why it failed or fell short, in words; empty when it went through.</param>
+/// <param name="GameError">The game's own error code when it refused; 0 otherwise.</param>
+/// <param name="Canceled">True when a transfer rule or handler canceled the game's quick stack or move all.</param>
+/// <param name="Steps">How many sim steps passed between the request and the move.</param>
+/// <param name="DryRun">True when nothing moved: the result says what would.</param>
 public sealed record MoveResult(
     ItemsStatus Status,
     MoveKind Kind,
@@ -538,6 +566,7 @@ public sealed record MoveResult(
     /// <summary>Something moved (or would, in a dry run).</summary>
     public bool Succeeded => Status is ItemsStatus.Done or ItemsStatus.Partial;
 
+    /// <summary>The kind, the status, the counts and the two owners, for logs.</summary>
     public override string ToString() =>
         $"{Kind} {Status} {Done} item(s) in {Stacks} stack(s) {From} -> {To}{(DryRun ? " (dry run)" : "")}" + (Message.Length > 0 ? $": {Message}" : "");
 
@@ -554,27 +583,46 @@ public enum TransferKind
     MoveAll = 2,
 }
 
+/// <summary>Which of the game's inventory-wide transfers a rule applies to. Combine them with <c>|</c>.</summary>
 [Flags]
 public enum TransferKinds
 {
+    /// <summary>Quick stack.</summary>
     QuickStack = 1,
+    /// <summary>Move all.</summary>
     MoveAll = 2,
+    /// <summary>Both kinds.</summary>
     Any = 3,
 }
 
 /// <summary>What a client's <c>inventoryTransferAction</c> asks for (<see cref="Items.Transfers.ParseAction"/>).</summary>
 public enum ClientTransferAmount : byte
 {
+    /// <summary>One item.</summary>
     One = 0,
+    /// <summary>Half the stack.</summary>
     Half = 1,
+    /// <summary>The whole stack.</summary>
     All = 2,
+    /// <summary>The amount in <see cref="ClientTransfer.CustomAmount"/>.</summary>
     CustomAmount = 3,
+    /// <summary>Destroy the items instead of moving them.</summary>
     Destroy = 4,
 }
 
 /// <summary>A client's <c>inventoryTransferAction</c>. The game reads its flags to pick the path:
 /// <see cref="RefillStacks"/> is a quick stack (the R key held), <see cref="MoveAllStacks"/> a move all; neither is a
 /// single stack from <see cref="SourceSlot"/> to <see cref="TargetSlot"/>.</summary>
+/// <param name="Source">The inventory owner the items leave.</param>
+/// <param name="Target">The inventory owner they go to.</param>
+/// <param name="SourceSlot">The slot they leave (a single-stack transfer).</param>
+/// <param name="TargetSlot">The slot they go to (a single-stack transfer).</param>
+/// <param name="Amount">How much of the stack the client asks for.</param>
+/// <param name="CustomAmount">The amount when <see cref="Amount"/> is
+/// <see cref="ClientTransferAmount.CustomAmount"/>.</param>
+/// <param name="RefillStacks">True for a quick stack (the R key held).</param>
+/// <param name="MoveAllStacks">True for a move all.</param>
+/// <param name="Gifting">True when the player gives the items to another player.</param>
 public readonly record struct ClientTransfer(EntityId Source, EntityId Target, SlotId SourceSlot, SlotId TargetSlot,
     ClientTransferAmount Amount, int CustomAmount, bool RefillStacks, bool MoveAllStacks, bool Gifting);
 
@@ -601,6 +649,7 @@ public sealed class InventoryTransferEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>Which transfer it was: quick stack or move all.</summary>
     public TransferKind Kind { get; }
 
     /// <summary>The inventory owner the items left.</summary>
@@ -627,10 +676,24 @@ public sealed class InventoryTransferEvent : KilnEvent
     /// <summary>The sim step it ran in.</summary>
     public ulong Step { get; }
 
+    /// <summary>The kind, the two owners and the counts, for logs.</summary>
     public override string ToString() =>
         $"{Kind} {From} -> {To}: {Moved} item(s){(Canceled ? ", canceled" : "")}{(Kept > 0 ? $", {Kept} stack(s) kept" : "")}{(ByMod ? ", by a mod" : "")}";
 }
 
 /// <summary>State of kiln.items' v3 parts.</summary>
+/// <param name="Moves">True when <see cref="Items.Move"/>, <see cref="Items.QuickStack"/> and
+/// <see cref="Items.MoveAll"/> work.</param>
+/// <param name="Names">True when <see cref="Items.ContainerName"/> works on this game build.</param>
+/// <param name="TransferHooks">True when the quick stack and move all hooks can be installed.</param>
+/// <param name="HooksInstalled">True when they are installed (a rule or handler was registered once).</param>
+/// <param name="Rules">Active transfer rules.</param>
+/// <param name="Handlers">Active native transfer handlers.</param>
+/// <param name="Reporters">Active listeners of transfer reports.</param>
+/// <param name="TransfersSeen">Calls of the game's quick stack and move all since the hooks went in.</param>
+/// <param name="TransfersCanceled">How many of those a rule or handler canceled.</param>
+/// <param name="MovesDone">Move requests that moved something.</param>
+/// <param name="NamesFound">Container name lookups that found a name.</param>
+/// <param name="Detail">The reason when a part is off; empty otherwise.</param>
 public sealed record ItemsV3Status(bool Moves, bool Names, bool TransferHooks, bool HooksInstalled, int Rules, int Handlers,
     int Reporters, ulong TransfersSeen, ulong TransfersCanceled, ulong MovesDone, int NamesFound, string Detail);

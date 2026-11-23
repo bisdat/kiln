@@ -57,7 +57,7 @@ internal static partial class Compiler
         }
         void Angle(float degrees)
         {
-            if (degrees is <= 0 or >= 180) throw new BlockError(ctx.Block, $"{path}.angle", $"{degrees} is outside 1..179 degrees");
+            if (degrees is <= 0 or >= 180) throw new BlockError(ctx.Block, $"{path}.angle", $"{degrees} must be more than 0 and less than 180 degrees");
         }
         switch (d)
         {
@@ -70,7 +70,8 @@ internal static partial class Compiler
                 break;
             case ConeBlock c:
                 Positive(c.Range, "range");
-                Angle(c.Angle);
+                // NaN fails every comparison: written this way it is refused, not taken for a full circle
+                if (!(c.Angle > 0 && c.Angle <= 360)) throw new BlockError(ctx.Block, $"{path}.angle", $"{c.Angle} must be more than 0 and at most 360 degrees");
                 Does(c.Effects);
                 break;
             case BeamBlock b:
@@ -342,7 +343,11 @@ internal static partial class Compiler
     {
         if (string.IsNullOrWhiteSpace(t.Name)) throw new BlockError(ctx.Block, $"{path}name", "a talent needs a name players can read");
         if (t.Cost < 0) throw new BlockError(ctx.Block, $"{path}cost", $"{t.Cost} is less than 0");
-        if (t.MaxLevel < 1) throw new BlockError(ctx.Block, $"{path}maxLevel", $"{t.MaxLevel} is less than 1");
+        if (t.MaxLevel < 1) throw new BlockError(ctx.Block, $"{path}maxLevel", $"{t.MaxLevel} must be at least 1 and at most 99");
+        // the cap and the grid cell are a tree's: a tree refuses them (TalentTree below), as does the game's tree; a talent on its own only warns
+        if (t.MaxLevel > 99) ctx.Tolerate($"{path}maxLevel", $"{t.MaxLevel} must be at least 1 and at most 99; a tree with this talent is refused");
+        if (t.Column is < 0 or > 31) ctx.Tolerate($"{path}column", $"{t.Column} must be at least 0 and at most 31; a tree with this talent is refused");
+        if (t.Row is < 0 or > 31) ctx.Tolerate($"{path}row", $"{t.Row} must be at least 0 and at most 31; a tree with this talent is refused");
         if (t.PointsSpent < 0) throw new BlockError(ctx.Block, $"{path}pointsSpent", $"{t.PointsSpent} is less than 0");
         if (t.CharacterLevel < 0) throw new BlockError(ctx.Block, $"{path}characterLevel", $"{t.CharacterLevel} is less than 0");
         if (t.Icon is { } icon && !icon.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) throw new BlockError(ctx.Block, $"{path}icon", $"\"{icon}\" is not a PNG in the mod's folder");

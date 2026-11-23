@@ -211,6 +211,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     public void Dispose()
     {
         Events.HandlerFaulted -= OnHandlerFaulted;
+        _registry?.Dispose(); _registry = null;
         StopTeardowns();
     }
 
@@ -430,6 +431,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
         if (_reportStart) StartProgress.Step("mods", "", "", count, count);
         PublishSnapshot();
+        TickRegistry();
         return loaded;
     }
 
@@ -565,6 +567,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             if (invoked)
             {
                 mod.Loaded = true;
+                _registry?.Loaded(instance, context, directory, _registryReload);
                 // a committed boot mod's runtime activation: its definitions' runtime parts and BootDefinitionsCommittedEvent (Kiln.Blocks)
                 if (manifest.Boot != ManifestBoot.None && BootGeneration.Report(manifest.Id) is { State: BootModState.Committed })
                     ActivateBoot(manifest.Id);
@@ -1010,7 +1013,10 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         foreach (var f in FailedDependents([id, .. cascade]))
             if (!directories.Contains(f.Directory))
                 directories.Add(f.Directory);
-        var loaded = LoadSet(directories.Select(ModCandidate.Read).ToList());
+        List<string> loaded;
+        _registryReload = true;
+        try { loaded = LoadSet(directories.Select(ModCandidate.Read).ToList()); }
+        finally { _registryReload = false; }
         var ok = loaded.Contains(id) && cascade.TrueForAll(loaded.Contains);
         var version = RecordById(id)?.Manifest?.Version ?? "?";
         var others = loaded.Where(x => x != id).ToList();
@@ -1116,6 +1122,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
 
     public void Pre(in TickInfo tick, IReadOnlyList<(LogLevel Level, string Text)> gameLines)
     {
+        TickRegistry();
         while (_unobserved.TryDequeue(out var lost)) AttributeUnobserved(lost);
         FinishWaitingUnloads();
         foreach (var mod in _mods)

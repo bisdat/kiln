@@ -4,7 +4,8 @@
 using System.Text.Json.Nodes;
 namespace Kiln;
 
-internal sealed record ToolActionPlan(Guid PrimaryProgram, Guid SecondaryProgram, Guid PrimarySequence, Guid SecondarySequence);
+internal sealed record ToolActionPlan(Guid PrimaryProgram, Guid SecondaryProgram, Guid PrimarySequence, Guid SecondarySequence,
+    TerrainToolMode PrimaryMode, TerrainToolMode SecondaryMode);
 
 internal static partial class Compiler
 {
@@ -26,13 +27,19 @@ internal static partial class Compiler
             new JsonObject { ["events[SpawnImpact#1].impact"] = pp.ToString() });
         low.Clone("sequences", ss, $"{ctx.Mod.Id}.{name}.secondary", ToolSecondarySequence,
             new JsonObject { ["events[SpawnImpact#1].impact"] = sp.ToString() });
-        return new ToolActionPlan(pp, sp, ps, ss);
+        return new ToolActionPlan(pp, sp, ps, ss, primary.Mode, secondary.Mode);
     }
 
     internal static ItemDefinition ApplyToolActions(BlockContext ctx, Lowered low, ItemDefinition brush, ToolActionPlan plan)
     {
         var fields = brush.Fields is null ? new Dictionary<string, object>() : new(brush.Fields);
         fields["equipment.repeatActionWhenPressed"] = true;
+        // The game's build cursor checks the selected building material on an input whose item asks for it, and the
+        // terraform impact refuses the stroke while the check fails (CursorFlag MissingMaterials; rules/CursorFlags'
+        // material check, docs/re/rules.md 2.1). Building_Overgrowth_Shape_Small asks on primary, its Add. A Remove takes
+        // no material, and a removal-only tool has none to select: it asks on neither input (kiln#133).
+        if (plan.PrimaryMode == TerrainToolMode.Remove) fields["equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction"] = false;
+        if (plan.SecondaryMode == TerrainToolMode.Remove) fields["equipment.cursorConfig.checkRequiredMaterialsOnSecondaryAction"] = false;
         ApplyToolActionRules(ctx, low, brush.Name, plan);
         return brush with { Fields = fields };
     }

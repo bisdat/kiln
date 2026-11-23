@@ -8,34 +8,54 @@ namespace Kiln;
 /// game keeps per kind for what a tool harvests and breaks (wood, stone, metal, explosion).</summary>
 public enum GearDamageKind
 {
+    /// <summary>Cut damage (<c>physicalCutDamage</c>).</summary>
     Cut,
+    /// <summary>Pierce damage (<c>physicalPierceDamage</c>).</summary>
     Pierce,
+    /// <summary>Blunt damage (<c>physicalBluntDamage</c>).</summary>
     Blunt,
+    /// <summary>Fire damage (<c>magicalFireDamage</c>).</summary>
     Fire,
+    /// <summary>Ice damage (<c>magicalIceDamage</c>).</summary>
     Ice,
     /// <summary>The game's fog damage.</summary>
     Shroud,
+    /// <summary>Lightning damage (<c>magicalLightningDamage</c>).</summary>
     Lightning,
+    /// <summary>Poison damage (<c>poisonDamage</c>).</summary>
     Poison,
+    /// <summary>Healing (<c>healing</c>).</summary>
     Healing,
+    /// <summary>The whole number the game keeps for wood, not a share (<c>woodDamage</c>).</summary>
     Wood,
+    /// <summary>The whole number the game keeps for stone, not a share (<c>stoneDamage</c>).</summary>
     Stone,
+    /// <summary>The whole number the game keeps for metal, not a share (<c>metalDamage</c>).</summary>
     Metal,
+    /// <summary>The whole number the game keeps for explosions, not a share (<c>explosionDamage</c>).</summary>
     Explosion,
 }
 
 /// <summary>A kind of armour an item gives (<see cref="GearStats.Armor"/>).</summary>
 public enum GearArmorKind
 {
+    /// <summary>Physical armour (<c>physical</c>).</summary>
     Physical,
+    /// <summary>Magical armour (<c>magical</c>).</summary>
     Magical,
+    /// <summary>Armour against cut damage (<c>cut</c>).</summary>
     Cut,
+    /// <summary>Armour against pierce damage (<c>pierce</c>).</summary>
     Pierce,
+    /// <summary>Armour against blunt damage (<c>blunt</c>).</summary>
     Blunt,
+    /// <summary>Armour against fire damage (<c>fire</c>).</summary>
     Fire,
+    /// <summary>Armour against ice damage (<c>ice</c>).</summary>
     Ice,
     /// <summary>The game's fog armour.</summary>
     Shroud,
+    /// <summary>Armour against lightning damage (<c>lightning</c>).</summary>
     Lightning,
 }
 

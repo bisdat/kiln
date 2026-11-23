@@ -186,6 +186,19 @@ public static class Descriptors
         "list the row in kiln.mod.json \"features\", or mark the calling method [RequiresCapability(\"row\")] to pass the " +
         "requirement on to its callers.");
 
+    public static readonly DiagnosticDescriptor RegistryOverrideMissing = Rule("KILN122",
+        "Registry points declared without an override",
+        "'{0}' declares registry entry points but does not override Mod.OnRegistry; Kiln refuses this declaration",
+        Contract, DiagnosticSeverity.Warning,
+        "RegistryEntryPoints is constant metadata read by the Host without running mod code. It needs a real OnRegistry override, " +
+        "including an inherited override; a hidden method does not count. Since API 0.2.17.");
+
+    public static readonly DiagnosticDescriptor RegistryPointsInvalid = Rule("KILN123",
+        "Invalid automatic registry points",
+        "'{0}' has invalid automatic registry points; declare a nonzero combination of GameStart, ModLoad, WorldLoad and HotReload (Manual is explicit)",
+        Contract, DiagnosticSeverity.Warning,
+        "Unknown bits, zero and Manual are not automatic entry points. Kiln refuses the declaration without executing the mod. Since API 0.2.17.");
+
     public static readonly DiagnosticDescriptor ExtensionValueType = Rule("KILN199",
         "Replicated extension value type outside the rule",
         "'{0}' cannot be the value of a replicated extension: {1}",

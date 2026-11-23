@@ -8,6 +8,7 @@ namespace Kiln;
 /// <summary>What a template is, judged from its name.</summary>
 public enum TemplateKind
 {
+    /// <summary>The template's kind is not known.</summary>
     Unknown = 0,
     /// <summary>Enemies and animals (Enemy_*, Animal_*, FakePlayer_* ...).</summary>
     Creature = 1,
@@ -25,6 +26,7 @@ public enum TemplateKind
 [Flags]
 public enum SpawnFlags
 {
+    /// <summary>No switches: Kiln records the entity in its per-world list, and it is not marked DoNotSave.</summary>
     None = 0,
     /// <summary>Do not record the entity in Kiln's per-world list; you remove it yourself.</summary>
     NoTrack = 1,
@@ -48,10 +50,24 @@ public enum SpawnFlags
 public sealed record TemplateInfo(Guid Id, string Name, string DisplayName, TemplateKind Kind, bool Shipped, bool LoadedByGame,
     bool? NeverSaved = null, bool Expires = false)
 {
+    /// <summary>The template's name, followed by its display name in brackets when it has one.</summary>
     public override string ToString() => DisplayName.Length > 0 ? $"{Name} ({DisplayName})" : Name;
 }
 
 /// <summary>An entity Kiln spawned in this world (kept in <c>kiln/data/spawn/&lt;world&gt;.json</c>).</summary>
+/// <param name="Serial">Kiln's id for the record, stable across restarts (unlike <paramref name="Entity"/>).</param>
+/// <param name="Entity">The entity's current id; 0 (<see cref="EntityId.None"/>) when it is not found in the world
+/// right now.</param>
+/// <param name="Template">The template GUID it was spawned from.</param>
+/// <param name="TemplateName">The template's engine name.</param>
+/// <param name="Position">Its last known position.</param>
+/// <param name="SpawnPosition">Where it was spawned.</param>
+/// <param name="SpawnedAt">When it was spawned (UTC, to the second).</param>
+/// <param name="IsLive">True when the entity exists in the world now; false when the record is missing its entity
+/// (gone, not saved, or not re-found yet after a restart).</param>
+/// <param name="Flags">The <see cref="SpawnFlags"/> the spawn was made with.</param>
+/// <param name="Tag">The <see cref="SpawnOptions.Tag"/> of the spawn, or "".</param>
+/// <param name="Origin">The id of the mod that spawned it.</param>
 public sealed record TrackedEntity(
     ulong Serial,
     EntityId Entity,
@@ -66,9 +82,24 @@ public sealed record TrackedEntity(
     string Origin);
 
 /// <summary>What <see cref="Spawn.CleanupTracked"/> did.</summary>
+/// <param name="Destroyed">Records whose entity was destroyed.</param>
+/// <param name="Missing">Records whose entity was not in the world; they are dropped.</param>
+/// <param name="Kept">Records that did not match the tag / origin filter and stay tracked.</param>
 public readonly record struct CleanupResult(int Destroyed, int Missing, int Kept);
 
 /// <summary>An entity's template and transform at the moment of the call.</summary>
+/// <param name="Entity">The entity that was inspected.</param>
+/// <param name="Template">The template GUID it was made from; null when unknown.</param>
+/// <param name="TemplateName">The template's engine name; null when <paramref name="Template"/> is null or not in the
+/// template list.</param>
+/// <param name="Position">Where it is now.</param>
+/// <param name="YawDegrees">Its rotation about +Y (up), in degrees.</param>
+/// <param name="IsTracked">True when it is a live record in Kiln's per-world list of spawned entities.</param>
+/// <param name="Serial">Its tracker record's serial (<see cref="TrackedEntity.Serial"/>) when
+/// <paramref name="IsTracked"/>, else 0.</param>
+/// <param name="SpawnTime">The game's SpawnTime component of the entity (ECS time in nanoseconds); null when it has
+/// none.</param>
+/// <param name="Parent">Its parent in the engine's entity record; <see cref="EntityId.None"/> when it has none.</param>
 public sealed record EntityInfo(EntityId Entity, Guid? Template, string? TemplateName, WorldPosition Position, float YawDegrees,
     bool IsTracked, ulong Serial, long? SpawnTime, EntityId Parent);
 
@@ -111,6 +142,7 @@ public sealed class SpawnOptions
     /// <summary>&gt; 0: the entity's level (OverrideLevel). 0 = the template's own.</summary>
     public int Level { get; init; }
 
+    /// <summary>The <see cref="SpawnFlags"/> switches; none by default.</summary>
     public SpawnFlags Flags { get; init; }
 
     /// <summary>Extra components given to the engine with the spawn (at most 64; one value per component). A
@@ -128,6 +160,8 @@ public sealed class SpawnOptions
 /// and <see cref="Spawn.TryItem"/> report the same refusal as a <see cref="SpawnResult"/> instead of throwing.</summary>
 public sealed class SpawnException(string message, int code) : Exception(message)
 {
+    /// <summary>The native result code: 1 invalid argument, 2 unknown template or entity, any other value means the
+    /// engine refused (kiln.log has the game's reason).</summary>
     public int Code { get; } = code;
 }
 

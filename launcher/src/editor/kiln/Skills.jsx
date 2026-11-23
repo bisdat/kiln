@@ -7,7 +7,7 @@
 // hover opens on the desktop follows focus.
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../ui';
-import { skills, nomeDe, descricaoDe, ATRIBUTOS, atributosDaArvore } from '../src/gamedata.js';
+import { skills, skillName, descricaoDe, ATRIBUTOS, atributosDaArvore } from '../src/gamedata.js';
 import { ui, tex } from '../src/ui.js';
 import { totalKey as totalKeyOf, checkTree, gameTotal } from '../src/treecheck.js';
 import { t } from '../../i18n';
@@ -174,7 +174,7 @@ export default function Skills({ model, setModel }) {
           return (
             <g key={n.id} className={`ke-node ${st}`} transform={`translate(${n.x} ${n.y})`} onClick={click} onContextMenu={ctx}
               role={env.deck ? undefined : 'button'} tabIndex={env.deck ? undefined : 0} aria-disabled={!env.deck && (disabled || isRoot) || undefined}
-              aria-label={env.deck ? undefined : isRoot ? nomeDe(n, '') : t('editor.skills.nodeLabel', { name: nomeDe(n, ''), level: lv, max: n.maxLevel || 1 })}
+              aria-label={env.deck ? undefined : isRoot ? skillName(n.id) : t('editor.skills.nodeLabel', { name: skillName(n.id), level: lv, max: n.maxLevel || 1 })}
               style={env.deck ? undefined : { outline: 'none' }}
               onFocus={env.deck ? undefined : () => { setFocused(n.id); follow(n); }}
               onBlur={env.deck ? undefined : () => { setFocused(null); setHover((h) => h === n ? null : h); }}
@@ -251,7 +251,7 @@ export default function Skills({ model, setModel }) {
             return (
               <button key={n.id} type="button" className="ke-tree-key" data-deck-id={`node-${n.id}`}
                 data-deck-a={disabled || n.type === 'Root' ? '-' : lv >= (n.maxLevel || 1) ? '-' : t('editor.skills.plusLevel')}
-                aria-label={`${nomeDe(n, '')}${n.type !== 'Root' ? `: ${lv}/${n.maxLevel || 1}` : ''}`} aria-disabled={disabled || n.type === 'Root' || undefined}
+                aria-label={`${skillName(n.id)}${n.type !== 'Root' ? `: ${lv}/${n.maxLevel || 1}` : ''}`} aria-disabled={disabled || n.type === 'Root' || undefined}
                 style={{ left: (n.x - v.x) * v.z + size.w / 2 - r, top: (n.y - v.y) * v.z + size.h / 2 - r, width: 2 * r, height: 2 * r }}
                 onFocus={() => follow(n)} onClick={() => { if (n.type !== 'Root') setLevel(n.id, lv + 1); }} />
             );
@@ -262,7 +262,7 @@ export default function Skills({ model, setModel }) {
       {hover && (
         <div className="ke-tree-tip">
           <span className="k-sc" style={{ color: classOf(hover) }}>{t(`editor.skills.class.${CLASS[hover.class] ? hover.class.toLowerCase() : 'neutral'}`)}{hover.type !== 'Root' ? ` · ${t('editor.skills.cost', { n: hover.cost })}` : ''}{hover.maxLevel ? ` · ${t('editor.skills.maxN', { n: hover.maxLevel })}` : ''}</span>
-          <strong className="ke-tree-tip-name">{nomeDe(hover, '')}</strong>
+          <strong className="ke-tree-tip-name">{skillName(hover.id)}</strong>
           {descricaoDe(hover) && <span className="ke-tree-tip-desc">{descricaoDe(hover).replace(/%k/g, '?')}</span>}
           {hover.type !== 'Root' && <span className="ke-note">{env.deck ? t('editor.skills.deckHint') : t('editor.skills.keyboardHint')}</span>}
         </div>

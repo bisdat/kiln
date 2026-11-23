@@ -1,0 +1,17 @@
+<Project>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>registry-edits</KilnModId>
+    <KilnModName>Registry edits example</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Typed registry edits at game start, world load and hot reload.</Description>
+    <KilnSide>server</KilnSide>
+    <KilnServices>Registry</KilnServices>
+    <KilnGameIds>None</KilnGameIds>
+    <NoWarn>$(NoWarn);KILNX031</NoWarn>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+  <Target Name="_RegistryEditsSharedOut" AfterTargets="_KilnModFiles">
+    <ItemGroup><_KilnModFile Remove="$(OutDir)Kiln.*" /></ItemGroup>
+  </Target>
+</Project>

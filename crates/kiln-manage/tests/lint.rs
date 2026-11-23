@@ -780,3 +780,100 @@ fn content_pack_registry_section() {
     let r = lint_as(&dir.join("stage"), "content/a.json", bad_stage);
     assert!(!refuses(&r, &[]).is_empty(), "an unknown stage is refused");
 }
+
+/// The same boundary matrix Kiln.Blocks.Tests compiles, checked by both kiln lint and independent draft-2020-12 AJV.
+#[test]
+fn block_range_boundaries_agree_with_schema_and_compiler_contract() {
+    let root = repo();
+    // Use the real reader's round-trip f64 parsing, including exact float.MaxValue boundaries.
+    let read = |path: &str| lint::json::parse(path, &std::fs::read_to_string(root.join(path)).unwrap(), 0, lint::json::Dialect::STRICT).root.unwrap().to_json();
+    let matrix = read("schema/fixtures/block-ranges.json");
+    let schema = read("schema/kiln-blocks.schema.json");
+    let dir = tmp("block-ranges");
+    let mut files = Vec::new();
+    let mut expected = Vec::new();
+    let mut bad = Vec::new();
+    for c in matrix.as_array().unwrap() {
+        let mut leaf = &schema["$defs"][c["definition"].as_str().unwrap()];
+        for part in c["schema"].as_str().unwrap().split('/').filter(|p| !p.is_empty()) {
+            leaf = if let Some(name) = part.strip_prefix("$ref:") { &schema["$defs"][name] }
+                else if leaf.is_array() { &leaf[part.parse::<usize>().unwrap()] } else { &leaf[part] };
+        }
+        let integer = leaf["type"] == "integer";
+        let step: f64 = if integer { 1.0 } else { 0.001 };
+        let bounds = c["bounds"].as_object().unwrap();
+        for (key, value) in bounds {
+            if leaf[key].as_f64() != value.as_f64() { bad.push(format!("{} {}: schema {key} {} != {value}", c["type"], c["field"], leaf[key])); }
+        }
+        for bound in bounds.values() {
+            let b = bound.as_f64().unwrap();
+            let delta = if integer { 1.0 } else { step.max(b.abs() * 0.000001) };
+            for offset in [-delta, 0.0, delta] {
+                let n = b + offset;
+                let valid = bounds.iter().all(|(key, b)| match key.as_str() {
+                    "minimum" => n >= b.as_f64().unwrap(), "maximum" => n <= b.as_f64().unwrap(),
+                    "exclusiveMinimum" => n > b.as_f64().unwrap(), "exclusiveMaximum" => n < b.as_f64().unwrap(), _ => unreachable!(),
+                });
+                let mut block = c["block"].clone();
+                let parts: Vec<_> = c["field"].as_str().unwrap().split('.').collect();
+                let mut at = &mut block;
+                for part in &parts[..parts.len()-1] {
+                    if at.is_array() { at = &mut at[part.parse::<usize>().unwrap()]; }
+                    else { if at[*part].is_null() { at[*part] = serde_json::json!({}); } at = &mut at[*part]; }
+                }
+                at[*parts.last().unwrap()] = if integer { serde_json::json!(n as i64) } else { serde_json::json!(n) };
+                if c["probe"] == "clip" { block = serde_json::json!({"clips":"body.glb", "idle":block}); }
+                let section = c["section"].as_str().unwrap();
+                let doc = serde_json::json!({"format":1, section:{"thing":block}});
+                let path = dir.join(format!("{}/blocks/range.json", files.len()));
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, doc.to_string()).unwrap();
+                let report = lint::lint_text(&path, &doc.to_string(), &opts());
+                let errors = refuses(&report, &[]);
+                if errors.is_empty() != valid { bad.push(format!("{} {} = {n}: expected {valid}, lint {errors:?}", c["type"], c["field"])); }
+                files.push(path);
+                expected.push(valid);
+            }
+        }
+    }
+    let Some(modules) = ajv_modules(&root) else { panic!("boundary parity requires AJV") };
+    let output = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs"))
+        .arg(root.join("schema")).arg(modules).arg("kiln-blocks.schema.json").args(&files).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let rows: Vec<Value> = String::from_utf8_lossy(&output.stdout).lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    assert_eq!(rows.len(), expected.len());
+    for (i, row) in rows.iter().enumerate() {
+        if row["valid"].as_bool() != Some(expected[i]) { bad.push(format!("AJV {}: expected {}, got {}", files[i].display(), expected[i], row)); }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+fn block_shapes_and_relational_bounds_match_compiler_contract() {
+    let root = repo();
+    let cases: Value = serde_json::from_str(&std::fs::read_to_string(root.join("schema/fixtures/block-shapes.json")).unwrap()).unwrap();
+    let dir = tmp("block-shapes");
+    let mut files = Vec::new();
+    let mut bad = Vec::new();
+    for (i, c) in cases.as_array().unwrap().iter().enumerate() {
+        let section = c["section"].as_str().unwrap();
+        let doc = serde_json::json!({"format":1, section:{"thing":c["block"]}});
+        let path = dir.join(format!("{i}/blocks/shape.json"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, doc.to_string()).unwrap();
+        let report = lint::lint_text(&path, &doc.to_string(), &opts());
+        let errors = refuses(&report, &[]);
+        if errors.is_empty() != c["valid"].as_bool().unwrap() { bad.push(format!("{}: lint {errors:?}", c["name"])); }
+        files.push(path);
+    }
+    let Some(modules) = ajv_modules(&root) else { panic!("shape parity requires AJV") };
+    let output = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs"))
+        .arg(root.join("schema")).arg(modules).arg("kiln-blocks.schema.json").args(&files).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let rows: Vec<Value> = String::from_utf8_lossy(&output.stdout).lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    assert_eq!(rows.len(), files.len());
+    for (c, row) in cases.as_array().unwrap().iter().zip(rows) {
+        if row["valid"] != c["schemaValid"] { bad.push(format!("{}: AJV {row}", c["name"])); }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

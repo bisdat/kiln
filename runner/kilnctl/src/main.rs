@@ -39,7 +39,7 @@ struct Cli {
 #[derive(Args, Clone)]
 struct GateArgs {
     /// Test mods (mods/tests/<id>), comma separated [default: world, players, chat, items, settings, gameplay,
-    /// hooks, combat, spawn, content]
+    /// hooks, combat, spawn, content, registry-proof (the registry proof's lab evidence)]
     #[arg(long, value_delimiter = ',')]
     tests: Option<Vec<String>>,
     /// UDP query port of the copy [default: the instance's + 1]

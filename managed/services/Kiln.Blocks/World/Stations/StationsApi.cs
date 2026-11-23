@@ -453,7 +453,7 @@ internal static unsafe partial class StationsCore
             get
             {
                 if (_t != null) return _t;
-                var t = Services.Get<StationsNative.Table>(StationsNative.Name, StationsNative.Version);
+                var t = (StationsNative.Table*)Services.Get<ServiceHeader>(StationsNative.Name, StationsNative.Version);
                 // an older kiln.stations (before 0.2.0-dev.29.17) has the table without the output-source members
                 if (t == null || t->Header.Size < (uint)StationsNative.TableV1) return null;
                 return _t = t;

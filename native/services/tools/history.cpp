@@ -6,6 +6,7 @@
 #include "qualified_entry.h"
 #include "kiln_hook.hpp"
 #include "include/kiln_tools_policy.h"
+#include "action_trace.h"
 
 namespace {
 using DiscardFn = void (*)(uintptr_t storage);
@@ -25,9 +26,12 @@ uintptr_t history_begin(uintptr_t allocator, uintptr_t storage) {
     // Read the sole policy TLS, owned by the tools impact binding. The original history creation is also observed for
     // vanilla actions: a ring slot reused by vanilla must never inherit a previous tool action's exact-refund tag.
     const bool policy = kiln_tools_active_policy() != nullptr;
-    return kiln::tools::create_history(g_tags,
+    const uintptr_t entry = kiln::tools::create_history(g_tags,
         [](uintptr_t a, uintptr_t s) { return g_begin.call<uintptr_t>(a, s); },
         [](uintptr_t s) { g_discard(s); }, allocator, storage, policy);
+    // A stroke inside a base without an undo record is cancelled by the game: the stroke's trace says so.
+    if (policy && !entry) kiln::tools::note_no_undo_record();
+    return entry;
 }
 
 void KILN_CALL world_changed(const KilnWorldEvent* event, void*) {

@@ -121,10 +121,17 @@ internal sealed partial class EffectEmitter
             case ConeBlock c:
             {
                 if (c.Vfx is { } coneVfx) e.PlaceVfx(coneVfx, null, origin, "Delivery", $"{path}.vfx");
-                var chest = e.ChestOf(e.Caster, "casterChest");
-                var forward = e.ForwardOf(origin, "");
-                var share = ConeShare(c.Angle);
-                e.InRange(origin, c.Range + 1, c.Affects, id, (who, next) => e.WithinAim(who, chest, forward, share, null, id, next),
+                Action<int, ProgramBuilder.Label>? aim = null;
+                // The aperture is the whole angle. The chord test works up to 360, but its strict comparison would miss
+                // a target exactly behind at 360 (and accumulate rounding near it): a full circle has no aim filter.
+                if (c.Angle < 360)
+                {
+                    var chest = e.ChestOf(e.Caster, "casterChest");
+                    var forward = e.ForwardOf(origin, "");
+                    var share = ConeShare(c.Angle);
+                    aim = (who, next) => e.WithinAim(who, chest, forward, share, null, id, next);
+                }
+                e.InRange(origin, c.Range + 1, c.Affects, id, aim,
                     (who, _, _) => e.OnTarget(c.Effects, who, $"{path}.effects"));
                 break;
             }

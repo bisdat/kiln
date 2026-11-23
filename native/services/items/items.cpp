@@ -32,14 +32,18 @@
 #include "scale.h"
 #include "gems.h"
 #include "stations.h"
+#include "dyes.h"
 #include "instances.h"
 #include "moves.h"
 #include "names.h"
 #include "rename.h"
 #include "pide.h"
+#include "qualified_code.h"
 #include "sets.h"
 #include "setsvc.h"
 #include "toolwear.h"
+#include "storage.h"
+#include "storage_guard.h"
 #include "wear.h"
 #include "kiln_api.h"
 #include "kiln_hook.hpp"
@@ -93,7 +97,8 @@ static_assert(offsetof(KilnItemsApi, gear_scale) == 344 && offsetof(KilnItemsApi
               offsetof(KilnItemsApi, scale_status) == 360);
 // v9 (0.2.0-dev.30.3): renaming a container, appended after the scales (a v8 table ends at 368)
 static_assert(offsetof(KilnItemsApi, container_rename) == 368 && offsetof(KilnItemsApi, rename_status) == 376 &&
-              sizeof(KilnItemsApi) == 384);
+              offsetof(KilnItemsApi, give_equip) == 384 && sizeof(KilnItemsApi) == 392);
+static_assert(sizeof(KilnItemsGiveEquipRequest) == 24 && offsetof(KilnItemsEquipResult, reserved) == 80);
 static_assert(sizeof(KilnItemsRenameRequest) == 272 && offsetof(KilnItemsRenameRequest, text) == 16);
 static_assert(sizeof(KilnItemsRenameResult) == 192 && offsetof(KilnItemsRenameResult, game_error) == 20 &&
               offsetof(KilnItemsRenameResult, changed) == 28 && offsetof(KilnItemsRenameResult, message) == 32);
@@ -545,7 +550,7 @@ void program_body(void* ctx, const uint64_t* it) {
     if (g_program.load() == KILN_ITEMS_PROGRAM_BROKEN) return;
     if (g_verified) {  // idle steps cost one lock: nothing to check or run
         std::lock_guard lock(g_mu);
-        if (g_pending.empty() && g_fuel_pending.empty() && g_keeps.empty() && g_move_pending.empty()) return;
+        if (g_pending.empty() && g_fuel_pending.empty() && g_keeps.empty() && g_move_pending.empty() && !storage_work()) return;
     }
     unsigned long code = 0;
     Access a{};
@@ -576,6 +581,7 @@ void program_body(void* ctx, const uint64_t* it) {
             if (a.acc[i] != g_access.acc[i] || a.items != g_access.items) return broken("the program's accessors changed");
     }
 
+    storage_program(a);
     run_fuel_jobs(a);
     run_move_jobs(a);
 
@@ -1153,10 +1159,14 @@ bool g_closed = false;  // tick thread
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
     if (ev->event == KILN_WORLD_STOPPING) {
+        storage_reset();
         drop_world("the game is closing it");
         g_closed = true;
     } else if (ev->event == KILN_WORLD_STARTED) {
-        if (ev->session > 1 && !g_closed) drop_world("a new server world started");
+        if (ev->session > 1 && !g_closed) {
+            storage_reset();
+            drop_world("a new server world started");
+        }
         g_closed = false;
     }
 }
@@ -1169,6 +1179,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         std::memcpy(&bits, &dt, 4);
         g_step_dt_bits.store(bits, std::memory_order_relaxed);
     }
+    storage_pre(tick->step);
     xfer_set_step(tick->step);
     instances_pre(g_world.load() ? g_world.load() : g_api->server_world(), tick->step);  // v4: the id counter check, prune
     poll_world_program();
@@ -1467,6 +1478,8 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
+    craft_sources_cancel_owner(owner);
+    storage_cancel_owner(owner);
 }
 
 KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnItemsSlot* slots, uint32_t capacity,
@@ -1495,7 +1508,7 @@ KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnIte
 
 KilnResult KILN_CALL t_find(uint32_t flags, KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
     if (out_count) *out_count = 0;
-    if ((capacity && !out) || (flags & ~0xFu)) return KILN_ERR_INVALID_ARGUMENT;
+    if ((capacity && !out) || (flags & ~0x1Fu)) return KILN_ERR_INVALID_ARGUMENT;
     if (!E.read_ok) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     const uintptr_t world = g_world.load();
@@ -1725,6 +1738,9 @@ KilnResult KILN_CALL t_container_rename(KilnOwner owner, const KilnItemsRenameRe
 }
 KilnResult KILN_CALL t_rename_status(KilnItemsRenameStatus* out) { return rename_status(out); }
 
+KilnResult KILN_CALL t_give_equip(KilnOwner owner, const KilnItemsGiveEquipRequest* r, KilnItemsEquipDoneFn done,
+                                void* user, uint64_t* ticket) { return give_equip_submit(owner,r,done,user,ticket); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1741,6 +1757,7 @@ const KilnItemsApi kTable = {
     &t_gear_upgrade,
     &t_gear_scale, &t_gear_scale_read, &t_scale_status,
     &t_container_rename, &t_rename_status,
+    &t_give_equip,
 };
 
 // ============================================================================================= self-test =======
@@ -2179,6 +2196,8 @@ void resolve() {
                  static_cast<unsigned long long>(E.tx_guard_flags), static_cast<unsigned long long>(E.tx_empty_state),
                  static_cast<unsigned long long>(E.tx_touched_count));
     }
+    E.give_equip_ok=E.sets_ok && E.move_ok && feat("items.give_equip") && sym("items/SelectEquipment",&E.select_equipment) &&
+        qualified_code(kiln::hooks_v2(g_api), reinterpret_cast<uintptr_t>(E.select_equipment), kSelectEquipmentCode);
     if (E.tx_ok) {
         g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE,
                                                   PAGE_READWRITE));
@@ -2198,6 +2217,7 @@ void resolve() {
     xfer_init();  // after every symbol above: a lab switch may install the hooks right now
     gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
     stations_resolve();  // kiln.stations: bases, stations, the game's fill (after the transaction symbols)
+    dyes_resolve();      // registered sources in the tinting screen and Tint's own transaction
     gear_resolve();      // v8: gear writes (after the tracked writes and the item instances)
     scale_resolve(g_api, g_owner);  // v8 (P7): power and armour scales (hooks only at the first scale)
 }
@@ -2205,6 +2225,7 @@ void resolve() {
 void register_main();
 
 void KILN_CALL on_ready(void*) {
+    storage_ready();
     note_setup(kiln_component_changes_find(g_api), g_owner);  // 07 S7: this service's writes are named in component watches
     register_main();
     // v5: equip runs in a program of its own, an entity program over the player characters: kiln.world only
@@ -2212,6 +2233,7 @@ void KILN_CALL on_ready(void*) {
     equip_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);
     gems_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // gem wave G3: kiln_items_gems
     stations_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // kiln.stations: kiln_items_stations
+    dyes_register();
     gear_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);      // v8: kiln_items_gear
 }
 
@@ -2277,6 +2299,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->version = KilnStr{"6", 1};
     info->on_ready = &on_ready;
     resolve();
+    storage_init();
     selftest_init();
     sets_lab_init();  // v6: the equipment sets' lab switches (kiln/data/kiln.items/sets-*), read once
     KilnHandle h = 0;

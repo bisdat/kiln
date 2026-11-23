@@ -74,6 +74,9 @@ public static partial class Coverage
             "KilnHarness.Tasks.Settle runs them to their end; KilnHarnessOptions.Side gives a joined or a hosting client's worlds " +
             "(client-world hops on the game's main thread). The pool's per-mod caps and per-step budgets are not modelled",
             "tasks.pool");
+        Row("Registry authoring", CoverageKind.RecordingFake,
+            "KilnHarness.Registry seeds copied JSON and records one OnRegistry pass's IR with expiring contexts; " +
+            "no native table, live application, pass composition or mapping/restart proof is simulated");
         Row("Config (global)", CoverageKind.Real,
             "Config.Register of every kind (common, server, client): files in the temp kiln/config, edits on disk reach the " +
             "change handlers (file watcher: pace steps in real time), bad files are refused and the values kept");

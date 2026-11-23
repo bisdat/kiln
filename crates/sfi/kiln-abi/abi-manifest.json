@@ -758,6 +758,9 @@
           "align": 8,
           "fields": {
             "bases": 96,
+            "block_at": 160,
+            "break_box": 176,
+            "find_wall": 168,
             "grid": 16,
             "grid_for_session": 152,
             "header": 0,
@@ -778,7 +781,7 @@
             "terrain_budget_reserve": 136,
             "write": 40
           },
-          "size": 160
+          "size": 184
         },
         "KilnBuildBase": {
           "align": 8,
@@ -791,6 +794,65 @@
             "size": 0
           },
           "size": 64
+        },
+        "KilnBuildBlockInfo": {
+          "align": 8,
+          "fields": {
+            "center": 40,
+            "damage": 32,
+            "fill": 16,
+            "hardness": 24,
+            "health": 28,
+            "kind": 8,
+            "material": 12,
+            "provenance": 20,
+            "refusal": 4,
+            "reserved": 36,
+            "size": 0
+          },
+          "size": 64
+        },
+        "KilnBuildBreak": {
+          "align": 8,
+          "fields": {
+            "actor": 96,
+            "build_flags": 100,
+            "damage": 32,
+            "dims": 20,
+            "flags": 4,
+            "materials": 56,
+            "origin": 8,
+            "origin_mod": 104,
+            "reserved": 52,
+            "selection": 88,
+            "size": 0,
+            "sphere_center": 136,
+            "sphere_margin": 168,
+            "sphere_minimum": 176,
+            "sphere_radius": 160,
+            "terrain_heal_seconds": 128,
+            "terrain_health_scale": 120
+          },
+          "size": 184
+        },
+        "KilnBuildBreakResult": {
+          "align": 8,
+          "fields": {
+            "considered": 16,
+            "damaged": 24,
+            "dropped": 40,
+            "excluded_cells": 72,
+            "flags": 8,
+            "protected_cells": 48,
+            "refusal": 4,
+            "removed": 32,
+            "reserved": 12,
+            "size": 0,
+            "unbreakable_cells": 64,
+            "unknown_cells": 56,
+            "write": 80
+          },
+          "size": 136
         },
         "KilnBuildGrid": {
           "align": 8,
@@ -926,7 +988,7 @@
           "size": 72
         }
       },
-      "sha256": "769ad9af96c59ac1967a80c428b5a46db37c62c02d4f3c1e279077eb37e591a9"
+      "sha256": "d918425d6c8fd40c87b753daf2fa5ab1cd01f41bf6e698378da3d902bb095bd0"
     },
     "native/core/abi/services/kiln_camera.h": {
       "function_macros": [],
@@ -3289,6 +3351,7 @@
             "gear_upgrade": 336,
             "gear_write": 296,
             "give": 8,
+            "give_equip": 384,
             "header": 0,
             "instances_status": 216,
             "item_at": 64,
@@ -3318,7 +3381,7 @@
             "transfer_report": 168,
             "transfer_rule": 152
           },
-          "size": 384
+          "size": 392
         },
         "KilnItemsChange": {
           "align": 8,
@@ -3517,6 +3580,19 @@
             "writes": 16
           },
           "size": 192
+        },
+        "KilnItemsGiveEquipRequest": {
+          "align": 4,
+          "fields": {
+            "count": 12,
+            "equipment_slot": 20,
+            "flags": 16,
+            "item": 8,
+            "player": 4,
+            "reserved": 21,
+            "size": 0
+          },
+          "size": 24
         },
         "KilnItemsInstance": {
           "align": 8,
@@ -4046,7 +4122,248 @@
           "size": 40
         }
       },
-      "sha256": "c4e919679e9a659e3edb19ea224ec07c2dcf224f9bffec5679c2e0438ba7f599"
+      "sha256": "95dc56ec73156d04329d5309cf499acbc78c9c2980175a58a2be2eb03dffe117"
+    },
+    "native/core/abi/services/kiln_items_storage.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnItemsStorageApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "holder": 16,
+            "list": 48,
+            "next_event": 56,
+            "park": 112,
+            "persist_bind": 72,
+            "register_storage": 8,
+            "release_frozen": 88,
+            "restore": 104,
+            "return_parked": 64,
+            "set_ref": 32,
+            "state": 24,
+            "status": 40,
+            "take_frozen": 80,
+            "unpark": 120,
+            "witness_of": 96
+          },
+          "size": 128
+        },
+        "KilnItemsStorageStatus": {
+          "align": 8,
+          "fields": {
+            "batches": 28,
+            "captures": 32,
+            "detail": 48,
+            "holders": 16,
+            "parked": 20,
+            "persist": 5,
+            "quarantined": 24,
+            "reason": 8,
+            "registrations": 12,
+            "restores": 40,
+            "session": 6,
+            "size": 0,
+            "stage_point": 7,
+            "storage": 4
+          },
+          "size": 208
+        },
+        "KilnStorageCapture": {
+          "align": 8,
+          "fields": {
+            "account": 56,
+            "changes": 48,
+            "character": 64,
+            "entry_count": 92,
+            "first_entry": 88,
+            "flags": 4,
+            "join": 16,
+            "player": 80,
+            "reason": 96,
+            "reserved": 100,
+            "revision": 40,
+            "seq": 8,
+            "size": 0,
+            "slot": 84,
+            "step": 24,
+            "witness": 32
+          },
+          "size": 104
+        },
+        "KilnStorageDef": {
+          "align": 8,
+          "fields": {
+            "death": 24,
+            "filter": 32,
+            "flags": 28,
+            "key": 8,
+            "size": 0,
+            "slots": 4
+          },
+          "size": 56
+        },
+        "KilnStorageDoc": {
+          "align": 8,
+          "fields": {
+            "account": 40,
+            "character": 48,
+            "entries": 64,
+            "entry_count": 12,
+            "flags": 4,
+            "record_count": 16,
+            "records": 72,
+            "reserved": 20,
+            "revision": 24,
+            "size": 0,
+            "source": 8,
+            "witness": 32
+          },
+          "size": 80
+        },
+        "KilnStorageEntry": {
+          "align": 4,
+          "fields": {
+            "count": 144,
+            "first": 140,
+            "key": 8,
+            "kind": 4,
+            "reason": 148,
+            "refs": 152,
+            "size": 0,
+            "slots": 136
+          },
+          "size": 160
+        },
+        "KilnStorageEvent": {
+          "align": 8,
+          "fields": {
+            "account": 88,
+            "character": 96,
+            "flags": 32,
+            "handle": 28,
+            "items": 44,
+            "join": 72,
+            "key": 112,
+            "kind": 4,
+            "player": 24,
+            "reason": 36,
+            "reserved": 60,
+            "revision": 64,
+            "seq": 8,
+            "size": 0,
+            "slot": 56,
+            "source": 52,
+            "stacks": 40,
+            "step": 16,
+            "tag": 80,
+            "target": 48
+          },
+          "size": 240
+        },
+        "KilnStorageFilter": {
+          "align": 8,
+          "fields": {
+            "categories": 4,
+            "flags": 8,
+            "id_count": 12,
+            "ids": 16,
+            "size": 0
+          },
+          "size": 24
+        },
+        "KilnStorageFrozenBatch": {
+          "align": 8,
+          "fields": {
+            "capture_count": 28,
+            "entry_count": 32,
+            "first_step": 40,
+            "flags": 4,
+            "last_step": 48,
+            "record_count": 36,
+            "revision": 24,
+            "saves_seq": 16,
+            "size": 0,
+            "tag": 8,
+            "unix_ms": 56,
+            "world_guid": 64
+          },
+          "size": 80
+        },
+        "KilnStorageRecord": {
+          "align": 4,
+          "fields": {
+            "count": 8,
+            "data": 16,
+            "flags": 3,
+            "item": 4,
+            "length": 2,
+            "level": 12,
+            "reason": 13,
+            "reserved": 14,
+            "slot": 0
+          },
+          "size": 80
+        },
+        "KilnStorageReturnResult": {
+          "align": 8,
+          "fields": {
+            "done": 28,
+            "kept": 36,
+            "message": 48,
+            "player": 16,
+            "requested": 24,
+            "reserved": 44,
+            "size": 0,
+            "stacks": 32,
+            "status": 4,
+            "steps": 40,
+            "target": 20,
+            "ticket": 8
+          },
+          "size": 208
+        },
+        "KilnStorageState": {
+          "align": 8,
+          "fields": {
+            "death": 172,
+            "handle": 136,
+            "holder": 148,
+            "key": 8,
+            "pages": 144,
+            "paired": 168,
+            "parked": 156,
+            "quarantined": 160,
+            "refs": 176,
+            "revision": 184,
+            "size": 0,
+            "slots": 140,
+            "source": 164,
+            "stacks": 152,
+            "status": 4
+          },
+          "size": 192
+        },
+        "KilnStorageWitness": {
+          "align": 8,
+          "fields": {
+            "account": 48,
+            "capture_seq": 40,
+            "captured": 32,
+            "character": 56,
+            "flags": 4,
+            "join": 8,
+            "player": 72,
+            "size": 0,
+            "slot": 76,
+            "step": 24,
+            "witness": 16
+          },
+          "size": 80
+        }
+      },
+      "sha256": "35c5ad11a21a3f990b706089900762d8897c876910051c38667cb85352c8a920"
     },
     "native/core/abi/services/kiln_launch.h": {
       "function_macros": [
@@ -5330,7 +5647,54 @@
           "size": 16
         }
       },
-      "sha256": "f9811c118567654bac63e6c6b524c1b915f5878939bfa803627e72531296558a"
+      "sha256": "f2a48619505b0da0f466343bf6cef2412904b60b40867a912294d3fb2059a68e"
+    },
+    "native/core/abi/services/kiln_registry_live.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnRegistryLiveApi": {
+          "align": 8,
+          "fields": {
+            "begin": 8,
+            "commit": 24,
+            "header": 0,
+            "read": 40,
+            "revert": 32,
+            "status": 48,
+            "submit": 16
+          },
+          "size": 56
+        },
+        "KilnRegistryLiveResult": {
+          "align": 8,
+          "fields": {
+            "accepted": 8,
+            "generation": 32,
+            "outcome": 4,
+            "reason": 40,
+            "refused": 12,
+            "reserved": 20,
+            "size": 0,
+            "skipped": 16,
+            "world": 24
+          },
+          "size": 232
+        },
+        "KilnRegistryLiveStatus": {
+          "align": 8,
+          "fields": {
+            "active": 28,
+            "drafts": 24,
+            "generation": 16,
+            "size": 0,
+            "world": 8,
+            "world_kind": 4
+          },
+          "size": 32
+        }
+      },
+      "sha256": "9ffaf11c920f454d0cf9a9de26d8cade9e36a00bc182883ad04dd6520e6f0dab"
     },
     "native/core/abi/services/kiln_render.h": {
       "function_macros": [],
@@ -6247,6 +6611,19 @@
           },
           "size": 16
         },
+        "KilnCraftSourceRequest": {
+          "align": 8,
+          "fields": {
+            "container": 8,
+            "filter": 16,
+            "item_count": 20,
+            "items": 24,
+            "order": 12,
+            "player": 4,
+            "size": 0
+          },
+          "size": 32
+        },
         "KilnStation": {
           "align": 8,
           "fields": {
@@ -6484,6 +6861,7 @@
         "KilnStationsApi": {
           "align": 8,
           "fields": {
+            "add_source": 248,
             "base_at": 24,
             "base_at_position": 40,
             "base_count": 16,
@@ -6493,6 +6871,7 @@
             "base_storage": 48,
             "base_water": 56,
             "cancel": 144,
+            "cancel_sources": 264,
             "category": 104,
             "category_at": 112,
             "collect": 200,
@@ -6506,9 +6885,12 @@
             "plan": 128,
             "recipe": 88,
             "recipe_inputs": 96,
+            "remove_source": 256,
             "set_craft_stock": 216,
+            "set_dye_stock": 280,
             "set_fill_answers": 232,
             "set_output_source": 176,
+            "source_stock": 272,
             "station_read": 80,
             "stations": 72,
             "status": 8,
@@ -6516,7 +6898,7 @@
             "watch": 152,
             "workshop_recipes": 120
           },
-          "size": 248
+          "size": 288
         },
         "KilnStationsStatus": {
           "align": 4,
@@ -6539,7 +6921,7 @@
           "size": 188
         }
       },
-      "sha256": "18596c86ce02390230c90ba85449b18dbf562e2f5e9463f8c7117920e47344dd"
+      "sha256": "a259bde01d7ff59df605d3fd430a35a1a6a10c85a53dcb2c1b2eb4e209e9b43d"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -7854,6 +8236,76 @@
       },
       "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
     },
+    "native/core/abi/services/kiln_ui_ammo.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiAmmoApi": {
+          "align": 8,
+          "fields": {
+            "context": 16,
+            "header": 0,
+            "publish": 8,
+            "take_picks": 24
+          },
+          "size": 32
+        },
+        "KilnUiAmmoContext": {
+          "align": 8,
+          "fields": {
+            "game_count": 28,
+            "game_rows": 40,
+            "game_serial": 32,
+            "held_item": 24,
+            "kind": 12,
+            "local_player": 20,
+            "ok": 4,
+            "reason": 8,
+            "session": 16,
+            "size": 0
+          },
+          "size": 1064
+        },
+        "KilnUiAmmoPick": {
+          "align": 8,
+          "fields": {
+            "count": 12,
+            "item": 8,
+            "kind": 4,
+            "row": 16,
+            "session": 20,
+            "size": 0,
+            "step": 24
+          },
+          "size": 32
+        },
+        "KilnUiAmmoPublish": {
+          "align": 8,
+          "fields": {
+            "count": 12,
+            "kind": 4,
+            "mode": 8,
+            "reserved": 20,
+            "rows": 32,
+            "serial": 24,
+            "session": 16,
+            "size": 0
+          },
+          "size": 40
+        },
+        "KilnUiAmmoRow": {
+          "align": 4,
+          "fields": {
+            "count": 4,
+            "flags": 8,
+            "item": 0,
+            "row": 12
+          },
+          "size": 16
+        }
+      },
+      "sha256": "79d470b5b0e25f898ac7b61a9902104d64f6ebceafc00f0faacf7b06d92d1367"
+    },
     "native/core/abi/services/kiln_ui_blocks.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -7871,6 +8323,34 @@
         }
       },
       "sha256": "bb0d8325b75a3e72991683ee57db77918bcc2f339e4e4090f60069ec8cc48942"
+    },
+    "native/core/abi/services/kiln_ui_chest.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiChestApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "subscribe": 8,
+            "unsubscribe": 16
+          },
+          "size": 24
+        },
+        "KilnUiChestPress": {
+          "align": 8,
+          "fields": {
+            "container": 4,
+            "frame": 24,
+            "local_player": 8,
+            "reserved": 12,
+            "session": 16,
+            "size": 0
+          },
+          "size": 32
+        }
+      },
+      "sha256": "ac1c1759d67bbf77ea9d5ff6ba259dbf96b5810c3d2e70176af7e9557f562cbe"
     },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
@@ -8123,6 +8603,22 @@
         }
       },
       "sha256": "1dbcc49bc32aa9515e58ff8e13f043a81d774ac077ef5a199b289a84deb3319b"
+    },
+    "native/core/abi/services/kiln_ui_tints.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiTintsApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "subscribe": 8,
+            "unsubscribe": 16
+          },
+          "size": 24
+        }
+      },
+      "sha256": "3cc455f7fa97e4b59a4136980c4bd2e0356ac71e21289f971c12dc05444aa78f"
     },
     "native/core/abi/services/kiln_ui_values.h": {
       "function_macros": [],
@@ -9525,14 +10021,14 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "480c16d7130b2fd06042f0e51cec41ca385d512069aaba41bb12cf96956a7bb0",
+    "src/layout.rs": "c1ac29c9d11eede1dee9089f3515f26eff65047ee2c932efab1e167a11990dbc",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
     "src/services/kiln_base_rules.rs": "051981ceeb97a78f02f625d8fb573289c0b388bd10a2dd303fa99a20fd53c53a",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
-    "src/services/kiln_build.rs": "4000679e75af5be05920724a38d66b93233777e6b5f09604b040a76f018718d4",
+    "src/services/kiln_build.rs": "aa7aa753e9a3cc411b48d3e1cb32144efaf5c60bf3bdaf9818ca295dcbd008c9",
     "src/services/kiln_camera.rs": "ae8af992fc075f61140c42b7864c0391b93a31ea214fe47ac9c8200cd157c0f7",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
@@ -9554,7 +10050,8 @@
     "src/services/kiln_gameplay.rs": "697b6e9a231122dd29e33b1b96bc050afd822950077bc1ca2d5d1caabf70fe43",
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
-    "src/services/kiln_items.rs": "aa910afb12948a34f118f62ca7979704f9f9487e38bd0e76ba6fb8dfba8ef707",
+    "src/services/kiln_items.rs": "997cdc279dc7704128c8d47efff8cd395652e0b93679a9c34848d6c54b6d5519",
+    "src/services/kiln_items_storage.rs": "391c254d91450e0f3c935d59c3d4917ce6aafe49fd7b645d1de00ee38f6d1c07",
     "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_markers.rs": "396fba83b17be93970b564b4f5bcd5052795c038d78b54ea80fb6c3e3514c9b9",
@@ -9570,6 +10067,7 @@
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
     "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
+    "src/services/kiln_registry_live.rs": "da9a69836002b7be3e9ae74260cc342c848da7ff6a71b1c6ca9ef8424f079805",
     "src/services/kiln_render.rs": "0d63717bf1a2388f2bf5e03ad5ffe2fc5be815c9522ff4fa124151c4853ccb91",
     "src/services/kiln_repl.rs": "49a43d82f7481a93068e9f63735be39c0420ad3b8945338ed84369debc2689e1",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
@@ -9579,7 +10077,7 @@
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
     "src/services/kiln_station_menus.rs": "f9755639d612efc6c34785105f36e6798337387dfe8a642b78ca413a1e70cac8",
-    "src/services/kiln_stations.rs": "852f4cf5ce119928eb4f954a21bfa496a3c60052e0ec3496be71ea272a6aba34",
+    "src/services/kiln_stations.rs": "a9d80849d6104e4b1858c99e2aaa2a680a23164ea3182d6737d4ad56af3e5827",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_survivors.rs": "ed6f377e897d0236e33196f19d1be825b230e5d6575129a676ff32da08df2722",
@@ -9589,18 +10087,21 @@
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui_ammo.rs": "6533ca816d68b06c9cd461564a7a15fa56df804e22e0f26dc6d590e93171ffa7",
     "src/services/kiln_ui_blocks.rs": "cf0d0e1760465229c8b1c2f2e0c6a0a9764476feffa231677c78f87c5921d011",
+    "src/services/kiln_ui_chest.rs": "9f1aaa1a9f8e9f0fb65f3f6e3339f325cec6f92a743bfba5211110b802567315",
     "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
     "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
     "src/services/kiln_ui_snapshot.rs": "789a0d13f6a7a770b42537e758f3e4f10dd6e05480c445848930fb54bfd6de4e",
+    "src/services/kiln_ui_tints.rs": "25f47ba11c95eaff66d0864f1b3c1024c77260e0188d8883d69a70267f6a1f6a",
     "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "d6ad2e18d475cba1e1c6f3fe780a20c1a499d5f2acde519352ba445a91237f3e"
+    "src/services/mod.rs": "1c529e1e609d97502bc273b15e97d7ae49232e10872a664c646c9459e2bbf4fa"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

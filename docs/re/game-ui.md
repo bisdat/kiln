@@ -715,11 +715,50 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
   (all, the local player's, the container's by holder) through the same mapping as marks; Kiln.Ui docks a panel to their
   right (else left). Game test pending: `ui-hooks.c5`. **[src] [hyp]**
 
-### For the next slices (not built)
+### Historical dev.30 remainder (implemented below since 0.2.17)
 - **A button in the chest screen (where Enlarge / Enchant sits):** the chest-style transfer screen is `0xb9d0f0(mode)`
   (PlayStateUi's switch `0xc61135`: 22 → mode 0, 41 → 1, 28 → 2), the other inventory found through play `+0x2c50`. Its
-  button row, the button renderer it uses, and the upgrade-storage action (`consumedUpgradeStorageAction`,
-  `ecs.InventoryTransferAction` are strings in the exe) are not traced. The menu entries' recipe (a frame through the
+  button row, the button renderer it used, and the upgrade-storage action (`consumedUpgradeStorageAction`,
+  `ecs.InventoryTransferAction` are strings in the exe) were not traced for dev.30. The menu entries' recipe (a frame through the
   game's own entry renderer inside the game's layout scope, identified by return address) is the model.
 - **The game's own slot tint:** ItemSlot's descriptor `+0x7d` and context `+0x51` gate the fuel bar; the slot's background
-  colour parameter is not mapped.
+  colour parameter was not mapped for dev.30; its native path is documented below.
+
+### Native slot backgrounds (since 0.2.17)
+Client 26430625 / `5d9ef2f1`, static disassembly and focused Ghidra decompilation: `SlotAppearance`
+(`0xd1a430`, output, slot descriptor, input state, context) copies the descriptor's 8-byte colour at
+`+0x48` into generated appearance `+0x30`. It does not mutate the descriptor. `SlotBackground` (`0xd79380`)
+passes that field to the native rectangle drawing path; the rarity decoration and focus are separate.
+The slot descriptor is 0x90 bytes; the first pointer names the 0x48-byte ItemView. Colour storage is
+ABGR in a uint32 followed by a float strength, not Kiln's canonical RRGGBBAA.
+`kiln.ui.tints` copies the descriptor, runs ordered colour rules on a copied ItemView, replaces only
+the copy's colour word, then calls the original appearance builder. The strength and all other bytes
+stay unchanged. The layout is accepted only for that measured executable, independently of pattern policy.
+Host tests cover channel order, strength, borrowed-memory immutability, ordered rules and retirement.
+Actual native colours, rarity/focus layering and appearance at different UI scales remain unverified in-game.
+
+### Storage-chest action-row insertion (since 0.2.17)
+Client 26430625 / `5d9ef2f1`, static disassembly and focused Ghidra decompilation (not a client run):
+- `ChestWindow` `0xb9d0f0(u8 mode)` is storage chest at mode 0, commerce at 1, factory at 2. It reads the
+  other inventory by the current play target; Kiln independently checks current Play/StorageChest state.
+- Its footer call at `0xb9eca4` (`0xb9eca9` return) invokes `ChestFooter` `0xc3a440(span*, u16 alignment,
+  padding*, u8 background, u8 stretch)`. The span is {pointer, u64 count} of 0x48-byte input-action descriptors.
+- The footer builds its outer frame, calls `ActionRow` `0xce8da0(span*, style*)`, then closes its frame.
+  The action row opens a horizontal/vertical layout according to style, draws its native action views and
+  closes at the `call UiFrameEnd` instruction `0xce8f79` (frame in `rcx`, code immediately before it
+  `lea rcx,[rbp-0x49]`). A mid there runs while the action row is still the active parent.
+- `ActionView` `0xce85b0` normally turns a native click into `AppendInputAction` `0xd91e20(action, device)`,
+  which appends a 0x18-byte event to the game's action queue. The earlier `0xda6500`/`0xda6830` helpers
+  consume bindings rather than provide an independent literal-text button. Kiln does NOT reuse that path.
+- Instead Kiln draws the existing `SystemMenuEntry` `0xcb47f0(GameText*, u8 enabled, u8 attention)` at
+  the row-close mid. This renderer is already used by several game lists, not only the pause menu. It opens
+  a child frame, registers native navigation (`0xa41fb0`), sizes/draws the label, handles activation through
+  `0xa471b0`, closes its child (`0xcb4c06`), and returns the activation byte (`0xcb4c13`). It reads no
+  PreGame/Pause state argument. The literal caption uses ui.values' permanent, bounded text store.
+`kiln.ui.chest` scopes the insertion with raw wrappers on ChestWindow and ChestFooter; mode 0 and the
+current target/session only, once per chest builder. Activations are delivered after that builder returns,
+with a fresh session check. No vanilla action descriptor/event or borrowed game memory is changed.
+Four active native captions total and unique text prevent unbounded row growth and duplicate widget ids.
+Host tests verify scoping, continuation counts, no game writes, copied current chest identity, deferred
+callbacks, duplicate/budget refusal, disposal and retirement. Native appearance/row sizing, mouse activation
+and controller focus/navigation remain real-game unverified; the generic native entry's semantics are static evidence.

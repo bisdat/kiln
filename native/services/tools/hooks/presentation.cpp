@@ -3,14 +3,21 @@
 #include "../presentation.h"
 #include "../held_observer.h"
 #include "../brush_frame.h"
+#include "../brush_trace.h"
 #include "../internal.h"
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_caps.h"
+#include "services/kiln_world.h"
+#include "../ammo_runtime.h"
+#include <deque>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <map>
+#include <string>
 
 namespace {
 using namespace kiln::tools;
@@ -27,6 +34,10 @@ KilnHandle next_handle=1;
 kiln::RawHook lookup_hook, preview_hook, identity_hook, selector_hook;
 kiln::MidHook2 brush_frame_hook;
 std::atomic<uintptr_t> brush_query_resume{};
+BrushTrace brush_trace;
+const KilnClientApi* trace_client{};
+KilnHandle trace_tick_handle{};
+std::chrono::steady_clock::time_point trace_published{};
 HeldObserver held_observer;
 std::atomic<KilnToolHeldItemProvider> held_provider{};
 std::shared_ptr<const Family> held_family() {
@@ -60,6 +71,7 @@ void remove_locked(const Registration& value) {
     identities.erase(value.tool);
 }
 void KILN_CALL owner_retiring(KilnOwner owner,void*) {
+    ammo::retire(owner);
     std::lock_guard lock(gate);
     for(auto i=registrations.begin();i!=registrations.end();) {
         if(i->second.owner!=owner){++i;continue;}
@@ -128,6 +140,7 @@ const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
 }
 void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only) {
     kt::ToolPolicyScope no_impact_policy(nullptr);
+    ammo::Frame ammo_frame(groups,access,current_only);
     // A quiet-tick owned observation, sampled once per entry. Never borrow another preview's identity or policy TLS.
     auto family=held_family();
     // Access[15] is this update's resolved held ItemInfo, also used by the native category routing.
@@ -136,18 +149,27 @@ void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only)
     if(family&&(!access||!copy_game_value(&item,static_cast<const uint8_t*>(access)+0x78,sizeof item)||
         families.root(presentation_item(item))!=family->tool))family.reset();
     selector_hook.call<void>(groups,access,current_only);
+    ammo::after(ammo_frame,groups,access);
     // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
     // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
     if(groups&&family&&!filter_selector_view(groups+2,family->materials))clear_selector_view(groups+2);
 }
 void report_caps();
+// Hot path: every frame the picker draws. Each exit is counted (relaxed atomics); nothing here allocates or logs.
 void brush_query_frame(KilnRegisters& regs) {
     const auto resume=brush_query_resume.load(std::memory_order_acquire);
-    const auto family=held_family();if(!resume||!family)return;
+    if(!resume){brush_trace.record(BrushFrameExit::Disabled);return;}
+    const auto family=held_family();
+    if(!family){brush_trace.record(BrushFrameExit::NoFamily);return;}
     std::array<uint8_t,16> guid{};
-    {std::lock_guard lock(gate);const auto i=identities.find(family->tool);if(i==identities.end())return;guid=i->second;}
-    const auto result=patch_brush_frame({regs.rsp,regs.rbp,regs.rcx,regs.rdx,regs.r8,regs.r9},family->tool,guid);
-    if(result==BrushFrameResult::WriteFault) {
+    {std::lock_guard lock(gate);const auto i=identities.find(family->tool);
+     if(i==identities.end()){brush_trace.record(BrushFrameExit::NoIdentity);return;}guid=i->second;}
+    std::array<uint32_t,brush_rows_capacity> items{};
+    for(size_t i=0;i<items.size()&&i<family->brushes.size();++i)items[i]=family->brushes[i].item;
+    const auto outcome=patch_brush_frame({regs.rsp,regs.rbp,regs.rcx,regs.rdx,regs.r8,regs.r9},family->tool,guid,
+        {items.data(),family->brushes.size()});
+    brush_trace.record(outcome);
+    if(outcome.result==BrushFrameResult::WriteFault) {
         regs.rip=resume; // Skip only this query after a partial write; its fresh output remains empty.
         brush_query_resume.store(0,std::memory_order_release);
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);report_caps();
@@ -195,6 +217,24 @@ bool qualify(uintptr_t address,const char* pattern) {
     for(size_t i=0;i<bytes.size();++i)if(bytes[i]>=0&&original[i]!=bytes[i])return false;
     return true;
 }
+// Client Post: a change of the picker frame's state becomes one log line and the tools.brush_families text, at most once a
+// second. The line names the state now and how many changes it stands for, then every counter so far.
+void publish_brush_trace() {
+    if(!brush_trace.pending()||!api)return;
+    const auto now=std::chrono::steady_clock::now();
+    if(trace_published.time_since_epoch().count()&&now-trace_published<std::chrono::seconds(1))return;
+    BrushFrameExit state{};uint64_t covered=0;
+    if(!brush_trace.take(&state,&covered))return;
+    trace_published=now;
+    try {
+        std::string line=std::string("tools: brush picker: ")+brush_exit_name(state)+" ("+brush_exit_meaning(state)+")";
+        if(covered>1)line+="; "+std::to_string(covered)+" state changes since the last line";
+        line+="; frames: "+brush_trace.summary();
+        if(api->log)api->log(parent_owner,state==BrushFrameExit::WriteFault||state==BrushFrameExit::ReadFault?KILN_LOG_WARN:KILN_LOG_INFO,{line.data(),line.size()});
+        report_caps();
+    } catch(...) {}
+}
+void KILN_CALL trace_tick(const KilnTickInfo*,void*) {publish_brush_trace();}
 void report_caps() {
     if(!api||!api->service||!parent_owner)return;
     const auto* caps=static_cast<const KilnCapsApi*>(api->service({KILN_CAPS_SERVICE,sizeof(KILN_CAPS_SERVICE)-1},KILN_CAPS_VERSION));
@@ -202,13 +242,20 @@ void report_caps() {
     KilnBuildInfo build{};build.size=sizeof build;
     const bool online=api->build_info&&api->build_info(&build)==KILN_OK;
     const bool enabled=online&&build.verified&&build.hooks_enabled;
+    std::string brush_frames;
+    try {if(brush_trace.any())brush_frames="; picker frames: "+brush_trace.summary();} catch(...) {}
     auto report=[&](const char* name,bool installed,const char* missing,bool client_only=true) {
         const bool wrong_side=client_only&&build.side!=KILN_SIDE_CLIENT;
         const bool ready=enabled&&!wrong_side&&installed;
-        const uint32_t reason=!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
-        const char* why=ready?"qualified native tool presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
-        caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
+        const bool ammo_fault=std::strncmp(name,"ui.ammo.",8)==0&&ammo::failed();
+        const uint32_t reason=ammo_fault?KILN_CAP_REASON_FAULTED:!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
+        const char* why=ammo_fault?"ammunition adapter faulted; native equip of its synthetic rows remains suppressed":ready?"qualified native presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
+        std::string text(why);
+        if(!brush_frames.empty()&&std::strcmp(name,"tools.brush_families")==0)try {text+=brush_frames;} catch(...) {}
+        caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{text.data(),text.size()});
     };
+    report("ui.ammo.list",ammo::available(),"exact selector/finalizer/pick mapping, stable client ECS reader or client item catalog adapter is unavailable");
+    report("ui.ammo.pick",ammo::available(),"native pick suppression and backpack-source validation are not qualified or installed");
     report("tools.material_lookup",kiln_tools_hook_installed(KILN_TOOL_HOOK_MATERIAL_LOOKUP),"scoped terrain material lookup mapping is unavailable or its hook was refused",false);
     report("tools.material_picker",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER),"selector or owned held-tool observer is unavailable");
     report("tools.material_snapshot",false,"separate per-player backpack/magic-chest observations are not qualified; aggregate selector counts are not split or fabricated");
@@ -220,6 +267,7 @@ bool install(kiln::RawHook& hook,const char* symbol,const char* pattern,void* fu
     uintptr_t address=0;
     return api->symbol({symbol,std::strlen(symbol)},&address)==KILN_OK&&address&&qualify(address,pattern)&&hook.install(api,child,address,function,symbol);
 }
+#include "../ammo_runtime.inl"
 bool install_brush_frame() {
     uintptr_t site=0,query=0;
     constexpr char site_symbol[]="tools/BrushQueryFrame",query_symbol[]="tools/BrushQuery";
@@ -239,6 +287,21 @@ bool install_brush_frame() {
 
 void kiln_tools_presentation_set_held_provider(KilnToolHeldItemProvider provider) {
     held_provider.store(provider,std::memory_order_release);
+}
+namespace {
+const char* mode_name(uint32_t mode) {return mode==KILN_TOOL_MODE_REMOVE?"Remove":mode==KILN_TOOL_MODE_ADD?"Add":"none";}
+// One line per published family (kiln#133): this process binds the family's programs, so its strokes reach the trace.
+void log_bound(const KilnToolFamilyDef& definition) noexcept {
+    if(!api||!api->log)return;
+    try {
+        char tail[200];
+        std::snprintf(tail,sizeof tail,": actions bound: primary %s (program 0x%08x), secondary %s (program 0x%08x), %u brushes; "
+            "strokes are traced on tools.actions",mode_name(definition.primary.mode),definition.primary.program,
+            mode_name(definition.secondary.mode),definition.secondary.program,definition.brush_count);
+        const std::string line="tools: "+std::string(definition.name.ptr,definition.name.len)+tail;
+        api->log(parent_owner,KILN_LOG_INFO,{line.data(),line.size()});
+    } catch(...) {}
+}
 }
 KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFamilyDef* definition,KilnHandle* out) {
     if(out)*out=0;
@@ -261,7 +324,7 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         Registration registration{owner,definition->tool,{definition->tool}};
         for(uint32_t i=0;i<definition->brush_count;++i)registration.ids.push_back(definition->brushes[i].item);
         std::array<uint8_t,16> guid;std::memcpy(guid.data(),definition->identity,16);
-        std::lock_guard lock(gate);
+        std::unique_lock lock(gate);
         // The owner lease can race teardown; validate admission again at the publication boundary.
         if(!child||!retiring||!required_hooks(definition->primary)||!required_hooks(definition->secondary))return KILN_ERR_UNAVAILABLE;
         // Retirement marks an owner dead before its callback takes this gate. A last live-owner check under
@@ -285,7 +348,10 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         }
         if(ok)ok=kiln_tools_bind_programs(owner,*definition);
         if(!ok){remove_locked(registration);registrations.erase(handle);return KILN_ERR_UNAVAILABLE;}
-        *out=handle;return KILN_OK;
+        *out=handle;
+        lock.unlock();
+        log_bound(*definition);
+        return KILN_OK;
     } catch(...) {return KILN_ERR_UNAVAILABLE;}
 }
 KilnResult KILN_CALL kiln_tools_remove_family(KilnOwner owner,KilnHandle handle) {
@@ -332,17 +398,29 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
         kiln_tools_report_hook(KILN_TOOL_HOOK_IDENTITY,install(identity_hook,"tools/RootIdentity","48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00",reinterpret_cast<void*>(&identity)));
         const bool held_ready=held_observer.start(api,child);
         kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
+        if(kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER))ammo::start();
+        brush_trace.reset();trace_published={}; // before the frame hook can count
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,held_ready&&install_brush_frame());
+        if(kiln_tools_hook_installed(KILN_TOOL_HOOK_BRUSH_PICKER)) {
+            const auto* client_service=static_cast<const KilnClientApi*>(api->service({KILN_CLIENT_SERVICE,sizeof(KILN_CLIENT_SERVICE)-1},KILN_CLIENT_VERSION));
+            if(client_service&&client_service->subscribe_tick&&client_service->unsubscribe&&
+               client_service->subscribe_tick(child,KILN_TICK_POST,&trace_tick,nullptr,&trace_tick_handle)==KILN_OK)trace_client=client_service;
+            else trace_tick_handle=0;
+        }
     }
     if(!client) {kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);}
 }
 void kiln_tools_presentation_uninstall() {
     KilnOwner retiring_child=0;
     {std::lock_guard lock(gate);retiring_child=child;child=0;retiring=0;} // Close family admission before stopping producers.
+    ammo::stop();
     held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
+    if(trace_tick_handle&&trace_client)trace_client->unsubscribe(trace_tick_handle);trace_tick_handle=0;trace_client=nullptr;
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
     report_caps(); // Parent-owned capability reports must close before the child hooks are revoked.
     {std::lock_guard lock(gate);for(const auto& [_,registration]:registrations)remove_locked(registration);registrations.clear();}
     if(retiring_child&&hooks)hooks->revoke_owner(retiring_child);if(retiring_child&&api)api->owner_revoke(retiring_child);
     brush_query_resume.store(0,std::memory_order_release);
 }
+
+const KilnUiAmmoApi* kiln_tools_ammo_api() {return &ammo::table;}

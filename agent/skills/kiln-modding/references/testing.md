@@ -118,7 +118,7 @@ var n = kiln.Run(() => Players.Count);          // Kiln API only through Run/As:
   `KilnHarness.Terrain`; dev.29+ `KilnHarness.Programs` (program wraps, [world-programs.md](world-programs.md)),
   `KilnHarness.ComponentChanges`, `kiln.ImpactNatives` (`[ImpactNative]` methods, `RegisterSync`, attachments), world-table
   and buff budgets; dev.29.18+ `kiln.Tasks.Settle()` / `Live` and `KilnHarnessOptions.Side` (dedicated server, hosting
-  or joined client; `EnterWorld`, `LeaveWorld`, `OnMainThread`), `FakeWorld.BusyReads`/`BusyWrites` (KILNX003)
+  or joined client; `EnterWorld`, `LeaveWorld`, `OnMainThread`), `FakeWorld.BusyReads`/`BusyWrites` (no experimental opt-in from dev.30.7 / mod API 0.2.16)
   ([tasks.md](tasks.md)); dev.29.19+ `kiln.LogFile` and `kiln.ReadLogFile()` read the harness's kiln.log while it is
   written (`File.ReadAllText` on it fails on Windows).
 - Gaps: a service that caches "no table" (`Kiln.Ui` render, `kiln.net` at the first channel) is asked once per process, so

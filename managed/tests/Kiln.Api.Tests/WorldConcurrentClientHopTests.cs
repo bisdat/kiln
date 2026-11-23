@@ -7,7 +7,6 @@
 using Xunit;
 
 #pragma warning disable xUnit1031, xUnit1051
-#pragma warning disable KILNX003
 
 namespace Kiln.Api.Tests;
 

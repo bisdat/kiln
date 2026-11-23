@@ -37,6 +37,8 @@ public abstract record TerrainSource
 
 /// <summary>One palette number per cell of the region, x fastest, then y, then z (<see cref="CellBox.Index"/>).
 /// 0 leaves the cell as it is; <c>n</c> is entry <c>n - 1</c> of the patch's palette.</summary>
+/// <param name="Cells">The palette numbers, one byte per cell of the region (x fastest, then y, then z). 0 leaves the
+/// cell as it is.</param>
 public sealed record TerrainVoxelVolume(byte[] Cells) : TerrainSource;
 
 /// <summary>One height per column of the region (x fastest, then z), in cells above the region's floor.</summary>
@@ -108,6 +110,9 @@ public sealed class TerrainApplyOptions
 }
 
 /// <summary>How far an <see cref="Terrain.Apply"/> is.</summary>
+/// <param name="Batches">The number of the batch that was just written, counting from 1.</param>
+/// <param name="BatchCount">How many batches the patch has.</param>
+/// <param name="ChangedCells">Cells whose value changed so far, over the batches written by this call.</param>
 public readonly record struct TerrainProgress(int Batches, int BatchCount, long ChangedCells);
 
 /// <summary>How an overlay call ended.</summary>
@@ -144,11 +149,19 @@ public enum TerrainConflictKind
 /// <summary>One block an overlay left alone.</summary>
 /// <param name="Block">The block's cells (8 per axis, on the world's 8-cell grid).</param>
 /// <param name="Owner">For <see cref="TerrainConflictKind.OtherPlan"/>: "mod/plan".</param>
+/// <param name="Kind">Why the block was not written.</param>
 public sealed record TerrainConflict(TerrainConflictKind Kind, CellBox Block, string? Owner = null);
 
 /// <summary>What <see cref="Terrain.Apply"/> did. It is never all-or-nothing: a patch is spread over ticks.</summary>
 /// <param name="ChangedCells">Cells whose value changed, in the batches that were written.</param>
 /// <param name="Batches">Batches written to the world by this call.</param>
+/// <param name="Ok">True when the call completed, found the plan already applied, or adopted the current cells; see
+/// <paramref name="State"/>.</param>
+/// <param name="Reason">Why it ended as it did when it did not complete; null when there is nothing to say.</param>
+/// <param name="State">How the call ended.</param>
+/// <param name="Plan">The plan's name inside the mod (<see cref="TerrainPatch.Id"/>).</param>
+/// <param name="Version">The plan's version (<see cref="TerrainPatch.Version"/>).</param>
+/// <param name="Conflicts">The blocks that were left alone; empty when there are none.</param>
 public sealed record TerrainResult(bool Ok, string? Reason, TerrainState State, string Plan, int Version, long ChangedCells,
     int Batches, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult
 {
@@ -166,6 +179,10 @@ public sealed record TerrainResult(bool Ok, string? Reason, TerrainState State, 
 /// <param name="EstimatedBytes">What the save grows by at most (1,024 bytes a block, before the game packs them).</param>
 /// <param name="Would">How an apply would end now.</param>
 /// <param name="Conflicts">The blocks an apply would leave alone.</param>
+/// <param name="Ok">False when the inspection could not be made: the world is not running, or the tiles did not
+/// load.</param>
+/// <param name="Reason">Why the apply would not complete, or why the inspection failed; null when there is nothing to
+/// say.</param>
 public sealed record TerrainPlanReport(bool Ok, string? Reason, CellBox Box, long Cells, int Blocks, int Batches,
     long EstimatedBytes, TerrainState Would, IReadOnlyList<TerrainConflict> Conflicts) : IKilnResult
 {
@@ -177,6 +194,11 @@ public sealed record TerrainPlanReport(bool Ok, string? Reason, CellBox Box, lon
 /// <param name="Complete">False while an apply is under way or was interrupted.</param>
 /// <param name="Blocks">Blocks the plan owns.</param>
 /// <param name="GivenUp">Blocks the plan gave up after a conflict.</param>
+/// <param name="Plan">The plan's name inside the mod (<see cref="TerrainPatch.Id"/>).</param>
+/// <param name="Version">The version that is applied.</param>
+/// <param name="Region">The cells the plan may touch.</param>
+/// <param name="AppliedAt">When the plan was last applied (UTC): set when an apply finishes or adopts the current
+/// cells.</param>
 public sealed record TerrainPlanInfo(string Plan, int Version, CellBox Region, bool Complete, int Blocks, int GivenUp,
     DateTimeOffset AppliedAt)
 {
@@ -206,15 +228,19 @@ public sealed class TerrainChangedEvent
 
     /// <summary>The mod that owns the plan.</summary>
     public string Mod { get; }
+    /// <summary>The plan's name inside the mod (<see cref="TerrainPatch.Id"/>).</summary>
     public string Plan { get; }
+    /// <summary>The plan's version (<see cref="TerrainPatch.Version"/>).</summary>
     public int Version { get; }
 
     /// <summary>The cells of this batch.</summary>
     public CellBox Box { get; }
+    /// <summary>Cells whose value changed in this batch.</summary>
     public long CellsChanged { get; }
 
     /// <summary>This batch's number, from 1.</summary>
     public int Batch { get; }
+    /// <summary>How many batches the patch has.</summary>
     public int BatchCount { get; }
 
     /// <summary>The patch's last batch.</summary>

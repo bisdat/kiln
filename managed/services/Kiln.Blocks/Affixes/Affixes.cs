@@ -8,6 +8,8 @@ using System.Text.Json;
 namespace Kiln;
 
 /// <summary>What <see cref="Affixes.Load"/> read from a data file.</summary>
+/// <param name="Affixes">The affixes the file defined.</param>
+/// <param name="Pools">The pools the file defined.</param>
 public sealed record AffixFile(IReadOnlyList<AffixHandle> Affixes, IReadOnlyList<AffixPoolHandle> Pools);
 
 /// <summary>An item with affixes as a player's game knows it from the server (<see cref="Affixes.SyncedItems"/>).</summary>

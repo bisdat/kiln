@@ -19,6 +19,7 @@ public sealed class NetClientHandshakeEvent : CancelableEvent
         Refuse = refuse;
     }
 
+    /// <summary>The client that sent the handshake.</summary>
     public NetPeer Peer { get; }
 
     /// <summary>Required server mods/channels the client lacks or has in another version ("id 1.2.0 (client 1.1.0)").</summary>
@@ -37,6 +38,7 @@ public sealed class NetClientHandshakeEvent : CancelableEvent
 /// <summary>Server: a client finished the Kiln handshake; channels it shares are usable. Tick thread.</summary>
 public sealed class NetPeerReadyEvent(NetPeer peer) : KilnEvent
 {
+    /// <summary>The client that finished the handshake.</summary>
     public NetPeer Peer { get; } = peer;
 }
 
@@ -54,12 +56,15 @@ public sealed class NetVanillaClientEvent : KilnEvent
         Kick = kick;
     }
 
+    /// <summary>The client that was found to have no Kiln.</summary>
     public NetPeer Peer { get; }
+    /// <summary>Whether Kiln will kick the client. It starts as the policy's decision; handlers may change it.</summary>
     public bool Kick { get; set; }
 }
 
 /// <summary>Server: a client's connection is gone (Kiln or vanilla). Tick thread.</summary>
 public sealed class NetPeerLeftEvent(NetPeer peer) : KilnEvent
 {
+    /// <summary>The client whose connection is gone.</summary>
     public NetPeer Peer { get; } = peer;
 }

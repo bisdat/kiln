@@ -40,15 +40,21 @@ public sealed unsafe class NativeInvocation
         _args = args;
     }
 
+    /// <summary>The native's name.</summary>
     public string Name { get; }
+    /// <summary>The instance whose program made the call.</summary>
     public ImpactRef Impact { get; }
     /// <summary>The ECALL's call-site id (unique per call site; the editor node id).</summary>
     public uint Site { get; }
+    /// <summary>The number of arguments of the call.</summary>
     public int ArgCount => _args.Length;
+    /// <summary>The live instance, to read or write the program's variables.</summary>
     public ImpactInstance Instance => _inst ??= new ImpactInstance(Impact.ImpactId);
 
     /// <summary>Argument i as passed: a handle 0xFFFF0000|index, 0 (not connected) or a raw value.</summary>
     public uint Raw(int i) => _args[i];
+    /// <summary>True when argument <paramref name="i"/> is a variable handle (0xFFFF0000|index), not 0 or a raw
+    /// value.</summary>
     public bool IsVariable(int i) => (_args[i] & 0xFFFF0000) == 0xFFFF0000;
 
     /// <summary>The variable argument i names (null for a raw value or a variable index out of range).</summary>
@@ -60,15 +66,32 @@ public sealed unsafe class NativeInvocation
         return idx < vars.Count ? vars[idx] : null;
     }
 
+    /// <summary>Argument <paramref name="i"/> as an int: the variable's first 4 bytes, or the raw argument when it is
+    /// not a variable.</summary>
     public int GetInt(int i) => Variable(i) is { } v && Instance.Read(v) is { Length: >= 4 } b ? BitConverter.ToInt32(b) : (int)_args[i];
+    /// <summary>Argument <paramref name="i"/> as a float: the variable's first 4 bytes, or the raw argument when it is
+    /// not a variable.</summary>
     public float GetFloat(int i) => Variable(i) is { } v && Instance.Read(v) is { Length: >= 4 } b ? BitConverter.ToSingle(b) : _args[i];
+    /// <summary>Argument <paramref name="i"/> as a bool: the variable's first byte is not 0, or the raw argument is not
+    /// 0.</summary>
     public bool GetBool(int i) => Variable(i) is { } v && Instance.Read(v) is { Length: >= 1 } b ? b[0] != 0 : _args[i] != 0;
+    /// <summary>Argument <paramref name="i"/> as an entity id (read like <see cref="GetInt(int)"/>).</summary>
     public EntityId GetEntity(int i) => new((uint)GetInt(i));
+    /// <summary>The bytes of the variable argument <paramref name="i"/> names; null when it is not a
+    /// variable.</summary>
     public byte[]? GetBytes(int i) => Variable(i) is { } v ? Instance.Read(v) : null;
 
+    /// <summary>Writes an int into the variable argument <paramref name="i"/> names, converted to its type. False when
+    /// it is not a variable or the write was refused.</summary>
     public bool SetInt(int i, int value) => Variable(i) is { } v && Instance.Write(v, ImpactConfigs.Encode(value, v) ?? []);
+    /// <summary>Writes a float into the variable argument <paramref name="i"/> names, converted to its type. False when
+    /// it is not a variable or the write was refused.</summary>
     public bool SetFloat(int i, float value) => Variable(i) is { } v && Instance.Write(v, ImpactConfigs.Encode(value, v) ?? []);
+    /// <summary>Writes a bool into the variable argument <paramref name="i"/> names, converted to its type. False when
+    /// it is not a variable or the write was refused.</summary>
     public bool SetBool(int i, bool value) => Variable(i) is { } v && Instance.Write(v, ImpactConfigs.Encode(value, v) ?? []);
+    /// <summary>Writes an entity id into the variable argument <paramref name="i"/> names. False when it is not a
+    /// variable or the write was refused.</summary>
     public bool SetEntity(int i, EntityId value) => SetInt(i, (int)value.Value);
 }
 
@@ -101,17 +124,29 @@ public unsafe ref struct NativeCall
     internal AbilitiesNative.NativeCall* Record => _c;
     internal ModContext? Owner => _owner;
 
+    /// <summary>The native's hash: FNV-1a-32 of its name (<see cref="Abilities.Natives.NameOf(uint)"/> gives the
+    /// name).</summary>
     public uint Native => _c->Hash;
+    /// <summary>The number of arguments of the call.</summary>
     public int ArgCount => (int)_c->Argc;
+    /// <summary>The id of the instance whose program made the call.</summary>
     public uint ImpactId => _c->ImpactId;
+    /// <summary>The id of that instance's program.</summary>
     public uint ProgramId => _c->ProgramId;
+    /// <summary>The call-site id of the call in the program.</summary>
     public uint Site => _c->Site;
+    /// <summary>The entity the program runs on.</summary>
     public EntityId Self => new(_c->Self);
     /// <summary>The game's native ran (or a handler returned a value): later handlers see the outcome.</summary>
     public bool Decided => _c->OriginalCalled != 0 || _c->OutError != 0xFF;
+    /// <summary>The value the program gets so far: the game's native's result, or the value a handler
+    /// returned.</summary>
     public byte ResultValue => _c->OutValue;
 
+    /// <summary>Argument <paramref name="i"/> as passed: a variable handle (0xFFFF0000|index), 0 (not connected) or a
+    /// raw value. Throws <see cref="IndexOutOfRangeException"/> when <paramref name="i"/> is out of range.</summary>
     public uint Raw(int i) => (uint)i < _c->Argc ? _c->Args[i] : throw new IndexOutOfRangeException();
+    /// <summary>True when argument <paramref name="i"/> is a variable handle, not 0 or a raw value.</summary>
     public bool IsConnected(int i) => (Raw(i) & 0xFFFF0000) == 0xFFFF0000;
 
     /// <summary>The bytes of argument i's variable, or empty (not connected, out of range). Writes go to the program.
@@ -141,6 +176,8 @@ public unsafe ref struct NativeCall
         return new Span<byte>(_c->Data + off, size);
     }
 
+    /// <summary>The type hash of the variable argument <paramref name="i"/> names; 0 when it is not a
+    /// variable.</summary>
     public uint VariableType(int i)
     {
         var h = Raw(i);
@@ -148,10 +185,17 @@ public unsafe ref struct NativeCall
         return *(uint*)(_c->Layout + (h & 0xFFFF) * 24 + 8);
     }
 
+    /// <summary>The variable's first 4 bytes as a float; 0 when the argument is not a variable of at least 4
+    /// bytes.</summary>
     public float GetFloat(int i) => BytesCore(i) is { Length: >= 4 } b ? BitConverter.ToSingle(b) : 0;
+    /// <summary>The variable's first 4 bytes as an unsigned integer; 0 when the argument is not a variable of at least
+    /// 4 bytes.</summary>
     public uint GetU32(int i) => BytesCore(i) is { Length: >= 4 } b ? BitConverter.ToUInt32(b) : 0;
+    /// <summary><see cref="GetU32(int)"/> as an entity id.</summary>
     public EntityId GetEntity(int i) => new(GetU32(i));
+    /// <summary>Writes a float into a 4-byte variable. False when the argument is not one.</summary>
     public bool SetFloat(int i, float v) => BytesCore(i) is { Length: 4 } b && BitConverter.TryWriteBytes(b, v);
+    /// <summary>Writes an unsigned integer into a 4-byte variable. False when the argument is not one.</summary>
     public bool SetU32(int i, uint v) => BytesCore(i) is { Length: 4 } b && BitConverter.TryWriteBytes(b, v);
 
     /// <summary>Runs the game's native now with the current arguments (once).</summary>
@@ -170,6 +214,8 @@ public unsafe ref struct NativeCall
     public void Cancel() => Return(0);
 }
 
+/// <summary>A handler of <see cref="Abilities.Natives.Wrap(string, NativeWrapHandler, int)"/>: runs synchronously on
+/// the game's job thread for every call of the wrapped native. See <see cref="NativeCall"/> for the rules.</summary>
 public delegate void NativeWrapHandler(ref NativeCall call);
 
 /// <summary>A synchronous Kiln native (<see cref="Abilities.Natives.RegisterSync"/>): runs inside the program's ECALL,
@@ -319,11 +365,17 @@ public unsafe ref struct DamageCall
     private NativeCall _call;
     internal DamageCall(NativeCall call) => _call = call;
 
+    /// <summary>The attacker (argument 1).</summary>
     public EntityId Attacker => _call.GetEntity(1);
+    /// <summary>The target (argument 2).</summary>
     public EntityId Target => _call.GetEntity(2);
+    /// <summary>The id of the instance whose program made the call.</summary>
     public uint ImpactId => _call.ImpactId;
+    /// <summary>The id of that instance's program.</summary>
     public uint ProgramId => _call.ProgramId;
+    /// <summary>The entity the program runs on.</summary>
     public EntityId Self => _call.Self;
+    /// <summary>True when this call site passes an AttackMod.</summary>
     public bool HasAttackMod => _call.IsConnected(6);
 
     /// <summary>The attack multiplier (variable AttackMod, 1.0 by default). Setting it scales this hit only: Kiln
@@ -349,9 +401,12 @@ public unsafe ref struct DamageCall
         }
     }
 
+    /// <summary>The hit does not happen: the program gets 0 and the game's applyDamage does not run.</summary>
     public void Cancel() => _call.Cancel();
 }
 
+/// <summary>A handler of <see cref="Abilities.OnDamage(DamageHandler, int)"/>: runs synchronously on the game's job
+/// thread for every applyDamage call.</summary>
 public delegate void DamageHandler(ref DamageCall call);
 
 public static unsafe partial class Abilities
@@ -381,6 +436,8 @@ public static unsafe partial class Abilities
 
         private static readonly ConcurrentDictionary<uint, string> Names = new();
 
+        /// <summary>The name of the native with this hash (the game's or Kiln's); <c>0x&lt;hash&gt;</c> when it is
+        /// unknown or kiln.abilities is not loaded.</summary>
         public static string NameOf(uint hash)
         {
             if (Names.TryGetValue(hash, out var n)) return n;

@@ -730,6 +730,10 @@ section 8.
   placeholder's, whose references name its missing mod's resources, are one Info line per item instead). A
   reference that was not loaded is tried again every ~2 s (kiln.assets may register it later), and at once when a
   template clone goes into a world (a joined client gets its items before the templates in the same content state).
+  Each world tries again for the clones in its own registry, on its own thread; in a game that hosts its world, a clone
+  the server world has (usually the one clone both worlds share) is written in the server world's Pre only, never from
+  the client world's step, as long as that server world may still read it: a client world set up after it stopped, or
+  a newer server world, takes the clone over (without the world-stop hook only a newer server world).
 - **Game items**: the same keys work as layers on registered items: data-pack rules (`"Weapon_X": {"@refs": true,
   "visual": "item:Weapon_Y"}`, or the document option `"options": {"refs": true}`), C# `entry.SetRef("visual",
   "item:Weapon_Y", allowGameItem: true)` / `SetPerks([...])` / `SetRefJson(key, json)`, C `set_ref(owner, kind, id,
@@ -878,7 +882,8 @@ Client.Post(() =>
   group), or `like:<item>` (into every group of every table that drops that item, next to it). `countMin`,
   `countMax` (1..100000), `chance` (spawnProbability 0..1), `weight` (in a selector group). Tables load on demand: the
   stacks are added the first time the game uses a table, before that roll (the DefaultInventoryAcquire hook), and to
-  every table seen so far when definitions change. A plain group gets one more child group holding the new stacks
+  every table seen so far when definitions change. Another thread that uses the same table meanwhile waits until they
+  are in. A plain group gets one more child group holding the new stacks
   (each rolls its own chance; the group's own stacks stay where they are, so drop rules keep working on them); a
   selector group (one entry picked by weight) gets its stack list copied with the new stacks appended (at most 64
   entries, the game's limit; drop rules are applied to the copy again). The world's Loot Amount scales the counts as
