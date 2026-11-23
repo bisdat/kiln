@@ -692,6 +692,20 @@ typedef struct KilnItemsEquipResult {
     char message[160];        /* why, for anything but DONE; NUL-terminated */
 } KilnItemsEquipResult;
 
+/* Since 0.2.0-dev.30.6: creates one stack straight into equipment, then runs the game's equipment-selection path in the same
+ * transaction. The old stack goes to an empty Generic slot (default), or is taken and reported (TAKE). Every refusal
+ * and DRY_RUN rolls back everything. Count must fit one stack; gear count must be 1. Backpack equipment slot 23 is
+ * refused: its inventory does not exist until commit. flags in the result use these bits; reserved[0] at +80 reports
+ * replaced_count (0 for an ordinary equip). from is 0: the new item never occupied a backpack slot. */
+#define KILN_ITEMS_GIVE_EQUIP_DRY_RUN 0x02u
+#define KILN_ITEMS_GIVE_EQUIP_TAKE 0x04u
+typedef struct KilnItemsGiveEquipRequest {
+    uint32_t size, player, item, count;
+    uint32_t flags;
+    uint8_t equipment_slot;
+    uint8_t reserved[3];
+} KilnItemsGiveEquipRequest;
+
 /* Tick thread, Pre of the step after the one the request ran in. */
 typedef void(KILN_CALL* KilnItemsEquipDoneFn)(const KilnItemsEquipResult* result, void* user);
 
@@ -1566,6 +1580,14 @@ typedef struct KilnItemsApi {
     KilnResult(KILN_CALL* container_rename)(KilnOwner owner, const KilnItemsRenameRequest* request, KilnItemsRenameDoneFn done,
                                             void* user, uint64_t* out_ticket, KilnItemsRenameResult* out_refusal);
     KilnResult(KILN_CALL* rename_status)(KilnItemsRenameStatus* out); /* any thread */
+
+    /* Since 0.2.0-dev.30.6; appended at 384, table end 392. Same queue, sessions, death check, cancellation and
+     * callbacks as equip. Server-authoritative only. INVALID_ARGUMENT: malformed request, count outside 1..65535,
+     * invalid physical equipment slot or flags/reserved. UNAVAILABLE: equip/transaction/move/commit guards missing,
+     * wrong side or no server session. A NULL request is a side-effect-free availability probe (OK or UNAVAILABLE).
+     * BUFFER_TOO_SMALL: 1024 equip requests waiting. Game outcomes in the callback. */
+    KilnResult(KILN_CALL* give_equip)(KilnOwner owner, const KilnItemsGiveEquipRequest* request, KilnItemsEquipDoneFn done,
+                                    void* user, uint64_t* out_ticket);
 } KilnItemsApi;
 
 #ifdef __cplusplus

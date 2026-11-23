@@ -58,6 +58,20 @@ int main() {
     Fixture plain;
     spawn(&plain);
     check(plain.perks[1] == 0 && plain.level[2] == 30 && plain.count() == 3, "ordinary loot and crafting spawns are unchanged");
+    Fixture equipped;
+    uint8_t initial_state[20]{}; initial_state[0x0e]=0x40;
+    equipped.list[3]={0x3a2fac75u,0,initial_state,20};
+    *reinterpret_cast<uint64_t*>(equipped.frame+32)=4;
+    PideOptions equip_options; equip_options.item=7; equip_options.equipped=true;
+    pide_commit(&equipped,&spawn,equip_options);
+    check(initial_state[0x0e]==0x48 && !t_equipped, "GiveEquip: initial ItemState is equipped before spawn; the scope ends at commit");
+    initial_state[0x0e]=0x40; spawn(&equipped);
+    check(initial_state[0x0e]==0x40, "GiveEquip: ordinary later creation does not inherit IsEquipped");
+    equip_options.item=99; pide_commit(&equipped,&spawn,equip_options);
+    check(initial_state[0x0e]==0x40, "GiveEquip: another item cannot inherit IsEquipped");
+    equip_options.item=7;
+    try { pide_commit(&equipped,&fail_commit,equip_options); } catch (...) {}
+    check(!t_equipped, "GiveEquip: a fault clears the initial-equipped scope");
     Fixture gear;
     pide_commit(&gear, &spawn, KILN_ITEMS_UNLOCK | KILN_ITEMS_GEM_SLOT, 255, 7);
     check(gear.perks[1] == 4 && gear.level[2] == 34 && gear.level[3] == 30 && gear.count() == 4 &&

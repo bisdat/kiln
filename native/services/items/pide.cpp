@@ -82,6 +82,7 @@ int64_t g_override = 0;                          // v7: ItemInfo.gemSlotOverride
 const uint32_t* g_level_index = nullptr;         // createPide's current-level index into Level's values
 bool g_ok = false;
 
+thread_local bool t_equipped = false;
 thread_local uint32_t t_flags = 0;
 thread_local uint8_t t_unlock = 0;
 thread_local uint32_t t_item = 0;
@@ -236,9 +237,11 @@ void apply(safetyhook::Context& c) {
     Override* level = nullptr;
     Override* dye = nullptr;
     Override* durability = nullptr;
+    Override* state = nullptr;
     bool gem = false, own_item = false;
     for (uint64_t i = 0; i < count; ++i) {
-        if (list[i].hash == kPerkContainerNew && list[i].size >= 2) perks = &list[i];
+        if (list[i].hash == 0x3a2fac75u && list[i].size == 20) state = &list[i];
+        else if (list[i].hash == kPerkContainerNew && list[i].size >= 2) perks = &list[i];
         else if (list[i].hash == kLevel && list[i].size >= 16) level = &list[i];
         else if (list[i].hash == kWeaponGemSlot) gem = true;
         else if (list[i].hash == kDye) dye = &list[i];
@@ -269,6 +272,12 @@ void apply(safetyhook::Context& c) {
         }
     }
     if (!own_item) return;
+    // createPide supplies this LOCAL ItemState override (not a template's shared default). A new equipped item has
+    // no pide when op7 is queued, so give it the same IsEquipped bit vanilla Equip sets on an existing instance.
+    if (t_equipped && state && state->data) {
+        auto* flags = static_cast<uint8_t*>(state->data) + 0x0e;
+        flags[0] |= 8;
+    }
     // Both parts of an upgrade must be understood before changing either one.
     if ((t_flags & KILN_ITEMS_UNLOCK) && perks && perks->data && level && level->data && g_level_index && *g_level_index < 2) {
         auto* p = static_cast<uint8_t*>(perks->data);
@@ -306,7 +315,7 @@ void apply_guarded(safetyhook::Context& c) {
 
 void hk_spawn(safetyhook::Context& c) {
     // v7: with feature gems.sockets every creation is looked at (one byte of ItemInfo; gemSlotOverride and rolls)
-    if ((t_flags & kPideFlags) || g_override) apply_guarded(c);
+    if (t_equipped || (t_flags & kPideFlags) || g_override) apply_guarded(c);
 }
 
 }  // namespace
@@ -342,6 +351,7 @@ bool pide_request_valid(uint32_t flags, uint8_t unlock) {
 }
 
 void pide_begin(const PideOptions& o) {
+    t_equipped = g_ok && o.equipped;
     t_flags = g_ok ? (o.flags & kPideFlags) : 0;
     t_unlock = o.unlock;
     t_item = o.item;
@@ -350,6 +360,7 @@ void pide_begin(const PideOptions& o) {
 }
 
 void pide_end() {
+    t_equipped = false;
     t_flags = 0;
     t_unlock = 0;
     t_item = 0;
@@ -358,6 +369,7 @@ void pide_end() {
 }
 
 void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions& o) {
+    const auto previous_equipped = t_equipped;
     const auto previous_flags = t_flags;
     const auto previous_unlock = t_unlock;
     const auto previous_item = t_item;
@@ -367,16 +379,16 @@ void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions& o)
 #ifdef KILN_ITEMS_HOST_TEST
     try { commit(tx); }
     catch (...) {
-        t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
+        t_equipped = previous_equipped; t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
         t_dye = previous_dye; t_durability = previous_durability;
         throw;
     }
-    t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
+    t_equipped = previous_equipped; t_flags = previous_flags; t_unlock = previous_unlock; t_item = previous_item;
     t_dye = previous_dye; t_durability = previous_durability;
 #else
     __try { commit(tx); }
     __finally {
-        t_flags = previous_flags;
+        t_equipped = previous_equipped; t_flags = previous_flags;
         t_unlock = previous_unlock;
         t_item = previous_item;
         t_dye = previous_dye;

@@ -26,6 +26,7 @@
 #include "gems_logic.h"
 #include "equip_logic.h"
 #include "instances.h"
+#include "pide.h"
 #include "setexec.h"
 #include "setorder.h"
 #include "setsvc.h"
@@ -57,6 +58,7 @@ struct Request {
     uint64_t ticket;
     KilnOwner owner;
     KilnItemsEquipRequest r;
+    KilnItemsGiveEquipRequest give{};
     uint64_t submitted;
     // The player's session at the submission (kiln.players: the connection handle carries the slot's generation, and
     // the step the session was first seen in game). A player entity is slot + 1: the next player in the slot gets the
@@ -415,10 +417,11 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
     res->replaced_stamp = stamp_for(res->replaced_pide, res->replaced);
 }
 
-bool run_equip(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res,
+bool run_equip(const Access& a, KilnEntity p, const Request& q, uint8_t* tx, KilnItemsEquipResult* res,
                unsigned long* code) {
     __try {
-        equip_impl(a, p, r, tx, res);
+        if(q.give.size) give_equip_run(a,q.give,tx,res);
+        else equip_impl(a, p, q.r, tx, res);
         return true;
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -588,7 +591,7 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
         } else {
             NoteLease note;  // 07 S7: what a component watch is told (only while something is watched)
             if (note_wanted()) note.begin(a, &player, 1);
-            if (!run_equip(a, player, batch[i].r, g_tx, &res, &code)) {
+            if (!run_equip(a, player, batch[i], g_tx, &res, &code)) {
                 abandon_tx(g_tx);
                 res.status = KILN_ITEMS_UNAVAILABLE;
                 std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
@@ -600,6 +603,7 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
                 note.end(a);
             }
         }
+        if (batch[i].give.size && res.status == KILN_ITEMS_UNAVAILABLE && g_state.load() == KILN_ITEMS_PROGRAM_RUNNING) broken(res.message);
         if (res.status == KILN_ITEMS_DONE && !(res.flags & KILN_ITEMS_EQUIP_DRY_RUN)) g_changed.fetch_add(1);
         else if (res.status != KILN_ITEMS_DONE) g_refused.fetch_add(1);
         finish(res);
@@ -1121,10 +1125,10 @@ void equip_world_closed() {
         set_detail("program registered, not run yet in this world");
 }
 
-KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnItemsEquipDoneFn done, void* user,
-                        uint64_t* out_ticket) {
+static KilnResult submit(KilnOwner owner, const KilnItemsEquipRequest* r, const KilnItemsGiveEquipRequest* give,
+                         KilnItemsEquipDoneFn done, void* user, uint64_t* out_ticket) {
     if (out_ticket) *out_ticket = 0;
-    if (!r || r->size < sizeof(KilnItemsEquipRequest) || !equip_request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!r || r->size < sizeof(KilnItemsEquipRequest) || (!give && !equip_request_valid(*r))) return KILN_ERR_INVALID_ARGUMENT;
     const int state = g_state.load();
     if (!E.equip_ok || !g_w || !g_tx || !g_players || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN ||
         here_now() != EquipHere::Yes)
@@ -1138,6 +1142,7 @@ KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnIte
     q.ticket = items_next_ticket();
     q.owner = owner;
     q.r = *r;
+    if(give) q.give=*give;
     q.r.size = sizeof(KilnItemsEquipRequest);
     q.submitted = current_step();
     {
@@ -1149,6 +1154,23 @@ KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnIte
     }
     if (out_ticket) *out_ticket = q.ticket;
     return KILN_OK;
+}
+
+KilnResult equip_submit(KilnOwner owner, const KilnItemsEquipRequest* r, KilnItemsEquipDoneFn done, void* user, uint64_t* ticket) {
+    return submit(owner,r,nullptr,done,user,ticket);
+}
+KilnResult give_equip_submit(KilnOwner owner, const KilnItemsGiveEquipRequest* r, KilnItemsEquipDoneFn done, void* user, uint64_t* ticket) {
+    if(ticket) *ticket=0;
+    KilnItemsEquipStatus status{}; status.size=sizeof status;
+    const bool available=E.give_equip_ok && pide_available() && equip_status(&status)==KILN_OK && status.available;
+    if(!r) return available ? KILN_OK : KILN_ERR_UNAVAILABLE;
+    if(r->size<sizeof *r || !r->player || !r->item || !r->count || r->count>65535 ||
+       selection_index(r->equipment_slot)<0 || (r->flags&~(KILN_ITEMS_GIVE_EQUIP_TAKE|KILN_ITEMS_GIVE_EQUIP_DRY_RUN)) ||
+       r->reserved[0] || r->reserved[1] || r->reserved[2]) return KILN_ERR_INVALID_ARGUMENT;
+    if(!available) return KILN_ERR_UNAVAILABLE;
+    KilnItemsEquipRequest equip{};
+    equip.size=sizeof equip; equip.player=r->player; equip.flags=r->flags; equip.equipment_slot=r->equipment_slot;
+    return submit(owner,&equip,r,done,user,ticket);
 }
 
 KilnResult equip_status(KilnItemsEquipStatus* out) {

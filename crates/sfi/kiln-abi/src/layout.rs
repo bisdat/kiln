@@ -2532,6 +2532,15 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsEquipResult, replaced_to) == 72);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsEquipResult, reserved) == 80);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsEquipResult, message) == 96);
+    assert!(core::mem::size_of::<crate::services::kiln_items::KilnItemsGiveEquipRequest>() == 24);
+    assert!(core::mem::align_of::<crate::services::kiln_items::KilnItemsGiveEquipRequest>() == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, size) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, player) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, item) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, count) == 12);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, flags) == 16);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, equipment_slot) == 20);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsGiveEquipRequest, reserved) == 21);
     assert!(core::mem::size_of::<crate::services::kiln_items::KilnItemsEquipStatus>() == 192);
     assert!(core::mem::align_of::<crate::services::kiln_items::KilnItemsEquipStatus>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsEquipStatus, size) == 0);
@@ -2800,7 +2809,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsRenameStatus, refused) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsRenameStatus, reserved1) == 20);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsRenameStatus, detail) == 24);
-    assert!(core::mem::size_of::<crate::services::kiln_items::KilnItemsApi>() == 384);
+    assert!(core::mem::size_of::<crate::services::kiln_items::KilnItemsApi>() == 392);
     assert!(core::mem::align_of::<crate::services::kiln_items::KilnItemsApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, give) == 8);
@@ -2850,6 +2859,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, scale_status) == 360);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, container_rename) == 368);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, rename_status) == 376);
+    assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, give_equip) == 384);
     assert!(core::mem::size_of::<crate::services::kiln_launch::KilnLaunchStatus>() == 200);
     assert!(core::mem::align_of::<crate::services::kiln_launch::KilnLaunchStatus>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_launch::KilnLaunchStatus, size) == 0);
