@@ -508,12 +508,14 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
   Both go to the mod's log.
 - **Selection.** The game keeps its selection on the same item when the rows change.
-- **Picks.** A row whose item the game lists itself (in `Replace` too) or the player carries is the game's own: it
-  equips it as always. Any other mod row raises `Picked` for the mod that provided it (on the UI thread at the next UI
-  frame; an earlier session's picks are dropped), and the game does nothing. `Picked` is a selection wish, not proof of
-  a click: the game's own automatic selection (the weapon's current ammunition is not in a replaced list, so it selects
-  the first or the kept row) raises it too. Kiln never moves an item; your server half validates the wish (the player
-  owns the item, the weapon takes it) and ignores repeats.
+- **Picks.** A row whose item the game lists itself with stock (in `Replace` too) or the player carries is the game's
+  own: it equips it as always. The row the game keeps at count 0 for a stack the player used up is not stock: since
+  0.2.0-dev.30.7 the backpack decides that item's pick (GitHub issue 131, thanks Fuzen777). Any other mod row raises
+  `Picked` for the mod that provided it (on the UI thread at the next UI frame; an earlier session's picks are dropped),
+  and the game does nothing. `Picked` is a selection wish, not proof of a click: the game's own automatic selection (the
+  weapon's current ammunition is not in a replaced list, so it selects the first or the kept row) raises it too. Kiln
+  never moves an item; your server half validates the wish (the player owns the item, the weapon takes it) and ignores
+  repeats.
 - **Refusals.** `Provide` throws `KilnUnavailableException` when `ui.ammo.list` is off (a server, a game build Kiln has
   not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
   and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of

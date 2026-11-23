@@ -222,7 +222,9 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   is admitted for the list of that kind; any other item is refused at publish.
 - Backpack membership (is a row virtual?) comes from the stable client ECS snapshot: `InventorySetup` (84 bytes; linked
   entities +0, categories +64; Generic 4, Virtual 5) and `Inventory` (96 bytes; eight 12-byte stacks, id +0, count +4).
-  A read failure suppresses the wish without an event. A row the game listed itself is never virtual, in either mode.
+  A read failure suppresses the wish without an event. A row the game listed itself with a non-zero count is never
+  virtual, in either mode; one it kept at count 0 (see the next point) is decided by the backpack (since
+  0.2.0-dev.30.7).
 - Rebuilding a group, vanilla zeroes the count of every row it keeps and adds stock to rows with a matching item; it does
   not remove unmatched rows, and the cycle `0x40c320` does not check a row's count. Kiln therefore keeps a group's
   binding across a session or world change until that group's next build takes the mod rows out (picks of them stay
