@@ -283,6 +283,8 @@ export interface ConfigEntry {
   synced?: boolean;
   min?: number;
   max?: number;
+  /** [Range(min, max, step)]: slider step (editor metadata only). */
+  step?: number;
   options?: string[];
 }
 export interface ConfigFile {

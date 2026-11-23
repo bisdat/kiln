@@ -9,7 +9,7 @@ namespace Kiln.ConfigScreensTests;
 
 public sealed class PageConfig
 {
-    [Range(0.01, 1000)]
+    [Range(0.01, 1000, 0.1)]
     public double Spread { get; set; } = 1;
 
     [Range(0, 100)]
@@ -227,6 +227,43 @@ public sealed class ConfigScreensTests : IDisposable
         Draw();
         ConfigScreens.RunCommits();
         Assert.Equal(2.5, _file.Get("spread"));
+    }
+
+    [Fact]
+    public void Only_slider_interaction_snaps_an_off_grid_value_before_Apply()
+    {
+        FakeUiTable.FieldLabel = "##n";
+        Draw();
+        Assert.Equal("1", FakeUiTable.Fields[0].Text); // off-grid saved/default value stays exact
+        Assert.False(Says("* spread"));
+        FakeUiTable.Set = (0, 0.348);                 // drag the float slider: min 0.01 + 3 * 0.1
+        Draw();
+        Draw();
+        Assert.Equal("0.31", FakeUiTable.Fields[0].Text);
+        Assert.Equal(1.0, _file.Get("spread"));
+        FakeUiTable.Click = "Apply";
+        Draw();
+        ConfigScreens.RunCommits();
+        Assert.Equal(0.31, _file.Get("spread"));
+    }
+
+    [Theory]
+    [InlineData("float", -0.35, 1.05, 0.1, -0.18, -0.15)]
+    [InlineData("float", 0.05, 1.0, 0.1, 0.348, 0.35)]
+    [InlineData("float", 0.0, 1.0, 0.00001, 0.123456, 0.12346)]
+    [InlineData("float", 0.05, 1.0, 0.1, 1.0, 0.95)] // max is not a grid point
+    [InlineData("int", -3.0, 20.0, 4.0, 4.0, 5.0)]
+    [InlineData("int", 3.0, 20.0, 4.0, 20.0, 19.0)]
+    [InlineData("float", 0.0, 1.0, 0.0, 0.123456, 0.1235)]
+    [InlineData("float", 0.0, 1.0, double.NaN, 0.123456, 0.1235)]
+    [InlineData("int", 0.0, 20.0, 0.5, 3.0, 3.0)]
+    public void Slider_values_use_a_min_anchored_decimal_grid_or_the_legacy_fallback(
+        string type, double min, double max, double step, double value, double expected)
+    {
+        var entry = new ConfigEntry("a", type, null, value, value, value, min, max, [], false, false) { Step = step };
+        Assert.Equal(expected, ConfigScreens.SliderValue(entry, value));
+        Assert.True(ConfigScreens.TryNumber(entry, "0.123456", out var typed) || type == "int" || min > 0.123456);
+        if (type == "float" && min <= 0.123456) Assert.Equal(0.123456, typed);
     }
 
     [Theory]

@@ -51,3 +51,7 @@ Kiln.RegistryThreadOnlyAttribute.RegistryThreadOnlyAttribute() -> void
 [KILNX031]Kiln.RegistryReadyPhase
 [KILNX031]Kiln.RegistryReadyPhase.Start = 4 -> Kiln.RegistryReadyPhase
 [KILNX031]Kiln.RegistryReadyPhase.WorldLoad = 5 -> Kiln.RegistryReadyPhase
+Kiln.ConfigEntry.Step.get -> double?
+Kiln.ConfigEntry.Step.init -> void
+Kiln.RangeAttribute.RangeAttribute(double min, double max, double step) -> void
+Kiln.RangeAttribute.Step.get -> double?

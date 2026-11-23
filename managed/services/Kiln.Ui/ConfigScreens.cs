@@ -199,7 +199,11 @@ internal static class ConfigScreens
             case "int" when e.Min is { } lo && e.Max is { } hi && hi - lo <= 100_000:
             {
                 var i = shown is int v ? v : Convert.ToInt32(shown, CultureInfo.InvariantCulture);
-                if (ui.Slider("##v", ref i, (int)Math.Ceiling(lo), (int)Math.Floor(hi))) Stage(f, e.Path, i);
+                if (ui.Slider("##v", ref i, (int)Math.Ceiling(lo), (int)Math.Floor(hi)))
+                {
+                    i = (int)SliderValue(e, i);
+                    Stage(f, e.Path, i);
+                }
                 NumberField(ui, f, e, typed, i.ToString(CultureInfo.InvariantCulture));
                 break;
             }
@@ -209,7 +213,7 @@ internal static class ConfigScreens
                 var s = (float)d;
                 if (ui.Slider("##v", ref s, (float)lo, (float)hi))
                 {
-                    d = Math.Round((double)s, 4);
+                    d = SliderValue(e, s);
                     Stage(f, e.Path, d);
                 }
                 NumberField(ui, f, e, typed, NumberText(d));
@@ -278,6 +282,29 @@ internal static class ConfigScreens
         ui.Tooltip(KilnText.T("config.type_here"));
         if (typed is not null)
             ui.TextDisabled(KilnText.T("config.range", ("min", e.Min?.ToString(CultureInfo.InvariantCulture)), ("max", e.Max?.ToString(CultureInfo.InvariantCulture))));
+    }
+
+    /// <summary>The value a slider row's slider sets when dragged to <paramref name="value"/>. With a
+    /// <see cref="ConfigEntry.Step"/> that suits the entry (<c>[Range(min, max, step)]</c>): the nearest
+    /// <c>min + n * step</c> inside the range, worked out in decimal so 0.1 steps give 0.3, not 0.30000000000000004.
+    /// Without one: the value as before (a float slider's to 4 places). Only the slider snaps; a value loaded or typed
+    /// stays as it is.</summary>
+    internal static double SliderValue(ConfigEntry e, double value)
+    {
+        var legacy = e.Type == "int" ? value : Math.Round(value, 4);
+        if (ConfigSchema.SliderStep(e.Type, e.Min, e.Max, e.Step) is not { } step || !double.IsFinite(value)) return legacy;
+        double lo = e.Min!.Value, hi = e.Max!.Value;
+        const double DecimalSafe = 1e15;
+        if (Math.Abs(lo) < DecimalSafe && Math.Abs(hi) < DecimalSafe && Math.Abs(value) < DecimalSafe && step >= 1e-12)
+        {
+            decimal dlo = (decimal)lo, dstep = (decimal)step;
+            var last = Math.Floor(((decimal)hi - dlo) / dstep);
+            var n = Math.Clamp(Math.Round(((decimal)value - dlo) / dstep, MidpointRounding.AwayFromZero), 0, last);
+            return (double)(dlo + n * dstep);
+        }
+        var count = Math.Floor((hi - lo) / step);
+        var k = Math.Clamp(Math.Round((value - lo) / step, MidpointRounding.AwayFromZero), 0, count);
+        return Math.Min(hi, lo + k * step);
     }
 
     /// <summary>A "float" entry's value as the number field shows it: the shortest text that gives the value back. A

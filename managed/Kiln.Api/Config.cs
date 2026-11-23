@@ -83,6 +83,13 @@ public sealed record ConfigEntry(string Path, string Type, string? Comment, obje
     /// <see cref="ConfigFile.IsFromServer"/>). <c>FileValue</c> is then this game's own value, which comes back on leave.</summary>
     public bool FromServer { get; init; }
 
+    /// <summary>The slider step of the entry's <see cref="RangeAttribute"/> (<c>[Range(min, max, step)]</c>): editors
+    /// move a slider from <see cref="Min"/> in steps of this size. Null when there is none or it does not suit the
+    /// entry (not a positive finite number, larger than <c>Max - Min</c>, too small to change a value of the range,
+    /// not whole for an "int" entry or one whose <see cref="Min"/> is not whole; only "int" and "float" entries have
+    /// one). Editor metadata only: values typed, read from the file or set in code are not rounded to it.</summary>
+    public double? Step { get; init; }
+
     /// <summary>True when the file's value differs from the running one, so the change waits for a reload or restart.
     /// Never true for a value that came from the server.</summary>
     public bool PendingRestart => !FromServer && !ConfigSchema.ValueEquals(Value, FileValue);
@@ -369,6 +376,7 @@ public abstract class ConfigFile
             if (e.FromServer) o["fromServer"] = true;
             if (e.Min is { } min) o["min"] = min;
             if (e.Max is { } max) o["max"] = max;
+            if (e.Step is { } step) o["step"] = step;
             if (e.Options.Count > 0) o["options"] = new JsonArray([.. e.Options.Select(x => (JsonNode)x)]);
             entries.Add(o);
         }
@@ -412,6 +420,7 @@ public abstract class ConfigFile
             };
             if (node.Min is { } min) o["min"] = min;
             if (node.Max is { } max) o["max"] = max;
+            if (node.Step is { } step) o["step"] = step;
             if (node.Options.Length > 0) o["options"] = new JsonArray([.. node.Options.Select(x => (JsonNode)x)]);
             entries.Add(o);
         }
@@ -510,7 +519,7 @@ public abstract class ConfigFile
         var running = node.Get(Holder(chain));
         var file = _file.TryGetValue(node.Path, out var f) ? f : running;
         return new ConfigEntry(node.Path, node.TypeName, node.Comment, node.Default, running, file, node.Min, node.Max,
-            node.Options, node.RequiresRestart, node.Synced) { FromServer = IsFromServer(node.Path) };
+            node.Options, node.RequiresRestart, node.Synced) { FromServer = IsFromServer(node.Path), Step = node.Step };
     }
 
     /// <summary>The object holding a value: the config object or one of its sections (created when null).</summary>

@@ -172,7 +172,8 @@ It is a normal Kiln config: it reloads while running, and the Kiln menu shows it
 ## Config screens (Kiln menu > Mods > Config)
 Every mod with a registered config gets a **Config** button. The page is generated from the schema:
 - bool: a checkbox;
-- whole number or float with a `[Range]`: a slider (whole numbers with a span over 100000 get a text field);
+- whole number or float with a `[Range]`: a slider (whole numbers with a span over 100000 get a text field); with
+  `[Range(min, max, step)]` the slider moves from min in steps of step (docs/kiln/config.md), the number field does not;
 - enum: `<` / `>` with the options in the tooltip;
 - string, duration (`30s`, `5m`), list (`[1, 2]`): a text field.
 

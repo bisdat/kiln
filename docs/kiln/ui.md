@@ -1068,7 +1068,8 @@ of key hints. Tab / Shift+Tab or LB / RB switch sections; arrows or the d-pad mo
     about it, the engine, the folder; for Kiln mods also the load order, what it needs, its status lines
     (`StatusLines`) and its settings inline: the page generated from its config schema (`ConfigScreens.cs`; server
     configs are read-only while connected) and the pages it registered with `Ui.AddConfigPage(modId, ui => …)`.
-    On the generated page a number with a `[Range]` is a slider with a number field beside it, where a value is typed;
+    On the generated page a number with a `[Range]` is a slider with a number field beside it, where a value is typed
+    (`[Range(min, max, step)]`: the slider snaps to min + n * step, the typed value is kept as typed);
     edits are marked and saved with Apply, and the table shows the applied values at once, also while the game is
     paused and the save waits for the next tick.
     ShroudForge mods have an enabled switch and settings from `extended.mod.json`, grouped and conditionally enabled,

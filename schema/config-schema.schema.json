@@ -44,6 +44,7 @@
           "synced": { "type": "boolean", "default": false },
           "min": { "type": "number" },
           "max": { "type": "number" },
+          "step": { "type": "number", "exclusiveMinimum": 0, "description": "[Range(min, max, step)]: editors move a slider from min in steps of this size. Editor metadata only (values are not rounded to it); an editor ignores a step that does not suit the entry (not int/float, larger than max - min, not whole for int)." },
           "options": { "type": "array", "items": { "type": "string" }, "description": "enum values." }
         }
       }

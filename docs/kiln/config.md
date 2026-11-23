@@ -21,6 +21,7 @@ public sealed class PvpSection
 {
     public bool Enabled { get; set; }
     [Range(0, 10), Synced] public double DamageFactor { get; set; } = 1.0;   // [Synced]: sent to Kiln clients, see docs/kiln/sync.md
+    [Range(0, 1, 0.05)] public double Chance { get; set; } = 0.25;          // slider in steps of 0.05 (0, 0.05, 0.1 ...)
 }
 
 // OnLoad:
@@ -35,6 +36,14 @@ var homes = _cfg.Value.MaxHomes;                    // always the current value 
 - Types: bool, whole numbers, float/double/decimal, string, enums, `TimeSpan`, lists/arrays of those, nested classes.
   Attributes: `[Comment]`, `[Range]` (also DataAnnotations' `RangeAttribute`), `[RequiresRestart]`, `[Synced]`,
   `[ConfigKey("name")]`, `[ConfigIgnore]`. Keys are camelCase member names.
+- `[Range(min, max, step)]` (mod API 0.2.17) gives the slider of the in-game config page and the launcher a step:
+  it moves from `min` in steps of `step` (`min + n * step`, the last one at or below `max`; `[Range(-0.35, 1.05, 0.1)]`
+  gives -0.35, -0.25 ... 0.95). It is editor metadata only: a value typed into the number field, read from the file,
+  set with `TrySet` or sent by a server keeps the plain bounds check and is never rounded to the step, and a saved
+  value off the step stays as it is until the slider is moved. A command argument's `[Range]` ignores the step.
+  `ConfigEntry.Step` and the schemas' `step` carry it only when it suits the entry: an int or float entry (not a list
+  or duration), a positive finite step no larger than `max - min` that changes a value of the range, and for whole
+  numbers a whole step and a whole `min`. Any other step is ignored and the slider moves as with `[Range(min, max)]`.
 
 ## The file
 Commented JSONC, written from the schema: each entry has its comment and a meta line (`Default`, `Range`, options,
@@ -48,7 +57,7 @@ that is not valid JSON is left alone and the previous values stay (`LastError`).
 `schema/config-schema.schema.json`, contracts.md 5.5), so the launcher can edit the file while the game is not
 running. It holds `format`, `source: "kiln"`, `file` (`<id>.json`), `valueFormat: "jsonc"`, `id`, `mod`,
 `modVersion`, `kind`, `kiln`, `sections[]`, `entries[]` (path, type, comment, default, requiresRestart, synced, min,
-max, options), `written` and `schemaHash` (sha256 of the rest). Written atomically, and only when the schema changed:
+max, step, options), `written` and `schemaHash` (sha256 of the rest). Written atomically, and only when the schema changed:
 a reload of the same mod version with the same class keeps the file; a changed class or mod version rewrites it.
 `ConfigFile.SchemaSnapshot()` / `SnapshotPath` give the same in code.
 
