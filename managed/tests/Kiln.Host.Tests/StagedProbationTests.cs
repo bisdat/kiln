@@ -57,6 +57,32 @@ public sealed class StagedProbationTests : ModsFixture
     }
 
     [Fact]
+    public void A_record_is_on_the_disk_before_it_replaces_the_one_before()
+    {
+        // a power cut must leave the old record or the whole new one, never an empty file: the new text goes to
+        // <record>.tmp, is flushed to the disk, then renamed over the record
+        InstallHello();
+        Watch("hello", "hello");
+        var seen = new List<(string Tmp, string Text, string? Record)>();
+        StagedProbation.TestFlushed = tmp => seen.Add((tmp, File.ReadAllText(tmp), Record("hello")?["state"]?.GetValue<string>()));
+        try
+        {
+            var (mods, _, _) = Start();
+            mods.LoadAll();
+            mods.UnloadAll("test");
+        }
+        finally
+        {
+            StagedProbation.TestFlushed = null;
+        }
+        var w = Assert.Single(seen);  // "loading"; the record goes once the mod loaded
+        Assert.Equal(ProbationFile("hello") + ".tmp", w.Tmp);
+        Assert.Equal("loading", JsonNode.Parse(w.Text)!["state"]!.GetValue<string>());
+        Assert.Equal("pending", w.Record);  // the one before stays until the rename
+        Assert.False(File.Exists(ProbationFile("hello") + ".tmp"));
+    }
+
+    [Fact]
     public void A_mod_whose_OnLoad_throws_right_after_its_update_is_marked_failed()
     {
         Install("SampleFaulty", "sample-faulty");

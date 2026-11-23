@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -9,11 +10,15 @@ namespace Kiln.Host;
 /// watched while it loads: "loading" right before its code runs, then the record goes when it loaded, or "failed" with the
 /// reason when it did not, and the next start rolls it back once. A start that ends while the mod loads leaves "loading",
 /// which the next start counts as a failure too. A Kiln update is confirmed once the mods loaded: its record goes, so the
-/// next start keeps it. Server only. Every write is atomic (a temp file, then a rename); one that fails is logged and
-/// changes nothing else.</summary>
+/// next start keeps it. Server only. Every write is atomic and durable (a temp file flushed to the disk, then a rename);
+/// one that fails is logged and changes nothing else.</summary>
 internal sealed class StagedProbation
 {
     private const string KilnRecord = "kiln.json";
+
+    /// <summary>Tests only: called with the temp file once a record's new text is flushed to the disk, before it is renamed
+    /// over the record. Null in Kiln.</summary>
+    internal static Action<string>? TestFlushed { get; set; }
     private readonly string _directory;  // kiln/staged/probation
     private readonly string _mods;       // kiln/mods, full path
     private readonly Action<LogLevel, string> _log;
@@ -112,12 +117,26 @@ internal sealed class StagedProbation
         var tmp = file + ".tmp";
         try
         {
-            System.IO.File.WriteAllText(tmp, record.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            // as staged.cpp writes its records: <record>.tmp, flushed to the disk, then renamed over the record, so a power
+            // cut leaves the record before or the whole new one (never an empty file the next start cannot read)
+            using (var s = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                s.Write(Encoding.UTF8.GetBytes(record.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+                s.Flush(flushToDisk: true);
+            }
+            TestFlushed?.Invoke(tmp);
             System.IO.File.Move(tmp, file, overwrite: true);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
+            try
+            {
+                System.IO.File.Delete(tmp);
+            }
+            catch (Exception d) when (d is IOException or UnauthorizedAccessException)
+            {
+            }
             _log(LogLevel.Warn, $"staged: mod folder {folder}: its probation record could not be written ({e.Message})");
             return false;
         }

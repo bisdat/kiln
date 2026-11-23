@@ -107,6 +107,10 @@ A full disk would cost the world its next save. The world's savegame folder is t
 - Rollbacks never wait for free space: they bring back the version that worked.
 - When the volume can't be asked, nothing is held back.
 
+Probation records are written like the journal: a temp file, flushed to the disk, then renamed over the record. That
+holds for the ones kiln-core and the proxy write and for Kiln.Host's (`loading`, `failed`). A power cut leaves the
+record that was there before or the whole new one, never an empty file.
+
 ## Rollback, and the automatic one
 - `update_rollback` writes `rollback/<unit>.json`. The next start swaps the current version with the kept one, so the
   version it rolled away from becomes the kept one.
