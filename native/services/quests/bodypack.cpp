@@ -67,7 +67,9 @@ std::span<const BodyLayoutType> body_layout() {
     static constexpr BodyLayoutField model[]{{"model", "keen::ObjectReference<keen::Model>", 0}};
     static constexpr BodyLayoutField graph[]{{"animationGraph", "keen::ObjectReference<keen::anim_graph::tool_graph::AnimationGraph2_0>", 0}};
     static constexpr BodyLayoutField cloth[]{{"clothCollider", "keen::Guid", 8}, {"currentClothCollider", "keen::Guid", 24}};
-    static constexpr BodyLayoutField path[]{{"horizontalRadius", "keen::float32", 56}, {"height", "keen::float32", 60}};
+    static constexpr const char* ref = "keen::actor::ActorSequenceReference";
+    static constexpr BodyLayoutField path[]{{"jumpSequence", ref, 0}, {"openDoorSequence", ref, 0x10}, {"teleportSequence", ref, 0x24},
+                                           {"horizontalRadius", "keen::float32", 56}, {"height", "keen::float32", 60}};
     static constexpr BodyLayoutField movement[]{{"width", "keen::float32", 0}, {"height", "keen::float32", 4}};
     static constexpr BodyLayoutField ui[]{{"healthBarOffset", "keen::ecs::Offset", 0}, {"interactionPromptOffset", "keen::ecs::Offset", 40}};
     static constexpr BodyLayoutField offset[]{{"localOffset", "keen::float3", 0}, {"worldOffset", "keen::float3", 12}};
@@ -83,6 +85,34 @@ std::span<const BodyLayoutType> body_layout() {
     static constexpr BodyLayoutField xyz[]{{"x", "keen::float32", 0}, {"y", "keen::float32", 4}, {"z", "keen::float32", 8}};
     static constexpr BodyLayoutField xyzw[]{{"x", "keen::float32", 0}, {"y", "keen::float32", 4}, {"z", "keen::float32", 8}, {"w", "keen::float32", 12}};
     static constexpr BodyLayoutValue masks[]{{"Interaction", 13}, {"Steering", 11}};
+    // 16f S4: the motion closure (motionclose.cpp): sequence resources, the event whitelist, the template's references
+    static constexpr const char* refs = "keen::BlobArray<keen::actor::ActorSequenceReference>";
+    static constexpr BodyLayoutField seqres[]{{"resourceId", "keen::Guid", 0}, {"subSequences", "keen::BlobArray<keen::actor::ActorSubSequenceResource>", 16}};
+    static constexpr BodyLayoutField subseq[]{{"sourceSubSequenceId", "keen::Guid", 0x30}};
+    static constexpr BodyLayoutField seqbase[]{{"events", "keen::SequenceEvents", 0}, {"length", "keen::Time", 8}, {"loop", "keen::bool", 0x10}};
+    static constexpr BodyLayoutField event[]{{"time", "keen::Time", 0}, {"duration", "keen::Time", 8}};
+    static constexpr BodyLayoutField time[]{{"value", "keen::sint64", 0}};
+    static constexpr BodyLayoutField setanim[]{{"animationName", "keen::animationgraph::StateIdReference", 0x60}};
+    static constexpr BodyLayoutField lerp[]{{"lerpDuration", "keen::Time", 0x70}};
+    static constexpr BodyLayoutField active[]{{"sitSequence", ref, 4}, {"sleepSequence", ref, 0x14}, {"inspectSequence", ref, 0x24},
+                                             {"socializingSetup", "keen::active_npc::SocializingSetup", 0x190}};
+    static constexpr BodyLayoutField social[]{{"sequences", "keen::ecs::NpcSocializingSequences", 0x20}};
+    static constexpr BodyLayoutField socialseq[]{{"greetings", refs, 0}, {"talking", refs, 8}, {"reactions", refs, 0x10}};
+    static constexpr BodyLayoutField npcstate[]{{"defaultGreetingSequence", ref, 0}, {"attentionGreetingSequence", ref, 0x10},
+                                               {"turnSetup", "keen::actor::TurnSetup", 0x20}};
+    static constexpr BodyLayoutField turn[]{{"turnLeftSmallSequence", ref, 0}, {"turnLeftBigSequence", ref, 0x10},
+                                           {"turnRightSmallSequence", ref, 0x20}, {"turnRightBigSequence", ref, 0x30}};
+    static constexpr BodyLayoutField actions[]{{"defaultInteractionSequence", ref, 0}, {"idleSequences", "keen::ecs::NpcIdleSequences", 0x10},
+                                              {"interactionSequences", "keen::ecs::NpcInteractionSequences", 0x18}};
+    static constexpr BodyLayoutField basenpc[]{{"sequences", "keen::BlobArray<keen::ecs::NpcSequenceEntry>", 0}};
+    static constexpr BodyLayoutField entry[]{{"sequence", ref, 0}};
+    static constexpr BodyLayoutField interactions[]{{"sequences", "keen::BlobArray<keen::ecs::NpcInteractionSequence>", 0}};
+    static constexpr BodyLayoutField interaction[]{{"sequence", ref, 0x10}};
+    static constexpr BodyLayoutField dialog[]{{"dialogResource", "keen::NpcDialogResource", 0x14}};
+    static constexpr BodyLayoutField dialogres[]{{"defaultSequence", ref, 0x14}, {"missingRequirementSequence", ref, 0x24},
+        {"initLines", "keen::BlobArray<keen::NpcDialogInitLineResource>", 0x34}, {"transitionLines", "keen::BlobArray<keen::NpcDialogTransitionLineResource>", 0x3c},
+        {"farewellLines", "keen::BlobArray<keen::NpcDialogFarewellResource>", 0x44}, {"dialogOptions", "keen::BlobArray<keen::NpcDialogOptionResource>", 0x4c}};
+    static constexpr BodyLayoutField line[]{{"sequence", ref, 8}};
     static const BodyLayoutType types[]{
         {"keen::ecs::TemplateResource", 24, root},
         {"keen::ecs::CharacterSetup", 44, {}, "keen::ecs::Component"}, {"keen::ecs::NewCharacterSetup", 1, {}, "keen::ecs::Component"},
@@ -108,6 +138,44 @@ std::span<const BodyLayoutType> body_layout() {
         {"keen::ecs::ColliderMask", 4, {}, "keen::Bitmask32<keen::ecs::ColliderFlags>"},
         {"keen::Bitmask32<keen::ecs::ColliderFlags>", 4, {}, "keen::ecs::ColliderFlags"},
         {"keen::AttachmentSlotMask", 8}, {"keen::float32", 4}, {"keen::Guid", 16},
+        // 16f S4: the motion closure
+        {"keen::actor::ActorSequenceResource", 24, seqres},
+        {"keen::BlobArray<keen::actor::ActorSubSequenceResource>", 8, {}, "keen::actor::ActorSubSequenceResource"},
+        {"keen::actor::ActorSubSequenceResource", 72, subseq, "keen::SequenceResource"}, {"keen::SequenceResource", 32, seqbase},
+        {"keen::SequenceEvents", 8, {}, "keen::BlobArray<keen::BlobVariant<keen::SequenceEvent>>"},
+        {"keen::BlobArray<keen::BlobVariant<keen::SequenceEvent>>", 8, {}, "keen::BlobVariant<keen::SequenceEvent>"},
+        {"keen::BlobVariant<keen::SequenceEvent>", 12, {}, "keen::SequenceEvent"}, {"keen::SequenceEvent", 96, event}, {"keen::Time", 8, time},
+        {"keen::ActionSequenceEvent", 96, {}, "keen::SequenceEvent"}, {"keen::SharedSequenceEvent", 96, {}, "keen::SequenceEvent"},
+        {"keen::NotifierEventBase", 144, {}, "keen::SharedSequenceEvent"},
+        {"keen::SfxNotifierEvent", 168, {}, "keen::NotifierEventBase"}, {"keen::VoiceoverNotifierEvent", 168, {}, "keen::NotifierEventBase"},
+        {"keen::actor::DisableAbilityEvent", 120, {}, "keen::ActionSequenceEvent"}, {"keen::actor::EnableAbilityEvent", 120, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::JumpEvent", 96, {}, "keen::ActionSequenceEvent"}, {"keen::actor::KeepAliveEvent", 112, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::LerpMovementFactorEvent", 120, lerp, "keen::ActionSequenceEvent"},
+        {"keen::actor::LerpRotationFactorEvent", 104, {}, "keen::ActionSequenceEvent"}, {"keen::actor::LoopEvent", 120, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::RotationLerpEvent", 104, {}, "keen::SharedSequenceEvent"}, {"keen::actor::SetAbortByMovement", 104, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::SetAnimationEvent", 120, setanim, "keen::ActionSequenceEvent"}, {"keen::actor::SetStateEvent", 104, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::ToggleInteractionActionEvent", 96, {}, "keen::ActionSequenceEvent"},
+        {"keen::actor::TriggerKnowledge", 104, {}, "keen::ActionSequenceEvent"}, {"keen::actor::TriggerNoiseEvent", 112, {}, "keen::SharedSequenceEvent"},
+        {"keen::animationgraph::StateIdReference", 16, {}, "keen::ObjectReference<keen::animationgraph::StateId>"},
+        {"keen::actor::ActorSequenceReference", 16, {}, "keen::ObjectReference<keen::actor::ActorSequence>"},
+        {"keen::BlobArray<keen::actor::ActorSequenceReference>", 8, {}, "keen::actor::ActorSequenceReference"},
+        {"keen::ecs::ActiveNpcState", 456, active, "keen::ecs::Component"}, {"keen::active_npc::SocializingSetup", 56, social},
+        {"keen::ecs::NpcSocializingSequences", 24, socialseq}, {"keen::ecs::NpcState", 128, npcstate, "keen::ecs::Component"},
+        {"keen::actor::TurnSetup", 72, turn}, {"keen::ecs::NpcActionSequences", 32, actions, "keen::ecs::Component"},
+        {"keen::ecs::NpcIdleSequences", 8, {}, "keen::ecs::BaseNpcSequences"}, {"keen::ecs::BaseNpcSequences", 8, basenpc},
+        {"keen::BlobArray<keen::ecs::NpcSequenceEntry>", 8, {}, "keen::ecs::NpcSequenceEntry"}, {"keen::ecs::NpcSequenceEntry", 16, entry},
+        {"keen::ecs::NpcInteractionSequences", 8, interactions},
+        {"keen::BlobArray<keen::ecs::NpcInteractionSequence>", 8, {}, "keen::ecs::NpcInteractionSequence"},
+        {"keen::ecs::NpcInteractionSequence", 32, interaction}, {"keen::ecs::NpcDialog", 120, dialog, "keen::ecs::Component"},
+        {"keen::NpcDialogResource", 84, dialogres},
+        {"keen::BlobArray<keen::NpcDialogInitLineResource>", 8, {}, "keen::NpcDialogInitLineResource"},
+        {"keen::BlobArray<keen::NpcDialogTransitionLineResource>", 8, {}, "keen::NpcDialogTransitionLineResource"},
+        {"keen::BlobArray<keen::NpcDialogFarewellResource>", 8, {}, "keen::NpcDialogFarewellResource"},
+        {"keen::BlobArray<keen::NpcDialogOptionResource>", 8, {}, "keen::NpcDialogOptionResource"},
+        {"keen::NpcDialogInitLineResource", 68, {}, "keen::NpcDialogOptionResourceBase"},
+        {"keen::NpcDialogTransitionLineResource", 64, {}, "keen::NpcDialogOptionResourceBase"},
+        {"keen::NpcDialogFarewellResource", 64, {}, "keen::NpcDialogOptionResourceBase"},
+        {"keen::NpcDialogOptionResource", 68, {}, "keen::NpcDialogOptionResourceBase"}, {"keen::NpcDialogOptionResourceBase", 64, line},
     };
     return types;
 }

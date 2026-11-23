@@ -20,6 +20,8 @@
 //    a search-area marker) with its own name tag, visible while the step is active; Kiln.Quests/Native puts it at the place.
 #include "questpack.h"
 #include "bodypack.h"
+#include "motionclose.h"
+#include "../../core/abi/services/kiln_capacity_util.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -143,6 +145,8 @@ struct Ctx {
         TemplateEdit edit;
         bool has_body = false;  // 16f: an authored roster body, lowered before the edit
         BodySpec body;
+        std::string mod, npc;   // 16f S4: whose motion closure (clone ids follow the mod, NPC and binding vector)
+        ojson motions;          // the admitted 27-row binding vector
     };
     std::vector<Tpl> templates;
     std::map<std::string, const ojson*> dialogues;  // of this mod
@@ -770,6 +774,9 @@ void compile_npc(Ctx& c, const std::string& nid, const ojson& n) {
             spec.height = size["height"].get<double>();
             tp->has_body = true;
             tp->body = spec;
+            tp->mod = c.mod->id;
+            tp->npc = nid;
+            tp->motions = b.value("bindings", ojson());
         }
     }
     uint32_t name_tag = 0;
@@ -1111,6 +1118,37 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
             n = lowered.size();
         }
         if (!edit_template(p, n, t.edit, &o.data, &err)) return fail(o.name + ": " + err);
+        if (t.has_body) {
+            // 16f S4: the motion closure. Each of the Fisher's 21 sequences is cloned under the mod's ids with its
+            // animation events bound to the authored states and retimed; every template reference follows the clone.
+            motionclose::Bindings bound;
+            if (!motionclose::parse_bindings(t.motions, &bound, &err)) return fail(o.name + ": " + err);
+            std::string vector_hash;
+            const auto digest = kiln::capacity::sha256(t.motions.dump());
+            kiln::capacity::detail::hex(vector_hash, digest.data(), digest.size());
+            const uint32_t sequence_type = fnv1a(motionclose::kSequenceType, std::strlen(motionclose::kSequenceType));
+            const auto id = [&](const std::string& source) { return derive_guid(t.mod, "npcmotion", t.npc + ":" + source + ":" + vector_hash); };
+            std::map<std::string, Guid> clones;
+            for (const auto& source : motionclose::fisher_closure()) {
+                Guid g;
+                parse_guid(source.guid, &g);
+                const uint8_t* sp = nullptr;
+                size_t sn = 0;
+                if (!game.read(g, sequence_type, &sp, &sn) || !sp)
+                    return fail(o.name + ": motions." + source.role + ": the Fisher's sequence " + source.guid + " is not in the game's data");
+                ResourceOut r;
+                r.guid = id(source.guid);
+                r.type = sequence_type;
+                r.name = o.name + ".motion." + source.role;
+                if (!motionclose::clone_sequence(sp, sn, r.guid, source, bound[source.role],
+                                                 [&](const Guid& old) { return id(guid_text(old)); }, &r.data, &err))
+                    return fail(o.name + ": " + err);
+                clones[source.guid] = r.guid;
+                out.resources.push_back(std::move(r));
+            }
+            size_t replaced = 0;
+            if (!motionclose::remap_template(&o.data, clones, &replaced, &err)) return fail(o.name + ": " + err);
+        }
         out.templates.push_back(std::move(o));
     }
     out.ok = out.errors.empty();

@@ -52,6 +52,12 @@ struct TemplateOut {
     bool is_new = false;
     Bytes data;
 };
+struct ResourceOut {  // 16f S4: a new resource the build adds beside its templates (cloned NPC motion sequences)
+    Guid guid;
+    uint32_t type = 0;
+    std::string name;
+    Bytes data;
+};
 struct TextOut {
     uint32_t tag = 0;
     std::string json;  // {"en": "...", "de": "..."}
@@ -67,6 +73,7 @@ struct PackOut {
     Bytes res_knowledge, res_journal, res_npcs;
     size_t knowledge_source_size = 0;  // input length before this compile appended tables; private compaction provenance
     std::vector<TemplateOut> templates;
+    std::vector<ResourceOut> resources;  // new keys only, published with the templates
     std::vector<TextOut> texts;
     std::vector<std::string> content_items, content_recipes;  // definitions for kiln.content's define()
     // The roster as built (since 0.2.0-dev.29; empty when no mod adds an NPC): the collection's NpcIds before the

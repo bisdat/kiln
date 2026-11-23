@@ -5,6 +5,7 @@
 #include "bootpack_memory_test.cpp"
 #undef main
 
+#include <cstdlib>
 #include <map>
 #include <set>
 
@@ -37,7 +38,10 @@ void layout_check() {
     struct Change { const char* type; std::function<void(BodyTypeFacts&)> change; const char* says; };
     const std::vector<Change> changes{
         {"keen::ecs::PathWalker", [](BodyTypeFacts& f) { f.size = 96; }, "keen::ecs::PathWalker is 96 bytes"},
-        {"keen::ecs::PathWalker", [](BodyTypeFacts& f) { f.fields[0].offset += 4; }, "keen::ecs::PathWalker.horizontalRadius moved"},
+        {"keen::ecs::PathWalker", [](BodyTypeFacts& f) {
+             for (auto& field : f.fields) if (field.name == "horizontalRadius") field.offset += 4; }, "keen::ecs::PathWalker.horizontalRadius moved"},
+        {"keen::actor::SetAnimationEvent", [](BodyTypeFacts& f) { f.fields[0].offset = 0x68; }, "keen::actor::SetAnimationEvent.animationName moved"},
+        {"keen::ecs::NpcDialog", [](BodyTypeFacts& f) { f.size = 124; }, "keen::ecs::NpcDialog is 124 bytes"},
         {"keen::ecs::ModelResource", [](BodyTypeFacts& f) { f.fields[0].type = "keen::Guid"; }, "keen::ecs::ModelResource.model moved"},
         {"keen::ecs::CharacterSetup", [](BodyTypeFacts& f) { f.inner = "keen::ecs::Other"; }, "keen::ecs::CharacterSetup no longer derives"},
         {"keen::ecs::ColliderFlags", [](BodyTypeFacts& f) { f.values[0].second = 14; }, "keen::ecs::ColliderFlags::Interaction changed"},
@@ -65,6 +69,10 @@ void layout_check() {
 }
 
 // ---- the real compiler and publisher with an admitted authored body --------------------------------------------
+const uint32_t kModelType = fnv1a("keen::RenderModel", std::strlen("keen::RenderModel"));
+const uint32_t kSequenceTypeHash = fnv1a(motionclose::kSequenceType, std::strlen(motionclose::kSequenceType));
+const uint32_t kGraphTypeHash = fnv1a(kGraphType, std::strlen(kGraphType));
+
 ModInput knowledge_only(const char* id) {
     ModInput mod;
     mod.id = id;
@@ -84,15 +92,19 @@ struct World {
     bootpack::Backend backend;
     Bytes fisher = body_fixture::fisher();
     const Bytes pristine = fisher;
+    std::map<std::string, Bytes> sequences;  // the Fisher's 21 closure sequences, by source GUID text
     std::map<uint64_t, std::string> owner_mod;
     std::vector<std::string> admitted, published;
     bool layout_ok = true;
     std::string refuse_admission, fail_body_put, fail_finish;
     World() {
         backend = store.backend();
+        for (const auto& s : motionclose::fisher_closure()) sequences[s.guid] = body_fixture::sequence(s);
         const auto read = backend.game.read;
         backend.game.read = [this, read](const Guid& g, uint32_t type, const uint8_t** p, size_t* n) {
             if (type == kTypeTemplate && g == guid(kFisherGuid)) { *p = fisher.data(); *n = fisher.size(); return true; }
+            if (type == kSequenceTypeHash)
+                if (const auto it = sequences.find(guid_text(g)); it != sequences.end()) { *p = it->second.data(); *n = it->second.size(); return true; }
             return read(g, type, p, n);
         };
         backend.game.template_by_name = [](const std::string& name, Guid* out) {
@@ -120,7 +132,7 @@ struct World {
                     for (auto& [name, npc] : document["npcs"].items())
                         if (npc.contains("body"))
                             npc["body"] = {{"model", kModel}, {"graph", kGraph}, {"size", {{"radius", .75}, {"height", 2}}},
-                                           {"bindings", ojson::array()}, {"closure", "c"}};
+                                           {"bindings", body_fixture::bindings()}, {"closure", "c"}};
             *assets = {{"entries", {{{"kind", "resource"}, {"guid", kModel}, {"type", "keen::RenderModel"}, {"mode", "new"}, {"file", "cooked/rig.bin"}},
                                     {{"kind", "resource"}, {"guid", kGraph}, {"type", kGraphType}, {"mode", "new"}, {"file", "cooked/rig.graph"}}}}};
             return true;
@@ -150,8 +162,6 @@ struct World {
         return out;
     }
 };
-const uint32_t kModelType = fnv1a("keen::RenderModel", std::strlen("keen::RenderModel"));
-const uint32_t kGraphTypeHash = fnv1a(kGraphType, std::strlen(kGraphType));
 
 void lowered_clone_is_published_under_its_mod() {
     World w;
@@ -183,6 +193,30 @@ void lowered_clone_is_published_under_its_mod() {
         CHECK(l && w.owner_mod[l->owner] == "b-body");
     }
     CHECK(w.knows("a-plain") && w.knows("b-body") && w.knows("c-after"));
+    // S4: the 21 closure clones are new keys of b-body; every template reference names a clone, none a source
+    std::map<std::string, Guid> clones;
+    for (const auto& l : w.store.layers)
+        if (l.type == kSequenceTypeHash) {
+            CHECK(w.owner_mod[l.owner] == "b-body");
+            Guid id;
+            std::memcpy(id.b, l.bytes.data(), 16);
+            CHECK(id == l.guid);  // resourceId follows the key
+            clones[guid_text(l.guid)] = l.guid;
+        }
+    CHECK(clones.size() == 21);
+    if (tpl) {
+        const Bytes& b = tpl->bytes;
+        const auto at = [&](const char* c, size_t o) { Guid g; std::memcpy(g.b, b.data() + body_fixture::component(b, c) + o, 16); return g; };
+        for (const auto& [c, o] : {std::pair{"ActiveNpcState", size_t{4}}, {"ActiveNpcState", 0x14}, {"NpcState", 0x50}, {"PathWalker", 0x10}})
+            CHECK(clones.count(guid_text(at(c, o))) == 1);
+        for (const auto& s : motionclose::fisher_closure()) {
+            Guid g;
+            parse_guid(s.guid, &g);
+            CHECK(std::search(b.begin(), b.end(), std::begin(g.b), std::end(g.b)) == b.end());
+        }
+    }
+    for (const auto& [text, bytes] : w.sequences) CHECK(bytes == body_fixture::sequence(*std::find_if(
+        motionclose::fisher_closure().begin(), motionclose::fisher_closure().end(), [&](const auto& s) { return text == s.guid; })));  // sources untouched
 }
 
 void refused_or_withdrawn_body_mods_leave_their_neighbours() {
@@ -215,6 +249,7 @@ void refused_or_withdrawn_body_mods_leave_their_neighbours() {
         if (mode == "taken") CHECK(w.layer(guid(kModel), kModelType) && w.layer(guid(kModel), kModelType)->owner == 999);
         else CHECK(w.layer(guid(kModel), kModelType) == nullptr);
         CHECK(w.layer(guid(kGraph), kGraphTypeHash) == nullptr);
+        CHECK(std::none_of(w.store.layers.begin(), w.store.layers.end(), [](const auto& l) { return l.type == kSequenceTypeHash; }));
         CHECK(w.knows("a-plain") && !w.knows("b-body") && w.knows("c-after"));
         CHECK(w.fisher.size() == 23 || w.fisher == w.pristine);
     }
@@ -424,10 +459,139 @@ void admission_of_the_local_cache() {
     CHECK(bodyadmit::resolve_spec("m", {{"body", "plain"}}, bodies, animations, motions).is_null());
     CHECK(bodyadmit::resolve_spec("m", {{"body", "golem"}, {"animation", "other:moves"}}, bodies, animations, motions)["animation"].is_null());
 }
+// ---- S4: the motion closure itself ----------------------------------------------------------------------------
+const motionclose::Source& source(const char* role) {
+    for (const auto& s : motionclose::fisher_closure()) if (std::string(s.role) == role) return s;
+    std::abort();
+}
+int64_t at64(const Bytes& b, size_t at) { int64_t v; std::memcpy(&v, b.data() + at, 8); return v; }
+struct Parsed { size_t sub; std::vector<std::pair<uint32_t, size_t>> events; };  // type hash, payload offset
+Parsed parse(const Bytes& b) {
+    Parsed p;
+    p.sub = 16 + static_cast<int32_t>(body_fixture::get32(b, 16));
+    const size_t headers = p.sub + static_cast<int32_t>(body_fixture::get32(b, p.sub));
+    for (uint32_t i = 0; i < body_fixture::get32(b, p.sub + 4); ++i) {
+        const size_t h = headers + i * 12;
+        p.events.emplace_back(body_fixture::get32(b, h), h + 4 + static_cast<int32_t>(body_fixture::get32(b, h + 4)));
+    }
+    return p;
+}
+void motion_closure_units() {
+    std::printf("-- 16f S4: bindings, sequence clones, retiming and template remapping\n");
+    motionclose::Bindings bound;
+    std::string why;
+    CHECK(motionclose::parse_bindings(body_fixture::bindings(), &bound, &why));
+    CHECK(bound.size() == 21 && bound["sit"].size() == 3 && bound["door"].size() == 3 && bound["jump"].size() == 1);
+    struct Bad { const char* name; std::function<void(ojson&)> change; const char* says; };
+    for (const auto& c : std::vector<Bad>{
+             {"26 rows", [](ojson& r) { r.erase(r.size() - 1); }, "27 rows"},
+             {"a duplicate", [](ojson& r) { r[1] = r[0]; }, "duplicate sit[0]"},
+             {"an unknown role", [](ojson& r) { r[0]["role"] = "dance"; }, "dance[0] is not in the Fisher manifest"},
+             {"a fourth sit variant", [](ojson& r) { r[0]["variant"] = 3; }, "sit[3] is not in the Fisher manifest"},
+             {"a zero state", [](ojson& r) { r[0]["state"] = "00000000-0000-0000-0000-000000000000"; }, ".state"},
+             {"no duration", [](ojson& r) { r[0]["durationNs"] = 0; }, ".durationNs"}}) {
+        ojson rows = body_fixture::bindings();
+        c.change(rows);
+        motionclose::Bindings out;
+        CHECK(!motionclose::parse_bindings(rows, &out, &why));
+        if (why.find(c.says) == std::string::npos) std::printf("bindings (%s) said: %s\n", c.name, why.c_str());
+        CHECK(why.find(c.says) != std::string::npos);
+    }
+
+    // The sit clone: new ids, bound states, times exactly as the verified time map (motionpack) maps them.
+    const auto& sit = source("sit");
+    const Bytes raw = body_fixture::sequence(sit);
+    const Guid clone = derive_guid("m", "npcmotion", "sit"), sub = derive_guid("m", "npcmotion", "sub");
+    Bytes out{0x5a};
+    CHECK(motionclose::clone_sequence(raw.data(), raw.size(), clone, sit, bound["sit"], [&](const Guid&) { return sub; }, &out, &why));
+    CHECK(out.size() == raw.size());
+    const Parsed in = parse(raw), cl = parse(out);
+    CHECK(std::memcmp(out.data(), clone.b, 16) == 0);
+    CHECK(std::memcmp(out.data() + cl.sub + 0x30, sub.b, 16) == 0);
+    std::vector<motionpack::Event> events;
+    std::vector<motionpack::Binding> bindings;
+    size_t ordinal = 0;
+    for (size_t j = 0; j < in.events.size(); ++j) {
+        const auto [type, p] = in.events[j];
+        motionpack::Event e;
+        e.span = {at64(raw, p), at64(raw, p + 8)};
+        e.type = type == body_fixture::hash("keen::actor::SetAnimationEvent") ? motionpack::EventType::SetAnimation
+               : type == body_fixture::hash("keen::actor::LerpMovementFactorEvent") ? motionpack::EventType::LerpMovementFactor
+               : type == body_fixture::hash("keen::actor::LoopEvent") ? motionpack::EventType::Loop
+               : type == body_fixture::hash("keen::SfxNotifierEvent") ? motionpack::EventType::SfxNotifier : motionpack::EventType::SetState;
+        if (e.type == motionpack::EventType::LerpMovementFactor) e.lerp_duration = at64(raw, p + 0x70);
+        if (e.type == motionpack::EventType::SetAnimation) {
+            const auto& v = bound["sit"][ordinal];
+            bindings.push_back({j, v.duration, v.loop, ordinal == 0 ? motionpack::Phase::Enter : ordinal == 1 ? motionpack::Phase::Loop : motionpack::Phase::Exit});
+            CHECK(std::memcmp(out.data() + cl.events[j].second + 0x60, v.state.b, 16) == 0);  // the bound state, in serialized order
+            ++ordinal;
+        }
+        events.push_back(e);
+    }
+    motionpack::Retimed expected;
+    CHECK(motionpack::retime(at64(raw, in.sub + 8), events, bindings, &expected, &why));
+    CHECK(at64(out, cl.sub + 8) == expected.length && expected.length != at64(raw, in.sub + 8));
+    for (size_t j = 0; j < cl.events.size(); ++j) {
+        CHECK(at64(out, cl.events[j].second) == expected.events[j].span.time);
+        CHECK(at64(out, cl.events[j].second + 8) == expected.events[j].span.duration);
+        if (expected.events[j].type == motionpack::EventType::LerpMovementFactor) CHECK(at64(out, cl.events[j].second + 0x70) == expected.events[j].lerp_duration);
+        // everything else of the event is copied: opaque payload bytes, flags, guards
+        const size_t p = cl.events[j].second, q = in.events[j].second;
+        CHECK(std::memcmp(out.data() + p + 16, raw.data() + q + 16, 0x50) == 0);
+    }
+    CHECK(at64(out, cl.events[0].second) == 0);  // zero stays zero
+    CHECK(out[cl.sub + 0x10] == raw[in.sub + 0x10]);  // the loop flag is kept
+
+    struct Refuse { const char* name; std::function<void(Bytes&)> change; const motionclose::Source* as; const char* says; };
+    const auto& door = source("door");
+    for (const auto& c : std::vector<Refuse>{
+             {"an event outside the whitelist", [&](Bytes& b) { body_fixture::put32(b, 16 + static_cast<int32_t>(body_fixture::get32(b, 16)) +
+                  static_cast<int32_t>(body_fixture::get32(b, parse(b).sub)), body_fixture::hash("keen::actor::SpawnEvent")); }, &sit, "outside the verified whitelist"},
+             {"a changed event size", [&](Bytes& b) { const size_t s0 = parse(b).sub; body_fixture::put32(b, s0 + static_cast<int32_t>(body_fixture::get32(b, s0)) + 8, 112); }, &sit, "changed size"},
+             {"fewer animation events than the manifest", [](Bytes&) {}, &door, "the manifest 3"},
+             {"an event past the sub-sequence", [&](Bytes& b) { const auto q = parse(b); const int64_t t = at64(b, q.sub + 8) + 1; std::memcpy(b.data() + q.events[2].second, &t, 8); }, &sit, "outside the SubSequence"},
+             {"a truncated sequence", [](Bytes& b) { b.resize(40); }, &sit, "sub-sequence array is invalid"}}) {
+        Bytes bytes = c.as == &door ? body_fixture::sequence(source("jump")) : raw;
+        c.change(bytes);
+        Bytes kept{0x5a};
+        CHECK(!motionclose::clone_sequence(bytes.data(), bytes.size(), clone, *c.as, bound[c.as->role], [&](const Guid&) { return sub; }, &kept, &why));
+        if (why.find(c.says) == std::string::npos) std::printf("clone (%s) said: %s\n", c.name, why.c_str());
+        CHECK(why.find(c.says) != std::string::npos);
+        CHECK(kept == Bytes{0x5a});
+    }
+
+    // The template: every verified reference remapped; zero stays; unknown or leftover sources refuse, unchanged.
+    std::map<std::string, Guid> map;
+    for (const auto& s : motionclose::fisher_closure()) map[s.guid] = derive_guid("m", "npcmotion", s.guid);
+    Bytes tpl = body_fixture::fisher();
+    size_t replaced = 0;
+    CHECK(motionclose::remap_template(&tpl, map, &replaced, &why));
+    CHECK(replaced == 22);
+    CHECK(body_fixture::get32(tpl, body_fixture::component(tpl, "PathWalker") + 0x24) == 0);  // teleport stays zero
+    Guid sit_ref;
+    std::memcpy(sit_ref.b, tpl.data() + body_fixture::component(tpl, "ActiveNpcState") + 4, 16);
+    CHECK(sit_ref == map[sit.guid]);
+    for (const auto& c : std::vector<std::pair<const char*, std::function<void(Bytes&)>>>{
+             {"is not in the verified Fisher motion closure", [](Bytes& b) { std::memset(b.data() + body_fixture::component(b, "NpcState") + 0x10, 0x77, 16); }},
+             {"remains at byte", [&](Bytes& b) { Guid g; parse_guid(sit.guid, &g); std::memcpy(b.data() + body_fixture::component(b, "LocaTagComponent"), g.b, 16); }},
+             {"NpcActionSequences: missing or changed", [](Bytes& b) {
+                  const size_t h = 16 + static_cast<int32_t>(body_fixture::get32(b, 16));
+                  for (uint32_t i = 0; i < body_fixture::get32(b, 20); ++i)
+                      if (body_fixture::get32(b, h + i * 12) == body_fixture::hash("keen::ecs::NpcActionSequences")) body_fixture::put32(b, h + i * 12 + 8, 40); }}}) {
+        Bytes bad = body_fixture::fisher();
+        c.second(bad);
+        const Bytes before = bad;
+        CHECK(!motionclose::remap_template(&bad, map, &replaced, &why));
+        if (why.find(c.first) == std::string::npos) std::printf("remap said: %s\n", why.c_str());
+        CHECK(why.find(c.first) != std::string::npos);
+        CHECK(bad == before);
+    }
+}
 }  // namespace
 
 int main() {
     layout_check();
+    motion_closure_units();
     lowered_clone_is_published_under_its_mod();
     refused_or_withdrawn_body_mods_leave_their_neighbours();
     missing_lowerer_and_collection_refusals();

@@ -652,12 +652,13 @@ bool content_boot_call(kc::bootpack::Call bridge, uint32_t operation, KilnOwner 
 }
 
 // ---- 16f authored roster bodies: what admission reads on this machine ----------------------------------------------
-// The NPC motion closure (16f S4: the Fisher's sequences cloned onto the authored graph and retimed) is part of an
-// authored body. Without it the clone would play sequences whose states its graph does not have, so until this build
-// installs it every authored body mod is refused with this reason (an implementation dependency, not a release gate).
-bool g_body_motion_closure = false;
-const char* const kNoMotionClosure =
-    "authored roster bodies need the NPC motion closure (sequences cloned onto the authored graph), which this build does not install yet";
+// Admission, lowering and the NPC motion closure (16f S3/S4) are built. The network clearance (16f S5: Ready and the
+// body's closure hash in the join handshake) is part of an authored body too: without it a client whose own admission
+// refused a body would meet a clone template it lacks. Until this build installs it every authored body mod is
+// refused with this reason (an implementation dependency, not a release gate).
+bool g_body_network_clearance = false;
+const char* const kNoClearance =
+    "authored roster bodies need the network clearance (Ready and the body's closure hash in the join handshake), which this build does not install yet";
 ka::bootpack::Call assets_body_bridge() {
     const HMODULE module = GetModuleHandleW(L"kiln-assets.dll");
     return module ? reinterpret_cast<ka::bootpack::Call>(GetProcAddress(module, ka::bootpack::kExport)) : nullptr;
@@ -802,7 +803,7 @@ qb::bootpack::Backend pack_backend(const qb::GameData& game, kc::bootpack::Call 
     // 16f: only where kiln.assets can register a body for this owner; otherwise a body-dependent mod is refused whole
     if (assets_body_bridge()) {
         backend.admit_body = [client](qb::ModInput* mod, qb::ojson* assets, std::string* why) {
-            if (!g_body_motion_closure) { *why = kNoMotionClosure; return false; }
+            if (!g_body_network_clearance) { *why = kNoClearance; return false; }
             qb::bodyadmit::Env env;
             env.client = client;
             env.read = [dir = mod->dir](const std::string& file, size_t max, qb::Bytes* out, std::string* reason) {
@@ -842,9 +843,9 @@ void report_bootpack_rows() {
         ready ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{why.data(), why.size()});
     // 16f S3: authored roster bodies need the rollback seam and kiln.assets' body registration; the Fisher layout itself is
     // checked against kiln.types at the build (a changed layout refuses each body mod, and this row says why from then on).
-    const bool bodies = ready && assets_body_bridge() != nullptr && g_body_motion_closure;
+    const bool bodies = ready && assets_body_bridge() != nullptr && g_body_network_clearance;
     const std::string body_why = !ready ? why : !assets_body_bridge() ? "kiln.assets' private body registration is missing"
-                               : !g_body_motion_closure ? kNoMotionClosure : "";
+                               : !g_body_network_clearance ? kNoClearance : "";
     caps->report(g_owner, kstr("quests.npc_body"), bodies ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
         bodies ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{body_why.data(), body_why.size()});
 }

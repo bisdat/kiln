@@ -35,16 +35,16 @@ ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_native_test" "$out"
 # The real compiler over synthetic knowledge maps: bounded per-pack resources and compact rollback records.
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
   -I"$here/.." -I"$here/../../../third_party" \
-  "$here/bootpack_memory_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_memory_test"
+  "$here/bootpack_memory_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../motionclose.cpp" "$here/../motionpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_memory_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_memory_test"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
   -I"$here/.." -I"$here/../../../third_party" \
-  "$here/bootpack_compile_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_compile_test"
+  "$here/bootpack_compile_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../motionclose.cpp" "$here/../motionpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_compile_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_compile_test"
 # authored roster bodies (16f S3): the real compiler/publisher over a synthetic Fisher, and the local cook cache's admission
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
   -I"$here/.." -I"$here/../../../third_party" \
-  "$here/body_runtime_test.cpp" "$here/../bootpack.cpp" "$here/../bodyadmit.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../questbuild.cpp" -o "$out/body_runtime_test"
+  "$here/body_runtime_test.cpp" "$here/../bootpack.cpp" "$here/../bodyadmit.cpp" "$here/../questpack.cpp" "$here/../bodypack.cpp" "$here/../motionclose.cpp" "$here/../motionpack.cpp" "$here/../questbuild.cpp" -o "$out/body_runtime_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/body_runtime_test"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -Wno-unused-function -fsanitize=address,undefined \
   -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \

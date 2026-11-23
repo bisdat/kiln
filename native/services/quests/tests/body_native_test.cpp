@@ -165,7 +165,7 @@ void body_reset(const char* name) {
     t_pathwalker_size = 92;
     build_fake_types();
     g_layout_checked = false, g_layout_ok = false, g_layout_why.clear();
-    g_body_motion_closure = true;  // the S3 path as it runs once S4 installs the closure
+    g_body_network_clearance = true;  // the S3/S4 path as it runs once S5 installs the network clearance
 }
 const kiln::qb::ojson* admitted_body(const std::string& mod) {
     for (const auto& input : kiln::qb::t_compile_inputs)
@@ -228,7 +228,7 @@ void test_refusals_leave_the_neighbour() {
                                                        R"("bodies":{"golem":{"model":"models/rig.gltf","template":"Enemy_Vukah_Melee","size":{"radius":0.75,"height":2}}}})"); },
          "uses the Fisher/Villager chassis only"},
         {"no body registration in kiln.assets", [] { t_body_bridge = false; }, "authored roster-body lowering is not installed"},
-        {"no motion closure in this build", [] { g_body_motion_closure = false; }, "need the NPC motion closure"},
+        {"no network clearance in this build", [] { g_body_network_clearance = false; }, "need the network clearance"},
     };
     for (const auto& c : cases) {
         body_reset((std::string("16f S3: ") + c.name + ": the body mod is refused whole, its neighbour publishes").c_str());

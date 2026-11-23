@@ -3,6 +3,8 @@
 // kiln-quests.dll, on resource files tools/kfc dumped.
 //   questbuild_cli --res DIR --names names.json --out DIR [--mod DIR]...
 //   questbuild_cli --hash TEXT   (uuid5 / fnv checks)
+//   questbuild_cli --motion DIR  (16f S4: DIR/template.bin, DIR/<source guid>.bin, DIR/bindings.json -> clones + remap)
+//   questbuild_cli --motion-closure  (the 21 closure sources as JSON)
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +14,7 @@
 
 #include "questpack.h"
 #include "bodypack.h"
+#include "motionclose.h"
 
 namespace fs = std::filesystem;
 using namespace kiln::qb;
@@ -51,6 +54,41 @@ int main(int argc, char** argv) {
             }
             std::cout << types.dump() << '\n';
             return 0;
+        }
+        else if (a == "--motion-closure") {
+            ojson rows = ojson::array();
+            for (const auto& s : motionclose::fisher_closure()) rows.push_back({{"guid", s.guid}, {"role", s.role}, {"variants", s.variants}});
+            std::cout << rows.dump() << '\n';
+            return 0;
+        }
+        else if (a == "--motion") {
+            // The motion closure as kiln-quests.dll builds it, on files a test dumped: clone ids derived like the boot build's.
+            const fs::path dir = argv[++i];
+            const ojson rows = ojson::parse(slurp(dir / "bindings.json"));
+            motionclose::Bindings bound;
+            std::string why;
+            ojson report = {{"ok", false}, {"reason", ""}, {"clones", ojson::object()}, {"replaced", 0}};
+            const auto done = [&](bool ok) { report["ok"] = ok; report["reason"] = why; std::cout << report.dump() << '\n'; return ok ? 0 : 1; };
+            if (!motionclose::parse_bindings(rows, &bound, &why)) return done(false);
+            std::map<std::string, Guid> map;
+            for (const auto& s : motionclose::fisher_closure()) {
+                const std::string raw = slurp(dir / (std::string(s.guid) + ".bin"));
+                const Guid clone = derive_guid("motion-cli", "npcmotion", std::string("tobin:") + s.guid);
+                Bytes out;
+                if (!motionclose::clone_sequence(reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), clone, s, bound[s.role],
+                        [](const Guid& old) { return derive_guid("motion-cli", "npcmotion", "tobin:" + guid_text(old)); }, &out, &why))
+                    return done(false);
+                spit(dir / (std::string(s.guid) + ".clone.bin"), out.data(), out.size());
+                map[s.guid] = clone;
+                report["clones"][s.guid] = guid_text(clone);
+            }
+            const std::string raw = slurp(dir / "template.bin");
+            Bytes tpl(raw.begin(), raw.end());
+            size_t replaced = 0;
+            if (!motionclose::remap_template(&tpl, map, &replaced, &why)) return done(false);
+            spit(dir / "template.clone.bin", tpl.data(), tpl.size());
+            report["replaced"] = replaced;
+            return done(true);
         }
         else if (a == "--roster-max") roster_max = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (a == "--parse-blocks") {

@@ -263,6 +263,67 @@ class BodyPack(unittest.TestCase):
                     else: self.assertEqual(a, b)
                 same(expected, decoder.decode("keen::ecs::TemplateResource", result))
 
+    @unittest.skipUnless((GAME / "enshrouded.exe").is_file(), "no installed game data")
+    def test_local_game_fisher_motion_closure_clones_and_remaps_every_reference(self):
+        # 16f S4 on the game's own Fisher template and its 21 sequences (read only, nothing kept): every animation event
+        # bound in order, local times inside the retimed sub-sequences, every template reference a clone, no source left.
+        from kfc.archive import Kfc, ResourceKey
+        from kfc.blob import Decoder
+        from kfc.refl import TypeDb
+        closure = json.loads(subprocess.run([str(self.exe), "--motion-closure"], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(21, len(closure))
+        self.assertEqual(27, sum(c["variants"] for c in closure))
+        rows = []
+        for c in closure:
+            for v in range(c["variants"]):
+                rows.append({"role": c["role"], "variant": v, "state": str(uuid.uuid5(uuid.NAMESPACE_URL, f"kiln-test:{c['role']}:{v}")),
+                             "durationNs": 1_500_000_000 + 1000 * len(rows), "loop": c["role"] in ("sit", "sleep") and v == 1, "clamp": False})
+        bound = {}
+        for row in rows:
+            bound.setdefault(row["role"], []).append(row["state"])
+        server = Path.home() / ".local/share/Steam/steamapps/common/EnshroudedServer"
+        installs = [(GAME, "enshrouded.exe")] + ([(server, "enshrouded_server.exe")] if (server / "enshrouded_server.exe").is_file() else [])
+        for directory, exe in installs:
+            with self.subTest(side=exe):
+                types = TypeDb.from_exe(directory / exe)
+                decoder = Decoder(types, max_array=1 << 24)
+                with tempfile.TemporaryDirectory(dir=OUT) as folder, closing(Kfc(directory)) as archive:
+                    d = Path(folder)
+                    (d / "template.bin").write_bytes(archive.read(ResourceKey("e7666cd3-e530-4f9d-9586-519e4ab969dc", fnv1a32("keen::ecs::TemplateResource"), 0)))
+                    for c in closure:
+                        (d / f"{c['guid']}.bin").write_bytes(archive.read(ResourceKey(c["guid"], fnv1a32("keen::actor::ActorSequenceResource"), 0)))
+                    (d / "bindings.json").write_text(json.dumps(rows))
+                    r = subprocess.run([str(self.exe), "--motion", str(d)], capture_output=True, text=True)
+                    self.assertIn(r.returncode, (0, 1), r.stderr)
+                    report = json.loads(r.stdout)
+                    self.assertTrue(report["ok"], report)
+                    clones = report["clones"]
+                    events = 0
+                    for c in closure:
+                        src = decoder.decode("keen::actor::ActorSequenceResource", (d / f"{c['guid']}.bin").read_bytes())
+                        out = decoder.decode("keen::actor::ActorSequenceResource", (d / f"{c['guid']}.clone.bin").read_bytes())
+                        self.assertEqual(clones[c["guid"]], out["resourceId"])
+                        names = []
+                        for s_sub, o_sub in zip(src["subSequences"], out["subSequences"], strict=True):
+                            self.assertEqual([e["$type"] for e in s_sub["events"]], [e["$type"] for e in o_sub["events"]])
+                            self.assertEqual(s_sub["loop"], o_sub["loop"])
+                            length = o_sub["length"]["value"]
+                            for e in o_sub["events"]:
+                                v = e["value"]
+                                self.assertGreaterEqual(v["time"]["value"], 0)
+                                self.assertLessEqual(v["time"]["value"] + v["duration"]["value"], length)
+                                if e["$type"].endswith("::SetAnimationEvent"):
+                                    names.append(v["animationName"])
+                        self.assertEqual(bound[c["role"]], names, c["role"])
+                        events += len(names)
+                    self.assertEqual(27, events)
+                    text = json.dumps(decoder.decode("keen::ecs::TemplateResource", (d / "template.clone.bin").read_bytes()))
+                    for c in closure:
+                        self.assertNotIn(c["guid"], text)
+                    self.assertEqual(report["replaced"], sum(text.count(g) for g in clones.values()))
+                    if exe == "enshrouded.exe":
+                        self.assertEqual(83, report["replaced"])  # the 83 reference paths of chapter 16f's evidence
+
     def test_geometry_and_zero_ids_refuse_with_the_field(self):
         raw, _ = fixture()
         for spec, field in (({"model": str(uuid.UUID(int=0))}, "body.model"),

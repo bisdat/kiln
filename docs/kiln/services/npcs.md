@@ -62,15 +62,15 @@ KL210 as an error otherwise.
 `NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
 The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
 Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
-Native body lowering and admission are built (below); the NPC motion closure (the Fisher's sequences cloned onto the
-authored graph and retimed) is not installed yet, so every authored body is still refused with that reason.
+Native admission, body lowering and the NPC motion closure are built (below); the network clearance (Ready and the
+body's closure hash in the join handshake) is not installed yet, so every authored body is still refused with that reason.
 An unavailable dependency is a refusal, not a rendered fallback and not a release hold.
 
 | Capability | Needs | Current contract |
 |---|---|---|
 | `blocks.npc_body` | `kiln.knowledge`, `quests.boot_pack`, `quests.npc_body`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
 | `quests.boot_pack` | Private native content rollback helper and the resource initialization hook | Per-mod compile/preflight and owner-isolated rollback through the existing boot path; no public bootpack or epoch API |
-| `quests.npc_body` | Native authored-body admission and lowering, kiln.assets' private body registration, the NPC motion closure | Unavailable while the motion closure is not installed (the row names it); a body mod is then refused whole. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
+| `quests.npc_body` | Native authored-body admission and lowering, the NPC motion closure, kiln.assets' private body registration, the network clearance | Unavailable while the network clearance is not installed (the row names it); a body mod is then refused whole. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
 
 Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
 only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
@@ -113,6 +113,22 @@ chassis refuses the mod. The body's cooked resources and blobs are registered by
 the same `bootpack:<mod>` owner inside that mod's transaction (new keys only, checked absent first and absent again
 after a rollback; never pinned), so a refusal or withdrawal takes them away with the rest of the pack and leaves earlier
 and independent mods as they were.
+
+### The NPC motion closure
+
+The Fisher's template names 21 action sequences (sit, sleep, inspect, greetings, talk, reactions, refusal, idle gestures,
+its object interaction, init/farewell/option lines, turns, jump and door; 27 animation events). For an authored body each
+is cloned under an id of the mod (UUIDv5 of the mod, the NPC, the source sequence and the binding vector's hash; its
+sub-sequence ids likewise), every `SetAnimationEvent` is bound in serialized order to the authored state of its role and
+variant, and every whitelisted event's local times are retimed to the cooked clip durations (chapter 16f section 5.1:
+zero stays zero, the lead-in is kept, each animation phase takes its longest bound clip, `lerpDuration` maps through the
+same piecewise-linear time map, loop flags and all other fields are copied). Then every sequence reference of the
+template's ActiveNpcState, NpcState, NpcActionSequences, NpcDialog and PathWalker is replaced by its clone. The build
+refuses the mod, naming the sequence, for an event type outside the verified whitelist, a changed event size, a
+different number of animation events than the manifest, a nonzero reference outside the 21, or a source id left anywhere
+in the template afterwards (a reference path a game update added). The sequence, event and reference layouts are
+checked against kiln.types together with the body's. The clones are new keys published with the template under
+`bootpack:<mod>`; the game's own sequences are never changed.
 
 Generated material-block/texture hashes describe dependencies only; they must not be mistaken for prepared material
 resource bytes. No Ready status, hot body replacement, or safe missing-model fallback is promised by a cooked manifest.

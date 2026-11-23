@@ -49,6 +49,7 @@ std::vector<Resource> resources(const PackOut& pack) {
         out.push_back({key, type, false, bytes, name});
     }
     for (const auto& item : pack.templates) out.push_back({item.guid, kTypeTemplate, item.is_new, &item.data, item.name});
+    for (const auto& item : pack.resources) out.push_back({item.guid, item.type, true, &item.data, item.name});  // 16f S4 clones
     return out;
 }
 
