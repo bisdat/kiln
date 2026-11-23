@@ -72,6 +72,27 @@ public sealed class BlockApiTests
         finally { FakeBuildTable.BlockRows(false); }
     }
     [Fact]
+    public void InvalidTerrainPolicyThrowsBeforeTheEditingEvent()
+    {
+        FakeBuildTable.BlockRows(true);
+        try
+        {
+            using var kit = new KilnHarness(); kit.Step(2);
+            kit.Run(() =>
+            {
+                var editing = 0; var edits = 0;
+                using var a = Events.On<BuildEditingEvent>(_ => editing++);
+                using var b = Events.On<BuildEditEvent>(_ => edits++);
+                Assert.Throws<ArgumentOutOfRangeException>(() => Build.BreakBox(new CellBox(0,0,0,1,1,1),
+                    new BlockBreakOptions { TerrainHealthScale = 0, Build = new() { Journal = false } }));
+                Assert.Throws<ArgumentOutOfRangeException>(() => Build.BreakBox(new CellBox(0,0,0,1,1,1),
+                    new BlockBreakOptions { TerrainHealAfter = TimeSpan.Zero, Build = new() { Journal = false } }));
+                Assert.Equal(0, editing); Assert.Equal(0, edits);
+            });
+        }
+        finally { FakeBuildTable.BlockRows(false); }
+    }
+    [Fact]
     public void QueryNotFoundIsNotARefusal()
     {
         var r=new BlockQueryResult(null,BlockRefusal.None);

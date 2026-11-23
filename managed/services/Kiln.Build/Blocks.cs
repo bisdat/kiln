@@ -163,6 +163,10 @@ public static partial class Build
         var o = options ?? new(); var build = o.Build;
         if (o.Damage.Length != 0 && o.Damage.Length != 5) throw new ArgumentException("five damage values required", nameof(options));
         if (o.Selection != null && o.Selection.Length != box.Count) throw new ArgumentException("selection size", nameof(options));
+        // Every argument check throws before BuildEditingEvent: handlers never see an edit that is then not attempted.
+        if (!double.IsFinite(o.TerrainHealthScale) || o.TerrainHealthScale <= 0 || o.TerrainHealthScale > 1e6 ||
+            o.TerrainHealAfter <= TimeSpan.Zero || o.TerrainHealAfter > TimeSpan.FromDays(1))
+            throw new ArgumentOutOfRangeException(nameof(options), "invalid terrain health threshold or expiry");
         if (!Editing(BuildEditKind.Write, box, build)) return BreakRefused(BlockRefusal.Canceled);
         BuildNative.Break q = default; q.Size = (uint)sizeof(BuildNative.Break); q.Flags = (uint)o.Flags;
         q.Origin[0] = box.X; q.Origin[1] = box.Y; q.Origin[2] = box.Z;
@@ -170,9 +174,6 @@ public static partial class Build
         for (var i = 0; i < o.Damage.Length; i++) q.Damage[i] = o.Damage[i];
         foreach (var m in o.Materials) q.Materials[m / 8] |= (byte)(1 << (m % 8));
         q.Actor = build.Actor.Value; q.BuildFlags = (uint)build.Flags;
-        if (!double.IsFinite(o.TerrainHealthScale) || o.TerrainHealthScale <= 0 || o.TerrainHealthScale > 1e6 ||
-            o.TerrainHealAfter <= TimeSpan.Zero || o.TerrainHealAfter > TimeSpan.FromDays(1))
-            throw new ArgumentOutOfRangeException(nameof(options), "invalid terrain health threshold or expiry");
         q.TerrainHealthScale = o.TerrainHealthScale; q.TerrainHealSeconds = o.TerrainHealAfter.TotalSeconds;
         if (o.ProtectedSphere is { } sphere)
         {
