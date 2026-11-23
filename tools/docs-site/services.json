@@ -47,6 +47,7 @@
       ],
       "capabilities": [],
       "samples": [
+        "BigCan",
         "FrostMark",
         "LightsOut",
         "WaterWorks"
@@ -240,7 +241,7 @@
         },
         {
           "name": "identity.entities",
-          "members": 9
+          "members": 14
         },
         {
           "name": "items.tool_wear_debit",
@@ -256,6 +257,10 @@
         },
         {
           "name": "saves.instance_data.sync",
+          "members": 2
+        },
+        {
+          "name": "stationmenus.store",
           "members": 2
         },
         {
@@ -275,6 +280,18 @@
           "members": 26
         },
         {
+          "name": "ui.blocks.state",
+          "members": 2
+        },
+        {
+          "name": "ui.blocks.world",
+          "members": 2
+        },
+        {
+          "name": "ui.command.server",
+          "members": 2
+        },
+        {
           "name": "worldtables.budgets",
           "members": 2
         },
@@ -286,6 +303,7 @@
       "samples": [
         "AbilityBlocks",
         "AffixSword",
+        "BigCan",
         "BlockKinds",
         "CosmeticSample",
         "CreatureAi",
@@ -299,6 +317,7 @@
         "MaterialSample",
         "MaterialTweaks",
         "MenuBlocks",
+        "ModelPhysics",
         "NpcSample",
         "RarityAnvil",
         "ScreenEffects",
@@ -307,6 +326,7 @@
         "TerrainSample",
         "UiBlocks",
         "VfxSample",
+        "VillagerRoutine",
         "WeaponMoves",
         "boot-gallery"
       ]
@@ -319,6 +339,10 @@
         "docs/kiln/services/build.md"
       ],
       "capabilities": [
+        {
+          "name": "build.base_limits",
+          "members": 1
+        },
         {
           "name": "build.block_info",
           "members": 1
@@ -372,19 +396,25 @@
         "FrostMark",
         "GemEffects",
         "ItemData",
+        "ItemFallback",
         "LightsOut",
         "Loadouts",
+        "ModValues",
         "NewItems",
         "NpcSample",
         "OreVein",
         "QuietServer",
         "QuiverSample",
+        "ReplWatch",
         "RulesSample",
         "SavedData",
         "Schematics",
         "SkyControl",
+        "SurvivorBeds",
         "TerrainSample",
         "TransformScale",
+        "UiBlocks",
+        "VillagerRoutine",
         "equipment-sets"
       ]
     },
@@ -405,7 +435,9 @@
       "samples": [
         "AffixSword",
         "CreatureTweaks",
+        "MarkersSample",
         "MaterialSample",
+        "ModValues",
         "RenderSample",
         "ShaderSample",
         "UiSample",
@@ -482,6 +514,7 @@
         "CreatureTweaks",
         "GemEffects",
         "GemSample",
+        "ItemFallback",
         "MaterialSample",
         "ModelSample",
         "NewItems",
@@ -535,7 +568,8 @@
         "CreatureControlSample",
         "EliteVukah",
         "NpcSample",
-        "RuleVukah"
+        "RuleVukah",
+        "VillagerRoutine"
       ]
     },
     {
@@ -714,22 +748,86 @@
       ],
       "samples": [
         "AffixSword",
+        "BigCan",
         "Decisions",
         "FetchNearby",
         "FrostMark",
         "GemEffects",
         "ItemData",
         "Loadouts",
+        "ModValues",
         "NewItems",
         "NpcSample",
         "PlayerStates",
         "QuiverSample",
         "RarityAnvil",
+        "ReplWatch",
         "SavedData",
         "Schematics",
         "SlotMarks",
         "equipment-sets",
         "quests-sample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Markers",
+      "name": "Markers",
+      "summary": "Session-only markers by key on the game's map, Kiln's drawn compass strip and world labels, set by a client mod or sent by a server mod to Kiln clients; the icon catalog; change events",
+      "guides": [
+        "docs/kiln/services/markers.md"
+      ],
+      "capabilities": [
+        {
+          "name": "markers.anchors.client",
+          "members": 1
+        },
+        {
+          "name": "markers.anchors.server",
+          "members": 1
+        },
+        {
+          "name": "markers.catalog",
+          "members": 3
+        },
+        {
+          "name": "markers.local",
+          "members": 3
+        },
+        {
+          "name": "markers.nameplates",
+          "members": 1
+        },
+        {
+          "name": "markers.send",
+          "members": 4
+        }
+      ],
+      "samples": [
+        "MarkersSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.ModValues",
+      "name": "ModValues",
+      "summary": "Mods' own per-character values (counters, currencies, experience with levels): a server-owned ledger saved with the character through Kiln.Saves' CharacterData, an owner-only copy for the player's Kiln client over channel kiln:mod-values, and the in-core native facade kiln.mod-values (native/core/abi/services/kiln_mod_values.h)",
+      "guides": [],
+      "capabilities": [
+        {
+          "name": "stats.definitions",
+          "members": 2
+        },
+        {
+          "name": "stats.own",
+          "members": 6
+        },
+        {
+          "name": "stats.sync",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "ModValues",
+        "UiBlocks"
       ]
     },
     {
@@ -746,8 +844,10 @@
         }
       ],
       "samples": [
+        "ModValues",
         "NetSample",
         "PlayerStates",
+        "ReplWatch",
         "SlotMarks"
       ]
     },
@@ -830,9 +930,11 @@
         "NpcSample",
         "OreVein",
         "QuietServer",
+        "ReplWatch",
         "RulesSample",
         "SavedData",
         "SlotMarks",
+        "SurvivorBeds",
         "equipment-sets",
         "quests-sample"
       ]
@@ -898,26 +1000,89 @@
         {
           "name": "npcs.roster_read",
           "members": 2
+        },
+        {
+          "name": "stations.read",
+          "members": 4
+        },
+        {
+          "name": "survivors.assign",
+          "members": 3
+        },
+        {
+          "name": "survivors.recruit",
+          "members": 1
+        },
+        {
+          "name": "survivors.summon",
+          "members": 1
         }
       ],
       "samples": [
         "CreatureBlocks",
         "NpcSample",
+        "SurvivorBeds",
         "quests-sample"
       ]
+    },
+    {
+      "assembly": "Kiln.Registry",
+      "name": "Registry",
+      "summary": "Kiln's registries (items, recipes, loot, drops, balance) as typed C# entries over Kiln-owned field names, generated from schema/registry/*.json by tools/registrygen/registrygen.py (Generated/*.g.cs; never edit those by hand)",
+      "guides": [],
+      "capabilities": [],
+      "samples": []
     },
     {
       "assembly": "Kiln.Replication",
       "name": "Replication",
       "summary": "The game's replication, read only, and on lab servers the loopback harness (ReplicationLab)",
-      "guides": [],
+      "guides": [
+        "docs/kiln/services/replication.md"
+      ],
       "capabilities": [
+        {
+          "name": "repl.client",
+          "members": 2
+        },
+        {
+          "name": "repl.filter",
+          "members": 1
+        },
+        {
+          "name": "repl.itemremap",
+          "members": 1
+        },
         {
           "name": "repl.loopback",
           "members": 5
+        },
+        {
+          "name": "repl.messages",
+          "members": 2
+        },
+        {
+          "name": "repl.observe",
+          "members": 2
+        },
+        {
+          "name": "repl.schema",
+          "members": 2
+        },
+        {
+          "name": "repl.sidecar",
+          "members": 1
+        },
+        {
+          "name": "repl.touch",
+          "members": 1
         }
       ],
-      "samples": []
+      "samples": [
+        "BigCan",
+        "ItemFallback",
+        "ReplWatch"
+      ]
     },
     {
       "assembly": "Kiln.Rules",
@@ -963,8 +1128,10 @@
         "AffixSword",
         "ItemData",
         "Loadouts",
+        "ModValues",
         "SavedData",
-        "Schematics"
+        "Schematics",
+        "UiBlocks"
       ]
     },
     {
@@ -994,7 +1161,7 @@
       "capabilities": [
         {
           "name": "hooks.typed",
-          "members": 17
+          "members": 24
         },
         {
           "name": "sig/GetComponent",
@@ -1060,10 +1227,6 @@
           "members": 2
         },
         {
-          "name": "kiln.world",
-          "members": 9
-        },
-        {
           "name": "spawn.components",
           "members": 1
         },
@@ -1074,6 +1237,10 @@
         {
           "name": "spawn.entities",
           "members": 3
+        },
+        {
+          "name": "ui.blocks.world",
+          "members": 9
         }
       ],
       "samples": [
@@ -1084,7 +1251,8 @@
         "ImpactSample",
         "LightsOut",
         "NpcSample",
-        "Schematics"
+        "Schematics",
+        "SurvivorBeds"
       ]
     },
     {
@@ -1156,7 +1324,8 @@
       ],
       "samples": [
         "FireNova",
-        "SkyControl"
+        "SkyControl",
+        "VillagerRoutine"
       ]
     },
     {
@@ -1186,6 +1355,10 @@
           "members": 1
         },
         {
+          "name": "ui.chest.buttons",
+          "members": 1
+        },
+        {
           "name": "ui.gemforge.inspect",
           "members": 2
         },
@@ -1206,6 +1379,10 @@
           "members": 2
         },
         {
+          "name": "ui.slots.tint",
+          "members": 1
+        },
+        {
           "name": "ui.tooltip.values",
           "members": 2
         },
@@ -1224,9 +1401,12 @@
       ],
       "samples": [
         "AffixSword",
+        "BigCan",
         "ItemData",
+        "MarkersSample",
         "MaterialSample",
         "MenuButtons",
+        "ModValues",
         "NetSample",
         "RenderSample",
         "ShaderSample",
@@ -1289,12 +1469,15 @@
         "MaterialSample",
         "NpcSample",
         "PlayerStates",
+        "ReplWatch",
         "SavedData",
         "ShaderSample",
         "SlotMarks",
+        "SurvivorBeds",
         "TerrainSample",
         "TransformScale",
         "VfxSample",
+        "VillagerRoutine",
         "WaterWorks"
       ]
     }
