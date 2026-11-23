@@ -464,7 +464,7 @@ public sealed record AttackBlock : INpcBlock
     public double HitAt { get; init; } = 0.5;
     /// <summary>Seconds it lasts. Default: its clip's length at its speed.</summary>
     public double? Length { get; init; }
-    /// <summary>Degrees in front of it that its hit reaches.</summary>
+    /// <summary>The hit cone's whole aperture in degrees: more than 0 and at most 360. 360 reaches all around; 359 leaves a one-degree gap behind.</summary>
     public double Angle { get; init; } = 100;
     /// <summary>What a hit does, to everything in front within <see cref="Range"/>.</summary>
     public IReadOnlyList<EffectRef>? OnHit { get; init; }

@@ -7,8 +7,8 @@
 #include <map>
 #include <new>
 #include <thread>
-// Freed memory is poisoned, so a container node used after another thread (or a callback) erased it faults at once
-// instead of reading stale but plausible links.
+// Freed memory is poisoned and never reused (the heap's free-list words would cover the poison), so a container node
+// used after another thread (or a callback) erased it faults at once instead of reading stale but plausible links.
 void* operator new(size_t n) {
     if (void* p = std::malloc(n ? n : 1))
         return p;
@@ -16,8 +16,7 @@ void* operator new(size_t n) {
 }
 void operator delete(void* p) noexcept {
     if (p) {
-        std::memset(p, 0xDD, _msize(p));
-        std::free(p);
+        std::memset(p, 0xDD, _msize(p)); // the test leaks every freed block on purpose
     }
 }
 void operator delete(void* p, size_t) noexcept { operator delete(p); }
@@ -192,7 +191,10 @@ KilnResult KILN_CALL get_default(uint32_t section, uint32_t id, KilnStr path, Ki
     original->i = authored_slots;
     return KILN_OK;
 }
+KilnCapsApi fake_caps{};
 const void* KILN_CALL service(KilnStr name, uint32_t) {
+    if (fake_caps.header.size && std::string(name.ptr, name.len) == KILN_CAPS_SERVICE)
+        return &fake_caps;
     return fake_gamedata.header.size && std::string(name.ptr, name.len) == KILN_GAMEDATA_SERVICE ? &fake_gamedata
                                                                                                  : nullptr;
 }
@@ -370,7 +372,7 @@ void service_tests() {
           kitems::parks.size() == 1);
     auto& parked_player = kitems::model.players.at(0);
     const auto hints_before = calls;
-    CHECK(kitems::park_holder(access, parked_player, "mod:bag", KIS_PARK_UNREGISTERED, service_lock));
+    CHECK(kitems::park_holder(access, 0, rejoin, "mod:bag", KIS_PARK_UNREGISTERED, true, service_lock));
     CHECK(calls == hints_before + 1 && !components.count({live.entity, kHashInventorySetup}) &&
           parked_player.holders.empty() && parked_player.entries.size() == 1 &&
           parked_player.entries[0].records.size() == 1);
@@ -508,10 +510,10 @@ void review_player(uint32_t entity) {
     setup[83] = 1;
     components[{entity, kHashSlotSelection}].assign(216, 0);
 }
-std::vector<KilnStorageEvent> events_after(uint64_t seq, const char* key, uint32_t kind) {
+std::vector<KilnStorageEvent> events_after(uint64_t seq, const char* key, uint32_t kind, uint32_t player = 0) {
     std::vector<KilnStorageEvent> out;
     for (const auto& e : kitems::model.events)
-        if (e.seq > seq && e.kind == kind && !std::strcmp(e.key, key))
+        if (e.seq > seq && e.kind == kind && !std::strcmp(e.key, key) && (!player || e.player == player))
             out.push_back(e);
     return out;
 }
@@ -525,9 +527,9 @@ void retire_life_one(uint32_t kind) {
     if (kind != KIS_STAGE_RESTORED || std::strcmp(kitems::model.events.back().key, "life:one"))
         return;
     review_hook = nullptr;
-    // another thread may retire an owner or register while the model mutex is released around the hint
+    // another thread may retire an owner while the model mutex is released around the hint; nothing may reuse the
+    // erased registration's memory before Post continues, so a kept map iterator would fault on the poison
     kitems::storage_owner_retiring(50, nullptr);
-    review_register(52, "life:three", 8);
 }
 void review_tests() {
     using namespace kitems;
@@ -657,9 +659,9 @@ void review_tests() {
     auto pack_again = review_register(31, "mod:pack", 8);
     auto before = kitems::model.last_event();
     kitems::post(nullptr, nullptr);
-    auto parked_events = events_after(before, "mod:pack", KIS_EVENT_PARKED);
+    auto parked_events = events_after(before, "mod:pack", KIS_EVENT_PARKED, 2);
     CHECK(parked_events.size() == 1 && parked_events[0].handle == 0 && parked_events[0].target == pack.entity);
-    auto restored_events = events_after(before, "mod:pack", KIS_EVENT_RESTORED);
+    auto restored_events = events_after(before, "mod:pack", KIS_EVENT_RESTORED, 2);
     CHECK(!restored_events.empty() && restored_events[0].handle == pack_again && restored_events[0].target &&
           restored_events[0].target != pack.entity);
     CHECK(kitems::state(31, pack_again, 2, &state) == KILN_OK && state.stacks == 1 && state.parked == 0);
@@ -736,11 +738,59 @@ void review_tests() {
     kitems::post(nullptr, nullptr);
     kitems::post(nullptr, nullptr);
     CHECK(kitems::state(51, life_two, 4, &state) == KILN_OK && state.status == KIS_STATE_READY);
-    CHECK(!kitems::model.players.at(3).holders.count("life:one") && kitems::model.players.at(3).holders.count("life:three"));
+    CHECK(!kitems::model.players.at(3).holders.count("life:one") && kitems::model.players.at(3).holders.count("life:two"));
+
+    // 6b. Clearing a storage's reference never clears a reference the player has since pointed at another cell.
+    const uint64_t bag_cell = KILN_SLOT_ID(5555, 2);
+    std::memcpy(components[{4, kHashSlotSelection}].data() + 14 * 8, &bag_cell, 8);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, KIS_REF_CLEAR) == KILN_OK);
+    kitems::storage_program(access);
+    uint64_t selected = 0;
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    CHECK(selected == bag_cell);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, 3) == KILN_OK);
+    kitems::storage_program(access);
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    const auto& life_holder = kitems::model.players.at(3).holders.at("life:two");
+    CHECK(selected == KILN_SLOT_ID(life_holder.pages[0], 3) && life_holder.refs[KIS_REF_ARROW] == 3);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, KIS_REF_CLEAR) == KILN_OK);
+    kitems::storage_program(access);
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    CHECK(selected == 0 && kitems::model.players.at(3).holders.at("life:two").refs[KIS_REF_ARROW] == KIS_REF_NONE);
+
+    // 7. A character read at a join that does not parse: storage goes off (a layout mismatch, with a caps reason) and
+    //    the slot's previous character keeps nothing a new occupant of the slot could use or pair.
+    std::vector<uint8_t> character(0x5500);
+    character[S.layout.main_pages] = 17;
+    const auto old_holder = kitems::model.players.at(1).holders.at("mod:pack").entity;
+    kitems::after_read(1, character.data());
+    CHECK(!kitems::enabled && (kitems::model.players.at(1).witness.flags & KIS_WITNESS_LEFT) &&
+          kitems::model.players.at(1).holders.empty() && kitems::garbage_contains(old_holder) &&
+          kitems::detail.find("characters/struct") != std::string::npos);
 
     kitems::enabled = true;
     kitems::world_api = nullptr;
     kitems::storage_reset();
+}
+std::vector<std::string> caps_reported;
+KilnResult KILN_CALL record_caps(KilnOwner, KilnStr name, uint32_t, uint32_t, KilnStr) {
+    caps_reported.emplace_back(name.ptr, name.len);
+    return KILN_OK;
+}
+// items.storage.client belongs to the managed kiln:storage mirror; the native service must not report it as well.
+void init_caps_test() {
+    fake_caps.header = {sizeof fake_caps, 1};
+    fake_caps.report = &record_caps;
+    fake_api.feature = +[](KilnStr) -> bool { return false; };
+    fake_api.subscribe_tick = +[](KilnOwner, int32_t, KilnTickFn, void*, KilnHandle* out) -> KilnResult {
+        *out = 1;
+        return KILN_OK;
+    };
+    fake_api.register_service = +[](KilnOwner, KilnStr, const void*) -> KilnResult { return KILN_OK; };
+    kitems::storage_init();
+    CHECK(std::count(caps_reported.begin(), caps_reported.end(), "items.storage") == 1);
+    CHECK(std::count(caps_reported.begin(), caps_reported.end(), "items.storage.client") == 0);
+    fake_caps = {};
 }
 } // namespace
 int main() {
@@ -916,6 +966,7 @@ int main() {
     CHECK(!character_witness(reinterpret_cast<void*>(1), &hash));
     service_tests();
     review_tests();
+    init_caps_test(); // last: storage_init replaces the structural gate the tests above use
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

@@ -110,7 +110,7 @@ How a spell, a wand's attack or an ability gets there. A spell's staff and a wan
 | `ProjectileBlock` | `Speed`, `Gravity`, `Range`, `Look`, `OnImpact` where it stops, `OnHit` on what it strikes, `Homing`, `Pierce` (it flies through that many creatures, 0..8, `OnHit` on each once, and stops at the next or at anything that is not a creature) | `projectile` |
 | `SelfBlock` | The caster | `self` |
 | `AroundBlock` | Everyone within `Radius` of the caster | `around` |
-| `ConeBlock` | Everyone within `Range`, inside `Angle` degrees of the aim | `cone` |
+| `ConeBlock` | Everyone within `Range`, inside the whole aperture `Angle` (0 < angle ≤ 360 degrees); 360 reaches all around, and with `Affects` friends the caster too, as `around` does (below 360 the caster is never in its own cone) | `cone` |
 | `BeamBlock` | Everyone along a line, `Range` long and `Width` wide. With `Seconds` it keeps hitting every `TickEvery`, turning with the caster | `beam` |
 | `ZoneBlock` | Everyone within `Radius` of a place `Ahead` of the caster, every `TickEvery`, for `Seconds` | `zone` |
 | `ChainBlock` | The first within `Range` and `Angle`, then `Jumps` more, each within `JumpRange` of the last, never one twice | `chain` |
@@ -324,6 +324,35 @@ A rename without `Was` makes a new item, and what the world holds of the old one
 | Editor and `kiln lint` | The schema, KL201 and KL202 for `clients`, KL314 for names, `E_UNCONNECTED` for hand-written Impact programs |
 | Load | `BlockError` with the block and the field: `block spell bad, cast.manaCost: -1 is less than 0`. A wrong block makes nothing, and the file's other blocks still load. A VFX's fields are checked on a server too; a client's builder also checks what needs its PNGs |
 | Content ready | What the game could not take, by name: `block status x, onApply[0].applies: the game has no status "0xdeadbeef"` |
+
+### Values that loaded in 0.2.0-dev.30.6
+
+Since 0.2.0-dev.30.7 the runtime checks every content block as the schema and `kiln lint` do. A few values those refuse loaded in
+0.2.0-dev.30.6 without harm: such a block still loads, as it did then, with one warning (in kiln.log, and in the mod's warnings that
+`kiln blocks` shows: `block creature golem: loads as it did in 0.2.0-dev.30.6, but kiln lint reports ...`). `kiln lint` and the editor
+report each one as an error: fix them, a later release may refuse them.
+
+| Value | What it does |
+|---|---|
+| AI `pickEvery` of 0, or above 60 up to 1000 | Used as written: 0 decides at every AI update |
+| A rule block (or a behaviour block's rules) with `every` outside 0..3600, `cooldown` below 0, `chance` outside 0..1 or an empty `do` | Nothing: a creature whose behaviour uses that rule is refused, as before |
+| A talent on its own with `column` or `row` outside 0..31 or `maxLevel` above 99 | Nothing: a tree with that talent is refused, as before |
+| An attack's empty `onHit: []` next to its `delivery` | Ignored: the delivery plays |
+| `stagger` on the game's animation (`template`, or `like` a premade) | Ignored: the game's own stagger plays |
+| A sphere collider's `height` below 0 | Ignored: a sphere has no height |
+| A clip's `blendIn` below 0 | Cooked as written |
+| A clip named `""` | Nothing: no glTF animation has an empty name, so the cook makes no clip of it |
+| Armour `resist` below 0 | Used as written: armour below 0 against that kind |
+| Loot `stackMax` below 1, without `stackMin` | Passed on: the game rolls from it up to the copied entry's smallest stack (below 0 does not fit, and the item drops as no random loot) |
+| A status's `tickEvery` of 0 or below, without `onTick` | Nothing reads it (with `onTick` it is refused, as before) |
+| A quest step's `recommendedLevel` above 255 | The journal keeps its lowest byte (256 shows none, 300 shows 44) |
+| A quest spawn's `level` below 0 | Kiln's spawner refuses it, so that spawn does not happen |
+| An NPC's `place.at` that is not 3 numbers, `place.distance` that is not 2 | Ignored |
+
+These stay refused, though 0.2.0-dev.30.6 loaded them, because they made the game misbehave: a hit clip with `speed` 0 or below (the hit
+layer leaves its pose only when the clip ends, so the creature stayed in it), a blend key that is not a finite number (`"NaN"`, `"1e999"`:
+it reached the game's blend space as the clip's position), and an attack or cone `angle` that is not a number (C# only: it reached the hit
+test as NaN, which hit nothing).
 
 ## The contract (dev.27)
 

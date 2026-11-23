@@ -52,7 +52,7 @@
 - `static Walk { get; } -> AnimState` — The engine's walk state.
 
 ## AttackBlock — One attack: the state it plays, how near it has to be, how often, and what its hit does.
-- `Angle { get; init; } -> double` — Degrees in front of it that its hit reaches.
+- `Angle { get; init; } -> double` — The hit cone's whole aperture in degrees: more than 0 and at most 360.
 - `Chance { get; init; } -> double?` — 0..1: how often it is chosen when it could be.
 - `Cooldown { get; init; } -> double?` — Seconds after any attack of the creature before this one is chosen again.
 - `Delivery { get; init; } -> IDeliveryBlock?` — A ranged attack: what leaves at `AttackBlock.HitAt`, as a spell's delivery.
