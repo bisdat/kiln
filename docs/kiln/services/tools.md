@@ -84,7 +84,7 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 | `tools.material_picker` | Terrain group2 is filtered only when the owned held-tool observation and the current call's resolved item agree; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
 | `tools.material_snapshot` | A separate per-player backpack/magic-chest observation producer is qualified. | Currently unavailable: aggregate selector counts are never fabricated into two sources. |
 | `tools.preview` | The explicit-item preview has an owned bounded row adapter. | Missing constructor mapping, wrong side or hooks disabled. |
-| `tools.brush_families` | A checked call-site adapter changes only the current tool frame's owned brush-query GUIDs. | Missing exact frame/query/held-tool context, checked-hook refusal or wrong side. |
+| `tools.brush_families` | A checked call-site adapter changes only the current tool frame's owned brush-query GUIDs and writes the held family's rows into that call's fresh output. Its text ends with the picker trace ("Reading the brush picker trace"). | Missing exact frame/query/held-tool context, checked-hook refusal or wrong side. |
 | `tools.identity` | The explicit-item root identity adapter is qualified. | Missing root helper, wrong side or hooks disabled. |
 
 The native client-Post observer copies the actual main-hand/action selection into an owned scalar snapshot tagged by
@@ -119,7 +119,7 @@ tools: brush picker: patched (the family's brushes were written into the picker)
 
 | State | What it means | Look at |
 |---|---|---|
-| `disabled` | The adapter is not installed, or it retired after a write fault. | `tools.brush_families` reason. |
+| `disabled` | The adapter retired after a write fault (an adapter that never installed counts nothing: the `tools.brush_families` reason says why). | `tools.brush_families` reason. |
 | `no held family` | The picker drew without a registered family in hand: a vanilla tool, or no current held-item sample. Normal while a vanilla tool is held. | Shown while the mod's tool is held: the family was never defined (a `blocks:` error at content ready) or the held-item observer has no sample. |
 | `no identity` | The held family lost its identity record between two lookups (a removal racing the frame). | Mod reloads. |
 | `other frame` | Not the Overgrowth branch's registers (the Decay branch, or another layout). | The root tool's base. |
@@ -132,21 +132,39 @@ No line at all while the tool's picker is open means the qualified frame drawer 
 
 **Still unavailable:** the per-actor producer that separates backpack and magic-chest observations. Static qualification,
 filtering fixtures and native runner tests do not establish actual menu rendering, network behavior or the complete
-real-game tool. **Not yet seen in the real game:** the picker drawing a family's rows (0.2.0-dev.30.7 is the first
-release that writes them), the rows' icons and names, selecting a brush from them, and the brushes' terrain preview
-model (`equipment.terrainVoxelObject`, resolved for the first time in 0.2.0-dev.30.7). The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
-running action's item; its last item must never be cached as evidence of what the player holds.
+real-game tool. **Not yet seen in the real game** (0.2.0-dev.30.7 is the first release that does each of these):
+the picker drawing a family's rows, the rows' icons and names, selecting a brush from them, a stroke with a selected
+brush (the family's Remove/Add action and its radius, `impactValues.0x5258131e`, written for the first time), and the
+brushes' terrain model (`equipment.terrainVoxelObject`, resolved for the first time; vanilla Overgrowth shapes carry
+none, only the game's terrain blueprints do). The item-presentation constructor's traced caller uses the selected
+hotbar model, which need not be the running action's item; its last item must never be cached as evidence of what the
+player holds.
 
-## Checks without the game
+## Checks without running the game
 
 `native/services/tools/tests/test-ammo.sh` runs the presentation fixtures on the host, among them the brush-frame
-adapter (`brush_frame.cpp`: rows, declared order, every refusal) and its trace (`brush_trace.cpp`).
-`test-tool-content.sh` runs what `ToolCompiler` hands kiln.content for a registered removal-only tool with three
-brushes (`ToolCompilerContentTests` with `KILN_TOOL_CONTENT_FIXTURE` set) through kiln.content's own resolvers, with the
-client's real reflection and game data that `extract_tool_content_inputs.py` writes into scratch storage (read-only
-from a game folder): definition fields and references, item rules, itemdata rules. Its negative controls are the three
-refusals of the first real-game run (a radius rule on a bare config id, a root GUID as an item tag, an unserved
-terrain model).
+adapter (`brush_frame.cpp`: rows, declared order, every refusal) and its trace (`brush_trace.cpp`). The managed
+`ToolCompilerContentTests` (Kiln.Blocks.Tests) check what `ToolCompiler` emits for a removal-only tool with three
+brushes; kiln.content's host tests check item tags and voxel models (`itemtag_test.cpp`) and served terrain models
+(`refs_test.cpp`).
+
+`test-tool-content.sh` runs that emitted content through kiln.content's own resolvers with the client's real
+reflection and game data: definition fields and references, item rules, itemdata rules. Its negative controls are the
+three refusals of the first real-game run (a radius rule on a bare config id, a root GUID as an item tag, an unserved
+terrain model). It needs files this repository does not hold, so it is not part of the regular suites, and without
+them it prints `SKIP` and exits 0:
+
+```sh
+# 1. the compiler's export (any machine with the .NET SDK)
+KILN_TOOL_CONTENT_FIXTURE=$PWD/out/compiler.json dotnet test managed/tests/Kiln.Blocks.Tests --filter ToolCompilerContentTests
+# 2. an installed game, only read as files (KILN_GAME defaults to ~/.local/share/Steam/steamapps/common/Enshrouded;
+#    KILN_CLIENT_EXE names another copy of its client exe)
+KILN_GAME=<game folder> native/services/tools/tests/test-tool-content.sh out/tool-content out/compiler.json
+```
+
+The script extracts the game inputs into `out/tool-content/inputs` (`extract_tool_content_inputs.py`, read-only).
+Inputs extracted earlier can be passed instead: `test-tool-content.sh <out> <compiler.json> <types.json> <brush.bin>
+<pool-item.bin> <registry.bin>`.
 
 Only the player runs the real-game check: confirm root/brush names, independent vanilla Overgrowth choices, all pool
 entries with backpack-only and magic-chest-only supplies, empty stock, switching between tools, inventory changes,
@@ -157,4 +175,6 @@ selection after leaving/rejoining a world, paid placement/removal and the game's
 - **0.2.0-dev.30.7:** the picker lists a family's own brushes (the game's query scans only its data's
   `terraformingTools` list, so they were never found); brush radii reach the game (`impactValues.0x5258131e`); no root
   GUID is written as an item tag; brush terrain models resolve; the brush-frame trace in `kiln.log` and
-  `tools.brush_families`; the content check without the game. Thanks bisdat (kiln#130).
+  `tools.brush_families`; a content check against the installed game's data (the game is not run).
+  `equipment.terrainVoxelObject` takes only a terrain model and `voxelObject` only a shape's model in data packs and
+  itemdata rules. Thanks bisdat (kiln#130).

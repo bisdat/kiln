@@ -100,7 +100,8 @@ which only sizes the search for candidates; see [creatures.md](creatures.md), "S
   (`ItemInfo.tags[i].tag`, an `ItemTagReference`) is no resource: it takes a GUID that the item registry's tag list
   (`ItemRegistryResource.itemTags`) holds, and any other GUID is refused (since 0.2.0-dev.30.7; before, every tag was
   refused). A shape's `voxelObject` and a terrain shape's `terrainVoxelObject` take the GUID of a loaded or served
-  `keen::VoxelModelResource`. Other references stay read-only.
+  `keen::VoxelModelResource` of their own kind, as the game's data pairs them: `voxelObject` a shape's model
+  (`isTerrain` clear), `terrainVoxelObject` a terrain model (`isTerrain` set). Other references stay read-only.
 - **Lists of rows**: `uiValues`, and a buff's `whileApplied` and `onCreate`, take a JSON list in place of the game's: `"whileApplied": [ { "slot": "Chest", "vfx": "<guid>",
   "offset.orientationOffset.w": 1 } ]`. A field a row does not name is zero, so a rotation has to say its `w`.
 

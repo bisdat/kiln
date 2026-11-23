@@ -164,8 +164,12 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   a unique pattern qualifies the instruction and its rel32 target. A checked MID requires the current held family root
   to match selected hotbar ID `[RBP+0x118]` and resolved ItemInfo `[RBP+0xe0]`. The Overgrowth branch has
   `RBP=RSP+0x100`, output `RCX=RBP+0x690` (fresh empty capacity16 array), include `R9=RSP+0x30`, ratio
-  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. Only include/ratio GUID **values** in these distinct caller-owned
-  temporaries are replaced. Other three query sites, the Decay tuple and persistent callback outputs stay untouched.
+  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. The include/ratio GUID **values** in these distinct caller-owned
+  temporaries are replaced, and (since 0.2.0-dev.30.7) the family's rows go into the output's inline storage
+  (`RBP+0x6b8`, 16 rows of 72 bytes, up to `RBP+0xb38`), its count (`RBP+0x698`) written last. After the call the
+  drawer copies the output's data pointer and count into a 0x68-byte entry of its own list at `RBP+0x248` and draws
+  from that view; nothing outlives the frame, so a later vanilla frame starts from a fresh empty output again. Other
+  three query sites, the Decay tuple and persistent callback outputs stay untouched.
   There is no inherited TLS admission. `RawHook::caller()` alone is insufficient: its per-target caller record is not
   restored after a recursive predecessor. A write fault skips this one empty-output query, never a half-patched query.
 - Item tags (0.2.0-dev.30.7) are no resources: the game data cooks no `keen::ItemTag` (`{label}`), and no resource has
@@ -174,8 +178,9 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   seen (`0xd25b50`, the pickup notice's `0xd53370`) compare GUIDs.
 - `equipment.terrainVoxelObject` (`ItemInfo+0x468`, `ObjectReference<keen::TerrainVoxelObjectDefinition>`, an empty
   editor type): the 11 game items that set it (terrain blueprints) name a `keen::VoxelModelResource` of the same GUID
-  with `isTerrain` set, as `voxelObject` names one for a shape. Vanilla Overgrowth shapes set neither; their radius is
-  their own `FloatImpactConfig` `0x5258131e` (0.5, 1.5, 2.5).
+  with `isTerrain` set, as `voxelObject` names one for a shape (the 144 items with a `voxelObject` name 67 models,
+  every one with `isTerrain` clear; the 11 terrain models are named only by `terrainVoxelObject`). Vanilla Overgrowth
+  shapes set neither; their radius is their own `FloatImpactConfig` `0x5258131e` (0.5, 1.5, 2.5).
 - `0xd3e130` writes a 16-byte root identity `{itemId,nameTag,descriptionTag,present}`. It substitutes vanilla root IDs
   based on ItemInfo flags +0x5d8 (bits 3/4/5/6/8). A Kiln root can instead use its own identity and content text tags:
   the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game
