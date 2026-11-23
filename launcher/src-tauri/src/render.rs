@@ -322,6 +322,11 @@ pub fn guarded(d: &Dmabuf, f: &ForceDmabuf) -> bool {
 
 /// [`when_late_x11`] with the forced renderer first: the newest change the player asked for goes first.
 pub fn when_late_forced(c: &Choice, d: &Dmabuf, x: &X11, f: &ForceDmabuf) -> Late {
+    if RENDER_OWNER.get() == Some(&false) {
+        // No shared state is ours to change, but a blank default start must still have a way out. The restart's
+        // in-memory software sentinel bounds this escape to one try even on a read-only data folder.
+        return if c.mode == Mode::Gpu && c.why == Why::Default { Late::Restart } else { Late::Report };
+    }
     if f.step != Force::Off { Late::NoForce } else { when_late_x11(c, d, x) }
 }
 
@@ -1909,11 +1914,10 @@ pub fn prepare(_args: &[String]) {}
 /// window and WebKit start: after crate::sandbox's message (whose restart or Quit is no crash).
 #[cfg(target_os = "linux")]
 pub fn watch() {
-    if RENDER_OWNER.get() == Some(&false) { return; }
     let Some(c) = choice().cloned() else { return };
     let d = dmabuf().cloned().unwrap_or(Dmabuf { on: false, why: DmabufWhy::Software, ignored: None });
     let f = force().cloned().unwrap_or(ForceDmabuf { step: Force::Off, why: ForceWhy::Unused });
-    if guarded(&d, &f)
+    if RENDER_OWNER.get() != Some(&false) && guarded(&d, &f)
         && let Some(dirs) = crate::folder::found_dirs()
     {
         // read-only use of the folder before the beta copy's gate, except this one file of our own
@@ -1990,10 +1994,14 @@ fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
         }
         Late::Restart => {
             let why = format!("The launcher turned this on by itself: {what} with the GPU");
-            let wrote = crate::state::dirs().and_then(|d| write_marker(&d, &why).map(|_| marker(&d)));
-            match &wrote {
-                Ok(p) => log(&format!("{what} ({}); wrote {}; starting again without the GPU", says(&c), p.display())),
-                Err(e) => log(&format!("{what} ({}); could not write the marker ({}); starting again without the GPU", says(&c), e.message)),
+            if RENDER_OWNER.get() == Some(&false) {
+                log(&format!("{what}; renderer state is unavailable; starting once without the GPU without changing shared markers"));
+            } else {
+                let wrote = crate::state::dirs().and_then(|d| write_marker(&d, &why).map(|_| marker(&d)));
+                match &wrote {
+                    Ok(p) => log(&format!("{what} ({}); wrote {}; starting again without the GPU", says(&c), p.display())),
+                    Err(e) => log(&format!("{what} ({}); could not write the marker ({}); starting again without the GPU", says(&c), e.message)),
+                }
             }
             let err = restart(&Relaunch::software_fallback().keeping());
             log(&format!("PROBLEM: could not start again without the GPU: {err}"));
@@ -2854,6 +2862,19 @@ mod tests {
                     assert!(!normal_pending(&dirs).exists());
                 }
                 _ => {
+                    if case == "competing" {
+                        assert_eq!(when_late_forced(choice().unwrap(), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Restart,
+                            "an unowned blank start must retain a stateless software escape, not disable its watchdog");
+                        let before = std::fs::read(normal_pending(&dirs)).unwrap();
+                        page_started();
+                        watch();
+                        frame_painted(true, true);
+                        after_gate();
+                        leaving();
+                        assert!(!dmabuf_pending(&dirs).exists());
+                        assert_eq!(std::fs::read(normal_pending(&dirs)).unwrap(), before);
+                        assert_eq!(when_late_forced(&decide(&[], None, true, false), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Report);
+                    }
                     assert_eq!(force().unwrap().step, Force::Off, "no guarded GPU start is possible: {case}");
                     assert!(std::env::var_os(FORCE_VAR).is_none());
                     assert!(std::env::var_os(SHM_VAR).is_none());
