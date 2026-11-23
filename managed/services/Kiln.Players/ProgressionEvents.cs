@@ -20,15 +20,20 @@ public sealed class PlayerLevelChangedEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>The player's entity.</summary>
     public EntityId Entity { get; }
     /// <summary>The player (null if they left in the meantime).</summary>
     public Player? Player => Players.Available ? Players.Find(Entity) : null;
+    /// <summary>The level before the change.</summary>
     public int OldLevel { get; }
+    /// <summary>The level after the change.</summary>
     public int NewLevel { get; }
     /// <summary>The Kiln request that caused it (<see cref="ProgressionResult.Request"/>), 0 = the game.</summary>
     public ulong Request { get; }
+    /// <summary>The server-world step the change was seen in.</summary>
     public ulong Step { get; }
 
+    /// <summary>The level change and the player's entity, for a log line.</summary>
     public override string ToString() => $"level {OldLevel} -> {NewLevel} (entity {Entity})";
 }
 
@@ -48,13 +53,20 @@ public sealed class PlayerSkillsChangedEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>The player's entity.</summary>
     public EntityId Entity { get; }
+    /// <summary>The player (null if they left in the meantime).</summary>
     public Player? Player => Players.Available ? Players.Find(Entity) : null;
+    /// <summary>The skill points the unlocked nodes cost before the change.</summary>
     public int OldPointsSpent { get; }
+    /// <summary>The skill points the unlocked nodes cost after the change.</summary>
     public int NewPointsSpent { get; }
+    /// <summary>The Kiln request that caused it (<see cref="ProgressionResult.Request"/>), 0 = the game (or not known).</summary>
     public ulong Request { get; }
+    /// <summary>The server-world step the change was seen in.</summary>
     public ulong Step { get; }
 
+    /// <summary>The change of spent points and the player's entity, for a log line.</summary>
     public override string ToString() => $"skill points spent {OldPointsSpent} -> {NewPointsSpent} (entity {Entity})";
 }
 
