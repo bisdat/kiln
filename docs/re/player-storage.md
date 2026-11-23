@@ -104,6 +104,47 @@ The direct inventory lookup is by entity/type, without checking that the entity 
 
 Thus the call is reusable **outside join**, but it directly calls CreateEntity. It must run with structural mutation safe: at authority Post with no world jobs, not merely inside a program that declares writes to Inventory. `native/core/abi/services/kiln_world.h:25` and the existing spawn service's structural gate explicitly distinguish these cases. For a worker-only restoration, use the queued creation path and preserve every record field; simply giving an item ID/count is not equivalent. PIDE stacks have count 1; stackables preserve their count. Set the final contained slot/owner when inserting; creation alone is not a completed inventory attachment.
 
+### Creation, cleanup and converter call contracts
+
+Additional qualified rows close the structural and death-program dependencies:
+
+| Symbol | Server | Client |
+|---|---:|---:|
+| `items/PageBuilder` | `0x7b1ea0` | `0xe560f0` |
+| `items/PageTemplateGuid` (data, RIP-captured from PageBuilder) | `0x131f280` | `0x1dae268` |
+| `items/CommandCreateEntity` | `0x5fb3d0` | `0x95f880` |
+| `items/StorageDestroyEntity` | `0x63e8a0` | `0x9a2a10` |
+| `items/CmdDestroyEntity` | `0x5fbe20` | `0x9602d0` |
+| `items/PlayerItemsLoot` | `0x1aa7a0` | `0x4094a0` |
+| `items/SourceEntityId` | `0x65eec0` | `0x9c3030` |
+| `items/ClientInventoryTransfer` | `0x19e860` | `0x3fd580` |
+
+CreateEntity is `u32(EntityStorage*, const CreateDesc48*)`, not a command-buffer call. The 48-byte descriptor has field0 u32 (set to 0 as the page builder does), template GUID at +4, component-descriptor pointer at +0x18, u64 count at +0x20, reserved u16 at +0x28, u16 at +0x2a and u8 flags at +0x2c. Component descriptors are 24 bytes `{u32 typeHash, padding, const void* bytes, u64 size}`. The page builder uses flags 4 and Inventory/OwnerRelationship overrides (`decomp/s-page-builder-7b1ea0.c:194-224`).
+
+The worker-safe queue entry is `u32* CommandCreateEntity(CommandBuffer*, u32* out, u32 source, u32 requestedId, const CreateDesc48*)`. It reserves an ID and copies all override bytes into its command; execution is deferred (`decomp/s-storage-client-guards.c:441-526`). Use the job command buffer here, a nonzero DefaultInventory GUID and requested ID 0. Do not read the new entity until commands have applied. This is distinct from the 8-argument convenience wrapper at server 0x5fb340.
+
+Direct destruction is `u8(EntityStorage*, u32 id, u8 mode, u8 skipCulled)`, with mode 1 and skipCulled 0 on the existing spawn path; it is safe only at a quiescent structural boundary (`native/services/spawn/game.cpp:62,123-127`; `decomp/s-storage-call-contracts.c:1398-1455`). Queued destruction is `u8(CommandBuffer*, u32 source, u32 target)` (`decomp/s-tombstone-link.c:34-49`). Cleanup must use the exact tracked entity set, not an ownership heuristic.
+
+Capture has seven Win64 arguments, with the hidden result explicit: `Result8*(out, Character*, opaqueSaveState, attributeRegistry, componentBindings, opaqueWorldContext, EntityRef*)`. **The fourth argument is the attribute registry**, proven by its direct attribute lookup calls and its forwarding through the page walker to RecordFromStack. The sixth is not a substitute. EntityRef is `{u32 id, u8 kind, u8 padding, u16 family, EntityStorage*, void* row}`. RecordFromStack has seven arguments too: `Result8*(out, Record56*, ItemStack12*, u8 slot, attributeRegistry, componentBindings, EntityRef*)`; it has no ItemRegistry argument.
+
+Converter bindings are a compact u16 type-index array, not a map or an owned object. The capture passes Save2 +0x54. Reconstruct a local buffer of at least 0x5a bytes from the current world's component map when freezing outside a capture, rather than retaining the hook pointer. The seven `items/record.binding.*` constants are holes from the converter's actual accesses:
+
+| Suffix | Offset on both targets | Component |
+|---|---:|---|
+| `dye` | `0x0e` | ColorPaletteItem |
+| `durability` | `0x16` | Durability |
+| `fuel` | `0x28` | Fuel |
+| `level` | `0x30` | Level, also on a socket's PIDE |
+| `perks_legacy` | `0x3a` | PerkContainer |
+| `perks` | `0x3c` | PerkContainerNew |
+| `gem` | `0x58` | WeaponGemSlot |
+
+Evidence: `decomp/s-record-context.c:1951-1952,2015,2074,2133,2205-2214,2245-2263`. Validate the type indices for the current world; unused binding entries are zero.
+
+Read is `Result8*(out, Character*, Reader**, ReadContext*)`; the version is u32 at ReadContext +8, not a scalar fourth argument. RecordRead is `void(Record56*, Reader**)`, and RecordWrite is `void(Writer**, Record56*)`. A memory reader has data +0, length +8, base offset +0x10, cursor +0x18, error byte +0x20, refill callback +0x28 and extra field +0x30 (`decomp/s-storage-call-contracts.c:1088-1099`). Its EOF callback flags error 0xb and supplies a zero buffer (`decomp/s-command-create.c:17-27`). Prevalidate exact record length, flags, counts and slots before invoking the game reader; decoding untrusted/truncated bytes is not a bounds check.
+
+JoinApply is `Result8*(out, PtrSize* uploadedBlob, ServerInstance*, u32 zeroBasedSlot, const WorldTransform56* spawnTransform)`. On success the reserved player entity is **slot +1**, not slot: the dispatcher passes connection ID &0x3f and the spawn wrapper requests entity slot +1 (`decomp/s-storage-call-contracts.c:624,874-903`). Scope Read hooks to an active JoinApply; unrelated character reads are not join offers.
+
 ## Tombstone to player association
 
 `player_items_loot` runs on the **already created tombstone**. Its 16-byte job row names the current tombstone at +0 and the source player at +4. `CurrentEntityId` reads +0; the source getter server `0x65eec0` reads +4 (`decomp/s-tombstone-link.c:4-13`; `decomp/s-owner-and-ammo.c:4-13`). The program reads Actor, SlotSelection and InventorySetup for that source ID, not for the tombstone (`decomp/s-player_items_loot-1aa7a0.c:100-131`). State 1 calls the transfer helper with `(tx, sourcePlayer, currentTombstone, mode)` (:243-252), commits (:254), then changes state to 2 or 3 (:269-291).
@@ -111,6 +152,47 @@ Thus the call is reusable **outside join**, but it directly calls CreateEntity. 
 Reflection: CreateItemLoot is one byte, states Start=0, WaitForInventorySetup=1, WaitForPlayerRevive=2, LootCreated=3. The authored tombstone template is `3a0df3ef-817c-46c0-975f-bd6b86be1f5f`, family Tombstone, with CreateItemLoot, InventorySetup, InventorySetupInit and ForceSave (`out/ps-re/grave-template.json`). Do not assume a persistent OwnerRelationship component on the grave; the program's source row is the concrete association.
 
 At Start the game checks whether eligible vanilla contents exist. If not, it queues removal rather than creating a storage-only grave. At WaitForInventorySetup it waits for the destination inventory before transferring. Storage death moves belong **after** that successful transfer/commit and state transition, once, not before the eligibility check. If no usable tombstone exists, keep storage; do not create or retain an extra grave just for storage.
+
+## Internal protection from client inventory actions
+
+The existing public transfer Deny implementation installs hooks only on **QuickStack and MoveAll** (`native/services/items/xfer.cpp:445-448`). That is not protection against ordinary slot moves, Destroy, equipment selection, sorting or ItemAction. Keep the public API's existing meaning separate from storage's internal protection.
+
+The common authority-side guard point is a **post raw hook of `gameplay/DeliverEvents`**, server `0x6c2300` / client `0xa25a50`, preserving the existing four-register passthrough and raw return (`native/services/players/playerstate.cpp:1217-1225`). Both independently decompiled SimStep implementations call InputApply, then DeliverEvents, then set up/schedule programs: `decomp/s-action-order.c:75-82,150` and `decomp/c-action-order.c:75-82,150`. Thus its post-hook is before every inventory/equipment program on dedicated and hosted authority. Require the existing `players.client_action_hold` feature, which includes both ordering probes.
+
+An internal guard can scan typed PlayerInput and ServerConsumedPlayerInput and consume a pending action's version when it references a tracked holder/page/PIDE. It must not consume the public held-action listing, which is shared and offered once. Held actions are neutralized before programs; if subsequently released, they pass the common barrier again. Reflection, not copied offsets, defines the action and consumed-version layouts.
+
+The inventory-addressed references in `ClientPlayerInputData` are:
+
+| Action type in `keen::ecs` | Fields to inspect |
+|---|---|
+| InventoryTransferAction | sourceEntityId, targetEntityId, sourceSlotId, targetSlotId |
+| SortInventoryAction | targetInventoryId |
+| AreaDepositPermissionAction | targetInventoryId |
+| UpgradeStorageAction | existingStorageEntityId |
+| ChangeEquipmentAction | inventorySlotId |
+| SwapEquipmentSetAction | targetInventoryId |
+| ItemAction | inventorySlotId, secondarySlotId |
+| ChangeWeaponGemAction | weaponPide, weaponGem, forgeEntityId |
+| PlayerCraftingAction | craftingStationId, waterSourceId |
+
+Inspect the low u32 entity in each InventorySlotId too: the separate source/target entity fields may be zero while a slot directly names a storage page. For a literal all-entity-reference guard, the same reflection also identifies LoreVoiceoverAction.playerEntityId, TeleportAction.target, SelectDialogOptionAction.targetNpc, StopDialogOptionAction.targetNpc, FlameAltarAction.baseEntityId, ChangeLogicEntityConfigAction.logicEntityId and RedeemItemAction.targetEntityId. Only reject references to the exact tracked storage set; ordinary game targets remain unaffected.
+
+### InventoryTransfer entry, for reference
+
+Existing `gameplay/InventoryTransfer` is server `0x19e860` / client `0x3fd580`; `items/ClientInventoryTransfer` independently qualifies the same function for storage. Its prototype is `void(ProgramContext*, InventoryActionsIterator*)`. The iterator's pointer to PlayerInput is at +0x10. PlayerInput.fromClient.inventoryTransferAction begins at +8, so the actual instruction-captured offsets are:
+
+| Constant | Both targets | Value |
+|---|---:|---|
+| `items/guard.iter.player_input` | `0x10` | PlayerInput pointer in iterator |
+| `items/guard.pi.source_entity` | `0x0c` | u32 source owner |
+| `items/guard.pi.target_entity` | `0x10` | u32 target owner |
+| `items/guard.pi.source_slot` | `0x14` | u64 source slot |
+| `items/guard.pi.target_slot` | `0x1c` | u64 target slot |
+| `items/guard.pi.type` | `0x24` | u8 InventoryActionType |
+| `items/guard.pi.flags` | `0x25` | u8 transfer flags |
+| `items/guard.pi.amount` | `0x26` | u16 custom amount |
+
+The complete entry covers One/Half/All/CustomAmount/Destroy and the RefillStacks/MoveAll/ToActionbar/ToBackpack branches (`decomp/s-storage-client-guards.c:64-85,146-179,233-390`). It is not just the slot-transfer branch. Returning before the original prevents mutation but does not consume the action version: the original marks its consumed-input write and stores version at +0x20 near entry (:70-85). A common-barrier guard avoids this entry-specific write protocol and also covers the other action types above.
 
 ## Witness encoding
 
