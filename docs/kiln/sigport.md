@@ -299,7 +299,7 @@ record (deployed `kiln/sigdb/builds/server/` or the source tree's `sigdb/builds/
 
 ### `kilnctl update <name>`
 stop → backup → cache the exe (if verified) → steamcmd → `sigdb_check` → if Kiln is deployed and the new sha has no
-verified record: **port → gate → mark** → summary → start. Marking requires all three:
+verified record: **port → gate → mark → registry proof** → summary → start. Marking requires all three:
 1. the port is complete (nothing lost, nothing below confidence),
 2. the deployed definitions work as they are (`symbols.patch` is empty). Otherwise the instance would run definitions
    the gate did not test,
@@ -312,6 +312,38 @@ redeploy, review the low-confidence names, look at the gate's regressions). The 
 before. `--no-port` keeps the old report-only behaviour, `--no-gate` ports without booting (nothing is marked), and
 `--no-mark` leaves marking to a human. `--dry-run` does no stop, backup, SteamCMD or start, ports and gates as if
 `--new-exe` (default: the instance's exe) had just been installed, and never writes a record.
+
+### The registry proof (`kilnctl regproof`)
+After the build record, with a green gate (the gate's lab run is its evidence), `update` and `port` run the registry
+proof (registry P2) on the new exe, unless the instance already has a verified regmap record of it: the regmap record of the
+build (`regmap/<side>/<exe sha256>.json`, [regmap/README.md](../../regmap/README.md)) that decides which Kiln registry
+fields apply on it. kilnctl reads the exe as data with the Kiln tree's tools (the reflection, the build's entries,
+`regmap_check.py --record` in a scratch copy) and finds the lab's outputs by content in the gate copy's and the instance's
+`kiln/data/content/registry/` and `content/registry/proof/`: the round-trip suites (`registry-roundtrip`), the values
+export (`registry-values`) and kiln.content's own id table. Steps: reflection member and enum diff (old vs new exe),
+formula checks, the round trip (live fields in a live generation, boot fields in a boot generation), the values diff with
+each base's origin, the alias check. The old build is the newest cached exe with a verified regmap record (not this
+section's sigport baseline); its record carries the id history. Lab files of another mapping (`regmapDigest`) are set
+aside, and a tree whose regmap/common differs from the instance's deployed one blocks.
+
+The record is `verified` only when every step ran with its inputs. A row is `ok` when every step proved it, `unproven`
+(with its reason in the record's `reasons`, kept off) when only lab evidence is missing, `changed` when the build changed
+what it maps or a lab step disproved it. It is marked into the instance's `kiln/regmap/server/` only when the build record was
+marked, and keeps a verified record unless `kilnctl regproof <name> --mark --replace` (the old one stays as
+`.json.bak`); a copy for the repository goes to the proof's
+folder (`~/.local/state/kiln/regproof/<name>/<sha12>-<time>/`, with `report.txt`, `NEXT.txt`, the step reports and the
+values changelog). A verified proof keeps the new build's id table and values export in `$KILN_REGMAP_IDS` (default
+`~/.local/state/kiln/regmap-ids/`, never overwritten) for the next update, and the id table goes into the instance's
+data folder; a dry run keeps nothing. Without a verified record every registry field stays refused on the new build.
+
+`kilnctl regproof <name>` runs the same proof on its own; without an instance, `--tree` with `--new-exe`/`--old-exe` (or
+`--new-refl`/`--old-refl`, `--record`, `--ids` as files) and `--evidence` (files or folders) does, for example for the
+client side (`--side client`, a copy of the client exe and the client's data folder). `--first-build` waives the previous
+build (refused where the side already has proven builds), `--accept <registry.field>` takes a reviewed reflection
+change, `--mark` writes into the instance and `--replace` replaces a verified record there.
+
+The lab half (the proof producer that writes the round-trip suites and the values export in the gate) comes with the
+registry P2 native slices; until it is there no record is verified and kilnctl says so in `NEXT.txt`.
 
 ### The lab gate (`kilnctl gate`)
 A sibling instance `<name>-gate`: `<dir>.gate` gets the instance's game files (reflinked), its deployed `kiln/` folder
