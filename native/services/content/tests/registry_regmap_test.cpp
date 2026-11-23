@@ -297,6 +297,17 @@ int main(int argc, char** argv) {
             }
             std::printf("regmap %s: %d mapped, %d unproven, %d unmapped\n", side, mapped, unproven, unmapped);
             CHECK(unmapped == 0 && mapped + unproven == static_cast<int>(std::size(gen::kFields)));
+            // review2 N9: the shipped behaviour of the records, not only their counts. A proven row applies; a row the game's
+            // read time is not traced for stays off with that reason; the client record mirrors the server proof row for row
+            // (owner ruling 2026-11-23: no client proof of its own), and keeps the server's reasons.
+            std::string why;
+            CHECK(one.mapping("items", "maxStack", &why) == Mapping::Mapped);
+            CHECK(one.mapping("items", "block", &why) == Mapping::Unproven && why.find("not traced") != std::string::npos);
+            if (std::string(side) == "client") {
+                CHECK(one.build.rows == rm.build.rows);
+                CHECK(one.build.reasons == rm.build.reasons);
+                CHECK(one.build.game_build == rm.build.game_build && one.build.regmap_digest == rm.build.regmap_digest);
+            }
             rm = std::move(one);
         }
         std::printf("regmap: %zu registries loaded from %s\n", rm.registries.size(), argv[1]);
