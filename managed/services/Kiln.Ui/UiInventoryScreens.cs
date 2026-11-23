@@ -21,8 +21,11 @@ public enum InventoryScreenKind
 [Flags]
 public enum InventoryScreens
 {
+    /// <summary>The backpack screen.</summary>
     Backpack = 1,
+    /// <summary>A chest's transfer screen.</summary>
     Chest = 2,
+    /// <summary>Both.</summary>
     All = Backpack | Chest,
 }
 
@@ -69,6 +72,7 @@ public sealed record InventoryPanelOptions
 {
     /// <summary>The screens it shows on (both by default).</summary>
     public InventoryScreens Screens { get; init; } = InventoryScreens.All;
+    /// <summary>Where the panel sits beside the slots. Default right.</summary>
     public InventoryPanelSide Side { get; init; } = InventoryPanelSide.Right;
     /// <summary>Width in pixels at scale 1 (height fits the contents).</summary>
     public float Width { get; init; } = 300;
@@ -87,7 +91,9 @@ public sealed record InventoryPanelOptions
 /// delay: <see cref="Ui.Inventory.ScreenChanged"/>.</summary>
 public sealed class InventoryScreenChangedEvent(InventoryScreen? previous, InventoryScreen? current) : KilnEvent
 {
+    /// <summary>The screen before the change; null when none was open.</summary>
     public InventoryScreen? Previous { get; } = previous;
+    /// <summary>The screen after the change; null when none is open.</summary>
     public InventoryScreen? Current { get; } = current;
 }
 
