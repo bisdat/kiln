@@ -46,7 +46,8 @@
  * another writer took after Kiln's layer stays with that writer for the world; the change's other fields stay applied.
  * read returns actual live bytes through Kiln's field mappings; restart fields use the kept start-time composition,
  * and pre-world reads include composed pending process changes. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
- * the next registry pump; multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
+ * the next registry pump (a world tick of kiln.content; a change committed before any world is published once a world is
+ * ready); multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
  * commit/revert. Only real world/pack applications send WORLDLOAD. Result.generation is the last published snapshot.
  * A nested commit/revert while another transaction is in flight returns UNAVAILABLE.
  */
