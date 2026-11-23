@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // 16f S3 authored-body admission (bodyadmit.h). No resource is published here.
 #include "bodyadmit.h"
-#include "../../core/abi/services/kiln_capacity_util.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -19,10 +18,7 @@ bool hex64(const ojson& value) {
 }
 std::string digest(const Bytes& bytes) {
     const char* data = bytes.empty() ? "" : reinterpret_cast<const char*>(bytes.data());
-    const auto hash = kiln::capacity::sha256(std::string_view(data, bytes.size()));
-    std::string text;
-    kiln::capacity::detail::hex(text, hash.data(), hash.size());
-    return text;
+    return sha256_hex(std::string_view(data, bytes.size()));
 }
 const ojson& member(const ojson& object, const char* key) {
     static const ojson null;

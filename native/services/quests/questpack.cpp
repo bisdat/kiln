@@ -21,7 +21,6 @@
 #include "questpack.h"
 #include "bodypack.h"
 #include "motionclose.h"
-#include "../../core/abi/services/kiln_capacity_util.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -1123,9 +1122,7 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
             // animation events bound to the authored states and retimed; every template reference follows the clone.
             motionclose::Bindings bound;
             if (!motionclose::parse_bindings(t.motions, &bound, &err)) return fail(o.name + ": " + err);
-            std::string vector_hash;
-            const auto digest = kiln::capacity::sha256(t.motions.dump());
-            kiln::capacity::detail::hex(vector_hash, digest.data(), digest.size());
+            const std::string vector_hash = sha256_hex(t.motions.dump());
             const uint32_t sequence_type = fnv1a(motionclose::kSequenceType, std::strlen(motionclose::kSequenceType));
             const auto id = [&](const std::string& source) { return derive_guid(t.mod, "npcmotion", t.npc + ":" + source + ":" + vector_hash); };
             std::map<std::string, Guid> clones;

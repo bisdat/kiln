@@ -5,6 +5,7 @@
 #pragma once
 #include <functional>
 #include <span>
+#include <string_view>
 #include "nlohmann/json.hpp"
 
 #include "questbuild.h"
@@ -40,6 +41,9 @@ using BodyTypeLookup = std::function<bool(const std::string& qualified_name, Bod
 // Every interpreted type, field (name, type, offset) and value of body_layout() must exist exactly in the running
 // registry; the first difference refuses with the type's name. Uninterpreted fields are not compared.
 bool check_body_layout(const BodyTypeLookup& lookup, std::string* why);
+// Lower-case hex SHA-256 (the capacity utility's), for TUs that must not see <windows.h>: its TextOut macro would rename
+// questpack.h's TextOut after the include (16f body closures, clone ids).
+std::string sha256_hex(std::string_view bytes);
 struct BodySpec {
     Guid model, graph;
     double radius = 0, height = 0;
