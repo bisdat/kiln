@@ -78,12 +78,15 @@ public sealed partial class BalanceZoneSize
     /// <summary>The element's index in its list.</summary>
     public int Index => _i;
 
+    /// <summary>The build zone's size along x, in metres.</summary>
     [RegistryField("balance.buildzoneSizesPerAltarLevel[].x", RegistryApplies.Restart)]
     public double X { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelX, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelX, _i, value); }
 
+    /// <summary>The build zone's size along y (height), in metres.</summary>
     [RegistryField("balance.buildzoneSizesPerAltarLevel[].y", RegistryApplies.Restart)]
     public double Y { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelY, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelY, _i, value); }
 
+    /// <summary>The build zone's size along z, in metres.</summary>
     [RegistryField("balance.buildzoneSizesPerAltarLevel[].z", RegistryApplies.Restart)]
     public double Z { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i, value); }
 }
@@ -96,18 +99,23 @@ public sealed partial class BalanceXpCurve
     private readonly int _i;
     internal BalanceXpCurve(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>One end of the curve's base range (base = min(start, end) + |end - start| * level / levelMax).</summary>
     [RegistryField("balance.xpCurve.start", RegistryApplies.Restart)]
     public int Start { get => RegistryCells.Int(_c, BalanceFields.XpCurveStart, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveStart, _i, value); }
 
+    /// <summary>The other end of the curve's base range.</summary>
     [RegistryField("balance.xpCurve.end", RegistryApplies.Restart)]
     public int End { get => RegistryCells.Int(_c, BalanceFields.XpCurveEnd, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveEnd, _i, value); }
 
+    /// <summary>The level at which the base has moved the whole way from one end of the range to the other.</summary>
     [RegistryField("balance.xpCurve.levelMax", RegistryApplies.Restart)]
     public int LevelMax { get => RegistryCells.Int(_c, BalanceFields.XpCurveLevelMax, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveLevelMax, _i, value); }
 
+    /// <summary>The factor the base is multiplied by (with 1.5) to give the experience a level needs.</summary>
     [RegistryField("balance.xpCurve.seed", RegistryApplies.Restart)]
     public int Seed { get => RegistryCells.Int(_c, BalanceFields.XpCurveSeed, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveSeed, _i, value); }
 
+    /// <summary>Experience added to every level's need after the factor.</summary>
     [RegistryField("balance.xpCurve.fromKnowledge", RegistryApplies.Restart)]
     public int FromKnowledge { get => RegistryCells.Int(_c, BalanceFields.XpCurveFromKnowledge, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveFromKnowledge, _i, value); }
 }
@@ -120,9 +128,11 @@ public sealed partial class BalanceFogResistance
     private readonly int _i;
     internal BalanceFogResistance(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>A player's shroud time before any flame level.</summary>
     [RegistryField("balance.fogResistance.base", RegistryApplies.Restart)]
     public int Base { get => RegistryCells.Int(_c, BalanceFields.FogResistanceBase, _i); set => RegistryCells.Set(_c, BalanceFields.FogResistanceBase, _i, value); }
 
+    /// <summary>The shroud time each flame level adds.</summary>
     [RegistryField("balance.fogResistance.perFlameLevel", RegistryApplies.Restart)]
     public int PerFlameLevel { get => RegistryCells.Int(_c, BalanceFields.FogResistancePerFlameLevel, _i); set => RegistryCells.Set(_c, BalanceFields.FogResistancePerFlameLevel, _i, value); }
 }
@@ -135,9 +145,11 @@ public sealed partial class BalanceDurability
     private readonly int _i;
     internal BalanceDurability(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The maximum durability of a level 1 item, before the rarity factor.</summary>
     [RegistryField("balance.durability.start", RegistryApplies.Restart)]
     public double Start { get => RegistryCells.Double(_c, BalanceFields.DurabilityStart, _i); set => RegistryCells.Set(_c, BalanceFields.DurabilityStart, _i, value); }
 
+    /// <summary>The maximum durability each item level above 1 adds, before the rarity factor.</summary>
     [RegistryField("balance.durability.growth", RegistryApplies.Restart)]
     public double Growth { get => RegistryCells.Double(_c, BalanceFields.DurabilityGrowth, _i); set => RegistryCells.Set(_c, BalanceFields.DurabilityGrowth, _i, value); }
 }
@@ -150,18 +162,23 @@ public sealed partial class BalanceRarityDurability
     private readonly int _i;
     internal BalanceRarityDurability(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The durability factor of common items.</summary>
     [RegistryField("balance.rarityDurability.common", RegistryApplies.Restart)]
     public double Common { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityCommon, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityCommon, _i, value); }
 
+    /// <summary>The durability factor of uncommon items.</summary>
     [RegistryField("balance.rarityDurability.uncommon", RegistryApplies.Restart)]
     public double Uncommon { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityUncommon, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityUncommon, _i, value); }
 
+    /// <summary>The durability factor of rare items.</summary>
     [RegistryField("balance.rarityDurability.rare", RegistryApplies.Restart)]
     public double Rare { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityRare, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityRare, _i, value); }
 
+    /// <summary>The durability factor of epic items.</summary>
     [RegistryField("balance.rarityDurability.epic", RegistryApplies.Restart)]
     public double Epic { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityEpic, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityEpic, _i, value); }
 
+    /// <summary>The durability factor of legendary items.</summary>
     [RegistryField("balance.rarityDurability.legendary", RegistryApplies.Restart)]
     public double Legendary { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityLegendary, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityLegendary, _i, value); }
 }
@@ -174,18 +191,23 @@ public sealed partial class BalanceSocketChance
     private readonly int _i;
     internal BalanceSocketChance(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The chance a new common weapon gets a gem socket.</summary>
     [RegistryField("balance.socketChance.common", RegistryApplies.Restart)]
     public double Common { get => RegistryCells.Double(_c, BalanceFields.SocketChanceCommon, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceCommon, _i, value); }
 
+    /// <summary>The chance a new uncommon weapon gets a gem socket.</summary>
     [RegistryField("balance.socketChance.uncommon", RegistryApplies.Restart)]
     public double Uncommon { get => RegistryCells.Double(_c, BalanceFields.SocketChanceUncommon, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceUncommon, _i, value); }
 
+    /// <summary>The chance a new rare weapon gets a gem socket.</summary>
     [RegistryField("balance.socketChance.rare", RegistryApplies.Restart)]
     public double Rare { get => RegistryCells.Double(_c, BalanceFields.SocketChanceRare, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceRare, _i, value); }
 
+    /// <summary>The chance a new epic weapon gets a gem socket.</summary>
     [RegistryField("balance.socketChance.epic", RegistryApplies.Restart)]
     public double Epic { get => RegistryCells.Double(_c, BalanceFields.SocketChanceEpic, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceEpic, _i, value); }
 
+    /// <summary>The chance a new legendary weapon gets a gem socket.</summary>
     [RegistryField("balance.socketChance.legendary", RegistryApplies.Restart)]
     public double Legendary { get => RegistryCells.Double(_c, BalanceFields.SocketChanceLegendary, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceLegendary, _i, value); }
 }
@@ -198,24 +220,31 @@ public sealed partial class BalanceUnlockCost
     private readonly int _i;
     internal BalanceUnlockCost(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The base cost of a perk unlock, before the creep and the kind's factor.</summary>
     [RegistryField("balance.unlockCost.seed", RegistryApplies.Restart)]
     public int Seed { get => RegistryCells.Int(_c, BalanceFields.UnlockCostSeed, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostSeed, _i, value); }
 
+    /// <summary>How much the cost grows with each unlock step, as a factor of the base.</summary>
     [RegistryField("balance.unlockCost.creep", RegistryApplies.Restart)]
     public double Creep { get => RegistryCells.Double(_c, BalanceFields.UnlockCostCreep, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostCreep, _i, value); }
 
+    /// <summary>The cost factor of weapon and shield perks.</summary>
     [RegistryField("balance.unlockCost.weapons", RegistryApplies.Restart)]
     public double Weapons { get => RegistryCells.Double(_c, BalanceFields.UnlockCostWeapons, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostWeapons, _i, value); }
 
+    /// <summary>The cost factor of armour perks.</summary>
     [RegistryField("balance.unlockCost.armor", RegistryApplies.Restart)]
     public double Armor { get => RegistryCells.Double(_c, BalanceFields.UnlockCostArmor, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostArmor, _i, value); }
 
+    /// <summary>The cost factor of ring perks.</summary>
     [RegistryField("balance.unlockCost.rings", RegistryApplies.Restart)]
     public double Rings { get => RegistryCells.Double(_c, BalanceFields.UnlockCostRings, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostRings, _i, value); }
 
+    /// <summary>The numerator of an advanced perk's cost.</summary>
     [RegistryField("balance.unlockCost.advanced", RegistryApplies.Restart)]
     public double Advanced { get => RegistryCells.Double(_c, BalanceFields.UnlockCostAdvanced, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostAdvanced, _i, value); }
 
+    /// <summary>The perk level (0 to 5) from which the advanced cost applies.</summary>
     [RegistryField("balance.unlockCost.advancedFrom", RegistryApplies.Restart)]
     public int AdvancedFrom { get => RegistryCells.Int(_c, BalanceFields.UnlockCostAdvancedFrom, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostAdvancedFrom, _i, value); }
 }
@@ -228,15 +257,19 @@ public sealed partial class BalanceGear
     private readonly int _i;
     internal BalanceGear(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The base of the damage power formula: base power = int(seed * creep * level + seed).</summary>
     [RegistryField("balance.gear.seed", RegistryApplies.Restart)]
     public double Seed => RegistryCells.Double(_c, BalanceFields.GearSeed, _i);
 
+    /// <summary>The share of seed the base power grows by with each level.</summary>
     [RegistryField("balance.gear.creep", RegistryApplies.Restart)]
     public double Creep => RegistryCells.Double(_c, BalanceFields.GearCreep, _i);
 
+    /// <summary>The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share).</summary>
     [RegistryField("balance.gear.armorOffset", RegistryApplies.Restart)]
     public double ArmorOffset => RegistryCells.Double(_c, BalanceFields.GearArmorOffset, _i);
 
+    /// <summary>The armour each level adds in the armour formula, before the item's share.</summary>
     [RegistryField("balance.gear.armorGradient", RegistryApplies.Restart)]
     public double ArmorGradient => RegistryCells.Double(_c, BalanceFields.GearArmorGradient, _i);
 }

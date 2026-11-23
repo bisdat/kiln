@@ -61,6 +61,9 @@ public sealed class RegistryEntryPointsAttribute : Attribute
 }
 
 /// <summary>A Kiln-owned world token and its save identity, when known. Token is never a game address.</summary>
+/// <param name="Token">Kiln's process-local number for the world; never a game address.</param>
+/// <param name="Kind">Whether it is a server or a client world.</param>
+/// <param name="Id">The world's save folder name, when Kiln knows it and it is bound to this world; else null.</param>
 [Experimental("KILNX031")]
 public readonly record struct RegistryWorld(ulong Token, WorldKind Kind, string? Id);
 

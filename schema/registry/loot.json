@@ -23,13 +23,15 @@
           "type": "int",
           "min": 0,
           "max": 65535,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The smallest stack a drop has."
         },
         "max": {
           "type": "int",
           "min": 0,
           "max": 65535,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The largest stack a drop has."
         },
         "scalable": {
           "type": "bool",
@@ -40,7 +42,8 @@
           "type": "int",
           "min": 0,
           "max": 65535,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The largest stack a drop has with the world's loot amount applied (when scalable)."
         }
       },
       "typeName": "ItemLootStack"

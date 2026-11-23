@@ -117,79 +117,92 @@
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as cut damage."
         },
         "pierce": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as pierce damage."
         },
         "blunt": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as blunt damage."
         },
         "fire": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as fire damage."
         },
         "ice": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as ice damage."
         },
         "shroud": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as shroud damage."
         },
         "lightning": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as lightning damage."
         },
         "poison": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit dealt as poison damage."
         },
         "healing": {
           "type": "float",
           "min": 0,
           "max": 10,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The share of a hit that heals instead of hurting; not counted in the hit shares."
         },
         "wood": {
           "type": "int",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The damage a hit deals to wood, a whole number."
         },
         "stone": {
           "type": "int",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The damage a hit deals to stone, a whole number."
         },
         "metal": {
           "type": "int",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The damage a hit deals to metal, a whole number."
         },
         "explosion": {
           "type": "int",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The explosion damage a hit deals, a whole number."
         }
       },
       "typeName": "ItemDamage"
@@ -210,55 +223,64 @@
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The physical armour the tooltip shows at levels.min."
         },
         "magical": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The magical armour the tooltip shows at levels.min."
         },
         "cut": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The cut armour the tooltip shows at levels.min."
         },
         "pierce": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The pierce armour the tooltip shows at levels.min."
         },
         "blunt": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The blunt armour the tooltip shows at levels.min."
         },
         "fire": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The fire armour the tooltip shows at levels.min."
         },
         "ice": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The ice armour the tooltip shows at levels.min."
         },
         "shroud": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The shroud armour the tooltip shows at levels.min."
         },
         "lightning": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The lightning armour the tooltip shows at levels.min."
         }
       },
       "typeName": "ItemArmor"

@@ -44,7 +44,8 @@
             "type": "int",
             "min": 1,
             "max": 65535,
-            "ops": "number"
+            "ops": "number",
+            "doc": "How many of the item or category one craft takes."
           }
         },
         "typeName": "RecipeInput"
@@ -62,13 +63,15 @@
           "item": {
             "type": "ref",
             "registry": "items",
-            "ops": "set"
+            "ops": "set",
+            "doc": "The item one craft makes."
           },
           "count": {
             "type": "int",
             "min": 1,
             "max": 65535,
-            "ops": "number"
+            "ops": "number",
+            "doc": "How many of the item one craft makes."
           }
         },
         "typeName": "RecipeOutput"

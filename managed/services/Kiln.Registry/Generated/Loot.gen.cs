@@ -37,9 +37,11 @@ public sealed partial class ItemLootStack
     private readonly int _i;
     internal ItemLootStack(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The smallest stack a drop has.</summary>
     [RegistryField("loot.stack.min", RegistryApplies.Now)]
     public int Min { get => RegistryCells.Int(_c, ItemLootFields.StackMin, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMin, _i, value); }
 
+    /// <summary>The largest stack a drop has.</summary>
     [RegistryField("loot.stack.max", RegistryApplies.Now)]
     public int Max { get => RegistryCells.Int(_c, ItemLootFields.StackMax, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMax, _i, value); }
 
@@ -47,6 +49,7 @@ public sealed partial class ItemLootStack
     [RegistryField("loot.stack.scalable", RegistryApplies.Now)]
     public bool Scalable { get => RegistryCells.Bool(_c, ItemLootFields.StackScalable, _i); set => RegistryCells.Set(_c, ItemLootFields.StackScalable, _i, value); }
 
+    /// <summary>The largest stack a drop has with the world's loot amount applied (when scalable).</summary>
     [RegistryField("loot.stack.maxScaled", RegistryApplies.Now)]
     public int MaxScaled { get => RegistryCells.Int(_c, ItemLootFields.StackMaxScaled, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMaxScaled, _i, value); }
 }
