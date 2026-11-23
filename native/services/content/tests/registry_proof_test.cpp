@@ -198,6 +198,16 @@ void byte_array_lists() {
     check(s["rawAfter"][0][0] == 2 && s["rawBefore"][0][0] == 1 && s["bytesBefore"] == s["bytesAfter"], "raw before and after, bytes back");
 }
 
+// review2 S6: a boot write refused because the row's path is not a scalar member (or has no such member) is a disagreement
+// (an error sample, kilnctl: changed); a refusal for anything else stays missing evidence.
+void structural_refusals_are_disagreements() {
+    check(proof::disagreement("\"objectId\" is not a scalar member of the resource"), "not a scalar member");
+    check(proof::disagreement("\"playerLevelCapp\": no such member"), "no such member");
+    check(proof::disagreement("\"a.b\": keen::X has no member b"), "has no member");
+    check(!proof::disagreement("\"playerLevelCap\": 70000 is outside the member's range"), "a range refusal is not a disagreement");
+    check(!proof::disagreement(""), "no reason, no disagreement");
+}
+
 void empty_boot_list_is_missing_evidence() {
     kc::rbtest::byte_blob_type(0);
     const Schema schema = generated_schema();
@@ -295,6 +305,7 @@ int main() {
                                                        {"boot_sample_on_bytes", boot_sample_on_bytes},
                                                        {"byte_array_lists", byte_array_lists},
                                                        {"empty_boot_list_is_missing_evidence", empty_boot_list_is_missing_evidence},
+                                                       {"structural_refusals_are_disagreements", structural_refusals_are_disagreements},
                                                        {"with_the_request", with_the_request}};
     for (const auto& [name, fn] : groups) {
         try {

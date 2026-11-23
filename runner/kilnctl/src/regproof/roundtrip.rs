@@ -54,6 +54,10 @@ pub struct Suite {
     /// 2026-11-23 ~1:20 PM)
     #[serde(default)]
     pub kinds: BTreeMap<String, BTreeMap<String, u64>>,
+    /// fields the producer could not sample, with why in Kiln words (players read it as the unproven reason): for example
+    /// drop tables the lab's world had not loaded
+    #[serde(default)]
+    pub unsampled: BTreeMap<String, String>,
     #[serde(default)]
     pub samples: Vec<Sample>,
 }
@@ -135,6 +139,9 @@ pub struct FieldResult {
     /// impactConfig rows: per config kind, what the proof holds ("proven", "none on this build", "not proven")
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub kinds: BTreeMap<String, String>,
+    /// no sample: why, as the producer said it (Kiln words; the record's reason)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lab_reason: Option<String>,
 }
 
 /// The impact-config kinds a proof knows, as the producer names them.
@@ -396,10 +403,12 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         }
         let where_ = want.map(|g| format!(" in a {g} generation")).unwrap_or_default();
         let mut missing = Vec::new();
+        let mut lab_reason = None;
         if !in_generation && unread {
             missing.push(format!("the lab could read no raw value of the field's members{where_}: the field is not proven on this build"));
         } else if samples == 0 {
             missing.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
+            lab_reason = good.iter().filter(|s| want.is_none_or(|g| g == s.generation)).find_map(|s| s.unsampled.get(&q)).cloned();
         } else if !in_generation && problems.is_empty() {
             missing.push(format!("no round-trip sample{where_} (only in another generation): the field is not proven on this build"));
         }
@@ -437,7 +446,7 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
                 }
             }
         }
-        r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing, kinds });
+        r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing, kinds, lab_reason });
     }
     r
 }

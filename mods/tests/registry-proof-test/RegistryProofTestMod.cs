@@ -240,7 +240,24 @@ public sealed unsafe class RegistryProofTestMod : Mod
     }
 
     // ---- probes: another value the field takes, in Kiln's terms ----
-    private static readonly HashSet<string> Compared = new() { "int", "float", "bool", "time", "enum", "flags", "optionalEnum", "formula" };
+    // the conversions kilnctl compares raw (roundtrip.rs raw_kind): a member that cannot be read raw stays null (missing
+    // evidence), never the resource digest (review2 N5: impactConfig)
+    private static readonly HashSet<string> Compared = new() { "int", "float", "bool", "time", "enum", "flags", "optionalEnum", "formula", "impactConfig" };
+
+    /// <summary>A live refusal that shows the mapping disagrees with the build (review2 S6): the schema or the regmap lacks the
+    /// field, a game member or enum value is missing, a member is not writable. kilnctl files such a sample as changed. Guard
+    /// refusals (Unproven, Unmapped, RestartRequired, not_exact), range refusals and entry-specific ones are missing
+    /// evidence instead (no sample).</summary>
+    private static bool IsDisagreement(string reason)
+    {
+        if (reason.Length == 0) return false;
+        foreach (var guard in new[] { "Unproven: ", "Unmapped: ", "RestartRequired", "not_exact: " })
+            if (reason.Contains(guard, StringComparison.Ordinal)) return false;
+        foreach (var structural in new[] { "not a field of the schema", "no regmap row", "is missing on this game build", "is not writable on this game build",
+                                           "is not a writable member on this game build", " is not a value of " })
+            if (reason.Contains(structural, StringComparison.Ordinal)) return true;
+        return false;
+    }
 
     private static JsonNode? Probe(JsonNode? v, JsonObject row, IReadOnlyList<string> otherIds)
     {
@@ -337,6 +354,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         Check(exe.Length == 64, $"the running build {exe}");
         var samples = new JsonArray();
         var kinds = new JsonObject();
+        var unsampled = new JsonObject(); // a field the lab could not sample, why (Kiln words: kilnctl's unproven reason)
         foreach (var registry in Live)
         {
             var map = JsonNode.Parse(File.ReadAllText(Path.Combine(_kiln, "regmap", "common", registry + ".json")))!;
@@ -352,6 +370,25 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 ++seen;
             }
             Log.Info($"registry-proof-test: {registry}: {seen} game entries, {entries.Count} with a Kiln id (of {table.Count})");
+            if (registry == "drops" && entries.Count == 0 && table.Count > 0)
+            {
+                // review2 S5: the game loads drop tables as players need them; the id table names them all. Try its entries
+                // through kiln.registry.live: a table the live back-end can read would be sampled once Content lists it.
+                var rcs = new SortedDictionary<int, int>();
+                var readable = 0;
+                foreach (var idNode in table.Select(p => p.Value).Take(50))
+                {
+                    if ((string?)idNode is not { } id) continue;
+                    if (Read(registry, id, "entries", out var rc) != null) ++readable;
+                    else rcs[rc] = rcs.GetValueOrDefault(rc) + 1;
+                }
+                Log.Info($"registry-proof-test: drops: Content lists no drop table; of the id table's first {Math.Min(50, table.Count)}, {readable} read live" +
+                         (rcs.Count > 0 ? ", refused " + string.Join(", ", rcs.Select(p => $"rc={p.Key} x{p.Value}")) : ""));
+                if (readable == 0)
+                    foreach (var (field, rowNode) in map["rows"]!.AsObject())
+                        if ((string?)rowNode?["state"] != "unmapped")
+                            unsampled[$"{registry}.{field}"] = "no drop table was loaded in the lab's world (the game loads them as players need them)";
+            }
             foreach (var (field, rowNode) in map["rows"]!.AsObject())
             {
                 var row = rowNode!.AsObject();
@@ -369,7 +406,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
             }
         }
         var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = side, ["exeSha256"] = exe, ["generation"] = "live",
-            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["samples"] = samples };
+            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["unsampled"] = unsampled, ["samples"] = samples };
         Directory.CreateDirectory(proof);
         var path = Path.Combine(proof, $"roundtrip-{side}-live.json");
         File.WriteAllText(path + ".tmp", doc.ToJsonString());
@@ -515,6 +552,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 if (ok) s["reverted"] = Finish(handle, true).Outcome == Reverted;
                 s["bytesAfter"] = BytesSha(key);
                 return s; // accepting 2.5 on Sint32 is changed, even if its rounded read-back happens to equal the base
+            }
+            if (!ok && IsDisagreement(refusal))
+            {
+                // the mapping disagrees with the build: a sample with the error (kilnctl: changed), not missing evidence
+                s["error"] = "the live back-end refused the probe: " + refusal;
+                return s;
             }
             if (!ok)
             {

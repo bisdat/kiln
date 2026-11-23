@@ -267,11 +267,13 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                         Some(None) => hard.push("reflection: not diffed".into()),
                         _ => {}
                     }
+                    let mut lab_reason = None;
                     match p.roundtrip.fields.get(&q) {
                         Some(f) if f.ok => {}
                         Some(f) => {
                             hard.extend(f.problems.iter().map(|x| format!("round trip: {x}")));
                             missing.extend(f.missing.iter().map(|x| format!("round trip: {x}")));
+                            lab_reason = f.lab_reason.clone();
                         }
                         None => hard.push("round trip: not checked".into()),
                     }
@@ -297,7 +299,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                         reason = Some(r);
                         "unproven"
                     } else if !missing.is_empty() {
-                        reason = Some(unproven_reason(&missing));
+                        reason = Some(lab_reason.unwrap_or_else(|| unproven_reason(&missing)));
                         why = missing;
                         "unproven"
                     } else {
@@ -1533,6 +1535,22 @@ mod tests {
         assert_eq!(rec["kinds"]["plans.cap"]["float"], roundtrip::NONE_ON_THIS_BUILD, "{rec}");
         assert!(rec["kinds"]["plans.cap"]["sint32"].as_str().is_some_and(|s| s.starts_with("proven")), "{rec}");
         assert!(record(&prove(&with_power_samples(inputs()), "T"), &candidate()).get("kinds").is_none());
+    }
+
+    /// review2 S3/S5: a field the producer could not sample carries the producer's reason (drop tables the lab's world never
+    /// loaded), not "no lab round trip of it".
+    #[test]
+    fn an_unsampled_field_carries_the_producers_reason() {
+        let mut inp = with_power_samples(inputs());
+        inp.suites[0].samples.retain(|x| x.field != "gadgets.size");
+        inp.suites[0].unsampled.insert("gadgets.size".into(), "no gadget was loaded in the lab's world".into());
+        let p = prove(&inp, "T");
+        assert_eq!(p.rows["gadgets.size"].state, "unproven");
+        assert_eq!(p.rows["gadgets.size"].reason.as_deref(), Some("no gadget was loaded in the lab's world"));
+        // a reason for a field that has a sample changes nothing
+        let mut inp = with_power_samples(inputs());
+        inp.suites[0].unsampled.insert("gadgets.tier".into(), "x".into());
+        assert_eq!(prove(&inp, "T").rows["gadgets.tier"].state, "ok");
     }
 
     #[test]

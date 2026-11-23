@@ -25,6 +25,33 @@ public class ProducerTests
         Assert.Equal(expected, (string?)method.Invoke(null, new object?[] { type, holds }));
     }
 
+    // review2 S6: refusals that show a mapping disagreeing with the build are an error sample (changed); guard, range and
+    // entry-specific refusals are missing evidence.
+    [Theory]
+    [InlineData("not a field of the schema", true)]
+    [InlineData("the game member impactValues is missing on this game build", true)]
+    [InlineData("the member raw:x is not a writable member on this game build", true)]
+    [InlineData("\"epic\" is not a value of rarity on this game build", true)]
+    [InlineData("Unproven: items.comfort is not proven for game build 1 (x); this edit was not applied", false)]
+    [InlineData("Unmapped: items.power is not mapped for game build 1 yet (a Kiln update is needed: not a field of the schema)", false)]
+    [InlineData("not_exact: items.manaCost of game:x is a whole number on this build; 2.5 was not written", false)]
+    [InlineData("the result 70000 over the value below is outside the field's range", false)]
+    [InlineData("the config value is not readable", false)]
+    [InlineData("", false)]
+    public void Structural_refusals_are_disagreements(string reason, bool expected)
+    {
+        var method = typeof(RegistryProofTestMod).GetMethod("IsDisagreement", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Equal(expected, (bool)method.Invoke(null, new object[] { reason })!);
+    }
+
+    // review2 N5: an impact config is compared raw; a raw read that fails stays null, never the resource digest
+    [Fact]
+    public void Impact_configs_are_compared_raw()
+    {
+        var field = typeof(RegistryProofTestMod).GetField("Compared", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Contains("impactConfig", (HashSet<string>)field.GetValue(null)!);
+    }
+
     // review2 N4: an impactConfig row naming a config Kiln has no id for gets no probe, never StaminaCost's id.
     [Theory]
     [InlineData("ManaCost", "0xaf236ece")]

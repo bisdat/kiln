@@ -138,6 +138,11 @@ std::optional<Value> probe_for(const FieldSpec& spec, const Value& v) {
     }
 }
 
+bool disagreement(const std::string& why) {
+    return why.find("is not a scalar member") != std::string::npos || why.find("no such member") != std::string::npos ||
+           why.find("has no member") != std::string::npos;
+}
+
 json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
                  const std::string& type, const std::vector<uint8_t>& base) {
     json s = {{"field", reg.registry + "." + field}, {"entry", id}, {"element", nullptr}};
@@ -207,6 +212,10 @@ json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std:
     std::vector<std::string> notes;
     boothook::write(key, type, &copy, rb, &out, &notes);
     if (out.size() != 1 || !out[0].ok) {
+        if (copy == base && out.size() == 1 && disagreement(out[0].why)) {
+            s["error"] = "the boot back-end refused the probe: " + out[0].why;  // the mapping disagrees with the build
+            return s;
+        }
         if (copy == base) return missing("the boot back-end refused this entry's probe");
         s["error"] = "the boot back-end changed bytes but did not finish the probe";
         return s;
