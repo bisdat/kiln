@@ -20,7 +20,8 @@ public override void OnLoad()
 Kiln prefixes the key with your mod id: a mod named `example-quiver` gets `example-quiver:quiver`. A key has 1–32
 lowercase letters, digits, `.`, `_`, or `-`, starting with a letter or digit. Changing the full key makes the old key an
 orphan, not an empty replacement for the same save. A storage has 1–64 logical slots; a mod may register 8 storages,
-with at most 256 slots across all loaded registrations per player.
+with a 256-slot page-rounded budget across all registrations per player: each registration counts its slots rounded
+up to 8, for at most 32 physical pages. Its logical slot count stays unchanged.
 
 Registration can happen on any thread. It does not mean a player's storage is ready yet: wait for
 `PlayerStorageRestoredEvent`, or check readiness on each operation. A registration after a player joined can restore
@@ -87,6 +88,8 @@ An admin command can enumerate `Items.PlayerStorages.Of(player)` and explicitly 
 `Items.PlayerStorages.ReturnOrphans(player, fullKey, OrphanTarget.Backpack)`, or target a permitted container with
 `OrphanTarget.Into`. Return affects parked records, not the ready holder's live items. What does not fit stays parked;
 check the result. Enumeration is one ordinary row per key, not the native temporary return inventories.
+A `PlayerStorageParkReason.ReturnedOutsideKiln` hold means the server suspects those items were already returned
+outside Kiln; an admin should release that copy through the orphan return path only if that suspicion is wrong.
 
 Do not implement a second save file for these item records. Kiln.Saves pairs storage with the character inventory from
 the same capture, and selects a matching pair at join before considering newer unmatched copies. When no witness

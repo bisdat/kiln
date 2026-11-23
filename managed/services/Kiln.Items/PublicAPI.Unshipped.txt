@@ -62,6 +62,7 @@ Kiln.PlayerStorageParkReason.Filter = 3 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageParkReason.Locked = 18 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageParkReason.Overflow = 2 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageParkReason.Requested = 16 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.ReturnedOutsideKiln = 19 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageParkReason.Stale = 17 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageParkReason.Unregistered = 1 -> Kiln.PlayerStorageParkReason
 Kiln.PlayerStorageRestoredEvent

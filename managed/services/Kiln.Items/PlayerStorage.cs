@@ -222,6 +222,9 @@ public enum PlayerStorageParkReason
     Stale = 17,
     /// <summary>Held back: saved by a newer Kiln.</summary>
     Locked = 18,
+    /// <summary>The server held its copy because the character's items were likely returned outside Kiln. An admin
+    /// should release it only if that is wrong, through <see cref="Items.PlayerStorages.ReturnOrphans"/>.</summary>
+    ReturnedOutsideKiln = 19,
 }
 
 /// <summary>One player's storage of one key (<see cref="PlayerStorage.Status"/>). Since 0.2.0-dev.30.7 (mod API 0.2.16).</summary>
@@ -578,7 +581,9 @@ public static unsafe partial class Items
     /// <returns>The storage; ready for a player once Kiln restored it (<see cref="PlayerStorage.IsReady"/>).</returns>
     /// <remarks>Once per key per mod load, any thread, best in <c>OnLoad</c> so it is there before players join (a later
     /// registration restores at once for players already in game). A mod has at most 8 storages, and all mods' storages
-    /// together at most 256 slots. When the mod unloads its storages end: their items are parked for players in game.
+    /// together at most 256 slots of page-rounded capacity: each registration counts its slots rounded up to 8 (at most
+    /// 32 pages per player), while its logical slot count stays unchanged. When the mod unloads its storages end: their
+    /// items are parked for players in game.
     /// Storage never counts for crafting costs. A matching character-inventory witness wins at join; without a match,
     /// the newest copy wins and <see cref="PlayerStorageStatus.Paired"/> is false. Bounded history cannot guarantee an
     /// exact pair after an old backup or offline edit, and a failed durable save can leave an older copy. Game item record

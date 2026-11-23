@@ -33,7 +33,7 @@ internal static unsafe class StorageNative
     public const uint EntryLive = 1, EntryParked = 2, EntryQuarantine = 3;
     // KIS_PARK_*
     public const uint ParkUnregistered = 1, ParkOverflow = 2, ParkFilter = 3, ParkHeld = 16, ParkRequested = 16, ParkStale = 17,
-        ParkLocked = 18;
+        ParkLocked = 18, ParkReturned = 19;
     // KIS_QUARANTINE_*
     public const byte QuarantineUnknownItem = 1, QuarantineCount = 2, QuarantineSlot = 3, QuarantineDecode = 4,
         QuarantineRebuild = 5;
@@ -51,7 +51,7 @@ internal static unsafe class StorageNative
     // KIS_BATCH_*
     public const uint BatchComplete = 1, BatchRefused = 2;
     // KIS_WITNESS_*
-    public const uint WitnessRead = 1, WitnessApplied = 2, WitnessRestored = 4, WitnessLeft = 8;
+    public const uint WitnessRead = 1, WitnessApplied = 2, WitnessRestored = 4, WitnessLeft = 8, WitnessExtraMainPages = 0x10;
     // KIS_EVENT_*
     public const uint EventJoined = 1, EventCaptured = 2, EventRestored = 3, EventParked = 4, EventQuarantined = 5,
         EventDeath = 6, EventLeft = 7, EventReturned = 8, EventBatch = 9;
