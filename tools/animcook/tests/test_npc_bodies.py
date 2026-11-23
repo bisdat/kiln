@@ -107,6 +107,25 @@ class NpcBodies(unittest.TestCase):
         (self.mod / "kiln.mod.json").write_text('{ // material id\n "id": "npc-mod", }')
         self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True))
 
+    def test_a_malformed_cached_row_is_named_and_the_old_cache_is_kept(self):
+        # Review finding: "entries": [{}] passed the object check and then failed with KeyError at the sort.
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        cache = self.mod / "assets/cooked/npc-bodies.v1.json"
+        good = json.loads(cache.read_text())
+        for index, bad in enumerate(({}, {"kind": "resource"}, {"kind": "resource", "file": 3, "producer": "modelcook"},
+                                     {"kind": "blob", "file": "assets/cooked/x.blob"}, {"kind": 1, "file": "f", "producer": "p"})):
+            with self.subTest(bad=bad):
+                doc = dict(good, entries=good["entries"] + [bad])
+                cache.write_text(json.dumps(doc))
+                before = cache.read_bytes()
+                row = len(good["entries"])
+                with self.assertRaisesRegex(B.BlocksError, rf"npc-bodies\.v1\.entries\[{row}\]: .*kind, file and producer"):
+                    B.body_manifest(self.recipe, [], True, producer="modelcook")
+                self.assertEqual(before, cache.read_bytes(), "a refused cook leaves the old cache as it was")
+                with self.assertRaisesRegex(R.RecipeError, rf"npc-bodies\.v1\.entries\[{row}\]"):
+                    R.Run(self.recipe, TYPES).run(update_manifest=True)
+                self.assertEqual(before, cache.read_bytes())
+
     def test_material_admission_records_each_block_identity_not_just_a_shared_JSON_file(self):
         import hashlib
         from anicook.graphgen import derive

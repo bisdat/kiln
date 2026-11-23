@@ -665,6 +665,12 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         path = CP.npc_manifest(recipe_path)
         old = object_value(json.loads(path.read_text()) if path.exists() else {"format": 1, "entries": [], "bodies": {}}, "npc-bodies.v1")
         old_entries = object_rows(old.get("entries", []), "npc-bodies.v1.entries")
+        # Every cached row is keyed and merged by these fields below; check its shape before any use, so a damaged local
+        # cache is named (and left as it is: nothing is written on a refusal) instead of failing with a KeyError.
+        for i, e in enumerate(old_entries):
+            if not all(isinstance(e.get(k), str) and e.get(k) for k in ("kind", "file", "producer")):
+                raise BlocksError(f"npc-bodies.v1.entries[{i}]: a cached body entry needs the strings kind, file and producer; "
+                                  f"this local cache ({path.relative_to(root).as_posix()}) is damaged: delete it and cook the mod again")
         sources = {}
         for file in sorted({s[field][key] for s in specs.values() for field, key in (("body", "model"), ("animation", "clips"))}):
             raw = CP.source(recipe_path, file).read_bytes()
