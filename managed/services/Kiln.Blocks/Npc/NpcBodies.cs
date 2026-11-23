@@ -81,6 +81,8 @@ public static class NpcBodies
     private static readonly Dictionary<(string Mod, string Name), NpcBodyBuildResult> Published = new();
     private static long _version = 1, _flushed, _posted;
 
+    /// <summary>The test kit: why its harness switched blocks.npc_body off, or null while it is on.</summary>
+    internal static Func<string?>? KitOff;
     /// <summary>Tests: where events go (null: the bus on a server, the client's main thread on a game client).</summary>
     internal static Action<NpcBodyBuildChangedEvent>? Raise;
     /// <summary>Tests: whether this process is a game client.</summary>
@@ -101,6 +103,9 @@ public static class NpcBodies
         var row = BlockCapabilities.CurrentNpcBodyRow();
         if (row.State != CapabilityState.Available) throw new KilnUnavailableException(BlockCapabilities.NpcBody, row.Text);
         if (BlockCapabilities.NpcBodyForTests != null) return;  // a unit test's own row: the process table is not its business
+        // the test kit's switch, read from the harness's own report: the process snapshot below may not hold a managed row for
+        // blocks.npc_body (bound afresh after another test swapped the backend), and a switch alone then reads as "no row"
+        if (KitOff?.Invoke() is { } off) throw new KilnUnavailableException(BlockCapabilities.NpcBody, off);
         Capability reported;
         try { reported = Capabilities.Get(BlockCapabilities.NpcBody); }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException or DllNotFoundException or EntryPointNotFoundException)

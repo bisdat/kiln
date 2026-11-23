@@ -30,6 +30,8 @@ internal sealed class NpcBodiesFake : IKitFake
         // Kiln.Blocks reports the row from its dependencies (kiln.knowledge, quests.boot_pack, ...), which the kit does not have: here it
         // is the kit's row, which a test switches off with Capabilities.Override
         BlockCapabilities.NpcBodyKit = static () => new BlockCapabilities.Row(CapabilityState.Available, CapabilityReason.None, null);
+        // Status reads the test's switch from the kit's own registry (deterministic), not only from the process snapshot
+        NpcBodies.KitOff = static () => FakeTables.Off(Row) ? KitBackend.Instance.Capabilities.Why(Row) : null;
     }
 
     public void Start(KilnHarness harness)

@@ -33,6 +33,22 @@ public sealed class NpcBodiesFakeTests
     }
 
     [Fact]
+    public void The_row_switched_off_holds_even_before_any_service_reported_the_row()
+    {
+        // The flake (mac1, 2026-11-23): a capability snapshot bound afresh (another test swapped the backend) holds no managed row
+        // for blocks.npc_body, and the test's switch alone then read as "no row" (reason unknown), which Status let through.
+        // Dropping the snapshot after the harness started (its services reported their rows) makes that state at will.
+        using var kiln = new KilnHarness();
+        typeof(Capabilities).GetMethod("Reset", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.Invoke(null, null);
+        kiln.NpcBodies.Ready("body-mod", "tobin");
+        kiln.Capabilities.Override("blocks.npc_body", false);
+        var e = Assert.Throws<KilnUnavailableException>(() => kiln.Run(() => NpcBodies.Status("body-mod:tobin")));
+        Assert.Equal("blocks.npc_body", e.Capability);
+        kiln.Capabilities.ClearOverride("blocks.npc_body");
+        Assert.Equal(NpcBodyBuildState.Ready, kiln.Run(() => NpcBodies.Status("body-mod:tobin")).State);
+    }
+
+    [Fact]
     public void The_row_switched_off_makes_Status_throw_and_a_new_harness_starts_without_rows()
     {
         using (var kiln = new KilnHarness())
