@@ -90,7 +90,14 @@ void KILN_CALL pre(const KilnTickInfo* tick,void*) {
   REQUIRE((info.flags & KILN_WORLD_WROTE_REPLICATED) && std::strstr(info.writer_names,"network_camera_control"));
   REQUIRE(make(&A,0) && make(&B,1));
   say("camera-fixture NCC size=3 replicated writer=network_camera_control; two AutomatedPlayer fixtures, not peers");
-  core.world_started(kcam::kServer,1); REQUIRE(apply(a_owner)); phase=1; break;
+  core.world_started(kcam::kServer,1); phase=15; break;
+ }
+ case 15: {
+  uint8_t a[3]{},b[3]{}; kcam::Incarnation ai,bi;
+  if(!bytes(A,0xd2c927b5u,a,3) || !bytes(B,0xd2c927b5u,b,3)) return;
+  REQUIRE(lab.player(A,&ai) && lab.player(B,&bi));
+  char text[240]; std::snprintf(text,sizeof text,"camera-fixture natural A=%u NCC=%u,%u,%u incarnation=%llu B=%u NCC=%u,%u,%u incarnation=%llu",A,a[0],a[1],a[2],static_cast<unsigned long long>(ai.a),B,b[0],b[1],b[2],static_cast<unsigned long long>(bi.a)); say(text);
+  REQUIRE(apply(a_owner)); phase=1; break;
  }
  case 2: { auto q=request(); q.transition_override=0; REQUIRE(core.update(a_owner,lease,KILN_CAMERA_RESTART_TIMELINE,&q,done,reinterpret_cast<void*>(1),kcam::kOnServer)==KILN_OK); phase=3; break; }
  case 3: if(updated==1) {
@@ -126,7 +133,12 @@ void KILN_CALL pre(const KilnTickInfo* tick,void*) {
   unchanged_before=mode.counters().results[KILN_WORLD_WRITE_UNCHANGED]; REQUIRE(apply(b_owner)); phase=14;
  } break;
  case 14: if(core.active_revision(lease)==1) {
-  REQUIRE(mode.counters().results[KILN_WORLD_WRITE_UNCHANGED]>unchanged_before); results[7]=1; REQUIRE(end(b_owner)); finish();
+  REQUIRE(mode.counters().results[KILN_WORLD_WRITE_UNCHANGED]>unchanged_before);
+  auto q=request(); KilnCameraLease refused=0;
+  for(uint32_t i=0;i<64;++i) REQUIRE(core.apply(b_owner,&q,&refused,done,nullptr,kcam::kOnServer)==KILN_OK);
+  REQUIRE(core.apply(b_owner,&q,&refused,done,nullptr,kcam::kOnServer)==KILN_ERR_BUFFER_TOO_SMALL);
+  say("camera-fixture Unchanged=ServerState; pending queue accepted=64, refused=65th; End has reserved capacity");
+  REQUIRE(end(b_owner)); finish(); if(!failed) results[7]=1;
  } break;
  default: break;
  }
@@ -135,7 +147,7 @@ void KILN_CALL post(const KilnTickInfo*,void*) {
  if(failed || phase==99 || !A) return;
  if(phase==1 && core.active_revision(lease)==1) {
   REQUIRE(held() && stock(B)); REQUIRE(lab.other_jobs==0);
-  if(++observations==20) { REQUIRE(applied==1 && updated==0); results[0]=1; results[1]=1; phase=2; }
+  if(++observations==20) { REQUIRE(applied==1 && updated==0); say("camera-fixture maintained observations=20 Applied=1 other-entity jobs=0"); results[0]=1; results[1]=1; phase=2; }
  }
  if(phase==5) { REQUIRE(stock(A) && mode.counters().writes==write_baseline); REQUIRE(applied==2 && updated==1); results[2]=1; results[3]=1; phase=6; }
  if(phase==7) { REQUIRE(stock(A) && mode.counters().writes==write_baseline); phase=8; }
