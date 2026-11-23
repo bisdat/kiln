@@ -3,6 +3,7 @@
 #include "../presentation.h"
 #include "../held_observer.h"
 #include "../brush_frame.h"
+#include "../brush_trace.h"
 #include "../internal.h"
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
@@ -12,6 +13,7 @@
 #include <deque>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <map>
 
@@ -30,6 +32,10 @@ KilnHandle next_handle=1;
 kiln::RawHook lookup_hook, preview_hook, identity_hook, selector_hook;
 kiln::MidHook2 brush_frame_hook;
 std::atomic<uintptr_t> brush_query_resume{};
+BrushTrace brush_trace;
+const KilnClientApi* trace_client{};
+KilnHandle trace_tick_handle{};
+std::chrono::steady_clock::time_point trace_published{};
 HeldObserver held_observer;
 std::atomic<KilnToolHeldItemProvider> held_provider{};
 std::shared_ptr<const Family> held_family() {
@@ -147,13 +153,21 @@ void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only)
     if(groups&&family&&!filter_selector_view(groups+2,family->materials))clear_selector_view(groups+2);
 }
 void report_caps();
+// Hot path: every frame the picker draws. Each exit is counted (relaxed atomics); nothing here allocates or logs.
 void brush_query_frame(KilnRegisters& regs) {
     const auto resume=brush_query_resume.load(std::memory_order_acquire);
-    const auto family=held_family();if(!resume||!family)return;
+    if(!resume){brush_trace.record(BrushFrameExit::Disabled);return;}
+    const auto family=held_family();
+    if(!family){brush_trace.record(BrushFrameExit::NoFamily);return;}
     std::array<uint8_t,16> guid{};
-    {std::lock_guard lock(gate);const auto i=identities.find(family->tool);if(i==identities.end())return;guid=i->second;}
-    const auto result=patch_brush_frame({regs.rsp,regs.rbp,regs.rcx,regs.rdx,regs.r8,regs.r9},family->tool,guid);
-    if(result==BrushFrameResult::WriteFault) {
+    {std::lock_guard lock(gate);const auto i=identities.find(family->tool);
+     if(i==identities.end()){brush_trace.record(BrushFrameExit::NoIdentity);return;}guid=i->second;}
+    std::array<uint32_t,brush_rows_capacity> items{};
+    for(size_t i=0;i<items.size()&&i<family->brushes.size();++i)items[i]=family->brushes[i].item;
+    const auto outcome=patch_brush_frame({regs.rsp,regs.rbp,regs.rcx,regs.rdx,regs.r8,regs.r9},family->tool,guid,
+        {items.data(),family->brushes.size()});
+    brush_trace.record(outcome);
+    if(outcome.result==BrushFrameResult::WriteFault) {
         regs.rip=resume; // Skip only this query after a partial write; its fresh output remains empty.
         brush_query_resume.store(0,std::memory_order_release);
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);report_caps();
@@ -201,6 +215,24 @@ bool qualify(uintptr_t address,const char* pattern) {
     for(size_t i=0;i<bytes.size();++i)if(bytes[i]>=0&&original[i]!=bytes[i])return false;
     return true;
 }
+// Client Post: a change of the picker frame's state becomes one log line and the tools.brush_families text, at most once a
+// second. The line names the state now and how many changes it stands for, then every counter so far.
+void publish_brush_trace() {
+    if(!brush_trace.pending()||!api)return;
+    const auto now=std::chrono::steady_clock::now();
+    if(trace_published.time_since_epoch().count()&&now-trace_published<std::chrono::seconds(1))return;
+    BrushFrameExit state{};uint64_t covered=0;
+    if(!brush_trace.take(&state,&covered))return;
+    trace_published=now;
+    try {
+        std::string line=std::string("tools: brush picker: ")+brush_exit_name(state)+" ("+brush_exit_meaning(state)+")";
+        if(covered>1)line+="; "+std::to_string(covered)+" state changes since the last line";
+        line+="; frames: "+brush_trace.summary();
+        if(api->log)api->log(parent_owner,state==BrushFrameExit::WriteFault||state==BrushFrameExit::ReadFault?KILN_LOG_WARN:KILN_LOG_INFO,{line.data(),line.size()});
+        report_caps();
+    } catch(...) {}
+}
+void KILN_CALL trace_tick(const KilnTickInfo*,void*) {publish_brush_trace();}
 void report_caps() {
     if(!api||!api->service||!parent_owner)return;
     const auto* caps=static_cast<const KilnCapsApi*>(api->service({KILN_CAPS_SERVICE,sizeof(KILN_CAPS_SERVICE)-1},KILN_CAPS_VERSION));
@@ -208,13 +240,17 @@ void report_caps() {
     KilnBuildInfo build{};build.size=sizeof build;
     const bool online=api->build_info&&api->build_info(&build)==KILN_OK;
     const bool enabled=online&&build.verified&&build.hooks_enabled;
+    std::string brush_frames;
+    try {if(brush_trace.any())brush_frames="; picker frames: "+brush_trace.summary();} catch(...) {}
     auto report=[&](const char* name,bool installed,const char* missing,bool client_only=true) {
         const bool wrong_side=client_only&&build.side!=KILN_SIDE_CLIENT;
         const bool ready=enabled&&!wrong_side&&installed;
         const bool ammo_fault=std::strncmp(name,"ui.ammo.",8)==0&&ammo::failed();
         const uint32_t reason=ammo_fault?KILN_CAP_REASON_FAULTED:!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
         const char* why=ammo_fault?"ammunition adapter faulted; native equip of its synthetic rows remains suppressed":ready?"qualified native presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
-        caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
+        std::string text(why);
+        if(!brush_frames.empty()&&std::strcmp(name,"tools.brush_families")==0)try {text+=brush_frames;} catch(...) {}
+        caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{text.data(),text.size()});
     };
     report("ui.ammo.list",ammo::available(),"exact selector/finalizer/pick mapping, stable client ECS reader or client item catalog adapter is unavailable");
     report("ui.ammo.pick",ammo::available(),"native pick suppression and backpack-source validation are not qualified or installed");
@@ -343,7 +379,14 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
         const bool held_ready=held_observer.start(api,child);
         kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
         if(kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER))ammo::start();
+        brush_trace.reset();trace_published={}; // before the frame hook can count
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,held_ready&&install_brush_frame());
+        if(kiln_tools_hook_installed(KILN_TOOL_HOOK_BRUSH_PICKER)) {
+            const auto* client_service=static_cast<const KilnClientApi*>(api->service({KILN_CLIENT_SERVICE,sizeof(KILN_CLIENT_SERVICE)-1},KILN_CLIENT_VERSION));
+            if(client_service&&client_service->subscribe_tick&&client_service->unsubscribe&&
+               client_service->subscribe_tick(child,KILN_TICK_POST,&trace_tick,nullptr,&trace_tick_handle)==KILN_OK)trace_client=client_service;
+            else trace_tick_handle=0;
+        }
     }
     if(!client) {kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);}
 }
@@ -352,6 +395,7 @@ void kiln_tools_presentation_uninstall() {
     {std::lock_guard lock(gate);retiring_child=child;child=0;retiring=0;} // Close family admission before stopping producers.
     ammo::stop();
     held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
+    if(trace_tick_handle&&trace_client)trace_client->unsubscribe(trace_tick_handle);trace_tick_handle=0;trace_client=nullptr;
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
     report_caps(); // Parent-owned capability reports must close before the child hooks are revoked.
     {std::lock_guard lock(gate);for(const auto& [_,registration]:registrations)remove_locked(registration);registrations.clear();}
