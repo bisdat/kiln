@@ -1740,7 +1740,10 @@ void registry_live_world_stop() {
     g.world = 0; g.world_kind = KILN_WORLD_KINDS;
     std::erase_if(g.changes, [](const auto& item) { return item.second.world != 0; });
     g.fields.clear(); g.pending_tables.clear(); g.table_addrs.clear(); g.table_fields.clear();
-    if (g.in) compose_changes();
+    if (g.in) {
+        compose_changes();
+        queue_change_report();  // review2 N4: registry.json drops the ended world's live rows at the next pump
+    }
 }
 RegistryLiveStatus registry_live_status() {
     std::lock_guard lock(store_mutex());

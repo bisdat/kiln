@@ -225,6 +225,16 @@ void process_change_reverts_without_a_world() {
     registry_live_world_begin(); apply_registry_files({});
     check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0, "the next world never applies it");
 }
+// review2 N4: a world's end drops its live rows from registry.json at the next pump.
+void world_stop_reports_without_its_live_rows() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":70}])", 2);
+    registry_live_commit(71, h, &reply); registry_live_publish();
+    auto has_live = [] { return registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos; };
+    check(has_live(), "the world's change is in registry.json");
+    registry_live_world_stop(); registry_live_publish();
+    check(!has_live(), "after the world ends, registry.json no longer shows its live rows");
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -951,6 +961,8 @@ int main() {
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
         {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+        {"world_stop_reports_without_its_live_rows", world_stop_reports_without_its_live_rows},
+
         {"drop_table_change_is_pending_resource", drop_table_change_is_pending_resource},
         {"formula_transaction_with_foreign_write", formula_transaction_with_foreign_write},
         {"draft_cannot_cross_worlds", draft_cannot_cross_worlds},
