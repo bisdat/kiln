@@ -374,9 +374,8 @@ public sealed class PlayerStorageMirrorTests
         // the hosted world stops (ServerStoppingEvent): the copy empties at once, and the queued pick goes with the world
         r.Kiln.Run(PlayerStorageMirror.WorldStopping);
         Assert.Empty(r.Kiln.Run(() => PlayerStorage.Client.Rows("quivers:quiver")));
-        r.Kiln.Step();
-        Assert.Empty(r.Changes[^1].Rows);
-        r.Pass();
+        Assert.Equal(("quivers:quiver", 0), (r.Changes[^1].Key, r.Changes[^1].Rows.Count));
+        r.Pass();  // the next world (the loopback still lists both players)
         Assert.Empty(equips.Calls);
         Assert.NotEqual(boView, r.Link.Sent[r.Bo.Entity.Value][^1].View);  // the next world: a new view for every player
     }
