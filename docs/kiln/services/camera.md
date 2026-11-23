@@ -184,12 +184,20 @@ returned with `MayHaveApplied`, which the sample retains so it can be ended.
 A lens-only request is `new CameraOverride(Lens: new CameraLens(40))`; it asks for no pose capability. The sample's
 two-key path uses explicit poses/rotations and `CameraBlend` for the whole request, not per-part blending. End the
 sample's current local lease before starting another; owner retirement also cancels all its work on unload.
-The mount-follow sample is separate work, not included here.
+`MountFollow.cs` is the riding view of a big or flying mount (chapter 03's S9): `MountFollow.BuildFlyerProfile` turns the
+mount's author-supplied bounds (scaled enclosing sphere with wings, seat height, top speed) into a height and an absolute
+distance that keep the camera at least 1 m outside the body while the followed sample is at most 250 ms old, and
+refuses (never clamps) a mount v1 cannot frame: H over 100 m, D over 200 m, or the camera more than 250 m from the
+rider. `MountView` asks it with `Camera.Set` for the rider (FollowHeading, 12° down, no collision, a 90° lens, 120 s
+renewed with `Restart` every 30 s, ended before a controlled teleport and on dismount) and tries once more if the view
+ends by itself while seated. The formula is the sample's, not Kiln API.
 
 `KilnHarness.Camera` records accepted calls and models lease ownership, priorities, updates, End and change ordering.
 `Expire`, `End`, `StopWorld` and `RefuseNext` script expiry, target/peer/capability losses, world stop and game
-refusals; unloading a mod ends its leases with `OwnerRetired`. It does not draw frames, advance camera clocks,
-blend, capture a snapshot or model remote transport. The sample tests use its real command for Mode and invoke the
+refusals; unloading a mod ends its leases with `OwnerRetired`. `KilnClient(player, parts)` makes a player's client a Kiln
+client offering those local parts: a remote request to any other player is refused `RequiresKilnClient`, a missing part
+`ClientCapability`. It does not draw frames, advance camera clocks, blend, capture a snapshot or model the wire (no ACK,
+timeout or negotiation). The sample tests use its real command for Mode and invoke the
 loaded mod's local handlers on the harness world thread (the kit does not model `Client.Post`).
 
 ## Verification

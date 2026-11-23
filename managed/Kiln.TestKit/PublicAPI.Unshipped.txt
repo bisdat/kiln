@@ -259,3 +259,4 @@ static Kiln.TestKit.FakeCameraCall.operator !=(Kiln.TestKit.FakeCameraCall left,
 static Kiln.TestKit.FakeCameraCall.operator ==(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
 ~override Kiln.TestKit.FakeCameraCall.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeCameraCall.ToString() -> string
+Kiln.TestKit.HarnessCamera.KilnClient(Kiln.EntityId player, ulong parts = 30) -> void

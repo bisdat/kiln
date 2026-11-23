@@ -17,6 +17,8 @@ internal static unsafe class CameraAbi
     public const uint EndReleased = 1, EndExpired = 2, EndWorldStopped = 5, EndSuperseded = 6, EndOwnerRetired = 8, EndCancelledBeforeApply = 13;
     public const uint StaleWorld = 12;
     public const uint Busy = 1, AlreadyOwned = 2, UnknownLease = 3, ForeignOwner = 4, WrongEndpoint = 5, InputPolicy = 6, LeaseKind = 23;
+    public const uint RequiresKilnClient = 7, ClientCapability = 25;
+    public const ulong CapRemote = 1ul << 6, LocalParts = (1ul << 1) | (1ul << 2) | (1ul << 3) | (1ul << 4);
     public const uint FlagAlreadyEnded = 2;
     public const int Revoked = 6;
 
@@ -84,14 +86,15 @@ internal sealed class CameraFakeState
     public readonly List<FakeCameraCall> Calls = [];
     public readonly HashSet<(uint Endpoint, uint Player)> InFlight = [];  // an apply or update waits for the next step there
     public readonly Queue<uint> Refusals = new();          // HarnessCamera.RefuseNext: the next accepted requests are refused so
+    public readonly Dictionary<uint, ulong> KilnClients = [];  // HarnessCamera.KilnClient: player -> the local parts its client offers
 }
 
 internal sealed unsafe class CameraFake : IKitFake
 {
     // the rows the fake serves (a test can switch one off), and the ones it does not model
-    public const string ServiceRow = "camera.service", ModeRow = "camera.server_mode";
+    public const string ServiceRow = "camera.service", ModeRow = "camera.server_mode", RemoteRow = "camera.remote";
     public static readonly string[] LocalRows = ["camera.local_pose", "camera.local_fov", "camera.local_profile", "camera.local_shake"];
-    public static readonly string[] OfflineRows = ["camera.rendered_snapshot", "camera.remote", "camera.resource_profile"];
+    public static readonly string[] OfflineRows = ["camera.rendered_snapshot", "camera.resource_profile"];
 
     public string Service => CameraAbi.Service;
 
@@ -120,7 +123,7 @@ internal sealed unsafe class CameraFake : IKitFake
             _table = t;
         }
         KitBackend.Instance.RegisterTable(CameraAbi.Service, (nint)_table);
-        FakeTables.Features([ServiceRow, ModeRow, .. LocalRows]);
+        FakeTables.Features([ServiceRow, ModeRow, RemoteRow, .. LocalRows]);
         foreach (var row in OfflineRows) FakeTables.Offline(row, "not modelled by the test kit's fake of kiln.camera");
     }
 
@@ -159,13 +162,15 @@ internal sealed unsafe class CameraFake : IKitFake
     }
 
     public void AddCoverage(List<CoverageRow> rows) =>
-        rows.Add(new CoverageRow("Camera", CoverageKind.RecordingFake, [CameraAbi.Service, ServiceRow, ModeRow, .. LocalRows],
+        rows.Add(new CoverageRow("Camera", CoverageKind.RecordingFake, [CameraAbi.Service, ServiceRow, ModeRow, RemoteRow, .. LocalRows],
             "Kiln.Camera's own code on the kit's kiln.camera. The lease rules are the service's: one lease per player and endpoint, AlreadyOwned for the same mod, " +
             "Busy unless another mod's priority is higher (the old lease ends superseded before the new one is applied), update and end with their refusals, " +
             "answers and Camera.Changed one step after the call; calls outside mod code (owner 0) are refused, and a mod that unloads has its applied leases end " +
             "OwnerRetired. There is no picture and no clock offline: a request counts as applied the step after it was made, and a lease ends only when the mod " +
-            "ends it or the test says so (KilnHarness.Camera.Expire, End, StopWorld; RefuseNext scripts a refusal); blends do nothing. Not modelled (the rows read " +
-            "offline): the frame snapshot (Camera.GetVisual) and a server's visual requests for a player's client (camera.remote)."));
+            "ends it or the test says so (KilnHarness.Camera.Expire, End, StopWorld; RefuseNext scripts a refusal); blends do nothing. A server's visual request for a " +
+            "player's client (camera.remote) reaches only a player the test made a Kiln client (KilnHarness.Camera.KilnClient, with the local parts it offers): any " +
+            "other is refused RequiresKilnClient, a missing part ClientCapability; there is no wire, ACK or timeout. Not modelled (the row reads offline): the frame " +
+            "snapshot (Camera.GetVisual)."));
 
     public static bool EndLease(CameraFakeState state, ulong lease, uint endReason)
     {
@@ -255,6 +260,19 @@ internal sealed unsafe class CameraFake : IKitFake
 
     private static bool On(string row) => KitBackend.Instance.Capabilities.Is(row);
 
+    // A remote visual request: the player's client must run Kiln and offer every part (the bridge's answer). 0: it does.
+    private static uint Recipient(CameraFakeState state, CameraAbi.Request* req)
+    {
+        if (req->Endpoint != CameraAbi.Remote || (req->Parts & CameraAbi.PartMode) != 0) return 0;
+        if (!state.KilnClients.TryGetValue(req->Player, out var offered)) return CameraAbi.RequiresKilnClient;
+        ulong need = 0;
+        if ((req->Parts & CameraAbi.PartPath) != 0) need |= 1ul << 1;
+        if ((req->Parts & CameraAbi.PartLens) != 0) need |= 1ul << 2;
+        if ((req->Parts & CameraAbi.PartProfile) != 0) need |= 1ul << 3;
+        if ((req->Parts & CameraAbi.PartShake) != 0) need |= 1ul << 4;
+        return (offered & need) == need ? 0 : CameraAbi.ClientCapability;
+    }
+
     // The checks every request passes before it is queued, in the service's order. 0: go on.
     private static int Admit(CameraAbi.Request* req, out KilnHarness? harness)
     {
@@ -279,6 +297,17 @@ internal sealed unsafe class CameraFake : IKitFake
             *mask = 0;
             if (FakeTables.Active(CameraAbi.Service) is null || !On(ServiceRow)) return FakeTables.Ok;
             if (endpoint == CameraAbi.ServerMode && On(ModeRow)) *mask = 1;
+            if (endpoint == CameraAbi.Remote && On(RemoteRow))
+            {
+                *mask = CameraAbi.CapRemote;
+                // with a player: the parts its client offered (as the transport bridge answers)
+                if (player != 0 && FakeTables.Active(CameraAbi.Service) is { } h)
+                {
+                    var state = KitFakes.State<CameraFakeState>(h);
+                    lock (state.Lock)
+                        if (state.KilnClients.TryGetValue(player, out var parts)) *mask |= parts;
+                }
+            }
             if (endpoint == CameraAbi.Local)
                 for (var i = 0; i < LocalRows.Length; i++)
                     if (On(LocalRows[i])) *mask |= 2ul << i;   // pose 2, fov 4, profile 8, shake 16
@@ -312,6 +341,7 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (holder is not null && holder.Owner == owner) refusal = CameraAbi.AlreadyOwned;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;  // one apply or update per endpoint at a time
                 else if (holder is not null && req->Priority <= holder.Priority) refusal = CameraAbi.Busy;
+                else if (Recipient(state, req) is var recipient and not 0) refusal = recipient;
                 else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Apply, lease.Id, req->Endpoint, new EntityId(lease.Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));
@@ -371,6 +401,7 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (mode != (lease.Endpoint == CameraAbi.ServerMode)) refusal = CameraAbi.LeaseKind;
                 else if (req->InputPolicy == 2) refusal = CameraAbi.InputPolicy;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;
+                else if (Recipient(state, req) is var recipient and not 0) refusal = recipient;
                 else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Update, id, req->Endpoint, new EntityId(req->Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));
@@ -468,7 +499,7 @@ internal sealed unsafe class CameraFake : IKitFake
         lock (Shared) return Subscribers.RemoveAll(s => s.Handle == handle) > 0 ? FakeTables.Ok : FakeTables.NotFound;
     }
 
-    // The frame snapshot and the transport bridge are not modelled.
+    // The frame snapshot and the transport bridge itself are not modelled (remote requests are answered by the fake).
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int GetVisual(void* visual, uint* reason) => FakeTables.Unavailable;
 

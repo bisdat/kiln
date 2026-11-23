@@ -50,10 +50,14 @@ public readonly record struct FakeCameraCall(ulong Step, FakeCameraCallKind Kind
 /// are refused as the service refuses them. A mod that unloads: its applied leases end <c>OwnerRetired</c> at the next
 /// step. What a test scripts: a lease that ends by itself (<see cref="End"/>, <see cref="Expire"/>), a stopping world
 /// (<see cref="StopWorld"/>), and refusals the game or the service would give (<see cref="RefuseNext"/>).</para>
+/// <para><b>Remote.</b> A server's visual request for a player's client (<c>camera.remote</c>) reaches only a player the
+/// test made a Kiln client (<see cref="KilnClient"/>, with the local parts its client offers): any other player is refused
+/// <c>RequiresKilnClient</c>, a part the client does not offer <c>ClientCapability</c>, and
+/// <c>Camera.GetCapabilities(Remote, player)</c> answers what that client offered. There is no wire: no ACK, timeout or
+/// negotiation.</para>
 /// <para><b>Not modelled.</b> Any picture: a request is "applied" the step after it was made. Time (a lease ends only
-/// when the test says so), blends, the frame snapshot (<c>camera.rendered_snapshot</c>), and requests of a server for a
-/// player's client (<c>camera.remote</c>). The service ends a stopping world's leases on the thread that stops it; the
-/// fake answers at the next step.</para>
+/// when the test says so), blends, the frame snapshot (<c>camera.rendered_snapshot</c>). The service ends a stopping
+/// world's leases on the thread that stops it; the fake answers at the next step.</para>
 /// </remarks>
 public sealed class HarnessCamera
 {
@@ -89,6 +93,22 @@ public sealed class HarnessCamera
     /// is answered <c>StaleWorld</c>.</summary>
     /// <returns>How many leases it ended.</returns>
     public int StopWorld() => CameraFake.StopWorld(State);
+
+    /// <summary>Makes <paramref name="player"/>'s client a Kiln client that offers <paramref name="parts"/> (<c>CameraCapability</c>'s
+    /// local part bits: 2 pose, 4 lens, 8 profile, 16 shake; the default is all four) to a server's visual requests
+    /// (<c>camera.remote</c>). 0 makes it a vanilla client again.</summary>
+    /// <exception cref="ArgumentException"><paramref name="player"/> is none, or <paramref name="parts"/> has a bit that is
+    /// not a local part.</exception>
+    public void KilnClient(EntityId player, ulong parts = 30)
+    {
+        if (player.IsNone) throw new ArgumentException("a player is required", nameof(player));
+        if ((parts & ~CameraAbi.LocalParts) != 0) throw new ArgumentException("only the local part bits 2, 4, 8 and 16", nameof(parts));
+        lock (State.Lock)
+        {
+            if (parts == 0) State.KilnClients.Remove(player.Value);
+            else State.KilnClients[player.Value] = parts;
+        }
+    }
 
     /// <summary>The next apply or update that the lease rules would accept is refused with <paramref name="reason"/> instead
     /// (<c>CameraReason</c>'s numbers, 1 to 27: e.g. 8 peer unavailable, 12 stale world, 18 frame fault), answered at the next

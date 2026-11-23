@@ -229,7 +229,8 @@ public sealed class CameraTests
         kiln.Capabilities.Override("camera.server_mode", false, "switched off by the test");
         Assert.Equal("camera.server_mode",
             Assert.Throws<KilnUnavailableException>(() => Sync(kiln, mod, () => Camera.SetMode(Player, CameraMode.PlayerCameraSitting, Minute))).Capability);
-        // a server's visual request for a player's client needs the transport: the row is off in the kit, and named
+        // a server's visual request for a player's client needs the transport: with its row off, it is named
+        kiln.Capabilities.Override("camera.remote", false, "switched off by the test");
         Assert.Equal("camera.remote", Assert.Throws<KilnUnavailableException>(() => Sync(kiln, mod, () => Camera.Set(Player, Lens()))).Capability);
         Assert.Equal("camera.rendered_snapshot", Assert.Throws<KilnUnavailableException>(() => kiln.Run(Camera.GetVisual)).Capability);
         // an update asks only for camera.service itself; the service's "unavailable" is named by the part row that is off
@@ -249,7 +250,7 @@ public sealed class CameraTests
         Assert.True(Is("camera.service"));
         Assert.True(Is("camera.local"), kiln.Run(() => Capabilities.Why("camera.local")));
         Assert.True(Is("camera.server"), kiln.Run(() => Capabilities.Why("camera.server")));
-        Assert.False(Is("camera.remote"));
+        Assert.True(Is("camera.remote"));   // the kit models a server's requests for players it made Kiln clients
         Assert.False(Is("camera.resource_profile"));
         // the local aggregate goes with the last local part; the server aggregate still has the mode lock
         foreach (var row in new[] { "camera.local_pose", "camera.local_fov", "camera.local_profile", "camera.local_shake" })
@@ -258,6 +259,9 @@ public sealed class CameraTests
         Assert.False(Is("camera.local"));
         Assert.True(Is("camera.server"));
         kiln.Capabilities.Override("camera.server_mode", false, "switched off by the test");
+        kiln.Step(25);
+        Assert.True(Is("camera.server"));   // camera.remote still serves a server's requests
+        kiln.Capabilities.Override("camera.remote", false, "switched off by the test");
         kiln.Step(25);
         Assert.False(Is("camera.server"));
     }
@@ -329,5 +333,29 @@ public sealed class CameraTests
         {
             kiln.Run(() => { Camera.Changed -= bad; Camera.Changed -= good; });
         }
+    }
+
+    [Fact]
+    public void A_servers_visual_reaches_only_a_Kiln_client_that_offers_the_parts()
+    {
+        using var kiln = Started(out var mod);
+        Assert.Equal(CameraCapability.Remote, kiln.Run(() => Camera.GetCapabilities(CameraEndpoint.Remote, Player)));
+        var vanilla = kiln.As(mod, () => Camera.Set(Player, Lens()));
+        kiln.Step();
+        Assert.Equal((false, CameraReason.RequiresKilnClient), (vanilla.Result.Ok, vanilla.Result.ReasonCode));
+        kiln.Camera.KilnClient(Player, (ulong)CameraCapability.LocalProfile);
+        Assert.Equal(CameraCapability.Remote | CameraCapability.LocalProfile, kiln.Run(() => Camera.GetCapabilities(CameraEndpoint.Remote, Player)));
+        var noLens = kiln.As(mod, () => Camera.Set(Player, Lens()));
+        kiln.Step();
+        Assert.Equal((false, CameraReason.ClientCapability), (noLens.Result.Ok, noLens.Result.ReasonCode));
+        kiln.Camera.KilnClient(Player);
+        var ok = kiln.As(mod, () => Camera.Set(Player, Lens()));
+        kiln.Step();
+        Assert.True(ok.Result.Ok);
+        Assert.Equal((CameraCommitScope.ClientFrame, CameraEndpoint.Remote, Player), (ok.Result.CommitScope, ok.Result.Lease.Endpoint, ok.Result.Lease.Player));
+        Assert.Throws<ArgumentException>(() => kiln.Camera.KilnClient(Player, 1));  // not a local part
+        var end = kiln.As(mod, () => Camera.End(ok.Result.Lease));
+        kiln.Step();
+        Assert.True(end.Result.Ok);
     }
 }
