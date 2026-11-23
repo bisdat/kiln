@@ -3,8 +3,24 @@
 #include "../storage.cpp"
 #include "../storage_engine.cpp"
 #include <cstdio>
+#include <malloc.h>
 #include <map>
+#include <new>
 #include <thread>
+// Freed memory is poisoned, so a container node used after another thread (or a callback) erased it faults at once
+// instead of reading stale but plausible links.
+void* operator new(size_t n) {
+    if (void* p = std::malloc(n ? n : 1))
+        return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept {
+    if (p) {
+        std::memset(p, 0xDD, _msize(p));
+        std::free(p);
+    }
+}
+void operator delete(void* p, size_t) noexcept { operator delete(p); }
 namespace {
 using namespace kitems;
 using namespace kitems::storage;
@@ -65,7 +81,7 @@ uint8_t __fastcall flag(void*) { return 0; }
 Result8* __fastcall convert(Result8* out, void* r, const void* stack, uint8_t slot, void*, void*, EntityRef*) {
     ++converts;
     Record v{};
-    v.item = 1;
+    v.item = static_cast<const uint32_t*>(stack)[0];
     v.slot = slot;
     v.count = static_cast<uint16_t>(static_cast<const uint32_t*>(stack)[1]);
     memory_from_record(v, static_cast<uint8_t*>(r));
@@ -424,10 +440,313 @@ void service_tests() {
     kitems::world_api = nullptr;
     kitems::storage_reset();
 }
+
+// ---- review: the per-key parked bound, held reasons, housekeeping events, the guard and callback lifetimes ----
+unsigned review_hints = 0;
+std::vector<KilnStorageEvent> hint_events;
+void (*review_hook)(uint32_t kind) = nullptr;
+void KILN_CALL review_stage(uint32_t kind, void* user) {
+    ++*static_cast<unsigned*>(user);
+    if (kind != KIS_EVENT_BATCH && !kitems::model.events.empty())
+        hint_events.push_back(kitems::model.events.back());
+    if (review_hook)
+        review_hook(kind);
+}
+KilnStorageRecord review_record(uint16_t slot, uint32_t item, uint16_t count) {
+    Record r{};
+    r.slot = static_cast<uint8_t>(slot);
+    r.item = item;
+    r.count = count;
+    auto wire = wire_record(r);
+    KilnStorageRecord k{};
+    k.slot = slot;
+    k.item = item;
+    k.count = count;
+    k.length = static_cast<uint8_t>(wire.size());
+    std::memcpy(k.data, wire.data(), wire.size());
+    return k;
+}
+KilnStorageEntry review_entry(const char* key, uint32_t kind, uint32_t slots, uint32_t reason, uint32_t first,
+                              uint32_t count) {
+    KilnStorageEntry e{};
+    e.size = sizeof e;
+    e.kind = kind;
+    std::snprintf(e.key, sizeof e.key, "%s", key);
+    e.slots = slots;
+    e.reason = reason;
+    e.first = first;
+    e.count = count;
+    std::fill(std::begin(e.refs), std::end(e.refs), uint16_t(KIS_REF_NONE));
+    return e;
+}
+KilnStorageDoc review_doc(uint64_t account, uint32_t source, KilnStorageEntry* entries, uint32_t entry_count,
+                          KilnStorageRecord* records, uint32_t record_count) {
+    KilnStorageDoc d{};
+    d.size = sizeof d;
+    d.source = source;
+    d.account = account;
+    d.entries = entries;
+    d.entry_count = entry_count;
+    d.records = records;
+    d.record_count = record_count;
+    return d;
+}
+uint32_t review_register(KilnOwner owner, const char* key, uint32_t slots) {
+    KilnStorageDef d{};
+    d.size = sizeof d;
+    d.slots = slots;
+    d.key = {key, std::strlen(key)};
+    d.filter.size = sizeof d.filter;
+    uint32_t handle = 0;
+    CHECK(kitems::register_storage(owner, &d, &handle) == KILN_OK && handle);
+    return handle;
+}
+void review_player(uint32_t entity) {
+    auto& setup = components[{entity, kHashInventorySetup}];
+    setup.assign(84, 0);
+    setup[80] = 1;
+    setup[83] = 1;
+    components[{entity, kHashSlotSelection}].assign(216, 0);
+}
+std::vector<KilnStorageEvent> events_after(uint64_t seq, const char* key, uint32_t kind) {
+    std::vector<KilnStorageEvent> out;
+    for (const auto& e : kitems::model.events)
+        if (e.seq > seq && e.kind == kind && !std::strcmp(e.key, key))
+            out.push_back(e);
+    return out;
+}
+const KilnStorageState* review_row(const KilnStorageState* rows, uint32_t count, const char* key) {
+    for (uint32_t i = 0; i < count; ++i)
+        if (!std::strcmp(rows[i].key, key))
+            return &rows[i];
+    return nullptr;
+}
+void retire_life_one(uint32_t kind) {
+    if (kind != KIS_STAGE_RESTORED || std::strcmp(kitems::model.events.back().key, "life:one"))
+        return;
+    review_hook = nullptr;
+    // another thread may retire an owner or register while the model mutex is released around the hint
+    kitems::storage_owner_retiring(50, nullptr);
+    review_register(52, "life:three", 8);
+}
+void review_tests() {
+    using namespace kitems;
+    using namespace kitems::storage;
+    kitems::storage_reset();
+    kitems::model = Model{};
+    kitems::enabled = true;
+    kitems::stage_point = true;
+    kitems::garbage.clear();
+    kitems::returned.clear();
+    CHECK(kitems::bind(0, &review_stage, &review_hints, nullptr) == KILN_OK);
+    KilnWorldApi fake_world{};
+    fake_world.header = {sizeof fake_world, 1};
+    fake_world.game_wrap_info = +[](KilnHandle, KilnGameWrapInfo* out) -> KilnResult {
+        out->state = KILN_WRAP_ACTIVE;
+        out->disabled = KILN_WRAP_OK;
+        return KILN_OK;
+    };
+    kitems::world_api = &fake_world;
+    kitems::death_before_wrap = 1;
+    kitems::death_after_wrap = 2;
+    uint8_t storage_bytes[16]{};
+    uint8_t registry_bytes[16]{};
+    void* registry = registry_bytes;
+    std::memcpy(storage_bytes, &registry, sizeof registry);
+    Access access{};
+    access.storage = storage_bytes;
+    access.ctx = reinterpret_cast<void*>(2);
+    access.job = reinterpret_cast<void*>(3);
+    for (int i = 0; i < A_COUNT; ++i)
+        access.acc[i] = i == A_SETUP ? kHashInventorySetup : i == A_INVENTORY ? kHashInventory : kHashSlotSelection;
+    kitems::structural_access = access;
+    E.component_map_find = +[](void*, const uint32_t*) -> uint16_t* {
+        static uint16_t index = 0;
+        return &index;
+    };
+    item_bytes[E.item_flags] = 0;
+
+    // 1. A live storage of 64 stacks and a held bag of the same key; the mod unloads. The held bag keeps its reason,
+    //    the live records join it in free cells up to 64, the rest is quarantined, and nothing comes back by itself.
+    review_player(1);
+    review_register(20, "mod:bag", 64);
+    auto join0 = kitems::model.join(0, 55, {}, 1, 1);
+    KilnStorageRecord held_record = review_record(0, 123, 5);
+    KilnStorageEntry held_entry = review_entry("mod:bag", KIS_ENTRY_PARKED, 9, KIS_PARK_RETURNED, 0, 1);
+    auto doc0 = review_doc(55, KIS_SOURCE_SERVER, &held_entry, 1, &held_record, 1);
+    CHECK(kitems::restore(0, 0, join0, &doc0) == KILN_OK);
+    kitems::model.applied(0, 1);
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::model.players.at(0).holders.count("mod:bag") == 1);
+    const Holder live = kitems::model.players.at(0).holders.at("mod:bag");
+    CHECK(live.pages.size() == 8);
+    for (size_t page = 0; page < live.pages.size(); ++page)
+        for (uint32_t cell = 0; cell < 8; ++cell) {
+            uint32_t stack[]{123, static_cast<uint32_t>(1 + page * 8 + cell), 0};
+            std::memcpy(components[{live.pages[page], kHashInventory}].data() + cell * 12, stack, 12);
+        }
+    kitems::storage_owner_retiring(20, nullptr);
+    {
+        // a capture between the unload and the next Post already obeys the bound
+        std::vector<Entry> frozen;
+        EntityRef ref{1, 0, 0, 0, storage_bytes, nullptr};
+        std::lock_guard lock(kitems::storage_mu);
+        CHECK(kitems::freeze(kitems::model.players.at(0), nullptr, kitems::bindings.data(), &ref, &frozen));
+        unsigned parked_entries = 0, parked = 0, full = 0;
+        for (const auto& e : frozen) {
+            if (e.row.kind == KIS_ENTRY_PARKED && !std::strcmp(e.row.key, "mod:bag")) {
+                ++parked_entries;
+                parked += static_cast<unsigned>(e.records.size());
+                CHECK(e.row.reason == KIS_PARK_RETURNED);
+            }
+            if (e.row.kind == KIS_ENTRY_QUARANTINE)
+                for (const auto& r : e.records)
+                    full += r.reason == 6;
+        }
+        CHECK(parked_entries == 1 && parked == 64 && full == 1);
+    }
+    kitems::post(nullptr, nullptr);
+    {
+        const auto& entries = kitems::model.players.at(0).entries;
+        unsigned parked_entries = 0, total = 0, full = 0;
+        std::set<unsigned> cells;
+        for (const auto& e : entries) {
+            total += static_cast<unsigned>(e.records.size());
+            if (e.row.kind == KIS_ENTRY_PARKED) {
+                ++parked_entries;
+                CHECK(e.row.reason == KIS_PARK_RETURNED && e.records.size() == 64 && e.records[0].count == 5);
+                for (const auto& r : e.records)
+                    cells.insert(r.slot);
+            } else
+                for (const auto& r : e.records)
+                    full += r.reason == 6;
+        }
+        CHECK(parked_entries == 1 && cells.size() == 64 && full == 1 && total == 65);
+        CHECK(kitems::model.players.at(0).holders.empty() && !components.count({live.entity, kHashInventorySetup}));
+    }
+    KilnStorageState rows[8]{};
+    rows[0].size = sizeof rows[0];
+    uint32_t count = 0;
+    CHECK(kitems::list(1, rows, 8, &count) == KILN_OK);
+    auto bag = review_row(rows, count, "mod:bag");
+    CHECK(bag && bag->status == KIS_STATE_PARKED && bag->parked == 64 && bag->quarantined == 1);
+    KilnItemsStorageStatus overall{};
+    overall.size = sizeof overall;
+    CHECK(kitems::status(&overall) == KILN_OK && overall.parked == 64 && overall.quarantined == 1);
+    auto bag_again = review_register(21, "mod:bag", 64);
+    kitems::post(nullptr, nullptr);
+    kitems::post(nullptr, nullptr);
+    KilnStorageState state{};
+    state.size = sizeof state;
+    CHECK(kitems::state(21, bag_again, 1, &state) == KILN_OK && state.status == KIS_STATE_READY && state.stacks == 0 &&
+          state.parked == 64 && state.quarantined == 1);
+
+    // 2. Hot reload: the old owner retires and the key is registered again before the next Post. Tearing down the old
+    //    holder is housekeeping (handle 0, Target = the old holder); the new holder's RESTORED is public.
+    review_player(2);
+    review_register(30, "mod:pack", 8);
+    auto join1 = kitems::model.join(1, 66, {}, 5, 1);
+    auto doc1 = review_doc(66, KIS_SOURCE_NEW, nullptr, 0, nullptr, 0);
+    CHECK(kitems::restore(0, 1, join1, &doc1) == KILN_OK);
+    kitems::model.applied(1, 2);
+    kitems::post(nullptr, nullptr);
+    const Holder pack = kitems::model.players.at(1).holders.at("mod:pack");
+    uint32_t pack_stack[]{123, 3, 0};
+    std::memcpy(components[{pack.pages[0], kHashInventory}].data(), pack_stack, 12);
+    kitems::storage_owner_retiring(30, nullptr);
+    auto pack_again = review_register(31, "mod:pack", 8);
+    auto before = kitems::model.last_event();
+    kitems::post(nullptr, nullptr);
+    auto parked_events = events_after(before, "mod:pack", KIS_EVENT_PARKED);
+    CHECK(parked_events.size() == 1 && parked_events[0].handle == 0 && parked_events[0].target == pack.entity);
+    auto restored_events = events_after(before, "mod:pack", KIS_EVENT_RESTORED);
+    CHECK(!restored_events.empty() && restored_events[0].handle == pack_again && restored_events[0].target &&
+          restored_events[0].target != pack.entity);
+    CHECK(kitems::state(31, pack_again, 2, &state) == KILN_OK && state.stacks == 1 && state.parked == 0);
+
+    // 3. A live copy of a key no mod registered: one public PARKED (Target 0) at the first restore, never two.
+    review_player(3);
+    auto join2 = kitems::model.join(2, 77, {}, 9, 1);
+    KilnStorageRecord gone_record = review_record(0, 123, 2);
+    KilnStorageEntry gone_entry = review_entry("gone:bag", KIS_ENTRY_LIVE, 8, 0, 0, 1);
+    auto doc2 = review_doc(77, KIS_SOURCE_SERVER, &gone_entry, 1, &gone_record, 1);
+    CHECK(kitems::restore(0, 2, join2, &doc2) == KILN_OK);
+    kitems::model.applied(2, 3);
+    before = kitems::model.last_event();
+    kitems::post(nullptr, nullptr);
+    auto gone_events = events_after(before, "gone:bag", KIS_EVENT_PARKED);
+    CHECK(gone_events.size() == 1 && gone_events[0].target == 0 && gone_events[0].handle == 0 &&
+          gone_events[0].reason == KIS_PARK_UNREGISTERED && gone_events[0].stacks == 1);
+    rows[0].size = sizeof rows[0];
+    CHECK(kitems::list(3, rows, 8, &count) == KILN_OK);
+    auto gone = review_row(rows, count, "gone:bag");
+    CHECK(gone && gone->status == KIS_STATE_PARKED && gone->parked == 1 && gone->holder == 0);
+
+    // 4. Its parked return: the temporary holder's RESTORED and PARKED are housekeeping (handle 0, Target set).
+    uint64_t ticket = 0;
+    CHECK(kitems::return_parked(60, 3, {"gone:bag", 8}, 100, nullptr, nullptr, &ticket) == KILN_OK && ticket);
+    before = kitems::model.last_event();
+    kitems::post(nullptr, nullptr);
+    auto temp_restored = events_after(before, "gone:bag", KIS_EVENT_RESTORED);
+    CHECK(temp_restored.size() == 1 && temp_restored[0].handle == 0 && temp_restored[0].target);
+    kitems::storage_program(access);
+    before = kitems::model.last_event();
+    kitems::post(nullptr, nullptr);
+    auto temp_parked = events_after(before, "gone:bag", KIS_EVENT_PARKED);
+    CHECK(temp_parked.size() == 1 && temp_parked[0].handle == 0 && temp_parked[0].target == temp_restored[0].target);
+
+    // 5. The guard keeps refusing when one tracked page cannot be read (the game may already have removed it).
+    kitems::model.mark_built(2, "fake:bag", 9001, {9002});
+    kitems::client_actions.clear();
+    ClientActionLayout action{};
+    action.offset = 0;
+    action.version = 32;
+    action.consumed = 0;
+    action.size = 32;
+    action.refs = {4};
+    kitems::client_actions.push_back(action);
+    kitems::input_size = 40;
+    kitems::consumed_size = 4;
+    auto& input = components[{2, kitems::hash_name("PlayerInput")}];
+    input.assign(40, 0);
+    uint32_t version = 5, target_page = kitems::model.players.at(1).holders.at("mod:pack").pages[0], consumed = 4;
+    std::memcpy(input.data() + 32, &version, 4);
+    std::memcpy(input.data() + 4, &target_page, 4);
+    auto& used = components[{2, kitems::hash_name("ServerConsumedPlayerInput")}];
+    used.assign(4, 0);
+    std::memcpy(used.data(), &consumed, 4);
+    kitems::guard_client_inputs(server() + E.world_storage);
+    std::memcpy(&consumed, components[{2, kitems::hash_name("ServerConsumedPlayerInput")}].data(), 4);
+    CHECK(consumed == 5 && kitems::enabled);
+    kitems::enabled = true;
+    kitems::model.players.at(2).holders.erase("fake:bag");
+    kitems::client_actions.clear();
+
+    // 6. A callback that retires the owner of the key being built (and registers another) must not break the pass.
+    review_player(4);
+    review_register(50, "life:one", 8);
+    auto life_two = review_register(51, "life:two", 8);
+    auto join3 = kitems::model.join(3, 88, {}, 11, 1);
+    auto doc3 = review_doc(88, KIS_SOURCE_NEW, nullptr, 0, nullptr, 0);
+    CHECK(kitems::restore(0, 3, join3, &doc3) == KILN_OK);
+    kitems::model.applied(3, 4);
+    review_hook = &retire_life_one;
+    kitems::post(nullptr, nullptr);
+    review_hook = nullptr;
+    kitems::post(nullptr, nullptr);
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::state(51, life_two, 4, &state) == KILN_OK && state.status == KIS_STATE_READY);
+    CHECK(!kitems::model.players.at(3).holders.count("life:one") && kitems::model.players.at(3).holders.count("life:three"));
+
+    kitems::enabled = true;
+    kitems::world_api = nullptr;
+    kitems::storage_reset();
+}
 } // namespace
 int main() {
     using namespace kitems;
     using namespace kitems::storage;
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // a faulting check must not lose the lines before it
     E.get_component = &get;
     E.read_other = &other;
     E.write_other = &write_other;
@@ -596,6 +915,7 @@ int main() {
     CHECK(!character_witness(character.data(), &hash));
     CHECK(!character_witness(reinterpret_cast<void*>(1), &hash));
     service_tests();
+    review_tests();
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

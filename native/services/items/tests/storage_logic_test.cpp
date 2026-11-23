@@ -37,6 +37,138 @@ Record from_json(const json& e) {
         }
     return r;
 }
+KilnStorageRecord stored(uint16_t slot, uint32_t item, uint16_t count) {
+    Record r{};
+    r.slot = static_cast<uint8_t>(slot);
+    r.item = item;
+    r.count = count;
+    auto wire = wire_record(r);
+    KilnStorageRecord k{};
+    k.slot = slot;
+    k.item = item;
+    k.count = count;
+    k.length = static_cast<uint8_t>(wire.size());
+    std::memcpy(k.data, wire.data(), wire.size());
+    return k;
+}
+KilnStorageEntry stored_entry(const char* key, uint32_t kind, uint32_t slots, uint32_t reason, uint32_t first,
+                              uint32_t count) {
+    KilnStorageEntry e{};
+    e.size = sizeof e;
+    e.kind = kind;
+    std::snprintf(e.key, sizeof e.key, "%s", key);
+    e.slots = slots;
+    e.reason = reason;
+    e.first = first;
+    e.count = count;
+    std::fill(std::begin(e.refs), std::end(e.refs), uint16_t(KIS_REF_NONE));
+    return e;
+}
+// A key keeps one PARKED entry of at most 64 records in distinct cells; held records first, the highest reason wins;
+// what does not fit goes to the key's quarantine unchanged ("parked storage full", reason 6). Nothing is dropped.
+void parked_bound_tests() {
+    Model m;
+    auto join = m.join(0, 55, {}, 1, 1);
+    std::vector<KilnStorageRecord> records;
+    for (uint16_t i = 0; i < 64; ++i)
+        records.push_back(stored(i, 100 + i, 1));
+    records.push_back(stored(0, 7, 5));
+    // document order on purpose: the unregistered live copy first, the held bag second
+    KilnStorageEntry rows[]{stored_entry("mod:bag", KIS_ENTRY_PARKED, 64, KIS_PARK_UNREGISTERED, 0, 64),
+                            stored_entry("mod:bag", KIS_ENTRY_PARKED, 9, KIS_PARK_RETURNED, 64, 1)};
+    KilnStorageDoc doc{};
+    doc.size = sizeof doc;
+    doc.source = KIS_SOURCE_SERVER;
+    doc.account = 55;
+    doc.entry_count = 2;
+    doc.record_count = static_cast<uint32_t>(records.size());
+    doc.entries = rows;
+    doc.records = records.data();
+    CHECK(m.restore(0, join, doc) == KILN_OK);
+    const auto& entries = m.players.at(0).entries;
+    unsigned parked_entries = 0, quarantined = 0, total = 0;
+    for (const auto& e : entries) {
+        total += static_cast<unsigned>(e.records.size());
+        if (e.row.kind == KIS_ENTRY_PARKED) {
+            ++parked_entries;
+            CHECK(e.row.reason == KIS_PARK_RETURNED && e.records.size() == 64 && e.row.slots == 64);
+            CHECK(e.records.size() == 64 && e.records[0].item == 7 && e.records[0].slot == 0);
+            std::set<unsigned> cells;
+            for (const auto& r : e.records) {
+                cells.insert(r.slot);
+                CHECK(r.slot < 64 && r.data[0] == r.slot);
+                Record decoded{};
+                CHECK(decode_record(r.data, r.length, &decoded) && decoded.slot == r.slot && decoded.item == r.item);
+            }
+            CHECK(cells.size() == e.records.size());
+            for (size_t i = 1; i < e.records.size(); ++i)
+                CHECK(e.records[i].item == 100 + i - 1 && e.records[i].slot == i);
+        } else if (e.row.kind == KIS_ENTRY_QUARANTINE) {
+            for (const auto& r : e.records) {
+                ++quarantined;
+                const auto original = stored(63, 163, 1);
+                CHECK(r.reason == 6 && r.slot == 63 && r.item == 163 && r.length == original.length &&
+                      !std::memcmp(r.data, original.data, original.length));
+            }
+        }
+    }
+    CHECK(parked_entries == 1 && quarantined == 1 && total == 65);
+    // An already bounded entry stays exactly as it was.
+    Model same;
+    auto same_join = same.join(0, 55, {}, 1, 1);
+    KilnStorageEntry one[]{stored_entry("mod:bag", KIS_ENTRY_PARKED, 9, KIS_PARK_FILTER, 0, 2)};
+    KilnStorageRecord two[]{stored(5, 9, 1), stored(2, 8, 1)};
+    doc.entry_count = 1;
+    doc.record_count = 2;
+    doc.entries = one;
+    doc.records = two;
+    CHECK(same.restore(0, same_join, doc) == KILN_OK);
+    const auto& kept = same.players.at(0).entries;
+    CHECK(kept.size() == 1 && kept[0].row.reason == KIS_PARK_FILTER && kept[0].row.slots == 9 &&
+          kept[0].records.size() == 2 && kept[0].records[0].slot == 5 && kept[0].records[1].slot == 2 &&
+          !std::memcmp(kept[0].records[0].data, two[0].data, two[0].length));
+    // Two held bags with a colliding cell: the highest held reason, the second record moves to the lowest free cell.
+    Model held;
+    auto held_join = held.join(0, 55, {}, 1, 1);
+    KilnStorageEntry bags[]{stored_entry("mod:bag", KIS_ENTRY_PARKED, 8, KIS_PARK_REQUESTED, 0, 1),
+                            stored_entry("mod:bag", KIS_ENTRY_PARKED, 8, KIS_PARK_STALE, 1, 1)};
+    KilnStorageRecord colliding[]{stored(0, 4, 1), stored(0, 5, 1)};
+    doc.entry_count = 2;
+    doc.entries = bags;
+    doc.records = colliding;
+    CHECK(held.restore(0, held_join, doc) == KILN_OK);
+    const auto& merged = held.players.at(0).entries;
+    CHECK(merged.size() == 1 && merged[0].row.reason == KIS_PARK_STALE && merged[0].records.size() == 2 &&
+          merged[0].records[0].item == 4 && merged[0].records[0].slot == 0 && merged[0].records[1].item == 5 &&
+          merged[0].records[1].slot == 1 && merged[0].records[1].data[0] == 1);
+}
+// A character that left keeps no holders: a later capture of that slot must not stage a pair without them.
+void left_capture_tests() {
+    Model m;
+    uint32_t handle = 0;
+    KilnStorageDef def{};
+    def.size = sizeof def;
+    def.slots = 8;
+    def.key = {"mod:bag", 7};
+    def.filter.size = sizeof def.filter;
+    CHECK(m.register_def(1, def, &handle) == KILN_OK);
+    auto join = m.join(0, 55, {}, 1, 1);
+    KilnStorageDoc doc{};
+    doc.size = sizeof doc;
+    doc.source = KIS_SOURCE_NEW;
+    doc.account = 55;
+    CHECK(m.restore(0, join, doc) == KILN_OK);
+    m.applied(0, 1);
+    m.mark_built(0, "mod:bag", 4000, {4001});
+    m.leave(0);
+    auto tag = m.begin_batch(1, 1, 1);
+    Entry parked;
+    parked.row = stored_entry("old:bag", KIS_ENTRY_PARKED, 8, KIS_PARK_UNREGISTERED, 0, 0);
+    m.capture(0, 77, {parked}, false, 0);
+    m.complete();
+    Frozen copy;
+    CHECK(m.take(tag, &copy) == KILN_OK && copy.captures.empty() && copy.entries.empty());
+}
 int main(int argc, char** argv) {
     if (argc != 2)
         return 2;
@@ -276,6 +408,8 @@ int main(int argc, char** argv) {
     malformed.refs = {8};
     uint8_t safe[64]{};
     CHECK(forbidden_action(safe, malformed, [](uint32_t) { return false; }));
+    parked_bound_tests();
+    left_capture_tests();
     std::printf("storage logic: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }
