@@ -250,7 +250,7 @@ internal static class CraftStock
         }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or TypeInitializationException)
         {
-            ModLog.Warn($"kiln.stations: the crafting menu does not count station outputs on this client: {e.Message}");
+            ModLog.Warn($"kiln.stations: the crafting menu does not count crafting sources (linked sources, station outputs) on this client: {e.Message}");
         }
     }
 

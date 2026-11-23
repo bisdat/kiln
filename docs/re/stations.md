@@ -846,6 +846,21 @@ current base stock and opted-in outputs already counted by `kiln:craftstock`; `K
 all filtered registered counts for consumers whose normal inventory view does not include that stock. Unknown flags
 refuse. Counts recheck the live player login, permission and container setup; they never authorize a payment.
 
+**Where a crafting-menu craft stops (GitHub #132 follow-up, 0.2.0-dev.31).** A 30.9 report from a hosting client: a
+decoration table's menu counted linked stock (an ingredient 0 -> 770, the recipe 0 -> 10), but Craft made nothing and kiln.log
+had no payment line. Static facts that bound it: the craft action handler queues the craft only for an enabled action
+(§10.2) and the UI dispatcher turns it into `UiCraftRecipeEvent` without checks (docs/re/creative-mode-146.md §3), so a
+press the raised count enabled is sent; `RecipeApply` returns 4 *before* `InventoryPay` when `0x91de90` (workshop,
+shelter, level, comfort, progress) refuses, and 5 for props (§10.1): such a refusal never reaches the adapter and looked
+exactly like a payment refusal in the log. On a hosting client the client world's own `RecipeApply` dry runs reach the
+adapter as well (their bases word is the client world's): they used up the six "left to the game" lines before the
+server's craft came. Which branch Fuzen777's craft took is not known from the report. Kiln now (a) keeps those dry runs on
+their own lines, (b) logs a server-world transaction whose accessors fail apart from them, and (c) brackets every player
+craft through kiln.gameplay's `CraftRecipe` hook (`kiln_stations_set_craft_context` at the start, the new
+`kiln_stations_craft_done(operator, station, recipe, code)` at the end, both not ABI) and writes one line saying whether
+the payment was never asked, was left to the game and why, was short and by how much, or was paid. The count line now says
+"by the server's crafting stock", since the snapshot does not record which source holds an item.
+
 Verification here is offline: host registry/payment arithmetic, Windows tests of the actual guarded adapter with
 fake transactions, managed snapshot/lifetime tests and symbol resolution on the two pinned binaries. No new game
 client, server or lab was run for this change; the guided checks are in the public station service docs.

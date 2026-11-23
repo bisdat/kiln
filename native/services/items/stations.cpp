@@ -147,6 +147,16 @@ struct Game {
 // The station a CraftRecipe call is paying for, set by kiln.gameplay's craft hook for the duration of that call
 // (same thread). 0: the hook is not in this call.
 thread_local uint32_t t_craft_station = 0;
+// How far the payment of the craft running on this thread got (GitHub #132 follow-up): opened by kiln.gameplay's craft hook
+// (kiln_stations_set_craft_context), noted by craft_pay_impl, written as one kiln.log line at the craft's end
+// (kiln_stations_craft_done).
+thread_local CraftTrace t_trace;
+void trace(uint8_t stage, uint64_t from = 0, const char* why = nullptr) {
+    if (!t_trace.active) return;
+    t_trace.stage = stage;
+    t_trace.from = from;
+    t_trace.why = why;
+}
 // What a Kiln client may count, from the server's last snapshot (bag + Magic chests + opted-in outputs).
 std::mutex g_craft_mu;
 std::unordered_map<uint32_t, uint32_t> g_craft_have;  // g_craft_mu
@@ -926,8 +936,13 @@ struct LogLimit {
     }
 };
 LogLimit g_log_left{6}, g_log_paid{20}, g_log_refused{12}, g_log_raised{12}, g_log_stock{8};
+// Kept apart (GitHub #132 follow-up): on a hosting client the client world's own dry runs (RecipeApply for every recipe a
+// crafting menu counts) reach the payment too; they used up the lines that would say why the server's craft was left to
+// the game. g_log_tx: the server world's transaction refused; g_log_craft: one line per player craft (craft_done_impl).
+LogLimit g_log_dry{4}, g_log_tx{8}, g_log_craft{24};
 
 void left_to_game(const char* why, unsigned mode, unsigned err, uint32_t owner) {
+    trace(kTraceLeft, 0, why);
     if (const uint32_t n = g_log_left.take())
         LOGI("stations: craft payment left to the game (%s; mode %u, stock error %u, payer %u)%s", why, mode, err, owner,
              n > 1 ? " (more held back)" : "");
@@ -939,13 +954,18 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     // ret is rules/RecipePaid, the return address: call_matches(ret, pay) checked at resolve that the instruction there
     // calls InventoryPay; comparing ret with RecipePaid is the runtime test. The storage upgrade and the alternate payer
     // (RecipePayAlt) return elsewhere and stay the game's.
-    if (ret != G.recipe_paid) return 0;
+    if (ret != G.recipe_paid) {
+        trace(kTraceOtherPayer);
+        return 0;
+    }
     CS.calls.fetch_add(1, std::memory_order_relaxed);
     const auto registered = G.registered_ok ? craft_sources_copy(owner) : std::vector<CraftSource>{};
     {
         std::lock_guard lock(g_mu);
         if (g_sources.empty() && registered.empty()) {
             CS.idle.fetch_add(1, std::memory_order_relaxed);
+            // links of this payer that craft_sources_copy left out: another login's, or an unreadable player record
+            trace(t_trace.active && G.registered_ok && !g_registered.copy(owner).empty() ? kTraceDropped : kTraceIdle);
             return 0;
         }
     }
@@ -962,6 +982,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     }
     if (head.mode == 0 && registered.empty()) {  // a factory never has player-bound registrations
         CS.mode0.fetch_add(1, std::memory_order_relaxed);
+        trace(kTraceLeft, 0, "stock mode 0 (the payer alone) and nothing linked to the payer");
         return 0;
     }
     Access a{};
@@ -970,7 +991,14 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         (head.mode == 0 && !used && !registered.empty()));
     if (!same_bases || !access_from_tx(tx, &a)) {
         CS.other_world.fetch_add(1, std::memory_order_relaxed);
-        if (const uint32_t n = g_log_left.take()) {
+        // Another world's transaction (a hosting client's own dry runs) and the server world's transaction whose accessors
+        // did not check out are told apart, each with its own lines: the first are many and expected.
+        trace(same_bases ? kTraceTxRefused : kTraceOtherWorld);
+        if (same_bases) {
+            if (const uint32_t n = g_log_tx.take())
+                LOGW("stations: the server world's craft transaction did not check out (its accessors): its payment is the "
+                     "game's, crafting sources not asked (mode %u, payer %u)%s", head.mode, owner, n > 1 ? " (more held back)" : "");
+        } else if (const uint32_t n = g_log_dry.take()) {
             TxWords w{static_cast<const uint8_t*>(tx), {}};
             guard(&tx_words_impl, &w, &fault);
             LOGI("stations: craft payment left to the game (not the server world's transaction: bases words %p / %p, the "
@@ -1029,7 +1057,10 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         items.push_back(item);
         lines.push_back(CraftCost{item, static_cast<uint32_t>(std::min<uint64_t>(static_cast<uint64_t>(rc.count[i]) * multiplier, 0xffffffffu)), 0, 0});
     }
-    if (lines.empty()) return 0;
+    if (lines.empty()) {
+        trace(kTraceLeft, 0, "the recipe's cost lines name nothing to pay");
+        return 0;
+    }
     if (list_n > kMaxCraftStock || (list_n && !list_ptr)) return skip("the base's stock list is longer than Kiln counts");
     std::vector<uint32_t> list(static_cast<size_t>(list_n));
     ListCopyJob lc{reinterpret_cast<const uint32_t*>(list_ptr), list.data(), list_n};
@@ -1085,19 +1116,23 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
                                   [&](uint32_t e, uint32_t item, uint32_t* left) { return pay_one(tx, e, item, left); }, &from, &why);
     if (verdict == kCraftGame) {
         (why == kCraftWhyCovered ? CS.covered : CS.short_).fetch_add(1, std::memory_order_relaxed);
-        if (why == kCraftWhyShort)
-            if (const uint32_t n = g_log_refused.take()) {
-                uint64_t short_by = 0;
-                for (const CraftCost& c : lines)
-                    if (c.need > c.game + c.outputs) short_by += c.need - c.game - c.outputs;
-                LOGI("stations: a craft left to the game: base %d's opted-in outputs cannot cover it (short by %llu; payer %u)%s",
-                     base, static_cast<unsigned long long>(short_by), owner, n > 1 ? " (more held back)" : "");
-            }
+        if (why == kCraftWhyShort) {
+            uint64_t short_by = 0;
+            for (const CraftCost& c : lines)
+                if (c.need > c.game + c.outputs) short_by += c.need - c.game - c.outputs;
+            trace(kTraceShort, short_by);
+            if (const uint32_t n = g_log_refused.take())
+                LOGI("stations: a craft left to the game: linked sources and base %d's opted-in outputs cannot cover it (short by "
+                     "%llu; payer %u)%s", base, static_cast<unsigned long long>(short_by), owner, n > 1 ? " (more held back)" : "");
+        } else {
+            trace(kTraceCovered);
+        }
         return 0;
     }
     if (verdict == kCraftPaid) {
         CS.paid.fetch_add(1, std::memory_order_relaxed);
         CS.from_outputs.fetch_add(static_cast<uint32_t>(std::min<uint64_t>(from, 0xffffffffu)), std::memory_order_relaxed);
+        trace(kTracePaid, from);
         if (const uint32_t n = g_log_paid.take())
             LOGI("stations: a craft paid %llu from additional crafting sources (base %d, payer %u)%s",
                  static_cast<unsigned long long>(from), base, owner, n > 1 ? " (more held back)" : "");
@@ -1105,6 +1140,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         return 1;
     }
     CS.rollback.fetch_add(1, std::memory_order_relaxed);
+    trace(kTraceRollback);
     LOGW("stations: a craft paid from additional sources rolled back (%s; base %d, payer %u): nothing moved",
          why == kCraftWhyFault ? "a take faulted" : "a line stayed short", base, owner);
     *code = 4;  // a take may already be queued: CraftRecipe rolls the transaction back
@@ -1136,19 +1172,20 @@ int craft_adjust_impl(uint32_t recipe, uint32_t cap, uint32_t game, const void* 
     if (crafts > game) {
         // once per recipe and count, in a few lines: the real-client check reads them
         static std::mutex mu;
-        static std::unordered_map<uint32_t, uint64_t> said;
+        static std::unordered_map<uint64_t, uint64_t> said;  // per recipe and cap: the craft-1 and craft-10 counts alternate
         const uint64_t key = (static_cast<uint64_t>(game) << 32) | crafts;
         bool fresh = false;
         {
             std::lock_guard lock(mu);
             if (said.size() > 512) said.clear();
-            auto [it, inserted] = said.emplace(recipe, key);
+            auto [it, inserted] = said.emplace((static_cast<uint64_t>(recipe) << 32) | cap, key);
             fresh = inserted || it->second != key;
             it->second = key;
         }
         if (fresh)
             if (const uint32_t n = g_log_raised.take())
-                LOGI("stations: the crafting menu's count for recipe 0x%08x raised %u -> %u by station outputs%s", recipe, game,
+                LOGI("stations: the crafting menu's count for recipe 0x%08x raised %u -> %u by the server's crafting stock (the bag, "
+                     "the Magic chests, linked sources and opted-in station outputs it counts)%s", recipe, game,
                      static_cast<unsigned>(crafts), n > 1 ? " (more held back)" : "");
     }
     return 1;
@@ -3524,15 +3561,15 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
         std::string why;
         uint32_t reason = 0;
         if (!rules_hook(KILN_RULES_HOOK_CRAFT_UI, &why, &reason)) {
-            LOGW("stations: the crafting menu does not count station outputs here: %s", why.c_str());
+            LOGW("stations: the crafting menu does not count crafting sources (linked sources, station outputs) here: %s", why.c_str());
             lower("stations.craft_ui", reason, why.c_str());
             lower("crafting.source_ui", reason, why.c_str());
         } else if (!G.resolve || !G.recipe_find) {
-            LOGW("stations: the crafting menu does not count station outputs here: the recipe reads did not resolve");
+            LOGW("stations: the crafting menu does not count crafting sources (linked sources, station outputs) here: the recipe reads did not resolve");
             lower("stations.craft_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
             lower("crafting.source_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
         } else {
-            LOGI("stations: the crafting menu counts opted-in station outputs when a Kiln server sends them (client world %s)",
+            LOGI("stations: the crafting menu counts crafting sources (linked sources, opted-in station outputs) when a Kiln server sends them (client world %s)",
                  g_client_recipes.load() ? "recipes read" : "recipes not read yet");
         }
     }
@@ -3800,6 +3837,24 @@ void stations_world_closed() {
     g_state.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE);
 }
 
+// kiln.gameplay's craft hook, at the end of a craft (this thread): one bounded line for a player's craft while some crafting
+// source could pay it, saying how far its payment got (GitHub #132 follow-up). A craft that never reached the hook (the
+// client never sent it, or the server dropped the event before CraftRecipe) leaves no line.
+void craft_done_impl(uint32_t op, uint32_t station, uint32_t recipe, int32_t rc) {
+    const CraftTrace t = t_trace;
+    t_trace = CraftTrace{};
+    if (!t.active || !G.craft_ok) return;
+    bool sources = false;
+    {
+        std::lock_guard lock(g_mu);
+        sources = !g_sources.empty();
+    }
+    if (!sources && G.registered_ok) sources = !g_registered.copy(op).empty();
+    if (!craft_trace_wanted(op, station, sources)) return;
+    if (const uint32_t n = g_log_craft.take())
+        LOGI("stations: %s%s", craft_trace_text(t, op, recipe, station, rc).c_str(), n > 1 ? " (more held back)" : "");
+}
+
 std::vector<CraftSource> craft_sources_copy(uint32_t player) {
     uint32_t session=0;
     if(!source_player(g_srv_bases.load(std::memory_order_acquire),player,&session))return {};
@@ -3826,6 +3881,16 @@ extern "C" KILN_EXPORT int kiln_stations_craft_pay(void* tx, void* costs, uint32
 // kiln.gameplay's craft hook: the station being crafted at, for the duration of CraftRecipe (this thread).
 extern "C" KILN_EXPORT void kiln_stations_set_craft_context(uint32_t station, int active) {
     kitems::t_craft_station = active ? station : 0;
+    if (active) {
+        kitems::t_trace = kitems::stations::CraftTrace{};
+        kitems::t_trace.active = true;
+    }
+}
+
+// kiln.gameplay's craft hook, after the game's CraftRecipe returned (this thread): the operator, the station, the recipe
+// id and the game's code. Not an ABI (as kiln_stations_set_craft_context); an older kiln-gameplay.dll does not call it.
+extern "C" KILN_EXPORT void kiln_stations_craft_done(uint32_t op, uint32_t station, uint32_t recipe, int32_t rc) {
+    kitems::craft_done_impl(op, station, recipe, rc);
 }
 
 // kiln.rules' craft-count hook on a Kiln client (the game's UI thread). 1: *out is the snapshot's craft count; `game` is

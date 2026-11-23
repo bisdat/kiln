@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 using namespace kitems::stations;
 
@@ -999,6 +1000,43 @@ int main() {
         CHECK(stock_ui_site_count(5, kAvailOther, true, 20, 0) == 5);
         CHECK(stock_ui_site_count(0, kAvailMenuOption, true, 0x1'0000'0005ull, 0) == 0xffffffffu);
         CHECK(stock_ui_site_count(0, kAvailMenuList, true, 0x1'0000'0005ull, 4) == 0xffffffffu);
+    }
+
+    // ---- GitHub #132 follow-up: one kiln.log line per player craft that crafting sources could matter to ----
+    {
+        CHECK(craft_trace_wanted(1, 3000, true));
+        CHECK(!craft_trace_wanted(1, 3000, false));     // no linked source and no opted-in station: the game's craft, no line
+        CHECK(!craft_trace_wanted(3000, 3000, true));   // a factory's own cycle (operator == station)
+        CHECK(!craft_trace_wanted(0, 3000, true));
+        CHECK(!craft_trace_wanted(1024, 3000, true));   // not a player
+        CraftTrace t;
+        std::string s = craft_trace_text(t, 1, 0x77, 3000, 4);
+        CHECK(s.find("player 1's craft of recipe 0x00000077 at station 3000") != std::string::npos);
+        CHECK(s.find("refused without reaching the recipe payment") != std::string::npos && s.find("game code 4") != std::string::npos);
+        CHECK(s.find("no crafting source was asked") != std::string::npos);
+        t.stage = kTracePaid;
+        t.from = 12;
+        s = craft_trace_text(t, 1, 0x77, 3000, 0);
+        CHECK(s.find("paid 12 item(s) from linked sources or opted-in station outputs") != std::string::npos && s.find("made") != std::string::npos);
+        t = CraftTrace{};
+        t.stage = kTraceShort;
+        t.from = 5;
+        s = craft_trace_text(t, 1, 0x77, 0, 4);
+        CHECK(s.find("short by 5") != std::string::npos && s.find("by hand") != std::string::npos);
+        t.stage = kTraceDropped;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 4).find("earlier login") != std::string::npos);
+        t.stage = kTraceTxRefused;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 4).find("transaction") != std::string::npos);
+        t.stage = kTraceOtherPayer;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("another payer") != std::string::npos);
+        t.stage = kTraceLeft;
+        t.why = "the cost lines could not be read";
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 4).find("left to the game: the cost lines could not be read") != std::string::npos);
+        t.stage = kTraceCovered;
+        t.why = nullptr;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("covered") != std::string::npos);
+        t.stage = 200;  // never a stage: still one bounded line
+        CHECK(!craft_trace_text(t, 1, 0x77, 3000, 0).empty());
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

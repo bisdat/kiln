@@ -446,10 +446,23 @@ is left out; a player crafts at a crafting station, which lends nothing unless i
 Each craft of a "craft x10" is its own payment: the first ones the bag and the chests cover are the game's, the ones
 they no longer cover take from the outputs, each all or nothing.
 
-kiln.log (server): `stations: a craft paid N from opted-in station outputs (base B, payer P)`; when Kiln looked and the
-outputs were short, `stations: a craft left to the game: base B's opted-in outputs cannot cover it (short by N; payer
-P)`; for the first few calls it leaves for another reason, `stations: craft payment left to the game (<why>; ...)`. The
-counters of every outcome are kiln-items.dll's `kiln_stations_craft_stats` (labs and support, not an API).
+kiln.log (server): `stations: a craft paid N from additional crafting sources (base B, payer P)`; when Kiln looked and
+the linked sources and outputs were short, `stations: a craft left to the game: linked sources and base B's opted-in
+outputs cannot cover it (short by N; payer P)`; for the first few calls it leaves for another reason, `stations: craft
+payment left to the game (<why>; ...)`. The counters of every outcome are kiln-items.dll's `kiln_stations_craft_stats`
+(labs and support, not an API).
+
+Since 0.2.0-dev.31 (GitHub #132), every player's craft that a crafting source could pay (a link registered for that
+player, or a station opted in) ends with one line, at most 24 and then one every 10 s, saying how far it got:
+`stations: player P's craft of recipe 0xR at station S: <stage>; made` (or `; not made (game code C)`). The stages:
+paid N item(s) from linked sources or opted-in station outputs; covered by the bag and the Magic chests; short by N;
+rolled back after a failed take; left to the game with the adapter's reason (another login's links, a transaction that
+did not check out, ...); or **refused without reaching the recipe payment**, when the game's own checks stopped it first
+(a recipe requirement such as workshop, shelter, level, comfort or progress, or the station's props) and no crafting
+source was asked. A press that leaves no such line never reached the server's craft (the client did not send it, or
+the server dropped the event before crafting). It needs kiln.gameplay's craft hook, which kiln.stations requests once
+a link or an opt-in exists. On a hosting client the client world's own dry runs (one per recipe the crafting menu
+counts) have their own few lines and no longer use up the ones above.
 
 Tested: `stations_test.cpp` (the order, the lenders, all or nothing, a fault or a remainder after a take) and the lab
 test `mods/tests/station-craft-test` on a dedicated server (33 PASS: [docs/re/stations.md §10.6](../../re/stations.md#106-lab-dev29-sc2)).
@@ -694,9 +707,9 @@ crafting station of that recipe (for copper bars, the Forge). Stand by the produ
 (kiln.log: `kiln.stations: station N lends its outputs as crafting stock`). Keep the bag and the Magic chests short of
 one craft of the recipe you test by less than the station's finished stack. Startup lines to find in kiln.log first:
 server or host `stations: reads on, fill on, ..., craft sources on`, then at the first opt-in `stations: a station is
-opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: the crafting menu counts opted-in station
-outputs when a Kiln server sends them`. A line `stations: station outputs in a craft are off: ...` or `the crafting menu
-does not count station outputs here: ...` means a check below cannot pass; note its reason.
+opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: the crafting menu counts crafting sources
+(linked sources, opted-in station outputs) when a Kiln server sends them`. A line `stations: station outputs in a craft are off: ...` or `the crafting menu
+does not count crafting sources (linked sources, station outputs) here: ...` means a check below cannot pass; note its reason.
 
 - **C7** The station screen's fill buttons (step 1, a Kiln client, 0.2.0-dev.29.19). A forge whose recipe needs the lent
   item (2 charcoal + 2 metal scraps: a charcoal kiln with 20 finished charcoal opted in, the bag and the Magic chests
@@ -724,9 +737,9 @@ does not count station outputs here: ...` means a check below cannot pass; note 
   greys again. Close the screen: client kiln.log `crafting stock cleared`; reopen it: the buttons follow the new stock.
 - **C8** Hosting, Kiln client. Open the crafting station's menu and pick the recipe. Expected: its count and craft button
   allow one craft that the bag and the chests alone could not (kiln.log: `crafting stock from the server: N item(s)` and
-  `the crafting menu's count for recipe 0x... raised 0 -> 1 by station outputs`). Craft it. Expected: it completes; the
+  `the crafting menu's count for recipe 0x... raised 0 -> 1 by the server's crafting stock ...`). Craft it. Expected: it completes; the
   lending station's finished stack is lower by exactly the shortfall; its queued inputs are unchanged; the bag and the
-  Magic chests are empty of that item (they paid first); kiln.log `stations: a craft paid N from opted-in station outputs
+  Magic chests are empty of that item (they paid first); kiln.log `stations: a craft paid N from additional crafting sources
   (base B, payer P)` with N the shortfall. Then a recipe the outputs cannot finish either: its button stays greyed, and
   nothing moves. Close the menu: kiln.log `crafting stock cleared`.
 - **C9** A Kiln client joined to a dedicated server with Kiln, the same layout, the client's player in the base with the

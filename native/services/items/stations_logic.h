@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -1095,6 +1096,92 @@ inline Unlock unlock_verdict(bool always, int world, const std::vector<int>& pla
         if (p == 0) known = true;
     }
     return known ? Unlock::No : Unlock::Unknown;
+}
+
+// ---- one kiln.log line per player craft that crafting sources could matter to (GitHub #132 follow-up) ----
+// kiln.gameplay's CraftRecipe hook brackets each craft (kiln_stations_set_craft_context, kiln_stations_craft_done); the
+// payment adapter notes, on the same thread, how far the craft's payment got. The line says which stage stopped it:
+// the game's own checks before any payment, the adapter's reasons, or the payment itself. Never a client's claim.
+enum CraftTraceStage : uint8_t {
+    kTraceNone = 0,        // no payment was asked for during the craft
+    kTraceOtherPayer = 1,  // the game paid through another payer than the one crafting sources answer
+    kTraceIdle = 2,        // nothing linked to this payer and no station opted in
+    kTraceDropped = 3,     // the payer's links belong to an earlier login, or its player record could not be read
+    kTraceOtherWorld = 4,  // not the server world's transaction (its bases system is another world's)
+    kTraceTxRefused = 5,   // the server world's transaction, but its accessors did not check out
+    kTraceLeft = 6,        // left to the game for the reason in `why`
+    kTraceCovered = 7,     // the bag and the base's Magic chests cover it: the game's own payment
+    kTraceShort = 8,       // short even with linked sources and opted-in outputs (`from`: by how much): nothing taken
+    kTracePaid = 9,        // paid; `from`: items taken from linked sources and opted-in outputs
+    kTraceRollback = 10,   // a take faulted or a line stayed short after the takes: code 4, rolled back
+};
+struct CraftTrace {
+    bool active = false;
+    uint8_t stage = kTraceNone;
+    uint64_t from = 0;
+    const char* why = nullptr;  // kTraceLeft: a string literal
+};
+// A line only for a player's craft (operator 1..1023, not a station crafting into itself) while some crafting source
+// could pay it (a link registered for that player, or a station opted in).
+inline bool craft_trace_wanted(uint32_t op, uint32_t station, bool sources) {
+    return sources && op >= 1 && op <= kMaxPlayerEntity && op != station;
+}
+inline std::string craft_trace_text(const CraftTrace& t, uint32_t op, uint32_t recipe, uint32_t station, int32_t rc) {
+    char head[96];
+    if (station && station != op)
+        std::snprintf(head, sizeof head, "player %u's craft of recipe 0x%08x at station %u: ", op, recipe, station);
+    else
+        std::snprintf(head, sizeof head, "player %u's craft of recipe 0x%08x by hand: ", op, recipe);
+    char body[320];
+    const unsigned long long n = static_cast<unsigned long long>(t.from);
+    switch (t.stage) {
+    case kTraceNone:
+        if (rc == 0)
+            std::snprintf(body, sizeof body, "made without the recipe payment crafting sources answer (a free recipe, or the game's alternate payer)");
+        else
+            std::snprintf(body, sizeof body,
+                          "refused without reaching the recipe payment (game code %d; on the qualified builds the recipe function "
+                          "refuses with 4 before paying when one of the recipe's requirements fails: workshop, shelter, level, "
+                          "comfort or progress; 5 for the station's props); no crafting source was asked", static_cast<int>(rc));
+        return std::string(head) + body;
+    case kTraceOtherPayer:
+        std::snprintf(body, sizeof body, "paid through another payer than the recipe payment crafting sources answer; no crafting source was asked");
+        break;
+    case kTraceIdle:
+        std::snprintf(body, sizeof body, "nothing is linked to this payer and no station is opted in: the game's own payment");
+        break;
+    case kTraceDropped:
+        std::snprintf(body, sizeof body, "this player's linked sources were not used: they were registered under an earlier login, or the player's record could not be read");
+        break;
+    case kTraceOtherWorld:
+        std::snprintf(body, sizeof body, "not the server world's transaction: the game's own payment");
+        break;
+    case kTraceTxRefused:
+        std::snprintf(body, sizeof body, "the server world's craft transaction did not check out (its accessors): crafting sources were not asked");
+        break;
+    case kTraceLeft:
+        std::snprintf(body, sizeof body, "left to the game: %s", t.why ? t.why : "no reason recorded");
+        break;
+    case kTraceCovered:
+        std::snprintf(body, sizeof body, "covered by the bag and the base's Magic chests: the game's own payment");
+        break;
+    case kTraceShort:
+        std::snprintf(body, sizeof body, "short by %llu even with linked sources and opted-in station outputs: nothing taken", n);
+        break;
+    case kTracePaid:
+        std::snprintf(body, sizeof body, "paid %llu item(s) from linked sources or opted-in station outputs", n);
+        break;
+    case kTraceRollback:
+        std::snprintf(body, sizeof body, "a take from crafting sources failed: the craft was rolled back, nothing moved");
+        break;
+    default:
+        std::snprintf(body, sizeof body, "payment stage %u", static_cast<unsigned>(t.stage));
+        break;
+    }
+    char end[48];
+    if (rc == 0) std::snprintf(end, sizeof end, "; made");
+    else std::snprintf(end, sizeof end, "; not made (game code %d)", static_cast<int>(rc));
+    return std::string(head) + body + end;
 }
 
 }  // namespace kitems::stations
