@@ -128,7 +128,8 @@ pub fn diff(old: &Export, new: &Export, side: &str, old_exe: &str, new_exe: &str
             d.problems.push(format!("the {what} export is of exe {}, not {}", short(&e.exe_sha256), short(exe)));
         }
         let o = e.base.origin.trim();
-        if o.is_empty() || o == "none" || o == "unknown" || e.base.writer.trim().is_empty() {
+        let w = e.base.writer.trim();
+        if o.is_empty() || o == "none" || o == "unknown" || w.is_empty() || w == "unknown" {
             d.problems.push(format!("the {what} export does not say what its base is (origin {:?}, writer {:?}): a values diff is \
                                      never assumed to be of the game's own data", e.base.origin, e.base.writer));
         } else if !vanilla(&e.base) {
@@ -273,6 +274,8 @@ pub(crate) mod tests {
         let mut none = export(OLD, "100", "none", old_values());
         none.base.origin = "none".into();
         assert!(!diff(&none, &export(NEW, "101", "none", new_values()), "server", OLD, NEW).ok);
+        // writer "none" is the game's own data; a writer nobody can name is refused
+        assert!(!diff(&export(OLD, "100", "unknown", old_values()), &export(NEW, "101", "none", new_values()), "server", OLD, NEW).ok);
         // an archive writer's base: named, the diff still made
         let mut eml = export(NEW, "101", "kiln-eml", new_values());
         eml.base.token = Some("first-managed-unclassified".into());

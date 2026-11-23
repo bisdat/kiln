@@ -86,7 +86,7 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `update <name> [--no-start] [--timeout S]` | Stop (if running; remembers whether systemd ran it), back up, `steamcmd ... validate`, then `tools/sigport/sigdb_check.py` on the new exe with the deployed definitions: build id and exe sha256 before/after, symbols/constants that fail, features on and OFF, and what the policy does with this build. Starts again the same way it was running. On a new build without a verified record (Kiln deployed): `sigport port` from the cached old exe, the lab gate, and the verified record only when the port is complete, the definitions need no change and the gate is green, then the registry proof (docs/kiln/sigport.md). `--dry-run [--new-exe E] [--old E]`, `--no-port`, `--no-gate`, `--no-mark` |
 | `port <name> [--old E] [--new E] [--defs T] [--no-gate] [--mark]` | Port the symbols to the instance's exe and boot the lab gate; `--mark` writes the record on green |
 | `gate <name> [--baseline] [--tests a,b] [--gate-port N]` | Boot `<name>-gate` (copy of the instance, policy any, self tests) and compare with the baseline |
-| `regproof [<name>] [--side server\|client] [--tree T] [--new-exe E] [--old-exe E] [--evidence P]... [--out D] [--accept ROW]... [--first-build] [--mark]` | The registry proof of a game build: reflection diff, formula checks, the lab's round trip, values diff, alias check; writes the regmap record candidate (verified only when every step is green) into `--out`, keeps the id table and values export, and with `--mark` puts a verified record into the instance's `kiln/regmap/<side>/`. Exit 0 = verified. Without an instance: `--tree` and the files (`--new-refl`, `--old-refl`, `--record`, `--ids`, `--prev-ids`) ([sigport.md](sigport.md#the-registry-proof-kilnctl-regproof), [regmap/README.md](../../regmap/README.md)) |
+| `regproof [<name>] [--side server\|client] [--tree T] [--new-exe E] [--old-exe E] [--evidence P]... [--out D] [--accept ROW]... [--first-build] [--mark [--replace]]` | The registry proof of a game build: reflection diff, formula checks, the lab's round trip, values diff, alias check; writes the regmap record candidate (verified only when every step is green) into `--out`, keeps a verified proof's id table and values export, and with `--mark` puts a verified record into the instance's `kiln/regmap/<side>/` (`--replace`: over a verified one, kept as `.json.bak`). Exit 0 = verified. Without an instance: `--tree` and the files (`--new-refl`, `--old-refl`, `--record`, `--ids`, `--prev-ids`) ([sigport.md](sigport.md#the-registry-proof-kilnctl-regproof), [regmap/README.md](../../regmap/README.md)) |
 | `list` | Instances, ports, running or not |
 | `report [<name>] [--dir D] [--out FILE] [--print]` | A support report of an instance, a server or client folder, or (neither) the client Steam knows: one zip (`./kiln-report-<date>.zip`) with kiln.log, proxy.log, the state files, the profile, chain.ini, the receipt, listings of the folder and `summary.txt` with findings; home folder, user and machine names, Steam ids and IP addresses replaced. Prints the short summary. `--print`: summary.txt to the terminal, no zip. Only reads ([launcher/support-report.md](launcher/support-report.md)) |
 | `deploy <name> --bundle ZIP [--samples]` | Installs a runtime bundle instead of running deploy-server.sh: `kiln_manage::install` with the server components (`core`, `sigdb-server`, `admin`; `--samples` adds `samples`), receipt `kiln/.install.json`, then the instance's policy in `kiln/kiln.json` (in place). The tree equals deploy-server.sh's (tools/package/parity.sh) |
@@ -242,8 +242,10 @@ gate copy's and the instance's `kiln/data/content/registry/proof/`, the values d
 checked against the previous build's. The regmap record is verified only when every step ran green; a field the lab gave
 no evidence for is `unproven` (kept off, with its reason), one the build changed is `changed`. Id tables and values
 exports are kept per build in `$KILN_REGMAP_IDS` (default `~/.local/state/kiln/regmap-ids/`), never in the repository
-(kilnctl refuses an output or maintainer folder inside a Kiln checkout). `--first-build` waives the previous build;
-`--accept <registry.field>` takes a reflection change a human reviewed. Formats: [regmap/README.md](../../regmap/README.md).
+(kilnctl refuses an output or maintainer folder inside a Kiln tree; tables harvested from data folders are kept apart, in
+`<side>/harvested/`). The old build is the newest cached exe with a verified regmap record. `--first-build` waives the
+previous build where the side has none yet; `--accept <registry.field>` takes a reflection change a human reviewed;
+`--mark --replace` replaces a verified record. Formats: [regmap/README.md](../../regmap/README.md).
 
 ## Files kilnctl writes
 | Path | What |
@@ -257,7 +259,7 @@ exports are kept per build in `$KILN_REGMAP_IDS` (default `~/.local/state/kiln/r
 | `<backup_dir>/<name>-savegame-*.tar.gz` | `backup`, `update` (never pruned) |
 | `~/.local/state/kiln/<name>.run.log`, `<name>.sigdb.json` | `start` (detached runner output), `update` |
 | `~/.local/state/kiln/regproof/<name>/<sha12>-<time>/` | `regproof`, `update`, `port`: the proof's report, `NEXT.txt`, step reports, values changelog, the record candidate (`--out` instead) |
-| `~/.local/state/kiln/regmap-ids/<side>/ids-*.json`, `values-*.json` (`$KILN_REGMAP_IDS`) | `regproof`, `update`, `port`: id tables and values exports per game build (game names: outside any repository) |
+| `~/.local/state/kiln/regmap-ids/<side>/ids-*.json`, `values-*.json`, `harvested/ids-*.json` (`$KILN_REGMAP_IDS`) | `regproof`, `update`, `port`: a verified proof's id table and values export per game build (never overwritten), tables harvested from data folders (game names: outside any repository) |
 | `<dir>/kiln/regmap/server/<sha>.json`, `<dir>/kiln/data/content/registry/ids-server-<sha>.json` | `regproof --mark` / `update` (a verified record), the new build's id table when the instance runs it |
 
 Restore a backup with the server stopped: `tar -xzf <backup> -C <dir>` (replaces `savegame/`).

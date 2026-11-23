@@ -204,8 +204,9 @@ fn the_docs_describe_regproof_and_its_contracts() {
         }
     };
     check("docs/kiln/kilnctl.md", &["`regproof", "KILN_REGMAP_IDS", "registry-roundtrip", "registry-values", "--accept", "--first-build",
-                                    "regmap-ids", "regproof/<name>"]);
-    check("docs/kiln/sigport.md", &["kilnctl regproof", "registry proof", "unproven", "boot generation", "content/registry/proof"]);
+                                    "regmap-ids", "regproof/<name>", "--replace", "harvested/"]);
+    check("docs/kiln/sigport.md", &["kilnctl regproof", "registry proof", "unproven", "boot generation", "content/registry/proof", "--replace",
+                                    "green gate", "verified regmap record"]);
     check("regmap/README.md", &["kilnctl regproof", "KILN_REGMAP_IDS", "registry-roundtrip", "registry-values", "unproven", "\"reasons\"",
-                                "rawBefore", "bytesBefore", "\"base\"", "content/registry/proof"]);
+                                "rawBefore", "bytesBefore", "\"base\"", "content/registry/proof", "regmapDigest", "harvested/", "removal history"]);
 }

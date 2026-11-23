@@ -100,12 +100,13 @@ build folder; at run time kiln.content keeps the id table of the running build i
 `values-<side>-<exe sha256>.json`), harvests the tables kiln.content wrote into a lab's or instance's data folder
 (`<game>/kiln/data/content/registry/ids-<side>-<exe sha256>.json`) and deploys the new build's table there. The kept table
 is regmap_check.py's (its pins applied) plus kiln.content's entries regmap_check.py does not cover (loot entries, keyed
-`#<id>`; input categories). kilnctl refuses a maintainer or output folder inside a Kiln checkout: tables, entries and
-values hold the game's names and never go into the repository.
+`#<id>`; input categories). Only a verified proof keeps its tables and export, and a kept one is never overwritten;
+tables harvested from data folders are kept apart, under `<side>/harvested/`. kilnctl refuses a maintainer or output
+folder inside a Kiln tree: tables, entries and values hold the game's names and never go into the repository.
 
 ## The proof (`kilnctl regproof`)
 
-1. **Reflection diff**: the old and new exe's reflection (`tools/kfc/kfc.py --exe <copy> types --closure <root types>`),
+1. **Reflection diff**: the old and new exe's reflection (`tools/kfc/kfc.py --exe <the exe, read as data> types --closure <root types>`),
    per row the members its paths walk, the leaf types and the enum values it maps. Same, carried (offsets moved, the enum
    gained values) or new (resolves only on the new build) rows go on; a changed row is reviewed by a human, with a rename
    or move proposal where one fits (`--accept <registry.field>` after the review).
@@ -147,7 +148,16 @@ state/registry.json names it:
   "base": { "origin": "live", "writer": "none" },                    // + "token" when the archive writer has one
   "registries": { "items": { "game:...": { "maxStack": 20, "power": 31 } } } }
 ```
-An export whose base origin or writer is empty, `none` or `unknown` is refused.
+An export whose base origin is empty, `none` or `unknown`, or whose writer is empty or `unknown`, is refused (writer `none`
+is the game's own data, as shipped).
+
+**The old build** is the newest cached exe whose build has a verified regmap record (the instance's `kiln/regmap` or the
+tree), not sigport's baseline. Its record, from the tree or else the instance (marked there and not committed yet),
+carries the removal history and the pins: the candidate must carry every earlier removal and never give such an id
+again, and keep every earlier pin or retire its id. Without that record the proof blocks; `--first-build` waives it only
+where the side has no proven build yet. A row regmap/common marks unproven stays unproven with its reason whatever the lab
+shows: a round trip proves the mapping, not when the game reads the value. A list or reference write must change the
+game's members.
 
 **Alias deltas (D3).** The full name-to-GUID table is made at every start from the game's own data; a record keeps only
 what must not move, carried forward from the previous build's record:
