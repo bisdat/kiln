@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Qualify storage signatures on explicit read-only exe copies; never starts the game."""
+"""Qualify the player storage sigdb rows on read-only copies of the qualified exes; never starts the game.
+
+    python3 -I native/services/items/tests/storage_sigdb_test.py --server <enshrouded_server.exe> --client <enshrouded.exe>
+
+KILN_SERVER_EXE / KILN_CLIENT_EXE stand in for a missing --server / --client. The copies are read as files, never run,
+and are never part of the repository. Without a copy that side is skipped, with a message, and the exit code is 0. A
+copy from the environment that is another build is skipped too; a copy named on the command line must be the
+qualified build (EXPECTED), or the test fails. native/services/items/tests/run.sh runs it after the Wine tests.
+"""
 import argparse
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import sys
@@ -37,15 +46,44 @@ def check(ok, text):
         raise AssertionError(text)
     print('PASS ' + text, flush=True)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--server', required=True)
-    parser.add_argument('--client', required=True)
+ENV = {'server': 'KILN_SERVER_EXE', 'client': 'KILN_CLIENT_EXE'}
+
+
+def copies():
+    """{side: (path, named on the command line)} of the exe copies that exist; the others are reported as skipped."""
+    parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    parser.add_argument('--server', help='read-only copy of enshrouded_server.exe (else $KILN_SERVER_EXE)')
+    parser.add_argument('--client', help='read-only copy of enshrouded.exe (else $KILN_CLIENT_EXE)')
     args = parser.parse_args()
+    found = {}
+    for side, env in ENV.items():
+        named = getattr(args, side)
+        path = named or os.environ.get(env)
+        if not path:
+            print(f'SKIP {side}: no exe copy (--{side} or {env})', flush=True)
+        elif not Path(path).is_file():
+            if named:
+                parser.error(f'--{side} {path}: no such file')
+            print(f'SKIP {side}: {env}={path} is not a file', flush=True)
+        else:
+            found[side] = (Path(path), bool(named))
+    return found
+
+
+def main():
+    found = copies()
+    ran = []
     for side in EXPECTED:
-        path = getattr(args, side)
+        if side not in found:
+            continue
+        path, named = found[side]
         sha, addresses = EXPECTED[side]
-        check(hashlib.sha256(Path(path).read_bytes()).hexdigest() == sha, side + ' exact build identity')
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != sha and not named:
+            print(f'SKIP {side}: {path} is build {actual[:12]}; these rows are qualified on {sha[:12]}', flush=True)
+            continue
+        ran.append(side)
+        check(actual == sha, side + ' exact build identity')
         doc = next(d for name, d, _ in compose(side) if name == 'player-storage.json')
         image = Image(path)
         symbols, constants, features = Resolver(image, doc).run()
@@ -98,7 +136,12 @@ def main():
             altered = copy.copy(image)
             altered.img = bytes(raw)
             check(not Resolver(altered, doc).run()[2]['items.storage'], f'{side} disagreeing {name} disables storage')
-    print(f'player storage sigdb: {checks} passed, 0 failed')
+    if not ran:
+        print('player storage sigdb: skipped, no qualified exe copies. Run it with --server <enshrouded_server.exe> '
+              '--client <enshrouded.exe> (or KILN_SERVER_EXE / KILN_CLIENT_EXE): read-only copies, never run.')
+        return
+    skipped = [side for side in EXPECTED if side not in ran]
+    print(f'player storage sigdb: {checks} passed, 0 failed' + (f'; {", ".join(skipped)} skipped' if skipped else ''))
 
 if __name__ == '__main__':
     main()

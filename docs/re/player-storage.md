@@ -35,6 +35,14 @@ Evidence corpus: `/mnt/Dongus/kiln-wave/dev30/out/player-storage/`. `decomp/` co
 
 All entry patterns match uniquely on **each** image, not merely by assuming that same-svn code was unchanged. `items.storage` requires every declared storage entry, field probe and constant. A missing probe, insufficient votes or disagreeing captures disables the feature.
 
+`native/services/items/tests/storage_sigdb_test.py` checks all of this on read-only copies of the two qualified exes, which are never part of the repository. Like the other exe-dependent sigdb tests (`rules_sigdb_test.py`, `chat_sigdb_test.py`), it reads the copies as files and never runs them:
+
+```
+python3 -I native/services/items/tests/storage_sigdb_test.py --server <enshrouded_server.exe> --client <enshrouded.exe>
+```
+
+`KILN_SERVER_EXE` / `KILN_CLIENT_EXE` stand in for a missing argument, and `native/services/items/tests/run.sh` runs the test that way after its Wine tests. A side without a copy, or with an environment copy of another build, is skipped with a message and exit code 0; a copy named on the command line must be the qualified build.
+
 ### Character layout
 
 Each of these constants is captured independently from the character reader and writer, with at least two agreeing votes.
