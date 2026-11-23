@@ -28,6 +28,8 @@ public sealed record ClothSphereBlock(double X, double Y, double Z, double Radiu
 
 /// <summary>A capsule collider of cloth: two spheres and the space between them. Both ends follow one joint (the game keeps one skin record per
 /// capsule), and their centres differ.</summary>
+/// <param name="A">One end: a sphere with its centre, radius and joint.</param>
+/// <param name="B">The other end: a sphere at a different centre that follows the same joint as <paramref name="A"/>.</param>
 public sealed record ClothCapsuleBlock(ClothSphereBlock A, ClothSphereBlock B) : ClothColliderBlock;
 
 /// <summary>

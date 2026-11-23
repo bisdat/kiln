@@ -31,6 +31,15 @@ public enum NpcBodyBuildState
 /// otherwise <see cref="Reason"/> says why. <see cref="BlockKey"/> is <c>mod:block</c>. <see cref="Template"/>, <see cref="Model"/> and
 /// <see cref="Graph"/> are the clone, the model and the animation graph the build used (empty when it has none);
 /// <see cref="Generation"/> is the boot build's generation for the body (0 when none).</summary>
+/// <param name="Ok">True only when <paramref name="State"/> is <see cref="NpcBodyBuildState.Ready"/>.</param>
+/// <param name="Reason">Why the body is not ready (the boot build's refusal, <c>NoDefinition</c>, or a restart it waits for); null when Ok.</param>
+/// <param name="State">Where the body stands: ready, failed, waiting for a restart, or removed.</param>
+/// <param name="ModId">The id of the mod that defines the NPC block.</param>
+/// <param name="BlockKey">The NPC block's key, <c>mod:block</c>.</param>
+/// <param name="Template">The clone the build used; empty when it has none.</param>
+/// <param name="Model">The model the build used; empty when it has none.</param>
+/// <param name="Graph">The animation graph the build used; empty when it has none.</param>
+/// <param name="Generation">The boot build's generation for the body; 0 when none.</param>
 public sealed record NpcBodyBuildResult(bool Ok, string? Reason, NpcBodyBuildState State, string ModId, string BlockKey, Guid Template,
     Guid Model, Guid Graph, ulong Generation) : IKilnResult;
 
@@ -317,5 +326,6 @@ public sealed class NpcBodyBuildChangedEvent : KilnEvent
     /// <summary>Raised on a game client's main thread (else on a dedicated server's tick thread).</summary>
     public bool ClientSide { get; }
 
+    /// <summary>One line for logs: the block key, the state before and after, and the generation.</summary>
     public override string ToString() => $"NPC body {After.BlockKey}: {Before.State} -> {After.State} (generation {After.Generation})";
 }

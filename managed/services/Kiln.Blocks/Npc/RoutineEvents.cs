@@ -34,6 +34,7 @@ public sealed class RoutineAssignmentChangedEvent : KilnEvent
     /// <summary>The world is stopping: see the remarks.</summary>
     public bool Teardown { get; }
 
+    /// <summary>One line for logs: the villager, the plan, the assignment before and after, and the reason.</summary>
     public override string ToString() => $"routine of villager 0x{After.NpcId:x8} ({After.Key}): {Before?.Assignment.ToString() ?? "none"} -> {After.Assignment} ({Reason})";
 }
 
@@ -66,6 +67,7 @@ public sealed class RoutineTaskChangedEvent : KilnEvent
     public uint NpcId { get; }
     /// <summary>The plan's identity, <c>&lt;mod&gt;:&lt;name&gt;</c>.</summary>
     public string Key { get; }
+    /// <summary>The plan's Version (the one its definition declares) of the assignment the task belongs to.</summary>
     public uint PlanVersion { get; }
     /// <summary>The assignment's revision when the change was reported.</summary>
     public ulong Revision { get; }
@@ -73,7 +75,9 @@ public sealed class RoutineTaskChangedEvent : KilnEvent
     public ulong Invocation { get; }
     /// <summary>The task; null when there is none.</summary>
     public RoutineTask? Task { get; }
+    /// <summary>The task's state before the change.</summary>
     public RoutineTaskState From { get; }
+    /// <summary>The task's state after the change.</summary>
     public RoutineTaskState To { get; }
     /// <summary>Why it was refused or suspended (<c>NativeSleepNotCurrentlyAllowed</c>, <c>TaskFailed</c>, <c>NoTransition</c>,
     /// <c>SafetyInterrupt</c>, <c>Interrupted</c>, <c>Replaced</c>, <c>Removed</c>, <c>WorldStopped</c>); else null.</summary>
@@ -81,5 +85,6 @@ public sealed class RoutineTaskChangedEvent : KilnEvent
     /// <summary>The world is stopping.</summary>
     public bool Teardown { get; }
 
+    /// <summary>One line for logs: the task's serial, the villager, the plan, the state change and the reason if any.</summary>
     public override string ToString() => $"routine task {Invocation} of villager 0x{NpcId:x8} ({Key}): {From} -> {To}{(Reason is null ? "" : $" ({Reason})")}";
 }
