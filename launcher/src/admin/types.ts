@@ -1,5 +1,5 @@
 // Result shapes of Kiln.Admin's ops (mods/Kiln.Admin/Ops*.cs is the source of truth).
-import type { AdminPos } from "../api/admin";
+import type { AdminPos, KapRestart } from "../api/admin";
 
 export interface AdminInfo {
   admin: string;
@@ -14,6 +14,54 @@ export interface AdminInfo {
   bridge?: string;
   ops: string[];
   topics: string[];
+  /** since 0.2.0-dev.30.9 */
+  restart?: KapRestart & { request: RestartRequest | null };
+}
+
+// restart (server_restart, server_restart_cancel; admin-protocol.md section 11)
+export interface RestartRequest {
+  state: "counting" | "saving" | "stopping" | "failed" | "canceled";
+  by: string;
+  requested: string;
+  secondsLeft: number;
+  message: string | null;
+  error: string | null;
+  /** how the stop was raised (e.g. "kernelbase.dll!CtrlRoutine") */
+  via: string | null;
+  restart: KapRestart;
+}
+
+// one-time login (login_mint, login_redeem; KAP only)
+export interface LoginMintResult {
+  secret: string;
+  consumer: string;
+  expiresAt: string;
+  ttlS: number;
+}
+export interface LoginRedeemResult {
+  role: "owner";
+  consumer: string;
+  label: string | null;
+  mintedBy: string;
+  mintedAt: string;
+}
+
+/** The "metrics" topic's push data (every 2 s to subscribers). */
+export interface AdminMetrics {
+  /** Unix ms at the window's end */
+  at: number;
+  windowS: number;
+  steps: number;
+  stepsPerS: number;
+  /** from one step's start to the next */
+  frameMs: { avg: number; p95: number; max: number };
+  /** one step itself (Pre to Post); null when none finished in the window */
+  tickMs: { avg: number; p95: number; max: number } | null;
+  memory: { workingSet: number; managedHeap: number };
+  /** percent: 100 = one core; null on the first push */
+  cpu: { percent: number | null; cores: number };
+  gcPauseMs: number;
+  players: number | null;
 }
 
 export interface StatusResult {
@@ -279,19 +327,43 @@ export interface PermissionCheck {
 export interface CommandInfo {
   name: string;
   aliases?: string[];
+  usage?: string;
   description?: string;
+  /** the owning mod's id ("kiln" for Kiln's own) */
   owner?: string;
   node?: string;
+  /** the command's level: everyone, admin or console */
   permission?: string;
+  typed?: boolean;
   usageLines?: string[];
   tree?: CommandNode;
 }
+/** A node of a typed command's tree; the form fields are since 0.2.0-dev.30.9 (admin-protocol.md section 11). */
 export interface CommandNode {
-  kind?: string;
+  kind?: "literal" | "argument" | string;
   name?: string;
+  executable?: boolean;
+  description?: string;
+  aliases?: string[];
+  /** a subcommand's own permission node, and its level */
+  permission?: string;
+  level?: "everyone" | "admin" | "console" | string;
+  /** argument: the line may end before it */
+  optional?: boolean;
+  /** argument: the value used when it is left out */
+  default?: number | boolean | string | null;
   type?: string;
   describe?: string;
   options?: string[];
+  min?: number;
+  max?: number;
+  /** duration: "s", time: "h" */
+  unit?: string;
+  greedy?: boolean;
+  quotable?: boolean;
+  many?: boolean;
+  selectors?: string[];
+  relative?: boolean;
   children?: CommandNode[];
 }
 export interface CompleteResult {
@@ -307,6 +379,8 @@ export interface CommandRunResult {
   parseError: boolean | string | null;
   error: string | null;
   output: string[];
+  /** the source it ran as ("dashboard", or the request's source); since 0.2.0-dev.30.9 */
+  source?: string;
 }
 
 // mods

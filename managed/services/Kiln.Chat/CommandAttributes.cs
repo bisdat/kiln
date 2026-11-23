@@ -144,6 +144,12 @@ internal static class CommandMethods
             if (p.HasDefaultValue || p.IsOptional) Executes(node, handler);
             var arg = Commands.Argument(p.Name ?? $"arg{i}", TypeOf(m, p));
             if (p.GetCustomAttribute<CommentAttribute>() is { } c) arg.Describe(c.Text);
+            if (p.HasDefaultValue)
+            {
+                var d = p.DefaultValue;
+                arg.Default = d is not null && p.ParameterType.IsEnum && d.GetType() != p.ParameterType ? System.Enum.ToObject(p.ParameterType, d) : d;
+                arg.HasDefault = true;
+            }
             Then(node, arg);
             node = arg;
         }

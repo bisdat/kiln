@@ -60,7 +60,8 @@ internal static partial class Ops
                 })]),
             };
         });
-        bridge.Register("crash_reports", req =>
+        // Only reads files: on the thread pool, so a busy disk never holds up a server step.
+        bridge.RegisterAsync("crash_reports", req => Task.Run<JsonNode?>(() =>
         {
             var dir = CrashDirectory();
             if (req["name"]?.GetValue<string>() is { Length: > 0 } name)
@@ -78,7 +79,7 @@ internal static partial class Ops
             {
                 ["name"] = f.Name, ["bytes"] = f.Length, ["time"] = f.LastWriteTimeUtc.ToString("O"),
             })]);
-        });
+        }));
     }
 
     static partial void StateMods(JsonObject state)
