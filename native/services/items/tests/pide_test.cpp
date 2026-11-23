@@ -60,9 +60,10 @@ int main() {
     check(plain.perks[1] == 0 && plain.level[2] == 30 && plain.count() == 3, "ordinary loot and crafting spawns are unchanged");
     Fixture equipped;
     uint8_t initial_state[20]{}; initial_state[0x0e]=0x40;
+    const uint64_t equipped_cell=KILN_SLOT_ID(100,0); std::memcpy(initial_state,&equipped_cell,8);
     equipped.list[3]={0x3a2fac75u,0,initial_state,20};
     *reinterpret_cast<uint64_t*>(equipped.frame+32)=4;
-    PideOptions equip_options; equip_options.item=7; equip_options.equipped=true;
+    PideOptions equip_options; equip_options.item=7; equip_options.equipped=true; equip_options.equipped_slot=equipped_cell;
     pide_commit(&equipped,&spawn,equip_options);
     check(initial_state[0x0e]==0x48 && !t_equipped, "GiveEquip: initial ItemState is equipped before spawn; the scope ends at commit");
     initial_state[0x0e]=0x40; spawn(&equipped);
@@ -70,6 +71,30 @@ int main() {
     equip_options.item=99; pide_commit(&equipped,&spawn,equip_options);
     check(initial_state[0x0e]==0x40, "GiveEquip: another item cannot inherit IsEquipped");
     equip_options.item=7;
+    bool nested_equipped = false, concurrent_equipped = false;
+    pide_commit(&nested_equipped, [](void* arg) {
+        Fixture nested;
+        uint8_t nested_state[20]{};
+        uint64_t nested_cell = KILN_SLOT_ID(101, 2);
+        std::memcpy(nested_state, &nested_cell, 8);
+        nested.list[3]={0x3a2fac75u,0,nested_state,20};
+        *reinterpret_cast<uint64_t*>(nested.frame+32)=4;
+        spawn(&nested); // another same-item creation reached re-entrantly during this commit
+        *static_cast<bool*>(arg) = (nested_state[0x0e] & 8) != 0;
+    }, equip_options);
+    check(!nested_equipped, "GiveEquip: a nested same-item creation in another cell cannot inherit IsEquipped");
+    pide_commit(&concurrent_equipped, [](void* arg) {
+        std::thread worker([arg] {
+            Fixture other;
+            uint8_t other_state[20]{};
+            other.list[3]={0x3a2fac75u,0,other_state,20};
+            *reinterpret_cast<uint64_t*>(other.frame+32)=4;
+            spawn(&other);
+            *static_cast<bool*>(arg) = (other_state[0x0e] & 8) != 0;
+        });
+        worker.join();
+    }, equip_options);
+    check(!concurrent_equipped, "GiveEquip: a concurrent same-item creation cannot inherit IsEquipped");
     try { pide_commit(&equipped,&fail_commit,equip_options); } catch (...) {}
     check(!t_equipped, "GiveEquip: a fault clears the initial-equipped scope");
     Fixture gear;

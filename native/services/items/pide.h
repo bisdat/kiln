@@ -21,6 +21,7 @@ struct PideOptions {
     uint32_t dye = 0;          // KILN_ITEMS_DYE
     float durability = 1.0f;   // KILN_ITEMS_DURABILITY: 0..1
     bool equipped = false;     // GiveEquip only: initial ItemState.IsEquipped, before its queued spawn
+    uint64_t equipped_slot = 0; // exact final cell: re-entrant creations of the same item must not inherit it
 };
 
 bool pide_install(const KilnApi* api, KilnOwner owner);  // feature items.pide_options; false: the options are refused

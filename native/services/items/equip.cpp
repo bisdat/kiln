@@ -419,9 +419,9 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
 
 bool run_equip(const Access& a, KilnEntity p, const Request& q, uint8_t* tx, KilnItemsEquipResult* res,
                unsigned long* code) {
+    if (q.give.size) return run_give_equip(a, q.give, tx, res, code);
     __try {
-        if(q.give.size) give_equip_run(a,q.give,tx,res);
-        else equip_impl(a, p, q.r, tx, res);
+        equip_impl(a, p, q.r, tx, res);
         return true;
     } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -592,9 +592,10 @@ void KILN_CALL each(KilnProgramCtx* ctx, uint64_t* it, KilnEntity player, void*)
             NoteLease note;  // 07 S7: what a component watch is told (only while something is watched)
             if (note_wanted()) note.begin(a, &player, 1);
             if (!run_equip(a, player, batch[i], g_tx, &res, &code)) {
-                abandon_tx(g_tx);
+                if (!batch[i].give.size) abandon_tx(g_tx);
                 res.status = KILN_ITEMS_UNAVAILABLE;
-                std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
+                if (!batch[i].give.size)
+                    std::snprintf(res.message, sizeof res.message, "the game's equip faulted (0x%08lx)", code);
                 char b[160];
                 std::snprintf(b, sizeof b, "the game's %s faulted (0x%08lx) for player %u",
                               (batch[i].r.flags & KILN_ITEMS_EQUIP_UNEQUIP) ? "unequip" : "equip", code, player);

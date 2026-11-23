@@ -37,6 +37,9 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
 - Always all-or-nothing: no partial give, no duplicated or missing item on an ordinary refusal. Count is 1..65535,
   must fit one item stack, and must be **1 for gear**. `From` is None. Ordinary `Equip`/`Unequip` keep
   `ReplacedCount = 0`. A successful committed GiveEquip posts one `EquipChangedEvent` on the tick thread.
+  A fault inside the game's commit is different from an ordinary refusal: the result is `Unavailable`, equipment
+  calls are disabled until restart, and the reason warns that items may have changed. Kiln never attempts an unsafe
+  second rollback after item-instance creation has begun.
 - **Limitation:** giving a backpack item into `EquipmentSlot.Backpack` is refused with
   "backpack items can't be given straight into the bag slot yet". Its nested inventory is only created at commit;
   this operation does not guess how to transfer backpack contents. Other equipment slots, including vanity, are supported.

@@ -6,9 +6,21 @@
 #include <cstring>
 
 #include "../equip_logic.h"
+#include "../qualified_code.h"
 
 namespace {
 int failures = 0;
+uint32_t code_kind = KILN_CODE_ORIGINAL;
+bool bad_original = false;
+KilnResult KILN_CALL original_code(uintptr_t, void* out, size_t size) {
+    if (size != sizeof(kitems::kSelectEquipmentCode)) return KILN_ERR_INVALID_ARGUMENT;
+    std::memcpy(out, kitems::kSelectEquipmentCode, size);
+    if (bad_original) static_cast<uint8_t*>(out)[0] ^= 1;
+    return KILN_OK;
+}
+KilnResult KILN_CALL live_code(uintptr_t, size_t, uint32_t* state, uint64_t* generation) {
+    *state=code_kind; *generation=1; return KILN_OK;
+}
 void check(bool ok, const char* what) {
     std::printf("%s %s\n", ok ? "PASS" : "FAIL", what);
     failures += !ok;
@@ -36,6 +48,28 @@ int main() {
     static_assert(sizeof(KilnItemsEquipRequest) == 32 && sizeof(KilnItemsEquipResult) == 256 &&
                       sizeof(KilnItemsEquipStatus) == 192,
                   "the v5 records keep their sizes (the managed mirror depends on them)");
+
+    KilnHooksApi hooks{}; hooks.header.size=sizeof hooks;
+    hooks.read_original=&original_code; hooks.code_state=&live_code;
+    check(qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: the verified original helper entry is callable");
+    code_kind=KILN_CODE_MANAGED;
+    check(qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: a registry-owned helper detour is callable");
+    code_kind=KILN_CODE_FOREIGN;
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: a foreign-patched helper is refused");
+    code_kind=KILN_CODE_UNKNOWN;
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: unknown helper code is refused");
+    code_kind=KILN_CODE_ORIGINAL; bad_original=true;
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: a helper whose file bytes differ is refused");
+    bad_original=false;
+    hooks.header.size=offsetof(KilnHooksApi,code_state);
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: a short hooks table cannot qualify a helper");
+    hooks.header.size=sizeof hooks; hooks.read_original=nullptr;
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: absent original-code reads refuse the helper");
+    hooks.read_original=&original_code; hooks.code_state=nullptr;
+    check(!qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: absent live-code qualification refuses the helper");
+    hooks.code_state=&live_code;
+    check(!qualified_code(nullptr,1,kSelectEquipmentCode) && !qualified_code(&hooks,0,kSelectEquipmentCode),
+          "GiveEquip: no hooks service or helper address is never callable");
 
     // SlotSelection.equipment: 0-16 in order, then HookShot 21, Glider 22, Backpack 23 at 17-19
     bool round = true;

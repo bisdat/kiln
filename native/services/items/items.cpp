@@ -37,6 +37,7 @@
 #include "names.h"
 #include "rename.h"
 #include "pide.h"
+#include "qualified_code.h"
 #include "sets.h"
 #include "setsvc.h"
 #include "toolwear.h"
@@ -2184,7 +2185,8 @@ void resolve() {
                  static_cast<unsigned long long>(E.tx_guard_flags), static_cast<unsigned long long>(E.tx_empty_state),
                  static_cast<unsigned long long>(E.tx_touched_count));
     }
-    E.give_equip_ok=E.sets_ok && E.move_ok && feat("items.give_equip") && sym("items/SelectEquipment",&E.select_equipment);
+    E.give_equip_ok=E.sets_ok && E.move_ok && feat("items.give_equip") && sym("items/SelectEquipment",&E.select_equipment) &&
+        qualified_code(kiln::hooks_v2(g_api), reinterpret_cast<uintptr_t>(E.select_equipment), kSelectEquipmentCode);
     if (E.tx_ok) {
         g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE,
                                                   PAGE_READWRITE));

@@ -231,8 +231,8 @@ struct FuelJob {
 bool verify_access(const uint64_t* it, const int* singleton_slots, const int* acc_slots, const int* event_slots,
                    void* ctx, Access* a, bool* ok, char* why, unsigned long* code);
 
-// Unprotected: called inside the equipment program's SEH guard, with its current player entity.
-void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* result);
+// With the equipment program's current player entity; owns fault cleanup and never rolls back after commit starts.
+bool run_give_equip(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* result, unsigned long* code);
 
 // Runs one give / take inside the program update. tx: E.tx_size bytes, 16-aligned.
 bool run_job(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res, unsigned long* code);

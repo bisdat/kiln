@@ -1475,10 +1475,20 @@ NoteLease::~NoteLease() {
 }
 
 
+namespace {
+struct GiveEquipTxState {
+    bool constructed = false;
+    bool finalizing = false;
+    bool freeing = false;
+    bool committing = false;
+};
+}
+
 // Create at the FINAL slot. InventoryCommit creates a pide at its op-0 slot: moving a pending creation to another
 // slot first is unsafe. Evacuate the old stack before add, then Equip sees source == destination and still runs its
 // type checks and selection update. No backpack slot is needed for an empty target or TAKE.
-void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res) {
+static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res,
+                           GiveEquipTxState* state) {
     auto fail = [&](int status, const char* why) {
         res->status = status;
         std::snprintf(res->message, sizeof res->message, "%s", why);
@@ -1539,18 +1549,32 @@ void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t
         }
         if(!backpack) return fail(KILN_ITEMS_NO_ROOM,"no free slot in the player's backpack for the replaced item");
     }
+    const uint32_t old_pide = pide_of(old);
+    const auto* old_info = old_pide && !take ? E.item_find(old.item, a.items) : nullptr;
+    if (old_pide && !take && !old_info) return fail(KILN_ITEMS_REFUSED, "the replaced equipment's item type cannot be read");
     alignas(16) uint8_t setup[kSetupBlock];
     fill_setup_for(a,r.player,0x80,setup); // no merge, no notification or InventoryFull before a possible rollback
-    E.tx_ctor(tx); E.tx_init(tx,setup);
+    E.tx_ctor(tx); state->constructed=true; E.tx_init(tx,setup);
     Result12 out{};
     bool ok=true;
-    const char* why="the game refused evacuating the old equipment";
-    if(old.item) {
+    const char* why="the game refused deselecting the old equipment";
+    if (old_pide && !take) {
+        // Transfer's op5 changes containment/owner, not IsEquipped. Op7 is the game's only unequip-state write.
+        E.select_equipment(&out,tx,1,r.player,selection,r.equipment_slot,target,old_info,old_pide);
+        ok=out.error==0;
+    }
+    if(ok && old.item) {
+        why="the game refused evacuating the old equipment";
         if(take) E.remove_items(&out,tx,r.player,old.item,target,old.count);
         else E.slot_transfer(&out,tx,backpack,target,0);
         ok=out.error==0 && (take ? out.value==0 : out.value==old.count);
         const auto* st=stack_at(a,target);
         ok=ok && st && rd<uint32_t>(st,4)==0;
+        if (ok && !take) {
+            const auto* moved=stack_at(a,backpack);
+            ok=moved && rd<uint32_t>(moved,0)==old.item && rd<uint32_t>(moved,4)==old.count &&
+                rd<uint32_t>(moved,8)==old.pide;
+        }
     }
     if(ok) {
         OptU32 level{}; OptU8 rarity{}; OptF32 fuel{};
@@ -1577,14 +1601,22 @@ void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t
         ok=ok && st && rd<uint32_t>(st,0)==r.item && rd<uint32_t>(st,4)==r.count;
         why="the game refused equipping the new stack";
     }
+    if (ok && backpack) {
+        const auto* moved=stack_at(a,backpack);
+        ok=moved && rd<uint32_t>(moved,0)==old.item && rd<uint32_t>(moved,4)==old.count && rd<uint32_t>(moved,8)==old.pide;
+        if (!ok) why="the replaced stack moved before the equipment commit";
+    }
     const bool guarded=(tx[E.tx_guard_flags]&0x40)!=0 ||
         (rd<uint64_t>(tx,E.tx_empty_state)==0 && rd<uint64_t>(tx,E.tx_touched_count)!=0);
     if(ok && guarded) { ok=false; why="the inventory commit would roll back"; }
     res->game_error=out.error;
+    state->finalizing=true;
     if(ok && !dry) {
-        PideOptions options; options.item=r.item; options.equipped=true;
+        PideOptions options; options.item=r.item; options.equipped=true; options.equipped_slot=target;
+        state->committing=true;
         pide_commit(tx,E.commit,options);
     } else E.rollback(tx);
+    state->freeing=true;
     E.free_arrays(tx);
     if(!ok) return fail(KILN_ITEMS_REFUSED,why);
     res->item=r.item; res->to=target; res->from=0;
@@ -1595,7 +1627,8 @@ void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t
         const auto* st=stack_at(a,target);
         const auto* sel=static_cast<const uint8_t*>(other(a,A_SLOTSEL,r.player));
         if(!st || rd<uint32_t>(st,0)!=r.item || rd<uint32_t>(st,4)!=r.count ||
-           !sel || (rd<uint64_t>(sel,index*8)&0xffffffffffull)!=target || (gear && !rd<uint32_t>(st,8))) {
+           !sel || (rd<uint64_t>(sel,index*8)&0xffffffffffull)!=target ||
+           (gear && (!rd<uint32_t>(st,8) || rd<uint32_t>(st,8)==UINT32_MAX))) {
             // Invariant failure: the caller disables equipment; never roll back after commit.
             return fail(KILN_ITEMS_UNAVAILABLE,"the committed equipment did not match the request; equipment is off until restart");
         }
@@ -1604,6 +1637,25 @@ void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t
         if(take && res->replaced_pide) stamp_destroyed(res->replaced_pide,old.item);
     }
     res->status=KILN_ITEMS_DONE;
+}
+
+bool run_give_equip(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* result, unsigned long* code) {
+    GiveEquipTxState state{};
+    __try { give_equip_run(a, r, tx, result, &state); return true; }
+    __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        // A preflight fault has no transaction. A commit may have already queued instances: never roll it back.
+        if (state.constructed && !state.finalizing) {
+            __try { E.rollback(tx); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        if (state.constructed && !state.freeing) {
+            __try { E.free_arrays(tx); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        result->status=KILN_ITEMS_UNAVAILABLE;
+        std::snprintf(result->message,sizeof result->message,
+            state.committing ? "the inventory commit or its cleanup faulted (0x%08lx); items may have changed; equipment is off until restart"
+                             : "the give-and-equip transaction faulted (0x%08lx); equipment is off until restart", *code);
+        return false;
+    }
 }
 
 }  // namespace kitems
