@@ -33,7 +33,8 @@ profiles are unchanged. The merge's six conflicts and what each kept: the fork's
 accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
 adds next to Kiln. 0.2.0-dev.30.7 pins fork branch `kiln-30.7-fixes` on top of `5bb133f0`: a working baseline that is not
 whole or not the source of the game files is never restored, and EML manifests may leave optional metadata null
-(section 5.0).
+(section 5.0). 0.2.0-dev.31 pins fork branch `kiln-dev31/bodyheat-signed` (`465aad9f`, on top of `90b76e3e`, the
+30.8/30.9 pin): BodyHeat's attribute calculation runs as the resource's sint32 (section 5.0).
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -202,6 +203,19 @@ such as `state/extra.rs:287`, so no folder of the player's or of the build machi
 is SF's own failure, so the pass is not run again
 without the package; the recovery is upstream's (the saved baseline back, the game starts without asset mods). Tests
 (host and Wine): `name_failing_mod`, `report_startup_panic`, `kiln_retry_tests`.
+
+**BodyHeat's calculation is signed** (fork branch `kiln-dev31/bodyheat-signed`, `465aad9f`, 0.2.0-dev.31). SF
+Survival's Infinite Frost Timer (`BodyHeat_Min = BodyHeat_Max` through `runtime.overrides.attribute`) always answered
+"signedness-dependent program with conflicting resource/storage scalar types": the attribute resource types the BodyHeat
+root (0xC7AEAF1D) `sint32`, its component `keen::ecs::BodyHeat` stores `keen::uint32` (a `UInt32Attribute`), and its
+programs are sign-dependent (Clamp, and BodyHeat_Max's ScaleToNewMax), so `bind_storage` refused every calculation of
+it. The engine runs that root on its signed interpreter only (`docs/re/combat.md`, "BodyHeat runs on the signed
+interpreter"), which is the interpreter ShroudForge's model runs for it. `bind_storage` and `from_resources` admit
+exactly that root with exactly that pair (`ENGINE_SIGNED_ROOTS`, `engine_signed_root`) as a `sint32` calculation; the
+common-range write domain still holds for every word before and after, and the reverse pair, any other root and a float
+storage keep the refusal. kiln-sfi (`catalog.rs` `bind_storage`) and kiln-eml (`sf_startup/attributes` `from_resources`)
+carry the same rule for kiln mode. Tests: the fork's `reflection/build_attribute_catalog.rs` and
+`lua/ingame/ecs/attributes/tests.rs` (host).
 
 **Writes into values a mod created** (fork `63b8862`, branch `kiln-sf-eml`, on top of `112d939`). In the pregame pass a
 value a mod builds (a plain table put into game data, such as a recipe inserted into the recipe registry, or a whole
