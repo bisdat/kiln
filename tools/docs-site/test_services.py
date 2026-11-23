@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""services.py (the table of contents by assembly, the overview and the service pages) and gen-services.py (services.json).
+
+  python3 -I tools/docs-site/test_services.py
+"""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent.parent
+
+
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, HERE / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+services = load("services", "services.py")
+gen = load("gen_services", "gen-services.py")
+
+
+def entry(uid, cid, kind, assembly, name=None, namespace="Kiln", summary=False):
+    out = [f"- uid: {uid}", f"  commentId: {cid}", f"  name: {name or uid.rsplit('.', 1)[-1]}", f"  type: {kind}",
+           "  assemblies:", f"  - {assembly}", f"  namespace: {namespace}"]
+    return "\n".join(out) + "\n"
+
+
+class Pages(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.api, self.stage = root / "api", root / "stage"
+        self.api.mkdir()
+        self.stage.mkdir()
+        (self.api / "Kiln.yml").write_text("items:\n" + entry("Kiln", "N:Kiln", "Namespace", "Kiln.Api"))
+        types = [("Kiln.Zebra", "Class", "Kiln.Api", None, "Kiln"), ("Kiln.Apple`1", "Struct", "Kiln.Api", "Apple<T>", "Kiln"),
+                 ("Kiln.Build", "Class", "Kiln.Build", None, "Kiln"), ("Kiln.Abilities.Natives", "Class", "Kiln.Abilities", "Abilities.Natives", "Kiln"),
+                 ("Kiln.Ecs.Position", "Struct", "Kiln.Game", "Ecs.Position", "Kiln"), ("Kiln.Ecs", "Class", "Kiln.Game", None, "Kiln"),
+                 ("Kiln.TestKit.Harness", "Class", "Kiln.TestKit", None, "Kiln.TestKit"), ("Kiln.TestKit.Xunit.Fact", "Class", "Kiln.TestKit", None, "Kiln.TestKit.Xunit"),
+                 ("Kiln.Mystery", "Enum", "Kiln.NotListed", None, "Kiln")]
+        for uid, kind, asm, name, ns in types:
+            (self.api / (uid.replace("`", "-") + ".yml")).write_text("items:\n" + entry(uid, "T:" + uid, kind, asm, name, ns))
+        (self.api / "Kiln.TestKit.yml").write_text("items:\n" + entry("Kiln.TestKit", "N:Kiln.TestKit", "Namespace", "Kiln.TestKit"))
+        (self.stage / "Kiln.Build.xml").write_text("<doc><members><member name='T:Kiln.Build'><summary>Builds <see cref='T:Kiln.Foo'/> cells | fast. Second.</summary></member></members></doc>")
+        self.json = root / "services.json"
+        self.json.write_text(json.dumps({"format": 1, "services": [
+            {"assembly": "Kiln.Build", "name": "Build", "summary": "Voxels and props.", "guides": ["docs/kiln/services/build.md", "docs/kiln/modding/blocks.md"],
+             "capabilities": [{"name": "kiln.build", "members": 40}], "samples": ["OreVein"]},
+            {"assembly": "Kiln.Api", "name": None, "summary": "The API mods compile against.", "guides": [], "capabilities": [], "samples": []},
+            {"assembly": "Kiln.TestKit", "name": None, "summary": "Tests.", "guides": [], "capabilities": [], "samples": []}]}))
+        self.by = services.build(self.api, self.stage, self.json)
+
+    def toc(self):
+        return (self.api / "toc.yml").read_text()
+
+    def test_the_table_of_contents_has_a_group_for_each_assembly(self):
+        names = [l[len("- name: "):].strip('"') for l in self.toc().splitlines() if l.startswith("- name: ")]
+        # the overview, the core in its own order, the services A-Z, the namespaces
+        self.assertEqual(names, ["Overview", "Kiln.Api", "Kiln.Game", "Kiln.TestKit", "Kiln.Abilities", "Kiln.Build", "Kiln.NotListed", "Namespaces"])
+        self.assertIn("- name: \"Kiln.Build\"\n  href: services/Kiln.Build.md\n  items:\n  - uid: \"Kiln.Build\"", self.toc())
+
+    def test_types_are_sorted_by_name_and_keep_their_docfx_names(self):
+        toc = self.toc()
+        api = toc[toc.index('- name: "Kiln.Api"'):toc.index('- name: "Kiln.Game"')]
+        self.assertLess(api.index('name: "Apple<T>"'), api.index('name: "Zebra"'))
+        self.assertIn('- uid: "Kiln.Apple`1"', api)
+        self.assertIn('name: "Abilities.Natives"', toc)
+
+    def test_a_type_of_a_sub_namespace_says_where_it_is(self):
+        self.assertIn('name: "Xunit.Fact"', self.toc())
+        self.assertIn('name: "Harness"', self.toc())
+
+    def test_the_namespaces_follow_the_services(self):
+        toc = self.toc()
+        tail = toc[toc.index("- name: Namespaces"):]
+        self.assertIn('- uid: "Kiln"', tail)
+        self.assertIn('- uid: "Kiln.TestKit"', tail)
+
+    def test_every_type_is_in_exactly_one_group(self):
+        uids = [l.split('"')[1] for l in self.toc().split("- name: Namespaces")[0].splitlines() if l.startswith('  - uid: "')]
+        self.assertEqual(sorted(uids), sorted(set(uids)))
+        self.assertEqual(len(uids), 9)
+
+    def test_a_service_page_has_facts_capabilities_samples_and_types(self):
+        page = (self.api / "services/Kiln.Build.md").read_text()
+        self.assertIn("# Kiln.Build\n\nVoxels and props.", page)
+        self.assertIn("- **Assembly:** `Kiln.Build.dll`", page)
+        self.assertIn("- **KilnServices name:** `Build`", page)
+        self.assertIn("[build.md](https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/build.md)", page)
+        self.assertIn("[blocks.md](../../modding/blocks.md)", page)               # a modding guide is on the site itself
+        self.assertIn("`<KilnServices>Build</KilnServices>`", page)
+        self.assertIn("| `kiln.build` | 40 |", page)
+        self.assertIn("- [OreVein](https://github.com/frostdev-ops/kiln/tree/main/mods/samples/OreVein)", page)
+        self.assertIn("- [Build](../Kiln.Build.yml) (class): Builds Foo cells | fast.", page)
+        self.assertIn("- [Apple&lt;T&gt;](../Kiln.Apple-1.yml) (struct)", (self.api / "services/Kiln.Api.md").read_text())
+
+    def test_the_core_has_no_service_name_and_the_test_kit_is_a_package(self):
+        self.assertIn("none: every mod has it", (self.api / "services/Kiln.Api.md").read_text())
+        self.assertIn("`Kiln.TestKit` (NuGet)", (self.api / "services/Kiln.TestKit.md").read_text())
+
+    def test_an_assembly_services_json_does_not_know_still_has_a_page(self):
+        page = (self.api / "services/Kiln.NotListed.md").read_text()
+        self.assertIn("# Kiln.NotListed", page)
+        self.assertIn("- [Mystery](../Kiln.Mystery.yml) (enum)", page)
+        self.assertNotIn("## Samples", page)
+
+    def test_the_game_types_generated_into_ecs_stay_off_the_page(self):
+        page = (self.api / "services/Kiln.Game.md").read_text()
+        self.assertNotIn("Position", page.split("## Types")[1].split("The 1 game types")[0])
+        self.assertIn("The 1 game types generated into `Ecs`", page)
+
+    def test_the_overview_lists_every_assembly(self):
+        index = (self.api / "index.md").read_text()
+        for asm in ("Kiln.Api", "Kiln.Build", "Kiln.Game", "Kiln.NotListed"):
+            self.assertIn(f"[{asm}](services/{asm}.md)", index)
+        self.assertIn("| [Kiln.Build](services/Kiln.Build.md) | `Build` | Voxels and props | [build.md](https://", index)
+        self.assertIn("[blocks.md](../modding/blocks.md)", index)
+
+    def test_a_list_not_a_table_holds_the_types(self):
+        # DocFX's Markdown parser fails on a table of a few hundred rows ("too deeply nested")
+        self.assertNotIn("| Type |", (self.api / "services/Kiln.Api.md").read_text())
+
+    def test_the_command_line(self):
+        r = subprocess.run([sys.executable, "-I", str(HERE / "services.py"), "--services", str(self.json), str(self.api), str(self.stage)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("services: 6 assemblies, 9 types", r.stdout)
+
+
+class Generator(unittest.TestCase):
+    def make(self):
+        root = Path(self.tmp.name)
+        files = {
+            "managed/Kiln.Api/Kiln.Api.csproj": "<Project><!-- The API mods compile against. More. --></Project>",
+            "managed/services/Kiln.Build/Kiln.Build.csproj": "<Project><!-- Managed face of native/services/build (kiln.build): voxels and props. Deployed. --></Project>",
+            "managed/services/Kiln.Build/Build.cs": 'public static class Build { const string Cap = "kiln.build"; [RequiresCapability(Cap)] void A() {}\n'
+                                                     '[RequiresCapability("build.find_wall")] void B() {} [RequiresCapability(Cap)] void C() {} }',
+            "managed/services/Kiln.Chat/Kiln.Chat.csproj": "<Project><!-- kiln.chat: the managed face of native/services/chat (commands, tell). Deployed. --></Project>",
+            "managed/services/Kiln.Chat/obj/Skip.cs": '[RequiresCapability("never")]',
+            "docs/kiln/services/build.md": "# Build\n",
+            "docs/kiln/modding/chat.md": "# Chat\n",
+            "mods/samples/OreVein/OreVein.csproj": '<Project><PropertyGroup><KilnServices>Build;Chat</KilnServices></PropertyGroup></Project>',
+            "mods/samples/Plain/Plain.csproj": '<Project><ItemGroup><ProjectReference Include="../../../managed/services/Kiln.Chat/Kiln.Chat.csproj" /></ItemGroup></Project>',
+        }
+        for rel, text in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "-A", "-f"], check=True)
+        return root
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        mock.patch.dict(os.environ, {"KILN_DOCS_TRACKED": ""}).start()
+        self.addCleanup(mock.patch.stopall)
+        self.root = self.make()
+
+    def test_it_finds_services_guides_capabilities_and_samples(self):
+        doc = gen.generate(self.root)
+        by = {s["assembly"]: s for s in doc["services"]}
+        self.assertEqual([s["assembly"] for s in doc["services"]], ["Kiln.Api", "Kiln.Build", "Kiln.Chat"])
+        build = by["Kiln.Build"]
+        self.assertEqual(build["name"], "Build")
+        self.assertEqual(build["summary"], "Voxels and props")
+        self.assertEqual(build["guides"], ["docs/kiln/services/build.md"])
+        self.assertEqual(by["Kiln.Chat"]["guides"], ["docs/kiln/modding/chat.md"])
+        self.assertEqual(build["capabilities"], [{"name": "build.find_wall", "members": 1}, {"name": "kiln.build", "members": 2}])
+        self.assertEqual(build["samples"], ["OreVein"])
+        self.assertEqual(by["Kiln.Chat"]["samples"], ["OreVein", "Plain"])      # a <ProjectReference> counts like <KilnServices>
+        self.assertEqual(by["Kiln.Chat"]["summary"], "Commands, tell")
+        self.assertEqual(by["Kiln.Chat"]["capabilities"], [])                  # obj/ is no source
+        self.assertEqual(by["Kiln.Api"]["name"], None)
+
+    def test_a_reworded_summary_is_kept(self):
+        before = gen.generate(self.root)
+        before["services"][1]["summary"] = "Reworded by hand."
+        self.assertEqual(gen.generate(self.root, before)["services"][1]["summary"], "Reworded by hand.")
+
+    def test_check_says_when_the_file_is_out_of_date(self):
+        target = self.root / "tools/docs-site/services.json"
+        target.parent.mkdir(parents=True)
+        args = [sys.executable, "-I", str(HERE / "gen-services.py"), str(self.root)]
+        r = subprocess.run(args + ["--check"], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        subprocess.run(args, check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "-A", "-f"], check=True)
+        r = subprocess.run(args + ["--check"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        (self.root / "mods/samples/Late").mkdir()
+        (self.root / "mods/samples/Late/Late.csproj").write_text("<Project><PropertyGroup><KilnServices>Build</KilnServices></PropertyGroup></Project>")
+        subprocess.run(["git", "-C", str(self.root), "add", "-A", "-f"], check=True)
+        r = subprocess.run(args + ["--check"], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("out of date", r.stderr)
+
+
+@unittest.skipUnless((REPO / ".git").exists() or os.environ.get("KILN_DOCS_TRACKED"), "needs a git checkout of the repository")
+class Checked(unittest.TestCase):
+    def test_the_checked_in_services_json_is_what_the_repository_gives(self):
+        r = subprocess.run([sys.executable, "-I", str(HERE / "gen-services.py"), "--check", str(REPO)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_every_assembly_of_the_reference_has_an_entry_with_a_summary(self):
+        doc = json.loads((HERE / "services.json").read_text())
+        names = {s["assembly"] for s in doc["services"]}
+        for folder in (REPO / "managed/services").iterdir():
+            if (folder / f"{folder.name}.csproj").exists():
+                self.assertIn(folder.name, names)
+        for s in doc["services"]:
+            if s["assembly"] not in ("Kiln.Tools",):
+                self.assertTrue(s["summary"], s["assembly"])
+
+
+if __name__ == "__main__":
+    unittest.main()

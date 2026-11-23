@@ -8,6 +8,11 @@
 # --nexus: afterwards upload it to the Kiln page on Nexus Mods (tools/release/nexus.py --publish; it asks first).
 # --sdk-site: also upload sdk/feed/ (the SDK as a static NuGet feed) and sdk/api/ (the modding site and API reference).
 #   Without it both stay out of the upload and of the SHA256SUMS that goes up: publishing them is the owner's decision.
+#   A release (not a test build) with its sdk/api/ also moves the latest alias: $KILN_RELEASE_DIR/api on the host is a
+#   symlink to downloads/<version>/sdk/api, so /kiln/api/ is the newest release's reference, next to the pinned copy at
+#   /kiln/downloads/<version>/sdk/api/. It moves only to this release or a newer one (tools/docs-site/latest.py: a hotfix of
+#   an older line leaves it). The host serves it once nginx has `location /kiln/api/ { alias <KILN_RELEASE_DIR>/api/; }`
+#   (like /kiln/downloads/; the owner adds it once, and a warning below says when /kiln/api/ is not served).
 # --no-dev-channel: a stable release normally also becomes the dev channel's newest build; skip that for a hotfix
 #   release when a newer dev build is out.
 # --no-beta-channel: a release normally also becomes the beta channel's newest build (testers are offered the final
@@ -140,6 +145,21 @@ for f in "$dir"/updates/frostdev.io/*/latest.json; do
 done
 echo "channels to move: ${channels[*]}"
 
+# the latest alias of the API reference (--sdk-site, a release): $remote/api -> downloads/<name>/sdk/api, swapped in one rename
+latest_api() {
+  [[ -f $dir/sdk/api/index.html ]] || { echo "no sdk/api/ in $dir: /kiln/api/ stays where it was"; return 0; }
+  local current="" why rc=0
+  if ((dry)); then echo "would read which release $host:$remote/api names, and move it only to this one or a newer one"
+  else current=$(ssh "$host" readlink "$remote/api" 2>/dev/null || true); fi
+  why=$(python3 -I "$repo_dir/tools/docs-site/latest.py" newer "$name" "$current") || rc=$?
+  if ((rc == 1)); then echo "$why: /kiln/api/ stays"; return 0; fi
+  ((rc == 0)) || { echo "WARNING: /kiln/api/ not moved: latest.py failed ($rc)" >&2; return 0; }
+  r ssh "$host" "ln -sfn downloads/$name/sdk/api $remote/.api.new && mv -T $remote/.api.new $remote/api"
+  ((dry)) && return 0
+  if curl -fsSI "https://frostdev.io/kiln/api/index.html" >/dev/null; then echo "https://frostdev.io/kiln/api/ is $name"
+  else echo "WARNING: $host:$remote/api now names $name, but https://frostdev.io/kiln/api/ is not served: add the nginx location /kiln/api/ (alias $remote/api/)" >&2; fi
+}
+
 echo "== frostdev.io ($host:$remote)"
 if ask "Upload $name to $host:$remote/downloads/$name and switch the manifests of ${channels[*]}?"; then
   r ssh "$host" mkdir -p "$remote/downloads" "${channels[@]/#/$remote/updates/}"
@@ -160,6 +180,7 @@ if ask "Upload $name to $host:$remote/downloads/$name and switch the manifests o
       || echo "WARNING: https://frostdev.io/kiln/updates/$ch/latest.json does not match yet (cache?)" >&2
   done
   ((dry)) || { curl -fsSI "https://frostdev.io/kiln/downloads/$name/SHA256SUMS" >/dev/null && echo "downloads reachable"; }
+  if ((sdk_site)) && [[ $channel != beta ]]; then latest_api; fi
 fi
 
 # the fixed pre-release that holds a channel's latest.json on GitHub (created when missing)
