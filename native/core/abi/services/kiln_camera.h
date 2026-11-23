@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.camera v1 (since 0.2.16): camera overrides as leases. docs/kiln/services/camera.md.
+ * kiln.camera v1 (since 0.2.17): camera overrides as leases. docs/kiln/services/camera.md.
  *
  * Three endpoints, each with its own lease domain:
  *  - SERVER_MODE: the server locks a player's stock camera mode for a time. It reaches vanilla clients. Server world.

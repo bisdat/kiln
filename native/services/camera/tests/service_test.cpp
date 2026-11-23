@@ -78,7 +78,7 @@ int main(int argc,char** argv) {
  hooks.header={sizeof hooks,KILN_HOOKS_VERSION}; hooks.subscribe_owner_retiring=subscribe_owner;
  KilnApi api{}; api.size=sizeof api; api.abi_version=KILN_ABI_VERSION; api.service=service; api.register_service=publish; api.feature=feature; api.log=log; api.side=side;
  api.on_world_thread=on_thread; api.subscribe_world=sub_world; api.subscribe_world_tick=sub_tick;
- KilnPluginInfo info{}; CHECK(kiln_plugin_main(&api,service_owner,&info)==KILN_OK); info.on_ready(nullptr);
+ KilnPluginInfo info{}; CHECK(kiln_plugin_main(&api,service_owner,&info)==KILN_OK); CHECK(pre==nullptr); info.on_ready(nullptr);
  CHECK(camera && camera->header.size==88 && camera->header.version==1);
  uint64_t mask=0; CHECK(camera->capabilities(KILN_CAMERA_SERVER_MODE,0,&mask)==KILN_OK);
  if(!observer || old_world) { CHECK(mask==0); CHECK(submits==0); std::printf("camera service fail-closed: PASS (%d checks)\n",checks); return 0; }

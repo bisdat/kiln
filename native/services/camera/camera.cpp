@@ -204,7 +204,11 @@ void KILN_CALL on_ready(void*) {
     KilnHandle h = 0;
     const bool observer = hooks && hooks->header.size >= kObserverEnd && hooks->subscribe_owner_retiring && g_api->feature(KC_STR("hooks.owner_cleanup")) &&
                           hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &h) == KILN_OK;
-    g_core.set_writes(observer);
+    // All kiln_plugin_main callbacks have registered by now: player scans and tracked-write results must precede us.
+    KilnHandle tick_handle = 0;
+    const bool server_tick = g_api->subscribe_world_tick(g_owner, KILN_WORLD_SERVER, KILN_TICK_PRE, &on_server_pre, nullptr, &tick_handle) == KILN_OK;
+    g_core.set_writes(observer && server_tick);
+    if (!server_tick) logf(KILN_LOG_WARN, "camera: server Pre unavailable: camera writes are off");
     g_mode_world.world = static_cast<const KilnWorldApi*>(g_api->service(KC_STR(KILN_WORLD_SERVICE), KILN_WORLD_VERSION));
     g_mode_world.players = static_cast<const KilnPlayersApi*>(g_api->service(KC_STR(KILN_PLAYERS_SERVICE), KILN_PLAYERS_VERSION));
     const auto* world = g_mode_world.world;
@@ -244,8 +248,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         logf(KILN_LOG_WARN, "camera: world lifecycle is unavailable on this build: kiln.camera is unavailable");
         return KILN_ERR_UNAVAILABLE;
     }
-    if (api->subscribe_world_tick(owner, KILN_WORLD_SERVER, KILN_TICK_PRE, &on_server_pre, nullptr, &h) != KILN_OK ||
-        (g_client_side && api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h) != KILN_OK)) {
+    if (g_client_side && api->subscribe_world_tick(owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h) != KILN_OK) {
         logf(KILN_LOG_WARN, "camera: the world ticks cannot be subscribed: kiln.camera is unavailable");
         return KILN_ERR_UNAVAILABLE;
     }

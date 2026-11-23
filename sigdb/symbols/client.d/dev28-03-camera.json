@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "kiln.camera on the game client (since mod API 0.2.16, chapter 03): where the renderer selects its camera and where the frame's camera is final. The service reads the renderer only inside these two mid hooks, only the fields named here, and keeps no pointer. A row is on only when every guard of it resolves; the service lowers it further (no owner cleanup, a fault). Checked on client 26430625 (sigdb_check).",
+  "comment": "kiln.camera on the game client (since mod API 0.2.17, chapter 03): where the renderer selects its camera and where the frame's camera is final. The service reads the renderer only inside these two mid hooks, only the fields named here, and keeps no pointer. A row is on only when every guard of it resolves; the service lowers it further (no owner cleanup, a fault). Checked on client 26430625 (sigdb_check).",
   "symbols": {
     "camera/RenderFovSelected": {
       "comment": "The renderer's camera selection, at the store of the selected vertical field of view: r13 = renderer, the selected pose (52 value bytes at camera/render.pose_start) is already copied, xmm6's low float is the field of view in radians. Mid hook; the one place a visual request is committed.",

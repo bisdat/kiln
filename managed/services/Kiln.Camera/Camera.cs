@@ -12,7 +12,7 @@ namespace Kiln;
 /// it lasts for its <see cref="CameraOverride.Duration"/> at most, and its owner updates or ends it.
 /// </summary>
 /// <remarks>
-/// <para>Since mod API 0.2.16. Each endpoint requires its own available capability rows.</para>
+/// <para>Since mod API 0.2.17. Each endpoint requires its own available capability rows.</para>
 /// <para><b>Two kinds.</b> A <i>mode lock</i> (<see cref="SetMode"/>) makes the server hold a player in one of the
 /// game's own camera modes; it reaches every client, vanilla ones too, and an Ok result says the server's state holds
 /// it (<see cref="CameraCommitScope.ServerState"/>). A <i>visual</i> request (<see cref="SetLocal"/>, <see cref="Set"/>)
