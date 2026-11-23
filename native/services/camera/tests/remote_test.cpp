@@ -392,6 +392,38 @@ void the_client_ends_a_lease_by_itself() {
     std::printf("  transport_ended: bridge owner, end reason and revision checked; one ENDED, no duplicate\n");
 }
 
+// review S8 M1: an update the client never answered is refused TransportTimeout (MayHaveApplied) and the bridge ends the
+// active lease (transport_ended, TRANSPORT_TIMEOUT) in the same step, in either order of arrival: the author gets the
+// refusal first, then one ENDED; the slot is free again.
+void a_timed_out_update_ends_its_lease() {
+    for (int order = 0; order < 2; ++order) {
+        Rig rig;
+        const auto lease = apply(rig, kAuthorA, lens(kGuest), kA);
+        rig.pre();
+        answer(g_sent.back(), true, 0, 0, 1);
+        rig.pre();
+        g_log.clear();
+        auto q = lens(kGuest);
+        CHECK(rig.core.update(kAuthorA, lease, KILN_CAMERA_RESTART_TIMELINE, &q, &on_done, kU, kOnServer) == KILN_OK);
+        rig.pre();
+        CHECK(g_sent.size() == 2 && g_sent[1].op == 3);
+        const KilnStr why{"no answer within 3 s", 20};
+        if (order == 1) CHECK(rig.remote.transport_ended(kBridge, lease, 1, KILN_CAMERA_END_TRANSPORT_TIMEOUT, KILN_CAMERA_REASON_TRANSPORT_TIMEOUT, why) == KILN_OK);
+        answer(g_sent[1], false, KILN_CAMERA_REASON_TRANSPORT_TIMEOUT, KILN_CAMERA_MAY_HAVE_APPLIED, 0, "no answer within 3 s");
+        if (order == 0) CHECK(rig.remote.transport_ended(kBridge, lease, 1, KILN_CAMERA_END_TRANSPORT_TIMEOUT, KILN_CAMERA_REASON_TRANSPORT_TIMEOUT, why) == KILN_OK);
+        rig.pre();
+        CHECK(g_log.size() == 2);
+        CHECK(g_log[0] == "done U lease=" + std::to_string(lease) + " ok=0 reason=15 rev=1 flags=1 scope=0 frame=0");
+        CHECK(g_log[1] == "event ended lease=" + std::to_string(lease) + " rev=1 end=12 reason=15 frame=0");
+        CHECK(rig.core.live_leases() == 0 && rig.remote.active() == 0 && rig.remote.outstanding() == 0);
+        // the slot is free: the same author applies again and is not refused ALREADY_OWNED
+        const auto again = apply(rig, kAuthorA, lens(kGuest), kA);
+        rig.pre();
+        CHECK(g_sent.back().lease == again && g_sent.back().op == 1);
+    }
+    std::printf("  an update that timed out: refused TransportTimeout (MayHaveApplied), then ENDED(TransportTimeout), slot free\n");
+}
+
 void a_higher_priority_lease_supersedes() {
     Rig rig;
     const auto a = apply(rig, kAuthorA, lens(kGuest, 0), kA);
@@ -567,6 +599,7 @@ int main() {
     update_and_end_go_through_the_bridge();
     end_preempts_a_queued_update_and_apply();
     the_client_ends_a_lease_by_itself();
+    a_timed_out_update_ends_its_lease();
     a_higher_priority_lease_supersedes();
     retired_authors_are_ended_and_told();
     unbind_ends_what_the_bridge_carried();

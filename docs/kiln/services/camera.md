@@ -120,7 +120,9 @@ still join; at most 16384 bytes a message) and turns the row on. Per player:
   it has, the server answers Welcome with a binding token, and each Apply, Update and End carries that binding, the
   lease and its revision. `Ok` comes only when a frame of that client was drawn with it (`CameraCommitScope.ClientFrame`,
   `Camera.Changed`'s `Frame` is the client's). No answer within 3 s (two resends of the same request) is
-  `TransportTimeout` with `MayHaveApplied`: end the lease. The client lets go by itself at the lease's duration, when the
+  `TransportTimeout` with `MayHaveApplied`, and the client is told to let go: a timed-out apply never becomes a lease (end
+  it anyway if you keep its number), a timed-out update ends its lease `TransportTimeout` (`Changed` `Ended`), so the
+  player's camera is free again. The client lets go by itself at the lease's duration, when the
   server's heartbeat is missing for 3 s, and when the connection or a world ends; it reports its own end, which arrives as
   `Changed` `Ended` with the client's reason (`Expired`, `TargetLost`, `SafetyRejected` ...). A player who leaves ends
   the lease `PeerDisconnected`.

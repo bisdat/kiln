@@ -103,6 +103,7 @@ public sealed class BridgeHostTests
         public readonly FakeLocal ServerLocal = new(), ClientLocal = new();
         public readonly object PeerKey = new(), LinkKey = new();
         public CameraBridgeHost Server = null!, Client = null!;
+        public bool UpLost;  // the client's messages to the server are lost (a hitch, a loading screen)
 
         public void Connect(NetPeerState state = NetPeerState.Ready, bool channel = true)
         {
@@ -110,7 +111,10 @@ public sealed class BridgeHostTests
             ServerNet.Peers.Add(new CameraPeerView(PeerKey, 0x101, state, Guest, channel, false));
             ClientNet.Link = new CameraPeerView(LinkKey, uint.MaxValue, state, 0, channel, false);
             ServerNet.Deliver = (_, id, body) => Client.OnRaw(LinkKey, false, id, body);
-            ClientNet.Deliver = (_, id, body) => Server.OnRaw(PeerKey, true, id, body);
+            ClientNet.Deliver = (_, id, body) =>
+            {
+                if (!UpLost) Server.OnRaw(PeerKey, true, id, body);
+            };
         }
 
         public void Pump(int n = 1)
@@ -350,6 +354,74 @@ public sealed class BridgeHostTests
         p.Pump();
         Assert.Equal((false, CameraReasons.PeerUnavailable), (_results[^1].Ok, _results[^1].Reason));
         Assert.Null(p.Server.BindingOf(Guest));
+    }
+
+    // review S8 M1 (its F1, inverted): an Update whose answer never comes times out TransportTimeout with MayHaveApplied;
+    // the client is told to let go, so kiln.camera must hear that the active lease ended (TransportTimeout), else it holds
+    // the player's slot forever, also after the player left.
+    [Fact]
+    public void A_guests_update_that_times_out_ends_its_lease_TransportTimeout()
+    {
+        var p = NewPair();
+        p.Server.Submit(11, TransportOp.Apply, 7, 1, Guest, Lens(60000), _results.Add);
+        p.Pump();
+        Answer(p.Client, p.ClientLocal);
+        p.Pump(2);
+        Assert.True(_results[0].Ok);
+        p.UpLost = true;
+        p.Server.Submit(11, TransportOp.UpdateRestart, 7, 2, Guest, Lens(60000), _results.Add);
+        p.Pump();
+        Assert.Equal("update-restart", p.ClientLocal.Calls[^1].Op);
+        Answer(p.Client, p.ClientLocal, from: 1);
+        for (var t = 0; t < 8; t++)
+        {
+            _now += 500;
+            p.Pump();
+        }
+        var timeout = _results[^1];
+        Assert.Equal((false, CameraReasons.TransportTimeout, true, 2ul), (timeout.Ok, timeout.Reason, timeout.MayHaveApplied, timeout.Revision));
+        Assert.Contains(p.ServerNet.Sent, s => s.Id == CameraMessage.End);  // the client is told to let go
+        var e = Assert.Single(_ended);                                      // and kiln.camera hears the lease ended
+        Assert.Equal((7ul, 1ul, CameraEndReasons.TransportTimeout, CameraReasons.TransportTimeout), (e.Lease, e.Revision, e.EndReason, e.Reason));
+        p.UpLost = false;
+        for (var t = 0; t < 4; t++)
+        {
+            _now += 1000;
+            p.Pump();
+        }
+        Assert.Equal(0ul, p.Client.ClientBinding!.ActiveLease);
+        p.ServerNet.Peers.Clear();  // the player leaves: nothing more to end, no second Ended
+        p.Pump(2);
+        Assert.Single(_ended);
+    }
+
+    // review S8 M1 (its F1b, inverted): the same on the host's own route (its 3 s answer deadline).
+    [Fact]
+    public void A_host_route_update_that_times_out_ends_its_lease_TransportTimeout()
+    {
+        var net = new FakeNet { IsClient = true, IsHosting = true, LocalPlayer = Host, ServerWorld = 2, ClientWorld = 2 };
+        var local = new FakeLocal();
+        var host = NewHost(net, local);
+        host.ServerPump();
+        host.ClientPump();
+        host.Submit(11, TransportOp.Apply, 7, 1, Host, Lens(60000), _results.Add);
+        host.ServerPump();
+        host.ClientPump();
+        Answer(host, local, frame: 5);
+        host.ClientPump();
+        host.ServerPump();
+        Assert.True(_results[0].Ok);
+        host.Submit(11, TransportOp.UpdatePreserve, 7, 2, Host, Lens(60000), _results.Add);
+        host.ServerPump();  // the client world does not step (a hitch, a loading screen)
+        _now += HostSelfRoute.AnswerDeadlineMs;
+        host.ServerPump();
+        Assert.Equal((false, CameraReasons.TransportTimeout, true), (_results[^1].Ok, _results[^1].Reason, _results[^1].MayHaveApplied));
+        var e = Assert.Single(_ended);
+        Assert.Equal((7ul, 1ul, CameraEndReasons.TransportTimeout, CameraReasons.TransportTimeout), (e.Lease, e.Revision, e.EndReason, e.Reason));
+        host.ClientPump();
+        Assert.Contains(local.Calls, c => c.Op == "end");  // the host's client let go of it
+        host.ServerPump();
+        Assert.Single(_ended);
     }
 
     [Fact]

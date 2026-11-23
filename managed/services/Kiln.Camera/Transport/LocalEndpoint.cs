@@ -218,6 +218,7 @@ internal sealed class HostSelfRoute
     private readonly Dictionary<ulong, Waiting> _pending = [];
     private readonly Dictionary<ulong, (ulong Revision, uint DurationMs)> _active = [];
     private readonly List<(Action<TransportResult> Done, TransportResult Result)> _results = [];
+    private readonly List<RemoteEnded> _ends = [];  // ends found while the step's results wait: told after them
     private ulong _serial;
     // client half
     private readonly HashSet<ulong> _started = [];  // serials the client half handed to the endpoint
@@ -266,10 +267,15 @@ internal sealed class HostSelfRoute
             if (now - p.SentAt < AnswerDeadlineMs) continue;
             // the client world did not answer (it does not step): honest uncertainty, and the lease is let go there
             _pending.Remove(serial);
-            _active.Remove(p.Lease);
+            var held = _active.Remove(p.Lease, out var was);
             _results.Add((p.Done, TransportResult.Refused(p.Op == TransportOp.End ? CameraReasons.None : CameraReasons.TransportTimeout, p.Lease, p.Revision,
                 p.Op == TransportOp.End ? 0 : CameraWireAbi.FlagMayHaveApplied, "the host's client world did not answer within 3 s")));
-            if (p.Op != TransportOp.End) _toClient.Enqueue(new RemoteRequest(CameraMessage.End, 0, p.Lease, p.Revision, 0, 0, null));
+            if (p.Op != TransportOp.End)
+            {
+                _toClient.Enqueue(new RemoteRequest(CameraMessage.End, 0, p.Lease, p.Revision, 0, 0, null));
+                // an update of the applied lease: it ends here as well (TransportTimeout), as on a guest's route (review S8 M1)
+                if (held) _ends.Add(new RemoteEnded(p.Lease, was.Revision, CameraEndReasons.TransportTimeout, CameraReasons.TransportTimeout, 0));
+            }
         }
         Deliver();
     }
@@ -290,10 +296,18 @@ internal sealed class HostSelfRoute
 
     private void Deliver()
     {
-        if (_results.Count == 0) return;
-        var batch = _results.ToArray();
-        _results.Clear();
-        foreach (var (done, result) in batch) done(result);
+        if (_results.Count > 0)
+        {
+            var batch = _results.ToArray();
+            _results.Clear();
+            foreach (var (done, result) in batch) done(result);
+        }
+        if (_ends.Count > 0)
+        {
+            var ends = _ends.ToArray();
+            _ends.Clear();
+            foreach (var e in ends) OnEnded?.Invoke(e);
+        }
     }
 
     // ---- the client half (client world's thread) ----

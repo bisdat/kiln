@@ -108,6 +108,7 @@ internal sealed class ServerBinding
     private long _lastHeartbeat;
     private Pending? _pending;
     private readonly List<(Action<TransportResult> Done, TransportResult Result)> _results = [];
+    private readonly List<RemoteEnded> _ends = [];  // ends found while the step's results wait: told after them
     // the lease the client holds as far as the server knows: what heartbeats authorize. DurationMs is its request's, and
     // _activeSince the server's clock at the ACK that started its timeline (Apply or a Restart update): the client's
     // reported times are clamped to the Duration, and the bookkeeping never outlives _activeSince + Duration (+ grace)
@@ -457,7 +458,12 @@ internal sealed class ServerBinding
         _pending = null;
         // honest uncertainty: the client may have shown it; a higher-serial End follows and the heartbeat stops covering it
         _excluded.Add(p.Lease);
-        if (_active is { } a && a.Lease == p.Lease) _active = null;
+        (ulong Lease, ulong Revision, ulong Owner, uint DurationMs)? ended = null;
+        if (_active is { } a && a.Lease == p.Lease)
+        {
+            _active = null;
+            if (p.Op != TransportOp.End) ended = a;
+        }
         Queue(p, TransportResult.Refused(CameraReasons.TransportTimeout, p.Lease, p.Revision, CameraWireAbi.FlagMayHaveApplied,
             "the client did not answer within 3 s"));
         if (p.Op != TransportOp.End)
@@ -465,6 +471,10 @@ internal sealed class ServerBinding
             var end = new WireHeader(_binding, p.Owner, p.Lease, ++_requestId, ++_serial, p.Revision);
             _o.Send(CameraMessage.End, CameraWire.Mutation(CameraMessage.End, end, 0, null, _maxBody)!);
         }
+        // An Update of the applied lease timed out: the client lets go of the lease (the End above), so the lease ends here
+        // too, TransportTimeout, at its applied revision. A refused update alone would keep it held at the server forever,
+        // with nothing left to end it (review S8 M1). The refusal above is reported first, then this end.
+        if (ended is { } gone) _ends.Add(new RemoteEnded(gone.Lease, gone.Revision, CameraEndReasons.TransportTimeout, CameraReasons.TransportTimeout, 0));
     }
 
     private void Refill(long now)
@@ -477,9 +487,17 @@ internal sealed class ServerBinding
 
     private void Deliver()
     {
-        if (_results.Count == 0) return;
-        var batch = _results.ToArray();
-        _results.Clear();
-        foreach (var (done, result) in batch) done(result);
+        if (_results.Count > 0)
+        {
+            var batch = _results.ToArray();
+            _results.Clear();
+            foreach (var (done, result) in batch) done(result);
+        }
+        if (_ends.Count > 0)
+        {
+            var ends = _ends.ToArray();
+            _ends.Clear();
+            foreach (var e in ends) _o.OnEnded?.Invoke(e);
+        }
     }
 }
