@@ -314,8 +314,15 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         };
         let raw = raw_kind(&row.conv);
         let (mut problems, mut samples, mut passed, mut in_generation) = (Vec::new(), 0, 0, false);
+        let mut unread = false;
         for s in &good {
             for x in s.samples.iter().filter(|x| x.field == q) {
+                // a member the lab could not read raw: no evidence for the comparison (missing), not a wrong value
+                let null = |v: &Option<Vec<Value>>| v.as_ref().is_some_and(|v| v.iter().any(Value::is_null));
+                if raw == Raw::Compared && x.error.is_none() && (null(&x.raw_before) || null(&x.raw_after)) {
+                    unread = true;
+                    continue;
+                }
                 samples += 1;
                 let p = sample_problems(row, x, raw);
                 if p.is_empty() {
@@ -327,7 +334,9 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         }
         let where_ = want.map(|g| format!(" in a {g} generation")).unwrap_or_default();
         let mut missing = Vec::new();
-        if samples == 0 {
+        if samples == 0 && unread {
+            missing.push(format!("the lab could read no raw value of the field's members{where_}: the field is not proven on this build"));
+        } else if samples == 0 {
             missing.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
         } else if !in_generation && problems.is_empty() {
             missing.push(format!("no round-trip sample{where_} (only in another generation): the field is not proven on this build"));
@@ -501,6 +510,20 @@ pub(crate) mod tests {
             assert!(x.problems.iter().any(|p| p.contains(word)), "{field}: {word:?} not in {:?}", x.problems);
             assert!(r.fields.iter().filter(|(q, _)| q.as_str() != field).all(|(_, o)| o.ok), "only {field} fails");
         }
+    }
+
+    /// The lab could not read a member raw (a null in rawBefore/rawAfter of a compared row): missing evidence, so the
+    /// field is unproven, not changed (a wrong value read raw stays a failed step).
+    #[test]
+    fn a_member_the_lab_could_not_read_raw_leaves_the_field_unproven() {
+        let mut suites = full();
+        edit(&mut suites, "gadgets.size", |s| s.raw_before = Some(vec![Value::Null]));
+        let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &suites);
+        let f = &r.fields["gadgets.size"];
+        assert!(!f.ok && f.problems.is_empty(), "{f:?}");
+        assert!(f.missing.iter().any(|m| m.contains("no raw value")), "{f:?}");
+        edit(&mut suites, "gadgets.size", |s| s.raw_before = Some(vec![json!(19)]));
+        assert!(!check(&map_with_float_cap(), "server", SHA, DIGEST, &suites).fields["gadgets.size"].problems.is_empty());
     }
 
     /// A list or reference row is not compared value by value, so a write through a wrong conversion and a read back
