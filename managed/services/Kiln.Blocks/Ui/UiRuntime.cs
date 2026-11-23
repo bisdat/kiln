@@ -152,10 +152,12 @@ internal static class UiRuntime
     /// <summary>Where the windows' state and data events go (UiWindowStateChangedEvent, UiControlStateChangedEvent,
     /// UiWindowStateResetEvent, UiBindingValueChangedEvent): the game's main thread in the client world's next step, as
     /// Kiln's other client events (the Pump commits on the service tick, which is the server's thread on a host). With no
-    /// client world (a menu) they are posted at once. Tests replace it.</summary>
+    /// client world (a menu) they are posted at once. A full client queue drops the event as it drops Kiln's other client
+    /// events (ClientEvents logs it); it is never posted from the service tick after all. Tests replace it.</summary>
     internal static Action<KilnEvent> PostEvent = static e =>
     {
-        if (ClientEvents.Session == 0 || !ClientEvents.Enqueue(e)) Events.Post(e);
+        if (ClientEvents.Session == 0) Events.Post(e);
+        else ClientEvents.Enqueue(e);
     };
 
     internal static Func<Action<ulong>, IDisposable> SubscribeTick = static tick => BlocksBridge.AddTick("kiln blocks ui", tick);
