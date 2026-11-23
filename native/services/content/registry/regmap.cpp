@@ -190,8 +190,15 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
     if (!reasons.is_object()) errs->push_back("record: reasons is an object of \"<registry>.<field>\": text");
     else
         for (const auto& [k, v] : reasons.items()) {
-            if (v.is_string()) out->reasons[k] = v.get<std::string>().substr(0, 400);
-            else errs->push_back("record: reasons." + k + " is text");
+            if (v.is_string()) {
+                std::string reason = v.get<std::string>();
+                if (reason.size() > 400) {
+                    size_t end = 400;
+                    while (end && (static_cast<unsigned char>(reason[end]) & 0xc0) == 0x80) --end;
+                    reason.resize(end); // never split a UTF-8 code point in the refusal/state JSON
+                }
+                out->reasons[k] = std::move(reason);
+            } else errs->push_back("record: reasons." + k + " is text");
         }
     const json a = doc.value("aliases", json::object());
     for (const char* list : {"renames", "suffixes"}) {

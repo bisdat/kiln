@@ -117,6 +117,17 @@ int main(int argc, char** argv) {
         map::load_record(map::json::parse(R"({"regmap": 1, "side": "server", "exeSha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
             "verified": true, "rows": {}, "reasons": {"items.comfort": 3}})"), &r3, &e3);
         CHECK(has(e3, "reasons.items.comfort"));
+        // The 400-byte display limit must not split a UTF-8 code point (registry state JSON uses strict UTF-8).
+        const std::string long_reason = std::string(399, 'a') + "é" + "more";
+        auto doc = map::json{{"regmap", 1}, {"side", "server"}, {"exeSha256", std::string(64, 'a')},
+                             {"verified", true}, {"rows", {{"items.comfort", "unproven"}}}, {"reasons", {{"items.comfort", long_reason}}}};
+        map::BuildRecord utf8;
+        std::vector<std::string> eu;
+        CHECK(map::load_record(doc, &utf8, &eu));
+        CHECK(utf8.reasons.at("items.comfort") == std::string(399, 'a'));
+        try { (void)map::json(utf8.reasons.at("items.comfort")).dump(); CHECK(true); }
+        catch (const map::json::exception&) { CHECK(false); }
+
     }
     // ---- the mapping state an edit gets on this build
     {
