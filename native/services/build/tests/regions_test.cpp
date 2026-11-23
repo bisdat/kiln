@@ -14,6 +14,25 @@
 
 namespace {
 int passed = 0, failed = 0;
+// A fully walked stack of the game's own frames from `ret` down (kb::kWalkFrames of them), and a frame elsewhere.
+kb::Frame in_game(uintptr_t at) {
+    kb::Frame f;
+    f.at = at;
+    return f;
+}
+std::vector<kb::Frame> game_stack(uintptr_t ret) {
+    std::vector<kb::Frame> f{in_game(ret)};
+    for (uintptr_t i = 1; i < kb::kWalkFrames; ++i) f.push_back(in_game(0x9000 + i * 0x10));
+    return f;
+}
+kb::Frame frame_in(uintptr_t at, kb::Place place, const char* module, uint64_t offset) {
+    kb::Frame f;
+    f.at = at;
+    f.place = place;
+    f.module = module;
+    f.offset = offset;
+    return f;
+}
 void check(bool ok, const char* text) {
     if (ok) ++passed;
     else { ++failed; std::fprintf(stderr, "FAIL: %s\n", text); }
@@ -142,17 +161,20 @@ int main() {
     check(bytes("FILTER") == journal_before,
           "save-time filtering does not modify the persistent kept-chunk JSON");
 
-    // ---- which caller gets Kiln's boxes: the world save only (and, so no edit goes unsaved, a caller Kiln does not know)
+    // ---- which caller gets Kiln's boxes: the world save only, when its call site resolved
     const kb::CallSites sites{0x1000, 0x2000, 0x3000};
     check(kb::classify_caller(0x1000, sites) == kb::Caller::WorldSave, "the save's call site is the world save");
     check(kb::classify_caller(0x2000, sites) == kb::Caller::BaseZones, "the ECS publish step's call site is base zones");
     check(kb::classify_caller(0x3000, sites) == kb::Caller::BaseQuery, "the ECS query callback's call site is base query");
     check(kb::classify_caller(0x4000, sites) == kb::Caller::Unknown, "any other return address is unknown");
     check(kb::classify_caller(0x1000, kb::CallSites{}) == kb::Caller::Unknown, "unresolved call sites make every caller unknown");
-    check(kb::kiln_boxes_for(kb::Caller::WorldSave) && kb::kiln_boxes_for(kb::Caller::Unknown),
-          "the world save and an unknown caller get Kiln's boxes");
-    check(!kb::kiln_boxes_for(kb::Caller::BaseZones) && !kb::kiln_boxes_for(kb::Caller::BaseQuery),
-          "the base zones the game's systems and clients use never get Kiln's boxes");
+    check(kb::kiln_boxes_for(kb::Caller::WorldSave, sites) && !kb::kiln_boxes_for(kb::Caller::Unknown, sites),
+          "world save call site resolved: the world save gets Kiln's boxes, a caller Kiln does not know none");
+    check(!kb::kiln_boxes_for(kb::Caller::BaseZones, sites) && !kb::kiln_boxes_for(kb::Caller::BaseQuery, sites),
+          "world save call site resolved: the base zones the game's systems and clients use get no Kiln boxes");
+    for (kb::Caller c : {kb::Caller::WorldSave, kb::Caller::BaseZones, kb::Caller::BaseQuery, kb::Caller::Unknown})
+        check(kb::kiln_boxes_for(c, kb::CallSites{0, 0x2000, 0x3000}),
+              "world save call site unresolved: every caller gets Kiln's boxes, as up to 30.8");
 
     // ---- the game's list after its builder returned, as the hook sees it
     using regions_test::FakeList;
@@ -194,9 +216,20 @@ int main() {
     }
     {
         std::vector<uint8_t> store;
-        FakeList l = run(0x4000, store, alo, ahi);
-        check(regions_test::kiln_entries(l.a) == 4 && regions_test::every_chunk_saved(l.a, kept, true),
-              "an unknown caller gets the same boxes as the world save (no edit goes unsaved)");
+        const int warnings = kb::warnings;
+        const auto stack = game_stack(0x4000);
+        FakeList l = regions_test::make_list(store);
+        regions_test::add_entry(l, base_id, alo, ahi);
+        kb::after_save_regions(0x4000, ok, &l.a, sites, &stack);
+        check(l.a.count == 1 && regions_test::kiln_entries(l.a) == 0,
+              "world save call site resolved: an unknown caller whose frames are all the game's gets no Kiln boxes");
+        check(kb::warnings == warnings + 1 && kb::last_warning.find("none of its three known callers") != std::string::npos &&
+                  kb::last_warning.find("adds no boxes") != std::string::npos,
+              "an unknown caller is reported once, saying it gets no boxes");
+        std::vector<uint8_t> store2;
+        FakeList l2 = regions_test::make_list(store2);
+        kb::after_save_regions(0x4000, ok, &l2.a, sites, &stack);
+        check(kb::warnings == warnings + 1, "an unknown caller is reported only once");
     }
     {
         // a save in the first steps after a load sees the altar's 40 m bounds: its chunks outside them get boxes
@@ -380,10 +413,256 @@ int main() {
         kb::after_save_regions(0x1000, ok, &a1.a, no_save);
         kb::after_save_regions(0x2000, ok, &a2.a, no_save);
         kb::after_save_regions(0x1000, ok, &a3.a, same);
-        check(regions_test::kiln_entries(a1.a) == 4 && regions_test::kiln_entries(a2.a) == 0,
-              "world save site unresolved: the save's call is unknown and gets the boxes, the base zones still do not");
+        check(regions_test::kiln_entries(a1.a) == 4 && regions_test::kiln_entries(a2.a) == 4,
+              "world save site unresolved: the save's call gets the boxes, and so do the base zones (as up to 30.8)");
         check(kb::classify_caller(0x1000, same) == kb::Caller::WorldSave && regions_test::kiln_entries(a3.a) == 4,
               "three names on one address: the world save wins, so the save keeps its boxes");
+    }
+    {
+        // A game update that breaks the call-site patterns (the sigdb names build/RetSaveRegions*): who gets Kiln's boxes,
+        // the warning in kiln.log when kiln.build starts, and the text of its kiln.caps row. The game still calls from its
+        // three sites (0x1000 world save, 0x2000 base zones, 0x3000 base query); 0x4000 is a caller Kiln never knew.
+        const std::string save_name = "build/RetSaveRegionsWorldSave", zones_name = "build/RetSaveRegionsBaseZones",
+                          query_name = "build/RetSaveRegionsBaseQuery";
+        struct Case {
+            const char* what;
+            kb::CallSites sites;
+            bool boxes[4];  // world save, base zones, base query, another caller
+            std::vector<std::string> missing;
+        };
+        const Case cases[] = {
+            {"all resolved", {0x1000, 0x2000, 0x3000}, {true, false, false, false}, {}},
+            {"base zones missing", {0x1000, 0, 0x3000}, {true, false, false, false}, {zones_name}},
+            {"base query missing", {0x1000, 0x2000, 0}, {true, false, false, false}, {query_name}},
+            {"world save missing", {0, 0x2000, 0x3000}, {true, true, true, true}, {save_name}},
+            {"all missing", {0, 0, 0}, {true, true, true, true}, {save_name, zones_name, query_name}},
+        };
+        for (const Case& c : cases) {
+            const std::string what = c.what;
+            auto says = [](const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; };
+            const int warnings = kb::warnings, reports = kb::cap_reports;
+            kb::last_info.clear();
+            kb::last_warning.clear();
+            kb::announce_sites(c.sites);
+            const bool all = c.missing.empty();
+            check(kb::warnings == warnings + (all ? 0 : 1),
+                  (what + ": a warning in kiln.log exactly when a name is missing").c_str());
+            check(kb::cap_reports == reports + 1, (what + ": kiln.build reports its kiln.caps row").c_str());
+            check(kb::cap_text.size() <= 512, (what + ": the row's text fits kiln.caps' 512 bytes").c_str());
+            if (c.sites.world_save)
+                check(says(kb::cap_text, "it may be the world save"),
+                      (what + ": the row says a call Kiln cannot place gets the boxes too").c_str());
+            const std::string& line = all ? kb::last_info : kb::last_warning;
+            for (const std::string& name : {save_name, zones_name, query_name}) {
+                const bool listed = std::find(c.missing.begin(), c.missing.end(), name) != c.missing.end();
+                check(says(line, name) == listed,
+                      (what + ": kiln.log names " + name + " exactly when it is missing").c_str());
+                check(says(kb::cap_text, name) == listed,
+                      (what + ": the row names " + name + " exactly when it is missing").c_str());
+            }
+            if (!all) {
+                check(says(line, "not resolved") && says(kb::cap_text, "not resolved"),
+                      (what + ": the warning and the row say the names did not resolve").c_str());
+            }
+            if (c.sites.world_save) {
+                check(kb::cap_available && says(kb::cap_text, "world save's region list only") &&
+                          says(line, "world save's region list only"),
+                      (what + ": row available; Kiln's boxes go into the world save's list only").c_str());
+            } else {
+                check(!kb::cap_available && says(kb::cap_text, "every caller") && says(kb::cap_text, "0.2.0-dev.30.8") &&
+                          says(line, "every caller") && says(line, "Flame Altar"),
+                      (what + ": row unavailable; every caller gets Kiln's boxes, as up to 0.2.0-dev.30.8").c_str());
+            }
+            const uintptr_t rets[4] = {0x1000, 0x2000, 0x3000, 0x4000};
+            const char* who[4] = {"the world save", "the base zones", "the base query", "another caller"};
+            for (int i = 0; i < 4; ++i) {
+                std::vector<uint8_t> store;
+                FakeList l = regions_test::make_list(store);
+                regions_test::add_entry(l, base_id, alo, ahi);
+                const auto stack = game_stack(rets[i]);  // the game's own frames: no other module's hook on the way
+                kb::after_save_regions(rets[i], ok, &l.a, c.sites, &stack);
+                const bool got = c.boxes[i]
+                                     ? regions_test::kiln_entries(l.a) == 4 && regions_test::every_chunk_saved(l.a, kept, true)
+                                     : l.a.count == 1 && regions_test::kiln_entries(l.a) == 0;
+                check(got, (what + ": " + who[i] + (c.boxes[i] ? " gets Kiln's boxes" : " gets none")).c_str());
+            }
+        }
+    }
+    {
+        // Another mod's detour in front of Kiln's (on the builder, or on one of its callers) changes the return address
+        // Kiln's hook sees: the call is placed by the frames below it, up to kWalkFrames. A call it cannot place gets the
+        // boxes when the stack shows another module's code on the way, or cannot be walked: it may be the world save.
+        using kb::Place;
+        const kb::CallSites all{0x1000, 0x2000, 0x3000};
+        auto kiln_boxes = [&](uintptr_t ret, const std::vector<kb::Frame>* frames, const kb::CallSites& s) {
+            std::vector<uint8_t> store;
+            FakeList l = regions_test::make_list(store);
+            regions_test::add_entry(l, base_id, alo, ahi);
+            kb::after_save_regions(ret, ok, &l.a, s, frames);
+            const uint64_t n = regions_test::kiln_entries(l.a);
+            return n == 4 && regions_test::every_chunk_saved(l.a, kept, true) ? 4 : n;
+        };
+        const uintptr_t mfa = 0x7ff812340100;  // a return address in another mod's DLL, mfa.dll+0x100
+        const kb::Frame mfa_frame = frame_in(mfa, Place::Other, "mfa.dll", 0x100);
+        {
+            const std::vector<kb::Frame> st{mfa_frame, in_game(0x1000), in_game(0x9100), in_game(0x9200)};
+            const auto v = kb::judge_caller(mfa, st, all);
+            check(v.kind == kb::Caller::WorldSave && v.how == kb::Found::Deeper && v.boxes && v.via.at == 0x1000,
+                  "a foreign detour in front of the world save: placed by the world save's site one frame deeper");
+            check(kiln_boxes(mfa, &st, all) == 4, "a foreign detour in front of the world save: the save gets the boxes");
+        }
+        {
+            const std::vector<kb::Frame> st{mfa_frame, in_game(0x2000), in_game(0x9100), in_game(0x9200)};
+            const auto v = kb::judge_caller(mfa, st, all);
+            check(v.kind == kb::Caller::BaseZones && v.how == kb::Found::Deeper && !v.boxes,
+                  "a foreign detour in front of the base-zone step: placed by the base-zone site found deeper");
+            check(kiln_boxes(mfa, &st, all) == 0, "a foreign detour in front of the base-zone step: no boxes");
+        }
+        {
+            // another Kiln link on the builder (a kiln-*.dll frame) is Kiln's, not another mod's
+            const kb::Frame kiln_link = frame_in(0x7ff900001000, Place::Kiln, "kiln-items.dll", 0x1000);
+            const std::vector<kb::Frame> st{kiln_link, in_game(0x3000), in_game(0x9100)};
+            check(kb::judge_caller(0x7ff900001000, st, all).kind == kb::Caller::BaseQuery && kiln_boxes(0x7ff900001000, &st, all) == 0,
+                  "another Kiln link in front of the base query: placed by the deeper site, no boxes");
+            auto own = game_stack(0x4000);
+            own[1] = kiln_link;
+            const auto v = kb::judge_caller(0x4000, own, all);
+            check(v.how == kb::Found::GameOnly && !v.boxes, "the game's frames and a Kiln module's only: no boxes");
+        }
+        {
+            // the world save's site past kWalkFrames is not looked at
+            auto st = game_stack(0x4000);
+            st.push_back(in_game(0x1000));
+            check(kb::judge_caller(0x4000, st, all).how == kb::Found::GameOnly, "a known site past 8 frames is not looked at");
+        }
+        {
+            // no known site within 8 frames, another module on the way (a mod that calls the builder from its own code,
+            // or the world save's site moved): it may be the world save, so it gets the boxes; told once, naming the module
+            std::vector<kb::Frame> st = game_stack(0x4000);
+            st[0] = mfa_frame;
+            const auto v = kb::judge_caller(mfa, st, all);
+            check(v.kind == kb::Caller::Unknown && v.how == kb::Found::Foreign && v.boxes && v.via.module == "mfa.dll",
+                  "no known site and another module's frame: Foreign, boxes");
+            const int warnings = kb::warnings;
+            check(kiln_boxes(mfa, &st, all) == 4, "no known site and another module's frame: the list gets the boxes");
+            check(kb::warnings == warnings + 1 && kb::last_warning.find("mfa.dll+0x100") != std::string::npos &&
+                      kb::last_warning.find("may be the world save") != std::string::npos,
+                  "a call through another module is reported once, naming the module");
+            kiln_boxes(mfa, &st, all);
+            check(kb::warnings == warnings + 1, "a call through another module is reported only once");
+            // a relay in no module (a hook's stub in private memory) is another module's code too
+            std::vector<kb::Frame> relay = game_stack(0x4000);
+            relay[2] = frame_in(0x500000, Place::Other, "", 0);
+            const auto r = kb::judge_caller(0x4000, relay, all);
+            check(r.how == kb::Found::Foreign && r.boxes && kb::frame_text(r.via).find("in no module") != std::string::npos,
+                  "a frame in no module (a relay): Foreign, boxes");
+        }
+        {
+            // a stack that cannot be walked past the return address: the boxes, as it may be the world save
+            const std::vector<kb::Frame> only{in_game(0x5000)};
+            check(kb::judge_caller(0x5000, only, all).how == kb::Found::Unwalked && kb::judge_caller(0x5000, only, all).boxes,
+                  "only the return address: Unwalked, boxes");
+            check(kb::judge_caller(0x5000, {}, all).how == kb::Found::Unwalked, "no frames at all: Unwalked");
+            const int warnings = kb::warnings;
+            check(kiln_boxes(0x5000, &only, all) == 4 && kiln_boxes(0x5000, nullptr, all) == 4,
+                  "an unwalkable stack, or none walked: the list gets the boxes");
+            check(kb::warnings == warnings + 1 && kb::last_warning.find("could not be walked") != std::string::npos,
+                  "an unwalkable stack is reported once");
+        }
+        {
+            // the world save's site unresolved: every call gets the boxes whatever its frames
+            const kb::CallSites no_save{0, 0x2000, 0x3000};
+            const auto game = game_stack(0x4000);
+            const std::vector<kb::Frame> zones{mfa_frame, in_game(0x2000)};
+            check(kb::judge_caller(0x4000, game, no_save).boxes && kb::judge_caller(mfa, zones, no_save).boxes &&
+                      kiln_boxes(0x4000, &game, no_save) == 4,
+                  "world save site unresolved: game-only and base-zone stacks get the boxes too");
+        }
+    }
+    {
+        // The game's voxel writer collects at most 4,096 stored chunks per record and skips the rest without a word, in
+        // hash order (docs/re/build.md §12): a base entry whose bounds touch more chunk positions than that may lose any
+        // chunk, so Kiln's kept chunks inside it keep their own boxes.
+        const kb::RegionBounds at_limit{{0.5f, 0.5f, 0.5f}, {255.5f, 255.5f, 255.5f}};  // 16 x 16 x 16 positions
+        const kb::RegionBounds over_limit{{0.5f, 1.f, 0.5f}, {271.5f, 15.f, 3855.5f}};  // 17 x 1 x 241 = 4,097
+        check(kb::chunk_positions(at_limit) == 4096 && kb::chunk_positions(over_limit) == 4097,
+              "chunk positions an entry touches: 4,096 and 4,097");
+        const kb::ChunkSet inside{{5, 0, 5}, {8, 0, 7}};
+        check(kb::chunks_outside_regions(inside, {at_limit}).empty(),
+              "an entry at 4,096 chunk positions saves the kept chunks wholly inside it: no box");
+        check(kb::chunks_outside_regions(inside, {over_limit}) == inside,
+              "an entry at 4,097 chunk positions may lose any chunk: every kept chunk in it needs a box");
+        const kb::RegionBounds grid_240{{5888.f, 1000.5f, 1000.5f}, {6128.f, 1240.5f, 1240.5f}};  // x faces on the 16 m grid
+        const kb::RegionBounds grid_239{{5888.f, 1000.5f, 1000.5f}, {6127.f, 1239.5f, 1239.5f}};
+        check(kb::chunk_positions(grid_240) == 17 * 16 * 16 && kb::chunk_positions(grid_239) <= 4096,
+              "a 240 m base with faces on the chunk grid touches 4,352 chunk positions, a 239 m one at most 4,096");
+        check(kb::chunks_outside_regions({{375, 70, 70}}, {grid_240}).size() == 1 &&
+                  kb::chunks_outside_regions({{375, 70, 70}}, {grid_239}).empty(),
+              "a kept chunk inside the grid-aligned 240 m base gets a box, inside the 239 m one none");
+        auto save_with = [&](const kb::ChunkSet& chunks, const float* lo, const float* hi, std::vector<uint8_t>& store) {
+            kb::g_chunks = chunks;
+            kb::g_boxes_stale = true;
+            FakeList l = regions_test::make_list(store);
+            if (lo) regions_test::add_entry(l, base_id, lo, hi);
+            kb::after_save_regions(0x1000, ok, &l.a, sites);
+            return l;
+        };
+        {
+            std::vector<uint8_t> s1, s2;
+            const float l1[3] = {0.5f, 0.5f, 0.5f}, h1[3] = {255.5f, 255.5f, 255.5f};
+            const float l2[3] = {0.5f, 1.f, 0.5f}, h2[3] = {271.5f, 15.f, 3855.5f};
+            FakeList a = save_with(inside, l1, h1, s1), b = save_with(inside, l2, h2, s2);
+            check(regions_test::kiln_entries(a.a) == 0 && regions_test::every_chunk_saved(a.a, inside, true),
+                  "world save, a base at 4,096 chunk positions: no box, the base's record keeps the kept chunks");
+            check(regions_test::kiln_entries(b.a) == 2 && regions_test::every_chunk_saved(b.a, inside, true),
+                  "world save, a base at 4,097 chunk positions: a box for each kept chunk in it");
+        }
+        {
+            // the lab's 288 m altar (6,498 stored chunks, 2,402 skipped by the writer): Kiln's kept chunks in it, even at
+            // its centre, keep their boxes
+            std::vector<uint8_t> store;
+            const float lo[3] = {5856.25f, 1056.f, 5856.25f}, hi[3] = {6144.25f, 1344.f, 6144.25f};
+            const kb::ChunkSet in_288{{375, 75, 375}, {370, 70, 380}, {381, 80, 367}};
+            FakeList l = save_with(in_288, lo, hi, store);
+            check(kb::chunk_positions(kb::RegionBounds{{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}}) == 19 * 20 * 19,
+                  "the 288 m altar touches 7,220 chunk positions");
+            check(regions_test::kiln_entries(l.a) == 3 && regions_test::every_chunk_saved(l.a, in_288, false),
+                  "a 288 m base: every kept chunk in it, the centre too, is in a Kiln box the writer keeps whole");
+        }
+        {
+            // Kiln's own boxes are records too: none may cover more than 4,096 chunk positions
+            kb::ChunkSet solid;
+            for (int32_t x = 0; x < 17; ++x)
+                for (int32_t y = 0; y < 16; ++y)
+                    for (int32_t z = 0; z < 16; ++z) solid.insert({1000 + x, y, 1000 + z});
+            const auto boxes = kb::boxes_for_chunks(solid);
+            uint64_t volume = 0, most = 0;
+            bool within = true;
+            for (const auto& b : boxes) {
+                const uint64_t v =
+                    uint64_t(b.hi[0] - b.lo[0] + 1) * uint64_t(b.hi[1] - b.lo[1] + 1) * uint64_t(b.hi[2] - b.lo[2] + 1);
+                volume += v;
+                most = std::max(most, v);
+                const int32_t lo[3] = {1000, 0, 1000}, hi[3] = {1016, 15, 1015};
+                for (int k = 0; k < 3; ++k) within = within && b.lo[k] >= lo[k] && b.hi[k] <= hi[k];
+            }
+            check(boxes.size() == 2 && most <= 4096 && volume == solid.size() && within,
+                  "a solid block of 17 x 16 x 16 kept chunks: two boxes of at most 4,096 chunks, together exactly the block");
+            std::vector<uint8_t> store;
+            FakeList l = save_with(solid, nullptr, nullptr, store);
+            check(regions_test::max_kiln_positions(l.a) <= 4096 && regions_test::every_chunk_saved(l.a, solid, false),
+                  "world save: no Kiln box over 4,096 chunk positions, every chunk of the block saved");
+            // the coarse boxes too (over 64 runs: one box per 128 m column), here 8 x 131 x 8 chunks high
+            kb::ChunkSet scattered;
+            for (int32_t k = 0; k < 66; ++k) scattered.insert({k % 8, 2 * k, (k / 8) % 8});
+            std::vector<uint8_t> store2;
+            FakeList l2 = save_with(scattered, nullptr, nullptr, store2);
+            check(regions_test::kiln_entries(l2.a) >= 3 && regions_test::max_kiln_positions(l2.a) <= 4096 &&
+                      regions_test::every_chunk_saved(l2.a, scattered, false),
+                  "scattered edits in one 128 m column: its coarse box is cut at 4,096 chunk positions, every chunk saved");
+        }
+        kb::g_chunks = kept;
+        kb::g_boxes_stale = true;
     }
     kb::g_chunks = kept;
     kb::g_boxes_stale = true;

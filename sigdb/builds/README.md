@@ -91,6 +91,7 @@ under the file that declares it. Corner cases:
 python3 tools/sigport/build_record.py <side> <exe> --steam-build N [--svn N]   # a new record, every name static
 python3 tools/sigport/build_record.py <side> <exe> --refresh                    # after any sigdb change
 python3 tools/sigport/build_record.py check [server] [client]                   # every declared name listed?
+python3 tools/sigport/must_port.py check [server] [client]                      # the must-port names alone
 ```
 
 - **`--refresh`** updates the existing record of the exe: new names enter at `static` (or `unresolved`), names sigdb
@@ -102,8 +103,10 @@ python3 tools/sigport/build_record.py check [server] [client]                   
   `--note TEXT` with `--refresh` replaces the note; `verified` is set only when a record is first written.
 - **`check`** needs no exe: it compares names. For each side, the record of the newest build (highest `steam_build`)
   must be format 2 and list every declared name exactly once, under the file that declares it, with a valid level
-  (an `unresolved` name with its reason). It names every missing, extra or misplaced name and exits 1. Older records
-  are reported as superseded and not checked. `tools/sigport/tests/test_build_record.py` runs it on the repository,
+  (an `unresolved` name with its reason). It names every missing, extra or misplaced name and exits 1. Every name on
+  sigport's must-port list (`tools/sigport/must_port.json`, [sigport.md](../../docs/kiln/sigport.md#must-port-names))
+  must also still be declared and resolve on that record: a dropped or `unresolved` one is a `must-port` line and
+  exit 1, also when the record was refreshed to match. Older records are reported as superseded and not checked. `tools/sigport/tests/test_build_record.py` runs it on the repository,
   so a sigdb name added without a refresh fails the tests.
 
 ### How a level moves from `static` to `lab`

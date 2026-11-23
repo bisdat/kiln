@@ -3,6 +3,7 @@
 // the rest of kiln.build when it is compiled alone (KILN_REGIONS_HOST_TEST), and a game-like region list to hand it.
 // Include once before "../regions.cpp" with KILN_REGIONS_SUPPORT_STUBS defined, and once after it without.
 #ifdef KILN_REGIONS_SUPPORT_STUBS
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -21,13 +22,38 @@ std::string identity;
 std::string detail;
 void set_detail(const char* text) { detail = text; }
 std::string current_world() { return identity; }
+// kiln.log: the newest line of each level as regions.cpp formatted it
+std::string last_info, last_warning;
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 3, 4)))
+#endif
+void log_line(std::string& line, int* count, const char* fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    line = buf;
+    if (count) ++*count;
+}
+// kiln.caps: the newest report of the row about the save-region builder's callers
+int cap_reports = 0;
+bool cap_available = false;
+std::string cap_text;
+void report_callers_row(bool available, const std::string& text) {
+    ++cap_reports;
+    cap_available = available;
+    cap_text = text;
+}
 }
 #define KILN_REGIONS_HOST_TEST
-#define KB_I(...) ((void)0)
-#define KB_W(...) ((void)++::kb::warnings)
+#define KB_I(...) ::kb::log_line(::kb::last_info, nullptr, __VA_ARGS__)
+#define KB_W(...) ::kb::log_line(::kb::last_warning, &::kb::warnings, __VA_ARGS__)
 #define KB_E(...) ((void)++::kb::errors)
 #else
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <set>
 #include <vector>
@@ -71,11 +97,40 @@ FakeList make_list(std::vector<uint8_t>& store) {
     return l;
 }
 bool is_kiln(const uint8_t* e) { return std::memcmp(e, "KILNBILD", 8) == 0; }
+// The 16 m chunk positions an entry's bounds touch (edges included), counted one by one on each axis with the game's
+// float test: the most stored chunks the voxel writer can collect for its record.
+uint64_t entry_positions(const uint8_t* e) {
+    float lo[3], hi[3];
+    std::memcpy(lo, e + 0x10, 12);
+    std::memcpy(hi, e + 0x20, 12);
+    uint64_t n = 1;
+    for (int k = 0; k < 3; ++k) {
+        uint64_t axis = 0;
+        const int64_t first = static_cast<int64_t>(std::floor(lo[k] / 16.0f)) - 2;
+        const int64_t last = static_cast<int64_t>(std::floor(hi[k] / 16.0f)) + 2;
+        for (int64_t c = first; c <= last; ++c) {
+            const float clo = static_cast<float>(c * 32) * 0.5f, chi = clo + 16.0f;
+            axis += clo <= hi[k] && lo[k] <= chi;
+        }
+        n *= axis;
+    }
+    return n;
+}
+constexpr uint64_t kWriterChunks = 4096;  // stored chunks the game's voxel writer collects per record, at most
+uint64_t max_kiln_positions(const kb::GameArray& a) {
+    uint64_t most = 0;
+    for (uint64_t i = 0; i < a.count; ++i)
+        if (is_kiln(a.data + i * 0x30)) most = std::max(most, entry_positions(a.data + i * 0x30));
+    return most;
+}
 // The voxel serializer's rule (docs/re/build.md §12), in floats as the game computes it: a stored 32-cell chunk goes
 // into the blob of every entry whose bounds its 16 m box touches, but there only its 4 m blocks (8 cells a side, 64 per
 // chunk, bit x + 4y + 16z) whose own box touches the bounds keep their cells (edges included); every other block is
-// written empty, and the loader leaves an empty block as the world generates it.
+// written empty, and the loader leaves an empty block as the world generates it. The writer collects at most 4,096 of
+// the record's stored chunks and skips the rest in hash order: of an entry whose bounds touch more chunk positions than
+// that, any chunk may be missing, so it counts as saving none.
 uint64_t blocks_saved_by(const std::array<int32_t, 3>& c, const uint8_t* e) {
+    if (entry_positions(e) > kWriterChunks) return 0;
     float lo[3], hi[3];
     std::memcpy(lo, e + 0x10, 12);
     std::memcpy(hi, e + 0x20, 12);

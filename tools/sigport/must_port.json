@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "comment": "Must-port names: sigdb names whose loss in a game update changes what Kiln does by itself (a fallback players see). A re-port or a check that drops one, or cannot resolve it, fails instead of carrying on (docs/kiln/sigport.md, 'Must-port names'). Each entry: name; section (symbols, constants or features; default symbols); sides (default both); why: what Kiln falls back to without it. Add new names at the end.",
+  "names": [
+    {
+      "name": "build/RetSaveRegionsWorldSave", "section": "symbols", "sides": ["server", "client"],
+      "why": "kiln.build: the world save's call of the save-region builder. Without it Kiln cannot tell the save from the base zones and the base query, so every caller gets Kiln's save boxes, as up to 0.2.0-dev.30.8: extra Flame Altars, and boxes among the base zones the game groups (docs/re/build.md §12)"
+    },
+    {
+      "name": "build/RetSaveRegionsBaseZones", "section": "symbols", "sides": ["server", "client"],
+      "why": "kiln.build: the base-zone publish step's call of the save-region builder. Without it kiln.build warns at every start (kiln.log, kiln.caps row build.persist_callers); only the world save still gets boxes"
+    },
+    {
+      "name": "build/RetSaveRegionsBaseQuery", "section": "symbols", "sides": ["server", "client"],
+      "why": "kiln.build: the base query's call of the save-region builder. Without it kiln.build warns at every start (kiln.log, kiln.caps row build.persist_callers); only the world save still gets boxes"
+    }
+  ]
+}
