@@ -18,7 +18,86 @@ uint64_t change(KilnOwner owner, const std::string& mod, const std::string& edit
     return h;
 }
 const std::string wood = R"("registry":"items","select":"game:material_t1_wood_logs","field":"maxStack",)";
+const std::string stone = R"("registry":"items","select":"game:material_stone","field":"maxStack",)";
+const std::string sword = R"("registry":"items","select":"game:sword_t2","field":"maxStack",)";
 void fresh_live() { world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({}); }
+bool report_names(const std::string& mod, const std::string& needle) {
+    return std::any_of(g_last_report.refused.begin(), g_last_report.refused.end(), [&](const registry::Refusal& r) {
+        return r.mod == mod && r.reason.find(needle) != std::string::npos;
+    });
+}
+
+// review4 NM1 (R1): the committing candidate's own write fails; other owners' retained changes stay applied and retained.
+void candidate_write_failure_keeps_other_owners() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + stone + R"("op":70}])");
+    registry_live_commit(72, b, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "a and b applied");
+    const auto c = change(73, "c", "[{" + sword + R"("op":9}])");
+    g_write_limits = {0}; // only c's slot is dirty in this flush, and its write fails
+    registry_live_commit(73, c, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0, "the candidate's own failed write refuses only the candidate");
+    check(reply.reason.find("0x") == std::string::npos && reply.reason.find("items[game:sword_t2].maxStack") != std::string::npos,
+          "the candidate's reason names the Kiln place, never a process address");
+    check(registry_live_status().active == 2 && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70 && at<uint32_t>(SWORD_AT) == 0,
+          "other owners' retained changes survive the candidate's own failed write");
+    registry_live_publish();
+    check(!report_names("a", "not applied") && !report_names("b", "not applied") && report_names("c", "not committed"),
+          "only the candidate is reported refused");
+    check(registry_live_revert(71, a, &reply) == KILN_OK && registry_live_revert(72, b, &reply) == KILN_OK,
+          "the retained handles stay valid");
+}
+// review4 NM1 (R2): a pack reapplication's unrelated stage-edit write fails; a live change on another field survives.
+void unrelated_application_write_failure_keeps_live() {
+    world();
+    g_files = {{"p/content/p.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":70}]}})"}};
+    const auto files = files_of({{"p", "p/content/p.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    check(at<uint32_t>(STONE_AT) == 70, "pack applied");
+    RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50, "live a applied");
+    g_files["p/content/p.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":80}]}})";
+    g_write_limits = {0}; // the pack's stone slot is the only write of this flush, and it fails
+    apply_registry_files(files);
+    check(registry_live_status().active == 1 && at<uint32_t>(WOOD_AT) == 50,
+          "an unrelated pack slot's failed write does not remove another mod's live change");
+    check(!report_names("a", "not applied") && report_names("p", "items[game:material_stone].maxStack: the game memory write failed"),
+          "the failed write is reported for the pack edit that owns the slot, not for the live change");
+}
+// review4 NM1: rows of retained changes rejected during a commit survive the commit's own rollback pass.
+void rejected_rows_survive_the_rollback_pass() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "a applied");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD); // a no longer binds in this world
+    const auto c = change(73, "c", "[{" + stone + R"("op":70}])");
+    g_write_limits = {0}; // c's write fails
+    registry_live_commit(73, c, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && at<uint32_t>(STONE_AT) == 50, "the candidate is refused and rolled back");
+    registry_live_publish();
+    check(report_names("a", "the entry is not in this world") && report_names("c", "not committed"),
+          "the rejected retained change's row reaches registry.json together with the candidate's");
+}
+// review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
+void multi_change_write_failure_is_attributed_per_change() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":{"mul":3}}])", 1);
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + stone + R"("op":70}])", 1);
+    registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 30 && at<uint32_t>(STONE_AT) == 70, "both applied");
+    put_pack(WOOD_AT, 20); // a relative change over a new pack value: only a's slot is written again
+    g_write_limits = {0};
+    apply_registry_files({});
+    check(at<uint32_t>(STONE_AT) == 70, "b's slot is untouched");
+    check(!report_names("b", "not applied") && report_names("a", "the game memory write of items[game:material_t1_wood_logs].maxStack failed"),
+          "the failed write is charged to the change that owns the slot only");
+}
 
 void packs_code_and_out_of_order_revert() {
     fresh_live(); put_pack(WOOD_AT, 20); std::string err; store_flush(&err);
@@ -638,7 +717,11 @@ int main() {
         {"repeated_submit_numbers_are_distinct", repeated_submit_numbers_are_distinct},
         {"restart_is_refused_at_every_live_point", restart_is_refused_at_every_live_point},
         {"refused_edits_share_change_budget", refused_edits_share_change_budget},
-        {"restart_is_per_edit_and_begin_is_bounded", restart_is_per_edit_and_begin_is_bounded}};
+        {"restart_is_per_edit_and_begin_is_bounded", restart_is_per_edit_and_begin_is_bounded},
+        {"candidate_write_failure_keeps_other_owners", candidate_write_failure_keeps_other_owners},
+        {"unrelated_application_write_failure_keeps_live", unrelated_application_write_failure_keeps_live},
+        {"rejected_rows_survive_the_rollback_pass", rejected_rows_survive_the_rollback_pass},
+        {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;

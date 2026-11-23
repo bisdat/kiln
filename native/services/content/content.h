@@ -305,6 +305,9 @@ void store_originals(uintptr_t addr, size_t size, uint8_t* out);  // out holds a
 bool store_has(uintptr_t addr);
 // Writes every dirty slot's effective bytes (newest layer, else the original). Returns slots written.
 size_t store_flush(std::string* error);
+// The same; unwritten (optional) receives the address of every slot whose write did not land (memory differs from it after the
+// batch), so a caller can charge a failure to the owner of that slot alone.
+size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten);
 std::vector<Conflict> store_conflicts();
 uint32_t store_changed();  // slots whose current bytes differ from the original
 uint64_t store_generation();  // changes with every change of a slot (what store_changed and store_conflicts count follows it)

@@ -433,7 +433,9 @@ bool store_original(uintptr_t addr, uint8_t n, uint8_t* out) {
     return true;
 }
 
-size_t store_flush(std::string* error) {
+size_t store_flush(std::string* error) { return store_flush_checked(error, nullptr); }
+
+size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten) {
     PhaseTimer pt(PH_FLUSH);
     std::lock_guard lock(g_mu);
     std::vector<Write> writes;
@@ -481,6 +483,11 @@ size_t store_flush(std::string* error) {
         PhaseTimer wt(PH_WRITE_BATCH);
         done = write_batch(writes, &failed);
     }
+    if (unwritten)  // each write whose bytes are not in memory now: attributed per slot by the caller (review4 NM1)
+        for (const Write& w : writes) {
+            uint8_t now[kSlotBytes] = {};
+            if (!rd(w.addr, now, w.n) || std::memcmp(now, w.bytes, w.n) != 0) unwritten->push_back(w.addr);
+        }
     if (failed && error) {
         char b[96];
         std::snprintf(b, sizeof b, "%zu of %zu writes failed (first at %p)", writes.size() - done, writes.size(),
