@@ -16,24 +16,36 @@ public sealed class TalentTreeState
     public int Granted { get; set; }
     /// <summary>The character level / game skill-point total seen last (for offline reads).</summary>
     public int LastLevel { get; set; }
+    /// <summary>The game's skill-point total seen last (the base of a <see cref="TalentPoints.ShareOfGame(double)"/>
+    /// tree, for offline reads).</summary>
     public int LastGameTotal { get; set; }
     /// <summary>+1 per change.</summary>
     public long Revision { get; set; }
 }
 
 /// <summary>A character's points in one tree.</summary>
+/// <param name="Total">All the points the tree gives the character: its points source plus what code granted.</param>
+/// <param name="Spent">Points in unlocked levels: each node's cost times its level.</param>
+/// <param name="Available"><paramref name="Total"/> minus <paramref name="Spent"/>.</param>
 public readonly record struct TalentPointsInfo(int Total, int Spent, int Available)
 {
+    /// <summary>The available points out of the total, with the spent ones, for logs.</summary>
     public override string ToString() => $"{Available} of {Total} ({Spent} spent)";
 }
 
 /// <summary>The answer of an unlock / lock / respec / grant.</summary>
+/// <param name="Ok">True when the action happened.</param>
+/// <param name="Reason">Why it was refused; empty when <paramref name="Ok"/>.</param>
+/// <param name="Level">The node's level after the call (a refusal: the level it stayed at); 0 for a respec and for an
+/// unknown node.</param>
+/// <param name="Points">The character's points in the tree after the call.</param>
 public sealed record TalentResult(bool Ok, string Reason, int Level, TalentPointsInfo Points) : IKilnResult
 {
     // IKilnResult's reason is null when the action happened; this record's own Reason keeps its text ("" then).
     string? IKilnResult.Reason => Ok ? null : Reason;
 
     internal static TalentResult No(string why, int level = 0, TalentPointsInfo points = default) => new(false, why, level, points);
+    /// <summary>"ok" with the level and points, or "refused" with the reason, for logs.</summary>
     public override string ToString() => Ok ? $"ok (level {Level}, points {Points})" : $"refused: {Reason}";
 }
 
@@ -69,6 +81,8 @@ public static partial class Skills
     private static readonly HashSet<(string Tree, uint Entity)> BudgetPending = new();
     private static bool _started;
 
+    /// <summary>Always true: Kiln talent trees run in managed code and need no native service. For the nodes in the
+    /// game's own tree see <see cref="GameTree.Available"/>.</summary>
     public static bool Available => true;
 
     /// <summary>Every registered tree.</summary>
@@ -80,6 +94,7 @@ public static partial class Skills
         }
     }
 
+    /// <summary>The registered tree with this id; null when there is none. Any thread.</summary>
     public static TalentTree? Find(string id)
     {
         lock (Gate) return Registry.TryGetValue(id, out var e) ? e.Tree : null;
@@ -387,6 +402,8 @@ public static partial class Skills
         return StateOf(Need(tree), holder);
     }
 
+    /// <summary>A character's state in a tree, for a player in game: <see cref="State(string, TalentHolder)"/> with
+    /// <see cref="HolderOf(EntityId)"/>. Tick thread.</summary>
     [TickThreadOnly]
     public static TalentTreeState State(string tree, EntityId player) => State(tree, HolderOf(player));
 
@@ -421,6 +438,8 @@ public static partial class Skills
         }
     }
 
+    /// <summary>A character's points in a tree: total, spent and available. Tick thread. Throws
+    /// <see cref="KeyNotFoundException"/> when no tree has that id.</summary>
     [TickThreadOnly]
     public static TalentPointsInfo Points(string tree, TalentHolder holder)
     {
@@ -481,6 +500,8 @@ public static partial class Skills
         return new TalentResult(true, "", level + 1, PointsOf(e, holder, s));
     }
 
+    /// <summary>Takes a node for a player in game: <see cref="Unlock(string, string, TalentHolder, bool)"/> with
+    /// <see cref="HolderOf(EntityId)"/> and no force. Tick thread.</summary>
     [TickThreadOnly]
     public static TalentResult Unlock(EntityId player, string tree, string node) => Unlock(tree, node, HolderOf(player));
 
@@ -551,6 +572,8 @@ public static partial class Skills
         return p;
     }
 
+    /// <summary>Gives a player in game points of the tree's own: <see cref="Grant(string, TalentHolder, int)"/> with
+    /// <see cref="HolderOf(EntityId)"/>. Tick thread.</summary>
     [TickThreadOnly]
     public static TalentPointsInfo Grant(string tree, EntityId player, int points) => Grant(tree, HolderOf(player), points);
 

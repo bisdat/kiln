@@ -6,9 +6,24 @@
 namespace Kiln;
 
 /// <summary>Client to server: <see cref="Op"/> 0 = state, 1 = unlock, 2 = lock, 3 = respec.</summary>
+/// <param name="Op">0 = state, 1 = unlock, 2 = lock, 3 = respec.</param>
+/// <param name="Tree">The id of the tree.</param>
+/// <param name="Node">The id of the node for an unlock or lock; not read for the other operations.</param>
 public sealed record TalentRequest(int Op, string Tree, string Node);
 
 /// <summary>Server to client: a player's state in one tree.</summary>
+/// <param name="Tree">The id of the tree.</param>
+/// <param name="Total">All the points the tree gives the character (<see cref="TalentPointsInfo.Total"/>).</param>
+/// <param name="Spent">Points in unlocked levels (<see cref="TalentPointsInfo.Spent"/>).</param>
+/// <param name="Available">Points still free (<see cref="TalentPointsInfo.Available"/>).</param>
+/// <param name="Levels">Node id to level; a locked node is absent.</param>
+/// <param name="Ok">False when the request was refused or failed; <paramref name="Message"/> says why, and a Kiln
+/// client shows it as a toast.</param>
+/// <param name="Message">A text for the player: the refusal or error; empty when there is none.</param>
+/// <param name="Revision">The count of changes to the character's state in this tree
+/// (<see cref="TalentTreeState.Revision"/>: plus 1 per change).</param>
+/// <param name="CharacterLevel">The character level the server saw last
+/// (<see cref="TalentTreeState.LastLevel"/>).</param>
 public sealed record TalentStateMessage(string Tree, int Total, int Spent, int Available, Dictionary<string, int> Levels,
     bool Ok, string Message, long Revision, int CharacterLevel);
 
