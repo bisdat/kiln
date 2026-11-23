@@ -226,6 +226,16 @@ public sealed class PlayerStorageDocumentTests
     }
 
     [Fact]
+    public void Current_reference_wins_over_older_parked_reference_on_registration()
+    {
+        var active = Storages();
+        var older = new JsonObject { ["mod:bag"] = Bag(7) };
+        var (restored, parked) = PlayerStorageDocument.Partition(active, older, new Dictionary<string, int> { ["mod:bag"] = 8 });
+        Assert.Equal(0, restored["mod:bag"]!["refs"]!["arrow"]!.GetValue<int>());
+        Assert.Empty(parked);
+    }
+
+    [Fact]
     public void Unregistered_and_overflow_records_ride_unchanged_then_registration_restores_them()
     {
         var bag = Bag(7);

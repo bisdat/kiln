@@ -168,6 +168,26 @@ public sealed class PlayerStorageStoreTests
         finally { store.Native = null; }
     }
 
+    [Theory]
+    [InlineData("join")]
+    [InlineData("next")]
+    public void Join_then_equal_capture_shares_contents_instead_of_duplicating_history(string capturedWitness)
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        store.Native = new Persist { Frozen = new(capturedWitness, PlayerStorageDocumentTests.Storages()) };
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            h.Save(1);
+            var carried = PlayerStorageDocument.Read(store.Carried(character)!, character.Id);
+            Assert.Empty(carried.Data["history"]!.AsArray());
+            Assert.True(PlayerStorageDocument.Choose("join", carried, null)!.Paired);
+        }
+        finally { store.Native = null; }
+    }
+
     [Fact]
     public void New_visit_never_receives_previous_visits_committed_update_before_its_own_save()
     {
