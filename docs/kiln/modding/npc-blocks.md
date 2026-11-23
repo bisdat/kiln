@@ -403,3 +403,8 @@ with slots. `Was` keeps the ids through a rename.
 ## Test
 `mods/tests/blocks-npc-test`: run `build-assets.py` (it writes the creature's glTF and cooks it), then start a lab twice with the force-ready switch
 (`kiln/data/kiln.creatures/force-ready`). It logs `blocks-npc-test: PASS` and `FAIL` lines, and `blocks-npc-test done: N PASS, M FAIL`.
+
+`mods/tests/npc-body-test` (authored roster bodies): `lab.sh bodies` lays Kiln out in a dedicated-server lab, cooks the mod with the
+server's files, adds a broken neighbour (the same body whose glTF changed after its cook) and starts three times: the build, a restart
+(with `handshake.py`'s fake clients at the join check), and one without the mod. It checks the native `NPC body` lines, the body ledger
+and the mod's `npc-body-test: PASS` lines. The sample `mods/samples/NpcBody` is the same kind of body for authors: run `make-body.py`.

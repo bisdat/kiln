@@ -1,0 +1,7 @@
+# Made on your machine by make-body.py and the cook, from the glTF it generates: never committed.
+models/
+assets/cooked/
+assets/assets.json
+blocks/models_*.materials.json
+bin/
+obj/
