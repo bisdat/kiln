@@ -61,11 +61,40 @@ orientation whose +Z looks at `target` with `up` corrected to be square to it; a
 along the view direction is an `ArgumentException` (no roll is guessed). Both are pure helpers: no capability, no
 thread. Since mod API 0.2.17.
 
+## The local visual camera: SetLocal
+
+On a game client, `Camera.SetLocal(request)` (the client world's thread) sets a render-only camera for this client's
+own player: a keyed `Path` (`camera.local_pose`) and/or a `Lens` (`camera.local_fov`); a lens alone needs only
+`camera.local_fov`. Kiln writes it in one place, the renderer's camera selection: the selected pose's position and
+rotation (its scale stays the game's) and/or the field of view the game is about to store. The player's input camera,
+aim, the game's camera object and every component stay as they are, so movement, aim and `Render.Camera` do not
+change. A request is `Ok` (`ClientFrame`) only after a frame showed it; the result names that frame. When something
+after Kiln changes the frame (another camera writer), the request ends with `FrameFault` and `MayHaveApplied`; with
+no confirming frame within 1 s it is `NoCameraFrame` (`MayHaveApplied` when one may have been drawn). There is no
+collision: an authored camera can clip terrain and buildings.
+
+Times run on the process's monotonic clock (pausing the simulation does not pause them). T0 is the first frame that
+showed the lease; it ends at T0 + `Duration` and the next frame is the game's own. Path keys: positions in straight
+lines, rotations the short way round, keyed lenses linear in degrees; before the first key and after the last the
+camera holds that key; no splines, no looping. `Update` replaces the whole request: `Preserve` evaluates the new one at
+the time already elapsed (refused `ExpiredUpdate` when no time is left, `InsufficientLifetime` when less is left than
+the new blends, and the old revision stays), `Restart` starts a new T0. Blends use smoothstep: `Blend.In` from what
+was on screen (the game's view on a fresh request, the previous visual on an update or a takeover), `Blend.Out` over
+the duration's last part toward the game's fresh view; `Camera.End` blends the last shown view out to the game's view
+and completes after that. Parts a replacement drops go back to the game's view at once.
+
+Limits: every key and every derived camera position must stay within 250 m of the local player, whose position Kiln
+copies each client step; a path request whose player sample is missing or older than 250 ms writes nothing (and ends
+`SafetyRejected` once it was shown), a lens alone does not need it. A value out of bounds is refused `Bounds` before the
+first frame and ends the lease `SafetyRejected` after it. Kiln leaves the game's view alone when it is one v1 does not
+take (a scaled camera, a lens outside 0.01 to pi - 0.01 rad). A write that faults turns visual writes off for the rest
+of the client world (the rows say so). Since mod API 0.2.17.
+
 ## Other endpoints
 
-The typed records, native ABI, TestKit fake, and managed wire/state machines also describe local/remote visuals.
-Their physical renderer and transport bridge are not implemented in this slice: their service rows are unavailable,
-not hidden behind a client-test switch. No arbitrary pose, lens, follow profile, or shake is sent to a vanilla peer.
+The typed records, native ABI, TestKit fake, and managed wire/state machines also describe remote visuals. Their
+transport bridge is not implemented in this slice: `camera.remote` is unavailable, not hidden behind a client-test
+switch. No arbitrary pose, lens, follow profile, or shake is sent to a vanilla peer.
 The input camera and aim are not a visual-control API. The reserved resource-profile bit is unavailable in v1.
 `camera.service` means the table exists; `camera.server` and `camera.local` are managed aggregates, not substitutes
 for checking every requested part. See [capability rows](caps.md).

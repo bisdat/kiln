@@ -159,13 +159,52 @@ uint64_t Frames::select(const Renderer& r) {
     p.renderer = r.base();
     p.sample_step = sample_step_.load(std::memory_order_acquire);
     p.epoch = epoch;
+    sel_pending_ = p;
     put_pending(p);
     return p.selection;
 }
 
-void Frames::publish_invalid(uint32_t epoch, uint64_t step, uint32_t reason) {
+void Frames::expect(uint64_t selection, const Expected& e) {
+    if (!selection || sel_pending_.selection != selection) return;
+    sel_pending_.expected = e;
+    put_pending(sel_pending_);
+}
+
+void Frames::push_outcome(uint64_t gen, uint64_t frame, bool matched) {
+    const uint64_t n = outcome_count_.load(std::memory_order_relaxed);
+    OutcomeSlot& s = outcomes_[n % kOutcomes];
+    s.seq.store(2 * n + 1, std::memory_order_relaxed);  // being written
+    std::atomic_thread_fence(std::memory_order_release);
+    s.gen.store(gen, std::memory_order_relaxed);
+    s.frame.store(frame, std::memory_order_relaxed);
+    s.matched.store(matched ? 1 : 0, std::memory_order_relaxed);
+    s.seq.store(2 * n + 2, std::memory_order_release);
+    outcome_count_.store(n + 1, std::memory_order_release);
+}
+
+bool Frames::next_outcome(uint64_t* cursor, Outcome* out) const {
+    const uint64_t count = outcome_count_.load(std::memory_order_acquire);
+    if (count - *cursor > kOutcomes) *cursor = count - kOutcomes;
+    while (*cursor < count) {
+        const uint64_t n = (*cursor)++;
+        const OutcomeSlot& s = outcomes_[n % kOutcomes];
+        const uint64_t seq = s.seq.load(std::memory_order_acquire);
+        if (seq != 2 * n + 2) continue;  // overwritten already
+        Outcome o;
+        o.gen = s.gen.load(std::memory_order_relaxed);
+        o.frame = s.frame.load(std::memory_order_relaxed);
+        o.matched = s.matched.load(std::memory_order_relaxed) != 0;
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (s.seq.load(std::memory_order_relaxed) != seq) continue;
+        *out = o;
+        return true;
+    }
+    return false;
+}
+
+void Frames::publish_invalid(uint32_t epoch, uint64_t step, uint32_t reason, uint64_t frame) {
     Snapshot s;
-    s.frame = frames_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    s.frame = frame;
     s.sample_step = step;
     s.captured_ns = clock_->now_ns();
     s.epoch = epoch;
@@ -177,8 +216,8 @@ void Frames::capture(const Renderer& r) {
     uint32_t epoch = 0;
     if (faulted_.load(std::memory_order_acquire) || !ours(r, &epoch)) return;
     uint64_t step = sample_step_.load(std::memory_order_acquire);
+    Pending p;
     if (selection_hooked_) {
-        Pending p;
         // the selection of this frame, of this renderer, of this world, not taken yet; otherwise this is not a new frame
         if (!get_pending(&p) || !p.selection || p.selection == captured_selection_ || p.renderer != r.base() || p.epoch != epoch) return;
         captured_selection_ = p.selection;
@@ -188,21 +227,34 @@ void Frames::capture(const Renderer& r) {
     uint8_t raw[kPoseBytes] = {};
     float lens[4] = {};  // aspect, near, far, field of view
     bool fault = false;
-    if (!r.read(l.pose, raw, kPoseValueBytes, &fault) || !r.read(l.proj_aspect, lens, sizeof lens, &fault)) {
-        if (fault) faulted_.store(true, std::memory_order_release);  // and no snapshot of this world any more
-        publish_invalid(epoch, step, KILN_CAMERA_REASON_NO_CAMERA_FRAME);
-        return;
-    }
+    const bool read = r.read(l.pose, raw, kPoseValueBytes, &fault) && r.read(l.proj_aspect, lens, sizeof lens, &fault);
     EnginePose pose;
     std::memcpy(&pose, raw, sizeof pose);
+    const uint64_t frame = frames_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    const Expected& e = p.expected;
+    if (e.gen) {
+        // what the selection wrote is what this frame shows, or something after us changed it
+        bool same = read;
+        if (same && (e.wrote & kWrotePose)) {
+            for (int i = 0; i < 3; ++i) same = same && pose.position[i] == e.position[i];
+            for (int i = 0; i < 4; ++i) same = same && std::fabs(pose.rotation[i] - e.rotation[i]) <= 1e-5f;
+        }
+        if (same && (e.wrote & kWroteFov)) same = std::fabs(lens[3] - e.fov) <= 1e-5f;
+        push_outcome(e.gen, frame, same);
+    }
+    if (!read) {
+        if (fault) faulted_.store(true, std::memory_order_release);  // and no snapshot of this world any more
+        publish_invalid(epoch, step, KILN_CAMERA_REASON_NO_CAMERA_FRAME, frame);
+        return;
+    }
     Quat q{pose.rotation[0], pose.rotation[1], pose.rotation[2], pose.rotation[3]};
     if (!lens_ok(lens[3], lens[0], lens[1], lens[2]) || !scale_ok(pose.scale) || !engine_unit(&q)) {
         // the game's own view is one v1 does not describe: say "no frame" rather than keep an older one valid
-        publish_invalid(epoch, step, KILN_CAMERA_REASON_NO_CAMERA_FRAME);
+        publish_invalid(epoch, step, KILN_CAMERA_REASON_NO_CAMERA_FRAME, frame);
         return;
     }
     Snapshot s;
-    s.frame = frames_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    s.frame = frame;
     s.sample_step = step;
     s.captured_ns = clock_->now_ns();
     s.epoch = epoch;

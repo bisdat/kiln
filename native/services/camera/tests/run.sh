@@ -19,7 +19,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthrea
     -I"$abi" "$here/capture_test.cpp" "$here/../capture.cpp" -o "$out/capture-test"
 "$out/capture-test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
-    -I"$abi" "$here/service_test.cpp" "$here/../camera.cpp" "$here/../mode.cpp" "$here/../state.cpp" "$here/../capture.cpp" "$here/../local.cpp" -o "$out/service-test"
+    -I"$abi" "$here/render_test.cpp" "$here/../render_tx.cpp" "$here/../sampler.cpp" "$here/../capture.cpp" "$here/../state.cpp" -o "$out/render-test"
+"$out/render-test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
+    -I"$abi" "$here/service_test.cpp" "$here/../camera.cpp" "$here/../mode.cpp" "$here/../state.cpp" "$here/../capture.cpp" "$here/../local.cpp" "$here/../sampler.cpp" "$here/../render_tx.cpp" -o "$out/service-test"
 "$out/service-test"
 "$out/service-test" no-observer
 "$out/service-test" old-world

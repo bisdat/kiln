@@ -152,6 +152,28 @@ public:
     // Frame preparation: publishes the snapshot of the renderer's newest selection, once per selection id.
     void capture(const Renderer& r);
 
+    // ---- what the render transaction wrote (render_tx.h) ----
+    enum : uint32_t { kWrotePose = 1, kWroteFov = 2 };
+    struct Expected {
+        uint64_t gen = 0;    // the plan whose values were written (0: nothing was written this frame)
+        uint32_t wrote = 0;  // kWrotePose | kWroteFov
+        float fov = 0;       // radians, as handed to the game's store
+        int64_t position[3] = {0, 0, 0};
+        float rotation[4] = {0, 0, 0, 0};
+    };
+    // The selection hook, after select() gave `selection`: what it wrote, for this frame's capture to check.
+    void expect(uint64_t selection, const Expected& e);
+    // A frame's verdict on a plan: the final camera is what was written (position exact in 32.32, rotation and field
+    // of view within 1e-5), or not (something after kiln.camera changed it).
+    struct Outcome {
+        uint64_t gen = 0, frame = 0;
+        bool matched = false;
+    };
+    static constexpr uint32_t kOutcomes = 32;
+    // The client Pre: the next verdict after *cursor, oldest first (false: none). A reader more than kOutcomes behind
+    // loses the oldest.
+    bool next_outcome(uint64_t* cursor, Outcome* out) const;
+
     // ---- the read (any thread) ----
     // 0 with *out filled (valid 1), or the reason there is none (*out zeroed, valid 0): NO_CAMERA_FRAME, SNAPSHOT_BUSY,
     // SNAPSHOT_STALE.
@@ -169,12 +191,18 @@ private:
         uint64_t renderer = 0;
         uint64_t sample_step = 0;
         uint32_t epoch = 0, pad = 0;
+        Expected expected;
     };
+    static_assert(sizeof(Expected) == 56 && sizeof(Pending) % 8 == 0, "copied as whole words");
+    struct OutcomeSlot {
+        std::atomic<uint64_t> seq{0}, gen{0}, frame{0}, matched{0};
+    };
+    void push_outcome(uint64_t gen, uint64_t frame, bool matched);  // the capture hook only
     void put_pending(const Pending& p);
     bool get_pending(Pending* out) const;
     // The live client world's renderer: its world field equals the live world's number.
     bool ours(const Renderer& r, uint32_t* epoch);
-    void publish_invalid(uint32_t epoch, uint64_t step, uint32_t reason);
+    void publish_invalid(uint32_t epoch, uint64_t step, uint32_t reason, uint64_t frame);
 
     const Clock* clock_;
     RenderLayout layout_{};
@@ -188,6 +216,9 @@ private:
     std::atomic<uint64_t> pend_seq_{0};
     std::atomic<uint64_t> pend_words_[sizeof(Pending) / 8]{};
     uint64_t captured_selection_ = 0;      // the capture hook's own: the last selection it published
+    Pending sel_pending_{};                // the selection hook's own: its newest record
+    OutcomeSlot outcomes_[kOutcomes];
+    std::atomic<uint64_t> outcome_count_{0};
     SnapshotStore store_;
 };
 
