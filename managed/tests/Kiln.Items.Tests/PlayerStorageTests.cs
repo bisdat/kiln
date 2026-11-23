@@ -2,7 +2,9 @@
 // Player storage (0.2.0-dev.30.7, GitHub issue 128): Items.RegisterPlayerStorage, PlayerStorage, StorageFilter,
 // Items.PlayerStorages and the storage events on the test kit's kiln.items.storage (Fakes/ItemsStorage: holders are fake
 // containers, the game's side is scripted with KilnHarness.PlayerStorage). What the game does (the capture, the join, the
-// tombstone) is the native lane's and the owner's in-game check; persistence is Kiln.Saves'.
+// tombstone) needs native implementation and the owner's in-game verification; persistence is Kiln.Saves'.
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Kiln;
 using Kiln.TestKit;
 using Xunit;
@@ -158,6 +160,55 @@ public sealed class PlayerStorageTests
         Assert.True(all[1].Registered);
         var parked = Assert.Single(r.Seen.OfType<PlayerStorageParkedEvent>());
         Assert.Equal(("oldmod:bag", 1, PlayerStorageParkReason.Unregistered), (parked.Key, parked.Stacks, parked.Reason));
+    }
+
+    private static string _returningKey = "";
+
+    [Theory]
+    [InlineData("gone:bag")]
+    [InlineData("quivers:quiver")]
+    public unsafe void PublicEnumerationHidesTemporaryReturnHoldersButKeepsTheOrdinaryRows(string returningKey)
+    {
+        using var r = new Run();
+        _returningKey = returningKey;
+        var table = *StorageNative.T;
+        table.List = &ListWithTemporaryReturnHolders;
+        StorageNative.UseForTests(&table);
+        try
+        {
+            // Saves still needs both raw rows per original key for InstanceData tracking.
+            var raw = stackalloc StorageNative.State[3];
+            raw[0].Size = (uint)sizeof(StorageNative.State);
+            uint count;
+            Assert.Equal(StorageNative.Ok, StorageNative.T->List(r.Ada.Entity.Value, raw, 3, &count));
+            Assert.Equal(3u, count);
+            Assert.Equal((StorageNative.StateParked, 0u, 901u), (raw[1].Status, raw[1].Handle, raw[1].Holder));
+
+            var all = r.Kiln.Run(() => Items.PlayerStorages.Of(r.Ada.Entity));
+            Assert.Equal(new[] { "gone:bag", "quivers:quiver" }, all.Select(i => i.FullKey));
+            Assert.Equal((false, EntityId.None, PlayerStorageState.Parked), (all[0].Registered, all[0].Holder, all[0].Status.State));
+            Assert.Equal((true, new EntityId(800), PlayerStorageState.Ready), (all[1].Registered, all[1].Holder, all[1].Status.State));
+        }
+        finally { StorageNative.ResetForTests(); }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe int ListWithTemporaryReturnHolders(uint player, StorageNative.State* rows, uint capacity, uint* count)
+    {
+        *count = 3;
+        if (capacity < 3) return StorageNative.BufferTooSmall;
+        for (var i = 0; i < 3; i++)
+        {
+            rows[i] = default;
+            rows[i].Size = (uint)sizeof(StorageNative.State);
+            StorageNative.SetText(rows[i].Key, StorageNative.KeyMax, i == 0 ? "gone:bag" : i == 1 ? _returningKey : "quivers:quiver");
+            rows[i].Status = i == 2 ? StorageNative.StateReady : StorageNative.StateParked;
+            rows[i].Handle = i == 2 ? 1u : 0;
+            rows[i].Holder = i == 2 ? 800u : i % 2 == 1 ? (uint)(900 + i) : 0;
+            rows[i].Slots = i % 2 == 1 ? 64u : i == 2 ? 8u : 0;
+            rows[i].Pages = i % 2 == 1 ? 8u : i == 2 ? 1u : 0;
+        }
+        return StorageNative.Ok;
     }
 
     [Fact]

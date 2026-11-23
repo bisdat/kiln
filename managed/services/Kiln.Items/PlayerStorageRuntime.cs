@@ -179,8 +179,13 @@ internal static unsafe class PlayerStorageRuntime
                 {
                     var list = new List<PlayerStorageInfo>((int)n);
                     for (var i = 0; i < n; i++)
+                    {
+                        // A return's temporary holder is listed for Kiln.Saves' InstanceData tracking, not as another
+                        // storage. The ordinary row of its original key remains (permanent PARKED rows have no holder).
+                        if (p[i].Status == StorageNative.StateParked && p[i].Handle == 0 && p[i].Holder != 0) continue;
                         list.Add(new PlayerStorageInfo(StorageNative.Text(p[i].Key, StorageNative.KeyMax), p[i].Handle != 0, (int)p[i].Slots,
                             new EntityId(p[i].Holder), StatusOf(&p[i])));
+                    }
                     return list;
                 }
             }
