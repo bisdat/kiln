@@ -295,6 +295,7 @@ internal static class PlayerStorageMirror
     public const string ChannelVersion = "1";
     internal const long PassMs = 250, FirstWaitMs = 5000, MaxWaitMs = 60000;
     internal const double PicksPerSecond = 4, PickBurst = 8;
+    internal const int MaxLocalPicks = 64;
 
     private static readonly object Gate = new();
     private static NetChannel? _channel;
@@ -359,6 +360,16 @@ internal static class PlayerStorageMirror
             Backend.Current.Log(0, LogLevel.Warn, $"kiln.items: the channel {ChannelName} needs Kiln.Network: {e.Message}");
         }
         lock (Gate) _tick ??= ServiceTickAccess.Add("kiln.items storage copy", static _ => Pass());
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = null;  // Kiln's own subscription, not the mod's whose first use started the copy
+        try
+        {
+            Events.On<ServerStoppingEvent>(static _ => WorldStopping());
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
         ReportCapability();
     }
 
@@ -466,7 +477,7 @@ internal static class PlayerStorageMirror
         if (link.Hosting)
         {
             var player = link.LocalPlayer;
-            if (player.IsNone) return false;
+            if (player.IsNone || LocalPicks.Count >= MaxLocalPicks) return false;  // the server tick takes them every step
             LocalPicks.Enqueue((player, pick));
             return true;
         }
@@ -485,19 +496,19 @@ internal static class PlayerStorageMirror
     // ================================================================ server ====
 
     /// <summary>The service tick (both sides; does work only where players are in game): local picks, then about four
-    /// times a second every player's rows.</summary>
+    /// times a second every player's rows. Nothing in the game's menu (Kiln's service tick runs there off the tick thread,
+    /// with no world): a queued pick waits for the world, or goes with it.</summary>
     internal static void Pass()
     {
         IStorageMirrorLink? link;
         lock (Gate) link = _link;
-        if (link is null) return;
+        if (link is null || !Game.IsTickThread) return;
         while (LocalPicks.TryDequeue(out var p)) HandlePick(p.Player, p.Pick);
         var now = Clock();
         if (_lastPass != long.MinValue && now - _lastPass < PassMs) return;
         _lastPass = now;
         try
         {
-            if (!Game.IsTickThread) return;
             if (!Capabilities.Is(PlayerStorage.Capability) && Views.Count == 0) return;  // no storage here and nobody was sent rows
             Send(link, now);
         }
@@ -751,9 +762,17 @@ internal static class PlayerStorageMirror
             if (Acceptors.TryGetValue(acceptor.Key, out var had) && ReferenceEquals(had, acceptor)) Acceptors.Remove(acceptor.Key);
     }
 
-    /// <summary>The hosted server world is stopping (ServerStoppingEvent).</summary>
+    /// <summary>The server world is stopping (ServerStoppingEvent: a hosted session ends, or the server shuts down; on the
+    /// tick thread while the world still runs): its views, the picks its own player queued and the pick rates go with it,
+    /// and a hosting game's own copy empties now (the game's menu runs no pass that could notice).</summary>
     internal static void WorldStopping()
     {
+        while (LocalPicks.TryDequeue(out _)) { }
+        var local = Views.Values.Any(v => v.Local);
+        Views.Clear();
+        PickStates.Clear();
+        _lastPass = long.MinValue;
+        if (local) Changed(Store.Clear());
     }
 
     /// <summary>Tests: how many players' pick rates are kept.</summary>

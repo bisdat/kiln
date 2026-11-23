@@ -462,6 +462,7 @@ public sealed class PlayerStorageMirrorTests
         Assert.Single(equips.Calls);  // the first is under way
         r.Kiln.Run(() => equips.Hold.SetResult(EquipResult.Fail(ItemsStatus.Done, r.Ada.Entity, EquipmentSlot.Arrow, false, default, "", false)));
         equips.Hold = null;
+        Drain(r, r.Quivers);  // the outcome comes back through the storage mod's scheduler (the host runs it at the next step)
         for (var i = 0; i < 12; i++) r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, pick));
         Assert.Equal(7, equips.Calls.Count);  // a burst of 8 a player: 2 went above, 6 of these 12
         r.Now += 1000;
