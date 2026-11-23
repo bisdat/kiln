@@ -13,7 +13,30 @@ public sealed class CameraSampleMod : Mod
     private Task<CameraResult>? _pending;
     private bool _ending;
 
-    public override void OnLoad() => Client.Tick += OnClientTick;
+    public override void OnLoad()
+    {
+        Client.Tick += OnClientTick;
+        Camera.Changed += OnChanged;  // a lease that ends by itself (its time is up, the world stopped) is forgotten
+    }
+
+    // In the lease's world step (or, for WorldStopped, on the thread that stops the world: no game access there, only this
+    // mod's own fields). The handler goes with the mod.
+    private void OnChanged(CameraChange change)
+    {
+        if (change.Kind != CameraChangeKind.Ended) return;
+        if (change.Lease.Endpoint == CameraEndpoint.Local)
+        {
+            if (change.Lease.Value == _local.Value) _local = default;
+            return;
+        }
+        lock (_modes)
+            foreach (var (player, lease) in _modes)
+                if (lease.Value == change.Lease.Value)
+                {
+                    _modes.Remove(player);
+                    break;
+                }
+    }
     public override void OnUnload()
     {
         Client.Tick -= OnClientTick;
@@ -26,17 +49,22 @@ public sealed class CameraSampleMod : Mod
     {
         if (!c.Source.IsPlayer) throw new CommandException("a player must request their own stock mode");
         var result = await Camera.SetMode(c.Source.Player, CameraMode.PlayerCameraBuildingFirstPerson, TimeSpan.FromSeconds(5));
-        if (result.Ok) _modes[c.Source.Player] = result.Lease;
+        if (result.Ok)
+            lock (_modes) _modes[c.Source.Player] = result.Lease;
         c.Reply(result.Ok ? "Stock mode accepted (ServerState, not a visual ACK)." : $"Refused: {result.ReasonCode}: {result.Reason}");
     }
 
     [Command("camera-mode-off", Permission = CommandPermission.Admin, Description = "End this sample's stock-mode lease")]
     private async Task ModeOff(CommandContext c)
     {
-        if (!c.Source.IsPlayer || !_modes.TryGetValue(c.Source.Player, out var lease))
+        CameraLease lease;
+        bool held;
+        lock (_modes) held = _modes.TryGetValue(c.Source.Player, out lease);
+        if (!c.Source.IsPlayer || !held)
             throw new CommandException("this sample holds no stock-mode lease for you");
         var result = await Camera.End(lease);
-        if (result.Ok) _modes.Remove(c.Source.Player);
+        if (result.Ok)
+            lock (_modes) _modes.Remove(c.Source.Player);
         c.Reply(result.Ok ? "Stock mode released." : $"Refused: {result.ReasonCode}: {result.Reason}");
     }
 

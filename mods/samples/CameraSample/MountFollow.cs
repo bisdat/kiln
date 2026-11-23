@@ -14,7 +14,8 @@
 // The view (MountView): FollowHeading on the mount's upright heading, 12 degrees down, no camera collision (it can clip
 // terrain: an outdoor view), a 90 degree lens, a 120 s lease renewed with Restart every 30 s while riding and on a size
 // change, ended before a controlled teleport and on dismount. On the server it is a remote visual for the rider's Kiln
-// client (camera.remote; a vanilla rider is refused RequiresKilnClient and keeps the stock camera); a client mod uses
+// client (camera.remote; MountView.Start asks for nothing for a rider whose client does not offer the parts, a vanilla
+// one included, and that rider keeps the stock camera); a client mod uses
 // Camera.SetLocal for its own player the same way. The rider's aim and input camera never move.
 using System.Numerics;
 using Kiln;

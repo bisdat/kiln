@@ -45,7 +45,8 @@ Bad arguments throw `ArgumentException`; the wrong world's thread throws `Invali
 capabilities throw `KilnUnavailableException` naming the required row. Valid current-state refusals return
 `CameraResult.Ok == false` with a stable `CameraReason`. Request durations are whole milliseconds, 1–120,000
 (default 10 seconds), priority is -1000–1000, Mode blend times must be zero, and the transition enum chooses stock
-blending. The native model admits at most 64 pending operations and 16 Mode slots.
+blending. The native model admits at most 64 pending operations, 16 players held in stock Mode and 16 players with a
+server's visual (`Camera.Set`) at once.
 
 ## The rendered camera: GetVisual, Project, LookAt
 
@@ -125,9 +126,12 @@ still join; at most 16384 bytes a message) and turns the row on. Per player:
   player's camera is free again. The client lets go by itself at the lease's duration, when the
   server's heartbeat is missing for 3 s, and when the connection or a world ends; it reports its own end, which arrives as
   `Changed` `Ended` with the client's reason (`Expired`, `TargetLost`, `SafetyRejected` ...). A player who leaves ends
-  the lease `PeerDisconnected`.
+  the lease `PeerDisconnected`. Kiln.Network takes up to its handshake timeout (`HandshakeTimeoutSeconds`, 20 s by
+  default) to call a client vanilla; until then a request for a vanilla player is refused `Negotiation`, after it
+  `RequiresKilnClient`.
 - **The host's own player** (a client that hosts) goes through a local queue from the server world to the client world:
-  no packet, no handshake; the host's own `camera.local_*` rows decide.
+  no packet, no handshake; the host's own `camera.local_*` rows decide. It also needs `camera.remote`: the bridge carries
+  this route too and binds only when kiln.net is there (chapter 03 §4.4's host row, a deviation the coordinator accepted).
 - **Refusals** (`Ok = false`, never a silent stock fallback): a vanilla client, or a Kiln without `kiln.camera`,
   `RequiresKilnClient`; a client without a part the request needs (its `camera.local_*` row is off there)
   `ClientCapability`; a client that does not finish the camera handshake within 2 s `Negotiation`; no such player
@@ -185,7 +189,8 @@ returned with `MayHaveApplied`, which the sample retains so it can be ended.
 
 A lens-only request is `new CameraOverride(Lens: new CameraLens(40))`; it asks for no pose capability. The sample's
 two-key path uses explicit poses/rotations and `CameraBlend` for the whole request, not per-part blending. End the
-sample's current local lease before starting another; owner retirement also cancels all its work on unload.
+sample's current local lease before starting another (one that ended by itself, its time up or its world stopped, is
+forgotten through `Camera.Changed`); owner retirement also cancels all its work on unload.
 `MountFollow.cs` is the riding view of a big or flying mount (chapter 03's S9): `MountFollow.BuildFlyerProfile` turns the
 mount's author-supplied bounds (scaled enclosing sphere with wings, seat height, top speed) into a height and an absolute
 distance that keep the camera at least 1 m outside the body while the followed sample is at most 250 ms old, and
@@ -210,3 +215,11 @@ a host, including absent dependencies, connected-player checks, cancellation, cl
 entities and a private fixture resolver. Its eight acceptance results are counted by Kiln.Testing. Those entities
 are not authenticated clients. The fixture's clock and model epoch changes are deterministic; it does not claim to
 reload the engine's world or prove what a connected player's screen displays.
+
+The transport bridge (`camera.remote`) has native host tests (`tests/run-bridge.sh`: the binding's drain under ASan,
+UBSan and TSan, and the REMOTE_VISUAL backend over the real lease model with a fake bridge), managed tests of both roles
+on a fake network (`Kiln.Camera.Tests`, `BridgeHostTests`), and a dedicated-server lab: `camera-test`'s remote checks
+against `camnet.py`, fake Kiln clients on kiln.net's lab transport that speak `kiln.camera` v1 (an applied request with
+the client's frame, an update and an end, the client's own end, an update the client never answers, and the refusals
+`ClientCapability`, `RequiresKilnClient`, `Negotiation` and `PeerUnavailable`). A real guest's game client and the
+host's own route in a real hosted game have not run.
