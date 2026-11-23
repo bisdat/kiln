@@ -73,6 +73,7 @@ public static unsafe class UnlimitedFlightScenario
         var help = k.RunCommand(admin, "help unlimitedflight");
         Ok(help);
         Assert.Contains("glid", Said(help));
+        Assert.Contains("/unlimitedflight", Said(k.RunCommand(admin, "help")));
         Assert.DoesNotContain(Commands.List(CommandSource.ForPlayer(guest.Entity)), c => c.Name == "unlimitedflight");
         Assert.Contains("is off", Said(Run(k, admin, "status")));
         foreach (var line in new[] { "unlimitedflight", "unlimitedflight toggle", "unlimitedflight on Guest", "unlimitedflight status Guest" })
@@ -107,6 +108,7 @@ public static unsafe class UnlimitedFlightScenario
         var current = hostAccess.GetProperty("Current")!;
         var mod = hostAccess.GetMethod("CreateContext")!.Invoke(null,
             [new ModInfo("command-caller", "Command caller", "1.0.0", k.ModsDirectory), 0UL, k.DataDirectory]);
+        RuleSet? mine = null;
         k.Run(() =>
         {
             set.Dispose();
@@ -117,10 +119,18 @@ public static unsafe class UnlimitedFlightScenario
                 Ok(Commands.Execute(source, "unlimitedflight on"));
                 Assert.Same(mod, current.GetValue(null));
                 Assert.Equal("kiln", Own().Owner);
+                // the calling mod's own glide set: its off takes only the command's set, its unload only the mod's
+                mine = RulesApi.Apply(host.Entity, new PlayerRules { UnlimitedGliding = true }, label: "caller-glide");
+                Assert.Equal("command-caller", mine.Owner);
+                Ok(Commands.Execute(source, "unlimitedflight off"));
+                NoOwn();
+                Assert.True(mine.Active);
+                Ok(Commands.Execute(source, "unlimitedflight on"));
             }
             finally { current.SetValue(null, outer); }
             typeof(ModContext).GetMethod("Retire", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(mod, null);
         });
+        Assert.False(mine!.Active);
         Assert.True(Own().Active);
         Assert.Contains("S pitch up, W dive", Said(k.RunCommand(source, "unlimitedflight status")));
         Ok(k.RunCommand(source, "unlimitedflight off"));
