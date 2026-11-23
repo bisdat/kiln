@@ -29,7 +29,9 @@ Since mod API **0.2.17**, this is a separate 56-byte table, not an extension of 
    an old snapshot over a later change, an older pack or a `Content.*` code owner. Revert consumes the handle.
 
 Later commits win, relative operations compose, and `exclusive`/`yield` retain their normal meaning across entry
-points. Registry layers remain above old packs and below `Content.*` code. `read` returns actual live values through
+points. Pass names do not reorder separate transactions: A commits a Final set to 70, then B commits an Alter set to 80;
+the result is 80, and reverting B restores 70. The copied base is prepared once and later turns use touched-entry overlays,
+not a full-base reconstruction for each retained handle. Registry layers remain above old packs and below `Content.*` code. `read` returns actual live values through
 the mapping, including lists and formulas, without creating a layer; pre-world/restart reads use the kept stage view.
 The stage reads all stable fields once for these later entry points. An unmapped or unproven field is refused, never
 inferred from a similar game field.

@@ -4,6 +4,7 @@
 #include "registry_live_test.cpp"
 #undef main
 #include "services/kiln_registry_live.h"
+#include <chrono>
 
 namespace {
 std::string doc(const std::string& mod, const std::string& edits) {
@@ -213,6 +214,63 @@ void stopped_world_uses_only_copied_data() {
     check(registry_live_status().world == 0 && registry_live_status().world_kind == KILN_WORLD_KINDS,
           "the stopped token and kind are cleared together");
 }
+void final_then_later_alter_obeys_commit_order() {
+    fresh_live(); RegistryLiveReply reply;
+    uint64_t a = 0;
+    registry_live_begin(71, "a", 4, &a);
+    std::string final = doc("a", "[{" + wood + R"("op":70}])");
+    final.replace(final.find("alter"), 5, "final");
+    registry_live_submit(71, a, final, &reply, nullptr);
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + wood + R"("op":80}])");
+    registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 80, "commit order wins even when an earlier transaction was Final and the later one Alter");
+    registry_live_revert(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 70, "reverting the later Alter restores the earlier Final");
+}
+void prepared_turn_still_checks_references() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto invalid = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"inputs","list":{"replace":[{"item":"missing:ingredient","count":3}]}}])");
+    check(registry_live_commit(71, invalid, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.reason.find("missing:ingredient") != std::string::npos,
+          "a field-only continuation still refuses a new missing reference");
+    const auto valid = change(72, "b", R"([{"registry":"recipes","select":"game:plank_recipe","field":"inputs","list":{"replace":[{"item":"game:material_t1_wood_logs","count":3}]}}])");
+    check(registry_live_commit(72, valid, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied,
+          "a valid reference-list transaction remains writable");
+    std::string value;
+    check(registry_live_read("recipes", "game:plank_recipe", "inputs", &value) == KILN_OK && registry::json::parse(value)[0]["count"] == 3,
+          "the reference-list transaction is visible through the mapped reader");
+    registry_live_revert(72, valid, &reply);
+    check(registry_live_read("recipes", "game:plank_recipe", "inputs", &value) == KILN_OK && registry::json::parse(value)[0]["count"] == 2,
+          "reverting the reference-list transaction restores the original list");
+}
+void retained_changes_have_bounded_commit_cost() {
+    fresh_live();
+    RegistryLive installed = *g.in;
+    for (size_t i = 0; i < 20000; ++i) {
+        registry::BaseModel::Entry entry;
+        entry.id = "game:cost_" + std::to_string(i);
+        entry.fields = {{"maxStack", registry::Value::integer(10)}, {"manaCost", registry::Value::number(10)},
+            {"staminaCost", registry::Value::number(10)}, {"power", registry::Value::integer(10)},
+            {"rarity", registry::Value::text("common")}, {"perks", registry::Value::of_list({})}};
+        installed.base.registries["items"].push_back(std::move(entry));
+    }
+    registry_live_install(std::move(installed)); registry_live_world_begin(); apply_registry_files({});
+    // Seed admitted copied changes directly, without charging or waiting for 63 earlier commits in this bounded-cost test.
+    // The final public commit still recomposes and binds all 64 retained transactions through the real backend/store.
+    for (unsigned i = 0; i < 63; ++i) {
+        const auto h = change(1000 + i, "cost-" + std::to_string(i), "[{" + wood + R"("op":{"add":1}}])");
+        g.changes.at(h).order = ++g.next_order;
+    }
+    const auto h = change(2000, "last", "[{" + wood + R"("op":{"add":1}}])");
+    RegistryLiveReply reply;
+    const auto start = std::chrono::steady_clock::now();
+    const auto rc = registry_live_commit(2000, h, &reply);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::printf("64 retained changes / 20000 extra entries: %.2f ms commit\n", ms);
+    check(rc == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 74,
+          "the bounded-cost commit preserves all 64 ordered relative edits");
+    check(ms < 1000, "64 retained scalar changes over 20000 entries commit within the 1000 ms sanitizer-host budget");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -319,6 +377,9 @@ int main() {
         {"nested_transactions_are_refused", nested_transactions_are_refused},
         {"wrong_world_thread_is_refused_under_lock", wrong_world_thread_is_refused_under_lock},
         {"stopped_world_uses_only_copied_data", stopped_world_uses_only_copied_data},
+        {"final_then_later_alter_obeys_commit_order", final_then_later_alter_obeys_commit_order},
+        {"prepared_turn_still_checks_references", prepared_turn_still_checks_references},
+        {"retained_changes_have_bounded_commit_cost", retained_changes_have_bounded_commit_cost},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

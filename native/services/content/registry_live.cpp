@@ -81,6 +81,7 @@ struct LiveState {
     uint64_t world = 0, next_order = 0;
     uint32_t world_kind = KILN_WORLD_KINDS;
     registry::Result stage_result;
+    std::shared_ptr<const registry::PreparedBase> prepared;
     bool reading = false;
     std::string read_reason;
     std::map<registry::FieldRef, LiveField> read_fields;
@@ -920,7 +921,7 @@ void compose_changes() {
     for (const auto* change : ordered) {
         registry::ModInput input;
         input.id = change->mod; input.batches = change->batches;
-        result = registry::compose_after(*g.in->schema, g.in->base, result, {input});
+        result = registry::compose_after(*g.in->schema, g.in->base, *g.prepared, result, {input});
         result.refused.insert(result.refused.end(), change->refused.begin(), change->refused.end());
     }
     g.in->result = std::move(result);
@@ -982,7 +983,9 @@ void apply_changes(std::string* error, uint64_t candidate = 0, bool keep_refused
     if (keep_refused) prior = std::move(g.refused); // changed pack sections can add their own restart diagnostics
     std::vector<registry::Refusal> rejected;
     std::string first_write_error, last_write_error;
-    compose_changes();
+    // A committing candidate has already composed/pruned its copied IR. Only recompose again if
+    // preflight removes another retained change; ordinary applications/reverts start from scratch.
+    if (!candidate) compose_changes();
     for (;;) {
         prepare_bindings();
         if (reject_unbound_changes(candidate, {}, &rejected)) { compose_changes(); continue; }
@@ -1131,6 +1134,7 @@ void registry_live_install(RegistryLive in) {
     std::lock_guard lock(store_mutex());
     g.in = std::make_shared<RegistryLive>(std::move(in));
     g.stage_result = g.in->result;
+    g.prepared = registry::prepare_base(g.in->base);
     g.fields.clear(); g.pending_tables.clear(); g.table_fields.clear(); g.table_addrs.clear();
     g.changes.clear(); g.dead.clear(); g.world = 0; g.world_kind = KILN_WORLD_KINDS;
     { std::lock_guard retiring(g_retiring_mu); g_retiring.clear(); }

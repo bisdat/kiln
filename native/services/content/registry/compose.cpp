@@ -1055,7 +1055,7 @@ std::string bounded(const std::string& text, const std::string& root) {
     return text.substr(0, cut) + " ... (root: " + r.substr(0, rc) + ")";
 }
 
-void check_references(Ctx& c, State& s) {
+void check_references(Ctx& c, State& s, bool fields_only = false) {
     std::map<std::string, std::vector<const FieldSpec*>> fields;  // registry -> its fields with references (lists, not leaf rows)
     for (const auto& [name, reg] : c.schema.registries)
         for (const auto& [fname, f] : reg.fields)
@@ -1088,18 +1088,29 @@ void check_references(Ctx& c, State& s) {
     std::map<EntryRef, std::vector<EntryRef>> referrers;
     std::deque<EntryRef> work;
     std::set<EntryRef> queued;
-    for (const auto& [reg, fl] : fields)
-        s.each_entry(reg, [&](const EntryState& e) {
-            if (e.removed) return;
-            bool any = false;
-            for (const FieldSpec* f : fl) {
-                std::vector<Ref> refs;
-                refs_of(c.schema, *f, s.current({reg, e.id, f->name}), f->name, &refs);
-                for (const auto& [path, id] : refs) referrers[{ref_registry(*f, path), lower(id)}].push_back({reg, e.id});
-                any = any || !refs.empty();
-            }
-            if (any && queued.insert({reg, e.id}).second) work.push_back({reg, e.id});
-        });
+    if (fields_only) {
+        // Field-only turns cannot remove an entry or invalidate an untouched reference. Inspect their
+        // accumulated touched reference fields, not every reference of every entry in the immutable base.
+        for (const auto& [fr, outcome] : s.fields) {
+            const auto* reg = c.schema.registry(fr.registry);
+            const auto* field = reg ? reg->field(fr.field) : nullptr;
+            const EntryRef entry{fr.registry, fr.id};
+            if (field && has_refs(c.schema, *field) && queued.insert(entry).second) work.push_back(entry);
+        }
+    } else {
+        for (const auto& [reg, fl] : fields)
+            s.each_entry(reg, [&](const EntryState& e) {
+                if (e.removed) return;
+                bool any = false;
+                for (const FieldSpec* f : fl) {
+                    std::vector<Ref> refs;
+                    refs_of(c.schema, *f, s.current({reg, e.id, f->name}), f->name, &refs);
+                    for (const auto& [path, id] : refs) referrers[{ref_registry(*f, path), lower(id)}].push_back({reg, e.id});
+                    any = any || !refs.empty();
+                }
+                if (any && queued.insert({reg, e.id}).second) work.push_back({reg, e.id});
+            });
+    }
     while (!work.empty()) {
         const EntryRef er = work.front();
         work.pop_front();
@@ -1229,20 +1240,10 @@ void check_references(Ctx& c, State& s) {
 
 }  // namespace
 
-static Result compose_impl(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
-                           const std::vector<ModInput>& mods, const Result* previous) {
-    Result out = previous ? *previous : Result{};
-    Ctx c{schema, out, base, {}, {}, {}, {}, {}};
-    for (const auto& [reg, covers] : base.raw_cover)
-        for (const auto& [key, cover] : covers) {
-            const std::string k = cover_key(key);
-            c.cover[reg][k] = cover;
-            if (cover.converted) c.converted[{reg, cover.field}].push_back(k);
-        }
-    for (const ModInput& m : mods)  // refused before the stage: a reference to such an add names this as its cause
-        for (const Refusal& x : m.refused)
-            if (const size_t bar = x.entry.find('|'); bar != std::string::npos)
-                c.refused_add.try_emplace({x.entry.substr(0, bar), lower(x.entry.substr(bar + 1))}, x.reason);
+// Immutable lookup/value state shared by later field-only turns; overlays copy only touched entries.
+struct PreparedBase { State state; };
+
+static State base_state(const BaseModel& base) {
     State s;
     for (const auto& [reg, entries] : base.registries)
         for (const BaseModel::Entry& e : entries) {
@@ -1269,6 +1270,32 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         x.removed_by = "the ids ledger (retired)";
         s.add_entry(reg, std::move(x));
     }
+    return s;
+}
+
+std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base) {
+    auto prepared = std::make_shared<PreparedBase>();
+    prepared->state = base_state(base);
+    return prepared;
+}
+
+static Result compose_impl(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
+                           const std::vector<ModInput>& mods, const Result* previous, const State* prepared = nullptr) {
+    Result out = previous ? *previous : Result{};
+    Ctx c{schema, out, base, {}, {}, {}, {}, {}};
+    for (const auto& [reg, covers] : base.raw_cover)
+        for (const auto& [key, cover] : covers) {
+            const std::string k = cover_key(key);
+            c.cover[reg][k] = cover;
+            if (cover.converted) c.converted[{reg, cover.field}].push_back(k);
+        }
+    for (const ModInput& m : mods)  // refused before the stage: a reference to such an add names this as its cause
+        for (const Refusal& x : m.refused)
+            if (const size_t bar = x.entry.find('|'); bar != std::string::npos)
+                c.refused_add.try_emplace({x.entry.substr(0, bar), lower(x.entry.substr(bar + 1))}, x.reason);
+    State s;
+    if (prepared) s.parent = prepared;
+    else s = base_state(base);
     // D1: Kiln's older paths and the archive writer's packages lie below every registry edit, in the order they apply
     // (a raw member's chain too: "raw:<key>", when the member resolves on this build). Old data packs (and Content.* code)
     // are applied by the game's kiln.content as today: each one's relative op over the value below the packs (what the game
@@ -1395,7 +1422,7 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         }
         run_edit(c, s, h.who, h.edit, true, &h.ids);
     }
-    check_references(c, s);
+    check_references(c, s, prepared != nullptr);
     out.fields = std::move(s.fields);
     return out;
 }
@@ -1405,6 +1432,11 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
 }
 Result compose_after(const Schema& schema, const BaseModel& base, const Result& previous, const std::vector<ModInput>& mods) {
     return compose_impl(schema, base, {}, mods, &previous);
+}
+
+Result compose_after(const Schema& schema, const BaseModel& base, const PreparedBase& prepared,
+                     const Result& previous, const std::vector<ModInput>& mods) {
+    return compose_impl(schema, base, {}, mods, &previous, &prepared.state);
 }
 
 }  // namespace kc::registry
