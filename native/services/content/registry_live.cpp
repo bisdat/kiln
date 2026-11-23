@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iterator>
 #include <optional>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 
@@ -725,6 +726,12 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const std::string& conv = rw.conv;
     if (conv == "int" || conv == "float" || conv == "bool" || conv == "time" || conv == "enum") {
         const Field* f = rw.paths.empty() ? nullptr : sc.find(rw.paths[0]);
+        // refl.cpp exposes a one-scalar struct (GemSlotOverride {isSet}) at its parent path.
+        constexpr std::string_view flag = ".isSet";
+        if (!f && conv == "bool" && !rw.paths.empty() && rw.paths[0].ends_with(flag)) {
+            const Field* flat = sc.find(rw.paths[0].substr(0, rw.paths[0].size() - flag.size()));
+            if (flat && flat->vt == KILN_CV_BOOL) f = flat;
+        }
         if (!f || (!g.reading && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
         return bind_scalar(b, f);
     }

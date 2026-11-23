@@ -381,6 +381,37 @@ void pending_fractional_integer_cost_is_refused() {
     for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
     check(exact, "a pending change's rejection preserves the stable reason token");
 }
+void flattened_socket_read_write_revert() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    mem<uint8_t>(WOOD_AT + 0x97, 0x5a); mem<uint8_t>(WOOD_AT + 0x99, 0xa5);
+    check(registry_live_read("items", "game:material_t1_wood_logs", "socket", &value) == KILN_OK && value == "false",
+          "socket reads the scalar that reflection exposes for its single-field struct");
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(WOOD_AT + 0x98) == 1,
+          "socket writes the flattened Boolean, not a missing nested member");
+    check(at<uint8_t>(WOOD_AT + 0x97) == 0x5a && at<uint8_t>(WOOD_AT + 0x99) == 0xa5,
+          "socket writes only its one-byte slot");
+    check(registry_live_read("items", "game:material_t1_wood_logs", "socket", &value) == KILN_OK && value == "true", "the mapped socket read observes the write");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint8_t>(WOOD_AT + 0x98) == 0, "socket reverts its own Boolean layer");
+}
+void staged_flattened_socket_binds() {
+    world(); g_files = {{"a/content/socket.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}]}})"}};
+    const auto files = files_of({{"a", "a/content/socket.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    check(at<uint8_t>(WOOD_AT + 0x98) == 1, "start-time socket edits bind the flattened field at world load too");
+}
+void flattened_socket_foreign_revert_is_skipped() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "the socket change applies before outside drift");
+    mem<uint8_t>(WOOD_AT + 0x98, 2);
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(WOOD_AT + 0x98) == 2,
+          "a socket revert preserves another writer's bytes");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -498,6 +529,9 @@ int main() {
         {"whole_and_float_costs_still_work", whole_and_float_costs_still_work},
         {"staged_fractional_integer_cost_is_refused", staged_fractional_integer_cost_is_refused},
         {"pending_fractional_integer_cost_is_refused", pending_fractional_integer_cost_is_refused},
+        {"flattened_socket_read_write_revert", flattened_socket_read_write_revert},
+        {"staged_flattened_socket_binds", staged_flattened_socket_binds},
+        {"flattened_socket_foreign_revert_is_skipped", flattened_socket_foreign_revert_is_skipped},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

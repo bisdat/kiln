@@ -217,6 +217,8 @@ void world() {
     add_field(I.schema, fld("damageSetup.dmgMod", 0x08, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("armorSetup.distribution.physical", 0x90, 4, KILN_CV_FLOAT));
+    Field socket = fld("gemSlotOverride", 0x98, 1, KILN_CV_BOOL); socket.type_name = "keen::GemSlotOverride";
+    add_field(I.schema, socket); // refl.cpp single_scalar flattens {isSet} to the parent path
     add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
     add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
     for (int i = 0; i < 5; ++i) {
@@ -273,6 +275,7 @@ registry::BaseModel base() {
     registry::BaseModel::Entry w;
     w.id = "game:material_t1_wood_logs";
     w.fields["maxStack"] = registry::Value::integer(10);
+    w.fields["socket"] = registry::Value::boolean(false);
     w.fields["rarity"] = registry::Value::text("common");
     w.fields["perks"] = registry::Value::of_list({registry::Value::text("game:perk_a")});
     items.push_back(w);
@@ -360,7 +363,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
-    in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
