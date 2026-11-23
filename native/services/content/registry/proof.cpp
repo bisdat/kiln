@@ -87,7 +87,10 @@ json roundtrip_doc(const Env& e, const std::string& generation, const std::strin
 
 }  // namespace
 
-bool requested(const Env& e) { return e.read_data && e.read_data(kRequest).has_value(); }
+bool requested(const Env& e) {
+    if (e.exists) return e.exists(kRequest);
+    return e.read_data && e.read_data(kRequest).has_value();
+}
 
 std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files) {
     std::sort(files.begin(), files.end());

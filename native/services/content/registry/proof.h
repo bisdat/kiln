@@ -39,6 +39,8 @@ inline constexpr const char* kRequest = "proof/request.json";
 struct Env {
     // under <data>/content/registry (stage.h Env's read_data / write_data)
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // the file is there (one file-system lookup, nothing read; review2 N1); without it requested() falls back to read_data
+    std::function<bool(const std::string& rel)> exists;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::unique_ptr<model::Source>(std::string* why)> source;  // the base (live bytes at resources-ready)
     std::function<bool(const KilnAssetKey& key, std::vector<uint8_t>* out, std::string* why)> bytes;  // one resource's base bytes

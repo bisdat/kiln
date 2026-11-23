@@ -118,6 +118,13 @@ void nothing_without_the_request() {
     looked = 0;
     check(proof::run(e).empty(), "no request file: nothing written");
     check(looked == 1 && other == 0, "no request file: one lookup and nothing else (no base read, no regmap, no file, no log)");
+    // review2 N1: with an existence check the request is never read (one file-system lookup at every start)
+    int exists = 0;
+    looked = 0;
+    e.exists = [&](const std::string& rel) { return check(rel == proof::kRequest, "only the request: " + rel), ++exists, false; };
+    check(!proof::requested(e) && exists == 1 && looked == 0, "the existence check alone, the request file not read");
+    e.exists = [&](const std::string&) { return ++exists, true; };
+    check(proof::requested(e) && looked == 0, "a request file there is requested without reading it");
 }
 
 void digest_contract() {

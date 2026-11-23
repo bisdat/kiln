@@ -144,7 +144,7 @@ pub fn verdict(r: &GateResult, baseline: Option<&GateResult>) -> (bool, Vec<Stri
     for (t, x) in &r.tests {
         // Evidence production is not a self-test of the sigdb build. regproof judges every row fail-closed;
         // missing evidence (including an older/broken producer) must not prevent sigport marking a new build.
-        if t == "registry-proof-test" { continue; }
+        if evidence_only(t) { continue; }
         if !x.summary {
             why.push(format!("{t}: no summary line (did not finish, or did not load)"));
             continue;
@@ -182,6 +182,12 @@ fn random_password() -> Result<String> {
     let mut b = [0u8; 12];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// A test that produces registry proof evidence and is no self-test of the build: its results and its build never block
+/// the gate (regproof judges its evidence fail-closed).
+fn evidence_only(test: &str) -> bool {
+    test == "registry-proof-test"
 }
 
 fn toml_str(s: &str) -> String {
@@ -384,7 +390,16 @@ pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
         println!("gate: registry proof unproven: no candidate in the copy ({e:#})");
     }
     for t in &o.tests {
-        let built = build_test(inst, t)?;
+        let built = match build_test(inst, t) {
+            Ok(b) => b,
+            // evidence production never blocks the gate or sigport's mark (as the verdict skips its results): a producer that
+            // does not build leaves every registry row without lab evidence (regproof: unproven), nothing more (review2 N3)
+            Err(e) if evidence_only(t) => {
+                println!("gate: {t} did not build ({e:#}): no live registry evidence from this gate (regproof keeps those rows unproven)");
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         install_mod(&built, &gdir.join("kiln/mods").join(t))?;
     }
     std::fs::create_dir_all(config::instances_dir())?;
@@ -487,6 +502,7 @@ mod tests {
     #[test]
     fn the_registry_proof_runs_in_the_gate_by_default() {
         assert!(DEFAULT_TESTS.contains(&"registry-proof-test"));
+        assert!(evidence_only("registry-proof-test") && !evidence_only("content-test"), "only the producer's build failure is tolerated");
         let with: Vec<String> = DEFAULT_TESTS.iter().map(|s| s.to_string()).collect();
         let (rel, text) = proof_request(&with).expect("requested with the producer");
         assert_eq!(rel, "kiln/data/content/registry/proof/request.json");
