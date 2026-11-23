@@ -72,6 +72,24 @@ followed by `dataStorage`; Health, Stamina, Mana and Oxygen derive from `SInt32A
 `UInt32Attribute` (the resource still types the group `sint32`, and the formula is a signed clamp, so Kiln reads every slot
 as s32). `host test native/services/combat/tests/run.sh` resolves the table from the real resource bytes and checks all of it.
 
+**BodyHeat runs on the signed interpreter** (dev.31; server exe `f0d824be…`, client exe `5d9ef2f1…` of Steam build
+26430625; static reads of copies, the game was not run). The engine has three attribute interpreters: signed (`idiv`;
+S `0x14003d730`, C `0x140220410`), unsigned (`div`; S `0x140064920`, C `0x140251cc0`) and float (S `0x140052800`, C
+`0x1402359c0`). Which one runs is the registry's choice, by the type the resource gives the root, not the component's
+class: the generic attribute dispatcher (S `0x14018b0e0`) reads the type hash at `info+8` of `AttrFind`'s answer (S
+`0x14018b15f`, C `0x1403e9ebf`) and sends `sint32` (`0x9859f31e`) to the signed one (S `0x14018b53a`, C `0x1403ea29a`),
+`uint32` (`0x32940bec`) to the unsigned one (S `0x14018b6ba`, C `0x1403ea41a`). The root recalculation after a plain add
+(S `0x140052700`, C `0x1402358c0`: the root by the component's `rootId`, each non-empty program from the last entry to
+the first, the result stored) uses the signed one, and that is what the BodyHeat recharge and depletion code calls after
+adding its delta (`AttrFind(0xC7AEAF1D)`, then `add dword [slot]`; S `0x140054d46`..`0x140054d8d`, also `0x1400c1175`;
+C `0x140237e96`..`0x140237edd`, also `0x1402d51d5`); `attrAdd` calls the signed one too (S `0x140190921`). The unsigned one has six direct
+callers on each side, none for BodyHeat: the dispatcher's `uint32` branch, FreezingResistance_Heat_Source, Experience's
+Experiance_Gain (twice), Level, and one site with ids `0xBBAEBAF7`/`0x5AB0B361` (a scan of direct calls: an
+indirect one is not excluded). So BodyHeat's Clamp and BodyHeat_Max's
+`ScaleToNewMax(LoadRef BodyHeat, Load0, BodyHeat_Max, BodyHeat_Max_Base + BodyHeat_Max_Adder)` are signed computations,
+which is why kiln-sfi and kiln-eml (and the ShroudForge fork from its dev.31 pin) admit this one root's calculation as
+`sint32` while every other root whose resource and storage disagree in signedness stays refused (`ENGINE_SIGNED_ROOTS`). **[dis] [data]**
+
 **The add path clamps.** `attrAdd` (`0x190810`, the same function the Health block calls) does: `AttrFind(id)` →
 slot `info+0xC`; refuse when the component is null or flag bit 0 is clear; `slot += delta` (a plain dword add, and the
 root of the id is **not** compared with the component's, so Kiln checks that); then it walks the root's `structure`

@@ -412,6 +412,13 @@ impl Catalog {
             }
             let scalar_matches = components.len() == 1 && components[0]["scalar_type_matches"] == true;
             let common_integer = components.len() == 1 && components[0]["integer_representation_compatible"] == true;
+            // Kiln's one admitted signedness conflict ([`engine_signed_root`]): calculated as the resource's sint32.
+            let engine_signed = components.len() == 1
+                && engine_signed_root(
+                    root,
+                    scalar.map(|t| t.qualified_name.as_str()),
+                    components[0]["storage_scalar_type"].as_str(),
+                );
             // These instructions operate on the same 32-bit representation for signed/unsigned interpreters,
             // including wrapping arithmetic. Ordering, division and rescaling are intentionally excluded.
             let sign_independent = structure.iter().all(|node| {
@@ -454,7 +461,7 @@ impl Catalog {
                     "name_source":"kfc-debugNames","root_hash":root,"index":index,"resource_ids":resource_ids,
                     "container_ids":container_ids,"scalar_type_hash":scalar_hash,
                     "scalar_type":scalar.map(|t| t.qualified_name.as_str()),"components":components,
-                    "calculation_scalar_type":if components.len() == 1 && (scalar_matches || (common_integer && sign_independent)) {
+                    "calculation_scalar_type":if components.len() == 1 && !engine_signed && (scalar_matches || (common_integer && sign_independent)) {
                         components[0]["storage_scalar_type"].clone()
                     } else {json!(scalar.map(|t| t.qualified_name.as_str()))},
                     "structure":structure[index],"calculation_words":words,
@@ -467,9 +474,9 @@ impl Catalog {
                     "effect_scope":"local process, network authority and publication remain engine-managed",
                     "storage_writable":scalar_matches || common_integer,
                     "write_value_domain":if !scalar_matches && common_integer {"integer-common-range-0-to-2147483647"} else {"declared-scalar"},
-                    "calculation_writable":scalar_matches || (common_integer && sign_independent),
+                    "calculation_writable":scalar_matches || (common_integer && (sign_independent || engine_signed)),
                     "calculation_reason":if components.is_empty() {Some("calculation storage type requires an initialized entity root match")}
-                        else if !scalar_matches && !sign_independent {Some("signedness-dependent program with conflicting resource/storage scalar types")} else {None},
+                        else if !scalar_matches && !sign_independent && !engine_signed {Some("signedness-dependent program with conflicting resource/storage scalar types")} else {None},
                     "storage_reason":if components.is_empty() {Some("no proven component/root association. Compact headers without a reflected definition GUID require an independently observed initialized root ID")}
                         else if !scalar_matches && !common_integer {Some("KFC scalar type differs from reflected storage")}
                         else if components.len() != 1 {Some("ambiguous component ownership")} else {None}});
@@ -525,6 +532,24 @@ impl Catalog {
         }
         Ok((result, trace))
     }
+}
+
+/// The roots whose calculation Kiln admits although their resource and storage scalar types differ in signedness and
+/// their programs depend on it (ShroudForge refuses them all): BodyHeat (0xC7AEAF1D) alone. The game's attribute
+/// resource types the root sint32; its component, keen::ecs::BodyHeat, is a keen::ecs::UInt32Attribute whose storage is
+/// keen::uint32; BodyHeat runs Clamp and BodyHeat_Max runs ScaleToNewMax. The engine evaluates this root with its
+/// signed interpreter only (client exe 5d9ef2f1, Steam build 26430625; server exe f0d824be): its attribute dispatcher
+/// picks the interpreter by the registry's resource type (sint32: the signed one), and the BodyHeat recharge and
+/// depletion code and attrAdd recompute the root through the signed recalculation (docs/re/combat.md, "BodyHeat runs").
+/// So the descriptor keeps the resource's scalar as its `calculation_scalar_type` (what [`Catalog::recalculate`] runs)
+/// and the common-range write domain of every conflicting integer pair. Every other conflicting root stays refused.
+/// The same rule as kiln-sfi's `catalog::ENGINE_SIGNED_ROOTS` and the ShroudForge fork's `bind_storage`.
+pub const ENGINE_SIGNED_ROOTS: [u32; 1] = [0xC7AE_AF1D];
+
+/// Whether `root` is one of [`ENGINE_SIGNED_ROOTS`] with exactly the pair proven for it: the resource's keen::sint32
+/// over keen::uint32 storage. The reverse pair, a float, or another root is not admitted.
+pub fn engine_signed_root(root: u32, scalar: Option<&str>, storage: Option<&str>) -> bool {
+    scalar == Some("keen::sint32") && storage == Some("keen::uint32") && ENGINE_SIGNED_ROOTS.contains(&root)
 }
 
 /// SF `definition_root`: the engine's Guid -> HashKey32. The zero GUID is 0; any other is FNV-1a over its bytes in

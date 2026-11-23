@@ -14,7 +14,7 @@ mod fixture;
 use fixture::*;
 use kiln_sfi::runtime::ecs::attributes::writes::text as w;
 use kiln_sfi::runtime::ecs::cas::text as cas;
-use serde_json::json;
+use serde_json::{Value as Json, json};
 
 /// Entity 4: Stamina (70, 0, 80) and Revive (1.5, 2.0); entity 6: a Health only.
 fn world() -> EcsWorld {
@@ -395,4 +395,293 @@ fn the_attribute_target_refuses_and_normalizes() {
          return t.normalize(snapshot, 500), snapshot.value"
     ));
     assert_eq!((normalized, read), (80, 70));
+}
+
+// BodyHeat: Kiln's one admitted signedness conflict (catalog::ENGINE_SIGNED_ROOTS). The game's resource types the root
+// keen::sint32, its component (a keen::ecs::UInt32Attribute) stores keen::uint32 and its programs are sign-dependent
+// (Clamp, ScaleToNewMax), so ShroudForge refuses every calculation of it; the engine runs it on its signed interpreter
+// only (docs/re/combat.md, "BodyHeat runs"). Kiln calculates exactly that root, as keen::sint32, with every word in the
+// common range; the reverse pair, another root and a word outside the range stay refused.
+const BODY_HEAT: &str = "keen::ecs::BodyHeat";
+const BODY_HEAT_ROOT: u32 = 0xC7AE_AF1D;
+/// The game's BodyHeat root in slot order (attribute resource 8f1fd455-a5bf-4184-a77c-7123955d6e04).
+const BODY_HEAT_IDS: [(&str, u32); 8] = [
+    ("BodyHeat", 0xC7AE_AF1D),
+    ("BodyHeat_Max", 0x783E_C3B6),
+    ("BodyHeat_Max_Adder", 0x3EAA_6DA6),
+    ("BodyHeat_Max_Base", 0xA0DD_FAE8),
+    ("BodyHeat_RechargeRampup", 0xC717_AFE7),
+    ("BodyHeat_RechargeTimeout", 0x66B9_3DDF),
+    ("BodyHeat_Recharge", 0xF8A7_A735),
+    ("BodyHeat_Min", 0x227C_527E),
+];
+const SIGNEDNESS: &str =
+    "signedness-dependent program with conflicting resource/storage scalar types";
+const COMMON_RANGE: &str =
+    "conflicting signedness: only the common integer range 0..2147483647 is validated";
+
+/// The BodyHeat root as kiln-eml's archive describes it for today's game (no definition GUID: bound per entity), with
+/// the game's programs: BodyHeat = Clamp(BodyHeat, BodyHeat_Min, BodyHeat_Max) and BodyHeat_Max =
+/// ScaleToNewMax(LoadRef BodyHeat, Load0, BodyHeat_Max, BodyHeat_Max_Base + BodyHeat_Max_Adder). `root` moves it to
+/// another root ID, `resource` is the resource's scalar type.
+fn body_heat_descriptors(root: u32, resource: &str) -> Vec<Json> {
+    BODY_HEAT_IDS
+        .iter()
+        .enumerate()
+        .map(|(index, (name, id))| {
+            let hash = if root == BODY_HEAT_ROOT {
+                *id
+            } else {
+                root.wrapping_add(index as u32)
+            };
+            let mut d = descriptor(name, hash, root, index, resource, None);
+            let words = match index {
+                0 => json!([0x20000, 0x20007, 0x20001, 0xcffff]),
+                1 => json!([
+                    0x30000, 0x10000, 0x20001, 0x20003, 0x20002, 0x6ffff, 0xdffff
+                ]),
+                _ => json!([]),
+            };
+            d["structure"]["calculation"] = words.clone();
+            d["calculation_words"] = words;
+            d["calculation_sign_independent"] = json!(false);
+            d["calculation_writable"] = json!(false);
+            d["calculation_reason"] =
+                json!("calculation storage type requires an initialized entity root match");
+            d
+        })
+        .collect()
+}
+
+/// The fake archive's attribute_evaluate for an 8-word root: the two BodyHeat programs on the signed interpreter (the
+/// ScaleToNewMax branch included, as the engine's); any other root as the fixture's.
+fn body_heat_evaluate(root: u32, input: &[u32]) -> Result<(Vec<u32>, Vec<Json>), (i32, String)> {
+    if input.len() != 8 {
+        return recalculate(root, input);
+    }
+    let mut v: Vec<i32> = input.iter().map(|w| *w as i32).collect();
+    let new_max = v[3].wrapping_add(v[2]);
+    if new_max != v[1] && v[1] != 0 {
+        v[0] = (v[0] as f32 / v[1] as f32 * new_max as f32) as i32;
+    }
+    v[1] = new_max;
+    v[0] = v[0].clamp(v[7].min(v[1]), v[7].max(v[1]));
+    let out: Vec<u32> = v.iter().map(|x| *x as u32).collect();
+    let trace =
+        vec![json!({"name":"BodyHeat","hash":root,"index":0,"before_bits":input,"after_bits":out})];
+    Ok((out, trace))
+}
+
+/// A server VM whose entity 9 carries a BodyHeat component of `words` under `root`, with the catalog above
+/// (`resource` scalar) and a reflected layout of `storage` storage.
+fn body_heat_setup(words: [u32; 8], root: u32, resource: &str, storage: &str) -> AttrSetup {
+    let (_, bytes) = component(root, STAMINA_GUID, 1, &words);
+    let world = EcsWorld::server().with(9, &[(fnv(BODY_HEAT), bytes)]);
+    let extra = vec![T {
+        qualified: BODY_HEAT,
+        primitive: "Struct",
+        size: 24 + 32,
+        inner: Some(index_of(ATTRIBUTE_BASE) as u64),
+        count: 0,
+        fields: Vec::new(),
+        flags: 0,
+    }];
+    let s = setup_with(world, extra);
+    let mut list = descriptors();
+    list.extend(body_heat_descriptors(root, resource));
+    let identity = identity();
+    fake_attributes::with(|f| {
+        f.catalog = Some(Ok(fake_attributes::catalog_reply(
+            &identity,
+            &list,
+            &[
+                stamina_layout(),
+                revive_layout(),
+                layout(BODY_HEAT, 8, storage, None),
+            ],
+        )));
+        f.evaluate = Some(std::rc::Rc::new(body_heat_evaluate));
+    });
+    s
+}
+
+/// Entity 9's BodyHeat words as the world holds them.
+fn body_heat(s: &AttrSetup) -> [u32; 8] {
+    s.world(|w| {
+        let bytes = &w.entities[&9].components[&fnv(BODY_HEAT)];
+        std::array::from_fn(|i| {
+            u32::from_le_bytes(bytes[24 + 4 * i..28 + 4 * i].try_into().unwrap())
+        })
+    })
+}
+
+// SF Survival's Infinite Frost Timer as it runs: its tracker sets BodyHeat_Min to BodyHeat_Max through the attribute
+// target, the root's signed calculation clamps BodyHeat up to it, and the tracker restores BodyHeat_Min when the mod
+// stops.
+#[test]
+fn body_heat_min_takes_its_maximum_through_the_attribute_target() {
+    let s = body_heat_setup(
+        [4000, 10000, 0, 10000, 0, 0, 0, 0],
+        BODY_HEAT_ROOT,
+        "keen::sint32",
+        "keen::uint32",
+    );
+    let e = s.handle(9);
+    let (ok, why): (bool, Option<String>) = s.eval(&format!(
+        "tracker = runtime.overrides.new()
+         tracker:begin_update()
+         target = assert(runtime.overrides.attribute({e}, 'BodyHeat_Min'))
+         return tracker:apply(target.key, 'infiniteFrostTimer', target, function(snapshot)
+           return snapshot.values.BodyHeat_Max
+         end)"
+    ));
+    assert_eq!((ok, why), (true, None));
+    assert_eq!(body_heat(&s), [10000, 10000, 0, 10000, 0, 0, 0, 10000]);
+    assert_eq!(s.trackers.cleanup("alpha"), Ok(()));
+    assert_eq!(
+        body_heat(&s),
+        [10000, 10000, 0, 10000, 0, 0, 0, 0],
+        "BodyHeat_Min restored; BodyHeat stays inside its bounds"
+    );
+    // the direct update answers the root as the storage's scalar, the calculation applied
+    let (heat, min, applied): (i64, i64, bool) = s.eval(&format!(
+        "local r = ecs.update_attribute({e}, 'BodyHeat_Min', 2500)
+         return r.values.BodyHeat, r.values.BodyHeat_Min, r.applied"
+    ));
+    assert_eq!((heat, min, applied), (10000, 2500, true));
+}
+
+// The common range holds for every word of the root, before and after the calculation, not only the one written: a
+// word the two readings disagree on refuses the write, and nothing is written.
+#[test]
+fn body_heat_writes_stay_in_the_common_range() {
+    let s = body_heat_setup(
+        [4000, 10000, 0x8000_0000, 10000, 0, 0, 0, 0],
+        BODY_HEAT_ROOT,
+        "keen::sint32",
+        "keen::uint32",
+    );
+    let e = s.handle(9);
+    assert_eq!(
+        s.reason(&format!("ecs.update_attribute({e}, 'BodyHeat_Min', 10000)")),
+        COMMON_RANGE
+    );
+    assert_eq!(
+        s.reason(&format!("ecs.update_attribute({e}, 'BodyHeat_Min', -1)")),
+        COMMON_RANGE
+    );
+    assert_eq!(body_heat(&s), [4000, 10000, 0x8000_0000, 10000, 0, 0, 0, 0]);
+    // a calculation whose result leaves the range is refused too: Base + Adder wraps to a negative maximum
+    let s = body_heat_setup(
+        [0, 0, 0, 0x7FFF_FFFF, 0, 0, 0, 0],
+        BODY_HEAT_ROOT,
+        "keen::sint32",
+        "keen::uint32",
+    );
+    let e = s.handle(9);
+    assert_eq!(
+        s.reason(&format!(
+            "ecs.update_attribute({e}, 'BodyHeat_Max_Adder', 1)"
+        )),
+        COMMON_RANGE
+    );
+    assert_eq!(body_heat(&s), [0, 0, 0, 0x7FFF_FFFF, 0, 0, 0, 0]);
+}
+
+// Every other signedness conflict stays ShroudForge's refusal: the reverse pair on the BodyHeat root, the proven pair on
+// any other root, and a float storage; nothing is written.
+#[test]
+fn other_signedness_conflicts_stay_refused() {
+    let words = [4000, 10000, 0, 10000, 0, 0, 0, 0];
+    for (root, resource, storage) in [
+        (BODY_HEAT_ROOT, "keen::uint32", "keen::sint32"),
+        (0x5EED_0100, "keen::sint32", "keen::uint32"),
+        (
+            BODY_HEAT_ROOT.wrapping_add(1),
+            "keen::sint32",
+            "keen::uint32",
+        ),
+        (BODY_HEAT_ROOT, "keen::sint32", "keen::float32"),
+    ] {
+        let s = body_heat_setup(words, root, resource, storage);
+        let e = s.handle(9);
+        assert_eq!(
+            s.reason(&format!("ecs.update_attribute({e}, 'BodyHeat_Min', 10000)")),
+            SIGNEDNESS,
+            "{root:#010x} {resource} over {storage}"
+        );
+        if storage == "keen::float32" {
+            continue;
+        }
+        // SF Survival's path: the target resolves, and its write answers the same refusal
+        let why: String = s.eval(&format!(
+            "local tracker = runtime.overrides.new()
+             tracker:begin_update()
+             local target = assert(runtime.overrides.attribute({e}, 'BodyHeat_Min'))
+             local ok, why = tracker:apply(target.key, 'infiniteFrostTimer', target, function(snapshot)
+               return snapshot.values.BodyHeat_Max
+             end)
+             assert(not ok)
+             return why"
+        ));
+        assert!(why.contains(SIGNEDNESS), "{why}");
+        assert_eq!(body_heat(&s), words, "nothing written");
+    }
+}
+
+// The bound descriptor (catalog::Catalog::bind_storage): the admitted root is calculation-writable as the resource's
+// keen::sint32 with the common-range domain; the same descriptors under the reverse pair or on another root are not.
+#[test]
+fn body_heat_binds_as_a_signed_calculation() {
+    use kiln_sfi::runtime::ecs::attributes::catalog::{
+        Catalog, ENGINE_SIGNED_ROOTS, engine_signed_root,
+    };
+    assert_eq!(ENGINE_SIGNED_ROOTS, [BODY_HEAT_ROOT]);
+    let bind = |root: u32, resource: &str, storage: &str| {
+        let list = body_heat_descriptors(root, resource);
+        let entries = list
+            .iter()
+            .map(|d| (d["hash"].as_u64().unwrap() as u32, d.clone()))
+            .collect();
+        let component = layout(BODY_HEAT, 8, storage, None);
+        let catalog = Catalog::new(entries, vec![component.clone()]);
+        catalog.bind_storage(&list[7], &component).unwrap()
+    };
+    let bound = bind(BODY_HEAT_ROOT, "keen::sint32", "keen::uint32");
+    assert_eq!(bound["calculation_writable"], true);
+    assert_eq!(bound["calculation_reason"], Json::Null);
+    assert_eq!(bound["calculation_scalar_type"], "keen::sint32");
+    assert_eq!(bound["storage_writable"], true);
+    assert_eq!(
+        bound["write_value_domain"],
+        "integer-common-range-0-to-2147483647"
+    );
+    for (root, resource, storage) in [
+        (BODY_HEAT_ROOT, "keen::uint32", "keen::sint32"),
+        (0x5EED_0100, "keen::sint32", "keen::uint32"),
+        (BODY_HEAT_ROOT, "keen::sint32", "keen::float32"),
+    ] {
+        let bound = bind(root, resource, storage);
+        assert_eq!(
+            bound["calculation_writable"], false,
+            "{root:#010x} {resource} over {storage}"
+        );
+        assert_eq!(bound["calculation_reason"], SIGNEDNESS);
+        assert!(!engine_signed_root(root, Some(resource), Some(storage)));
+    }
+    // a sign-independent conflict keeps ShroudForge's storage-typed calculation
+    let mut list = body_heat_descriptors(0x5EED_0100, "keen::uint32");
+    for d in &mut list {
+        d["calculation_sign_independent"] = json!(true);
+    }
+    let entries = list
+        .iter()
+        .map(|d| (d["hash"].as_u64().unwrap() as u32, d.clone()))
+        .collect();
+    let component = layout(BODY_HEAT, 8, "keen::sint32", None);
+    let bound = Catalog::new(entries, vec![component.clone()])
+        .bind_storage(&list[0], &component)
+        .unwrap();
+    assert_eq!(bound["calculation_writable"], true);
+    assert_eq!(bound["calculation_scalar_type"], "keen::sint32");
 }

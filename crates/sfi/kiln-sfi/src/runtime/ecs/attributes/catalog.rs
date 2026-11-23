@@ -177,9 +177,12 @@ impl Catalog {
     }
 
     /// SF `bind_storage`: `descriptor` bound to one component layout: its storage and calculation writability for
-    /// that component's scalar type.
+    /// that component's scalar type. Kiln adds one case ShroudForge refuses: a root of [`ENGINE_SIGNED_ROOTS`] with
+    /// the resource's keen::sint32 over keen::uint32 storage is calculated as keen::sint32, the engine's own
+    /// interpreter for it ([`engine_signed_root`]).
     pub fn bind_storage(&self, descriptor: &Value, component: &Value) -> Result<Value, String> {
-        let count = self.root_entries(uint(&descriptor["root_hash"])?)?.len();
+        let root = uint(&descriptor["root_hash"])?;
+        let count = self.root_entries(root)?.len();
         if component["storage_size"].as_u64() != Some(count as u64 * 4) {
             return Err(text::STORAGE_COUNT.into());
         }
@@ -188,7 +191,9 @@ impl Catalog {
         let exact = scalar.is_some() && scalar == storage;
         let integer = matches!(scalar, Some("keen::sint32" | "keen::uint32"))
             && matches!(storage, Some("keen::sint32" | "keen::uint32"));
-        let calculation = exact || (integer && descriptor["calculation_sign_independent"] == true);
+        let engine_signed = engine_signed_root(root, scalar, storage);
+        let calculation = exact
+            || (integer && (descriptor["calculation_sign_independent"] == true || engine_signed));
         let mut result = descriptor.clone();
         result["components"] = json!([component]);
         result["storage_writable"] = json!(exact || integer);
@@ -209,10 +214,34 @@ impl Catalog {
             json!("signedness-dependent program with conflicting resource/storage scalar types")
         };
         if calculation {
-            result["calculation_scalar_type"] = component["storage_scalar_type"].clone();
+            result["calculation_scalar_type"] = if engine_signed {
+                json!(scalar)
+            } else {
+                component["storage_scalar_type"].clone()
+            };
         }
         Ok(result)
     }
+}
+
+/// The roots whose calculation Kiln admits although their resource and storage scalar types differ in signedness and
+/// their programs depend on it (ShroudForge refuses them all): BodyHeat (0xC7AEAF1D) alone. The game's attribute
+/// resource types the root keen::sint32; its component, keen::ecs::BodyHeat, is a keen::ecs::UInt32Attribute whose
+/// storage is keen::uint32; BodyHeat runs Clamp and BodyHeat_Max runs ScaleToNewMax. The engine evaluates this root
+/// with its signed interpreter only (client exe 5d9ef2f1, Steam build 26430625; server exe f0d824be): its attribute
+/// dispatcher picks the interpreter by the registry's resource type (sint32: the signed one), and the BodyHeat
+/// recharge and depletion code and attrAdd recompute the root through the signed recalculation (docs/re/combat.md,
+/// "BodyHeat runs"). So the root is calculated as the resource's keen::sint32, which is also what the archive's
+/// attribute_evaluate runs; the write domain stays the common range 0..2147483647 for every word before and after
+/// (`validate_attribute_bits`), where both readings of the storage agree. Every other conflicting root stays refused.
+pub const ENGINE_SIGNED_ROOTS: [u32; 1] = [0xC7AE_AF1D];
+
+/// Whether `root` is one of [`ENGINE_SIGNED_ROOTS`] with exactly the pair proven for it: the resource's keen::sint32
+/// over keen::uint32 storage. The reverse pair, a float, or another root is not admitted.
+pub fn engine_signed_root(root: u32, scalar: Option<&str>, storage: Option<&str>) -> bool {
+    scalar == Some("keen::sint32")
+        && storage == Some("keen::uint32")
+        && ENGINE_SIGNED_ROOTS.contains(&root)
 }
 
 /// ShroudForge's texts that name the archive format (kept out of this file's source lines whole: the licence guard
