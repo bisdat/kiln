@@ -1668,6 +1668,174 @@
   {
    "side": "server",
    "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/DecideTask",
+   "rva": "0x1fb8c0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "none|callee",
+    "insns": 181
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/FinishState",
+   "rva": "0x1f7750",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 127
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/ProcessCommands",
+   "rva": "0x1f3320",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/SetDecision",
+   "rva": "0x1f65b0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 66
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/SetState",
+   "rva": "0x1f6da0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/SleepCheck",
+   "rva": "0x1f0490",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+   "symbol": "routines/VillagerWorker",
+   "rva": "0x1f7850",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "server",
+   "sha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
    "symbol": "rules/QuatRotate",
    "rva": "0x3ba80",
    "expect": {
@@ -1898,6 +2066,174 @@
     "stack": [],
     "ret": "rax",
     "insns": 74
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/DecideTask",
+   "rva": "0x4631a0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "none|callee",
+    "insns": 181
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/FinishState",
+   "rva": "0x45bcd0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 127
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/ProcessCommands",
+   "rva": "0x4565f0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/SetDecision",
+   "rva": "0x45a8a0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 66
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/SetState",
+   "rva": "0x45b320",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx",
+     "rdx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "callee",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/SleepCheck",
+   "rva": "0x453160",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax",
+    "insns": 300,
+    "truncated": true
+   }
+  },
+  {
+   "side": "client",
+   "sha256": "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77",
+   "symbol": "routines/VillagerWorker",
+   "rva": "0x45c8f0",
+   "expect": {
+    "result": "ok",
+    "reads": [
+     "rcx"
+    ],
+    "passes": [
+     "xmm0",
+     "xmm1",
+     "r8",
+     "xmm2",
+     "r9",
+     "xmm3"
+    ],
+    "indirect": [],
+    "stack": [],
+    "ret": "rax|callee",
+    "insns": 300,
+    "truncated": true
    }
   },
   {
