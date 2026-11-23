@@ -120,7 +120,7 @@ If a hosted engine needs Kiln's hook first, load the DLL late:
   being drawn. It shows nothing until the drawing finishes, then the picture; no retry is needed. Called while the mod's DLL loads, it
   waits (at most 120 s for the whole start). kiln-eml's portrait cache codes: 5 busy and 7 cache I/O error (both tried again at
   the next start), 6 full (delete unused folders in `emf/cache/portraits`). Use kiln-emf and kiln-eml from the same release.
-- EMF: kiln-emf serves EmfApi v47 (EMF 0.6.19) since dev.30.6; v46 (EMF 0.6.14) since dev.29.12; v42 since dev.28. Some members answer EMF's documented
+- EMF: kiln-emf serves EmfApi v48 (EMF 0.6.20) since dev.30.8; v47 (EMF 0.6.19) since dev.30.6; v46 (EMF 0.6.14) since dev.29.12; v42 since dev.28. Some members answer EMF's documented
   failure on Kiln (`docs/kiln/emf-parity.md`). dev.29+: EMF's `register_program`, `register_program_def` and `on_event`
   with `EMF_WORLD_CLIENT` run in the client world. Wiki [EMF mods](https://frostdev.io/kiln/wiki/emf-mods).
 - ShroudForge and EML mods run unchanged next to Kiln mods (wiki [EML and ShroudForge](https://frostdev.io/kiln/wiki/eml-shroudforge)).

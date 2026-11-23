@@ -42,6 +42,7 @@ uint32_t api_size_for(uint32_t version) {
         case 45: return kApiV45Size;
         case 46: return kApiV46Size;
         case 47: return kApiV47Size;
+        case 48: return kApiV48Size;
         default: return 0;
     }
 }
