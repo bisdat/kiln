@@ -53,7 +53,7 @@ def scalar(text):
 
 
 def items(path):
-    """The items of one ManagedReference YAML file: dicts with uid, commentId, type, summary (True/False/None for
+    """The items of one ManagedReference YAML file: dicts with uid, commentId, type, name, namespace, summary (True/False/None for
     absent), head (the summary's first line), parent, assemblies, attributes (attribute type names) and arguments (for each attribute, in the same
     order, the values of its constructor arguments as written under `arguments:`)."""
     out, cur, key, section = [], None, None, None
@@ -71,7 +71,7 @@ def items(path):
         m = KEY.match(line)
         if m:
             key, value = m.group(1), m.group(2).strip()
-            if key in ("commentId", "type", "parent"):
+            if key in ("commentId", "type", "parent", "name", "namespace"):
                 cur[key] = scalar(value)
             elif key == "summary":
                 cur["summary"] = value not in ("", "''", '""') or None

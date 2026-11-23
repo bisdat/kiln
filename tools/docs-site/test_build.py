@@ -21,9 +21,17 @@ class Build(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.here = self.root / "repo/tools/docs-site"
         self.here.mkdir(parents=True)
-        for name in ("build.sh", "docfx.json", "index.md", "toc.yml", "filterConfig.yml",
-                     "annotate.py", "undocumented.py", "undocumented-dev24.txt", "stage-guide.py", "check-links.py"):
+        for name in ("build.sh", "docfx.json", "index.md", "toc.yml", "filterConfig.yml", "annotate.py", "apiids.py", "docxml.py",
+                     "samples.py", "services.json", "services.py", "since.py", "undocumented.py", "undocumented-dev24.txt",
+                     "stage-guide.py", "check-links.py"):
             shutil.copy2(HERE / name, self.here / name)
+        # since.py reads the release tooling's ordering of releases; the ledger and Mods.cs are what annotate.py --repo reads
+        (self.root / "repo/tools/release/lib").mkdir(parents=True)
+        shutil.copy2(HERE.parent / "release/lib/apihistory.py", self.root / "repo/tools/release/lib/apihistory.py")
+        (self.root / "repo/managed/Kiln.Api").mkdir(parents=True)
+        (self.root / "repo/managed/Kiln.Api/Mods.cs").write_text('public const string ApiVersion = "0.2.15";\n')
+        (self.root / "repo/managed/api-history.tsv").write_text("kind\tproject\tentry\trelease\tmod_api\n"
+                                                                 "managed\tKiln.Api\tKiln.Mock\t0.2.0-dev.30\t0.2.12\n")
         shutil.copytree(HERE / "apidoc", self.here / "apidoc")
         guide = self.root / "repo/docs/kiln/modding"
         (guide / "schemas").mkdir(parents=True)
@@ -66,8 +74,11 @@ elif sys.argv[1] == "exec":
         config = json.loads(pathlib.Path(sys.argv[4]).read_text())
         dest = pathlib.Path(config["metadata"][0]["dest"])
         dest.mkdir(parents=True, exist_ok=True)
-        if dest.name == "api":
+        typed = os.environ["MOCK_METADATA"] == "typed"
+        if dest.name == "api" or (typed and dest.name == "api-raw"):
             text = "items:\\n- uid: Kiln.Mock\\n  type: Class\\n"
+            if typed:
+                text += "  commentId: T:Kiln.Mock\\n  name: Mock\\n  namespace: Kiln\\n  assemblies:\\n  - Kiln.Api\\n  summary: A summary.\\n"
             if os.environ["MOCK_METADATA"] == "crash":
                 text = 'items:\\n- uid: "bad\\\\q"\\n  type: Class\\n'
             elif os.environ["MOCK_METADATA"] == "documented":
@@ -94,6 +105,39 @@ else:
                               env={**self.env, "MOCK_METADATA": metadata,
                                    "KILN_DOCS_STRICT": "1" if strict else "0"},
                               text=True, capture_output=True)
+
+    def test_the_reference_gets_a_table_of_contents_by_assembly_and_an_overview(self):
+        result = self.build("documented")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("annotate: 0 members with a thread/side line, 0 with a capability, 0 with a since line", result.stdout)
+        self.assertIn("services: 0 assemblies", result.stdout)
+        api = self.out / "docs-work/api"
+        self.assertTrue((api / "toc.yml").read_text().startswith("### YamlMime:TableOfContent\n- name: Overview\n  href: index.md\n"))
+        self.assertIn("# Kiln API reference", (api / "index.md").read_text())
+        # the pages and the table of contents are part of what docfx builds
+        self.assertIn("api/services/*.md", (self.out / "docs-work/docfx.json").read_text())
+
+    def test_a_typed_member_gets_its_since_line_and_a_service_page(self):
+        (self.out / "mdk-stage/Kiln.Api.xml").write_text(
+            "<doc><assembly><name>Kiln.Api</name></assembly><members>"
+            "<member name='T:Kiln.Mock'><summary>A mock.</summary></member></members></doc>")
+        result = self.build("typed")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("1 with a since line", result.stdout)
+        doc = (self.out / "docs-work/stage/Kiln.Api.xml").read_text()
+        self.assertIn("<para>Since mod API 0.2.12 (0.2.0-dev.30)</para>", doc)
+        # the original stage is not touched: annotate.py works on a copy
+        self.assertNotIn("Since mod API", (self.out / "mdk-stage/Kiln.Api.xml").read_text())
+        api = self.out / "docs-work/api"
+        self.assertIn("- [Mock](../Kiln.Mock.yml) (class): A mock.", (api / "services/Kiln.Api.md").read_text())
+        self.assertIn('- name: "Kiln.Api"\n  href: services/Kiln.Api.md\n  items:\n  - uid: "Kiln.Mock"', (api / "toc.yml").read_text())
+
+    def test_a_build_without_the_api_history_ledger_fails_instead_of_leaving_the_since_lines_out(self):
+        (self.root / "repo/managed/api-history.tsv").unlink()
+        result = self.build("documented")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no API history ledger", result.stderr)
+        self.assertFalse((self.out / "docs-site/index.html").exists())
 
     def test_metadata_parser_crash_fails_build_even_without_strict(self):
         for strict in (False, True):

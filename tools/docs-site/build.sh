@@ -9,9 +9,15 @@
 # The tool goes into $KILN_OUT/tools (dotnet tool install, from NuGet). Generated files stay out of the repository: the
 # config is copied to $KILN_OUT/docs-work, where docfx writes api/ and docfx.log.
 # Steps: docfx metadata over the stage; annotate.py turns the thread, side and [RequiresCapability] attributes it finds
-# in that metadata into a visible line in a copy of the XML docs; docfx metadata again over the copy (api/);
-# undocumented.py against undocumented-dev24.txt, or the file KILN_DOCS_BASELINE names (a warning; with
-# KILN_DOCS_STRICT=1 an error, before docfx build); docfx build.
+# in that metadata into a visible line in a copy of the XML docs, adds the "Since mod API" line of each type and member
+# (managed/api-history.tsv and PublicAPI.Unshipped.txt), the call shape of each extension member and the lists of them on
+# their receivers, and the samples (mods/samples) that use each type; docfx metadata again over the copy (api/);
+# services.py rewrites api/toc.yml as one group per assembly and writes the overview and a page for each service
+# (tools/docs-site/services.json, made by gen-services.py); undocumented.py against undocumented-dev24.txt, or the file
+# KILN_DOCS_BASELINE names (a warning; with KILN_DOCS_STRICT=1 an error, before docfx build); docfx build.
+# KILN_DOCS_RELEASE (else KILN_SDK_VERSION, which release.sh sets) names the release this build is part of: the members
+# still in PublicAPI.Unshipped.txt are its own (since.py). Without one they read "next release".
+# publish.sh --sdk-site puts the folder at <version>/sdk/api/ and points /kiln/api/ (the latest alias) at the newest one.
 # docfx's runtimeconfig also asks for ASP.NET Core, which only `docfx serve` needs and which an SDK-only machine lacks, so
 # it runs from a private copy that names just Microsoft.NETCore.App.
 set -euo pipefail
@@ -68,9 +74,10 @@ log=$work/docfx.log
 docfx() { NO_COLOR=1 dotnet exec "$run/docfx.dll" "$@"; }
 # pass one only tells annotate.py the attributes; its warnings come again in pass two
 docfx metadata docfx-raw.json >"$work/docfx-raw.log" 2>&1 || { tail -40 "$work/docfx-raw.log" >&2; exit 1; }
-python3 -I "$here/annotate.py" "$work/api-raw" "$work/stage"
+python3 -I "$here/annotate.py" --repo "$repo" "$work/api-raw" "$work/stage"
 rm -rf "$work/api-raw"
 docfx metadata docfx.json 2>&1 | tee "$log"
+python3 -I "$here/services.py" --services "$here/services.json" "$work/api" "$work/stage"
 baseline=${KILN_DOCS_BASELINE:-$here/undocumented-dev24.txt}
 [[ -f $baseline ]] || { echo "no baseline file $baseline" >&2; exit 1; }
 rc=0
