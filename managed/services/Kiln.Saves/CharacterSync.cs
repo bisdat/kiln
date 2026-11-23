@@ -613,9 +613,12 @@ internal static class CharacterSidecar
     {
         try
         {
-            return File.Exists(path) && JsonNode.Parse(File.ReadAllBytes(path)) is JsonObject;
+            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllBytes(path)) is not JsonObject doc) return false;
+            if (doc["revision"] is { } revision && revision.GetValue<long>() < 0) return false;
+            if (doc["mods"] is not null && doc["mods"] is not JsonObject) return false;
+            return doc["mods"] is not JsonObject mods || mods.All(m => m.Value is JsonObject);
         }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException or FormatException or OverflowException)
         {
             return false;
         }

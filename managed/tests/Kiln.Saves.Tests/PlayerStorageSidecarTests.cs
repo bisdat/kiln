@@ -57,6 +57,22 @@ public sealed class PlayerStorageSidecarTests : IDisposable
     }
 
     [Fact]
+    public void Structurally_broken_sidecar_never_overwrites_good_previous_copy()
+    {
+        var id = PlayerStorageDocumentTests.Character;
+        CharacterSidecar.Apply(id, 1, Change(PlayerStorageDocumentTests.Doc("a", 1).Write(8)), null);
+        var path = CharacterSidecar.PathOf(id);
+        var good = File.ReadAllBytes(path);
+        File.Copy(path, path + ".prev");
+        const string broken = "{\"format\":1,\"revision\":\"broken\",\"mods\":{}}";
+        File.WriteAllText(path, broken);
+        CharacterSidecar.Apply(id, 2, Change(PlayerStorageDocumentTests.Doc("b", 2).Write(8)), null);
+        Assert.Equal(good, File.ReadAllBytes(path + ".prev"));
+        var archived = Assert.Single(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.corrupt-*"));
+        Assert.Equal(broken, File.ReadAllText(archived));
+    }
+
+    [Fact]
     public void Future_storage_value_survives_even_if_server_sends_a_replacement()
     {
         var id = PlayerStorageDocumentTests.Character;
