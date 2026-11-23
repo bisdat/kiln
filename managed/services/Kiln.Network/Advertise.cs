@@ -10,6 +10,11 @@ using System.Text.RegularExpressions;
 namespace Kiln;
 
 /// <summary>Where players get a server's mods (<c>network.json</c> <c>modpack</c>; schema common modpackRef).</summary>
+/// <param name="Url">Where players download the modpack: an <c>http</c>, <c>https</c> or <c>file</c> URL of at most 2048 characters.</param>
+/// <param name="Sha256">The SHA-256 of the download, as 64 lowercase hex digits.</param>
+/// <param name="Name">The modpack's display name, or null.</param>
+/// <param name="Version">The modpack's version, or null.</param>
+/// <param name="Size">The download size in bytes, or null when not stated.</param>
 public sealed record NetModpack(string Url, string Sha256, string? Name = null, string? Version = null, long? Size = null)
 {
     internal static NetModpack? Parse(JsonElement e)
@@ -34,6 +39,11 @@ public sealed record NetModpack(string Url, string Sha256, string? Name = null, 
 }
 
 /// <summary>A mod players need: kind (<c>kiln</c> | <c>native</c>), id, version, kdh1 of its folder.</summary>
+/// <param name="Id">The mod's id.</param>
+/// <param name="Version">The mod's version string.</param>
+/// <param name="Hash">The kdh1 hash of the mod's folder (see <see cref="DirHash"/>).</param>
+/// <param name="Kind">Either <c>kiln</c> (a Kiln mod) or <c>native</c> (a native mod). Default <c>kiln</c>.</param>
+/// <param name="Name">The mod's display name, or null.</param>
 public sealed record NetRequiredMod(string Id, string Version, string Hash, string Kind = "kiln", string? Name = null)
 {
     internal JsonObject ToJson(bool withName = false)
@@ -56,6 +66,14 @@ public sealed record NetRequiredMod(string Id, string Version, string Hash, stri
 /// <summary>What a server advertises in REJECT/WELCOME. Server side (<see cref="Network.Advertised"/>): this server,
 /// everything; client side (<see cref="Network.ServerAdvert"/>): what the server sent, <see cref="Truncated"/> when
 /// required[] was cut to keep the frame under 7 KB (<see cref="RequiredCount"/> is the full count).</summary>
+/// <param name="ServerId">The server's stable id, or null when the handshake carried none.</param>
+/// <param name="ServerName">The name the server sends to clients, or null.</param>
+/// <param name="Kiln">The server's Kiln version, or null when it is not known.</param>
+/// <param name="Modpack">Where players get the server's mods, or null when the server names no modpack.</param>
+/// <param name="Required">The mods players need, with their hashes. On the client side this list can be cut short (see <paramref name="Truncated"/>).</param>
+/// <param name="RequiredCount">How many mods players need in all, also when <paramref name="Required"/> was cut short.</param>
+/// <param name="Truncated">True when <paramref name="Required"/> holds fewer mods than <paramref name="RequiredCount"/>.</param>
+/// <param name="Pending">True while the server has not finished hashing the required mods, so their hashes are not complete yet.</param>
 public sealed record NetServerAdvert(string? ServerId, string? ServerName, string? Kiln, NetModpack? Modpack,
     IReadOnlyList<NetRequiredMod> Required, int RequiredCount, bool Truncated, bool Pending)
 {

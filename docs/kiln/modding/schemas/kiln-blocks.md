@@ -184,7 +184,7 @@ How it notices and chases: a game creature's tuning to start from, and what to c
 | `like` | `"vukah"` \| `"scavenger"` \| `"heavy"` \| `"still"` |  |  |
 | `moves` | boolean |  |  |
 | `nightSight` | number |  | Share of its sight at night. min 0 max 4 |
-| `pickEvery` | number |  | Seconds. min 0 max 60 |
+| `pickEvery` | number |  | Seconds. max 60 |
 | `pickTarget` | string |  | A picker registered with Blocks.Target. |
 | `relations` | object |  | Faction name -> how this creature treats it. |
 | `returnsHome` | boolean |  | False: it never walks home after a fight. |
@@ -214,7 +214,7 @@ Animations mixed by an input.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `circular` | boolean |  |  |
-| `clips` | object | yes |  |
+| `clips` | object | yes | Finite numeric input positions (decimal or scientific notation) mapped to clip names. kiln lint checks finite values. |
 | `input` | string |  | moveDirection, hitDirection, lookYaw, ..., or a name of your own. |
 
 ## animClip
@@ -257,7 +257,7 @@ How a body moves: a glTF of the mod with its clips (cooked when the mod builds),
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `clips` | string |  | The glTF file, its path in the mod's folder. Pattern `\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
+| `clips` | string |  | The glTF file, its path in the mod's folder: not starting with a slash, a backslash or a drive (C:), and without two dots in a row. |
 | `dead` | [animClip](#animclip) |  |  |
 | `fall` | [animClip](#animclip) |  |  |
 | `hit` | [animClip](#animclip) |  |  |
@@ -417,7 +417,7 @@ What a creature does: attacks and rules on top of the game's combat AI, or a bra
 | `perception` | object |  | How the brain sees. Only with a brain. Left out: distance and faction. |
 | `phases` | array of string |  |  |
 | `pickAttack` | string |  |  |
-| `pickEvery` | number |  | Seconds. min 0 max 60 |
+| `pickEvery` | number |  | Seconds. max 60 |
 | `rules` | array of [ref](#ref) or [rule](#rule) |  | max items 32 |
 | `template` | string |  |  |
 
@@ -447,8 +447,8 @@ What a creature is: a skinned glTF of the mod, or a game creature's body ("like"
 | `cloth` | array of [modelCloth](#modelcloth) |  | Primitives of the model the game simulates as cloth, cooked into it when the mod builds (assets/physics.json's form). Needs the cook feature modelcook.cloth (on) and scale 1. max items 255 |
 | `colliders` | array of [collider](#collider) |  | max items 2 |
 | `like` | `"vukah"` \| `"scavenger"` \| `"fisher"` \| `"villager"` |  |  |
-| `model` | string |  | Pattern `\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
-| `scale` | number |  | 1 as modelled. min 0 max 20 |
+| `model` | string |  | The glTF file, its path in the mod's folder: not starting with a slash, a backslash or a drive (C:), and without two dots in a row. |
+| `scale` | number |  | 1 as modelled. max 20 |
 | `size` | object |  |  |
 | `skeleton` | string |  |  |
 | `slots` | object |  | The game's attachment slots on joints: { "HandR": "hand_r" }. |
@@ -560,8 +560,8 @@ How a spell or an ability is cast: animation, timing, costs.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `height` | number |  | Metres, a capsule's caps included. min 0 |
-| `radius` | number |  | Metres. min 0 |
+| `height` | number |  | Metres, a capsule's caps included. At least 0; a capsule must be at least 2 * radius high (checked by kiln lint). min 0 |
+| `radius` | number |  | Metres. |
 | `shape` | `"capsule"` \| `"sphere"` |  |  |
 
 ## comfort
@@ -642,17 +642,17 @@ An attack: the state it plays, its reach, what its blow does.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `angle` | number |  | Degrees in front. min 0 max 360 |
+| `angle` | number |  | Whole cone aperture in degrees, more than 0 and at most 360. 360 hits all around; 359 leaves a one-degree gap behind. max 360 |
 | `chance` | number |  | 0..1. min 0 max 1 |
 | `cooldown` | number |  | Seconds. min 0 |
 | `delivery` | [delivery](#delivery) |  |  |
-| `hitAt` | number |  | Seconds into it. min 0 |
-| `length` | number |  | Seconds. min 0 max 30 |
-| `minRange` | number |  | Metres. min 0 |
+| `hitAt` | number |  | Seconds into it, at least 0 and strictly less than length when supplied; kiln lint checks the relationship. A cooked clip can impose a shorter length at runtime. min 0 |
+| `length` | number |  | Seconds. max 30 |
+| `minRange` | number |  | Metres, at least 0 and strictly less than range (default range 2.5); kiln lint checks the relationship. min 0 |
 | `name` | string |  | Pattern `^[A-Za-z0-9._-]+$`. |
-| `onHit` | array of [effectRef](#effectref) |  |  |
+| `onHit` | array of [effectRef](#effectref) |  | min items 1 |
 | `plays` | string |  |  |
-| `range` | number |  | Metres. min 0 max 200 |
+| `range` | number |  | Metres. max 200 |
 | `sequence` | [guid](#guid) |  |  |
 | `style` | array of string |  |  |
 
@@ -769,7 +769,7 @@ A place in the game's drop tables: table or dropsLike, one of them.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `chance` | number |  | min 0 max 1 |
-| `countMax` | integer |  | min 1 |
+| `countMax` | integer |  | At least countMin; default 1 (checked by kiln lint). min 1 |
 | `countMin` | integer |  | min 1 |
 | `dropsLike` | [itemRef](#itemref) |  | Every table that drops this item, next to it. |
 | `table` | string |  | A table's GUID or a glob over GUIDs. |
@@ -984,7 +984,7 @@ Where it can be found, besides being made.
 |---|---|---|---|
 | `like` | [itemRef](#itemref) |  | It is rolled in chests and world pickups where this item is, with its chances. |
 | `rolled` | boolean |  | Gear only: a roll gives it a level and rarity of its own. The opposite of the crafted-item rule, so it refuses a recipe (KL406). |
-| `stackMax` | integer |  | min 1 |
+| `stackMax` | integer |  | At least 1 and at least stackMin when both are supplied (checked by kiln lint). min 1 |
 | `stackMin` | integer |  | min 1 |
 | `tables` | array of [dropPlace](#dropplace) |  | The game's own drop tables it goes into: what enemies and fixed chests hold. A table of your own is a lootTables block. |
 
@@ -1074,7 +1074,7 @@ One move. At least one field: a move with none changes nothing.
 |---|---|---|---|
 | `animation` | [moveAnimation](#moveanimation) |  |  |
 | `followUps` | array of [moveFollowUp](#movefollowup) |  | Where the motion's follow-up windows lead, when not where the class has them. A weapon with any applies all its moves at once or none (Blocks.MovesStatus). Needs blocks.move_followups. max items 64 |
-| `hitAt` | number |  | Seconds into the move its blow lands: the first damage event moves here. |
+| `hitAt` | number |  | Seconds into the move its blow lands: more than 0 and strictly less than length when supplied (checked by kiln lint). |
 | `length` | number |  | Seconds the whole move lasts. |
 | `like` | string |  | The game sequence it starts from: a sub-sequence name or a sequence GUID. Default: the class's in this slot. min length 1 |
 
@@ -1082,7 +1082,7 @@ One move. At least one field: a move with none changes nothing.
 
 The state it plays: a state of this mod by name, a game state ("State" or "Machine/State"), its GUID or its 0x id; or a list, one per state event of the motion (null keeps one).
 
-Type: string or array of string \| null
+Type: string or array of string or null
 
 ## moveChain
 
@@ -1562,7 +1562,7 @@ On a trigger, every so often, when its conditions hold, do something.
 | `chance` | number |  | 0..1. min 0 max 1 |
 | `cooldown` | number |  | Seconds. min 0 |
 | `do` | array of [action](#action) | yes | min items 1 |
-| `every` | number |  | Seconds. min 0 max 3600 |
+| `every` | number |  | Seconds. max 3600 |
 | `name` | string |  |  |
 | `on` | `"onUpdate"` \| `"onEnter"` \| `"onExit"` \| `"onStartAttack"` \| `"onEndAttack"` \| `"onEnterState"` \| `"onExitState"` \| `"OnUpdate"` \| `"OnEnter"` \| `"OnExit"` \| `"OnStartAttack"` \| `"OnEndAttack"` \| `"OnEnterState"` \| `"OnExitState"` |  |  |
 | `when` | array of [condition](#condition) |  |  |
@@ -1736,7 +1736,7 @@ A buff or debuff, shown in the game's buff bar. It lasts its seconds, or while a
 | `onTick` | [effects](#effects) |  |  |
 | `refreshes` | boolean |  | Applied again while it runs: the timer starts over (true, the default), or the new one replaces the old. |
 | `screen` | [screenRef](#screenref) |  | A full-screen effect on the screen of the player who has it, while they have it. |
-| `seconds` | number |  | How long it lasts unless whoever applies it says otherwise. Not needed with while. |
+| `seconds` | number |  | How long it lasts unless whoever applies it says otherwise. Not needed with while. min 0 |
 | `tickEvery` | number |  | Seconds between onTick (default 1). |
 | `tweak` | [tweak](#tweak) |  |  |
 | `vfx` | [vfx](#vfx) |  |  |
@@ -1893,7 +1893,7 @@ What a tool does: what it is for, and how well. Each class takes the fields it h
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `breaksInto` | [itemRef](#itemref) |  | What it becomes when its durability runs out: a game item or an item of this mod. A torch, or a tool with enhancement slots. |
-| `durability` | number |  | Seconds a torch burns while held, the tooltip's Duration (600). Only a torch. |
+| `durability` | number |  | Seconds a torch burns while held, the tooltip's Duration (600). Only a torch. max 2147483647 |
 | `fishing` | object |  | A fishing rod's pull and stamina. |
 | `harvests` | `"wood"` \| `"stone"` \| `"rake"` \| `"sieve"` \| `"glider"` \| `"grappling-hook"` \| `"fishing-rod"` \| `"torch"` | yes | wood: an axe. stone: a pickaxe, for stone and metal, and it digs. rake: flattens the ground. sieve: the mining sieve. glider, grappling-hook, fishing-rod, torch: the game's. |
 | `power` | integer |  | How hard it bites: an axe's wood damage, a pickaxe's or a sieve's stone damage (the rest scales along), a rake's flattening strength (the game's: 500, 1000). |

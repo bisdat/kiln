@@ -47,6 +47,7 @@ public sealed class HookRefusedEvent : KilnEvent
     /// <summary>Why it was refused (the same text as <see cref="HookResult.Reason"/>).</summary>
     public string Reason { get; }
 
+    /// <summary>A one-line description naming the symbol, the mod and the reason.</summary>
     public override string ToString() => $"typed hook on {Symbol} for {ModId} refused: {Reason}";
 }
 
@@ -54,7 +55,31 @@ public sealed class HookRefusedEvent : KilnEvent
 [EditorBrowsable(EditorBrowsableState.Never)]
 public enum SigKind : uint
 {
-    Void = 0, S8 = 1, U8 = 2, S16 = 3, U16 = 4, S32 = 5, U32 = 6, S64 = 7, U64 = 8, F32 = 9, F64 = 10, Bool = 11,
+    /// <summary>No value. A return kind only.</summary>
+    Void = 0,
+    /// <summary>A signed 8-bit integer.</summary>
+    S8 = 1,
+    /// <summary>An unsigned 8-bit integer.</summary>
+    U8 = 2,
+    /// <summary>A signed 16-bit integer.</summary>
+    S16 = 3,
+    /// <summary>An unsigned 16-bit integer.</summary>
+    U16 = 4,
+    /// <summary>A signed 32-bit integer.</summary>
+    S32 = 5,
+    /// <summary>An unsigned 32-bit integer.</summary>
+    U32 = 6,
+    /// <summary>A signed 64-bit integer.</summary>
+    S64 = 7,
+    /// <summary>An unsigned 64-bit integer.</summary>
+    U64 = 8,
+    /// <summary>A 32-bit float.</summary>
+    F32 = 9,
+    /// <summary>A 64-bit float (a double).</summary>
+    F64 = 10,
+    /// <summary>A boolean.</summary>
+    Bool = 11,
+    /// <summary>A pointer.</summary>
     Ptr = 12,
     /// <summary>A struct by value: 1, 2, 4 or 8 bytes travel in the integer position, any other size as a pointer to
     /// the caller's copy.</summary>
@@ -76,6 +101,11 @@ public enum SigInvoke
 }
 
 /// <summary>One declared parameter of a descriptor.</summary>
+/// <param name="Name">The parameter's name in the descriptor.</param>
+/// <param name="Kind">The parameter's type. <see cref="SigKind.Void"/> and <see cref="SigKind.Struct"/> are not
+/// argument kinds.</param>
+/// <param name="Size">The size in bytes. For <see cref="SigKind.ByVal"/> it is the struct's size and must not be 0;
+/// for other kinds it is the kind's own size or 0.</param>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public readonly record struct SigArg(string Name, SigKind Kind, uint Size);
 

@@ -17,14 +17,21 @@ public sealed class TalentTree
     /// <summary>Unique id, "&lt;mod&gt;:&lt;name&gt;" (letters, digits, '.', '_', '-', ':'). The save key: never change a
     /// released id.</summary>
     public required string Id { get; init; }
+    /// <summary>The tree's name: the title of its screen, and the tree's name in its key's description on the Keys
+    /// page. Default "Talents".</summary>
     public UiText Name { get; init; } = "Talents";
+    /// <summary>A text under the title on the tree's screen. Null = none.</summary>
     public UiText? Description { get; init; }
     /// <summary>Where the points come from (default: 1 at level 1, plus 1 per level).</summary>
     public TalentPoints Points { get; init; } = TalentPoints.Own(start: 1, perLevel: 1);
+    /// <summary>The tree's nodes. Ids must be unique, each node needs its own grid cell and every id in a node's
+    /// <see cref="TalentNode.Requires"/> must be one of these nodes, or <see cref="Skills.Register(TalentTree)"/>
+    /// throws <see cref="ArgumentException"/>.</summary>
     public IReadOnlyList<TalentNode> Nodes { get; init; } = [];
     /// <summary>An entry in the game's pause menu that opens the tree (client). Null = none.</summary>
     public UiText? MenuEntry { get; init; } = null;
-    /// <summary>Also in the main menu? (Only shows a note there: there is no character before a world.)</summary>
+    /// <summary>Where <see cref="MenuEntry"/> sits among the pause menu's entries: lower comes first (the <c>order</c> of
+    /// <c>Ui.Menus.Add</c>). Default 20.</summary>
     public int MenuOrder { get; init; } = 20;
     /// <summary>A key that opens the tree ("K", "Shift+T"); null = none. Players remap it in the Kiln menu.</summary>
     public string? Key { get; init; }
@@ -45,10 +52,13 @@ public sealed class TalentNode
 {
     /// <summary>Unique in the tree; the save key.</summary>
     public required string Id { get; init; }
+    /// <summary>The node's name: on its button, in its tooltip and in the detail panel of the tree's screen.</summary>
     public UiText Name { get; init; } = "";
+    /// <summary>A text for the node's tooltip and detail panel. Null = none.</summary>
     public UiText? Description { get; init; }
     /// <summary>Grid position (column, row from the top-left). The screen draws one cell per position.</summary>
     public int Column { get; init; }
+    /// <summary>Grid row, counted from the top (0 to 31). Two nodes of a tree cannot share a cell.</summary>
     public int Row { get; init; }
     /// <summary>Points per level.</summary>
     public int Cost { get; init; } = 1;
@@ -57,6 +67,8 @@ public sealed class TalentNode
     /// <summary>Nodes of the same tree that lead here: any one of them unlocked (all, with <see cref="RequireAll"/>).
     /// Empty = available from the start. Drawn as links.</summary>
     public IReadOnlyList<string> Requires { get; init; } = [];
+    /// <summary>True: every node in <see cref="Requires"/> must be unlocked. False (default): any one of them is
+    /// enough.</summary>
     public bool RequireAll { get; init; }
     /// <summary>Points spent in this tree before this node can be taken (tiers).</summary>
     public int PointsSpentRequired { get; init; }
@@ -64,6 +76,8 @@ public sealed class TalentNode
     public int LevelRequired { get; init; }
     /// <summary>A PNG, relative to the tree's mod folder (client).</summary>
     public string? Icon { get; init; }
+    /// <summary>What the node does while it is unlocked. They run at unlock and at every join, end at lock and respec,
+    /// and run again when the level changes.</summary>
     public IReadOnlyList<TalentEffect> Effects { get; init; } = [];
     /// <summary>The tooltip lists what <see cref="Effects"/> do under the description. Off when the description says it all.</summary>
     public bool ListEffects { get; init; } = true;
@@ -92,6 +106,7 @@ public sealed class TalentPoints
     /// <summary>Code decides the total (server, tick thread); spent points are subtracted.</summary>
     public static TalentPoints Custom(Func<TalentHolder, int> total) => new() { Source = Kind.Custom, Total = total };
 
+    /// <summary>A short text for the points source, for logs.</summary>
     public override string ToString() => Source switch
     {
         Kind.Own => $"own ({Start} + {PerLevel}/level)",
@@ -104,11 +119,14 @@ public sealed class TalentPoints
 /// the player entity while in game. Use <see cref="Skills.HolderOf(EntityId)"/> or
 /// <see cref="Skills.HolderOf(CharacterKey, ulong)"/>. A holder with only a Steam id means the character that id last
 /// played in this world, or (no such character: Kiln data from before characters) the account's data.</summary>
+/// <param name="SteamId">The player's Steam id; 0 when it is not known.</param>
+/// <param name="Entity">The player entity while the player is in game; none for an offline holder.</param>
 public readonly record struct TalentHolder(ulong SteamId, EntityId Entity)
 {
     /// <summary>The character whose unlocks these are; none when only the Steam id is known.</summary>
     public CharacterKey Character { get; init; }
 
+    /// <summary>The Steam id, the entity (when there is one) and the character (when there is one), for logs.</summary>
     public override string ToString() =>
         (Entity.IsNone ? $"steam {SteamId}" : $"entity {Entity} (steam {SteamId})") + (Character.IsNone ? "" : $" character {Character}");
 
@@ -228,11 +246,23 @@ internal sealed class CallbackEffect(Action<TalentContext> apply, Action<TalentC
 /// names were matched in the lab through each attribute component of a player entity).</summary>
 public static class TalentAttributes
 {
+    /// <summary>The game's AttributeReference GUID for Strength. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Strength = new("64810163-59a0-4b55-82b9-5bb6290b22d7");
+    /// <summary>The game's AttributeReference GUID for Constitution. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Constitution = new("0b1ceec5-402d-43ff-9a12-43392d53cf26");
+    /// <summary>The game's AttributeReference GUID for Intelligence. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Intelligence = new("2609852d-a281-4176-804e-b2dc4b8eb8e8");
+    /// <summary>The game's AttributeReference GUID for Spirit. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Spirit = new("0e31beac-22c5-4572-a98a-e39dca2bd1f7");
+    /// <summary>The game's AttributeReference GUID for Dexterity. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Dexterity = new("4be83310-d59c-4f6d-89dd-1e61e033db86");
+    /// <summary>The game's AttributeReference GUID for Endurance. Pass it to
+    /// <see cref="TalentEffect.Attribute(Guid, int)"/>.</summary>
     public static readonly Guid Endurance = new("6bd1a147-1ea7-441e-8c6e-6f8b68dbcbfe");
 
     internal static readonly Dictionary<string, Guid> ByName = new(StringComparer.OrdinalIgnoreCase)
@@ -241,6 +271,8 @@ public static class TalentAttributes
         ["Dexterity"] = Dexterity, ["Endurance"] = Endurance,
     };
 
+    /// <summary>The attribute's name ("Strength", "Constitution", "Intelligence", "Spirit", "Dexterity" or "Endurance")
+    /// for one of the GUIDs above; the GUID as text for any other.</summary>
     public static string NameOf(Guid g) => ByName.FirstOrDefault(kv => kv.Value == g).Key ?? g.ToString();
 
     // the game's own German names (its De_De loca)
@@ -273,9 +305,13 @@ public sealed class TalentContext
         Level = level;
     }
 
+    /// <summary>The tree the node belongs to.</summary>
     public TalentTree Tree { get; }
+    /// <summary>The node whose effect runs.</summary>
     public TalentNode Node { get; }
+    /// <summary>The character the effect applies to.</summary>
     public TalentHolder Holder { get; }
+    /// <summary>The player's entity (the holder's <see cref="TalentHolder.Entity"/>).</summary>
     public EntityId Player => Holder.Entity;
     /// <summary>The level being applied (or the one being removed).</summary>
     public int Level { get; }
@@ -284,8 +320,31 @@ public sealed class TalentContext
 }
 
 /// <summary>What changed in a player's tree.</summary>
-public enum TalentChangeKind { Unlock, Lock, Respec, Grant, Reset }
+public enum TalentChangeKind
+{
+    /// <summary>A node got one more level.</summary>
+    Unlock,
+    /// <summary>A node gave one level back.</summary>
+    Lock,
+    /// <summary>The whole tree was respecced: every level was given back.</summary>
+    Respec,
+    /// <summary>Code gave the character points of the tree (<see cref="Skills.Grant(string, TalentHolder, int)"/>).</summary>
+    Grant,
+    /// <summary>Not raised by Kiln at present.</summary>
+    Reset,
+}
 
+/// <summary>One change of a player's tree, as <see cref="TalentTree.OnChanged"/> and <see cref="TalentChangedEvent"/>
+/// report it.</summary>
+/// <param name="Tree">The tree that changed.</param>
+/// <param name="Holder">The character whose tree changed.</param>
+/// <param name="Kind">What happened.</param>
+/// <param name="Node">The id of the node that changed; null for <see cref="TalentChangeKind.Respec"/> and
+/// <see cref="TalentChangeKind.Grant"/>.</param>
+/// <param name="OldLevel">The node's level before; for a respec, the sum of all levels given back; 0 for a
+/// grant.</param>
+/// <param name="NewLevel">The node's level after; 0 for a respec and for a grant.</param>
+/// <param name="Points">The character's points still available in the tree after the change.</param>
 public sealed record TalentChange(TalentTree Tree, TalentHolder Holder, TalentChangeKind Kind, string? Node, int OldLevel,
     int NewLevel, int Points);
 
@@ -302,12 +361,17 @@ public sealed class TalentUnlockingEvent : CancelableEvent
         Cost = cost;
     }
 
+    /// <summary>The tree.</summary>
     public TalentTree Tree { get; }
+    /// <summary>The node being taken.</summary>
     public TalentNode Node { get; }
+    /// <summary>The character taking it.</summary>
     public TalentHolder Holder { get; }
     /// <summary>The level the node gets.</summary>
     public int Level { get; }
+    /// <summary>The points the unlock costs (the node's <see cref="TalentNode.Cost"/>).</summary>
     public int Cost { get; }
+    /// <summary>The text the refusal carries when a handler cancels the event. Default "refused".</summary>
     public string Reason { get; set; } = "refused";
 }
 
@@ -315,7 +379,9 @@ public sealed class TalentUnlockingEvent : CancelableEvent
 public sealed class TalentChangedEvent : KilnEvent
 {
     internal TalentChangedEvent(TalentChange change) => Change = change;
+    /// <summary>What changed.</summary>
     public TalentChange Change { get; }
+    /// <summary>The tree id, the kind, the node, the levels and the holder, for logs.</summary>
     public override string ToString() =>
         $"{Change.Tree.Id} {Change.Kind} {Change.Node} {Change.OldLevel}->{Change.NewLevel} ({Change.Holder})";
 }

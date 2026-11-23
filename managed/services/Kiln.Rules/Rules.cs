@@ -136,18 +136,23 @@ public sealed class RuleSet : IDisposable
         Expires = expires;
     }
 
+    /// <summary>A number that identifies this rule set, unique in the process.</summary>
     public long Id { get; }
+    /// <summary>Who the rules apply to.</summary>
     public RuleScope Scope { get; }
+    /// <summary>The rules this set asks for. <see cref="Update"/> replaces them.</summary>
     public PlayerRules Rules { get; private set; }
 
     /// <summary>Id of the mod that applied it ("kiln" outside mod code).</summary>
     public string Owner { get; }
 
+    /// <summary>A name for the set, for logs and listings; empty when none was given.</summary>
     public string Label { get; }
 
     /// <summary>When it ends by itself (UTC), or null.</summary>
     public DateTime? Expires { get; }
 
+    /// <summary>True until the set ends: it was disposed, it expired, or it was removed with its mod or its player.</summary>
     public bool Active { get; private set; } = true;
 
     /// <summary>Counts <see cref="Update"/> calls: a request a death or a teleport used up (NoClip) is asked anew by
@@ -172,6 +177,7 @@ public sealed class RuleSet : IDisposable
         RulesRuntime.Changed(this);
     }
 
+    /// <summary>Takes the rules away. Disposing a set that has already ended does nothing.</summary>
     public void Dispose()
     {
         if (!Active) return;
@@ -181,6 +187,7 @@ public sealed class RuleSet : IDisposable
         RulesRuntime.Remove(this);
     }
 
+    /// <summary>A short description for logs: the id, the owner, the label and the scope.</summary>
     public override string ToString() => $"#{Id} {Owner}{(Label.Length > 0 ? " '" + Label + "'" : "")} for {Scope}";
 }
 
@@ -210,6 +217,19 @@ public enum RulesClient
     Simulated,
 }
 
+/// <summary>The state of kiln.rules' hooks and counters (diagnostics).</summary>
+/// <param name="Flight">The fly-gate hook works (FlyAnywhere).</param>
+/// <param name="Placement">The build cursor's hook works (the placement rules).</param>
+/// <param name="Costs">The material cost hooks work (BuildCost, BuildRefund).</param>
+/// <param name="Mining">The dig damage hook works (DigDamage).</param>
+/// <param name="Players">Server entities that have rules set.</param>
+/// <param name="FlyAllowed">Fly-gate decisions turned to allowed.</param>
+/// <param name="CursorCleared">Cursor evaluations where a refusal flag was cleared.</param>
+/// <param name="CostsScaled">Material lists scaled when placing.</param>
+/// <param name="RefundsScaled">Material lists scaled when dismantling and undoing.</param>
+/// <param name="DigsScaled">Damage values scaled.</param>
+/// <param name="Faults">Hook bodies that faulted; the game's own path ran instead.</param>
+/// <param name="Detail">What is switched off and why, as text; empty when nothing is.</param>
 public sealed record RulesStatus(bool Flight, bool Placement, bool Costs, bool Mining, int Players, ulong FlyAllowed,
     ulong CursorCleared, ulong CostsScaled, ulong RefundsScaled, ulong DigsScaled, ulong Faults, string Detail)
 {
@@ -222,8 +242,11 @@ public sealed record RulesStatus(bool Flight, bool Placement, bool Costs, bool M
     /// <summary>The glider's hooks (UnlimitedGliding, GlideSink, GlideBoost).</summary>
     public bool Gliding { get; init; }
 
+    /// <summary>Building-zone tests turned to "near a base".</summary>
     public ulong ZoneForced { get; init; }
+    /// <summary>Shroud timer steps held or recovered instead of draining.</summary>
     public ulong ShroudHeld { get; init; }
+    /// <summary>Glider steps changed (sink, stamina, boost).</summary>
     public ulong GlideChanged { get; init; }
 
     /// <summary>The recipe-payment hooks (FreeCrafting): crafts pay nothing inside the game's own transaction.</summary>
@@ -270,87 +293,116 @@ public sealed class PlayerRulesChangedEvent : KilnEvent
         After = after;
     }
 
+    /// <summary>The player entity whose rules changed.</summary>
     public EntityId Player => After.Player;
+    /// <summary>The player's rules before the change.</summary>
     public EffectiveRules Before { get; }
+    /// <summary>The player's rules after the change.</summary>
     public EffectiveRules After { get; }
+    /// <summary>A short description for logs: the player and the new rules.</summary>
     public override string ToString() => $"rules of {Player}: {After}";
 }
 
 /// <summary>The server's limits on everyone's rules: <c>&lt;configDir&gt;/rules.json</c>.</summary>
 public sealed class RulesPolicy
 {
+    /// <summary>Players may get the building fly mode outside bases (<see cref="PlayerRules.FlyAnywhere"/>). Default true.</summary>
     [Comment("Players may get the building fly mode outside bases (FlyAnywhere).")]
     public bool AllowFlyAnywhere { get; set; } = true;
 
+    /// <summary>Players may build outside bases (<see cref="PlayerRules.BuildOutsideBases"/>). Default true.</summary>
     [Comment("Players may build outside bases (BuildOutsideBases).")]
     public bool AllowBuildOutsideBases { get; set; } = true;
 
+    /// <summary>Players may build in the game's no-build zones around points of interest, dungeons and altars (<see cref="PlayerRules.IgnoreNoBuildZones"/>). Default true.</summary>
     [Comment("Players may build in the game's no-build zones around points of interest, dungeons and altars (IgnoreNoBuildZones).")]
     public bool AllowIgnoreNoBuildZones { get; set; } = true;
 
+    /// <summary>Players may build with enemies nearby (<see cref="PlayerRules.IgnoreEnemiesNearby"/>). Default true.</summary>
     [Comment("Players may build with enemies nearby (IgnoreEnemiesNearby).")]
     public bool AllowIgnoreEnemiesNearby { get; set; } = true;
 
+    /// <summary>Players may build inside the Shroud (<see cref="PlayerRules.BuildInShroud"/>). Default true.</summary>
     [Comment("Players may build inside the Shroud (BuildInShroud).")]
     public bool AllowBuildInShroud { get; set; } = true;
 
+    /// <summary>Players may build in other players' bases without their permission (<see cref="PlayerRules.IgnoreBasePermissions"/>). Default false: other players' bases stay theirs.</summary>
     [Comment("Players may build in other players' bases without their permission (IgnoreBasePermissions). Off by default: other players' bases stay theirs.")]
     public bool AllowIgnoreBasePermissions { get; set; }
 
+    /// <summary>Players may be made invulnerable (<see cref="PlayerRules.Invulnerable"/>). Default true.</summary>
     [Comment("Players may be made invulnerable (Invulnerable).")]
     public bool AllowInvulnerable { get; set; } = true;
 
+    /// <summary>Water containers may get water back (<see cref="PlayerRules.Water"/>). Default true.</summary>
     [Comment("Water containers may get water back (Water).")]
     public bool AllowWater { get; set; } = true;
 
+    /// <summary>The lowest building cost multiplier any rule may give, 0 to 1000 (0 allows free building). Default 0.</summary>
     [Comment("The lowest building cost multiplier any rule may give (0 = free building allowed)."), Range(0, 1000)]
     public double MinBuildCost { get; set; }
 
+    /// <summary>The highest dig damage multiplier any rule may give, 1 to 1000000 (1000 breaks anything breakable in one hit). Default 1000.</summary>
     [Comment("The highest dig damage multiplier any rule may give (1000 = one hit breaks anything breakable)."), Range(1, 1000000)]
     public double MaxDigDamage { get; set; } = 1000;
 
+    /// <summary>The highest health floor any rule may keep, 0 to 1 (1 is full). Default 1.</summary>
     [Comment("The highest health floor any rule may keep (1 = full)."), Range(0, 1)]
     public double MaxHealthFloor { get; set; } = 1;
 
+    /// <summary>The highest stamina floor any rule may keep, 0 to 1 (1 is full). Default 1.</summary>
     [Comment("The highest stamina floor any rule may keep (1 = full)."), Range(0, 1)]
     public double MaxStaminaFloor { get; set; } = 1;
 
+    /// <summary>The highest mana floor any rule may keep, 0 to 1 (1 is full). Default 1.</summary>
     [Comment("The highest mana floor any rule may keep (1 = full)."), Range(0, 1)]
     public double MaxManaFloor { get; set; } = 1;
 
+    /// <summary>The Shroud timer may be frozen for a player (<see cref="PlayerRules.FreezeShroudTimer"/>). Default true.</summary>
     [Comment("The Shroud timer may be frozen for a player (FreezeShroudTimer).")]
     public bool AllowFreezeShroudTimer { get; set; } = true;
 
+    /// <summary>The highest Shroud timer floor any rule may keep, 0 to 1 (1 is full). Default 1.</summary>
     [Comment("The highest Shroud timer floor any rule may keep (1 = full)."), Range(0, 1)]
     public double MaxShroudFloor { get; set; } = 1;
 
+    /// <summary>Gliding may cost no stamina for a player (<see cref="PlayerRules.UnlimitedGliding"/>). Default true.</summary>
     [Comment("Gliding may cost no stamina for a player (UnlimitedGliding).")]
     public bool AllowUnlimitedGliding { get; set; } = true;
 
+    /// <summary>Holding sprint may push a glider along the view (<see cref="PlayerRules.GlideBoost"/>). Default true.</summary>
     [Comment("Holding sprint may push a glider along the view (GlideBoost).")]
     public bool AllowGlideBoost { get; set; } = true;
 
+    /// <summary>The fastest a boosted glider may go, m/s, 0 to 120. Default 60.</summary>
     [Comment("The fastest a boosted glider may go, m/s."), Range(0, 120)]
     public double MaxGlideSpeed { get; set; } = 60;
 
+    /// <summary>The glider's own nose may be steered for a player (<see cref="PlayerRules.GlideSteer"/>). It applies only for a player whose game confirms it steers too; others glide as before. Default true.</summary>
     [Comment("The glider's own nose may be steered for a player (GlideSteer): S raises it, letting go holds it, W dives. Applied only for a player whose game confirms it steers too; others glide as before.")]
     public bool AllowGlideSteer { get; set; } = true;
 
+    /// <summary>How far above level a steered glider's nose may rise, degrees, 0 to 85 (85 is almost straight up, 0 is level at most). Default 85.</summary>
     [Comment("How far above level a steered glider's nose may rise, degrees (85 = almost straight up, 0 = level at most)."), Range(0, 85)]
     public double MaxGlideSteerAngle { get; set; } = 85;
 
+    /// <summary>Falls may do no damage for a player (<see cref="PlayerRules.NoFallDamage"/>). Default true.</summary>
     [Comment("Falls may do no damage for a player (NoFallDamage).")]
     public bool AllowNoFallDamage { get; set; } = true;
 
+    /// <summary>Allows requesting <see cref="PlayerRules.FreeCrafting"/>. Currently unavailable without an authoritative transaction hook. Default true.</summary>
     [Comment("Allows requesting FreeCrafting; currently unavailable without an authoritative transaction hook.")]
     public bool AllowFreeCrafting { get; set; } = true;
 
+    /// <summary>Allows requesting <see cref="PlayerRules.KeepConsumables"/>: arrows, ammunition, food and potions are not used up. Default true.</summary>
     [Comment("Allows requesting KeepConsumables (arrows, ammunition, food, potions are not used up).")]
     public bool AllowKeepConsumables { get; set; } = true;
 
+    /// <summary>The character itself may fly for a player (<see cref="PlayerRules.CharacterFlight"/>). Default false: off until the server turns it on.</summary>
     [Comment("The character itself may fly for a player (CharacterFlight). Off until the server turns it on: new, and tested on fewer setups than the rest.")]
     public bool AllowCharacterFlight { get; set; }
 
+    /// <summary>A player may move through terrain, blocks and props (<see cref="PlayerRules.NoClip"/>, also <c>/noclip</c>). Default false: off until the server turns it on; a tool for admins and for debugging, not for normal play.</summary>
     [Comment("A player may move through terrain, blocks and props (NoClip, also /noclip). Off until the server turns it on: a tool for admins and for debugging, not for normal play.")]
     public bool AllowNoClip { get; set; }
 

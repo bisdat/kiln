@@ -152,7 +152,11 @@ pub enum ReportNote {
     DialogCancelled,
     /// The Save dialog answered with a path; report_save follows.
     DialogChosen,
-    /// The Save dialog or the save itself failed; `detail` is the error the window showed.
+    /// The native Save dialog failed; an automatic save follows.
+    DialogFailed,
+    /// The player chose the dialog-free Downloads action.
+    SaveToDownloads,
+    /// The save itself failed; `detail` is the error the window showed.
     Failed,
 }
 
@@ -164,6 +168,8 @@ pub async fn report_note(note: ReportNote, detail: Option<String>) -> Result<(),
         ReportNote::Opened => "support report: \"What's in this report\" opened".to_string(),
         ReportNote::DialogCancelled => "support report: the Save dialog was closed without a file name; nothing written".to_string(),
         ReportNote::DialogChosen => format!("support report: the Save dialog chose {detail}"),
+        ReportNote::DialogFailed => format!("support report: the Save dialog failed: {detail}; trying Kiln's state folder, then Downloads, then home"),
+        ReportNote::SaveToDownloads => "support report: Save to Downloads chosen; no Save dialog".to_string(),
         ReportNote::Failed => format!("support report: the window showed an error: {detail}"),
     };
     crate::commands::app::launcher_log("report", &line);
@@ -171,9 +177,10 @@ pub async fn report_note(note: ReportNote, detail: Option<String>) -> Result<(),
 }
 
 /// Writes the support report zip to `path` (".zip" added when missing). `exclude`: other mods' files the player left
-/// out ("What's in this report"; Kiln's own files cannot be left out).
+/// out ("What's in this report"; Kiln's own files cannot be left out). `destination` absent: the chosen path;
+/// automatic: dialog failure (Kiln's state folder first); downloads: no dialog (Downloads, then home).
 #[tauri::command]
-pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String, exclude: Option<Vec<String>>) -> Result<ReportSaved, Error> {
+pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path: String, exclude: Option<Vec<String>>, destination: Option<kiln_manage::report::SaveDestination>) -> Result<ReportSaved, Error> {
     if path.trim().is_empty() {
         return Err(Error::invalid("Choose where to save the report."));
     }
@@ -185,14 +192,17 @@ pub async fn report_save(app: tauri::AppHandle, target: Option<LogTarget>, path:
     log(format!("building the support report for {}", out.display()));
     let mut input = report_input(&app, target).inspect_err(|e| log(format!("the support report for {} could not be prepared: {}", out.display(), e.message)))?;
     input.exclude = exclude.unwrap_or_default();
+    let places = crate::dialog_folder::Places::of_this_system(&app);
+    let folders = kiln_manage::report::SaveFolders { owned: kiln_manage::util::state_dir(), downloads: places.downloads, home: places.home };
+    let destination = destination.unwrap_or_default();
+    log(format!("support report destination: {destination:?}"));
     // the blocking pool runs the write to its end even when the window stops waiting; every end is logged
     blocking(move || {
         let log = |line: String| crate::commands::app::launcher_log("report", &line);
         let started = std::time::Instant::now();
         let r = kiln_manage::report::build(&input);
         log(format!("support report built in {} ms ({} files); writing {}", started.elapsed().as_millis(), r.files.len(), out.display()));
-        let size = kiln_manage::report::write_zip(&r, &out)
-            .inspect_err(|e| log(format!("the support report was NOT written to {}: {}", out.display(), e.message)))?;
+        let (out, size) = kiln_manage::report::save_zip(&r, &out, destination, &folders, log)?;
         log(format!("support report written to {} ({size} bytes, {} findings, {} files left out)", out.display(), r.findings.len(), r.left_out.len()));
         Ok(ReportSaved { path: out.display().to_string(), size, findings: r.findings, errors: r.errors })
     })

@@ -686,7 +686,8 @@ internal static unsafe partial class ItemsTable
     {
         try
         {
-            if (count == null || (out_ == null && capacity > 0) || (flags & ~0xFu) != 0) return FakeTables.InvalidArgument;
+            // KILN_ITEMS_FIND_PLAYER_STORAGE (0x10, kiln_items_storage.h) is the one bit past kiln.items' own
+            if (count == null || (out_ == null && capacity > 0) || (flags & ~(0xFu | StorageNative.FindPlayerStorage)) != 0) return FakeTables.InvalidArgument;
             *count = 0;
             if (Fake is not { } f || FakeTables.Off(ItemsFake.ReadFeature)) return FakeTables.Unavailable;
             if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
@@ -855,6 +856,9 @@ internal sealed unsafe partial class ItemsFake
         public required List<uint> Links;  // the 8-slot inventories, each an entity; a container's first is itself
         public required Stack[] Slots;
         public FakePlayer? Player;
+        // a player storage's holder (Fakes/ItemsStorage): found only with KILN_ITEMS_FIND_PLAYER_STORAGE, its filter on gives
+        public bool Storage;
+        public Func<uint, bool>? Accepts;
 
         public ulong SlotId(int i) => Links[i / 8] | ((ulong)(uint)(i % 8) << 32);
 
@@ -990,6 +994,7 @@ internal sealed unsafe partial class ItemsFake
         out_->LevelMin = (uint)i.LevelMin;
         out_->LevelMax = (uint)i.LevelMax;
         out_->Gear = i.Gear ? (byte)1 : (byte)0;
+        out_->EquipSlot = i.EquipmentSlotType;  // ItemInfo.EquipSlot (the game's EquipmentSlotType), as SetEquipmentSlotType set it
         out_->Name = new NativeStr { Ptr = (byte*)i.NameUtf8, Len = (nuint)i.NameLength };
     }
 
@@ -1067,8 +1072,9 @@ internal sealed unsafe partial class ItemsFake
             foreach (var (e, inv) in _inventories.OrderBy(kv => kv.Key))
             {
                 if (Of(e) is null) continue;
-                var kind = inv.IsPlayer ? ItemsAbi.FindPlayers : ItemsAbi.FindContainers;
-                if ((flags & 7u) != 0 && (flags & kind) == 0) continue;  // no kind bit: every kind
+                var kind = inv.Storage ? StorageNative.FindPlayerStorage : inv.IsPlayer ? ItemsAbi.FindPlayers : ItemsAbi.FindContainers;
+                var kinds = flags & (7u | StorageNative.FindPlayerStorage);
+                if (kinds == 0 ? inv.Storage : (kinds & kind) == 0) continue;  // no kind bit: every kind but player storage
                 if ((flags & ItemsAbi.FindNonEmpty) != 0 && inv.Slots.All(s => s.Count == 0)) continue;
                 found.Add(e);
             }
@@ -1273,6 +1279,8 @@ internal sealed unsafe partial class ItemsFake
     {
         if (Of(q.Entity) is not { } inv) return (ItemsAbi.NoInventory, 0, ErrorNoSetup, $"entity {q.Entity} has no inventory");
         if (Item(q.Item) is not { } item) return (ItemsAbi.UnknownItem, 0, ErrorNoItem, $"item 0x{q.Item:x8} is not in the game's item registry");
+        if (inv.Accepts is { } accepts && !accepts(item.Id))
+            return ((int)StorageNative.ItemsFiltered, 0, 0, $"the player storage's filter does not take {item.Name}");
         var dry = (q.Flags & ItemsAbi.DryRun) != 0;
         var all = (q.Flags & ItemsAbi.AllOrNothing) != 0;
         var noMerge = (q.Flags & ItemsAbi.NoMerge) != 0;
@@ -1418,6 +1426,17 @@ internal sealed unsafe partial class ItemsFake
                 s.Level = 0;
                 s.Rarity = 0;
             }
+    }
+
+    /// <summary>A player storage's holder goes (Fakes/ItemsStorage): its inventory and its further 8-slot inventories.</summary>
+    public void RemoveInventory(uint entity)
+    {
+        lock (_lock)
+        {
+            if (!_inventories.Remove(entity, out var inv)) return;
+            foreach (var s in inv.Slots)
+                if (s.Pide != 0) DestroyGear(s.Pide);
+        }
     }
 
     public object Lock => _lock;

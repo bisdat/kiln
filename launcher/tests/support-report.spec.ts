@@ -29,3 +29,26 @@ test("a server's Logs page has the block too", async ({ page }) => {
   await desktop(page, "/servers/lab/logs");
   await expect(page.getByTestId("support-report")).toBeVisible();
 });
+
+test("a desktop without Deck detection keeps the normal Save report action", async ({ page }) => {
+  await desktop(page, "/logs");
+  const block = page.getByTestId("support-report");
+  await expect(block.getByRole("button", { name: "Save report...", exact: true })).toBeVisible();
+  await expect(block.getByRole("button", { name: "Save to Downloads", exact: true })).toHaveCount(0);
+});
+
+test("a detected Steam Deck offers Save to Downloads beside Save report, without a dialog", async ({ page }) => {
+  await page.goto("/?deck=steamdeck#/logs");
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  const block = page.getByTestId("support-report");
+  const button = block.getByRole("button", { name: "Save to Downloads", exact: true });
+  await expect(button).toBeVisible();
+  expect(await button.evaluate((el) => el.previousElementSibling?.textContent)).toBe("Save report...");
+  await button.click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".k-toasts")).toContainText(/\/home\/player\/Downloads\/kiln-report-\d{4}-\d{2}-\d{2}\.zip/);
+  const open = page.locator(".k-toasts").getByRole("button", { name: "Open folder" });
+  await expect(open).toBeVisible();
+  await open.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __kilnMock: { openedPaths: () => string[] } }).__kilnMock.openedPaths())).toEqual(["/home/player/Downloads/"]);
+});

@@ -45,7 +45,7 @@ export const NEVER: ReportContents["never"] = [
   { id: "saves", text: "your saves and world data (the game's savegame folder, kiln/data/)" },
   { id: "settings", text: "mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens" },
   { id: "admin", text: "Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint)" },
-  { id: "mods", text: "the contents of your mods (only folder and file names, sizes and times are listed)" },
+  { id: "mods", text: "the contents of your mods (only folder and file names, sizes and times are listed, plus ShroudForge manifest ids and versions in findings)" },
   { id: "steam", text: "Steam's own files, besides the compat tool and launch options shown above" },
 ];
 

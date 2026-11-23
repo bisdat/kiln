@@ -230,6 +230,27 @@ void served_impact_programs() {
 // gone. Kept as the base's value, the placeholder ran the base gem's program (a Frostbite acted as a Gem of Bleeding).
 // A placeholder names no program instead (the game's gem spawner runs nothing for a gem without a program), while every
 // other unresolved reference keeps the base's value as before, and a program that does resolve is kept.
+// kiln#130: a terrain brush's equipment.terrainVoxelObject names the keen::VoxelModelResource kiln.worldtables serves
+// under the brush's item GUID (isTerrain set), as all 11 game items with that field name theirs. It was asked for as a
+// keen::TerrainVoxelObjectDefinition resource, which the game data never cooks, so every terrain brush was refused.
+void served_terrain_models() {
+    using namespace kc;
+    static KilnAssetsApi a{};
+    a.header.size = sizeof a;
+    a.resource_read = [](const KilnAssetKey* k, void*, size_t, size_t* n) -> KilnResult {
+        asked_type = k->type;
+        *n = 96;
+        return k->type == 0xe53afbafu && k->guid[0] == 0xb7 ? KILN_ERR_BUFFER_TOO_SMALL : KILN_ERR_NOT_FOUND;
+    };
+    test_assets = &a;
+    uint8_t g[16] = {0xb7, 0x05, 0x13, 0x0f};
+    check(asset_served("keen::ObjectReference<keen::TerrainVoxelObjectDefinition>", g), "a terrainVoxelObject served as a terrain VoxelModelResource is loaded");
+    check(asked_type == 0xe53afbafu, "TerrainVoxelObjectDefinition asks kiln.assets for keen::VoxelModelResource (0xe53afbaf)");
+    check(asset_served("keen::ObjectReference<keen::VoxelObjectDefinition>", g) && asked_type == 0xe53afbafu, "a shape's voxelObject as before");
+    g[0] = 0x11;
+    check(!asset_served("keen::ObjectReference<keen::TerrainVoxelObjectDefinition>", g), "a terrain model nobody serves is not loaded");
+    test_assets = nullptr;
+}
 void placeholder_programs() {
     using namespace kc;
     static KilnAssetsApi a{};
@@ -298,6 +319,7 @@ int main(int argc, char** argv) {
     pool_references_need_their_binding();
         malformed_entries();
         served_impact_programs();
+        served_terrain_models();
         placeholder_programs();
         if (argc != 2) throw std::runtime_error("provide a new fixture directory");
         own_mod_models(argv[1]);

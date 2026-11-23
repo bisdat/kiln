@@ -9,12 +9,19 @@ namespace Kiln;
 [Flags]
 public enum ChatPermissions : uint
 {
+    /// <summary>No rights.</summary>
     None = 0,
+    /// <summary>May kick and ban players (the game's CanKickBan right).</summary>
     KickBan = 1 << 0,
+    /// <summary>May access inventories (the game's CanAccessInventories right).</summary>
     AccessInventories = 1 << 1,
+    /// <summary>May edit bases (the game's CanEditBase right).</summary>
     EditBase = 1 << 2,
+    /// <summary>May edit the world (the game's CanEditWorld right).</summary>
     EditWorld = 1 << 3,
+    /// <summary>May extend bases (the game's CanExtendBase right).</summary>
     ExtendBase = 1 << 4,
+    /// <summary>Receives experience (the game's CanReceiveEXP right).</summary>
     ReceiveExp = 1 << 5,
 }
 
@@ -62,7 +69,9 @@ public sealed class ChatMessage
     /// <summary>The sender, or null when their connection record was not found.</summary>
     public ChatPlayer? Player { get; }
 
+    /// <summary>The sender's player entity; <see cref="EntityId.None"/> when the sender is not known.</summary>
     public EntityId Sender => Player?.Entity ?? EntityId.None;
+    /// <summary>The sender's platform name; empty when the sender is not known.</summary>
     public string SenderName => Player?.Name ?? "";
 
     /// <summary>The sender's connection handle.</summary>
@@ -79,12 +88,23 @@ public sealed class ChatMessage
     /// <summary>Set to true to drop the line: nobody sees it, not even the sender, and no command runs.</summary>
     public bool Cancel { get; set; }
 
+    /// <summary>The line as <c>#id sender: text</c>, for logs.</summary>
     public override string ToString() => $"#{Id} {SenderName}: {Text}";
 }
 
+/// <summary>Handles a line a player typed (see <see cref="Chat.Received"/>). Set <see cref="ChatMessage.Cancel"/> to drop it.</summary>
+/// <param name="message">The line.</param>
 public delegate void ChatMessageHandler(ChatMessage message);
 
 /// <summary>Counters of the native service.</summary>
+/// <param name="ReceiveHooked">Players' lines can be observed and consumed.</param>
+/// <param name="SendReady">The game server and its chat system have been seen, so server lines can be sent.</param>
+/// <param name="Players">Connected players (records with a connection).</param>
+/// <param name="Subscribers">Subscribers to players' lines.</param>
+/// <param name="Received">Lines typed by players that were received.</param>
+/// <param name="Consumed">Of those, lines a subscriber consumed.</param>
+/// <param name="Sent">Server lines added, one per recipient.</param>
+/// <param name="InboxCount">Lines held in the chat system's inbox right now.</param>
 public readonly record struct ChatStatus(bool ReceiveHooked, bool SendReady, int Players, int Subscribers,
     ulong Received, ulong Consumed, ulong Sent, ulong InboxCount);
 
@@ -98,6 +118,11 @@ public enum ServerLineStyle
 }
 
 /// <summary>The newest line in the server's chat inbox (diagnostics).</summary>
+/// <param name="Type">The game's type number of the line.</param>
+/// <param name="Connection">The speaker's connection handle.</param>
+/// <param name="Account">The speaker's account id hash.</param>
+/// <param name="ReaderMask">Bit r set: reader r will not be sent this line (done with it, or it was not addressed to that reader).</param>
+/// <param name="Text">The line's text.</param>
 public readonly record struct ChatLine(uint Type, uint Connection, ulong Account, uint ReaderMask, string Text);
 
 /// <summary>
@@ -328,6 +353,7 @@ public static unsafe partial class Chat
         }
     }
 
+    /// <summary>A connected player by entity id; null when the entity is none, not a connected player, or kiln.chat is not loaded.</summary>
     public static ChatPlayer? FindPlayer(EntityId entity)
     {
         var t = T;
@@ -346,6 +372,7 @@ public static unsafe partial class Chat
         return prefix.Count == 1 ? prefix[0] : null;
     }
 
+    /// <summary>The native chat service's counters; all zero or false when kiln.chat is not loaded.</summary>
     public static ChatStatus Status
     {
         get

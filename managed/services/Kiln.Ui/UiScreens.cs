@@ -29,12 +29,15 @@ public sealed record UiScreenOptions
 
     /// <summary>Size in pixels at UI scale 1, centred on the screen.</summary>
     public float Width { get; init; } = 720;
+    /// <summary>Size in pixels at UI scale 1, centred on the screen. Default 520.</summary>
     public float Height { get; init; } = 520;
     /// <summary>Escape closes the screen (the top one first).</summary>
     public bool CloseOnEscape { get; init; } = true;
     /// <summary>Darken the game behind the screen.</summary>
     public bool DimBackground { get; init; } = true;
+    /// <summary>Whether the screen has a title bar. Default true.</summary>
     public bool TitleBar { get; init; } = true;
+    /// <summary>Whether the player can resize the screen. Default false.</summary>
     public bool Resizable { get; init; }
     /// <summary>A close button (X) in the title bar.</summary>
     public bool CloseButton { get; init; } = true;
@@ -67,7 +70,9 @@ public sealed class UiScreen : IDisposable
         Id = $"###kiln.screen{Interlocked.Increment(ref _ids)}";
     }
 
+    /// <summary>The title shown in the title bar.</summary>
     public UiText Title { get; set; }
+    /// <summary>The options the screen was created with.</summary>
     public UiScreenOptions Options { get; }
     internal Action<UiDraw> Draw { get; }
     internal ModContext? Owner { get; }
@@ -76,6 +81,7 @@ public sealed class UiScreen : IDisposable
     internal long OpenedAt;
     internal bool FocusNext;
 
+    /// <summary>The screen is open now.</summary>
     public bool IsOpen => _open;
 
     /// <summary>Runs (as the owning mod, on the thread that closed it) when the screen closes.</summary>
@@ -84,6 +90,7 @@ public sealed class UiScreen : IDisposable
     /// <summary>Runs when the screen opens.</summary>
     public event Action? Opened;
 
+    /// <summary>Opens the screen (does nothing when it is open, removed, or the overlay does not draw).</summary>
     public void Open()
     {
         if (Disposed || _open || UiNative.DrawingOffReason != null) return;
@@ -94,6 +101,7 @@ public sealed class UiScreen : IDisposable
         if (Opened is { } o) UiModCalls.Invoke(Owner, static a => a(), o, "screen Opened");
     }
 
+    /// <summary>Closes the screen, if it is open.</summary>
     public void Close()
     {
         if (!_open) return;
@@ -102,6 +110,7 @@ public sealed class UiScreen : IDisposable
         if (Closed is { } c) UiModCalls.Invoke(Owner, static a => a(), c, "screen Closed");
     }
 
+    /// <summary>Opens the screen if it is closed, closes it if it is open.</summary>
     public void Toggle()
     {
         if (_open) Close();

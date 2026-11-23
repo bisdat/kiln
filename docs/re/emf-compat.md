@@ -86,6 +86,10 @@ point.
 - **for_each_entity:**
   - It walks the storage's entity map. The layout is derived as `kiln.world` derives it: capacity/values from
     `world/storage.entities*`, bits/keys from the singleton map, both cross-checked. Snapshot first, then callbacks.
+  - The map has a fixed slot count (1,048,576 in a hosted game's server world). Since 0.2.0-dev.30.7 the snapshot copies
+    the occupancy bits (128 KB) and then only the occupied slots' keys (`src/entity_scan.h`); up to 30.6 it copied all 4 MB
+    of keys into a fresh allocation per call, 0.8-1.9 ms per call on the host benchmark (`tests/entity_scan_test.cpp`,
+    22,866 entities) against 0.15 ms now.
   - Probe: 2818 entities, 2702 with a 56-byte CurrentTransform.
   - Client and prediction worlds use the same layout from the client's composed sigdb (offline check: the world
     constants resolve on enshrouded.exe 26404966); not yet run in game.

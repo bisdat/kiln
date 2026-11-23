@@ -951,8 +951,50 @@ bool vfx_reference_kept(const uint8_t g[16]) {
     return false;
 }
 
+// An item tag (ItemTagReference, ItemInfo.tags[i].tag) is no resource: the game data cooks none. The tags the game knows
+// are the item registry's list, ItemRegistryResource.itemTags {tagGuid, labelId} (210 on client 26430625, every tag an
+// item carries among them); readers compare GUIDs (docs/re/building.md 1.2.2). Read through the reflection, no offsets.
+bool item_tag_known(const uint8_t g[16]) {
+    const TType* reg = type_named("keen::ItemRegistryResource");
+    const TField* tags = reg ? reg->field("itemTags") : nullptr;
+    const TType* list = tags ? tags->type() : nullptr;
+    list = list ? list->resolved() : nullptr;
+    const TType* info = list && list->inner() ? list->inner()->resolved() : nullptr;
+    const TField* guid = info ? info->field("tagGuid") : nullptr;
+    if (!guid || !info->size || guid->offset + 16 > info->size) return false;
+    std::vector<std::array<uint8_t, 16>> keys;
+    if (!res_list(reg->hash, &keys)) return false;
+    for (const auto& k : keys) {
+        uint64_t size = 0;
+        const uintptr_t base = res_data(k.data(), reg->hash, &size);
+        uintptr_t data = 0;
+        uint32_t count = 0;
+        if (!base || size < tags->offset + 8 || !blob_array(base + tags->offset, &data, &count)) continue;
+        for (uint32_t i = 0; i < count; ++i) {
+            uint8_t t[16];
+            if (rd(data + uintptr_t(i) * info->size + guid->offset, t, 16) && std::memcmp(t, g, 16) == 0) return true;
+        }
+    }
+    return false;
+}
+
+// A voxel model's kind: 1 a terrain model (isTerrain set), 0 a shape's model, -1 no loaded or served
+// keen::VoxelModelResource of that GUID, -2 a build whose model type has no isTerrain field (read through the reflection).
+int voxel_model_terrain(const uint8_t g[16]) {
+    const TType* m = type_named("keen::VoxelModelResource");
+    const TField* f = m ? m->field("isTerrain") : nullptr;
+    if (!f) return -2;
+    uint64_t size = 0;
+    const uintptr_t base = res_data(g, m->hash, &size);
+    uint8_t terrain = 0;
+    if (!base || size < uint64_t(f->offset) + 1 || !rd(base + f->offset, &terrain, 1)) return -1;
+    return terrain ? 1 : 0;
+}
+
 // The resource type a reference field points at: "keen::ObjectReference<keen::X>" somewhere in its typedef chain.
-uint32_t ref_target(const std::string& type_name) {
+// *voxel_model: 1 for a shape's model (VoxelObjectDefinition), 2 for a terrain shape's (TerrainVoxelObjectDefinition).
+uint32_t ref_target(const std::string& type_name, int* voxel_model = nullptr) {
+    if (voxel_model) *voxel_model = 0;
     const TType* t = type_named(type_name);
     for (int i = 0; i < 12 && t; ++i) {
         const std::string& n = t->name;
@@ -964,6 +1006,11 @@ uint32_t ref_target(const std::string& type_name) {
             if (target == "keen::ecs::Template") target = "keen::ecs::TemplateResource";  // a template reference: a loaded template or a clone
             if (target == "keen::Model") target = "keen::RenderModel";  // cooked under the editor type's GUID, as a sound below
             if (target == "keen::SoundContainer") target = "keen::SoundContainerResource";
+            // shape and terrain-shape models: both editor types are cooked as keen::VoxelModelResource under the same GUID
+            if (target == "keen::VoxelObjectDefinition" || target == "keen::TerrainVoxelObjectDefinition") {
+                if (voxel_model) *voxel_model = target == "keen::VoxelObjectDefinition" ? 1 : 2;
+                target = "keen::VoxelModelResource";
+            }
             return fnv1a(target);
         }
         if (t->kind != K_TYPEDEF) break;
@@ -992,7 +1039,8 @@ bool parse_leaf(const Field& f, const gjson& j, const uint8_t* original, uint8_t
         const std::string s = j.get<std::string>();
         if (s.empty() || s == "none" || s == "00000000-0000-0000-0000-000000000000") return true;  // all zero: no reference
         uint8_t g[16] = {};
-        const uint32_t target = ref_target(f.type_name);
+        int voxel_model = 0;
+        const uint32_t target = ref_target(f.type_name, &voxel_model);
         const GEntry* named = nullptr;
         // a buff (BuffTypeReference: BuffType configs, ApplyBuffEvent.buffTypeOverride, onTimeout.followUp): buffs are
         // records of the one collection, not resources; the GUID must hash (FNV-1a) to a loaded buff's id (a game buff
@@ -1062,7 +1110,18 @@ bool parse_leaf(const Field& f, const gjson& j, const uint8_t* original, uint8_t
                 std::memcpy(g, named->guid, 16);
             }
         }
-        if (target && f.ref) {
+        if (target && f.ref && voxel_model) {
+            // the game data never mixes the two kinds: voxelObject names shape models (isTerrain clear), terrainVoxelObject
+            // terrain models (isTerrain set), loaded or served by kiln.worldtables / kiln.assets (docs/re/building.md 1.2.2)
+            const int terrain = voxel_model_terrain(g);
+            if (terrain != (voxel_model == 2 ? 1 : 0)) {
+                *err = terrain == -2 ? f.type_name + ": Kiln cannot tell a terrain model from a shape's on this build (keen::VoxelModelResource has no isTerrain)"
+                       : terrain == -1 ? guid_text(g) + " is not a loaded keen::VoxelModelResource"
+                       : terrain == 1 ? guid_text(g) + " is a terrain model (isTerrain set): voxelObject takes a shape's model"
+                                      : guid_text(g) + " is a shape's model (isTerrain clear): terrainVoxelObject takes a terrain model";
+                return false;
+            }
+        } else if (target && f.ref) {
             // the GUID must be a loaded resource of the reference's type (a template the game knows, ...)
             // A StateId (SetAnimationEvent.animationName) and an OverlayId (SetAnimationOverlayEvent.overlayName) are only hashed into the graph's id, never
             // loaded as a resource: any GUID is valid, so blocks can name the game's states and overlays and invent new ones.
@@ -1074,11 +1133,17 @@ bool parse_leaf(const Field& f, const gjson& j, const uint8_t* original, uint8_t
                                   kGraph = fnv1a(std::string("keen::anim_graph::runtime_graph::AnimationGraphResource2_0"));
             // A loca tag is only hashed to its id, and the UI shows an empty string for a tag no table has (client LocaRecord): any GUID is safe, and a
             // clone's own texts answer theirs.
+            static const uint32_t kItemTag = fnv1a(std::string("keen::ItemTag"));
             const bool ok = f.type_name == "keen::ObjectReference<keen::animationgraph::StateId>" || f.type_name == "keen::ObjectReference<keen::animationgraph::OverlayId>" || f.type_name == "keen::ObjectReference<keen::LocaTag>" ||
+                            (target == kItemTag && item_tag_known(g)) ||
                             (server && (f.type_name == "keen::ObjectReference<keen::UiImage>" || target == kSound || target == kModel)) ||
                             res_data(g, target) != 0 ||
                             (target == kToolGraph && res_data(g, kGraph) != 0) ||
                             (target == fnv1a(std::string("keen::ecs::TemplateResource")) && greg(KILN_GD_TEMPLATES).get(fnv1a(g, 16)));
+            if (!ok && target == kItemTag) {
+                *err = guid_text(g) + " is not an item tag the game knows (ItemRegistryResource.itemTags lists none of that GUID)";
+                return false;
+            }
             if (!ok) {
                 *err = guid_text(g) + " is not a loaded " + f.type_name;
                 return false;

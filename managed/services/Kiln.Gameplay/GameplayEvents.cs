@@ -8,6 +8,7 @@ namespace Kiln;
 [Flags]
 public enum GameplayActions : uint
 {
+    /// <summary>No action.</summary>
     None = 0,
     /// <summary>Place building blocks and props.</summary>
     Build = 0x01,
@@ -23,10 +24,14 @@ public enum GameplayActions : uint
     Craft = 0x20,
     /// <summary>Natural spawns (random spawners) inside; applies to everyone.</summary>
     Spawn = 0x40,
+    /// <summary>Every action.</summary>
     All = 0x7F,
 }
 
 /// <summary>A stack of items (item id as the game's <c>ItemId</c>, see Kiln.Items).</summary>
+/// <param name="ItemId">The item's id (the game's <c>ItemId</c>); 0 in a recipe's inputs means an input
+/// category.</param>
+/// <param name="Count">How many.</param>
 public readonly record struct GameplayItemStack(uint ItemId, int Count);
 
 /// <summary>Base of the cancelable gameplay events: a protection zone may have canceled the event before any handler
@@ -50,6 +55,7 @@ public abstract class GameplayCancelableEvent : CancelableEvent
 /// <summary>Base of the gameplay notifications.</summary>
 public abstract class GameplayEvent : KilnEvent
 {
+    /// <summary>The server-world step the event was posted in.</summary>
     public ulong Step { get; internal init; }
 }
 
@@ -64,20 +70,28 @@ public sealed class CraftEvent : GameplayCancelableEvent
     public EntityId Operator { get; internal init; }
     /// <summary>The entity with <c>Crafting</c>: a workbench, a villager, or the player itself (hand crafting).</summary>
     public EntityId Station { get; internal init; }
+    /// <summary>The recipe being crafted.</summary>
     public uint RecipeId { get; internal init; }
     /// <summary>How many times the recipe is crafted.</summary>
     public int Amount { get; internal init; }
+    /// <summary>Where the station is; null when it has no position.</summary>
     public WorldPosition? StationPosition { get; internal init; }
+    /// <summary>True when the operator is a player.</summary>
     public bool ByPlayer => Operator.IsPlayer;
 }
 
 /// <summary>The game's result codes of one craft (the craft core).</summary>
 public enum CraftResult
 {
+    /// <summary>The craft went through.</summary>
     Crafted = 0,
+    /// <summary>The output did not fit in the operator's inventory.</summary>
     NoRoomForOutput = 2,
+    /// <summary>The operator lacked ingredients.</summary>
     MissingMaterials = 4,
+    /// <summary>A crafting prop the recipe needs was not near the station.</summary>
     MissingCraftingProps = 5,
+    /// <summary>Any other code of the game; <see cref="ItemCraftedEvent.RawResult"/> has it.</summary>
     Other = -1,
 }
 
@@ -89,16 +103,25 @@ public enum CraftResult
 public sealed class ItemCraftedEvent : GameplayEvent
 {
     static ItemCraftedEvent() => Gameplay.RegisterHookEvent(typeof(ItemCraftedEvent),2,"gameplay.craft");
+    /// <summary>Whose inventory paid and received.</summary>
     public EntityId Operator { get; internal init; }
+    /// <summary>The entity that did the crafting: a workbench, a villager, or the player (hand crafting).</summary>
     public EntityId Station { get; internal init; }
+    /// <summary>The recipe that was crafted.</summary>
     public uint RecipeId { get; internal init; }
+    /// <summary>The id of the workshop the recipe belongs to.</summary>
     public uint WorkshopId { get; internal init; }
+    /// <summary>The game's result code, as a named value.</summary>
     public CraftResult Result { get; internal init; }
+    /// <summary>The game's raw result code; 0 is success.</summary>
     public int RawResult { get; internal init; }
+    /// <summary>True when the craft went through (<see cref="RawResult"/> is 0).</summary>
     public bool Succeeded => RawResult == 0;
     /// <summary>The recipe's outputs for one craft (what arrived when <see cref="Succeeded"/>).</summary>
     public IReadOnlyList<GameplayItemStack> Outputs { get; internal init; } = [];
+    /// <summary>Where the station is; null when it has no position.</summary>
     public WorldPosition? StationPosition { get; internal init; }
+    /// <summary>True when the operator is a player.</summary>
     public bool ByPlayer => Operator.IsPlayer;
 }
 
@@ -110,10 +133,15 @@ public sealed class ItemCraftedEvent : GameplayEvent
 /// interaction fail; nothing opens).</summary>
 public sealed class InteractEvent : GameplayCancelableEvent
 {
+    /// <summary>Who accepts the offer: a player or a villager.</summary>
     public EntityId Guest { get; internal init; }
+    /// <summary>The entity whose offer is accepted: a chest, a door, a station, a bed, a portal, an NPC.</summary>
     public EntityId Host { get; internal init; }
+    /// <summary>The id of the offer that is accepted.</summary>
     public uint OfferId { get; internal init; }
+    /// <summary>Where the host is; null when it has no position.</summary>
     public WorldPosition? HostPosition { get; internal init; }
+    /// <summary>True when the guest is a player.</summary>
     public bool ByPlayer => Guest.IsPlayer;
 }
 
@@ -121,9 +149,13 @@ public sealed class InteractEvent : GameplayCancelableEvent
 /// (including the ones Kiln declined).</summary>
 public sealed class InteractionResultEvent : GameplayEvent
 {
+    /// <summary>Who tried to interact.</summary>
     public EntityId Guest { get; internal init; }
+    /// <summary>The entity they tried to interact with.</summary>
     public EntityId Host { get; internal init; }
+    /// <summary>The id of the offer.</summary>
     public uint OfferId { get; internal init; }
+    /// <summary>True when the game accepted the attempt; false when it was declined.</summary>
     public bool Accepted { get; internal init; }
 }
 
@@ -137,10 +169,15 @@ public sealed class LootEvent : GameplayCancelableEvent
     public EntityId Guest { get; internal init; }
     /// <summary>What is looted: the item pickup, container, plant, animal.</summary>
     public EntityId Host { get; internal init; }
+    /// <summary>The id of the loot offer.</summary>
     public uint OfferId { get; internal init; }
+    /// <summary>The game's <c>lootAll</c> flag of the request.</summary>
     public bool LootAll { get; internal init; }
+    /// <summary>The game's <c>bypassInteraction</c> flag of the request.</summary>
     public bool BypassInteraction { get; internal init; }
+    /// <summary>Where the looted entity is; null when it has no position.</summary>
     public WorldPosition? HostPosition { get; internal init; }
+    /// <summary>True when the guest is a player.</summary>
     public bool ByPlayer => Guest.IsPlayer;
 }
 
@@ -148,29 +185,43 @@ public sealed class LootEvent : GameplayCancelableEvent
 /// looting, harvesting, crafting output, building refunds (Forge's ItemPickupEvent, after the fact).</summary>
 public sealed class ItemPickupEvent : GameplayEvent
 {
+    /// <summary>The inventory owner the items arrived with.</summary>
     public EntityId Receiver { get; internal init; }
     /// <summary>Where the items came from (none for crafting output).</summary>
     public EntityId Source { get; internal init; }
+    /// <summary>The item that arrived (the game's <c>ItemId</c>).</summary>
     public uint ItemId { get; internal init; }
+    /// <summary>How many arrived.</summary>
     public int Count { get; internal init; }
     /// <summary>The 8-slot inventory entity the items went to, and the slot index.</summary>
     public EntityId SlotInventory { get; internal init; }
+    /// <summary>The index of the slot they went to, in <see cref="SlotInventory"/>.</summary>
     public int SlotIndex { get; internal init; }
+    /// <summary>The game's flag for a pickup that shows no popup.</summary>
     public bool HiddenInUi { get; internal init; }
+    /// <summary>Where the pickup happened.</summary>
     public WorldPosition Position { get; internal init; }
 }
 
 // ------------------------------------------------------------------------------------------------- building ----
 
+/// <summary>What a <see cref="BuildEvent"/> is about.</summary>
 public enum BuildKind
 {
+    /// <summary>A building block was placed.</summary>
     PlaceBlock = 1,
+    /// <summary>A prop was placed.</summary>
     PlaceProp = 2,
+    /// <summary>A block was dismantled.</summary>
     Dismantle = 3,
+    /// <summary>A prop was picked up.</summary>
     PickUpProp = 4,
+    /// <summary>Terrain was dug, added to, flattened or changed (see
+    /// <see cref="BuildEvent.TerraformType"/>).</summary>
     Terraform = 5,
 }
 
+/// <summary>How a building operation ended.</summary>
 public enum BuildOutcome
 {
     /// <summary>The game did it.</summary>
@@ -196,19 +247,27 @@ public sealed class BuildEvent : GameplayEvent
     static unsafe BuildEvent() => EventProducers.Register(typeof(BuildEvent),
         GameplayNative.RequestBuild(GameplayNative.T) != null ? "gameplay.build_hooks" : "gameplay.build",
         Gameplay.PrepareBuildEvents, allowPending: true);
+    /// <summary>What the operation was.</summary>
     public BuildKind Kind { get; internal init; }
+    /// <summary>The player who did it.</summary>
     public EntityId Player { get; internal init; }
     /// <summary>Block / prop item (place), material item (dismantle); 0 for terraforming.</summary>
     public uint ItemId { get; internal init; }
+    /// <summary>Where it happened.</summary>
     public WorldPosition Position { get; internal init; }
     /// <summary>The prop entity (<see cref="BuildKind.PickUpProp"/>).</summary>
     public EntityId Target { get; internal init; }
     /// <summary>Terraform: 0 remove (dig), 1 add, 2-3 flatten, 4-5 overgrowth, 6-7 decay.</summary>
     public int TerraformType { get; internal init; }
+    /// <summary>How it ended.</summary>
     public BuildOutcome Outcome { get; internal init; }
+    /// <summary>The id of the zone that refused it (0 = none).</summary>
     public uint DeniedByZone { get; internal init; }
+    /// <summary>The name of that zone (empty when none or unknown).</summary>
     public string ZoneName => DeniedByZone == 0 ? "" : Gameplay.ZoneName(DeniedByZone);
+    /// <summary>True for placing a block or a prop.</summary>
     public bool IsPlacement => Kind is BuildKind.PlaceBlock or BuildKind.PlaceProp;
+    /// <summary>True for dismantling a block, picking up a prop, or digging terrain (terraform type 0).</summary>
     public bool IsRemoval => Kind is BuildKind.Dismantle or BuildKind.PickUpProp || (Kind == BuildKind.Terraform && TerraformType == 0);
 }
 
@@ -220,7 +279,9 @@ public sealed class BuildEvent : GameplayEvent
 /// it there instead.</summary>
 public sealed class TeleportEvent : GameplayCancelableEvent
 {
+    /// <summary>The entity that is about to be teleported.</summary>
     public EntityId Entity { get; internal init; }
+    /// <summary>Where it is now.</summary>
     public WorldPosition From { get; internal init; }
     /// <summary>The destination. Handlers may change it (metres).</summary>
     public WorldPosition Target { get; set; }
@@ -228,15 +289,20 @@ public sealed class TeleportEvent : GameplayCancelableEvent
     public EntityId TargetEntity { get; internal init; }
     /// <summary>The game searches walkable ground near the destination.</summary>
     public bool SearchesGround { get; internal init; }
+    /// <summary>True when the entity is a player.</summary>
     public bool IsPlayer => Entity.IsPlayer;
 }
 
 /// <summary>A watched entity was teleported this step (its TeleportCount changed). Post phase.</summary>
 public sealed class TeleportedEvent : GameplayEvent
 {
+    /// <summary>The entity that was teleported.</summary>
     public EntityId Entity { get; internal init; }
+    /// <summary>Where it was before.</summary>
     public WorldPosition From { get; internal init; }
+    /// <summary>Where it is now.</summary>
     public WorldPosition To { get; internal init; }
+    /// <summary>The entity's teleport count after this teleport.</summary>
     public int Count { get; internal init; }
 }
 
@@ -249,8 +315,11 @@ public sealed class TeleportedEvent : GameplayEvent
 public sealed class NaturalSpawnEvent : GameplayCancelableEvent
 {
     static NaturalSpawnEvent() => Gameplay.RegisterHookEvent(typeof(NaturalSpawnEvent),8,"gameplay.spawn");
+    /// <summary>The creature the spawner made; none for a spawn that a zone refused.</summary>
     public EntityId Entity { get; internal init; }
+    /// <summary>The GUID of the creature's template.</summary>
     public Guid Template { get; internal init; }
+    /// <summary>Where it spawned.</summary>
     public WorldPosition Position { get; internal init; }
     /// <summary>A <see cref="Gameplay.ReplaceNaturalSpawns"/> rule swapped the spawner's template: <see cref="Template"/>
     /// is the replacement.</summary>
@@ -264,7 +333,9 @@ public sealed class NaturalSpawnEvent : GameplayCancelableEvent
 [Flags]
 public enum EntityCategories : uint
 {
+    /// <summary>No category.</summary>
     None = 0,
+    /// <summary>Players.</summary>
     Player = 0x01,
     /// <summary>Enemies and animals.</summary>
     Creature = 0x02,
@@ -279,17 +350,20 @@ public enum EntityCategories : uint
     Other = 0x20,
     /// <summary>What is reported when no mod narrowed or widened it.</summary>
     Default = Player | Creature | Npc | Prop | Pickup,
+    /// <summary>Every category.</summary>
     All = 0x3F,
 }
 
 /// <summary>Fields shared by <see cref="EntityJoinLevelEvent"/> and <see cref="EntityLeaveLevelEvent"/>.</summary>
 public interface IEntityLifecycleEvent
 {
+    /// <summary>The entity that joined or left the world.</summary>
     EntityId Entity { get; }
     /// <summary>Template GUID (null for entities without one).</summary>
     Guid? Template { get; }
     /// <summary>The entity this one belongs to (a creature for its weakspot), or None.</summary>
     EntityId Parent { get; }
+    /// <summary>The entity's category.</summary>
     EntityCategories Category { get; }
     /// <summary>Where it was (metres); null when it has no transform.</summary>
     WorldPosition? Position { get; }
@@ -327,14 +401,23 @@ public sealed class EntityJoinLevelEvent : GameplayCancelableEvent, IEntityLifec
 {
     static EntityJoinLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityJoinLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
+    /// <inheritdoc/>
     public EntityId Entity { get; internal init; }
+    /// <inheritdoc/>
     public Guid? Template { get; internal init; }
+    /// <inheritdoc/>
     public EntityId Parent { get; internal init; }
+    /// <inheritdoc/>
     public EntityCategories Category { get; internal init; }
+    /// <inheritdoc/>
     public WorldPosition? Position { get; internal init; }
+    /// <inheritdoc/>
     public bool ByKiln { get; internal init; }
+    /// <inheritdoc/>
     public TemplateInfo? TemplateInfo => _t.Get(Template);
+    /// <inheritdoc/>
     public string TemplateName => TemplateInfo?.Name ?? "";
+    /// <summary>True when the entity is a player.</summary>
     public bool IsPlayer => Category == EntityCategories.Player;
 }
 
@@ -345,14 +428,23 @@ public sealed class EntityLeaveLevelEvent : GameplayEvent, IEntityLifecycleEvent
 {
     static EntityLeaveLevelEvent() => Gameplay.RegisterHookEvent(typeof(EntityLeaveLevelEvent),16,"gameplay.entity_events");
     private TemplateLookup _t;
+    /// <inheritdoc/>
     public EntityId Entity { get; internal init; }
+    /// <inheritdoc/>
     public Guid? Template { get; internal init; }
+    /// <inheritdoc/>
     public EntityId Parent { get; internal init; }
+    /// <inheritdoc/>
     public EntityCategories Category { get; internal init; }
+    /// <inheritdoc/>
     public WorldPosition? Position { get; internal init; }
+    /// <inheritdoc/>
     public bool ByKiln { get; internal init; }
+    /// <inheritdoc/>
     public TemplateInfo? TemplateInfo => _t.Get(Template);
+    /// <inheritdoc/>
     public string TemplateName => TemplateInfo?.Name ?? "";
+    /// <summary>True when the entity was a player.</summary>
     public bool IsPlayer => Category == EntityCategories.Player;
 }
 
@@ -373,15 +465,20 @@ public enum DiscardKind
 /// stays in the slot.</summary>
 public sealed class ItemTossEvent : GameplayCancelableEvent
 {
+    /// <summary>The player who discards the stack.</summary>
     public EntityId Player { get; internal init; }
+    /// <summary>How the player discards it.</summary>
     public DiscardKind How { get; internal init; }
     /// <summary>The inventory entity of the slot (a player's bag, a chest's inventory link).</summary>
     public EntityId Inventory { get; internal init; }
+    /// <summary>The index of the slot in <see cref="Inventory"/>.</summary>
     public int SlotIndex { get; internal init; }
     /// <summary>The game's item id in that slot (Kiln.Items <c>ItemId</c>); 0 if the slot could not be read.</summary>
     public uint ItemId { get; internal init; }
+    /// <summary>How many items the stack holds.</summary>
     public int Count { get; internal init; }
     /// <summary>The stack's own entity (gear with level, perks, durability), or None.</summary>
     public EntityId ItemEntity { get; internal init; }
+    /// <summary>Where the player is; null when it has no position.</summary>
     public WorldPosition? PlayerPosition { get; internal init; }
 }

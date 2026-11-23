@@ -11,6 +11,7 @@ namespace Kiln;
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class BlockClientsAttribute(ClientsLevel level) : Attribute
 {
+    /// <summary>The level the block type asks of players' games.</summary>
     public ClientsLevel Level { get; } = level;
 }
 
@@ -19,6 +20,7 @@ public sealed class BlockClientsAttribute(ClientsLevel level) : Attribute
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class ClientsModWhenAttribute(string pattern) : Attribute
 {
+    /// <summary>The regular expression a field's value is tested against: a value that matches asks for <see cref="ClientsLevel.Mod"/>.</summary>
     public string Pattern { get; } = pattern;
 }
 
@@ -35,10 +37,14 @@ public interface ITweakable
 /// More than the target's maximum is lost; a target without that attribute (most creatures have no mana) gets nothing.</summary>
 public sealed record RestoreBlock
 {
+    /// <summary>Health given back.</summary>
     public int Health { get; init; }
+    /// <summary>Mana given back.</summary>
     public int Mana { get; init; }
+    /// <summary>Stamina given back.</summary>
     public int Stamina { get; init; }
 
+    /// <summary>Adds two restores kind by kind.</summary>
     public static RestoreBlock operator +(RestoreBlock a, RestoreBlock b) => new()
     {
         Health = a.Health + b.Health, Mana = a.Mana + b.Mana, Stamina = a.Stamina + b.Stamina,
@@ -48,35 +54,62 @@ public sealed record RestoreBlock
 /// <summary>Shorthands for <see cref="RestoreBlock"/>.</summary>
 public static class Restore
 {
+    /// <summary>A <see cref="RestoreBlock"/> of <paramref name="n"/> health.</summary>
     public static RestoreBlock Health(int n) => new() { Health = n };
+    /// <summary>A <see cref="RestoreBlock"/> of <paramref name="n"/> mana.</summary>
     public static RestoreBlock Mana(int n) => new() { Mana = n };
+    /// <summary>A <see cref="RestoreBlock"/> of <paramref name="n"/> stamina.</summary>
     public static RestoreBlock Stamina(int n) => new() { Stamina = n };
 }
 
 /// <summary>Something to spawn: a <c>GameTemplates</c> constant, or a template's GUID. It starts as a child of what spawned it, at the
 /// same level and of the same faction, and lives on after it.</summary>
+/// <param name="Value">A <c>GameTemplates</c> constant, or a template's GUID as text.</param>
 [JsonConverter(typeof(TemplateRefConverter))]
 public readonly record struct TemplateRef(string Value)
 {
+    /// <summary>A template by name: a <c>GameTemplates</c> constant, or a template's GUID as text.</summary>
     public static implicit operator TemplateRef(string value) => new(value);
+    /// <summary>A template by its GUID.</summary>
     public static implicit operator TemplateRef(Guid guid) => new(guid.ToString());
+    /// <summary>The template as written, the same as <see cref="Value"/>.</summary>
     public override string ToString() => Value;
 }
 
 /// <summary>A sound: a <see cref="SoundBlock"/> or a cue of this mod's cook recipe by name, <c>"other-mod:name"</c>, or a cue's GUID (<c>GameSounds.Guids</c>).
 /// A cue of the mod's own needs the mod on every client (<c>clients: "mod"</c>).</summary>
+/// <param name="Value">A cue's name or <c>"other-mod:name"</c>, or a cue's GUID as text.</param>
 [JsonConverter(typeof(SoundRefConverter))]
 public readonly record struct SoundRef(string Value)
 {
+    /// <summary>A sound by name: a cue of this mod's cook recipe, <c>"other-mod:name"</c>, or a cue's GUID as text.</summary>
     public static implicit operator SoundRef(string value) => new(value);
+    /// <summary>A sound by a cue's GUID.</summary>
     public static implicit operator SoundRef(Guid guid) => new(guid.ToString());
     /// <summary>A <see cref="SoundBlock"/> of this mod, by its handle.</summary>
     public static implicit operator SoundRef(BlockHandle<SoundBlock> sound) => new(sound.Guid.ToString());
+    /// <summary>The sound as written, the same as <see cref="Value"/>.</summary>
     public override string ToString() => Value;
 }
 
 /// <summary>A place on a body: the game's attachment slots.</summary>
-public enum VfxSlot { Root, Head, Chest, LeftHand, RightHand, Feet, Weapon }
+public enum VfxSlot
+{
+    /// <summary>The root of the body.</summary>
+    Root,
+    /// <summary>The head.</summary>
+    Head,
+    /// <summary>The chest.</summary>
+    Chest,
+    /// <summary>The left hand.</summary>
+    LeftHand,
+    /// <summary>The right hand.</summary>
+    RightHand,
+    /// <summary>The feet.</summary>
+    Feet,
+    /// <summary>The weapon in hand.</summary>
+    Weapon,
+}
 
 /// <summary>A VFX and where it shows: the slot on every field that shows one (<see cref="EffectBlock.Vfx"/>, <see cref="CastBlock.Vfx"/>,
 /// <see cref="ProjectileBlock.Vfx"/>, <see cref="StatusBlock.Vfx"/>, <see cref="AreaBlock.Vfx"/>, an item's on-hit). A name in JSON or C# is a <c>VfxBlock</c> of this mod,
@@ -87,6 +120,7 @@ public sealed record VfxRef
     /// <summary>A name that is a new VFX, not one of the game's: the build reads it for what a mod asks of players' games.</summary>
     internal const string OwnName = "^(?!game:)(?![0-9a-fA-F]{8}-)[^ ]+$";
 
+    /// <summary>A VFX by name: a <c>VfxBlock</c> of this mod, <c>"other-mod:name"</c> for another mod's, or <c>"game:name"</c> for one of the game's (see <see cref="Game"/>).</summary>
     public VfxRef(string name) => Name = name;
 
     /// <summary>The block's name, <c>"mod:name"</c>, or <c>"game:name"</c>.</summary>
@@ -106,11 +140,17 @@ public sealed record VfxRef
 
     /// <summary>One of the game's VFX, by its catalog name (<c>GameVfx</c>).</summary>
     public static VfxRef Game(string name) => new($"game:{name}");
+    /// <summary>A VFX by name, as <see cref="VfxRef(string)"/> takes it.</summary>
     public static implicit operator VfxRef(string name) => new(name);
+    /// <summary>The VFX block that <see cref="Blocks.Define{T}"/> returned, by its <c>mod:name</c>.</summary>
     public static implicit operator VfxRef(BlockHandle handle) => new(handle.ToString());
 }
 
 /// <summary>A stat of a character. Premade instances name the game's attributes; <c>new Stat("my-key", guid, Whole: true)</c> names any other.</summary>
+/// <param name="Key">The name JSON gives this stat (<c>"max-health"</c>).</param>
+/// <param name="Attribute">The GUID of the game's attribute it changes.</param>
+/// <param name="Whole">True: whole points (strength, maximum health, armour), so a modifier takes whole numbers. False: a share, 0.1 being 10%.</param>
+/// <param name="Subtract">True: the game applies a modifier as a subtraction, as the resistances do (0.25 takes a quarter of that damage away). False: it adds.</param>
 [JsonConverter(typeof(StatConverter))]
 public sealed record Stat(string Key, Guid Attribute, bool Whole = false, bool Subtract = false) : IPremade
 {
@@ -119,52 +159,91 @@ public sealed record Stat(string Key, Guid Attribute, bool Whole = false, bool S
     private static Stat Resist(string key, string guid) => new(key, new Guid(guid), Subtract: true);
 
     // ---- the six attributes, whole points
+    /// <summary>The strength attribute, in whole points.</summary>
     public static readonly Stat Strength = Points("strength", "64810163-59a0-4b55-82b9-5bb6290b22d7");
+    /// <summary>The constitution attribute, in whole points.</summary>
     public static readonly Stat Constitution = Points("constitution", "0b1ceec5-402d-43ff-9a12-43392d53cf26");
+    /// <summary>The dexterity attribute, in whole points.</summary>
     public static readonly Stat Dexterity = Points("dexterity", "4be83310-d59c-4f6d-89dd-1e61e033db86");
+    /// <summary>The endurance attribute, in whole points.</summary>
     public static readonly Stat Endurance = Points("endurance", "6bd1a147-1ea7-441e-8c6e-6f8b68dbcbfe");
+    /// <summary>The intelligence attribute, in whole points.</summary>
     public static readonly Stat Intelligence = Points("intelligence", "2609852d-a281-4176-804e-b2dc4b8eb8e8");
+    /// <summary>The spirit attribute, in whole points.</summary>
     public static readonly Stat Spirit = Points("spirit", "0e31beac-22c5-4572-a98a-e39dca2bd1f7");
 
     // ---- pools and how they refill, whole points
+    /// <summary>Maximum health, in whole points.</summary>
     public static readonly Stat MaxHealth = Points("max-health", "e57246cd-ed4f-40ee-81db-0ddf7710be1d");
+    /// <summary>Maximum mana, in whole points.</summary>
     public static readonly Stat MaxMana = Points("max-mana", "8f8780ca-ff9f-4c5a-aadb-3aa0ee0ea3de");
+    /// <summary>Maximum stamina, in whole points.</summary>
     public static readonly Stat MaxStamina = Points("max-stamina", "904174b4-ef56-476f-b0e2-d5e00add14ca");
+    /// <summary>Health regeneration, in whole points.</summary>
     public static readonly Stat HealthRegen = Points("health-regen", "5355a563-fb99-4165-bf0b-7588cc20502c");
+    /// <summary>Mana regeneration, in whole points.</summary>
     public static readonly Stat ManaRegen = Points("mana-regen", "20696ee7-ca28-403f-bb4f-5f08914dd977");
+    /// <summary>Stamina regeneration, in whole points.</summary>
     public static readonly Stat StaminaRegen = Points("stamina-regen", "9f2613ca-57f1-47eb-bc56-a86133665d56");
+    /// <summary>Maximum oxygen, in whole points.</summary>
     public static readonly Stat MaxOxygen = Points("max-oxygen", "e11444db-848e-4e34-9140-4c1b7b4015b6");
+    /// <summary>Shroud time, in whole points.</summary>
     public static readonly Stat ShroudTime = Points("shroud-time", "1b2d53e6-38ab-4236-9c45-100d4ea31cdb");
 
     // ---- shares: 0.1 is 10% more, -0.5 is half
+    /// <summary>Movement speed, as a share: 0.1 is 10% more, -0.5 is half.</summary>
     public static readonly Stat MoveSpeed = Share("move-speed", "75f222d4-8cb9-4e4b-bb99-73f692d78f07");
+    /// <summary>Sprint speed, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat SprintSpeed = Share("sprint-speed", "fb6d1030-dbd4-4c07-89e7-534d28b1a9c0");
+    /// <summary>Melee damage, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat MeleeDamage = Share("melee-damage", "a673b002-e7f7-49ea-95db-334c72b418bc");
+    /// <summary>Ranged damage, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat RangedDamage = Share("ranged-damage", "63262131-9a59-4766-a1be-19bd5c0e81f7");
+    /// <summary>Magic damage, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat MagicDamage = Share("magic-damage", "92f40832-6ae3-4bc2-b514-6dcc904eb25c");
+    /// <summary>Critical hit chance, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat CritChance = Share("crit-chance", "df9b8dd0-f4e9-4751-ba27-52eb82e73db9");
+    /// <summary>Critical hit damage, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat CritDamage = Share("crit-damage", "1a6ad674-9023-4647-b6f4-f50534bbfe5b");
+    /// <summary>Healing, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat Healing = Share("healing", "a45270b3-b791-4dd7-906c-d75ca03f3689");
+    /// <summary>Parry, as a share: 0.1 is 10% more.</summary>
     public static readonly Stat Parry = Share("parry", "1d05303a-24d0-4bc1-b7f2-d81e599de00a");
+    /// <summary>Stamina used for climbing, as a share: -0.1 is 10% less.</summary>
     public static readonly Stat StaminaUseClimb = Share("stamina-use-climb", "533f9fc9-316e-466e-95e7-b2a7be0658af");
+    /// <summary>Stamina used for gliding, as a share: -0.1 is 10% less.</summary>
     public static readonly Stat StaminaUseGlide = Share("stamina-use-glide", "7d8a4cf2-9439-4bb7-b04d-4553f481fd61");
+    /// <summary>Stamina used for sprinting, as a share: -0.1 is 10% less.</summary>
     public static readonly Stat StaminaUseSprint = Share("stamina-use-sprint", "36541843-3894-4203-86d6-a35936f09cb2");
 
     // ---- armour, points
+    /// <summary>Physical armour, in whole points.</summary>
     public static readonly Stat PhysicalArmor = Points("physical-armor", "68a64242-abf2-4839-bf4c-6c9aaa04dac4");
+    /// <summary>Magical armour, in whole points.</summary>
     public static readonly Stat MagicalArmor = Points("magical-armor", "48d6f3cd-212d-44a2-a26d-ce5e6885b377");
+    /// <summary>Block, in whole points.</summary>
     public static readonly Stat Block = Points("block", "05ce03e9-0006-4668-82d4-58dd92988dbf");
 
     // ---- resistances: a share of that damage taken away (0.25 takes a quarter less, -0.25 a quarter more)
+    /// <summary>Resistance to physical damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistPhysical = Resist("resist-physical", "9e147516-5765-4c3a-9e75-7405ffee7e9e");
+    /// <summary>Resistance to magical damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistMagical = Resist("resist-magical", "7db690ee-6a37-4221-9516-bc8994f1db03");
+    /// <summary>Resistance to cut damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistCut = Resist("resist-cut", "3c40b8a1-6146-45e1-a5b4-96e26aa8f970");
+    /// <summary>Resistance to pierce damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistPierce = Resist("resist-pierce", "763b78f6-21cc-4a16-8a7b-eee0ff735e3e");
+    /// <summary>Resistance to blunt damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistBlunt = Resist("resist-blunt", "75bd2050-a925-498c-98fe-9f8ac8a64f07");
+    /// <summary>Resistance to fire damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistFire = Resist("resist-fire", "142aa1a6-a25c-47c6-b6c7-241f525f197f");
+    /// <summary>Resistance to ice damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistIce = Resist("resist-ice", "b4fce925-8793-47af-aa41-b14d72a7831c");
+    /// <summary>Resistance to lightning damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistLightning = Resist("resist-lightning", "9335eca1-bd14-476d-b11c-d68ab9866e51");
+    /// <summary>Resistance to shroud damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistShroud = Resist("resist-shroud", "12058b0b-fc5f-4c5d-ad6d-db83091c79c1");
+    /// <summary>Resistance to poison damage: the share of it taken away (0.25 takes a quarter less, -0.25 a quarter more).</summary>
     public static readonly Stat ResistPoison = Resist("resist-poison", "96f041eb-8611-4664-a826-0262abc52e58");
 
     internal static readonly Stat[] All =

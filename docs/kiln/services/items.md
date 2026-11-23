@@ -13,6 +13,14 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
 | Test | `mods/tests/items-test/` (PASS / FAIL lines in kiln.log; v3: `MovesTest.cs`; v5: `EquipTest.cs`); `mods/tests/equipment-sets-test/` (v6); `managed/tests/Kiln.Items.Tests` (offline); `mods/tests/craftmatch-test/` (rarity, level, perks of made items); `mods/tests/fuel-test/` (water, three boots); `native/services/items/tests/run.sh` (host tests under Wine); `mods/tests/instances-test/` (entity refs, item instances, following items) |
 
+## Persistent player storage (since 0.2.0-dev.30.7)
+
+`Items.RegisterPlayerStorage` registers an independent inventory for each player, persisted by Kiln.Saves and paired
+with the character save. Use its holder with the inventory operations on this page. It is not part of the backpack,
+does not pay crafting costs, and is excluded from default inventory scans. Read the
+[player storage contract](player-storage.md) and [modding guide](../modding/player-storage.md) for filters, death rules,
+parking, travel and trust limits.
+
 ## Give straight into equipment (since 0.2.0-dev.30.6)
 
 `Items.GiveEquip(player, item, count, EquipmentSlot slot, GiveEquipOptions? options = null)` returns
@@ -1020,7 +1028,7 @@ Details and every field: the header.
 ## For Kiln.Admin
 | op | Kiln |
 |---|---|
-| `inventory {entity}` → `{inventories:[{link, entity, category, slots:[{item, count, pide}]}], generic, available}` | `Items.Read(entity)`: group `Slots` by `Slot.Inventory` (`Link`, `Category`), `GenericSlots`, `AvailableSlots`. Names: `Items.Get(slot.Item)?.Label` |
+| `inventory {entity}` → `{inventories:[{link, entity, category, slots:[{item, count, pide}]}], generic, available}` | `Items.Read(entity)`: group `Slots` by `InventorySlot.Link` (an index into `Inventories`, whose entries have an `Inventory` and a `Category`), `GenericSlots`, `AvailableSlots`. Names: `Items.Get(slot.Item)?.Label` |
 | `give_item {entity, item, count 1..100000, maxStack}` → `{given, requested, stacks}` | `await Items.Give(entity, new ItemId(item), count, gear, GiveOptions.Notify)` → `{given = r.Done, requested = r.Requested, stacks = r.Changes.Count}`. `maxStack` is no longer needed (the game knows it); gear works: pass `new Gear(level, rarity)`; `Partial` / `NoRoom` say when the backpack is full |
 
 ## Client checklist (needs a joined player; not verifiable in a player-free lab)

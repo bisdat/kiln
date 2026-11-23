@@ -3529,7 +3529,7 @@
       "saves": "Twoje zapisy gry i światy",
       "settings": "Ustawienia modów i folder konfiguracji Kiln (mogą zawierać hasła do serwerów)",
       "admin": "Token i adres Kiln.Admin",
-      "mods": "Zawartość twoich modów (tylko nazwy, rozmiary i daty plików)",
+      "mods": "Zawartość twoich modów (wymieniane są tylko nazwy plików i folderów, rozmiary i daty oraz identyfikatory i wersje manifestów ShroudForge w ustaleniach)",
       "steam": "Własne pliki Steama"
     }
   },
@@ -6502,5 +6502,28 @@
       "vanilla": "To niekoniecznie pliki takie, jakie dostarcza Steam. Do tego użyj w Steam opcji Zweryfikuj spójność plików gry (Właściwości gry, Zainstalowane pliki).",
       "unknown": "Kiln nie potrafi określić, które pliki gry by przywrócił: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Schowek",
+    "title": "Schowek gracza",
+    "readOnly": "Tylko do odczytu. Te przedmioty pozostają w Kiln, oddzielnie od plecaka.",
+    "empty": "Ta postać nie ma schowka gracza.",
+    "return": "Zwróć postaci",
+    "returnTitle": "Zwrócić zawartość schowka tej postaci?",
+    "returnBody": "Kiln najpierw tworzy kopię zapasową, a następnie dodaje tyle stosów z podstawowej gry, ile zmieści się na dodatkowych stronach plecaka. Przedmioty z modów i cała reszta pozostają w schowku. Gra i Steam muszą być zamknięte.",
+    "serverCopy": "Serwer Kiln przechowuje własną kopię tego schowka. Jeśli dołączysz bez Kiln, ten serwer może zwrócić ci swoją kopię na miejscu.",
+    "confirm": "Zwróć przedmioty",
+    "returning": "Zwracanie…",
+    "result": "Zwrócono {returned} stosów; w schowku pozostało {remaining} stosów.",
+    "closeGame": "Zamknij Enshrouded i Steam przed zwróceniem zawartości schowka.",
+    "localOnly": "Zwrot jest dostępny tylko dla postaci LOCAL, nie dla zapisów Steam Cloud.",
+    "saveFirst": "Zapisz lub odrzuć zmiany przed zwróceniem zawartości schowka.",
+    "unavailable": "Nie można zwrócić zawartości schowka",
+    "restoreWarning": "Ta postać ma schowek gracza. Starsza kopia zapasowa może pasować do starszego schowka. Jeśli pasująca para nie jest już przechowywana, przedmioty przeniesione od czasu tej kopii mogą zostać utracone lub powielone.",
+    "unpaired": "Ta postać zmieniła się, odkąd Kiln ostatnio widział jej schowek, więc nie można jej nic zwrócić. Pokazano najnowszą kopię schowka.",
+    "parked": "Mod wyłączony",
+    "kept": "kiln/data/characters i kiln/data/worlds pozostają. Chronią schowek gracza do czasu ponownej instalacji Kiln.",
+    "unreadable": "Niektórych zapisanych rekordów nie można wyświetlić. Pozostają bez zmian.",
+    "modItems": "{count} stosów przedmiotów z modów pozostaje w schowku: wymagają swojego moda."
   }
 }

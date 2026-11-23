@@ -28,6 +28,7 @@ public abstract class CancelableEvent : KilnEvent
     /// subscribed with <c>receiveCanceled</c> (and may set it back to false).</summary>
     public bool Canceled { get; set; }
 
+    /// <summary>Cancels the event: sets <see cref="Canceled"/>.</summary>
     public void Cancel() => Canceled = true;
 
     /// <summary>Who canceled it: the id of the mod whose handler set <see cref="Canceled"/> ("kiln" for Kiln's own
@@ -49,6 +50,7 @@ public enum EventResult
 /// <summary>An event with an <see cref="EventResult"/>; see <see cref="ResultEvent"/>.</summary>
 public interface IResultEvent
 {
+    /// <summary>The decision so far; <see cref="EventResult.Default"/> until a handler sets one.</summary>
     EventResult Result { get; set; }
 }
 
@@ -56,8 +58,12 @@ public interface IResultEvent
 /// handler to set <see cref="Result"/> wins; <see cref="EventPriority.Monitor"/> handlers must only read it.</summary>
 public abstract class ResultEvent : KilnEvent, IResultEvent
 {
+    /// <summary>The decision so far; <see cref="EventResult.Default"/> until a handler sets one. The last handler to
+    /// set it wins.</summary>
     public EventResult Result { get; set; }
+    /// <summary>Sets <see cref="Result"/> to <see cref="EventResult.Allow"/>.</summary>
     public void Allow() => Result = EventResult.Allow;
+    /// <summary>Sets <see cref="Result"/> to <see cref="EventResult.Deny"/>.</summary>
     public void Deny() => Result = EventResult.Deny;
 
     /// <summary>The decision, with <paramref name="vanilla"/> for <see cref="EventResult.Default"/>.</summary>
@@ -72,10 +78,15 @@ public abstract class ResultEvent : KilnEvent, IResultEvent
 /// <summary>A <see cref="CancelableEvent"/> that also carries an <see cref="EventResult"/>.</summary>
 public abstract class CancelableResultEvent : CancelableEvent, IResultEvent
 {
+    /// <summary>The decision so far; <see cref="EventResult.Default"/> until a handler sets one. The last handler to
+    /// set it wins.</summary>
     public EventResult Result { get; set; }
+    /// <summary>Sets <see cref="Result"/> to <see cref="EventResult.Allow"/>.</summary>
     public void Allow() => Result = EventResult.Allow;
+    /// <summary>Sets <see cref="Result"/> to <see cref="EventResult.Deny"/>.</summary>
     public void Deny() => Result = EventResult.Deny;
 
+    /// <summary>The decision, with <paramref name="vanilla"/> for <see cref="EventResult.Default"/>.</summary>
     public bool Decide(bool vanilla) => Result switch
     {
         EventResult.Allow => true,
@@ -87,11 +98,17 @@ public abstract class CancelableResultEvent : CancelableEvent, IResultEvent
 /// <summary>Order in which handlers run. <see cref="Monitor"/> runs last and must only observe the final result.</summary>
 public enum EventPriority
 {
+    /// <summary>Runs first.</summary>
     Highest = 0,
+    /// <summary>Runs after <see cref="Highest"/>, before <see cref="Normal"/>.</summary>
     High = 1,
+    /// <summary>The default.</summary>
     Normal = 2,
+    /// <summary>Runs after <see cref="Normal"/>, before <see cref="Lowest"/>.</summary>
     Low = 3,
+    /// <summary>Runs after <see cref="Low"/>, before the <see cref="Monitor"/> handlers.</summary>
     Lowest = 4,
+    /// <summary>Runs last, and must only observe the final result.</summary>
     Monitor = 5,
 }
 
@@ -100,8 +117,10 @@ public enum EventPriority
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
 public sealed class SubscribeAttribute : Attribute
 {
+    /// <summary>Marks the method as a handler that runs at <paramref name="priority"/>.</summary>
     public SubscribeAttribute(EventPriority priority = EventPriority.Normal) => Priority = priority;
 
+    /// <summary>Where the handler runs among the handlers of the event.</summary>
     public EventPriority Priority { get; }
 
     /// <summary>Also run for events an earlier handler canceled.</summary>
@@ -109,8 +128,14 @@ public sealed class SubscribeAttribute : Attribute
 }
 
 /// <summary>Time spent in one handler since it subscribed (or since <see cref="Events.Diagnostics.ResetStats"/>).</summary>
+/// <param name="Calls">How many times the handler ran.</param>
+/// <param name="TotalMs">The time spent in it, in milliseconds.</param>
+/// <param name="MaxMs">The longest single call, in milliseconds.</param>
+/// <param name="Faults">The exceptions it threw.</param>
 public readonly record struct EventHandlerStats(long Calls, double TotalMs, double MaxMs, int Faults)
 {
+    /// <summary><see cref="EventHandlerStats.TotalMs"/> divided by <see cref="EventHandlerStats.Calls"/>; 0 before the
+    /// first call.</summary>
     public double AverageMs => Calls == 0 ? 0 : TotalMs / Calls;
 }
 
@@ -131,8 +156,12 @@ public sealed class EventSubscription : IDisposable
         Name = $"{handler.Method.DeclaringType?.Name}.{handler.Method.Name}";
     }
 
+    /// <summary>The event type the handler subscribed to; a handler of a base class also receives derived
+    /// events.</summary>
     public Type Type { get; }
+    /// <summary>Where the handler runs among the handlers of the event.</summary>
     public EventPriority Priority { get; }
+    /// <summary>Whether it also runs for events an earlier handler canceled.</summary>
     public bool ReceiveCanceled { get; }
 
     /// <summary>What this handler receives (<see cref="Events.On{T}(Action{T}, EventFilter, EventPriority, bool)"/>); null:
@@ -151,21 +180,31 @@ public sealed class EventSubscription : IDisposable
     internal object? Target { get; init; }
     internal Action<object>? Invoke { get; set; }
     private bool _active = true;
+    /// <summary>False once the subscription was removed: disposed, its mod unloaded, or too many faults.</summary>
     public bool Active { get => Volatile.Read(ref _active); internal set => Volatile.Write(ref _active, value); }
 
     // Also written by service dispatchers (e.g. the render thread).
     internal long Calls, TotalTicks, MaxTicks;
     internal int Faults;
 
+    /// <summary>The time this handler has used.</summary>
     public EventHandlerStats Stats => new(Interlocked.Read(ref Calls), Interlocked.Read(ref TotalTicks) * 1000.0 / Stopwatch.Frequency,
         Interlocked.Read(ref MaxTicks) * 1000.0 / Stopwatch.Frequency, Volatile.Read(ref Faults));
 
+    /// <summary>Unsubscribes the handler.</summary>
     public void Dispose() => Events.Remove(this);
 
+    /// <summary>The event type, the owner, the handler and the priority, for logs.</summary>
     public override string ToString() => $"{Type.Name} -> {Owner}:{Name} ({Priority})";
 }
 
 /// <summary>A row of <see cref="Events.Diagnostics.Handlers"/>.</summary>
+/// <param name="Event">The event type's full name.</param>
+/// <param name="Owner">The id of the mod that subscribed ("kiln" for Kiln's own code).</param>
+/// <param name="Handler">"Type.Method" of the handler.</param>
+/// <param name="Priority">Where the handler runs.</param>
+/// <param name="ReceiveCanceled">Whether it also runs for canceled events.</param>
+/// <param name="Stats">The time it has used.</param>
 public sealed record EventHandlerInfo(string Event, string Owner, string Handler, EventPriority Priority,
     bool ReceiveCanceled, EventHandlerStats Stats);
 

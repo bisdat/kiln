@@ -156,6 +156,20 @@ What that means for EMF's own mods of 0.6.8, read from their source (not seen wi
 In the lab, server-admin cost about 1.1 ms per step and the lua mod with 8 scripts about 0.8 ms. Every other shipped
 mod cost 0.1 ms or less.
 
+Since 0.2.0-dev.30.7 each loaded mod also has `cost` in `emf.json`: how many components it read (`componentReads`,
+`get_component`), how often it listed every entity (`entityScans`, `entityScanEntities`, `for_each_entity`), Kiln's own
+time for those listings (`entityScanMs`), and `lastMinute` with the same per server step. A mod whose callbacks take
+more than 2 ms per server step over a minute gets a line in `kiln.log` (a warning from 4 ms), again every 10 minutes
+while it stays over, for example:
+
+    emf mod lua costs 11.2 ms per server step (the last 3340 steps; ...); it lists every entity 1.0 time(s) per step
+    (for_each_entity, 22866 entities each; kiln-emf's share 0.10 ms); it reads 45732 components per step ...
+
+A step has 16.7 ms at 60 steps per second for the whole game, so a mod near that slows the server world. For Lua mods,
+`lua.perf` in the game console says which script it is. Mod authors: listing every entity each step to find the players
+costs one component read per entity (tens of thousands in a built-up base); list them less often (every second or so)
+and keep the player entities between listings.
+
 kiln-emf never waits for the disk on the server world's step (since 0.2.0-dev.29.17): `emf.json`, the mods' settings
 files and `emf/commands.txt` are written and read on a thread of its own. When its part of a step still takes over
 100 ms, `kiln.log` names the part (`slow tick: kiln-emf's server Pre took ...`, at most once a minute); a file that took

@@ -173,6 +173,22 @@ export interface RenderInfo {
   markerWhy?: string;
   /** X11 (XWayland) in this start: only on a Wayland session with XWayland (render.rs, 0.2.0-dev.30). */
   x11?: X11Info;
+  /** Settings' "Force GPU drawing on NVIDIA" and this start's step past Ubuntu WebKit's NVIDIA block (render.rs,
+   *  0.2.0-dev.30.7). */
+  force?: ForceInfo;
+}
+export interface ForceInfo {
+  /** Effective switch: manual choice or remembered automatic NVIDIA recovery; off on clean starts. */
+  on: boolean;
+  /** This start: nothing forced, or WEBKIT_FORCE_DMABUF_RENDERER=1 with WEBKIT_DMABUF_RENDERER_FORCE_SHM=1. */
+  step: "off" | "shm";
+  /** Why: the switch off or on; the start before with it failed (the launcher turns the switch off); the user's own
+   *  variables; no DMA-BUF renderer in this start (software mode, its off switch). */
+  why: "off" | "on" | "failed" | "recovery" | "recovered" | "unguarded" | "yours" | "unused";
+  /** Why the launcher turned the switch off by itself, and when. */
+  failedWhy?: string;
+  /** This start found Ubuntu WebKit's NVIDIA block behind WebKit drawing without the GPU. */
+  blocked: boolean;
 }
 export interface X11Info {
   /** This start draws through X11 (the launcher set GDK_BACKEND=x11). */
@@ -1433,12 +1449,15 @@ export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
 /** The first screen is up (once per start: shell/started.ts). */
 export const appStarted = () => call<null>("app_started");
+/** Visibility alone does not prove painting. Two visible animation frames can confirm a renderer startup. */
+export const appRenderFrame = (painted: boolean, visible: boolean) => call<string | null>("app_render_frame", { painted, visible });
 /** What the page measured about its drawing (shell/renderReport.ts), into launcher.log: at most two lines a start. */
 export const appRenderReport = (report: PageRender) => call<null>("app_render_report", { report });
 /** Settings, "Draw the launcher without the GPU": sets or clears the marker for the next start (Linux). */
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
 /** Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself, off keeps Wayland (Linux). */
 export const appRenderX11Set = (on: boolean) => call<RenderInfo>("app_render_x11_set", { on });
+export const appRenderForceSet = (on: boolean) => call<RenderInfo>("app_render_force_set", { on });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
 export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
 /** (dev.30) The folder a file dialog of `kind` opens in, or "<folder>/<fileName>" (src-tauri/src/dialog_folder.rs; ui/dialogFolder.ts):
@@ -2188,14 +2207,18 @@ export interface ReportContents {
 }
 /** What the report would hold, built as report_save builds it; nothing is written. `exclude`: other mods' files left out. */
 export const reportPreview = (target: LogTarget | null, exclude: string[] = []) => call<ReportContents>("report_preview", { target, exclude });
+/** A chosen path, the native-dialog fallback, or the dialog-free Downloads action. */
+export type ReportSaveDestination = "chosen" | "automatic" | "downloads";
 /** Writes the support report zip (logs, state files, profile, listings, summary.txt; names and paths replaced) to
- *  `path`. `target` null: the system and the launcher only. `exclude`: other mods' files the player left out. */
-export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = []) => call<ReportSaved>("report_save", { target, path, exclude });
+ *  `path`, with filesystem fallbacks. `automatic`: the dialog failed (Kiln's state folder, Downloads, home);
+ *  `downloads`: no dialog (Downloads, home). Both use only the filename from `path`. The result is the actual path.
+ *  `target` null: the system and the launcher only. `exclude`: other mods' files the player left out. */
+export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = [], destination: ReportSaveDestination = "chosen") => call<ReportSaved>("report_save", { target, path, exclude, destination });
 /** A few lines for a forum post, redacted like the zip. */
 export const reportSummary = (target: LogTarget | null) => call<string>("report_summary", { target });
 /** What the window did with a support report that report_save never hears of (the Save dialog cancelled, an error
  *  shown), into launcher.log. Never throws: a note that cannot be written is dropped. */
-export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "failed";
+export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "dialogFailed" | "saveToDownloads" | "failed";
 export const reportNote = (note: ReportNote, detail?: string) => call<null>("report_note", { note, detail: detail ?? null }).catch(() => null);
 
 // saves.rs
@@ -2218,6 +2241,11 @@ export const editorWriteSave = (path: string, data: Uint8Array | number[]) => ca
 export const editorListBackups = (target: string) => call<EditorBackup[]>("editor_list_backups", { target });
 export const editorRestoreBackup = (src: string, target: string) => call<null>("editor_restore_backup", { src, target });
 export const editorOpenBackups = () => call<null>("editor_open_backups");
+export interface EditorStorageSnapshot { character: string; gameId: string; text: string | null; local: boolean }
+/** `storage` is the planned `mods["kiln-items"].storage` value only; the backend writes it into the exact sidecar bytes. */
+export interface EditorStorageReturn { path: string; gameId: string; expectedSave: number[]; expectedSidecar: string; data: number[]; storage: string; oldWitness: string; newWitness: string }
+export const editorStorageRead = (path: string, gameId: string | null = null) => call<EditorStorageSnapshot | null>("editor_storage_read", { path, gameId });
+export const editorReturnStorage = (request: EditorStorageReturn) => call<{ backup: string }>("editor_return_storage", { request });
 
 // server.rs
 export const serverList = () => call<ServerInstance[]>("server_list");
@@ -2462,8 +2490,8 @@ export const COMMANDS = [
   "registry_report_read",
   "saves_list", "saves_backups", "saves_backup", "saves_restore", "saves_delete",
   "editor_list_saves", "editor_file_info", "editor_read_file", "editor_zstd_decompress", "editor_zstd_compress",
-  "editor_game_running", "editor_backup_file", "editor_write_save", "editor_list_backups", "editor_restore_backup",
-  "editor_open_backups",
+  "editor_game_running", "editor_backup_file", "editor_write_save", "editor_list_backups", "editor_restore_backup", "editor_open_backups",
+  "editor_storage_read", "editor_return_storage",
   "server_list", "server_get", "server_create", "server_import", "server_remove", "server_status", "server_start", "server_stop",
   "server_restart", "server_update", "server_deploy", "server_settings_get", "server_settings_set", "server_mods",
   "server_mods_sync", "server_mod_enable", "server_backups", "server_backup_create", "server_backup_restore", "server_query",
@@ -2486,7 +2514,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set", "app_render_x11_set", "app_render_report",
+  "app_started", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

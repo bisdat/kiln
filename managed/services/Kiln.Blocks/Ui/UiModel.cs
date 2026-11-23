@@ -21,7 +21,15 @@ public enum WindowKind
 }
 
 /// <summary>Which of the game's menus a window's entry goes into.</summary>
-public enum UiMenuIn { Pause, Main, Both }
+public enum UiMenuIn
+{
+    /// <summary>The game's pause menu.</summary>
+    Pause,
+    /// <summary>The game's main menu.</summary>
+    Main,
+    /// <summary>The pause menu and the main menu.</summary>
+    Both,
+}
 
 /// <summary>An entry in the game's own menus that opens a window.</summary>
 public sealed record UiMenu
@@ -29,6 +37,7 @@ public sealed record UiMenu
     /// <summary>The label. A plain text, or one per language: <c>UiText.Of(("en", "Settings"), ("de", "Einstellungen"))</c>.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Text { get; init; }
+    /// <summary>Which of the game's menus holds the entry. Default <see cref="UiMenuIn.Pause"/>.</summary>
     public UiMenuIn In { get; init; } = UiMenuIn.Pause;
     /// <summary>Lower first. Kiln's own Mods entry has 1000.</summary>
     public int Order { get; init; }
@@ -56,8 +65,10 @@ public sealed record UiMenu
 [BlockClients(ClientsLevel.Mod)]
 public sealed record WindowBlock : IUiBlock
 {
+    /// <summary>The window's title: a text, or one per language. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Title { get; init; }
+    /// <summary>A window (the default) or a full screen.</summary>
     public WindowKind Kind { get; init; } = WindowKind.Window;
     /// <summary>Pixels at UI scale 1. 0: a window fits its rows, a screen is 720 wide.</summary>
     public float Width { get; init; }
@@ -67,6 +78,7 @@ public sealed record WindowBlock : IUiBlock
     public float[]? Position { get; init; }
     /// <summary>A window: it grows and shrinks with its rows.</summary>
     public bool AutoResize { get; init; }
+    /// <summary>The title bar shows. Default true.</summary>
     public bool TitleBar { get; init; } = true;
     /// <summary>A window: how opaque the background is, 0..1. Null: the theme's.</summary>
     public float? Alpha { get; init; }
@@ -80,6 +92,7 @@ public sealed record WindowBlock : IUiBlock
     public double Refresh { get; init; } = 0.25;
     /// <summary>An entry in the game's pause menu and/or main menu that opens it.</summary>
     public UiMenu? Menu { get; init; }
+    /// <summary>The rows, from top to bottom.</summary>
     public required IReadOnlyList<UiRow> Rows { get; init; }
     /// <summary>The window's own typed state, by key (<c>[a-z][a-z0-9_-]{0,63}</c>): what its rows bind as
     /// <c>state.&lt;key&gt;</c> (since 0.2.0-dev.31). Kept while the player stays in one world, reset in the next, never saved.
@@ -120,6 +133,7 @@ public abstract record UiRow
 /// <summary>A line of text. <c>{game.fps:0}</c> and <c>{config.clock.scale:0.00}</c> in it show a value; <c>{{</c> and <c>}}</c> are braces.</summary>
 public sealed record TextRow : UiRow
 {
+    /// <summary>The text. <c>{game.fps:0}</c> shows a value. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Text { get; init; }
     /// <summary>"#rrggbb", "#rrggbbaa", or white, black, gray, red, green, yellow, orange, cyan.</summary>
@@ -131,6 +145,7 @@ public sealed record TextRow : UiRow
 /// <summary>A label and a value that cannot be edited here: <c>Label: value</c>.</summary>
 public sealed record ValueRow : UiRow
 {
+    /// <summary>The label before the value. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
     /// <summary><c>game.&lt;name&gt;</c> or <c>config.&lt;path&gt;</c> (<c>config.&lt;config id&gt;/&lt;path&gt;</c> when two configs have the path).</summary>
@@ -142,33 +157,41 @@ public sealed record ValueRow : UiRow
 /// <summary>A checkbox on a true/false config entry. A click writes the config.</summary>
 public sealed record ToggleRow : UiRow
 {
+    /// <summary>The checkbox's label. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
+    /// <summary>The true/false config entry it shows and writes: <c>config.&lt;path&gt;</c>. Required.</summary>
     public required string Bind { get; init; }
 }
 
 /// <summary>A slider on a whole-number or decimal config entry. A drag writes the config once it rests for a moment.</summary>
 public sealed record SliderRow : UiRow
 {
+    /// <summary>The slider's label. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
+    /// <summary>The config entry it shows and writes: <c>config.&lt;path&gt;</c>. Required.</summary>
     public required string Bind { get; init; }
     /// <summary>Default: the entry's own range, which it must have when this and <see cref="Max"/> are left out.</summary>
     public double? Min { get; init; }
+    /// <summary>The upper end of the slider. See <see cref="Min"/>.</summary>
     public double? Max { get; init; }
 }
 
 /// <summary>A drop-down on an enum config entry, with its options.</summary>
 public sealed record ChoiceRow : UiRow
 {
+    /// <summary>The drop-down's label. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
+    /// <summary>The enum config entry it shows and writes: <c>config.&lt;path&gt;</c>. Required.</summary>
     public required string Bind { get; init; }
 }
 
 /// <summary>A line, with a heading when it has text.</summary>
 public sealed record SeparatorRow : UiRow
 {
+    /// <summary>The heading. Without text it is a plain line.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public UiText? Text { get; init; }
 }
@@ -176,8 +199,10 @@ public sealed record SeparatorRow : UiRow
 /// <summary>A button that runs an action.</summary>
 public sealed record ButtonRow : UiRow
 {
+    /// <summary>The button's label. Required.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
+    /// <summary>What a click does. Required.</summary>
     public required UiAction Does { get; init; }
 }
 
@@ -315,7 +340,9 @@ public sealed record UiAction
     public AbilityRef? CastAbility { get; init; }
     /// <summary>Applies an effect to the player, through a hidden ability Kiln makes for it (<c>ui-apply.&lt;name&gt;</c>). The server needs the mod.</summary>
     public EffectRef? ApplyEffect { get; init; }
+    /// <summary>Opens a window block of this mod, or <c>"other-mod:name"</c>.</summary>
     public WindowRef? OpenWindow { get; init; }
+    /// <summary>Closes a window block of this mod, or <c>"other-mod:name"</c>.</summary>
     public WindowRef? CloseWindow { get; init; }
     /// <summary>Opens the window when it is closed and closes it when it is open (since 0.2.0-dev.31): one key for both. A
     /// key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so it also
@@ -329,17 +356,22 @@ public sealed record UiAction
 /// <summary>A config entry and the value to give it.</summary>
 public sealed record UiSet
 {
+    /// <summary>The config entry to set: <c>config.&lt;path&gt;</c>. Required.</summary>
     public required string Bind { get; init; }
     /// <summary>A true/false, a number or a text, which the entry takes: a number in its range, an option of an enum.</summary>
     public required object To { get; init; }
 }
 
 /// <summary>A window: what <see cref="Blocks.Define{T}"/> returned, its name in this mod, or <c>"other-mod:name"</c>.</summary>
+/// <param name="Value">The window's name in this mod, or <c>"other-mod:name"</c>.</param>
 [JsonConverter(typeof(WindowRefConverter))]
 public readonly record struct WindowRef(string Value)
 {
+    /// <summary>A window by its name in this mod, or <c>"other-mod:name"</c>.</summary>
     public static implicit operator WindowRef(string value) => new(value);
+    /// <summary>A window by its handle, as <see cref="Blocks.Define{T}"/> returned it.</summary>
     public static implicit operator WindowRef(BlockHandle<WindowBlock> handle) => new(handle.ToString());
+    /// <summary>The window's name.</summary>
     public override string ToString() => Value;
 }
 
@@ -361,6 +393,7 @@ public sealed record HudLineBlock : IUiBlock
     /// <summary>The text, with <c>{game.fps:0}</c> and <c>{config.clock.scale:0.00}</c> for values.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Text { get; init; }
+    /// <summary>Where on the screen the line sits. Default <see cref="HudAnchor.TopLeft"/>.</summary>
     public HudAnchor Anchor { get; init; } = HudAnchor.TopLeft;
     /// <summary>"#rrggbb", "#rrggbbaa", or white, black, gray, red, green, yellow, orange, cyan. Default white.</summary>
     public string? Color { get; init; }
@@ -390,6 +423,7 @@ public sealed record KeyBindingBlock : IUiBlock
     public UiText? Description { get; init; }
     /// <summary>The group in the Keys tab. Default: the mod's name.</summary>
     public string? Category { get; init; }
+    /// <summary>What the key does. Required.</summary>
     public required UiAction Does { get; init; }
     /// <summary>A key that types something (a letter, a digit) fires in play only; true fires on every game screen too, chat included.</summary>
     public bool OnGameScreens { get; init; }

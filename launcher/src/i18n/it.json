@@ -3395,7 +3395,7 @@
       "saves": "I tuoi salvataggi e i tuoi mondi",
       "settings": "Le impostazioni delle mod e la cartella di configurazione di Kiln (possono contenere password dei server)",
       "admin": "Token e indirizzo di Kiln.Admin",
-      "mods": "Il contenuto delle tue mod (solo nomi, dimensioni e date dei file)",
+      "mods": "Il contenuto delle tue mod (sono elencati solo nomi di file e cartelle, dimensioni e date, più ID e versioni dei manifest ShroudForge nelle segnalazioni)",
       "steam": "I file di Steam stesso"
     }
   },
@@ -6208,5 +6208,28 @@
       "vanilla": "Non sono per forza i file come li fornisce Steam. Per quelli, usa Verifica integrità dei file di gioco in Steam (Proprietà del gioco, File installati).",
       "unknown": "Kiln non sa dire quali file del gioco rimetterebbe: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Deposito",
+    "title": "Deposito del giocatore",
+    "readOnly": "Sola lettura. Questi oggetti restano in Kiln, separati dallo zaino.",
+    "empty": "Nessun deposito per questo personaggio.",
+    "return": "Restituisci al personaggio",
+    "returnTitle": "Restituire il deposito a questo personaggio?",
+    "returnBody": "Kiln crea prima un backup, poi aggiunge quante più pile del gioco base possibile in pagine aggiuntive dello zaino. Gli oggetti delle mod e tutto il resto rimangono nel deposito. Il gioco e Steam devono essere chiusi.",
+    "serverCopy": "Un server Kiln conserva una propria copia di questo deposito. Se entri senza Kiln, quel server può restituirti la sua copia lì.",
+    "confirm": "Restituisci oggetti",
+    "returning": "Restituzione…",
+    "result": "Restituite {returned} pile; {remaining} pile rimangono nel deposito.",
+    "closeGame": "Chiudi Enshrouded e Steam prima di restituire il deposito.",
+    "localOnly": "La restituzione è disponibile solo per i personaggi LOCAL, non per i salvataggi Steam Cloud.",
+    "saveFirst": "Salva o scarta le modifiche prima di restituire il deposito.",
+    "unavailable": "Impossibile restituire il deposito",
+    "restoreWarning": "Questo personaggio ha un deposito. Un vecchio backup può corrispondere a un deposito precedente; se la coppia non è più conservata, gli oggetti spostati dopo quel backup potrebbero andare persi o essere duplicati.",
+    "unpaired": "Questo personaggio è cambiato dall'ultima volta che Kiln ha visto il suo deposito, quindi non gli si può restituire nulla. Viene mostrata la copia più recente del deposito.",
+    "parked": "Mod disattivata",
+    "kept": "kiln/data/characters e kiln/data/worlds vengono conservati. Mantengono al sicuro il deposito finché non reinstalli Kiln.",
+    "unreadable": "Alcuni record del deposito non possono essere mostrati. Rimangono invariati.",
+    "modItems": "{count} pile di oggetti delle mod rimangono nel deposito: richiedono la loro mod."
   }
 }

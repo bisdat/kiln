@@ -36,10 +36,15 @@ public sealed class StatusLine : IDisposable
     /// <summary>The lines this entry reports right now (a source runs now, on the calling thread).</summary>
     public IReadOnlyList<string> Text => StatusLines.Read(this);
 
+    /// <summary>Removes the line.</summary>
     public void Dispose() => StatusLines.Remove(this);
 }
 
 /// <summary>One mod's status lines, as <see cref="StatusLines.All"/> reads them.</summary>
+/// <param name="ModId">The mod's id.</param>
+/// <param name="Name">The mod's name.</param>
+/// <param name="Version">The mod's version.</param>
+/// <param name="Lines">The mod's status lines, in the order it added them.</param>
 public sealed record ModStatus(string ModId, string Name, string Version, IReadOnlyList<string> Lines);
 
 /// <summary>

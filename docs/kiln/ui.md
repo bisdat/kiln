@@ -369,8 +369,8 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
 world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
 gives an `ItemEntity`). A plain stack (materials, consumables, ammunition: the game keeps it as an item id and a count)
-has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`; name such a stack by `Holder`,
-`Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
+has none, so a click on it says `ItemEntity` 0 with its `Item` and `SlotClick.Slot.Count`; name such a stack by `Holder`,
+`SlotClick.Slot.InventoryPage`, `SlotClick.Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
 station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
 (`docs/re/network.md`, dossier chapter 05a section 6).
 Since 0.2.0-dev.30.5 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `VisibleSlot.ServerEntity` (and so
@@ -380,7 +380,7 @@ the chest-style transfer screen, a factory station: the entity the screen is abo
 any other holder. `VisibleSlot.Rarity` (an `ItemRarity?`) and `Level` (also on `SlotClick`) are the item's as the game
 drew the slot, the values its tooltip shows, captured on the game's main/UI thread and copied to render-thread mark
 rules: a `MarkWhen` rule can tell a Legendary staff from an Uncommon one without `Items.Read`. `Rarity` is null for an empty slot.
-`Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
+`Holder`, `VisibleSlot.InventoryPage` and `VisibleSlot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.
 
@@ -508,16 +508,23 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
   Both go to the mod's log.
 - **Selection.** The game keeps its selection on the same item when the rows change.
-- **Picks.** A row whose item the game lists itself (in `Replace` too) or the player carries is the game's own: it
-  equips it as always. Any other mod row raises `Picked` for the mod that provided it (on the UI thread at the next UI
-  frame; an earlier session's picks are dropped), and the game does nothing. `Picked` is a selection wish, not proof of
-  a click: the game's own automatic selection (the weapon's current ammunition is not in a replaced list, so it selects
-  the first or the kept row) raises it too. Kiln never moves an item; your server half validates the wish (the player
-  owns the item, the weapon takes it) and ignores repeats.
+- **Picks.** A row whose item the game lists itself with stock (in `Replace` too) or the player carries is the game's
+  own: it equips it as always. The row the game keeps at count 0 for a stack the player used up is not stock: since
+  0.2.0-dev.30.7 a mod row of that item raises `Picked` unless the player carries it, in either mode (GitHub issue 131,
+  thanks Fuzen777). Any other mod row raises
+  `Picked` for the mod that provided it (on the UI thread at the next UI frame; an earlier session's picks are dropped),
+  and the game does nothing. `Picked` is a selection wish, not proof of a click: the game's own automatic selection (the
+  weapon's current ammunition is not in a replaced list, so it selects the first or the kept row) raises it too. Kiln
+  never moves an item; your server half validates the wish (the player owns the item, the weapon takes it) and ignores
+  repeats.
 - **Refusals.** `Provide` throws `KilnUnavailableException` when `ui.ammo.list` is off (a server, a game build Kiln has
   not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
   and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of
   a list, or unloading the mod, shows the game's own list again.
+- **A quiver from player storage.** Since 0.2.0-dev.30.7, a mod whose arrows or spells live in a Kiln player storage
+  needs none of the above: `PlayerStorage.Client.ProvideAmmo(fullKey, AmmoKinds.Arrow | AmmoKinds.Spell)` provides the
+  storage's rows from Kiln's client copy and its server half checks and equips a pick
+  ([player storage](../services/player-storage.md#the-client-copy-and-the-huds-ammunition-lists)).
 - **Unit tests.** The test kit's `KilnHarness.AmmoList` plays the game's side (`Hold` a bow or staff with the game's
   rows, `SetGameRows`, `NewSession`, `KnownItems`), shows what the HUD would (`Shown`, `Provided`, `ModeOf`, `Selected`)
   and picks a row (`Pick`, raised at the next `Step`).

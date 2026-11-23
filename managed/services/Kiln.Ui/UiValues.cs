@@ -28,12 +28,19 @@ public enum UiValueKind
 /// <summary>The HUD pairs a provider can replace.</summary>
 public enum HudValue
 {
+    /// <summary>The local player's health pair (<see cref="UiValueKind.Health"/>).</summary>
     Health = 3,
+    /// <summary>The local player's stamina pair (<see cref="UiValueKind.Stamina"/>).</summary>
     Stamina = 4,
+    /// <summary>The local player's mana pair (<see cref="UiValueKind.Mana"/>).</summary>
     Mana = 5,
 }
 
 /// <summary>The part of the game screen a presentation identity names: no frame number, language or thread.</summary>
+/// <param name="State">The game's top-level UI state.</param>
+/// <param name="Hud">The open game screen (see <see cref="GameScreen.Hud"/>).</param>
+/// <param name="Crafting">The game's crafting state byte of the screen; 0 when no crafting menu is open.</param>
+/// <param name="Station">The <c>keen::WorkshopId</c> of the crafting menu's station; 0 for the player's own crafting.</param>
 public readonly record struct UiScreenKey(GameUiState State, HudScreen Hud, byte Crafting, uint Station);
 
 /// <summary>A presentation identity (what <see cref="UiValueChangedEvent"/> keys on). HUD values: kind, session and local
@@ -41,6 +48,15 @@ public readonly record struct UiScreenKey(GameUiState State, HudScreen Hud, byte
 /// item (also for a stack without a pide); a synthetic detail (built for an item id alone) is grouped by kind, session,
 /// screen and item with <see cref="SyntheticGroup"/> set and the rest empty. Not an item's lifetime handle: never use it
 /// for accounting.</summary>
+/// <param name="Kind">Which value of the game's UI it is.</param>
+/// <param name="Session">The session the identity was published in: it changes when every value is forgotten (<see cref="UiValuesResetEvent"/>).</param>
+/// <param name="LocalPlayer">The local player's entity.</param>
+/// <param name="Screen">The part of the game screen it was shown on.</param>
+/// <param name="InventoryPage">The inventory page entity of the slot; none for a HUD value.</param>
+/// <param name="SlotIndex">The slot's index on its page.</param>
+/// <param name="ClientEntity">The item's entity in the client's world; none when there is none.</param>
+/// <param name="Item">The item's id; 0 for a HUD value.</param>
+/// <param name="SyntheticGroup">True for a synthetic detail (built for an item id alone); its page, slot and entity are empty.</param>
 public readonly record struct UiValueIdentity(UiValueKind Kind, ulong Session, EntityId LocalPlayer, UiScreenKey Screen,
     EntityId InventoryPage, byte SlotIndex, EntityId ClientEntity, ItemId Item, bool SyntheticGroup);
 
@@ -60,15 +76,25 @@ public enum UiLabelMode
 /// <summary>A label edit: <see cref="UiLabelMode.Set"/> needs a <paramref name="Text"/>, the other modes take none.
 /// Label edits are for <see cref="UiValueKind.Detail"/> only. A label is interned for the process (it is never freed):
 /// use the numbers for what changes, keep the label text stable.</summary>
+/// <param name="Mode">What to do with the label.</param>
+/// <param name="Text">The text for <see cref="UiLabelMode.Set"/>; null for the other modes.</param>
 public sealed record UiLabelEdit(UiLabelMode Mode, UiText? Text = null);
 
 /// <summary>A value as the game would draw it after the earlier providers. <paramref name="LabelOverride"/>: null while the
 /// game's own label shows; an empty text when a provider cleared it.</summary>
+/// <param name="Fraction">How full the bar is, 0 to 1.</param>
+/// <param name="Current">The current number, in the units of the kind (<see cref="UiValueKind"/>).</param>
+/// <param name="Max">The maximum number, in the units of the kind.</param>
+/// <param name="LabelOverride">The label.</param>
 public sealed record UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride);
 
 /// <summary>What a provider changes; a null field keeps the value. Fraction (0 to 1) only for detail and slot; for the
 /// held item and HUD pairs the picture follows Current/Max and Max must be above 0. Detail numbers are at most
 /// 2,147,483,647. Units are the kind's (<see cref="UiValueKind"/>).</summary>
+/// <param name="Fraction">The bar's fill, 0 to 1; null keeps it.</param>
+/// <param name="Current">The current number; null keeps it.</param>
+/// <param name="Max">The maximum number; null keeps it.</param>
+/// <param name="Label">What to do with the label (detail bars only); null keeps it.</param>
 public sealed record UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)
 {
     /// <summary>Changes nothing.</summary>
@@ -78,6 +104,9 @@ public sealed record UiBarEdit(float? Fraction = null, uint? Current = null, uin
 /// <summary>A provider's answer. Ok with an edit commits exactly its non-null fields; Ok with <see cref="UiBarEdit.None"/>
 /// passes the value on; not Ok refuses (the earlier providers' value stays; the reason is logged once and posted as
 /// <see cref="UiValueProviderRefusedEvent"/>, never shown to the player).</summary>
+/// <param name="Ok">True to commit the edit (or pass the value on with <see cref="UiBarEdit.None"/>); false to refuse.</param>
+/// <param name="Reason">Why it refused; null when <see cref="Ok"/>.</param>
+/// <param name="Edit">What to change; <see cref="UiBarEdit.None"/> changes nothing.</param>
 public sealed record UiProviderDecision(bool Ok, string? Reason, UiBarEdit Edit) : IKilnResult
 {
     /// <summary>Change nothing.</summary>
@@ -96,12 +125,32 @@ public sealed record UiProviderDecision(bool Ok, string? Reason, UiBarEdit Edit)
 /// <see cref="EntityId.None"/> in this version: Kiln does not prove that a client entity is the server's (a client-local
 /// id must never be matched to server data by number). Fuel/FuelMax are always raw fuel units;
 /// <see cref="UnitsPerCharge"/> is the detail view's divisor (at least 1). Durability fields are the raw values.</summary>
+/// <param name="Flags">What the game drew the value for, as bit flags: 1 a client entity, 2 a proven server entity, 4 a real inventory slot, 8 the item detail view's own copy, 16 a synthetic detail.</param>
+/// <param name="LocalPlayer">The local player's entity.</param>
+/// <param name="ClientEntity">The item's entity in the client's world (flag 1); none for a plain stack and a synthetic detail.</param>
+/// <param name="ServerEntity">Always <see cref="EntityId.None"/> in this version.</param>
+/// <param name="Item">The item's id.</param>
+/// <param name="InventoryPage">The inventory page entity of the slot (flag 4: a real slot).</param>
+/// <param name="SlotIndex">The slot's index on its page (flag 4: a real slot).</param>
+/// <param name="Fuel">The item's fuel in raw fuel units (for water: the water held).</param>
+/// <param name="FuelMax">The most fuel the item holds, in raw fuel units.</param>
+/// <param name="UnitsPerCharge">Raw fuel units per charge: the detail view's divisor, at least 1.</param>
+/// <param name="Durability">The raw durability.</param>
+/// <param name="DurabilityMax">The raw maximum durability.</param>
+/// <param name="Count">How many items are in the stack.</param>
+/// <param name="Level">The item's level.</param>
+/// <param name="Rarity">The item's rarity.</param>
+/// <param name="Screen">The game screen the value was drawn on.</param>
 public readonly record struct UiItemView(uint Flags, EntityId LocalPlayer, EntityId ClientEntity, EntityId ServerEntity,
     ItemId Item, EntityId InventoryPage, byte SlotIndex, uint Fuel, uint FuelMax, uint UnitsPerCharge, uint Durability,
     uint DurabilityMax, uint Count, uint Level, ItemRarity Rarity, GameScreen Screen);
 
 /// <summary>Where a provider call happens. Detail and slot: <see cref="Frame"/> is the game UI frame being drawn. Held and
 /// HUD: the last completed frame, and <see cref="ClientStep"/> the client world's step.</summary>
+/// <param name="Kind">Which value of the game's UI is asked for.</param>
+/// <param name="Session">The session of the call (see <see cref="UiValueIdentity.Session"/>).</param>
+/// <param name="Frame">The game UI frame (see above for what it is by kind).</param>
+/// <param name="ClientStep">The client world's step.</param>
 public readonly record struct UiValueContext(UiValueKind Kind, ulong Session, ulong Frame, ulong ClientStep);
 
 /// <summary>A value provider. Runs on the game client's main thread inside the game's UI frame (detail, slot) or right

@@ -114,6 +114,9 @@ public sealed record NetworkConfig
         }
     }
 
+    /// <summary>Reads <c>network.json</c> from the config folder.</summary>
+    /// <param name="error">The reason when the file exists but cannot be read; otherwise null.</param>
+    /// <returns>The settings in the file, or the defaults when the file is absent or cannot be read.</returns>
     public static NetworkConfig Load(out string? error)
     {
         error = null;

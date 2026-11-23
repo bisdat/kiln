@@ -11,15 +11,37 @@ using System.Text.Json;
 namespace Kiln;
 
 /// <summary>A cue as the mod's cook wrote it (null fields: not in the index).</summary>
+/// <param name="Mod">The id of the mod the cue belongs to.</param>
+/// <param name="Name">The cue's name in the mod's cook recipe.</param>
+/// <param name="Id">The cue's GUID.</param>
+/// <param name="Bus">The cue container's bus as the cook wrote it (<c>Sfx</c>, <c>Music</c>, <c>Ui</c> or <c>Voice</c>); null when none is written.</param>
+/// <param name="DefaultScene">The scene <see cref="Sound.Play2D"/> uses when you give none: the cooked <c>playScene</c>, else derived from <paramref name="Bus"/> (Ui gives Ui, Music gives Music, anything else Game).</param>
+/// <param name="Loop">True when the cue loops: it plays until you stop it.</param>
+/// <param name="MinDistance">For a positional (3D) cue, the near end of its attenuation range in metres. Null for a cue without a range.</param>
+/// <param name="MaxDistance">For a positional (3D) cue, the far end of its attenuation range in metres. Null for a cue without a range. A relayed <see cref="Sound.PlayAt"/> with no radius uses this, else 60 m.</param>
+/// <param name="Volume">The cue's own volume from the cook, 0..1 (1 when none is written). The volume you pass and the player's slider apply on top.</param>
+/// <param name="DurationMs">The cooked length of the cue's take in milliseconds; 0 when unknown.</param>
+/// <param name="Override">True when the cook wrote the cue as an override of an existing game cue (mode <c>override</c>) instead of a new one.</param>
 public sealed record CueInfo(
     string Mod, string Name, SoundId Id, string? Bus, SoundScene DefaultScene, bool Loop, double? MinDistance,
     double? MaxDistance, float Volume, int DurationMs, bool Override);
 
 /// <summary>One voice language of a cooked voice-over line.</summary>
+/// <param name="Language">The language key: en, de, fr, es or zh.</param>
+/// <param name="Cue">The GUID of the cue that plays for this language.</param>
+/// <param name="DurationMs">The cooked length of the take in milliseconds; 0 when unknown.</param>
+/// <param name="FallbackOf">When the cook filled this slot from another language, that language's key; null for a take recorded for this language.</param>
 public sealed record VoiceoverLanguage(string Language, Guid Cue, int DurationMs, string? FallbackOf);
 
 /// <summary>A voice-over line as the mod's cook wrote it. <see cref="Languages"/> holds en, de, fr, es, zh; a null
 /// value means that slot is empty, so a player with that voice language hears nothing (the mod's choice).</summary>
+/// <param name="Mod">The id of the mod the line belongs to.</param>
+/// <param name="Name">The line's name in the mod's cook recipe.</param>
+/// <param name="Id">The line's GUID.</param>
+/// <param name="Narration">True when the cook marked the line as narration (for the lore queue, <see cref="Voiceover.Narrate"/>).</param>
+/// <param name="Fallback">The language whose cue the cook used to fill empty slots, as written for the line; null when it set none, so empty slots stay silent.</param>
+/// <param name="Languages">The cooked takes by language key (en, de, fr, es, zh). A null value is an empty slot.</param>
+/// <param name="Subtitles">The cooked subtitle text by text-language key. Keys are matched without regard to case.</param>
 public sealed record VoiceoverInfo(
     string Mod, string Name, VoiceoverId Id, bool Narration, string? Fallback,
     IReadOnlyDictionary<string, VoiceoverLanguage?> Languages, IReadOnlyDictionary<string, string> Subtitles)

@@ -885,6 +885,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
+    /// `sf-mod-bundled-newer`,
     /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`, `launcher-files-missing`.
     pub id: String,
     pub level: Level,
@@ -2191,6 +2192,8 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
 
+    check_sf_mod_bundled_newer(&mut cx, game);
+
     // ---- raw files
     let mut state_files: Vec<String> = std::fs::read_dir(game.join(crate::paths::game::STATE))
         .into_iter()
@@ -2422,6 +2425,119 @@ fn greeneye_logs(cx: &mut Ctx, game: &Path, install: Option<&GameInstall>, dirs:
             "The logs of {} were left out: {} folder is not inside the game's greeneye folder or the launcher's Library \
              (or is reached through a link), and the report reads no other folder.",
             skipped.join(", "), if skipped.len() == 1 { "its" } else { "their" }));
+    }
+}
+
+/// Identify packages without the general detector's INI/DLL probes: a report reads manifests, never native payloads.
+/// Native-only packages without explicit ShroudForge metadata are ambiguous, so leave them out rather than guess.
+fn sf_report_is_mod(folder: &Path) -> std::result::Result<bool, String> {
+    let extended = folder.join("extended.mod.json").is_file(); // both manifests have already passed the link checks
+    let manifest = match head(&folder.join("mod.json"), crate::shroudforge::MAX_FILE_BYTES as u64)? {
+        None if !extended => return Ok(false), // native plugins and unrelated folders need no Lua manifest
+        None => return Err("mod.json is missing".into()),
+        Some((_, true)) => return Err("mod.json is larger than 2 MiB".into()),
+        Some((bytes, false)) => serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| e.to_string())?,
+    };
+    if ["dll", "main", "emf", "emfMin", "emf_api"].iter().any(|k| manifest.get(*k).is_some()) {
+        return Ok(false);
+    }
+    if extended || manifest.get("$schema").and_then(|s| s.as_str()).is_some_and(|s| s.to_ascii_lowercase().contains("shroudforge")) {
+        if !["id", "name", "version"].iter().all(|k| manifest.get(*k).and_then(|v| v.as_str()).is_some()) {
+            return Err("mod.json must name an id, name and version".into());
+        }
+        return Ok(true);
+    }
+    // Legacy Lua packages: inspect names only, and never enumerate a linked src folder.
+    for file in ["mod.lua", "src"] {
+        let path = folder.join(file);
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+            Ok(m) if crate::quick::import_is_link(&m) => return Err(format!("{file}: a link, not followed")),
+            Ok(m) if file == "mod.lua" && m.is_file() => return Ok(true),
+            Ok(m) if file == "src" && m.is_dir() => {
+                for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    if entry.path().extension().is_some_and(|x| x == "lua") {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(_) => {}
+        }
+    }
+    Ok(false)
+}
+
+/// Package metadata only: the shared ShroudForge reader, bounded and without following links into another folder.
+fn sf_report_versions(cx: &mut Ctx, game: &Path, root: &str) -> Vec<(crate::shroudforge::SfMod, crate::semver::SemVersion)> {
+    let mut dir = game.to_path_buf();
+    for part in root.split('/') {
+        dir = crate::sf_paths::ci_child(&dir, part);
+        match std::fs::symlink_metadata(&dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => { cx.err(root, e); return Vec::new(); }
+            Ok(m) if crate::quick::import_is_link(&m) => { cx.err(root, "a link, not followed"); return Vec::new(); }
+            Ok(m) if !m.is_dir() => { cx.err(root, "not a folder"); return Vec::new(); }
+            Ok(_) => {}
+        }
+    }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) => { cx.err(root, e); return Vec::new(); }
+    };
+    let mut folders = Vec::new();
+    for entry in entries {
+        let entry = match entry { Ok(e) => e, Err(e) => { cx.err(root, e); continue; } };
+        let name = format!("{root}/{}", entry.file_name().to_string_lossy());
+        match std::fs::symlink_metadata(entry.path()) {
+            Ok(m) if crate::quick::import_is_link(&m) => cx.err(&name, "a link, not followed"),
+            Ok(m) if m.is_dir() => folders.push((name, entry.path())),
+            Ok(_) => {}
+            Err(e) => cx.err(&name, e),
+        }
+    }
+    folders.sort();
+    let mut mods = Vec::new();
+    'folder: for (name, folder) in folders {
+        for file in ["mod.json", "extended.mod.json"] {
+            let why = match std::fs::symlink_metadata(folder.join(file)) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => Some(e.to_string()),
+                Ok(m) if crate::quick::import_is_link(&m) => Some("a link, not followed".into()),
+                Ok(m) if !m.is_file() => Some("not a file".into()),
+                Ok(_) => None,
+            };
+            if let Some(why) = why {
+                cx.err(&format!("{name}/{file}"), format!("could not read: {why}"));
+                continue 'folder;
+            }
+        }
+        match sf_report_is_mod(&folder) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(e) => { cx.err(&name, format!("could not read: {e}")); continue; }
+        }
+        match crate::shroudforge::read_mod(&folder) {
+            Ok(m) => match crate::semver::SemVersion::parse(&m.version) {
+                Ok(v) => mods.push((m, v)),
+                Err(e) => cx.err(&format!("{name}/mod.json"), e.message),
+            },
+            Err(e) => cx.err(&name, format!("could not read: {}", e.message)),
+        }
+    }
+    mods
+}
+
+/// An older copy in the player's mods folder is context, never a reason to change that copy or its switch.
+fn check_sf_mod_bundled_newer(cx: &mut Ctx, game: &Path) {
+    let own = sf_report_versions(cx, game, "mods");
+    let bundled = sf_report_versions(cx, game, "kiln/plugins/shroudforge/mods");
+    for (m, version) in own {
+        if let Some((newer, _)) = bundled.iter().find(|(b, v)| b.id == m.id && version.compare(v).is_lt()) {
+            cx.find("sf-mod-bundled-newer", Level::Info, format!(
+                "{} {} is older than the {} Kiln brings.", m.id, m.version, newer.version));
+        }
     }
 }
 
@@ -2698,7 +2814,7 @@ pub const NEVER_COLLECTED: [(&str, &str); 5] = [
     ("saves", "your saves and world data (the game's savegame folder, kiln/data/)"),
     ("settings", "mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens"),
     ("admin", "Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint)"),
-    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed)"),
+    ("mods", "the contents of your mods (only folder and file names, sizes and times are listed, plus ShroudForge manifest ids and versions in findings)"),
     ("steam", "Steam's own files, besides the compat tool and launch options shown above"),
 ];
 
@@ -2707,7 +2823,7 @@ pub const LEFT_OUT: &str = "Never collected:
 - your saves and world data (the game's savegame folder, kiln/data/);
 - mod settings and Kiln's config folder (kiln/config/, the profile's config folder): they may hold server passwords and tokens;
 - Kiln.Admin's files (kiln/data/kiln-admin/: the admin token and endpoint);
-- the contents of your mods (only folder and file names, sizes and times are listed);
+- the contents of your mods (only folder and file names, sizes and times are listed, plus ShroudForge manifest ids and versions in findings);
 - Steam's own files, besides the compat tool and launch options shown above.
 Replaced in every file: your home folder (<home>), user name (<user>), computer name (<host>), Steam names and ids
 (<steam-name>, <steamid>), the names of other players in Kiln's and ShroudLink's logs (<player>), IP and MAC addresses
@@ -2744,6 +2860,157 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
         let _ = std::fs::remove_file(&tmp);
     })?;
     std::fs::metadata(out).map(|m| m.len()).map_err(crate::util::io_at(out, "reading back"))
+}
+
+/// A chosen file, or the dialog-free destinations when a native file chooser cannot be used.
+#[cfg(feature = "zip")]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SaveDestination {
+    #[default]
+    Chosen,
+    Automatic,
+    Downloads,
+}
+
+/// Existing launcher and user folders, supplied by the caller rather than the working directory.
+#[cfg(feature = "zip")]
+pub struct SaveFolders {
+    pub owned: PathBuf,
+    pub downloads: Vec<PathBuf>,
+    pub home: Option<PathBuf>,
+}
+
+/// Saves a report, retrying from Kiln's folder and falling back to Downloads/home. Returns the actual file and size.
+/// Automatic destinations get a new filename on collision: only the player's explicitly chosen file may be replaced.
+#[cfg(feature = "zip")]
+pub fn save_zip(report: &Report, out: &Path, destination: SaveDestination, folders: &SaveFolders, mut log: impl FnMut(String)) -> crate::Result<(PathBuf, u64)> {
+    save_zip_with(report, out, destination, folders, &mut log, &mut write_zip)
+}
+
+/// Direct writes stay atomic. If a folder refuses the adjacent temporary file or rename, build the zip in Kiln's
+/// state folder and copy it to the destination instead. Only Kiln's folder is created; a missing Downloads falls
+/// through to home. All path operations use native Paths, including Windows drive letters and redirected Downloads.
+#[cfg(feature = "zip")]
+fn save_zip_with(report: &Report, out: &Path, destination: SaveDestination, folders: &SaveFolders, log: &mut impl FnMut(String), write: &mut impl FnMut(&Report, &Path) -> crate::Result<u64>) -> crate::Result<(PathBuf, u64)> {
+    let name = out.file_name().ok_or_else(|| crate::Error::invalid("Choose a report file name."))?;
+    let mut paths = match destination {
+        SaveDestination::Chosen => vec![out.to_path_buf()],
+        SaveDestination::Automatic => vec![folders.owned.join(name)],
+        SaveDestination::Downloads => Vec::new(),
+    };
+    paths.extend(folders.downloads.iter().chain(folders.home.iter()).filter(|p| p.is_absolute()).map(|p| p.join(name)));
+    let mut tried = Vec::new();
+    let mut failures = Vec::new();
+    for path in paths {
+        if tried.contains(&path) { continue; }
+        tried.push(path.clone());
+        log(format!("support report: trying {}", path.display()));
+        let automatic = !matches!(destination, SaveDestination::Chosen) || path != out;
+        let path = if automatic {
+            let reserved = (|| {
+                if path.parent() == Some(folders.owned.as_path()) {
+                    std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+                }
+                reserve_report_path(&path, log)
+            })();
+            match reserved {
+                Ok(path) => path,
+                Err(e) => {
+                    let message = format!("support report: reserving {} failed: {}", path.display(), e.message);
+                    log(message.clone());
+                    failures.push(message);
+                    continue;
+                }
+            }
+        } else { path };
+        let direct = (|| {
+            if path.parent() == Some(folders.owned.as_path()) {
+                std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+            }
+            write(report, &path)
+        })();
+        match direct {
+            Ok(size) => {
+                log(format!("support report written to {} ({size} bytes)", path.display()));
+                return Ok((path, size));
+            }
+            Err(e) => {
+                let message = format!("support report: writing {} failed: {}", path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+            }
+        }
+        // An unpredictable, per-save path: concurrent saves cannot copy or delete each other's staged zip.
+        // This also helps a chosen file in Kiln's own folder when only its adjacent temporary filename is refused.
+        let stage = match crate::util::random_bytes::<16>() {
+            Ok(bytes) => folders.owned.join(format!(".kiln-report-{}.zip", crate::hash::hex(&bytes))),
+            Err(e) => {
+                let message = format!("support report: staging in {} for {} failed: {}", folders.owned.display(), path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+                if automatic { remove_report_temp(&path, log); }
+                continue;
+            }
+        };
+        log(format!("support report: trying staging file {} for {}", stage.display(), path.display()));
+        let copied = (|| {
+            std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+            let size = write(report, &stage)?;
+            log(format!("support report: copying {} to {}", stage.display(), path.display()));
+            std::fs::copy(&stage, &path).map_err(crate::util::io_at(&path, "copying the report to"))?;
+            std::fs::OpenOptions::new().write(true).open(&path).and_then(|f| f.sync_all()).map_err(crate::util::io_at(&path, "flushing"))?;
+            let actual = std::fs::metadata(&path).map_err(crate::util::io_at(&path, "reading back"))?.len();
+            if actual != size { return Err(crate::Error::new(crate::ErrorCode::Io, format!("{}: copied report has {actual} bytes, expected {size}", path.display()))); }
+            Ok(size)
+        })();
+        remove_report_temp(&stage, log);
+        match copied {
+            Ok(size) => {
+                log(format!("support report written to {} ({size} bytes, copied from Kiln's state folder)", path.display()));
+                return Ok((path, size));
+            }
+            Err(e) => {
+                let message = format!("support report: staging {} and copying to {} failed: {}", stage.display(), path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+                if automatic { remove_report_temp(&path, log); }
+            }
+        }
+    }
+    let message = format!("The support report was NOT saved. {}", failures.join("; "));
+    log(message.clone());
+    Err(crate::Error::new(crate::ErrorCode::Io, message))
+}
+
+/// Reserve a new file without following or replacing an existing file/link, including a racing report save.
+#[cfg(feature = "zip")]
+fn reserve_report_path(path: &Path, log: &mut impl FnMut(String)) -> crate::Result<PathBuf> {
+    for n in 0..1000 {
+        let candidate = if n == 0 { path.to_path_buf() } else {
+            let mut name = path.file_stem().unwrap_or_default().to_os_string();
+            name.push(format!("-{n}.zip"));
+            path.with_file_name(name)
+        };
+        log(format!("support report: reserving {}", candidate.display()));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                log(format!("support report: reserving {} failed: {e}; trying a new name", candidate.display()));
+            }
+            Err(e) => return Err(crate::util::io_at(&candidate, "reserving a report file")(e)),
+        }
+    }
+    Err(crate::Error::new(crate::ErrorCode::AlreadyExists, format!("{}: no free report filename", path.display())))
+}
+
+#[cfg(feature = "zip")]
+fn remove_report_temp(path: &Path, log: &mut impl FnMut(String)) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log(format!("support report: removing temporary file {} failed: {e}", path.display()));
+        }
+    }
 }
 
 /// Each file's options in a report zip: deflated, the time of writing.
