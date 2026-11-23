@@ -1114,7 +1114,7 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `ai` | [ref](#ref) or [ai](#ai) |  |  |
-| `animation` | [ref](#ref) or [animation](#animation) |  |  |
+| `animation` | [ref](#ref) or [animation](#animation) |  | Only with an authored roster body (body.model of this mod): its cooked clips and graph. A game NPC body refuses it. |
 | `behaviour` | [ref](#ref) or [behaviour](#behaviour) |  |  |
 | `body` | [ref](#ref) or [body](#body) | yes |  |
 | `motions` | [ref](#ref) or [npcMotions](#npcmotions) |  | Motion-role bindings for an authored Fisher/Villager body: this mod's npcMotions block by name, or inline bindings. |
