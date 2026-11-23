@@ -44,7 +44,8 @@ public sealed record ConeBlock : PlacedDelivery
 {
     /// <summary>Metres.</summary>
     public float Range { get; init; } = 8;
-    /// <summary>The cone's whole aperture, in degrees: more than 0 and at most 360. 360 reaches all around.</summary>
+    /// <summary>The cone's whole aperture, in degrees: more than 0 and at most 360. 360 reaches all around, with no aim test: with
+    /// <see cref="Affects"/> friends it reaches the caster too, as <see cref="AroundBlock"/> does. Below 360 the caster is never in its own cone.</summary>
     public float Angle { get; init; } = 60;
     /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
