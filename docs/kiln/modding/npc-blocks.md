@@ -377,7 +377,9 @@ WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure has
 and the server refuses a player whose bodies differ, naming the first body that does. A player whose game says a body
 waits for its restart (the handshake's `pending` key; this version sends none) is refused with a restart-required reason.
 `modSync: off` waives this check, as it waives the player animation graph's: such a player joins and the server only logs
-a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies. A mod's
+a warning. If that player's game lacks a body the server spawns, it may crash when that NPC reaches it: the server sends
+the NPC's clone entity, and the game crashes on an entity of a template it doesn't have ([network.md](../network.md#clients-without-kiln)).
+Keep `modSync` on for servers with authored bodies. A mod's
 `NetClientHandshakeEvent` handler cannot waive this check (it may refuse a player for reasons of its own).
 
 Not verified in a real game yet: anything on a player's game (its admission of the body with kiln.vfx's materials, the

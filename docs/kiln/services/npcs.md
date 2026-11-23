@@ -64,7 +64,7 @@ The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-mot
 Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
 Native admission, body lowering, the NPC motion closure and the network clearance (Ready and the body's closure hash in
 the join handshake) are built: a body in `blocks/*.json` is built at start. A player whose game did not build the same
-bodies is refused at the join (except under `modSync: off`). An unavailable dependency is a refusal, not a rendered
+bodies is refused at the join (except under `modSync: off`, where a player lacking a body may crash on that NPC). An unavailable dependency is a refusal, not a rendered
 fallback. Not verified in a real game yet: the player side (admission, the same closure, the body drawn and animated).
 
 | Capability | Needs | Current contract |
