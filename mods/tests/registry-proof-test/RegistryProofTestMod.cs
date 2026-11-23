@@ -143,9 +143,32 @@ public sealed unsafe class RegistryProofTestMod : Mod
     /// a scalar the content reader takes (then the sample says so and kilnctl does not count it as compared).</summary>
     private static JsonNode? Raw(ContentEntry e, string path)
     {
+        var tries = RawPaths(path);
+        for (var i = 0; i < tries.Count; ++i)
+        {
+            ContentValue v;
+            try { v = e.Get(tries[i]); }
+            catch (Exception) { continue; }
+            if (i > 0 && v.Type != ContentValueType.Bool) return null; // the fallback only stands for a one-flag struct
+            return RawValue(v);
+        }
+        return null;
+    }
+
+    /// <summary>The paths a member is read raw by, in order: the path itself, and for "<c>x.isSet</c>" also "<c>x</c>",
+    /// where reflection exposes a struct whose only scalar is that flag (GemSlotOverride {isSet}, items.socket), as
+    /// kiln.registry.live binds it.</summary>
+    private static IReadOnlyList<string> RawPaths(string path)
+    {
+        const string flag = ".isSet";
+        return path.EndsWith(flag, StringComparison.Ordinal) && path.Length > flag.Length
+            ? new[] { path, path[..^flag.Length] } : new[] { path };
+    }
+
+    private static JsonNode? RawValue(ContentValue v)
+    {
         try
         {
-            var v = e.Get(path);
             return v.Type switch
             {
                 ContentValueType.Bool => JsonValue.Create(v.Bool),

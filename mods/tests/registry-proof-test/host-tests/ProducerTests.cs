@@ -23,6 +23,19 @@ public class ProducerTests
         Assert.NotEqual(before, number);
     }
 
+    // Reflection exposes a struct with one scalar (GemSlotOverride {isSet}) at the struct's own path, so the raw read of
+    // items.socket's "gemSlotOverride.isSet" falls back to "gemSlotOverride" (only for a Boolean, see Raw).
+    [Theory]
+    [InlineData("gemSlotOverride.isSet", "gemSlotOverride.isSet|gemSlotOverride")]
+    [InlineData("armorSetup.isSet", "armorSetup.isSet|armorSetup")]
+    [InlineData("impactValues", "impactValues")]
+    [InlineData("isSet", "isSet")]
+    public void Raw_paths_include_the_flattened_one_flag_struct(string path, string expected)
+    {
+        var method = typeof(RegistryProofTestMod).GetMethod("RawPaths", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Equal(expected, string.Join("|", (IEnumerable<string>)method.Invoke(null, new object[] { path })!));
+    }
+
     [Theory]
     [InlineData(2, "not_exact: value cannot be represented", true)]
     [InlineData(0, "not_exact: value cannot be represented", false)]
