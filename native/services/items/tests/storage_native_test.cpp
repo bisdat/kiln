@@ -916,9 +916,17 @@ KilnResult KILN_CALL guard_code_state(uintptr_t at, size_t n, uint32_t* state, u
     *generation = 1;
     return KILN_OK;
 }
+// SEH-guarded like kiln.hooks' read: a jump the refusal follows may lead anywhere.
+bool guarded_copy(void* out, uintptr_t at, size_t n) {
+    __try {
+        std::memcpy(out, reinterpret_cast<const void*>(at), n);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 KilnResult KILN_CALL guard_read(uintptr_t at, void* out, size_t n) {
-    std::memcpy(out, reinterpret_cast<const void*>(at), n);
-    return KILN_OK;
+    return guarded_copy(out, at, n) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
 KilnResult KILN_CALL guard_read_original(uintptr_t at, void* out, size_t n) {
     std::memcpy(out, deliver_file + (at - reinterpret_cast<uintptr_t>(deliver_code)), n);
@@ -1057,7 +1065,8 @@ void guard_ready_tests() {
         CHECK(!kitems::enabled && detours == 0 && why == std::string(prefix) + "symbol missing: gameplay/DeliverEvents");
     }
     {
-        // Another module hooked DeliverEvents before the guard: refused, with the bytes Kiln saw.
+        // A Kiln detour placed over another module's patch (Kiln's E9 in front): refused, with the bytes Kiln saw and
+        // what to do; the jump into memory nothing maps is followed no further.
         fake_types::Catalog c;
         guard_catalog(c);
         deliver_state = KILN_CODE_FOREIGN;
@@ -1065,8 +1074,39 @@ void guard_ready_tests() {
         deliver_state = KILN_CODE_MANAGED;
         CHECK(!kitems::enabled && detours == 0 && has(why, prefix) && has(why, "gameplay/DeliverEvents") &&
               has(why, "outside Kiln's hook registry") && has(why, "live e9 10 20 30 40 90 48 83") &&
-              has(why, "file 40 56 41 55 41 56 48 83"));
+              has(why, "file 40 56 41 55 41 56 48 83") && has(why, "(in no module") &&
+              has(why, "Remove that mod or loader"));
         std::printf("  foreign: %s\n", why.c_str());
+    }
+    {
+        // Another module's hook in retour's shape (shroudlink's own core): jmp [rip+0] to a relay in private memory,
+        // whose jmp [rip+0] goes to the hook in its module (this test's exe stands in for that DLL). The refusal names
+        // the module, not the relay, and says what to do.
+        fake_types::Catalog c;
+        guard_catalog(c);
+        auto* relay = static_cast<uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        CHECK(relay != nullptr);
+        const uint8_t jmp_rip[6]{0xff, 0x25, 0, 0, 0, 0};
+        const uint64_t hook = reinterpret_cast<uintptr_t>(&deliver_next), to_relay = reinterpret_cast<uintptr_t>(relay);
+        uint8_t saved[16];
+        std::memcpy(saved, deliver_code, 16);
+        if (relay) {
+            std::memcpy(relay, jmp_rip, 6);
+            std::memcpy(relay + 6, &hook, 8);
+            std::memcpy(deliver_code, jmp_rip, 6);
+            std::memcpy(deliver_code + 6, &to_relay, 8);
+        }
+        deliver_state = KILN_CODE_FOREIGN;
+        const auto why = run_ready(c);
+        deliver_state = KILN_CODE_MANAGED;
+        std::memcpy(deliver_code, saved, 16);
+        if (relay)
+            VirtualFree(relay, 0, MEM_RELEASE);
+        CHECK(!kitems::enabled && detours == 0 && has(why, prefix) && has(why, "its jump leads into ") &&
+              has(why, ".exe+0x") && !has(why, "in no module") && has(why, "Remove that mod or loader") &&
+              has(why, "restart") && has(why, "shroudlink's own core") && has(why, "live ff 25 00 00 00 00") &&
+              has(why, "file 40 56 41 55 41 56 48 83"));
+        std::printf("  foreign relay: %s\n", why.c_str());
     }
     {
         fake_types::Catalog c;

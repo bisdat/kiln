@@ -150,8 +150,10 @@ inline std::string client_layout(const KilnTypesApi* types, ClientLayout* out) {
 // or patch, before or over Kiln's detour, or bytes Kiln cannot read or account for.
 struct CodeVerdict {
     bool ok = false;
-    std::string why;     // when !ok: what kiln.hooks said, and the bytes it saw
-    uintptr_t jump = 0;  // when the live bytes start with a jump: where to (for the caller to name its module)
+    uint32_t state = KILN_CODE_UNKNOWN; // what kiln.hooks' code_state said (KILN_CODE_*)
+    std::string why;                    // when !ok: what kiln.hooks said
+    std::string bytes;                  // when !ok: "live <16 bytes>, file <16 bytes>", as far as they could be read
+    uintptr_t jump = 0;                 // when foreign and the live bytes start with a jump: its first hop
 };
 inline std::string hex_bytes(const uint8_t* b, size_t n) {
     std::string s;
@@ -162,24 +164,52 @@ inline std::string hex_bytes(const uint8_t* b, size_t n) {
     }
     return s;
 }
-// A jump at the start of `b` (16 bytes at `at`): jmp rel32, jmp [rip+0] with the address after it, or mov rax, imm64;
-// jmp rax. 0 when the bytes start with none of them.
-inline uintptr_t jump_target(uintptr_t at, const uint8_t* b) {
-    if (b[0] == 0xe9) {
-        int32_t rel = 0;
+// Where the jump at the start of `b` (16 bytes at `at`) goes: jmp rel32 or rel8, call rel32, jmp [rip+disp32] (the
+// address read through `read(address, out, 8)`), mov rax/r11, imm64 + jmp. 0 when the bytes start with none of them.
+// The forms kiln.hooks' own analysis follows (hooks_chain.cpp first_hop).
+template <class Read> uintptr_t jump_target(uintptr_t at, const uint8_t* b, Read read) {
+    int32_t rel = 0;
+    uint64_t to = 0;
+    if (b[0] == 0xe9 || b[0] == 0xe8) {
         std::memcpy(&rel, b + 1, 4);
         return at + 5 + static_cast<intptr_t>(rel);
     }
-    uint64_t to = 0;
-    if (b[0] == 0xff && b[1] == 0x25 && !b[2] && !b[3] && !b[4] && !b[5]) {
-        std::memcpy(&to, b + 6, 8);
-        return static_cast<uintptr_t>(to);
+    if (b[0] == 0xeb)
+        return at + 2 + static_cast<int8_t>(b[1]);
+    if (b[0] == 0xff && b[1] == 0x25) {
+        std::memcpy(&rel, b + 2, 4);
+        return read(at + 6 + static_cast<intptr_t>(rel), &to, 8) ? static_cast<uintptr_t>(to) : 0;
     }
     if (b[0] == 0x48 && b[1] == 0xb8 && b[10] == 0xff && b[11] == 0xe0) {
         std::memcpy(&to, b + 2, 8);
         return static_cast<uintptr_t>(to);
     }
+    if (b[0] == 0x49 && b[1] == 0xbb && b[10] == 0x41 && b[11] == 0xff && b[12] == 0xe3) {
+        std::memcpy(&to, b + 2, 8);
+        return static_cast<uintptr_t>(to);
+    }
     return 0;
+}
+// A loaded module and the offset of an address in it; an empty name when no module holds the address.
+struct ModulePlace {
+    std::string name;
+    uint64_t offset = 0;
+};
+// Where a chain of jumps that reached `to` ends: the first address in a module (`locate(address).name` not empty), or
+// the last one whose bytes cannot be read or are no jump (a relay or stub of its own), after at most `hops` more jumps.
+// A hook's relay (retour's jmp [rip+0] in private memory, Kiln's own stub) is followed into the module behind it.
+template <class Read, class Locate>
+uintptr_t follow_jumps(uintptr_t to, Read read, Locate locate, int hops = 5) {
+    for (int i = 0; to && i < hops && locate(to).name.empty(); ++i) {
+        uint8_t b[16]{};
+        if (!read(to, b, sizeof b))
+            break;
+        const uintptr_t next = jump_target(to, b, read);
+        if (!next || next == to)
+            break;
+        to = next;
+    }
+    return to;
 }
 inline CodeVerdict code_verdict(const KilnHooksApi* hooks, uintptr_t at) {
     constexpr size_t n = 16;
@@ -197,30 +227,63 @@ inline CodeVerdict code_verdict(const KilnHooksApi* hooks, uintptr_t at) {
                 std::to_string(rc) + ")";
         return v;
     }
+    v.state = state;
     if (state == KILN_CODE_ORIGINAL || state == KILN_CODE_MANAGED) {
         v.ok = true;
         return v;
     }
+    auto read = [hooks](uintptr_t a, void* out, size_t size) {
+        return hooks->read && hooks->read(a, out, size) == KILN_OK;
+    };
     uint8_t live[n]{}, file[n]{};
-    const bool have_live = hooks->read && hooks->read(at, live, n) == KILN_OK;
+    const bool have_live = read(at, live, n);
     const bool have_file = hooks->read_original && hooks->read_original(at, file, n) == KILN_OK;
-    std::string bytes;
     if (have_live)
-        bytes += "live " + hex_bytes(live, n);
+        v.bytes += "live " + hex_bytes(live, n);
     if (have_file)
-        bytes += std::string(bytes.empty() ? "" : ", ") + "file " + hex_bytes(file, n);
+        v.bytes += std::string(v.bytes.empty() ? "" : ", ") + "file " + hex_bytes(file, n);
     if (state == KILN_CODE_FOREIGN) {
-        v.why = "its code was hooked or patched outside Kiln's hook registry (another module, before or over Kiln's "
-                "own detour); Kiln does not chain onto a foreign patch";
+        v.why = "its code was hooked or patched outside Kiln's hook registry (by another module, before or over Kiln's "
+                "own detour), which storage does not build on";
         if (have_live)
-            v.jump = jump_target(at, live);
+            v.jump = jump_target(at, live, read);
     } else if (state == KILN_CODE_UNKNOWN)
         v.why = "its live code could not be read, changed while it was read, or does not lead back to the exe's "
                 "bytes through Kiln's own detours";
     else
         v.why = "kiln.hooks code_state answered " + std::to_string(state);
-    if (!bytes.empty())
-        v.why += " (" + bytes + ")";
     return v;
+}
+// A Kiln module's file name: kiln-core.dll, kiln-<service or plugin>.dll (kiln.hooks' own rule for "a Kiln module").
+inline bool kiln_module(const std::string& file) {
+    std::string low = file;
+    for (char& c : low)
+        c = static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    return low.size() > 9 && low.rfind("kiln-", 0) == 0 && low.compare(low.size() - 4, 4, ".dll") == 0;
+}
+// What the capability text says when code_verdict refused `name`: the function and why; for another module's hook or
+// patch where its jump leads (`to`, in `where` when a module holds it) and what the player can do; the bytes last, so a
+// capability row's 512 bytes keep the rest. Module file names only, never a path.
+inline std::string code_refusal(const char* name, const CodeVerdict& v, uintptr_t to, const ModulePlace& where) {
+    std::string t = std::string(name) + ": " + v.why;
+    if (v.state == KILN_CODE_FOREIGN) {
+        char at[48];
+        if (v.jump && !where.name.empty()) {
+            std::snprintf(at, sizeof at, "+0x%llx", static_cast<unsigned long long>(where.offset));
+            t += "; its jump leads into " + where.name + at;
+            if (kiln_module(where.name))
+                t += " (Kiln's own detour, placed over another module's patch)";
+        } else if (v.jump) {
+            std::snprintf(at, sizeof at, "0x%llx", static_cast<unsigned long long>(to ? to : v.jump));
+            t += std::string("; its jump leads to ") + at + " (in no module: a relay or stub)";
+        }
+        t += ". Remove that mod or loader and restart (kiln.log's hooks lines name it)";
+        if (!std::strcmp(name, "gameplay/DeliverEvents"))
+            t += "; shroudlink's own core (steam_api64.dll, shroudlink_core.dll) is one: Kiln runs shroudlink mods "
+                 "without it";
+    }
+    if (!v.bytes.empty())
+        t += " (" + v.bytes + ")";
+    return t;
 }
 } // namespace kitems::storage

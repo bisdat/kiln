@@ -6,9 +6,11 @@
 #include "fake_types.h"
 #include "nlohmann/json.hpp"
 #include "services/hooks_code.h"
+#include "services/kiln_caps.h"
 #include <array>
 #include <cstdio>
 #include <fstream>
+#include <map>
 using namespace kitems::storage;
 using nlohmann::json;
 int checks = 0, failed = 0;
@@ -239,8 +241,9 @@ void code_tests() {
         foreign_jump(0x7ff812340000ull);
         const auto later = code_verdict(&hooks, kDeliver);
         CHECK(!later.ok && has(later.why, "outside Kiln's hook registry") && later.jump == 0x7ff812340000ull &&
-              has(later.why, "live ff 25 00 00 00 00 00 00 34 12 f8 7f 00 00 33 ed") &&
-              has(later.why, "file 40 56 41 55 41 56 48 83 ec 40 48 8b 31 45 33 ed"));
+              later.state == KILN_CODE_FOREIGN &&
+              later.bytes == "live ff 25 00 00 00 00 00 00 34 12 f8 7f 00 00 33 ed, file 40 56 41 55 41 56 48 83 ec "
+                             "40 48 8b 31 45 33 ed");
         std::printf("  foreign over Kiln's detour: %s\n", later.why.c_str());
     }
     {
@@ -260,7 +263,8 @@ void code_tests() {
         reset_code();
         live_readable = false;
         const auto v = code_verdict(&hooks, kDeliver);
-        CHECK(!v.ok && has(v.why, "could not be read") && has(v.why, "(file 40 56") && !has(v.why, "live 40"));
+        CHECK(!v.ok && v.state == KILN_CODE_UNKNOWN && has(v.why, "could not be read") && !v.jump &&
+              v.bytes == "file 40 56 41 55 41 56 48 83 ec 40 48 8b 31 45 33 ed");
         live_readable = true;
     }
     {
@@ -271,13 +275,138 @@ void code_tests() {
     }
     {
         // the jumps the verdict decodes
+        auto none = [](uintptr_t, void*, size_t) { return false; };
         uint8_t b[16]{0x48, 0xb8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xff, 0xe0};
-        CHECK(jump_target(0x1000, b) == 0x1122334455667788ull);
+        CHECK(jump_target(0x1000, b, none) == 0x1122334455667788ull);
         const uint8_t e9[16]{0xe9, 0xfb, 0xff, 0xff, 0xff};
-        CHECK(jump_target(0x1000, e9) == 0x1000);
-        CHECK(jump_target(0x1000, kPrologue) == 0);
+        CHECK(jump_target(0x1000, e9, none) == 0x1000);
+        CHECK(jump_target(0x1000, kPrologue, none) == 0);
+        const uint8_t eb[16]{0xeb, 0x10};
+        CHECK(jump_target(0x1000, eb, none) == 0x1012);
+        const uint8_t r11[16]{0x49, 0xbb, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x41, 0xff, 0xe3};
+        CHECK(jump_target(0x1000, r11, none) == 0x1122334455667788ull);
     }
     registry_now = nullptr;
+}
+
+// ---- Where a foreign jump at DeliverEvents leads, and what the refusal tells the player ----
+// A little address space: a few 16-byte cells of code or data, and the modules (name, base, size) loaded in it.
+struct Memory {
+    std::map<uintptr_t, std::array<uint8_t, 16>> cells;
+    struct Module {
+        std::string name;
+        uintptr_t base;
+        size_t size;
+    };
+    std::vector<Module> modules;
+    void put(uintptr_t at, std::initializer_list<uint8_t> bytes, uint64_t tail = 0, size_t tail_at = 0) {
+        std::array<uint8_t, 16> c{};
+        std::copy(bytes.begin(), bytes.end(), c.begin());
+        if (tail || tail_at)
+            std::memcpy(c.data() + tail_at, &tail, 8);
+        cells[at] = c;
+    }
+    bool read(uintptr_t at, void* out, size_t n) const {
+        for (const auto& [base, c] : cells)
+            if (at >= base && at - base + n <= c.size()) {
+                std::memcpy(out, c.data() + (at - base), n);
+                return true;
+            }
+        return false;
+    }
+    ModulePlace locate(uintptr_t at) const {
+        for (const auto& m : modules)
+            if (at >= m.base && at - m.base < m.size)
+                return {m.name, at - m.base};
+        return {};
+    }
+};
+std::string hex16(const uint8_t* b) { return hex_bytes(b, 16); }
+
+void refusal_tests() {
+    // retour (shroudlink's own core, for one) on x64: jmp rel32 to a relay in private memory, the relay's jmp [rip+0]
+    // to the hook in its DLL. The first hop is the relay (in no module); the chain ends in the DLL.
+    Memory m;
+    const uintptr_t deliver = 0x140a25a50, relay = 0x140001000, hook = 0x7ff812341234;
+    m.modules = {{"enshrouded.exe", 0x140100000, 0x1000}, // not where the relay is
+                 {"steam_api64.dll", 0x7ff812340000, 0x10000},
+                 {"kiln-players.dll", 0x7ff900000000, 0x10000}};
+    const int32_t rel = static_cast<int32_t>(relay - (deliver + 5));
+    std::array<uint8_t, 16> entry{0xe9};
+    std::memcpy(entry.data() + 1, &rel, 4);
+    m.cells[deliver] = entry;
+    m.put(relay, {0xff, 0x25, 0, 0, 0, 0}, hook, 6);
+    auto read = [&](uintptr_t a, void* out, size_t n) { return m.read(a, out, n); };
+    auto locate = [&](uintptr_t a) { return m.locate(a); };
+    CHECK(jump_target(deliver, entry.data(), read) == relay);
+    CHECK(follow_jumps(relay, read, locate) == hook);
+    CHECK(follow_jumps(hook, read, locate) == hook); // already in a module
+    // Kiln's own raw link stub: jmp [rip+disp32] through a cell that names the first link's handler.
+    const uintptr_t stub = 0x140002000, cell = 0x140003000, handler = 0x7ff900001230;
+    m.put(stub, {0xff, 0x25, 0xfa, 0x0f, 0, 0}); // [stub + 6 + 0xffa] = cell
+    m.put(cell, {}, handler, 0);
+    CHECK(follow_jumps(stub, read, locate) == handler);
+    // a jump into memory that cannot be read, or a loop, ends where it is
+    CHECK(follow_jumps(0x150000000, read, locate) == 0x150000000);
+    m.put(0x140004000, {0xeb, 0xfe}); // jmp $
+    CHECK(follow_jumps(0x140004000, read, locate) == 0x140004000);
+
+    // The verdict kiln.hooks' registry gives for a foreign jmp [rip+0] at DeliverEvents (its words and bytes).
+    Registry r;
+    registry_now = &r;
+    reset_code();
+    foreign_jump(0x7ff812341234ull);
+    auto hooks = hooks_table();
+    const CodeVerdict v = code_verdict(&hooks, kDeliver);
+    registry_now = nullptr;
+    CHECK(!v.ok && v.state == KILN_CODE_FOREIGN && v.jump == 0x7ff812341234ull && !has(v.why, "live ") &&
+          v.bytes == "live ff 25 00 00 00 00 34 12 34 12 f8 7f 00 00 33 ed, file 40 56 41 55 41 56 48 83 ec 40 48 8b 31 "
+                     "45 33 ed");
+    const std::string prefix = "items.storage: client inventory guard is unavailable: ";
+    {
+        // into another module: named, with what to do, and the bytes last
+        const auto t = code_refusal("gameplay/DeliverEvents", v, hook, m.locate(hook));
+        std::printf("  refusal: %s\n", t.c_str());
+        CHECK(t.rfind("gameplay/DeliverEvents: " + v.why, 0) == 0 && has(t, "outside Kiln's hook registry"));
+        CHECK(has(t, "its jump leads into steam_api64.dll+0x1234") && !has(t, "placed over another module's patch"));
+        CHECK(has(t, "Remove that mod or loader") && has(t, "restart") && has(t, "kiln.log"));
+        CHECK(has(t, "shroudlink's own core (steam_api64.dll, shroudlink_core.dll)"));
+        CHECK(t.find("restart") < t.find("(live ff 25 00 00 00 00") && has(t, "file 40 56 41 55"));
+        // what to do fits in a capability row's text (KILN_CAP_TEXT_MAX) behind storage_ready's prefix
+        CHECK(prefix.size() + t.find(" (live ") <= KILN_CAP_TEXT_MAX);
+    }
+    {
+        // Kiln's own detour sits in front (it was placed over the other module's patch)
+        const auto t = code_refusal("gameplay/DeliverEvents", v, handler, m.locate(handler));
+        std::printf("  refusal (Kiln's detour in front): %s\n", t.c_str());
+        CHECK(has(t, "its jump leads into kiln-players.dll+0x1230 (Kiln's own detour, placed over another module's "
+                     "patch)") &&
+              has(t, "Remove that mod or loader"));
+        CHECK(prefix.size() + t.find(" (live ") <= KILN_CAP_TEXT_MAX);
+    }
+    {
+        // a relay no module owns, and another function than DeliverEvents: no shroudlink hint
+        const auto t = code_refusal("characters/Capture", v, relay, {});
+        CHECK(has(t, "its jump leads to 0x140001000 (in no module") && has(t, "Remove that mod or loader") &&
+              !has(t, "shroudlink"));
+    }
+    {
+        // no jump at all (bytes patched in place): no jump clause
+        auto in_place = v;
+        in_place.jump = 0;
+        const auto t = code_refusal("gameplay/DeliverEvents", in_place, 0, {});
+        CHECK(!has(t, "jump") && has(t, "Remove that mod or loader") && has(t, "(live ff 25"));
+    }
+    {
+        // not foreign: the verdict's own words, no advice
+        CodeVerdict unknown;
+        unknown.state = KILN_CODE_UNKNOWN;
+        unknown.why = "its live code could not be read";
+        unknown.bytes = "live e9 00 00 00 00 90 48 83 ec 40 48 8b 31 45 33 ed, file " + hex16(kPrologue);
+        const auto t = code_refusal("gameplay/DeliverEvents", unknown, 0, {});
+        CHECK(t == "gameplay/DeliverEvents: its live code could not be read (live e9 00 00 00 00 90 48 83 ec 40 48 8b 31 "
+                   "45 33 ed, file 40 56 41 55 41 56 48 83 ec 40 48 8b 31 45 33 ed)");
+    }
 }
 
 int main(int argc, char** argv) {
@@ -289,6 +418,7 @@ int main(int argc, char** argv) {
     const json fixture = json::parse(in);
     layout_tests(fixture);
     code_tests();
+    refusal_tests();
     std::printf("storage client guard: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

@@ -201,8 +201,9 @@ template <class F> bool function(const char* name, F* out) {
     *out = reinterpret_cast<F>(at);
     return true;
 }
-// The module a jump goes into, as "name+0xoffset", or "" when the address is in no module (a hook's stub memory).
-std::string module_at(uintptr_t at) {
+// The module that holds an address (its file name, never the path, and the offset), or an empty name (a hook's relay or
+// stub memory, or nothing mapped).
+ModulePlace module_place(uintptr_t at) {
     HMODULE m = nullptr;
     wchar_t path[MAX_PATH]{};
     if (!at ||
@@ -215,24 +216,26 @@ std::string module_at(uintptr_t at) {
         if (*c == L'\\' || *c == L'/')
             name = c + 1;
     char text[MAX_PATH * 3]{};
-    WideCharToMultiByte(CP_UTF8, 0, name, -1, text, sizeof text, nullptr, nullptr);
-    char off[24];
-    std::snprintf(off, sizeof off, "+0x%llx", static_cast<unsigned long long>(at - reinterpret_cast<uintptr_t>(m)));
-    return std::string(text) + off;
+    if (!WideCharToMultiByte(CP_UTF8, 0, name, -1, text, sizeof text, nullptr, nullptr) || !text[0])
+        return {};
+    return {text, static_cast<uint64_t>(at - reinterpret_cast<uintptr_t>(m))};
 }
 // Live code Kiln may chain a hook on: the exe file's, or changed only by Kiln's own hook registry (another Kiln owner's
-// detour, which the new link joins). Otherwise detail says why, with the bytes kiln.hooks saw.
+// detour, which the new link joins). Otherwise detail says why, where another module's jump leads (through its relay)
+// and what to do, with the bytes kiln.hooks saw.
 bool qualified(uintptr_t at, const char* name) {
-    const auto v = code_verdict(kiln::hooks_v2(api), at);
+    const auto* hooks = kiln::hooks_v2(api);
+    const auto v = code_verdict(hooks, at);
     if (v.ok)
         return true;
-    detail = std::string(name) + ": " + v.why;
+    uintptr_t to = 0;
+    ModulePlace where;
     if (v.jump) {
-        const auto where = module_at(v.jump);
-        char to[24];
-        std::snprintf(to, sizeof to, "0x%llx", static_cast<unsigned long long>(v.jump));
-        detail += "; it jumps " + (where.empty() ? std::string("to ") + to + " (in no module)" : "into " + where);
+        auto read = [hooks](uintptr_t a, void* out, size_t n) { return hooks->read && hooks->read(a, out, n) == KILN_OK; };
+        to = follow_jumps(v.jump, read, &module_place);
+        where = module_place(to);
     }
+    detail = code_refusal(name, v, to, where);
     return false;
 }
 bool field(const char* type, const char* name, uint32_t* out, uint32_t wanted) {
