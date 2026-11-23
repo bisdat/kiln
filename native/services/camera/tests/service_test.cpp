@@ -74,6 +74,17 @@ void KILN_CALL done(const KilnCameraResult* r,void*) { CHECK(r->ok && r->commit_
 KilnCameraChange last_change{};
 void KILN_CALL changed_last(const KilnCameraChange* c,void*) { last_change=*c; ++changes; }
 void KILN_CALL changed(const KilnCameraChange*,void*) { ++changes; }
+// the transport bridge Kiln.Camera binds (bind_transport): what it was handed
+struct BridgeSent { KilnOwner author; uint32_t op; KilnCameraLease lease; uint64_t revision; KilnCameraDone done; void* user; };
+std::vector<BridgeSent> bridge_sent;
+KilnResult KILN_CALL bridge_submit(KilnOwner a,uint32_t op,KilnCameraLease l,uint64_t rev,const KilnCameraRequest* q,KilnCameraDone d,void* u) {
+ CHECK((op==4)==(q==nullptr)); if(q) CHECK(q->endpoint==KILN_CAMERA_REMOTE_VISUAL && q->player_entity==1); bridge_sent.push_back({a,op,l,rev,d,u}); return KILN_OK;
+}
+KilnResult KILN_CALL bridge_caps(KilnEntity p,uint64_t* m) { *m = p==1 ? KILN_CAMERA_CAP_LOCAL_FOV : 0; return KILN_OK; }
+int bridge_retired;
+void KILN_CALL bridge_retire(KilnOwner) { ++bridge_retired; }
+KilnCameraResult remote_result{}; int remote_done;
+void KILN_CALL done_remote(const KilnCameraResult* r,void*) { remote_result=*r; remote_result.reason={}; ++remote_done; }
 void event(uint32_t what,uint32_t epoch) { KilnWorldEvent e{}; e.kind=KILN_WORLD_SERVER; e.event=what; e.session=epoch; lifecycle(&e,life_user); }
 void tick() {
  auto due=std::move(jobs); jobs.clear();
@@ -99,6 +110,38 @@ int main(int argc,char** argv) {
  CHECK(camera && camera->header.size==88 && camera->header.version==1);
  uint64_t mask=0; CHECK(camera->capabilities(KILN_CAMERA_SERVER_MODE,0,&mask)==KILN_OK);
  if(!observer || old_world) { CHECK(mask==0); CHECK(submits==0); std::printf("camera service fail-closed: PASS (%d checks)\n",checks); return 0; }
+ if(mode_arg=="bridge") {
+  // camera.remote: off until Kiln.Camera binds its bridge; on while bound; off again after unbind
+  CHECK(rows["camera.remote"].state==KILN_CAP_UNAVAILABLE);
+  CHECK(camera->capabilities(KILN_CAMERA_REMOTE_VISUAL,0,&mask)==KILN_OK && mask==0);
+  event(KILN_WORLD_STARTED,1);
+  KilnCameraRequest q{}; q.size=sizeof q; q.endpoint=KILN_CAMERA_REMOTE_VISUAL; q.player_entity=1; q.parts=KILN_CAMERA_LENS; q.input_policy=KILN_CAMERA_VISUAL_ONLY;
+  q.duration_ms=5000; q.lens_source=KILN_CAMERA_LENS_CONSTANT; q.fov_y_degrees=75.0f;
+  KilnCameraLease l=0; CHECK(camera->apply(author,&q,&l,done_remote,nullptr)==KILN_ERR_UNAVAILABLE);
+  const KilnCameraTransport t{{sizeof(KilnCameraTransport),1},bridge_submit,bridge_caps,bridge_retire};
+  CHECK(camera->bind_transport(0,&t)==KILN_ERR_INVALID_ARGUMENT);
+  CHECK(camera->bind_transport(900,&t)==KILN_OK);
+  CHECK(camera->bind_transport(901,&t)==KILN_ERR_INVALID_ARGUMENT);
+  CHECK(rows["camera.remote"].state==KILN_CAP_AVAILABLE);
+  CHECK(camera->capabilities(KILN_CAMERA_REMOTE_VISUAL,0,&mask)==KILN_OK && mask==KILN_CAMERA_CAP_REMOTE);
+  CHECK(camera->capabilities(KILN_CAMERA_REMOTE_VISUAL,1,&mask)==KILN_OK && mask==(KILN_CAMERA_CAP_REMOTE|KILN_CAMERA_CAP_LOCAL_FOV));
+  CHECK(camera->apply(author,&q,&l,done_remote,nullptr)==KILN_OK && l);
+  CHECK(bridge_sent.empty()); tick(); CHECK(bridge_sent.size()==1 && bridge_sent[0].author==author && bridge_sent[0].op==1 && bridge_sent[0].lease==l);
+  KilnCameraResult r{}; r.size=sizeof r; r.ok=1; r.commit_scope=KILN_CAMERA_COMMIT_CLIENT_FRAME; r.frame=77; bridge_sent[0].done(&r,bridge_sent[0].user);
+  CHECK(remote_done==0); tick(); CHECK(remote_done==1 && remote_result.ok==1 && remote_result.commit_scope==KILN_CAMERA_COMMIT_CLIENT_FRAME && remote_result.frame==77 && remote_result.lease==l);
+  // a client's own end, through the bridge owner only
+  CHECK(camera->transport_ended(901,l,1,KILN_CAMERA_END_EXPIRED,0,KilnStr{"",0})==KILN_ERR_REVOKED);
+  KilnHandle sub=0; CHECK(camera->subscribe(30,changed_last,nullptr,&sub)==KILN_OK);
+  CHECK(camera->transport_ended(900,l,1,KILN_CAMERA_END_EXPIRED,0,KilnStr{"",0})==KILN_OK);
+  tick(); CHECK(changes==1 && last_change.kind==KILN_CAMERA_ENDED && last_change.end_reason==KILN_CAMERA_END_EXPIRED && last_change.lease==l);
+  CHECK(camera->unbind_transport(901)==KILN_ERR_REVOKED);
+  CHECK(camera->unbind_transport(900)==KILN_OK);
+  CHECK(rows["camera.remote"].state==KILN_CAP_UNAVAILABLE);
+  CHECK(camera->capabilities(KILN_CAMERA_REMOTE_VISUAL,0,&mask)==KILN_OK && mask==0);
+  CHECK(camera->unbind_transport(900)==KILN_ERR_NOT_FOUND);
+  event(KILN_WORLD_STOPPING,1);
+  std::printf("camera service bridge: PASS (%d checks, camera.remote only while bound)\n",checks); return 0;
+ }
  if(refused) {
   CHECK(declared==1); CHECK(mask==0);
   CHECK(rows["camera.server_mode"].state==KILN_CAP_UNAVAILABLE && rows["camera.server_mode"].reason==KILN_CAP_REASON_SERVICE_MISSING);

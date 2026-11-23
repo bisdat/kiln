@@ -185,15 +185,22 @@ void Core::set_backend(uint32_t endpoint, Backend* b) {
     if (endpoint >= 1 && endpoint <= 3) backends_[endpoint] = b;
 }
 
-KilnResult Core::capabilities(uint32_t endpoint, KilnEntity, uint64_t* mask) const {
+KilnResult Core::capabilities(uint32_t endpoint, KilnEntity player, uint64_t* mask) const {
     if (!mask || endpoint < KILN_CAMERA_SERVER_MODE || endpoint > KILN_CAMERA_REMOTE_VISUAL) return KILN_ERR_INVALID_ARGUMENT;
     uint64_t bits = 0;
-    if (const Backend* b = backend(endpoint)) bits = b->caps();
+    // REMOTE_VISUAL with a player: the bridge adds what that player's client offered (no lock is held here)
+    if (const Backend* b = backend(endpoint)) bits = player && endpoint == KILN_CAMERA_REMOTE_VISUAL ? b->player_caps(player) : b->caps();
     // every write needs the owner-retiring observer: without it a lease could outlive the code it calls
     if (!writes()) bits = 0;
     if (endpoint == KILN_CAMERA_LOCAL_VISUAL) bits |= local_read_caps_.load(std::memory_order_acquire);
     *mask = bits & ~KILN_CAMERA_CAP_RESOURCE_PROFILE;
     return KILN_OK;
+}
+
+uint64_t Core::endpoint_caps(uint32_t endpoint) const {
+    uint64_t bits = 0;
+    capabilities(endpoint, 0, &bits);
+    return bits;
 }
 
 uint32_t Core::epoch(World w) const {
@@ -451,6 +458,8 @@ void Core::cleanup_owner(KilnOwner owner, World w) {
     }
     for (size_t i = subs_.size(); i-- > 0;)
         if (subs_[i].owner == owner) subs_.erase(subs_.begin() + static_cast<std::ptrdiff_t>(i));
+    for (uint32_t e = 1; e <= 3; ++e)
+        if (world_of(e) == w && backends_[e]) backends_[e]->owner_gone(owner);
 }
 
 void Core::fault(KilnOwner owner, World w, const char* what) {
@@ -535,8 +544,8 @@ KilnResult Core::apply(KilnOwner owner, const KilnCameraRequest* request, KilnCa
     std::lock_guard<std::mutex> lock(m_);
     if (dead(owner)) return KILN_ERR_REVOKED;
     if (fits) {
-        uint64_t have = 0;
-        capabilities(r.endpoint, r.player_entity, &have);
+        // the endpoint's rows; a remote recipient's own parts are the bridge's to judge (an answer through `done`)
+        const uint64_t have = endpoint_caps(r.endpoint);
         const uint64_t need = required_caps(r);
         if (!b || (have & need) != need) return KILN_ERR_UNAVAILABLE;
     }
@@ -634,8 +643,7 @@ KilnResult Core::update(KilnOwner owner, KilnCameraLease id, uint32_t timing, co
     Backend* b = lease ? backend(lease->endpoint) : nullptr;
     if (!reason) {
         // the rows of the new, whole request; a missing one leaves the old revision as it is
-        uint64_t have = 0;
-        capabilities(r.endpoint, lease->player, &have);
+        const uint64_t have = endpoint_caps(r.endpoint);
         const uint64_t need = required_caps(r);
         if (!b || (have & need) != need) return KILN_ERR_UNAVAILABLE;
     }

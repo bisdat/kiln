@@ -89,6 +89,12 @@ public:
     virtual ~Backend() = default;
     // KILN_CAMERA_CAP_* this backend serves now. Any thread.
     virtual uint64_t caps() const = 0;
+    // The same for one player (capabilities() with a player): REMOTE_VISUAL adds the part bits that player's client
+    // offered. Any thread, never under the core's lock (it may call the transport bridge).
+    virtual uint64_t player_caps(KilnEntity player) const {
+        (void)player;
+        return caps();
+    }
     // Before anything is queued. KILN_OK with *reason 0: go on. KILN_OK with a reason: a refusal, answered through
     // `done`. Anything else is the call's immediate return (KILN_ERR_NOT_FOUND: no such player here). May fill in
     // request.req.player_entity (LOCAL_VISUAL: 0 becomes the local player).
@@ -104,6 +110,8 @@ public:
     virtual void drop(KilnCameraLease lease) = 0;
     // The world of this endpoint is going: everything of `epoch` is void. Any thread: atomics only, no game.
     virtual void world_stopped(uint32_t epoch) = 0;
+    // An owner retired (or faulted) and its leases of this endpoint's world were dropped. Under the lock: note it only.
+    virtual void owner_gone(KilnOwner owner) { (void)owner; }
 };
 
 // How the core reaches author code and the log. call_*: false when the callback faulted.
@@ -215,6 +223,8 @@ private:
         return (static_cast<uint64_t>(endpoint) << 32) | (endpoint == KILN_CAMERA_LOCAL_VISUAL ? 0u : player);
     }
     Backend* backend(uint32_t endpoint) const { return endpoint >= 1 && endpoint <= 3 ? backends_[endpoint] : nullptr; }
+    // capabilities() without a player: what apply/update check under the lock (no backend may call out there).
+    uint64_t endpoint_caps(uint32_t endpoint) const;
     bool dead(KilnOwner owner) const { return dead_.count(owner) != 0; }
     uint32_t slots_of(uint32_t endpoint) const;
 

@@ -9,7 +9,8 @@
 // Rows (docs/kiln/services/caps.md): camera.service (this table), and one per capability bit: camera.server_mode,
 // camera.local_pose, camera.local_fov, camera.local_profile, camera.local_shake, camera.rendered_snapshot,
 // camera.remote, camera.resource_profile (reserved). Every write row needs kiln.hooks' owner-retiring observer
-// (hooks.owner_cleanup): without it a lease could call into a mod that is gone, so nothing is admitted.
+// (hooks.owner_cleanup): without it a lease could call into a mod that is gone, so nothing is admitted. camera.remote
+// is on while Kiln.Camera's transport bridge is bound (bridge.h): it binds once it owns the channel kiln.camera.
 #include <chrono>
 
 #include <cstdarg>
@@ -30,6 +31,7 @@
 #include "state.h"
 #include "mode.h"
 #include "local.h"
+#include "bridge.h"
 
 namespace {
 
@@ -89,6 +91,7 @@ struct ServiceModeWorld : kcam::ModeWorld {
 };
 ServiceModeWorld g_mode_world;
 kcam::ModeBackend g_mode(&g_core, &g_mode_world, 0xd2c927b5u, "kiln.camera");
+kcam::RemoteBackend g_remote(&g_core);
 uint64_t g_reported_mode = 0;
 void report_rows();
 
@@ -120,10 +123,25 @@ KilnResult KILN_CALL t_subscribe(KilnOwner owner, KilnCameraChanged fn, void* us
 KilnResult KILN_CALL t_unsubscribe(KilnHandle handle) { return g_core.unsubscribe(handle); }
 
 KilnResult KILN_CALL t_get_visual(KilnCameraVisual* out, uint32_t* out_reason) { return kcam::local_get_visual(out, out_reason); }
-// The transport bridge is not in this build yet: its row is off and says so.
-KilnResult KILN_CALL t_bind_transport(KilnOwner, const KilnCameraTransport*) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_unbind_transport(KilnOwner) { return KILN_ERR_UNAVAILABLE; }
-KilnResult KILN_CALL t_transport_ended(KilnOwner, KilnCameraLease, uint64_t, uint32_t, uint32_t, KilnStr) { return KILN_ERR_UNAVAILABLE; }
+// Framework-private (Kiln.Camera's CameraStartup). The row camera.remote follows the binding at once.
+KilnResult KILN_CALL t_bind_transport(KilnOwner owner, const KilnCameraTransport* table) {
+    const KilnResult rc = g_remote.bind(owner, table);
+    if (rc == KILN_OK) {
+        logf(KILN_LOG_INFO, "camera: transport bridge bound (owner %llu): camera.remote is on", static_cast<unsigned long long>(owner));
+        report_rows();
+    }
+    return rc;
+}
+KilnResult KILN_CALL t_unbind_transport(KilnOwner owner) {
+    const KilnResult rc = g_remote.unbind(owner);
+    if (rc == KILN_OK) report_rows();
+    else if (rc == KILN_ERR_INTERNAL)
+        logf(KILN_LOG_ERROR, "camera: the transport bridge did not drain within 2 s: it stays closed and kept (its callbacks are not freed)");
+    return rc;
+}
+KilnResult KILN_CALL t_transport_ended(KilnOwner owner, KilnCameraLease lease, uint64_t revision, uint32_t end_reason, uint32_t reason_code, KilnStr reason) {
+    return g_remote.transport_ended(owner, lease, revision, end_reason, reason_code, reason);
+}
 
 const KilnCameraApi kTable = {{sizeof(KilnCameraApi), KILN_CAMERA_VERSION},
                               &t_capabilities,
@@ -153,6 +171,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
 void KILN_CALL on_server_pre(const KilnTickInfo* tick, void*) {
     if (tick) g_mode_world.server_step = tick->step;
     g_mode.step();
+    g_remote.step();  // the bridge's answers first, then what waits goes out
     g_core.pre(kcam::kServer);
     const uint64_t mode = g_mode.caps();
     if (mode != g_reported_mode) { g_reported_mode = mode; report_rows(); }
@@ -181,6 +200,8 @@ void report_rows() {
     static constexpr char kNoObserver[] = "kiln.hooks has no owner cleanup (hooks.owner_cleanup): camera writes are off";
     static constexpr char kNoBackend[] = "this build of kiln.camera does not have it yet";
     static constexpr char kClientOnly[] = "the local camera of a game client";
+    static constexpr char kNoBridge[] = "Kiln.Camera has not bound its transport bridge (it binds at Kiln's first service tick once the channel "
+                                        "kiln.camera is open; kiln.log says why not)";
     const bool writes = g_core.writes();
     uint64_t mode = 0, local = 0, remote = 0;
     g_core.capabilities(KILN_CAMERA_SERVER_MODE, 0, &mode);
@@ -214,7 +235,8 @@ void report_rows() {
     write_row("camera.local_fov", local, KILN_CAMERA_CAP_LOCAL_FOV, true);
     write_row("camera.local_profile", local, KILN_CAMERA_CAP_LOCAL_PROFILE, true);
     write_row("camera.local_shake", local, KILN_CAMERA_CAP_LOCAL_SHAKE, true);
-    write_row("camera.remote", remote, KILN_CAMERA_CAP_REMOTE, false);
+    if (!(remote & KILN_CAMERA_CAP_REMOTE) && writes) row("camera.remote", false, KILN_CAP_REASON_SERVICE_MISSING, kNoBridge);
+    else write_row("camera.remote", remote, KILN_CAMERA_CAP_REMOTE, false);
     if (local & KILN_CAMERA_CAP_RENDERED_SNAPSHOT) row("camera.rendered_snapshot", true, 0, "");
     else if (!g_client_side) row("camera.rendered_snapshot", false, KILN_CAP_REASON_WRONG_SIDE, kClientOnly);
     else if (uint32_t why = 0; const char* text = kcam::local_why(KILN_CAMERA_CAP_RENDERED_SNAPSHOT, &why)) row("camera.rendered_snapshot", false, why, text);
@@ -250,6 +272,7 @@ void KILN_CALL on_ready(void*) {
     const bool declared = mode_dependencies && world->write_declare(g_owner, KC_STR(KILN_CAMERA_SERVICE), &ncc, 1) == KILN_OK;
     g_mode.set_ready(declared);
     g_core.set_backend(KILN_CAMERA_SERVER_MODE, &g_mode);
+    g_core.set_backend(KILN_CAMERA_REMOTE_VISUAL, &g_remote);
     if (!declared) logf(KILN_LOG_WARN, "camera: maintained Mode unavailable (tracked writes, player records, or NCC declaration missing)");
 
     if (!observer) logf(KILN_LOG_WARN, "camera: kiln.hooks has no owner-retiring observer (hooks.owner_cleanup): no camera write is admitted");
