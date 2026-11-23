@@ -1,0 +1,11 @@
+{
+  "id": "registry-proof-test",
+  "name": "Registry proof producer (lab only)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryProofTest.dll",
+  "side": "server",
+  "clients": "none",
+  "advanced": true,
+  "description": "Lab-only: the live half of kilnctl regproof's lab evidence. With <data>/content/registry/proof/request.json it round-trips every mapped live field once through kiln.registry.live (begin/submit/commit/read/revert, the public mapping guard), reads the game's members raw, hashes the entry's resource bytes, and writes registry-roundtrip format 1 (generation live) into content/registry/proof. Without the request file it does nothing."
+}

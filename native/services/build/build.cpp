@@ -11,6 +11,7 @@
 #include "services/kiln_engine.h"
 #include "terrain_budget.h"
 #include "voxel_tasks.h"
+#include "block_runtime.h"
 
 namespace kb {
 
@@ -330,10 +331,15 @@ const KilnBuildApi kTable = {
     &t_terrain_budget_reserve,
     &t_terrain_budget_charge,
     &t_grid_for_session,
+    &block_at,
+    &find_wall,
+    &break_box,
 };
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     ++g_steps;
+    block_tick(tick);
+    block_caps();
     if (!server_world()) return;
     g_terrain_budget.begin(tick ? tick->step : g_steps);
     try {
@@ -408,6 +414,7 @@ void KILN_CALL on_ready(void*) {
     props_resolve();
     regions_ready();
     tasks_ready();
+    block_ready();
     if (!g_spawn) KB_W("kiln.spawn is unavailable: voxel writes require core lifecycle and kiln.saves confirmed load state");
     if (!g_world) KB_W("kiln.world is unavailable: base protection and prop details are off");
     if (!g_gameplay) KB_W("kiln.gameplay is unavailable: KILN_BUILD_F_RESPECT_ZONES cannot check zones");

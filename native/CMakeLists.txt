@@ -171,8 +171,9 @@ foreach(dir ${KILN_PLUGIN_DIRS})
 endforeach()
 
 # Compile-only: kiln_world.h and kiln_abilities.h in one translation unit, both orders (core/tests/test-abi-headers.sh).
+# Also kiln_items_storage.h's layout asserts (core/tests/abi_headers/items_storage.c), so MSVC checks them on Windows.
 add_library(kiln-abi-headers OBJECT core/tests/abi_headers/world_first.c core/tests/abi_headers/abilities_first.c
-            core/tests/abi_headers/both.cpp)
+            core/tests/abi_headers/both.cpp core/tests/abi_headers/items_storage.c)
 target_include_directories(kiln-abi-headers PRIVATE core/abi)
 
 add_library(kiln-native-hello SHARED samples/native-hello/plugin.cpp)

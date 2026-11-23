@@ -32,6 +32,9 @@ alignas(16) uint8_t g_arena[1 << 20];  // the made-up game memory (real addresse
 size_t g_near = 1 << 19;
 Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
+std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
+std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -46,8 +49,15 @@ bool rd(uintptr_t address, void* out, size_t n) {
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
 }
-size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
-    for (const Write& w : writes) std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
+    if (g_before_write) { auto callback = std::move(g_before_write); g_before_write = {}; callback(); }
+    size_t limit = writes.size();
+    if (!g_write_limits.empty()) { limit = g_write_limits.front(); g_write_limits.erase(g_write_limits.begin()); }
+    for (size_t i = 0; i < writes.size(); ++i) {
+        const Write& w = writes[i];
+        if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+    }
     return writes.size();
 }
 void* near_alloc(uintptr_t, size_t n) {
@@ -98,12 +108,16 @@ uint32_t fnv1a(const void* data, size_t n) {
     for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 16777619u;
     return h;
 }
-// kiln.gamedata's item configs: the sword has a ManaCost config (float at +0x40) with a tooltip row (+0x44, Normal format)
+// The made-up sword has mana/stamina configs and tooltip rows; each can use actual integer or float storage.
 bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
-    if (e.id != 0x222 || path != "impactValues.0xaf236ece") return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
-    out->addr = e.addr + 0x40, out->kind = 1000, out->id = e.id, out->field = 7;
-    out->f.path = "impactValues.0xaf236ece.value", out->f.offset = 0, out->f.bytes = 4, out->f.vt = KILN_CV_FLOAT, out->f.writable = true;
-    out->tip = e.addr + 0x44, out->tip_format = 0;
+    const bool mana = path == "impactValues.0xaf236ece", stamina = path == "impactValues.0x727d7f78";
+    if (e.id != 0x222 || (!mana && !stamina)) return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    const size_t offset = mana ? 0x40 : 0x48;
+    const bool integer = g_integer_impacts.count(mana ? "manaCost" : "staminaCost") != 0;
+    out->addr = e.addr + offset, out->kind = 1000, out->id = e.id, out->field = mana ? 7 : 8;
+    out->f.path = path + ".value", out->f.offset = 0, out->f.bytes = 4;
+    out->f.vt = integer ? KILN_CV_INT : KILN_CV_FLOAT, out->f.is_signed = integer, out->f.writable = true;
+    out->tip = e.addr + offset + 4, out->tip_format = 0;
     return true;
 }
 bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
@@ -186,6 +200,8 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
+    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);
@@ -202,6 +218,8 @@ void world() {
     add_field(I.schema, fld("damageSetup.dmgMod", 0x08, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("armorSetup.distribution.physical", 0x90, 4, KILN_CV_FLOAT));
+    Field socket = fld("gemSlotOverride", 0x98, 1, KILN_CV_BOOL); socket.type_name = "keen::GemSlotOverride";
+    add_field(I.schema, socket); // refl.cpp single_scalar flattens {isSet} to the parent path
     add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
     add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
     for (int i = 0; i < 5; ++i) {
@@ -216,6 +234,7 @@ void world() {
     mem<uint32_t>(WOOD_AT, 10);
     std::memcpy(g_arena + WOOD_AT + 0x30, P1, 16), mem<uint32_t>(WOOD_AT + 0x80, 0x901);  // perk slot 0: perk_a
     mem<float>(SWORD_AT + 0x40, 10.0f), mem<int32_t>(SWORD_AT + 0x44, 10);            // ManaCost 10, its tooltip 10
+    mem<float>(SWORD_AT + 0x48, 10.0f), mem<int32_t>(SWORD_AT + 0x4C, 10);            // StaminaCost 10, its tooltip 10
     Registry& L = g_regs[KILN_CONTENT_LOOT];
     L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
     add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
@@ -257,6 +276,7 @@ registry::BaseModel base() {
     registry::BaseModel::Entry w;
     w.id = "game:material_t1_wood_logs";
     w.fields["maxStack"] = registry::Value::integer(10);
+    w.fields["socket"] = registry::Value::boolean(false);
     w.fields["rarity"] = registry::Value::text("common");
     w.fields["perks"] = registry::Value::of_list({registry::Value::text("game:perk_a")});
     items.push_back(w);
@@ -269,6 +289,7 @@ registry::BaseModel base() {
         registry::formulas::armor_read(1, 10, registry::formulas::constants_of({})));
     s.fields["maxStack"] = registry::Value::integer(1);
     s.fields["manaCost"] = registry::Value::number(10);
+    s.fields["staminaCost"] = registry::Value::number(10);
     items.push_back(s);
     registry::BaseModel::Entry st;
     st.id = "game:material_stone";
@@ -315,7 +336,7 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 }
 
 // What S11 does at resources-ready: lower the sections, compose, install.
-void stage(const std::vector<PackFile>& files) {
+void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -324,8 +345,15 @@ void stage(const std::vector<PackFile>& files) {
         for (auto& b : s.batches) it->batches.push_back(b);
         for (auto& r : s.refused) it->refused.push_back(r);
     }
+    // Runner hands over data first, queued code next, and recorded callback turns last.
+    for (const auto& batch : code) {
+        auto it = std::find_if(mods.begin(), mods.end(), [&](const auto& m) { return m.id == batch.mod; });
+        if (it == mods.end()) mods.push_back({}), it = mods.end() - 1, it->id = batch.mod;
+        it->batches.push_back(batch);
+    }
     RegistryLive in;
     in.schema = std::make_shared<const registry::Schema>(sc);
+    in.on_world_thread = [](uint32_t) { return true; };
     in.regmap = g_regmap;
     in.base = base();
     in.mods = mods;
@@ -336,7 +364,7 @@ void stage(const std::vector<PackFile>& files) {
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
-    in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
@@ -368,6 +396,37 @@ bool conflict(const registry::FieldRef& ref, registry::LineKind kind, const std:
     return std::any_of(g_last_report.lines.begin(), g_last_report.lines.end(), [&](const registry::Line& line) {
         return line.field == ref && line.kind == kind && line.winner == "m" && line.loser == pack;
     });
+}
+
+void callback_order_survives_reloads() {
+    for (bool queued : {false, true}) {
+        world();
+        g_files = {{"a/content/a.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":4}}]}})"},
+                   {"b/content/b.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":{"mul":2}}]}})"}};
+        const auto files = files_of({{"a", "a/content/a.json"}, {"b", "b/content/b.json"}});
+        std::vector<registry::Batch> code;
+        auto record = [&](const char* op, const char* source) {
+            registry::Batch batch; std::vector<registry::Refusal> refused; std::string why;
+            const std::string ir = std::string(R"({"ir":1,"mod":"a","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":)") + op + "}]}";
+            check(registry::parse_batch(ir, registry_schema(), &batch, &refused, &why) && refused.empty(), "parse recorded code batch");
+            batch.source = source; code.push_back(std::move(batch));
+        };
+        if (queued) record(R"({"mul":2})", "code:a");
+        record(R"({"add":5})", "code");
+        stage(files, code); apply_registry_files(files);
+        const uint32_t factor = queued ? 2 : 1;
+        check(at<uint32_t>(WOOD_AT) == 40 * factor + 5, "start applies data, queued code, then the callback");
+        g_files["b/content/b.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":{"mul":3}}]}})";
+        apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 40 * factor + 5, "an unrelated section reload keeps data before recorded code");
+        g_files["a/content/a.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":6}}]}})";
+        apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 60 * factor + 5, "a same-mod reload also keeps the callback last, exactly once");
+        g_files["a/content/a.json"] = "{}"; apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 10 * factor + 5, "removing data leaves queued code and the callback exactly once");
+        registry_live_owner_gone(77); registry_live_publish();
+        check(at<uint32_t>(WOOD_AT) == 10 * factor + 5, "owner retirement does not discard already-taken start edits");
+    }
 }
 
 void live_recipe_report() {
@@ -556,7 +615,6 @@ void every_live_kind() {
 // knowledge requirement, "game" keeps it), loot stack sizes
 void perks_costs_unlock_loot() {
     world();
-    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     g_files = {{"m/content/a.json", R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "perks", "list": {"append": ["game:perk_b"]}},
         {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "manaCost", "op": {"mul": 1.5}},
@@ -657,6 +715,54 @@ void another_writer_in_the_report() {
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
 }
+// P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
+void live_transactions() {
+    world();
+    g_files.clear();
+    stage({});
+    registry_live_world_begin();
+    apply_registry_files({});
+    uint64_t h = 0;
+    RegistryLiveReply reply;
+    check(registry_live_begin(77, "change", 4, &h) == KILN_OK && h, "begin an owner-scoped live transaction");
+    const std::string ir = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":3}}]})";
+    check(registry_live_submit(77, h, ir, &reply, nullptr) == KILN_OK, "submit Kiln fields");
+    check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "commit the live transaction");
+    check(at<uint32_t>(WOOD_AT) == 30, "the live change writes through the real store");
+    registry_live_publish();
+    check(registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos, "the live owner and transaction are in the report");
+    check(registry_live_revert(78, h, &reply) == KILN_ERR_INVALID_ARGUMENT, "another owner cannot revert it");
+    check(registry_live_revert(77, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "revert restores the layer below");
+    check(registry_live_revert(77, h, &reply) == KILN_ERR_NOT_FOUND, "revert does not reuse stale handles");
+}
+
+void live_transaction_foreign_revert() {
+    world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({});
+    uint64_t h = 0; RegistryLiveReply reply;
+    registry_live_begin(77, "change", 4, &h);
+    registry_live_submit(77, h, R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    registry_live_commit(77, h, &reply);
+    mem<uint32_t>(WOOD_AT, 777);
+    check(registry_live_revert(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Skipped, "a foreign write makes the revert explicitly skipped");
+    check(at<uint32_t>(WOOD_AT) == 777, "revert never overwrites the foreign writer");
+}
+
+void live_transaction_points_and_revoke() {
+    world(); g_files.clear(); stage({});
+    uint64_t h = 0; RegistryLiveReply reply;
+    registry_live_begin(77, "change", 1, &h);
+    registry_live_submit(77, h, R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld, "mod-load changes can wait for the first world");
+    check(at<uint32_t>(WOOD_AT) == 10, "no premature game write before world readiness");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 90, "the queued mod-load change applies at world load");
+    registry_live_owner_gone(77); registry_live_publish();
+    check(at<uint32_t>(WOOD_AT) == 10, "revoked live owners lose their live layers on the world thread");
+    check(registry_live_begin(77, "change", 2, &h) == KILN_ERR_REVOKED, "a revoked owner cannot create more transactions");
+    registry_live_begin(88, "later", 3, &h);
+    registry_live_submit(88, h, R"({"ir":1,"mod":"later","stage":"alter","edits":[{"registry":"balance","select":"game:balance","field":"levelCap","op":60}]})", &reply, nullptr);
+    check(registry_live_commit(88, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::RestartRequired, "a restart field is never silently written from hot reload");
+}
 }  // namespace
 
 int main() {
@@ -668,6 +774,7 @@ int main() {
     }
     const std::pair<const char*, void (*)()> tests[] = {
         {"relative_over_packs_and_reload", relative_over_packs_and_reload},
+        {"callback_order_survives_reloads", callback_order_survives_reloads},
         {"live_recipe_report", live_recipe_report},
         {"live_formula_report", live_formula_report},
         {"report_caps_lists", report_caps_lists},
@@ -676,6 +783,9 @@ int main() {
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"live_transactions", live_transactions},
+        {"live_transaction_foreign_revert", live_transaction_foreign_revert},
+        {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
     };
     int failed = 0;
     for (auto& [name, fn] : tests) {

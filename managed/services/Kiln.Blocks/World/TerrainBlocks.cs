@@ -17,6 +17,7 @@ public sealed record TerrainMaterialBlock : IBlock
     /// <summary>What players read: its item's name when it's <see cref="Placeable"/>.</summary>
     public required string Name { get; init; }
 
+    /// <summary>The description of the item, when the material is <see cref="Placeable"/>.</summary>
     public string? Description { get; init; }
 
     /// <summary>The game terrain material it starts from: a <c>GameMaterials</c> Terrain name or <c>Cell&lt;1..127&gt;</c>. It brings that material's strength, what digging it gives,

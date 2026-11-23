@@ -4,6 +4,12 @@ using Kiln;
 
 namespace TkBlock;
 
+public sealed class TkBootBlockMod : Mod
+{
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.NoOptimization)]
+    public override void OnLoad() => Thread.Sleep(Timeout.Infinite);
+}
+
 public sealed class TkUnloadBlockMod : Mod
 {
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.NoOptimization)]

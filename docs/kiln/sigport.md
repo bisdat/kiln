@@ -340,10 +340,17 @@ data folder; a dry run keeps nothing. Without a verified record every registry f
 `--new-refl`/`--old-refl`, `--record`, `--ids` as files) and `--evidence` (files or folders) does, for example for the
 client side (`--side client`, a copy of the client exe and the client's data folder). `--first-build` waives the previous
 build (refused where the side already has proven builds), `--accept <registry.field>` takes a reviewed reflection
-change, `--mark` writes into the instance and `--replace` replaces a verified record there.
+change, `--mark` writes into the instance and `--replace` replaces a verified record there. A client record is not proven
+by a client lab: `--side client --mirror <server record> --server-exe <server exe>` mirrors the server proof onto the client
+exe (a row is ok only where the server proved it and the client's layout of it is the server's; regmap/README.md).
 
-The lab half (the proof producer that writes the round-trip suites and the values export in the gate) comes with the
-registry P2 native slices; until it is there no record is verified and kilnctl says so in `NEXT.txt`.
+The lab half is the gate's default test `registry-proof-test` with kiln.content's proof producer: the gate writes
+`kiln/data/content/registry/proof/request.json` into its copy, and only then do they write the live and boot round-trip
+suites and the values export there (regmap/README.md "The producer"); a gate run without that test leaves the record
+unverified. The gate deploys a reflection-checked regmap candidate only into the disposable copy, so the live guard can
+sample a build that has no proven record yet. Missing state, ids, or live samples is no evidence (`unproven`), not a
+self-test failure. Producer diagnostics never block the sigport build mark; the separate registry proof still refuses
+each row without passing evidence. No candidate is written into the source instance.
 
 ### The lab gate (`kilnctl gate`)
 A sibling instance `<name>-gate`: `<dir>.gate` gets the instance's game files (reflinked), its deployed `kiln/` folder
@@ -355,11 +362,12 @@ passwords are replaced with random ones. The instance's own mods and native plug
 copy boots through kilnctl's normal start (preflight included). kilnctl waits for each test's summary line in
 `kiln/logs/kiln.log`, then stops the copy with a save.
 
-Default tests: world, players, chat, items, settings, gameplay, hooks, combat, spawn, content (`--tests a,b`). The
-verdict is green when Kiln hooked SimStep, every test printed a summary, and no test fails more, or other checks, than
-in the baseline. FAIL lines are compared with digits masked. Some tests fail on a verified build too (the lab world:
+Default tests: world, players, chat, items, settings, gameplay, hooks, combat, spawn, content, registry-proof (`--tests a,b`). The
+verdict is green when Kiln hooked SimStep, every self-test printed a summary, and no self-test fails more, or other checks, than
+in the baseline. Registry-proof is an evidence producer rather than a self-test: its failures or absent summary are
+reported but do not decide this verdict (the registry proof judges its evidence per row). FAIL lines are compared with digits masked. Some tests fail on a verified build too (the lab world:
 combat 1, items 2, spawn 1), so record a baseline once on a verified build: `kilnctl gate <name> --baseline`. Without a
-baseline every FAIL counts. Results: `~/.local/state/kiln/gate/<name>/`.
+baseline every self-test FAIL counts. Results: `~/.local/state/kiln/gate/<name>/`.
 
 Verified in a lab: baseline on 1285601;
 `update --dry-run --old <1273043 exe>` (port 122/122 + 314/314, no definition change, gate GREEN in 1:42, "ready to

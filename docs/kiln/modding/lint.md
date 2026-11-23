@@ -8,6 +8,13 @@ against the mod's content, cook recipes, licences). Every finding has a stable c
 
 Field-by-field reference of each format, generated from the schemas: [schemas/](schemas/).
 
+Content-block numeric bounds match the runtime compiler (including exclusive zero bounds). Lint also reports `KL109` for numeric relationships a standard JSON Schema cannot express:
+attack `minRange < range` and `hitAt < length`, capsule `height >= 2 * radius`, AI roaming/fleeing `min <= max`, move `hitAt < length`, and loot maximum counts below their minimums.
+These checks apply to inline blocks and standalone parts, including a loose `blocks/*.json` file. A cooked clip's actual duration, registered code callbacks and game-resource availability still need runtime validation.
+A few values these refuse loaded in 0.2.0-dev.30.6 without harm: the runtime still loads such a block with one warning, while lint keeps them as errors so
+they get fixed ([blocks.md](blocks.md#values-that-loaded-in-020-dev306)).
+
+
 ## Usage
 ```sh
 kiln lint                                       # the current folder

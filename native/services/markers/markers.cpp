@@ -364,7 +364,9 @@ void KILN_CALL on_ready(void*) {
     kmk::anchors_ready();
     kmk::surfaces_ready();
     kmk::link_ready();
-    if (g_catalog_reader && g_assets->when_resources_ready(&on_resources_ready, nullptr) != KILN_OK) {
+    // Only a game client reads the catalog from its own resources (g_assets is set in its branch above). A dedicated
+    // server's catalog reader is the marker link: g_catalog_reader is on there with g_assets null, nothing to register.
+    if (g_assets && g_catalog_reader && g_assets->when_resources_ready(&on_resources_ready, nullptr) != KILN_OK) {
         g_catalog_reader = false;
         logf(KILN_LOG_WARN, "markers: kiln.assets' resources are off on this build: markers.catalog is off");
         report(kCatalog, KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, "kiln.assets' resources are off on this build");

@@ -394,6 +394,21 @@ typedef struct KilnStationsStatus {
 
 typedef struct KilnStationCollect KilnStationCollect;
 
+/* Player-specific linked storage (since 0.2.0-dev.30.6). The mod chooses the containers; the server enforces the
+ * player's own CanAccessInventories permission and a readable initialized container, not membership of a base.
+ * order: 0 before station outputs, 1 after. filter: 0 deny set, 1 allow set. Empty deny set allows every item.
+ * items is copied at registration; no callbacks run during native payment. All reserved fields must be zero. */
+enum { KILN_CRAFT_SOURCE_STOCK_ALL = 1u }; /* source_stock: include overlaps with bag/base/station stock */
+typedef struct KilnCraftSourceRequest {
+    uint32_t size;
+    KilnEntity player;
+    KilnEntity container;
+    uint32_t order;
+    uint32_t filter;
+    uint32_t item_count;
+    const KilnItemId* items;
+} KilnCraftSourceRequest;
+
 typedef struct KilnStationsApi {
     KilnServiceHeader header; /* { sizeof(KilnStationsApi), KILN_STATIONS_VERSION } */
 
@@ -465,8 +480,9 @@ typedef struct KilnStationsApi {
     /* ---- the crafting menu's snapshot for Kiln clients, GitHub #68 step 2 (header.size tells whether these are here) ---- */
     /* A Kiln client's snapshot of the crafting stock its crafting menu may count: per item, the player's bag, the base's
      * Magic chests and the opted-in stations' Outputs, for the items craft_items names. count 0 clears it (the game's own
-     * counts again). Any thread. The server's payment never reads it. KILN_ERR_INVALID_ARGUMENT: count over
-     * KILN_STATIONS_MAX_CRAFT_STOCK, or rows null with count set. */
+     * counts again). A row whose count is 0 names its item with none: the snapshot stays on and that item keeps the game's
+     * counts (since 0.2.0-dev.30.8; before, such a row was dropped). Any thread. The server's payment never reads it.
+     * KILN_ERR_INVALID_ARGUMENT: count over KILN_STATIONS_MAX_CRAFT_STOCK, or rows null with count set. */
     KilnResult(KILN_CALL* set_craft_stock)(const KilnStationStack* rows, uint32_t count);
     /* The items a Kiln client must have counted to raise a recipe's count with station outputs: every input (an item, or
      * every option of a category input) of every recipe that takes one of `items` (the lent outputs), and `items`
@@ -483,6 +499,28 @@ typedef struct KilnStationsApi {
      * materials and that no answer names: at most KILN_STATIONS_MAX_FILL_KEYS, oldest first. They stay until an answer
      * names them or the snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* fill_asks)(KilnStationFillKey* out, uint32_t capacity, uint32_t* out_count);
+    /* ---- player crafting sources, since 0.2.0-dev.30.6; capability crafting.sources ---- */
+    /* Tick thread, server world. Rejects non-containers, players/NPCs, production stations (FactoryStation), and
+     * inventory links without a container setup. Production stations lend their outputs through set_output_source.
+     * Up to 4096 registrations and 65536 filter items per registration. Returns an owner-bound disposable handle.
+     * Registrations are session-only: after restart the mod must register them again. */
+    KilnResult(KILN_CALL* add_source)(KilnOwner owner, const KilnCraftSourceRequest* request, uint64_t* out_handle);
+    /* Any thread. NOT_FOUND for a removed handle or another owner's handle. In-flight payments may finish. */
+    KilnResult(KILN_CALL* remove_source)(KilnOwner owner, uint64_t handle);
+    /* Any thread: remove this owner's registrations (also called by kiln.items.cancel_owner). */
+    void(KILN_CALL* cancel_sources)(KilnOwner owner);
+    /* Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and opted-in
+     * station outputs. No base required. Access is checked again, never inferred from a client's message.
+     * flags 0: crafting extras; KILN_CRAFT_SOURCE_STOCK_ALL: all registered counts (e.g. for dyes). Unknown bits: INVALID_ARGUMENT.
+     * BUFFER_TOO_SMALL reports the whole needed count: never send a truncated crafting snapshot. */
+    KilnResult(KILN_CALL* source_stock)(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
+    /* Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player. Client only,
+     * any thread; at most 256 distinct item/count rows, copied. player 0 or count 0 clears. The client shows these
+     * only in its tinting screen, for at most 15 seconds without a refresh. Counts are not authority: the server's
+     * Tint entry and payment re-resolve/recheck the shared per-player registrations, access and filters at use time.
+     * UNAVAILABLE: wrong side, no client world, unqualified wire/palette hooks. INVALID_ARGUMENT: malformed rows.
+     * This is Kiln's own transport bridge, not a way for a mod to grant access to a source. */
+    KilnResult(KILN_CALL* set_dye_stock)(KilnEntity player, const KilnStationStack* rows, uint32_t count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

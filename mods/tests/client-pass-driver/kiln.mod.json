@@ -1,0 +1,10 @@
+{
+  "id": "client-pass-driver",
+  "name": "Client pass driver",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "ClientPassDriver.dll",
+  "side": "server",
+  "description": "Test only. /drive does a client-pass check's in-game action through the game's own requests (Gameplay.Inject): use the nearest offered thing (anvil, forge, well), craft at the nearest station, provoke a creature, step away from a station. Each action logs one line 'client-pass-driver:' in kiln.log."
+}

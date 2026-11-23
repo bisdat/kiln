@@ -126,6 +126,41 @@ internal static unsafe class BuildNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct BlockInfo
+    {
+        public uint Size, Refusal, Kind, Material, Fill;
+        public int Provenance, Hardness, Health, Damage;
+        public uint Reserved;
+        public Vec3 Center;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Break
+    {
+        public uint Size, Flags;
+        public fixed int Origin[3];
+        public fixed uint Dims[3];
+        public fixed int Damage[5];
+        public uint Reserved;
+        public fixed byte Materials[32];
+        public byte* Selection;
+        public uint Actor, BuildFlags;
+        public NativeStr OriginMod;
+        public double TerrainHealthScale, TerrainHealSeconds;
+        public Vec3 SphereCenter;
+        public double SphereRadius, SphereMargin, SphereMinimum;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BreakResult
+    {
+        public uint Size, Refusal, Flags, Reserved;
+        public ulong Considered, Damaged, Removed, Dropped;
+        public ulong ProtectedCells, UnknownCells, UnbreakableCells, ExcludedCells;
+        public Result Write;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct Table
     {
         public ServiceHeader Header;
@@ -145,6 +180,19 @@ internal static unsafe class BuildNative
         public delegate* unmanaged[Cdecl]<uint, GuidBytes*, int> ItemTemplate;
         public delegate* unmanaged[Cdecl]<int*, uint*, int> Keep;
         public delegate* unmanaged[Cdecl]<int*, uint*, ulong*, int> Release;
+        public delegate* unmanaged[Cdecl]<uint, uint, int> TerrainBudgetReserve;
+        public delegate* unmanaged[Cdecl]<double, void> TerrainBudgetCharge;
+        public nint GridForSession;
+        public delegate* unmanaged[Cdecl]<Vec3, BlockInfo*, int> BlockAt;
+        public delegate* unmanaged[Cdecl]<Vec3, Vec3, uint, BlockInfo*, int> FindWall;
+        public delegate* unmanaged[Cdecl]<Break*, BreakResult*, int> BreakBox;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Prefix
+    {
+        public ServiceHeader Header;
+        public fixed byte Rows[128]; // original v1 through release; optional tail is checked member-by-member
     }
 
     private static Table* _table;
@@ -158,9 +206,10 @@ internal static unsafe class BuildNative
             if (_checked) return null;
             _checked = true;
             if (sizeof(Grid) != 88 || sizeof(Result) != 56 || sizeof(Write) != 72 || sizeof(Shape) != 104 ||
-                sizeof(Prop) != 104 || sizeof(PropInfo) != 216 || sizeof(Base) != 64 || sizeof(Status) != 264)
+                sizeof(Prop) != 104 || sizeof(PropInfo) != 216 || sizeof(Base) != 64 || sizeof(Status) != 264 ||
+                sizeof(BlockInfo) != 64 || sizeof(Break) != 184 || sizeof(BreakResult) != 136 || sizeof(Table) != 184)
                 throw new InvalidOperationException("Kiln.Build: native layout mismatch (kiln_build.h changed)");
-            _table = Services.Get<Table>("kiln.build", 1);
+            _table = (Table*)Services.Get<Prefix>("kiln.build", 1);
             return _table;
         }
     }

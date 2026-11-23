@@ -56,7 +56,7 @@ int64_t g_server_chat = -1, g_reader_pending = -1, g_reader_stride = -1;
 constexpr size_t kMaxCallbacks = 1024, kMaxOut = 4096, kPerPlayerOut = 256;
 constexpr uint64_t kExpireMs = 30000;
 // What this end calls itself in a hello and in its mod list: the EMF version whose table it serves, marked as Kiln's.
-constexpr const char *kEmfVersionHere = "0.6.14-kiln";
+constexpr const char *kEmfVersionHere = "0.6.20-kiln";
 std::unique_ptr<emf::core::ModsCheck> g_mods_check; // made in net_on_ready, never freed (the channel's handlers use it)
 std::atomic<uint32_t> g_client_session{0};          // +1 per client world: the list is sent and the note shown again
 std::atomic<uint64_t> g_mods_tick_at{0};

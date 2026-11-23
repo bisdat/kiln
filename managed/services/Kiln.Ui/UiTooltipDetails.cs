@@ -13,6 +13,9 @@ namespace Kiln;
 /// <summary>A tooltip-lines provider's answer: Ok with the lines to add (at most 16 per detail view, all providers
 /// together; a provider whose lines do not fit adds none), or not Ok (adds none; the reason is logged once). Lines are
 /// interned for the process: keep them stable, do not make a new text every frame.</summary>
+/// <param name="Ok">True to add <paramref name="Lines"/>; false to add none.</param>
+/// <param name="Reason">Why it refused; null when <see cref="Ok"/>.</param>
+/// <param name="Lines">The lines to add.</param>
 public sealed record UiTooltipDecision(bool Ok, string? Reason, IReadOnlyList<UiText> Lines) : IKilnResult
 {
     /// <summary>No lines.</summary>
@@ -32,6 +35,10 @@ public delegate UiTooltipDecision UiTooltipProvider(in UiValueContext context, i
 
 /// <summary>The details window was opened: Ok with the snapshot's session and source frame, or not Ok
 /// ("no tooltip": no item detail with lines in this session; "viewport too small").</summary>
+/// <param name="Ok">True when the window was opened.</param>
+/// <param name="Reason">Why not; null when <see cref="Ok"/>.</param>
+/// <param name="Session">The session of the snapshot it shows.</param>
+/// <param name="SourceFrame">The game UI frame the snapshot was collected at.</param>
 public sealed record UiTooltipOpenResult(bool Ok, string? Reason, ulong Session, ulong SourceFrame) : IKilnResult;
 
 /// <summary>Kiln's details window opened or closed (also closed by a world change or a provider change). Tick thread, next
@@ -39,9 +46,13 @@ public sealed record UiTooltipOpenResult(bool Ok, string? Reason, ulong Session,
 [ClientOnly]
 public sealed class UiTooltipPanelChangedEvent(bool open, ulong session, ulong sourceFrame, ItemId item, string? reason) : KilnEvent
 {
+    /// <summary>True when the window opened, false when it closed.</summary>
     public bool Open { get; } = open;
+    /// <summary>The session of the snapshot it shows.</summary>
     public ulong Session { get; } = session;
+    /// <summary>The game UI frame the snapshot was collected at.</summary>
     public ulong SourceFrame { get; } = sourceFrame;
+    /// <summary>The item the window is about.</summary>
     public ItemId Item { get; } = item;
     /// <summary>Why it closed or could not open; null when opened or closed by a call.</summary>
     public string? Reason { get; } = reason;

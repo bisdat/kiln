@@ -2004,3 +2004,23 @@ fn enshrouded_modloaders_native_module_and_its_worlds_survive_install_repair_act
     install::uninstall(&dirs, &inst, &mut NoProgress).unwrap();
     same("uninstall");
 }
+
+#[test]
+fn uninstall_always_keeps_character_and_world_storage_even_if_a_receipt_lists_it() {
+    let t = tmp("storage-retention");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let game = t.0.join("game");
+    put(&game, "enshrouded.exe", b"MZ");
+    let staged = stage(&t.0, "storage", false);
+    for path in ["kiln/data/characters/a.json", "kiln/data/worlds/world-a/generations/1.json"] {
+        put(&staged, &format!("core/{path}"), b"stored items");
+    }
+    let bundle = bundle::create(&staged, &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let inst = client(&game);
+    install::install(&dirs, &inst, &bundle, &InstallOptions::default(), &mut NoProgress).unwrap();
+    install::uninstall_report(&dirs, &inst, &mut NoProgress).unwrap();
+    for path in ["kiln/data/characters/a.json", "kiln/data/worlds/world-a/generations/1.json"] {
+        assert_eq!(std::fs::read(game.join(path)).unwrap(), b"stored items", "{path}");
+    }
+    assert!(!game.join("kiln/kiln-core.dll").exists());
+}

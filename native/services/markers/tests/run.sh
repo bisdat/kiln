@@ -61,3 +61,12 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-s
   "$here/link_test.cpp" "$src/server.cpp" "$src/receiver.cpp" "$src/bridge.cpp" "$src/wire.cpp" "$src/catalog.cpp" "$src/store.cpp" \
   "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" -o "$out/link_test"
 "$out/link_test"
+
+# The glue (markers.cpp) through the core's start, kiln_plugin_main then on_ready, on a fake core for a dedicated server
+# and a game client (joined or hosting): on_ready returns on each, and only a client registers for the game's resources.
+# Anchors and surfaces are stand-ins (game hooks, render); the link is real. One child process per case.
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$here/stubs" -I"$src" \
+  -I"$abi" "$here/ready_test.cpp" "$src/markers.cpp" "$src/link.cpp" "$src/server.cpp" "$src/receiver.cpp" "$src/bridge.cpp" \
+  "$src/wire.cpp" "$src/catalog.cpp" "$src/store.cpp" "$src/events.cpp" "$src/arena.cpp" "$src/text.cpp" "$src/guard.cpp" \
+  -o "$out/ready_test"
+"$out/ready_test"

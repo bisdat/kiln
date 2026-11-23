@@ -16,6 +16,14 @@ public sealed class RegistryHostTests
         Assert.Equal("[]", RegistryHost.OrderJson([]));
     }
 
+    // review4 NS1: mods whose code uses the registry API are flagged, so the stage decodes the game's base before packs write.
+    [Fact(Timeout = 30_000)]
+    public async Task RegistryUsersAreFlaggedInTheOrder()
+    {
+        await Task.Yield();
+        var json = RegistryHost.OrderJson([("late", "1.0.0"), ("author", "2.0.0")], new HashSet<string>(StringComparer.Ordinal) { "author" });
+        Assert.Equal("""[{"mod":"late","version":"1.0.0"},{"mod":"author","version":"2.0.0","registry":true}]""", json);
+    }
     [Fact]
     public void ADifferentOnBootOrderIsNamed()
     {

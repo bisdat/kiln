@@ -3092,7 +3092,21 @@
       "x11Software": "Not used while the launcher draws without the GPU.",
       "x11Yours": "Your GDK_BACKEND={value} decides.",
       "x11NextOn": "The launcher may switch to X11 by itself",
-      "x11NextOff": "The next start stays on Wayland"
+      "x11NextOff": "The next start stays on Wayland",
+      "force": "Force GPU drawing on NVIDIA",
+      "forceIntro": "The Linux launcher bundles Ubuntu's WebKit, which draws without the GPU on every NVIDIA card. This switch lifts that block (WEBKIT_FORCE_DMABUF_RENDERER=1 with shared memory, WEBKIT_DMABUF_RENDERER_FORCE_SHM=1). It is off on clean starts: some NVIDIA drivers crash or show a black window with it. If a normal NVIDIA start fails to paint, the next start may try shared memory once and remember it if it works. Turning this switch off explicitly disables that recovery too. If a shared-memory start fails, the launcher turns it off by itself. Applies at the next start.",
+      "forceOff": "This start leaves the block as it is.",
+      "forceBlocked": "This start draws without the GPU because of that block: turn this on to try the GPU.",
+      "forceOn": "This start draws past the block.",
+      "forceFailed": "The start before with it failed, so this start forces nothing and the switch goes off.",
+      "recoveryTitle": "Launcher drawing recovered",
+      "forceRecovery": "The previous normal NVIDIA startup never confirmed a visible frame. This start is trying shared-memory GPU drawing once; a successful visible start is remembered for this installation and display backend.",
+      "forceRecovered": "Shared memory is the last working automatic renderer for this installation and display backend. Turning this switch off disables automatic recovery too.",
+      "forceUnguarded": "The startup crash guard could not be written, so this start forces nothing and the switch goes off.",
+      "forceUnused": "Not used without NVIDIA, while drawing without the GPU, or without WebKit's DMA-BUF renderer.",
+      "forceYours": "Your own WEBKIT_FORCE_DMABUF_RENDERER or WEBKIT_DMABUF_RENDERER_FORCE_SHM decides.",
+      "forceNextOn": "The next start draws past Ubuntu WebKit's NVIDIA block",
+      "forceNextOff": "The next start leaves Ubuntu WebKit's NVIDIA block alone"
     },
     "dev": {
       "mock": "Developer: mock data fallback",
@@ -3419,6 +3433,7 @@
       "updateState": "This launcher",
       "noGpu": "For a window that stays black.",
       "x11": "Much faster on a HiDPI screen, less sharp.",
+      "forceDmabuf": "For NVIDIA cards. Off by default.",
       "sandbox": "Keep it on unless the window will not open."
     },
     "tag": {
@@ -3862,7 +3877,7 @@
       "saves": "Your saves and worlds",
       "settings": "Mod settings and Kiln's config folder (they can hold server passwords)",
       "admin": "Kiln.Admin's token and address",
-      "mods": "What's inside your mods (only file names, sizes and dates)",
+      "mods": "What's inside your mods (only file and folder names, sizes and dates are listed, plus ShroudForge manifest IDs and versions in findings)",
       "steam": "Steam's own files"
     }
   },
@@ -3870,6 +3885,8 @@
     "dialogTitle": "Save a support report",
     "saved": "Report saved",
     "savedFile": "{file}, {size}.",
+    "savedPath": "Saved to {path} ({size}).",
+    "saveDownloads": "Save to Downloads",
     "problems": {
       "one": "It found {count} problem.",
       "other": "It found {count} problems."
@@ -3915,6 +3932,7 @@
     "catalog": "Catalog",
     "runtime": "Runtime",
     "logs": "Logs",
+    "conflicts": "Conflicts",
     "saves": "Saves",
     "editor": "Editor",
     "servers": "Servers",
@@ -6703,5 +6721,128 @@
       "vanilla": "These are not necessarily the files as Steam ships them. For those, use Verify integrity of game files in Steam (the game's Properties, Installed Files).",
       "unknown": "Kiln cannot tell which game files it would put back: {reason}."
     }
+  },
+  "registry": {
+    "title": "Registry conflicts",
+    "gameUnavailable": "Game selection unavailable",
+    "noGame": "No game selected",
+    "noGameHint": "Choose an installed game in Settings to read its registry snapshot.",
+    "sub": "The saved registry snapshot for this game, not live telemetry or a prediction of the next start.",
+    "refresh": "Refresh report",
+    "unavailable": "Registry report unavailable",
+    "missing": "No registry report yet",
+    "missingHint": "Kiln has not written kiln/state/registry.json for this game. There is no registry snapshot to inspect.",
+    "stale": "Stale snapshot",
+    "staleBody": "{reason} Values below belong to the saved snapshot, not necessarily the current world or mod list.",
+    "snapshot": "Snapshot",
+    "snapshotSub": "{time} · generation {generation} · {phase}",
+    "baseOrigin": "Base origin: {origin}",
+    "archiveWriter": "Archive writer: {writer}",
+    "unverified": "Mapping unverified",
+    "unverifiedBody": "Field edits may be refused as Unproven. Read each refusal for its reason.",
+    "certaintyHint": "Certain = Kiln observed the writer. Named from journal = archive-writer attribution. Best-effort drift is not proof of who wrote it or that no other writer exists.",
+    "partial": "Partial report",
+    "partialRows": {
+      "one": "{count} row was omitted by the native report or this view's safety limits.",
+      "other": "{count} rows were omitted by the native report or this view's safety limits."
+    },
+    "partialWriters": {
+      "one": "{count} earlier writer was left out of the writer chains.",
+      "other": "{count} earlier writers were left out of the writer chains."
+    },
+    "partialBody": "Text and list values are also bounded; this is not the full history.",
+    "empty": "No registry edits in this snapshot",
+    "emptyHint": "The report is present and valid, but contains no fields, conflicts, refusals or entry changes.",
+    "refused": "Refused edits",
+    "refusedSub": "These edits were not applied. RestartRequired needs a game restart; Unproven needs a proven mapping in Kiln.",
+    "noRefused": "No refused edits in the displayed report.",
+    "conflicts": "Conflicts and drift",
+    "conflictsSub": "Winners and other owners are as recorded at snapshot time.",
+    "noConflicts": "No conflict lines in the displayed report.",
+    "conflictLine": "{kind} · Winner: {winner} · Other owner: {loser}",
+    "fields": "Fields and writer chains",
+    "fieldsSub": "Earlier writers first; expand a field for its base, operations and result.",
+    "filter": "Filter fields or owners",
+    "noMatch": "No displayed fields match this filter.",
+    "noFields": "No field rows in the displayed report.",
+    "entries": "Entry changes",
+    "noEntries": "No entry changes.",
+    "added": "Added",
+    "removed": "Removed",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page} of {pages} · {count} displayed rows",
+    "summary": "Winner: {winner} · Result: {result}",
+    "summaryOmitted": {
+      "one": "{count} earlier writer omitted",
+      "other": "{count} earlier writers omitted"
+    },
+    "applies": "Applies: {applies} · Base origin: {origin}",
+    "baseValue": "Base value: {value}",
+    "writersOmitted": {
+      "one": "{count} earlier writer omitted. Only the retained end of the chain is shown.",
+      "other": "{count} earlier writers omitted. Only the retained end of the chain is shown."
+    },
+    "element": "Element: {element}",
+    "operation": "Operation: {operation}",
+    "after": "After: {value}",
+    "noWriters": "No writer rows; the base decides the result.",
+    "formula": "Formula inputs (evaluation order): {inputs}",
+    "winner": "Winner: {winner}",
+    "result": "Result:",
+    "certainty": {
+      "certain": "Certain",
+      "named": "Named from journal",
+      "bestEffort": "Best-effort drift",
+      "unknown": "Unknown"
+    },
+    "advancedField": "Advanced field (details hidden)",
+    "advancedReason": "Advanced field (mapping details hidden).",
+    "advancedConflict": "Advanced field conflict; mapping details hidden.",
+    "unknownField": "{field} (Field unknown to this launcher)",
+    "elementHidden": "element details hidden",
+    "baseOwner": "Base",
+    "noOwner": "None",
+    "referenceCheck": "Kiln reference check",
+    "referenceOp": "Reference check",
+    "fresh": {
+      "clock": "The report clock cannot be verified.",
+      "process": "The current game process cannot be verified.",
+      "stopped": "The game is not running; this is its last saved snapshot.",
+      "previousStart": "The report predates the current game start.",
+      "old": "This snapshot is more than 24 hours old.",
+      "start": "The current game start cannot be verified."
+    },
+    "error": {
+      "tooLarge": "Registry report exceeds the 8 MiB limit this view reads. Open kiln/state/registry.json in the game folder to read it in full.",
+      "nesting": "Registry report nesting limit exceeded.",
+      "structure": "Registry report structure limit exceeded.",
+      "notJson": "Registry report is not valid JSON.",
+      "format": "Unsupported registry report format (expected 1).",
+      "malformed": "Invalid registry report ({part})."
+    }
+  },
+  "playerStorage": {
+    "tab": "Storage",
+    "title": "Player storage",
+    "readOnly": "Read-only. These items wait in Kiln, separate from your backpack.",
+    "empty": "No player storage for this character.",
+    "return": "Return to character",
+    "returnTitle": "Return storage to this character?",
+    "returnBody": "Kiln makes a backup first, then adds as many base-game stacks as fit in extra backpack pages. Mod items and anything else stay in storage. The game and Steam must be closed.",
+    "serverCopy": "A Kiln server keeps its own copy of this storage. If you join it without Kiln, that server can give its copy back there.",
+    "confirm": "Return items",
+    "returning": "Returning…",
+    "result": "Returned {returned} stacks; {remaining} stacks remain in storage.",
+    "closeGame": "Close Enshrouded and Steam before returning storage.",
+    "localOnly": "Return is only available for LOCAL characters, not Steam Cloud saves.",
+    "saveFirst": "Save or discard your edits before returning storage.",
+    "unavailable": "Storage cannot be returned",
+    "restoreWarning": "This character has player storage. An older backup may pair with older storage; if its pair is no longer kept, items moved since that backup could be lost or duplicated.",
+    "unpaired": "This character changed since Kiln last saw its storage, so nothing can be returned to it. The newest storage copy is shown.",
+    "parked": "Mod off",
+    "kept": "kiln/data/characters and kiln/data/worlds stay. They keep player storage safe until you install Kiln again.",
+    "unreadable": "Some stored records cannot be shown. They are left unchanged.",
+    "modItems": "{count} stacks of mod items stay in storage: they need their mod."
   }
 }

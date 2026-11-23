@@ -20,8 +20,11 @@ public sealed class CreatureStateEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>The creature whose AI changed state.</summary>
     public EntityId Entity { get; }
+    /// <summary>The state it left.</summary>
     public EnemyState From { get; }
+    /// <summary>The state it entered.</summary>
     public EnemyState To { get; }
     /// <summary>The StateCondition HandleCondition was given (<see cref="StateCondition.Unknown"/> if none).</summary>
     public StateCondition Condition { get; }
@@ -79,13 +82,19 @@ public sealed class CreatureTargetEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>The creature whose target changed.</summary>
     public EntityId Entity { get; }
+    /// <summary>The new target (<see cref="EntityId.None"/> = it lost its target).</summary>
     public EntityId Target { get; }
+    /// <summary>The target it had before (<see cref="EntityId.None"/> = it had none).</summary>
     public EntityId Previous { get; }
     /// <summary>The last AI state Kiln saw for the creature.</summary>
     public EnemyState State { get; }
+    /// <summary>The server-world step the change was seen in.</summary>
     public ulong Step { get; }
+    /// <summary>The creature had no target and has one now.</summary>
     public bool Acquired => !Target.IsNone && Previous.IsNone;
+    /// <summary>The creature has no target now (<see cref="Target"/> is none).</summary>
     public bool Lost => Target.IsNone;
 }
 
@@ -101,7 +110,9 @@ public sealed class CreatureVariantAppliedEvent : KilnEvent
         Natural = natural;
     }
 
+    /// <summary>The creature the variant was applied to.</summary>
     public EntityId Entity { get; }
+    /// <summary>The variant that was applied.</summary>
     public CreatureVariant Variant { get; }
     /// <summary>A natural spawn (spawn rule), not a Kiln spawn.</summary>
     public bool Natural { get; }

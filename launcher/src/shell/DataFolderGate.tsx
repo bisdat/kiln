@@ -16,6 +16,7 @@ import { qk, useDataFolder } from "../api/hooks";
 import { Button, KeyValue, Modal, PathText, Splash, TaskProgress, errorText, toast, useTaskFeed } from "../ui";
 import { pickFolder, restartLauncher } from "./dataFolder";
 import { brokenTitle, elsewhereTitle, noticeView, undoingCancelLine, undoingTitle } from "./dataFolderText";
+import { dataFolderHold } from "./started";
 import { useT } from "../i18n";
 
 const GATE_WAIT_MS = 5000;
@@ -36,6 +37,8 @@ export function DataFolderGate({ children }: { children: ReactNode }) {
       .finally(() => clearTimeout(timer));
     return () => { live = false; clearTimeout(timer); };
   }, [qc]);
+  // the page's frame reports (shell/started.ts) wait while the folder is held: the backend keeps its renderer state there
+  useEffect(() => { dataFolderHold.set(broken !== null); }, [broken]);
   if (broken === undefined) return <Splash done={false} />;
   if (broken?.problem) return <BrokenPointer folder={broken} />;
   if (broken?.elsewhere) return <MovingElsewhere />;

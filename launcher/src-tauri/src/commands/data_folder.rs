@@ -373,6 +373,14 @@ pub(crate) fn start_with(f: &Folder) -> Next {
     Next::Nothing
 }
 
+/// Before the window (crate::render's start, which writes its breadcrumbs into the folder): this start holds the folder
+/// to remove an unfinished move's partial copy ([`start_with`]'s `Next::Undo`; also when it then cannot lock it for
+/// that). Reads the journal only.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn undo_waits(f: &Folder) -> bool {
+    f.located().is_ok_and(|l| l.source != RootSource::Env) && matches!(dfm::pending(&f.env), Ok(Pending::Uncommitted { .. }))
+}
+
 /// Keep the source stable and the copy unwritable for the entire scheduled/running recovery.
 fn lock_for_undo(f: &Folder, target: &Path) -> Result<Option<df::DataLock>, Error> {
     let locked = || busy("Kiln could not lock both data folders exclusively: close other Kiln processes and restart to remove the unfinished copy. Nothing was removed.");
@@ -1512,6 +1520,7 @@ pub(crate) mod tests {
         let (t, env, from, to) = moving("unrecorded", 4);
         let f = Arc::new(Folder::open(env.clone()));
         folder::replace(f.clone());
+        assert!(!undo_waits(&f), "no move yet");
         let l = f.located().unwrap().clone();
         hold_for_move(&f).unwrap();
         let opts = dfm::MoveOptions { force_copy: true, inject: Some(dfm::Inject::StopAfter(dfm::Step::Copy)) };
@@ -1526,6 +1535,9 @@ pub(crate) mod tests {
         let f2 = Arc::new(Folder::open(env.clone()));
         folder::replace(f2.clone());
         assert_eq!(f2.located().unwrap().dirs.root, from);
+        // known before the window, from the journal alone (crate::render keeps its breadcrumbs out of the folder then)
+        assert!(undo_waits(&f2), "the start will hold the folder for the removal");
+        assert_eq!(f2.hold(), Hold::Free, "and asking holds nothing yet");
         let scheduled = start_with(&f2);
         assert!(added.is_file(), "startup synchronously deleted an unrecorded addition (scheduled={scheduled:?})");
         assert_eq!(scheduled, Next::Undo, "the recovery is a task");

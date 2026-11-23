@@ -560,6 +560,7 @@ public static class AiStats
 {
     /// <summary>Sense filter calls, and how many of them refused.</summary>
     public static long FilterCalls => Interlocked.Read(ref AiRuntime.FilterCalls);
+    /// <summary>How many of the <see cref="FilterCalls"/> refused.</summary>
     public static long FilterRefused => Interlocked.Read(ref AiRuntime.FilterRefused);
     /// <summary>Creatures given their own relations.</summary>
     public static long Rows => Interlocked.Read(ref AiRuntime.RowsWritten);

@@ -141,6 +141,7 @@ pub(crate) fn run(l: &mut Linter) {
                 "natives" => natives(&mut out, m, f),
                 "schematic" => schematic(&mut out, f),
                 "skills" => skills(&mut out, f),
+                "blocks" => { if let Some(root) = &f.root { block_relations(&mut out, &f.display, root, "", ""); } },
                 _ => {}
             }
         }
@@ -167,6 +168,7 @@ pub(crate) fn run(l: &mut Linter) {
             "schematic" => schematic(&mut out, f),
             "skills" => skills(&mut out, f),
             "mod-values" => mod_values(&mut out, &[f], None),
+            "blocks" => { if let Some(root) = &f.root { block_relations(&mut out, &f.display, root, "", ""); } },
             _ => {}
         }
     }
@@ -2239,6 +2241,87 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         }
     }
     rarity_rolls_crafted(out, m, &files);
+}
+
+/// Numeric relationships cannot be expressed by draft-2020-12's scalar bounds. Keep these aligned with the
+/// runtime compilers using schema/fixtures/block-shapes.json (also compiled by Kiln.Blocks.Tests).
+fn block_relations(out: &mut Out, file: &str, n: &Node, kind: &str, ptr: &str) {
+    if let Some(a) = n.as_array() {
+        for (i, child) in a.iter().enumerate() { block_relations(out, file, child, kind, &format!("{ptr}/{i}")); }
+        return;
+    }
+    let Some(obj) = n.as_object() else { return };
+    let number = |key: &str| n.get(key).and_then(Node::as_f64);
+    let mut check = |field: &str, bad: bool, message: String| {
+        if bad {
+            let at = n.get(field).unwrap_or(n);
+            out.push(Diagnostic::new(file, codes::SCHEMA_RULE, at.span, &message).pointer(&format!("{ptr}/{}", ptr_seg(field))));
+        }
+    };
+    match kind {
+        "behaviour" | "behaviours" => {
+            let mut names = HashSet::new();
+            for (i, attack) in n.get("attacks").and_then(Node::as_array).into_iter().flatten().enumerate() {
+                if attack.as_object().is_none() { continue; }
+                let name = attack.str_of("name").map(str::to_owned).unwrap_or_else(|| format!("attack{i}"));
+                if !names.insert(name.clone()) {
+                    out.push(Diagnostic::new(file, codes::SCHEMA_RULE, attack.span, &format!("two attacks are called {name}"))
+                        .pointer(&format!("{ptr}/attacks/{i}/name")));
+                }
+            }
+        }
+        "attacks" => {
+            let range = number("range").unwrap_or(2.5);
+            check("minRange", number("minRange").is_some_and(|v| v >= range), format!("minRange must be at least 0 and less than range {range}"));
+            if let Some(length) = number("length") {
+                check("hitAt", number("hitAt").unwrap_or(0.5) >= length, format!("hitAt must be at least 0 and less than length {length}"));
+            }
+        }
+        "colliders" if n.str_of("shape").unwrap_or("capsule") == "capsule" => {
+            check("height", number("height").unwrap_or(2.0) < 2.0 * number("radius").unwrap_or(0.5), "a capsule must be at least as high as it is wide (height >= 2 * radius)".into());
+        }
+        "roam" | "flee" => {
+            check("min", number("min").zip(number("max")).is_some_and(|(lo, hi)| lo > hi), "min must be at most max".into());
+        }
+        "blendPoints" => {
+            for point in obj {
+                if !point.key.trim().parse::<f64>().is_ok_and(f64::is_finite) {
+                    out.push(Diagnostic::new(file, codes::SCHEMA_RULE, point.key_span, "a blend input position must be a finite number")
+                        .pointer(&format!("{ptr}/{}", ptr_seg(&point.key))));
+                }
+            }
+        }
+        "move" => {
+            check("hitAt", number("hitAt").zip(number("length")).is_some_and(|(hit, len)| hit >= len), "hitAt must be more than 0 and less than length".into());
+        }
+        "loot" => {
+            check("stackMax", number("stackMax").zip(number("stackMin")).is_some_and(|(hi, lo)| hi < lo), "stackMax must be at least stackMin".into());
+        }
+        "entries" => {
+            check("countMax", number("countMax").is_some_and(|hi| hi < number("countMin").unwrap_or(1.0)), "countMax must be at least countMin".into());
+        }
+        "tables" => {
+            // DropPlace defaults countMax to 1; a LootEntry instead defaults it to countMin.
+            check("countMax", number("countMax").unwrap_or(1.0) < number("countMin").unwrap_or(1.0), "countMax (default 1) must be at least countMin".into());
+        }
+        _ => {}
+    }
+    for member in obj {
+        let key = member.key.as_str();
+        // A section is a map of names, not itself a block. Its entries (and inline parts/arrays) use the same checks.
+        if ptr.is_empty() {
+            for entry in member.value.as_object().into_iter().flatten() {
+                block_relations(out, file, &entry.value, key, &format!("/{}/{}", ptr_seg(key), ptr_seg(&entry.key)));
+            }
+            continue;
+        }
+        let child_kind = match (kind, key) {
+            ("blend", "clips") => "blendPoints",
+            (_, "primary" | "heavy" | "heavyAir" | "dodgeAttack" | "jumpAttack" | "plungeAttack" | "block" | "parry" | "special" | "execution" | "sneakAttack") => "move",
+            _ => key,
+        };
+        block_relations(out, file, &member.value, child_kind, &format!("{ptr}/{}", ptr_seg(key)));
+    }
 }
 
 /// KL406 for rarity rolls: a rule that rolls crafts (sources "craft", the default) of an item this mod gives a recipe. The

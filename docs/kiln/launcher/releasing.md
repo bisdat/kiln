@@ -369,6 +369,29 @@ rpm: rpm versions can't hold the `-` of `X.Y.Z-dev.N`.
 Builds reuse `<repo>/.out/release-work` (`--work`): a fixed export path keeps the compiler caches warm. Pinned
 downloads (the .NET runtime, netcoredbg) are cached in `~/.cache/kiln-release`.
 
+**One run per work folder and per `KILN_GLIBC_DIR`.** A run holds `<work>/.release.lock` and
+`KILN_GLIBC_DIR/.release.lock` (not with `--host-build`, which builds Linux in the work folder) from its start until
+it ends, however it ends (`flock` on an open file, `tools/release/lib/run-locks.sh`). A second run on either stops at
+once, before it removes or writes anything (the `--force` removal of `--out` included), with exit 1 and a line naming
+the lock and the run holding it (pid, release, out folder, start time), e.g. `release: another release builds in
+KILN_GLIBC_DIR=... (its lock: .../.release.lock; held by: pid 4242 release 0.2.0-dev.30.7, out ..., since ...)`. Two
+releases at once (a trial beside a release) need their own `--work` and their own `KILN_GLIBC_DIR`. Why: the
+0.2.0-dev.30 T1b trial shared `KILN_GLIBC_DIR` with another run and shipped the kilnctl that run built minutes later in
+the same cargo folder. A build the run started and left behind keeps the lock open; when the run named in the file is
+gone, the message says so (`fuser -v <lock>` finds the process). The lock files stay; an unheld one is harmless.
+Other users of a `KILN_GLIBC_DIR` (`linux-build/run.sh` by hand, a client test build) take no lock: give them
+another folder while a release runs.
+
+**Fresh file times and the run's own Linux CLIs.** `git archive` gives every exported file the commit's time, and Cargo
+counts a crate as built when none of its inputs is newer than its last build, so a reused cargo folder
+(`<work>/cargo`, `KILN_GLIBC_DIR/cargo`) that last built a later commit kept that commit's code for an older export.
+After the source tarballs (which keep the commit's time) every file of the export gets the time of the export: each
+run rebuilds the workspace crates (crates.io dependencies are not judged by file times), slower but right for a
+release. kilnctl, kiln and kiln-eml-inspect (Linux) are copied into `<work>/linux-bin` right after their build; the
+runtime bundle, the stage, the folder and the checks take those copies, never the cargo target folder. Tests:
+`python3 -I tools/release/test_release_locks.py` (a second run refused on a held work folder or `KILN_GLIBC_DIR`,
+before anything is changed; the file times; Cargo keeping an older-dated change and rebuilding it after the reset).
+
 ## Linux builds (the Ubuntu 22.04 container)
 Every Linux ELF file of a release (the launcher's AppImage, deb and rpm, `kilnctl`, `kiln`) is compiled and bundled
 in a Docker container, Ubuntu 22.04 with glibc 2.35 (`tools/release/linux-build/`). Why: a Linux binary needs the
@@ -393,7 +416,7 @@ cannot be inspected or exceeds the nesting limit (32). Source, Windows and updat
   no host HOME or signing environment is passed. Its HOME, CARGO_HOME and cargo
   target dir live in `KILN_GLIBC_DIR` (default `<repo>/.out/glibc`: `home/` holds Tauri's downloaded AppImage tools,
   `cargo-home/` the crates, `cargo/` the Linux build), separate from the host's own cargo builds, so later runs are
-  incremental. Symlinked host directories retain their requested paths inside the container; commands and compiler
+  incremental. One release at a time per `KILN_GLIBC_DIR` (its `.release.lock`, see "The release folder"). Symlinked host directories retain their requested paths inside the container; commands and compiler
   flags preserve spaces. Run as the release owner, not root. The wrapper removes its container on failure or a
   catchable signal. Caches and build/log evidence stay for reuse; the unpacked notices scratch directory is removed.
   It needs ~3 GB, the image ~2.4 GB of Docker's disk; on the build machine `.out/glibc` is a link to `/mnt/Dongus/kiln-glibc`, off the root
@@ -536,6 +559,95 @@ Every release, minor patches (0.2.0-dev.29.N) and majors (0.2.0-dev.30) alike, m
    words when wanted, edited by hand.
 
 Tests: `python3 -I tools/release/test_roadmap.py` (offline; git, ssh, npm and curl stubbed).
+
+### The API history ledger
+`managed/api-history.tsv` says which release first shipped every public API entry, and the mod API version of that
+release. The agent API index and the "Since mod API 0.2.x" lines of the API reference read it. Tab-separated, one header
+line, Unix newlines, sorted by `kind`, `project`, `entry`:
+
+| Column | Holds |
+|---|---|
+| `kind` | `managed` or `native` |
+| `project` | the assembly (`Kiln.Blocks`); native: the header under `native/core/abi` (`services/kiln_stations.h`) |
+| `entry` | the exact line of `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt`; native: `<header>:<Table>:<row>`, a function-pointer row of a `Kiln*Api` struct |
+| `release` | `0.2.0-dev.30.5` (`<=0.2.0-dev.26`: that release or an earlier one) |
+| `mod_api` | `Kiln.Mods.ApiVersion` at that release, `0.2.14` (`<=0.2.1`) |
+
+The record starts at the first release tag that has it: PublicAPI files at 0.2.0-dev.26, the native headers at
+0.2.0-dev.10, so what stood there then is `<=`. Lines still in `PublicAPI.Unshipped.txt` have no row: they get
+theirs when `promote` moves them. A beta tag is no release, and a line's row is never removed: a member made
+experimental or forwarded keeps the row of its old line, and the new line (`[KILNX001]...`, `... (forwarded,
+contained in ...)`) has its own, dated by the change. The `const Kiln.Mods.ApiVersion = "..."` line is not in the ledger
+(every bump rewrites it).
+
+- `tools/release/api-gate.sh promote --if-same-as <commit> --release $V` (release.sh does this after good checks) moves
+  the lines and appends their rows, plus every native row of the released commit's headers that has none. Commit
+  `managed/api-history.tsv` with the moved PublicAPI files, as release.sh's closing text says. Without `--release` the
+  name is the release tag on the commit, else promote refuses.
+- `tools/release/api-gate.sh history --check` exits 1 unless the ledger equals what the release tags say (no missing,
+  extra or wrong row; needs the tags: `git fetch --tags`), is in canonical order and format, and has a row for every
+  line of every `PublicAPI.Shipped.txt`. Rows of a release with no tag yet (promoted, waiting for its tag) are accepted
+  when the record has their entries.
+- `history --seed` writes the whole ledger from the tags (a few seconds, the same file every time); `history --append
+  --release $V [--mod-api X.Y.Z]` adds the rows of a promote that did not run.
+
+Tests: `python3 -I tools/release/test_apihistory.py`.
+
+### The agent API index, the doc gate and the drift checks
+Three generated or gated things follow the public API from `tools/check.sh` to the release, so a gap stops at the commit
+that makes it, and the release only repeats the check.
+
+**The agent API index** (`agent/skills/kiln-modding/references/api-index/`, `tools/docs-site/api_index.py`) is generated from
+the PublicAPI record, the XML docs of a Release build and the ledger above, and committed.
+- `tools/check.sh` stage `index` regenerates it in memory from the build it made and fails when the committed copy
+  differs (a changed API line, doc comment or ledger row makes it stale). The fix is the command the failure prints:
+  `python3 -I tools/docs-site/api_index.py --xml <KILN_OUT>/dotnet/bin`, then commit.
+- `release.sh` runs the generator before the export (step "agent API index"). A release builds a commit, so when the
+  index was out of date the release stops at once, says so, and wants the regenerated files committed
+  (`skill: regenerate the API index`) before it runs again. After the checks, `promote` moves the Unshipped lines and
+  appends their ledger rows; release.sh then regenerates the index once more from the same XML docs, and the closing text
+  lists the API record, `managed/api-history.tsv` and the index as one commit (`api: ship the API of <version>`). Test
+  builds (`--beta`, `--worktree`, `--launcher-only`) skip both runs and export the committed index.
+
+**The doc gate**: every public type and member has an XML summary, a positional record has a documented property for each
+parameter, and `undocumented-baseline.txt` is empty.
+- `tools/check.sh` stage `docs` runs `tools/docs-site/record_params.py` (the compiler's CS1591 never asks for the
+  properties of `record Pair(int Left, int Right)`; each needs a `<param name="Left">` on the record) and
+  `tools/docs-site/build.sh --gate-only` (docfx metadata over the build's DLLs and XML docs, then `undocumented.py`
+  strict). It takes about a minute and installs the docfx tool into `$KILN_OUT/tools` on first use (NuGet);
+  `tools/check.sh --no-docfx` leaves the docfx half out when offline, and the last line says so.
+- `release.sh` builds the modding site with `KILN_DOCS_STRICT=1`: `tools/docs-site/build.sh` fails before `docfx build` on a
+  name that has no summary and is not in `tools/docs-site/undocumented-baseline.txt`. The baseline names nothing (it had
+  4,777 names at dev.24): write the doc comment, do not add the name. `KILN_DOCS_STRICT=0` makes the gate a warning, only
+  for looking at a tree that has gaps.
+- Not gaps (left out by `undocumented.py`, as the compiler leaves them out): a record's `Equals`, `GetHashCode`,
+  `ToString`, `==`, `Deconstruct` and copy constructor, a delegate's constructor and `Invoke`/`BeginInvoke`/`EndInvoke`, the
+  generated `Kiln.Ecs` types. Experimental (`[KILNX...]`) members are checked like any other.
+- Tests: `python3 -I tools/docs-site/test_undocumented.py`, `test_record_params.py` and `test_build.py`.
+
+**The drift checks** (`tools/docs-site/drift.py`, `tools/check.sh` stage `drift`, a second or two, no build) hold the docs and
+the skill to the code:
+- `names`: every `Type.Member` in backticks (and in a C# code fence) of `agent/skills/kiln-modding/**` and `docs/kiln/**`
+  is public API: a member, nested type or enum value of the type, an inherited member, a C# 14 `extension(...)` member or a
+  classic extension method. Release notes, generated pages, schema pages and the `*-plan.md` design plans are not read.
+- `versions`: a "since 0.2.0-dev.N", "dev.N+" or "mod API 0.2.N" mark before (or after) a backticked name must not be earlier
+  than the ledger's first release of that name; a name still in `PublicAPI.Unshipped.txt` is later than every release.
+- `facts`: `SKILL.md`, `references/setup.md` and `references/api*.md` pin no build or mod API older than the current
+  `Kiln.Mods.ApiVersion` (`Kiln.Sdk/<version>`, a version on a "this release" line, "(0.2.N on dev.X)"), and
+  `references/versions.md` has a row for the current mod API and for every mod API from its first row on.
+- `map`: every repository page and sample `references/docs-map.md` names exists, every wiki page it names exists in
+  frostdev.io's `src/content/kiln-wiki` (`$KILN_WIKI_DIR`; skipped when that folder is not there), and the skill's relative
+  links, `#anchors` and `docs/kiln/...` pages resolve.
+- A false positive (a sample name, a csproj name, a placeholder, a deliberate "do not do this" or "there is no such member"
+  text) goes into `tools/docs-site/drift-allow.txt`, four tab-separated cells: check, name, file glob, reason. A real
+  mistake is fixed in the text. An entry that matches nothing any more fails the check.
+- `python3 -I tools/docs-site/drift.py [names|versions|facts|map] [--warn <check>]` runs it by hand;
+  `python3 -I tools/docs-site/test_drift.py` tests it (`KILN_DRIFT_REAL=1` runs it over this tree too).
+
+**The status page** `docs/kiln/status.generated.md` (`tools/docs-site/status-tables.py`) is the one generated page that
+cannot be made from the repository: it reads the `kiln/state/capabilities.json` of a booted server (and a client boot) and
+the `client-checks.json` ledger, which only a running Kiln writes. After a release's lab run, regenerate it from those
+files (the command is in the page's own header) and commit it; release.sh's closing text names the step.
 
 ### Cutting a beta (a test build for the Discord testers)
 A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta

@@ -24,13 +24,16 @@ public sealed class SettingChangedEvent : KilnEvent
     /// <summary>Values as <see cref="Settings.Get"/> returns them (bool, double, long, string).</summary>
     public object Before { get; }
 
+    /// <summary>The value after the change, as <see cref="Settings.Get"/> returns it.</summary>
     public object After { get; }
 
     /// <summary>Id of the mod that changed it, "kiln" for Kiln itself, "game" for a change outside Kiln.</summary>
     public string By { get; }
 
+    /// <summary>True for a change made outside Kiln (<see cref="By"/> is "game").</summary>
     public bool FromGame => By == "game";
 
+    /// <summary>A one-line description: the setting, its old and new value, and who changed it.</summary>
     public override string ToString() => $"{Name}: {Before} -> {After} ({By})";
 }
 

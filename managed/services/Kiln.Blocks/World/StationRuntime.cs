@@ -3,15 +3,49 @@
 namespace Kiln;
 
 /// <summary>What a station is doing: the game's <c>FactoryStationState</c>.</summary>
-public enum StationState { NoRecipe, MissingMaterials, Paused, Stopped, Running, MissingOutputSpace }
+public enum StationState
+{
+    /// <summary>It has no recipe to make.</summary>
+    NoRecipe,
+    /// <summary>The inputs of its recipe are not there. A recipe of another workshop shows as this too.</summary>
+    MissingMaterials,
+    /// <summary>It is paused: there is no water under it, or no energy.</summary>
+    Paused,
+    /// <summary>It is stopped.</summary>
+    Stopped,
+    /// <summary>A cycle is running.</summary>
+    Running,
+    /// <summary>The finished outputs wait for room.</summary>
+    MissingOutputSpace,
+}
 
 /// <summary>What keeps a station from running: the game's <c>FactoryStationRequirementMask</c>.</summary>
 [Flags]
-public enum StationNeeds { None = 0, Recipe = 1, EnergySourceInRange = 2, EnergyAmount = 4, InputMaterials = 8, OutputSpace = 16, AboveWater = 32 }
+public enum StationNeeds
+{
+    /// <summary>Nothing is missing.</summary>
+    None = 0,
+    /// <summary>A recipe.</summary>
+    Recipe = 1,
+    /// <summary>An energy source in range.</summary>
+    EnergySourceInRange = 2,
+    /// <summary>Enough energy.</summary>
+    EnergyAmount = 4,
+    /// <summary>The input materials.</summary>
+    InputMaterials = 8,
+    /// <summary>Room for the outputs.</summary>
+    OutputSpace = 16,
+    /// <summary>To stand above water.</summary>
+    AboveWater = 32,
+}
 
+/// <summary>What a placed station is doing, as <see cref="Stations.Status"/> reads it from the game's <c>FactoryStation</c>.</summary>
+/// <param name="State">What it is doing.</param>
 /// <param name="Running">The recipe in progress, or 0.</param>
 /// <param name="Next">The recipe it was told to make, which it goes back to as long as there are inputs. 0: none.</param>
 /// <param name="Started">Its current cycle's start, on the game's clock.</param>
+/// <param name="Needs">What keeps it from running, as flags. <see cref="StationNeeds.None"/> when nothing does.</param>
+/// <param name="StoppedByPlayer">True while a player's stop (the game's stop button) is on.</param>
 public sealed record StationStatus(StationState State, uint Running, uint Next, TimeSpan Started, StationNeeds Needs, bool StoppedByPlayer);
 
 /// <summary>

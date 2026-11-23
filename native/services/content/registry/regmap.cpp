@@ -10,6 +10,8 @@
 #include <set>
 #include <sstream>
 
+#include "../../../core/src/services/boot_gamedata.h"
+
 #include "schema.g.h"
 
 namespace kc::registry::map {
@@ -167,6 +169,10 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
     if (out->exe_sha256.size() != 64 || !std::all_of(out->exe_sha256.begin(), out->exe_sha256.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
         errs->push_back("record: exeSha256 is the exe's SHA-256 in 64 lower-case hex digits");
     out->game_build = str(doc, "gameBuild"), out->steam_build = str(doc, "steamBuild"), out->proof = str(doc, "proof");
+    out->regmap_digest = str(doc, "regmapDigest");
+    if (doc.contains("regmapDigest") && (out->regmap_digest.size() != 64 ||
+                                         !std::all_of(out->regmap_digest.begin(), out->regmap_digest.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })))
+        errs->push_back("record: regmapDigest is the sha256 of the regmap/common it was proven on, 64 lower-case hex digits");
     if (!doc.contains("verified") || !doc["verified"].is_boolean()) errs->push_back("record: verified is true or false");
     else out->verified = doc["verified"].get<bool>();
     const json layouts = doc.value("layouts", json::object());
@@ -183,8 +189,23 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
         if (s == "ok") out->rows[k] = BuildRow::Ok;
         else if (s == "changed") out->rows[k] = BuildRow::Changed;
         else if (s == "unmapped") out->rows[k] = BuildRow::Unmapped;
-        else errs->push_back("record: rows." + k + " is ok, changed or unmapped");
+        else if (s == "unproven") out->rows[k] = BuildRow::Unproven;
+        else errs->push_back("record: rows." + k + " is ok, changed, unproven or unmapped");
     }
+    const json reasons = doc.value("reasons", json::object());
+    if (!reasons.is_object()) errs->push_back("record: reasons is an object of \"<registry>.<field>\": text");
+    else
+        for (const auto& [k, v] : reasons.items()) {
+            if (v.is_string()) {
+                std::string reason = v.get<std::string>();
+                if (reason.size() > 400) {
+                    size_t end = 400;
+                    while (end && (static_cast<unsigned char>(reason[end]) & 0xc0) == 0x80) --end;
+                    reason.resize(end); // never split a UTF-8 code point in the refusal/state JSON
+                }
+                out->reasons[k] = std::move(reason);
+            } else errs->push_back("record: reasons." + k + " is text");
+        }
     const json a = doc.value("aliases", json::object());
     for (const char* list : {"renames", "suffixes"}) {
         const json items = a.value(list, json::array());
@@ -229,6 +250,16 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
         if (e.is_regular_file() && e.path().extension() == ".json") files.push_back(e.path());
     if (ec) return errs->push_back(dir + "/common: " + ec.message()), false;
     std::sort(files.begin(), files.end());
+    // the deployed mapping's digest (kilnctl regproof's regmapDigest): which mapping a record's proof holds for
+    std::string digest_text;
+    for (const fs::path& p : files) {
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        const std::u8string name = p.filename().u8string();
+        digest_text += std::string(name.begin(), name.end()) + "\n" + kiln::boot_gd::hex_of(kiln::boot_gd::sha256(ss.str())) + "\n";
+    }
+    out->common_digest = kiln::boot_gd::hex_of(kiln::boot_gd::sha256(digest_text));
     for (const fs::path& p : files) {
         json doc;
         if (!read_json(p, &doc, errs)) continue;
@@ -281,7 +312,19 @@ Mapping RegMap::mapping(const std::string& registry, const std::string& field, s
         *reason = "Unproven: " + q + " is not proven for " + build_name + " (no verified regmap record for it yet; a Kiln update is needed)" + kNotApplied;
         return Mapping::Unproven;
     }
+    if (build.regmap_digest != common_digest) {
+        // the record's proof holds for the mapping it was proven on, not for an edited one (review2 S1)
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (its record was proven for another Kiln mapping than the one " +
+                  "installed; a Kiln update is needed)" + kNotApplied;
+        return Mapping::Unproven;
+    }
     const auto b = build.rows.find(q);
+    if (b != build.rows.end() && b->second == BuildRow::Unproven) {
+        const auto r = build.reasons.find(q);
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (" +
+                  (r != build.reasons.end() && !r->second.empty() ? r->second : std::string("no lab evidence on this build")) + ")" + kNotApplied;
+        return Mapping::Unproven;
+    }
     if (b == build.rows.end() || b->second != BuildRow::Ok) {
         *reason = "Unmapped: " + q + " is not mapped for " + build_name + " yet (a Kiln update is needed)" + kNotApplied;
         return Mapping::Unmapped;

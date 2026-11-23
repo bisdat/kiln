@@ -11,8 +11,15 @@
     },
     "tools/RemoveBuildingVoxels": {
       "find": [{"pattern": "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 4C 89 60 20 55 41 56 41 57 48 8D A8 18 F8 FF FF 48 81 EC D0 08 00 00"}]
+    },
+    "@tools/TerrainCarveKernel.report": {
+      "comment": "The kernel's removal report (kiln#133, the tool action trace): report = [descriptor + tools/carve.report]; each carved cell adds its fraction to the float total at report + tools/carve.report_total. S 0xa3aab9 / C 0xa901b9, rdi = the descriptor (rcx at entry).",
+      "find": [{"scope": {"symbol": "tools/TerrainCarveKernel", "size": 2432}, "pattern": "48 8B 87 {tools/carve.report:d32} F3 0F 2C C8 40 3A F1 44 0F B6 C1 44 0F 42 C6 48 85 C0 74 ?? 45 84 C0 74 ?? 0F 28 C6 F3 0F 58 40 {tools/carve.report_total:d8} F3 0F 11 40 {tools/carve.report_total:d8} 48 8B 87 {tools/carve.report:d32}"}]
     }
   },
-  "constants": {},
+  "constants": {
+    "tools/carve.report": { "min_votes": 2 },
+    "tools/carve.report_total": { "min_votes": 2 }
+  },
   "features": {}
 }

@@ -10,6 +10,8 @@ cxx=${CXX:-c++}
 "$cxx" -std=c++20 -D__fastcall= -Wall -Wextra -Werror -I"$abi" \
     "$here/impact_args_test.cpp" -o "$out/impact-args-test"
 "$out/impact-args-test"
+"$cxx" -std=c++20 -Wall -Wextra -Werror -pthread -I"$abi" "$here/action_trace.cpp" -o "$out/action-trace-test"
+"$out/action-trace-test"
 "$cxx" -std=c++20 -D__fastcall= -Wall -Wextra -Werror -pthread -I"$abi" \
     "$here/impact_dispatch_test.cpp" "$here/../impact_binding.cpp" "$here/../policy.cpp" -o "$out/impact-dispatch-test"
 "$out/impact-dispatch-test"

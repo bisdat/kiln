@@ -8,6 +8,7 @@
 #endif
 
 #include "services/kiln_registry.h"
+#include "services/kiln_registry_live.h"
 #ifdef KILN_TEST_REGISTRY_HOST
 #include "kiln_registry_host.h"
 #endif
@@ -19,7 +20,7 @@
 #endif
 
 KILN_TEST_ASSERT(KILN_REGISTRY_VERSION == 1u, "kiln.registry v1");
-KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 88, "KilnRegistryApi: header + 10 pointers (registry P2 appends its live members later)");
+KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 88, "KilnRegistryApi: header + 10 pointers (registry P2 live API uses a separate table)");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, header) == 0, "header");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, status) == 8, "status");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, schema_json) == 16, "schema_json");
@@ -104,10 +105,10 @@ KILN_TEST_SIG(subscribe_ready, KilnResult(KILN_CALL*)(KilnOwner, KilnRegistryRea
 KILN_TEST_SIG(unsubscribe, KilnResult(KILN_CALL*)(KilnHandle));
 
 #ifdef KILN_TEST_REGISTRY_HOST
-KILN_TEST_ASSERT(KILN_REGISTRY_HOST_VERSION == 1u, "kiln.internal.registry v1");
-KILN_TEST_ASSERT(sizeof(KilnRegistryHostApi) == 24 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
-                     offsetof(KilnRegistryHostApi, set_mode) == 16,
-                 "kiln.internal.registry v1 layout");
+KILN_TEST_ASSERT(KILN_REGISTRY_HOST_VERSION == 2u, "kiln.internal.registry v2");
+KILN_TEST_ASSERT(sizeof(KilnRegistryHostApi) == 32 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
+                     offsetof(KilnRegistryHostApi, set_mode) == 16 && offsetof(KilnRegistryHostApi, read_pass) == 24,
+                 "kiln.internal.registry v2 layout (read_pass, review4 NS5)");
 KILN_TEST_ASSERT(KILN_REGISTRY_MODE_RESOURCES_READY == 0 && KILN_REGISTRY_MODE_ONBOOT == 1, "stage modes");
 #endif
 

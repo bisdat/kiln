@@ -9,6 +9,7 @@ import { useAssetsStatus, useExtractTask } from '../../components/GameArt';
 import { reopenIfClean } from './session.js';
 import { PLACEHOLDER } from './parts.jsx';
 import { t } from '../../i18n';
+import { setGameNames } from './game-names.js';
 
 /** The dev fallback that copies upstream's art (the browser dev server only). */
 export const FETCH_SCRIPT = 'tools/launcher/fetch-editor-assets.sh';
@@ -23,43 +24,41 @@ async function loadOverlay(version) {
   }
 }
 
+async function loadNames(version) {
+  try {
+    const r = await fetch(`${ASSET_BASE}names/names.json?v=${encodeURIComponent(version)}`);
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
 /** {ready, gen, assets, hint}: mount the views once `ready`; key them by `gen` (new art: icons that fell back to the
  *  placeholder load again). `root`: the element whose broken images get the placeholder. */
 export function useEditorArt(root) {
   const [assets, setAssets] = useState(null);
   const [gen, setGen] = useState(0);
-  const [ready, setReady] = useState(!IS_TAURI);
+  const [ready, setReady] = useState(false);
   const st = useAssetsStatus();
   const task = useExtractTask(st.data);
   const e = st.data?.editor;
   const known = !IS_TAURI || st.data !== undefined || st.isError;
   const artKey = e?.extracted ?? '';
   const modVersion = e?.modded?.version ?? '';
-  useEffect(() => { assetsPresent().then(setAssets); }, []);
-  // new art (first extraction, a game update): load the icons again. Keyed by the art it last saw, not by "first run":
-  // React's StrictMode runs an effect twice on mount, and a second run with the same art must not remount the views
-  // (that dropped the open character menu and the Deck's focus a moment after the page showed)
-  const seenArt = useRef(null);
-  useEffect(() => {
-    if (!known) return;
-    if (seenArt.current === null || seenArt.current === artKey) { seenArt.current = artKey; return; }
-    seenArt.current = artKey;
-    assetsPresent().then((ok) => { setAssets(ok); setGen((g) => g + 1); });
-  }, [artKey, known]);
-  // mod items: merge before the first mount, again whenever the overlay changes
+  useEffect(() => { assetsPresent().then(setAssets); }, [artKey]);
+  // Load both tables before mounting either shell. A fresh art generation also refreshes the local names.
   const merged = useRef(false);
   useEffect(() => {
     if (!known) return undefined;
     let live = true;
-    loadOverlay(modVersion).then((ov) => {
+    Promise.all([loadOverlay(modVersion), loadNames(artKey)]).then(([ov, names]) => {
       if (!live) return;
+      setGameNames(names);
       mergeModded(ov, modVersion);
       if (merged.current) { setGen((g) => g + 1); reopenIfClean(); }
       merged.current = true;
       setReady(true);
     });
     return () => { live = false; };
-  }, [modVersion, known]);
+  }, [modVersion, artKey, known]);
   // on the document: the catalog is a dialog drawn outside the editor's element (the desktop's Modal, a Deck dialog)
   useEffect(() => {
     const onError = (ev) => {

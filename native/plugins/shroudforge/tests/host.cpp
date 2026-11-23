@@ -641,7 +641,10 @@ int main(int argc, char** argv) {
                 if (!event) Sleep(20);
             }
             if (!event) return 12;
-            const bool installed = std::filesystem::exists(game / L"shroudforge/shroudforge.exe");
+            // KILN_SF_NO_HELPER: shroudforge.exe is installed, but the adapter must not have started it (an app older than
+            // the runtime, src/helper_version.h): Kiln's event takes the toggles
+            const bool installed = std::filesystem::exists(game / L"shroudforge/shroudforge.exe") &&
+                                   !GetEnvironmentVariableW(L"KILN_SF_NO_HELPER", nullptr, 0);
             const bool exits = GetEnvironmentVariableW(L"KILN_SF_HELPER_EXIT", nullptr, 0) != 0;
             if (exits) Sleep(2300);  // worker notices a dead helper and publishes the Kiln handoff
             for (int i = 0; i < 3; ++i) {

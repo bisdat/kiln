@@ -15,3 +15,7 @@ Kiln.UiTextFieldFlags.EnterReturns = 1 -> Kiln.UiTextFieldFlags
 Kiln.UiTextFieldFlags.Multiline = 4 -> Kiln.UiTextFieldFlags
 Kiln.UiTextFieldFlags.None = 0 -> Kiln.UiTextFieldFlags
 Kiln.UiTextFieldFlags.ReadOnly = 2 -> Kiln.UiTextFieldFlags
+const Kiln.Ui.Inventory.TintCapability = "ui.slots.tint" -> string!
+static Kiln.Ui.Inventory.TintWhen(System.Func<Kiln.UiItemView, Kiln.Color?>! rule, Kiln.ItemId item = default(Kiln.ItemId)) -> System.IDisposable!
+const Kiln.Ui.Inventory.ChestButtonCapability = "ui.chest.buttons" -> string!
+static Kiln.Ui.Inventory.AddChestButton(string! caption, System.Action<Kiln.InventoryScreen>! handler) -> System.IDisposable!

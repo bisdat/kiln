@@ -1,5 +1,5 @@
 /* This file is EMF's public C API header, copied unchanged (below the line) from EMF (Enshrouded Modding Framework)
- * 0.6.14, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v46 table on Kiln's
+ * 0.6.20, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v48 table on Kiln's
  * services so unmodified EMF mods load on Kiln. Also in licenses/EMF-LICENSE.txt.
  *
  * MIT License
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * ------------------------------------------------------------------------------------------------------------------ */
-/* EMF (Enshrouded Modding Framework) C API, version 46 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 48 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -52,7 +52,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 46
+#define EMF_API_VERSION 48
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -585,6 +585,8 @@ typedef void (*EmfBuffCallback)(EmfWorld* world, const EmfBuffEvent* ev, void* u
 #define EMF_MARKER_EDGE_ARROW 0x04u /* off screen or behind: an arrow at the screen's edge */
 #define EMF_MARKER_DISTANCE 0x08u   /* the distance under the text ("42 m") */
 #define EMF_MARKER_MINIMAP 0x10u    /* v35: a canvas's EMF_CANVAS_MARKERS command draws it (a minimap) */
+#define EMF_MARKER_BAR 0x20u        /* v47: a bar under the text, `bar` of it filled (a health bar); an older core
+                                       leaves the flag out (no bar) */
 #define EMF_MARKER_DIAMOND 0u       /* EmfMarker.shape, drawn when there is no icon */
 #define EMF_MARKER_CIRCLE 1u
 #define EMF_MARKER_SQUARE 2u
@@ -603,7 +605,7 @@ typedef struct EmfMarker {
     uint8_t shape;      /* EMF_MARKER_DIAMOND ... */
     uint8_t pad[3];
     uint32_t game_icon; /* EMF_MARKER_GAME_MAP: a game map icon type (marker_types) drawn by the game, 0 = EMF's shape */
-    uint32_t pad2;
+    float bar;          /* v47 (pad2 before): with EMF_MARKER_BAR the filled share of the bar under the text, 0..1 */
 } EmfMarker;
 #define EMF_MAP_TYPE_FAST_TRAVEL 0x01u /* EmfMapMarkerType.flags: a fast travel destination (shrines, altars) */
 #define EMF_MAP_TYPE_CUSTOM 0x02u      /* one of the types players place themselves */
@@ -783,6 +785,16 @@ typedef struct EmfPathQuery {
     uint8_t closest;      /* 1 = fall back to the closest reachable point (the game's march does this) */
     uint8_t pad[3];
     uint32_t max_nodes;   /* 0 = 2000; at most 20000 (the game's own default is 500) */
+    /* API v48 (0.6.20; an older core ignores it: check emf::has_v48()): plan as this creature walks, from its
+       templates: the room and node rules of its PathWalker (the game's own rule), its PathFinder's highest steps, and
+       its behaviour's default moves (an enemy that can open doors: the door move too) and default costs per ground
+       type. Calm walking: an enemy in the game's Guard state or a fight adds its extended moves (jumps), and a roaming
+       one its road costs; add jumps with `moves` to plan for that. On top: this query's from, to, closest and
+       max_nodes; `moves` is added; max_jump_up/down, width and height as given (width and height 0 = the creature's).
+       With the door move the room across is 0 unless width is given (any room loses the door). Only from a world
+       callback on the server world passed to path_find. Refused when the entity has no DynamicPathFinder or
+       PathWalker (not a creature the game plans paths for). owner 0 = this creature. 0 = off. */
+    uint32_t as_entity;
 } EmfPathQuery;
 typedef struct EmfPathPoint {
     float x, y, z;
@@ -799,6 +811,13 @@ typedef struct EmfPathResult {
        point with move 5), else 0; `count` entries. NULL when no point is a door (or the game gave no usable list).
        Valid during the callback only. */
     const uint32_t* doors;
+    /* API v48 (0.6.20; read them only when `size` covers them): what the search planned with, after as_entity and this
+       query's own fields: why a path differs shows here. */
+    uint16_t moves;     /* EMF_PATH_* */
+    uint8_t jump_up;    /* metres; 0 = no limit */
+    uint8_t jump_down;
+    float width;        /* the room across, as the query's width (half-metre steps); 0 = none */
+    float height;       /* the room up, metres (half-metre steps); 0 = none */
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);
@@ -853,6 +872,14 @@ typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, v
 #define EMF_BREAK_WORLD 0x4u   /* API v45: break the world's own blocks too (its ruins, as the game shipped them). Without
                                   it every sphere stops just short of the nearest such block (and of any block whose
                                   origin is not known), so a hole next to a ruin is smaller. A v44 core refuses the flag */
+#define EMF_BREAK_TERRAIN 0x8u /* API v47: break the terrain blocks a player placed too (Stone, Granite, dirt ... where
+                                  the shipped world had no ground), never the world's own ground or a ruin. Each cell
+                                  takes hits from its terrain material's health and hardness (EMF keeps that damage; it
+                                  heals 20 s after the last hit); EMF_BREAK_INSTANT and EMF_BREAK_DROPS apply; materials
+                                  lists building ids only. A cell whose shipped state is not known is never broken. An
+                                  older core refuses the flag */
+#define EMF_FIND_TERRAIN 0x1u  /* API v47 find_wall_ex: stop at a terrain cell a player placed too (other terrain is
+                                  passed over) */
 #define EMF_BREAK_DONE 0u
 #define EMF_BREAK_CANCELLED 1u /* the world ended first */
 #define EMF_BREAK_FAILED 2u    /* a game call faulted: breaking is off until a restart */
@@ -860,7 +887,7 @@ typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, v
 #define EMF_BREAK_DEFAULT_DAMAGE {100, 100, 95, 60, 50}
 typedef struct EmfBreakBlocks {
     uint32_t size;            /* sizeof(EmfBreakBlocks) */
-    uint32_t flags;           /* EMF_BREAK_INSTANT, EMF_BREAK_DROPS, EMF_BREAK_WORLD (v45) */
+    uint32_t flags;           /* EMF_BREAK_INSTANT, EMF_BREAK_DROPS, EMF_BREAK_WORLD (v45), EMF_BREAK_TERRAIN (v47) */
     float x, y, z;            /* metres: the centre of the (lowest) sphere */
     float radius;             /* metres, 0.25..3.5; 0 = 1 */
     float height;             /* metres, 0..4: more spheres up to this far above the centre (a column; at most 8) */
@@ -881,14 +908,17 @@ typedef struct EmfBlockInfo {
     uint32_t size;     /* sizeof(EmfBlockInfo) */
     uint32_t kind;     /* EMF_BLOCK_* */
     uint32_t material; /* building 0..127, terrain 1..127 */
-    uint32_t fill;     /* 0..255 */
-    uint32_t hardness; /* building: 0 Soft .. 4 VeryHard, 5 Unbreakable; terrain: 0 */
-    int32_t health;    /* building: the material's health points; 0 unknown */
+    uint32_t fill;     /* the cell's high byte, 0..255: terrain's fill; for a building block its paint (bit 7
+                          weathered, bits 4-6 overgrowth; 0 unpainted), not a sign of who placed it (see world) */
+    uint32_t hardness; /* 0 Soft .. 4 VeryHard, 5 Unbreakable; terrain: its terrain material's from v47 (0 before) */
+    int32_t health;    /* the material's health points (terrain: from v47); 0 unknown */
     int32_t damage;    /* building: the damage so far, 0..255 (it heals 20 s after the last hit); -1 unknown */
     float x, y, z;     /* the block's centre, metres */
     int32_t world;     /* API v45 (written when size covers it): building: 1 = the world's own block (a ruin as the
                           game shipped it), 0 = a player's (placed, or another material than the shipped one), -1 = not
-                          known (its place is not loaded); terrain and empty: 0 */
+                          known (its place is not loaded); terrain from v47: 1 = the world's own ground (the shipped
+                          world had ground there), 0 = a player placed it (it had none), -1 = not known (0 before
+                          v47); empty: 0 */
 } EmfBlockInfo;
 
 typedef struct EmfHitRule {
@@ -1614,7 +1644,8 @@ typedef struct EmfApi {
      * EMF already open, or the feature is off on this game build. The grid exists where the world is loaded (near
      * players); a query elsewhere ends NO_START, NO_TARGET or OTHER (no answer in 10 s). Each query is a search in the
      * game's own jobs, shared with every walking creature: do not ask again every step (the game's own enemies ask
-     * at most every 0.5 s). Any thread. */
+     * at most every 0.5 s). Any thread; with q->as_entity (v48) only from a world callback (on_tick, run_on_world,
+     * on_event) on the server world passed to it, where the creature's templates are read. */
     uint32_t (*path_find)(EmfWorld* world, const EmfPathQuery* q, EmfPathCallback cb, void* user);
     /* Ends a query: its callback still comes, with EMF_PATH_CANCELLED. False for an unknown or answered id. */
     bool (*path_cancel)(uint32_t id);
@@ -1672,7 +1703,7 @@ typedef struct EmfApi {
      * get_component. EMF's own chat admins ([chat] admins) are another list: EmfNetFrom.admin and command senders. */
     bool (*player_permissions)(EmfWorld* world, uint32_t player, uint32_t* perms);
 
-    /* ---- v44: breaking player-built blocks (EmfBreakBlocks, EmfBlockInfo); never terrain ---- */
+    /* ---- v44: breaking player-built blocks (EmfBreakBlocks, EmfBlockInfo); v47: terrain a player placed too ---- */
     /* Queues a break of the building blocks in a sphere (or a column of spheres) for the next server step. Returns its
      * id (from 1), or 0 with req->why: not the server world (a joined game cannot break blocks), not available on this
      * game version (or off after a fault), bad numbers, 64 breaks waiting. cb (may be NULL) gets the result once: after
@@ -1708,6 +1739,18 @@ typedef struct EmfApi {
     bool (*villager_move_cancel)(uint32_t id);
     /* The id of `villager`'s move or hold, 0 = none. */
     uint32_t (*villager_moving)(EmfWorld* world, uint32_t villager);
+
+    /* ---- v47: terrain a player placed (EMF_BREAK_TERRAIN, EMF_FIND_TERRAIN, EmfBlockInfo.world for terrain) ---- */
+    /* find_wall with flags: EMF_FIND_TERRAIN also stops at a terrain cell a player placed (the shipped world had no
+     * ground there; one whose shipped state is not known is passed over); other terrain is passed over as by
+     * find_wall. Flags 0: find_wall. False for unknown flags (logged once) and for find_wall's reasons. */
+    bool (*find_wall_ex)(EmfWorld* world, const float from[3], const float to[3], uint32_t flags, EmfBlockInfo* out);
+    /* spawn_ex, turned yaw_deg about the up axis (teleport's yaw: 0 = the template's own facing) in the spawn's own
+     * transform. A door, a gate or a target that must face a creature is turned this way: writing its transform after
+     * the spawn moves what is drawn but not what the game reads. 0 when spawn_ex would be, or for a yaw that is no
+     * finite number. */
+    uint32_t (*spawn_facing)(EmfWorld* world, const uint8_t template_guid[16], double x, double y, double z,
+                             float yaw_deg, const EmfComponentInit* inits, uint32_t count);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

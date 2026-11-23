@@ -23,16 +23,26 @@
 #include "../include/kiln_registry_host.h"
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
+#include "pristine.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_launch.h"
 #include "services/kiln_registry.h"
+#include "services/kiln_registry_live.h"
 #include "boot_hooks.h"
+#include "proof.h"
 #include "stage.h"
+#include "stage_owner.h"
 
 namespace kc::registry::stage {
 
 namespace {
+
+const KilnOwnersInternalApi* owners() {
+    static const auto* table = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(
+        KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 2)) : nullptr;
+    return table;
+}
 
 std::string api_path(int kind) {
     char b[1024];
@@ -51,6 +61,23 @@ const KilnAssetsApi* assets() {
 }
 kiln::boot_view::LiveView& live_view() {
     static kiln::boot_view::LiveView& v = *new kiln::boot_view::LiveView([]() -> const KilnAssetsApi* { return assets(); });
+    return v;
+}
+// The registry's base view: kiln.assets' live bytes with kiln.content's own store writes taken back out, so a base decoded
+// after packs applied is still the game's (review4 NS1). The resident range comes from resource_data (address only).
+PristineView& pristine_view() {
+    static PristineView& v = *new PristineView(
+        live_view(),
+        [](const KilnAssetKey& key, uintptr_t* at, size_t* len) {
+            const KilnAssetsApi* a = assets();
+            if (!a || a->header.size < offsetof(KilnAssetsApi, resource_data) + sizeof(void*) || !a->resource_data) return false;
+            const void* p = nullptr;
+            size_t n = 0;
+            if (a->resource_data(&key, &p, &n) != KILN_OK || !p) return false;
+            *at = reinterpret_cast<uintptr_t>(p), *len = n;
+            return true;
+        },
+        [](uintptr_t at, size_t len, uint8_t* bytes) { store_pristine(at, len, bytes); });
     return v;
 }
 
@@ -111,13 +138,23 @@ Env make_env() {
         e.side = bi.side == KILN_SIDE_CLIENT ? "client" : "server";
         if (bi.kiln_version.ptr) e.kiln_version.assign(bi.kiln_version.ptr, bi.kiln_version.len);
     }
+    e.owner_alive = [](uint64_t owner) {
+        const auto* table = owners();
+        uint32_t grants = 0;
+        return table && table->header.size >= offsetof(KilnOwnersInternalApi, grants) + sizeof(table->grants) &&
+               table->grants && table->grants(owner, &grants) == KILN_OK;
+    };
+    e.prepare_live = true;
+    e.owner_gone = &registry_live_owner_gone;
     e.pid = GetCurrentProcessId();
     e.now = &utc_now;
     e.writer = writer_of();
     e.source = [](std::string* why) -> std::unique_ptr<model::Source> {
         kiln::boot_view::LiveView& v = live_view();
+        v.restart(); // each owned source is a new read generation; the prior stage/ledger source may be released
+        pristine_view().restart();
         if (!v.ready(why)) return nullptr;
-        return model::live_source(v, [](uint32_t type, std::vector<KilnAssetKey>* out) {
+        return model::live_source(pristine_view(), [](uint32_t type, std::vector<KilnAssetKey>* out) {
             const KilnAssetsApi* a = assets();
             if (!a) return false;
             size_t n = 0;
@@ -165,6 +202,47 @@ Env make_env() {
         else LOGI("%s", line.c_str());
     };
     return e;
+}
+
+// The lab's registry proof (proof.h): nothing at all without <data>/content/registry/proof/request.json (one lookup). With
+// it, the proof reads the base before the stage runs and before any patch of this start is written (a view that is not
+// open is opened for it and released again; the stage then opens its own read generation).
+void lab_proof() {
+    proof::Env e;
+    e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
+    e.exists = [](const std::string& rel) {
+        std::error_code ec;
+        return fs::is_regular_file(data_root() / u8(rel), ec);
+    };
+    if (!proof::requested(e)) return;
+    Env s = make_env();
+    e.write_data = s.write_data;
+    e.regmap = s.regmap;
+    e.log = s.log;
+    e.source = s.source;
+    e.side = s.side, e.exe_sha256 = s.exe_sha256, e.writer = s.writer;
+    e.schema = &registry_schema();
+    // open the view only when it is not open yet, and release it again only then
+    kiln::boot_view::LiveView& v = live_view();
+    std::string closed;
+    const bool reopened = !v.ready(&closed);
+    if (reopened) v.restart();
+    e.bytes = [&v](const KilnAssetKey& key, std::vector<uint8_t>* out, std::string* why) {
+        std::string b;
+        if (v.bytes(key, size_t{256} << 20, &b, why) != KILN_OK) return false;
+        out->assign(b.begin(), b.end());
+        return true;
+    };
+    e.common_files = [] {
+        std::vector<std::pair<std::string, std::string>> out;
+        std::error_code ec;
+        for (const auto& f : fs::directory_iterator(u8(api_path(KILN_PATH_KILN)) / u8"regmap" / u8"common", ec))
+            if (f.path().extension() == L".json")
+                if (auto t = read_whole(f.path())) out.emplace_back(f.path().filename().string(), std::move(*t));
+        return out;
+    };
+    proof::run(e);
+    if (reopened) v.release();
 }
 
 // ---- the C tables ----
@@ -217,8 +295,7 @@ bool guarded_ready(KilnRegistryReadyFn fn, const KilnRegistryReady* r, void* use
 // kind prefix ("mod:", "native:", ...), folded to lower case. Empty: no such owner, or an id that is no mod id.
 std::string bound_mod(KilnOwner owner, bool* revoked = nullptr) {
     if (revoked) *revoked = false;
-    static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 2))
-                                 : nullptr;
+    const auto* t = owners();
     if (!t || t->header.version < 2 || t->header.size < offsetof(KilnOwnersInternalApi, owner_id) + sizeof(void*) || !t->owner_id) return {};  // v2: owner_id
     char buf[256];
     size_t len = 0;
@@ -317,10 +394,71 @@ KilnResult KILN_CALL t_subscribe_ready(KilnOwner owner, KilnRegistryReadyFn fn, 
         r.phase = static_cast<uint32_t>(p);
         r.generation = gen;
         r.world = KILN_WORLD_KINDS;
-        if (!guarded_ready(fn, &r, user)) LOGE("registry: a ready callback faulted");
+        return guarded_ready(fn, &r, user);
     }, out);
 }
 KilnResult KILN_CALL t_unsubscribe(KilnHandle h) { return runner().unsubscribe(h); }
+
+KilnResult live_owner(KilnOwner owner, std::string* mod = nullptr) {
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    bool revoked = false;
+    const std::string id = bound_mod(owner, &revoked);
+    if (revoked) return KILN_ERR_REVOKED;
+    if (id.empty()) return KILN_ERR_INVALID_ARGUMENT;
+    if (mod) *mod = id;
+    return KILN_OK;
+}
+bool live_out_ok(KilnRegistryLiveResult* out) { return !out || out->size >= sizeof(*out); }
+void live_out(const RegistryLiveReply& reply, KilnRegistryLiveResult* out) {
+    if (!out) return;
+    std::memset(out, 0, sizeof(*out)); out->size = sizeof(*out);
+    out->outcome = static_cast<uint32_t>(reply.outcome); out->accepted = reply.accepted;
+    out->refused = reply.refused; out->skipped = reply.skipped; out->world = reply.world;
+    out->generation = runner().generation();
+    size_t n = std::min(reply.reason.size(), sizeof(out->reason) - 1);
+    while (n && n < reply.reason.size() && (static_cast<unsigned char>(reply.reason[n]) & 0xc0) == 0x80) --n;
+    std::memcpy(out->reason, reply.reason.data(), n);
+}
+KilnResult KILN_CALL l_begin(KilnOwner owner, uint32_t point, KilnHandle* out) {
+    if (!out) return KILN_ERR_INVALID_ARGUMENT;
+    std::string mod; const KilnResult rc = live_owner(owner, &mod);
+    return rc == KILN_OK ? registry_live_begin(owner, mod, point, out) : rc;
+}
+KilnResult KILN_CALL l_submit(KilnOwner owner, KilnHandle handle, KilnStr ir, KilnRegistryLiveResult* out, char* buf, size_t cap, size_t* len) {
+    if (!live_out_ok(out) || !str_ok(ir, KILN_REGISTRY_MAX_IR_BYTES) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
+    RegistryLiveReply reply; std::string text;
+    const KilnResult rc = registry_live_submit(owner, handle, str(ir), &reply, &text);
+    live_out(reply, out); report_out(text, buf, cap, len); return rc;
+}
+KilnResult KILN_CALL l_commit(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
+    if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
+    RegistryLiveReply reply; const KilnResult rc = registry_live_commit(owner, handle, &reply);
+    live_out(reply, out); return rc;
+}
+KilnResult KILN_CALL l_revert(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
+    if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
+    RegistryLiveReply reply; const KilnResult rc = registry_live_revert(owner, handle, &reply);
+    live_out(reply, out); return rc;
+}
+KilnResult KILN_CALL l_read(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
+    if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
+    std::string text; const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text);
+    return rc == KILN_OK ? copy_out(text, buf, cap, len) : rc;
+}
+KilnResult KILN_CALL l_status(KilnRegistryLiveStatus* out) {
+    if (!out || out->size < sizeof(*out)) return KILN_ERR_INVALID_ARGUMENT;
+    const auto status = registry_live_status();
+    std::memset(out, 0, sizeof(*out)); out->size = sizeof(*out);
+    out->world = status.world; out->world_kind = status.world_kind;
+    out->generation = runner().generation(); out->drafts = status.drafts; out->active = status.active;
+    return KILN_OK;
+}
+const KilnRegistryLiveApi kLiveTable = {{sizeof(KilnRegistryLiveApi), KILN_REGISTRY_LIVE_VERSION},
+    &l_begin, &l_submit, &l_commit, &l_revert, &l_read, &l_status};
 
 const KilnRegistryApi kTable = {
     {sizeof(KilnRegistryApi), KILN_REGISTRY_VERSION},
@@ -334,7 +472,16 @@ KilnResult KILN_CALL h_set_order(KilnStr order) {
     return rc;
 }
 KilnResult KILN_CALL h_set_mode(uint32_t mode) { return runner().set_mode(mode); }
-const KilnRegistryHostApi kHostTable = {{sizeof(KilnRegistryHostApi), KILN_REGISTRY_HOST_VERSION}, &h_set_order, &h_set_mode};
+KilnResult KILN_CALL h_read_pass(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
+    if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    std::string mod;
+    const KilnResult own = live_owner(owner, &mod);
+    if (own != KILN_OK) return own;
+    std::string text;
+    const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text, mod);
+    return rc == KILN_OK ? copy_out(text, buf, cap, len) : rc;
+}
+const KilnRegistryHostApi kHostTable = {{sizeof(KilnRegistryHostApi), KILN_REGISTRY_HOST_VERSION}, &h_set_order, &h_set_mode, &h_read_pass};
 
 }  // namespace
 
@@ -345,8 +492,26 @@ Runner& runner() {
 
 void bind_service() {
     if (!g_api) return;
+    const auto* owner_hooks = static_cast<const KilnHooksApi*>(g_api->service(
+        KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1));
+    const KilnResult cleanup = bind_owner_cleanup(owner_hooks, g_owner, &runner());
+    if (cleanup != KILN_OK) {
+        LOGE("registry: owner-retiring notification unavailable (rc %d): the registry service was not registered", cleanup);
+        return;  // never retain callbacks into mods without their owner's cleanup
+    }
     static const boothook::Hooks hooks{
-        [](const std::vector<boothook::OldDoc>& docs) { return runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); }); },
+        [](const std::vector<boothook::OldDoc>& docs) {
+            // lab only, nothing without the request file (proof.h). Before the stage: the proof opens its own read generation of
+            // the view, which would invalidate the source a deferred stage keeps for first use (lazy_source).
+            lab_proof();
+            std::vector<std::pair<KilnAssetKey, std::string>> freeze;
+            for (const auto& doc : docs) freeze.emplace_back(doc.res, doc.type);
+            // An unused registry defers decoding, but old writers must still compose over their pre-write bytes.
+            // Retain owned documents, never the callback's stack reference.
+            Runner::OldWritesFn old;
+            if (!docs.empty()) old = [docs](model::Model& model) { return boothook::old_writes(docs, model); };
+            return runner().run(old, freeze);
+        },
         &boothook::write, [](const std::vector<BootOutcome>& o) { runner().finish(o); }};
     boothook::set(&hooks);
     // the live back-end (registry_live.cpp, S9): now and worldLoad fields as store layers at each world load
@@ -366,11 +531,15 @@ void bind_service() {
         if (h.boot_fields) in.boot_fields = *h.boot_fields;
         in.check = h.check;
         in.report = h.report;
+        in.changed = h.changed;
+        in.prepare = h.prepare;
+        in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         registry_live_install(std::move(in));
     });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);
     const KilnResult b = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_HOST_SERVICE, sizeof(KILN_REGISTRY_HOST_SERVICE) - 1}, &kHostTable);
-    if (a != KILN_OK || b != KILN_OK) LOGW("registry: kiln.registry rc %d, kiln.internal.registry rc %d", a, b);
+    const KilnResult c = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_LIVE_SERVICE, sizeof(KILN_REGISTRY_LIVE_SERVICE) - 1}, &kLiveTable);
+    if (a != KILN_OK || b != KILN_OK || c != KILN_OK) LOGW("registry: kiln.registry rc %d, kiln.internal.registry rc %d, kiln.registry.live rc %d", a, b, c);
 }
 
 }  // namespace kc::registry::stage

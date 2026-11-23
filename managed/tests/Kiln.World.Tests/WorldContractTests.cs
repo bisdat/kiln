@@ -111,7 +111,6 @@ public sealed unsafe class WorldContractTests
         SameLayout(abi, "KilnEcsWriteEvent", typeof(EcsWriteEventNative));
     }
 
-#pragma warning disable KILNX003  // the public enums mirror the header's values
     [Fact]
     public void The_ecs_write_constants_match_the_header()
     {
@@ -139,7 +138,6 @@ public sealed unsafe class WorldContractTests
         Assert.Equal(EcsWriteConstants.NotWritable, (uint)ExchangeStatus.NotWritable);
         Assert.Equal(EcsWriteConstants.Uncertain, (uint)ExchangeStatus.Uncertain);
     }
-#pragma warning restore KILNX003
 
     private static string Snake(string name) =>
         string.Concat(name.Select((c, i) => i > 0 && char.IsUpper(c) ? "_" + c : c.ToString())).ToUpperInvariant();

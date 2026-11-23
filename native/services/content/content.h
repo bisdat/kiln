@@ -284,6 +284,10 @@ bool store_put_eval(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, i
 bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out);
 // The same, with only the layers below the registry band (packs, the original): the value registry layers are computed over.
 bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
+// The slot's value with its registry-band layers replaced by one evaluated layer (none: nullptr), layers below and above
+// it as they are: what a registry reader sees without some registry rows (review4 NS5). Memory when there is no slot or
+// another writer owns it for this world.
+bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is
@@ -302,9 +306,15 @@ bool store_drop(KilnOwner owner, uintptr_t addr);  // removes one layer
 uint32_t store_drop_owner(KilnOwner owner);         // removes every layer of owner; returns slots affected
 bool store_original(uintptr_t addr, uint8_t n, uint8_t* out);  // original bytes if the slot exists
 void store_originals(uintptr_t addr, size_t size, uint8_t* out);  // out holds a copy of this memory: what rules changed in it goes back to the original
+// The same without the store's lock (a leaf lock only, safe under another subsystem's lock): bytes holds a copy of
+// [addr, addr + size); every slot fully inside it gets its original bytes back (review4 NS1, the registry's lazy base).
+void store_pristine(uintptr_t addr, size_t size, uint8_t* bytes);
 bool store_has(uintptr_t addr);
 // Writes every dirty slot's effective bytes (newest layer, else the original). Returns slots written.
 size_t store_flush(std::string* error);
+// The same; unwritten (optional) receives the address of every slot whose write did not land (memory differs from it after the
+// batch), so a caller can charge a failure to the owner of that slot alone.
+size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten);
 std::vector<Conflict> store_conflicts();
 uint32_t store_changed();  // slots whose current bytes differ from the original
 uint64_t store_generation();  // changes with every change of a slot (what store_changed and store_conflicts count follows it)

@@ -10,7 +10,7 @@ namespace Kiln.TestKit;
 
 /// <summary>Mirror of <c>kiln_items.h</c>'s v1 table, the v8 gear functions and the structs they use. The sizes are pinned
 /// by tests to Kiln.Items' private mirrors (ItemsNative).</summary>
-internal static unsafe class ItemsAbi
+internal static unsafe partial class ItemsAbi
 {
     public const string Service = "kiln.items";
     // the whole v9 table: v1, the gear functions (v8) and container renames (v9) are modelled; water (v2), instances (v4),
@@ -293,6 +293,7 @@ internal static unsafe class ItemsAbi
         // v9 (0.2.0-dev.30.3): container_rename, rename_status
         public delegate* unmanaged[Cdecl]<ulong, RenameRequest*, delegate* unmanaged[Cdecl]<RenameResult*, void*, void>, void*, ulong*, RenameResult*, int> ContainerRename;
         public delegate* unmanaged[Cdecl]<RenameStatus*, int> RenameStatusOf;
+        public delegate* unmanaged[Cdecl]<ulong, GiveEquipRequest*, nint, void*, ulong*, int> GiveEquip;
     }
 
     // ---- v9: renaming a container (KilnItemsRenameRequest, -Result, -Status; KILN_ITEMS_NAME_*, KILN_ITEMS_RENAME_*) ----
@@ -339,7 +340,7 @@ internal static unsafe class ItemsAbi
 
 /// <summary>The C# functions behind the fake <c>kiln.items</c> table: give, take, cancel, read, find_inventories, the item
 /// catalog and status (v1), gear_write, gear_read and gear_status (v8), and stubs for v2 to v7 that answer unavailable.</summary>
-internal static unsafe class ItemsTable
+internal static unsafe partial class ItemsTable
 {
     private static ItemsAbi.Table* _table;
 
@@ -390,6 +391,7 @@ internal static unsafe class ItemsTable
         full->ScaleStatusOf = &ScaleStatusOf;
         full->ContainerRename = &ContainerRename;  // v9
         full->RenameStatusOf = &RenameStatusOf;
+        full->GiveEquip = &GiveEquip;
         _table = t;
         return (nint)t;
     }
@@ -684,7 +686,8 @@ internal static unsafe class ItemsTable
     {
         try
         {
-            if (count == null || (out_ == null && capacity > 0) || (flags & ~0xFu) != 0) return FakeTables.InvalidArgument;
+            // KILN_ITEMS_FIND_PLAYER_STORAGE (0x10, kiln_items_storage.h) is the one bit past kiln.items' own
+            if (count == null || (out_ == null && capacity > 0) || (flags & ~(0xFu | StorageNative.FindPlayerStorage)) != 0) return FakeTables.InvalidArgument;
             *count = 0;
             if (Fake is not { } f || FakeTables.Off(ItemsFake.ReadFeature)) return FakeTables.Unavailable;
             if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
@@ -786,6 +789,9 @@ internal static unsafe class ItemsTable
 internal sealed record FakeItem(uint Id, Guid Guid, string Name, int MaxStack, ItemCategory Category, ItemRarity Rarity, bool Gear, int LevelMin,
     int LevelMax, nint NameUtf8, int NameLength)
 {
+    /// <summary>The equipment type configured by HarnessItems.SetEquipmentSlotType; 0 means not equippable.</summary>
+    public byte EquipmentSlotType { get; set; }
+
     /// <summary>Gear: how many of the type's five perk slots are filled (its last filled one + 1): the highest rarity + 1
     /// a gear write gives without FORCE_SLOT. Every slot unless the test says (HarnessItems.SetPerkSlots).</summary>
     public int PerkSlots { get; set; } = 5;
@@ -830,7 +836,7 @@ internal sealed unsafe partial class ItemsFake
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature, GiveEquipFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
         "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
@@ -850,6 +856,9 @@ internal sealed unsafe partial class ItemsFake
         public required List<uint> Links;  // the 8-slot inventories, each an entity; a container's first is itself
         public required Stack[] Slots;
         public FakePlayer? Player;
+        // a player storage's holder (Fakes/ItemsStorage): found only with KILN_ITEMS_FIND_PLAYER_STORAGE, its filter on gives
+        public bool Storage;
+        public Func<uint, bool>? Accepts;
 
         public ulong SlotId(int i) => Links[i / 8] | ((ulong)(uint)(i % 8) << 32);
 
@@ -926,6 +935,8 @@ internal sealed unsafe partial class ItemsFake
             _scales.Clear();
             _names.Clear();
             _renamePending.Clear();
+            _giveEquipPending.Clear();
+            _equipment.Clear();
         }
     }
 
@@ -983,6 +994,7 @@ internal sealed unsafe partial class ItemsFake
         out_->LevelMin = (uint)i.LevelMin;
         out_->LevelMax = (uint)i.LevelMax;
         out_->Gear = i.Gear ? (byte)1 : (byte)0;
+        out_->EquipSlot = i.EquipmentSlotType;  // ItemInfo.EquipSlot (the game's EquipmentSlotType), as SetEquipmentSlotType set it
         out_->Name = new NativeStr { Ptr = (byte*)i.NameUtf8, Len = (nuint)i.NameLength };
     }
 
@@ -1060,8 +1072,9 @@ internal sealed unsafe partial class ItemsFake
             foreach (var (e, inv) in _inventories.OrderBy(kv => kv.Key))
             {
                 if (Of(e) is null) continue;
-                var kind = inv.IsPlayer ? ItemsAbi.FindPlayers : ItemsAbi.FindContainers;
-                if ((flags & 7u) != 0 && (flags & kind) == 0) continue;  // no kind bit: every kind
+                var kind = inv.Storage ? StorageNative.FindPlayerStorage : inv.IsPlayer ? ItemsAbi.FindPlayers : ItemsAbi.FindContainers;
+                var kinds = flags & (7u | StorageNative.FindPlayerStorage);
+                if (kinds == 0 ? inv.Storage : (kinds & kind) == 0) continue;  // no kind bit: every kind but player storage
                 if ((flags & ItemsAbi.FindNonEmpty) != 0 && inv.Slots.All(s => s.Count == 0)) continue;
                 found.Add(e);
             }
@@ -1160,7 +1173,7 @@ internal sealed unsafe partial class ItemsFake
         lock (_lock)
         {
             var job = _pending.FirstOrDefault(j => j.Ticket == ticket && j.Done != 0);
-            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket) || CancelRename(ticket);
+            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket) || CancelRename(ticket) || CancelGiveEquip(ticket);
             job.Done = 0;
             return true;
         }
@@ -1173,6 +1186,7 @@ internal sealed unsafe partial class ItemsFake
         CancelGearOwner(owner);
         CancelUpgradeOwner(owner);
         CancelRenameOwner(owner);
+        foreach (var q in _giveEquipPending.Where(q => q.Owner == owner)) q.Done = 0;
     }
 
     private const int MaxPending = 1024;  // items.cpp kMaxPending
@@ -1256,6 +1270,7 @@ internal sealed unsafe partial class ItemsFake
         RunGear(step);
         RunUpgrades(step);
         RunRenames(step);
+        RunGiveEquips(step);
     }
 
     private const uint ErrorNoItem = 0x15, ErrorNoSetup = 0x16;
@@ -1264,6 +1279,8 @@ internal sealed unsafe partial class ItemsFake
     {
         if (Of(q.Entity) is not { } inv) return (ItemsAbi.NoInventory, 0, ErrorNoSetup, $"entity {q.Entity} has no inventory");
         if (Item(q.Item) is not { } item) return (ItemsAbi.UnknownItem, 0, ErrorNoItem, $"item 0x{q.Item:x8} is not in the game's item registry");
+        if (inv.Accepts is { } accepts && !accepts(item.Id))
+            return ((int)StorageNative.ItemsFiltered, 0, 0, $"the player storage's filter does not take {item.Name}");
         var dry = (q.Flags & ItemsAbi.DryRun) != 0;
         var all = (q.Flags & ItemsAbi.AllOrNothing) != 0;
         var noMerge = (q.Flags & ItemsAbi.NoMerge) != 0;
@@ -1409,6 +1426,17 @@ internal sealed unsafe partial class ItemsFake
                 s.Level = 0;
                 s.Rarity = 0;
             }
+    }
+
+    /// <summary>A player storage's holder goes (Fakes/ItemsStorage): its inventory and its further 8-slot inventories.</summary>
+    public void RemoveInventory(uint entity)
+    {
+        lock (_lock)
+        {
+            if (!_inventories.Remove(entity, out var inv)) return;
+            foreach (var s in inv.Slots)
+                if (s.Pide != 0) DestroyGear(s.Pide);
+        }
     }
 
     public object Lock => _lock;

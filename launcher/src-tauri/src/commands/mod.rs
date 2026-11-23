@@ -12,6 +12,7 @@ pub mod config;
 pub mod sfi_backend;
 pub mod launch;
 pub mod logs;
+pub mod registry;
 pub mod saves;
 pub mod editor;
 pub mod server;
@@ -106,6 +107,7 @@ pub const NAMES: &[&str] = &[
     "logs_follow",
     "logs_unfollow",
     "logs_crash_reports",
+    "registry_report_read",
     "saves_list",
     "saves_backups",
     "saves_backup",
@@ -122,6 +124,8 @@ pub const NAMES: &[&str] = &[
     "editor_list_backups",
     "editor_restore_backup",
     "editor_open_backups",
+    "editor_storage_read",
+    "editor_return_storage",
     "server_list",
     "server_get",
     "server_create",
@@ -224,8 +228,10 @@ pub const NAMES: &[&str] = &[
     "data_folder_notice_ack",
     "data_folder_restart",
     "app_started",
+    "app_render_frame",
     "app_render_set",
     "app_render_x11_set",
+    "app_render_force_set",
     "app_render_report",
     "updates_check",
     "app_desktop_set",
