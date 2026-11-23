@@ -73,6 +73,23 @@ int main() {
     registry_entries_prepare(&in);
     entry_check(queued.empty() && in.result.added.empty(), "definition failure refuses dependent recipes and forgets their unpublished definitions");
     entry_check(std::any_of(in.result.refused.begin(), in.result.refused.end(), [](const auto& r) { return r.registry == "recipes" && r.reason.find("injected item definition refusal") != std::string::npos; }), "definition failure root reaches dependent recipe refusal");
+    RegistryLive revised = *g.in; revised.added_guid = in.added_guid;
+    registry::ModInput revising; revising.id = "a"; registry::Batch first, later;
+    registry::parse_batch(registry::json{{"ir", 1}, {"mod", "a"}, {"stage", "add"}, {"edits", {
+        {{"registry", "recipes"}, {"entry", "add"}, {"id", "a:recipe"}, {"like", "game:plank_recipe"}},
+        {{"registry", "items"}, {"entry", "add"}, {"id", "a:logs"}, {"like", "game:material_t1_wood_logs"}}
+    }}}, *revised.schema, &first, &refusals, &why);
+    registry::parse_batch(std::string(R"({"ir":1,"mod":"a","stage":"alter","edits":[{"registry":"recipes","select":"a:recipe","field":"outputs","list":{"replace":[{"item":"a:logs","count":1}]}}]})"), *revised.schema, &later, &refusals, &why);
+    revising.batches = {first, later}; revised.mods = {revising}; revised.result = registry::compose(*revised.schema, revised.base, {}, revised.mods); queued.clear();
+    revised.pin_definition = [](const auto&, const auto&, auto*) { return true; };
+    revised.define_entry = [&](const auto& ref, const auto& definition, auto* error) {
+        if (ref.registry == "items") { *error = "injected later definition failure"; return false; }
+        queued[ref] = definition; return true;
+    };
+    revised.forget_entry = [&](const auto& ref) { queued.erase(ref); };
+    registry_entries_prepare(&revised);
+    entry_check(revised.result.added.size() == 1 && revised.result.definitions.count({"recipes", "a:recipe"}), "a refused field reference preserves the independently valid recipe definition");
+    entry_check(queued.at({"recipes", "a:recipe"}) == revised.entry_bodies.at({"recipes", "a:recipe"}), "recomposition refreshes an already queued definition whose invalid later field edit was removed");
     registry::Batch removal; refusals.clear();
     entry_check(registry::parse_batch(registry::json{{"ir", 1}, {"mod", "a"}, {"stage", "alter"}, {"edits", {{{"registry", "items"}, {"entry", "remove"}, {"select", "game:material_t1_wood_logs"}}}}}, *in.schema, &removal, &refusals, &why), "removal gate fixture parses");
     auto proof = *g_regmap;

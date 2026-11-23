@@ -102,7 +102,7 @@ void registry_entries_prepare(RegistryLive* target) {
     auto& in = *target;
     const auto base_ids = in.ids;
     const auto base_nums = in.nums;
-    std::set<registry::EntryRef> defined;
+    std::map<registry::EntryRef, registry::json> defined;
     for (;;) {
         in.ids = base_ids; in.nums = base_nums;
         for (const auto& [ref, definition] : in.result.definitions) {
@@ -126,11 +126,11 @@ void registry_entries_prepare(RegistryLive* target) {
         if (failures.empty()) {
             for (const auto& ref : in.result.added) {
                 const auto& body = bodies.at(ref); // stage order, so a clone's like entry is queued before its dependents
-                if (defined.count(ref)) continue;
+                if (const auto queued = defined.find(ref); queued != defined.end() && queued->second == body) continue;
                 std::string why;
                 if (!in.define_entry || !in.define_entry(ref, body, &why))
                     failures[ref] = why.empty() ? "the content definition backend is unavailable" : why;
-                else defined.insert(ref);
+                else defined[ref] = body; // a refusal can remove a later field edit from an otherwise valid queued definition
             }
         }
         if (failures.empty()) { in.entry_bodies = std::move(bodies); break; }
@@ -139,8 +139,8 @@ void registry_entries_prepare(RegistryLive* target) {
         for (const auto& [ref, field] : in.boot_fields) in.result.fields[ref] = field;
         in.result.refused.insert(in.result.refused.begin(), in.pre_refused.begin(), in.pre_refused.end());
         for (auto it = defined.begin(); it != defined.end();) {
-            if (in.result.definitions.count(*it)) { ++it; continue; }
-            if (in.forget_entry) in.forget_entry(*it);
+            if (in.result.definitions.count(it->first)) { ++it; continue; }
+            if (in.forget_entry) in.forget_entry(it->first);
             it = defined.erase(it);
         }
     }
