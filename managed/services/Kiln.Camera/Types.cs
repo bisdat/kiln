@@ -174,7 +174,7 @@ public readonly record struct CameraLease(ulong Value, CameraEndpoint Endpoint, 
 /// <summary>Where a camera is and where it looks: +Z of <paramref name="Rotation"/> is forward, +Y up.</summary>
 /// <param name="Position">World metres.</param>
 /// <param name="Rotation">A unit quaternion.</param>
-public sealed record CameraPose(WorldPosition Position, Quaternion Rotation);
+public sealed partial record CameraPose(WorldPosition Position, Quaternion Rotation);
 
 /// <summary>A field of view, alone or next to a path, profile or shake.</summary>
 /// <param name="FieldOfViewDegrees">The vertical field of view, 5 to 160 degrees.</param>
@@ -266,7 +266,7 @@ public sealed record CameraChange(CameraLease Lease, ulong Revision, CameraChang
 /// <param name="TargetSampleStep">The client step whose positions the frame's camera was built from.</param>
 /// <param name="SessionGeneration">The client world it belongs to.</param>
 /// <param name="Age">How old the snapshot was when it was read; never above 250 ms.</param>
-public sealed record CameraVisualSnapshot(CameraPose Pose, float FieldOfViewDegrees,
+public sealed partial record CameraVisualSnapshot(CameraPose Pose, float FieldOfViewDegrees,
     float AspectRatio, float NearPlane, float FarPlane, ulong Frame,
     ulong TargetSampleStep, uint SessionGeneration, TimeSpan Age);
 

@@ -29,6 +29,7 @@
 #include "seh.h"
 #include "state.h"
 #include "mode.h"
+#include "local.h"
 
 namespace {
 
@@ -112,11 +113,8 @@ KilnResult KILN_CALL t_subscribe(KilnOwner owner, KilnCameraChanged fn, void* us
 
 KilnResult KILN_CALL t_unsubscribe(KilnHandle handle) { return g_core.unsubscribe(handle); }
 
-// The frame snapshot and the transport bridge are not in this build yet: their rows are off and say so.
-KilnResult KILN_CALL t_get_visual(KilnCameraVisual* out, uint32_t* out_reason) {
-    if (!out || !out_reason || out->size < sizeof(KilnCameraVisual)) return KILN_ERR_INVALID_ARGUMENT;
-    return KILN_ERR_UNAVAILABLE;
-}
+KilnResult KILN_CALL t_get_visual(KilnCameraVisual* out, uint32_t* out_reason) { return kcam::local_get_visual(out, out_reason); }
+// The transport bridge is not in this build yet: its row is off and says so.
 KilnResult KILN_CALL t_bind_transport(KilnOwner, const KilnCameraTransport*) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_unbind_transport(KilnOwner) { return KILN_ERR_UNAVAILABLE; }
 KilnResult KILN_CALL t_transport_ended(KilnOwner, KilnCameraLease, uint64_t, uint32_t, uint32_t, KilnStr) { return KILN_ERR_UNAVAILABLE; }
@@ -153,7 +151,10 @@ void KILN_CALL on_server_pre(const KilnTickInfo* tick, void*) {
     const uint64_t mode = g_mode.caps();
     if (mode != g_reported_mode) { g_reported_mode = mode; report_rows(); }
 }
-void KILN_CALL on_client_pre(const KilnTickInfo*, void*) { g_core.pre(kcam::kClient); }
+void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
+    if (kcam::local_pre(tick)) report_rows();  // the client side's own step (local.h) comes before the core's
+    g_core.pre(kcam::kClient);
+}
 
 // Any thread (the one that revoked the owner). Marks only: each world drops the owner's leases at its next Pre.
 void KILN_CALL on_owner_retiring(KilnOwner retiring, void*) { g_core.owner_retiring(retiring); }
@@ -226,6 +227,7 @@ void KILN_CALL on_ready(void*) {
     if (!declared) logf(KILN_LOG_WARN, "camera: maintained Mode unavailable (tracked writes, player records, or NCC declaration missing)");
 
     if (!observer) logf(KILN_LOG_WARN, "camera: kiln.hooks has no owner-retiring observer (hooks.owner_cleanup): no camera write is admitted");
+    kcam::local_start(g_api, g_owner, &g_core, g_client_side);  // the client side: render hooks, snapshot, local backend
     report_rows();
     uint64_t mode = 0, local = 0;
     g_core.capabilities(KILN_CAMERA_SERVER_MODE, 0, &mode);

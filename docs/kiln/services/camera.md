@@ -40,6 +40,27 @@ capabilities throw `KilnUnavailableException` naming the required row. Valid cur
 (default 10 seconds), priority is -1000–1000, Mode blend times must be zero, and the transition enum chooses stock
 blending. The native model admits at most 64 pending operations and 16 Mode slots.
 
+## The rendered camera: GetVisual, Project, LookAt
+
+On a game client, `Camera.GetVisual()` (`camera.rendered_snapshot`, any thread) returns the camera the newest frame was
+really drawn with: after the game's own shake and extra rotation and after any kiln.camera override, with the
+frame's field of view, aspect ratio and near/far planes. It is the logical, unjittered main view (no anti-aliasing
+jitter, lens distortion or motion blur). Kiln reads it in the renderer's frame preparation, once per camera selection
+and only for the live client world's renderer (other views and previews are skipped), and keeps values only. It
+never waits: `Ok == false` with `SnapshotBusy` (a frame is being written that instant), `SnapshotStale` (older than
+250 ms: the game is paused or not drawing) or `NoCameraFrame` (no frame of the live client world yet, the world
+stopped, or the game's view is one v1 does not describe: a scaled camera, a lens outside 0.01 rad to pi - 0.01 rad, a
+rotation that is not a unit quaternion). `TargetSampleStep` names the client step whose positions the frame's camera
+was built from. `Render.Camera` stays what it was: the player's input camera, which is not the same thing.
+
+`CameraVisualSnapshot.Project(point, viewportOrigin, viewportSize)` puts a world point on that frame's screen with the
+snapshot's own lens: give the rectangle the game's view fills on your surface (letterbox included). A point behind the
+near plane or past the far plane has no pixel; a point within depth keeps its pixel when it is off the rectangle
+(`OnScreen` false), unless the number does not fit a float. `CameraPose.LookAt(position, target, up)` builds the
+orientation whose +Z looks at `target` with `up` corrected to be square to it; a target closer than 0.0001 m or an up
+along the view direction is an `ArgumentException` (no roll is guessed). Both are pure helpers: no capability, no
+thread. Since mod API 0.2.17.
+
 ## Other endpoints
 
 The typed records, native ABI, TestKit fake, and managed wire/state machines also describe local/remote visuals.
