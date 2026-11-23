@@ -51,7 +51,8 @@ public enum HarnessTombstoneMode
 /// records. A mod that unloads parks its storages.</para>
 /// <para><b>Not modelled.</b> The game's record codec (records carry slot, item, count and level), item entities in
 /// storage, moves (<c>PlayerStorage.Store</c> and <c>Retrieve</c> need <c>items.move</c>), captures at the kit's own
-/// saves, the client copy.</para>
+/// saves, native temporary parked-return holders and tracker notices (the fake delivers records directly), or the
+/// client copy.</para>
 /// </remarks>
 public sealed class HarnessPlayerStorage
 {

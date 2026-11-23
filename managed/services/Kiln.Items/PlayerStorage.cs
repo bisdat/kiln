@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Player storage (since 0.2.0-dev.30.7, mod API 0.2.16; GitHub issue 128, thanks Fuzen777): storages a mod registers for
 // every player (a quiver, a spellbook, an extra bag) that survive a world save, a rejoin, a trip to another world, the mod
-// being off and Kiln being removed, without duplicating or losing an item. Native: kiln.items.storage
+// being off and Kiln being removed, using witness-paired copies and bounded histories. Native: kiln.items.storage
 // (native/core/abi/services/kiln_items_storage.h, served by kiln-items.dll); persistence: Kiln.Saves. The runtime that
 // talks to the table is PlayerStorageRuntime.cs. Usage: docs/kiln/services/player-storage.md.
 using System.Collections.Immutable;
@@ -270,6 +270,7 @@ public readonly record struct OrphanTarget
     /// <summary>The player's backpack.</summary>
     public bool IsBackpack => Container.IsNone;
 
+    /// <summary>The target in words, for a log line.</summary>
     public override string ToString() => IsBackpack ? "backpack" : $"container {Container}";
 }
 
@@ -477,6 +478,7 @@ public sealed class PlayerStorageRestoredEvent : KilnEvent
     /// <summary>The copy's revision.</summary>
     public long Revision { get; }
 
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() =>
         $"player storage {Key} restored for {Player}: {Stacks} stack(s) ({(Paired ? "paired" : "unpaired")}, {Source}{(Live ? ", live" : "")})";
 }
@@ -506,6 +508,7 @@ public sealed class PlayerStorageParkedEvent : KilnEvent
     /// <summary>Why.</summary>
     public PlayerStorageParkReason Reason { get; }
 
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() => $"player storage {Key} of {Player}: {Stacks} stack(s) parked ({Reason})";
 }
 
@@ -537,6 +540,7 @@ public sealed class PlayerStorageDeathEvent : KilnEvent
     /// <summary>The storage's death rule.</summary>
     public StorageDeath Rule { get; }
 
+    /// <summary>The event in one line, for a log.</summary>
     public override string ToString() =>
         Moved == 0 ? $"player storage {Key} of {Player} kept its items at death ({Rule})" : $"player storage {Key} of {Player}: {Moved} stack(s) to tombstone {To} ({Rule})";
 }
@@ -563,8 +567,8 @@ public static unsafe partial class Items
     /// <summary>
     /// Registers a storage every player of the server world gets: a quiver, a spellbook, an extra bag. Kiln keeps its items
     /// with the character, paired with the character's own save: across world saves, rejoins, trips to other worlds, the mod
-    /// being off (they wait parked) and Kiln being removed (they wait in Kiln's copies), without duplicating or losing an
-    /// item. Since 0.2.0-dev.30.7 (mod API 0.2.16).
+    /// being off (they wait parked) and Kiln being removed (they wait in Kiln's copies). Since 0.2.0-dev.30.7 (mod API
+    /// 0.2.16).
     /// </summary>
     /// <param name="key">The storage's name within the mod: lowercase letters, digits, '.', '_' and '-', 32 at most. Its full
     /// key is "&lt;mod id&gt;:&lt;key&gt;". Keep it stable: the saved items belong to it.</param>
@@ -575,7 +579,10 @@ public static unsafe partial class Items
     /// <remarks>Once per key per mod load, any thread, best in <c>OnLoad</c> so it is there before players join (a later
     /// registration restores at once for players already in game). A mod has at most 8 storages, and all mods' storages
     /// together at most 256 slots. When the mod unloads its storages end: their items are parked for players in game.
-    /// Storage never counts for crafting costs.</remarks>
+    /// Storage never counts for crafting costs. A matching character-inventory witness wins at join; without a match,
+    /// the newest copy wins and <see cref="PlayerStorageStatus.Paired"/> is false. Bounded history cannot guarantee an
+    /// exact pair after an old backup or offline edit, and a failed durable save can leave an older copy. Game item record
+    /// fields travel with the character, but arbitrary mod InstanceData remains world-only.</remarks>
     /// <exception cref="ArgumentException">A bad key or slot count, an unknown death rule, or a filter that takes no item or
     /// too many (more than 1024 by id).</exception>
     /// <exception cref="InvalidOperationException">Outside mod code, the key is registered already, or a limit is reached.</exception>
@@ -590,7 +597,7 @@ public static unsafe partial class Items
     public static class PlayerStorages
     {
         /// <summary>Every storage key of <paramref name="player"/>: the registered ones (any state) and those whose items wait
-        /// parked, sorted by key. Empty for an unknown player.</summary>
+        /// parked, sorted by key, with one entry per key. Empty for an unknown player.</summary>
         /// <exception cref="KilnUnavailableException">The row <c>items.storage</c> is off.</exception>
         [TickThreadOnly]
         public static IReadOnlyList<PlayerStorageInfo> Of(EntityId player) => PlayerStorageRuntime.Of(player);
