@@ -249,6 +249,9 @@ Kiln.TestKit.FakeCameraCallKind.Update = 1 -> Kiln.TestKit.FakeCameraCallKind
 Kiln.TestKit.HarnessCamera
 Kiln.TestKit.HarnessCamera.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCameraCall>!
 Kiln.TestKit.HarnessCamera.Expire(ulong lease) -> bool
+Kiln.TestKit.HarnessCamera.End(ulong lease, uint endReason) -> bool
+Kiln.TestKit.HarnessCamera.RefuseNext(uint reason) -> void
+Kiln.TestKit.HarnessCamera.StopWorld() -> int
 Kiln.TestKit.HarnessCamera.Leases.get -> System.Collections.Generic.IReadOnlyList<ulong>!
 Kiln.TestKit.KilnHarness.Camera.get -> Kiln.TestKit.HarnessCamera!
 override Kiln.TestKit.FakeCameraCall.GetHashCode() -> int

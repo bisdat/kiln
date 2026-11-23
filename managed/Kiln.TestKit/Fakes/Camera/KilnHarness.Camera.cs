@@ -7,6 +7,11 @@ public sealed partial class KilnHarness
 
     /// <summary>The fake kiln.camera of this harness: the camera requests mods made, and leases a test lets run out.</summary>
     public HarnessCamera Camera => _camera ??= new HarnessCamera(this);
+
+    internal bool CameraOwnerRevoked(ulong owner)
+    {
+        lock (_host.Revoked) return _host.Revoked.Contains(owner);
+    }
 }
 
 /// <summary>What a camera call asked of the fake kiln.camera.</summary>
@@ -41,10 +46,14 @@ public readonly record struct FakeCameraCall(ulong Step, FakeCameraCallKind Kind
 /// <para><b>Modelled.</b> Leases as the service keeps them: one per player and endpoint, the same owner applying again
 /// is refused, another owner wins only with a higher priority (the old lease ends superseded first), one apply or update
 /// per player and endpoint waits at a time (another is busy until its answer), update and end with their refusals, answers and change events one step after the call, in the order of the calls. The rows
-/// <c>camera.server_mode</c> and <c>camera.local_*</c>, which a test can switch off.</para>
+/// <c>camera.server_mode</c> and <c>camera.local_*</c>, which a test can switch off. Calls outside mod code (owner 0)
+/// are refused as the service refuses them. A mod that unloads: its applied leases end <c>OwnerRetired</c> at the next
+/// step. What a test scripts: a lease that ends by itself (<see cref="End"/>, <see cref="Expire"/>), a stopping world
+/// (<see cref="StopWorld"/>), and refusals the game or the service would give (<see cref="RefuseNext"/>).</para>
 /// <para><b>Not modelled.</b> Any picture: a request is "applied" the step after it was made. Time (a lease ends only
-/// through <see cref="Expire"/>), blends, the frame snapshot (<c>camera.rendered_snapshot</c>), requests of a server
-/// for a player's client (<c>camera.remote</c>), and what a stopping world does to open leases.</para>
+/// when the test says so), blends, the frame snapshot (<c>camera.rendered_snapshot</c>), and requests of a server for a
+/// player's client (<c>camera.remote</c>). The service ends a stopping world's leases on the thread that stops it; the
+/// fake answers at the next step.</para>
 /// </remarks>
 public sealed class HarnessCamera
 {
@@ -62,5 +71,32 @@ public sealed class HarnessCamera
 
     /// <summary>Lets a lease run out, as its duration would: its change event (ended, expired) goes out at the next step.</summary>
     /// <returns>False when no such lease holds a camera.</returns>
-    public bool Expire(ulong lease) => CameraFake.Expire(State, lease);
+    public bool Expire(ulong lease) => CameraFake.EndLease(State, lease, CameraAbi.EndExpired);
+
+    /// <summary>Ends an applied lease by itself, as the service would for <paramref name="endReason"/> (<c>CameraEndReason</c>'s
+    /// numbers: 2 expired, 3 target lost, 4 player left, 7 capability lost, 9 peer disconnected, 10 authority timeout, 11 safety
+    /// rejected, 12 transport timeout). Its change event goes out at the next step.</summary>
+    /// <returns>False when no such applied lease holds a camera.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="endReason"/> is not one a lease ends with by itself.</exception>
+    public bool End(ulong lease, uint endReason)
+    {
+        if (endReason is not (2 or 3 or 4 or 7 or 9 or 10 or 11 or 12))
+            throw new ArgumentOutOfRangeException(nameof(endReason), endReason, "released, superseded, world stopped, owner retired and cancelled have their own paths");
+        return CameraFake.EndLease(State, lease, endReason);
+    }
+
+    /// <summary>The world stops: at the next step every applied lease ends <c>WorldStopped</c> and a waiting apply or update
+    /// is answered <c>StaleWorld</c>.</summary>
+    /// <returns>How many leases it ended.</returns>
+    public int StopWorld() => CameraFake.StopWorld(State);
+
+    /// <summary>The next apply or update that the lease rules would accept is refused with <paramref name="reason"/> instead
+    /// (<c>CameraReason</c>'s numbers, 1 to 27: e.g. 8 peer unavailable, 12 stale world, 18 frame fault), answered at the next
+    /// step. Calls queue: two calls refuse the next two.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="reason"/> is not a refusal.</exception>
+    public void RefuseNext(uint reason)
+    {
+        if (reason is < 1 or > 27) throw new ArgumentOutOfRangeException(nameof(reason), reason, "a CameraReason from 1 to 27");
+        lock (State.Lock) State.Refusals.Enqueue(reason);
+    }
 }

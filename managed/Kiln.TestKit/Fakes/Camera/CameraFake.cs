@@ -14,7 +14,8 @@ internal static unsafe class CameraAbi
     public const uint ServerMode = 1, Local = 2, Remote = 3;
     public const uint PartMode = 1, PartPath = 2, PartProfile = 4, PartShake = 8, PartLens = 16;
     public const uint Applied = 1, Updated = 2, Ended = 3;
-    public const uint EndReleased = 1, EndExpired = 2, EndSuperseded = 6, EndOwnerRetired = 8;
+    public const uint EndReleased = 1, EndExpired = 2, EndWorldStopped = 5, EndSuperseded = 6, EndOwnerRetired = 8, EndCancelledBeforeApply = 13;
+    public const uint StaleWorld = 12;
     public const uint Busy = 1, AlreadyOwned = 2, UnknownLease = 3, ForeignOwner = 4, WrongEndpoint = 5, InputPolicy = 6, LeaseKind = 23;
     public const uint FlagAlreadyEnded = 2;
     public const int Revoked = 6;
@@ -69,6 +70,8 @@ internal sealed class FakeCameraLease
     public ulong Id, Owner, Revision = 1;
     public uint Endpoint, Player;
     public int Priority;
+    public bool Applied;   // its apply was answered Ok
+    public bool Stopped;   // the world stopped while it lived (HarnessCamera.StopWorld)
 }
 
 /// <summary>One harness's kiln.camera: the leases, what waits for the next step, and the record.</summary>
@@ -80,6 +83,7 @@ internal sealed class CameraFakeState
     public readonly List<Action> Queue = [];               // answers and events of the next step, in order
     public readonly List<FakeCameraCall> Calls = [];
     public readonly HashSet<(uint Endpoint, uint Player)> InFlight = [];  // an apply or update waits for the next step there
+    public readonly Queue<uint> Refusals = new();          // HarnessCamera.RefuseNext: the next accepted requests are refused so
 }
 
 internal sealed unsafe class CameraFake : IKitFake
@@ -129,6 +133,13 @@ internal sealed unsafe class CameraFake : IKitFake
         Action[] due;
         lock (state.Lock)
         {
+            // as the service's Pre: the leases of an owner that retired end OwnerRetired (other mods hear it, it does not)
+            foreach (var gone in state.Leases.Values.Where(l => harness.CameraOwnerRevoked(l.Owner)).ToList())
+            {
+                state.Leases.Remove(gone.Id);
+                state.Ended[gone.Id] = gone.Owner;
+                state.Queue.Add(() => { if (gone.Applied) Raise(gone, CameraAbi.Ended, CameraAbi.EndOwnerRetired); });
+            }
             due = [.. state.Queue];
             state.Queue.Clear();
             state.InFlight.Clear();
@@ -149,26 +160,46 @@ internal sealed unsafe class CameraFake : IKitFake
 
     public void AddCoverage(List<CoverageRow> rows) =>
         rows.Add(new CoverageRow("Camera", CoverageKind.RecordingFake, [CameraAbi.Service, ServiceRow, ModeRow, .. LocalRows],
-            "Kiln.Camera's own code on the kit's kiln.camera. The lease rules are the service's: one lease per player and endpoint, AlreadyOwned for the same " +
-            "mod, Busy unless another mod's priority is higher (the old lease ends superseded before the new one is applied), update and end with their refusals, " +
-            "answers and Camera.Changed one step after the call. There is no picture and no clock offline: a request counts as applied the step after it was made, " +
-            "a lease ends only when the mod ends it or the test calls KilnHarness.Camera.Expire, and blends do nothing. Not modelled (the rows read offline): the " +
-            "frame snapshot (Camera.GetVisual), a server's visual requests for a player's client (camera.remote), and what a stopping world does to open leases."));
+            "Kiln.Camera's own code on the kit's kiln.camera. The lease rules are the service's: one lease per player and endpoint, AlreadyOwned for the same mod, " +
+            "Busy unless another mod's priority is higher (the old lease ends superseded before the new one is applied), update and end with their refusals, " +
+            "answers and Camera.Changed one step after the call; calls outside mod code (owner 0) are refused, and a mod that unloads has its applied leases end " +
+            "OwnerRetired. There is no picture and no clock offline: a request counts as applied the step after it was made, and a lease ends only when the mod " +
+            "ends it or the test says so (KilnHarness.Camera.Expire, End, StopWorld; RefuseNext scripts a refusal); blends do nothing. Not modelled (the rows read " +
+            "offline): the frame snapshot (Camera.GetVisual) and a server's visual requests for a player's client (camera.remote)."));
 
-    public static bool Expire(CameraFakeState state, ulong lease)
+    public static bool EndLease(CameraFakeState state, ulong lease, uint endReason)
     {
         lock (state.Lock)
         {
-            if (!state.Leases.Remove(lease, out var l)) return false;
+            if (!state.Leases.TryGetValue(lease, out var l) || !l.Applied) return false;  // only an applied lease ends by itself
+            state.Leases.Remove(lease);
             state.Ended[lease] = l.Owner;
-            state.Queue.Add(() => Raise(l, CameraAbi.Ended, CameraAbi.EndExpired));
+            state.Queue.Add(() => Raise(l, CameraAbi.Ended, endReason));
             return true;
+        }
+    }
+
+    // The world stops: an applied lease ends WorldStopped, a waiting apply or update is answered StaleWorld.
+    public static int StopWorld(CameraFakeState state)
+    {
+        lock (state.Lock)
+        {
+            var all = state.Leases.Values.ToList();
+            foreach (var l in all)
+            {
+                state.Leases.Remove(l.Id);
+                state.Ended[l.Id] = l.Owner;
+                l.Stopped = true;
+                state.Queue.Add(() => { if (l.Applied) Raise(l, CameraAbi.Ended, CameraAbi.EndWorldStopped); });
+            }
+            return all.Count;
         }
     }
 
     // ---- deliveries ----
 
-    private static void Answer(nint done, nint user, FakeCameraLease lease, ulong id, bool ok, uint reason, uint flags = 0)
+    // `revision`: the lease's revision in force for a refused update of its owner (the service reports it; 0 otherwise)
+    private static void Answer(nint done, nint user, FakeCameraLease lease, ulong id, bool ok, uint reason, uint flags = 0, ulong? revision = null)
     {
         if (done == 0) return;
         var text = ok ? default : Str(reason);
@@ -176,7 +207,7 @@ internal sealed unsafe class CameraFake : IKitFake
         {
             Size = (uint)sizeof(CameraAbi.Result), Ok = ok ? 1u : 0u, ReasonCode = reason, Flags = flags, Lease = id, Reason = text,
             CommitScope = !ok || flags != 0 ? 0u : lease.Endpoint == CameraAbi.ServerMode ? 1u : 2u,
-            Endpoint = lease.Endpoint, Player = lease.Player, Generation = 1, Revision = ok && flags == 0 ? lease.Revision : 0,
+            Endpoint = lease.Endpoint, Player = lease.Player, Generation = 1, Revision = revision ?? (ok && flags == 0 ? lease.Revision : 0),
         };
         ((delegate* unmanaged[Cdecl]<CameraAbi.Result*, void*, void>)done)(&r, (void*)user);
     }
@@ -281,6 +312,7 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (holder is not null && holder.Owner == owner) refusal = CameraAbi.AlreadyOwned;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;  // one apply or update per endpoint at a time
                 else if (holder is not null && req->Priority <= holder.Priority) refusal = CameraAbi.Busy;
+                else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Apply, lease.Id, req->Endpoint, new EntityId(lease.Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));
                 if (refusal != 0)
@@ -297,8 +329,19 @@ internal sealed unsafe class CameraFake : IKitFake
                 }
                 state.Leases[lease.Id] = lease;
                 state.InFlight.Add((lease.Endpoint, lease.Player));
-                state.Queue.Add(() => Answer(fn, u, lease, lease.Id, true, 0));
-                state.Queue.Add(() => Raise(lease, CameraAbi.Applied));
+                var h = harness;
+                state.Queue.Add(() =>
+                {
+                    if (h.CameraOwnerRevoked(lease.Owner)) return;  // the service drops a retired owner's waiting lease without a word
+                    if (lease.Stopped)
+                    {
+                        Answer(fn, u, lease, lease.Id, false, CameraAbi.StaleWorld);
+                        return;
+                    }
+                    lease.Applied = true;
+                    Answer(fn, u, lease, lease.Id, true, 0);
+                    Raise(lease, CameraAbi.Applied);
+                });
             }
             return FakeTables.Ok;
         }
@@ -328,18 +371,25 @@ internal sealed unsafe class CameraFake : IKitFake
                 else if (mode != (lease.Endpoint == CameraAbi.ServerMode)) refusal = CameraAbi.LeaseKind;
                 else if (req->InputPolicy == 2) refusal = CameraAbi.InputPolicy;
                 else if (state.InFlight.Contains((lease.Endpoint, lease.Player))) refusal = CameraAbi.Busy;
+                else if (state.Refusals.Count > 0) refusal = state.Refusals.Dequeue();
                 state.Calls.Add(new FakeCameraCall(harness!.CurrentStep, FakeCameraCallKind.Update, id, req->Endpoint, new EntityId(req->Player), req->Parts, req->DurationMs,
                     req->Priority, refusal));
                 var about = lease is not null && lease.Owner == owner ? lease : new FakeCameraLease { Endpoint = req->Endpoint, Player = req->Player };
                 if (refusal != 0)
                 {
-                    state.Queue.Add(() => Answer(fn, u, about, id, false, refusal));
+                    var keeps = lease is not null && lease.Owner == owner ? lease.Revision : 0;
+                    state.Queue.Add(() => Answer(fn, u, about, id, false, refusal, revision: keeps));
                     return FakeTables.Ok;
                 }
                 state.InFlight.Add((lease!.Endpoint, lease.Player));
                 var priority = req->Priority;
                 state.Queue.Add(() =>
                 {
+                    if (lease.Stopped || !state.Leases.ContainsKey(lease.Id))
+                    {
+                        Answer(fn, u, lease, id, false, lease.Stopped ? CameraAbi.StaleWorld : 24u);  // the lease ended first: Cancelled
+                        return;
+                    }
                     lock (state.Lock)
                     {
                         lease.Revision++;
