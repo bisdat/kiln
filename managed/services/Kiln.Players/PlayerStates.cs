@@ -31,10 +31,13 @@ public sealed record PlayerStateInfo(PlayerStateId Id, PlayerStateSource Source,
 /// (<c>GameItems.Food_...</c>) or the id (<c>GameItems.Ids.Food_...</c>).</summary>
 public readonly struct PlayerItem : IEquatable<PlayerItem>
 {
+    /// <summary>Wraps a game item id.</summary>
+    /// <param name="id">The game's item id (FNV-1a of its GUID); 0 = none.</param>
     public PlayerItem(uint id) => Id = id;
 
     /// <summary>The game's item id (FNV-1a of its GUID); 0 = none.</summary>
     public uint Id { get; }
+    /// <summary>True when this is no item (<see cref="Id"/> is 0).</summary>
     public bool IsNone => Id == 0;
 
     private PlayerItemInfo? Info => Id == 0 ? null : PlayerStates.ItemInfoOf(Id);
@@ -46,20 +49,34 @@ public readonly struct PlayerItem : IEquatable<PlayerItem>
     /// <summary>The game's EquipmentSlotType name: "Consumable", "MeleeWeapon", "Glider", ...</summary>
     public string SlotType => Info?.SlotType ?? "";
 
+    /// <summary>True when both are the same item id.</summary>
     public bool Equals(PlayerItem other) => Id == other.Id;
+    /// <summary>True when <paramref name="obj"/> is a <see cref="PlayerItem"/> with the same id.</summary>
     public override bool Equals(object? obj) => obj is PlayerItem o && Equals(o);
+    /// <summary>A hash of the item id.</summary>
     public override int GetHashCode() => Id.GetHashCode();
+    /// <summary>The game's name for the item, else its id in hex, or "(none)" for no item.</summary>
     public override string ToString() => Id == 0 ? "(none)" : Name.Length > 0 ? Name : $"0x{Id:x8}";
 
+    /// <summary>True when both are the same item id.</summary>
     public static bool operator ==(PlayerItem a, PlayerItem b) => a.Id == b.Id;
+    /// <summary>True when the item ids differ.</summary>
     public static bool operator !=(PlayerItem a, PlayerItem b) => a.Id != b.Id;
+    /// <summary>True when the item's game name equals <paramref name="name"/> (ordinal). False for no item.</summary>
     public static bool operator ==(PlayerItem a, string? name) => a.Id != 0 && string.Equals(a.Name, name, StringComparison.Ordinal);
+    /// <summary>The negation of the name comparison.</summary>
     public static bool operator !=(PlayerItem a, string? name) => !(a == name);
+    /// <summary>True when the item's game name equals <paramref name="name"/> (ordinal). False for no item.</summary>
     public static bool operator ==(string? name, PlayerItem a) => a == name;
+    /// <summary>The negation of the name comparison.</summary>
     public static bool operator !=(string? name, PlayerItem a) => !(a == name);
+    /// <summary>True when the item's id is <paramref name="id"/>.</summary>
     public static bool operator ==(PlayerItem a, uint id) => a.Id == id;
+    /// <summary>True when the item's id is not <paramref name="id"/>.</summary>
     public static bool operator !=(PlayerItem a, uint id) => a.Id != id;
+    /// <summary>True when the item's id is <paramref name="id"/>.</summary>
     public static bool operator ==(uint id, PlayerItem a) => a.Id == id;
+    /// <summary>True when the item's id is not <paramref name="id"/>.</summary>
     public static bool operator !=(uint id, PlayerItem a) => a.Id != id;
 }
 
@@ -75,10 +92,23 @@ public sealed record PlayerBuff(uint Id, string Slot, TimeSpan? Remaining = null
     /// <summary>True for this id, given as a number or as a <c>GameBuffs.X</c> constant ("0x..").</summary>
     public bool Is(string idText) => idText is not null && idText.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
         uint.TryParse(idText.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out var v) && v == Id;
+    /// <summary>True for this id.</summary>
     public bool Is(uint id) => Id == id;
 }
 
 /// <summary>The action a player runs: the game's action sequence and what started it.</summary>
+/// <param name="Sequence">The game's id of the action sequence: FNV-1a of the sequence GUID.</param>
+/// <param name="SequenceName">The game's name of the sequence ("UseItem_Food_Buff"); empty when it cannot be read.</param>
+/// <param name="Trigger">What started it: a state such as <see cref="PlayerStateId.ActionPrimary"/>.</param>
+/// <param name="Input">The input behind it, when one: a state such as <see cref="PlayerStateId.InputQuickUse0"/>; <see cref="PlayerStateId.None"/> when none.</param>
+/// <param name="Item">The item the action uses; <see cref="PlayerItem.IsNone"/> when none.</param>
+/// <param name="Ammunition">The ammunition item it uses; none when it uses none.</param>
+/// <param name="CostItem">The item the action costs; none when it costs none.</param>
+/// <param name="Slot">The inventory slot the item comes from: the inventory entity in the low 32 bits, the slot index above them. <see cref="PlayerAction.SlotInventory"/> and <see cref="PlayerAction.SlotIndex"/> split it.</param>
+/// <param name="Host">The entity of the interaction host (the thing the player interacts with); <see cref="EntityId.None"/> when there is none.</param>
+/// <param name="TriggerTime">The game's time when the action started, in nanoseconds. Together with <paramref name="Sequence"/> it identifies this start.</param>
+/// <param name="Played">How far the sequence has played.</param>
+/// <param name="Length">How long the sequence lasts.</param>
 public sealed record PlayerAction(
     uint Sequence, string SequenceName, PlayerStateId Trigger, PlayerStateId Input, PlayerItem Item, PlayerItem Ammunition, PlayerItem CostItem,
     ulong Slot, EntityId Host, long TriggerTime, TimeSpan Played, TimeSpan Length)
@@ -101,7 +131,9 @@ public sealed class PlayerSnapshot
         PlayerStates.ComputeDerived(in N, out DerivedOn, out DerivedKnown);
     }
 
+    /// <summary>The player's entity.</summary>
     public EntityId Entity => new(N.Entity);
+    /// <summary>Where the read came from: the server, a client's prediction or a replicated copy.</summary>
     public PlayerStateOrigin Origin => (PlayerStateOrigin)N.World;
 
     /// <summary>True when the player is in this state; false when not, or when it is unknown (see <see cref="Check"/>).</summary>
@@ -128,31 +160,48 @@ public sealed class PlayerSnapshot
     /// <summary>The action it runs now; null when none.</summary>
     public PlayerAction? Action => N.HasAction != 0 && N.Action.Sequence != 0 ? PlayerStates.ActionOf(in N) : null;
 
+    /// <summary>The player's health; null when the vitals could not be read.</summary>
     public int? Health => N.HasVitals != 0 ? N.Health : null;
+    /// <summary>The player's maximum health; null when the vitals could not be read.</summary>
     public int? HealthMax => N.HasVitals != 0 ? N.HealthMax : null;
+    /// <summary>The player's stamina; null when the vitals could not be read.</summary>
     public int? Stamina => N.HasVitals != 0 ? N.Stamina : null;
+    /// <summary>The player's maximum stamina; null when the vitals could not be read.</summary>
     public int? StaminaMax => N.HasVitals != 0 ? N.StaminaMax : null;
+    /// <summary>The player's mana; null when the vitals could not be read.</summary>
     public int? Mana => N.HasVitals != 0 ? N.Mana : null;
+    /// <summary>The player's maximum mana; null when the vitals could not be read.</summary>
     public int? ManaMax => N.HasVitals != 0 ? N.ManaMax : null;
+    /// <summary>The player's body heat; null when the vitals could not be read.</summary>
     public int? BodyHeat => N.HasVitals != 0 ? N.BodyHeat : null;
+    /// <summary>The player's maximum body heat; null when the vitals could not be read.</summary>
     public int? BodyHeatMax => N.HasVitals != 0 ? N.BodyHeatMax : null;
+    /// <summary>The player's special ability meter; null when the vitals could not be read.</summary>
     public int? SpecialAbility => N.HasVitals != 0 ? N.Special : null;
+    /// <summary>The special ability meter's maximum; null when the vitals could not be read.</summary>
     public int? SpecialAbilityMax => N.HasVitals != 0 ? N.SpecialMax : null;
     /// <summary>The game's FogResistance value. In the Shroud it goes down by one a second, in the deadly kind (the game's
     /// FogType.Death) by 100; outside it recovers by 25 a second.</summary>
     public int? ShroudResistance => N.HasVitals != 0 ? N.Fog : null;
+    /// <summary>The highest <see cref="ShroudResistance"/> the player can have; null when the vitals could not be read.</summary>
     public int? ShroudResistanceMax => N.HasVitals != 0 ? N.FogMax : null;
     /// <summary>The Shroud timer the game shows: <see cref="ShroudResistance"/> in seconds.</summary>
     public TimeSpan? ShroudTimeLeft => N.HasVitals != 0 ? TimeSpan.FromSeconds(N.Fog) : null;
+    /// <summary>The player's oxygen; null when the vitals could not be read.</summary>
     public int? Oxygen => N.HasVitals != 0 ? N.Oxygen : null;
+    /// <summary>The player's maximum oxygen; null when the vitals could not be read.</summary>
     public int? OxygenMax => N.HasVitals != 0 ? N.OxygenMax : null;
+    /// <summary>The player's level; null when the vitals could not be read.</summary>
     public int? Level => N.HasVitals != 0 ? N.Level : null;
+    /// <summary>The player's comfort value as the game holds it; null when the vitals could not be read.</summary>
     public int? Comfort => N.HasVitals != 0 ? N.Comfort : null;
     /// <summary>Jumps since the last landing.</summary>
     public int? JumpCount => N.HasJump != 0 ? N.JumpCount : null;
     /// <summary>Water depth at the player, metres; null when unknown.</summary>
     public float? WaterDepth => N.HasJump != 0 ? N.WaterDepth : null;
+    /// <summary>The player can swim now; null when unknown.</summary>
     public bool? CanSwim => N.HasJump != 0 ? N.CanSwim != 0 : null;
+    /// <summary>The player can dive now; null when unknown.</summary>
     public bool? CanDive => N.HasJump != 0 ? N.CanDive != 0 : null;
 }
 
@@ -817,6 +866,13 @@ public sealed record PlayerClientActionInfo(int Index, string Name, int Bytes, b
 
 /// <summary>What kiln.playerstate can do on this build.</summary>
 /// <param name="Cancel">A <see cref="PlayerActionEvent"/> can be canceled (the game's reset of a running sequence resolved).</param>
+/// <param name="Reflection">Field offsets and enum names came from the game's reflection.</param>
+/// <param name="SequenceNames">Sequence names can be read (<see cref="PlayerAction.SequenceName"/>).</param>
+/// <param name="ItemDetails">Item details can be read (<see cref="PlayerItem.Name"/>, <see cref="PlayerItem.Category"/>, <see cref="PlayerItem.SlotType"/>).</param>
+/// <param name="Sources">How many state sources resolved.</param>
+/// <param name="Scans">How many scans were done.</param>
+/// <param name="PlayersRead">How many player reads were done.</param>
+/// <param name="Detail">What did not resolve, in words. Empty when everything did.</param>
 public sealed record PlayerStateServiceStatus(bool Reflection, bool Cancel, bool SequenceNames, bool ItemDetails, int Sources,
     ulong Scans, ulong PlayersRead, string Detail)
 {
@@ -828,9 +884,46 @@ public sealed record PlayerStateServiceStatus(bool Reflection, bool Cancel, bool
 /// <summary>A slot of a player's equipment, named as the game's SlotSelection.equipment fields.</summary>
 public enum PlayerEquipSlot
 {
-    VanityHead, VanityUpperBody, VanityArms, VanityLowerBody, VanityFeet,
-    ArmourHead, ArmourUpperBody, ArmourArms, ArmourLowerBody, ArmourFeet,
-    Ring0, Ring1, RangedWeapon, Shield, Arrow, Spell, FishingBait, HookShot, Glider, Backpack,
+    /// <summary>The vanity (cosmetic) head slot.</summary>
+    VanityHead,
+    /// <summary>The vanity (cosmetic) upper body slot.</summary>
+    VanityUpperBody,
+    /// <summary>The vanity (cosmetic) arms slot.</summary>
+    VanityArms,
+    /// <summary>The vanity (cosmetic) lower body slot.</summary>
+    VanityLowerBody,
+    /// <summary>The vanity (cosmetic) feet slot.</summary>
+    VanityFeet,
+    /// <summary>The head armour slot.</summary>
+    ArmourHead,
+    /// <summary>The upper body armour slot.</summary>
+    ArmourUpperBody,
+    /// <summary>The arms armour slot.</summary>
+    ArmourArms,
+    /// <summary>The lower body armour slot.</summary>
+    ArmourLowerBody,
+    /// <summary>The feet armour slot.</summary>
+    ArmourFeet,
+    /// <summary>The first ring slot.</summary>
+    Ring0,
+    /// <summary>The second ring slot.</summary>
+    Ring1,
+    /// <summary>The ranged weapon slot.</summary>
+    RangedWeapon,
+    /// <summary>The shield slot.</summary>
+    Shield,
+    /// <summary>The arrow slot.</summary>
+    Arrow,
+    /// <summary>The spell slot.</summary>
+    Spell,
+    /// <summary>The fishing bait slot.</summary>
+    FishingBait,
+    /// <summary>The grappling hook slot.</summary>
+    HookShot,
+    /// <summary>The glider slot.</summary>
+    Glider,
+    /// <summary>The backpack slot.</summary>
+    Backpack,
 }
 
 /// <summary>What a player wears and holds at one moment.</summary>
@@ -873,35 +966,64 @@ public sealed partial record Player
     /// <summary>Everything at once, one read: states, action, health and the rest. Null when unreadable.</summary>
     public PlayerSnapshot? Snapshot() => PlayerStates.Read(Entity);
 
+    /// <summary>The player is gliding (<see cref="PlayerStateId.Gliding"/>). See <see cref="Is"/> for what false means.</summary>
     public bool IsGliding => Is(PlayerStateId.Gliding);
+    /// <summary>The player is in the air: not on the ground, and not climbing, swimming or hanging from a hook (<see cref="PlayerStateId.Airborne"/>).</summary>
     public bool IsAirborne => Is(PlayerStateId.Airborne);
+    /// <summary>The player is on the ground (<see cref="PlayerStateId.Grounded"/>).</summary>
     public bool IsGrounded => Is(PlayerStateId.Grounded);
+    /// <summary>The player is rising from a jump (<see cref="PlayerStateId.Jumping"/>).</summary>
     public bool IsJumping => Is(PlayerStateId.Jumping);
+    /// <summary>The player is falling (<see cref="PlayerStateId.LocomotionFalling"/>).</summary>
     public bool IsFalling => Is(PlayerStateId.LocomotionFalling);
+    /// <summary>The player is swimming (<see cref="PlayerStateId.Swimming"/>).</summary>
     public bool IsSwimming => Is(PlayerStateId.Swimming);
+    /// <summary>The player is diving (<see cref="PlayerStateId.Diving"/>).</summary>
     public bool IsDiving => Is(PlayerStateId.Diving);
+    /// <summary>The player is underwater (<see cref="PlayerStateId.Underwater"/>).</summary>
     public bool IsUnderwater => Is(PlayerStateId.Underwater);
+    /// <summary>The player is climbing (<see cref="PlayerStateId.Climbing"/>).</summary>
     public bool IsClimbing => Is(PlayerStateId.Climbing);
+    /// <summary>The player is sprinting (<see cref="PlayerStateId.Sprinting"/>).</summary>
     public bool IsSprinting => Is(PlayerStateId.Sprinting);
+    /// <summary>The player is crouching, in the game's sneak mode (<see cref="PlayerStateId.Sneaking"/>).</summary>
     public bool IsCrouching => Is(PlayerStateId.Sneaking);
+    /// <summary>The player hangs from a grappling hook (<see cref="PlayerStateId.Grappling"/>).</summary>
     public bool IsGrappling => Is(PlayerStateId.Grappling);
+    /// <summary>The player is holding a block (<see cref="PlayerStateId.Blocking"/>).</summary>
     public bool IsBlocking => Is(PlayerStateId.Blocking);
+    /// <summary>The player is in a dodge (<see cref="PlayerStateId.Dodging"/>).</summary>
     public bool IsDodging => Is(PlayerStateId.Dodging);
+    /// <summary>The player runs an action that swings or fires a weapon (<see cref="PlayerStateId.Attacking"/>).</summary>
     public bool IsAttacking => Is(PlayerStateId.Attacking);
+    /// <summary>The player runs an action that uses a spell, or a wand's own attack (<see cref="PlayerStateId.Casting"/>).</summary>
     public bool IsCasting => Is(PlayerStateId.Casting);
+    /// <summary>The player runs an action with a used item that is not a weapon (<see cref="PlayerStateId.UsingItem"/>).</summary>
     public bool IsUsingItem => Is(PlayerStateId.UsingItem);
+    /// <summary>The player is sitting on a seat (<see cref="PlayerStateId.Sitting"/>).</summary>
     public bool IsSitting => Is(PlayerStateId.Sitting);
+    /// <summary>The player is sleeping (<see cref="PlayerStateId.Sleeping"/>).</summary>
     public bool IsSleeping => Is(PlayerStateId.Sleeping);
+    /// <summary>The player is dead (<see cref="PlayerStateId.Dead"/>).</summary>
     public bool IsDead => Is(PlayerStateId.Dead);
+    /// <summary>The player is inside a flame altar's build zone (<see cref="PlayerStateId.InBase"/>).</summary>
     public bool IsInBase => Is(PlayerStateId.InBase);
+    /// <summary>The player stands in the Shroud (<see cref="PlayerStateId.InShroud"/>).</summary>
     public bool IsInShroud => Is(PlayerStateId.InShroud);
+    /// <summary>The player is in combat (<see cref="PlayerStateId.InCombat"/>).</summary>
     public bool IsInCombat => Is(PlayerStateId.InCombat);
 
+    /// <summary>The player's health; null when it cannot be read (<see cref="Snapshot"/>).</summary>
     public int? Health => Snapshot()?.Health;
+    /// <summary>The player's maximum health; null when it cannot be read.</summary>
     public int? HealthMax => Snapshot()?.HealthMax;
+    /// <summary>The player's mana; null when it cannot be read.</summary>
     public int? Mana => Snapshot()?.Mana;
+    /// <summary>The player's maximum mana; null when it cannot be read.</summary>
     public int? ManaMax => Snapshot()?.ManaMax;
+    /// <summary>The player's stamina; null when it cannot be read.</summary>
     public int? Stamina => Snapshot()?.Stamina;
+    /// <summary>The player's maximum stamina; null when it cannot be read.</summary>
     public int? StaminaMax => Snapshot()?.StaminaMax;
     /// <summary>The Shroud timer the game shows. Null when unknown.</summary>
     public TimeSpan? ShroudTimeLeft => Snapshot()?.ShroudTimeLeft;

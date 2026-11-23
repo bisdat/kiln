@@ -16,6 +16,12 @@ public sealed partial record Player
 }
 
 /// <summary>What kiln.characters can do on this build.</summary>
+/// <param name="Resolved">The record offset of the character id was found on this build.</param>
+/// <param name="Records">kiln.players gave the player records at the last scan.</param>
+/// <param name="Simulated">The lab simulation is on (<c>KILN_CHARACTERS_SIMULATE</c>).</param>
+/// <param name="Scans">How many scans were done.</param>
+/// <param name="Known">How many slots have a character id in the snapshot.</param>
+/// <param name="RecordOffset">The record offset of the character id.</param>
 public sealed record PlayerCharactersStatus(bool Resolved, bool Records, bool Simulated, ulong Scans, int Known, int RecordOffset);
 
 /// <summary>kiln.characters: the game's CharacterId of each connected player. Any thread; values are as of the last

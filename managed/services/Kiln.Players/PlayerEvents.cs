@@ -16,6 +16,7 @@ public sealed class PlayerJoinedEvent : KilnEvent
         Sequence = e.Sequence;
     }
 
+    /// <summary>The player who logged in.</summary>
     public Player Player { get; }
 
     /// <summary>The server-world step of the join.</summary>
@@ -24,6 +25,7 @@ public sealed class PlayerJoinedEvent : KilnEvent
     /// <summary>kiln.players' running event number.</summary>
     public ulong Sequence { get; }
 
+    /// <summary>The player, for a log line.</summary>
     public override string ToString() => $"joined: {Player}";
 }
 
@@ -40,10 +42,14 @@ public sealed class PlayerLeftEvent : KilnEvent
         Sequence = e.Sequence;
     }
 
+    /// <summary>The player who left, as they were last seen in game.</summary>
     public Player Player { get; }
+    /// <summary>The server-world step of the leave.</summary>
     public ulong Step { get; }
+    /// <summary>kiln.players' running event number.</summary>
     public ulong Sequence { get; }
 
+    /// <summary>The player, for a log line.</summary>
     public override string ToString() => $"left: {Player}";
 }
 
