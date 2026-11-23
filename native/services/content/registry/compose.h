@@ -154,11 +154,28 @@ struct ModInput {
     std::function<void(Stage, const View&, Batch*)> code;
 };
 
+// Kiln-internal binding data, never a game pointer or a public ABI record. Values are the final stable view;
+// like/base are Kiln ids. The backend resolves them before it creates a real content definition.
+struct EntryDefinition {
+    std::string like, base, mod, source;
+    uint32_t n = 0;
+    std::map<std::string, Value> values;
+    std::set<std::string> traits;
+};
+struct EntryRemoval {
+    std::string mod, source;
+    Stage stage = Stage::Alter;
+    uint32_t n = 0;
+    std::string reason;
+};
+
 struct Result {
     std::map<FieldRef, FieldOutcome> fields;  // every touched field
     std::vector<Line> lines;                  // in the order they happened
     std::vector<Refusal> refused;
     std::vector<EntryRef> added, removed;
+    std::map<EntryRef, EntryDefinition> definitions;
+    std::map<EntryRef, EntryRemoval> removals;
 };
 
 Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods);

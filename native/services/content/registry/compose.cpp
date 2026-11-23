@@ -856,6 +856,10 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
         if (w.stage != Stage::Add) return refuse(c, w, e, "an entry is added in stage add");
         if (e.add_id.rfind(w.mod + ":", 0) != 0) return refuse(c, w, e, "an added entry's id is \"" + w.mod + ":<name>\"");
         if (lower(e.add_id) != e.add_id) return refuse(c, w, e, "an added entry's id is lower case (Kiln ids are), not \"" + e.add_id + "\"");
+        const std::string name = e.add_id.substr(w.mod.size() + 1);
+        if (name.empty() || e.add_id.size() > 256 || !std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+                return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+            })) return refuse(c, w, e, "an added entry's id is <mod>:<name>, at most 256 characters; name uses a-z, 0-9, '.', '_' or '-'");
         if (s.entry(e.registry, e.add_id)) return refuse(c, w, e, "the id " + e.add_id + " is taken (ids are never reused)");
         auto refuse_add = [&](const std::string& why) {  // a reference to this id names why it is not there
             c.refused_add.try_emplace({e.registry, e.add_id}, why);
@@ -930,7 +934,10 @@ void run_edit(Ctx& c, State& s, const Who& w, const Edit& e, bool report, const 
             if (!x || x->removed) continue;
             x->removed = true;
             x->removed_by = w.mod;
-            if (report) c.out.removed.push_back({e.registry, id});
+            if (report) {
+                c.out.removed.push_back({e.registry, id});
+                c.out.removals[{e.registry, id}] = {w.mod, w.source, w.stage, e.n, "hidden by " + w.mod};
+            }
         }
         return;
     }
@@ -1073,7 +1080,6 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
     for (const auto& [name, reg] : c.schema.registries)
         for (const auto& [fname, f] : reg.fields)
             if (fname.find("[]") == std::string::npos && has_refs(c.schema, f)) fields[name].push_back(&f);
-    if (fields.empty()) return;
     std::map<EntryRef, std::string> roots;  // a refused add's root cause
     // the bad references of a value: (place, id, why), and the ids alone
     auto bad_of = [&](const FieldSpec& f, const Value& v, std::vector<std::tuple<std::string, std::string, std::string>>* out) {
@@ -1111,11 +1117,19 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
             if (field && has_refs(c.schema, *field) && queued.insert(entry).second) work.push_back(entry);
         }
     } else {
-        for (const auto& [reg, fl] : fields)
+        for (const auto& [reg, spec] : c.schema.registries)
             s.each_entry(reg, [&](const EntryState& e) {
                 if (e.removed) return;
                 bool any = false;
-                for (const FieldSpec* f : fl) {
+                if (!e.like.empty()) {
+                    referrers[{reg, e.like}].push_back({reg, e.id});
+                    any = true;
+                }
+                if (reg == "loot" && c.schema.registry("items")) {
+                    referrers[{"items", e.id}].push_back({reg, e.id});
+                    any = true;
+                }
+                for (const FieldSpec* f : fields[reg]) {
                     std::vector<Ref> refs;
                     refs_of(c.schema, *f, s.current({reg, e.id, f->name}), f->name, &refs);
                     for (const auto& [path, id] : refs) referrers[{ref_registry(*f, path), lower(id)}].push_back({reg, e.id});
@@ -1124,6 +1138,24 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                 if (any && queued.insert({reg, e.id}).second) work.push_back({reg, e.id});
             });
     }
+    auto enqueue_referrers = [&](const EntryRef& er) {
+        if (const auto rs = referrers.find(er); rs != referrers.end())
+            for (const EntryRef& by : rs->second)
+                if (queued.insert(by).second) work.push_back(by);
+    };
+    auto refuse_added = [&](const EntryRef& er, EntryState& e, const Ctx::Adder& adder,
+                            const std::string& why, const std::string& root, const std::string& field) {
+        c.refused_add[er] = why;
+        roots[er] = root;
+        e.removed = true;
+        e.removed_by = "refused";
+        c.out.refused.push_back({adder.mod, adder.source, Stage::Add, adder.n, er.registry + " " + er.id + " refused: " + why,
+                                 er.registry + "|" + er.id, er.registry, er.id, field});
+        std::erase_if(c.out.added, [&](const EntryRef& a) { return a == er; });
+        for (auto x = s.fields.lower_bound({er.registry, er.id, ""}); x != s.fields.end() && x->first.registry == er.registry && x->first.id == er.id;) x = s.fields.erase(x);
+        std::erase_if(c.out.lines, [&](const Line& l) { return l.field.registry == er.registry && l.field.id == er.id; });
+        enqueue_referrers(er);
+    };
     while (!work.empty()) {
         const EntryRef er = work.front();
         work.pop_front();
@@ -1131,6 +1163,25 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
         EntryState* e = s.entry(er.registry, er.id);
         if (!e || e->removed) continue;
         const auto adder = c.adders.find(er);
+        // Clone bases and an item's loot row are identity dependencies, not editable schema fields.
+        const EntryRef dependency = !e->like.empty() ? EntryRef{er.registry, e->like} : EntryRef{"items", er.id};
+        if (!e->like.empty() || (er.registry == "loot" && c.schema.registry("items"))) {
+            const std::string gone = why_gone(c, s, dependency.registry, dependency.id);
+            if (!gone.empty()) {
+                const auto root = roots.find(dependency);
+                const std::string root_text = root == roots.end() ? dependency.id + " " + gone : root->second;
+                const std::string why = bounded((e->like.empty() ? "item " : "like ") + dependency.id + " " + gone, root_text);
+                if (adder != c.adders.end()) refuse_added(er, *e, adder->second, why, root_text, "");
+                else {
+                    e->removed = true; e->removed_by = "the reference check";
+                    c.out.removed.push_back(er);
+                    c.out.removals[er] = {"", "reference check", Stage::Alter, 0, why};
+                    c.out.lines.push_back({LineKind::Dropped, {er.registry, er.id, ""}, "", "", er.registry + " " + er.id + " disabled: " + why});
+                    enqueue_referrers(er);
+                }
+                continue;
+            }
+        }
         for (const FieldSpec* f : fields[er.registry]) {
             const FieldRef fr{er.registry, er.id, f->name};
             if (bad_ids(*f, s.current(fr)).empty()) continue;
@@ -1194,6 +1245,7 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                     e->removed = true;
                     e->removed_by = "the reference check";
                     c.out.removed.push_back(er);
+                    c.out.removals[er] = {"", "reference check", Stage::Alter, 0, why};
                     c.out.lines.push_back({LineKind::Dropped, fr, "", "", cat({er.registry, " ", er.id, " removed: ", why})});
                     if (const auto rs = referrers.find(er); rs != referrers.end())
                         for (const EntryRef& by : rs->second)
@@ -1234,18 +1286,7 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
             if (still.empty()) continue;
             std::string root;
             const std::string why = cause(*f, still.front(), &root);
-            c.refused_add[er] = why;
-            roots[er] = root;
-            e->removed = true;
-            e->removed_by = "refused";
-            c.out.refused.push_back({adder->second.mod, adder->second.source, Stage::Add, adder->second.n, er.registry + " " + er.id + " refused: " + why,
-                                     er.registry + "|" + er.id, er.registry, er.id, f->name});
-            std::erase_if(c.out.added, [&](const EntryRef& a) { return a == er; });
-            for (auto x = s.fields.lower_bound({er.registry, er.id, ""}); x != s.fields.end() && x->first.registry == er.registry && x->first.id == er.id;) x = s.fields.erase(x);
-            std::erase_if(c.out.lines, [&](const Line& l) { return l.field.registry == er.registry && l.field.id == er.id; });
-            if (const auto rs = referrers.find(er); rs != referrers.end())
-                for (const EntryRef& by : rs->second)
-                    if (queued.insert(by).second) work.push_back(by);
+            refuse_added(er, *e, adder->second, why, root, f->name);
             break;
         }
     }
@@ -1436,6 +1477,26 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         run_edit(c, s, h.who, h.edit, true, &h.ids);
     }
     check_references(c, s, prepared != nullptr);
+    if (!previous) {
+        for (const EntryRef& ref : out.added) {
+            const EntryState* e = s.entry(ref.registry, ref.id);
+            const auto adder = c.adders.find(ref);
+            if (!e || adder == c.adders.end()) continue;
+            EntryDefinition d;
+            d.like = e->like; d.base = e->like;
+            for (size_t hops = 0; hops < 64; ++hops) {
+                const auto* parent = s.entry(ref.registry, d.base);
+                if (!parent || !parent->added) break;
+                d.base = parent->like;
+            }
+            d.mod = adder->second.mod; d.source = adder->second.source; d.n = adder->second.n;
+            d.traits = e->traits;
+            d.values = e->base;
+            for (auto f = s.fields.lower_bound({ref.registry, ref.id, ""}); f != s.fields.end() && f->first.registry == ref.registry && f->first.id == ref.id; ++f)
+                if (!is_raw_field(f->first.field)) d.values[f->first.field] = f->second.result;
+            out.definitions[ref] = std::move(d);
+        }
+    }
     out.fields = std::move(s.fields);
     return out;
 }

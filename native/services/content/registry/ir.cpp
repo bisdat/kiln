@@ -441,6 +441,10 @@ bool edit_of(const json& e, const Batch& b, const Schema& schema, Edit* out, std
                 return *err = "an added entry's id is \"" + prefix + "<name>\", not " + brief(e["id"]), false;
             if (std::any_of(out->add_id.begin(), out->add_id.end(), [](char c) { return c >= 'A' && c <= 'Z'; }))
                 return *err = "an added entry's id is lower case (Kiln ids are), not " + brief(e["id"]), false;
+            const auto name = out->add_id.substr(prefix.size());
+            if (out->add_id.size() > 256 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+                })) return *err = "an added entry's id is <mod>:<name>, at most 256 characters; name uses a-z, 0-9, '.', '_' or '-'", false;
             if (e.contains("like")) {
                 if (!e["like"].is_string()) return *err = "\"like\" is an id", false;
                 out->like = e["like"].get<std::string>();
