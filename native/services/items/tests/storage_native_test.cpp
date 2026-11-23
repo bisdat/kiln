@@ -1000,6 +1000,11 @@ void holder_retry_tests() {
               components.at({unrelated.pages[0], kHashInventory}) == unrelated_page);
         CHECK(kitems::detail.find(std::string("stage=") + c.stage) != std::string::npos);
         CHECK(kitems::detail.find("cleanup=") != std::string::npos);
+        // #135: the one log line / capability text must name the native outcome and raw result
+        CHECK(kitems::detail.find(" native=") != std::string::npos && kitems::detail.find(" raw=") != std::string::npos);
+        CHECK(std::any_of(storage_logs.begin(), storage_logs.end(), [&](const std::string& line) {
+            return line.find(std::string("stage=") + c.stage) != std::string::npos;
+        }));
         const auto failed_creates = creates;
         kitems::post(nullptr, nullptr);
         CHECK(creates == failed_creates && creates == before + (c.nth ? c.nth : 3));
