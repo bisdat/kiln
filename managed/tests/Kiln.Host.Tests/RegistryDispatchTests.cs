@@ -547,6 +547,38 @@ public sealed class RegistryDispatchTests : ModsFixture
         }
         finally { WorldConfigs.Reset(); }
     }
+    // review4 recheck RS1: a replaced-ModLoad HotReload whose Alter reads per-world settings and whose Final does not: the
+    // pass decides its lifetime once, so a replay at each bound world replaces its layers instead of stacking Finals.
+    [Fact(Timeout = 30_000)]
+    public void Review4R_MixedLifetimeReplayDoesNotAccumulateLayers()
+    {
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            WorldConfigs.Announce(Path.Combine(DataDir, "world-a"));
+            var old = Owner(native, "mixed");
+            dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, 20); }), old, Root, false);
+            dispatch.FlushLoads();
+            old.Retire();
+            var replacement = Owner(native, "mixed"); var read = 0;
+            dispatch.Loaded(new Author(c => {
+                if (c.Phase == RegistryPhase.Alter) { read += Config.RegisterWorld<WorldInput>().Value.Count; Edit(c, 50); }
+                if (c.Phase == RegistryPhase.Final) Edit(c, 60);
+            }), replacement, Root, true);
+            dispatch.FlushLoads();
+            var first = native.LayerCount;
+            for (ulong w = 2; w <= 4; ++w)
+            {
+                native.ChangeWorld(w); WorldConfigs.Announce(Path.Combine(DataDir, "world-" + w)); dispatch.FlushLoads();
+            }
+            Assert.True(read >= 3 * 2, $"per-world settings were read {read / 3} time(s)");
+            Assert.Equal(first, native.LayerCount);
+            replacement.Retire();
+        }
+        finally { WorldConfigs.Reset(); }
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {

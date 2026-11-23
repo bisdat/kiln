@@ -277,7 +277,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         var ordered = records.Where(r => selected(r) && r.Context.Alive).ToArray();
         var retry = new HashSet<Runtime>();
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
-        var captured = ordered.ToDictionary(r => r, _ => new List<(RegistryPhase Phase, RegistryEntryPoint Native, string Ir)>());
+        var captured = ordered.ToDictionary(r => r, _ => new List<(RegistryPhase Phase, string Ir)>());
+        // review4 recheck RS1: a record's pass has one lifetime. If any phase read per-world settings, every phase of it is
+        // world-scoped, so a replay at the next bound world replaces its layers instead of stacking a process-lifetime Final.
+        var worldSettings = ordered.ToDictionary(r => r, _ => false);
         var committed = ordered.ToDictionary(r => r, _ => new List<ulong>());
         foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
         void Remember(Runtime record, RegistryEntryPoint native, RegistryCompletion result)
@@ -334,8 +337,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 {
                     using var scope = context.Enter();
                     record.Instance.OnRegistry(context);
-                    var ir = context.CaptureIr(); var native = NativePoint(record, point, context.ReadWorldSettings); context.Close();
-                    if (ir is not null) captured[record].Add((phase, native, ir));
+                    var ir = context.CaptureIr(); worldSettings[record] |= context.ReadWorldSettings; context.Close();
+                    if (ir is not null) captured[record].Add((phase, ir));
                 }
                 catch (Exception e) { Fault(record, e); } // the author's code: a fault, whatever the exception
                 finally { context.Close(); }
@@ -345,7 +348,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             foreach (var record in ordered)
             {
                 if (!record.Context.Alive || record.Faulted) continue;
-                foreach (var (_, native, ir) in captured[record].Where(x => x.Phase == phase).ToArray())
+                var native = NativePoint(record, point, worldSettings[record]);
+                foreach (var (_, ir) in captured[record].Where(x => x.Phase == phase).ToArray())
                 {
                     ulong handle = 0;
                     try
