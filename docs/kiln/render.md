@@ -49,7 +49,8 @@ public sealed class Markers : Mod
 | `MenuOpen`, `Capturing`, `Screen` | the Kiln menu is open, a Kiln screen has the input, the game's screen (`GameScreen`) |
 | `Camera` | `RenderCamera` for this frame (below) |
 | `Draw` | `RenderDraw`: pixels |
-| `World` | `WorldDraw`: world positions |
+| `World` | `WorldDraw`: world positions; draws nothing over the game's menus (since 0.2.0-dev.31, below) |
+| `WorldOverMenus` | `WorldDraw` that also draws over the game's menus (since 0.2.0-dev.31) |
 
 `RenderDraw` (origin top left, y down, colours `Color`): `Line`, `Rect` / `FillRect` (rounding), `Circle` / `FillCircle`,
 `Triangle` / `FillTriangle`, `Polyline` (closed or not), `FillPolygon` (convex), `Arrow(tip, angle, size)`,
@@ -62,6 +63,16 @@ bytes) and show from the frame after loading; the mod's images are freed when it
 `Marker(p, color, size, MarkerShape)` (`Diamond`, `Circle`, `Square`, `Triangle`, `Cross`), `Label(p, text)`,
 `Icon(p, image, size)`, `Line(a, b)`, `Box(min, max)` / `Box(center, size)`, `Circle(center, radius)`. Points behind the
 camera are not drawn; lines, boxes and rings are clipped to the near plane and viewport, so visible segments still show.
+
+**Over the game's menus** (since 0.2.0-dev.31, GitHub issue #138): `e.World` submits nothing while one of the game's menus
+covers the world: the map, the inventory and its tabbed menu, crafting (the player's, a station's, an NPC's, a production
+station's screen), storage chests, the character screen, the journal, the skill tree, NPC dialog, the pause and settings
+menus, and the main menu, loading, cinematic and credits screens. Its markers, labels, icons, lines, boxes and rings are
+left out for that frame; `Ready`, `ToScreen`, `ToScreenClamped`, `DistanceTo` and the return values of `Marker`,
+`Label` and `Icon` stay what they would be on the HUD, so a mod's own logic sees no difference. Kiln reads the game's screen
+once per frame (`e.Screen` is that reading). On the HUD, in the text chat, on a screen Kiln does not know
+(`ScreenKind.Other`) and while the screen is not known (no game-UI integration on this build, `ScreenKind.None`) it draws as
+before. A mod that means to draw over a menu uses `e.WorldOverMenus` (the same calls); `e.Draw` (pixels) is never hidden.
 
 ### `RenderCamera`
 `Valid`, `Position`, `Rotation` (quaternion, camera space to world), `Forward` / `Right` / `Up`, `Heading` (degrees: 0
