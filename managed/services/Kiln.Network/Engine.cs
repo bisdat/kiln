@@ -199,6 +199,7 @@ internal static class NetEngine
         }
         foreach (var (k, v) in WorldTablesGate.Properties()) d[k] = v;
         foreach (var (k, v) in PlayerGraphGate.Properties()) d[k] = v;
+        foreach (var (k, v) in NpcBodyGate.Properties()) d[k] = v;
         foreach (var (k, v) in BootGate.Properties()) d[k] = v;  // nothing without a boot generation
         return d;
     }
@@ -521,6 +522,17 @@ internal static class NetEngine
                 refusedFor = [.. refusedFor, graph];
             }
             else Log(LogLevel.Warn, $"{p.Name} joins with another player animation graph (modSync off): {graph}");
+        }
+        // Authored NPC bodies built differently (or one waiting for the client's restart) draw another body: the same rule.
+        if (NpcBodyGate.Difference(hello.Properties) is { } bodies)
+        {
+            if (_config.ModSync != ModSyncPolicy.Off)
+            {
+                reason = refuse ? reason + " " + bodies : bodies;
+                refuse = true;
+                refusedFor = [.. refusedFor, bodies];
+            }
+            else Log(LogLevel.Warn, $"{p.Name} joins with other NPC bodies (modSync off): {bodies}");
         }
         if (Events.HasSubscribers<NetClientHandshakeEvent>())
         {
