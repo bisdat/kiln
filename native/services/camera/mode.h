@@ -19,6 +19,13 @@
 // Threads. Backend methods run under the core's lock on the server world's thread (state.h). step() and the write
 // result run on the tick thread outside it; they report to the core after their own lock is let go. The change callback
 // reads the ticket and atomics only. world_stopped may come on any thread: atomics only; step() forgets the rest.
+//
+// A cancelled ticket is not freed at once. write_cancel's OK covers three cases kiln.world cannot tell apart: the job
+// never runs, it ran and only its result is dropped, or the write program's update that holds it runs right now (a
+// cancel from a program on the tick thread while the write program runs on a worker): then its change callback still
+// comes with the ticket until that update ends. So a cancelled ticket is retired and freed in the next step() (a server
+// Pre: the update that may hold it has ended). A cancel that fails (WRONG_THREAD: inside the write program, or off the
+// tick thread) leaves the job queued: its change callback finds the guard cleared and refuses, and its result frees it.
 #ifndef KILN_CAMERA_MODE_H
 #define KILN_CAMERA_MODE_H
 
@@ -66,6 +73,7 @@ public:
 
     // `component`: NetworkCameraControl's hash; `who`: the name write_declare took the component under (kept as is).
     ModeBackend(Core* core, ModeWorld* world, uint32_t component, std::string who);
+    ~ModeBackend() override;  // frees the retired tickets (nothing may call into the backend after this anyway)
 
     // The component was declared and tracked writes work: the backend serves (caps() has SERVER_MODE).
     void set_ready(bool on) { ready_.store(on, std::memory_order_release); }
@@ -96,6 +104,7 @@ public:
     };
     Counters counters() const;
     uint32_t tickets() const;  // write tickets out now (takes the backend's lock: not from inside a ModeWorld call)
+    uint32_t retired() const;  // cancelled tickets kept until the next step() (the same lock)
     // Whether the ticket whose `user` this is may still write (its slot's guard names its lease and revision). Lock-free:
     // a ModeWorld::cancel can ask it about the ticket being cancelled (the lab fixture proves the tombstone comes first).
     static bool ticket_current(const void* user);
@@ -153,7 +162,8 @@ private:
     // the revision the slot writes next (the staged one first), or null
     const Rev* next(const Slot& s) const;
     void set_guard(Slot& s, const Rev* r);
-    // Clears the guard first, then cancels the slot's ticket: no change callback of it starts after this.
+    // Clears the guard first, then cancels the slot's ticket: a change callback of it that still comes refuses. The
+    // ticket is retired (freed in the next step()) or, when the cancel failed, left to its result.
     void cut(Slot& s);
     void submit(Slot& s);
     void free_if_idle(Slot& s);
@@ -171,6 +181,7 @@ private:
 
     mutable std::mutex m_;
     Slot slots_[kMaxPlayerSlots];
+    std::vector<Ticket*> retired_;  // cancelled; freed at the start of the next step()
 
     std::atomic<uint64_t> submits_{0}, cancels_{0}, writes_{0}, refusals_{0};
     std::atomic<uint64_t> results_[8]{};

@@ -104,7 +104,8 @@ public static unsafe class Camera
     /// <param name="replacement">The new request.</param>
     /// <param name="timing">Whether the lease's clock goes on or starts again.</param>
     /// <exception cref="ArgumentException">The request is malformed, or <paramref name="lease"/> is none.</exception>
-    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world.</exception>
+    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, or inside a program wrap's
+    /// handler.</exception>
     /// <exception cref="KilnUnavailableException">A row the new request needs is off.</exception>
     [TickThreadOnly, RequiresCapability("camera.service")]
     public static Task<CameraResult> Update(CameraLease lease, CameraOverride replacement, CameraUpdateTiming timing = CameraUpdateTiming.Preserve)
@@ -112,6 +113,7 @@ public static unsafe class Camera
         const string api = "Camera.Update";
         ArgumentNullException.ThrowIfNull(replacement);
         RequireLease(lease, api);
+        RequireLeaseThread(lease, api);
         if (!Enum.IsDefined(timing)) throw new ArgumentException($"{api}: timing {timing} is not Preserve or Restart", nameof(timing));
         var built = CameraRequests.Build(replacement, lease.Endpoint, lease.Player, api);
         CameraCaps.Require(CameraCaps.Service);
@@ -130,12 +132,14 @@ public static unsafe class Camera
     /// waits is cancelled first. Ending a lease that has ended is Ok with <see cref="CameraResult.AlreadyEnded"/>.
     /// The task completes when the camera was let go (after a blend out, if the request had one).</summary>
     /// <exception cref="ArgumentException"><paramref name="lease"/> is none.</exception>
-    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world.</exception>
+    /// <exception cref="InvalidOperationException">Not on the thread of the lease's world, or inside a program wrap's
+    /// handler.</exception>
     [TickThreadOnly, RequiresCapability("camera.service")]
     public static Task<CameraResult> End(CameraLease lease)
     {
         const string api = "Camera.End";
         RequireLease(lease, api);
+        RequireLeaseThread(lease, api);
         CameraCaps.Require(CameraCaps.Service);
         var (key, pending) = Register();
         var rc = CameraNative.T->End(Services.CallerOwner, lease.Value, &OnDone, (void*)key);
@@ -290,6 +294,17 @@ public static unsafe class Camera
     {
         if (lease.Value == 0) throw new ArgumentException($"{api}: the lease is none", nameof(lease));
         if (!Enum.IsDefined(lease.Endpoint)) throw new ArgumentException($"{api}: the lease's endpoint {lease.Endpoint} is not an endpoint", nameof(lease));
+    }
+
+    // A server lease (mode, remote) is the tick thread's, as SetMode and Set are. A local lease is the client world's:
+    // kiln.camera checks that thread; here only the program wrap's handler is refused, which runs inside a step even on
+    // the world's own thread (and may cancel a write its update holds).
+    private static void RequireLeaseThread(CameraLease lease, string api)
+    {
+        if (lease.Endpoint != CameraEndpoint.Local)
+            Services.RequireTickThread(api);
+        else if (SliceGuard.Depth > 0)
+            throw new InvalidOperationException($"{api} cannot be called from a program wrap's handler (it runs inside the world's step, maybe on a worker); use slice.Post");
     }
 
     // QueryPerformanceCounter as nanoseconds: the clock kiln.camera stamps a snapshot with.

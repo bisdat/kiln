@@ -4,6 +4,7 @@
 // next Pre, before the backend's own step, as kiln.world does (kiln_world.h, tracked writes). run.sh builds it.
 #include <array>
 #include <cstdio>
+#include <functional>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -59,7 +60,7 @@ struct FakeWorld : ModeWorld {
     struct Req {
         uint64_t id = 0;
         KilnWorldWriteRequest q{};
-        bool cancelled = false, ran = false, delivered = false;
+        bool cancelled = false, ran = false, delivered = false, suppress_result = false;
         bool current_at_cancel = false;  // the ticket's guard still named it when cancel came
         uint32_t status = 0;
         uint64_t step = 0;
@@ -68,6 +69,9 @@ struct FakeWorld : ModeWorld {
     uint64_t next_id = 1, now = 1000, steps = 0, fraction_ns = 0;
     std::map<KilnEntity, Incarnation> players{{A, {1, 1}}, {B, {2, 1}}};
     std::map<KilnEntity, Bytes> ncc, stock{{A, {0, 7, 0}}, {B, {0, 9, 1}}};
+    bool cancel_wrong_thread = false;      // write_cancel answers WRONG_THREAD (inside the write program, off the tick thread)
+    bool in_update = false;                // the write program's update runs: a cancel now drops the result only
+    std::function<void()> mid_update;      // runs inside the update, after it took its batch (a program on the tick thread)
     bool game_writes = true;               // the game's writer puts the stock bytes back every step
     bool component_gone = false;           // NO_COMPONENT for every request
     uint32_t force_status = 0xffffffffu;   // answer every request with this status, without running it
@@ -88,6 +92,12 @@ struct FakeWorld : ModeWorld {
                 r.current_at_cancel = ModeBackend::ticket_current(r.q.user);
                 if (r.current_at_cancel) ++cancels_while_current;
                 if (r.delivered) return KILN_ERR_NOT_FOUND;
+                if (cancel_wrong_thread) return KILN_ERR_WRONG_THREAD;
+                if (in_update && !r.ran) {
+                    // write_queue's cancelled_running_: OK, the result is dropped, but the change callback still runs
+                    r.suppress_result = true;
+                    return KILN_OK;
+                }
                 r.cancelled = true;
                 return KILN_OK;
             }
@@ -107,10 +117,14 @@ struct FakeWorld : ModeWorld {
     // The sim step: the game's writer, then kiln_world_writes with every request not yet run.
     void sim() {
         ++steps;
+        const uint64_t batch_end = next_id;  // the update takes what was queued before it began
         if (game_writes)
             for (auto& [e, b] : stock) ncc[e] = b;
-        for (Req& r : reqs) {
-            if (r.ran || r.cancelled) continue;
+        in_update = true;
+        if (mid_update) mid_update();
+        for (size_t i = 0; i < reqs.size(); ++i) {
+            Req& r = reqs[i];
+            if (r.ran || r.cancelled || r.id >= batch_end) continue;
             r.ran = true;
             r.step = steps;
             if (force_status != 0xffffffffu) {
@@ -129,6 +143,7 @@ struct FakeWorld : ModeWorld {
             r.status = copy == ncc[r.q.entity] ? KILN_WORLD_WRITE_UNCHANGED : KILN_WORLD_WRITE_DONE;
             ncc[r.q.entity] = copy;
         }
+        in_update = false;
     }
     // kiln.world's Pre: the results of the last step, oldest first (a callback may submit or cancel).
     void deliver() {
@@ -136,6 +151,7 @@ struct FakeWorld : ModeWorld {
             Req& r = reqs[i];
             if (!r.ran || r.cancelled || r.delivered) continue;
             r.delivered = true;
+            if (r.suppress_result) continue;
             KilnWorldWriteResult res{};
             res.size = sizeof res;
             res.status = r.status;
@@ -516,6 +532,58 @@ void test_submillisecond_origin() {
     CHECK(r.at(A) == r.world.stock[A]);
 }
 
+// M1: End from a program on the tick thread while the write program's update holds the lease's job. kiln.world's
+// cancel answers OK (it only drops the result) and the change callback still runs in that update with the ticket as
+// `user`; or the cancel fails (WRONG_THREAD) and the job runs and is answered as if never cancelled. The ticket must
+// outlive both (ASan), the write must not land, and nothing of it is reported.
+void test_cancel_while_change_can_still_run() {
+    for (bool wrong_thread : {false, true}) {
+        Rig r;
+        const auto id = r.apply(kMod, A, 34, 2);
+        r.tick(2);
+        CHECK(count("applied") == 1);
+        r.pre();  // the next write is out
+        CHECK(r.mode.tickets() == 1);
+        const auto before = r.mode.counters();
+        r.world.cancel_wrong_thread = wrong_thread;
+        r.world.mid_update = [&] {
+            r.end(kMod, id);
+            CHECK(r.mode.tickets() == 0);
+        };
+        r.world.sim();
+        r.world.mid_update = nullptr;
+        r.world.cancel_wrong_thread = false;
+        CHECK(r.mode.retired() == (wrong_thread ? 0u : 1u));      // kept until the next step(): the update did call it
+        CHECK(r.at(A) == r.world.stock[A]);                       // the guard refused: the stock bytes stay
+        CHECK(r.mode.counters().refusals == before.refusals + 1);  // the callback did run, on the live ticket
+        CHECK(r.mode.counters().writes == before.writes);
+        r.pre();  // the retired ticket is freed; a WRONG_THREAD one is freed by its own result
+        CHECK(r.mode.tickets() == 0);
+        CHECK(r.mode.retired() == 0);
+        CHECK(count("ended") == 1);
+        CHECK(count("applied") == 1);
+        r.tick(3);
+        CHECK(r.at(A) == r.world.stock[A]);
+        CHECK(r.mode.counters().submits == before.submits);  // no maintenance for an ended lease
+    }
+}
+
+// A cancel between two steps (a Pre) frees nothing at once either: the ticket waits for the next step(), and a
+// lease ended there writes nothing more.
+void test_cancel_in_pre_retires_until_next_step() {
+    Rig r;
+    const auto id = r.apply(kMod, A, 34, 2);
+    r.tick(2);
+    r.pre();
+    r.end(kMod, id);
+    CHECK(r.mode.retired() == 1);
+    r.world.sim();
+    CHECK(r.at(A) == r.world.stock[A]);
+    r.pre();
+    CHECK(r.mode.retired() == 0);
+    CHECK(count("ended") == 1);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -524,8 +592,11 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[1], "expiry") == 0) test_expiry_inside_write();
         if (std::strcmp(argv[1], "timeline") == 0) test_timeline_begins_at_write();
         if (std::strcmp(argv[1], "precision") == 0) test_submillisecond_origin();
+        if (std::strcmp(argv[1], "running-cancel") == 0) test_cancel_while_change_can_still_run();
         return 0;
     }
+    test_cancel_while_change_can_still_run();
+    test_cancel_in_pre_retires_until_next_step();
     test_retire_before_next_pre();
     test_expiry_inside_write();
     test_timeline_begins_at_write();

@@ -21,6 +21,10 @@ std::string text_of(const KilnWorldWriteResult& r, const char* fallback) {
 ModeBackend::ModeBackend(Core* core, ModeWorld* world, uint32_t component, std::string who)
     : core_(core), world_(world), component_(component), who_(std::move(who)) {}
 
+ModeBackend::~ModeBackend() {
+    for (Ticket* t : retired_) delete t;
+}
+
 uint64_t ModeBackend::caps() const {
     return ready_.load(std::memory_order_acquire) && !broken_.load(std::memory_order_acquire) ? KILN_CAMERA_CAP_SERVER_MODE : 0;
 }
@@ -136,6 +140,10 @@ void ModeBackend::step() {
     const uint32_t epoch = core_->epoch(kServer);
     {
         std::lock_guard<std::mutex> lock(m_);
+        // A Pre: no update of the write program runs now, and the one that may have held a ticket cancelled since the
+        // last step() has ended. Tickets cancelled from here on wait for the next one.
+        for (Ticket* t : retired_) delete t;
+        retired_.clear();
         const uint64_t now = world_->now_ns();
         now_ns_.store(now, std::memory_order_release);
         stopped_.store(false, std::memory_order_release);
@@ -212,7 +220,7 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
         std::lock_guard<std::mutex> lock(m_);
         results_[r.status < 8 ? r.status : 7].fetch_add(1, std::memory_order_relaxed);
         Slot& s = slots_[t->slot];
-        if (s.ticket != t) {  // not the slot's any more (a cancel comes first, so this does not happen)
+        if (s.ticket != t) {  // not the slot's any more: cut() could not cancel it (WRONG_THREAD), so it is ours to free
             delete t;
             return;
         }
@@ -306,9 +314,12 @@ void ModeBackend::cut(Slot& s) {
     if (!s.ticket) return;
     Ticket* t = s.ticket;
     s.ticket = nullptr;
-    world_->cancel(t->id);  // not run after this returns; its result is not delivered (kiln_world.h)
+    const KilnResult rc = world_->cancel(t->id);
     cancels_.fetch_add(1, std::memory_order_relaxed);
-    delete t;
+    // OK: its result is not delivered, but an update running now may still call its change callback (mode.h).
+    // NOT_FOUND: nothing of it is left to call. Both: free it once no update can hold it, in the next step().
+    if (rc == KILN_OK || rc == KILN_ERR_NOT_FOUND) retired_.push_back(t);
+    // Anything else (WRONG_THREAD): still queued. result() frees it, since it is no slot's ticket any more.
 }
 
 void ModeBackend::submit(Slot& s) {
@@ -388,6 +399,11 @@ ModeBackend::Counters ModeBackend::counters() const {
     c.refusals = refusals_.load();
     for (int i = 0; i < 8; ++i) c.results[i] = results_[i].load();
     return c;
+}
+
+uint32_t ModeBackend::retired() const {
+    std::lock_guard<std::mutex> lock(m_);
+    return static_cast<uint32_t>(retired_.size());
 }
 
 uint32_t ModeBackend::tickets() const {
