@@ -3,6 +3,8 @@
 #include "../internal.h"
 #include "../voxel_tasks.h"
 #include "../block_runtime.h"
+#include "services/kiln_caps.h"
+#include <map>
 #include <cstdio>
 #include <cstdarg>
 namespace {
@@ -11,11 +13,22 @@ uint64_t grid_data[7]{},wrapper[2]{},base_list[2]{};
 uint8_t editor[1024]{};
 bool readable_bases=true,on_tick=true;int commits=0;KilnEntity seen_actor=0;
 uint32_t session_state=KILN_SESSION_HOST;bool session_live=true;
+uint64_t session_id=1;
+int cap_lookups=0,cap_reports=0;bool fail_report=false;
+std::map<std::string,std::pair<uint32_t,uint32_t>> cap_rows;
+KilnResult KILN_CALL cap_report(KilnOwner,KilnStr name,uint32_t state,uint32_t reason,KilnStr){
+    ++cap_reports;if(fail_report){fail_report=false;return KILN_ERR_UNAVAILABLE;}
+    cap_rows[std::string(kb::sv(name))]={state,reason};return KILN_OK;
+}
+const void* KILN_CALL service(KilnStr name,uint32_t){
+    ++cap_lookups;static KilnCapsApi caps{};caps.header.size=sizeof caps;caps.report=&cap_report;
+    return kb::sv(name)==KILN_CAPS_SERVICE?&caps:nullptr;
+}
 size_t at(int x,int y,int z){return static_cast<size_t>((z*16+y)*16+x);}
 uintptr_t KILN_CALL singleton(uintptr_t,KilnStr name){
     return kb::sv(name)=="ecs::VoxelGrid"?reinterpret_cast<uintptr_t>(grid_data):reinterpret_cast<uintptr_t>(base_list);
 }
-KilnResult KILN_CALL session(KilnSessionInfo* s){s->state=session_state;s->lifecycle=session_live?1:0;s->worlds[KILN_WORLD_SERVER]=123;s->sessions[KILN_WORLD_SERVER]=1;return KILN_OK;}
+KilnResult KILN_CALL session(KilnSessionInfo* s){s->state=session_state;s->lifecycle=session_live?1:0;s->worlds[KILN_WORLD_SERVER]=123;s->sessions[KILN_WORLD_SERVER]=session_id;return KILN_OK;}
 bool KILN_CALL zone_check(KilnEntity actor,KilnVec3,uint32_t,uint32_t*){seen_actor=actor;return false;}
 void native_write(uintptr_t,void* p,const uint32_t* d,const int32_t* o){
     ++commits;const auto* span=static_cast<kb::CellSpan*>(p);size_t j=0;
@@ -88,5 +101,22 @@ int main(){
     check(kb::block_at({2,2,2},&info)==KILN_ERR_UNAVAILABLE && info.refusal==KILN_BUILD_BLOCK_OFFLINE,"block runtime reports a missing game provider as Offline");api.session=&session;
     session_live=false;
     check(kb::block_at({2,2,2},&info)==KILN_ERR_UNAVAILABLE && info.refusal==KILN_BUILD_BLOCK_NO_SESSION,"block runtime refuses unavailable world lifecycle");session_live=true;
+    api.service=&service;
+    kb::block_caps();
+    check(cap_reports==8 && cap_rows["build.block_info"].first==KILN_CAP_AVAILABLE,"block caps initially reports all rows");
+    int reports=cap_reports,lookups=cap_lookups;
+    kb::block_caps();
+    check(cap_reports==reports && cap_lookups==lookups+1,"unchanged block caps avoids reports and performs only one service lookup");
+    kb::F.read=false;kb::block_caps();
+    check(cap_reports==reports+2 && cap_rows["build.block_info"].second==KILN_BUILD_BLOCK_SYMBOL_MISSING,"read hook uninstall updates only affected rows");
+    reports=cap_reports;kb::F.read=true;kb::block_caps();
+    check(cap_reports==reports+2 && cap_rows["build.find_wall"].first==KILN_CAP_AVAILABLE,"read hook install restores query capabilities mid-session");
+    reports=cap_reports;session_live=false;kb::block_caps();
+    check(cap_rows["build.block_info"].first==KILN_CAP_PENDING && cap_rows["build.block_info"].second==KILN_BUILD_BLOCK_NO_SESSION,"stopping session changes query rows to pending");
+    session_live=true;kb::block_caps();reports=cap_reports;++session_id;kb::block_caps();
+    check(cap_reports==reports+4,"replacement session re-reports all four session rows even with equal states");
+    reports=cap_reports;kb::block_caps();check(cap_reports==reports,"replacement session settles without per-tick reports");
+    kb::F.read=false;fail_report=true;kb::block_caps();reports=cap_reports;kb::block_caps();
+    check(cap_reports==reports+1 && cap_rows["build.block_info"].second==KILN_BUILD_BLOCK_SYMBOL_MISSING,"failed capability report is retried, not cached as delivered");
     std::printf("block writer: %d passed, %d failed\n",total-failed,failed);return failed?1:0;
 }
