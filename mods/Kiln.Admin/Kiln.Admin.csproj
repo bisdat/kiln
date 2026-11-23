@@ -36,4 +36,8 @@
     <ProjectReference Include="../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- managed/tests/Kiln.Admin.Tests: the file bridge's I/O thread, KAP topics, the login mint, the restart -->
+    <InternalsVisibleTo Include="Kiln.Admin.Tests" />
+  </ItemGroup>
 </Project>

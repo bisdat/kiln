@@ -31,6 +31,8 @@ RestartSec=15
 # runtime abort() can end with 3): read kiln/logs/kiln.log before starting again
 # (docs/kiln/dedicated-servers.md).
 RestartPreventExitStatus=1 2 3
+# 75 is kilnctl run's own exit after a restart an admin tool asked for (Kiln.Admin's server_restart): the server saved
+# and stopped, and Restart=on-failure brings it back (docs/kiln/kilnctl.md).
 SyslogIdentifier=kiln@%i
 
 [Install]

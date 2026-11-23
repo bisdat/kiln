@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -14,6 +15,10 @@ public sealed class AdminMod : Mod
     private Bridge _bridge = null!;
     private TcpAdmin? _tcp;
     private ulong _step;
+    private readonly MetricsSampler _metrics = new();
+    private bool _postOn;
+    private RestartController? _restart;
+    private GameRestartHost? _restartHost;
 
     public override void OnLoad()
     {
@@ -44,6 +49,11 @@ public sealed class AdminMod : Mod
         Ops.RegisterQuestsSafe(_bridge, Log);
         Ops.RegisterWorldStatusSafe(_bridge, Log);
         Ops.RegisterRulesSafe(_bridge, Log);
+        _restartHost = new GameRestartHost(Log, Context.DataDirectory);
+        if (GameRestartHost.DeleteMarker(_restartHost.MarkerPath, Log)) Log.Info($"removed a leftover {Ops.RestartMarker} (kilnctl did not take it)");
+        _restart = new RestartController(_restartHost, RestartSupport.FromEnvironment());
+        Ops.RegisterRestart(_bridge, Log, _restart);
+        Ops.RegisterLogin(_bridge, Log, new LoginTokens(() => Environment.TickCount64));
         StartTcp(config);
         Context.Tick.Pre += OnPre;
         Log.Info($"file bridge at {_bridge.Directory}; ops: {string.Join(", ", _bridge.OpNames)}");
@@ -52,16 +62,34 @@ public sealed class AdminMod : Mod
     public override void OnUnload()
     {
         Context.Tick.Pre -= OnPre;
-        var reason = Lifecycle.Phase == ServerPhase.Stopping ? "shutdown" : "unload";
+        if (_postOn) Context.Tick.Post -= OnPost;
+        if (_restart is { Busy: true, Stopping: false })
+        {
+            Log.Warn("restart dropped: Kiln.Admin unloads before the countdown and the save were over");
+            _restartHost?.Abandon();
+        }
+        var reason = _restart?.Stopping == true ? "restart" : Lifecycle.Phase == ServerPhase.Stopping ? "shutdown" : "unload";
         _tcp?.Stop(reason);
         _tcp = null;
         Ops.Tcp = null;
         _bridge.Abandon();
+        _bridge.Dispose();  // the file bridge's I/O thread writes what it has and ends
     }
 
     private void OnPre(in TickInfo tick)
     {
         _step = tick.Step;
+        // the metrics topic: only while some KAP connection is subscribed (then also a Post handler for the step time)
+        var wants = _tcp?.WantsMetrics == true;
+        if (wants != _postOn)
+        {
+            if (wants) Context.Tick.Post += OnPost;
+            else Context.Tick.Post -= OnPost;
+            _postOn = wants;
+        }
+        if (wants || _metrics.Running)
+            if (_metrics.Pre(wants, tick.WallDeltaMs, Stopwatch.GetTimestamp(), PlayerCount) is { } window) _tcp?.OfferMetrics(window);
+        _restart?.Tick();
         _tcp?.Drain();
         if (tick.Step % PollEverySteps == 0) _bridge.Poll();
         if (tick.Step % StateEverySteps == 0)
@@ -71,6 +99,10 @@ public sealed class AdminMod : Mod
             _tcp?.PushState(text);
         }
     }
+
+    private void OnPost(in TickInfo tick) => _metrics.Post(Stopwatch.GetTimestamp());
+
+    private static int PlayerCount() => Players.Available ? Players.All.Count(p => p.InGame) : -1;
 
     /// <summary>KAP/1: <c>"tcp": {"enabled": true, "port": 0}</c> (the default). Port 0: the server's query port number
     /// on TCP, then +1000 ... +9000, then any free port; endpoint.json says which one it got.</summary>
@@ -88,7 +120,10 @@ public sealed class AdminMod : Mod
             for (var i = 0; i < 10; i++) candidates.Add(q + i * 1000);
         try
         {
-            var t = new TcpAdmin(_bridge, Log, Context.DataDirectory, Ops.ServerIdent, Game.KilnVersion, Context.Info.Version);
+            var t = new TcpAdmin(_bridge, Log, Context.DataDirectory, Ops.ServerIdent, Game.KilnVersion, Context.Info.Version)
+            {
+                RestartInfo = _restart?.Support.ToJson(),
+            };
             if (!t.Start(port, candidates)) return;
             _tcp = t;
             Ops.Tcp = t;

@@ -187,6 +187,15 @@ start (adds `gameSettings`). kilnctl never edits an existing file; change the po
 - After the launcher exits, `run` waits for the server process (up to `stop_timeout`), then `wineserver -w` (30 s,
   then `wineserver -k`), and exits with the launcher's status (128 + signal when killed). A crashed server gives a
   non-zero status, which `Restart=on-failure` acts on.
+- **Restarts asked for by an admin tool (0.2.0-dev.30.9).** `run` gives the server `KILN_RUN_ID` (a new id per run)
+  and, when it is a systemd unit's main process (`SYSTEMD_EXEC_PID` is its pid, or `INVOCATION_ID` is set on older
+  systemd), `KILN_RESTART=kilnctl`; Kiln.Admin then tells admin tools that a restart comes back. Kiln.Admin's
+  `server_restart` saves, writes `kiln/data/kiln-admin/restart.json` (with that run id) and stops the server like a
+  Ctrl-C. After the server has exited, `run` reads that file and deletes it; when it is this run's (same `runId`,
+  written after the run started) and the server exited 0, `run` exits **75**, so the unit's `Restart=on-failure`
+  starts it again. Any other marker (another run's, an old one, not JSON) is deleted and changes nothing; one left
+  from an earlier run is also deleted before the server starts. Admin protocol: docs/kiln/launcher/admin-protocol.md
+  section 11.
 
 ## systemd (user units)
 Files in `runner/systemd/`:
@@ -196,6 +205,8 @@ Files in `runner/systemd/`:
   `RestartPreventExitStatus=1 2 3`: exit status 1 (kiln.boot stopped the start, 0x4B01), 2 (the NPC roster cannot be
   held, 0x4B02) and 3 (the mods' NPCs and quests could not be built at all, 0x4B03) mean the mod list cannot run, so
   the unit stays down until it is fixed (`kilnctl run` passes the server's status on; Wine gives the low byte).
+  Exit status 75 is `kilnctl run`'s own: an admin tool asked for a restart (Process model, above), so the unit
+  restarts the server after 15 s; these restarts count toward the 5 starts in 10 minutes.
 - `kiln-backup@.service` + `kiln-backup@.timer`: `kilnctl backup %i` daily (randomised by 30 min, `Persistent=true`).
 
 A release ships the three units next to kilnctl (`runtime/`; on GitHub as `kiln-systemd-units-<version>.tar.gz`):

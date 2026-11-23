@@ -13,6 +13,9 @@ arguments they refuse (no side effects).
 
 --only build (never part of the default run) edits the lab's world through the build_* ops (Kiln.Build): a box, a
 prop, a schematic capture + paste turned 90 degrees, then undoes all of it and checks the cells read as before.
+
+--only restart (never part of the default run) asks for server_restart in 3 s and checks the countdown, the bye
+{reason: "restart"}, kiln-admin's restart.json and that the server process goes away (the lab is stopped after it).
 """
 import argparse
 import hashlib
@@ -156,10 +159,12 @@ REFUSING = {
     "permissions_group_remove": {}, "permissions_map_user_group": {}, "mod_load": {}, "mod_reload": {}, "mod_unload": {},
     "mod_test": {}, "inventory": {}, "health": {}, "log_tail": {"lines": 0},
     "build_undo": {"owner": "kaptest-nobody"},
+    "server_restart": {"seconds": -1}, "server_restart_cancel": {},
 }
 # not compared op-by-op: tested on its own (the others with side effects are harmless in a lab: a save, a reload of
 # unchanged files, weather, despawning what this test never spawned)
-SKIP = {"admin_token_rotate"}
+SKIP = {"admin_token_rotate",
+        "login_mint", "login_redeem"}  # KAP only by design (t_login)
 # values that differ between two calls a few ms apart
 VOLATILE = {"ms", "clock", "uptimeS", "connections", "time", "hours", "lastSaved", "roundTripMs", "framesIn",
             "framesOut", "dropped", "preMsPerStep", "postMsPerStep", "maxMs", "step", "steps", "tick", "now",
@@ -257,7 +262,7 @@ class Suite:
         self.check("handshake.hello", h["t"] == "hello" and h["proto"] == "kap/1" and len(h["nonce"]) == 64 and
                    h["auth"] == ["hmac-sha256"] and h["server"]["id"] == self.endpoint["server"]["id"], json.dumps(h)[:300])
         self.check("handshake.ready", r.get("t") == "ready" and r.get("_macok") and "status" in r["ops"] and
-                   r["topics"] == ["state", "log"] and r["limits"]["maxFrame"] == 16 << 20 and r["limits"]["maxClientFrame"] == 1 << 20
+                   r["topics"] == ["state", "log", "metrics"] and r["limits"]["maxFrame"] == 16 << 20 and r["limits"]["maxClientFrame"] == 1 << 20
                    and r["limits"]["inflight"] == 64, json.dumps({x: r[x] for x in r if x != "ops"})[:300] + f", {len(r['ops'])} ops")
         res = k.call("ping")
         self.check("handshake.req-ping", res and res["ok"] and res["op"] == "ping" and res["data"]["pong"] is True, json.dumps(res))
@@ -398,6 +403,65 @@ class Suite:
         k.call("command", {})  # logs "command failed: ..."
         got = k.read_until(lambda f: f.get("t") == "push" and f.get("topic") == "log" and any("command" in l for l in f["data"]["lines"]), 5)
         self.check("push.log", got is not None, json.dumps(got)[:200] if got else "no log push in 5 s")
+        k.close()
+
+    def t_metrics(self):
+        k = self.kap()
+        self.check("metrics.topic", "metrics" in k.ready["topics"] and isinstance(k.ready.get("restart"), dict),
+                   json.dumps({"topics": k.ready["topics"], "restart": k.ready.get("restart")}))
+        k.send({"t": "sub", "id": 60, "topic": "metrics"})
+        r = k.read_until(lambda f: f.get("id") == 60)
+        pushes = []
+        end = time.time() + 7
+        while time.time() < end and len(pushes) < 3:
+            f = k.read_until(lambda f: f.get("t") == "push" and f.get("topic") == "metrics", 3.5)
+            if f is None:
+                break
+            pushes.append((time.time(), f))
+        keys = {"at", "windowS", "steps", "stepsPerS", "frameMs", "tickMs", "memory", "cpu", "gcPauseMs", "players"}
+        gaps = [b[0] - a[0] for a, b in zip(pushes, pushes[1:])]
+        d = pushes[-1][1]["data"] if pushes else {}
+        self.check("metrics.push", r and r["ok"] and len(pushes) >= 2 and [p[1]["seq"] for p in pushes] == list(range(1, len(pushes) + 1)) and
+                   all(1.5 <= g <= 2.6 for g in gaps) and set(d) == keys and d["steps"] > 0 and d["frameMs"]["avg"] > 0 and
+                   d["tickMs"] is not None and d["memory"]["workingSet"] > 0,
+                   f"{len(pushes)} pushes, gaps {', '.join(f'{g:.2f}' for g in gaps)} s, last {json.dumps(d)[:300]}")
+        k.send({"t": "unsub", "id": 61, "topic": "metrics"})
+        k.read_until(lambda f: f.get("id") == 61)
+        k.pending = []
+        late = k.read_until(lambda f: f.get("t") == "push" and f.get("topic") == "metrics", 3)
+        self.check("metrics.unsub", late is None, str(late)[:100])
+        k.close()
+
+    def t_login(self):
+        launcher, web = self.kap(), self.kap()
+        m = launcher.call("login_mint", {"consumer": "kaptest-web", "label": "kaptest"})
+        secret = (m.get("data") or {}).get("secret", "")
+        self.check("login.mint", m["ok"] and len(secret) == 64 and m["data"]["ttlS"] == 60, json.dumps({x: y for x, y in (m.get("data") or {}).items() if x != "secret"}))
+        wrong = web.call("login_redeem", {"consumer": "kaptest-other", "secret": secret})
+        ok = web.call("login_redeem", {"consumer": "kaptest-web", "secret": secret})
+        again = web.call("login_redeem", {"consumer": "kaptest-web", "secret": secret})
+        self.check("login.redeem-once", wrong["ok"] is False and ok["ok"] and ok["data"]["role"] == "owner" and
+                   ok["data"]["mintedBy"] == "kaptest" and again["ok"] is False, f"{wrong.get('error')} | {json.dumps(ok.get('data'))} | {again.get('error')}")
+        f = self.bridge.call("login_mint", {"consumer": "kaptest-web"})
+        log = (self.lab / "kiln/logs/kiln.log").read_text(errors="replace")
+        self.check("login.kap-only-never-logged", f and f["ok"] is False and "only served over KAP" in f["error"] and secret and secret not in log,
+                   (f or {}).get("error", "no answer"))
+        launcher.close()
+        web.close()
+
+    def t_restart(self):
+        k = self.kap()
+        k.send({"t": "sub", "id": 70, "topic": "log"})
+        k.read_until(lambda f: f.get("id") == 70)
+        r = k.call("server_restart", {"seconds": 3, "message": "kaptest", "by": "kaptest"})
+        self.check("restart.scheduled", r["ok"] and r["data"]["state"] == "counting" and r["data"]["secondsLeft"] == 3, json.dumps(r.get("data"))[:300])
+        info = k.call("admin_info")["data"]["restart"]
+        bye = k.read_until(lambda f: f.get("t") == "bye", 40)
+        marker = self.lab / "kiln/data/kiln-admin/restart.json"
+        m = json.loads(marker.read_text()) if marker.exists() else None
+        self.check("restart.bye", bye is not None and bye.get("reason") == "restart", json.dumps(bye))
+        self.check("restart.marker", m is not None and m["by"] == "kaptest" and m["format"] == 1, json.dumps(m))
+        self.check("restart.info", info["request"]["state"] in ("counting", "saving") and info["supported"] in ("supported", "unknown"), json.dumps(info))
         k.close()
 
     def t_ping(self):
@@ -601,10 +665,11 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     s = Suite(a.lab.expanduser(), a.verbose)
-    order = ["vector", "endpoint", "handshake", "refused", "framing", "ops", "push", "ping", "idle", "limits", "rotate"]
+    order = ["vector", "endpoint", "handshake", "refused", "framing", "ops", "push", "metrics", "login", "ping", "idle", "limits",
+             "rotate"]
     only = [x for x in a.only.split(",") if x]
-    for name in order + ["build"]:
-        if name == "build" and name not in only:
+    for name in order + ["build", "restart"]:
+        if name in ("build", "restart") and name not in only:
             continue
         if only and name not in only:
             continue

@@ -286,6 +286,14 @@ internal sealed class StringArg(StringMode mode) : ArgumentType
     public override string Describe() => mode switch { StringMode.Word => "one word", StringMode.Greedy => "text to the end of the line", _ => "word or \"quoted text\"" };
     internal override int Tokens => mode == StringMode.Greedy ? 0 : 1;
 
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["greedy"] = mode == StringMode.Greedy;
+        o["quotable"] = mode == StringMode.Quotable;
+        return o;
+    }
+
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
         error = "";
@@ -368,6 +376,16 @@ internal sealed class PlayerArg(bool many) : ArgumentType
     public override Type ValueType => many ? typeof(IReadOnlyList<global::Kiln.Player>) : typeof(global::Kiln.Player);
     public override string Describe() => many ? "player name, @s, @p, @r or @a[...]" : "player name, @s, @p or @r";
 
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["many"] = many;
+        o["selectors"] = Selectors(["@s", "@p", "@r", "@a"]);
+        return o;
+    }
+
+    internal static JsonArray Selectors(string[] heads) => new([.. heads.Select(h => (JsonNode)h)]);
+
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
         value = null;
@@ -447,6 +465,14 @@ internal sealed class EntityArg(bool many) : ArgumentType
     public override string Describe() => many ? "entity ids, player names or a selector (@e[type=...,distance=..])"
         : "entity id, @s, @p, @r or a selector matching one";
 
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["many"] = many;
+        o["selectors"] = PlayerArg.Selectors(["@s", "@p", "@r", "@a", "@e"]);
+        return o;
+    }
+
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
         value = null;
@@ -521,6 +547,13 @@ internal sealed class PositionArg : ArgumentType
     public override Type ValueType => typeof(WorldPosition);
     public override string Describe() => "x y z (~ = relative to you)";
     internal override int Tokens => 3;
+
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["relative"] = true;
+        return o;
+    }
 
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
@@ -621,6 +654,16 @@ internal sealed class DurationArg(TimeSpan? min, TimeSpan? max) : ArgumentType
     public override string Describe() => "duration (90s, 5m, 1h30m)" +
         (min is null && max is null ? "" : $" {(min is { } a ? Durations.Format(a) : "0s")}..{(max is { } b ? Durations.Format(b) : "")}");
 
+    /// <summary>min and max in seconds.</summary>
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["unit"] = "s";
+        if (min is { } a) o["min"] = a.TotalSeconds;
+        if (max is { } b) o["max"] = b.TotalSeconds;
+        return o;
+    }
+
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
         value = null;
@@ -646,6 +689,16 @@ internal sealed class TimeOfDayArg : ArgumentType
     public override string Name => "time";
     public override Type ValueType => typeof(double);
     public override string Describe() => "time of day (7, 07:30, 7pm, noon, dusk)";
+
+    /// <summary>Hours of the day, 0 to 24.</summary>
+    internal override JsonObject ToJson()
+    {
+        var o = base.ToJson();
+        o["unit"] = "h";
+        o["min"] = 0;
+        o["max"] = 24;
+        return o;
+    }
 
     internal override bool TryParse(ArgReader r, out object? value, out string error)
     {
