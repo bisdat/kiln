@@ -97,12 +97,15 @@ internal static partial class KilnApis
         "M:Kiln.Boss.KilledBy(Kiln.Player)", // Boss.KilledBy(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Boss.get_Killed", // Boss.Killed.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Build.Add(Kiln.BuildShape,System.Byte,Kiln.BuildOptions)", // Build.Add(BuildShape, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
+        "M:Kiln.Build.BlockAt(Kiln.WorldPosition)", // Build.BlockAt(WorldPosition): Services.RequireTickThread
         "M:Kiln.Build.BoxAround(Kiln.WorldPosition,System.Double,System.Double,System.Double)", // Build.BoxAround(WorldPosition, double, double, double): via Build.BoxBetween(WorldPosition, WorldPosition)
         "M:Kiln.Build.BoxBetween(Kiln.WorldPosition,Kiln.WorldPosition)", // Build.BoxBetween(WorldPosition, WorldPosition): via Build.CellOf(WorldPosition)
+        "M:Kiln.Build.BreakBox(Kiln.CellBox,Kiln.BlockBreakOptions)", // Build.BreakBox(CellBox, BlockBreakOptions?): Services.RequireTickThread
         "M:Kiln.Build.CellOf(Kiln.WorldPosition)", // Build.CellOf(WorldPosition): via Build.G.get
         "M:Kiln.Build.CenterOf(Kiln.CellPos)", // Build.CenterOf(CellPos): via Build.G.get
         "M:Kiln.Build.CornerOf(Kiln.CellPos)", // Build.CornerOf(CellPos): via Build.G.get
         "M:Kiln.Build.Dig(Kiln.BuildShape,Kiln.BuildOptions)", // Build.Dig(BuildShape, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
+        "M:Kiln.Build.FindWall(Kiln.WorldPosition,Kiln.WorldPosition,Kiln.FindWallFlags)", // Build.FindWall(WorldPosition, WorldPosition, FindWallFlags): Services.RequireTickThread
         "M:Kiln.Build.Flatten(Kiln.BuildShape,System.Double,System.Byte,Kiln.BuildOptions)", // Build.Flatten(BuildShape, double, byte, BuildOptions?): via Build.RunShape(ShapeOp, BuildShape, byte, byte, double, float, int, BuildOptions?)
         "M:Kiln.Build.IsLoaded(Kiln.CellBox)", // Build.IsLoaded(CellBox): via Build.Require(string)
         "M:Kiln.Build.Keep(Kiln.CellBox)", // Build.Keep(CellBox): via Build.Require(string)
@@ -905,6 +908,8 @@ internal static partial class KilnApis
         "P:Kiln.Time.CanSetSpeed=kiln.time", // via Kiln.Time.HasScale
         "P:Kiln.Time.WeatherChoiceAvailable=kiln.time,time.weather_choose", // T3 != null: Services.Get("kiln.time"); Is("time.weather_choose")
         "P:Kiln.ToolMaterials.Available=tools.material_snapshot", // Is("tools.material_snapshot")
+        "P:Kiln.Ui.AmmoList.Available=ui.ammo.list", // Is("ui.ammo.list")
+        "P:Kiln.Ui.AmmoList.PicksAvailable=ui.ammo.pick", // Is("ui.ammo.pick")
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba

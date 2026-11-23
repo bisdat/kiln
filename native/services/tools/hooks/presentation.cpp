@@ -7,6 +7,9 @@
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_caps.h"
+#include "services/kiln_world.h"
+#include "../ammo_runtime.h"
+#include <deque>
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -60,6 +63,7 @@ void remove_locked(const Registration& value) {
     identities.erase(value.tool);
 }
 void KILN_CALL owner_retiring(KilnOwner owner,void*) {
+    ammo::retire(owner);
     std::lock_guard lock(gate);
     for(auto i=registrations.begin();i!=registrations.end();) {
         if(i->second.owner!=owner){++i;continue;}
@@ -128,6 +132,7 @@ const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
 }
 void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only) {
     kt::ToolPolicyScope no_impact_policy(nullptr);
+    ammo::Frame ammo_frame(groups,access,current_only);
     // A quiet-tick owned observation, sampled once per entry. Never borrow another preview's identity or policy TLS.
     auto family=held_family();
     // Access[15] is this update's resolved held ItemInfo, also used by the native category routing.
@@ -136,6 +141,7 @@ void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only)
     if(family&&(!access||!copy_game_value(&item,static_cast<const uint8_t*>(access)+0x78,sizeof item)||
         families.root(presentation_item(item))!=family->tool))family.reset();
     selector_hook.call<void>(groups,access,current_only);
+    ammo::after(ammo_frame,groups,access);
     // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
     // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
     if(groups&&family&&!filter_selector_view(groups+2,family->materials))clear_selector_view(groups+2);
@@ -205,10 +211,13 @@ void report_caps() {
     auto report=[&](const char* name,bool installed,const char* missing,bool client_only=true) {
         const bool wrong_side=client_only&&build.side!=KILN_SIDE_CLIENT;
         const bool ready=enabled&&!wrong_side&&installed;
-        const uint32_t reason=!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
-        const char* why=ready?"qualified native tool presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
+        const bool ammo_fault=std::strncmp(name,"ui.ammo.",8)==0&&ammo::failed();
+        const uint32_t reason=ammo_fault?KILN_CAP_REASON_FAULTED:!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
+        const char* why=ammo_fault?"ammunition adapter faulted; native equip of its synthetic rows remains suppressed":ready?"qualified native presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
         caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
     };
+    report("ui.ammo.list",ammo::available(),"exact selector/finalizer/pick mapping, stable client ECS reader or client item catalog adapter is unavailable");
+    report("ui.ammo.pick",ammo::available(),"native pick suppression and backpack-source validation are not qualified or installed");
     report("tools.material_lookup",kiln_tools_hook_installed(KILN_TOOL_HOOK_MATERIAL_LOOKUP),"scoped terrain material lookup mapping is unavailable or its hook was refused",false);
     report("tools.material_picker",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER),"selector or owned held-tool observer is unavailable");
     report("tools.material_snapshot",false,"separate per-player backpack/magic-chest observations are not qualified; aggregate selector counts are not split or fabricated");
@@ -220,6 +229,7 @@ bool install(kiln::RawHook& hook,const char* symbol,const char* pattern,void* fu
     uintptr_t address=0;
     return api->symbol({symbol,std::strlen(symbol)},&address)==KILN_OK&&address&&qualify(address,pattern)&&hook.install(api,child,address,function,symbol);
 }
+#include "../ammo_runtime.inl"
 bool install_brush_frame() {
     uintptr_t site=0,query=0;
     constexpr char site_symbol[]="tools/BrushQueryFrame",query_symbol[]="tools/BrushQuery";
@@ -332,6 +342,7 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
         kiln_tools_report_hook(KILN_TOOL_HOOK_IDENTITY,install(identity_hook,"tools/RootIdentity","48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00",reinterpret_cast<void*>(&identity)));
         const bool held_ready=held_observer.start(api,child);
         kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
+        if(kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER))ammo::start();
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,held_ready&&install_brush_frame());
     }
     if(!client) {kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);}
@@ -339,6 +350,7 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
 void kiln_tools_presentation_uninstall() {
     KilnOwner retiring_child=0;
     {std::lock_guard lock(gate);retiring_child=child;child=0;retiring=0;} // Close family admission before stopping producers.
+    ammo::stop();
     held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
     report_caps(); // Parent-owned capability reports must close before the child hooks are revoked.
@@ -346,3 +358,5 @@ void kiln_tools_presentation_uninstall() {
     if(retiring_child&&hooks)hooks->revoke_owner(retiring_child);if(retiring_child&&api)api->owner_revoke(retiring_child);
     brush_query_resume.store(0,std::memory_order_release);
 }
+
+const KilnUiAmmoApi* kiln_tools_ammo_api() {return &ammo::table;}

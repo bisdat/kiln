@@ -2,6 +2,8 @@
 #pragma once
 #include "kiln_api.h"
 #include "services/kiln_tools.h"
+#include "services/kiln_ui_ammo.h"
+const KilnUiAmmoApi* kiln_tools_ammo_api();
 KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFamilyDef* definition,KilnHandle* out);
 KilnResult KILN_CALL kiln_tools_remove_family(KilnOwner owner,KilnHandle handle);
 KilnResult KILN_CALL kiln_tools_material_snapshot(KilnEntity actor,uint32_t tool,KilnToolMaterialSnapshot* out);
