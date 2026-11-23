@@ -1,0 +1,116 @@
+# Testing (Kiln.Testing)
+
+## Testing.Assert — Checks for test methods.
+- `static Contains(string expected, string? actual, string? message = null) -> void`
+- `static Equal<T>(T expected, T actual, string? message = null) -> void`
+- `static Fail(string message) -> void`
+- `static False(bool condition, string? message = null) -> void`
+- `static InRange(double actual, double low, double high, string? message = null) -> void`
+- `static NotEqual<T>(T unexpected, T actual, string? message = null) -> void`
+- `static NotNull<T>(T? value, string? message = null) -> T`
+- `static Null(object? value, string? message = null) -> void`
+- `static Same(object? expected, object? actual, string? message = null) -> void`
+- `static Skip(string reason) -> void` — Ends the test as skipped (e.g. a feature is unavailable on this build).
+- `static Throws<TException>(Action action, string? message = null) -> TException`
+- `static ThrowsAsync<TException>(Func<Task> action, string? message = null) -> Task<TException>`
+- `static True(bool condition, string? message = null) -> void`
+
+## Testing.AssertionException — A failed check.
+- `AssertionException(string message)`
+
+## Testing.CheckContext — What a running check gets.
+- `Cancellation { get; } -> CancellationToken` — Signalled when the check ends early: the player stopped the run, gave a verdict before the body asked for one, or...
+- `Delay(TimeSpan time) -> Task` — Waits wall time, coming back on the tick thread.
+- `Expect(bool condition, string what, string? detail = null) -> bool` — Records an automatic assertion next to the player's verdict.
+- `Id { get; } -> string` — The check's id.
+- `Instruct(string text) -> void` — Shows `text` as the current instruction: in the list and on the HUD line, until the next instruction or the end of...
+- `Log { get; } -> Logger` — The mod's log (`kiln/logs/kiln.log`).
+- `Mod { get; } -> ModContext` — The context of the mod the check belongs to.
+- `OnEnd(Action cleanup) -> void` — Registers `cleanup` to run when the check ends, however it ends (verdict, stop, exception, unload): on the tick...
+- `OnEnd(Func<Task> cleanup) -> void` — Registers `cleanup` to run when the check ends, however it ends (verdict, stop, exception, unload): on the tick...
+- `Player { get; } -> EntityId` — The entity of the player who runs the check: the local player when hosted, the joining player's entity on the server...
+- `Session { get; } -> Testing.ClientCheckSession` — Where the check runs.
+- `Skip(string reason) -> Task<Testing.ClientCheckVerdict>` `0.2.3` — Ends the check with the verdict skip and `reason` as its note, without asking the player: for a check that can judge...
+- `Ticks(int count = 1) -> Task` — Continues on the tick thread after `count` server-world steps.
+- `Title { get; } -> string` — The check's title.
+- `Until(Func<bool> condition, TimeSpan timeout, string what) -> Task<bool>` — Checks `condition` once per step until it holds or `timeout` passes.
+- `Verdict() -> Task<Testing.ClientCheckVerdict>` — Waits for the player's verdict: pass, fail (with a one-line note) or skip.
+
+## Testing.ClientCheckAttribute — Marks a guided client check: an async method of a mod taking one `CheckContext` and returning `Task` or `ValueTask`.
+- `ClientCheckAttribute(string id, string title)` — Marks an async method `Task M(CheckContext c)` as a guided check with this id and title.
+- `Area { get; init; } -> string?` — The group the list shows the check under (default: the mod's name).
+- `Confirm { get; init; } -> string?` — A sentence the runner shows before the body runs; the body starts only after the player answers yes to it with its...
+- `Id { get; } -> string` — The check's id, unique within the mod (`area.slug`).
+- `Needs { get; init; } -> Testing.ClientCheckNeeds` — Which session the check needs; in another one it is refused with the reason shown.
+- `Order { get; init; } -> int` — Lower runs first in "run all"; equal orders keep the mod's load order, then class, then declaration order.
+- `Since { get; init; } -> string?` — The Kiln or mod release that added what the check covers, e.g. `0.2.0-dev.26`.
+- `Tags { get; init; } -> string[]` — Tags: the names in `ClientCheckTags`, or free ones for grouping.
+- `Title { get; } -> string` — What the check list shows.
+
+## Testing.ClientCheckNeeds — The session a check needs (`ClientCheckAttribute.Needs`).
+enum: Any, Hosted, Joined
+
+## Testing.ClientChecks — Registers a mod's guided checks with the runner.
+- `static Register(Mod mod) -> int` — Lists the `ClientCheckAttribute` methods of `mod`'s assemblies with the runner.
+
+## Testing.ClientCheckSession — Where a check runs, as written into its ledger entry.
+enum: Hosted, Joined, Server
+
+## Testing.ClientCheckTags — Tag names of `ClientCheckAttribute.Tags`.
+- `const Audio = "audio" -> string` — The player judges something they hear.
+- `const Cheats = "cheats" -> string` — The check uses level, experience, skill-point or knowledge commands (or anything else that changes what the game may...
+- `const GuardProof = "guard-proof" -> string` — The check that shows the achievement guard working on this game build and Kiln version.
+- `const Launcher = "launcher" -> string` — Done (partly) in the Kiln launcher, outside the game.
+- `const SteamDeck = "steam-deck" -> string` — Needs a Steam Deck.
+- `const TwoPlayers = "two-players" -> string` — Needs a second player.
+- `const Visual = "visual" -> string` — The player judges something they see.
+- `const Windows = "windows" -> string` — Needs a Windows PC.
+
+## Testing.ClientCheckVerdict — The player's verdict on a check.
+enum: Pass, Fail, Skip
+
+## Testing.KilnTestAttribute — Marks a test method.
+- `KilnTestAttribute(string? name = null)`
+- `Name { get; } -> string?` — Display name (default `Class.Method`).
+- `Order { get; init; } -> int` — Lower runs first; equal orders run in declaration order.
+- `Skip { get; init; } -> string?` — When set, the test is reported as skipped with this reason.
+- `TimeoutSeconds { get; init; } -> int` — Per-test timeout in seconds (0 = the mod's `tests.timeoutSeconds`, else 30 s).
+
+## Testing.SkipException — Thrown by `Assert.Skip`.
+- `SkipException(string reason)`
+
+## Testing.TestContext — What a running test gets (optional parameter of a test method).
+- `Cancellation { get; } -> CancellationToken` — Signalled when the test timed out; awaits on this context then throw.
+- `Delay(TimeSpan time) -> Task` — Waits wall time, coming back on the tick thread.
+- `Log { get; } -> Logger`
+- `Mod { get; } -> ModContext` — The context of the mod under test.
+- `Name { get; } -> string` — The test's display name.
+- `Ticks(int count = 1) -> Task` — Continues on the tick thread after `count` server-world steps.
+- `Until(Func<bool> condition, TimeSpan timeout, string? what = null) -> Task` — Checks `condition` once per step until it holds; fails the test after `timeout`.
+
+## Testing.TestOutcome — Outcome of one test.
+enum: Pass, Fail, Skip, Timeout
+
+## Testing.TestReport — Results of one run (also written to `kiln/logs/tests/<mod>.json`).
+- `TestReport(string Mod, string Version, DateTime Started, double Ms, IReadOnlyList<Testing.TestResult> Results)`
+- `Failed { get; } -> int`
+- `File { get; init; } -> string?` — Where the JSON report was written, if anywhere.
+- `Mod { get; init; } -> string`
+- `Ms { get; init; } -> double`
+- `Ok { get; } -> bool`
+- `Passed { get; } -> int`
+- `Results { get; init; } -> IReadOnlyList<Testing.TestResult>`
+- `Skipped { get; } -> int`
+- `Started { get; init; } -> DateTime`
+- `Version { get; init; } -> string`
+
+## Testing.TestResult
+- `TestResult(string Name, Testing.TestOutcome Outcome, double Ms, string? Message, string? Stack)`
+- `Message { get; init; } -> string?`
+- `Ms { get; init; } -> double`
+- `Name { get; init; } -> string`
+- `Outcome { get; init; } -> Testing.TestOutcome`
+- `Stack { get; init; } -> string?`
+
+## Testing.Tests — Runs a loaded mod's tests from code (a chat command, a dashboard op).
+- `static RunAsync(string modId, string? filter = null) -> Task<Testing.TestReport>` — Runs the `KilnTestAttribute` methods of `modId` (those whose name contains `filter`), starting at the next step.

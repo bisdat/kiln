@@ -15,6 +15,11 @@
 #           managed/Kiln.Analyzers/tests/*, managed/services/Kiln.DevTools/tests
 #   stage   Kiln.Api, Kiln.Testing and every managed/services/* DLL from that build into $KILN_OUT/check/stage, the set
 #           managed/Kiln.Sdk/pack.sh stages and packs
+#   index   the agent API index (agent/skills/kiln-modding/references/api-index/): tools/docs-site/api_index.py --check regenerates
+#           it from the PublicAPI record, the XML docs this build just wrote ($KILN_OUT/dotnet/bin/<project>/release) and
+#           managed/api-history.tsv, in memory (a couple of seconds, no build of its own), and fails when the committed copy
+#           differs. A changed API line, doc comment or ledger row makes the copy stale: the failure names the command that
+#           regenerates it from this same build
 #   compat  gate 2: tools/release/apicompat.sh against KILN_API_BASELINE (-v lists every addition)
 # On a failure the stage prints the failing diagnostics (record lines, compiler errors, failed tests, BREAK lines), not
 # the whole log; the full logs are in $KILN_OUT/check/*.log. A failed record stage does not stop the build stages.
@@ -146,6 +151,20 @@ if ((built)); then
   done
   if ((${#missing[@]})); then result stage FAILED $((SECONDS - t)) "not built: ${missing[*]}"; failed+=(stage)
   else result stage OK $((SECONDS - t)) "$(find "$stage" -name 'Kiln.*.dll' | wc -l) DLLs in $stage"; fi
+
+  # index
+  t=$SECONDS
+  python3 -I "$repo/tools/docs-site/api_index.py" --check --xml "$out/dotnet/bin" >"$work/index.log" 2>&1
+  rc=$?
+  case $rc in
+    0) result index OK $((SECONDS - t)) "$(tail -1 "$work/index.log" | sed 's/^api-index: //')" ;;
+    1) result index FAILED $((SECONDS - t)) "the agent API index is stale:"
+       sed -n '1,40p' "$work/index.log"
+       failed+=(index) ;;
+    *) result index FAILED $((SECONDS - t)) "api_index.py could not run (exit $rc):"
+       tail -20 "$work/index.log"
+       failed+=(index) ;;
+  esac
 fi
 
 # compat

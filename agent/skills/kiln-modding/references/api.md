@@ -2,8 +2,11 @@
 
 Namespace `Kiln` for everything. Each service is its own assembly: list it in `KilnServices` ([setup.md](setup.md)), and
 [which assembly holds a type](api-contract.md#which-assembly-holds-a-type-kilnservices) says which entry a type needs.
-The guides below keep the how-to prose, rules and examples with the common signatures; the XML docs and the generated API
-reference ([docs-map.md](docs-map.md)) have every member. Talents, quests, NPCs and sounds:
+The guides below keep the how-to prose, rules and examples with the common signatures. **Every** public type and member, with
+the mod API that added it and the first sentence of its doc, is in [api-index/](api-index/INDEX.md): generated each release, one
+file per assembly named by its `KilnServices` entry, and `native.md` for the native ABI rows. Grep it
+(`grep -rn "BlockAt" api-index/`) before you write a signature; the XML docs and the generated API reference
+([docs-map.md](docs-map.md)) have the long text. Talents, quests, NPCs and sounds:
 [quests-talents-sounds.md](quests-talents-sounds.md). Queries, terrain, refusable events, watches, stations and gems:
 [gameplay.md](gameplay.md). Kiln tasks: [tasks.md](tasks.md). OnBoot and resource patches: [boot.md](boot.md).
 
