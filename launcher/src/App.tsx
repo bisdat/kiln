@@ -20,6 +20,7 @@ import CatalogPage from "./pages/CatalogPage";
 import { NexusRoute } from "./components/NexusGate";
 import RuntimePage from "./pages/RuntimePage";
 import LogsPage from "./pages/LogsPage";
+import RegistryConflictsPage from "./registry/RegistryConflictsPage";
 import SavesPage from "./pages/SavesPage";
 import SettingsPage from "./pages/SettingsPage";
 import AboutPage from "./pages/AboutPage";
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="catalog" element={<NexusRoute home="/"><CatalogPage /></NexusRoute>} />
         <Route path="runtime" element={<RuntimePage />} />
         <Route path="logs" element={<LogsPage />} />
+        <Route path="conflicts" element={<RegistryConflictsPage />} />
         <Route path="saves" element={<SavesPage />} />
         <Route path="editor" element={<EditorPage />} />
         <Route path="studio" element={<StudioPage />} />

@@ -707,11 +707,11 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             out->edits.push_back(std::move(x));
             continue;
         }
-        Refusal r{out->mod, out->source, out->stage, x.n, why, "", "", "", ""};
+        Refusal r{out->mod, out->source, out->stage, x.n, why, "", "", "", "", false};
         if (e.is_object()) {  // where, when the document says it
             if (e.contains("registry") && e["registry"].is_string()) r.registry = e["registry"].get<std::string>();
             if (e.contains("field") && e["field"].is_string()) r.field = e["field"].get<std::string>();
-            else if (e.contains("raw") && e["raw"].is_object() && !e["raw"].empty()) r.field = e["raw"].begin().key();
+            else if (e.contains("raw") && e["raw"].is_object() && !e["raw"].empty()) r.field = e["raw"].begin().key(), r.raw = true;
             if (e.contains("id") && e["id"].is_string()) r.id = e["id"].get<std::string>();
             else if (e.contains("select") && e["select"].is_string()) r.id = e["select"].get<std::string>();
             else if (e.contains("select") && e["select"].is_object() && e["select"].contains("id") && e["select"]["id"].is_string()) r.id = e["select"]["id"].get<std::string>();

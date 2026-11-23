@@ -1,0 +1,11 @@
+/* Reuse Hearth's sheet, sections, state words and controls; no separate dashboard theme. */
+.registry-conflicts p { margin: 6px 0; }
+.registry-conflicts .registry-hint { color: var(--k-text-2); }
+.registry-line, .registry-field { padding: 12px 0; border-bottom: 1px solid var(--k-line); overflow-wrap: anywhere; }
+.registry-line-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.registry-field summary { cursor: pointer; }
+.registry-field summary span { display: block; margin: 6px 0 0 18px; color: var(--k-text-2); }
+.registry-chain { padding: 8px 0 0 18px; }
+.registry-chain ol { padding-left: 24px; }
+.registry-chain li { padding: 8px 0; }
+.registry-paging { display: flex; align-items: center; gap: 12px; padding-top: 12px; flex-wrap: wrap; }

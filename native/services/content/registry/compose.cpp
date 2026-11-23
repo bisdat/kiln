@@ -776,8 +776,9 @@ bool raw_target(Ctx& c, State& s, const std::string& reg, const std::string& id,
 // The place a refusal names: the registry, the entry (the one that failed, else an exact selector's, else an add's id), the
 // Kiln field or raw path.
 void refuse(Ctx& c, const Who& w, const Edit& e, const std::string& why) {
-    Refusal r{w.mod, w.source, w.stage, e.n, why, "", e.registry, "", ""};
-    r.field = e.element.on || !e.field.empty() ? e.field : !e.raw.empty() ? e.raw.front().path : "";
+    Refusal r{w.mod, w.source, w.stage, e.n, why, "", e.registry, "", "", false};
+    r.raw = !e.element.on && e.field.empty() && !e.raw.empty();
+    r.field = e.element.on || !e.field.empty() ? e.field : r.raw ? e.raw.front().path : "";
     if (!c.failed_id.empty()) r.id = c.failed_id;
     else if (e.entry == EntryOp::Add) r.id = e.add_id;
     else if (!e.select.id.empty() && e.select.id.find_first_of("*?") == std::string::npos)

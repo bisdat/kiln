@@ -3380,6 +3380,7 @@
     "catalog": "카탈로그",
     "runtime": "런타임",
     "logs": "로그",
+    "conflicts": "충돌",
     "saves": "세이브",
     "editor": "편집기",
     "servers": "서버",

@@ -3584,6 +3584,7 @@
     "catalog": "Katalog",
     "runtime": "Środowisko",
     "logs": "Logi",
+    "conflicts": "Konflikty",
     "saves": "Zapisy",
     "editor": "Edytor",
     "servers": "Serwery",

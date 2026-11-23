@@ -2459,6 +2459,7 @@ export const COMMANDS = [
   "config_list", "config_read", "config_set", "config_write", "config_reset", "config_native_state", "config_native_set",
   "launch_play", "launch_state", "launch_prestart", "launch_begin", "launch_progress", "launch_end",
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
+  "registry_report_read",
   "saves_list", "saves_backups", "saves_backup", "saves_restore", "saves_delete",
   "editor_list_saves", "editor_file_info", "editor_read_file", "editor_zstd_decompress", "editor_zstd_compress",
   "editor_game_running", "editor_backup_file", "editor_write_save", "editor_list_backups", "editor_restore_backup",

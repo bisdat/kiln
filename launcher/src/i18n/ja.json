@@ -3380,6 +3380,7 @@
     "catalog": "カタログ",
     "runtime": "ランタイム",
     "logs": "ログ",
+    "conflicts": "競合",
     "saves": "セーブ",
     "editor": "エディター",
     "servers": "サーバー",
