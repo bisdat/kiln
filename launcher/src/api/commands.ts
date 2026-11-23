@@ -2218,6 +2218,10 @@ export const editorWriteSave = (path: string, data: Uint8Array | number[]) => ca
 export const editorListBackups = (target: string) => call<EditorBackup[]>("editor_list_backups", { target });
 export const editorRestoreBackup = (src: string, target: string) => call<null>("editor_restore_backup", { src, target });
 export const editorOpenBackups = () => call<null>("editor_open_backups");
+export interface EditorStorageSnapshot { character: string; gameId: string; text: string | null; local: boolean }
+export interface EditorStorageReturn { path: string; gameId: string; expectedSave: number[]; expectedSidecar: string; data: number[]; sidecar: string; oldWitness: string; newWitness: string }
+export const editorStorageRead = (path: string, gameId: string | null = null) => call<EditorStorageSnapshot | null>("editor_storage_read", { path, gameId });
+export const editorReturnStorage = (request: EditorStorageReturn) => call<{ backup: string }>("editor_return_storage", { request });
 
 // server.rs
 export const serverList = () => call<ServerInstance[]>("server_list");
@@ -2461,7 +2465,7 @@ export const COMMANDS = [
   "logs_list", "logs_read", "logs_follow", "logs_unfollow", "logs_crash_reports",
   "saves_list", "saves_backups", "saves_backup", "saves_restore", "saves_delete",
   "editor_list_saves", "editor_file_info", "editor_read_file", "editor_zstd_decompress", "editor_zstd_compress",
-  "editor_game_running", "editor_backup_file", "editor_write_save", "editor_list_backups", "editor_restore_backup",
+  "editor_game_running", "editor_backup_file", "editor_write_save", "editor_list_backups", "editor_restore_backup", "editor_storage_read", "editor_return_storage",
   "editor_open_backups",
   "server_list", "server_get", "server_create", "server_import", "server_remove", "server_status", "server_start", "server_stop",
   "server_restart", "server_update", "server_deploy", "server_settings_get", "server_settings_set", "server_mods",

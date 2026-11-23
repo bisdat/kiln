@@ -18,7 +18,12 @@
 # before docfx build. The undocumented gate is strict: KILN_DOCS_STRICT=0 makes it a warning (only for looking at a tree
 # that has gaps). release.sh runs this with KILN_DOCS_STRICT=1. docfx build.
 # KILN_DOCS_RELEASE (else KILN_SDK_VERSION, which release.sh sets) names the release this build is part of: the members
-# still in PublicAPI.Unshipped.txt are its own (since.py). Without one they read "next release".
+# still in PublicAPI.Unshipped.txt are its own (since.py), and the pages' header names it. Without one they read "next release".
+# The look is frostdev.io's Kiln pages (template/: layout/_master.tmpl over DocFX's default and modern templates, its own CSS
+# and JS, no Bootstrap, highlight.js or search worker): theme.py, after services.py, copies it into docs-work with its static
+# files under content-hashed names and puts the navigation and the release into docfx.json; after docfx build,
+# search_index.py writes the search's two files (search/: types and guide pages, members) from the metadata and the built
+# guide pages and checks every page and anchor they name. DocFX's own index.json (the text of every page) is not shipped.
 # publish.sh --sdk-site puts the folder at <version>/sdk/api/ and points /kiln/api/ (the latest alias) at the newest one.
 #   KILN_OUT=<build dir> [KILN_DOCS_STAGE=<folder of Kiln.*.dll and Kiln.*.xml>] tools/docs-site/build.sh --gate-only
 # runs only the first docfx metadata pass and the undocumented gate (no annotate, no services, no site), over KILN_DOCS_STAGE
@@ -98,6 +103,7 @@ else
   rm -rf "$work/api-raw"
   docfx metadata docfx.json 2>&1 | tee "$log"
   python3 -I "$here/services.py" --services "$here/services.json" "$work/api" "$work/stage"
+  python3 -I "$here/theme.py" "$work" --template "$here/template" --release "${KILN_DOCS_RELEASE:-${KILN_SDK_VERSION:-}}"
   api=$work/api
 fi
 baseline=${KILN_DOCS_BASELINE:-$here/undocumented-baseline.txt}
@@ -112,15 +118,17 @@ n=$(grep -c . <<<"$missing" || true)
 if ((n)); then
   printf 'undocumented: %s public types and members have no XML summary and are not in %s:\n%s\n' \
     "$n" "$(basename "$baseline")" "$missing" >&2
-  [[ ${KILN_DOCS_STRICT:-1} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them (KILN_DOCS_STRICT=0 only warns)" >&2; exit 1; }
+  [[ ${KILN_DOCS_STRICT:-1} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them. Fix: write a /// <summary> for each name above (a positional record's property: a <param> on the record); do not add names to $(basename "$baseline"). tools/check.sh (stage docs) finds them before a release; KILN_DOCS_STRICT=0 only warns, outside release.sh" >&2; exit 1; }
 else
   echo "undocumented: none beyond $(basename "$baseline")"
 fi
 ((gate_only)) && exit 0
 rm -rf "$site"
 docfx build docfx.json --output "$site" 2>&1 | tee -a "$log"
-# the manifest names this build folder and only docfx's own tools read it; the source maps are a third of the size
-rm -f "$site/manifest.json" "$site"/public/*.map
+# the manifest names this build folder and only docfx's own tools read it; the template reads neither DocFX's index.json
+# (the text of every page, 10 MB) nor its table-of-contents files (and ships none of the modern template's public/)
+rm -f "$site/manifest.json" "$site/index.json" "$site"/toc.{html,json} "$site"/api/toc.{html,json}
+python3 -I "$here/search_index.py" "$site" "$work/api" "$work/stage"
 python3 - "$log" <<'PY'
 import collections, re, sys
 kinds = collections.Counter()

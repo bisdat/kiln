@@ -236,7 +236,7 @@ public sealed unsafe class FakesReviewTests
         Assert.Equal([ada.Entity, chest], kiln.Run(() => Items.FindInventories(InventoryKinds.NonEmpty)));
         Assert.Contains(empty, kiln.Run(() => Items.FindInventories((InventoryKinds)0)));
         Assert.Contains(ada.Entity, kiln.Run(() => Items.FindInventories((InventoryKinds)0)));
-        Assert.Throws<InvalidOperationException>(() => kiln.Run(() => Items.FindInventories((InventoryKinds)16)));  // native: invalid argument
+        Assert.Throws<InvalidOperationException>(() => kiln.Run(() => Items.FindInventories((InventoryKinds)32)));  // native: invalid argument (16 is PlayerStorage)
     }
 
     // 10 (MEDIUM): a new harness's clock is a new world's: Kiln.Time's day/night watch starts fresh.

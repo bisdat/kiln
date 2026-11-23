@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "emf_internal.h"
+#include "entity_scan.h"
 #include "services/kiln_types.h"
 #include "nlohmann/json.hpp"
 
@@ -155,6 +156,7 @@ uint32_t api_local_player() {
 }
 
 void* api_get_component(EmfWorld* w, uint32_t hash, uint32_t entity, uint64_t* size_out) {
+    ++t_ctx.api.reads;  // mod_cost.h: plain counter, summed into the mod when its callback ends
     if (size_out) *size_out = 0;
     return const_cast<void*>(component_of(w, hash, entity, size_out));
 }
@@ -180,15 +182,23 @@ void api_for_each_entity(EmfWorld* w, EmfEntityCallback cb, void* user) {
         !seh_read_u64(map + static_cast<uintptr_t>(l.ent_keys), &keys) || cap == 0 || (cap & (cap - 1)) ||
         cap > (1u << 24) || !bits || !keys)
         return;
-    std::vector<uint64_t> words(static_cast<size_t>((cap + 63) / 64));
-    std::vector<uint32_t> ids(static_cast<size_t>(cap));
-    if (!seh_copy(words.data(), reinterpret_cast<const void*>(bits), words.size() * 8) ||
-        !seh_copy(ids.data(), reinterpret_cast<const void*>(keys), ids.size() * 4))
-        return;
+    // entity_scan.h: the occupancy bits into a buffer this thread keeps (it is only read before the callbacks run, so a
+    // nested for_each_entity is safe), then only the occupied slots' keys. Up to 30.6 this copied all `cap` keys (4 MB
+    // for the server world's 1M slots, freshly allocated) on every call.
+    thread_local std::vector<uint64_t> t_words;
+    thread_local size_t t_last_count = 0;
+    const uint64_t t0 = qpc_ns();
     std::vector<uint32_t> snapshot;
-    snapshot.reserve(4096);
-    for (uint64_t i = 0; i < cap; ++i)
-        if ((words[i >> 6] >> (i & 63)) & 1) snapshot.push_back(ids[i]);
+    snapshot.reserve(t_last_count + 256);
+    const bool ok = scan_entity_keys(
+        cap, static_cast<uintptr_t>(bits), static_cast<uintptr_t>(keys),
+        [](void* dst, uintptr_t src, size_t n) { return seh_copy(dst, reinterpret_cast<const void*>(src), n); }, t_words,
+        snapshot);
+    ++t_ctx.api.scans;
+    t_ctx.api.scan_ns += qpc_ns() - t0;
+    if (!ok) return;
+    t_last_count = snapshot.size();
+    t_ctx.api.scan_entities += snapshot.size();
     for (uint32_t id : snapshot) cb(id, user);  // a fault here is the caller's callback: its own guard catches it
 }
 
@@ -289,6 +299,7 @@ bool api_mod_info_at(uint32_t index, EmfModInfo* out) {
 }
 
 void* api_get_template_component(EmfWorld* w, uint32_t hash, uint32_t entity, uint64_t* size_out) {
+    ++t_ctx.api.reads;
     return template_component_of(w, hash, entity, size_out);
 }
 

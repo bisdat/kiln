@@ -3395,7 +3395,7 @@
       "saves": "Vos sauvegardes et vos mondes",
       "settings": "Les réglages des mods et le dossier de configuration de Kiln (ils peuvent contenir des mots de passe de serveur)",
       "admin": "Le jeton et l'adresse de Kiln.Admin",
-      "mods": "Le contenu de vos mods (seulement les noms, tailles et dates des fichiers)",
+      "mods": "Le contenu de vos mods (seuls les noms des fichiers et dossiers, leurs tailles et dates sont listés, ainsi que les identifiants et versions des manifestes ShroudForge dans les constats)",
       "steam": "Les fichiers de Steam lui-même"
     }
   },
@@ -6207,5 +6207,28 @@
       "vanilla": "Ce ne sont pas forcément les fichiers tels que Steam les fournit. Pour cela, utilisez Vérifier l'intégrité des fichiers du jeu dans Steam (Propriétés du jeu, Fichiers installés).",
       "unknown": "Kiln ne peut pas dire quels fichiers du jeu il remettrait : {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Stockage",
+    "title": "Stockage du joueur",
+    "readOnly": "Lecture seule. Ces objets restent dans Kiln, séparément de votre sac à dos.",
+    "empty": "Aucun stockage pour ce personnage.",
+    "return": "Rendre au personnage",
+    "returnTitle": "Rendre le stockage à ce personnage ?",
+    "returnBody": "Kiln crée d’abord une copie de secours, puis ajoute autant de piles du jeu de base que possible dans des pages supplémentaires du sac à dos. Les objets de mods et tout le reste demeurent dans le stockage. Le jeu et Steam doivent être fermés.",
+    "serverCopy": "Un serveur Kiln conserve sa propre copie de ce stockage. Si vous le rejoignez sans Kiln, ce serveur peut vous y rendre sa copie.",
+    "confirm": "Rendre les objets",
+    "returning": "Restitution…",
+    "result": "{returned} piles rendues ; {remaining} piles restent dans le stockage.",
+    "closeGame": "Fermez Enshrouded et Steam avant de rendre le stockage.",
+    "localOnly": "La restitution est réservée aux personnages LOCAL, pas aux sauvegardes Steam Cloud.",
+    "saveFirst": "Enregistrez ou abandonnez vos modifications avant de rendre le stockage.",
+    "unavailable": "Impossible de rendre le stockage",
+    "restoreWarning": "Ce personnage possède un stockage. Une ancienne copie de secours peut correspondre à un stockage plus ancien ; si cette paire n’est plus conservée, les objets déplacés depuis cette copie risquent d’être perdus ou dupliqués.",
+    "unpaired": "Aucune paire enregistrée ne correspond à ce personnage. La copie de stockage la plus récente est affichée.",
+    "parked": "Mod désactivé",
+    "kept": "kiln/data/characters et kiln/data/worlds sont conservés. Ils préservent le stockage jusqu’à la réinstallation de Kiln.",
+    "unreadable": "Certains enregistrements stockés ne peuvent pas être affichés. Ils restent inchangés.",
+    "modItems": "{count} piles d’objets de mods restent dans le stockage : elles nécessitent leur mod."
   }
 }

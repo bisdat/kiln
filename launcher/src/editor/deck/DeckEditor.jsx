@@ -21,6 +21,7 @@ import { canSave, canUndo, canRedo, undo, redo, historyTitle, startHistoryContro
 import { BACKUP_KIND, TABS, backupGroups, backupName, sayOf, useBusyEditorDialogs } from '../kiln/EditorApp.jsx';
 import Equipment from '../kiln/Equipment.jsx';
 import Inventory from '../kiln/Inventory.jsx';
+import Storage, { StorageRestoreWarning } from '../kiln/Storage.jsx';
 import Skills from '../kiln/Skills.jsx';
 import Knowledge from '../kiln/Knowledge.jsx';
 import '../kiln/editor.css';
@@ -65,7 +66,7 @@ export default function DeckEditor() {
   }), []);
 
   // a part's first stop when the player switches to it (what had focus is gone with the part before)
-  const firstOf = { inv: '[data-deck-id^="slot-"]', char: '[data-deck-id="worn-5"], [data-deck-id^="worn-"]', skills: '[data-deck-id="node-681148866"], [data-deck-id^="node-"]', know: '[data-deck-id="know-search"]' };
+  const firstOf = { inv: '[data-deck-id^="slot-"]', char: '[data-deck-id="worn-5"], [data-deck-id^="worn-"]', skills: '[data-deck-id="node-681148866"], [data-deck-id^="node-"]', know: '[data-deck-id="know-search"]', storage: '[data-deck-id="storage-return"]' };
   const switched = useRef(false);
   useEffect(() => {
     if (!switched.current) return;
@@ -154,6 +155,7 @@ export default function DeckEditor() {
               {tab === 'inv' && <Inventory model={model} setModel={setModel} />}
               {tab === 'skills' && <Skills model={model} setModel={setModel} />}
               {tab === 'know' && <Knowledge model={model} setModel={setModel} />}
+              {tab === 'storage' && <Storage model={model} />}
             </div>
           )}
           {!edit && saves !== null && (
@@ -312,12 +314,13 @@ function Backups({ model, dirty, onClose }) {
           <DeckButton onClick={() => setConfirm(null)} disabled={busy}>{t('editor.page.cancel')}</DeckButton>
           <DeckButton id="restore-confirm" primary disabled={busy} onClick={() => void restore(confirm)}>{busy ? t('editor.backups.restoring') : t('editor.backups.restore')}</DeckButton>
         </>}>
-        <p className="deck-note">{BACKUP_KIND[confirm.kind] ? t(BACKUP_KIND[confirm.kind]) : confirm.kind} · {dataHora(confirm.modified)}. {t('editor.backups.restoreBody')}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
+        <p className="deck-note">{BACKUP_KIND[confirm.kind] ? t(BACKUP_KIND[confirm.kind]) : confirm.kind} · {dataHora(confirm.modified)}. {t('editor.backups.restoreBody')}{model.storage?.hasStorage ? ` ${t('playerStorage.restoreWarning')}` : ''}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
       </Dialog>
     );
   }
   return (
     <Dialog name="editor-backups" title={t('editor.backups.title', { nome: model.name })} onClose={onClose} wide backLabel={t('editor.page.close')}>
+      <StorageRestoreWarning model={model} />
       {err && <p className="deck-note"><Word tone="err">{err}</Word></p>}
       <div className="deck-list deck-scroll">
         {list === null && <p className="deck-note">{t('editor.backups.looking')}</p>}

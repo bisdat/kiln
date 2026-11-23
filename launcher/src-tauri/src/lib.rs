@@ -167,6 +167,8 @@ pub fn run() {
             commands::editor::editor_list_backups,
             commands::editor::editor_restore_backup,
             commands::editor::editor_open_backups,
+            commands::editor::editor_storage_read,
+            commands::editor::editor_return_storage,
             commands::server::server_list,
             commands::server::server_get,
             commands::server::server_create,

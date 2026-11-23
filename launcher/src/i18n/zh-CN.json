@@ -3779,7 +3779,7 @@
       "saves": "你的存档和世界",
       "settings": "模组设置和 Kiln 的配置文件夹（可能含有服务器密码）",
       "admin": "Kiln.Admin 的令牌和地址",
-      "mods": "模组的内容（只有文件名、大小和日期）",
+      "mods": "模组的内容（仅列出文件和文件夹名称、大小及日期，诊断结果还会包含 ShroudForge 清单 ID 和版本）",
       "steam": "Steam 自己的文件"
     }
   },
@@ -6547,5 +6547,28 @@
     "title": "已检测到 EML-R 加载器（{file}）",
     "text": "EML-R 启动时会按自己的列表加载模组，即使在 Kiln 当前配置方案里关闭这些模组也一样。",
     "interpreter": "只要游戏目录里有 EML-R 加载器，Kiln 就会暂停使用自己的 ShroudForge 解释器，避免重复加载模组。"
+  },
+  "playerStorage": {
+    "tab": "储物空间",
+    "title": "玩家储物空间",
+    "readOnly": "只读。这些物品由 Kiln 保管，与背包分开存放。",
+    "empty": "此角色没有玩家储物空间。",
+    "return": "返还给角色",
+    "returnTitle": "将储物空间中的物品返还给此角色？",
+    "returnBody": "Kiln 会先创建备份，再将能放下的原版物品堆叠加入额外的背包页面。模组物品及其余物品将留在储物空间中。游戏和 Steam 必须关闭。",
+    "serverCopy": "某个 Kiln 服务器保留着此储物空间的独立副本。如果你不使用 Kiln 加入该服务器，它可能会在那边将其副本中的物品返还给你。",
+    "confirm": "返还物品",
+    "returning": "正在返还…",
+    "result": "已返还 {returned} 堆；储物空间中还剩 {remaining} 堆。",
+    "closeGame": "返还物品前请关闭 Enshrouded 和 Steam。",
+    "localOnly": "返还功能仅适用于 LOCAL 角色，不适用于 Steam 云存档。",
+    "saveFirst": "返还物品前请保存或放弃编辑。",
+    "unavailable": "无法返还储物空间中的物品",
+    "restoreWarning": "此角色拥有玩家储物空间。较旧的备份可能与较旧的储物空间配对；如果对应配对已不再保留，该备份之后移动的物品可能丢失或重复。",
+    "unpaired": "没有与此角色匹配的已保存配对。当前显示最新的储物空间副本。",
+    "parked": "模组已停用",
+    "kept": "kiln/data/characters 和 kiln/data/worlds 将保留。这些目录会安全保存玩家储物空间，直到你重新安装 Kiln。",
+    "unreadable": "部分储物记录无法显示，将原样保留。",
+    "modItems": "{count} 堆模组物品将留在储物空间中：它们需要对应的模组。"
   }
 }

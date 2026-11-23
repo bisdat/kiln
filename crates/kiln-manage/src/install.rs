@@ -1241,7 +1241,12 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
     // adopted originals were there before with the bundle's bytes: they stay where they are
     let adopted: BTreeSet<String> =
         originals.iter().filter(|r| r.action == ReplacedAction::Adopted).map(|r| r.path.clone()).collect();
-    originals.retain(|r| r.action != ReplacedAction::Adopted);
+    // Player/world stores belong to saves, even if an old bundle receipt accidentally listed them.
+    let storage_data = |path: &str| {
+        let path = path.replace('\\', "/").to_ascii_lowercase();
+        path.starts_with("kiln/data/characters/") || path.starts_with("kiln/data/worlds/")
+    };
+    originals.retain(|r| r.action != ReplacedAction::Adopted && !storage_data(&r.path));
     // the chained copy, the backup in the game folder, else that backup's second copy in the launcher's data folder
     let source = |r: &ReplacedFile| -> Option<PathBuf> {
         let ok = |p: PathBuf| file_sha(&p).is_some_and(|(h, _)| h == r.sha256).then_some(p);
@@ -1284,6 +1289,10 @@ pub fn uninstall_report(dirs: &DataDirs, install: &GameInstall, progress: &mut d
     for kept in &report.placements.kept_files { progress.report(None, kept); }
     let total = receipt.files.len().max(1);
     for (i, f) in receipt.files.iter().enumerate() {
+        if storage_data(&f.path) {
+            report.kept.push(f.path.clone());
+            continue;
+        }
         if f.config {
             continue;
         }

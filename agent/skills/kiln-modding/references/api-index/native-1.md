@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.15): part 1 of 3
+# Native ABI rows (mod API 0.2.16): part 1 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -419,3 +419,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ### KilnEngineApi — 24 bytes
 - kiln_engine.h `KilnEngineApi.identity` @8 `0.2.10` — The image and the selected profile.
 - kiln_engine.h `KilnEngineApi.gate_stats` @16 `0.2.10` — A copy of the counters.
+
+## services/kiln_example.h — service `kiln.example`
+### KilnExampleApi — 16 bytes
+- kiln_example.h `KilnExampleApi.steps` @8
