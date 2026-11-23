@@ -36,7 +36,7 @@ internal static unsafe class StorageNative
         ParkLocked = 18, ParkReturned = 19;
     // KIS_QUARANTINE_*
     public const byte QuarantineUnknownItem = 1, QuarantineCount = 2, QuarantineSlot = 3, QuarantineDecode = 4,
-        QuarantineRebuild = 5;
+        QuarantineRebuild = 5, QuarantineParkedFull = 6;
     // KIS_REF_*
     public const int RefRanged = 0, RefArrow = 1, RefSpell = 2, RefBait = 3, RefCount = 4;
     public const ushort RefNone = 0xFFFF;

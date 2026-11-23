@@ -169,8 +169,7 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
         return new("xxh3:" + capture->Witness.ToString("x16"), live, parked, quarantine);
     }
 
-    // KIS_QUARANTINE_PARKED_FULL=6 is the bounded parked merge diagnostic (no new ABI row/layout).
-    private static string QuarantineReason(byte reason) => reason == 6 ? "parked storage full" : "native: " + (reason switch
+    private static string QuarantineReason(byte reason) => reason == StorageNative.QuarantineParkedFull ? "parked storage full" : "native: " + (reason switch
     {
         StorageNative.QuarantineUnknownItem => "unknown item", StorageNative.QuarantineCount => "invalid stack count",
         StorageNative.QuarantineSlot => "invalid slot", StorageNative.QuarantineDecode => "item record decode failed",
