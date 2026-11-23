@@ -274,7 +274,7 @@ A `quests/*.json` of the mod's own that names the same NPC wins over both. Playe
 
 ### Authored roster bodies and motions
 
-New authoring types in **mod API 0.2.16** (dev.31).
+New authoring types in **mod API 0.2.17** (dev.31).
 
 The authoring contract accepts a `BodyBlock.Model`, an `AnimationBlock` and `NpcBlock.Motions` (a reusable
 `npcMotions` block or an inline `NpcMotionsBlock`). The chassis is Kiln's Fisher/Villager chassis; authors name

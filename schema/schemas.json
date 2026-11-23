@@ -71,6 +71,15 @@
       "docs": "docs/kiln/services/assets.md#mod-layout-assetsassetsjson"
     },
     {
+      "schema": "npc-bodies.schema.json",
+      "name": "Kiln local NPC body cache",
+      "kind": "npc-bodies",
+      "fileMatch": ["**/assets/cooked/npc-bodies.v1.json"],
+      "dialect": {"comments": false, "trailingCommas": false, "bom": false},
+      "reader": "tools/animcook/anicook/blocks.py body_manifest (generated machine-local metadata; native body lowering is not installed yet)",
+      "docs": "docs/kiln/modding/npc-blocks.md#authored-roster-bodies-and-motions"
+    },
+    {
       "schema": "cook.schema.json",
       "name": "Kiln cook recipe",
       "kind": "cook",

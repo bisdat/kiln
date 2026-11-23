@@ -13,7 +13,7 @@
   },
   "$defs": {
     "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "file": { "type": "string", "pattern": "^assets/cooked/[^\\\\]+$" },
+    "file": { "type": "string", "pattern": "^assets/cooked/[^\\\\]+$", "not": { "pattern": "(^|/)\\.\\.(/|$)" } },
     "dependency": {
       "type": "object", "additionalProperties": false, "required": ["file", "sha256"],
       "properties": { "file": { "type": "string" }, "sha256": { "$ref": "#/$defs/hash" } }

@@ -49,6 +49,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `materialTweaks` | object |  | Changes to game materials: what it takes to dig them. Read at boot by kiln.worldtables; a strength change asks nothing of players' games. |
 | `materials` | `kiln-vfx.schema.json materialSection` |  | Surfaces for models, on the game's own shaders. No base to name, no game data. Built by the game client at start. |
 | `menus` | object |  | Parts: the crafting menu a station opens. |
+| `npcMotions` | object |  | Reusable Kiln-owned motion-role bindings for an authored Fisher/Villager roster body. |
 | `npcs` | object |  | Friendly NPCs: talk, wares, a place in the roster. |
 | `onHits` | object |  | Parts: what an item does to what its wearer hits. |
 | `perks` | object |  | Enhancements for an item's perks: the game's rule applies, so one runs once a player has unlocked its slot. |
@@ -884,8 +885,9 @@ Its kind follows from what you fill in: tool, ammo, feeds, heals or onUse, else 
 | `flow` | number |  | How fast a water container fills and pours (at a lake, a well or a barrel, onto crops and soil), as a multiple of the game's own: what one step moves, 32 for the can, 16 for the pouch, about 20 steps a second. The game has no rate for filling alone. Default: 1. min 0.25 max 8 |
 | `fuel` | number |  | Seconds it burns in a fire. |
 | `heals` | integer |  | Health using it gives at once; the tooltip's number. |
-| `holds` | integer |  | A water container's capacity, in charges: the game's watering can holds 100, its pouch 20 sips. At most 1023: players' games are sent the water as charges x 64 in 16 bits. Default: the kind's own. min 1 max 1023 |
+| `holds` | integer |  | A water container's capacity, in charges: the game's watering can holds 100, its pouch 20 sips. At most 1023 (players' games are sent the water as charges x 64 in 16 bits) unless largeHolds. Default: the kind's own. min 1 max 65535 |
 | `kind` | `"material"` \| `"consumable"` \| `"food"` \| `"ammo"` \| `"tool"` \| `"watering-can"` \| `"water-pouch"` |  | watering-can and water-pouch: the game's water containers; holds and flow are theirs. |
+| `largeHolds` | boolean |  | Lets holds go past 1023, up to 65535: every player's game shows the container full until it is down to 1023 unless a mod sends the true value (a replicated extension). Default: false. |
 | `level` | [level](#level) |  |  |
 | `loot` | [loot](#loot) |  |  |
 | `name` | string | yes | min length 1 |
@@ -898,6 +900,7 @@ Its kind follows from what you fill in: tool, ammo, feeds, heals or onUse, else 
 | `texts` | object |  | Texts per language (en, de, pt-BR, ...). |
 | `tool` | [tool](#tool) |  |  |
 | `tweak` | [tweak](#tweak) |  |  |
+| `vanillaLook` | string |  | The game item players without this mod see in its place (a vanilla client, a Kiln client without the mod's content): a game item of the same kind, by debug name. Default: none (an empty slot). |
 | `visual` | [visualRef](#visualref) |  |  |
 | `was` | [name](#name) |  |  |
 
@@ -981,11 +984,18 @@ Changes a game material in place: what it takes to dig it, its pictures, or both
 
 ## menu
 
-The crafting menu a station opens: an existing station's, which lists the station's recipes among its own.
+The crafting menu a station opens: an existing station's, which lists the station's recipes among its own; or, with tabs, a menu a station with a workshop of its own lays out itself.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `like` | `"workbench"` \| `"carpenter"` \| `"kitchen"` \| `"forge"` \| `"oven"` \| `"alchemy"` \| `"drying-rack"` \| `"charcoal-kiln"` \| `"kiln"` \| `"smelter"` \| `"fireplace"` \| `"grinder"` \| `"tannery"` \| `"table-saw"` |  | Default: the station's kind. |
+| `like` | `"workbench"` \| `"carpenter"` \| `"kitchen"` \| `"forge"` \| `"oven"` \| `"alchemy"` \| `"drying-rack"` \| `"charcoal-kiln"` \| `"kiln"` \| `"smelter"` \| `"fireplace"` \| `"grinder"` \| `"tannery"` \| `"table-saw"` |  | Default: the station's kind. With tabs: the menu whose tabs lend theirs their icons. |
+| `tabs` | array of [stationMenuTab](#stationmenutab) |  | The menu in tabs of its own (since 0.2.0-dev.31; capability stationmenus.store). Only for a station with a workshop of its own: the game's stations keep the game's tabs. Recipes are named by their menuKey; one that no tab lists is still made, but not shown. max items 15 |
+
+## menuKey
+
+A key in a station's menu: letters, digits, '.', '_' and '-', at most 64, no colon. Pattern `^[A-Za-z0-9._-]{1,64}$`.
+
+Type: string
 
 ## modelChain
 
@@ -1067,6 +1077,7 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | `animation` | [ref](#ref) or [animation](#animation) |  |  |
 | `behaviour` | [ref](#ref) or [behaviour](#behaviour) |  |  |
 | `body` | [ref](#ref) or [body](#body) | yes |  |
+| `motions` | [ref](#ref) or [npcMotions](#npcmotions) |  | Motion-role bindings for an authored Fisher/Villager body: this mod's npcMotions block by name, or inline bindings. |
 | `name` | string | yes | min length 1 |
 | `names` | object |  |  |
 | `place` | object |  |  |
@@ -1075,6 +1086,15 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | `talk` | string |  | A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build. |
 | `vendor` | object |  |  |
 | `was` | string |  |  |
+
+## npcMotions
+
+The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. This part alone requests no client content.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `bindings` | array of object |  | Unique role/variant pairs. Sit, sleep, inspect, jump and door are required; omitted optional roles need optionalFallback. |
+| `optionalFallback` | string |  | Explicit GUID-bearing graph state for omitted optional motions. Fallbacks are clamped and non-looping; required roles never fall back. min length 1 |
 
 ## onHit
 
@@ -1417,6 +1437,7 @@ How something is crafted.
 | `burns` | object |  | Fuel each cycle burns, item -> count. An input, as in the game's data: with none left the station stops. |
 | `comfort` | integer |  | The comfort level it asks of whoever makes it. min 0 |
 | `makes` | integer |  | How many one craft gives. For a spell: charges. min 1 max 65535 |
+| `menuKey` | [menuKey](#menukey) |  | Its name in the menu of a station with tabs of its own (menu.tabs): one recipe of the mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself. |
 | `needs` | object |  | Item -> count: a game item, an item of this mod by its block name, or "other-mod:name". |
 | `needsProps` | array of string |  | Props that have to stand near a manual station: blocks with provides, by name ("other-mod:name" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field. max items 8 |
 | `output` | [itemRef](#itemref) |  | What it makes: in a station's list of recipes, and in a recipes block of its own, where it is needed. Elsewhere a recipe makes the block it is on. |
@@ -1644,6 +1665,27 @@ A station a player builds: a prop that makes things. With processing it works on
 | `tweakPlaced` | [tweak](#tweak) |  | The same, set on the template it places (templates section paths). |
 | `visual` | [visualRef](#visualref) |  | Its look: like (a game item that places something: model, collision and how it places), or model (item:<name>, or the GUID of a model your assets/assets.json serves). |
 | `was` | [name](#name) |  |  |
+
+## stationMenuSet
+
+A set of recipes in a tab.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `heading` | [uiText](#uitext) |  | The heading over the set; none on a tab's first set. |
+| `key` | [menuKey](#menukey) | yes | Unique in its tab. |
+| `recipes` | array of string | yes | The recipes it lists, in this order, by their menuKey: "key" for the station's mod, "other-mod:key" for another's. Each one once in the menu, at most 512 in a tab. max items 512 |
+
+## stationMenuTab
+
+A tab of a station's menu: its name, the icon it borrows, and its sets of recipes.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `iconFromTab` | integer |  | The icon of the n-th tab (0 the first) of the menu the station is like, as the game shipped it. -1 (the default): the first. min -1 max 14 |
+| `key` | [menuKey](#menukey) | yes | Unique in the menu; the tab's id follows from it, so keep it. |
+| `name` | [uiText](#uitext) | yes | What the tab says. A language map: at most 35 languages, each text 1 to 4096 bytes. |
+| `sets` | array of [stationMenuSet](#stationmenuset) | yes | Its sets of recipes. The first has no heading: the tab's name heads it. max items 28 |
 
 ## status
 
