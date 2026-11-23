@@ -124,7 +124,7 @@ column (3800, 1430) = a player's house:       column (3024, 1552) = an empty pla
   pillar survived the restart (`column (3024, 1552)` identical before and after).
 - The builder is called twice per tick for some seconds after boot and at each save (245 calls in the first minute)
   **[rt]**. Those are three different callers, and only one of them is the save: §12. Since kiln#136 Kiln's boxes go
-  into the world save's list only, and only for kept chunks no base entry of that list saves.
+  into the world save's list only, and only for kept chunks the base entries of that list do not save whole.
 
 ## 6. Props: the building helper
 
@@ -435,7 +435,7 @@ abandoned ones included; `0x93ea20` and `0x93fea0` write the no-build and playab
 
 | Caller (S / C) | Returns to (S / C) | What the list becomes |
 |---|---|---|
-| world save `0x7c3aa0` / `0xe67410` | `0x7c3d99` / `0xe67709` | one base record per entry: BaseId, bounds, voxel blob (`0x83d200`), water blob (C `0x11631a0`); C logs "Failed to save 'ServerSaveGame', while getting base zones" when it fails |
+| world save `0x7c3aa0` / `0xe67410` | `0x7c3d99` / `0xe67709` | one base record per entry: BaseId, bounds, voxel blob (`0x83d200`), water blob (C `0x11631a0`); both log "Failed to save 'ServerSaveGame', while getting base zones" when it fails |
 | step `0x7bbeb0` / `0xe5fa70`, when `0x94a850(bzs)` reports a change | `0x7bc7d5` / `0xe6031d` | the ECS **base-zone list**: `0x68eca0` / `0x9f2b00` ("[ecs] Build zones changed") |
 | ECS callback `0x7b44c0` / `0xe58610` (registered with the ECS world by `0x7af7c0` / `0xe53a10`) | `0x7b4546` / `0xe58696` | bounds (0x20 each) for a per-entity "inside a base" answer (`0x729e70`) |
 
@@ -456,9 +456,16 @@ build zones `ecs+0x15f8a68` from `0x941d30`, `0x69ce20` playable area `ecs+0x15f
   `0x2072e0` without a bound check, and builds its mask as `(1 << (n & 31)) - 1`. The game never has more than 16
   bases; with more zones the areas are wrong, and a 17th area would be written over the zone span.
 
-**The serializer's rule** **[dec 0x83d200]**: for each level-6 key of the store map (x/y/z i16 cells, multiples of 32)
-the chunk box is `key * 0.5` m to `+ 16` m, and the whole chunk is written when `chunkMin <= max && min <= chunkMax` on
-every axis (touching counts). There is no other terrain list in the save: a chunk outside every record regrows.
+**The serializer's rule** (S `0x83d200` via `0x83db00`, C `0x10b89b0` via `0x10b92b0`, the same code) **[dec, dis]**:
+for each level-6 key of the store map (x/y/z i16 cells, multiples of 32) the chunk box is `key * 0.5` m to `+ 16` m, and
+the chunk goes into the record's blob when `chunkMin <= max && min <= chunkMax` on every axis (touching counts). Not
+whole: for its 64 blocks of 8 cells a side (4 m; index x + 4y + 16z, box `key * 0.5 + 4 * i` m to `+ 4` m, the 4.0 at
+S `0xbd84b0`) the same test runs again (S `0x83d792..0x83d7e7`, `comiss`/`jb`), and a block whose box does not touch the
+record's bounds is written as byte 0, its cells dropped (`0x83d962`). The loader (S `0x830e30`, C `0x10ac730`, called
+for each record with no bounds) skips a 0 block (C `0x10acaf1`): those cells stay as the world generates them, and a
+block another record saved keeps that record's cells. So a 16 m chunk only partly inside every record is saved only in
+part, and blocks two records save between them are saved. There is no other terrain list in the save: a block outside
+every record regrows.
 
 **Load (C `0xe63fb0`).** Case 5 reads the records (BaseId + bounds) into a list and hands their bounds to water
 (`0x1165ef0`); case 6 applies each record's voxel and water blobs, and after the last one hands the list to `0x9f3a70`,
@@ -477,9 +484,10 @@ later at 120 m [player probe]. Every altar above the first size does this at eve
 writes the smaller bounds.
 
 **Kiln (since kiln#136).** The hook reads its caller's return address before the original runs. World save: after the
-game's entries, boxes for the kept chunks no entry of that same list touches (the serializer's rule above, so the
-decision is the save's own, whatever the bounds are at that instant: no time window). Base zones and base query: the
-list stays as the builder wrote it. Any other return address (unresolved sites, another mod's hook in front of Kiln's):
+game's entries, boxes for the kept chunks whose 64 blocks the entries of that same list do not all keep (the
+serializer's rule above, so the decision is the save's own, whatever the bounds are at that instant: no time window).
+Kiln knows only which 16 m chunks its edits touched, so a kept chunk on a base's edge that reaches outside it gets a box
+even when the edits in it are all inside the base. Base zones and base query: the list stays as the builder wrote it. Any other return address (unresolved sites, another mod's hook in front of Kiln's):
 boxes as for the world save, so no edit goes unsaved. Entries that cannot be read, or a list with more than 256 entries
 or count > capacity: boxes for every kept chunk. The chunk JSON is never filtered. Up to 0.2.0-dev.30.8 every caller got
 a box for every kept chunk: Kiln's boxes were ECS base zones (stations, storage and beds grouped by them, clients sent

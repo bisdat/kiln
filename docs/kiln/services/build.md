@@ -27,17 +27,20 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   for it).
 - **Saving.** The game saves terrain **only inside player-base build zones**; everything else regrows at the next
   restart. Kiln remembers the 16 m chunks its own writes touch (`kiln/data/kiln.build/regions/<world GUID>.json`).
-  When the game saves the world, Kiln adds boxes to the list of regions that save writes, for the kept chunks no base
-  saves already, so Kiln's edits are saved like a base. Inside a Kiln region the players' own digging is kept too.
-  `Build.Release(box)` forgets regions (the terrain there reverts at the next restart).
+  When the game saves the world, Kiln adds boxes to the list of regions that save writes, for the kept chunks the
+  bases do not save whole already, so Kiln's edits are saved like a base. Inside a Kiln region the players' own
+  digging is kept too. `Build.Release(box)` forgets regions (the terrain there reverts at the next restart).
 - **Kiln's boxes, bases and Flame Altars** (kiln#136, thanks bisdat). The save writes one record per region, and the
-  world list counts the records as Flame Altars. An edit inside a base adds no box: the base's own record keeps every
-  16 m chunk it touches. An edit outside every base adds a box (neighbouring chunks share one), and the world list
-  shows it as one more altar: the save has no other place for terrain ([RE notes](../../re/build.md) §12). The box is
-  only in the save: the base areas the game groups stations, storage and beds by, and sends to every client, are the
-  real bases alone. (While a world loads, the game briefly treats every saved record, a box too, as a build zone,
-  until the altars' own zones replace them.) Kiln decides at each save from the regions of that same save, so a save right after a load, when
-  an altar's zone is still its first size, still keeps every edit. When a base shrinks, moves, is abandoned or goes,
+  world list counts the records as Flame Altars. A base's own record keeps the terrain of the 4 m blocks its zone
+  touches, so a kept 16 m chunk wholly inside a base adds no box. A kept chunk outside every base adds a box
+  (neighbouring chunks share one), and so does a kept chunk on a base's edge that reaches outside it, since the base's
+  record drops the part outside its zone and Kiln knows only which 16 m chunks its edits touched, not where in them.
+  The world list shows each box as one more altar: the save has no other place for terrain
+  ([RE notes](../../re/build.md) §12). The box is only in the save: the base areas the game groups stations, storage
+  and beds by, and sends to every client, are the real bases alone. (While a world loads, the game briefly treats
+  every saved record, a box too, as a build zone, until the altars' own zones replace them.) Kiln decides at each save
+  from the regions of that same save, so a save right after a load, when an altar's zone is still its first size,
+  still keeps every edit. When a base shrinks, moves, is abandoned or goes,
   its kept chunks get boxes again at the next save; the JSON keeps every chunk either way. A world saved by 30.8 or
   earlier shows its extra altars until its next save. Up to 0.2.0-dev.30.8 every kept chunk had a box in every save,
   and the boxes were also base zones for the game's systems.
@@ -350,7 +353,8 @@ the base 780 m away, visible at once after the teleport, gone after undo). 4 and
 
 ## Limits
 - An edit outside every base shows as an extra Flame Altar in the world list (one per box) as long as Kiln keeps it;
-  `Build.Release(box)` drops it. Edits inside bases add none.
+  `Build.Release(box)` drops it. Edits inside bases add none, except in the 16 m chunks along a base's edge that reach
+  outside it.
 - If the game's region list cannot take Kiln's boxes in a save (its growth fails, or appending faults), that save
   keeps only the game's own regions and logs it: edits outside bases are back in the next save that succeeds, but a
   restart right after such a save loses them. Failing the save instead could stop the world from saving at all.
