@@ -100,17 +100,24 @@ inline int compare_sf_versions(const SfVersion& a, const SfVersion& b) {
 }
 
 // The line kiln.log gets instead of ShroudForge's windows, when its app (version `app`, from its version.json) is older
-// than the runtime Kiln runs (version `runtime`) or its version cannot be read; empty: start the windows as before (the
-// same or a newer app, or a runtime whose own version is no version, which Kiln never selects).
+// than the runtime Kiln runs (version `runtime`); empty: start the windows (the same or a newer app, an app whose version
+// cannot be read, see helper_windows_note, or a runtime whose own version is no version, which Kiln never selects).
 inline std::string helper_windows_refusal(std::string_view app, std::string_view runtime) {
+    const SfVersion r = parse_sf_version(runtime), a = parse_sf_version(app);
+    if (!r.ok || !a.ok || compare_sf_versions(a, r) >= 0) return {};
+    return "ShroudForge's own app (version " + a.text + ") is older than the ShroudForge Kiln runs (" + r.text +
+           "): update ShroudForge to use its Modloader and World Editor windows. Mods still load.";
+}
+
+// The info line kiln.log gets beside ShroudForge's windows when its app's version cannot be read (no version.json, no
+// "version" in it, or text that is no version): they start as before (0.2.0-dev.30.6), since that app may well be the
+// same or newer, but fail if it is older. Empty otherwise.
+inline std::string helper_windows_note(std::string_view app, std::string_view runtime) {
     const SfVersion r = parse_sf_version(runtime);
-    if (!r.ok) return {};
-    const SfVersion a = parse_sf_version(app);
-    const std::string tail = " than the ShroudForge Kiln runs (" + r.text +
-                             "): update ShroudForge to use its Modloader and World Editor windows. Mods still load.";
-    if (!a.ok) return "ShroudForge's own app (version unknown) may be older" + tail;
-    if (compare_sf_versions(a, r) < 0) return "ShroudForge's own app (version " + a.text + ") is older" + tail;
-    return {};
+    if (!r.ok || parse_sf_version(app).ok) return {};
+    return "The version of ShroudForge's own app could not be read (shroudforge/version.json): its Modloader and World "
+           "Editor windows start as before, but may fail if the app is older than the ShroudForge Kiln runs (" +
+           r.text + "); if they do, update ShroudForge.";
 }
 
 }  // namespace ksf

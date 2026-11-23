@@ -260,32 +260,37 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     # An older shroudforge.exe checks the settings the newer runtime writes against its own older schema and refuses
     # them (a player's 1.7.9 app beside the bundled 1.8.1: "Additional properties are not allowed ('uiTargets' was
     # unexpected)"). Kiln's default, the bundled runtime, here 1.8.1; the app's version is its install's version.json.
+    # One whose version cannot be read starts its windows as before (it may well be newer), with one info line.
     tail = " than the ShroudForge Kiln runs (1.8.1): update ShroudForge to use its Modloader and World Editor windows. Mods still load."
-    def app_windows(started, version=None, runtime='1.8.1'):
+    unknown = ("The version of ShroudForge's own app could not be read (shroudforge/version.json): its Modloader and "
+               "World Editor windows start as before, but may fail if the app is older than the ShroudForge Kiln runs "
+               "(1.8.1); if they do, update ShroudForge.")
+    def app_windows(started, said=None, runtime='1.8.1'):  # said: kiln.log's one line on the app's version (None: none)
         def verify(status, calls, out):
             menu_is('helper' if started else 'kiln')(status, calls, out)
             assert status['version'] == runtime, status
-            lines = [l for l in out.splitlines() if "ShroudForge's own app (version " in l]
-            if started:
+            lines = [l for l in out.splitlines() if "ShroudForge's own app" in l]
+            if said is None:
                 assert not lines, out
+            else:
+                assert len(lines) == 1 and lines[0].endswith(said), out
+            if started:
                 assert 'Modloader window started' in out and 'World Editor window started' in out, out
             else:
-                said = "ShroudForge's own app (version unknown) may be older" if version is None else \
-                    f"ShroudForge's own app (version {version}) is older"
-                assert len(lines) == 1 and lines[0].endswith(said + tail), out
                 assert 'window started' not in out and 'could not be started' not in out, out
         return verify
     refused = dict(client, KILN_SF_NO_HELPER='1')  # host.cpp: shroudforge.exe is there, but no helper may run
     bundled_181 = {'kiln/plugins/shroudforge': '1.8.1'}
     case('app-older', extra_env=refused, helper=True, use_installed=False,
-         versions=dict(bundled_181, shroudforge='1.7.9'), verify=app_windows(False, '1.7.9'))
-    case('app-unreadable-missing', extra_env=refused, helper=True, use_installed=False,
-         versions=dict(bundled_181, shroudforge=None), verify=app_windows(False))
-    case('app-unreadable-broken', extra_env=refused, helper=True, use_installed=False,
-         versions=dict(bundled_181, shroudforge=b'{"version": "1.8.1"'), verify=app_windows(False))
+         versions=dict(bundled_181, shroudforge='1.7.9'),
+         verify=app_windows(False, "ShroudForge's own app (version 1.7.9) is older" + tail))
+    case('app-unreadable-missing', extra_env=client, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge=None), verify=app_windows(True, unknown))
+    case('app-unreadable-broken', extra_env=client, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge=b'{"version": "1.8.1"'), verify=app_windows(True, unknown))
     # a version that would not be one plain line in kiln.log is none
-    case('app-unreadable-line-break', extra_env=refused, helper=True, use_installed=False,
-         versions=dict(bundled_181, shroudforge='1.8.1\nbeta'), verify=app_windows(False))
+    case('app-unreadable-line-break', extra_env=client, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge='1.8.1\nbeta'), verify=app_windows(True, unknown))
     case('app-equal', extra_env=client, helper=True, use_installed=False,
          versions=dict(bundled_181, shroudforge='1.8.1'), verify=app_windows(True))
     case('app-newer', extra_env=client, helper=True, use_installed=False,
