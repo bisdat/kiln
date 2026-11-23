@@ -52,6 +52,10 @@ public readonly record struct PermissionSubject
     /// <summary>The game's user-group id when known.</summary>
     public uint? UserGroupId { get; init; }
 
+    /// <summary>The highest level of node the subject may have, whatever the rules grant (a command source capped by
+    /// Kiln.Admin's <c>command_run</c> level); null = no cap.</summary>
+    internal PermissionLevel? LevelCap { get; init; }
+
     /// <summary>The server console: it has every node.</summary>
     public static PermissionSubject Console => new() { Kind = PermissionSubjectKind.Console, Name = "console", DeclaredAdmin = true };
 
@@ -257,11 +261,14 @@ public static class Permissions
                     Backend.Current.Log(0, LogLevel.Debug, $"permissions: '{n}' is not registered; treated as an admin node");
             }
         }
-        return PermissionRules.Decide(PermissionStore.Model, Facts(subject), n, level);
+        var d = PermissionRules.Decide(PermissionStore.Model, Facts(subject), n, level);
+        return subject.LevelCap is { } cap && level > cap && d.Allowed
+            ? d with { Allowed = false, From = "cap:" + cap.ToString().ToLowerInvariant() }
+            : d;
     }
 
     /// <summary>Whether the subject counts as admin (for <see cref="PermissionLevel.Admin"/> nodes).</summary>
-    public static bool IsAdmin(PermissionSubject subject) => subject.Kind switch
+    public static bool IsAdmin(PermissionSubject subject) => subject.LevelCap is { } cap && cap < PermissionLevel.Admin ? false : subject.Kind switch
     {
         PermissionSubjectKind.Console => true,
         PermissionSubjectKind.Remote => subject.DeclaredAdmin,

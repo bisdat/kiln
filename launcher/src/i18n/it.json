@@ -3441,7 +3441,13 @@
     "checkNow": "Controlla ora",
     "testBuild": "Build di prova {beta} di {current}.",
     "switchBack": "Torna alla release",
-    "followBeta": "Segui la beta: la prossima build di prova arriva come aggiornamento."
+    "followBeta": "Segui la beta: la prossima build di prova arriva come aggiornamento.",
+    "checkingNow": "Ricerca aggiornamenti…",
+    "upToDateLine": "Kiln è aggiornato ({version})",
+    "availableLine": "Kiln {version} è disponibile",
+    "failedLine": "Controllo fallito: {reason}",
+    "checkedAt": "controllato: {time}",
+    "noAnswer": "nessun server di aggiornamento ha risposto"
   },
   "nav": {
     "play": "Gioca",

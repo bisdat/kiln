@@ -1,10 +1,17 @@
 // Server administration over KAP/1. Protocol: docs/kiln/launcher/admin-protocol.md; the pages
 // and hooks: docs/kiln/launcher/admin-pages.md.
 //
-// One AdminHub session per server is shared by every admin page: <AdminProvider serverId> (or the first hook that
-// names the server) acquires it, the last release closes it 30 s later. The hub connects with admin_connect,
-// subscribes to the `state` topic (pushes arrive in `kiln://admin`), reconnects with backoff when the session closes,
-// errors or goes quiet, and gates every op on the session's `ready.ops` ("needs a newer Kiln.Admin").
+// One session per server is shared by every admin page: <AdminProvider serverId> (or the first hook that names the
+// server) acquires it, the last release closes it 30 s later. The hub connects through its AdminTransport (below),
+// subscribes to the `state` topic, follows the transport's events (closed {retry}, ready, pushes), reconnects with
+// backoff when a connect fails, and gates every op on the session's `ready.ops` ("needs a newer Kiln.Admin").
+//
+// The transport is the seam between the pages and what carries KAP/1 (configureAdmin):
+//   - the launcher: ./adminTauri.ts, the Tauri commands admin_* and the `kiln://admin` event (the Rust AdminHub);
+//     src/main.tsx installs it;
+//   - a web page (Kiln Web Admin, through @kiln/admin-ui): ./adminWs.ts, KAP/1 frames as JSON over an
+//     already-authenticated WebSocket.
+// This module and everything the admin pages import is Tauri-free (unit-tests/admin-ui-package.test.ts).
 //
 // Hooks (both forms work; the one without serverId uses the nearest <AdminProvider>):
 //   useAdminState([serverId])          connection + the latest `state` push
@@ -12,14 +19,16 @@
 //   useAdminCaller([serverId])         (op, args) => Promise<data>  (rejects with KilnError)
 //   useAdminCall(op, options?)         TanStack mutation; mutate(args)
 //   useAdminQuery(op, args?, options?) TanStack query, refetched per session
+//   useKap([serverId])                 typed calls of the newer ops (kapOps)
 import { useMutation, useQuery, useQueryClient, type QueryClient, type UseMutationOptions, type UseQueryOptions } from "@tanstack/react-query";
 import { createContext, createElement, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { create } from "zustand";
 import { t } from "../i18n";
-import {
-  adminCall, adminConnect, adminDisconnect, adminSubscribe, onKilnEvent, toKilnError,
-  type AdminEvent, type AdminSession, type AdminTransport, type Json, type KilnError, type ServerId,
-} from "./commands";
+import { toKilnError, type Json, type KilnError, type ServerId } from "./shared";
+import type {
+  AdminInfo, LoginMintResult, LoginRedeemResult, RestartRequest, ServerRestartArgs, UpdateCancelResult, UpdateList,
+  UpdateRollbackResult, UpdateStageArgs, UpdateStageResult,
+} from "../admin/types";
 
 // ---------------------------------------------------------------- KAP/1 wire types (Rust: kiln_manage::admin::protocol)
 
@@ -40,7 +49,7 @@ export interface KapLimits {
 export type KapFrame =
   | { t: "hello"; proto: string; nonce: string; kiln?: string; admin?: string; server: { id?: string | null; name?: string | null }; auth: string[] }
   | { t: "auth"; proto: string; cnonce: string; mac: string; client?: string }
-  | { t: "ready"; session: string; mac: string; ops: string[]; topics: string[]; limits: KapLimits }
+  | { t: "ready"; session: string; mac: string; ops: string[]; topics: string[]; limits: KapLimits; restart?: KapRestart }
   | { t: "req"; id: number; op: string; args: Record<string, Json> }
   | { t: "res"; id: number; ok: boolean; op: string; ms?: number; data?: Json; error?: string; code?: KapErrorCode }
   | { t: "sub"; id: number; topic: string; everyMs?: number }
@@ -51,8 +60,17 @@ export type KapFrame =
   | { t: "error"; code: KapErrorCode; message: string; id?: number }
   | { t: "bye"; reason: string };
 
-/** Topics Kiln.Admin offers (ready.topics lists the server's). */
-export type AdminTopic = "state" | "log";
+/** ready.restart / admin_info.restart (0.2.0-dev.30.9): does a stop asked for with server_restart come back? */
+export interface KapRestart {
+  supported: "supported" | "unknown";
+  /** "kilnctl" (its systemd unit restarts the server) or null */
+  via: string | null;
+  /** kilnctl run's exit code after such a stop (75), or null */
+  code: number | null;
+}
+
+/** Topics Kiln.Admin offers (ready.topics lists the server's). "metrics": AdminMetrics every 2 s (since 30.9). */
+export type AdminTopic = "state" | "log" | "metrics";
 
 export interface AdminPos {
   x: number;
@@ -116,7 +134,128 @@ export type KnownOp =
   | "commands_describe" | "command_complete" | "events_stats" | "mods" | "mod_load" | "mod_reload" | "mod_unload" | "mod_test"
   | "crash_reports"
   // Connection and session state
-  | "admin_info" | "network_status" | "network_reload" | "native_status" | "log_tail" | "admin_token_rotate";
+  | "admin_info" | "network_status" | "network_reload" | "native_status" | "log_tail" | "admin_token_rotate"
+  // Restart and one-time login (0.2.0-dev.30.9; check with useHasOp)
+  | "server_restart" | "server_restart_cancel" | "login_mint" | "login_redeem"
+  // Staged mod and Kiln updates (0.2.0-dev.30.9, Ops.Updates.cs; check with useHasOp)
+  | "update_list" | "update_stage" | "update_cancel" | "update_rollback";
+
+// ---------------------------------------------------------------- the transport seam
+
+/** What the launcher may ask its backend for (Rust `Transport`): automatic, Kiln.Admin's TCP listener, the file bridge,
+ * an SSH tunnel to a remote server. A transport lists the ones it offers in `kinds`. */
+export type AdminTransportKind = "auto" | "tcp" | "file" | "ssh";
+
+/** One server's admin session as the transport hands it out (Rust kiln_manage::admin::client::AdminSession). `session`
+ * is the transport's id for it, stable across its own reconnects; `transport` says what carries it ("ws": a
+ * WebSocket). */
+export interface AdminSession {
+  session: string;
+  serverId: ServerId;
+  transport: AdminTransportKind | "ws";
+  ops: string[];
+  topics: string[];
+  kiln: string | null;
+  server: { id?: string | null; name?: string | null };
+  /** ready.restart (0.2.0-dev.30.9) when the transport has it */
+  restart?: KapRestart;
+}
+
+/** A session's events (Rust AdminEvent): pushes; `closed` (retry: the transport reconnects by itself and sends `ready`
+ * again; false: final; absent: an older backend, the hub retries); `error` (a non-fatal KAP error frame); `ready`
+ * after every reconnect. */
+export type AdminEvent =
+  | { kind: "push"; topic: string; seq: number; data: Json }
+  | { kind: "closed"; reason: string; retry?: boolean }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; transport: AdminSession["transport"]; ops: string[]; topics: string[]; restart?: KapRestart };
+
+/** An event with its session (the launcher's `kiln://admin` payload). */
+export interface AdminHubEvent {
+  session: string;
+  serverId: ServerId;
+  event: AdminEvent;
+}
+
+/** Carries KAP/1 for the hub. Every method rejects with a KilnError: `not_found` for a session it does not know,
+ * `admin_unavailable` while it reconnects, the op's error as `op_failed` (busy, timeout for those KAP codes). It keeps
+ * one session per server (connect again returns it), re-subscribes after its own reconnects, and reports them as
+ * `closed {retry: true}` then `ready`. */
+export interface AdminTransport {
+  /** For diagnostics: "tauri", "websocket", ... */
+  readonly name: string;
+  /** The kinds a user may pick (the Reconnect menu); empty: nothing to pick. */
+  readonly kinds: readonly AdminTransportKind[];
+  connect(serverId: ServerId, want: AdminTransportKind): Promise<AdminSession>;
+  disconnect(session: string): Promise<void>;
+  /** Runs an op; resolves to its `data`. */
+  call<T = Json>(session: string, op: string, args: Record<string, Json>): Promise<T>;
+  subscribe(session: string, topic: string): Promise<void>;
+  unsubscribe(session: string, topic: string): Promise<void>;
+  /** Every session's events; resolves to the unsubscribe function. */
+  listen(handler: (e: AdminHubEvent) => void): Promise<() => void>;
+}
+
+/** The map art's state where the host makes it from the game (the launcher's Settings, Game art). */
+export interface AdminArtStatus {
+  map?: boolean;
+  extracted?: string | null;
+  canExtract?: boolean;
+}
+
+/** A crash report file the host found itself (logs_crash_reports). */
+export interface AdminCrashFile {
+  name: string;
+  created: string;
+  size: number;
+}
+
+/** What the pages need from the app around them, beyond KAP. A launcher action here is never an op: a KAP op of a
+ * similar name (server_restart) goes through the transport (kapOps), these through the host. */
+export interface AdminHost {
+  /** Base URL of the local game art (map/..., data/...); undefined: /assets-local/ (catalog.ts assetsRoot). */
+  assetsRoot?: () => string | undefined;
+  /** A hook: the map art's state, to probe again when the host made it. */
+  useArtStatus: () => AdminArtStatus | undefined;
+  /** The launcher reads a stopped server's crash reports from its folder. */
+  crashReportsFromDisk?: (serverId: ServerId) => Promise<AdminCrashFile[]>;
+  /** The launcher restarts a server it manages (its own server_restart command, not Kiln.Admin's op). */
+  restartManagedServer?: (serverId: ServerId) => Promise<unknown>;
+}
+
+const noArtStatus = (): AdminArtStatus | undefined => undefined;
+let transportNow: AdminTransport | null = null;
+let hostNow: AdminHost = { useArtStatus: noArtStatus };
+
+/** Sets what the hub talks through and the app around the pages. Sessions of a previous transport are dropped (their
+ * timers stopped; nothing is sent to it). The launcher calls this once (./adminTauri.ts); a web page before it renders
+ * the pages. */
+export function configureAdmin(c: { transport: AdminTransport | null; host?: Partial<AdminHost> }) {
+  if (c.transport !== transportNow) {
+    for (const r of rt.values()) {
+      if (r.retry) clearTimeout(r.retry);
+      if (r.release) clearTimeout(r.release);
+    }
+    rt.clear();
+    useAdminHub.setState({ conns: {} });
+    const was = listening;
+    listening = null;
+    was?.then((un) => un()).catch(() => undefined);
+    transportNow = c.transport;
+  }
+  hostNow = { ...c.host, useArtStatus: c.host?.useArtStatus ?? noArtStatus };
+}
+
+/** The configured transport; rejects (admin_unavailable) when there is none. */
+function transport(): AdminTransport {
+  if (!transportNow) throw { code: "admin_unavailable", message: t("api.admin.noTransport") } satisfies KilnError;
+  return transportNow;
+}
+
+/** The configured transport (null before configureAdmin). */
+export const adminTransport = (): AdminTransport | null => transportNow;
+/** The app around the pages (configureAdmin's host). */
+export const adminHost = (): AdminHost => hostNow;
 
 // ---------------------------------------------------------------- the hub (one session per server)
 
@@ -127,8 +266,8 @@ export interface AdminConn {
   serverId: ServerId;
   status: AdminStatus;
   session: AdminSession | null;
-  /** the transport asked for (admin_connect); the session says which one it got */
-  want: AdminTransport;
+  /** the transport kind asked for (connect); the session says which one it got */
+  want: AdminTransportKind;
   error: KilnError | null;
   state: AdminState | null;
   stateSeq: number;
@@ -145,7 +284,7 @@ export interface AdminConn {
 
 /** The contract's state shape (contracts.md section 13) plus the hub's details. */
 export interface AdminHubState extends AdminConn {
-  transport: AdminTransport | null;
+  transport: AdminSession["transport"] | null;
   connecting: boolean;
   ready: boolean;
   ops: ReadonlySet<string>;
@@ -186,7 +325,7 @@ const runtime = (id: ServerId): Runtime => {
   return r;
 };
 
-function loadTransport(id: ServerId): AdminTransport {
+function loadTransport(id: ServerId): AdminTransportKind {
   try {
     const v = localStorage.getItem(`kiln.admin.transport.${id}`);
     return v === "tcp" || v === "file" || v === "ssh" ? v : "auto";
@@ -211,10 +350,10 @@ function normalizeState(raw: Record<string, unknown>): AdminState {
   return st as unknown as AdminState;
 }
 
-// one listener for every session's events (registered on first use)
+// one listener for every session's events (registered on first use, again after configureAdmin)
 let listening: Promise<() => void> | null = null;
 function listen() {
-  listening ??= onKilnEvent("kiln://admin", ({ session, serverId, event }) => {
+  listening ??= transport().listen(({ session, serverId, event }) => {
     const c = useAdminHub.getState().conns[serverId];
     if (!c?.session || c.session.session !== session) return;
     if (event.kind === "push") {
@@ -231,6 +370,8 @@ function listen() {
         }
       } else for (const l of topicListeners) l(serverId, event.topic, event.data);
     } else if (event.kind === "closed") {
+      // a session the hub ended itself (Reconnect while connected): its transport's `closed` is not the server leaving
+      if (ending.delete(session)) return;
       closed(serverId, event.reason, event.retry);
     } else if (event.kind === "error") {
       patch(serverId, { error: { code: "internal", message: event.message } });
@@ -241,12 +382,12 @@ function listen() {
   return listening;
 }
 
-/** The AdminEvent after every (re)connect of the Rust hub's session (it re-subscribes by itself). */
+/** The AdminEvent after every (re)connect of the transport's session (it re-subscribes by itself). */
 type ReadyEvent = Extract<AdminEvent, { kind: "ready" }>;
 /** Without `retry` (an older backend) a closed session is retried by this hub after this grace time. */
 const CLOSED_GRACE_MS = 10_000;
 
-/** closed {retry: true}: the Rust hub reconnects (backoff 1..30 s) and sends `ready`; {retry: false}: final, the user
+/** closed {retry: true}: the transport reconnects (backoff 1..30 s) and sends `ready`; {retry: false}: final, the user
  * reconnects (the Reconnect button). */
 function closed(id: ServerId, reason: string, retry: boolean | undefined) {
   const r = runtime(id);
@@ -280,6 +421,7 @@ function readyAgain(id: ServerId, ev: ReadyEvent) {
     transport: ev.transport ?? c.session.transport,
     ops: ev.ops ?? c.session.ops,
     topics: ev.topics ?? c.session.topics,
+    ...(ev.restart ? { restart: ev.restart } : {}),
   };
   patch(id, { status: "ready", session, error: null, attempt: 0, connectedAt: Date.now(), stateSeq: 0 });
 }
@@ -299,6 +441,20 @@ export function onAdminTopic(l: TopicListener): () => void {
   return () => topicListeners.delete(l);
 }
 
+/** Sessions the hub is ending itself (their `closed` event is expected; forgotten after a minute). */
+const ending = new Set<string>();
+
+/** Ends a session; a transport that is gone or refuses is no reason to stop. */
+function disconnectQuietly(session: string): Promise<void> {
+  ending.add(session);
+  setTimeout(() => ending.delete(session), 60_000);
+  try {
+    return transport().disconnect(session).catch(() => undefined);
+  } catch {
+    return Promise.resolve();
+  }
+}
+
 async function connect(id: ServerId) {
   const r = runtime(id);
   if (r.retry) clearTimeout(r.retry);
@@ -306,18 +462,18 @@ async function connect(id: ServerId) {
   const gen = ++r.gen;
   const prev = get(id);
   patch(id, { status: prev.status === "ready" || prev.attempt > 0 || prev.session ? "reconnecting" : "connecting", retryAt: null });
-  // admin_connect returns the server's existing hub session whatever the transport: close it first
-  if (prev.session) await adminDisconnect(prev.session.session).catch(() => undefined);
+  // connect returns the server's existing session whatever the kind: close it first
+  if (prev.session) await disconnectQuietly(prev.session.session);
   try {
     await listen();
-    const session = await adminConnect(id, get(id).want);
+    const session = await transport().connect(id, get(id).want);
     if (gen !== r.gen) {
-      adminDisconnect(session.session).catch(() => undefined);
+      disconnectQuietly(session.session);
       return;
     }
     patch(id, { status: "ready", session, error: null, attempt: 0, connectedAt: Date.now(), stateSeq: 0, gaps: 0 });
     if (session.topics.includes("state")) {
-      await adminSubscribe(session.session, "state").catch((e) => patch(id, { error: toKilnError(e) }));
+      await transport().subscribe(session.session, "state").catch((e) => patch(id, { error: toKilnError(e) }));
     }
   } catch (e) {
     if (gen !== r.gen) return;
@@ -325,15 +481,15 @@ async function connect(id: ServerId) {
   }
 }
 
-/** No session (admin_connect failed: server stopped, no endpoint, ...): show why and try again later while a page
- * still uses the server. A live session's reconnects are the Rust hub's (closed/ready events). */
+/** No session (connect failed: server stopped, no endpoint, ...): show why and try again later while a page still uses
+ * the server. A live session's reconnects are the transport's (closed/ready events). */
 function lost(id: ServerId, error: KilnError) {
   const r = runtime(id);
   const c = get(id);
   const attempt = c.attempt + 1;
   const wait = BACKOFF_S[Math.min(BACKOFF_S.length - 1, attempt - 1)] * 1000;
   r.gen++;
-  if (c.session) adminDisconnect(c.session.session).catch(() => undefined);
+  if (c.session) disconnectQuietly(c.session.session);
   const retry = r.refs > 0 && error.code !== "auth_failed";
   patch(id, { status: "error", session: null, error, attempt, retryAt: retry ? Date.now() + wait : null });
   if (r.retry) clearTimeout(r.retry);
@@ -362,17 +518,17 @@ export function releaseAdmin(id: ServerId) {
     if (r.retry) clearTimeout(r.retry);
     r.retry = null;
     const c = get(id);
-    if (c.session) adminDisconnect(c.session.session).catch(() => undefined);
+    if (c.session) disconnectQuietly(c.session.session);
     patch(id, { ...blank(id), want: c.want });
   }, RELEASE_MS);
 }
 
-/** Reconnect now (the "Reconnect" button), optionally over another transport. */
-export function reconnectAdmin(id: ServerId, transport?: AdminTransport) {
-  if (transport) {
-    patch(id, { want: transport });
+/** Reconnect now (the "Reconnect" button), optionally over another transport kind. */
+export function reconnectAdmin(id: ServerId, kind?: AdminTransportKind) {
+  if (kind) {
+    patch(id, { want: kind });
     try {
-      localStorage.setItem(`kiln.admin.transport.${id}`, transport);
+      localStorage.setItem(`kiln.admin.transport.${id}`, kind);
     } catch {
       /* private mode */
     }
@@ -411,12 +567,12 @@ export async function callAdmin<T = Json>(id: ServerId, op: string, args: Record
   const s = c.session!;
   if (!s.ops.includes(op)) throw needsNewer(op);
   try {
-    return await adminCall<T>(s.session, op, args);
+    return await transport().call<T>(s.session, op, args);
   } catch (e) {
     const err = toKilnError(e);
     if (get(id).session?.session === s.session) {
-      // not_found: the hub forgot the session (launcher restarted the backend): connect again;
-      // admin_unavailable: the hub is reconnecting it: show that until its `ready`
+      // not_found: the transport forgot the session (the launcher restarted its backend): connect again;
+      // admin_unavailable: the transport is reconnecting it: show that until its `ready`
       if (err.code === "not_found") lost(id, err);
       else if (err.code === "admin_unavailable" && get(id).status === "ready") patch(id, { status: "reconnecting", error: err });
     }
@@ -535,4 +691,31 @@ export function useAdminQuery<T = Json>(op: KnownOp | string, args: Record<strin
 export function invalidateAdmin(qc: QueryClient, serverId: ServerId, ops: (KnownOp | string)[]) {
   const set = new Set(ops);
   return qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "admin" && q.queryKey[1] === serverId && set.has(String(q.queryKey[2])) });
+}
+
+// ---------------------------------------------------------------- typed calls of the newer ops
+
+/** Typed calls of Kiln.Admin's newer ops (0.2.0-dev.30.9; admin-protocol.md sections 8 and 11), each a KAP request on
+ * the server's session through the hub's transport. They are ops, never launcher actions: `serverRestart` is Kiln.Admin
+ * restarting the server it runs in (KAP `server_restart`), not the launcher's restart of a server it manages
+ * (AdminHost.restartManagedServer). Check an op with useHasOp before offering it. */
+export function kapOps(call: AdminCall) {
+  return {
+    adminInfo: () => call<AdminInfo>("admin_info"),
+    serverRestart: (args: ServerRestartArgs = {}) => call<RestartRequest>("server_restart", { ...args }),
+    serverRestartCancel: (args: { by?: string } = {}) => call<{ canceled: true }>("server_restart_cancel", { ...args }),
+    loginMint: (args: { consumer: string; label?: string }) => call<LoginMintResult>("login_mint", { ...args }),
+    loginRedeem: (args: { consumer: string; secret: string }) => call<LoginRedeemResult>("login_redeem", { ...args }),
+    updateList: () => call<UpdateList>("update_list"),
+    updateStage: (args: UpdateStageArgs) => call<UpdateStageResult>("update_stage", { ...args } as unknown as Record<string, Json>),
+    updateCancel: (args: { unit: string }) => call<UpdateCancelResult>("update_cancel", { ...args }),
+    updateRollback: (args: { unit: string }) => call<UpdateRollbackResult>("update_rollback", { ...args }),
+  };
+}
+export type KapOps = ReturnType<typeof kapOps>;
+
+/** kapOps on the server's shared session (the provider's, or the named server's). */
+export function useKap(serverId?: ServerId): KapOps {
+  const call = useAdminCaller(serverId);
+  return useMemo(() => kapOps(call), [call]);
 }

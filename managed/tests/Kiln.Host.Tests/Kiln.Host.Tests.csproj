@@ -29,6 +29,9 @@
     <KilnSample Include="../../../mods/samples/SampleFaulty/SampleFaulty.csproj" />
     <KilnSample Include="../../../mods/samples/SampleTasks/SampleTasks.csproj" />
     <ProjectReference Include="@(KilnSample)" ReferenceOutputAssembly="false" />
+    <!-- Kiln.Admin's staged updates (update_* ops), as it is, and the path rules it shares with native/core/src/staged.cpp. -->
+    <Compile Include="../../../mods/Kiln.Admin/Staging.cs" Link="AdminStaging.cs" />
+    <None Include="../../../schema/fixtures/staged/paths.json" Link="fixtures/staged-paths.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- samples.txt: the output assembly of each sample, so tests find them under any configuration/artifacts path. -->
   <Target Name="WriteSamplePaths" AfterTargets="Build">

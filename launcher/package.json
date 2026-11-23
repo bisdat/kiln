@@ -5,6 +5,9 @@
   "description": "Kiln Launcher: play, configure and administer Enshrouded with Kiln (frontend; backend in src-tauri/)",
   "license": "MIT",
   "type": "module",
+  "workspaces": [
+    "packages/admin-ui"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -17,7 +20,8 @@
     "test": "bun test ./unit ./unit-tests ./scripts",
     "test:schema": "node ../schema/tests/profile_review.mjs && node ../schema/tests/closed_dll_schemas.mjs && node ../schema/tests/ui-blocks-review.mjs && node ../schema/tests/sfi_review.mjs",
     "test:smoke": "playwright test",
-    "build:web": "vite build"
+    "build:web": "vite build",
+    "build:admin-ui": "vite build --config vite.admin-ui.config.ts && tsc -p tsconfig.admin-ui.json && bun scripts/admin-ui-dist.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.105.3",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! `kilnctl client activate` and `play-once` in kiln mode, with the real binary and scratch folders: they
 //! run kiln_manage's own activation and play-once write, then print every warning the check before Play would show
-//! (here Kiln's interpreter: held while the gate list holds it, else missing from the scratch game), and ask nothing; a hosted game prints what it printed before. Nothing here starts the
+//! (here the interpreter that does not run: held, or not installed), and ask nothing; a hosted game prints what it printed before. Nothing here starts the
 //! game, Steam, Wine or a server.
 use kiln_manage::paths::DataDirs;
 use std::path::{Path, PathBuf};
@@ -9,16 +9,6 @@ use std::process::{Command, Output};
 
 const HELD: &str = r#"{"shroudforge": {"backend": "kiln"}}"#;
 const HOSTED: &str = r#"{"shroudforge": {"backend": "hosted"}}"#;
-
-/// Why no ShroudForge package runs a kiln-mode start of a game without Kiln's interpreter installed: `interpreter-held`
-/// while native/core/gates/sfi.json (the list this build ships and kiln-manage compiles in) has a `kiln-sfi.interpreter`
-/// row on either side (kiln.json has no "preview" here), else `interpreter-missing` (no kiln/plugins/kiln-sfi.dll).
-fn interpreter_refusal() -> &'static str {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/core/gates/sfi.json");
-    let list: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let held = list["gates"].as_array().unwrap().iter().any(|g| g["name"] == kiln_manage::sfi_backend::INTERPRETER_CAPABILITY);
-    if held { "interpreter-held" } else { "interpreter-missing" }
-}
 
 fn scratch(name: &str) -> PathBuf {
     let t = std::env::temp_dir().join(format!("kilnctl-v811-{name}-{}", std::process::id()));
@@ -55,22 +45,31 @@ fn client(t: &Path, kiln_json: &str) -> (PathBuf, String) {
     (g, p.id)
 }
 
+/// Why a kiln-mode start of the scratch client runs no ShroudForge package: the interpreter is held while this build's
+/// gate list (native/core/gates/sfi.json) has its row, as kiln-manage's routing tests read it; else it is a normal
+/// choice, and the scratch folder has no kiln/plugins/kiln-sfi.dll.
+fn kiln_mode_refusal() -> &'static str {
+    let policy = kiln_manage::sfi_release::ReleasePolicy::shipped();
+    let held = policy.rows().unwrap().iter().any(|r| r.name == kiln_manage::sfi_release::INTERPRETER);
+    if held { "interpreter-held" } else { "interpreter-missing" }
+}
+
 #[test]
 fn activate_and_play_once_print_the_warnings_of_a_kiln_mode_start() {
     let t = scratch("held");
     let (g, id) = client(&t, HELD);
     let dir = g.to_string_lossy().into_owned();
+    let code = kiln_mode_refusal();
     let o = kilnctl(&t, &["client", "activate", &id, "--dir", &dir]);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     assert!(out.contains("activated profile"), "{out}");
-    let why = interpreter_refusal();
-    assert!(out.contains(&format!("WARNING: no ShroudForge package runs this start ({why})")), "{out}");
+    assert!(out.contains(&format!("WARNING: no ShroudForge package runs this start ({code})")), "{out}");
     assert!(out.contains("a headless start asks nobody"), "{out}");
     let o = kilnctl(&t, &["client", "play-once", "profile", "--profile", &id, "--dir", &dir]);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
-    assert!(out.contains(&format!("({why})")) && out.contains("wrote "), "{out}");
+    assert!(out.contains(&format!("({code})")) && out.contains("wrote "), "{out}");
     assert!(g.join("kiln/play-once.ini").is_file(), "the start goes on: {out}");
     let _ = std::fs::remove_dir_all(&t);
 }

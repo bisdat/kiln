@@ -8,6 +8,11 @@ import { t } from "../i18n";
 import { canFallBack, noteFallback } from "./fallback";
 import { loadMock } from "./mockLoad";
 import { oneActivation, profileSwitched } from "./oneActivation";
+import { toKilnError, type Json, type KilnError, type PlacementCleanup, type RetainedPlacement, type SchemaSnapshot, type ServerId, type ValidationError } from "./shared";
+
+// The basics the admin pages' package (@kiln/admin-ui) shares with this layer live in ./shared.ts (Tauri-free).
+export { isKilnError, toKilnError } from "./shared";
+export type { ErrorCode, Json, KilnError, PlacementCleanup, RetainedPlacement, SchemaSnapshot, ServerId, SnapshotEntry, ValidationError } from "./shared";
 
 // ---------------------------------------------------------------- plumbing
 
@@ -16,31 +21,6 @@ export { loadMock };
 
 /** True inside the Tauri webview; false in a plain browser (the mock layer answers then). */
 export const isTauri = (): boolean => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-export type ErrorCode =
-  | "not_implemented" | "invalid_argument" | "not_found" | "already_exists" | "io" | "parse" | "schema" | "conflict"
-  | "game_running" | "steam_updating" | "permission" | "unsupported" | "network" | "hash_mismatch"
-  | "consent_required" | "refused" | "timeout" | "canceled" | "busy" | "auth_failed" | "admin_unavailable"
-  | "op_failed" | "internal"
-  /** The data folder cannot be used: its pointer names a folder that is missing, unreadable or not a Kiln data folder. */
-  | "data_folder";
-
-/** What every command rejects with. */
-export interface KilnError {
-  code: ErrorCode;
-  message: string;
-  detail?: unknown;
-}
-
-export function isKilnError(e: unknown): e is KilnError {
-  return typeof e === "object" && e !== null && "code" in e && "message" in e;
-}
-
-/** Any rejection as a KilnError (Tauri passes the serialized error through; anything else becomes "internal"). */
-export function toKilnError(e: unknown): KilnError {
-  if (isKilnError(e)) return e;
-  return { code: "internal", message: e instanceof Error ? e.message : String(e) };
-}
 
 async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   try {
@@ -60,7 +40,6 @@ async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise
 
 export type GameId = string;
 export type ProfileId = string;
-export type ServerId = string;
 export type TaskId = string;
 /** kiln_manage::manifest::ModKind: Kiln's own four, then other engines' mods, each imported by the Library and run by
  *  Kiln's plugin for that engine (XHL companions require external XHL-Core; Ember's are held but don't run yet: no published mod ABI). Labels and helpers:
@@ -73,7 +52,6 @@ export type RunSide = "server" | "client";
 export type Clients = "none" | "kiln" | "mod";
 export type LogTarget = { game: GameId } | { server: ServerId };
 export type ConfigTarget = { profile: ProfileId } | { server: ServerId } | { game: GameId };
-export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 // app
 export interface AppInfo {
@@ -908,31 +886,6 @@ export interface LintReport {
 }
 
 // configs
-export interface SnapshotEntry {
-  path: string;
-  type: string;
-  comment: string | null;
-  default: Json;
-  requiresRestart: boolean;
-  synced: boolean;
-  min?: number;
-  max?: number;
-  options?: string[];
-}
-export interface SchemaSnapshot {
-  format: number;
-  source: "kiln" | "emf";
-  file: string;
-  valueFormat: "jsonc" | "ini";
-  id: string;
-  mod: string;
-  modVersion: string | null;
-  kind: string | null;
-  written: string | null;
-  kiln: string | null;
-  sections: { path: string; comment: string | null; synced: boolean }[];
-  entries: SnapshotEntry[];
-}
 export interface ConfigFileInfo {
   file: string;
   mod: string | null;
@@ -940,10 +893,6 @@ export interface ConfigFileInfo {
   hasSchema: boolean;
   modVersion: string | null;
   modified: string | null;
-}
-export interface ValidationError {
-  path: string;
-  message: string;
 }
 export interface ConfigDocument {
   file: string;
@@ -1389,7 +1338,8 @@ export interface ModpackPublishState {
   required: RequiredMod[];
 }
 
-// admin (KAP types and hooks: ./admin.ts)
+// admin: the Tauri commands' payloads (KAP types, the hub and its transport seam: ./admin.ts, where AdminTransport is the
+// seam's interface and AdminTransportKind this union; the transport over these commands: ./adminTauri.ts)
 export type AdminTransport = "auto" | "tcp" | "file" | "ssh";
 export interface AdminSession {
   session: string;
@@ -1616,21 +1566,6 @@ export const runtimeStatus = (gameId: GameId) => call<InstallState>("runtime_sta
 /** Task result: InstallReceipt. */
 export const runtimeInstall = (gameId: GameId, version: string, options: InstallOptions = {}) =>
   call<TaskId>("runtime_install", { gameId, version, options });
-/** A placed mod folder Kiln left where it is (engine_mods.rs RetainedPlacement): `mayRun`, its own loader may still run
- * it whatever the profile says. */
-export interface RetainedPlacement {
-  path: string;
-  reason: string;
-  mayRun: boolean;
-  /** The profile has the mod off, or no longer has it (absent: on, or an older backend). */
-  off?: boolean;
-}
-export interface PlacementCleanup {
-  removed: string[];
-  retained: RetainedPlacement[];
-  /** Files the mods wrote into removed copies, now in the game's kiln/kept-mod-files: one sentence per mod. Absent: none. */
-  keptFiles?: string[];
-}
 export interface UninstallResult {
   removed: number;
   restored: string[];

@@ -1,20 +1,33 @@
 // SPDX-License-Identifier: MIT
-// Kiln save regions: the game saves voxel edits only inside player-base build zones. Its save state machine builds the
-// list of regions to save from BuildZoneSystem (build/SaveRegions: entries {BaseId[16], float3 min, pad, float3 max,
-// pad}, 0x30 bytes, a game array {data, count, capacity, grow}), and the voxel serializer then writes every stored
-// 32-cell chunk that overlaps a region, one blob per region; the loader applies every blob it finds, base or not
-// (docs/re/build.md). Kiln remembers the 16 m chunks its own writes touched and appends boxes covering them to that
-// list, so the game's own save keeps Kiln's edits outside bases too. The chunk set lives in
-// kiln/data/kiln.build/regions/<world GUID>.json, written atomically when it changes.
-#ifndef KILN_REGIONS_HOST_TEST
+// Kiln save regions. The game saves voxel edits only inside player-base build zones. build/SaveRegions builds the list of
+// the active (not abandoned) base zones from BuildZoneSystem: entries {BaseId[16], float3 min, pad, float3 max, pad},
+// 0x30 bytes, in a game array {data, count, capacity, grow}. Three places in the game call it (docs/re/build.md §12):
+//  - the world save, which writes one base record per entry: its BaseId, its bounds, the stored 32-cell chunks whose 16 m
+//    box touches the bounds, of each only the 4 m blocks (8 cells a side) that touch them too (the rest written empty:
+//    it regrows), and the water inside them. The loader applies every record it finds, base or not; the world list
+//    counts the records as Flame Altars;
+//  - the step that publishes the base zones to the ECS when BuildZoneSystem changed: the base areas the game's systems
+//    group stations, storage and beds by, and every client receives;
+//  - an ECS callback that asks which entities stand inside a base.
+// Kiln remembers the 16 m chunks its own writes touched (kiln/data/kiln.build/regions/<world GUID>.json, written
+// atomically when it changes). Into the world save's list only, after the game's own entries, it appends boxes for the
+// kept chunks the entries of that same list do not save whole (every 4 m block), so the save keeps Kiln's edits outside
+// bases too, without a box (and a Flame Altar in the world list) for chunks a base saves already. The other two callers
+// get the game's list as its builder wrote it. When a game update breaks the world save's call-site pattern, every
+// caller gets the boxes, as up to 0.2.0-dev.30.8: a lost edit is worse than extra altars. The game's voxel writer keeps
+// at most 4,096 stored chunks per record, so a base that touches more chunks does not count as saving any, and no Kiln
+// box covers more than 4,096 chunks. Thanks bisdat (kiln#136) for the covered-chunk filter and its bounds checks.
+#ifdef _WIN32
 #include <windows.h>
 #endif
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <vector>
 #include <filesystem>
@@ -22,21 +35,318 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string>
 
 #ifndef KILN_REGIONS_HOST_TEST
+#include <cstddef>
+
 #include "internal.h"
 #include "kiln_hook.hpp"
+#include "services/kiln_caps.h"
 #include "services/kiln_saves.h"
 #endif
 
 namespace kb {
+#ifdef KILN_REGIONS_HOST_TEST
+bool regions_lifecycle_safe();
+#endif
 namespace {
 
-constexpr int kChunk = 32;  // cells per store chunk edge (16 m)
+constexpr int kChunk = 32;              // cells per store chunk edge (16 m)
+constexpr int kBlock = 8;               // cells per edge of the blocks the save keeps or drops (4 m)
+constexpr int kBlocks = kChunk / kBlock;  // blocks per chunk edge: 4, 64 blocks per chunk
+constexpr uint64_t kWholeChunk = ~uint64_t{0};
+constexpr size_t kEntry = 0x30;         // one entry of the game's region list
+constexpr uint64_t kMaxGameEntries = 256;  // far more than the game's base limit: a larger list is not read
+// The game's voxel writer collects a record's stored chunks into a fixed scratch array of 4,096 keys on its stack and
+// skips every chunk past it without a word, in hash order, so the loss is scattered over the whole record (server
+// 0x83d200, the array set up at 0x83d2f8, grow callback 0x832de0; client 0x10b89b0, 0x10b8aa8, 0x10ae690;
+// docs/re/build.md §12).
+constexpr double kWriterChunks = 4096;
 
 struct Box {
     int32_t lo[3], hi[3];  // chunk coordinates, inclusive
 };
+
+// An entry's bounds, as the voxel serializer gets them.
+struct RegionBounds {
+    float lo[3], hi[3];
+};
+struct RegionCoverage {
+    size_t overlaps_base = 0;  // kept chunks the entries save whole
+    size_t outside_bases = 0;  // kept chunks they save in part or not at all: Kiln's boxes
+};
+bool valid_region(const RegionBounds& b) {
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(b.lo[axis]) || !std::isfinite(b.hi[axis]) || b.lo[axis] > b.hi[axis])
+            return false;
+    return true;
+}
+// The serializer's own rule (docs/re/build.md §12), first step: a stored chunk goes into the blob of every entry its 16 m
+// box [16c, 16c + 16] touches, edges included.
+bool chunk_touches_region(const std::array<int32_t, 3>& chunk, const RegionBounds& region) {
+    if (!valid_region(region)) return false;
+    constexpr double metres_per_chunk = 0.5 * kChunk;
+    for (int axis = 0; axis < 3; ++axis) {
+        const double lo = static_cast<double>(chunk[axis]) * metres_per_chunk;
+        const double hi = lo + metres_per_chunk;
+        if (hi < region.lo[axis] || lo > region.hi[axis]) return false;
+    }
+    return true;
+}
+// Second step: of such a chunk, only the 4 m blocks whose own box touches the entry's bounds (edges included) keep their
+// cells in that blob; the others are written empty, and the loader leaves an empty block as the world generates it. Bit
+// x + 4y + 16z for block (x, y, z), as the serializer walks them. The values are whole metres and the entry's floats,
+// so these comparisons in double give the game's float results.
+uint64_t blocks_saved_by(const std::array<int32_t, 3>& chunk, const RegionBounds& region) {
+    if (!chunk_touches_region(chunk, region)) return 0;
+    constexpr double metres_per_block = 0.5 * kBlock;
+    unsigned touched[3] = {};  // per axis: the block rows that touch the bounds
+    for (int axis = 0; axis < 3; ++axis) {
+        const double first = static_cast<double>(chunk[axis]) * (0.5 * kChunk);
+        for (int i = 0; i < kBlocks; ++i) {
+            const double lo = first + i * metres_per_block, hi = lo + metres_per_block;
+            if (lo <= region.hi[axis] && region.lo[axis] <= hi) touched[axis] |= 1u << i;
+        }
+    }
+    uint64_t saved = 0;
+    for (int z = 0; z < kBlocks; ++z)
+        for (int y = 0; y < kBlocks; ++y)
+            for (int x = 0; x < kBlocks; ++x)
+                if ((touched[0] >> x & 1) && (touched[1] >> y & 1) && (touched[2] >> z & 1))
+                    saved |= uint64_t{1} << (x + kBlocks * y + kBlocks * kBlocks * z);
+    return saved;
+}
+// The 16 m chunk positions an entry's bounds touch, edges included (the serializer's first step): chunk c of an axis
+// touches [lo, hi] when 16c <= hi and lo <= 16c + 16. The most stored chunks the voxel writer can collect for it.
+double chunk_positions(const RegionBounds& b) {
+    double n = 1;
+    for (int axis = 0; axis < 3; ++axis) n *= std::floor(b.hi[axis] / 16.0) - std::ceil(b.lo[axis] / 16.0) + 2;
+    return n;
+}
+// Every block of the chunk is in the blob of some entry: the loader applies each blob's blocks and skips its empty ones,
+// so blocks two bases save between them count too. An entry whose bounds touch more chunk positions than the writer
+// collects may lose any of its chunks (a zone a mod made larger than 240 m, or exactly 240 m with faces on the 16 m
+// grid): it counts as saving none, and Kiln's kept chunks in it keep their boxes.
+bool chunk_saved_whole(const std::array<int32_t, 3>& chunk, const std::vector<RegionBounds>& native) {
+    uint64_t saved = 0;
+    for (const RegionBounds& b : native)
+        if (chunk_positions(b) <= kWriterChunks && (saved |= blocks_saved_by(chunk, b)) == kWholeChunk) return true;
+    return false;
+}
+// The kept chunks the game's entries do not save whole: those outside every base, and those on a base's edge that reach
+// outside it (Kiln knows only which 16 m chunks its edits touched, not where in them). They stay in g_chunks and the
+// JSON either way: a base can move, shrink, be abandoned or go, and the next save then needs Kiln's boxes for them again.
+using ChunkSet = std::set<std::array<int32_t, 3>>;
+ChunkSet chunks_outside_regions(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
+    ChunkSet outside;
+    for (const auto& chunk : chunks)
+        if (!chunk_saved_whole(chunk, native)) outside.insert(chunk);
+    return outside;
+}
+RegionCoverage classify_chunks(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
+    const auto outside = chunks_outside_regions(chunks, native);
+    return {chunks.size() - outside.size(), outside.size()};
+}
+
+// Who called the builder: its return address against the three call sites sigdb resolves (0 = not resolved).
+enum class Caller { WorldSave, BaseZones, BaseQuery, Unknown };
+struct CallSites {
+    uintptr_t world_save = 0, base_zones = 0, base_query = 0;
+};
+Caller classify_caller(uintptr_t ret, const CallSites& s) {
+    if (ret && ret == s.world_save) return Caller::WorldSave;
+    if (ret && ret == s.base_zones) return Caller::BaseZones;
+    if (ret && ret == s.base_query) return Caller::BaseQuery;
+    return Caller::Unknown;
+}
+// Kiln's boxes go where the game saves terrain. With the world save's call site resolved, only the world save gets
+// them: the base zones and the base query get the list as the game's builder wrote it, whether their own call sites
+// resolved or not. Without it Kiln cannot tell the save from the other callers, so every caller gets them, as up to
+// 0.2.0-dev.30.8: extra Flame Altars and base zones (the game's base grouping goes wrong past 16 zones) are better than
+// edits the save drops. A call Kiln cannot place: judge_caller below.
+bool kiln_boxes_for(Caller c, const CallSites& s) { return !s.world_save || c == Caller::WorldSave; }
+
+// Another mod's detour in front of Kiln's (on the builder, or a caller of it) changes the return address Kiln's hook
+// sees, so a call is also placed by the return addresses below it on the stack. Where one lies: in the game exe, in one
+// of Kiln's own modules (kiln-core.dll, kiln-*.dll: another Kiln link on the builder), in one of the system's
+// (system_module: Windows' or Wine's ntdll, kernel32 and kernelbase, the C runtime: a thread's start, never a mod's hook),
+// or anywhere else: another module (named) or memory no module holds (a hook's relay or stub).
+enum class Place { Game, Kiln, System, Other };
+// The modules every thread starts in (ntdll!RtlUserThreadStart, kernel32!BaseThreadInitThunk) and the C runtime's, the
+// same names under Wine. A worker thread's stack reaches them within a few frames: counted as another module, a
+// base-zone or base-query call whose own site did not resolve would get Kiln's boxes, and past 16 zones the game's base
+// areas go wrong. No mod's detour lives in them.
+bool system_module(const std::string& file) {
+    static constexpr const char* names[] = {"ntdll.dll",        "kernel32.dll",       "kernelbase.dll", "ucrtbase.dll",
+                                            "msvcrt.dll",       "vcruntime140.dll",   "vcruntime140_1.dll",
+                                            "msvcp140.dll"};
+    std::string low = file;
+    for (char& c : low) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    for (const char* n : names)
+        if (low == n) return true;
+    return false;
+}
+struct Frame {
+    uintptr_t at = 0;
+    Place place = Place::Game;
+    std::string module;  // Other: the module's file name ("" = no module); Kiln: the module's file name
+    uint64_t offset = 0;  // from the module's base
+};
+constexpr size_t kWalkFrames = 8;  // return addresses looked at, from the one Kiln's hook returns to
+// How a call was placed: its return address is a known site, or a deeper frame is; or no known site within
+// kWalkFrames (or above the first system frame, where the walk ends) and a frame outside the game exe, Kiln and the
+// system (another module's code is on the way: it may be the world save), or a walk that did not get past the return
+// address; or only the game's own frames (a caller Kiln does not know).
+enum class Found { Site, Deeper, Foreign, Unwalked, GameOnly };
+struct CallerVerdict {
+    Caller kind = Caller::Unknown;
+    Found how = Found::Site;
+    bool boxes = false;
+    Frame via;  // Deeper: the frame at the known site; Foreign: the first frame outside the game exe and Kiln
+};
+// `frames`: the return addresses from the one Kiln's hook returns to (`ret`, first) down, as far as the stack could
+// be walked. A call Kiln cannot place gets the boxes, unless every frame looked at is the game's own: the world save's
+// own call through another mod's detour must not lose players' edits at every save.
+CallerVerdict judge_caller(uintptr_t ret, const std::vector<Frame>& frames, const CallSites& s) {
+    CallerVerdict v;
+    v.kind = classify_caller(ret, s);
+    if (v.kind == Caller::Unknown) {
+        v.how = Found::GameOnly;
+        const size_t n = std::min(frames.size(), kWalkFrames);
+        // the walk ends at the first frame in a system module: below it lies the thread's start, not the call chain
+        // that reached the builder (and under Wine nothing that unwinds cleanly)
+        size_t m = 0;
+        while (m < n && frames[m].place != Place::System) ++m;
+        for (size_t i = 0; i < m && v.kind == Caller::Unknown; ++i)
+            if ((v.kind = classify_caller(frames[i].at, s)) != Caller::Unknown) {
+                v.how = Found::Deeper;
+                v.via = frames[i];
+            }
+        for (size_t i = 0; i < m && v.kind == Caller::Unknown; ++i)
+            if (frames[i].place == Place::Other) {
+                v.how = Found::Foreign;
+                v.via = frames[i];
+                break;
+            }
+        // the builder called straight from a system module: no game code placed it, so it may be the world save
+        if (v.kind == Caller::Unknown && n > 0 && m == 0) {
+            v.how = Found::Foreign;
+            v.via = frames[0];
+        }
+        if (v.how == Found::GameOnly && n < 2) v.how = Found::Unwalked;
+    }
+    v.boxes = v.kind != Caller::Unknown ? kiln_boxes_for(v.kind, s) : !s.world_save || v.how != Found::GameOnly;
+    return v;
+}
+std::string frame_text(const Frame& f) {
+    char b[64];
+    std::snprintf(b, sizeof b, "0x%llx", static_cast<unsigned long long>(f.at));
+    if (f.place == Place::Game) return std::string(b) + " (in the game)";
+    if (f.module.empty()) return std::string(b) + " (in no module: a hook's relay or stub)";
+    std::snprintf(b, sizeof b, "+0x%llx", static_cast<unsigned long long>(f.offset));
+    return f.module + b;
+}
+#ifdef _WIN32
+// A Kiln module's file name: kiln-core.dll, kiln-<service or plugin>.dll (kiln.hooks' own rule).
+bool kiln_module(const std::string& file) {
+    std::string low = file;
+    for (char& c : low) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    return low.size() > 9 && low.rfind("kiln-", 0) == 0 && low.compare(low.size() - 4, 4, ".dll") == 0;
+}
+// The module that holds a return address. RtlPcToFileHeader reads the loader's lookup table without its lock; a module's
+// name is read once (GetModuleFileNameW) and kept.
+Frame place_of(uintptr_t at) {
+    static const uintptr_t game = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    static std::mutex mu;
+    static std::map<uintptr_t, std::string> names;
+    Frame f;
+    f.at = at;
+    void* base = nullptr;
+    if (!at || !RtlPcToFileHeader(reinterpret_cast<void*>(at), &base) || !base) {
+        f.place = Place::Other;
+        return f;
+    }
+    const uintptr_t b = reinterpret_cast<uintptr_t>(base);
+    f.offset = at - b;
+    if (b == game) return f;
+    std::lock_guard lock(mu);
+    auto it = names.find(b);
+    if (it == names.end()) {
+        wchar_t path[MAX_PATH]{};
+        char text[MAX_PATH * 3]{};
+        const DWORD len = GetModuleFileNameW(reinterpret_cast<HMODULE>(base), path, MAX_PATH);
+        const wchar_t* name = path;
+        for (DWORD i = 0; i < len; ++i)
+            if (path[i] == L'\\' || path[i] == L'/') name = path + i + 1;
+        if (!len || !WideCharToMultiByte(CP_UTF8, 0, name, -1, text, sizeof text, nullptr, nullptr)) text[0] = 0;
+        it = names.emplace(b, text[0] ? text : "an unnamed module").first;
+    }
+    f.module = it->second;
+    f.place = kiln_module(f.module) ? Place::Kiln : system_module(f.module) ? Place::System : Place::Other;
+    return f;
+}
+// The stack below the caller of this function, from `ret` (the return address Kiln's hook returns to) down, at most
+// kWalkFrames: RtlCaptureStackBackTrace unwinds through every frame with unwind data. `ret` comes first even when the
+// walk does not reach it (then nothing follows it).
+std::vector<Frame> walk_from(uintptr_t ret) {
+    void* raw[32] = {};
+    const USHORT n = RtlCaptureStackBackTrace(0, 32, raw, nullptr);
+    std::vector<Frame> out;
+    if (!ret) return out;
+    out.push_back(place_of(ret));
+    USHORT i = 0;
+    while (i < n && reinterpret_cast<uintptr_t>(raw[i]) != ret) ++i;
+    for (++i; i < n && out.size() < kWalkFrames; ++i) out.push_back(place_of(reinterpret_cast<uintptr_t>(raw[i])));
+    return out;
+}
+#endif
+
+// What kiln.build says when it starts about the three call sites: a line in kiln.log (a warning when a name did not
+// resolve) and the text of its kiln.caps row, which is unavailable when Kiln's boxes reach every caller.
+constexpr char kCallersRow[] = "build.persist_callers";
+struct SitesNotice {
+    bool warn = false, available = true;
+    std::string text;
+};
+SitesNotice sites_notice(const CallSites& s) {
+    const std::pair<const char*, uintptr_t> names[] = {{"build/RetSaveRegionsWorldSave", s.world_save},
+                                                       {"build/RetSaveRegionsBaseZones", s.base_zones},
+                                                       {"build/RetSaveRegionsBaseQuery", s.base_query}};
+    std::string missing;
+    for (const auto& [name, at] : names)
+        if (!at) missing += (missing.empty() ? "" : ", ") + std::string(name);
+    // a call Kiln cannot place (judge_caller) gets the boxes too: it may be the world save behind another mod's hook
+    const char* unplaced = " (a call it cannot place, through another module or on a stack it cannot walk, gets them "
+                           "too: it may be the world save)";
+    if (missing.empty())
+        return {false, true,
+                std::string("the save-region builder's three call sites resolved: Kiln's save boxes go into the world "
+                            "save's region list only") + unplaced};
+    if (s.world_save)
+        return {true, true,
+                "sigdb names not resolved on this game build: " + missing + ". Kiln's save boxes still go into the world "
+                "save's region list only" + unplaced + "; the other callers of the save-region builder get none"};
+    return {true, false,
+            "sigdb names not resolved on this game build: " + missing + ". Kiln cannot tell the world save from the "
+            "other callers of the save-region builder, so every caller gets Kiln's save boxes, as up to "
+            "0.2.0-dev.30.8: each box is one more Flame Altar in the world list and a base zone the game's systems "
+            "group stations, storage and beds by"};
+}
+#ifndef KILN_REGIONS_HOST_TEST
+void report_callers_row(bool available, const std::string& text) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, report) + sizeof(void*) || !caps->report) return;
+    caps->report(g_owner, kstr(kCallersRow), available ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                 available ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING, kstr(text));
+}
+#endif
+void announce_sites(const CallSites& s) {
+    const SitesNotice n = sites_notice(s);
+    if (n.warn) KB_W("save regions: %s", n.text.c_str());
+    else KB_I("save regions: %s", n.text.c_str());
+    report_callers_row(n.available, n.text);
+}
 
 #ifndef KILN_REGIONS_HOST_TEST
 kiln::RawHook g_hook;
@@ -47,14 +357,34 @@ std::string g_world;                         // world GUID text the set belongs 
 bool g_dirty = false;
 bool g_lifecycle_ok = false;
 std::filesystem::path g_dir;                 // kiln/data/kiln.build/regions
-std::vector<Box> g_boxes;   // boxes over g_chunks, recomputed when the set changes
-bool g_boxes_stale = true;
-size_t g_last_logged = ~size_t{0};
+bool g_boxes_stale = true;                   // g_chunks changed since the last plan
 std::filesystem::path g_file;
 #ifndef KILN_REGIONS_HOST_TEST
 const KilnSavesApi* g_saves = nullptr;
 #endif
+CallSites g_sites;  // set once by regions_install, before the hook can run
 std::atomic<uint64_t> g_saves_seen{0}, g_boxes_added{0};
+std::atomic<bool> g_unknown_told{false}, g_foreign_told{false}, g_unwalked_told{false}, g_deeper_told{false},
+    g_header_told{false};
+
+// What one save needs from Kiln, and the last one logged (under g_mu).
+struct SavePlan {
+    std::vector<Box> boxes;
+    size_t kept = 0, covered = 0;  // kept chunks; those the game's entries of the same list save whole already
+    bool bounds = false;           // false: the game's entries could not be read, every kept chunk has a box
+};
+struct LoggedPlan {
+    uint64_t added = ~uint64_t{0}, wanted = 0, kept = 0, covered = 0, entries = 0;
+    bool bounds = false;
+    bool operator==(const LoggedPlan&) const = default;
+};
+struct PlanCache {
+    bool valid = false, bounds = false;
+    std::vector<RegionBounds> native;
+    SavePlan plan;
+};
+PlanCache g_plan;
+LoggedPlan g_last_log;
 
 #ifndef KILN_REGIONS_HOST_TEST
 std::string guid_text(const uint8_t g[16]) {
@@ -134,9 +464,8 @@ void close_locked() {
     g_world.clear();
     g_file.clear();
     g_dirty = false;
-    g_boxes.clear();
     g_boxes_stale = true;
-    g_last_logged = ~size_t{0};
+    g_last_log = {};
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
@@ -169,14 +498,35 @@ void load_locked() {
     for (const auto& c : pending) g_chunks.insert(c);
     g_dirty = g_chunks.size() != loaded;
     g_boxes_stale = true;
-    g_last_logged = ~size_t{0};
+    g_last_log = {};
     KB_I("save regions: %zu chunk(s) kept for world %s (%s)", loaded, w.c_str(), reinterpret_cast<const char*>(g_file.u8string().c_str()));
 }
 
-// Greedy boxes over the chunk set: runs along x, merged across z when equal, then across y.
-std::vector<Box> boxes_locked() {
+// A Kiln box is a record of its own, and its bounds sit 0.05 m inside its chunks, so the chunks it covers are the
+// positions it touches: a box over the voxel writer's 4,096 is cut into slabs across its longest axis, as thick as the
+// other two axes allow (a slab still too large is cut again).
+void split_for_writer(const Box& b, std::vector<Box>& out) {
+    double extent[3], volume = 1;
+    for (int k = 0; k < 3; ++k) volume *= extent[k] = static_cast<double>(b.hi[k]) - b.lo[k] + 1;
+    if (volume <= kWriterChunks) {
+        out.push_back(b);
+        return;
+    }
+    const int axis = extent[0] >= extent[1] && extent[0] >= extent[2] ? 0 : extent[1] >= extent[2] ? 1 : 2;
+    const double cross = volume / extent[axis];
+    const int64_t step = cross >= kWriterChunks ? 1 : static_cast<int64_t>(kWriterChunks / cross);
+    for (int64_t lo = b.lo[axis]; lo <= b.hi[axis]; lo += step) {
+        Box slab = b;
+        slab.lo[axis] = static_cast<int32_t>(lo);
+        slab.hi[axis] = static_cast<int32_t>(std::min<int64_t>(lo + step - 1, b.hi[axis]));
+        split_for_writer(slab, out);
+    }
+}
+
+// Greedy boxes over the chunk set: runs along x, merged across z when equal, then across y; none over 4,096 chunks.
+std::vector<Box> boxes_for_chunks(const ChunkSet& chunks) {
     std::map<std::pair<int32_t, int32_t>, std::vector<int32_t>> rows;  // (y, z) -> sorted x
-    for (const auto& c : g_chunks) rows[{c[1], c[2]}].push_back(c[0]);
+    for (const auto& c : chunks) rows[{c[1], c[2]}].push_back(c[0]);
     std::vector<Box> runs;
     for (auto& [yz, xs] : rows) {
         std::sort(xs.begin(), xs.end());
@@ -227,10 +577,40 @@ std::vector<Box> boxes_locked() {
         runs.clear();
         for (auto& [k, b] : coarse) runs.push_back(b);
     }
-    return runs;
+    std::vector<Box> boxes;
+    for (const Box& b : runs) split_for_writer(b, boxes);
+    return boxes;
+}
+std::vector<Box> boxes_locked() { return boxes_for_chunks(g_chunks); }
+
+bool same_bounds(const std::vector<RegionBounds>& a, const std::vector<RegionBounds>& b) {
+    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(RegionBounds)) == 0);
+}
+// The boxes this save needs: over the kept chunks the game's entries do not save whole, or over every kept chunk when the
+// entries could not be read (`native` null). Kept until the chunk set or the entries' bounds change.
+const SavePlan& plan_locked(const std::vector<RegionBounds>* native) {
+    const bool bounds = native != nullptr;
+    if (g_boxes_stale || !g_plan.valid || g_plan.bounds != bounds || (bounds && !same_bounds(g_plan.native, *native))) {
+        SavePlan p;
+        p.kept = g_chunks.size();
+        p.bounds = bounds;
+        if (bounds) {
+            const ChunkSet outside = chunks_outside_regions(g_chunks, *native);
+            p.covered = p.kept - outside.size();
+            p.boxes = boxes_for_chunks(outside);
+            g_plan.native = *native;
+        } else {
+            p.boxes = boxes_locked();
+            g_plan.native.clear();
+        }
+        g_plan.plan = std::move(p);
+        g_plan.bounds = bounds;
+        g_plan.valid = true;
+        g_boxes_stale = false;
+    }
+    return g_plan.plan;
 }
 
-#ifndef KILN_REGIONS_HOST_TEST
 struct GameArray {
     uint8_t* data;
     uint64_t count;
@@ -243,8 +623,8 @@ bool append(GameArray* a, const Box& b, uint32_t index) {
     if (a->capacity < a->count + 1) {
         if (!a->grow || !a->grow(a, -static_cast<int64_t>(a->count + 1), 1)) return false;
     }
-    uint8_t* e = a->data + a->count * 0x30;
-    std::memset(e, 0, 0x30);
+    uint8_t* e = a->data + a->count * kEntry;
+    std::memset(e, 0, kEntry);
     const uint32_t id[4] = {0x4e4c494bu /* "KILN" */, 0x444c4942u /* "BILD" */, index, 0x6b69726eu};
     std::memcpy(e, id, 16);
     const double cs = 0.5 * kChunk;  // metres per chunk
@@ -271,7 +651,18 @@ void append_all(void* p) {
         ++c->added;
     }
 }
-bool seh_append(HookCtx* c) {
+
+// Guards around game memory. No frame here holds a C++ object with a destructor, as __try requires.
+#ifdef _WIN32
+bool guarded_copy(void* dst, const void* src, size_t n) {
+    __try {
+        std::memcpy(dst, src, n);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool guarded_append(HookCtx* c) {
     __try {
         append_all(c);
         return true;
@@ -279,48 +670,140 @@ bool seh_append(HookCtx* c) {
         return false;
     }
 }
+#else  // the Linux host test: no structured exceptions there, and no game memory either
+bool guarded_copy(void* dst, const void* src, size_t n) {
+    std::memcpy(dst, src, n);
+    return true;
+}
+bool guarded_append(HookCtx* c) {
+    append_all(c);
+    return true;
+}
+#endif
 
+// The game's own entries, the ones its builder just wrote; false when the list is implausible or cannot be read.
+bool read_game_entries(const GameArray& head, std::vector<RegionBounds>* out) {
+    out->clear();
+    if (head.count > kMaxGameEntries || head.count > head.capacity || (head.count && !head.data)) return false;
+    std::vector<uint8_t> raw(static_cast<size_t>(head.count) * kEntry);
+    if (!raw.empty() && !guarded_copy(raw.data(), head.data, raw.size())) return false;
+    for (uint64_t i = 0; i < head.count; ++i) {
+        RegionBounds b{};
+        std::memcpy(b.lo, raw.data() + i * kEntry + 0x10, sizeof b.lo);
+        std::memcpy(b.hi, raw.data() + i * kEntry + 0x20, sizeof b.hi);
+        if (!valid_region(b)) return false;
+        out->push_back(b);
+    }
+    return true;
+}
+
+// After the game's builder returned `r` and `list`: into the world save's list (into every caller's when the world
+// save's call site did not resolve), after the game's entries, Kiln's boxes for the kept chunks the game's entries do
+// not save whole. Lists for anyone else stay untouched.
+// `frames`: the stack from `ret` down (walk_from); null when it was not walked.
+void after_save_regions(uintptr_t ret, const uint8_t* r, GameArray* list, const CallSites& sites,
+                        const std::vector<Frame>* frames = nullptr) {
+    const CallerVerdict who = judge_caller(ret, frames ? *frames : std::vector<Frame>{}, sites);
+    if (who.kind == Caller::Unknown && sites.world_save && F.persist) {
+        const unsigned long long at = ret;
+        if (who.how == Found::Foreign && !g_foreign_told.exchange(true))
+            KB_W("save regions: the save-region builder was called from 0x%llx, none of its three known callers within "
+                 "%zu frames, through %s (another mod's hook?): Kiln adds its boxes to that list, as it may be the world "
+                 "save", at, kWalkFrames, frame_text(who.via).c_str());
+        else if (who.how == Found::Unwalked && !g_unwalked_told.exchange(true))
+            KB_W("save regions: the save-region builder was called from 0x%llx, none of its three known callers, and "
+                 "the stack could not be walked past it: Kiln adds its boxes to that list, as it may be the world save",
+                 at);
+        else if (who.how == Found::GameOnly && sites.base_zones && sites.base_query && !g_unknown_told.exchange(true))
+            KB_W("save regions: the save-region builder was called from 0x%llx in the game, none of its three known "
+                 "callers within %zu frames: Kiln adds no boxes to that list", at, kWalkFrames);
+    } else if (who.how == Found::Deeper && !g_deeper_told.exchange(true)) {
+        KB_I("save regions: the save-region builder's %s call reached Kiln's hook through 0x%llx; its call site %s was "
+             "found deeper on the stack", who.kind == Caller::WorldSave ? "world save" :
+             who.kind == Caller::BaseZones ? "base-zone" : "base-query", static_cast<unsigned long long>(ret),
+             frame_text(who.via).c_str());
+    }
+    if (!who.boxes) return;
+    if (!regions_lifecycle_safe() || !F.persist) return;
+    if (!r || r[0] != 0 || !list) return;  // the game failed itself: leave it alone
+    GameArray head{};
+    if (!guarded_copy(&head, list, sizeof head)) {
+        if (!g_header_told.exchange(true))
+            KB_E("save regions: the game's region list could not be read; this save keeps only the game's own regions");
+        return;
+    }
+    std::vector<RegionBounds> native;
+    const bool bounds = read_game_entries(head, &native);
+    std::vector<Box> boxes;
+    LoggedPlan now;
+    {
+        std::lock_guard lock(g_mu);
+        load_locked();
+        if (g_world.empty() || g_chunks.empty()) return;
+        const SavePlan& p = plan_locked(bounds ? &native : nullptr);
+        boxes = p.boxes;
+        now.wanted = p.boxes.size();
+        now.kept = p.kept;
+        now.covered = p.covered;
+        now.bounds = p.bounds;
+        if (g_dirty) save_locked();
+    }
+    now.entries = head.count;
+    HookCtx c{list, &boxes, 0};
+    if (!boxes.empty() && !guarded_append(&c)) {
+        list->count = head.count;  // never hand the game a half-written entry
+        KB_E("save regions: appending faulted; this save keeps only the game's own regions");
+        return;
+    }
+    g_boxes_added.fetch_add(c.added, std::memory_order_relaxed);
+    now.added = c.added;
+    bool tell = false;
+    {
+        std::lock_guard lock(g_mu);
+        if (!(now == g_last_log)) {
+            g_last_log = now;
+            tell = true;
+        }
+    }
+    if (!tell) return;
+    if (c.added < boxes.size())
+        KB_W("save regions: the game's list took only %u of %zu Kiln box(es); %llu kept chunk(s) its %llu base "
+             "region(s) do not save whole may not be in this save", c.added, boxes.size(),
+             static_cast<unsigned long long>(now.kept - now.covered), static_cast<unsigned long long>(head.count));
+    else if (!now.bounds)
+        KB_I("save regions: the game's save now writes %u Kiln box(es) for all %llu kept chunk(s) after its %llu base "
+             "region(s), whose bounds could not be read", c.added, static_cast<unsigned long long>(now.kept),
+             static_cast<unsigned long long>(head.count));
+    else
+        KB_I("save regions: the game's save now writes %u Kiln box(es) for %llu kept chunk(s) its %llu base region(s) "
+             "do not save whole; the other %llu are saved with the bases", c.added,
+             static_cast<unsigned long long>(now.kept - now.covered), static_cast<unsigned long long>(head.count),
+             static_cast<unsigned long long>(now.covered));
+}
+
+#ifndef KILN_REGIONS_HOST_TEST
 uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t zones) {
+    const uintptr_t ret = g_hook.caller();  // the game's call site: valid only before the original runs
     uint8_t* r = g_hook.call<uint8_t*>(result, list, zones);
     g_saves_seen.fetch_add(1, std::memory_order_relaxed);
-    // the voxel serializer runs next, from this list; transient cells are on disk already (journaled before their
-    // commit): this only compacts the journal
+    // for the world save the voxel serializer runs next, from this list; transient cells are on disk already (journaled
+    // before their commit): this only compacts the journal, whoever called
     try {
         transient_before_save();
     } catch (...) {
     }
-    if (!regions_lifecycle_safe() || !F.persist) return r;
-    if (!r || r[0] != 0 || !list) return r;  // the game failed itself: leave it alone
-    std::vector<Box> boxes;
     try {
-        std::lock_guard lock(g_mu);
-        load_locked();
-        if (g_world.empty() || g_chunks.empty()) return r;
-        if (g_boxes_stale) {
-            g_boxes = boxes_locked();
-            g_boxes_stale = false;
-        }
-        boxes = g_boxes;
-        if (g_dirty) save_locked();
+        // the stack is walked only for a return address that is no known site (another mod's detour in front of Kiln's),
+        // and only while the world save's site is known (without it every call gets the boxes anyway)
+        std::vector<Frame> frames;
+        const bool walk = g_sites.world_save && classify_caller(ret, g_sites) == Caller::Unknown;
+        if (walk) frames = walk_from(ret);
+        after_save_regions(ret, r, list, g_sites, walk ? &frames : nullptr);
     } catch (...) {
-        return r;  // nothing may escape into the game's save
-    }
-    HookCtx c{list, &boxes, 0};
-    const uint64_t before = list->count;
-    if (!seh_append(&c)) {
-        list->count = before;  // never hand the game a half-written entry
-        KB_E("save regions: appending faulted; this save keeps only the game's own regions");
-        return r;
-    }
-    g_boxes_added.fetch_add(c.added, std::memory_order_relaxed);
-    if (c.added != g_last_logged) {
-        g_last_logged = c.added;
-        KB_I("save regions: the game's save now writes %u Kiln box(es) (%zu chunk(s)) after its %llu base region(s)",
-             c.added, g_chunks.size(), static_cast<unsigned long long>(before));
+        // nothing may escape into the game's save
     }
     return r;
 }
-
 #endif
 
 }  // namespace
@@ -334,10 +817,20 @@ bool regions_install() {
         g_dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.build" / "regions";  // UTF-8
     uintptr_t a = 0;
     if (g_api->symbol(kstr("build/SaveRegions"), &a) != KILN_OK || !a) return F.persist = false;
+    // The builder's three callers (docs/re/build.md §12): only the world save gets Kiln's boxes, or every caller when the
+    // world save's site does not resolve. Read before the hook is installed.
+    auto site = [](const char* name) {
+        uintptr_t v = 0;
+        return g_api->symbol(kstr(name), &v) == KILN_OK ? v : uintptr_t{0};
+    };
+    g_sites.world_save = site("build/RetSaveRegionsWorldSave");
+    g_sites.base_zones = site("build/RetSaveRegionsBaseZones");
+    g_sites.base_query = site("build/RetSaveRegionsBaseQuery");
     if (!g_hook.install(g_api, g_owner, a, reinterpret_cast<void*>(&hk_save_regions), "build/SaveRegions")) {
         KB_E("hooking the save-region builder failed: Kiln edits outside bases are not saved");
         return F.persist = false;
     }
+    announce_sites(g_sites);
     return true;
 }
 

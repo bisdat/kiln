@@ -198,11 +198,11 @@ pub fn deploy(inst: &Instance, from: Option<&Path>, samples: bool, build: bool) 
     kiln::deploy(inst, from, samples, build)
 }
 
-/// `kilnctl deploy --bundle`: the runtime bundle's server components through kiln_manage::install (a first deploy: the
-/// defaults; an update: the installed ones plus every new or newly default component not turned off, see
-/// install::resolve_components; `samples` adds samples), then the instance's policy in kiln/kiln.json (kept when the
-/// file exists, like deploy).
-pub fn deploy_bundle(inst: &Instance, zip: &Path, samples: bool) -> Result<()> {
+/// `kilnctl deploy --bundle`: the runtime bundle's server components (its zip, or the folder it was unpacked to) through
+/// kiln_manage::install (a first deploy: the defaults; an update: the installed ones plus every new or newly default
+/// component not turned off, see install::resolve_components; `samples` adds samples), then the instance's policy in
+/// kiln/kiln.json (kept when the file exists, like deploy).
+pub fn deploy_bundle(inst: &Instance, bundle: &Path, samples: bool) -> Result<()> {
     refuse_running(inst, "deploying")?;
     if !inst.exe().exists() {
         bail!("{} missing (kilnctl install {})", inst.exe().display(), inst.name);
@@ -217,11 +217,11 @@ pub fn deploy_bundle(inst: &Instance, zip: &Path, samples: bool) -> Result<()> {
         let options = kiln_manage::install::InstallOptions {
             installer: Some(format!("kilnctl {}", env!("CARGO_PKG_VERSION"))), ..Default::default()
         };
-        let r = kiln_manage::install::install_adding(&dirs, &g, zip, &options, &["samples".into()], &mut crate::bundle::Printer::new())
+        let r = kiln_manage::install::install_adding(&dirs, &g, bundle, &options, &["samples".into()], &mut crate::bundle::Printer::new())
             .map_err(|e| anyhow::anyhow!(e.message))?;
         crate::bundle::print_receipt(&r, &g.path);
     } else {
-        crate::bundle::install_into(&g, zip, None, false)?;
+        crate::bundle::install_into(&g, bundle, None, false)?;
     }
     // the bundle's kiln.json is installed only when missing; the instance's policy goes in either way (in place)
     let kiln_json = kiln::kiln_dir(inst).join("kiln.json");
@@ -743,10 +743,10 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
     }
     let green = gate_res.as_ref().is_some_and(|r| r.green);
     if !rep.complete {
-        next.push(format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
-            rep.out.join("report.txt").display()));
+        next.push(incomplete_reason(&rep));
     }
     next.extend(next_for_sigs(&rep));
+    next.extend(must_port_warnings(&rep));
     if !rep.defs_unchanged {
         next.push(format!("the definitions need changes: review and apply {} to the Kiln tree (git apply), redeploy \
                            (kilnctl deploy {}), then run kilnctl port {} --mark", rep.patch().display(), inst.name, inst.name));
@@ -800,6 +800,26 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         if next.is_empty() { "nothing left to do".to_string() } else { next.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n") });
     std::fs::write(rep.out.join("NEXT.txt"), text)?;
     Ok(FlowOutcome { marked, summary })
+}
+
+/// NEXT.txt's line for an incomplete port: the names below the confidence, the lost ones, and each must-port name the
+/// port could not take to the new exe (tools/sigport/must_port.json), which alone makes a port incomplete.
+pub fn incomplete_reason(rep: &sigport::PortReport) -> String {
+    let mut s = format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
+        rep.out.join("report.txt").display());
+    for l in &rep.must_port {
+        s.push_str("; ");
+        s.push_str(l);
+    }
+    s
+}
+
+/// NEXT.txt lines for warn-level must-port names the port could not take to the new exe (tools/sigport/must_port.json):
+/// they do not stop a mark, but a human should port them.
+pub fn must_port_warnings(rep: &sigport::PortReport) -> Vec<String> {
+    rep.must_port_warn.iter()
+        .map(|l| format!("warning: {l}; the build can still be marked verified, but port the name (tools/sigport/port.py)"))
+        .collect()
 }
 
 /// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark. A review can also flag changed code

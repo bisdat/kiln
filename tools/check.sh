@@ -7,7 +7,9 @@
 #           of a PublicAPI.Unshipped.txt beside its [KILNX...] line (made experimental) or its "(forwarded, contained
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
-#           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
+#           once, with a level (sigdb/builds/README.md), and resolves every must-port name (tools/sigport/must_port.json);
+#           a sigdb name added without a refresh, or a fail-level must-port name dropped or unresolved, fails here (a
+#           warn-level one only prints a warning)
 #   registry tools/registrygen/registrygen.py --check: the registry schemas (schema/registry/*.json) are valid, every name
 #           is in ids.lock.json, and the files made from them (Kiln.Registry's Generated/*.g.cs, schema.g.h, the data
 #           section's schema, docs/kiln/modding/registries/*.md) are current; tools/registrygen/regmap_check.py: regmap/
