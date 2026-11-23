@@ -13,8 +13,9 @@
 // atomically when it changes). Into the world save's list only, after the game's own entries, it appends boxes for the
 // kept chunks the entries of that same list do not save whole (every 4 m block), so the save keeps Kiln's edits outside
 // bases too, without a box (and a Flame Altar in the world list) for chunks a base saves already. The other two callers
-// get the game's list as its builder wrote it. Thanks bisdat (kiln#136) for the covered-chunk filter and its bounds
-// checks.
+// get the game's list as its builder wrote it. When a game update breaks the world save's call-site pattern, every
+// caller gets the boxes, as up to 0.2.0-dev.30.8: a lost edit is worse than extra altars. Thanks bisdat (kiln#136) for
+// the covered-chunk filter and its bounds checks.
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -36,8 +37,11 @@
 #include <string>
 
 #ifndef KILN_REGIONS_HOST_TEST
+#include <cstddef>
+
 #include "internal.h"
 #include "kiln_hook.hpp"
+#include "services/kiln_caps.h"
 #include "services/kiln_saves.h"
 #endif
 
@@ -141,10 +145,55 @@ Caller classify_caller(uintptr_t ret, const CallSites& s) {
     if (ret && ret == s.base_query) return Caller::BaseQuery;
     return Caller::Unknown;
 }
-// Kiln's boxes go where the game saves terrain. A caller Kiln does not know (a game build whose call sites did not
-// resolve, another mod's hook in front of Kiln's) gets them too: an extra Flame Altar in the world list is better than an
-// edit that is not saved. The base zones the game's systems and every client use never get them.
-bool kiln_boxes_for(Caller c) { return c == Caller::WorldSave || c == Caller::Unknown; }
+// Kiln's boxes go where the game saves terrain. With the world save's call site resolved, only the world save gets
+// them: the base zones, the base query and a caller Kiln does not know (another mod's hook in front of Kiln's) get the
+// list as the game's builder wrote it, whether their own call sites resolved or not. Without it Kiln cannot tell the
+// save from the other callers, so every caller gets them, as up to 0.2.0-dev.30.8: extra Flame Altars and base zones
+// (the game's base grouping goes wrong past 16 zones) are better than edits the save drops.
+bool kiln_boxes_for(Caller c, const CallSites& s) { return !s.world_save || c == Caller::WorldSave; }
+
+// What kiln.build says when it starts about the three call sites: a line in kiln.log (a warning when a name did not
+// resolve) and the text of its kiln.caps row, which is unavailable when Kiln's boxes reach every caller.
+constexpr char kCallersRow[] = "build.persist_callers";
+struct SitesNotice {
+    bool warn = false, available = true;
+    std::string text;
+};
+SitesNotice sites_notice(const CallSites& s) {
+    const std::pair<const char*, uintptr_t> names[] = {{"build/RetSaveRegionsWorldSave", s.world_save},
+                                                       {"build/RetSaveRegionsBaseZones", s.base_zones},
+                                                       {"build/RetSaveRegionsBaseQuery", s.base_query}};
+    std::string missing;
+    for (const auto& [name, at] : names)
+        if (!at) missing += (missing.empty() ? "" : ", ") + std::string(name);
+    if (missing.empty())
+        return {false, true,
+                "the save-region builder's three call sites resolved: Kiln's save boxes go into the world save's region "
+                "list only"};
+    if (s.world_save)
+        return {true, true,
+                "sigdb names not resolved on this game build: " + missing + ". Kiln's save boxes still go into the world "
+                "save's region list only; every other caller of the save-region builder gets none"};
+    return {true, false,
+            "sigdb names not resolved on this game build: " + missing + ". Kiln cannot tell the world save from the "
+            "other callers of the save-region builder, so every caller gets Kiln's save boxes, as up to "
+            "0.2.0-dev.30.8: each box is one more Flame Altar in the world list and a base zone the game's systems "
+            "group stations, storage and beds by"};
+}
+#ifndef KILN_REGIONS_HOST_TEST
+void report_callers_row(bool available, const std::string& text) {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, report) + sizeof(void*) || !caps->report) return;
+    caps->report(g_owner, kstr(kCallersRow), available ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                 available ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING, kstr(text));
+}
+#endif
+void announce_sites(const CallSites& s) {
+    const SitesNotice n = sites_notice(s);
+    if (n.warn) KB_W("save regions: %s", n.text.c_str());
+    else KB_I("save regions: %s", n.text.c_str());
+    report_callers_row(n.available, n.text);
+}
 
 #ifndef KILN_REGIONS_HOST_TEST
 kiln::RawHook g_hook;
@@ -471,19 +520,19 @@ bool read_game_entries(const GameArray& head, std::vector<RegionBounds>* out) {
     return true;
 }
 
-// After the game's builder returned `r` and `list`: into the world save's list (or a caller Kiln does not know), after
-// the game's entries, Kiln's boxes for the kept chunks the game's entries do not save whole. Lists for anyone else stay
-// untouched.
+// After the game's builder returned `r` and `list`: into the world save's list (into every caller's when the world
+// save's call site did not resolve), after the game's entries, Kiln's boxes for the kept chunks the game's entries do
+// not save whole. Lists for anyone else stay untouched.
 void after_save_regions(uintptr_t ret, const uint8_t* r, GameArray* list, const CallSites& sites) {
     const Caller kind = classify_caller(ret, sites);
-    if (!kiln_boxes_for(kind)) return;
-    if (!regions_lifecycle_safe() || !F.persist) return;
-    if (!r || r[0] != 0 || !list) return;  // the game failed itself: leave it alone
-    if (kind == Caller::Unknown && sites.world_save && sites.base_zones && sites.base_query &&
+    if (kind == Caller::Unknown && sites.world_save && sites.base_zones && sites.base_query && F.persist &&
         !g_unknown_told.exchange(true))
         KB_W("save regions: the save-region builder was called from 0x%llx, none of its three known callers (another "
-             "mod's hook in front of Kiln's?): Kiln adds its boxes to that list too, so no edit goes unsaved",
-             static_cast<unsigned long long>(ret));
+             "mod's hook in front of Kiln's?): Kiln adds no boxes to that list; if it was the world save, Kiln's edits "
+             "outside bases are not in it", static_cast<unsigned long long>(ret));
+    if (!kiln_boxes_for(kind, sites)) return;
+    if (!regions_lifecycle_safe() || !F.persist) return;
+    if (!r || r[0] != 0 || !list) return;  // the game failed itself: leave it alone
     GameArray head{};
     if (!guarded_copy(&head, list, sizeof head)) {
         if (!g_header_told.exchange(true))
@@ -570,8 +619,8 @@ bool regions_install() {
         g_dir = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(buf), len)) / "kiln.build" / "regions";  // UTF-8
     uintptr_t a = 0;
     if (g_api->symbol(kstr("build/SaveRegions"), &a) != KILN_OK || !a) return F.persist = false;
-    // The builder's three callers (docs/re/build.md §12): only the world save gets Kiln's boxes. Read before the hook is
-    // installed; a site that does not resolve leaves that caller unknown, and an unknown caller gets the boxes too.
+    // The builder's three callers (docs/re/build.md §12): only the world save gets Kiln's boxes, or every caller when the
+    // world save's site does not resolve. Read before the hook is installed.
     auto site = [](const char* name) {
         uintptr_t v = 0;
         return g_api->symbol(kstr(name), &v) == KILN_OK ? v : uintptr_t{0};
@@ -583,13 +632,7 @@ bool regions_install() {
         KB_E("hooking the save-region builder failed: Kiln edits outside bases are not saved");
         return F.persist = false;
     }
-    if (g_sites.base_zones && g_sites.base_query)
-        KB_I("save regions: Kiln's boxes go into the world save's list only (world save call site %s), never into the "
-             "base zones the game's systems use", g_sites.world_save ? "known" : "unknown: any other caller gets them");
-    else
-        KB_W("save regions: the base-zone call sites of this game build are unknown (base zones %s, base query %s): "
-             "Kiln's boxes may reach the base zones the game's systems use, as in earlier Kiln versions",
-             g_sites.base_zones ? "known" : "unknown", g_sites.base_query ? "known" : "unknown");
+    announce_sites(g_sites);
     return true;
 }
 
