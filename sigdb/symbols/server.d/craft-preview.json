@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Shared client/server native material-page read sites, #132 preview safety. InventoryRemoveItems may skip a failed InventoryPageFetch while leaving its outer error 0 and a remainder. Both return sites are scoped to its native implementation. Only the exact client rollback-only RecipeApply preview observes these calls; no server payment hook is added here. Static copies f0d824be / 5d9ef2f1.",
+  "symbols": {
+    "stations/MaterialPageFetchRet": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/InventoryRemoveItems",
+            "size": 733
+          },
+          "pattern": "44 8B C3 48 8D 4C 24 60 49 8B D6 E8 {items/InventoryPageFetch:rel32} 44 38 6C 24 60 75 54",
+          "offset": 16
+        }
+      ]
+    },
+    "stations/MaterialPreferredPageFetchRet": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/InventoryRemoveItems",
+            "size": 733
+          },
+          "pattern": "44 8B 44 24 40 48 8D 4C 24 60 49 8B D6 E8 {items/InventoryPageFetch:rel32} 0F B6 44 24 60 84 C0 74 09",
+          "offset": 18
+        }
+      ]
+    }
+  }
+}

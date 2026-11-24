@@ -1207,8 +1207,10 @@ int craft_adjust_impl(uint32_t, uint32_t, uint32_t, const void*, uint32_t*) { re
 
 // Only player_ui's type-1 RecipeApply call is a preview. The hosted server uses the same RecipeApply/InventoryPay
 // functions but not this call site. The caller ALWAYS rolls this transaction back, including after success.
-kiln::RawHook h_preview_apply, h_preview_take;
+kiln::RawHook h_preview_apply, h_preview_take, h_preview_fetch;
 uintptr_t g_preview_apply = 0, g_preview_ret = 0, g_preview_pay = 0, g_preview_paid = 0, g_preview_take = 0;
+uintptr_t g_preview_remove = 0, g_preview_fetch = 0, g_preview_fetch_ret = 0, g_preview_preferred_ret = 0;
+uintptr_t g_preview_stock = 0, g_preview_rollback = 0;
 bool g_preview_feat = false, g_preview_failed = false;
 std::atomic<bool> g_preview_hooked{false};
 LogLimit g_log_preview{12};
@@ -1226,7 +1228,9 @@ bool preview_code_ok() {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) return false;
     for (auto [at, size] : {std::pair<uintptr_t, size_t>{g_preview_apply, 0x275},
-                           {g_preview_pay, 0x286}, {g_preview_take, 0x2b}, {g_preview_ret ? g_preview_ret - 5 : 0, 19}}) {
+                           {g_preview_pay, 0x286}, {g_preview_take, 0x2b}, {g_preview_remove, 0x2dd},
+                           {g_preview_fetch, 0x10c}, {g_preview_stock, 0x174}, {g_preview_rollback, 0x508},
+                           {g_preview_ret ? g_preview_ret - 5 : 0, 19}}) {
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
         if (!at || h->code_state(at, size, &state, &generation) != KILN_OK ||
@@ -1234,17 +1238,42 @@ bool preview_code_ok() {
     }
     return true;
 }
-// InventoryPay folds failed inventory reads/takes into the same final code 4 as an honest shortfall. Observe the
-// native per-item results, without changing them: any error (or unobserved payment) must remain refused/vanilla.
+// InventoryRemoveItems can skip failed page fetches and still answer {error=0,left=remaining}. Observe its actual
+// participating fetches inside each native PayMaterial call, including base-stock payers, without another simulation.
+using PreviewFetchFn = void*(__fastcall*)(void* out, void* tx, uint32_t page);
+struct PreviewFetchRead { void* tx; uint32_t calls = 0; bool error = false; };
+thread_local PreviewFetchRead* t_preview_fetch = nullptr;
+void* __fastcall hk_preview_fetch(void* out, void* tx, uint32_t page) {
+    const uintptr_t ret = h_preview_fetch.caller();
+    PreviewFetchRead* const read = t_preview_fetch && t_preview_fetch->tx == tx && t_preview.tx == tx ? t_preview_fetch : nullptr;
+    void* const result = h_preview_fetch.original<PreviewFetchFn>()(out, tx, page);
+    if (read) {
+        if (read->calls == UINT32_MAX) read->error = true;
+        else ++read->calls;
+        uint8_t error = 0xff;
+        __try {
+            // The native fetch always returns its out pointer; success carries a nonnull inventory view at +8.
+            if (result && result == out && rd<void*>(result, 8)) error = rd<uint8_t>(result, 0);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        read->error = read->error || error != 0 || (ret != g_preview_fetch_ret && ret != g_preview_preferred_ret);
+    }
+    return result;
+}
+PayOut* preview_native_take(PayOut* out, void* tx, uint32_t entity, uint32_t item, uint32_t count, PreviewFetchRead* read) {
+    struct Scope { PreviewFetchRead* saved = t_preview_fetch; ~Scope() { t_preview_fetch = saved; } } scope;
+    t_preview_fetch = t_preview.tx == tx && tx ? read : nullptr;
+    return h_preview_take.original<PayFn>()(out, tx, entity, item, count);
+}
+// Preserve every native result. An unobserved/incomplete fetch or any outer error prevents complementing code 4.
 PayOut* __fastcall hk_preview_take(PayOut* out, void* tx, uint32_t entity, uint32_t item, uint32_t count) {
-    PayOut* const result = h_preview_take.original<PayFn>()(out, tx, entity, item, count);
+    PreviewFetchRead read{tx};
+    PayOut* const result = preview_native_take(out, tx, entity, item, count, &read);
     if (t_preview.tx == tx && tx) {
         t_preview.saw_take = true;
-        const PayOut* const value = result;
-        uint8_t error = 0;
-        __try { error = value && value->left <= count ? value->error : 0xff; }
-        __except (EXCEPTION_EXECUTE_HANDLER) { error = 0xff; }
-        t_preview.take_error = t_preview.take_error || error != 0;
+        uint8_t error = 0xff;
+        __try { if (result && result == out && result->left <= count) error = result->error; }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        t_preview.take_error = t_preview.take_error || error != 0 || !read.calls || read.error;
     }
     return result;
 }
@@ -1315,7 +1344,7 @@ uint32_t __fastcall hk_preview_apply(void* tx, const void* recipe, const void* i
 uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amount, void* extra, uintptr_t ret, uint32_t game) {
     if (game != 4 || !tx || t_preview.tx != tx || t_preview.owner != owner || t_preview.amount != amount || extra ||
         ret != g_preview_paid || !g_preview_paid || !t_preview.saw_take || t_preview.take_error ||
-        !g_craft_on.load(std::memory_order_acquire) || g_off.load()) return game;
+        !g_craft_on.load(std::memory_order_acquire) || g_off.load() || !preview_code_ok()) return game;
     RawCosts rc{static_cast<const uint8_t*>(costs), nullptr, 0, {}, {}, 0};
     unsigned long fault = 0;
     if (!guard(&costs_impl, &rc, &fault) || !rc.n || rc.n != t_preview.costs.n) return game;
@@ -1341,6 +1370,13 @@ void preview_hook_on_demand() {
     if (!preview_code_ok()) {
         g_preview_failed = true;
         LOGW("stations: linked craft preview stands down: recipe/payment or rollback call site is occupied or unknown (CBS/other hooks kept)");
+        return;
+    }
+    if (!h_preview_fetch && !h_preview_fetch.install(g_api, g_owner, g_preview_fetch, reinterpret_cast<void*>(&hk_preview_fetch),
+                                                    "stations/client.CraftPreviewFetch")) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: native page reads cannot be observed (%s)",
+             h_preview_fetch.error() ? h_preview_fetch.error() : "hook refused");
         return;
     }
     if (!h_preview_take && !h_preview_take.install(g_api, g_owner, g_preview_take, reinterpret_cast<void*>(&hk_preview_take), "stations/client.CraftPreviewTake")) {
@@ -3809,6 +3845,10 @@ void stations_resolve() {
     if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.craft_ui")) {
         g_preview_feat = sym("items/RecipeApply", &g_preview_apply) && sym("stations/client.CraftPreviewReturn", &g_preview_ret) &&
             sym("rules/InventoryPay", &g_preview_pay) && sym("rules/RecipePaid", &g_preview_paid) && sym("gems/PayMaterial", &g_preview_take) &&
+            sym("items/InventoryRemoveItems", &g_preview_remove) && sym("items/InventoryPageFetch", &g_preview_fetch) &&
+            sym("stations/MaterialPageFetchRet", &g_preview_fetch_ret) && sym("stations/MaterialPreferredPageFetchRet", &g_preview_preferred_ret) &&
+            sym("stations/BaseStockForPlayer", &g_preview_stock) && sym("items/InventoryRollback", &g_preview_rollback) &&
+            call_matches(g_preview_fetch_ret, g_preview_fetch) && call_matches(g_preview_preferred_ret, g_preview_fetch) &&
             call_matches(g_preview_ret, g_preview_apply) && call_matches(g_preview_paid, g_preview_pay) && G.recipe_find && E.tx_ok;
         if (!g_preview_feat) LOGW("stations: linked craft preview unavailable: the scoped dry run did not resolve; native status kept");
     }

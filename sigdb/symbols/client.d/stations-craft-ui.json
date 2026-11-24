@@ -13,7 +13,12 @@
         "items/InventoryRollback",
         "rules/InventoryPay",
         "rules/RecipePaid",
-        "gems/PayMaterial"
+        "gems/PayMaterial",
+        "items/InventoryRemoveItems",
+        "items/InventoryPageFetch",
+        "stations/MaterialPageFetchRet",
+        "stations/MaterialPreferredPageFetchRet",
+        "stations/BaseStockForPlayer"
       ]
     },
     "crafting.source_ui": {
@@ -26,7 +31,12 @@
         "items/InventoryRollback",
         "rules/InventoryPay",
         "rules/RecipePaid",
-        "gems/PayMaterial"
+        "gems/PayMaterial",
+        "items/InventoryRemoveItems",
+        "items/InventoryPageFetch",
+        "stations/MaterialPageFetchRet",
+        "stations/MaterialPreferredPageFetchRet",
+        "stations/BaseStockForPlayer"
       ]
     }
   },

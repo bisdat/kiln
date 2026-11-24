@@ -25,6 +25,27 @@ def check(ok, text):
     print('PASS ' + text, flush=True)
 
 
+def unwind_covers(path, start, size):
+    """Include all split runtime-function fragments, not merely the first prologue's pdata entry."""
+    raw = path.read_bytes()
+    pe = struct.unpack_from('<I', raw, 0x3c)[0]
+    section = pe + 24 + struct.unpack_from('<H', raw, pe + 20)[0]
+    for n in range(struct.unpack_from('<H', raw, pe + 6)[0]):
+        at = section + n * 40
+        if raw[at:at + 8].rstrip(b'\0') != b'.pdata':
+            continue
+        length, offset = struct.unpack_from('<II', raw, at + 16)
+        end = start
+        for at in range(offset, offset + length - 11, 12):
+            lo, hi, _ = struct.unpack_from('<III', raw, at)
+            if start <= lo < start + size:
+                if lo != end:
+                    return False
+                end = hi
+        return end == start + size
+    return False
+
+
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument('--client', required=True)
@@ -77,6 +98,44 @@ def main():
         check(not Resolver(altered, doc).run()[2]['preview'], f'changed call at {at:#x} disables preview')
     check(entry not in json.loads((ROOT / 'sigdb/symbols/server.d/stations.json').read_text())['symbols'],
           'no dedicated preview hook declared')
+    # Shared read dependency declarations, independently resolved on both pinned executables.
+    for side, path, image, expected in [
+        ('client', client, c, [0x411360, 0x416400, 0x41154b, 0x411474, 0x46fa10, 0x418150]),
+        ('server', server, s, [0x1b0d90, 0x1b5fa0, 0x1b0f7b, 0x1b0ea4, 0x2081c0, 0x1b8310]),
+    ]:
+        defs = {name: doc for name, doc, _ in compose(side)}
+        dep_symbols = copy.deepcopy(defs['craft-preview.json']['symbols'])
+        for name in ['items/InventoryRemoveItems', 'items/InventoryRollback']:
+            dep_symbols[name] = defs['items.json']['symbols'][name]
+        dep_symbols['stations/BaseStockForPlayer'] = defs['stations.json']['symbols']['stations/BaseStockForPlayer']
+        dep_names = ['items/InventoryRemoveItems', 'items/InventoryPageFetch', 'stations/MaterialPageFetchRet',
+                     'stations/MaterialPreferredPageFetchRet', 'stations/BaseStockForPlayer', 'items/InventoryRollback']
+        dep_doc = {'symbols': dep_symbols, 'features': {'reads': {'symbols': dep_names}}}
+        resolved, _, supported = Resolver(image, dep_doc).run()
+        check(supported['reads'], side + ' complete native read/rollback dependencies resolve')
+        for name, rva in zip(dep_names, expected):
+            check(resolved[name]['rva'] == rva, f'{side} {name} = {rva:#x}')
+        remove, fetch, loop, preferred, stock, rollback = expected
+        check(image.img[loop:loop + 7] == bytes.fromhex('44386C24607554'),
+              side + ' a failed page fetch is silently skipped by InventoryRemoveItems')
+        check(image.img[remove + 0x25a:remove + 0x271] == bytes.fromhex('4533C045897C240833D245896C2404488D4DB045882C24'),
+              side + ' the skip path can return error zero and an unpaid remainder')
+        check(image.img[fetch + 0xd4:fetch + 0xd8] == bytes.fromhex('41C6061F'),
+              side + ' missing native inventory view reports error 0x1f')
+        for entry, extent, label in [(remove, 0x2dd, 'material implementation'), (fetch, 0x10c, 'page fetch'),
+                                     (stock, 0x174, 'base stock'), (rollback, 0x508, 'rollback')]:
+            check(unwind_covers(path, entry, extent), side + ' full code-state extent covers ' + label)
+        for ret in [loop, preferred]:
+            altered = copy.copy(image)
+            b = bytearray(image.img)
+            b[ret - 5] = 0x90
+            altered.img = bytes(b)
+            check(not Resolver(altered, dep_doc).run()[2]['reads'], f'{side} changed fetch call at {ret - 5:#x} disables reads')
+        altered = copy.copy(image)
+        b = bytearray(image.img)
+        b[loop - 4] ^= 1
+        altered.img = bytes(b)
+        check(not Resolver(altered, dep_doc).run()[2]['reads'], side + ' disagreeing page-fetch targets disable reads')
     print(f'craft preview sigdb: {checks} passed, 0 failed')
 
 

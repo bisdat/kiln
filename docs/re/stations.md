@@ -634,11 +634,23 @@ workshop, shelter, level, comfort and progress. Props refuse as 5. Neither eligi
 Kiln now scopes a thread-local preview context to the exact client call returning to C `0x2be03f`, pinned together
 with its unconditional rollback. It verifies the recipe against the client registry, the client-storage kind 2,
 the qualified transaction layout, read-only inventory accessor types and initialized inventory pages, item identities, and the actual resolved cost
-lines. A passive, scoped `PayMaterial` observer preserves its results and records any native inventory error. After the original
-`InventoryPay` returns 4, **at least one observed take and no error bytes** are required: that distinguishes a genuine
-material remainder from the other payer failures that InventoryPay folds into 4. Its existing kiln.rules hook may complement
-**only that preview's payment result**, and only when the server-stock snapshot covers every ingredient times the
-requested amount. Unknown/zero/duplicate costs, unknown modes/flags, absent stock and failed reads stay vanilla.
+lines. **Review correction:** the outer `PayMaterial` result alone is not enough. Its implementation
+`InventoryRemoveItems` (C `0x411360`, S `0x1b0d90`) calls `InventoryPageFetch` (C `0x416400`, S `0x1b5fa0`).
+The page loop silently skips a failed fetch, including missing-view error `0x1f`, then can return **error 0 with an
+unpaid remainder**. Checking only the owner's inventory pages misses that failure on a native base-stock payer.
+
+A passive fetch observer now runs only inside each actual `PayMaterial` call of the exact preview transaction. It
+accepts the loop fetch return (C `0x41154b`, S `0x1b0f7b`) and preferred-page fetch return (C `0x411474`, S `0x1b0ea4`).
+Each take must have at least one observed native fetch, and every participating fetch must return its out pointer,
+error 0 and a nonnull inventory view. Missing observations, unknown call sites, error bytes or unreadable results mark
+the take incomplete even when the outer take says error 0. Other transactions and fetches outside that take's scope
+are passed through without affecting the preview. The observer never changes the result or repeats a take.
+
+After the original `InventoryPay` returns 4, **observed, complete, error-free native takes** are required before its
+existing kiln.rules hook may complement **only that preview's payment result**. The server-stock snapshot must also
+cover every ingredient times the requested amount. Unknown/zero/duplicate costs, unknown modes/flags, absent stock
+and failed reads stay vanilla. This observes the work the native payer actually performed; it does not claim a full
+simulation of all native inventories or run an additional mutating payment.
 `RecipeApply` still executes its normal water and output-space checks and computes the cached status itself.
 The obsolete private count-adjust bridge is inert; ingredient display counts never authorize real payment.
 
@@ -656,10 +668,27 @@ checks are **not bypassed**. Output-capacity evaluation can be conservatively fa
 removal would free a bag slot in the real payment; only the real server transaction constructs the final paid inventory.
 This limit remains, and a successful preview is never treated as authority to commit or dispense outputs.
 
-Before installing the RecipeApply link and passive per-material observer, and at preview entry, Kiln checks the recipe/payment code and scoped caller
-with kiln.hooks' code-state API. Foreign/occupied or unknown code causes stand-down (logged at installation), never
-a second patch over CBS. Original or Kiln-managed code may use the shared detour. If CBS already covers the native
-preview payment, its success is left unchanged. CBS itself was not downloaded or executed for this work.
+Before installing the RecipeApply and passive observers, at preview entry, and immediately before complementing the
+payment result, Kiln checks the full relevant code ranges with kiln.hooks' code-state API:
+
+| Dependency | Client RVA | Checked bytes |
+|---|---:|---:|
+| RecipeApply | `0x3f8f30` | `0x275` |
+| InventoryPay | `0x3f89e0` | `0x286` |
+| PayMaterial wrapper | `0x411330` | `0x2b` |
+| InventoryRemoveItems implementation | `0x411360` | `0x2dd` |
+| InventoryPageFetch | `0x416400` | `0x10c` |
+| BaseStockForPlayer | `0x46fa10` | `0x174` |
+| InventoryRollback, including split tails and dispatch table | `0x418150` | `0x508` |
+| Exact RecipeApply-to-rollback caller | `0x2be03a` | 19 |
+
+The material implementation, fetch, base-stock and rollback extents are verified against the complete contiguous
+`.pdata` fragments on both pinned releases, not just each function's first unwind fragment. Foreign/occupied or
+unknown code in those ranges causes stand-down (logged at installation), never a patch over CBS. This includes
+CBS changing BaseStockForPlayer even though Kiln does not hook that dependency. Original or Kiln-managed code can use
+the shared detour. Native successes are always preserved; stand-down does not replace or suppress CBS's own native
+payment. CBS itself was not downloaded or executed for this work. Address-specific tests cover every qualified range
+at installation/use, unknown and foreign states, native success, and a dependency changed during the original call.
 
 Regression evidence: `native/services/items/tests/craft_preview_test.cpp` (actual guarded bridge with fake native
 functions) and `craft_preview_sigdb_test.py` (the two static executable copies, exact branches and changed-call
