@@ -10,16 +10,18 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../api/commands";
-import type { BuiltPack, CrucibleShared, GameInstall, ProfileId } from "../api/commands";
+import type { CrucibleShared, GameInstall, ProfileId } from "../api/commands";
 import { useGame, useGameSel, useLibrary, useProfile, useProfiles } from "../api/hooks";
 import { t, useT } from "../i18n";
-import { Button, ProgressBar, Spinner, TextInput, fmtBytes, pickPaths, runTask, toast, useTasks, waitTask } from "../ui";
+import { Button, ProgressBar, Spinner, TextInput, fmtBytes, toast, useTasks, waitTask } from "../ui";
 import { create } from "zustand";
 import MARK from "../assets/crucible/mark-64.png";
 import { useCommunityUi } from "../community/state";
 import { libraryChangedOf, notifyLibraryChanged } from "../shell/libraryChanged";
 import { anyChange, codeInput, countsOf, crucibleTarget, shareEstimate } from "./code";
 import { clipboardPrefill } from "./prefill";
+import { saveAsFile } from "./localExport";
+export { saveAsFile } from "./localExport";
 import { openCrucible } from "./Preview";
 import { copyText, crk, crucibleError, readClipboard, shortLink, useCrucibleStatus, useCrucibleUi, useShareRun, useShared } from "./state";
 
@@ -64,31 +66,6 @@ export async function startShare(qc: QueryClient, profileId: ProfileId) {
     if (!notifyLibraryChanged(qc, err, () => void startShare(qc, profileId)) && err.code !== "auth_failed" && useDock.getState().open !== "share")
       toast.error(crucibleError(err, true), t("crucible.share.failed"));
   }
-}
-
-/** A folder the player picks (the browser mock answers itself). */
-async function pickFolder(): Promise<string | null> {
-  if (!api.isTauri()) return (await api.loadMock()).mockPickFolder();
-  const r = await pickPaths({ directory: true, title: t("crucible.save.pick"), kind: "packSave" });
-  return r?.[0] ?? null;
-}
-
-/** Save as file: the profile as a .kilnpack in a folder the player picks (pack_build). */
-export async function saveAsFile(qc: QueryClient, profileId: ProfileId, name: string, version = "1.0.0"): Promise<BuiltPack | null> {
-  const dir = await pickFolder();
-  if (!dir) return null;
-  const save = async (): Promise<BuiltPack | null> => {
-    try {
-      const r = await runTask<BuiltPack>(() => api.packBuild({ profile: profileId, version, name }, dir), { quiet: true });
-      toast.ok(t("crucible.save.done", { name }), r.file, { actions: [{ label: t("crucible.save.openFolder"), onClick: () => void api.appOpenPath(dir).catch((e) => toast.error(e)) }] });
-      return r;
-    } catch (e) {
-      if (!notifyLibraryChanged(qc, e, () => void save()) && api.toKilnError(e).code !== "canceled")
-        toast.error(e, t("crucible.save.failed", { name }));
-      return null;
-    }
-  };
-  return save();
 }
 
 /** "1 added, 1 updated": what changed since the share. */

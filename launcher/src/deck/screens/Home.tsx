@@ -28,9 +28,10 @@ import { useT } from "../../i18n";
 import { DeckSendToSupport } from "../../community/parts";
 import { crashLine, useCrashNotice } from "../../community/crash";
 import { DeckCodeDialog, DeckShareDialog } from "../../crucible/DeckCrucible";
+import { DeckExportDialog } from "../../crucible/DeckExport";
 import { useCrucibleOn } from "../../crucible/state";
 
-type Open = null | "install" | "update" | "once" | "find" | "share" | "code";
+type Open = null | "install" | "update" | "once" | "find" | "share" | "code" | "export";
 
 export default function Home() {
   const t = useT();
@@ -107,7 +108,8 @@ export default function Home() {
   const advice = rt?.installed && s?.launchOptions?.advice && (!s.launchOptions.hasDllOverride || s.launchOptions.chainedOverrideMissing);
 
   // (dev.30) Crucible: share the loaded profile, open a pack by its code
-  const crucible = useCrucibleOn() && !!game && !!rt?.installed && !!mods.profileId;
+  const canExport = !!game && !!rt?.installed && !!mods.profileId;
+  const crucible = useCrucibleOn() && canExport;
   const actions: DeckAction[] = [];
   if (game && rt?.installed) actions.push({ button: "x", label: t("deck.dialogs.playOnce"), run: () => setOpen("once"), disabled: !ctl.canPlay || kiln.installing });
 
@@ -147,6 +149,7 @@ export default function Home() {
           {game && rt?.installed && rt.upgradeAvailable && <DeckButton id="update" disabled={!ctl.canPlay || kiln.installing} onClick={() => setOpen("update")}>{t("deck.home.updateKiln")}</DeckButton>}
           {(advice || (ctl.stuck && rt?.installed)) && <DeckButton id="steam-setting" a={t("deck.home.how")} onClick={() => nav("/deck/help")}>{s?.launchOptions?.hasDllOverride && s.launchOptions.chainedOverrideMissing ? t("deck.home.steamSettingAsi") : ctl.stuck ? t("deck.home.notLoading") : t("deck.shared.steamSetting")}</DeckButton>}
           {crucible && <DeckButton id="crucible-share" a={t("crucible.share.button")} onClick={() => setOpen("share")}>{t("crucible.share.button")}</DeckButton>}
+          {canExport && <DeckButton id="pack-export" onClick={() => setOpen("export")}>{t("crucible.save.button")}</DeckButton>}
           {crucible && <DeckButton id="crucible-code" onClick={() => setOpen("code")}>{t("crucible.deck.enterCode")}</DeckButton>}
           {change?.state === "failed" && <DeckButton id="kiln-failed" onClick={() => nav("/deck/kiln")}>{t("deck.app.tabs.kiln")}</DeckButton>}
         </div>
@@ -169,6 +172,7 @@ export default function Home() {
       {(open === "install" || open === "update") && game && <InstallDialog game={game} update={open === "update"} onClose={() => setOpen(null)} />}
       {open === "once" && <PlayOnceDialog onClose={() => setOpen(null)} onPlay={(m) => ctl.play(m)} />}
       {open === "find" && <FindGameDialog onClose={() => setOpen(null)} />}
+      {open === "export" && mods.profileId && <DeckExportDialog profileId={mods.profileId} profileName={mods.summary?.name ?? mods.profileId} onClose={() => setOpen(null)} />}
       {open === "share" && mods.profileId && <DeckShareDialog profileId={mods.profileId} profileName={mods.summary?.name ?? mods.profileId} onClose={() => setOpen(null)} />}
       {open === "code" && <DeckCodeDialog onClose={() => setOpen(null)} />}
       {sfOpen && <SfStartupDialog note={sfOpen} onClose={() => setSfOpen(null)} />}

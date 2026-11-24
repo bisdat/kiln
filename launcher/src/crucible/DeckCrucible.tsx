@@ -17,6 +17,7 @@ import { anyChange, checksLine, codeInput, countsOf, crucibleTarget } from "./co
 import { installBlock, neededKiln, openCrucible, sizeLine, useInstallPack, usePreview, type PreviewModel } from "./Preview";
 import { ShareConfirm, changeWords, startShare, useProfileShare } from "./Share";
 import { useCrucibleLinks } from "./Host";
+import { DeckExportDialog } from "./DeckExport";
 import { crk, crucibleError, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
 import "./crucible.css";
 
@@ -28,6 +29,8 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
   const run = useShareRun((s) => s.runs[profileId]);
   const task = useTasks((s) => (run?.taskId ? s.tasks[run.taskId] : undefined));
   const [signIn, setSignIn] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  if (exporting) return <DeckExportDialog profileId={profileId} profileName={profileName} onClose={() => setExporting(false)} />;
   const signedIn = !!status.data?.signedIn;
   const s = shared.data;
   const needsSignIn = (!signedIn && !!(s?.requiresSignIn ?? s?.pack.owner?.id)) || run?.error?.code === "auth_failed";
@@ -72,7 +75,10 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
     : <DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>;
   return (
     <>
-      <Dialog name="crucible-share" title={t("crucible.deck.shareTitle", { name: profileName })} wide onClose={onClose} backLabel={t("common.close")} buttons={buttons}>
+      <Dialog name="crucible-share" title={t("crucible.deck.shareTitle", { name: profileName })} wide onClose={onClose} backLabel={t("common.close")} buttons={<>
+        {!uploading && <DeckButton id="crucible-save-file" onClick={() => setExporting(true)}>{t("crucible.share.saveInstead")}</DeckButton>}
+        {buttons}
+      </>}>
         {body}
       </Dialog>
       {signIn && <DeckSignIn onClose={() => setSignIn(false)} onDone={() => { setSignIn(false); void qc.invalidateQueries({ queryKey: crk.status }).then(() => startShare(qc, profileId)); }} />}

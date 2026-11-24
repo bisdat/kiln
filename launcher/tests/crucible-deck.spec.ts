@@ -118,3 +118,195 @@ test("a kiln:// link opens the Deck preview", async ({ page }) => {
   await page.evaluate(() => (window as unknown as { __kilnCrucibleMock: { link: (u: string) => void } }).__kilnCrucibleMock.link("https://frostdev.io/kiln/crucible/p/K4TW-9XRB"));
   await expect(page.locator('[data-deck-dialog="crucible-preview"]')).toContainText("Cinder Trails");
 });
+
+const calls = (page: Page) => page.evaluate(() => (window as unknown as { __kilnMock: { calls: () => string[] } }).__kilnMock.calls());
+const packRequests = (page: Page) => page.evaluate(() => (window as unknown as { __kilnCrucibleMock: { requests: () => { cmd: string; args: unknown }[] } }).__kilnCrucibleMock.requests());
+
+async function openExportFromShare(page: Page) {
+  await focusOn(page, "crucible-share");
+  await pad(page, "a");
+  await expect.poll(() => focused(page)).toBe("crucible-share-confirm");
+  await pad(page, "left");
+  await expect.poll(() => focused(page)).toBe("crucible-save-file");
+  await pad(page, "a");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toBeVisible();
+  await expect(page.getByTestId("deck-export-destination")).toHaveText("/home/player/Downloads");
+}
+
+for (const community of ["", "&discord=offline", "&discord=relaydown", "&discord=hidden"]) test(`local export before QR is signed-out, offline and Community-independent (${community || "signed out"})`, async ({ page }) => {
+  await openDeck(page, `/?deck=steamdeck${community}#/`);
+  await openExportFromShare(page);
+  await expect.poll(() => focused(page)).toBe("pack-export-confirm");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toContainText("Nothing is uploaded");
+  await shot(page, "deck-export-confirm-" + (community.replace(/[^a-z]/g, "") || "signedout"));
+  // Even two starts in one event loop turn may start only one build.
+  await page.locator('[data-deck-id="pack-export-confirm"]').evaluate((el: HTMLButtonElement) => { el.click(); el.click(); });
+  await expect(page.getByTestId("deck-export-file")).toHaveText("/home/player/Downloads/ember-run-1.0.0.kilnpack");
+  const invoked = await calls(page);
+  expect(invoked.filter((x) => x === "pack_build")).toHaveLength(1);
+  expect(invoked).not.toContain("community_signin_start");
+  expect(invoked).not.toContain("crucible_share");
+  expect((await packRequests(page)).find((r) => r.cmd === "pack_build")?.args).toEqual({ request: { profile: "ember-run", name: "Ember run", version: "1.0.0" }, outDir: "/home/player/Downloads" });
+  await shot(page, "deck-export-saved-" + (community.replace(/[^a-z]/g, "") || "signedout"));
+});
+
+test("local export is reachable after Back from failed QR, without another sign-in or share", async ({ page }) => {
+  // New links need no account; only a legacy account-owned update still enters the QR flow.
+  await openDeck(page, "/?deck=steamdeck&crucible=shared,accountshare&discord=relaydown#/");
+  await focusOn(page, "crucible-share"); await pad(page, "a");
+  const signin = page.locator('[data-deck-dialog="crucible-share"]').getByRole("button", { name: "Sign in with Discord" });
+  await signin.focus();
+  await expect(signin).toBeFocused();
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-qr")).toContainText("isn't answering");
+  await pad(page, "b");
+  await expect(page.getByTestId("deck-qr")).toHaveCount(0);
+  const before = (await calls(page)).filter((x) => x === "community_signin_start").length;
+  // The existing nested-dialog navigation may use the first move to seed focus after the QR is removed.
+  for (let i = 0; i < 2 && await focused(page) !== "crucible-save-file"; i++) await pad(page, "left");
+  await expect.poll(() => focused(page)).toBe("crucible-save-file");
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-destination")).toBeVisible();
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-file")).toBeVisible();
+  const after = await calls(page);
+  expect(after.filter((x) => x === "community_signin_start")).toHaveLength(before);
+  expect(after.filter((x) => x === "pack_build")).toHaveLength(1);
+  expect(after).not.toContain("crucible_share");
+});
+
+for (const exit of ["b", "cancel"]) test(`cancel export before confirmation writes nothing (${exit})`, async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await openExportFromShare(page);
+  if (exit === "cancel") { await pad(page, "left"); await expect.poll(() => focused(page)).toBe("pack-export-cancel"); await pad(page, "a"); }
+  else await pad(page, "b");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toHaveCount(0);
+  await expect(page.locator(".deck-toasts")).toContainText("Export canceled");
+  const invoked = await calls(page);
+  for (const cmd of ["pack_build", "community_signin_start", "crucible_share", "app_dialog_remember"]) expect(invoked).not.toContain(cmd);
+});
+
+for (const status of ["off", "error"]) test(`Home local export does not depend on Crucible status (${status})`, async ({ page }) => {
+  if (status === "error") await page.addInitScript(() => { (window as unknown as { __kilnMockPlans: unknown }).__kilnMockPlans = { crucible_status: [{ error: { code: "io", message: "Status unavailable" } }] }; });
+  await openDeck(page, `/?deck=steamdeck&crucible=${status}#/`);
+  if (status === "error") {
+    // Refuse subsequent status reads too; this is a local query failure, not a health probe.
+    await page.evaluate(async () => {
+      const mock = (window as unknown as { __kilnMock: { planCommand: (c: string, p: unknown) => void; emit: (n: string, p: unknown) => void } }).__kilnMock;
+      mock.planCommand("crucible_status", { error: { code: "io", message: "Status unavailable" } });
+      mock.emit("kiln://community", { kind: "changed" });
+    });
+  }
+  await expect(page.locator('[data-deck-id="crucible-share"]')).toHaveCount(0);
+  await focusOn(page, "pack-export"); await pad(page, "a");
+  await expect(page.getByTestId("deck-export-destination")).toBeVisible();
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-file")).toBeVisible();
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+});
+
+test("export shows build failure and cancellation, then retries only on request", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await openExportFromShare(page);
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __kilnMock: { planCommand: (cmd: string, p: unknown) => void } }).__kilnMock;
+    mock.planCommand("pack_build", { error: { code: "io", message: "Destination is read-only" } });
+    mock.planCommand("pack_build", { error: { code: "canceled", message: "canceled" } });
+  });
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-error")).toContainText("Destination is read-only");
+  await expect(page.getByTestId("deck-export-file")).toHaveCount(0);
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-error")).toContainText("Export canceled");
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-file")).toBeVisible();
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(3);
+});
+
+test("an unresolved destination cannot write a pack", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __kilnMock: { planCommand: (cmd: string, p: unknown) => void } }).__kilnMock;
+    // Development StrictMode resolves the read-only destination in both effect mounts.
+    for (let i = 0; i < 2; i++) mock.planCommand("app_dialog_default", { result: null });
+  });
+  await focusOn(page, "pack-export"); await pad(page, "a");
+  await expect(page.getByTestId("deck-export-error")).toContainText("Downloads or home folder");
+  await expect(page.locator('[data-deck-id="pack-export-confirm"]')).toBeDisabled();
+  await pad(page, "a"); await pad(page, "b");
+  expect(await calls(page)).not.toContain("pack_build");
+});
+
+for (const taskFailure of [false, true]) test(`export recovers changed Library files in the confirmed folder (${taskFailure ? "task" : "command"})`, async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await openExportFromShare(page);
+  await page.evaluate(async (taskFailure) => {
+    const api = await import("/src/api/commands.ts");
+    const p = await api.profileGet("ember-run");
+    const entry = { kind: "shroudforge", ...p.mods.shroudforge[0] };
+    const mock = (window as unknown as { __kilnMock: { editInLibrary: (kind: string, id: string, c: unknown) => void; planCommand: (cmd: string, p: unknown) => void; emit: (n: string, p: unknown) => void } }).__kilnMock;
+    mock.editInLibrary(entry.kind, entry.id, { name: "Better Chests edited", version: "0.4.2" });
+    const error = { code: "hash_mismatch", message: "Better Chests was changed in its folder", detail: { libraryChanged: entry, name: "Better Chests" } };
+    if (taskFailure) {
+      mock.planCommand("pack_build", { result: "pack-library-error" });
+      const { useTasks } = await import("/src/ui/TaskProgress.tsx");
+      useTasks.getState().upsert({ id: "pack-library-error", kind: "pack_build", title: "Save pack", state: "failed", progress: null,
+        message: error.message, started: new Date().toISOString(), finished: new Date().toISOString(), error });
+    } else mock.planCommand("pack_build", { error });
+  }, taskFailure);
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-error")).toContainText("Better Chests was changed in its folder");
+  await expect.poll(() => focused(page)).toBe("pack-export-recover");
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-file")).toHaveText("/home/player/Downloads/ember-run-1.0.0.kilnpack");
+  const now = await page.evaluate(async () => (await (await import("/src/api/commands.ts")).profileGet("ember-run")).mods.shroudforge[0]);
+  expect(now.version).toBe("0.4.2");
+  const invoked = await calls(page);
+  expect(invoked.filter((x) => x === "library_take_over")).toHaveLength(1);
+  expect(invoked.filter((x) => x === "pack_build")).toHaveLength(2);
+  expect(invoked).not.toContain("community_signin_start");
+  expect(invoked).not.toContain("crucible_share");
+});
+
+test("home fallback is explicit and Back during destination resolution cannot start a late write", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __kilnMock: { planCommand: (cmd: string, p: unknown) => void } }).__kilnMock;
+    for (let i = 0; i < 2; i++) mock.planCommand("app_dialog_default", { gate: "export-folder", result: "/home/player" });
+  });
+  await focusOn(page, "pack-export"); await pad(page, "a");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toContainText("Finding Downloads");
+  await pad(page, "b");
+  await page.evaluate(() => (window as unknown as { __kilnMock: { openGate: (name: string) => void } }).__kilnMock.openGate("export-folder"));
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toHaveCount(0);
+  expect(await calls(page)).not.toContain("pack_build");
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __kilnMock: { planCommand: (cmd: string, p: unknown) => void } }).__kilnMock;
+    for (let i = 0; i < 2; i++) mock.planCommand("app_dialog_default", { result: "/home/player" });
+  });
+  await focusOn(page, "pack-export"); await pad(page, "a");
+  await expect(page.getByTestId("deck-export-destination")).toHaveText("/home/player");
+  await expect.poll(() => focused(page)).toBe("pack-export-confirm");
+  await pad(page, "a");
+  await expect(page.getByTestId("deck-export-file")).toHaveText("/home/player/ember-run-1.0.0.kilnpack");
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+});
+
+test("a running export cannot be dismissed or restarted with the pad", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck#/");
+  await openExportFromShare(page);
+  await page.evaluate(() => (window as unknown as { __kilnMock: { holdTasks: (kind: string, hold: unknown) => void } }).__kilnMock.holdTasks("pack_build", { gate: "export-writing" }));
+  await pad(page, "a");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toContainText("Saving and checking");
+  await pad(page, "b"); await pad(page, "a"); await pad(page, "a");
+  await expect(page.locator('[data-deck-dialog="pack-export"]')).toBeVisible();
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+  await page.evaluate(() => (window as unknown as { __kilnMock: { openGate: (name: string) => void } }).__kilnMock.openGate("export-writing"));
+  await expect(page.getByTestId("deck-export-file")).toBeVisible();
+  await expect.poll(() => focused(page)).toBe("pack-export-done");
+  await pad(page, "a");
+  await expect(page.locator('[data-deck-dialog="crucible-share"]')).toBeVisible();
+  expect((await calls(page)).filter((x) => x === "pack_build")).toHaveLength(1);
+});
