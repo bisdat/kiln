@@ -1224,17 +1224,26 @@ thread_local PreviewCall t_preview;
 
 // Foreign (e.g. CBS), unreadable and unknown code stays vanilla. RawHook may join Kiln's existing physical detour,
 // never patch over a foreign one. Recheck at entry as another loader can install later.
-bool preview_code_ok() {
+// *why: the dependency that failed, for the stand-down line.
+bool preview_code_ok(const char** why = nullptr) {
     const auto* h = kiln::hooks_v2(g_api);
-    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) return false;
-    for (auto [at, size] : {std::pair<uintptr_t, size_t>{g_preview_apply, 0x275},
-                           {g_preview_pay, 0x286}, {g_preview_take, 0x2b}, {g_preview_remove, 0x2dd},
-                           {g_preview_fetch, 0x10c}, {g_preview_stock, 0x174}, {g_preview_rollback, 0x508},
-                           {g_preview_ret ? g_preview_ret - 5 : 0, 19}}) {
+    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
+        if (why) *why = "kiln.hooks' code-state check";
+        return false;
+    }
+    struct Dep { uintptr_t at; size_t size; const char* name; };
+    for (const Dep& d : {Dep{g_preview_apply, 0x275, "RecipeApply"}, Dep{g_preview_pay, 0x286, "InventoryPay"},
+                         Dep{g_preview_take, 0x2b, "PayMaterial"}, Dep{g_preview_remove, 0x2dd, "InventoryRemoveItems"},
+                         Dep{g_preview_fetch, 0x10c, "InventoryPageFetch"}, Dep{g_preview_stock, 0x174, "BaseStockForPlayer"},
+                         Dep{g_preview_rollback, 0x508, "InventoryRollback"},
+                         Dep{g_preview_ret ? g_preview_ret - 5 : 0, 19, "the crafting menu's RecipeApply call"}}) {
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
-        if (!at || h->code_state(at, size, &state, &generation) != KILN_OK ||
-            (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) return false;
+        if (!d.at || h->code_state(d.at, d.size, &state, &generation) != KILN_OK ||
+            (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+            if (why) *why = d.name;
+            return false;
+        }
     }
     return true;
 }
@@ -1367,9 +1376,10 @@ uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amou
 }
 void preview_hook_on_demand() {
     if (!g_preview_feat || g_preview_failed || g_preview_hooked.load() || !g_craft_on.load()) return;
-    if (!preview_code_ok()) {
+    if (const char* why = "the game code"; !preview_code_ok(&why)) {
         g_preview_failed = true;
-        LOGW("stations: linked craft preview stands down: recipe/payment or rollback call site is occupied or unknown (CBS/other hooks kept)");
+        LOGW("stations: linked craft preview stands down: %s is patched by another module or cannot be checked "
+             "(CBS/other hooks kept; the game's own craft status is used)", why);
         return;
     }
     if (!h_preview_fetch && !h_preview_fetch.install(g_api, g_owner, g_preview_fetch, reinterpret_cast<void*>(&hk_preview_fetch),

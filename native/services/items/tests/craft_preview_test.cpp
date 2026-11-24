@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // #132: the actual scoped client RecipeApply/InventoryPay preview bridge on fake game functions. No game is run.
 #include "../stations.cpp"
+#include <cstdarg>
 #include <string>
 #include <map>
 namespace fixture {
@@ -16,6 +17,7 @@ std::map<uintptr_t,uint32_t> code_states;
 uintptr_t late_foreign=0;
 uint32_t installs=0, eligibility=0, after_payment=0, native_payment=4, payment_calls=0;
 uint8_t storage[32]={}, recipe[0xb0]={};
+std::string last_warn;
 }
 namespace kitems {
 Engine E{};
@@ -33,7 +35,10 @@ bool read_fuel(uintptr_t,void*,KilnEntity,int32_t*,int32_t*,bool*,unsigned long*
 uint64_t items_next_ticket() { std::abort(); }
 bool read_inventory(uintptr_t,void*,KilnEntity,ReadOut*,unsigned long*) { std::abort(); }
 uintptr_t items_server_world() { return 0; }
-void items_log(int,const char*,...) {}
+void items_log(int level,const char* f,...) {
+    if(level!=KILN_LOG_WARN)return;
+    char b[512];va_list a;va_start(a,f);std::vsnprintf(b,sizeof b,f,a);va_end(a);fixture::last_warn=b;
+}
 uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
@@ -101,6 +106,12 @@ int main() {
     // A foreign hook (including CBS at this site) or unknown code means no second patch and no attempt to enable.
     for(uint32_t state : {KILN_CODE_FOREIGN,KILN_CODE_UNKNOWN}) {
         fixture::code_states[g_preview_apply]=state;g_preview_failed=false;preview_hook_on_demand();CHECK(fixture::installs==0);
+    }
+    // The stand-down line names the occupied dependency, e.g. CBS changing BaseStockForPlayer or the material taker.
+    for(auto [at,name] : {std::pair<uintptr_t,const char*>{0x14046fa70,"BaseStockForPlayer"},{0x140411380,"InventoryRemoveItems"},
+                          {0x1404185a0,"InventoryRollback"}}) {
+        fixture::code_states.clear();fixture::code_states[at]=KILN_CODE_FOREIGN;fixture::last_warn.clear();g_preview_failed=false;
+        preview_hook_on_demand();CHECK(fixture::installs==0 && fixture::last_warn.find(name)!=std::string::npos);
     }
     fixture::code_states.clear();g_preview_failed=false;
     preview_hook_on_demand();CHECK(fixture::installs==3 && g_preview_hooked.load());
