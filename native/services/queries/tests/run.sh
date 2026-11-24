@@ -21,3 +21,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined \
     -I"$KILN_OUT/queries-tests/stubs" -I"$here/../../../core/abi" \
     -I"$here/.." -I"$here/../../../third_party" "$here/path_submit_test.cpp" -o "$KILN_OUT/queries-tests/path-submit-test"
 "$KILN_OUT/queries-tests/path-submit-test"
+# Full production path glue; each scenario has fresh process-latched fault/owner state. Engine leaves are fakes.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined \
+    -I"$KILN_OUT/queries-tests/stubs" -I"$here/../../../core/abi" \
+    -I"$here/.." -I"$here/../../../third_party" "$here/path_lifecycle_test.cpp" -o "$KILN_OUT/queries-tests/path-lifecycle-test"
+for scenario in feature layout gates found partial unsupported empty truncated copy nonfinite no-path \
+    cancel-before cancel identity retire world world-result realm grid program fault-defaults fault-create fault-result fault-destroy; do
+    "$KILN_OUT/queries-tests/path-lifecycle-test" "$scenario"
+done
