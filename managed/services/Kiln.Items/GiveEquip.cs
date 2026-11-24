@@ -37,8 +37,13 @@ public static unsafe partial class Items
     }
 
     /// <summary>Creates one stack straight into an empty or occupied equipment slot, atomically. No free backpack slot
-    /// is needed for an empty target or Replaced.Take. The game's equipment checks apply: the item's EquipmentSlotType
-    /// must fit. Count must fit one stack (one for gear). Backpack items cannot yet be given into the bag slot.
+    /// is needed for an empty gear/vanity target or Replaced.Take of existing gear. Arrow, Spell and FishingBait instead
+    /// require a verified Generic backpack cell: reuse the selected cell, or choose an empty unselected cell when the
+    /// selection is zero. A non-Generic ammo selection is refused, never repaired or relocated. Existing occupied
+    /// ammo contents must still resolve to plain Ammunition of that slot's type, or SlotChanged is returned before
+    /// mutation, even for Take/DryRun. Different valid ammo of the matching type remains replaceable. New ammo must
+    /// also be a plain Ammunition-category stack. EquipmentSlotType must fit. Count must fit one stack (one for gear).
+    /// Backpack items cannot yet be given into the bag slot.
     /// Since 0.2.0-dev.30.6.</summary>
     /// <returns>One transaction's outcome. A refusal or DryRun changes nothing. A committed change posts
     /// EquipChangedEvent; ReplacedItem and ReplacedCount report the old stack. From is None: no intermediate backpack

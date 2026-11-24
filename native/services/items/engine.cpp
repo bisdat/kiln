@@ -1544,7 +1544,7 @@ struct GiveEquipTxState {
 
 // Create at the FINAL slot. InventoryCommit creates a pide at its op-0 slot: moving a pending creation to another
 // slot first is unsafe. Evacuate the old stack before add, then Equip sees source == destination and still runs its
-// type checks and selection update. No backpack slot is needed for an empty target or TAKE.
+// type checks and selection update. Gear needs no backpack slot for an empty target or TAKE; ammo lives in Generic.
 static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res,
                            GiveEquipTxState* state) {
     auto fail = [&](int status, const char* why) {
@@ -1567,6 +1567,9 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
     if (info[0x104] != slot_type_of(r.equipment_slot))
         return fail(KILN_ITEMS_REFUSED, "the item does not fit that equipment slot: the game refused it");
     const bool gear = (rd<uint32_t>(info,E.item_flags)&2) != 0;
+    const bool ammo = r.equipment_slot>=14 && r.equipment_slot<=16;
+    if (ammo && (gear || info[0xCC]!=8))
+        return fail(KILN_ITEMS_REFUSED, "ammo equipment requires a plain Ammunition stack");
     if ((gear && r.count!=1) || r.count>rd<uint16_t>(info,E.item_max_stack))
         return fail(KILN_ITEMS_REFUSED, "count must fit one equipment stack (one item for gear)");
     const int index = selection_index(r.equipment_slot);
@@ -1576,7 +1579,31 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
             if (ps.p[i].entity==KILN_SLOT_INVENTORY(slot) && KILN_SLOT_INDEX(slot)<8) return &ps.p[i].s[KILN_SLOT_INDEX(slot)];
         return nullptr;
     };
-    const uint8_t category = r.equipment_slot<5 ? kLinkCustomization : kLinkEquipment;
+    // read_pages represents an unreadable Inventory as empty. Ammo may only use a real, sized Inventory on a
+    // Generic route whose setups are also sized and initialized, including the worn backpack's Virtual links.
+    // Reuse walk's category/order/depth rules, but never infer a writable cell from that zero-filled snapshot.
+    Tree generic{};
+    if (ammo) {
+        const auto* setup=static_cast<const uint8_t*>(other_sized(a,A_SETUP,r.player,kSetupSize));
+        if (!setup || !setup[E.setup_initialized])
+            return fail(KILN_ITEMS_NO_INVENTORY, "the player's inventory setup could not be verified");
+        walk(setup, +[](const void* ctx, KilnEntity e) -> const uint8_t* {
+            const auto* s=static_cast<const uint8_t*>(other_sized(*static_cast<const Access*>(ctx),A_SETUP,e,kSetupSize));
+            return s && s[E.setup_initialized] ? s : nullptr;
+        }, &a, &generic, 0, -1);
+    }
+    auto generic_cell = [&](uint64_t cell) {
+        const uint32_t page=KILN_SLOT_INVENTORY(cell);
+        if (page==rd<uint32_t>(selection,0xa0) || page==rd<uint32_t>(selection,0xa4) || !live_stack(a,cell)) return false;
+        for (uint32_t i=0;i<generic.n;++i)
+            if (generic.ids[i]==page && generic.cats[i]==kLinkGeneric) return true;
+        return false;
+    };
+    auto reserved = [&](uint64_t cell, int except=-1) {
+        for (int i=0;i<static_cast<int>(kEquipSlots);++i) if (i!=except && selected[i]==cell) return true;
+        return false;
+    };
+    const uint8_t category = ammo ? kLinkGeneric : r.equipment_slot<5 ? kLinkCustomization : kLinkEquipment;
     uint64_t target = selected[index];
     Stack old{};
     if (target) {
@@ -1584,26 +1611,41 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
         bool correct_page=false;
         for(uint32_t i=0;i<pages[0].n;++i)
             if(pages[0].p[i].entity==KILN_SLOT_INVENTORY(target) &&
-               (pages[0].cat[i]==category || (r.equipment_slot>=14 && r.equipment_slot<=16 && pages[0].cat[i]==kLinkGeneric)))
-                correct_page=true; // arrows, spells and bait are equipped where they lie, including Generic cells
-        if (!stack || !correct_page) return fail(KILN_ITEMS_SLOT_CHANGED,"the equipment selection does not name an equipment page");
+               pages[0].cat[i]==category)
+                correct_page=true;
+        // Never relocate or repair a pre-existing non-Generic ammo reference, even with Take or DryRun.
+        if (!stack || !correct_page || (ammo && (!generic_cell(target) || reserved(target,index))))
+            return fail(KILN_ITEMS_SLOT_CHANGED,ammo ? "the ammo selection is not a verified unshared Generic backpack cell"
+                                                   : "the equipment selection does not name an equipment page");
         if (!is_empty(*stack)) old=*stack;
     } else {
         for (uint32_t i=0;!target && i<pages[0].n;++i) {
             if(pages[0].cat[i]!=category) continue;
             for(const Stack& stack:pages[0].p[i].s) {
-                if (!is_empty(stack) || std::find(selected,selected+kEquipSlots,stack.slot)!=selected+kEquipSlots) continue;
+                if (!is_empty(stack) || reserved(stack.slot) || (ammo && !generic_cell(stack.slot))) continue;
                 target=stack.slot; break;
             }
         }
     }
-    if (!target) return fail(KILN_ITEMS_NO_ROOM,"no empty unselected equipment slot is available");
+    if (!target) return fail(KILN_ITEMS_NO_ROOM,ammo ? "no verified empty unselected Generic backpack cell is available"
+                                                  : "no empty unselected equipment slot is available");
+    // A Generic cell may have been reused since this ammo reference was selected. Neither Backpack nor Take may
+    // evacuate unrelated contents: validate the old stack's provenance before even constructing the transaction.
+    if (ammo && old.item) {
+        const auto* previous_info=static_cast<const uint8_t*>(E.item_find(old.item,a.items));
+        if (!previous_info || previous_info[0x104]!=slot_type_of(r.equipment_slot) || previous_info[0xCC]!=8 ||
+            (rd<uint32_t>(previous_info,E.item_flags)&2)!=0)
+            return fail(KILN_ITEMS_SLOT_CHANGED,"the selected ammo cell no longer holds matching plain Ammunition");
+    }
     uint64_t backpack=0;
     const bool take=(r.flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0, dry=(r.flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;
     if(old.item && !take) {
         for(uint32_t i=0;!backpack && i<pages[0].n;++i) {
             if(pages[0].cat[i]!=kLinkGeneric) continue;
-            for(const Stack& stack:pages[0].p[i].s) if(is_empty(stack)) { backpack=stack.slot; break; }
+            for(const Stack& stack:pages[0].p[i].s)
+                if(is_empty(stack) && (!ammo || (generic_cell(stack.slot) && !reserved(stack.slot)))) {
+                    backpack=stack.slot; break;
+                }
         }
         if(!backpack) return fail(KILN_ITEMS_NO_ROOM,"no free slot in the player's backpack for the replaced item");
     }

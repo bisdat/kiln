@@ -1582,7 +1582,7 @@ void issue109_engine() {
 
 // GiveEquip exercises the production engine path with delayed creation, as InventoryCommit does.
 bool ge_equip_fail = false, ge_guard = false;
-int ge_commits = 0, ge_rollbacks = 0, ge_frees = 0;
+int ge_ctors = 0, ge_commits = 0, ge_rollbacks = 0, ge_frees = 0;
 bool ge_free_fault = false, ge_preflight_fault = false, ge_steal_replaced = false;
 bool ge_spill = false, ge_move_new = false, ge_empty_guard = false, ge_invalid_pide = false;
 int ge_fault = 0;
@@ -1606,6 +1606,7 @@ Result12* __fastcall ge_transfer(Result12* out, void* tx, uint64_t dst, uint64_t
     return out;
 }
 void* __fastcall ge_ctor(void* tx) {
+    ++ge_ctors;
     fake_tx_ctor(tx);
     g_ops.clear();
     g_oplist = reinterpret_cast<OpList*>(static_cast<uint8_t*>(tx) + E.tx_ops);
@@ -1646,7 +1647,10 @@ Result12* __fastcall ge_equip(Result12* out, void* tx, uint64_t source, uint8_t 
     if (ge_equip_fail) return out->error = 0x11, out;
     uint64_t target=0;
     std::memcpy(&target,comp(T_SEL,P,216).data()+selection_index(slot)*8,8);
-    if(!target) { // vanilla's chooser sees the pending source as occupied: it chooses another free cell
+    // Ammo is selected where it lies, not moved into a spare Equipment cell. This models only that routing;
+    // the real selection helper remains runtime-qualified by items.cpp, not by this fake.
+    if (slot>=14 && slot<=16) target=source;
+    if(!target) { // gear's chooser sees the pending source as occupied: it chooses another free cell
         for(int i=0;i<8;++i) if(!count_at(100,i)) { target=KILN_SLOT_ID(100,i); break; }
     }
     if(!target) return out->error=0x1f,out;
@@ -1726,7 +1730,7 @@ void give_equip_test() {
         comp(T_SETUP, P,84)[0x40] = 2;
         comp(T_SEL,P,216);
         for (int k=0;k<8;++k) put(101,k,WOOD,250);
-        ge_commits=ge_rollbacks=ge_frees=0; ge_equip_fail=ge_guard=g_add_fails=false;
+        ge_ctors=ge_commits=ge_rollbacks=ge_frees=0; ge_equip_fail=ge_guard=g_add_fails=false;
         ge_target=0; ge_free_fault=ge_preflight_fault=ge_steal_replaced=false; ge_fault=0;
         ge_spill=ge_move_new=ge_empty_guard=ge_invalid_pide=false;
     };
@@ -1855,7 +1859,171 @@ void give_equip_test() {
     for(int k=0;k<8;++k) put(100,k,WOOD,250);
     const auto full=g_comps; r=run(); check(r.status==KILN_ITEMS_NO_ROOM && g_comps==full && ge_frees==0,
           "give-equip: no empty unselected equipment slot refuses without mutation");
-    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : {0u,KILN_ITEMS_GIVE_EQUIP_TAKE,KILN_ITEMS_GIVE_EQUIP_DRY_RUN}) {
+    // #139: production GiveEquip, not a separate destination-policy model. Equipment has free cells first.
+    const uint32_t ammo_flags[] = {0,KILN_ITEMS_GIVE_EQUIP_TAKE,KILN_ITEMS_GIVE_EQUIP_DRY_RUN,
+                                  KILN_ITEMS_GIVE_EQUIP_TAKE|KILN_ITEMS_GIVE_EQUIP_DRY_RUN};
+    auto ammo_reset = [&](uint8_t slot) {
+        reset(); set_item(ARROW,99,false,slot_type_of(slot),8);
+        std::memcpy(g_item_bytes[ARROW%8],&ARROW,4);
+    };
+    auto unchanged_refusal = [&](const auto& before, const KilnItemsEquipResult& out, int status, const char* why) {
+        check(out.status==status && g_comps==before && !ge_ctors && !ge_commits && !ge_rollbacks && !ge_frees,why);
+    };
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : ammo_flags) {
+        ammo_reset(slot); put(101,0,0,0);
+        const auto before_ammo=g_comps; const auto next=g_next_pide;
+        const uint64_t cell=KILN_SLOT_ID(101,0);
+        r=run(flags,slot,ARROW,50);
+        const bool dry=(flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && ge_target==cell && !r.pide && !r.replaced &&
+              g_next_pide==next && ge_ctors==1 && ge_commits==!dry && ge_rollbacks==dry && ge_frees==1 &&
+              (dry ? g_comps==before_ammo : item_at(101,0)==ARROW && count_at(101,0)==50 && page_empty(100) &&
+                  rd<uint64_t>(comp(T_SEL,P,216).data(),slot*8)==cell),
+              "#139 zero ammo selection: exact Generic stack selected in place, never Equipment, Take/Backpack/DryRun");
+        ammo_reset(slot); put(101,0,0,0);
+        std::memcpy(comp(T_SEL,P,216).data()+slot*8,&cell,8);
+        const auto before_selected=g_comps;
+        r=run(flags,slot,ARROW,50);
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && !r.replaced && !r.replaced_to &&
+              (dry ? g_comps==before_selected : count_at(101,0)==50 && page_empty(100)),
+              "#139 selected empty Generic cell: reuse exactly that cell without an evacuation slot");
+    }
+    // The synthetic vanilla route for an existing ammo stack and the new zero-selection route select the same cell.
+    ammo_reset(15); put(101,0,0,0); r=run(0,15,ARROW,50);
+    const auto ammo_route=g_comps;
+    ammo_reset(15); put(101,0,ARROW,50);
+    ge_ctor(vanilla_tx); ge_equip(&vanilla_out,vanilla_tx,KILN_SLOT_ID(101,0),15); ge_commit(vanilla_tx);
+    check(vanilla_out.error==0 && g_comps==ammo_route,
+          "#139 ammo route matches fixture vanilla in-place selection (not live persistence proof)");
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : ammo_flags) {
+        for (int bad=0; bad<8; ++bad) {
+            ammo_reset(slot);
+            if (bad==1) g_comps.erase({T_INV,101});
+            if (bad==2) g_comps[{T_INV,101}].resize(95);
+            if (bad==3) comp(T_SETUP,P,84)[0x41]=kLinkEquipment;
+            if (bad==4) { put(101,0,0,0); std::memcpy(comp(T_SEL,P,216).data()+0xa0,&A2,4); }
+            if (bad==5) { put(101,0,0,0); const uint64_t reserved=KILN_SLOT_ID(101,0);
+                std::memcpy(comp(T_SEL,P,216).data()+88,&reserved,8); }
+            if (bad==6) { const uint32_t zero=0; std::memcpy(comp(T_SETUP,P,84).data()+4,&zero,4); }
+            if (bad==7) comp(T_SETUP,P,84)[0x41]=kLinkCurrency;
+            const auto before_invalid=g_comps;
+            r=run(flags,slot,ARROW,50);
+            unchanged_refusal(before_invalid,r,KILN_ITEMS_NO_ROOM,
+                "#139 full/missing/short/non-Generic/action-bar/reserved/absent Generic destination refuses before transaction");
+        }
+        for (int bad=0; bad<8; ++bad) {
+            ammo_reset(slot); put(101,0,0,0);
+            const uint64_t cell=(bad==0 || bad==6) ? KILN_SLOT_ID(100,0) : bad==1 ? KILN_SLOT_ID(B,0) :
+                                bad==2 ? KILN_SLOT_ID(101,8) : KILN_SLOT_ID(101,0);
+            if (bad==1) make_setup(B,{B}); // valid Generic elsewhere is not owned by this player
+            if (bad==3) g_comps.erase({T_INV,101});
+            if (bad==4) std::memcpy(comp(T_SEL,P,216).data()+0xa0,&A2,4);
+            if (bad==5) std::memcpy(comp(T_SEL,P,216).data()+88,&cell,8);
+            if (bad==6) put(100,0,ARROW,20);
+            if (bad==7) g_comps[{T_INV,101}].resize(95);
+            std::memcpy(comp(T_SEL,P,216).data()+slot*8,&cell,8);
+            const auto before_invalid=g_comps;
+            r=run(flags,slot,ARROW,50);
+            unchanged_refusal(before_invalid,r,KILN_ITEMS_SLOT_CHANGED,
+                "#139 invalid/non-Generic/foreign/action-bar/shared selected ammo cell refuses, never relocates or mints");
+        }
+    }
+    // A reachable Generic cell is not proof that its occupied contents are still the selected ammo.
+    // Reject stale references before Backpack can move, or Take can destroy, an unrelated stack.
+    constexpr uint32_t OTHER_AMMO=12;
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : ammo_flags) {
+        for (int bad=0; bad<5; ++bad) {
+            ammo_reset(slot);
+            set_item(WOOD,250,false,0,9);
+            set_item(OTHER_AMMO,99,bad==4,
+                     slot_type_of(bad==2 ? (slot==16 ? 14 : slot+1) : slot),bad==3 ? 9 : 8);
+            const uint32_t previous=bad==0 ? WOOD : bad==1 ? 0xfedcba98u : OTHER_AMMO;
+            const uint64_t cell=KILN_SLOT_ID(101,0);
+            put(101,0,previous,bad==4 ? 1 : 20); put(101,3,0,0);
+            std::memcpy(comp(T_SEL,P,216).data()+slot*8,&cell,8);
+            const auto before_stale=g_comps;
+            r=run(flags,slot,ARROW,50);
+            char text[160];
+            std::snprintf(text,sizeof text,
+                "#139 stale selected Generic ammo (slot=%u flags=0x%x case=%d) refuses before transaction",slot,flags,bad);
+            unchanged_refusal(before_stale,r,KILN_ITEMS_SLOT_CHANGED,text);
+        }
+        ammo_reset(slot); set_item(OTHER_AMMO,99,false,slot_type_of(slot),8);
+        const uint64_t cell=KILN_SLOT_ID(101,0), spare=KILN_SLOT_ID(101,3);
+        put(101,0,OTHER_AMMO,20); put(101,3,0,0);
+        std::memcpy(comp(T_SEL,P,216).data()+slot*8,&cell,8);
+        const auto before_other=g_comps;
+        r=run(flags,slot,ARROW,50);
+        const bool dry=(flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0, take=(flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0;
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && r.replaced==OTHER_AMMO && r.reserved[0]==20 &&
+              r.replaced_to==(take ? 0 : spare) && !r.pide && ge_commits==!dry && ge_rollbacks==dry &&
+              (dry ? g_comps==before_other : item_at(101,0)==ARROW && count_at(101,0)==50 &&
+                  (take ? count_at(101,3)==0 : item_at(101,3)==OTHER_AMMO && count_at(101,3)==20)),
+              "#139 a different valid spell/arrow/bait of the matching type still supports Backpack/Take/DryRun");
+    }
+    // A Virtual link is another setup, not an Inventory page. Require a sized, initialized setup and real Inventory.
+    for (int bad=0; bad<5; ++bad) {
+        ammo_reset(15);
+        make_setup_cats(P,{{100,2},{QBAG,5}},1);
+        make_setup_cats(QBAG,{{QBP1,4}},0);
+        if (bad==1) g_comps.erase({T_SETUP,QBAG});
+        if (bad==2) g_comps[{T_SETUP,QBAG}].resize(80);
+        if (bad==3) comp(T_SETUP,QBAG,84)[0x53]=0;
+        if (bad==4) g_comps.erase({T_INV,QBP1});
+        const auto before_nested=g_comps;
+        r=run(0,15,ARROW,50);
+        if (!bad) check(r.status==KILN_ITEMS_DONE && r.to==KILN_SLOT_ID(QBP1,0) && count_at(QBP1,0)==50 && page_empty(100),
+                       "#139 verified Generic pages behind a Virtual backpack link are eligible");
+        else unchanged_refusal(before_nested,r,KILN_ITEMS_NO_ROOM,
+                       "#139 unverified Virtual setup or Inventory cannot supply an ammo destination");
+    }
+    for (int bad=0; bad<3; ++bad) {
+        ammo_reset(15); put(101,0,0,0);
+        if (bad==0) g_item_bytes[ARROW%8][0xCC]=9;
+        if (bad==1) g_item_bytes[ARROW%8][E.item_flags]=2;
+        if (bad==2) g_item_bytes[ARROW%8][0x104]=6;
+        const auto before_type=g_comps; r=run(0,15,ARROW,bad==1 ? 1 : 50);
+        unchanged_refusal(before_type,r,KILN_ITEMS_REFUSED,
+                          "#139 ammo requires matching physical type and plain Ammunition category, not gear or material");
+    }
+    // Free evacuation cells must also be real Generic, not action bars or another equipment reference.
+    for (bool take : {false,true}) {
+        ammo_reset(15); const uint64_t cell=KILN_SLOT_ID(101,0), reserved=KILN_SLOT_ID(101,3);
+        put(101,0,ARROW,20); put(101,3,0,0);
+        std::memcpy(comp(T_SEL,P,216).data()+15*8,&cell,8);
+        std::memcpy(comp(T_SEL,P,216).data()+88,&reserved,8);
+        const auto before_reserved=g_comps;
+        r=run(take ? KILN_ITEMS_GIVE_EQUIP_TAKE : 0,15,ARROW,50);
+        if (take) check(r.status==KILN_ITEMS_DONE && r.to==cell && !r.replaced_to && r.reserved[0]==20 && count_at(101,0)==50,
+                        "#139 selected occupied Generic ammo: Take needs no spare backpack cell");
+        else unchanged_refusal(before_reserved,r,KILN_ITEMS_NO_ROOM,
+                        "#139 Backpack cannot evacuate old ammo into a cell another equipment selection reserves");
+    }
+    for (bool occupied : {false,true}) for (bool take : {false,true}) for (int fault=0; fault<7; ++fault) {
+        ammo_reset(15); put(101,0,occupied ? ARROW : 0,occupied ? 20 : 0); put(101,3,0,0);
+        const uint64_t cell=KILN_SLOT_ID(101,0);
+        if (occupied) std::memcpy(comp(T_SEL,P,216).data()+15*8,&cell,8);
+        const auto before_fault=g_comps; const auto next=g_next_pide;
+        g_add_fails=fault==0; ge_equip_fail=fault==1; ge_spill=fault==2;
+        ge_guard=fault==3; ge_empty_guard=fault==4; ge_move_new=fault==5 && occupied;
+        ge_free_fault=fault==6;
+        if (fault==5 && !occupied) ge_fault=5;
+        r=run(take ? KILN_ITEMS_GIVE_EQUIP_TAKE : 0,15,ARROW,50);
+        if (fault==6) check(r.status==KILN_ITEMS_UNAVAILABLE && ge_commits==1 && !ge_rollbacks && ge_frees==1 &&
+                            count_at(101,0)==50 && g_next_pide==next,
+                            "#139 ammo cleanup fault after commit never rolls back or creates an instance");
+        else check(r.status==(fault==5 && !occupied ? KILN_ITEMS_UNAVAILABLE : KILN_ITEMS_REFUSED) &&
+                   g_comps==before_fault && g_next_pide==next && !ge_commits && ge_rollbacks==1 && ge_frees==1,
+                   "#139 zero/occupied ammo add/select/spill/guard/movement failure restores bytes, once, with no partial stack");
+    }
+    // Regular equipment and vanity still use their own categories, even with free Generic cells.
+    reset(); put(101,0,0,0); set_item(SWORD,1,true,13,0); const uint32_t sword=SWORD;
+    std::memcpy(g_item_bytes[SWORD%8],&sword,4); comp(T_SETUP,P,84)[0x40]=kLinkCustomization;
+    std::memset(comp(T_SEL,P,216).data(),0,8);
+    r=run(0,0,SWORD,1);
+    check(r.status==KILN_ITEMS_DONE && r.to==KILN_SLOT_ID(100,0) && r.pide && !count_at(101,0),
+          "#139 vanity still creates its instance in Customization, not Generic");
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : ammo_flags) {
         reset(); set_item(ARROW,99,false,slot_type_of(slot),8);
         const uint64_t selected=KILN_SLOT_ID(101,0);
         put(101,0,ARROW,20); put(101,3,0,0);
@@ -1864,7 +2032,9 @@ void give_equip_test() {
         r=run(flags,slot,ARROW,50);
         check(r.status==KILN_ITEMS_DONE && r.to==selected && r.reserved[0]==20 && !r.pide &&
               ((flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN) ? g_comps==before_stack : count_at(101,0)==50) &&
-              ((flags&KILN_ITEMS_GIVE_EQUIP_TAKE) ? !r.replaced_to : r.replaced_to==KILN_SLOT_ID(101,3)),
+              ((flags&KILN_ITEMS_GIVE_EQUIP_TAKE) ? !r.replaced_to : r.replaced_to==KILN_SLOT_ID(101,3)) &&
+              ((flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN) || (flags&KILN_ITEMS_GIVE_EQUIP_TAKE) ||
+                  (item_at(101,3)==ARROW && count_at(101,3)==20)) && page_empty(100),
               "give-equip: worn Generic-cell arrows/spells/bait support Backpack, Take and nonmutating DryRun with exact old count");
     }
 }

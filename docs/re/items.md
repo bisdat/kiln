@@ -851,19 +851,38 @@ component and sends no additional equipment event in this branch. The special fl
   that local override for GiveEquip only. Other bytes and other creations are unchanged; the scope is restored even
   when commit faults. `createPide` itself supplies contained slot, inventory OwnerRelationship, level, perks,
   durability and other default components, exactly as for a normal Give.
-- Empty logical target: choose an empty unselected cell in the proper Equipment/Customization page, Add there,
+- Empty logical gear/vanity target: choose an empty unselected cell in the proper Equipment/Customization page, Add there,
   then call the game's helper to select **that same cell**. Calling Equip here would choose another empty cell
   after Add (`0x1b5041..0x1b51d9`), reintroducing the pending-create move.
 - Occupied logical target: evacuate the previous stack with the game's transfer to a preflighted empty Generic
   cell, or its removeItems for Take; Add directly at the selected final cell; run Equip with source=target.
   Reject any spill or movement of the newly added stack. Check the commit's rollback guards, finalize once, free once.
   Bag slot 23 is refused before mutation because its nested inventory only exists after creation.
+- Arrow/Spell/FishingBait (physical slots 14-16) with a matching type must be plain Ammunition-category stacks.
+  A zero selection chooses an empty, unselected Generic (4) backpack cell, not Equipment. An already-selected Generic
+  cell is reused in place; occupied cells use the same Backpack/Take transaction above only after their existing
+  item resolves to the same physical slot type, Ammunition category and no gear flag. Unknown, stale or mismatched
+  contents return SlotChanged before transaction construction, even for Take/DryRun; a different valid spell of the
+  matching type remains replaceable. The final cell and any ammo
+  evacuation cell must have a sized Inventory component, lie on a sized/initialized setup route (Virtual links expanded
+  by the existing walk), not be an action-bar page, and not be referenced by another equipment selection. Generic
+  eligibility follows the repository's link/category and eight-cell Inventory reads, not the setup's aggregate counts.
+  A selected non-Generic, foreign, action-bar, unreadable or shared cell refuses before transaction construction,
+  including Take/DryRun: relocating it would silently repair state this narrow operation has not qualified.
+  Missing/short pages are not empty space (the ordinary page snapshot otherwise represents them as zeros).
+  `items.cpp` still requires `SelectEquipment` symbol resolution and `qualified_code`: matching original entry bytes
+  and ORIGINAL/MANAGED live-code ownership. The fake helper does not prove that gate or the game's persistence.
 
 **Fixture proof, not live-game proof:** `move_test.cpp give-equip` runs the production engine path with delayed
 pide creation. It compares the resulting selection, all ItemState bytes (slot/item/flags/rarity/level) and inventory owner
 against the fixture's vanilla transfer+selection of identical existing gear. It checks full-backpack empty/Take success,
 Backpack preflight refusal, replacement identity/count, no free equipment cell, type mismatch, add/equip/commit-guard
-failure and dry-run rollback with identical original component bytes and no orphan. `pide_test.cpp` tests the real
+failure and dry-run rollback with identical original component bytes and no orphan. The #139 matrix covers zero,
+empty-selected and occupied-selected Arrow/Spell/Bait Generic cells, root/Virtual routes, real Inventory size,
+category/slot checks, stale occupied contents versus different valid ammo, other equipment references, action bars,
+foreign pages, Take/Backpack and both dry-run policies;
+ammo failures roll back once, and post-commit cleanup faults never roll back. `pide_test.cpp` tests the real
 scoped hook's initial equipped bit, isolation to the requested item, ordinary later creation and fault cleanup.
 Derived stats, impact recalculation, visual replication, persistence, real backpack topology and live-player effects
-remain **unverified** and require the guided in-game check; fixture equality is not evidence of execution in the game.
+remain **unverified**; fixture equality is not evidence of execution in the game or a save/reload fix. The reported
+reload-loss mechanism has not been established. No game, live server or real save was used for the #139 fix.

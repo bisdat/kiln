@@ -25,7 +25,7 @@ parking, travel and trust limits.
 
 `Items.GiveEquip(player, item, count, EquipmentSlot slot, GiveEquipOptions? options = null)` returns
 `Task<EquipResult>`. It creates **one stack** directly in equipment and equips it in **one game inventory
-transaction**. An empty target needs no free backpack slot. Gear uses the game's default level and rarity and is
+transaction**. An empty gear/vanity target needs no free backpack slot. Gear uses the game's default level and rarity and is
 created with its item entity and normal instance data in its final equipped cell, never in an intermediate backpack
 slot. The item's `EquipmentSlotType` must fit, just as for `Items.Equip`.
 
@@ -36,11 +36,22 @@ if (!result.Ok) Log.Info(result.Reason);
 else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
 ```
 
+- **Arrow, Spell and FishingBait** are selected in place on a verified Generic backpack page, never in a spare
+  Equipment page cell. The item must have the matching physical slot type, Ammunition category and no gear flag.
+  With a zero selection, a real empty Generic cell not on the action bars or reserved by another equipment selection
+  is required, even for `Replaced.Take`. A valid already-selected Generic cell is reused, empty or occupied.
+  Occupied contents must still resolve to plain Ammunition of the selected logical slot's type; stale, unknown,
+  non-ammo or gear contents return `SlotChanged` before mutation, including Take and DryRun. A different valid spell,
+  arrow or bait of the matching type can still replace the old one; item identity need not match.
+  Missing/short Inventory components and unverified Virtual backpack setups are not free space. A selected non-Generic,
+  foreign, action-bar or shared cell returns `SlotChanged` before mutation; this call does not repair or migrate it.
 - `Replaced.Backpack` (default) preserves the old stack and its instance in an empty Generic backpack slot.
-  An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty target still works.
+  An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty gear/vanity target still works;
+  selected empty ammo reuses its verified Generic cell without needing a second cell.
 - `Replaced.Take` **destroys** the old stack: it and its item entity are removed from the game, not moved or
   dropped anywhere. The result reports `ReplacedItem` (an alias of `Replaced`), `ReplacedCount`, and the old instance
-  identity. It works with a full backpack. `ReplacedTo` is None for a taken stack.
+  identity. It works with a full backpack when the final cell is valid (ammo still requires its selected Generic
+  cell, or a free Generic cell for a zero selection). `ReplacedTo` is None for a taken stack.
 - `DryRun = true` runs and rolls back the whole transaction. No inventory/selection changes, new item entity or
   `EquipChangedEvent` survives. The result reports the old stack and the predicted destination, but no new instance.
 - Always all-or-nothing: no partial give, no duplicated or missing item on an ordinary refusal. Count is 1..65535,
