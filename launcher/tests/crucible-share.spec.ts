@@ -125,3 +125,54 @@ test("Crucible off in this build: no share button", async ({ page }) => {
   await page.waitForTimeout(500);
   await expect(page.getByTestId("crucible-share")).toHaveCount(0);
 });
+
+
+for (const taskFailure of [false, true]) test(`a nested Library edit found while sharing offers take-over and retries with the updated profile (${taskFailure ? "task" : "command"})`, async ({ page }) => {
+  await open(page, "/?mock=1&discord=in#/");
+  await page.evaluate(async (taskFailure) => {
+    const api = await import("/src/api/commands.ts");
+    const p = await api.profileGet("ember-run");
+    const entry = { kind: "shroudforge", ...p.mods.shroudforge[0] };
+    const mock = (window as unknown as { __kilnMock: { editInLibrary: (kind: string, id: string, change: unknown) => void; planCommand: (cmd: string, plan: unknown) => void } }).__kilnMock;
+    // The displayed Library query is still cached: only the share's deep integrity check sees the edit.
+    mock.editInLibrary(entry.kind, entry.id, { name: "Better Chests edited", version: "0.4.2" });
+    const error = { code: "hash_mismatch" as const, message: "Better Chests was changed in its folder", detail: { libraryChanged: entry, name: "Better Chests" } };
+    if (taskFailure) {
+      mock.planCommand("crucible_share", { result: "share-changed-task" });
+      const { useTasks } = await import("/src/ui/TaskProgress.tsx");
+      useTasks.getState().upsert({ id: "share-changed-task", kind: "crucible_share", title: "Share Ember run", state: "failed", progress: null,
+        message: error.message, started: new Date().toISOString(), finished: new Date().toISOString(), error });
+    } else mock.planCommand("crucible_share", { error });
+  }, taskFailure);
+  await expect(page.locator(".k-hero")).not.toContainText("Changed on disk");
+  await page.getByTestId("crucible-share").click();
+  await page.getByTestId("crucible-share-confirm").click();
+  const recovery = page.locator(".k-toast", { hasText: "Better Chests was changed in its folder" });
+  await expect(recovery).toBeVisible();
+  await expect(page.getByTestId("crucible-share-error")).toHaveText("Better Chests was changed in its folder");
+  await recovery.getByRole("button", { name: "Use the changed files" }).click();
+  await expect(page.getByTestId("crucible-share-pop")).toContainText("Link copied", { timeout: 15_000 });
+  const now = await page.evaluate(async () => (await (await import("/src/api/commands.ts")).profileGet("ember-run")).mods.shroudforge[0]);
+  expect(now.version).toBe("0.4.2");
+  expect((await requests(page)).filter((r) => r.cmd === "crucible_share")).toHaveLength(1); // failed planned command was intercepted before the Crucible mock
+});
+
+
+test("Save as file offers the same Library recovery and retries in the chosen folder", async ({ page }) => {
+  await open(page, "/?mock=1#/");
+  await page.evaluate(async () => {
+    const p = await (await import("/src/api/commands.ts")).profileGet("ember-run");
+    const entry = { kind: "shroudforge", ...p.mods.shroudforge[0] };
+    const mock = (window as unknown as { __kilnMock: { editInLibrary: (kind: string, id: string, change: unknown) => void; planCommand: (cmd: string, plan: unknown) => void } }).__kilnMock;
+    mock.editInLibrary(entry.kind, entry.id, { name: "Better Chests edited", version: "0.4.2" });
+    mock.planCommand("pack_build", { error: { code: "hash_mismatch", message: "Better Chests was changed in its folder", detail: { libraryChanged: entry, name: "Better Chests" } } });
+  });
+  await page.getByTestId("crucible-share").click();
+  await page.getByTestId("crucible-save-file").click();
+  const recovery = page.locator(".k-toast", { hasText: "Better Chests was changed in its folder" });
+  await expect(recovery.getByRole("button", { name: "Use the changed files" })).toBeVisible();
+  await recovery.getByRole("button", { name: "Use the changed files" }).click();
+  await expect(page.locator(".k-toast", { hasText: "Saved Ember run as a file" })).toContainText("/mnt/games/ember-run-1.0.0.kilnpack");
+  const build = (await requests(page)).find((r) => r.cmd === "pack_build");
+  expect(build?.args.outDir).toBe("/mnt/games");
+});

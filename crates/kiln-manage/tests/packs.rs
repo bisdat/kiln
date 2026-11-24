@@ -483,3 +483,154 @@ fn per_mod_archives_are_the_same_bytes_on_every_pc() {
     }
     assert_eq!(kiln_manage::hash::of_mod_records(kiln_manage::manifest::ModKind::Kiln, recs).unwrap(), r.hash);
 }
+
+
+/// Cross-Base Storage's native Library layout: the imported DLL and root manifests stay old while the DLL writes
+/// settings and a text log under native/. No root mtime changes for the Mods list to notice.
+fn native_share_fixture(root: &Path, dirs: &DataDirs) -> (LibraryRef, PathBuf, BuildRequest) {
+    let src = root.join("src/cross-base-storage");
+    put(&src, "native.json", br#"{"id":"cross-base-storage","name":"Cross-Base Storage","version":"1.1.0","dlls":["native/cross-base-storage.dll"],"side":"both"}"#);
+    put(&src, "mod.json", br#"{"id":"cross-base-storage","version":"1.1.0","type":"native"}"#);
+    put(&src, "README.md", b"Original release\n");
+    put(&src, "native/cross-base-storage.dll", &kiln_manage::pe::build_test_dll(&[], b"original"));
+    let r = find(&import(dirs, &[src]), "cross-base-storage");
+    assert_eq!(r.kind, kiln_manage::manifest::ModKind::Native);
+    let at = library::path_of(dirs, &r).unwrap();
+    for file in ["native/cross-base-storage.dll", "mod.json", "native.json", "README.md"] {
+        std::fs::File::options().write(true).open(at.join(file)).unwrap().set_modified(std::time::UNIX_EPOCH).unwrap();
+    }
+    let mut p = profile::create(dirs, "Native share", None).unwrap();
+    p.mods.native.push(pm(&r, true));
+    profile::save(dirs, &p).unwrap();
+    (r, at, BuildRequest { profile: p.id, version: "1.0.0".into(), ..Default::default() })
+}
+
+fn native_output(at: &Path) {
+    put(at, "native/cross-base-storage.ini", b"[Storage]\nrange=100\n");
+    put(at, "native/cross-base-storage.log", b"runtime log, not for sharing\n");
+}
+
+fn archive_records(path: &Path) -> Vec<kiln_manage::hash::Record> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    (0..z.len()).map(|i| {
+        let mut e = z.by_index(i).unwrap();
+        let mut b = Vec::new();
+        e.read_to_end(&mut b).unwrap();
+        kiln_manage::hash::Record { path: e.name().unwrap().to_string(), size: b.len() as u64, sha256: kiln_manage::hash::sha256_hex(&b) }
+    }).collect()
+}
+
+#[test]
+fn native_generated_output_only_shares_exactly_the_imported_files() {
+    let t = tmp("native-output-share");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, at, req) = native_share_fixture(&t.0, &dirs);
+    let clean = t.0.join("clean.zip");
+    pack::mod_archive(&dirs, &r, &clean).unwrap();
+    let root_time = std::fs::metadata(&at).unwrap().modified().unwrap();
+    native_output(&at);
+    assert_eq!(std::fs::metadata(&at).unwrap().modified().unwrap(), root_time);
+    assert!(!library::changed_on_disk(&at, &library::record(&dirs, &r).unwrap()), "nested output is not a Changed on disk row");
+    assert_ne!(kiln_manage::hash::dirhash(&at).unwrap(), r.hash);
+    let built = pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).expect("only recognized runtime output was added");
+    assert_eq!(pack::verify(&built.file, None).unwrap().mods[0].hash, r.hash);
+    let packed = archive_records(&built.file);
+    let prefix = "mods/native/cross-base-storage/";
+    let imported: Vec<_> = packed.into_iter().filter_map(|mut f| { f.path = f.path.strip_prefix(prefix)?.to_string(); Some(f) }).collect();
+    assert_eq!(imported.len(), 4);
+    assert_eq!(kiln_manage::hash::dirhash_records(imported).unwrap(), r.hash, "omitting only output restores the exact import proof");
+    let shared = t.0.join("shared.zip");
+    pack::mod_archive(&dirs, &r, &shared).expect("Crucible's per-mod archive uses the same proof");
+    assert_eq!(std::fs::read(&shared).unwrap(), std::fs::read(&clean).unwrap());
+    let files = archive_records(&shared);
+    assert_eq!(files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["README.md", "mod.json", "native.json", "native/cross-base-storage.dll"]);
+    assert_eq!(kiln_manage::hash::dirhash_records(files).unwrap(), r.hash);
+    assert!(at.join("native/cross-base-storage.ini").exists(), "sharing never deletes the mod's output");
+}
+
+#[test]
+fn native_real_changes_refuse_sharing_with_recovery_even_next_to_output() {
+    for output in [false, true] {
+        for change in ["dll", "readme", "manifest", "added-code"] {
+            let t = tmp(&format!("native-share-change-{output}-{change}"));
+            let dirs = DataDirs::at(t.0.join("data"));
+            let (r, at, req) = native_share_fixture(&t.0, &dirs);
+            if output { native_output(&at); }
+            match change {
+                "dll" => {
+                    let file = at.join("native/cross-base-storage.dll");
+                    let mut bytes = std::fs::read(&file).unwrap();
+                    *bytes.last_mut().unwrap() ^= 1;
+                    std::fs::write(file, bytes).unwrap();
+                }
+                "readme" => put(&at, "README.md", b"Changed release!\n"),
+                "manifest" => put(&at, "mod.json", br#"{"id":"cross-base-storage","version":"1.1.1","type":"native"}"#),
+                _ => put(&at, "native/helper.dll", b"added code"),
+            }
+            if change == "dll" {
+                assert!(!library::changed_on_disk(&at, &library::record(&dirs, &r).unwrap()), "the cheap row scan misses a nested edit too");
+            }
+            let errs = [
+                pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).unwrap_err(),
+                pack::mod_archive(&dirs, &r, &t.0.join("shared.zip")).unwrap_err(),
+            ];
+            for e in errs {
+                assert_eq!(e.code, ErrorCode::HashMismatch, "{change}, output={output}: {e:?}");
+                assert_eq!(e.detail.as_ref().unwrap()["libraryChanged"], serde_json::to_value(&r).unwrap());
+                assert!(e.message.contains("Use the changed files"));
+            }
+            assert!(!t.0.join("shared.zip").exists());
+            if change == "dll" {
+                let taken = library::take_over_with(&dirs, &r, &mut |_, _| Ok(None)).unwrap();
+                assert_ne!(taken.to.hash, r.hash);
+                pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).expect("take-over updates the profile so retry succeeds");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_imported_settings_file_is_not_discarded_as_new_runtime_output() {
+    let t = tmp("imported-settings-share");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let (r, at, req) = native_share_fixture(&t.0, &dirs);
+    native_output(&at);
+    // Explicit take-over makes these settings part of the attested import. A later edit must not be ignored.
+    put(&at, "native/cross-base-storage.dll", b"a different build");
+    let r = library::take_over_with(&dirs, &r, &mut |_, _| Ok(None)).unwrap().to;
+    put(&library::path_of(&dirs, &r).unwrap(), "native/cross-base-storage.ini", b"[Storage]\nrange=200\n");
+    assert_eq!(pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).unwrap_err().code, ErrorCode::HashMismatch);
+    assert_eq!(pack::mod_archive(&dirs, &r, &t.0.join("shared.zip")).unwrap_err().code, ErrorCode::HashMismatch);
+}
+
+#[test]
+fn plugin_sharing_still_hashes_and_packs_only_the_dll() {
+    let t = tmp("plugin-share");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let src = t.0.join("src/share-plugin.dll");
+    let bytes = kiln_manage::pe::build_test_dll(&["kiln_plugin_main"], b"original plugin");
+    put(src.parent().unwrap(), "share-plugin.dll", &bytes);
+    let r = import(&dirs, &[src]).into_iter().find(|r| r.kind == kiln_manage::manifest::ModKind::Plugin).unwrap();
+    let at = library::path_of(&dirs, &r).unwrap();
+    put(at.parent().unwrap(), "runtime.log", b"not the plugin");
+    let mut p = profile::create(&dirs, "Plugin share", None).unwrap();
+    p.mods.plugin.push(pm(&r, true));
+    profile::save(&dirs, &p).unwrap();
+    let req = BuildRequest { profile: p.id, version: "1.0.0".into(), ..Default::default() };
+    let built = pack::build(&dirs, &req, &t.0.join("out"), &mut NoProgress).unwrap();
+    assert_eq!(pack::verify(&built.file, None).unwrap().mods[0].hash, r.hash);
+    let out = t.0.join("plugin.zip");
+    pack::mod_archive(&dirs, &r, &out).unwrap();
+    let files = archive_records(&out);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, at.file_name().unwrap().to_str().unwrap());
+    assert_eq!(files[0].sha256, r.hash);
+    let mut edited = bytes;
+    *edited.last_mut().unwrap() ^= 1;
+    std::fs::write(&at, edited).unwrap();
+    for e in [pack::build(&dirs, &req, &t.0.join("bad"), &mut NoProgress).unwrap_err(), pack::mod_archive(&dirs, &r, &t.0.join("bad.zip")).unwrap_err()] {
+        assert_eq!(e.code, ErrorCode::HashMismatch);
+        assert_eq!(e.detail.as_ref().unwrap()["libraryChanged"], serde_json::to_value(&r).unwrap());
+    }
+}

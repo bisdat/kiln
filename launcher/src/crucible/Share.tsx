@@ -17,6 +17,7 @@ import { Button, ProgressBar, Spinner, TextInput, fmtBytes, pickPaths, runTask, 
 import { create } from "zustand";
 import MARK from "../assets/crucible/mark-64.png";
 import { useCommunityUi } from "../community/state";
+import { libraryChangedOf, notifyLibraryChanged } from "../shell/libraryChanged";
 import { anyChange, codeInput, countsOf, crucibleTarget, shareEstimate } from "./code";
 import { clipboardPrefill } from "./prefill";
 import { openCrucible } from "./Preview";
@@ -63,7 +64,8 @@ export async function startShare(qc: QueryClient, profileId: ProfileId) {
   } catch (e) {
     const err = api.toKilnError(e);
     useShareRun.getState().set({ ...useShareRun.getState().runs[profileId], error: err, pendingSignIn: err.code === "auth_failed" ? useShareRun.getState().runs[profileId]?.pendingSignIn ?? false : false });
-    if (err.code !== "auth_failed" && useDock.getState().open !== "share") toast.error(crucibleError(err, true), t("crucible.share.failed"));
+    if (!notifyLibraryChanged(qc, err, () => void startShare(qc, profileId)) && err.code !== "auth_failed" && useDock.getState().open !== "share")
+      toast.error(crucibleError(err, true), t("crucible.share.failed"));
   }
 }
 
@@ -75,14 +77,21 @@ async function pickFolder(): Promise<string | null> {
 }
 
 /** Save as file: the profile as a .kilnpack in a folder the player picks (pack_build). */
-export async function saveAsFile(profileId: ProfileId, name: string, version = "1.0.0"): Promise<BuiltPack | null> {
+export async function saveAsFile(qc: QueryClient, profileId: ProfileId, name: string, version = "1.0.0"): Promise<BuiltPack | null> {
   const dir = await pickFolder();
   if (!dir) return null;
-  try {
-    const r = await runTask<BuiltPack>(() => api.packBuild({ profile: profileId, version, name }, dir), { failed: t("crucible.save.failed", { name }) });
-    toast.ok(t("crucible.save.done", { name }), r.file, { actions: [{ label: t("crucible.save.openFolder"), onClick: () => void api.appOpenPath(dir).catch((e) => toast.error(e)) }] });
-    return r;
-  } catch { return null; }
+  const save = async (): Promise<BuiltPack | null> => {
+    try {
+      const r = await runTask<BuiltPack>(() => api.packBuild({ profile: profileId, version, name }, dir), { quiet: true });
+      toast.ok(t("crucible.save.done", { name }), r.file, { actions: [{ label: t("crucible.save.openFolder"), onClick: () => void api.appOpenPath(dir).catch((e) => toast.error(e)) }] });
+      return r;
+    } catch (e) {
+      if (!notifyLibraryChanged(qc, e, () => void save()) && api.toKilnError(e).code !== "canceled")
+        toast.error(e, t("crucible.save.failed", { name }));
+      return null;
+    }
+  };
+  return save();
 }
 
 /** "1 added, 1 updated": what changed since the share. */
@@ -168,7 +177,7 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
   const changed = s?.changed && anyChange(countsOf(s.changed)) ? s.changed : null;
   // the result has been seen here
   useEffect(() => { if (run?.result && !run.seen) useShareRun.getState().set({ ...run, seen: true }); }, [run]);
-  const save = async () => { setSaving(true); await saveAsFile(profileId, profileName, s?.version.version); setSaving(false); };
+  const save = async () => { setSaving(true); await saveAsFile(qc, profileId, profileName, s?.version.version); setSaving(false); };
   const saveButton = <Button size="s" variant="ghost" loading={saving} onClick={() => void save()} data-testid="crucible-save-file">{t("crucible.save.button")}</Button>;
 
   if (uploading) {
@@ -184,7 +193,7 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
   if (run?.error && run.error.code !== "auth_failed") {
     return (
       <Panel title={t("crucible.share.failed")} testid="crucible-share-pop">
-        <p className="kcr-p k-tone-err" data-testid="crucible-share-error">{crucibleError(run.error, true)}</p>
+        <p className="kcr-p k-tone-err" data-testid="crucible-share-error">{libraryChangedOf(run.error) ? run.error.message : crucibleError(run.error, true)}</p>
         <div className="kcr-pop-actions">
           <Button size="s" variant="primary" onClick={() => void startShare(qc, profileId)}>{t("common.retry")}</Button>
           {saveButton}
