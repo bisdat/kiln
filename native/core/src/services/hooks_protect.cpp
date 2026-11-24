@@ -7,6 +7,7 @@
 // In-core: picked up by the CMake glob with the other services, but no KILN_SERVICE of its own (an internal table gets
 // no capability row).
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <exception>
 #include <mutex>
@@ -102,9 +103,30 @@ KilnResult KILN_CALL h_protect_code_ranges(uint64_t owner, const KilnCodeRange* 
     return KILN_ERR_INTERNAL;
 }
 
+KilnResult KILN_CALL describe_code_conflict(uintptr_t address, size_t size, char* note, size_t note_size) {
+    if (!note || !note_size) return KILN_ERR_INVALID_ARGUMENT;
+    note[0] = '\0';
+    try {
+        uint32_t state = KILN_CODE_UNKNOWN;
+        uint64_t generation = 0;
+        code::ConflictSample sample;
+        const KilnResult rc = code::registry().code_state(code_image(), address, size, &state, &generation, &sample);
+        if (rc != KILN_OK) return rc;
+        if (state != KILN_CODE_FOREIGN || !sample.first) return KILN_ERR_NOT_FOUND;
+        const std::string text = sigdb::code_difference_note(address, sample.file.data(), sample.live.data(), size,
+                                                            sample.first - address);
+        if (text.empty()) return KILN_ERR_NOT_FOUND;
+        std::snprintf(note, note_size, "%s", text.c_str());
+        return KILN_OK;
+    } catch (...) {
+        return KILN_ERR_INTERNAL;
+    }
+}
+
 const KilnHooksInternalApi kInternalTable = {
     {sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION},
     &h_protect_code_ranges,
+    &describe_code_conflict,
 };
 
 }  // namespace

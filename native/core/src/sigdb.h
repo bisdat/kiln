@@ -83,6 +83,8 @@ bool code_from_disk();  // true when the file's .text is in use, false on the li
 // n bytes of the exe file's code (relocated like the live image) at a live address; false on the live fallback or when
 // the range is outside .text.
 bool file_bytes(uintptr_t live_addr, uint8_t* out, size_t n);
+// The same patch location/redirect attribution used by the hook map, for a known differing byte in a read range.
+std::string code_difference_note(uintptr_t address, const uint8_t* file, const uint8_t* live, size_t size, size_t off);
 // The sigdb symbol (core first, then fragments) resolved to exactly this address, or "".
 std::string symbol_name_at(uintptr_t live_addr);
 // A hook-map extension (hooks::add_map_extension): state/hooks.json "codePatches", every place the live code differs

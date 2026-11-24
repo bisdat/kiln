@@ -60,6 +60,12 @@ inline KilnResult read_original(const Image& image, uintptr_t address, void* out
     return KILN_OK;
 }
 
+// File and live bytes from the same guarded read that produced FOREIGN. Only populated by the internal diagnostic.
+struct ConflictSample {
+    uintptr_t first = 0;
+    std::vector<uint8_t> file, live;
+};
+
 // What protect() found, for the caller's log line.
 struct ProtectOutcome {
     size_t added = 0, added_bytes = 0;  // ranges (and their bytes) newly protected
@@ -115,7 +121,7 @@ private:
         return false;
     }
 
-    uint32_t classify(uintptr_t address, const uint8_t* file, const uint8_t* live, size_t size) const {
+    uint32_t classify(uintptr_t address, const uint8_t* file, const uint8_t* live, size_t size, uintptr_t* first_foreign = nullptr) const {
         bool managed = false, foreign = false;
         for (size_t i = 0; i < size; ++i) {
             if (live[i] == file[i]) continue;
@@ -131,7 +137,10 @@ private:
                 value = it->original[offset];
             }
             if (value == file[i]) managed = true;
-            else foreign = true;
+            else {
+                if (!foreign && first_foreign) *first_foreign = at;
+                foreign = true;
+            }
         }
         return foreign ? KILN_CODE_FOREIGN : managed ? KILN_CODE_MANAGED : KILN_CODE_ORIGINAL;
     }
@@ -161,14 +170,21 @@ public:
     // invalidates cached ownership observations. Its later sweep publishes the new chain under lock().
     void note_chain_fault() { generation_.fetch_add(1, std::memory_order_relaxed); }
 
-    KilnResult code_state(const Image& image, uintptr_t address, size_t size, uint32_t* state, uint64_t* generation) {
+    KilnResult code_state(const Image& image, uintptr_t address, size_t size, uint32_t* state, uint64_t* generation,
+                          ConflictSample* conflict = nullptr) {
         if (!state || !generation || !valid_range(image, address, size)) return KILN_ERR_INVALID_ARGUMENT;
         std::vector<uint8_t> file(size), live(size), second(size);
         if (!image.file || !image.file(address, file.data(), size)) return KILN_ERR_UNAVAILABLE;
         auto guard = lock();
         const bool readable = image.live && image.live(address, live.data(), size) &&
             image.live(address, second.data(), size) && live == second;
-        const uint32_t result = readable ? classify(address, file.data(), live.data(), size) : KILN_CODE_UNKNOWN;
+        uintptr_t changed = 0;
+        const uint32_t result = readable ? classify(address, file.data(), live.data(), size, conflict ? &changed : nullptr)
+                                         : KILN_CODE_UNKNOWN;
+        if (conflict) {
+            *conflict = {};
+            if (result == KILN_CODE_FOREIGN) *conflict = {changed, std::move(file), live};
+        }
         if (observed_address_ != address || observed_size_ != size || observed_readable_ != readable ||
             observed_state_ != result || (readable && observed_ != live)) touch_locked();
         observed_address_ = address;

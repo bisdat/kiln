@@ -52,10 +52,15 @@ typedef struct KilnCodeRange {
 typedef struct KilnHooksInternalApi {
     KilnServiceHeader header; /* { sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION } */
     KilnResult(KILN_CALL* protect_code_ranges)(uint64_t owner, const KilnCodeRange* ranges, size_t n, KilnStr reason);
+    /* Diagnostic only: when the same range still reads FOREIGN, describe the first unaccounted byte and
+     * a redirect's destination if identifiable. The destination is not proof of who wrote a patch.
+     * Never use the result for admission. Returns NOT_FOUND if no foreign byte is stable enough to report. */
+    KilnResult(KILN_CALL* describe_code_conflict)(uintptr_t address, size_t size, char* note, size_t note_size);
 } KilnHooksInternalApi;
 
 }  // extern "C"
 
 static_assert(sizeof(KilnCodeRange) == 16 && offsetof(KilnCodeRange, size) == 8, "KilnCodeRange");
-static_assert(sizeof(KilnHooksInternalApi) == 16 && offsetof(KilnHooksInternalApi, protect_code_ranges) == 8,
+static_assert(sizeof(KilnHooksInternalApi) == 24 && offsetof(KilnHooksInternalApi, protect_code_ranges) == 8 &&
+              offsetof(KilnHooksInternalApi, describe_code_conflict) == 16,
               "kiln.internal.hooks v1 (Kiln-internal; checked with the build stamp, not an ABI promise)");

@@ -17,7 +17,8 @@ std::map<uintptr_t,uint32_t> code_states;
 uintptr_t late_foreign=0;
 uint32_t installs=0, eligibility=0, after_payment=0, native_payment=4, payment_calls=0;
 uint8_t storage[32]={}, recipe[0xb0]={};
-std::string last_warn;
+std::string last_warn, last_info;
+uintptr_t report_conflict_at=0;
 }
 namespace kitems {
 Engine E{};
@@ -36,8 +37,9 @@ uint64_t items_next_ticket() { std::abort(); }
 bool read_inventory(uintptr_t,void*,KilnEntity,ReadOut*,unsigned long*) { std::abort(); }
 uintptr_t items_server_world() { return 0; }
 void items_log(int level,const char* f,...) {
-    if(level!=KILN_LOG_WARN)return;
-    char b[512];va_list a;va_start(a,f);std::vsnprintf(b,sizeof b,f,a);va_end(a);fixture::last_warn=b;
+    if(level!=KILN_LOG_WARN && level!=KILN_LOG_INFO)return;
+    char b[1024];va_list a;va_start(a,f);std::vsnprintf(b,sizeof b,f,a);va_end(a);
+    (level==KILN_LOG_WARN ? fixture::last_warn : fixture::last_info)=b;
 }
 uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
@@ -90,7 +92,17 @@ KilnResult KILN_CALL code_state(uintptr_t at,size_t n,uint32_t* out,uint64_t* ge
 KilnResult KILN_CALL revoke(KilnHandle) {return KILN_OK;}
 uintptr_t KILN_CALL caller(KilnHandle h) {return h==reinterpret_cast<uintptr_t>(&fetch)?fixture::fetch_ret:fixture::ret;}
 KilnHooksApi hooks=[] {KilnHooksApi t{};t.header={sizeof t,KILN_HOOKS_VERSION};t.raw_detour=&raw;t.caller=&caller;t.revoke=&revoke;t.code_state=&code_state;return t;}();
-const void* KILN_CALL service(KilnStr,uint32_t) {return &hooks;}
+KilnResult KILN_CALL describe_conflict(uintptr_t at,size_t n,char* text,size_t size) {
+    if(fixture::report_conflict_at < at || fixture::report_conflict_at-at >= n) return KILN_ERR_NOT_FOUND;
+    std::snprintf(text,size," (first unrecognised difference at +0x%llx, call redirected to example.dll)",
+                  static_cast<unsigned long long>(fixture::report_conflict_at-at));
+    return KILN_OK;
+}
+KilnHooksInternalApi internal_hooks={{sizeof internal_hooks,KILN_HOOKS_INTERNAL_VERSION},nullptr,&describe_conflict};
+const void* KILN_CALL service(KilnStr name,uint32_t) {
+    if(std::string_view(name.ptr,name.len)==KILN_HOOKS_INTERNAL_SERVICE) return &internal_hooks;
+    return &hooks;
+}
 }
 int main() {
     using namespace kitems;
@@ -114,6 +126,12 @@ int main() {
         preview_hook_on_demand();CHECK(fixture::installs==0 && fixture::last_warn.find(name)!=std::string::npos);
     }
     fixture::code_states.clear();g_preview_failed=false;
+    fixture::report_conflict_at=g_preview_pay+0x10e;
+    fixture::code_states[fixture::report_conflict_at]=KILN_CODE_FOREIGN;
+    preview_hook_on_demand();
+    CHECK(fixture::installs==0 && fixture::last_warn.find("InventoryPay code state FOREIGN")!=std::string::npos &&
+          fixture::last_warn.find("+0x10e, call redirected to example.dll")!=std::string::npos);
+    fixture::report_conflict_at=0;fixture::code_states.clear();g_preview_failed=false;
     preview_hook_on_demand();CHECK(fixture::installs==3 && g_preview_hooked.load());
     uint8_t tx[0x100]={};void* job=reinterpret_cast<void*>(1);void* ctx=&job;wr(tx,0,ctx);wr(tx,8,reinterpret_cast<void*>(1));
     uint16_t accessor=1;wr(tx,0x18,&accessor);wr(tx,0x20,&accessor);tx[0xb1]=2;fixture::storage[8]=2;wr(fixture::storage,0,reinterpret_cast<void*>(1));
@@ -125,15 +143,18 @@ int main() {
     uint32_t display=99;
     CHECK(craft_adjust_impl(7,10,4,nullptr,&display)==0); // no status-as-count shortcut, even with stock
     CHECK(run()==0 && fixture::payment_calls==1); // linked-only authorized stock, native material shortage only
-    CHECK(!t_preview.tx); // scope never leaks to a real craft, another recipe or another worker
+    CHECK(!t_preview.tx && !t_preview_diag); // scope never leaks to a real craft, another recipe or another worker
     CHECK(craft_preview_impl(tx,&costs,1,1,nullptr,g_preview_paid,4)==4);
     stock[1].count=1;t_set_craft_stock(stock,2);CHECK(run()==4); // every ingredient, not just the displayed recipe count
+    CHECK(fixture::last_info.find("snapshot-insufficient (payment 4, item 0x00000008, need 2, counted 1")!=std::string::npos);
     stock[1].count=2;t_set_craft_stock(stock,2);
     fixture::eligibility=4;const auto called=fixture::payment_calls;CHECK(run()==4 && fixture::payment_calls==called);
+    CHECK(fixture::last_info.find("no-matching-payment (payment not-observed")!=std::string::npos);
     fixture::eligibility=5;CHECK(run()==5);fixture::eligibility=0;
     for(uint32_t code : {2u,3u,5u}) {fixture::native_payment=code;CHECK(run()==code);}
     fixture::native_payment=4;
     fixture::base_page_error=0x1f;fixture::base_fetches=0;CHECK(run()==4);
+    CHECK(fixture::last_info.find("native-page-read-error")!=std::string::npos);
     CHECK(fixture::base_fetches==1 && fixture::last_outer_error==0 && fixture::last_outer_left==5);
     fixture::native_payment=0;CHECK(run()==0);fixture::native_payment=4;fixture::base_page_error=0;
     fixture::skip_base_fetch=true;CHECK(run()==4);fixture::skip_base_fetch=false;
@@ -144,15 +165,19 @@ int main() {
     uint8_t outside[56]={};CHECK(hk_preview_fetch(outside,tx,2400)==outside && outside[0]==0x1f);CHECK(run()==0);
     CHECK(!t_preview_fetch);
     fixture::native_error=0x0b;CHECK(run()==4);fixture::native_error=0;
+    g_log_preview_payment.budget.store(2);
     fixture::observe_take=false;CHECK(run()==4);fixture::observe_take=true;
+    CHECK(fixture::last_info.find("no-native-material-take")!=std::string::npos);
     fixture::null_take=true;CHECK(run()==4);fixture::null_take=false;
     fixture::bad_remainder=true;CHECK(run()==4);fixture::bad_remainder=false;
     for(uint32_t code : {2u,4u,5u}) {fixture::after_payment=code;CHECK(run()==code);} // room, water, output checks remain native
     fixture::after_payment=0;
     fixture::native_payment=0;CHECK(run()==0); // bag/native/CBS already pays: unmodified
     fixture::native_payment=4;
-    fixture::ret=0x9999;CHECK(run()==4);fixture::ret=g_preview_ret; // actual hosted/server RecipeApply call is NOT the UI dry run
-    fixture::storage[8]=0;CHECK(run()==4);fixture::storage[8]=2; // dedicated/hosted authoritative storage stays untouched
+    fixture::last_info.clear();fixture::ret=0x9999;CHECK(run()==4);fixture::ret=g_preview_ret;
+    CHECK(fixture::last_info.empty()); // hosted/server RecipeApply is not this desktop's exact UI dry run
+    fixture::storage[8]=0;CHECK(run()==4);fixture::storage[8]=2;
+    CHECK(fixture::last_info.find("client-storage")!=std::string::npos);
     tx[0xb0]=0x40;CHECK(run()==4);tx[0xb0]=0;
     tx[0xb1]=1;CHECK(run()==4);tx[0xb1]=2;
     E.tx_ok=false;CHECK(run()==4);E.tx_ok=true;

@@ -473,6 +473,16 @@ int main() {
     check(query() == KILN_OK && state == 1 && generation > foreign, "fresh observed byte change bumps generation even if ownership did not change");
     live[79] ^= 1;
     check(query() == KILN_OK && state == 2, "foreign byte outside detour within query is state 2");
+    ConflictSample sample;
+    check(r.code_state(image, text, 64, &state, &generation, &sample) == KILN_OK && state == KILN_CODE_FOREIGN &&
+              sample.first == base + 79 && sample.file.size() == 64 && sample.live.size() == 64 &&
+              sample.live[63] != sample.file[63],
+          "conflict diagnostic skips the managed prologue, identifies the interior byte and keeps the checked bytes");
+    torn = true;
+    check(r.code_state(image, text, 64, &state, &generation, &sample) == KILN_OK && state == KILN_CODE_UNKNOWN &&
+              !sample.first && sample.live.empty(), "ambiguous reads do not report an attributed conflict");
+    torn = false;
+    live[16] = file[16];
     live[79] ^= 1;
     { auto guard = r.lock(); std::memcpy(live.data() + 48, original.data(), original.size()); r.remove_locked(token); }
     check(query() == KILN_OK && state == 0, "physical patch removal returns state 0");

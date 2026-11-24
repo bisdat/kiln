@@ -234,18 +234,25 @@ inline bool relay_shape(const uint8_t* p) {
 // whether the new target is a place such a call is sent to (sigdb: a relay or a loaded module). The byte before a
 // call cannot be checked for being an instruction boundary here, so an E8 inside another instruction's immediate
 // passes when its four bytes read as such a pair of targets; the tests on both targets are what keeps that rare.
-inline bool redirected_call_at(const uint8_t* file, const uint8_t* live, size_t size, size_t start, uintptr_t live_text,
-                               uintptr_t image_base, size_t image_size, bool (*call_lands)(uintptr_t) = nullptr) {
+// The sampled byte span need not be the whole code section. The original callee must be in the section, not the span.
+inline bool redirected_call_in_span(const uint8_t* file, const uint8_t* live, size_t size, size_t start, uintptr_t span,
+                                    uintptr_t code, size_t code_size, uintptr_t image_base, size_t image_size,
+                                    bool (*call_lands)(uintptr_t) = nullptr) {
     if (start >= size || size - start < 5 || file[start] != 0xE8 || live[start] != 0xE8) return false;
     int32_t was, now;
     std::memcpy(&was, file + start + 1, 4);
     std::memcpy(&now, live + start + 1, 4);
     if (was == now) return false;
-    const uintptr_t next = live_text + start + 5;
+    const uintptr_t next = span + start + 5;
     const uintptr_t from = next + static_cast<intptr_t>(was), to = next + static_cast<intptr_t>(now);
-    const bool in_code = from >= live_text && from - live_text < size;
+    const bool in_code = from >= code && from - code < code_size;
     const bool outside = to < image_base || to - image_base >= image_size;
     return in_code && outside && (!call_lands || call_lands(to));
+}
+
+inline bool redirected_call_at(const uint8_t* file, const uint8_t* live, size_t size, size_t start, uintptr_t live_text,
+                               uintptr_t image_base, size_t image_size, bool (*call_lands)(uintptr_t) = nullptr) {
+    return redirected_call_in_span(file, live, size, start, live_text, live_text, size, image_base, image_size, call_lands);
 }
 
 // A complete entry jump to outside the game image. The caller establishes the function boundary.

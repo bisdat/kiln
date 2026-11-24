@@ -129,21 +129,16 @@ std::string module_at(uintptr_t a) {
 
 // The target of a jmp or call at `a` (E9/E8 rel32, EB rel8, FF 25/FF 15 [rip+disp32], mov rax,imm64 + jmp rax),
 // or 0.
-uintptr_t jump_target(uintptr_t a) {
-    if (!readable(a, 14)) return 0;
-    const auto* p = reinterpret_cast<const uint8_t*>(a);
+template<class ReadSlot>
+uintptr_t jump_target_from(uintptr_t a, const uint8_t* p, size_t size, ReadSlot read_slot) {
     int32_t d = 0;
-    if (p[0] == 0xE9 || p[0] == 0xE8) return std::memcpy(&d, p + 1, 4), a + 5 + d;
-    if (p[0] == 0xEB) return a + 2 + static_cast<int8_t>(p[1]);
-    if (p[0] == 0xFF && (p[1] == 0x25 || p[1] == 0x15)) {
+    if (size >= 5 && (p[0] == 0xE9 || p[0] == 0xE8)) return std::memcpy(&d, p + 1, 4), a + 5 + d;
+    if (size >= 2 && p[0] == 0xEB) return a + 2 + static_cast<int8_t>(p[1]);
+    if (size >= 6 && p[0] == 0xFF && (p[1] == 0x25 || p[1] == 0x15)) {
         std::memcpy(&d, p + 2, 4);
-        const uintptr_t slot = a + 6 + d;
-        uint64_t t = 0;
-        if (!readable(slot, 8)) return 0;
-        std::memcpy(&t, reinterpret_cast<const void*>(slot), 8);
-        return static_cast<uintptr_t>(t);
+        return read_slot(a + 6 + d);
     }
-    if (p[0] == 0x48 && p[1] == 0xB8 && p[10] == 0xFF && p[11] == 0xE0) {
+    if (size >= 12 && p[0] == 0x48 && p[1] == 0xB8 && p[10] == 0xFF && p[11] == 0xE0) {
         uint64_t t = 0;
         std::memcpy(&t, p + 2, 8);
         return static_cast<uintptr_t>(t);
@@ -151,9 +146,17 @@ uintptr_t jump_target(uintptr_t a) {
     return 0;
 }
 
-// What patched the live code at `a`: follows jmps (relays, trampolines) to the first module outside the exe.
-std::string patched_by(uintptr_t a) {
-    uintptr_t t = jump_target(a);
+uintptr_t jump_target(uintptr_t a) {
+    if (!readable(a, 14)) return 0;
+    return jump_target_from(a, reinterpret_cast<const uint8_t*>(a), 14, [](uintptr_t slot) -> uintptr_t {
+        uintptr_t target = 0;
+        if (readable(slot, sizeof target)) std::memcpy(&target, reinterpret_cast<const void*>(slot), sizeof target);
+        return target;
+    });
+}
+
+// Destination attribution, not proof of who wrote the code: follows relays to the first module outside the exe.
+std::string patch_destination(uintptr_t t) {
     if (!t) return "bytes changed in place";
     const uintptr_t exe_lo = image().base, exe_hi = image().base + image().size;
     for (int hop = 0; hop < 4; ++hop) {
@@ -186,6 +189,8 @@ std::string patched_by(uintptr_t a) {
     return b;
 }
 
+std::string patched_by(uintptr_t a) { return patch_destination(jump_target(a)); }
+
 // Where a redirected call may go (pe::redirected_call_at): into a loaded module, or to a relay as hookers write
 // them. Relays take more than one layout — an indirect jump through a pointer slot at any displacement (greeneye's
 // sits 10 bytes past the instruction, XHL's is a per-page pointer table), a trampoline, a generated stub — so follow
@@ -209,7 +214,8 @@ bool call_lands(uintptr_t to) {
 // One line naming the first difference the hook check rejected: RVA, file/live bytes, and who patched it. Without
 // this the fallback clears the diff runs and the log can only say the check failed, never which patch tripped it.
 std::string first_difference_note(const uint8_t* file, const uint8_t* live, size_t size, uintptr_t live_text,
-                                  uintptr_t image_base, size_t image_size, uint32_t text_rva, size_t off) {
+                                  uintptr_t image_base, size_t image_size, uint32_t text_rva, size_t off,
+                                  uintptr_t code_text, size_t code_size, bool captured = false) {
     if (off >= size) return "";
     const size_t n = std::min<size_t>(8, size - off);
     std::string fb, lb;
@@ -223,12 +229,25 @@ std::string first_difference_note(const uint8_t* file, const uint8_t* live, size
     // Attribute from the patch site. A redirected call's first differing byte is in the operand, so the bytes there
     // decode as nothing: back up to the E8 and attribute from the call. The shape check runs without call_lands —
     // the call was rejected, so the landing test is what failed; the targets are what identify it.
-    std::string by = patched_by(live_text + off);
-    if (by == "bytes changed in place") {
+    // For the already-checked sample, don't re-read the instruction while naming its destination. An indirect
+    // pointer not captured in the sample isn't evidence; the text must not attribute it to a later patch.
+    const auto by_at = [&](size_t pos) {
+        if (!captured) return patched_by(live_text + pos);
+        return patch_destination(jump_target_from(live_text + pos, live + pos, size - pos,
+            [&](uintptr_t slot) -> uintptr_t {
+                uintptr_t target = 0;
+                if (slot >= live_text && slot - live_text < size && size - (slot - live_text) >= sizeof target)
+                    std::memcpy(&target, live + (slot - live_text), sizeof target);
+                return target;
+            }));
+    };
+    std::string by = by_at(off);
+    if (captured || by == "bytes changed in place") {
         for (uintptr_t back = 1; back <= 4 && off >= back; ++back) {
             const size_t start = off - back;
-            if (!pe::redirected_call_at(file, live, size, start, live_text, image_base, image_size)) continue;
-            const std::string call_by = patched_by(live_text + start);
+            if (!pe::redirected_call_in_span(file, live, size, start, live_text, code_text, code_size,
+                                             image_base, image_size)) continue;
+            const std::string call_by = by_at(start);
             if (call_by.rfind("jmp to ", 0) == 0) by = "call redirected to " + call_by.substr(7);
             break;
         }
@@ -306,7 +325,7 @@ void init_code() {
         // Name the first in-place difference (RVA, file/live bytes, who patched it) before the evidence is cleared,
         // so a report says which patch tripped the check.
         const std::string first = first_difference_note(text, img.text, size, live, img.base, img.size, ft.text_rva,
-                                                        g_code.in_place.first.front());
+                                                        g_code.in_place.first.front(), live, size);
         g_code.runs.clear();
         g_code.in_place = {};
         return fallback("file/live differences are not recognised inline hooks and the exe file is no verified "
@@ -1358,6 +1377,13 @@ bool file_bytes(uintptr_t live_addr, uint8_t* out, size_t n) {
     if (!f || n > static_cast<size_t>(cv.end() - f)) return false;
     std::memcpy(out, f, n);
     return true;
+}
+
+std::string code_difference_note(uintptr_t address, const uint8_t* file, const uint8_t* live, size_t size, size_t off) {
+    const auto& img = image();
+    return first_difference_note(file, live, size, address, img.base, img.size,
+                                 static_cast<uint32_t>(address - img.base), off,
+                                 reinterpret_cast<uintptr_t>(img.text), img.text_size, true);
 }
 
 std::string symbol_name_at(uintptr_t live_addr) {

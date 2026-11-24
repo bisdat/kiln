@@ -214,6 +214,9 @@ bool file_bytes(uintptr_t a, uint8_t* out, size_t n) {
     if (a == g_pause_at.load()) file_read_noted();
     return true;
 }
+std::string code_difference_note(uintptr_t address, const uint8_t*, const uint8_t*, size_t, size_t off) {
+    return "diagnostic at " + std::to_string(address + off);
+}
 std::atomic<int> g_sym_calls{0};
 std::string symbol_name_at(uintptr_t) {
     ++g_sym_calls;
@@ -2853,9 +2856,9 @@ void test_protected_ranges() {
     std::puts("-- kiln.internal.hooks: code protected for engine calls refuses installs, patches and writes over it");
     namespace code = kiln::hooks::code;
     const KilnHooksInternalApi* I = kiln::hooks::internal_table();
-    check(I && I->header.size == sizeof(KilnHooksInternalApi) && I->header.size == 16 &&
-              I->header.version == KILN_HOOKS_INTERNAL_VERSION && I->protect_code_ranges,
-          "kiln.internal.hooks v1: 16 bytes, protect_code_ranges set");
+    check(I && I->header.size == sizeof(KilnHooksInternalApi) && I->header.size == 24 &&
+              I->header.version == KILN_HOOKS_INTERNAL_VERSION && I->protect_code_ranges && I->describe_code_conflict,
+          "kiln.internal.hooks v1: protect_code_ranges and diagnostic entry available");
     const size_t base_count = code::registry().protected_count();
     const KilnStr why{"engine call PropSpawnSubmit", 27};
     auto protect = [&](KilnOwner o, uintptr_t at, size_t n) {

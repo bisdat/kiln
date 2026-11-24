@@ -833,6 +833,36 @@ static void redirected_capture_on_file_scan(const char* dir) {
     kiln::test_verified = true;
 }
 
+static void conflict_note_from_a_sampled_function() {
+    Loaded x(false, 0x4000);
+    uint8_t* const m = x.live.data();
+    const uintptr_t base = kiln::test_image.base;
+    constexpr size_t start = TestPe::kFunc, call = 10;
+    std::array<uint8_t, 32> file{};
+    std::memcpy(file.data(), m + start, file.size());
+    // Mirrors InventoryPay: an interior call to a different native function, redirected to a loaded mod.
+    const int32_t rel = static_cast<int32_t>(0x3840 - (start + call + 5));
+    std::memcpy(m + start + call + 1, &rel, 4);
+    const uint8_t* const live = m + start;
+    const size_t diff = std::mismatch(file.begin(), file.end(), live).first - file.begin();
+    test_query = true;
+    test_mbi = {m, x.live.size(), MEM_COMMIT, 4};
+    test_module_lo = base + 0x3800;
+    test_module_hi = base + 0x3900;
+    std::array<uint8_t, 32> captured{};
+    std::copy_n(live, captured.size(), captured.begin());
+    const auto note = sigdb::code_difference_note(base + start, file.data(), captured.data(), file.size(), diff);
+    CHECK(note.find("call redirected to relay-mod.dll+0x40") != std::string::npos,
+          "conflict note: an interior call whose original target is outside the sampled function names the destination module");
+    const int32_t later = static_cast<int32_t>(0x3870 - (start + call + 5));
+    std::memcpy(m + start + call + 1, &later, 4);
+    const auto original_note = sigdb::code_difference_note(base + start, file.data(), captured.data(), file.size(), diff);
+    CHECK(original_note == note && original_note.find("relay-mod.dll+0x70") == std::string::npos,
+          "conflict note: replacing the live instruction does not change attribution of the captured instruction");
+    test_module_lo = test_module_hi = 0;
+    test_query = false;
+}
+
 // sigdb_runtime_test <scratch folder> [--client <enshrouded.exe>] [--sigdb <sigdb/symbols>]
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
@@ -845,6 +875,7 @@ int main(int argc, char** argv) {
     diff_budget();
     redirected_captures_skipped(argv[1]);
     relay_layouts();
+    conflict_note_from_a_sampled_function();
     redirected_capture_on_file_scan(argv[1]);
     std::filesystem::path sigdb_dir = std::filesystem::path(__FILE__).parent_path() / "../../../sigdb/symbols";
     for (int i = 2; i + 1 < argc; i += 2) {

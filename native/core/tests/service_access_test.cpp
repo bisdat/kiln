@@ -74,7 +74,7 @@ const KilnLaunchInternalApi internal_own{{sizeof(KilnLaunchInternalApi), KILN_LA
 const KilnLaunchInternalApi* internal_table() { return &internal_own; }  // stands for launch.cpp's internal table
 }  // namespace launch
 namespace hooks {
-const KilnHooksInternalApi internal_own{{sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION}, nullptr};
+const KilnHooksInternalApi internal_own{{sizeof(KilnHooksInternalApi), KILN_HOOKS_INTERNAL_VERSION}, nullptr, nullptr};
 const KilnHooksInternalApi* internal_table() { return &internal_own; }  // stands for hooks_protect.cpp's table
 }  // namespace hooks
 namespace mod_values {
@@ -230,7 +230,7 @@ void internal_hooks_views() {
         check(api_service_services(name, 2) == nullptr, std::string("...not for a later version").append(mode).c_str());
     }
     g_hooks = true;
-    const KilnHooksInternalApi spoof{{sizeof(KilnHooksInternalApi), 1}, nullptr};
+    const KilnHooksInternalApi spoof{{sizeof(KilnHooksInternalApi), 1}, nullptr, nullptr};
     alive.insert(7);
     service_owner_add(7);
     const int before = caps::published;

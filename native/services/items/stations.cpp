@@ -42,6 +42,7 @@
 #include "equip.h"
 #include "equip_logic.h"
 #include "kiln_hook.hpp"
+#include "../../core/src/hooks_protect_internal.h"
 #include "instances.h"
 #include "sets.h"
 #include "stations_logic.h"
@@ -1213,22 +1214,29 @@ uintptr_t g_preview_remove = 0, g_preview_fetch = 0, g_preview_fetch_ret = 0, g_
 uintptr_t g_preview_stock = 0, g_preview_rollback = 0;
 bool g_preview_feat = false, g_preview_failed = false;
 std::atomic<bool> g_preview_hooked{false};
-LogLimit g_log_preview{12};
+LogLimit g_log_preview{12}, g_log_preview_entry{12}, g_log_preview_payment{16}, g_log_preview_native{8};
 struct PreviewCall {
     void* tx = nullptr;
     uint32_t owner = 0, amount = 0, recipe = 0;
     RawCosts costs{};
-    bool saw_take = false, take_error = false;
+    bool saw_take = false;
+    const char* take_error = nullptr;
 };
 thread_local PreviewCall t_preview;
 
 // Foreign (e.g. CBS), unreadable and unknown code stays vanilla. RawHook may join Kiln's existing physical detour,
 // never patch over a foreign one. Recheck at entry as another loader can install later.
-// *why: the dependency that failed, for the stand-down line.
-bool preview_code_ok(const char** why = nullptr) {
+struct PreviewCodeRefusal {
+    const char* name = nullptr;
+    uintptr_t at = 0;
+    size_t size = 0;
+    uint32_t state = KILN_CODE_UNKNOWN;
+    KilnResult rc = KILN_ERR_UNAVAILABLE;
+};
+bool preview_code_ok(PreviewCodeRefusal* why = nullptr) {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
-        if (why) *why = "kiln.hooks' code-state check";
+        if (why) why->name = "kiln.hooks' code-state check";
         return false;
     }
     struct Dep { uintptr_t at; size_t size; const char* name; };
@@ -1239,32 +1247,76 @@ bool preview_code_ok(const char** why = nullptr) {
                          Dep{g_preview_ret ? g_preview_ret - 5 : 0, 19, "the crafting menu's RecipeApply call"}}) {
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
-        if (!d.at || h->code_state(d.at, d.size, &state, &generation) != KILN_OK ||
-            (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
-            if (why) *why = d.name;
+        const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+        if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+            if (why) *why = {d.name, d.at, d.size, state, rc};
             return false;
         }
     }
     return true;
 }
+// Only on a rate-limited refusal, after the decision. A decoded destination is evidence, not permission to chain.
+void preview_code_note(const PreviewCodeRefusal& failure, char* note, size_t n) {
+    if (!failure.name || !n) return;
+    char detail[384]{};
+    const char* state = failure.rc != KILN_OK ? "unavailable" : failure.state == KILN_CODE_FOREIGN ? "FOREIGN" : "UNKNOWN";
+    if (failure.rc == KILN_OK && failure.state == KILN_CODE_FOREIGN) {
+        const auto* hooks = static_cast<const KilnHooksInternalApi*>(g_api->service(str(KILN_HOOKS_INTERNAL_SERVICE),
+                                                                                    KILN_HOOKS_INTERNAL_VERSION));
+        if (hooks && hooks->header.size >= offsetof(KilnHooksInternalApi, describe_code_conflict) + sizeof(hooks->describe_code_conflict) &&
+            hooks->describe_code_conflict)
+            hooks->describe_code_conflict(failure.at, failure.size, detail, sizeof detail);
+    }
+    std::snprintf(note, n, ": %s code state %s (result %d)%s", failure.name, state, static_cast<int>(failure.rc), detail);
+}
+
+struct PreviewDiagnostic {
+    void* tx;
+    const char* entry = "entry-arguments";
+    const char* payment = "no-matching-payment";
+    PreviewCodeRefusal code;
+    uint32_t recipe = 0, game_payment = 0, item = 0;
+    uint64_t need = 0, have = 0;
+    unsigned long fault = 0;
+    bool saw_payment = false;
+};
+thread_local PreviewDiagnostic* t_preview_diag = nullptr;
+
+void log_preview_refusal(const PreviewDiagnostic& diag, int32_t amount, uint32_t result) {
+    // Separate budgets: a menu can preview many native-only refusals before the player reaches the affected recipe.
+    auto& limit = diag.entry ? g_log_preview_entry : diag.saw_payment && diag.payment ? g_log_preview_payment : g_log_preview_native;
+    if (!limit.take()) return;
+    char note[512]{}, payment[32]{};
+    preview_code_note(diag.code, note, sizeof note);
+    if (diag.saw_payment) std::snprintf(payment, sizeof payment, "%u", diag.game_payment);
+    else std::snprintf(payment, sizeof payment, "not-observed");
+    LOGI("stations: linked craft preview left recipe 0x%08x x%d to native result %u: %s (payment %s, item 0x%08x, "
+         "need %llu, counted %llu, fault 0x%lx)%s", diag.recipe, amount, result,
+         diag.entry ? diag.entry : diag.payment ? diag.payment : "native-check-after-supplement", payment, diag.item,
+         static_cast<unsigned long long>(diag.need), static_cast<unsigned long long>(diag.have), diag.fault, note);
+}
+
 // InventoryRemoveItems can skip failed page fetches and still answer {error=0,left=remaining}. Observe its actual
 // participating fetches inside each native PayMaterial call, including base-stock payers, without another simulation.
 using PreviewFetchFn = void*(__fastcall*)(void* out, void* tx, uint32_t page);
-struct PreviewFetchRead { void* tx; uint32_t calls = 0; bool error = false; };
+struct PreviewFetchRead { void* tx; uint32_t calls = 0; const char* error = nullptr; };
 thread_local PreviewFetchRead* t_preview_fetch = nullptr;
 void* __fastcall hk_preview_fetch(void* out, void* tx, uint32_t page) {
     const uintptr_t ret = h_preview_fetch.caller();
     PreviewFetchRead* const read = t_preview_fetch && t_preview_fetch->tx == tx && t_preview.tx == tx ? t_preview_fetch : nullptr;
     void* const result = h_preview_fetch.original<PreviewFetchFn>()(out, tx, page);
     if (read) {
-        if (read->calls == UINT32_MAX) read->error = true;
+        if (read->calls == UINT32_MAX) read->error = "page-observation-overflow";
         else ++read->calls;
         uint8_t error = 0xff;
         __try {
             // The native fetch always returns its out pointer; success carries a nonnull inventory view at +8.
             if (result && result == out && rd<void*>(result, 8)) error = rd<uint8_t>(result, 0);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
-        read->error = read->error || error != 0 || (ret != g_preview_fetch_ret && ret != g_preview_preferred_ret);
+        if (!read->error) {
+            if (error != 0) read->error = "native-page-read-error";
+            else if (ret != g_preview_fetch_ret && ret != g_preview_preferred_ret) read->error = "unrecognized-page-caller";
+        }
     }
     return result;
 }
@@ -1282,7 +1334,11 @@ PayOut* __fastcall hk_preview_take(PayOut* out, void* tx, uint32_t entity, uint3
         uint8_t error = 0xff;
         __try { if (result && result == out && result->left <= count) error = result->error; }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
-        t_preview.take_error = t_preview.take_error || error != 0 || !read.calls || read.error;
+        if (!t_preview.take_error) {
+            if (error != 0) t_preview.take_error = "native-material-take-error";
+            else if (!read.calls) t_preview.take_error = "no-native-page-read";
+            else t_preview.take_error = read.error;
+        }
     }
     return result;
 }
@@ -1290,16 +1346,20 @@ struct PreviewRead {
     PreviewCall call;
     const void* recipe;
     const void* inputs;
+    const char* stage = "transaction-layout";
     bool ok = false;
 };
 void preview_read_impl(void* arg) {
     auto& j = *static_cast<PreviewRead*>(arg);
     auto* tx = static_cast<uint8_t*>(j.call.tx);
     if (!E.tx_ok) return;  // no client layout reads when the transaction feature did not qualify
+    j.stage = "transaction-mode-or-flags";
     if ((tx[0xb0] & ~0x08u) || (tx[0xb1] != 0 && tx[0xb1] != 2)) return;
+    j.stage = "client-recipe-identity";
     j.call.recipe = rd<uint32_t>(j.recipe, kRecipeId);
     void* const reg = g_client_recipes.load(std::memory_order_acquire);
     if (!j.call.recipe || !reg || find_recipe(j.call.recipe, reg) != j.recipe) return;
+    j.stage = "client-storage";
     const auto ctx = rd<void*>(tx, 0);
     const auto job = ctx ? rd<void*>(ctx, 0) : nullptr;
     Access a{};
@@ -1307,6 +1367,7 @@ void preview_read_impl(void* arg) {
     if (!a.storage || rd<uint8_t>(a.storage, 8) != 2 || !E.component_map_find || !E.read_other) return;
     void* const registry = rd<void*>(a.storage, 0);
     if (!registry) return;
+    j.stage = "client-inventory-accessors";
     // Read-only client access, deliberately NOT access_from_tx (which must remain server-only for real payment).
     for (auto [which, offset] : {std::pair<Acc, int>{A_SETUP, 0x18}, {A_INVENTORY, 0x20}}) {
         a.acc[which] = rd<uint64_t>(tx, offset);
@@ -1316,15 +1377,19 @@ void preview_read_impl(void* arg) {
     }
     PageSet pages{};
     bool initialized = false;
+    j.stage = "owner-inventory-pages";
     if (!read_pages(a, j.call.owner, &pages, &initialized) || !initialized || !pages.n || pages.n > KILN_ITEMS_MAX_INVENTORIES) return;
+    j.stage = "owner-inventory-view";
     for (uint32_t i = 0; i < pages.n; ++i) {
         PtrSize ps{};
         E.read_other(&ps, a.storage, a.acc[A_INVENTORY], pages.p[i].entity);
         if (!ps.ptr || ps.size < kInventorySize) return;
     }
+    j.stage = "preview-cost-lines";
     j.call.costs.costs = static_cast<const uint8_t*>(j.inputs);
     costs_impl(&j.call.costs);
     if (!j.call.costs.n || !E.item_find) return;
+    j.stage = "preview-item-identity";
     void* const items = rd<void*>(tx, 8);
     if (!items) return;
     for (uint32_t i = 0; i < j.call.costs.n; ++i)
@@ -1335,39 +1400,74 @@ void preview_read_impl(void* arg) {
 uint32_t __fastcall hk_preview_apply(void* tx, const void* recipe, const void* inputs, uint64_t props,
                                     const void* station, const uint32_t* workshop, uint32_t owner, int32_t amount) {
     const uintptr_t ret = h_preview_apply.caller();
-    struct Scope { PreviewCall saved = t_preview; ~Scope() { t_preview = saved; } } scope;
+    struct Scope {
+        PreviewCall saved = t_preview;
+        PreviewDiagnostic* diagnostic = t_preview_diag;
+        ~Scope() { t_preview = saved; t_preview_diag = diagnostic; }
+    } scope;
     t_preview = {};
-    if (!g_off.load() && ret == g_preview_ret && tx && recipe && inputs && owner && owner <= kMaxPlayerEntity &&
-        amount > 0 && amount <= 1000 && g_craft_on.load(std::memory_order_acquire) && preview_code_ok()) {
-        PreviewRead j{{tx, owner, static_cast<uint32_t>(amount)}, recipe, inputs};
-        unsigned long fault = 0;
-        if (guard(&preview_read_impl, &j, &fault) && j.ok) t_preview = j.call;
+    t_preview_diag = nullptr;
+    PreviewDiagnostic diag{tx};
+    const bool scoped = !g_off.load() && ret == g_preview_ret && g_craft_on.load(std::memory_order_acquire);
+    if (scoped) {
+        t_preview_diag = &diag;
+        if (tx && recipe && inputs && owner && owner <= kMaxPlayerEntity && amount > 0 && amount <= 1000) {
+            if (!preview_code_ok(&diag.code)) diag.entry = "entry-code";
+            else {
+                PreviewRead j{{tx, owner, static_cast<uint32_t>(amount)}, recipe, inputs};
+                const bool readable = guard(&preview_read_impl, &j, &diag.fault);
+                diag.recipe = j.call.recipe;
+                diag.entry = readable && j.ok ? nullptr : j.stage;
+                if (readable && j.ok) t_preview = j.call;
+            }
+        }
     }
     // All eligibility, props, water, output capacity and recipe logic stays in the game's function.
-    return h_preview_apply.original<RecipeApplyFn>()(tx, recipe, inputs, props, station, workshop, owner, amount);
+    const uint32_t result = h_preview_apply.original<RecipeApplyFn>()(tx, recipe, inputs, props, station, workshop, owner, amount);
+    if (scoped && result) log_preview_refusal(diag, amount, result);
+    return result;
 }
 
 // Called AFTER the original InventoryPay, through its already existing kiln.rules hook. Only its material-shortfall
 // code can be complemented. No stock is taken here: the UI caller rolls back. The server's real payment still checks
 // live authorizations/inventories and performs every take, bag first, with the existing no-overdraw rollback.
 uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amount, void* extra, uintptr_t ret, uint32_t game) {
-    if (game != 4 || !tx || t_preview.tx != tx || t_preview.owner != owner || t_preview.amount != amount || extra ||
-        ret != g_preview_paid || !g_preview_paid || !t_preview.saw_take || t_preview.take_error ||
-        !g_craft_on.load(std::memory_order_acquire) || g_off.load() || !preview_code_ok()) return game;
+    PreviewDiagnostic* const diag = t_preview_diag && tx && t_preview_diag->tx == tx ? t_preview_diag : nullptr;
+    if (diag) { diag->saw_payment = true; diag->game_payment = game; }
+    const auto refuse = [diag, game](const char* reason) {
+        if (diag) diag->payment = reason;
+        return game;
+    };
+    if (game != 4) return refuse("native-payment-result");
+    if (!tx || t_preview.tx != tx || t_preview.owner != owner || t_preview.amount != amount || extra)
+        return refuse("payment-scope");
+    if (ret != g_preview_paid || !g_preview_paid) return refuse("payment-caller");
+    if (!t_preview.saw_take) return refuse("no-native-material-take");
+    if (t_preview.take_error) return refuse(t_preview.take_error);
+    if (!g_craft_on.load(std::memory_order_acquire) || g_off.load()) return refuse("snapshot-off");
+    if (!preview_code_ok(diag ? &diag->code : nullptr)) return refuse("payment-code");
     RawCosts rc{static_cast<const uint8_t*>(costs), nullptr, 0, {}, {}, 0};
     unsigned long fault = 0;
-    if (!guard(&costs_impl, &rc, &fault) || !rc.n || rc.n != t_preview.costs.n) return game;
+    if (!guard(&costs_impl, &rc, &fault) || !rc.n || rc.n != t_preview.costs.n) {
+        if (diag) diag->fault = fault;
+        return refuse("payment-cost-lines");
+    }
     {
         std::lock_guard lock(g_craft_mu);
-        if (!g_craft_on.load(std::memory_order_relaxed)) return game;
+        if (!g_craft_on.load(std::memory_order_relaxed)) return refuse("snapshot-off");
         for (uint32_t i = 0; i < rc.n; ++i) {
-            if (!rc.item[i] || !rc.count[i] || rc.item[i] != t_preview.costs.item[i] || rc.count[i] != t_preview.costs.count[i]) return game;
-            for (uint32_t k = 0; k < i; ++k) if (rc.item[k] == rc.item[i]) return game;
+            if (!rc.item[i] || !rc.count[i] || rc.item[i] != t_preview.costs.item[i] || rc.count[i] != t_preview.costs.count[i])
+                return refuse("payment-cost-mismatch");
+            for (uint32_t k = 0; k < i; ++k) if (rc.item[k] == rc.item[i]) return refuse("duplicate-cost-item");
             const uint64_t need = static_cast<uint64_t>(rc.count[i]) * amount;
             const auto it = g_craft_have.find(rc.item[i]);
-            if (need > UINT32_MAX || it == g_craft_have.end() || it->second < need) return game;
+            if (need > UINT32_MAX || it == g_craft_have.end() || it->second < need) {
+                if (diag) { diag->item = rc.item[i]; diag->need = need; diag->have = it == g_craft_have.end() ? 0 : it->second; }
+                return refuse(need > UINT32_MAX ? "cost-overflow" : "snapshot-insufficient");
+            }
         }
     }
+    if (diag) diag->payment = nullptr;
     if (const uint32_t n = g_log_preview.take())
         LOGI("stations: client craft preview of recipe 0x%08x x%u: material shortfall covered by the server stock; "
              "native eligibility and output checks continue, real payment still required%s", t_preview.recipe, amount,
@@ -1376,10 +1476,11 @@ uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amou
 }
 void preview_hook_on_demand() {
     if (!g_preview_feat || g_preview_failed || g_preview_hooked.load() || !g_craft_on.load()) return;
-    if (const char* why = "the game code"; !preview_code_ok(&why)) {
+    if (PreviewCodeRefusal why; !preview_code_ok(&why)) {
         g_preview_failed = true;
-        LOGW("stations: linked craft preview stands down: %s is patched by another module or cannot be checked "
-             "(CBS/other hooks kept; the game's own craft status is used)", why);
+        char note[512]{};
+        preview_code_note(why, note, sizeof note);
+        LOGW("stations: linked craft preview stands down%s (existing hooks kept; the game's own craft status is used)", note);
         return;
     }
     if (!h_preview_fetch && !h_preview_fetch.install(g_api, g_owner, g_preview_fetch, reinterpret_cast<void*>(&hk_preview_fetch),
