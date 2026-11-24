@@ -247,12 +247,16 @@ parseable API**; use `Rules.Of` for typed rule values. The new managed surface i
 release/API version and ABI history assignments remain release-coordinator work.
 
 **Optional v1 wire extension.** The existing state prefix is byte-for-byte unchanged. An optional suffix is marker
-`0xce`, suffix version `1`, row count (1..22), then rows: stable ID byte, requested byte (0/1), other-owners byte (0/1),
+`0xce`, suffix version `1`, row count (1..255; this version writes at most 22), then rows: stable ID byte, requested byte (0/1), other-owners byte (0/1),
 UTF-8 effective/restore/lock strings (empty lock means unlocked). Explicit IDs 1..22 correspond to the table order
 above and must never be renumbered/reused; the display may be reordered independently. Strings are bounded to 512
-UTF-16 characters/2048 UTF-8 bytes; duplicates, unknown IDs/versions, invalid flags/counts/truncations and nonzero
-trailing bytes are rejected. Zero to three final transport padding bytes are accepted, including an old state without
-a suffix. A new client sends opcode 9 (`Effect`) only after support is advertised; `Item` is the stable effect ID,
+UTF-16 characters/2048 UTF-8 bytes. The suffix never costs the state message (the client fails soft): rows with an ID
+it does not know (a newer server's effects) are skipped and the known rows still show; an unknown marker or suffix
+version, an empty or truncated list, duplicate IDs, invalid flags, oversized strings or nonzero trailing bytes show the
+menu without effect rows. Nothing from a rejected row is shown, reads stay within those bounds and the channel's
+64 KiB message limit, and the client logs such a state at most once a minute. So a later server may add effect IDs
+or a new suffix version without breaking this client's Creative menu. Zero to three final transport padding bytes are
+accepted, including an old state without a suffix. A new client sends opcode 9 (`Effect`) only after support is advertised; `Item` is the stable effect ID,
 `Count` is exactly 0/1, all unrelated request fields retain their neutral defaults. Old clients ignore the suffix and
 continue using the unchanged requests. Server identity, queue/rate bounds, client trust confirmations and Flame idle
 checks are unchanged. No sensitive message or player-data field is repurposed.
