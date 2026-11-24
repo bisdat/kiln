@@ -1117,26 +1117,15 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
             done += 1;
             let r = LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
             let at = crate::library::path_of(dirs, &r)?;
-            let (path, hash) = if kind == ModKind::Plugin {
-                let file = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", m.id)))?.to_string();
-                let zp = format!("{MODS_DIR}/plugin/{file}");
-                stamp(&at);
-                entries.push((zp.clone(), Src::Disk(at.clone())));
-                (zp, crate::hash::sha256_file(&at)?.0)
-            } else {
-                let files = super::mod_files(kind, &at)?;
-                let hash = crate::hash::of_mod_records(kind, records(&files)?)?;
-                let zp = mod_path(kind, &m.id);
-                for (rel, p) in files {
-                    stamp(&p);
-                    entries.push((format!("{zp}/{rel}"), Src::Disk(p)));
-                }
-                (zp, hash)
-            };
-            if hash != m.hash {
-                return Err(err(ErrorCode::Refused, format!(
-                    "{} {} changed in its Library folder since it was imported ({hash}, the profile names {}): take it over first (Library, or kilnctl library take-over)",
-                    kind.as_str(), m.id, m.hash)));
+            let (files, hash) = library_files(dirs, &r, &at)?;
+            let path = if kind == ModKind::Plugin {
+                let file = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", m.id)))?;
+                format!("{MODS_DIR}/plugin/{file}")
+            } else { mod_path(kind, &m.id) };
+            for (rel, p) in files {
+                stamp(&p);
+                let zp = if kind == ModKind::Plugin { path.clone() } else { format!("{path}/{rel}") };
+                entries.push((zp, Src::Disk(p)));
             }
             let lib = libs.get(&(kind, m.id.clone()));
             let side = lib.and_then(|e| e.versions.iter().find(|v| v.hash == m.hash)).and_then(|v| v.side);
@@ -1306,19 +1295,34 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
 #[cfg(feature = "zip")]
 pub fn mod_archive(dirs: &DataDirs, r: &LibraryRef, out: &Path) -> Result<StoredFile> {
     let at = crate::library::path_of(dirs, r)?;
+    let (files, _) = library_files(dirs, r, &at)?;
+    archive_files(&files, &format!("{} {}", r.kind.as_str(), r.id), out)
+}
+
+/// Only the files attested by this Library import travel. Reuse the Library's conservative proof of new runtime
+/// output, then hash the actual selection again: a recognized output name must never hide an edit of an imported file.
+#[cfg(feature = "zip")]
+fn library_files(dirs: &DataDirs, r: &LibraryRef, at: &Path) -> Result<(Vec<(String, PathBuf)>, String)> {
     let (files, hash) = if r.kind == ModKind::Plugin {
         let name = at.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::invalid(format!("plugin {}: no file name", r.id)))?.to_string();
-        let hash = crate::hash::sha256_file(&at)?.0;
-        (vec![(name, at.clone())], hash)
+        (vec![(name, at.to_path_buf())], crate::hash::sha256_file(at)?.0)
     } else {
-        let files = super::mod_files(r.kind, &at)?;
-        let hash = crate::hash::of_mod_records(r.kind, records(&files)?)?;
+        let mut files = super::mod_files(r.kind, at)?;
+        let mut hash = crate::hash::of_mod_records(r.kind, records(&files)?)?;
+        if hash != r.hash {
+            let rec = crate::library::record(dirs, r)?;
+            if let Some(output) = crate::library::own_output(at, &rec)? {
+                files.retain(|(rel, _)| !output.contains(rel));
+                hash = crate::hash::of_mod_records(r.kind, records(&files)?)?;
+            }
+        }
         (files, hash)
     };
     if hash != r.hash {
-        return Err(err(ErrorCode::Refused, format!("{} {} changed in its Library folder since it was imported ({hash}, expected {})", r.kind.as_str(), r.id, r.hash)));
+        let folder = if r.kind == ModKind::Plugin { at.parent().unwrap_or(at) } else { at };
+        return Err(crate::library::changed_error(r, folder));
     }
-    archive_files(&files, &format!("{} {}", r.kind.as_str(), r.id), out)
+    Ok((files, hash))
 }
 
 /// [`mod_archive`] of a folder that is no Library entry (a pack layer unpacked from a built pack): the same bytes rules.
