@@ -53,3 +53,4 @@ launcher, the in-game texts).
 | Language | Translator | Translated |
 |---|---|---|
 | Simplified Chinese (简体中文, `zh-CN`) | MagicFox (XHL), also known as XiaoHuLi666 | The whole launcher (`launcher/src/i18n/zh-CN.json`) and all of Kiln's in-game texts (`runtime/locales/zh-CN.json`), from 0.2.0-dev.29.18; updated for 0.2.0-dev.30.5. |
+| Korean (한국어, `ko`) | [kraewon7422](https://github.com/kraewon7422) | A native review of the Korean launcher (`launcher/src/i18n/ko.json`) and in-game texts (`runtime/locales/ko.json`): 71 texts corrected, from 0.2.0-dev.31.3 ([issue 98](https://github.com/frostdev-ops/kiln/issues/98), [pull request 143](https://github.com/frostdev-ops/kiln/pull/143)). |
