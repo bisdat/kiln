@@ -2042,6 +2042,8 @@
     "overview": {
       "fileBridge": "File bridge",
       "sshTunnel": "SSH tunnel",
+      "openWebPanel": "Open web panel",
+      "webPanelError": "Could not open the web panel",
       "noKiln": "Kiln isn't installed",
       "stopToInstall": "Stop the server to install it.",
       "facts": "Server facts",

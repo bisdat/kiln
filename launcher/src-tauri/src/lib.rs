@@ -194,6 +194,7 @@ pub fn run() {
             commands::server::server_modpack_build,
             commands::server::server_modpack_publish,
             commands::admin::admin_connect,
+            commands::admin::admin_open_web_panel,
             commands::admin::admin_disconnect,
             commands::admin::admin_sessions,
             commands::admin::admin_call,
@@ -382,6 +383,7 @@ pub fn run() {
                 // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
                 render::leaving();
                 watch::leaving();
+                commands::admin::close_web_panel_tunnels();
                 leave_for_sure();
                 deck::gamepad::stop();
             }

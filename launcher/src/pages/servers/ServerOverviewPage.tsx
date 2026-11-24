@@ -123,6 +123,7 @@ function Steady({ id }: { id: string }) {
   const query = useQuery({ queryKey: sk.query(id), queryFn: () => api.serverQuery(id), enabled: running, refetchInterval: 15000, retry: false });
   const bundles = useQuery({ queryKey: ["runtime_list"], queryFn: api.runtimeList, staleTime: 60_000 });
   const mods = useQuery({ queryKey: sk.mods(id), queryFn: () => api.serverMods(id) as Promise<ServerModX[]>, retry: false, staleTime: 15_000 });
+  const webPanel = running && mods.data?.some((mod) => mod.id === "kiln-webadmin" && mod.enabled);
   const backups = useQuery({ queryKey: sk.backups(id), queryFn: () => api.serverBackups(id), retry: false, staleTime: 30_000 });
   const { ticks } = useTicks({ server: id });
   const showDeploy = useDeployDialog((d) => d.show);
@@ -153,6 +154,7 @@ function Steady({ id }: { id: string }) {
           {running ? t("servers.overview.kilnUpdateRunning", { latest: update.latest, current: update.current }) : t("servers.overview.kilnUpdateStopped", { latest: update.latest, current: update.current })}
         </Banner>
       )}
+      {webPanel && <OpenWebPanel key={id} id={id} />}
       <dl className="k-sstats">
         <div className="k-sstat">
           <dt>{t("servers.overview.stat.players")}</dt>
@@ -187,6 +189,27 @@ function Steady({ id }: { id: string }) {
       </div>
     </div>
   );
+}
+
+function OpenWebPanel({ id }: { id: string }) {
+  const t = useT();
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string>();
+  async function open() {
+    setOpening(true);
+    setError(undefined);
+    try {
+      await api.adminOpenWebPanel(id);
+    } catch (e) {
+      setError((e as { message?: string } | null)?.message ?? t("servers.overview.webPanelError"));
+    } finally {
+      setOpening(false);
+    }
+  }
+  return <div>
+    <Button size="s" disabled={opening} onClick={() => void open()}>{t("servers.overview.openWebPanel")}</Button>
+    {error && <Banner tone="err" title={t("servers.overview.webPanelError")}>{error}</Banner>}
+  </div>;
 }
 
 /** How many are online: Kiln.Admin's list when it is connected, else the status / query count. */

@@ -150,6 +150,7 @@ pub const NAMES: &[&str] = &[
     "server_modpack_build",
     "server_modpack_publish",
     "admin_connect",
+    "admin_open_web_panel",
     "admin_disconnect",
     "admin_sessions",
     "admin_call",

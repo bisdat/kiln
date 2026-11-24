@@ -14,6 +14,7 @@ zip = ["dep:zip"]                       # bundle, modpack: read/write zips
 sevenz = ["dep:sevenz-rust2"]           # library: read .7z packages (pure Rust)
 http = ["dep:ureq", "dep:ring", "dep:base64"] # modpack: https download; crucible: Ed25519 index signatures (ring is ureq's TLS crypto already)
 admin = ["dep:hmac", "dep:getrandom"]   # admin: KAP/1 handshake MAC, nonces
+web-panel = ["admin", "server", "dep:rustls"] # launcher: certificate-pinned Web Admin discovery
 jsonc = ["dep:jsonc-parser"]            # config, jsonc: value edits that keep comments
 saves = ["dep:zstd"]                    # saves::editor: zstd (the save editor's format)
 server = ["dep:toml"]                   # server::instance: kilnctl instance files
@@ -34,6 +35,7 @@ zip = { version = "9", optional = true, default-features = false, features = ["d
 # is a Rust port: nothing here needs a C compiler, so the Windows cross build stays as it is.
 sevenz-rust2 = { version = "0.25", optional = true, default-features = false, features = ["bzip2", "ppmd", "deflate"] }
 ureq = { version = "3", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["std", "ring", "tls12"] }
 # crucible: Ed25519 verification of signed pack indexes (the ring rustls already builds for ureq) and their base64
 ring = { version = "0.17", optional = true }
 base64 = { version = "0.23", optional = true }

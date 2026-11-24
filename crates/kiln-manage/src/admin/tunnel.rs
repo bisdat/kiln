@@ -3,6 +3,7 @@
 
 use crate::server::remote::RemoteSpec;
 use crate::{Error, ErrorCode, Result};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
@@ -15,9 +16,13 @@ pub struct SshTunnel {
 impl SshTunnel {
     /// Starts the forward on a free local port and waits (up to 15 s) until it accepts connections.
     pub fn open(remote: &RemoteSpec, remote_port: u16) -> Result<SshTunnel> {
+        Self::open_to(remote, SocketAddr::new(Ipv4Addr::LOCALHOST.into(), remote_port))
+    }
+
+    pub fn open_to(remote: &RemoteSpec, target: SocketAddr) -> Result<SshTunnel> {
         remote.validate()?;
         let local_port = free_port()?;
-        let fwd = format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}");
+        let fwd = format!("127.0.0.1:{local_port}:{target}");
         let mut cmd = remote.ssh(&["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", "-L", &fwd]);
         cmd.stdout(Stdio::null()).stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| Error::new(ErrorCode::Network, format!("cannot run ssh: {e}")))?;
@@ -32,7 +37,7 @@ impl SshTunnel {
                 return Err(Error::new(ErrorCode::Network, format!("ssh tunnel to {} ended ({st}): {}", remote.host, err.trim())));
             }
             if super::discover::probe("127.0.0.1", local_port, Duration::from_millis(200)) {
-                return Ok(SshTunnel { local_port, remote_port, child: Some(child) });
+                return Ok(SshTunnel { local_port, remote_port: target.port(), child: Some(child) });
             }
             if start.elapsed() > Duration::from_secs(15) {
                 let _ = child.kill();

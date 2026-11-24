@@ -5,12 +5,30 @@
 use crate::events::{AdminEventPayload, ADMIN};
 use kiln_manage::admin::client::{AdminClient, AdminSession, Transport};
 use kiln_manage::admin::hub::AdminHub;
+use kiln_manage::admin::web_panel::WebPanelTunnels;
 use crate::state::blocking;
 use kiln_manage::Error;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
 static HUB: OnceLock<AdminHub> = OnceLock::new();
+static WEB_PANEL_TUNNELS: OnceLock<Mutex<WebPanelTunnels>> = OnceLock::new();
+
+pub fn close_web_panel_tunnels() {
+    if let Some(tunnels) = WEB_PANEL_TUNNELS.get() {
+        tunnels.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    }
+}
+
+#[tauri::command]
+pub async fn admin_open_web_panel(server_id: String) -> Result<(), Error> {
+    blocking(move || {
+        let server = kiln_manage::server::instance::get(&server_id)?;
+        let url = WEB_PANEL_TUNNELS.get_or_init(Mutex::default)
+            .lock().unwrap_or_else(|p| p.into_inner()).url(&server)?;
+        crate::state::open_external(std::ffi::OsStr::new(&url))
+    }).await
+}
 
 /// The process-wide hub; the first caller's AppHandle receives the events.
 pub fn hub(app: &AppHandle) -> &'static AdminHub {

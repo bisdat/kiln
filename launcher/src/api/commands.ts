@@ -2229,6 +2229,7 @@ export const serverConsoleClose = (subscription: string) => call<null>("server_c
 // admin.rs (hooks in ./admin.ts)
 export const adminConnect = (serverId: ServerId, transport: AdminTransport = "auto") => call<AdminSession>("admin_connect", { serverId, transport });
 export const adminDisconnect = (session: string) => call<null>("admin_disconnect", { session });
+export const adminOpenWebPanel = (serverId: ServerId) => call<null>("admin_open_web_panel", { serverId });
 export const adminSessions = () => call<AdminSession[]>("admin_sessions");
 /** The op's `data`; rejects with op_failed (message = the op's error) when it answers ok=false. */
 export const adminCall = <T = Json>(session: string, op: string, args: Record<string, Json> = {}) => call<T>("admin_call", { session, op, args });
@@ -2435,7 +2436,7 @@ export const COMMANDS = [
   "server_restart", "server_update", "server_deploy", "server_settings_get", "server_settings_set", "server_mods",
   "server_mods_sync", "server_mod_enable", "server_backups", "server_backup_create", "server_backup_restore", "server_query",
   "server_modpack_status", "server_modpack_build", "server_modpack_publish",
-  "admin_connect", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
+  "admin_connect", "admin_open_web_panel", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
   "modpack_pending", "modpack_inspect", "modpack_install", "modpack_dismiss",
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   // Settings' ShroudForge card

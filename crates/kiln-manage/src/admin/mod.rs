@@ -9,6 +9,8 @@ pub mod discover;
 pub mod hub;
 pub mod protocol;
 pub mod tunnel;
+#[cfg(feature = "web-panel")]
+pub mod web_panel;
 
 #[cfg(all(test, feature = "admin"))]
 mod tests;

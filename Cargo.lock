@@ -2088,6 +2088,7 @@ dependencies = [
  "libc",
  "png",
  "ring",
+ "rustls",
  "serde",
  "serde_json",
  "sevenz-rust2",
