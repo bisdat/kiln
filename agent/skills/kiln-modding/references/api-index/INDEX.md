@@ -1,4 +1,4 @@
-# Kiln mod API index (mod API 0.2.17)
+# Kiln mod API index (mod API 0.2.18)
 
 Every public type and member of the mod API, one line each, to grep: a name (`BlockAt`), a word of what it does (`refusal`), a mod API (`0.2.15` finds what that release added). Then open that assembly's file: its name is the `KilnServices` entry (`Items.md` needs `<KilnServices>Items</KilnServices>`; `Api.md` needs none). A file that was too large is a map (`Blocks.md`) of its parts (`Blocks-items.md`).
 
@@ -39,7 +39,7 @@ Every public type and member of the mod API, one line each, to grep: a name (`Bl
 | Kiln.Quests | `Quests` | The quest engine, world progress, knowledge, dialogues, the journal | [quests-talents-sounds.md](../quests-talents-sounds.md) | `services/quests.md`, `services/knowledge.md`, `services/world-progress.md`, `modding/quests.md` | 128 | 1043 | [Quests.md](Quests.md) (map of 2 parts) |
 | Kiln.Registry | `Registry` | Kiln's registries (items, recipes, loot, drops, balance) as typed entries over Kiln-owned field names | - | `modding/registries/README.md` | 0 | 0 | no public API (lab members only) |
 | Kiln.Replication | (Kiln's own) | Replication lab; a mod does not list it | - | - | 31 | 187 | [Replication.md](Replication.md) (21 KB) |
-| Kiln.Rules | `Rules` | What players may do and what it costs: rules, NoClip, creative mode | [api-events.md](../api-events.md) | `services/rules.md` | 22 | 236 | [Rules.md](Rules.md) (28 KB) |
+| Kiln.Rules | `Rules` | What players may do and what it costs: rules, NoClip, creative mode | [api-events.md](../api-events.md) | `services/rules.md` | 22 | 236 | [Rules.md](Rules.md) (29 KB) |
 | Kiln.Saves | `Saves` | Save events and persistent mod data: world, player, entity, item instance, character | [api-items.md](../api-items.md) | `services/saves.md`, `services/character-data.md` | 46 | 300 | [Saves.md](Saves.md) (34 KB) |
 | Kiln.Settings | `Settings` | The server's game settings, live | [api-world.md](../api-world.md) | `services/settings.md` | 7 | 70 | [Settings.md](Settings.md) (8 KB) |
 | Kiln.Sigs | `Sigs` | The generated typed-hook classes; needs Hooks | [api-hooks.md](../api-hooks.md) | `services/hooks.md`, `hooks.md` | 54 | 204 | [Sigs.md](Sigs.md) (31 KB) |
