@@ -27,6 +27,34 @@ pub(super) fn load(dirs: &DataDirs, api: &str, profile: &str) -> Result<Option<O
     Ok(Some(owner))
 }
 
+/// Keys this profile held for earlier links: kept beside the current key (see [`retire`]), never used to share.
+fn retired_dir(dirs: &DataDirs, api: &str, profile: &str) -> PathBuf {
+    path(dirs, api, profile).with_extension("retired")
+}
+
+/// Before a new key is made for this profile: a key bound to an earlier link (its record in shared.json lost or
+/// unreadable) moves to the retired folder instead of being overwritten, so that link never becomes unmanageable.
+pub(super) fn retire(dirs: &DataDirs, api: &str, profile: &str) -> Result<()> {
+    let Some(pack) = load(dirs, api, profile)?.and_then(|o| o.pack) else { return Ok(()) };
+    let dir = retired_dir(dirs, api, profile);
+    std::fs::create_dir_all(&dir).map_err(crate::util::io_at(&dir, "creating"))?;
+    let to = dir.join(format!("{}.key", crate::hash::sha256_hex(pack.as_bytes())));
+    let from = path(dirs, api, profile);
+    std::fs::rename(&from, &to).map_err(crate::util::io_at(&from, "keeping"))
+}
+
+#[cfg(test)]
+pub(super) fn retired(dirs: &DataDirs, api: &str, profile: &str) -> Result<Vec<Owner>> {
+    let dir = retired_dir(dirs, api, profile);
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(Vec::new()) };
+    let mut all = Vec::new();
+    for e in entries.flatten() {
+        let bytes = std::fs::read(e.path()).map_err(crate::util::io_at(&e.path(), "reading"))?;
+        all.push(serde_json::from_slice(&protect(&bytes, false)?).map_err(|_| err(ErrorCode::Refused, "A kept owner key cannot be read."))?);
+    }
+    Ok(all)
+}
+
 pub(super) fn save(dirs: &DataDirs, api: &str, profile: &str, owner: &Owner) -> Result<()> {
     let bytes = protect(&serde_json::to_vec(owner)?, true)?;
     crate::community::session::write_private(&path(dirs, api, profile), &bytes)

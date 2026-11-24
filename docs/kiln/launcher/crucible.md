@@ -324,7 +324,9 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   a random 256-bit per-pack owner capability authorizes only those writes and scoped upload completion/resume.
   Native-only `<data>/crucible/owners/<hash-of-api-and-profile>.key` is atomically 0600 on Unix and DPAPI-encrypted
   for the Windows user. No owner key crosses IPC or enters a link, preview, log or `shared.json`. Keep the launcher
-  data to update the same code; losing the key does not remove the pack or allow account recovery. Public publishing
+  data to update the same code; losing the key does not remove the pack or allow account recovery. A new key never
+  overwrites one bound to an earlier link (its `shared.json` record lost or unreadable): that key moves to
+  `owners/<hash>.retired/` first, so the earlier link keeps an owner capability on this device. Public publishing
   and existing account-owned shares keep their Discord session and existing gates. An account sign-out/forget does
   not delete unlinked anonymous packs. `SharedState.requiresSignIn` distinguishes account shares for the UI.
   Both paths reuse the same exact-import hashing, deterministic archives, override allowlist and secret scan.

@@ -787,3 +787,26 @@ fn an_installed_pack_is_named_after_the_pack_and_its_creator_and_never_twice() {
     let unique: std::collections::BTreeSet<&String> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "{names:?}");
 }
+
+#[test]
+fn a_lost_share_record_keeps_the_owner_key_of_the_earlier_link() {
+    let t = tmp("anonymous-lost-record");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let c = Crucible::new(&ep, &fake, "0");
+    let req = ShareRequest { profile: pid.clone(), ..Default::default() };
+    let first = share(&a, &c, &req, None, &mut NoProgress).unwrap();
+    let before = ownership::load(&a, &ep.api, &pid).unwrap().unwrap();
+    // shared.json is lost or unreadable: the profile looks never shared, so Share makes a new link...
+    std::fs::write(root(&a).join("shared.json"), b"{broken").unwrap();
+    let second = share(&a, &c, &req, None, &mut NoProgress).unwrap();
+    assert_ne!(second.pack.id, first.pack.id);
+    let now = ownership::load(&a, &ep.api, &pid).unwrap().unwrap();
+    assert_eq!(now.pack.as_deref(), Some(second.pack.id.as_str()));
+    // ...but the first link's capability, which nothing else can recover, is kept rather than overwritten
+    let kept = ownership::retired(&a, &ep.api, &pid).unwrap();
+    assert!(kept.iter().any(|o| o.key == before.key && o.pack.as_deref() == Some(first.pack.id.as_str())),
+        "the earlier link's owner key was overwritten");
+    assert!(!serde_json::to_string(&shared(&a, &pid).unwrap().unwrap()).unwrap().contains(&before.key));
+}

@@ -1311,6 +1311,7 @@ pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&Ga
             None => {
                 let o = ownership::Owner { pack: None, key: crate::hash::hex(&crate::util::random_bytes::<32>()?) };
                 // Persist before the first request, so a failed local write never creates an unmanageable share.
+                ownership::retire(dirs, &c.ep.api, &req.profile)?;
                 ownership::save(dirs, &c.ep.api, &req.profile, &o)?;
                 Some(o)
             }
@@ -1362,6 +1363,7 @@ pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&Ga
                     // all existing account-owned updates keep their refusal; no anonymous reset of an old pack.
                     Err(e) if !anonymous && e.code == ErrorCode::AuthFailed => {
                         let o = ownership::Owner { pack: None, key: crate::hash::hex(&crate::util::random_bytes::<32>()?) };
+                        ownership::retire(dirs, &c.ep.api, &req.profile)?;
                         ownership::save(dirs, &c.ep.api, &req.profile, &o)?;
                         let ac = Crucible { ep: c.ep, transport: c.transport, session: None, owner_key: Some(o.key.clone()), agent: c.agent.clone() };
                         let v = ac.call(Method::Post, "/anonymous/quickshare", Some(&body), true)?;
