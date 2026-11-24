@@ -1,10 +1,10 @@
 # EMF mods on Kiln (kiln-emf)
 
-Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.20 / v48)
-through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v48 table built on Kiln's services:
+Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.22 / v49)
+through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v49 table built on Kiln's services:
 of 144 C slots, 80 are full, 19 partial, and 45 (functions EMF added between 0.6.3 and 0.6.19)
-answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0620)). v41, v42, v45 and
-v48 (EMF 0.6.10, 0.6.11, 0.6.14 and 0.6.20) added no function. API coverage is not a guarantee for every mod
+answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0622)). v41, v42, v45 and
+v48/v49 (EMF 0.6.10, 0.6.11, 0.6.14, 0.6.20 and 0.6.22) added no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
 DLL mods and EMF's Lua mods; you do not need EMF's own `dinput8.dll` or `emf_core.dll`.
 
@@ -52,7 +52,7 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 ### Which mods load
 - **Switch:** `enabled` in the ini decides. Without a value, `mod.json`'s `"enabled"` decides (default on). A
   profile entry with `enabled: false` is always off.
-- **API version:** `"emf": N` above 48 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
+- **API version:** `"emf": N` above 49 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
 - **Side:** `"side": "client"` mods do nothing on a dedicated server, so the server skips them (clock). Everything
   else loads everywhere, as in EMF.
 - **Dependencies:** `depends` / `dependencies` take EMF's version ranges (`^1.2`, `~1.2`, `>=1.0 <2`, `1.2.x`,
@@ -79,7 +79,9 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 
 <a id="mods-built-for-emf-063-to-0619"></a>
 
-### Mods built for EMF 0.6.3 to 0.6.20
+<a id="mods-built-for-emf-063-to-0620"></a>
+
+### Mods built for EMF 0.6.3 to 0.6.22
 A mod built with EMF's SDK does not start on a host whose table is smaller than the one it was built with. Kiln
 served EMF 0.6.0's table until 0.2.0-dev.26, so every EMF DLL built since 0.6.3 stayed off ("this mod was built for
 EMF API v40; the core is v27"), and with EMF's `lua` mod every Lua mod of a current EMF. Since 0.2.0-dev.27 the table
@@ -129,6 +131,28 @@ table size is the same). `path_find` is still not carried, so the new fields cha
 with or without `as_entity`, gets 0 and no callback, and no result is handed to a mod. A Lua script that passes `as`
 now gets `nil` from `emf.path_find`, as any path query on Kiln, where a v47 table made the `lua` mod raise "as needs
 EMF 0.6.20 or newer". See [the v48 section](emf-parity.md#v48-emf-0620).
+
+EMF 0.6.22 (API v49, Lua host 1.43) adds **no C function slots**: the table remains 1160 bytes. The adapter
+admits manifest requirements through `"emf": 49`; version 50 and later remain refused. All v48 slots and prefix
+layouts are preserved. `has_v49()` now reports the contract version, **not path or movement availability**.
+`EmfPathQuery.as_state` adds calm/Guard planning (56 to 60 bytes); `EMF_MOVE_CLEAR` requests wall-clear arrival.
+Neither feature is implemented here: all `path_find` queries return 0, logged, without a callback or result;
+all valid-size `enemy_move` orders return 0 and `why = "not available on Kiln yet"`, without a callback or movement.
+Unknown states and flags are also no-action refusals, never downgraded to calm planning or movement without the flag.
+This does not enable Kiln-native path/orders hooks or establish gameplay parity for EMF 0.6.22's mods.
+
+Lua 1.42 adds `emf.offer(..., {sequence = "chest"})`; its C value (`EMF_SEQUENCE_CHEST`) already passes unchanged
+through the existing offer component queue. Host tests verify the sequence bytes, **not opening a chest in game**.
+Lua 1.43 parses `state = "calm"/"guard"` (requires `as`) and `clear = true`; valid calls still receive the above
+unavailable answers (`nil`, or `nil` and the reason). Neither upstream Lua DLL has been executed for this change.
+EMF's new `keys` conflict listing and key-setting `"shared": true` are upstream diagnostic/UI features, not new
+adapter API functions; kiln-emf does not provide that listing and ignores `shared`. When EMF's own loader runs,
+0.6.22 leaves EML content building to Kiln if `<game>/kiln/kiln.json` exists. kiln-emf remains separate from that
+content loader and still steps aside for a running EMF core/loader.
+
+Exact source/header identities, ABI layouts, loader differences and audit limits are recorded in the
+[pinned v49 audit](../re/emf-compat.md#pinned-emf-0622-v49-audit-issue-141); the [v49 parity section](emf-parity.md#v49-emf-0622)
+distinguishes admission from implemented features.
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
@@ -261,10 +285,10 @@ plain detour and the log says `outside the game exe`. `kiln-emf`'s own hooks (Ch
 v27 client chat bridge) are links too, `ChatLogAdd` after `kiln.chat`'s.
 
 ## Compatibility by function
-The full table for EmfApi v48 (144 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
+The full table for EmfApi v49 (144 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
 in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068), v43 to v46 in
 [another](emf-parity.md#v43-to-v46-emf-0613-to-0614), [v47 here](emf-parity.md#v47-emf-0619) and
-[v48 here](emf-parity.md#v48-emf-0620). v22-v27 in short:
+[v48 here](emf-parity.md#v48-emf-0620) and [v49 here](emf-parity.md#v49-emf-0622). v22-v27 in short:
 player level and XP through `kiln.progression`; `change_component` and E-prompt offers through kiln-emf's own
 `kiln.world` program; mod windows and pictures through `kiln.ui` in the game client (refused on a dedicated server, as
 in EMF). API v27 adds mod messaging on the official `#!emf1` wire; joined-client handshake and gameplay still need checks.

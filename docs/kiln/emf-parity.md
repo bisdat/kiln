@@ -1,7 +1,7 @@
-# EMF API parity (EmfApi v48)
+# EMF API parity (EmfApi v49)
 
 kiln-emf (`native/plugins/emf`) hands every EMF mod an `EmfApi` table built on Kiln's services. This page lists
-every function of EMF 0.6.20's C API (v48, 144 functions, `sdk/include/emf/emf_api.h`; v41, v42, v45 and v48 added none) and every function of its Lua
+every function of EMF 0.6.22's C API (v49, 144 functions, `sdk/include/emf/emf_api.h`; v41, v42, v45, v48 and v49 added none) and every function of its Lua
 API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C# API, and the status.
 
 - **full**: behaves as EMF documents. **partial**: the difference is in the row. **not yet**: Kiln does not carry
@@ -16,7 +16,7 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
   0.2.0-dev.30.3) and 41 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7: two full, one partial and four not yet
   ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2, both full (`spawn_facing`,
-  `find_wall_ex`; [v47](#v47-emf-0619)); v48 appends none ([v48](#v48-emf-0620)). Counts are C table slots, not
+  `find_wall_ex`; [v47](#v47-emf-0619)); v48 and v49 append none ([v48](#v48-emf-0620), [v49](#v49-emf-0622)). Counts are C table slots, not
   grouped rows or attribute constants.
   The two attribute slots remain partial because the XP/level ids use the queued progression path below. The four
   chat line slots are partial because a plain line (no `EMF_CHAT_SYSTEM`) shows without a speaker's name on Kiln and
@@ -31,17 +31,17 @@ a joined player's handshake, hidden chat, taming, portraits, UI or multiplayer b
 
 ## Version negotiation
 
-One table, `version = 48`, `size = sizeof(EmfApi) = 1160`. Slots are only appended (v22 at
+One table, `version = 49`, `size = sizeof(EmfApi) = 1160`. Slots are only appended (v22 at
 byte 592, v23 616, v24 624, v25 648, v26 672, v27 688, v28 728, v29 736, v30 752, v31 776, v32 808, v33 864, v34 920,
 v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064; v41 and v42 appended nothing; v43 1088, v44 1096; v45
-appended nothing; v46 1120; v47 1144; v48 appended nothing). Every earlier prefix is unchanged. A mod's `mod.json` `"emf": N` above 48 is refused
+appended nothing; v46 1120; v47 1144; v48 and v49 appended nothing). Every earlier prefix is unchanged. A mod's `mod.json` `"emf": N` above 49 is refused
 ("needs EMF API vN"). Mods built with EMF's C++ SDK also check
 `api->size >= sizeof(EmfApi)` of their own header and do not start on a smaller table, whatever they then call: this
 is why Kiln serves the whole table although it does not carry every function yet. A mod built for EMF 0.6.3 or
 later, EMF's Lua host among them, did not start on Kiln's earlier 728-byte table; one built for EMF 0.6.13 or 0.6.14
 (EMF 0.6.14's Lua host 1.39, Night Raids 1.2 and Villager Jobs 1.5.2 among them) did not start on the 1088-byte v42
 table ("this mod was built for EMF API v46; the core is v42"). `emf::has_v45()` and `emf::has_v48()` go by the
-version (v45 and v48 did not grow the table), so the table says 48. The table is a shared, immutable prefix-compatible view; it is not shrunk for an
+version (v45, v48 and v49 did not grow the table), so the table now says 49. The table is a shared, immutable prefix-compatible view; it is not shrunk for an
 older mod. EMF 0.6.19 SDK mods (Lua 1.40, Night Raids 1.3.0 and Beastmaster 1.19.0) need the new
 1160-byte v47 table, replacing the 1144-byte v46 table that refused them. EMF 0.6.20's SDK mods (its `lua` mod 1.41,
 which runs Beastmaster 1.20.0) check for the same 1160 bytes. Since 0.2.0-dev.30.8 the table says 48: a `mod.json`
@@ -267,7 +267,7 @@ EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or stru
 The version only: no slot is appended and the table stays 1160 bytes. Two structs of `path_find` grow at their end
 (EMF's `src/core/api_sizes.h`): `EmfPathQuery.as_entity` at byte 52 (the query is 56 bytes) and `EmfPathResult`'s
 `moves`, `jump_up`, `jump_down`, `width` and `height` at bytes 32 to 43 (a reader checks `size` against 44; the struct
-is 48 bytes). The header is EMF 0.6.20's unchanged MIT header below Kiln's licence preface.
+is 48 bytes). Those are the v48 layouts; the current copied header is the pinned v49 header below Kiln's licence preface.
 
 | EMF addition | On Kiln | Status | Tested |
 |---|---|---|---|
@@ -284,6 +284,24 @@ own qualified reverse engineering, so a mod never sees game layouts; EMF's notes
 say which game behaviour matters, not where Kiln reads it. Carrying it takes three parts: the other move kinds in
 `kiln.queries`, a creature profile read inside Kiln core, and kiln-emf's query and result translation.
 
+## v49 (EMF 0.6.22)
+
+Pinned to upstream `a47284006f0eb22240639f8870bbc5ff5fcb8ef2` (MIT). No slot was added or reordered; all 144
+function slots and the v48 prefixes remain unchanged. The adapter advertises v49 and admits manifest minimums up
+to 49, not unknown later versions. This is ABI admission, not a feature-parity claim or a run of upstream mods.
+See the [source/header and loader audit](../re/emf-compat.md#pinned-emf-0622-v49-audit-issue-141).
+
+| Addition | On Kiln | Evidence/limit |
+|---|---|---|
+| `uint32_t EmfPathQuery.as_state` at 56, `sizeof` 60, calm 0 / Guard 1 | All path queries remain refused: 0, unsupported log, no callback or result. Unknown states are not masked to calm. | Production adapter host tests: exact 52/56/60-byte allocations, calm/Guard/unknown, with/without `as_entity`. |
+| `EMF_MOVE_CLEAR = 0x10` (existing `uint32_t flags`; move order still 136 bytes) | Every valid-size `enemy_move` is refused with `why`; no point reads, callback, or entity mutation. CLEAR and unknown flags cannot become unqualified moves. | Production adapter host tests: exact 128/136-byte orders, CLEAR/mixed/unknown flags and inaccessible point pointer. |
+| Lua 1.42 `sequence = "chest"`, `EMF_SEQUENCE_CHEST = 0x3E49C160` | Existing C offer model preserves this sequence in runtime component bytes. No inventory is created by an offer. | Model test only; upstream Lua DLL and storage screen not run. |
+| Lua 1.43 `state = "calm"/"guard"`, `clear = true` | Source-pinned parsing; underlying C functions remain unavailable (`nil`, or `nil` and reason). | Source audit plus C refusal tests, not Lua execution. |
+| `keys`, key-setting `shared`, EML content-owner detection | Upstream tooling, no new C API slots. No keys-list UI is supplied here; `shared` is ignored. Upstream EMF defers EML to Kiln when `kiln/kiln.json` exists. | Source audit; no loader/UI/content code changed in this task. |
+
+The table's availability helpers still report version/slot presence, not successful path or movement support.
+No #142 path/orders hooks are activated by this compatibility change.
+
 ## Lua API (`emf.*`, run by EMF's `lua` mod on the C API)
 
 EMF's `lua` mod is an EMF DLL mod built on the public C API only, so every Lua function works on Kiln exactly as far
@@ -292,7 +310,9 @@ EMF's own DLL, dev.20) and Lua 1.33 (EMF 0.6.8, built from EMF's unchanged sourc
 run EMF's Lua mods; their actual player-facing features still need the client checklist. Lua 1.39 (EMF 0.6.14) is
 built against the v46 header and needs at least a 1144-byte table; it has not been run on Kiln yet.
 Lua 1.40 (EMF 0.6.19) needs v47 / 1160 bytes, likewise not run in game. Lua 1.41 (EMF 0.6.20) checks the same
-1160 bytes and looks at the version (48) only for `emf.path_find`'s `as`; not run in game either.
+1160 bytes and looks at the version (48) for `emf.path_find`'s `as`; not run in game either. Lua 1.42 uses
+the v48 contract plus the chest sequence; Lua 1.43 uses the v49 header with the same table size, checking
+version 49 for `state`. Their manifests both say `"emf": 20`; neither DLL was run for the v49 audit.
 Lua 1.33 looks at the table's version and size before it uses a newer function, then at the function's answer: on
 Kiln the functions still marked not yet below return what EMF's Lua guide documents for a feature that is off (`nil`,
 `false`, or `nil` and a reason).
@@ -371,6 +391,9 @@ portraits and their appearance in Beastmaster remain unchecked. See [eml.md](eml
 - EMF's own console UI, debug bridge, save backups and profile manager are EMF's tooling, not API.
 
 ## Changelog
+
+- **Issue #141 (unreleased):** pinned EMF 0.6.22/v49 and Lua 1.42/1.43 source audit; v49 ABI/version admission,
+  unchanged 1160-byte table, v48 compatibility preserved. Path/Guard/CLEAR/move functionality remains unavailable.
 
 - **0.2.0-dev.30.8:** EmfApi v48 (EMF 0.6.20 by matenm and the EMF contributors, MIT): the table says version 48
   (still 1160 bytes), so a mod or `mod.json` that asks for v48 loads next to those built with EMF 0.6.19's SDK.

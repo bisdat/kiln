@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: loads unmodified EMF (Enshrouded Modding Framework 0.6.20, API v48, MIT) mods on Kiln. Shared state.
+// kiln-emf: loads unmodified EMF (Enshrouded Modding Framework 0.6.22, API v49, MIT) mods on Kiln. Shared state.
 //
 // Layout of the plugin:
 //   plugin.cpp    kiln_plugin_main / on_ready: step aside when the real EMF runs, discover, order and load the mods,
@@ -18,7 +18,7 @@
 //   api_components.cpp v23 change_component (a kiln.world program) and v25 E prompts (offers)
 //   api_windows.cpp v24 mod windows and v26 pictures through kiln.ui (client); refused on a dedicated server
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
-//   api_v40.cpp   v28-v48: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
+//   api_v40.cpp   v28-v49: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
@@ -63,7 +63,7 @@ namespace kemf {
 
 constexpr const char* kPluginId = "kiln-emf";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr uint32_t kEmfApiVersion = EMF_API_VERSION;  // 48
+constexpr uint32_t kEmfApiVersion = EMF_API_VERSION;  // 49
 
 // ---------------------------------------------------------------------------------------------- core handles ----
 extern const KilnApi* g_api;

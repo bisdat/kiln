@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v48 answers and v31 on_hit (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers and v31 on_hit (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -21,7 +21,7 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -o "$out/glue_test"
 "$out/glue_test" "$out"
 "$out/glue_test" "$out" no-render
-# v48 (EMF 0.6.20): v47 and v48 path queries against the production api_v40.cpp (also built natively: emf-path-test).
+# v49 (EMF 0.6.22): v47/v48/v49 path and old/new move no-action refusals against the production api_v40.cpp (also built natively: emf-path-test).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/path_test.cpp" "$here/../src/api_v40.cpp" -o "$out/path_test"

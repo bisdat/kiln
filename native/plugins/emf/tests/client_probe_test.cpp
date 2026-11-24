@@ -28,6 +28,13 @@ int main() {
     CHECK(!emf_mod_load(&table));
     CHECK(registrations == 0);
     table.size = 1160;
+    CHECK(!emf_mod_load(&table));  // the current-header probe requires v49, even with the unchanged v48 table size
+    CHECK(registrations == 0);
+    table.version = 49;
+    table.size = 1159;
+    CHECK(!emf_mod_load(&table));
+    CHECK(registrations == 0);
+    table.size = 1160;
     CHECK(emf_mod_load(&table));
     CHECK(registrations == 6);
     std::printf("client_probe_test: %d checks, %d failures\n", checks, failures);

@@ -72,18 +72,20 @@ static void test_table() {
     CHECK(api_size_for(47) == 1160);
     // v48 (EMF 0.6.20): the version only, the table stays v47's
     CHECK(api_size_for(48) == 1160 && api_size_for(48) == sizeof(EmfApi));
-    CHECK(api_size_for(49) == 0);
-    CHECK(EMF_API_VERSION == 48);
+    CHECK(api_size_for(49) == 1160 && kApiV49Size == kApiV48Size);
+    CHECK(api_size_for(50) == 0 && api_size_for(UINT32_MAX) == 0);
+    CHECK(EMF_API_VERSION == 49);
     // the "emf" gate of mod.json (mods.cpp refuses a requirement above the table's version): mods of EMF 0.6.19 and
-    // 0.6.20 load
-    for (uint64_t v = 41; v <= 48; ++v) CHECK(api_requirement(v) <= EMF_API_VERSION);
-    CHECK(api_requirement(49) > EMF_API_VERSION);
+    // 0.6.20 and 0.6.22 are admitted (not a gameplay guarantee)
+    for (uint64_t v = 41; v <= 49; ++v) CHECK(api_requirement(v) <= EMF_API_VERSION);
+    CHECK(api_requirement(50) > EMF_API_VERSION);
     CHECK(kRemoveBuildingV36Size == 144 && kPathQueryV37Size == 52 && kEnemyOrderV39Size == 120 && kMoveOrderV40Size == 128);
     // the fields v41 and v42 appended (read by EMF only when a request's or result's `size` covers them)
     CHECK(sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 && EMF_MOVE_PEACEFUL_ALL == 0x4u);
     CHECK(kPathResultV37Size == 20 && kPathResultV42Size == 32 && offsetof(EmfPathResult, doors) == 24);
     // v48's fields: EmfPathQuery.as_entity (52 -> 56) and the result's used values (32 -> 48), at the ends
-    CHECK(kPathQueryV48Size == 56 && sizeof(EmfPathQuery) == 56 && offsetof(EmfPathQuery, as_entity) == 52);
+    CHECK(kPathQueryV48Size == 56 && sizeof(EmfPathQuery) == 60 && offsetof(EmfPathQuery, as_entity) == 52);
+    CHECK(kPathQueryV49Size == 60 && offsetof(EmfPathQuery, as_state) == 56);
     CHECK(kPathResultV48Size == 44 && sizeof(EmfPathResult) == 48 && offsetof(EmfPathResult, moves) == 32 &&
           offsetof(EmfPathResult, height) == 40);  // 44: the end of height (a reader's `size` check), 48 with padding
     // v44's and v45's structs, and v46's hold_seconds in pad2's place
@@ -388,6 +390,14 @@ static void test_offers() {
     CHECK(b.size() == 56 && seq == EMF_SEQUENCE_TOUCH && verb == EMF_VERB_OPEN && b[48] == 1 && b[47] == 0);
     CHECK(offer_range_bytes(s)[0] == 10 && offer_range_bytes(OfferSpec{})[0] == 32);
     CHECK(offer_verb(OfferSpec{}) == EMF_VERB_USE);
+    // Lua 1.42 names this existing C sequence; it must reach the runtime component unchanged.
+    o.sequence = EMF_SEQUENCE_CHEST;
+    CHECK(offer_spec_from(&o, &s).empty());
+    const auto chest = offer_runtime_bytes(s);
+    std::memcpy(&seq, chest.data() + 8, 4);
+    CHECK(seq == 0x3E49C160u);
+    o.sequence = 0;
+    CHECK(offer_spec_from(&o, &s).empty());
 
     // the service over the real component queue and a fake world
     EmfWorld* W = reinterpret_cast<EmfWorld*>(0x1000);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// emf_probe: an EMF mod (EMF C API v48, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
+// emf_probe: an EMF mod (EMF C API v49, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
 // one "PASS <what>" / "FAIL <what>" line per check, then "emf-probe done: N PASS, M FAIL". Player-free: it uses a
 // villager of the copied world (teleport, put/take items), spawns one Vukah next to it and kills it (damage ->
 // EntityDiedEvent), changes and resets a world setting, asks for a save, runs its own command through
@@ -8,7 +8,7 @@
 // position for a moment, spawns a creature and saves the world.
 // v22-v26: the level curve and its refusals, change_component (ScaleComponent on a second Vukah), E-prompt offers
 // (offer / offer_active / offer_remove on it, spawn_offer), and the window / picture refusals of a dedicated server.
-// v28-v48: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
+// v28-v49: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
 #include <windows.h>
 
 #include <atomic>
@@ -225,7 +225,7 @@ void ws_cb(const char* key, double, void*) {
     if (key && std::strcmp(key, "experienceCombatFactor") == 0) ++g_ws_changes;
 }
 
-// ---- v28-v48 (EMF 0.6.3 to 0.6.20) on a dedicated server, inside a server world callback ----
+// ---- v28-v49 (EMF 0.6.3 to 0.6.22) on a dedicated server, inside a server world callback ----
 int g_v40_callbacks = 0;
 uint32_t g_on_hits = 0, g_on_hit_kills = 0;  // on_hit deliveries (v31, carried since 0.2.0-dev.30.3), killing blows
 void v40_checks(EmfWorld* w) {
@@ -310,10 +310,13 @@ void v40_checks(EmfWorld* w) {
     q.size = 52;  // a v47 mod's query (EMF 0.6.19's header: no as_entity)
     const auto path_cb = [](EmfWorld*, uint32_t, const EmfPathResult*, const EmfPathPoint*, void*) { ++g_v40_callbacks; };
     const bool p47 = A->path_find(w, &q, path_cb, nullptr) == 0;
-    q.size = sizeof q;  // v48 (EMF 0.6.20): 56 bytes, planned as the villager, from this world callback
+    q.size = 56;  // v48 (EMF 0.6.20): as_entity, no as_state
     q.as_entity = F.villager;
-    check(p47 && sizeof q == 56 && A->path_find(w, &q, path_cb, nullptr) == 0 && !A->path_cancel(1),
-          "paths: path_find answers 0 for a v47 and a v48 (as_entity) query, path_cancel false");
+    const bool p48 = A->path_find(w, &q, path_cb, nullptr) == 0;
+    q.size = sizeof q;
+    q.as_state = EMF_PATH_AS_GUARD;
+    check(p47 && p48 && sizeof q == 60 && A->path_find(w, &q, path_cb, nullptr) == 0 && !A->path_cancel(1),
+          "paths: v47, v48 (as_entity) and v49 (Guard) queries refused, path_cancel false");
     check(A->door_state(w, F.villager) == EMF_DOOR_NONE && !A->door_set(w, F.villager, 1, 0) && !A->door_lock(w, F.villager, 1),
           "doors: door_state answers EMF_DOOR_NONE, door_set and door_lock false");
     EmfEnemyOrder eo{};
@@ -851,7 +854,7 @@ void on_tick(EmfWorld* w, void*) {
 extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     if (!api || api->version < 40 || api->size < sizeof(EmfApi)) return false;
     A = api;
-    check(api->version == 48 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1160, "the table is EmfApi v48 of the SDK's size",
+    check(api->version == 49 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1160, "the table is EmfApi v49 of the SDK's size",
           std::to_string(api->version) + ", " + std::to_string(api->size) + " bytes");
     bool all = true;
     for (size_t i = 0; i < (sizeof(EmfApi) - 8) / sizeof(void*); ++i)

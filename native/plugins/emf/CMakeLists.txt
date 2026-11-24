@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# kiln-emf.dll: loads unmodified EMF mods (EMF 0.3.3 to 0.6.20, EmfApi v48) on Kiln. Deployed to <game>/kiln/plugins/.
+# kiln-emf.dll: loads unmodified EMF mods (EMF 0.3.3 to 0.6.22, EmfApi v49) on Kiln. Deployed to <game>/kiln/plugins/.
 # include/emf/emf_api.h is EMF's own header (MIT, EMF contributors; licenses/EMF-LICENSE.txt).
 kiln_plugin(emf
     src/plugin.cpp
@@ -55,7 +55,7 @@ set_target_properties(emf-net-probe PROPERTIES OUTPUT_NAME emf_net_probe RUNTIME
 add_executable(emf-portrait-bridge-test tests/portrait_wine.cpp)
 set_target_properties(emf-portrait-bridge-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
 
-# EmfApi v48 path queries (v47 and v48 callers) through the production api_v40.cpp; headless native Windows test.
+# EmfApi v49 path/move refusals (including v47 and v48 callers) through the production api_v40.cpp; headless native Windows test.
 add_executable(emf-path-test tests/path_test.cpp src/api_v40.cpp)
 target_include_directories(emf-path-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")

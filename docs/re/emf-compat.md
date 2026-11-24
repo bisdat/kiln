@@ -1,14 +1,14 @@
-# kiln-emf: EMF 0.3.3 mods on Kiln (how and evidence)
+# kiln-emf: EMF mods on Kiln (how and evidence)
 
 `native/plugins/emf/` builds `kiln-emf.dll`, a Kiln plugin that gives unmodified EMF (Enshrouded Modding Framework
-0.3.3, MIT, "EMF contributors") mods an `EmfApi` v21 table built on Kiln's services. The user guide is
+through 0.6.22, MIT, "EMF contributors") mods an `EmfApi` v49 table built on Kiln's services. The user guide is
 [docs/kiln/emf.md](../kiln/emf.md). EMF's own core is described in [emf-core.md](emf-core.md).
 
 ## The table
 - **Header:** `native/plugins/emf/include/emf/emf_api.h` is EMF's own header, unchanged below an MIT notice
   (`licenses/EMF-LICENSE.txt`).
-- **Size:** 73 function slots, `{version 21, size 592}`.
-- **Every slot is filled.** `emf::init` checks only `size >= sizeof(EmfApi)`, so an empty slot would crash a mod.
+- **Size:** 144 function slots, `{version 49, size 1160}`; the original v21 prefix remains 592 bytes.
+- **Every slot is filled.** The pinned SDK's default `emf::init` checks `size >= sizeof(EmfApi)`, so an empty slot would crash a mod.
   Unsupported functions are stubs that log once and return a failure. The probe checks this (`every function slot is
   filled`).
 - **Who called:** most calls do not name their mod. kiln-emf finds the caller from the return address (`_ReturnAddress`,
@@ -16,6 +16,94 @@
   `emf_mod_load` or callback).
 - **Kiln owners:** each mod gets one, `emf:<id>`. It carries the mod's log lines and its content layers
   (big_stacks' `maxStackSize` changes are its own `kiln.content` layer).
+
+<a id="pinned-emf-0622-v49-audit-issue-141"></a>
+
+## Pinned EMF 0.6.22 / v49 audit (issue #141)
+
+This change targets the MIT adapter `native/plugins/emf`, not `gpl/kiln-eml`. Public source was fetched into an
+isolated audit repository; the shared older upstream checkout was not switched or modified. Only source and release
+metadata were read. No upstream programs, Lua scripts, loader, game or server were run.
+
+### Identities and package boundary
+
+Repository: <https://github.com/matenm/emf-enshrouded>. These are immutable source identities, not a claim that a
+release DLL has been tested or independently matched to its source.
+
+| Contract | Exact upstream commit | Header SHA-256 (`sdk/include/emf/emf_api.h`) |
+|---|---|---|
+| EMF 0.6.20 / v48 baseline, Lua 1.41.0 | `38523f9c3e5808194fcf10801bacc50796b3f360` | `417643608de290324a36608536b4049ea89a43affddb0fd995e7cdb814c511c5` |
+| Lua 1.42.0 introduction (untagged intermediate source, still v48) | `a9d3bea4624e24fec7626901097ae23d312f34a4` | `f5479d2850812fa5c6e44e42130ec055d6659aefbb0377121354f485d5ea4d85` |
+| Lua 1.43.0 / v49 introduction | `ba437ba2b70e697af686c84d5b27b4b0f294a8e5` | `6a5eee59239b898f1f5b96e435ee5dccf6d6f7a81585a41673dddcb33dcf36fd` |
+| EMF release tag `v0.6.22` (same v49 header, Lua manifest 1.43.0) | `a47284006f0eb22240639f8870bbc5ff5fcb8ef2` | `6a5eee59239b898f1f5b96e435ee5dccf6d6f7a81585a41673dddcb33dcf36fd` |
+
+The vendored header below Kiln's MIT preface is byte-for-byte the tag's header (Git blob
+`20c9b54106670040b47be959732a252bfa23b8c1`). Tag `v0.6.21` was also compared: it still has v48 and Lua 1.41.0;
+Lua 1.42 is not its own EMF release tag. Pinned `scripts/package.ps1` copies `sdk/include` into the SDK and the
+built `lua.dll` plus `mod.json` into `game/emf/mods/lua`; scripts and examples have separate package paths.
+
+GitHub release id `456495022` reports the following asset identities. **Metadata only**: payloads were not downloaded,
+opened, independently hashed or executed, so no binary-package equivalence is asserted.
+
+| Asset | GitHub-reported bytes | GitHub-reported SHA-256 |
+|---|---:|---|
+| `EMF-0.6.22.zip` | 13140928 | `fb25c4fdb8f65929e0908587de5a8d62c580623ff9f6e59428896a4d63d3a76f` |
+| `EMF-0.6.22-manual.zip` | 11687703 | `52f18fafe6daaccf0ebacb8b9a0e97d66652281d446e060d0d863c2760831c1e` |
+| `EMF-0.6.22-source.zip` | 57830392 | `fdc0ce7878e9483c85a600463ac4bd3bd8e04eb258dbd92fc70a6da29c3f8dd8` |
+
+### Verified x64 C layouts and semantics
+
+The authority is the pinned header plus `src/core/api_sizes.h`, `src/core/api.cpp`, `src/core/path_service.cpp` and
+`src/core/move_orders.cpp`. `EmfApi` is a C function-pointer table, not a C++ vtable. It stays 1160 bytes, alignment 8,
+with two `uint32_t` fields (`version` at 0, `size` at 4) and 144 unchanged pointer slots. In particular `path_find`
+is at 1000, `enemy_move` at 1064 and the last slot, `spawn_facing`, at 1152. No slot is added/reordered in v49.
+
+| Type/member | Exact type, x64 size/alignment and offsets | Contract and adapter behavior |
+|---|---|---|
+| `EmfPathQuery` | alignment 4; v37/v47 size 52, v48 size 56, v49 size 60; `moves` is `uint16_t` at 32; `max_nodes` is `uint32_t` at 48; `as_entity` is `uint32_t` at 52; appended `as_state` is `uint32_t` at 56 | `EMF_PATH_AS_CALM = 0`, `EMF_PATH_AS_GUARD = 1`. Guard needs an enemy `as_entity`, its extended move bits and roaming costs, in a server-world callback. Unknown states are refused upstream. Kiln refuses **all** queries before reading them, including old/short queries and unknown states: 0, unsupported log, no callback/result, no state change. |
+| `EmfPathResult` | unchanged from v48: size 48, alignment 8; `const uint32_t* doors` at 24, `uint16_t moves` at 32, `uint8_t jump_up/jump_down` at 34/35, `float width/height` at 36/40; field end 44, padded size 48 | Neither old 32-byte nor current 48-byte results are delivered by this adapter. |
+| `EmfMoveOrder` | unchanged size 136, alignment 8; `uint32_t flags` at 8; `const EmfPathPoint* points` at 16; `char why[96]` at 32; `float stuck_seconds` at 128 and `float hold_seconds` at 132; v40 minimum prefix 128 | New `EMF_MOVE_CLEAR = 0x10`, enemy moves only: an arrival point requires a building-block-clear line 1 m above both feet positions; not terrain line-of-sight. Upstream refuses unknown flags and CLEAR if wall checks are unavailable. Kiln refuses every valid-size move, writes only the unavailable `why`, and reads no points; unknown flags do not become a supported move. Undersized requests are refused untouched. |
+| `EmfOffer` | unchanged size 24, alignment 8; `uint32_t sequence` at 16; `uint8_t range_m` at 20 | New named constant `EMF_SEQUENCE_CHEST = 0x3E49C160` uses the entity's own `InventorySetup`; an offer does not create inventory. Existing offer translation preserves the hash in `InteractionOfferRuntime` bytes at 8. Host tests prove byte forwarding, not a storage-screen or inventory gameplay check. |
+
+### Lua, keys and loader behavior
+
+- Both pinned Lua manifests declare `"emf": 20`; the actual Lua DLL source calls `emf::init(api)` with the default
+  current-header contract. The SDK default branch checks table **size**, not `a->version >= EMF_API_VERSION`;
+  its opt-in lower-minimum branch also checks the explicit minimum version. All v48/v49 full tables are 1160 bytes,
+  so this is not evidence that the unmodified Lua DLL previously failed startup on v48. `has_v49()` checks version
+  on top of earlier slot/size helpers. The adapter now advertises 49 and admits manifest minimums through 49;
+  unknown future minimums are refused. Those helpers are not path/Guard/CLEAR capability probes.
+- Lua 1.42 (`src/lua_host/bindings.cpp`) accepts only named offer sequences `touch`, `button`, `chest`; arbitrary
+  sequence options remain errors in the Lua host. The C API already forwards sequence hashes and is not narrowed.
+- Lua 1.43 `path_bindings.cpp` accepts only `state = "calm"` or `"guard"`, requires `as`, and errors below version
+  49 if `state` is explicitly supplied. A valid query on Kiln still returns `nil` without a callback. Its
+  `move_bindings.cpp` accepts boolean `clear` and ORs CLEAR into the existing flags; a valid move on Kiln still
+  returns `nil` plus the unavailable reason. These Lua outcomes are traced from source, not executed here.
+- `keys` and key-setting `"shared": true` are upstream console/app conflict diagnostics (`src/core/key_list.*`,
+  `manifest.*`), with a numpad scan-code fix; `sdk/include/emf/keys.hpp` is unchanged from v48. There is no new
+  `EmfApi` key slot. Kiln's current settings parser accepts but ignores `shared`; no equivalent key-list UI or
+  conflict semantics are claimed. Existing wheel/key input behavior is unchanged by this change.
+- Upstream `src/core/mods.cpp` discovers `emf/mods` DLLs/manifests, checks minimum API, switches, side and dependencies,
+  and automatically adds a `lua` host dependency for `.lua` `main` files. `src/lua_host/host.cpp` enumerates
+  `EMF_MOD_SCRIPT` records via `mod_info_at` and opens `mods_dir/source/main`, not an absolute Library path.
+  Kiln's existing profile/drop-in discovery and settings mirror remain in use; it marks `main` records SCRIPT and
+  checks declared dependencies but does **not** synthesize that upstream implicit host dependency. This existing
+  reporting difference is not repaired by raising the ABI version, and SCRIPT alone does not prove a host ran it.
+- Upstream `src/loader/content_owner.h` now chooses Kiln as EML owner when the game directory contains
+  `kiln/kiln.json`, even in forced-on content mode; no second EMF content build should be attempted by that loader.
+  That is separate from EMF-mod ownership: kiln-emf still steps aside for a running EMF loader/core. No EML, GPL,
+  launch ordering or ownership configuration is changed here.
+
+### Scope and checks
+
+`tests/abi_test.cpp` freezes types/offsets and the whole slot map; `tests/v26_model_test.cpp` covers v48/v49 table
+sizes, minimum-version normalization and unknown later versions, plus chest-sequence bytes. `tests/path_test.cpp`
+runs the production refusal adapter against fakes with exact 52/56/60-byte queries, 128/136-byte move orders,
+calm/Guard/unknown states, CLEAR/mixed/unknown flags, null inputs and callback sentinels (ASan/UBSan on the host).
+Those tests must pass without paths, movement, new game hooks, or any game services. The live probes' current-header
+version pins are updated, but no probe/game/server was launched. Full player-facing feature parity, Lua DLL startup,
+release payload equivalence, keys UI, and in-game chest behavior remain unverified. The separate #142 Kiln-native
+path/orders work must be trial-merged and built/tested by the coordinator; this change does not activate it.
 
 ## Load sequence (`plugin.cpp`, `mods.cpp`)
 Everything runs in `on_ready`: after all services and plugins ran `kiln_plugin_main`, still before the game's entry
@@ -37,7 +125,7 @@ point.
      its lower-case file name. The first copy of an id wins.
 3. **Decide** each mod. Reasons are logged, and kept in `state/emf.json` and `mod_info`:
    - the switch (ini `enabled`, else `mod.json` `enabled`; a profile entry with `enabled: 0` is always off);
-   - `"emf"` > 21 is refused;
+   - `"emf"` > 49 is refused;
    - `side: "client"` on a dedicated server is skipped;
    - `main` makes a script mod (status SCRIPT, run by `lua`);
    - required dependencies that are missing, off, rejected, failed or of the wrong version reject the mod. Version
