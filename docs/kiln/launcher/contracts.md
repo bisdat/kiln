@@ -1493,6 +1493,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | server | `server_console_open` | serverId, maxLines: number \| null (default 5000, at most 50000) | `ConsoleOpen` {subscription, serverId, source: 'capture'\|'gamelog'\|'none', path: string \| null, lines: `ConsoleLine` {text, level: 'info'\|'warn'\|'error'\|'debug'\|'meta'}[], truncated} (the last run of the server's output; new lines in `kiln://console`; remote: unsupported; [servers.md](servers.md) "Console") |
 | server | `server_console_close` | subscription: string | null |
 | admin | `admin_connect` | serverId, transport: 'auto'\|'tcp'\|'file'\|'ssh' | `AdminSession` |
+| admin | `admin_open_web_panel` | serverId | null; opens the server's Kiln Web Admin in the browser from its `kiln/data/kiln-webadmin/launcher-endpoint.json` (`{format: 1, host, port, sha256?}`): a remote server's listener through an SSH forward on 127.0.0.1 kept while the launcher runs; with `sha256`, the leaf certificate is pinned and the URL carries a one-time `login_mint` secret in its fragment (`/launcher#secret=`); without it, plain `/signin` only on a loopback or forwarded listener. A missing or invalid file: `admin_unavailable` / `invalid_argument` |
 | admin | `admin_disconnect` | session: string | null |
 | admin | `admin_sessions` | - | `AdminSession[]` |
 | admin | `admin_call` | session: string, op: string, args: object | unknown (the op's `data`; op_failed with its error) |
