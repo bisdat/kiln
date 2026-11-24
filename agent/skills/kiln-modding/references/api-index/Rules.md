@@ -16,13 +16,13 @@ enum: Off, Unlimited, BuildingArea
 
 ## CreativeEffectState `0.2.18` — One Creative contribution.
 - `CreativeEffectState(string Name, string Label, bool Requested, string Effective, string Restore, string? Locked, bool OtherOwners)`
-- `Effective { get; init; } -> string`
-- `Label { get; init; } -> string`
-- `Locked { get; init; } -> string?`
-- `Name { get; init; } -> string`
-- `OtherOwners { get; init; } -> bool`
-- `Requested { get; init; } -> bool`
-- `Restore { get; init; } -> string`
+- `Effective { get; init; } -> string` — Display text for the merged result the player gets now, after other rules and server limits.
+- `Label { get; init; } -> string` — The effect's display name for menus.
+- `Locked { get; init; } -> string?` — Null when the effect can be switched back on; otherwise the reason it can't (server preset or policy, a limit that...
+- `Name { get; init; } -> string` — The effect's stable name, as /creative effect and `Creative.SetEffect` take it.
+- `OtherOwners { get; init; } -> bool` — Whether other mods or rule sets also grant this effect for the player.
+- `Requested { get; init; } -> bool` — Whether Creative itself currently grants this effect for the player.
+- `Restore { get; init; } -> string` — Display text for what switching the effect back on would grant.
 
 ## CreativeResult — What `Creative.Set` did.
 - `CreativeResult(bool Ok, bool On, string Message)`
