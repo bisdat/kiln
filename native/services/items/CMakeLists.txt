@@ -86,3 +86,7 @@ set_target_properties(items-dye-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY
 add_executable(items-dyes-native-test tests/dyes_native_test.cpp)
 target_include_directories(items-dyes-native-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(items-dyes-native-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-craft-preview-test tests/craft_preview_test.cpp)
+target_include_directories(items-craft-preview-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(items-craft-preview-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
