@@ -812,6 +812,8 @@ bool upgrade_free_guarded(void* tx, uint32_t owner, uintptr_t ret, unsigned long
 // kiln-items.dll's craft payment (kiln.stations, GitHub #68): set once at the first world, read by every payment.
 using CraftPayFn = int (*)(void*, void*, uint32_t, uint32_t, void*, uintptr_t, uint32_t*);
 std::atomic<CraftPayFn> g_craft_pay{nullptr};
+using CraftPreviewFn = uint32_t (*)(void*, void*, uint32_t, uint32_t, void*, uintptr_t, uint32_t);
+std::atomic<CraftPreviewFn> g_craft_preview{nullptr};
 
 uint32_t __fastcall hk_pay(void* tx, int64_t* costs, uint32_t owner, uint32_t multiplier, void* extra) {
     if (kiln_rules_creative::idle()) return h_pay.call<uint32_t>(tx, costs, owner, multiplier, extra);
@@ -833,7 +835,10 @@ uint32_t __fastcall hk_pay(void* tx, int64_t* costs, uint32_t owner, uint32_t mu
     if (const CraftPayFn craft_pay = g_craft_pay.load(std::memory_order_acquire);
         craft_pay && craft_pay(tx, costs, owner, multiplier, extra, ret, &crafted))
         return crafted;
-    return h_pay.call<uint32_t>(tx, costs, owner, multiplier, extra);
+    const uint32_t game = h_pay.call<uint32_t>(tx, costs, owner, multiplier, extra);
+    if (const auto preview = g_craft_preview.load(std::memory_order_acquire))
+        return preview(tx, costs, owner, multiplier, extra, ret, game);
+    return game;
 }
 
 // Check the resolved return address really follows a direct call to this payment. A stale symbol may only turn
@@ -1539,12 +1544,14 @@ void arm_payments() {
         // free crafting nor the storage upgrade needed it. kiln-items.dll reads HOOK_PAYMENT and lowers its row without it.
         const HMODULE items = GetModuleHandleW(L"kiln-items.dll");
         const auto craft_pay = items ? reinterpret_cast<CraftPayFn>(GetProcAddress(items, "kiln_stations_craft_pay")) : nullptr;
-        if (craft_pay && feat("stations.craft_sources") && !h_pay &&
+        if (craft_pay && (feat("stations.craft_sources") || feat("stations.craft_ui")) && !h_pay &&
             !(sym("rules/InventoryPay", &pay) &&
               inline_hook(h_pay, reinterpret_cast<void*>(pay), reinterpret_cast<void*>(&hk_pay), "the inventory payment", "rules/InventoryPay")))
             note("station outputs in a craft (stations.craft_sources: payment hook failed)");
         if (h_pay) {
             g_craft_pay.store(craft_pay, std::memory_order_release);
+            g_craft_preview.store(items ? reinterpret_cast<CraftPreviewFn>(GetProcAddress(items, "kiln_stations_craft_preview")) : nullptr,
+                                  std::memory_order_release);
             g_hooks |= KILN_RULES_HOOK_PAYMENT;
         }
     }();

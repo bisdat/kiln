@@ -1,20 +1,52 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "GitHub #68 step 2, Kiln clients: the crafting menu's craftable count (rules/client.CraftableAmount) can include the server's snapshot of bag, Magic chests and opted-in station outputs. The count is not authority. A vanilla client has no hook. docs/re/stations.md section 10.",
+  "comment": "Kiln clients: CraftableAmount is a type-1 RecipeApply dry-run STATUS, not a count (GitHub #132). The exact call below always rolls back. Only its native InventoryPay material-shortfall may use per-ingredient server stock to continue the preview; native eligibility/output guards and authoritative server payment are unchanged.",
   "features": {
     "stations.craft_ui": {
       "symbols": [
         "rules/client.CraftableAmount",
         "stations/ResolveRecipeInputs",
-        "content/RecipeFind"
+        "content/RecipeFind",
+        "items/RecipeApply",
+        "stations/client.CraftPreviewReturn",
+        "items/InventoryRollback",
+        "rules/InventoryPay",
+        "rules/RecipePaid",
+        "gems/PayMaterial",
+        "items/InventoryRemoveItems",
+        "items/InventoryPageFetch",
+        "stations/MaterialPageFetchRet",
+        "stations/MaterialPreferredPageFetchRet",
+        "stations/BaseStockForPlayer"
       ]
     },
     "crafting.source_ui": {
       "symbols": [
         "rules/client.CraftableAmount",
         "stations/ResolveRecipeInputs",
-        "content/RecipeFind"
+        "content/RecipeFind",
+        "items/RecipeApply",
+        "stations/client.CraftPreviewReturn",
+        "items/InventoryRollback",
+        "rules/InventoryPay",
+        "rules/RecipePaid",
+        "gems/PayMaterial",
+        "items/InventoryRemoveItems",
+        "items/InventoryPageFetch",
+        "stations/MaterialPageFetchRet",
+        "stations/MaterialPreferredPageFetchRet",
+        "stations/BaseStockForPlayer"
+      ]
+    }
+  },
+  "symbols": {
+    "stations/client.CraftPreviewReturn": {
+      "find": [
+        {
+          "pattern": "48 8D 8D 80 9C 00 00 E8 {items/RecipeApply:rel32} 48 8D 8D 80 9C 00 00 8B F8 E8 {items/InventoryRollback:rel32} 45 33 C0",
+          "offset": 12
+        }
       ]
     }
   }

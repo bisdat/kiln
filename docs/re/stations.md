@@ -611,25 +611,88 @@ entities are 1..1023). That hook group is installed on demand; kiln.stations ask
 crafts at a crafting station (a Crafting component), and only a station with a FactoryStation lends, so this matters
 only for an entity that has both.
 
-### 10.2 How the client counts a recipe
+### 10.2 The client's craft status (GitHub #132 correction)
 
-`ui/CraftingMenu` is C `0xb80130`. `rules/client.CraftableAmount` (C `0xb2ddd0`) is a cache read at the game UI data
-+0x14f70, keyed by the recipe, the cap and the selections; it returns the cached count or 0 until the cache is filled.
-The crafting screen stores the cap-1 count on the selected entry at +8 (the call at C `0xc79652`). The hints path
-(C `0xd21120`) receives the cap-10 count. At C `0xd2127a` the screen compares that entry's count with 1 and, when it
-is not 1, sets the bit that disables the action. The handler C `0xd13120` (called from the screen at C `0xc79a63`)
-queues a craft (`UiQueueCraftRecipe` C `0xd6e460`) only for an action whose activation byte is set: type 0 crafts 1,
-type 0x1b crafts 10. So the client does not send the one-craft when its own count is not enough.
+Static disassembly on client 26430625 (`5d9ef2f1`), compared with dedicated `f0d824be`; no game was run for this correction.
+`rules/client.CraftableAmount` (C `0xb2ddd0`) is misnamed: it returns the **status** of a type-1 action query, not a
+number of craftable items. The key includes the recipe, requested amount (1 or 10), and selections. Pending is 0;
+ready is 1; refusals are 2/3/4/5. `player_ui` calls `RecipeApply` at C `0x2be03a`, preserves its result, and always
+rolls the transaction back at C `0x2be048`. It caches a material refusal as 4 at C `0x2be854` and success as 1 at
+C `0x2bea65`. The screen stores that status at entry `+8` (C `0xc79668`). Both Craft handlers require **exactly 1**
+(C `0xd13192`, `0xd1327f`) before calling `UiQueueCraftRecipe` (C `0xd6e460`).
 
-The cache is the client's view of the replicated chests and the bag. It does not include a station. Kiln's existing
-`CraftableAmount` hook (kiln.rules, installed for `rules.craft_ui` and, now, for `stations.craft_ui`) returns the
-greater of the game's count and a count from a snapshot the server pushed. The snapshot is not authority.
+The previous Kiln bridge incorrectly returned `max(status, snapshotCrafts)`: a native material refusal 4 was not
+changed for amount 1 (`4 < 1` is false), while a pending 0 or refusal 4 could become the invalid status 10 for amount
+10. The old “count raised 0 -> 10” log therefore did not establish that Craft could send a request. A request blocked
+here never reaches the hosted server's `CraftRecipe` or its `stations: player ...` line. This is a verified static
+explanation of that symptom; the exact branch taken in the player's process was not observed.
 
-The count needs the recipe's resolved inputs (`content/RecipeFind`, `stations/ResolveRecipeInputs`, both on the client
-build: `sigdb/symbols/client.d/stations-craft-ui.json`) and a `g38_items::RecipeRegistry`. A joined client has no server
-world, so the registry is the client world's own singleton, read on the client world's thread (its Pre) and kept for the
-UI thread. The client world registers it: kiln.content's client pass already reads it there on a joined client
-(`native/services/content/content.cpp`, `on_client_pre`).
+The first material-only refusal is inside `InventoryPay`: C `0x3f8c42` / S `0x199ee2` return 4 when the line is still
+short after the normal sources. This is separate from `RecipeApply`'s **pre-payment** 4 (C `0x3f8f68` / S `0x19a208`):
+workshop, shelter, level, comfort and progress. Props refuse as 5. Neither eligibility branch is changed.
+
+Kiln now scopes a thread-local preview context to the exact client call returning to C `0x2be03f`, pinned together
+with its unconditional rollback. It verifies the recipe against the client registry, the client-storage kind 2,
+the qualified transaction layout, read-only inventory accessor types and initialized inventory pages, item identities, and the actual resolved cost
+lines. **Review correction:** the outer `PayMaterial` result alone is not enough. Its implementation
+`InventoryRemoveItems` (C `0x411360`, S `0x1b0d90`) calls `InventoryPageFetch` (C `0x416400`, S `0x1b5fa0`).
+The page loop silently skips a failed fetch, including missing-view error `0x1f`, then can return **error 0 with an
+unpaid remainder**. Checking only the owner's inventory pages misses that failure on a native base-stock payer.
+
+A passive fetch observer now runs only inside each actual `PayMaterial` call of the exact preview transaction. It
+accepts the loop fetch return (C `0x41154b`, S `0x1b0f7b`) and preferred-page fetch return (C `0x411474`, S `0x1b0ea4`).
+Each take must have at least one observed native fetch, and every participating fetch must return its out pointer,
+error 0 and a nonnull inventory view. Missing observations, unknown call sites, error bytes or unreadable results mark
+the take incomplete even when the outer take says error 0. Other transactions and fetches outside that take's scope
+are passed through without affecting the preview. The observer never changes the result or repeats a take.
+
+After the original `InventoryPay` returns 4, **observed, complete, error-free native takes** are required before its
+existing kiln.rules hook may complement **only that preview's payment result**. The server-stock snapshot must also
+cover every ingredient times the requested amount. Unknown/zero/duplicate costs, unknown modes/flags, absent stock
+and failed reads stay vanilla. This observes the work the native payer actually performed; it does not claim a full
+simulation of all native inventories or run an additional mutating payment.
+`RecipeApply` still executes its normal water and output-space checks and computes the cached status itself.
+The obsolete private count-adjust bridge is inert; ingredient display counts never authorize real payment.
+
+This commits nothing: all native preview takes, including partial ones, are still rolled back. The snapshot comes from
+`CraftStock.Build`: logged-in player, native permission/session-filtered `ExtraStock`, bag and authorized base stock.
+The server recomputes it every 30 steps (about 1.2 s), sends changed totals, and clears it on menu/world lifecycle changes.
+There is **no per-attempt freshness or reservation guarantee**; unchanged totals are not a new timestamped grant. A stale
+snapshot can offer a request which the server then refuses. All actual authorization, live counts, bag-first payment, linked-source filtering, exact
+shortfall limits and rollback remain in the unchanged server adapter (§10.1, §10.7). Hosted and dedicated authoritative
+transactions cannot enter the preview context; the dedicated executable has no such call site.
+
+The preview is not an exact simulated withdrawal from linked inventories. Native InventoryPay stops at its first short
+line; subsequent bag deductions are therefore absent when RecipeApply continues into its water/output checks. Those
+checks are **not bypassed**. Output-capacity evaluation can be conservatively false-negative when a later ingredient's
+removal would free a bag slot in the real payment; only the real server transaction constructs the final paid inventory.
+This limit remains, and a successful preview is never treated as authority to commit or dispense outputs.
+
+Before installing the RecipeApply and passive observers, at preview entry, and immediately before complementing the
+payment result, Kiln checks the full relevant code ranges with kiln.hooks' code-state API:
+
+| Dependency | Client RVA | Checked bytes |
+|---|---:|---:|
+| RecipeApply | `0x3f8f30` | `0x275` |
+| InventoryPay | `0x3f89e0` | `0x286` |
+| PayMaterial wrapper | `0x411330` | `0x2b` |
+| InventoryRemoveItems implementation | `0x411360` | `0x2dd` |
+| InventoryPageFetch | `0x416400` | `0x10c` |
+| BaseStockForPlayer | `0x46fa10` | `0x174` |
+| InventoryRollback, including split tails and dispatch table | `0x418150` | `0x508` |
+| Exact RecipeApply-to-rollback caller | `0x2be03a` | 19 |
+
+The material implementation, fetch, base-stock and rollback extents are verified against the complete contiguous
+`.pdata` fragments on both pinned releases, not just each function's first unwind fragment. Foreign/occupied or
+unknown code in those ranges causes stand-down (logged at installation), never a patch over CBS. This includes
+CBS changing BaseStockForPlayer even though Kiln does not hook that dependency. Original or Kiln-managed code can use
+the shared detour. Native successes are always preserved; stand-down does not replace or suppress CBS's own native
+payment. CBS itself was not downloaded or executed for this work. Address-specific tests cover every qualified range
+at installation/use, unknown and foreign states, native success, and a dependency changed during the original call.
+
+Regression evidence: `native/services/items/tests/craft_preview_test.cpp` (actual guarded bridge with fake native
+functions) and `craft_preview_sigdb_test.py` (the two static executable copies, exact branches and changed-call
+negative cases). The no-CBS Windows player's real game after this fix, and actual CBS 1.1.0 coexistence, remain unverified.
 
 ### 10.3 C7, the station screen's fill button
 
@@ -755,8 +818,8 @@ factory's own craft (stock mode 0) never reaches this test.
 The client's own `RecipeApply` dry run (C `0x2be03a`, inside the station screen's status function `FUN_1402b8430`, stock
 mode 2 set at C `0x2bdd01`, rolled back at C `0x2be048`) also returns to `RecipePaid` (C `0x3f8fec`). On a hosting Kiln
 client with a station opted in, the payment hook sees it. Its transaction is the client world's: its storage kind is 2
-(and its bases words are not the server's), so Kiln leaves it to the game (counter `other_world`). Read from the code,
-not run: a hosting client is the real-client check C8.
+(and its bases words are not the server's), so the real payment adapter leaves it to the game (counter `other_world`). The client-only material-preview bridge
+in §10.2 can complement that dry run after the native payment; it cannot use the server adapter to take items.
 
 Thread. On a dedicated server the game's programs, `handle_crafting_events` among them, run on the tick thread
 (docs/kiln/services/world.md). In a hosted game the server world's programs may run on a game worker thread. Kiln does
@@ -855,11 +918,11 @@ the bag held, and whether `PayMaterial` answered the bag with an error byte (tre
 source"), was not logged; the lines now say both. Lenders now pay at most the counted shortfall: a bag or chest that
 pays less than counted rolls the craft back instead of the lenders paying the difference.
 
-**Where a crafting-menu craft stops (GitHub #132 follow-up, 0.2.0-dev.31).** A 30.9 report from a hosting client: a
+**Earlier diagnostic hypothesis (GitHub #132 follow-up, 0.2.0-dev.31; corrected by §10.2).** A 30.9 report from a hosting client: a
 decoration table's menu counted linked stock (an ingredient 0 -> 770, the recipe 0 -> 10), but Craft made nothing and kiln.log
-had no payment line. Static facts that bound it: the craft action handler queues the craft only for an enabled action
+had no payment line. The earlier analysis assumed the returned value was a count. The corrected status trace is in §10.2. The craft action handler queues the craft only for an enabled action
 (§10.2) and the UI dispatcher turns it into `UiCraftRecipeEvent` without checks (docs/re/creative-mode-146.md §3), so a
-press the raised count enabled is sent; `RecipeApply` returns 4 *before* `InventoryPay` when `0x91de90` (workshop,
+press is sent only when the entry holds status 1 (the old count raise did not ensure that); `RecipeApply` returns 4 *before* `InventoryPay` when `0x91de90` (workshop,
 shelter, level, comfort, progress) refuses, and 5 for props (§10.1): such a refusal never reaches the adapter and looked
 exactly like a payment refusal in the log. On a hosting client the client world's own `RecipeApply` dry runs reach the
 adapter as well (their bases word is the client world's): they used up the six "left to the game" lines before the

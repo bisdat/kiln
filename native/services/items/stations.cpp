@@ -1200,48 +1200,198 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     return 1;
 }
 
-// The client's crafting-menu count (kiln.rules' CraftableAmount hook, the game's UI thread). 1: *out is how many the
-// snapshot can make (the caller keeps the greater of this and the game's own count `game`). 0: no snapshot, or the recipe
-// could not be read. The recipes are the client world's own registry: a joined client has no server world.
-int craft_adjust_impl(uint32_t recipe, uint32_t cap, uint32_t game, const void* selections, uint32_t* out) {
-    if (!out || !cap || !recipe || !G.resolve || !G.recipe_find || !g_craft_on.load(std::memory_order_acquire)) return 0;
+// The misnamed CraftableAmount cache returns a STATUS (1 ready, 4 refused), not a count. Never raise it from a display
+// snapshot: RecipeApply also uses 4 for non-material eligibility failures. Keep the old private bridge inert for older
+// kiln-rules builds. The scoped dry run below lets the game's full RecipeApply compute its own status instead.
+int craft_adjust_impl(uint32_t, uint32_t, uint32_t, const void*, uint32_t*) { return 0; }
+
+// Only player_ui's type-1 RecipeApply call is a preview. The hosted server uses the same RecipeApply/InventoryPay
+// functions but not this call site. The caller ALWAYS rolls this transaction back, including after success.
+kiln::RawHook h_preview_apply, h_preview_take, h_preview_fetch;
+uintptr_t g_preview_apply = 0, g_preview_ret = 0, g_preview_pay = 0, g_preview_paid = 0, g_preview_take = 0;
+uintptr_t g_preview_remove = 0, g_preview_fetch = 0, g_preview_fetch_ret = 0, g_preview_preferred_ret = 0;
+uintptr_t g_preview_stock = 0, g_preview_rollback = 0;
+bool g_preview_feat = false, g_preview_failed = false;
+std::atomic<bool> g_preview_hooked{false};
+LogLimit g_log_preview{12};
+struct PreviewCall {
+    void* tx = nullptr;
+    uint32_t owner = 0, amount = 0, recipe = 0;
+    RawCosts costs{};
+    bool saw_take = false, take_error = false;
+};
+thread_local PreviewCall t_preview;
+
+// Foreign (e.g. CBS), unreadable and unknown code stays vanilla. RawHook may join Kiln's existing physical detour,
+// never patch over a foreign one. Recheck at entry as another loader can install later.
+bool preview_code_ok() {
+    const auto* h = kiln::hooks_v2(g_api);
+    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) return false;
+    for (auto [at, size] : {std::pair<uintptr_t, size_t>{g_preview_apply, 0x275},
+                           {g_preview_pay, 0x286}, {g_preview_take, 0x2b}, {g_preview_remove, 0x2dd},
+                           {g_preview_fetch, 0x10c}, {g_preview_stock, 0x174}, {g_preview_rollback, 0x508},
+                           {g_preview_ret ? g_preview_ret - 5 : 0, 19}}) {
+        uint32_t state = KILN_CODE_UNKNOWN;
+        uint64_t generation = 0;
+        if (!at || h->code_state(at, size, &state, &generation) != KILN_OK ||
+            (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) return false;
+    }
+    return true;
+}
+// InventoryRemoveItems can skip failed page fetches and still answer {error=0,left=remaining}. Observe its actual
+// participating fetches inside each native PayMaterial call, including base-stock payers, without another simulation.
+using PreviewFetchFn = void*(__fastcall*)(void* out, void* tx, uint32_t page);
+struct PreviewFetchRead { void* tx; uint32_t calls = 0; bool error = false; };
+thread_local PreviewFetchRead* t_preview_fetch = nullptr;
+void* __fastcall hk_preview_fetch(void* out, void* tx, uint32_t page) {
+    const uintptr_t ret = h_preview_fetch.caller();
+    PreviewFetchRead* const read = t_preview_fetch && t_preview_fetch->tx == tx && t_preview.tx == tx ? t_preview_fetch : nullptr;
+    void* const result = h_preview_fetch.original<PreviewFetchFn>()(out, tx, page);
+    if (read) {
+        if (read->calls == UINT32_MAX) read->error = true;
+        else ++read->calls;
+        uint8_t error = 0xff;
+        __try {
+            // The native fetch always returns its out pointer; success carries a nonnull inventory view at +8.
+            if (result && result == out && rd<void*>(result, 8)) error = rd<uint8_t>(result, 0);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        read->error = read->error || error != 0 || (ret != g_preview_fetch_ret && ret != g_preview_preferred_ret);
+    }
+    return result;
+}
+PayOut* preview_native_take(PayOut* out, void* tx, uint32_t entity, uint32_t item, uint32_t count, PreviewFetchRead* read) {
+    struct Scope { PreviewFetchRead* saved = t_preview_fetch; ~Scope() { t_preview_fetch = saved; } } scope;
+    t_preview_fetch = t_preview.tx == tx && tx ? read : nullptr;
+    return h_preview_take.original<PayFn>()(out, tx, entity, item, count);
+}
+// Preserve every native result. An unobserved/incomplete fetch or any outer error prevents complementing code 4.
+PayOut* __fastcall hk_preview_take(PayOut* out, void* tx, uint32_t entity, uint32_t item, uint32_t count) {
+    PreviewFetchRead read{tx};
+    PayOut* const result = preview_native_take(out, tx, entity, item, count, &read);
+    if (t_preview.tx == tx && tx) {
+        t_preview.saw_take = true;
+        uint8_t error = 0xff;
+        __try { if (result && result == out && result->left <= count) error = result->error; }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        t_preview.take_error = t_preview.take_error || error != 0 || !read.calls || read.error;
+    }
+    return result;
+}
+struct PreviewRead {
+    PreviewCall call;
+    const void* recipe;
+    const void* inputs;
+    bool ok = false;
+};
+void preview_read_impl(void* arg) {
+    auto& j = *static_cast<PreviewRead*>(arg);
+    auto* tx = static_cast<uint8_t*>(j.call.tx);
+    if (!E.tx_ok) return;  // no client layout reads when the transaction feature did not qualify
+    if ((tx[0xb0] & ~0x08u) || (tx[0xb1] != 0 && tx[0xb1] != 2)) return;
+    j.call.recipe = rd<uint32_t>(j.recipe, kRecipeId);
     void* const reg = g_client_recipes.load(std::memory_order_acquire);
-    const void* rec = reg ? find_recipe(recipe, reg) : nullptr;
-    if (!rec) return 0;
-    ResolveCall rc{};
-    if (!resolve_inputs(rec, static_cast<const KilnStationChoice*>(selections), reg, &rc) || !rc.n) return 0;
-    uint64_t crafts = cap;
+    if (!j.call.recipe || !reg || find_recipe(j.call.recipe, reg) != j.recipe) return;
+    const auto ctx = rd<void*>(tx, 0);
+    const auto job = ctx ? rd<void*>(ctx, 0) : nullptr;
+    Access a{};
+    a.storage = job && E.job_storage ? E.job_storage(job) : nullptr;
+    if (!a.storage || rd<uint8_t>(a.storage, 8) != 2 || !E.component_map_find || !E.read_other) return;
+    void* const registry = rd<void*>(a.storage, 0);
+    if (!registry) return;
+    // Read-only client access, deliberately NOT access_from_tx (which must remain server-only for real payment).
+    for (auto [which, offset] : {std::pair<Acc, int>{A_SETUP, 0x18}, {A_INVENTORY, 0x20}}) {
+        a.acc[which] = rd<uint64_t>(tx, offset);
+        const uint32_t hash = comp_hash(which == A_SETUP ? "InventorySetup" : "Inventory");
+        const auto index = E.component_map_find(static_cast<uint8_t*>(registry) + E.registry_components, &hash);
+        if (!index || !a.acc[which] || rd<uint16_t>(reinterpret_cast<void*>(a.acc[which]), 0) != *index) return;
+    }
+    PageSet pages{};
+    bool initialized = false;
+    if (!read_pages(a, j.call.owner, &pages, &initialized) || !initialized || !pages.n || pages.n > KILN_ITEMS_MAX_INVENTORIES) return;
+    for (uint32_t i = 0; i < pages.n; ++i) {
+        PtrSize ps{};
+        E.read_other(&ps, a.storage, a.acc[A_INVENTORY], pages.p[i].entity);
+        if (!ps.ptr || ps.size < kInventorySize) return;
+    }
+    j.call.costs.costs = static_cast<const uint8_t*>(j.inputs);
+    costs_impl(&j.call.costs);
+    if (!j.call.costs.n || !E.item_find) return;
+    void* const items = rd<void*>(tx, 8);
+    if (!items) return;
+    for (uint32_t i = 0; i < j.call.costs.n; ++i)
+        if (!j.call.costs.item[i] || !j.call.costs.count[i] || !E.item_find(j.call.costs.item[i], items)) return;
+    j.ok = true;
+}
+
+uint32_t __fastcall hk_preview_apply(void* tx, const void* recipe, const void* inputs, uint64_t props,
+                                    const void* station, const uint32_t* workshop, uint32_t owner, int32_t amount) {
+    const uintptr_t ret = h_preview_apply.caller();
+    struct Scope { PreviewCall saved = t_preview; ~Scope() { t_preview = saved; } } scope;
+    t_preview = {};
+    if (!g_off.load() && ret == g_preview_ret && tx && recipe && inputs && owner && owner <= kMaxPlayerEntity &&
+        amount > 0 && amount <= 1000 && g_craft_on.load(std::memory_order_acquire) && preview_code_ok()) {
+        PreviewRead j{{tx, owner, static_cast<uint32_t>(amount)}, recipe, inputs};
+        unsigned long fault = 0;
+        if (guard(&preview_read_impl, &j, &fault) && j.ok) t_preview = j.call;
+    }
+    // All eligibility, props, water, output capacity and recipe logic stays in the game's function.
+    return h_preview_apply.original<RecipeApplyFn>()(tx, recipe, inputs, props, station, workshop, owner, amount);
+}
+
+// Called AFTER the original InventoryPay, through its already existing kiln.rules hook. Only its material-shortfall
+// code can be complemented. No stock is taken here: the UI caller rolls back. The server's real payment still checks
+// live authorizations/inventories and performs every take, bag first, with the existing no-overdraw rollback.
+uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amount, void* extra, uintptr_t ret, uint32_t game) {
+    if (game != 4 || !tx || t_preview.tx != tx || t_preview.owner != owner || t_preview.amount != amount || extra ||
+        ret != g_preview_paid || !g_preview_paid || !t_preview.saw_take || t_preview.take_error ||
+        !g_craft_on.load(std::memory_order_acquire) || g_off.load() || !preview_code_ok()) return game;
+    RawCosts rc{static_cast<const uint8_t*>(costs), nullptr, 0, {}, {}, 0};
+    unsigned long fault = 0;
+    if (!guard(&costs_impl, &rc, &fault) || !rc.n || rc.n != t_preview.costs.n) return game;
     {
         std::lock_guard lock(g_craft_mu);
-        if (!g_craft_on.load(std::memory_order_relaxed)) return 0;
+        if (!g_craft_on.load(std::memory_order_relaxed)) return game;
         for (uint32_t i = 0; i < rc.n; ++i) {
-            if (!rc.out[i].count) continue;
-            const auto it = g_craft_have.find(rc.out[i].item);
-            const uint64_t h = it == g_craft_have.end() ? 0 : it->second;
-            crafts = std::min(crafts, h / rc.out[i].count);
+            if (!rc.item[i] || !rc.count[i] || rc.item[i] != t_preview.costs.item[i] || rc.count[i] != t_preview.costs.count[i]) return game;
+            for (uint32_t k = 0; k < i; ++k) if (rc.item[k] == rc.item[i]) return game;
+            const uint64_t need = static_cast<uint64_t>(rc.count[i]) * amount;
+            const auto it = g_craft_have.find(rc.item[i]);
+            if (need > UINT32_MAX || it == g_craft_have.end() || it->second < need) return game;
         }
     }
-    *out = static_cast<uint32_t>(crafts);
-    if (crafts > game) {
-        // once per recipe and count, in a few lines: the real-client check reads them
-        static std::mutex mu;
-        static std::unordered_map<uint64_t, uint64_t> said;  // per recipe and cap: the craft-1 and craft-10 counts alternate
-        const uint64_t key = (static_cast<uint64_t>(game) << 32) | crafts;
-        bool fresh = false;
-        {
-            std::lock_guard lock(mu);
-            if (said.size() > 512) said.clear();
-            auto [it, inserted] = said.emplace((static_cast<uint64_t>(recipe) << 32) | cap, key);
-            fresh = inserted || it->second != key;
-            it->second = key;
-        }
-        if (fresh)
-            if (const uint32_t n = g_log_raised.take())
-                LOGI("stations: the crafting menu's count for recipe 0x%08x raised %u -> %u by the server's crafting stock (the bag, "
-                     "the Magic chests, linked sources and opted-in station outputs it counts)%s", recipe, game,
-                     static_cast<unsigned>(crafts), n > 1 ? " (more held back)" : "");
+    if (const uint32_t n = g_log_preview.take())
+        LOGI("stations: client craft preview of recipe 0x%08x x%u: material shortfall covered by the server stock; "
+             "native eligibility and output checks continue, real payment still required%s", t_preview.recipe, amount,
+             n > 1 ? " (more held back)" : "");
+    return 0;
+}
+void preview_hook_on_demand() {
+    if (!g_preview_feat || g_preview_failed || g_preview_hooked.load() || !g_craft_on.load()) return;
+    if (!preview_code_ok()) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: recipe/payment or rollback call site is occupied or unknown (CBS/other hooks kept)");
+        return;
     }
-    return 1;
+    if (!h_preview_fetch && !h_preview_fetch.install(g_api, g_owner, g_preview_fetch, reinterpret_cast<void*>(&hk_preview_fetch),
+                                                    "stations/client.CraftPreviewFetch")) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: native page reads cannot be observed (%s)",
+             h_preview_fetch.error() ? h_preview_fetch.error() : "hook refused");
+        return;
+    }
+    if (!h_preview_take && !h_preview_take.install(g_api, g_owner, g_preview_take, reinterpret_cast<void*>(&hk_preview_take), "stations/client.CraftPreviewTake")) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: native material errors cannot be observed (%s)",
+             h_preview_take.error() ? h_preview_take.error() : "hook refused");
+        return;
+    }
+    if (!h_preview_apply.install(g_api, g_owner, g_preview_apply, reinterpret_cast<void*>(&hk_preview_apply), "stations/client.CraftPreview")) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: %s", h_preview_apply.error() ? h_preview_apply.error() : "hook refused");
+        return;
+    }
+    g_preview_hooked.store(true);
+    LOGI("stations: linked crafting's client dry-run material check hooked; native status and real payment remain authoritative");
 }
 
 // ---- the station screen's fill buttons on a Kiln client (GitHub #68, docs/re/stations.md §10.3) ----
@@ -3606,6 +3756,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
         g_client_recipes.store(w ? reinterpret_cast<void*>(g_api->singleton(w, str("g38_items::RecipeRegistry"))) : nullptr,
                                std::memory_order_release);
     }
+    preview_hook_on_demand();
     fill_hook_on_demand();
     avail_hook_on_demand();
     static bool checked = false;
@@ -3613,16 +3764,16 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
         checked = true;
         std::string why;
         uint32_t reason = 0;
-        if (!rules_hook(KILN_RULES_HOOK_CRAFT_UI, &why, &reason)) {
-            LOGW("stations: the crafting menu does not count crafting sources (linked sources, station outputs) here: %s", why.c_str());
+        if (!rules_hook(KILN_RULES_HOOK_PAYMENT, &why, &reason)) {
+            LOGW("stations: the linked crafting preview is unavailable here: %s", why.c_str());
             lower("stations.craft_ui", reason, why.c_str());
             lower("crafting.source_ui", reason, why.c_str());
         } else if (!G.resolve || !G.recipe_find) {
-            LOGW("stations: the crafting menu does not count crafting sources (linked sources, station outputs) here: the recipe reads did not resolve");
+            LOGW("stations: the linked crafting preview is unavailable here: the recipe reads did not resolve");
             lower("stations.craft_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
             lower("crafting.source_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
         } else {
-            LOGI("stations: the crafting menu counts crafting sources (linked sources, opted-in station outputs) when a Kiln server sends them (client world %s)",
+            LOGI("stations: linked crafting uses the native client dry-run status and per-ingredient server stock (client world %s)",
                  g_client_recipes.load() ? "recipes read" : "recipes not read yet");
         }
     }
@@ -3689,6 +3840,17 @@ void stations_resolve() {
         g_fill_feat = sym("stations/client.UiActionStatus", &g_ui_status) && g_ui_status;
         if (!g_fill_feat)
             lower("stations.fill_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/client.UiActionStatus did not resolve");
+    }
+    // Exact client-only type-1 dry run, with its unconditional rollback. A joined client need not have a server world.
+    if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.craft_ui")) {
+        g_preview_feat = sym("items/RecipeApply", &g_preview_apply) && sym("stations/client.CraftPreviewReturn", &g_preview_ret) &&
+            sym("rules/InventoryPay", &g_preview_pay) && sym("rules/RecipePaid", &g_preview_paid) && sym("gems/PayMaterial", &g_preview_take) &&
+            sym("items/InventoryRemoveItems", &g_preview_remove) && sym("items/InventoryPageFetch", &g_preview_fetch) &&
+            sym("stations/MaterialPageFetchRet", &g_preview_fetch_ret) && sym("stations/MaterialPreferredPageFetchRet", &g_preview_preferred_ret) &&
+            sym("stations/BaseStockForPlayer", &g_preview_stock) && sym("items/InventoryRollback", &g_preview_rollback) &&
+            call_matches(g_preview_fetch_ret, g_preview_fetch) && call_matches(g_preview_preferred_ret, g_preview_fetch) &&
+            call_matches(g_preview_ret, g_preview_apply) && call_matches(g_preview_paid, g_preview_pay) && G.recipe_find && E.tx_ok;
+        if (!g_preview_feat) LOGW("stations: linked craft preview unavailable: the scoped dry run did not resolve; native status kept");
     }
     // The ingredient rows' "available" count (the same snapshot). Hooked on demand.
     if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) avail_resolve();
@@ -3932,6 +4094,12 @@ KilnResult stations_publish(const KilnApi* api, KilnOwner owner) {
 extern "C" KILN_EXPORT int kiln_stations_craft_pay(void* tx, void* costs, uint32_t owner, uint32_t multiplier, void* extra,
                                                    uintptr_t ret, uint32_t* code) {
     return kitems::craft_pay_impl(tx, costs, owner, multiplier, extra, ret, code);
+}
+
+// kiln.rules' already installed InventoryPay hook, after the native material payment. Private, not a service ABI.
+extern "C" KILN_EXPORT uint32_t kiln_stations_craft_preview(void* tx, void* costs, uint32_t owner, uint32_t amount,
+                                                         void* extra, uintptr_t ret, uint32_t game) {
+    return kitems::craft_preview_impl(tx, costs, owner, amount, extra, ret, game);
 }
 
 // kiln.gameplay's craft hook: the station being crafted at, for the duration of CraftRecipe (this thread).

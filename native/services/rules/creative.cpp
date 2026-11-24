@@ -194,11 +194,6 @@ uint32_t __fastcall hk_alt(void* tx, int64_t* costs, uint32_t owner, uint32_t mu
 
 using CraftableFn = uint32_t(__fastcall*)(void* ui, uint32_t recipe, uint32_t cap, const void* selections);
 kiln::RawHook h_craftable;
-// kiln-items.dll's count from the server's crafting-stock snapshot (kiln.stations, GitHub #68): looked up once, when the
-// hook goes in (the first world). (recipe, cap, the game's count, selections, out) -> 1 when *out is the snapshot's count.
-using AdjustFn = int (*)(uint32_t, uint32_t, uint32_t, const void*, uint32_t*);
-std::atomic<AdjustFn> g_adjust{nullptr};
-
 uint32_t __fastcall hk_craftable(void* ui, uint32_t recipe, uint32_t cap, const void* selections) {
     const uint32_t n = h_craftable.call<uint32_t>(ui, recipe, cap, selections);
     if (idle()) return n;
@@ -208,11 +203,7 @@ uint32_t __fastcall hk_craftable(void* ui, uint32_t recipe, uint32_t cap, const 
         S.craft_ui.fetch_add(1, std::memory_order_relaxed);
         return want;
     }
-    // kiln.stations: a Kiln client's snapshot of what opted-in station outputs add (GitHub #68). Never below the game's
-    // own count.
-    uint32_t extra = 0;
-    if (const AdjustFn adjust = g_adjust.load(std::memory_order_acquire); n < want && adjust && adjust(recipe, want, n, selections, &extra))
-        return std::max(n, extra);
+    // Linked crafting must use RecipeApply's material-only preview bridge, never replace a cached status with a count.
     return n;
 }
 
@@ -361,10 +352,7 @@ uint32_t install(const KilnApi* api, KilnOwner owner, std::string& off) {
             inline_hook(h_fog, fog, reinterpret_cast<void*>(&hk_fog), "the fog of war's discover call", "rules/client.FogDiscover"))
             hooks |= KILN_RULES_HOOK_MAP;
         else note("map reveal (rules.map_reveal)");
-        // rules.craft_ui: free crafting's buttons. stations.craft_ui: opted-in station outputs in the same count.
-        if (feat("stations.craft_ui"))
-            if (const HMODULE items = GetModuleHandleW(L"kiln-items.dll"))
-                g_adjust.store(reinterpret_cast<AdjustFn>(GetProcAddress(items, "kiln_stations_craft_adjust")), std::memory_order_release);
+        // Free crafting's legacy UI hook. Linked crafting keeps the native dry-run status untouched.
         if ((feat("rules.craft_ui") || feat("stations.craft_ui")) && sym("rules/client.CraftableAmount", &craftable) &&
             inline_hook(h_craftable, craftable, reinterpret_cast<void*>(&hk_craftable), "the craftable amount", "rules/client.CraftableAmount"))
             hooks |= KILN_RULES_HOOK_CRAFT_UI;
