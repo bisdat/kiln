@@ -26,7 +26,7 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.events` | `StationStateChangedEvent`, `StationPlacedEvent`, `StationRemovedEvent`, `BasesChangedEvent`, `StationCraftedEvent`, `StationPlayerActionEvent` (a subscription is taken before a world runs, in `OnLoad`) |
 | `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
 | `stations.craft_sources` | the same opt-in, as the last source of a player's craft ([Station outputs in a craft](#station-outputs-in-a-craft)); lowered at the first world when kiln.rules' payment hook is not in (Creative Mode runs, kiln-rules.dll missing) |
-| `stations.craft_ui` | a Kiln client's crafting menu counts those outputs (`client.d/stations-craft-ui.json`); lowered when kiln.rules' crafting-count hook is not in. A vanilla client has neither |
+| `stations.craft_ui` | a Kiln client's crafting menu can offer a craft those outputs complete: since 0.2.0-dev.31 through the game's own dry run, when its payment is short only of materials the server's snapshot covers ([What each client shows](#what-each-client-shows), `client.d/stations-craft-ui.json`); lowered when kiln.rules' payment hook is not in. A vanilla client has neither |
 | `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows. Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 | `stations.fill_ui` | a Kiln client's station screen offers its "+1" / "+10" fill when only those outputs can cover it ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); its hook goes in only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 
@@ -316,7 +316,7 @@ still apply.
 
 A **Kiln client** counts the filtered linked stock through `kiln:craftstock` in every crafting menu: a crafting
 station's (the workbench, the decoration table...), an NPC's and the inventory's, including outside a base. The menu's
-craft count and, since 0.2.0-dev.30.8, its ingredient rows (each ingredient's "available" count and the counts of a
+craft status (since 0.2.0-dev.31 through the dry run's material check, [What each client shows](#what-each-client-shows)) and, since 0.2.0-dev.30.8, its ingredient rows (each ingredient's "available" count and the counts of a
 category ingredient's options) include it; before, the ingredient rows of every crafting menu showed only the bag and the
 base (GitHub #132). The snapshot includes the bag and any permitted current base stock; it de-duplicates linked containers
 against that stock and opted-in station outputs. It is only UI help: the server recounts at payment. A vanilla client
@@ -335,7 +335,7 @@ Not seen in a real game yet (0.2.0-dev.30.8): the crafting menus' ingredient row
 station's rows with the game's counts beside a lit "+1", and the dye order below. The crafting menu's ingredient list calls the count Kiln
 raises only when the menu sets a flag (otherwise it counts the bag itself); a player's report puts that flag on in a
 crafting station's menu. In the inventory's and an NPC's menu it was not seen: where it is off, those rows keep the game's
-counts (the craft count still includes the snapshot).
+counts (the craft status still uses the snapshot).
 
 **Lifetime:** `CraftSourceHandle.Dispose()` is idempotent and works on any thread. Unloading the mod removes all of its
 sources; an already-running payment may finish. Sources are session-only and cleared when the world closes. They
@@ -348,7 +348,7 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | Capability | Side and refusal |
 | --- | --- |
 | `crafting.sources` (`Crafting.SourcesCapability`) | Server or host. Missing payment/access symbols or the permission layout, missing/old `kiln.stations`, or a missing/disabled `kiln.rules` payment hook refuses it. A joined client is the wrong side; offline and no-server-session calls refuse without taking items. |
-| `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input/count symbols and `kiln.rules` crafting-count hook. No client/offline or an unresolved hook means the game's counts remain. |
+| `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
 
 `Kiln.TestKit` records the real managed API on its fake native table: `h.Crafting.Sources` lists live registrations and
 `h.Crafting.Stock(player)` reads registered-only, filtered, permission-checked counts. It models disposal and mod unload,
@@ -494,19 +494,24 @@ Kiln's does not run for that call; one put on it *after* Kiln's makes Kiln stand
 no longer `RecipePaid`), which is safe.
 
 ### What each client shows
-A crafting menu's "how many" and its craft button follow a count the game's client computes from its own view of the
-bag and the base's Magic chests; it does not see a station. Without help it greys a craft only the outputs can complete,
-and it does not send a craft its own count does not allow.
+A crafting menu's craft button follows a status the game's client computes with a dry run of the recipe (`RecipeApply`,
+always rolled back) on its own view of the bag and the base's Magic chests; it does not see a station or a linked source.
+Without help it refuses a craft only those can complete, and it does not send a craft its own status does not allow.
 
 A **Kiln client** helps it while a crafting menu is open: it tells the server (on the channel `kiln:craftstock`,
 `required: false`) when a menu opens, every 5 s that it is still open, and when it closes. The server then sends that
 player, while the player stands in a base where they may access inventories, what the base can pay: per item, the bag,
 the Magic chests and the opted-in stations' finished items, only for the items of the recipes that take something those
-stations make, again whenever a count changes. The client's count is then the greater of the game's count and the
-snapshot's, so a craft only the outputs can complete is offered. When the menu closes the counts are the game's again.
+stations make, again whenever a count changes. Since 0.2.0-dev.31, when the dry run's payment refuses only because
+materials are short, and every native inventory read of that payment succeeded, the client lets the dry run go on if the
+snapshot covers every ingredient times the amount asked. The dry run's other checks (workshop, shelter, level, comfort,
+progress, props, water, output space) stay the game's, and the server still checks and pays the real craft. Before
+0.2.0-dev.31 the client raised the menu's cached value as if it were a count, which did not enable the craft button
+(docs/re/stations.md, section 10.2). Where another module (Cross-Base Storage, say) patched the code the dry run reads,
+the client stands down and kiln.log names that function. When the menu closes the game's status applies again.
 A hosting player's own client gets the same in process. kiln.log on the client: `stations: crafting stock from the
-server: N item(s) the crafting menu may count`, `stations: the crafting menu's count for recipe 0x... raised a -> b by
-station outputs`, `stations: crafting stock cleared: ...`.
+server: N item(s) the crafting menu may count`, `stations: client craft preview of recipe 0x... xN: material shortfall
+covered by the server stock; ...`, `stations: crafting stock cleared: ...`.
 
 A session ends when the player leaves, when someone else joins into that entity, when the menu closes or stops saying it
 is open (15 s), and with a new world; a send that did not go out is sent again. A visitor without the right to access
@@ -724,9 +729,9 @@ crafting station of that recipe (for copper bars, the Forge). Stand by the produ
 (kiln.log: `kiln.stations: station N lends its outputs as crafting stock`). Keep the bag and the Magic chests short of
 one craft of the recipe you test by less than the station's finished stack. Startup lines to find in kiln.log first:
 server or host `stations: reads on, fill on, ..., craft sources on`, then at the first opt-in `stations: a station is
-opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: the crafting menu counts crafting sources
-(linked sources, opted-in station outputs) when a Kiln server sends them`. A line `stations: station outputs in a craft are off: ...` or `the crafting menu
-does not count crafting sources (linked sources, station outputs) here: ...` means a check below cannot pass; note its reason.
+opted in: kiln.gameplay's craft hook asked for`; a Kiln client `stations: linked crafting uses the native client dry-run status
+and per-ingredient server stock`. A line `stations: station outputs in a craft are off: ...`, `the linked crafting preview is
+unavailable here: ...` or `linked craft preview stands down: ...` means a check below cannot pass; note its reason.
 
 - **C7** The station screen's fill buttons (step 1, a Kiln client, 0.2.0-dev.29.19). A forge whose recipe needs the lent
   item (2 charcoal + 2 metal scraps: a charcoal kiln with 20 finished charcoal opted in, the bag and the Magic chests
@@ -752,9 +757,9 @@ does not count crafting sources (linked sources, station outputs) here: ...` mea
   Expected: nothing moves from the forge's side beyond what the game's own fill would do (the server's kiln.log has the
   player's fill as the game's, or `not even with station outputs` at debug level), and within about two seconds the button
   greys again. Close the screen: client kiln.log `crafting stock cleared`; reopen it: the buttons follow the new stock.
-- **C8** Hosting, Kiln client. Open the crafting station's menu and pick the recipe. Expected: its count and craft button
-  allow one craft that the bag and the chests alone could not (kiln.log: `crafting stock from the server: N item(s)` and
-  `the crafting menu's count for recipe 0x... raised 0 -> 1 by the server's crafting stock ...`). Craft it. Expected: it completes; the
+- **C8** Hosting, Kiln client. Open the crafting station's menu and pick the recipe. Expected: its craft button
+  allows one craft that the bag and the chests alone could not (kiln.log: `crafting stock from the server: N item(s)` and
+  `client craft preview of recipe 0x... x1: material shortfall covered by the server stock ...`). Craft it. Expected: it completes; the
   lending station's finished stack is lower by exactly the shortfall; its queued inputs are unchanged; the bag and the
   Magic chests are empty of that item (they paid first); kiln.log `stations: a craft paid N from additional crafting sources
   (base B, payer P)` with N the shortfall. Then a recipe the outputs cannot finish either: its button stays greyed, and
@@ -793,10 +798,10 @@ does not count crafting sources (linked sources, station outputs) here: ...` mea
 - No "which station screen is open" read (`Stations.Nearest` stands in), and no event when a chest's contents change.
 - Hooks: the fills and the station actions call the game's own functions and write the bytes its own code writes.
   Station outputs in a craft ride on kiln.rules' hook on the inventory payment (server or host) and, on a Kiln client,
-  its crafting-count hook; kiln.stations also asks for kiln.gameplay's craft hook (the station crafted at) once a station
+  the same hook during the crafting menu's dry run; kiln.stations also asks for kiln.gameplay's craft hook (the station crafted at) once a station
   is opted in.
 - Station outputs pay `Stations.Fill` and players' crafts. The crafting menu counts them on Kiln clients only (a vanilla
-  client keeps the game's counts), in its craft count and, since 0.2.0-dev.30.8, its ingredient rows. The station screen's
+  client keeps the game's counts), in its craft status and, since 0.2.0-dev.30.8, its ingredient rows. The station screen's
   fill buttons count them on Kiln clients (since 0.2.0-dev.29.19, C7); its ingredient rows did from 0.2.0-dev.29.19
   through 0.2.0-dev.30.7 and keep the game's counts since; other screens' item counts do not.
 
@@ -817,7 +822,8 @@ kiln.stations passes a shorter result). Since 0.2.0-dev.29.17 `submit` and `plan
 `KILN_STATIONS_MAX_CRAFT_STOCK` rows; any thread; the server's payment never reads it) and `craft_items(items, n, ...)`
 the items a client must have counted for those lent items (the inputs of every recipe that takes one; server, tick
 thread). kiln-items.dll also exports, for Kiln's own DLLs and labs (not an ABI): `kiln_stations_craft_pay` (kiln.rules'
-payment hook), `kiln_stations_craft_adjust` (kiln.rules' crafting-count hook), `kiln_stations_set_craft_context`
+payment hook), `kiln_stations_craft_preview` (kiln.rules' payment hook in the crafting menu's dry run; since 0.2.0-dev.31
+`kiln_stations_craft_adjust`, kiln.rules' old crafting-count bridge, answers nothing), `kiln_stations_set_craft_context`
 (kiln.gameplay's craft hook) and `kiln_stations_craft_stats` (the payment's counters).
 A cycle's end
 for native code is kiln.gameplay's `KILN_GAMEPLAY_CRAFTED` (once per cycle since 0.2.0-dev.29.14). The game's facts behind
@@ -832,6 +838,9 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.31:** a Kiln client's crafting menu treats the game's cached craft value as the status it is: only the dry
+  run's material shortfall can be covered by the server's snapshot, every other refusal stays the game's, and the
+  preview stands down when another module patched the code it reads. Thanks Fuzen777 (kiln#132).
 - **0.2.0-dev.30.8:** crafting menus at a crafting station (and every other crafting menu) count linked sources and
   opted-in station outputs in their ingredient rows, not only in the craft count; a production station's ingredient rows
   count only what their transfer buttons move (the game's own counts: no linked sources, no opted-in outputs; its "+1" /
