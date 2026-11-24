@@ -29,7 +29,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "kilnctl", version, about = "Run Enshrouded dedicated servers with Kiln under Wine (SteamCMD, no Steam client)")]
+#[command(name = "kilnctl", version = kiln_manage::VERSION, about = "Run Enshrouded dedicated servers with Kiln under Wine (SteamCMD, no Steam client)")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

@@ -192,8 +192,9 @@ pub mod crucible;
 
 pub use error::{Error, ErrorCode, Result};
 
-/// This crate's version: the repository's VERSION file (the workspace version mirrors it).
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// This Kiln's version: the repository's VERSION file as built (build.rs), so a release's own version
+/// (0.2.0-dev.31.1), not the tree's placeholder (0.2.0-dev). Mod and modpack `kiln` ranges are checked against it.
+pub const VERSION: &str = env!("KILN_BUILD_VERSION");
 
 /// Steam app ids.
 pub const CLIENT_APP_ID: u32 = 1203620;

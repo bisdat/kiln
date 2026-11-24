@@ -41,8 +41,24 @@ fn walk(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
+/// KILN_BUILD_VERSION: the repository's VERSION file, which a release build stamps with the release's version
+/// (tools/release/release.sh writes it into the export before anything is built, as the native runtime reads it). The
+/// crate's own version is the tree's placeholder (0.2.0-dev), which sorts below every release, so a mod's
+/// `kiln: >=0.2.0-dev.28` would read as too new for the build that ships it.
+fn build_version() {
+    let file = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("../../VERSION");
+    println!("cargo:rerun-if-changed={}", file.display());
+    let pkg = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    let v = fs::read_to_string(&file).map(|s| s.trim().to_owned()).unwrap_or_default();
+    // The tree's VERSION has the crate's X.Y.Z (the workspace version mirrors it); anything else keeps the crate's own.
+    let same_base = |a: &str, b: &str| a.split(['-', '+']).next() == b.split(['-', '+']).next();
+    let v = if !v.is_empty() && !v.contains(char::is_whitespace) && same_base(&v, &pkg) { v } else { pkg };
+    println!("cargo:rustc-env=KILN_BUILD_VERSION={v}");
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    build_version();
     println!("cargo:rerun-if-env-changed=KILN_RELEASE_BUILD");
     println!("cargo:rerun-if-env-changed=KILN_COOK_HELPERS");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("cooktools_files.rs");

@@ -1175,7 +1175,9 @@ pub fn build(dirs: &DataDirs, req: &BuildRequest, out_dir: &Path, progress: &mut
         authors: req.authors.clone(),
         description: req.description.clone().filter(|s| !s.trim().is_empty()),
         game: (!req.game_builds.is_empty()).then(|| PackGame { builds: req.game_builds.clone() }),
-        kiln: Some(format!(">={}", crate::VERSION)),
+        // The tree's version (0.2.0-dev), not this build's: a pack made here keeps loading on an earlier patch of the
+        // same release line; its `api` floor below is the real requirement.
+        kiln: Some(format!(">={}", env!("CARGO_PKG_VERSION"))),
         api: Some(format!(">={}", crate::profile::KILN_API)),
         crucible: None,
         mods,
