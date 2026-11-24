@@ -12,12 +12,13 @@ internal sealed class Logger { public void Info(string _) { } }
 internal sealed class Bridge
 {
     public readonly Dictionary<string, Func<JsonObject, Task<JsonNode?>>> Async = new();
-    public void Register(string _, Func<JsonObject, JsonNode?> op) { }
+    public readonly Dictionary<string, Func<JsonObject, JsonNode?>> Sync = new();
+    public void Register(string name, Func<JsonObject, JsonNode?> op) => Sync[name] = op;
     public void RegisterAsync(string name, Func<JsonObject, Task<JsonNode?>> op) => Async[name] = op;
 }
 internal static partial class Ops
 {
-    private static Player RequirePlayer(JsonObject _) => new() { Entity = new EntityId(3), Name = "test" };
+    private static Player RequirePlayer(JsonObject req) => new() { Entity = new EntityId(req["entity"]?.GetValue<uint>() ?? 3), Name = "test" };
     // The test namespace Kiln.Rules.Tests shadows the public Rules type when production admin source is linked.
     private static class Rules
     {
@@ -31,6 +32,22 @@ internal static partial class Ops
 }
 public sealed class AdminOpsReviewTests
 {
+    [Theory]
+    [InlineData("{}", "effect requires an explicit boolean on")]
+    [InlineData("{\"on\":\"off\"}", "effect requires an explicit boolean on")]
+    [InlineData("{\"on\":false,\"effect\":12}", "effect must be a Creative effect name")]
+    [InlineData("{\"on\":false,\"effect\":\"typo\"}", "Unknown Creative effect")]
+    public void InvalidAdminEffectNeverFallsThroughToWholeCreativeToggle(string json, string error)
+    {
+        var bridge = new Bridge();
+        Assert.True(Ops.RegisterRulesSafe(bridge, new Logger()));
+        var request = (JsonObject)JsonNode.Parse(json)!;
+        if (!request.ContainsKey("effect")) request["effect"] = "stamina";
+        var e = Assert.Throws<AdminError>(() => bridge.Sync["creative"](request));
+        Assert.StartsWith(error, e.Message);
+        Assert.False(Creative.IsOn(new EntityId(3)));
+    }
+
     [Theory]
     [InlineData("count", "\"oops\"", "count must be an integer")]
     [InlineData("count", "1.5", "count must be an integer")]

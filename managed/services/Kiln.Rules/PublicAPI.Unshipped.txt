@@ -1,1 +1,27 @@
 #nullable enable
+Kiln.CreativeEffectState
+Kiln.CreativeEffectState.<Clone>$() -> Kiln.CreativeEffectState!
+Kiln.CreativeEffectState.CreativeEffectState(string! Name, string! Label, bool Requested, string! Effective, string! Restore, string? Locked, bool OtherOwners) -> void
+Kiln.CreativeEffectState.Deconstruct(out string! Name, out string! Label, out bool Requested, out string! Effective, out string! Restore, out string? Locked, out bool OtherOwners) -> void
+Kiln.CreativeEffectState.Effective.get -> string!
+Kiln.CreativeEffectState.Effective.init -> void
+Kiln.CreativeEffectState.Equals(Kiln.CreativeEffectState? other) -> bool
+Kiln.CreativeEffectState.Label.get -> string!
+Kiln.CreativeEffectState.Label.init -> void
+Kiln.CreativeEffectState.Locked.get -> string?
+Kiln.CreativeEffectState.Locked.init -> void
+Kiln.CreativeEffectState.Name.get -> string!
+Kiln.CreativeEffectState.Name.init -> void
+Kiln.CreativeEffectState.OtherOwners.get -> bool
+Kiln.CreativeEffectState.OtherOwners.init -> void
+Kiln.CreativeEffectState.Requested.get -> bool
+Kiln.CreativeEffectState.Requested.init -> void
+Kiln.CreativeEffectState.Restore.get -> string!
+Kiln.CreativeEffectState.Restore.init -> void
+override Kiln.CreativeEffectState.Equals(object? obj) -> bool
+override Kiln.CreativeEffectState.GetHashCode() -> int
+override Kiln.CreativeEffectState.ToString() -> string!
+static Kiln.Creative.Effects(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.CreativeEffectState!>!
+static Kiln.Creative.SetEffect(Kiln.EntityId player, string! name, bool on) -> Kiln.CreativeResult!
+static Kiln.CreativeEffectState.operator !=(Kiln.CreativeEffectState? left, Kiln.CreativeEffectState? right) -> bool
+static Kiln.CreativeEffectState.operator ==(Kiln.CreativeEffectState? left, Kiln.CreativeEffectState? right) -> bool

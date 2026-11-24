@@ -10,7 +10,7 @@ namespace Kiln;
 /// <see cref="Set"/> off, when the player leaves, or when the world closes. Tick thread.
 /// </summary>
 [ServerOnly]
-public static class Creative
+public static partial class Creative
 {
     /// <summary>The preset's name.</summary>
     public const string PresetName = "creative";
@@ -35,6 +35,7 @@ public static class Creative
         var name = NameOf(player);
         if (!on)
         {
+            Defaults.Remove(player);
             if (!Sets.Remove(player, out var set) || !set.Active) return new(true, false, $"{name} is not in creative mode.");
             set.Dispose();
             CreativeServer.Push(player);
@@ -63,15 +64,25 @@ public static class Creative
         // Kiln's rule set, whoever asked: it outlives the mod or tool that turned it on
         var outer = ModContext.CurrentMod;
         ModContext.CurrentMod = null;
+        RuleSet? made = null;
         try
         {
-            Sets[player] = Rules.Apply(player, rules, label: PresetName);
+            Defaults[player] = rules;
+            // Capture before resolution so even a fully excluded/capped preset tracks Creative's player lifetime.
+            Rules.Apply(RuleScope.ForPlayer(player), rules, null, PresetName, set => Sets[player] = made = set);
+        }
+        catch
+        {
+            Sets.Remove(player);
+            Defaults.Remove(player);
+            made?.Dispose();
+            throw;
         }
         finally
         {
             ModContext.CurrentMod = outer;
         }
-        var now = Rules.Of(player);
+        var now = RulesRuntime.Fresh(player);
         CreativeServer.Push(player);
         Tell(player, $"Creative mode is on: {Describe(player, now)}. For throwaway or creative worlds: it grants no levels, XP, skill points or unlocks.");
         return new(true, true, $"Creative mode on for {name}: {Describe(player, now, name + "'s")}" +
@@ -92,16 +103,19 @@ public static class Creative
         if (!Sets.TryGetValue(player, out var set) || !set.Active) return new(false, false, $"{name} is not in creative mode.");
         if (mode != CharacterFlightMode.Off && !RulesRuntime.CanPredictFlight(player))
             return new(false, true, $"Character flight stays off for {name}: their game has not confirmed matching flight hooks.");
-        var outer = ModContext.CurrentMod;
-        ModContext.CurrentMod = null;
-        try
+        var restore = Defaults.GetValueOrDefault(player) ?? set.Rules;
+        if (mode != CharacterFlightMode.Off)
         {
-            set.Update(set.Rules.With(new PlayerRules { CharacterFlight = mode }));
+            if (restore.CharacterFlight == CharacterFlightMode.Off)
+                return new(false, true, "Character flight is excluded by the Creative preset.");
+            var requested = restore with { CharacterFlight = mode };
+            if (LockReason(player, set, CreativeEffects.Find("character-flight")!, requested) is { } why)
+                return new(false, true, why);
         }
-        finally
-        {
-            ModContext.CurrentMod = outer;
-        }
+        Update(set, mode == CharacterFlightMode.Off
+            ? CreativeEffects.Find("character-flight")!.Edit(set.Rules, restore, false)
+            : set.Rules with { CharacterFlight = mode });
+        if (mode != CharacterFlightMode.Off) Defaults[player] = restore with { CharacterFlight = mode };
         CreativeServer.Push(player);
         var now = RulesRuntime.Fresh(player);
         if (mode != CharacterFlightMode.Off && now.CharacterFlight == CharacterFlightMode.Off)
@@ -140,6 +154,7 @@ public static class Creative
     internal static void Forget()
     {
         Sets.Clear();
+        Defaults.Clear();
         CreativeTools.WorldClosed();
         CreativeNet.WorldClosed();
     }
@@ -197,7 +212,14 @@ public static class Creative
                 .Then(Commands.Argument("player", Arg.Player()).Executes(c => c.Reply(Run(c, c.Get<Player>("player").Entity, true)))))
             .Then(Commands.Literal("off").Executes(c => c.Reply(Run(c, Self(c), false)))
                 .Then(Commands.Argument("player", Arg.Player()).Executes(c => c.Reply(Run(c, c.Get<Player>("player").Entity, false)))))
-            .Then(Commands.Literal("status").Executes(c => c.Reply(Status())))
+            .Then(Commands.Literal("status").Executes(c => c.Reply(Status()))
+                .Then(Commands.Argument("player", Arg.Player()).Executes(c => c.Reply(EffectStatus(c.Get<Player>("player").Entity)))))
+            .Then(Commands.Literal("effect").Executes(c => c.Reply(EffectStatus(Self(c))))
+                .Then(Commands.Argument("effect", Arg.Word()).Executes(c => c.Reply(EffectStatus(Self(c), c.Get<string>("effect"))))
+                    .Then(Commands.Literal("on").Executes(c => EffectCommand(c, Self(c), true))
+                        .Then(Commands.Argument("player", Arg.Player()).Executes(c => EffectCommand(c, c.Get<Player>("player").Entity, true))))
+                    .Then(Commands.Literal("off").Executes(c => EffectCommand(c, Self(c), false))
+                        .Then(Commands.Argument("player", Arg.Player()).Executes(c => EffectCommand(c, c.Get<Player>("player").Entity, false))))))
             .Then(Commands.Literal("give").Describe("takes items from the catalogue for a player in creative mode")
                 .Then(Commands.Argument("player", Arg.Player())
                     .Then(Commands.Argument("item", Arg.Item()).Executes(c => Give(c, 1, null))
@@ -216,6 +238,9 @@ public static class Creative
     }
 
     // A player runs it for themselves; on a game playing offline, the console acts as the host's character.
+    private static void EffectCommand(CommandContext c, EntityId player, bool on) =>
+        c.Reply(Tools(c, SetEffect(player, c.Get<string>("effect"), on)));
+
     private static EntityId Self(CommandContext c) =>
         c.Source.IsPlayer && !c.Source.Player.IsNone ? c.Source.Player : throw new CommandException("name a player: /creative [on|off] <player>");
 

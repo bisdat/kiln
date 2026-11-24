@@ -353,6 +353,11 @@ internal static class CreativeServer
             case CreativeAsk.Backpack:
                 CreativeNet.SendBackpack(player, new CreativeBackpackMsg(Creative.IsOn(player) ? CreativeTools.BackpackSlots(player) : []), local);
                 return;
+            case CreativeAsk.Effect:
+                Answer(player, CreativeNet.ValidEffectRequest(req)
+                    ? Creative.SetEffect(player, CreativeEffects.Find(req.Item)!.Name, req.Count == 1)
+                    : new CreativeResult(false, Creative.IsOn(player), "Invalid Creative effect request."), local);
+                return;
             case CreativeAsk.Flight:
                 Answer(player, Enum.IsDefined((CharacterFlightMode)req.Count) ? Creative.SetFlight(player, (CharacterFlightMode)req.Count)
                     : new CreativeResult(false, Creative.IsOn(player), "unknown flight mode"), local);
@@ -465,13 +470,13 @@ internal static class CreativeServer
         string rules;
         try
         {
-            rules = Creative.Describe(player, Rules.Of(player));
+            rules = Creative.Describe(player, RulesRuntime.Fresh(player));
         }
         catch (Exception)
         {
             rules = "";
         }
-        return new CreativeStateMsg(a, cycle, hours, rules, Creative.Status());
+        return new CreativeStateMsg(a, cycle, hours, rules, Creative.Status(), Creative.Effects(player));
     }
 
     private static void SendPage(EntityId player, int start, bool local)

@@ -256,14 +256,33 @@ internal static unsafe class RulesRuntime
     /// <summary>The player's rules combined now, without waiting for the next tick (after a rule set changed).</summary>
     internal static EffectiveRules Fresh(EntityId player) => Combine(player, Players.Available ? Players.Find(player)?.Position : null);
 
-    private static EffectiveRules Combine(EntityId player, WorldPosition? at)
+    // Updating another Creative effect must not re-arm a NoClip request spent by death/teleport. Only an explicit
+    // NoClip off/on changes that field and asks anew. Other rule sets retain RuleSet.Update's existing semantics.
+    internal static void UpdateCreative(RuleSet set, PlayerRules next)
+    {
+        if (set.Rules.NoClip == next.NoClip)
+            lock (Gate)
+                foreach (var spent in Spent.Values)
+                    if (spent.Remove((set.Id, set.Version))) spent.Add((set.Id, set.Version + 1));
+        set.Update(next);
+    }
+
+    internal static EffectiveRules Preview(EntityId player, RuleSet? replace, PlayerRules rules) =>
+        Combine(player, Players.Available ? Players.Find(player)?.Position : null, replace, rules);
+
+    internal static bool LandingGrace(EntityId player)
+    {
+        lock (Gate) return PlayersByEntity.TryGetValue(player, out var state) && state.GraceUntil is not null;
+    }
+
+    private static EffectiveRules Combine(EntityId player, WorldPosition? at, RuleSet? replace = null, PlayerRules? replacement = null)
     {
         List<(RuleSet?, PlayerRules)> matching;
         lock (Gate)
         {
             Spent.TryGetValue(player, out var spent);
             matching = SetsList.Where(s => s.Active && s.Scope.Covers(player, at))
-                .Select(s => ((RuleSet?)s, NoClipMath.WithoutSpent(s.Rules, s.Id, s.Version, spent))).ToList();
+                .Select(s => ((RuleSet?)s, ReferenceEquals(s, replace) ? replacement! : NoClipMath.WithoutSpent(s.Rules, s.Id, s.Version, spent))).ToList();
         }
         var rules = RulesCrafting.Supported(RulesMath.Combine(player, matching, _limits));
         if (rules.CharacterFlight != CharacterFlightMode.BuildingArea) return rules;
@@ -393,7 +412,7 @@ internal static unsafe class RulesRuntime
             {
                 if (!PlayersByEntity.TryGetValue(p.Entity, out s!))
                 {
-                    if (eff.IsDefault) continue;  // nothing to track
+                    if (eff.IsDefault && !Creative.IsOn(p.Entity)) continue;  // Creative still owns a session lifetime
                     PlayersByEntity[p.Entity] = s = new PlayerState(p.Entity) { Handle = p.Handle };
                 }
             }
@@ -506,6 +525,7 @@ internal static unsafe class RulesRuntime
         {
             _retiring--;
         }
+        Creative.Forget(s.Entity);
         UnlimitedFlight.Forget(s.Entity);
         s.Clip = null;
         if (RulesNative.T is var t && t != null) t->Set(s.Entity.Value, null);

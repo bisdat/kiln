@@ -277,6 +277,41 @@ internal static class CreativeMenu
 
     // ---------------------------------------------------------------------------------------- drawing ----------
 
+    internal static bool SupportsEffects { get { lock (Lock) return _state?.Effects is { Count: > 0 }; } }
+
+    // One model drives both drawing and unit-test coverage of requested/effective/locked/other-owner states.
+    internal static (bool Enabled, string Button, string Detail) EffectRow(CreativeEffectState e, bool active) =>
+        (active && (e.Requested || e.Locked is null), e.Requested ? "Creative: on" : "Creative: off",
+            $"Effective: {e.Effective}. On restores: {e.Restore}." +
+            (e.OtherOwners ? " Other owners also grant this effect." : "") +
+            (e.Locked is { } reason ? $" Locked for on: {reason}" : ""));
+
+    private static void DrawEffects(UiDraw ui, CreativeStateMsg s)
+    {
+        if (s.Effects is not { Count: > 0 } effects)
+        {
+            ui.TextDisabled("Effect controls locked: this server has not advertised modular Creative effects.");
+            return;
+        }
+        ui.TextWrapped("Each switch changes Creative only. Effective rules may still come from other owners. Safe landing protection is separate.");
+        if (ui.BeginChild("creative.effects", 0, 280 * ui.Scale))
+            foreach (var e in effects)
+            {
+                var row = EffectRow(e, (s.Access & CreativeAccess.On) != 0);
+                ui.Text(e.Label);
+                if (row.Enabled)
+                {
+                    ui.SameLine();
+                    if (ui.SmallButton(row.Button + "###creative.effect." + e.Name))
+                        CreativeNet.Ask(new CreativeRequest(CreativeAsk.Effect, Item: CreativeEffects.Find(e.Name)!.Id, Count: e.Requested ? 0 : 1));
+                }
+                else { ui.SameLine(); ui.TextDisabled(row.Button + " (locked)"); }
+                ui.TextWrapped(row.Detail);
+                ui.Separator();
+            }
+        ui.EndChild();
+    }
+
     private static void Draw(UiDraw ui)
     {
         if (CreativeFlame.Running) { ui.TextWrapped(CreativeFlame.Note + "."); return; }
@@ -343,6 +378,8 @@ internal static class CreativeMenu
             if (ui.BeginTab(KilnText.T("creative.tab.rules") + "###creative.rules"))
             {
                 ui.TextWrapped(on || s.Rules.Length > 0 ? KilnText.T("creative.rules.yours", ("rules", s.Rules)) : KilnText.T("creative.rules.game"));
+                ui.Spacing();
+                DrawEffects(ui, s);
                 ui.Spacing();
                 ui.TextWrapped(s.Hooks);
                 ui.Spacing();

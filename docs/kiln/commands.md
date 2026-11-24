@@ -158,6 +158,12 @@ Kiln.Rules' (loaded on servers and in every game), so it is there wherever a wor
 hosting a co-op world, or a world played offline. `Creative.Set(player, on)` does the same from code.
 - `/creative` toggles it for yourself; `/creative on|off` sets it; a player name does it for that player;
   `/creative status` lists who has it and which hooks work on this build.
+- `/creative effect` lists all effect names and their Creative/requested, effective, restore and lock status;
+  `/creative effect <name>` inspects one. `/creative effect <name> on|off [player]` changes only that effect while
+  Creative is active; `/creative status <player>` lists that player's effects. The same Admin node still applies.
+  Names and grouping are in [Modular Creative effects](services/rules.md#modular-creative-effects).
+  `on` restores the captured entry preset values, **not** hard-coded full-strength defaults; `off` withdraws Creative's
+  grant, not other owners' grants. Unknown, excluded or denied `on` requests do not mutate the set.
 - Who may: admins (the server user group's kick/ban right, or a permissions.json rule). In a world a game hosts, the
   host's group has every right, so the host may. A world played offline has no chat: put the line in a console file
   (`kiln/control/console/<name>.cmd` in the game folder), whose lines run as the host's character with the console's
@@ -178,7 +184,8 @@ hosting a co-op world, or a world played offline. `Creative.Set(player, on)` doe
   world always qualifies.
 - It ends with `/creative off`, when the player leaves, or when the world closes. A flight outside a base ends at once
   and sets the player down on the ground. Builds placed outside bases stay in the save.
-- Remote tools: Kiln.Admin's ops `creative {entity, on?}` and `rules` call the same (docs/kiln/launcher/admin-protocol.md).
+- Remote tools: Kiln.Admin's existing mutation op `creative {entity, effect, on}` changes an effect (explicit boolean required);
+  `creative {entity, on?}` still controls the whole mode, and read-only `rules {entity}` includes effect status. These call the same (docs/kiln/launcher/admin-protocol.md).
 - `/creative give <player> <item> [count] [level]`: items from the catalogue for a player in creative mode (refused
   otherwise), up to one stack and at most 9,999 items; gear at a supported level. Invalid values are refused. The command says it is giving; the player is told the outcome (`Took 7 x Wood Logs.`),
   and kiln.log has `kiln.rules: creative: <name> took ...`.
@@ -187,7 +194,7 @@ hosting a co-op world, or a world played offline. `Creative.Set(player, on)` doe
   hold jump to climb, sneak to sink, sprint for speed). Off on every server until its `rules.json` sets
   `"allowCharacterFlight": true`; refused with the reason otherwise (docs/kiln/services/rules.md "Character flight").
 - While Creative Mode (Nexus 146) runs in the same game through kiln-flame, `/creative on`, `give`, `time`, `cycle` and
-  `flight` are refused and `/creative status` says so: its own menu applies.
+  `flight` and effect mutations are refused and `/creative status` says so: its own menu applies.
 - `/creative cycle normal|stopped|fast`: the day and night cycle for the whole world until it is set back or the server
   restarts: stopped (the sun stands still, sleeping doesn't move it), fast (a whole day and night in about 90 s).
 - The same in the game's **creative menu** (F7, or Creative in the pause menu; docs/kiln/services/rules.md "Creative

@@ -4,13 +4,25 @@
 enum: Off, Unlimited, BuildingArea
 
 ## Creative — Creative mode for one player: the `creative` preset (`Rules.Preset`: Kiln's own, or the server's `<configDir>/rules/creative.json`) applied as a Kiln rule set for the...
+- `static Effects(EntityId player) -> IReadOnlyList<CreativeEffectState>` `0.2.17` — Fresh status of every named effect, including locked/excluded effects.
 - `static IsOn(EntityId player) -> bool` — Whether `player` is in creative mode.
 - `const PermissionNode = "kiln.command.creative" -> string` — The command's permission node (level Admin; a hosted world's host and the console have it).
 - `static Players { get; } -> IReadOnlyList<EntityId>` — The players in creative mode.
 - `const PresetName = "creative" -> string` — The preset's name.
 - `static Set(EntityId player, bool on) -> CreativeResult` — Turns creative mode on or off for `player`.
+- `static SetEffect(EntityId player, string name, bool on) -> CreativeResult` `0.2.17` — Restores or withdraws one named effect on Creative's own live rule set.
 - `static SetFlight(EntityId player, CharacterFlightMode mode) -> CreativeResult` — Sets how `player`'s character flies in creative mode (`PlayerRules.CharacterFlight` on their creative rule set).
 - `static Status() -> string` — One line on who is in creative mode and which hooks work on this build.
+
+## CreativeEffectState `0.2.17` — One Creative contribution.
+- `CreativeEffectState(string Name, string Label, bool Requested, string Effective, string Restore, string? Locked, bool OtherOwners)`
+- `Effective { get; init; } -> string`
+- `Label { get; init; } -> string`
+- `Locked { get; init; } -> string?`
+- `Name { get; init; } -> string`
+- `OtherOwners { get; init; } -> bool`
+- `Requested { get; init; } -> bool`
+- `Restore { get; init; } -> string`
 
 ## CreativeResult — What `Creative.Set` did.
 - `CreativeResult(bool Ok, bool On, string Message)`

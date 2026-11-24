@@ -96,6 +96,11 @@ Never deploy to a server players are using. Use a separate local test server.
   still checks permissions, resources and range; game client 26430625, not checked in a real game yet). `SteamMessages` is Steam
   peer-to-peer outside the game's connection (`Open` needs `"steamMessages": true` in kiln.mod.json); prefer Kiln.Network
   channels. Ask `Available` first. [references/api-network.md](references/api-network.md#client).
+- **Creative effects.** Use tick-thread `Creative.SetEffect(player, name, on)` only for Creative's own active set;
+  preserve the caller's existing authorization. On restores the captured preset, off withdraws that group's grant,
+  not another mod's. `Creative.Effects` distinguishes requested/effective/locked/other-owner state; its display strings
+  are not parseable rules API. [references/api-index/Rules.md](references/api-index/Rules.md),
+  `docs/kiln/services/rules.md` (Modular Creative effects).
 - **Read every result (dev.27+).** A refusal by the game is a result with `Ok = false` and a `Reason`, not an exception.
   KILN120 warns when nobody reads one; pass the reason on to the player or the log.
 - **Never ship Kiln assemblies.** Kiln.Sdk references them with `ExcludeAssets=runtime`.

@@ -16,6 +16,7 @@ internal enum CreativeAsk : byte
     Found = 6,
     Flight = 7,
     Backpack = 8,
+    Effect = 9,
 }
 
 /// <summary>One request: <see cref="Kind"/> says which fields count.</summary>
@@ -62,7 +63,8 @@ internal enum CreativeAccess : uint
     FlightBuildingArea = 256,
 }
 
-internal readonly record struct CreativeStateMsg(CreativeAccess Access, TimeCycle Cycle, double Hours, string Rules, string Hooks);
+internal readonly record struct CreativeStateMsg(CreativeAccess Access, TimeCycle Cycle, double Hours, string Rules, string Hooks,
+    IReadOnlyList<CreativeEffectState>? Effects = null);
 
 internal readonly record struct CreativeReplyMsg(bool Ok, string Text);
 
@@ -126,9 +128,7 @@ internal static class CreativeNet
                         static (ref NetReader r) => DecodeRequest(ref r),
                         static (m, c) => Inbox.Enqueue(c.Player, m, false, c.Sender), NetDirection.ToServer)
                     .Register<CreativeStateMsg>(MsgState,
-                        static (m, w) => w.UInt32((uint)m.Access).Byte((byte)m.Cycle).Double(m.Hours).String(m.Rules).String(m.Hooks),
-                        static (ref NetReader r) => new CreativeStateMsg((CreativeAccess)r.UInt32(), (TimeCycle)r.Byte(), r.Double(),
-                            r.String() ?? "", r.String() ?? ""),
+                        EncodeState, DecodeState,
                         static (m, _) => CreativeMenu.OnState(m), NetDirection.ToClient)
                     .Register<CreativeReplyMsg>(MsgReply,
                         static (m, w) => w.Bool(m.Ok).String(m.Text),
@@ -155,6 +155,64 @@ internal static class CreativeNet
             }
         }
     }
+
+    // A marker and version distinguish the optional suffix from the transport's 0..3 zero padding bytes.
+    // A legacy client reads only the unchanged prefix; no required channel or message number changes.
+    internal static void EncodeState(CreativeStateMsg m, NetWriter w)
+    {
+        w.UInt32((uint)m.Access).Byte((byte)m.Cycle).Double(m.Hours).String(m.Rules).String(m.Hooks);
+        if (m.Effects is null) return;
+        if (m.Effects.Count == 0 || m.Effects.Count > CreativeEffects.All.Length) throw new NetFormatException("Too many Creative effects.");
+        w.Byte(0xce).Byte(1).Byte((byte)m.Effects.Count);
+        var seen = new HashSet<byte>();
+        foreach (var e in m.Effects)
+        {
+            var effect = CreativeEffects.Find(e.Name) ?? throw new NetFormatException("Unknown Creative effect.");
+            if (!seen.Add(effect.Id) || e.Effective.Length > 512 || e.Restore.Length > 512 || e.Locked?.Length > 512)
+                throw new NetFormatException("Invalid Creative effect state.");
+            w.Byte(effect.Id).Bool(e.Requested).Bool(e.OtherOwners).String(e.Effective).String(e.Restore).String(e.Locked);
+        }
+    }
+
+    internal static CreativeStateMsg DecodeState(ref NetReader r)
+    {
+        var state = new CreativeStateMsg((CreativeAccess)r.UInt32(), (TimeCycle)r.Byte(), r.Double(),
+            r.String() ?? "", r.String() ?? "");
+        if (r.Remaining == 0) return state;
+        if (r.Remaining <= 3)
+        {
+            var tail = r.Rest();
+            if (tail.IndexOfAnyExcept((byte)0) < 0) return state;
+            throw new NetFormatException("Truncated Creative effect state.");
+        }
+        if (r.Byte() != 0xce || r.Byte() != 1) throw new NetFormatException("Unknown Creative effect state version.");
+        var count = r.Byte();
+        if (count == 0 || count > CreativeEffects.All.Length) throw new NetFormatException("Invalid Creative effect count.");
+        var effects = new List<CreativeEffectState>(count);
+        var seen = new HashSet<byte>();
+        for (var i = 0; i < count; i++)
+        {
+            var id = r.Byte();
+            var effect = CreativeEffects.Find((uint)id) ?? throw new NetFormatException("Unknown Creative effect ID.");
+            var requested = r.Byte();
+            var others = r.Byte();
+            if (!seen.Add(id) || requested > 1 || others > 1) throw new NetFormatException("Invalid Creative effect flags.");
+            var effective = r.String(2048) ?? "";
+            var restore = r.String(2048) ?? "";
+            var lockedText = r.String(2048);
+            string? locked = lockedText.Length == 0 ? null : lockedText;
+            if (effective.Length > 512 || restore.Length > 512 || locked?.Length > 512)
+                throw new NetFormatException("Oversized Creative effect display.");
+            effects.Add(new(effect.Name, effect.Label, requested == 1, effective, restore, locked, others == 1));
+        }
+        if (r.Remaining > 3 || r.Remaining > 0 && r.Rest().IndexOfAnyExcept((byte)0) >= 0)
+            throw new NetFormatException("Invalid Creative effect state tail.");
+        return state with { Effects = effects };
+    }
+
+    internal static bool ValidEffectRequest(CreativeRequest r) => r.Kind == CreativeAsk.Effect &&
+        CreativeEffects.Find(r.Item) is not null && r.Count is 0 or 1 && r.Level == -1 && r.Rarity == -1 &&
+        r.Value == 0 && r.Options == 0 && r.Slot == 0;
 
     internal static CreativeRequest DecodeRequest(ref NetReader r)
     {
@@ -240,6 +298,7 @@ internal static class CreativeNet
     /// when there is nobody to ask: a remote server without Kiln's creative channel.</summary>
     public static bool Ask(CreativeRequest req)
     {
+        if (req.Kind == CreativeAsk.Effect && (!ValidEffectRequest(req) || !CreativeMenu.SupportsEffects)) return false;
         if (Hosting(out var self))
         {
             return Inbox.Enqueue(self, req, true);
@@ -393,7 +452,8 @@ internal sealed class CreativeInbox
     public bool Enqueue(EntityId player, CreativeRequest req, bool local, NetPeer? peer = null, long? at = null)
     {
         if (player.IsNone || !Enum.IsDefined(req.Kind) ||
-            (req.Kind == CreativeAsk.Give && !CreativeGiveOptions.Valid(req.Options))) return false;
+            (req.Kind == CreativeAsk.Give && !CreativeGiveOptions.Valid(req.Options)) ||
+            (req.Kind == CreativeAsk.Effect && !CreativeNet.ValidEffectRequest(req))) return false;
         var now = at ?? Environment.TickCount64;
         lock (_queue)
         {

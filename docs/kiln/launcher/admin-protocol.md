@@ -189,8 +189,8 @@ truth for each op's arguments and result: its `Ops.*.cs` file.
 | | `god` | entity, on? |
 | | `kill` (async) | entity (any entity) |
 | | `damage` (async) | entity, amount, attacker? |
-| rules (Ops.Rules.cs) | `creative` | entity, on? (toggles without it); refused for a player whose game has no Kiln with the rules channel |
-| | `rules` | entity? (the hooks, presets, active rule sets, creative players; with entity that player's rules) |
+| rules (Ops.Rules.cs) | `creative` | entity, on? (toggles whole mode without it); or entity, effect (modular Creative effect name), on (explicit boolean required). Effect mutations require active Creative and preserve other owners/preset exclusions/server policy. Returns effects status; no new privilege or operation name. Refused for a player whose game has no Kiln with the rules channel |
+| | `rules` | entity? (the hooks, presets, active rule sets, creative players; with entity that player's rules and modular effect status; remains read-only) |
 | | `creative_give` | entity, item (name or id), count? (1..one stack, at most 9,999), level? (gear's range), rarity? (Common/Uncommon/Rare/Epic/Legendary string); async, refused unless the player is in creative mode; one pending take per player, 250 ms between admissions |
 | | `creative_cycle` | mode: normal, stopped or fast (the day and night cycle for the whole world, this session) |
 | saves (Ops.Saves.cs) | `save_now` (async) | - |

@@ -153,6 +153,110 @@ could name a preset too (an item that applies one while held, a quest reward of 
 `allowNoClip` (**false** by default: a tool for admins and for debugging).
 Edits apply within a second.
 
+## Modular Creative effects
+
+Creative's entry behavior is unchanged: `PlayerRules.CreativeExtras.With(Rules.Preset("creative") ?? PlayerRules.Creative)`.
+An installed/server `<configDir>/rules/creative.json` replaces the built-in preset, rather than being filled from it.
+Only free crafting and kept consumables are added when unspecified; explicit `false` wins. The preset writer and
+its exact-byte upgrade rules are unchanged. No levels, unlocks, permissions or persistent player settings are added.
+
+While Creative is active, F7 **Rules** has a visible on/off row for **every** group below, including excluded groups.
+Each row distinguishes **Creative: on/off** (this set's request), **Effective** (fresh scoped merge, current server
+policy, server hooks and matching-client gates), and **On restores**. Excluded or denied restores show **locked** and
+the reason instead of a clickable no-op. An already requested but now denied effect can still be switched off.
+**Other owners** means another currently scoped rule set also grants a value that survives the merge/policy; it does
+not mean a denied request is effective. Off can therefore leave the effect effective. Status refreshes with the menu's
+existing two-second poll and immediately after a mutation. Older servers display controls as unavailable, not enabled.
+
+Commands (existing `kiln.command.creative`, Admin): `/creative effect`, `/creative effect <name>`,
+`/creative effect <name> on|off [player]`, `/creative status <player>`. Trusted server code uses
+`Creative.SetEffect(player, name, on)` and `Creative.Effects(player)` on the tick thread. Like `Creative.Set`, code
+must enforce its own existing authorization. A player already granted Creative can customize their own effects from
+F7, as with the existing flight selector and item tools; the optional channel cannot choose another player.
+Kiln.Admin keeps its existing mutation/read-only operation split: `creative {entity, effect, on}` (explicit boolean)
+and `rules {entity}` (status only). No new permission node or op name is introduced.
+
+**Restore semantics.** On restores precisely this group's values captured when Creative was entered, including custom
+fractions, multipliers, water item filters and glider settings. It never invents an absent/false preset grant. Current
+policy and hooks are revalidated before editing; unknown effects, invalid network/admin inputs, exclusions and denied
+restores leave all rules unchanged. Numeric caps may reduce an allowed value; the effective column shows the result.
+A numeric policy locks a group only when its isolated request is entirely neutralized against the policy-held game
+baseline. For example, a preset with only `buildCost: 0` is locked when `minBuildCost` is 1, and `digDamage: 1000` is
+locked when `maxDigDamage` is 1. The default building group's `buildRefund: 0` survives that cost cap, so that group
+remains unlocked; an allowed partial mining multiplier remains unlocked. Another owner's grant saturating a cap
+is not a policy lock, nor does a zero health-floor cap lock the group's still-allowed damage immunity.
+
+Creative status/preflight also qualifies the execution prerequisites used by the managed runtime: health/stamina/mana
+floors need `Abilities.Available` and `Abilities.Status.Attributes`; invulnerability needs `Combat.Available`; explicit
+no-fall needs that plus `Combat.Status.Falls`; water needs the live `Items.Fuel.Available` capability/program state.
+A missing prerequisite displays neutral effective values with an execution-support lock, rather than claiming the
+requested effect is running. This qualification is Creative-only: entry rules, other owners and general runtime
+merge semantics are unchanged. Availability is refreshed from existing APIs, with no new native ABI or wire fields.
+These are **supported merged rule values**, not per-entity execution receipts: missing attributes on an entity, a dead
+character, absent/mismatched water containers or a failed runtime write/refill can still prevent an individual update.
+They are not evidence of an observed health change or inventory refill. Safe-landing status separately notes when
+its Combat protection is unavailable; a pending grace is not reported as working immunity in that case.
+A later preset file edit takes effect on the next Creative off/on; live `rules.json` policy changes still apply now.
+Off removes granting fields (null/no opinion), never inserts false/zero/`CharacterFlightMode.Off` as a veto against
+other owners. Existing explicit preset denials are retained. Entry defaults and toggles are session-only and are
+forgotten on off, leave/entity replacement, world close and Flame handoff. A fully excluded/capped custom preset
+still tracks its Creative session for leave cleanup, even though its effective rule values are the game's defaults.
+
+| Name (stable command/API name) | Fields restored/withdrawn together | Built-in entry |
+|---|---|---|
+| `building-flight` | `FlyAnywhere`, `FlightCarriesBody` | true, true |
+| `build-outside` | `BuildOutsideBases`, `KeepBuildsOutsideBases` | true, true |
+| `no-build-zones` | `IgnoreNoBuildZones` | true |
+| `near-enemies` | `IgnoreEnemiesNearby` | true |
+| `build-in-shroud` | `BuildInShroud` | true |
+| `base-permissions` | `IgnoreBasePermissions` | absent/locked |
+| `building-costs` | `BuildCost`, `BuildRefund` | 0, 0 |
+| `free-crafting` | `FreeCrafting` | true via Extras |
+| `no-consume` | `KeepConsumables` | true via Extras |
+| `mining` | `DigDamage` | 1000 |
+| `invulnerability` | `Invulnerable`, `MinHealth` | true, 1 |
+| `no-fall` | `NoFallDamage` | absent/locked |
+| `stamina` | `MinStamina` | 1 |
+| `mana` | `MinMana` | 1 |
+| `shroud-timer` | `FreezeShroudTimer`, `MinShroudTime` | true, absent |
+| `unlimited-gliding` | `UnlimitedGliding` | true |
+| `glider-sink` | `GlideSink` | 0 |
+| `glider-boost` | `GlideBoost` (all settings) | preset object |
+| `glider-steering` | `GlideSteer` | preset object |
+| `water` | `Water` (rate and item filters) | keep full |
+| `character-flight` | `CharacterFlight` | absent/locked until selected |
+| `no-clip` | `NoClip` | absent/locked |
+
+Invulnerability and its health floor are one explicit group: disabling damage immunity must not silently leave health
+locked full. Stamina, mana and explicit no-fall protection remain independent. Building flight is the game's spark;
+character flight moves the character itself; glider duration/sink/boost/steering concern an opened glider only.
+`BuildOutsideBases` also opens the game's zone-based building fly gate, so withdrawing `building-flight` is not a global
+flight ban. `/creative flight off|unlimited|buildingarea [player]` still selects character flight; successful non-off
+selection becomes that effect's restore value for this session. Explicit preset `Off` and server denials cannot be
+bypassed. Flight off withdraws Creative's field instead of vetoing another owner's character flight.
+
+**Landing safety is not an effect toggle.** Existing building-flight carry/teleport and NoClip return protection remain
+runtime-owned until grounded or the existing 60-second bound. Neither invulnerability nor no-fall off cancels that
+grace; status notes active grace separately. Character-flight withdrawal still ends its locomotion and may cause a
+fall; with invulnerability/no-fall withdrawn, it is not an assurance of immunity. Toggling an unrelated group does not
+re-arm NoClip consumed by death/teleport; explicitly withdrawing and restoring NoClip can ask anew.
+
+`CreativeEffectState` has `Name`, `Label`, `Requested` (bool), `Effective` (display string), `Restore` (display string),
+`Locked` (null when restoring is allowed, otherwise reason), and `OtherOwners` (bool). Effective/Restore are **not
+parseable API**; use `Rules.Of` for typed rule values. The new managed surface is additive in PublicAPI.Unshipped;
+release/API version and ABI history assignments remain release-coordinator work.
+
+**Optional v1 wire extension.** The existing state prefix is byte-for-byte unchanged. An optional suffix is marker
+`0xce`, suffix version `1`, row count (1..22), then rows: stable ID byte, requested byte (0/1), other-owners byte (0/1),
+UTF-8 effective/restore/lock strings (empty lock means unlocked). Explicit IDs 1..22 correspond to the table order
+above and must never be renumbered/reused; the display may be reordered independently. Strings are bounded to 512
+UTF-16 characters/2048 UTF-8 bytes; duplicates, unknown IDs/versions, invalid flags/counts/truncations and nonzero
+trailing bytes are rejected. Zero to three final transport padding bytes are accepted, including an old state without
+a suffix. A new client sends opcode 9 (`Effect`) only after support is advertised; `Item` is the stable effect ID,
+`Count` is exactly 0/1, all unrelated request fields retain their neutral defaults. Old clients ignore the suffix and
+continue using the unchanged requests. Server identity, queue/rate bounds, client trust confirmations and Flame idle
+checks are unchanged. No sensitive message or player-data field is repurposed.
+
 ## Creative menu
 Creative mode's tools beyond the rules, in one Kiln screen: **F7** in the game (Kiln menu > Keys changes it), or
 **Creative** in the pause menu (shown to admins and to players in creative mode).
@@ -163,7 +267,7 @@ Creative mode's tools beyond the rules, in one Kiln screen: **F7** in the game (
 - **World**: the time of day (jump forward to an hour) and the day and night cycle: **Normal**, **Stopped** (the sun
   stands still; sleeping doesn't move it), **Fast** (a whole day and night in about 90 s). Admins only; for the whole
   world, until it is set back or the server restarts.
-- **Rules**: what creative mode gives you now, and which hooks work on this build.
+- **Rules**: every modular effect toggle with requested/effective/restore/lock state (see above), plus which hooks work on this build.
 - **Only what I have found** (journey): the list shows only items you have picked up, crafted or used (the game's
   item knowledge, read on the server), so you find or craft the first one as the game intends and then take as many as
   you like.

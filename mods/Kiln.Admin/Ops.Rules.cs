@@ -29,12 +29,21 @@ internal static partial class Ops
         {
             var p = RequirePlayer(req);
             var on = req["on"] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : !Creative.IsOn(p.Entity);
-            var r = Creative.Set(p.Entity, on);
+            CreativeResult r;
+            if (req.ContainsKey("effect"))
+            {
+                if (req["effect"] is not JsonValue ev || !ev.TryGetValue<string>(out var effect) || string.IsNullOrWhiteSpace(effect))
+                    throw new AdminError("effect must be a Creative effect name");
+                if (req["on"] is not JsonValue ov || !ov.TryGetValue<bool>(out var enabled))
+                    throw new AdminError("effect requires an explicit boolean on");
+                r = Creative.SetEffect(p.Entity, effect, enabled);
+            }
+            else r = Creative.Set(p.Entity, on);
             if (!r.Ok) throw new AdminError(r.Message);
             return new JsonObject
             {
                 ["entity"] = p.Entity.Value, ["name"] = p.Name, ["creative"] = r.On, ["client"] = Rules.ClientOf(p.Entity).ToString(),
-                ["message"] = r.Message, ["rules"] = EffectiveJson(Rules.Of(p.Entity)),
+                ["message"] = r.Message, ["rules"] = EffectiveJson(Rules.Of(p.Entity)), ["effects"] = EffectsJson(p.Entity),
             };
         });
         // {entity?} -> the rules hooks, presets, active rule sets, creative players and (with entity) one player's rules
@@ -54,7 +63,12 @@ internal static partial class Ops
                 })]),
                 ["creative"] = new JsonArray([.. Creative.Players.Select(e => (JsonNode)e.Value)]),
             };
-            if (req["entity"] is JsonValue) o["player"] = EffectiveJson(Rules.Of(RequirePlayer(req).Entity));
+            if (req["entity"] is JsonValue)
+            {
+                var player = RequirePlayer(req).Entity;
+                o["player"] = EffectiveJson(Rules.Of(player));
+                o["effects"] = EffectsJson(player);
+            }
             return o;
         });
         // {entity, item (name or id), count?, level?, rarity?} -> items for a player in creative mode (the creative menu's Take)
@@ -93,6 +107,12 @@ internal static partial class Ops
         log.Info("creative and rules ops are on (/creative itself is Kiln.Rules')");
         return true;
     }
+
+    private static JsonArray EffectsJson(EntityId player) => new([.. Creative.Effects(player).Select(e => (JsonNode)new JsonObject
+    {
+        ["name"] = e.Name, ["label"] = e.Label, ["requested"] = e.Requested, ["effective"] = e.Effective,
+        ["restore"] = e.Restore, ["locked"] = e.Locked, ["otherOwners"] = e.OtherOwners,
+    })]);
 
     private static JsonObject EffectiveJson(EffectiveRules e) => new()
     {
