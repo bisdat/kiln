@@ -24409,6 +24409,25 @@ managed	Kiln.Rules	Kiln.CharacterFlightMode.BuildingArea = 2 -> Kiln.CharacterFl
 managed	Kiln.Rules	Kiln.CharacterFlightMode.Off = 0 -> Kiln.CharacterFlightMode	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	Kiln.CharacterFlightMode.Unlimited = 1 -> Kiln.CharacterFlightMode	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	Kiln.Creative	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Rules	Kiln.CreativeEffectState	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.<Clone>$() -> Kiln.CreativeEffectState!	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.CreativeEffectState(string! Name, string! Label, bool Requested, string! Effective, string! Restore, string? Locked, bool OtherOwners) -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Deconstruct(out string! Name, out string! Label, out bool Requested, out string! Effective, out string! Restore, out string? Locked, out bool OtherOwners) -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Effective.get -> string!	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Effective.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Equals(Kiln.CreativeEffectState? other) -> bool	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Label.get -> string!	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Label.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Locked.get -> string?	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Locked.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Name.get -> string!	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Name.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.OtherOwners.get -> bool	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.OtherOwners.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Requested.get -> bool	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Requested.init -> void	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Restore.get -> string!	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	Kiln.CreativeEffectState.Restore.init -> void	0.2.0-dev.31.2	0.2.18
 managed	Kiln.Rules	Kiln.CreativeResult	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	Kiln.CreativeResult.<Clone>$() -> Kiln.CreativeResult!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	Kiln.CreativeResult.CreativeResult(bool Ok, bool On, string! Message) -> void	<=0.2.0-dev.26	<=0.2.1
@@ -24771,6 +24790,9 @@ managed	Kiln.Rules	const Kiln.GlideSteerRule.AngleLimit = 85 -> double	<=0.2.0-d
 managed	Kiln.Rules	const Kiln.NoClip.Capability = "rules.noclip" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.Rules	const Kiln.NoClip.PermissionNode = "kiln.command.noclip" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.Rules	const Kiln.Rules.ChannelName = "kiln:rules" -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Rules	override Kiln.CreativeEffectState.Equals(object? obj) -> bool	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	override Kiln.CreativeEffectState.GetHashCode() -> int	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	override Kiln.CreativeEffectState.ToString() -> string!	0.2.0-dev.31.2	0.2.18
 managed	Kiln.Rules	override Kiln.CreativeResult.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	override Kiln.CreativeResult.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	override Kiln.CreativeResult.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -24804,11 +24826,15 @@ managed	Kiln.Rules	override Kiln.RulesStatus.ToString() -> string!	<=0.2.0-dev.2
 managed	Kiln.Rules	override Kiln.WaterRule.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	override Kiln.WaterRule.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	override Kiln.WaterRule.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Rules	static Kiln.Creative.Effects(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.CreativeEffectState!>!	0.2.0-dev.31.2	0.2.18
 managed	Kiln.Rules	static Kiln.Creative.IsOn(Kiln.EntityId player) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	static Kiln.Creative.Players.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	static Kiln.Creative.Set(Kiln.EntityId player, bool on) -> Kiln.CreativeResult!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Rules	static Kiln.Creative.SetEffect(Kiln.EntityId player, string! name, bool on) -> Kiln.CreativeResult!	0.2.0-dev.31.2	0.2.18
 managed	Kiln.Rules	static Kiln.Creative.SetFlight(Kiln.EntityId player, Kiln.CharacterFlightMode mode) -> Kiln.CreativeResult!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	static Kiln.Creative.Status() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Rules	static Kiln.CreativeEffectState.operator !=(Kiln.CreativeEffectState? left, Kiln.CreativeEffectState? right) -> bool	0.2.0-dev.31.2	0.2.18
+managed	Kiln.Rules	static Kiln.CreativeEffectState.operator ==(Kiln.CreativeEffectState? left, Kiln.CreativeEffectState? right) -> bool	0.2.0-dev.31.2	0.2.18
 managed	Kiln.Rules	static Kiln.CreativeResult.operator !=(Kiln.CreativeResult? left, Kiln.CreativeResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	static Kiln.CreativeResult.operator ==(Kiln.CreativeResult? left, Kiln.CreativeResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Rules	static Kiln.CreativeTools.CanGive(Kiln.EntityId player) -> bool	<=0.2.0-dev.26	<=0.2.1
