@@ -45,6 +45,7 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
   arrow or bait of the matching type can still replace the old one; item identity need not match.
   Missing/short Inventory components and unverified Virtual backpack setups are not free space. A selected non-Generic,
   foreign, action-bar or shared cell returns `SlotChanged` before mutation; this call does not repair or migrate it.
+  Instance-backed spells (including eternal spells) are not currently supported by `GiveEquip`.
 - `Replaced.Backpack` (default) preserves the old stack and its instance in an empty Generic backpack slot.
   An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty gear/vanity target still works;
   selected empty ammo reuses its verified Generic cell without needing a second cell.
