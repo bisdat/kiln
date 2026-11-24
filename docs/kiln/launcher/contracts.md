@@ -1405,7 +1405,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | profile | `profile_create` | name: string, copyFrom: ProfileId \| null | `Profile` |
 | profile | `profile_save` | profile: Profile | `Profile` (conflict on a stale generation) |
 | profile | `profile_delete` | profileId | null |
-| profile | `profile_resolve` | profileId, side: RunSide, gameId?: the game whose kiln.json `mods.hosted` applies (absent: on) | `ResolvePreview` (`withWorld`: a client's Kiln mods that start with the player's own world) |
+| profile | `profile_resolve` | profileId, side: RunSide, gameId?: the identified game whose kiln.json `mods.hosted`, EMF folder and installed native runtime apply (absent: launcher-scoped preview; see below) | `ResolvePreview` (`withWorld`: a client's Kiln mods that start with the player's own world) |
 | profile | `profile_activate` | profileId, gameId | `Activation` |
 | profile | `profile_deactivate` | gameId | `PlacementCleanup {removed: Path[], retained: [{path, reason, mayRun}]}`; removes only proven unchanged Kiln copies, keeps player edits and warns that retained mods may still run |
 | profile | `profile_active` | gameId | `Activation \| null` (null also when another data folder's profile is active in the game) |
@@ -1509,6 +1509,36 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | update | `update_restart` | - | null (restarts into the update that is ready; Windows: runs its installer; returns only on failure) |
 | update | `update_skip` | version: string \| null | `UpdateStatus` (null: un-skips) |
 | update | `update_ack` | - | `UpdateStatus` (clears `justUpdated`) |
+
+**Profile preview runtime scope.** `profile_resolve` first resolves a supplied `gameId` to that game's path. A bad or
+no-longer-known id returns `not_found`; it is not an unbound request and never falls back to the first/default game.
+For resolver-planned native mods only, `native.json`'s `kiln` requirement is evaluated by the existing dependency
+resolver against that path's `kiln/.install.json` (`InstallReceipt.runtime.version`), when `install::read_receipt`
+accepts the receipt and the version parses with the resolver's semantic-version parser. Dependency failures still
+propagate to native `requires` dependents. No special range, prerelease or release-floor promotion is added: plain
+release alternatives retain their existing dev-as-release rule; explicit numbered-dev alternatives compare the
+actual installed version (including a legacy bare `dev` stamp). A future floor still fails.
+
+- No `gameId` (`resolve_preview`, `resolve_preview_for`, `resolve_preview_in(..., None)`, and `kilnctl profile show`):
+  the explicitly unbound default remains `kiln_manage::VERSION`, the launcher's/CLI's build stamp, not any discovered
+  game's version. A shipped numbered-dev stamp is therefore meaningful, but this is not an installed-runtime verdict.
+- Missing, unreadable, malformed, unsupported-format or unsafe-path receipts, and receipts with an unparseable runtime
+  version: native resolution retains that same launcher-scoped default. When there are resolver-planned native
+  candidates, `warnings` explicitly says which fallback is in use and that installed runtime compatibility is unknown.
+  This preserves a useful preview instead of failing the whole profile/managed/EMF flow. It never consults another
+  game's receipt, a cached runtime bundle, `boot.json` or the running game's last version.
+- A readable but stale receipt is deliberately a recorded-install snapshot: preview does not hash DLLs, compare file
+  ages, or prove that the receipt still describes bytes on disk. Its recorded version is used even after an out-of-band
+  replacement; a fresh preview rereads it. Installation/status and actual runtime admission remain separate authorities.
+- This is **not** an installed managed-mod/API preview. Managed menu/world resolutions still use the launcher build
+  and `profile::KILN_API`; `kilnBuild` diagnostics keep their existing separate path. Native packages placed directly
+  into the game folder still use `game_files`' placement preview, not the native dependency resolver. Disabled mods,
+  skipped engine loaders, runtime admission and modpack-generated floors are unchanged.
+- Main-list rows still have their existing optimistic display when a preview is absent or errors: no rejection is
+  invented, and that display is not confirmation of installed compatibility. Load order invents no native/managed
+  order without a preview. Load order and Native and DLLs show preview warnings; no new runtime-admission guarantee
+  is implied by an enabled row. Cache keys include profile, side and game id (null for unbound); game invalidation
+  after install/rollback also invalidates only that game's previews, across profiles and sides.
 
 The Nexus Mods build (`AppInfo.distribution` "nexus", built without the `self-update` feature; [releasing.md](releasing.md)
 "The two builds") has the same seven commands with no self-update behind them: `update_status`, `update_check`,

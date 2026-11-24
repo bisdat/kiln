@@ -1045,12 +1045,18 @@ fn with_world(menu: &mut Resolution, world: Option<&Resolution>, server_dirs: &s
     ids
 }
 
+/// Unbound preview (also kilnctl's default): both resolver environments use this launcher's [`crate::VERSION`],
+/// not a runtime discovered in some other game. This is not an installed-runtime compatibility verdict.
 pub fn resolve_preview(dirs: &DataDirs, profile: &Profile, side: RunSide) -> Result<ResolvePreview> {
     resolve_preview_for(dirs, profile, side, true)
 }
 
 /// [`resolve_preview`] in a game (None: no game), as the launcher asks for it: whether a client's server mods start with
 /// the player's own world ([`hosted_server_mods`]), and EMF's dependencies over the game's emf/mods folder too.
+/// Resolver-planned native mods use this game's receipt's runtime version for `native.json`'s `kiln` requirement.
+/// Missing/unreadable/invalid receipts (including an invalid runtime version) keep the launcher-scoped native preview,
+/// with a warning; a readable receipt is a snapshot, not a check of the installed DLLs or its age. Managed mods retain
+/// their launcher-scoped environment/API; game-folder placements retain their separate planning rules.
 pub fn resolve_preview_in(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Result<ResolvePreview> {
     preview_with(dirs, profile, side, game.is_none_or(hosted_server_mods), game)
 }
@@ -1168,7 +1174,25 @@ fn preview_with(dirs: &DataDirs, profile: &Profile, side: RunSide, hosted: bool,
             }
         }
     }
-    let nres = crate::resolver::resolve(&ncands, &environment(side))?;
+    let mut native_env = environment(side);
+    if !ncands.is_empty() {
+        if let Some(game) = game {
+            match crate::install::read_receipt(game) {
+                Ok(Some(r)) if crate::semver::SemVersion::try_parse(&r.runtime.version).is_some() => {
+                    native_env.kiln = r.runtime.version;
+                }
+                receipt => {
+                    let why = match receipt {
+                        Ok(None) => "no install receipt".into(),
+                        Ok(Some(_)) => "the install receipt has an invalid runtime version".into(),
+                        Err(e) => format!("the install receipt could not be read: {}", e.message),
+                    };
+                    warnings.push(format!("Native compatibility preview uses launcher Kiln {}: {why}; installed runtime compatibility is unknown.", crate::VERSION));
+                }
+            }
+        }
+    }
+    let nres = crate::resolver::resolve(&ncands, &native_env)?;
     let mut ordered: Vec<NativePlanEntry> = nres
         .order
         .iter()

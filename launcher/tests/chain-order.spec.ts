@@ -62,3 +62,19 @@ test("a rule that cannot order its DLLs is a warning, and the switches stay the 
   await expect(toggle(page, "xinput9_1_0.dll")).toBeEnabled();
   await expect(row(page, "dinput8.dll")).not.toContainText(SAID);
 });
+
+// A receipt failure leaves a useful but explicitly launcher-scoped native preview. Both native views must say so.
+test("native receipt fallback warning is visible on Native and DLLs and Load order", async ({ page }) => {
+  const warning = "Native compatibility preview uses launcher Kiln 0.2.0-dev.31.1: no install receipt; installed runtime compatibility is unknown.";
+  await page.addInitScript((text) => {
+    (window as unknown as { __kilnMockPlans: unknown }).__kilnMockPlans = {
+      profile_resolve: Array.from({ length: 40 }, () => ({ result: {
+        side: "client", kiln: { order: [], rejected: [] }, native: [], withWorld: [], warnings: [text], emf: [],
+      } })),
+    };
+  }, warning);
+  await nativePage(page);
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  await page.evaluate(() => { location.hash = "#/mods/order"; });
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+});

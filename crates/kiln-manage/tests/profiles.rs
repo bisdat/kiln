@@ -966,3 +966,138 @@ fn the_folder_cooked_is_the_one_the_game_loads_in_each_path_mode() {
         assert_eq!(hash::mod_identity(&server.join("kiln/mods/blades")).unwrap(), e.hash);
     }
 }
+
+/// Only synthetic Library mods and game receipts: no discovery, game process, or installed runtime is needed.
+fn native_preview_fixture(root: &Path) -> (DataDirs, profile::Profile) {
+    let dirs = DataDirs::at(root.join("data"));
+    let mut sources = Vec::new();
+    for (id, extra) in [
+        ("matching", r#", "kiln": ">=0.2.0-dev.31.1""#),
+        ("dependent", r#", "requires": ["matching"]"#),
+        ("future", r#", "kiln": ">=0.2.0-dev.32""#),
+        ("plain", r#", "kiln": ">=0.2.0""#),
+    ] {
+        let src = native_mod(root, id, "early", "");
+        let path = src.join("native.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, format!("{}, \"side\": \"both\"{extra}}}", text.trim_end().trim_end_matches('}'))).unwrap();
+        sources.push(src);
+    }
+    // Managed kiln dependencies deliberately keep their existing launcher-scoped environment.
+    sources.push(kiln_mod(root, "managed", "1.0.0", r#", "dependencies": [{"id":"kiln", "version":">=0.2.0-dev.31.1"}]"#));
+    let imported = library::import(&dirs, &sources, &mut NoProgress).unwrap();
+    let mut p = profile::create(&dirs, "Runtime preview", None).unwrap();
+    p.mods.native = ["matching", "dependent", "future", "plain"].into_iter()
+        .map(|id| pm(&refs(&imported, ModKind::Native, id), true)).collect();
+    p.mods.kiln = vec![pm(&refs(&imported, ModKind::Kiln, "managed"), true)];
+    (dirs, p)
+}
+
+fn preview_receipt(game: &Path, version: &str) {
+    put(game, "kiln/.install.json", serde_json::to_string(&serde_json::json!({
+        "format": 1, "installId": "synthetic-preview", "installed": "2020-01-01T00:00:00Z",
+        "runtime": { "version": version }, "side": "client", "files": []
+    })).unwrap().as_bytes());
+}
+
+#[test]
+fn native_preview_uses_selected_installed_runtime_and_preserves_resolver_rules() {
+    let t = tmp("native-runtime");
+    let (dirs, p) = native_preview_fixture(&t.0);
+    let game = t.0.join("game");
+    let unbound = profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap();
+    for version in ["0.2.0-dev.31.1", "0.2.0-dev.31.1+synthetic"] {
+        preview_receipt(&game, version);
+        for side in [RunSide::Client, RunSide::Server] {
+            let pre = profile::resolve_preview_in(&dirs, &p, side, Some(&game)).unwrap();
+            assert!(pre.warnings.is_empty(), "{:?}", pre.warnings);
+            for id in ["matching", "dependent", "plain"] {
+                assert!(pre.native.iter().find(|n| n.id == id).unwrap().enabled, "{id} with {version}");
+            }
+            let future = pre.native.iter().find(|n| n.id == "future").unwrap();
+            assert!(!future.enabled);
+            assert!(future.reason.as_ref().unwrap().contains(version), "{:?}", future.reason);
+            assert!(future.reason.as_ref().unwrap().contains(">=0.2.0-dev.32"));
+            assert_eq!(pre.kiln, unbound.kiln, "not an installed managed API/runtime compatibility preview");
+        }
+    }
+    // A legacy bare dev stamp must not be promoted past an explicit numbered-dev floor.
+    for version in ["0.2.0-dev.30.9", "0.2.0-dev+synthetic"] {
+        preview_receipt(&game, version);
+        let pre = profile::resolve_preview_in(&dirs, &p, RunSide::Client, Some(&game)).unwrap();
+        let matching = pre.native.iter().find(|n| n.id == "matching").unwrap();
+        assert!(!matching.enabled);
+        assert!(matching.reason.as_ref().unwrap().contains(version), "{:?}", matching.reason);
+        assert!(!pre.native.iter().find(|n| n.id == "dependent").unwrap().enabled, "dependency failure propagates");
+        assert!(pre.native.iter().find(|n| n.id == "plain").unwrap().enabled, "plain floor still accepts dev as release");
+    }
+}
+
+#[test]
+fn native_preview_switches_game_and_rereads_receipts_without_borrowing_versions() {
+    let t = tmp("native-switch");
+    let (dirs, p) = native_preview_fixture(&t.0);
+    let a = t.0.join("game-a");
+    let b = t.0.join("game-b");
+    preview_receipt(&a, "0.2.0-dev.31.1");
+    preview_receipt(&b, "0.2.0-dev.30.9");
+    let enabled = |game: &Path| profile::resolve_preview_in(&dirs, &p, RunSide::Client, Some(game)).unwrap()
+        .native.into_iter().find(|n| n.id == "matching").unwrap().enabled;
+    assert!(enabled(&a));
+    assert!(!enabled(&b));
+    assert!(enabled(&a));
+    preview_receipt(&b, "0.2.0-dev.31.1");
+    assert!(enabled(&b), "an upgrade at the same path is read again");
+}
+
+#[test]
+fn native_preview_receipt_fallback_is_explicit_and_unbound_preview_stays_launcher_scoped() {
+    let t = tmp("native-fallback");
+    let (dirs, p) = native_preview_fixture(&t.0);
+    // Even a matching installed game elsewhere must not become an implicit CLI/default target.
+    preview_receipt(&t.0.join("other-game"), "0.2.0-dev.31.1");
+    let unbound = profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap();
+    assert!(unbound.warnings.is_empty());
+    assert_eq!(profile::resolve_preview_in(&dirs, &p, RunSide::Client, None).unwrap(), unbound);
+    assert_eq!(profile::resolve_preview_for(&dirs, &p, RunSide::Client, true).unwrap(), unbound);
+    let game = t.0.join("game");
+    for bad in [None, Some("{broken"), Some(r#"{"format":1}"#)] {
+        if let Some(text) = bad { put(&game, "kiln/.install.json", text.as_bytes()); }
+        let pre = profile::resolve_preview_in(&dirs, &p, RunSide::Client, Some(&game)).unwrap();
+        assert_eq!(pre.native, unbound.native);
+        assert_eq!(pre.kiln, unbound.kiln);
+        assert_eq!(pre.warnings.len(), 1);
+        assert!(pre.warnings[0].contains(kiln_manage::VERSION));
+        assert!(pre.warnings[0].contains("installed runtime compatibility is unknown"));
+    }
+    // Invalid versions, unsupported receipt formats and unsafe receipt paths are all fallback, not admission.
+    for (version, format, files) in [
+        ("not-a-version", 1, serde_json::json!([])),
+        ("0.2.0-dev.31.1", 2, serde_json::json!([])),
+        ("0.2.0-dev.31.1", 1, serde_json::json!([{"path":"../escape", "sha256":"00", "size":0}])),
+    ] {
+        preview_receipt(&game, version);
+        let path = game.join("kiln/.install.json");
+        let mut r: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        r["format"] = format.into();
+        r["files"] = files;
+        put(&game, "kiln/.install.json", serde_json::to_string(&r).unwrap().as_bytes());
+        let pre = profile::resolve_preview_in(&dirs, &p, RunSide::Client, Some(&game)).unwrap();
+        assert_eq!(pre.native, unbound.native);
+        assert_eq!(pre.warnings.len(), 1);
+        assert!(pre.warnings[0].contains("installed runtime compatibility is unknown"));
+    }
+    std::fs::remove_file(game.join("kiln/.install.json")).unwrap();
+    std::fs::create_dir(game.join("kiln/.install.json")).unwrap(); // unreadable as a file even when tests run as root
+    let pre = profile::resolve_preview_in(&dirs, &p, RunSide::Client, Some(&game)).unwrap();
+    assert_eq!(pre.native, unbound.native);
+    assert_eq!(pre.warnings.len(), 1);
+    // A profile with no resolver-planned native candidates still has its ordinary managed/EMF flow: no receipt
+    // warning (or receipt read) is needed to judge native mods that are all off.
+    let mut off = p.clone();
+    for m in &mut off.mods.native { m.enabled = false; }
+    let pre = profile::resolve_preview_in(&dirs, &off, RunSide::Client, Some(&game)).unwrap();
+    assert!(pre.warnings.is_empty());
+    assert!(pre.native.iter().all(|n| !n.enabled && n.reason.as_deref() == Some("disabled in the profile")));
+    assert_eq!(pre.kiln, unbound.kiln);
+}

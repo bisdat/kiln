@@ -215,16 +215,26 @@ pub async fn profile_delete(profile_id: String) -> Result<(), Error> {
 }
 
 /// `game_id`: the game the preview is for; its kiln.json `mods.hosted` says whether a client's server mods start with
-/// the player's own world (absent: they do, Kiln's default).
+/// the player's own world (absent: they do, Kiln's default). Native compatibility uses only that game's receipt's
+/// runtime version. No id keeps the launcher-scoped default; a bad id errors instead of borrowing another game.
 #[tauri::command]
 pub async fn profile_resolve(profile_id: String, side: RunSide, game_id: Option<String>) -> Result<ResolvePreview, Error> {
     blocking(move || {
         let d = dirs()?;
         let p = profile::get(&d, &profile_id)?;
-        let game = game_id.map(|g| crate::state::game(&g)).transpose()?;
-        profile::resolve_preview_in(&d, &p, side, game.as_ref().map(|g| g.path.as_path()))
+        resolve_for_game(&d, &p, side, game_id.as_deref(), crate::state::game)
     })
     .await
+}
+
+/// Keep selected-game lookup failures distinct from an unbound preview or a missing receipt. The lookup is supplied
+/// so this command's game-id boundary can be tested without global data folders or Steam discovery.
+fn resolve_for_game(
+    d: &kiln_manage::paths::DataDirs, p: &Profile, side: RunSide, game_id: Option<&str>,
+    lookup: impl FnOnce(&str) -> Result<kiln_manage::game::GameInstall, Error>,
+) -> Result<ResolvePreview, Error> {
+    let game = game_id.map(lookup).transpose()?;
+    profile::resolve_preview_in(d, p, side, game.as_ref().map(|g| g.path.as_path()))
 }
 
 /// The game's fresh status, from its own thread: the activation answers as soon as profile.json is written (the
@@ -336,6 +346,21 @@ pub async fn profile_ensure_default(app: AppHandle, game_id: String) -> Result<O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_bad_game_id_errors_and_no_game_id_never_looks_up_a_game() {
+        let root = std::env::temp_dir().join(format!("kl-preview-game-id-{}", std::process::id()));
+        let d = kiln_manage::paths::DataDirs::at(root.clone());
+        let p = profile::create(&d, "Synthetic preview", None).unwrap();
+        let bad = resolve_for_game(&d, &p, RunSide::Client, Some("not-known"), |id| {
+            assert_eq!(id, "not-known");
+            Err(Error::not_found("No game 'not-known'. Detect or add it on Play."))
+        }).unwrap_err();
+        assert_eq!(bad.code, kiln_manage::ErrorCode::NotFound);
+        let unbound = resolve_for_game(&d, &p, RunSide::Client, None, |_| panic!("unbound must not discover a game")).unwrap();
+        assert_eq!(unbound, profile::resolve_preview(&d, &p, RunSide::Client).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn activation(n: u64, note: bool) -> Activation {
         serde_json::from_value(serde_json::json!({ "gameId": "g", "profileId": "p", "generation": n, "pathMode": "z",

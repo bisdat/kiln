@@ -203,6 +203,9 @@ export function invalidateGame(qc: QueryClient, g: GameId) {
   // (cook_plan: which mods need a cook follows the profile in the game and the game's build)
   for (const k of [qk.games, qk.gameStatus(g), qk.launchState(g), qk.runtimeStatus(g), qk.active(g), qk.pending(g), qk.profiles, qk.backups(g), ["cook_plan", g], ["launch_progress", g]])
     qc.invalidateQueries({ queryKey: k });
+  // Native compatibility follows this game's installed runtime, which an install or rollback can change without
+  // changing its id. Keep other games' and unbound previews separate (the game is last in qk.resolve).
+  qc.invalidateQueries({ queryKey: ["profile_resolve"], predicate: (q) => q.queryKey[3] === g });
 }
 
 /** Mount once (the shell): backend events refresh queries. */

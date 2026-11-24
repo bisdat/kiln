@@ -654,7 +654,10 @@ export interface ResolvePreview {
   side: RunSide;
   /** The main menu's load order and why the others wait or stay out (a client's server mods: `withWorld`). */
   kiln: Resolution;
+  /** Resolver-planned native compatibility uses the selected game's valid receipt runtime version; unbound or
+   *  receipt fallback uses the launcher build. Game-folder placements have their own planning rules. */
   native: NativePlanEntry[];
+  /** Includes an explicit native launcher-scoped fallback when a bound game's receipt/version cannot be used. */
   warnings: string[];
   /** Client: the Kiln mods that start with the player's own world (single-player, or friends joining it) instead of in
    *  the menu: side "server" mods and the mods that need one, in the order they load then. Each is also in
@@ -1586,7 +1589,8 @@ export const profileGet = (profileId: ProfileId) => call<Profile>("profile_get",
 export const profileCreate = (name: string, copyFrom: ProfileId | null = null) => call<Profile>("profile_create", { name, copyFrom });
 export const profileSave = (profile: Profile) => call<Profile>("profile_save", { profile });
 export const profileDelete = (profileId: ProfileId) => call<null>("profile_delete", { profileId });
-/** `gameId`: the game the preview is for (its kiln.json `mods.hosted`); null: Kiln's default. */
+/** `gameId`: the identified game's hosted setting, EMF folder and receipt runtime for native compatibility.
+ *  null: explicitly unbound/launcher-scoped, never another game's runtime. An unknown supplied id errors. */
 export const profileResolve = (profileId: ProfileId, side: RunSide, gameId: GameId | null = null) =>
   call<ResolvePreview>("profile_resolve", { profileId, side, gameId });
 /** One activation per game at a time (./oneActivation.ts): a second one while the first runs is refused (`busy`). */

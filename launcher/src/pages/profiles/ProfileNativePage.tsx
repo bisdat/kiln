@@ -43,6 +43,7 @@ export default function ProfileNativePage() {
 
   return (
     <div className="k-scroll k-stack" style={{ gap: 18, paddingBottom: 20 }}>
+      {preview.data?.warnings.map((w) => <p key={w} className="k-hint k-tone-warn">{w}</p>)}
       {profile.mods.native.some((m) => m.enabled && phaseOf(m) === "dllmain") && (
         <Banner tone="warn" title={t("profiles.native.dllmain")}>{t("profiles.native.dllmainBanner")}</Banner>
       )}
