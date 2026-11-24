@@ -304,7 +304,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     const code = was?.pack.code ?? (prof.id === "ember-run" ? "H7QK-3MZP" : ["T6WB-4NHJ", "C9KF-5RXD", "P3VM-8QGA"][codeSeq++ % 3]);
     const mods = MOD_KINDS.reduce((s, k) => s + (prof.mods[k] ?? []).length, 0);
     const p: CruciblePack = was?.pack ?? { id: "pk_" + prof.id, slug: prof.id, code, url: SITE + "/p/" + code, title: req.title ?? prof.name, summary: "",
-      icon: null, owner: { ...ME }, visibility: "link", upvotes: 0, comments: 0, installs: 0, mods, builds: [26404966] };
+      icon: null, owner: account() || FLAGS.has("accountshare") ? { ...ME } : { id: "", name: "Anonymous" }, visibility: "link", upvotes: 0, comments: 0, installs: 0, mods, builds: [26404966] };
     p.mods = mods;
     const size = Math.round((12 + mods * 6) * MB);
     const ver: CrucibleVersion = { id: "pv_" + prof.id.replace(/-/g, "") + n, number: n, version: n + ".0.0", changes: was ? "Updated by the launcher." : null, size, published: now(), status: "ready" };
@@ -452,7 +452,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     },
     crucible_share: (a) => {
       const req = a.request as CrucibleShareRequest;
-      if (!account()) err("auth_failed", "Sign in with Discord to share. Your friends don't need to.");
+      if (!account() && shared.get(req.profile)?.pack.owner?.id) err("auth_failed", "Sign in with Discord to update this account-owned share.");
       if (!online) err("network", "Kiln can't reach Crucible.");
       const prof = d.profiles.get(req.profile) ?? err("not_found", "No profile '" + req.profile + "'.");
       const again = shared.has(prof.id);
@@ -464,7 +464,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const pid = String(a.profileId);
       const s = shared.get(pid);
       if (!s) return null;
-      return { profile: pid, pack: clone(s.pack), version: clone(s.version), changed: changedOf(pid) };
+      return { profile: pid, pack: clone(s.pack), version: clone(s.version), changed: changedOf(pid), requiresSignIn: !!s.pack.owner?.id };
     },
     crucible_trust: () => clone(trust),
     crucible_trust_set: (a) => {

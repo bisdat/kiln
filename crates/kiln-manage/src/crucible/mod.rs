@@ -20,6 +20,7 @@ pub mod dev;
 pub mod links;
 /// Pack Studio's publish: a version of a pack source, its credits, link-only or public.
 pub mod publish;
+mod ownership;
 pub mod sign;
 
 use crate::game::GameInstall;
@@ -279,6 +280,7 @@ pub struct Crucible<'a> {
     ep: &'a Endpoints,
     transport: &'a dyn Transport,
     session: Option<String>,
+    owner_key: Option<String>,
     agent: String,
 }
 
@@ -316,7 +318,7 @@ fn refusal(status: u16, body: &[u8]) -> Error {
 impl<'a> Crucible<'a> {
     /// `version`: the launcher's (the User-Agent is `kiln-launcher/<version>` and nothing else).
     pub fn new(ep: &'a Endpoints, transport: &'a dyn Transport, version: &str) -> Crucible<'a> {
-        Crucible { ep, transport, session: None, agent: format!("kiln-launcher/{version}") }
+        Crucible { ep, transport, session: None, owner_key: None, agent: format!("kiln-launcher/{version}") }
     }
 
     /// The relay session key (the player's Discord sign-in): sent to the API only.
@@ -350,8 +352,11 @@ impl<'a> Crucible<'a> {
     /// One API call: JSON in, JSON out.
     pub fn call(&self, method: Method, path: &str, body: Option<&Value>, auth: bool) -> Result<Value> {
         let mut req = Request::new(method, format!("{}{path}", self.ep.api)).header("Accept", "application/json").max_response(4 * 1024 * 1024);
-        if auth {
-            let key = self.session.as_deref().ok_or_else(|| err(ErrorCode::AuthFailed, "Sign in with Discord to share. Your friends don't need to."))?;
+        if path.starts_with("/anonymous/") {
+            let key = self.owner_key.as_deref().ok_or_else(|| err(ErrorCode::Refused, "This device does not hold the owner key for this link."))?;
+            req = req.header("Authorization", &format!("CrucibleOwner {key}"));
+        } else if auth {
+            let key = self.session.as_deref().ok_or_else(|| err(ErrorCode::AuthFailed, "Sign in with Discord to update this account-owned share."))?;
             req = req.header("Authorization", &format!("Bearer {key}"));
         }
         if let Some(b) = body {
@@ -554,7 +559,8 @@ impl<'a> Crucible<'a> {
             sent(size);
         }
         let body = if parts.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "parts": parts }) };
-        self.call(Method::Post, &format!("/uploads/{}/complete", u.id), Some(&body), true)?;
+        let prefix = if self.owner_key.is_some() { "/anonymous" } else { "" };
+        self.call(Method::Post, &format!("{prefix}/uploads/{}/complete", u.id), Some(&body), true)?;
         Ok(())
     }
 
@@ -642,6 +648,8 @@ pub struct SharedState {
     /// None: the profile matches what was shared.
     pub changed: Option<ShareChanges>,
     pub pending: bool,
+    /// Existing account-owned shares still need their Discord sign-in to update.
+    pub requires_sign_in: bool,
 }
 
 fn changes_since(profile: &crate::profile::Profile, ix: &PackIndex) -> ShareChanges {
@@ -671,7 +679,7 @@ pub fn shared(dirs: &DataDirs, pid: &str) -> Result<Option<SharedState>> {
     let Some(rec) = all.profiles.get(pid) else { return Ok(None) };
     let profile = crate::profile::get(dirs, pid)?;
     let c = changes_since(&profile, &rec.index);
-    Ok(Some(SharedState { profile: pid.into(), pack: rec.pack.clone(), version: rec.version.clone(), changed: (!c.is_empty()).then_some(c), pending: rec.pending }))
+    Ok(Some(SharedState { profile: pid.into(), pack: rec.pack.clone(), version: rec.version.clone(), changed: (!c.is_empty()).then_some(c), pending: rec.pending, requires_sign_in: rec.pack.owner.as_ref().is_none_or(|o| !o.id.is_empty()) }))
 }
 
 /// A creator the player always trusts.
@@ -982,7 +990,7 @@ pub fn install(dirs: &DataDirs, c: &Crucible, game: Option<&GameInstall>, req: &
         &mut Scaled { inner: progress, from: 0.6, to: 1.0 },
     )?;
     if req.trust_always
-        && let Some(o) = owner
+        && let Some(o) = owner.filter(|o| !o.id.is_empty())
     {
         let _ = set_trust(dirs, &o.id, &o.name, true);
     }
@@ -1286,20 +1294,46 @@ fn file_list(ix: &PackIndex) -> Vec<Value> {
 }
 
 /// Share to Crucible: the profile as a link-only pack (or the next version of the pack it was shared as), only the files
-/// Crucible lacks uploaded. Needs the sign-in.
+/// Crucible lacks uploaded. New signed-out shares use a native-only owner capability; existing account shares keep
+/// their authenticated route. Neither creating an anonymous share nor receiving it needs a Discord session.
 pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&GameInstall>, progress: &mut dyn Progress) -> Result<ShareResult> {
-    if !c.signed_in() {
-        return Err(err(ErrorCode::AuthFailed, "Sign in with Discord to share. Your friends don't need to."));
-    }
+    static SHARING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _lock = SHARING.lock().map_err(|_| err(ErrorCode::Busy, "Another share stopped unexpectedly. Restart Kiln and try again."))?;
     let mut all = shared_all(dirs);
     let rec = all.profiles.get(&req.profile).cloned();
+    let anonymous = rec.as_ref().map(|r| r.pack.owner.as_ref().is_some_and(|o| o.id.is_empty())).unwrap_or(!c.signed_in());
+    let mut owner = if anonymous {
+        let kept = ownership::load(dirs, &c.ep.api, &req.profile)?;
+        let kept = kept.filter(|o| o.pack.as_deref() == rec.as_ref().map(|r| r.pack.id.as_str()));
+        match kept {
+            Some(o) => Some(o),
+            None if rec.is_some() => return Err(err(ErrorCode::Refused, "This device no longer holds the owner key for this link. The link still works for receivers.")),
+            None => {
+                let o = ownership::Owner { pack: None, key: crate::hash::hex(&crate::util::random_bytes::<32>()?) };
+                // Persist before the first request, so a failed local write never creates an unmanageable share.
+                ownership::save(dirs, &c.ep.api, &req.profile, &o)?;
+                Some(o)
+            }
+        }
+    } else {
+        if !c.signed_in() { return Err(err(ErrorCode::AuthFailed, "Sign in with Discord to update this account-owned share.")); }
+        None
+    };
+    let scoped = Crucible { ep: c.ep, transport: c.transport, session: if anonymous { None } else { c.session.clone() }, owner_key: owner.as_ref().map(|o| o.key.clone()), agent: c.agent.clone() };
+    let c = &scoped;
+    let prefix = if anonymous { "/anonymous" } else { "" };
+    let mut expired_fallback = None;
     let profile = crate::profile::get(dirs, &req.profile)?;
     // the same profile, unchanged, with files still to send: finish that share
     let resume = rec.as_ref().filter(|r| r.pending && changes_since(&profile, &r.index).is_empty());
     let (files, answer) = if let Some(r) = resume {
         // the same profile, unchanged, zips to the same archives (they are deterministic): only their paths are needed
         let files = prepare(dirs, req, None, game, progress)?;
-        let plan = c.call(Method::Post, "/uploads", Some(&serde_json::json!({ "files": file_list(&r.index) })), true)?;
+        let plan = if anonymous {
+            c.call(Method::Post, &format!("/anonymous/versions/{}/uploads", r.version.id), Some(&serde_json::json!({})), true)?
+        } else {
+            c.call(Method::Post, "/uploads", Some(&serde_json::json!({ "files": file_list(&r.index) })), true)?
+        };
         let mut answer: ShareAnswer = serde_json::from_value(plan).map_err(|_| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?;
         answer.pack = Some(r.pack.clone());
         answer.version = r.version.clone();
@@ -1309,28 +1343,50 @@ pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&Ga
         let body = serde_json::json!({ "index": files.index, "title": req.title.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| files.index.name.clone()) });
         progress.report(Some(0.32), "asking Crucible for upload slots");
         let answer = match &rec {
-            Some(r) => match c.call(Method::Post, &format!("/packs/{}/versions", r.pack.id), Some(&serde_json::json!({ "index": files.index, "changes": files.index.changes })), true) {
+            Some(r) => match c.call(Method::Post, &format!("{prefix}/packs/{}/versions", r.pack.id), Some(&serde_json::json!({ "index": files.index, "changes": files.index.changes })), true) {
                 Ok(v) => {
                     let mut a: ShareAnswer = serde_json::from_value(v).map_err(|_| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?;
                     a.pack = Some(r.pack.clone());
                     a
                 }
                 // the pack was deleted or expired on Crucible: share it as a new one
-                Err(e) if matches!(e.code, ErrorCode::NotFound | ErrorCode::Refused) => {
+                Err(e) if !anonymous && matches!(e.code, ErrorCode::NotFound | ErrorCode::Refused) => {
                     serde_json::from_value(c.call(Method::Post, "/quickshare", Some(&body), true)?).map_err(|_| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?
                 }
                 Err(e) => return Err(e),
             },
-            None => serde_json::from_value(c.call(Method::Post, "/quickshare", Some(&body), true)?).map_err(|_| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?,
+            None => {
+                let value = match c.call(Method::Post, &format!("{prefix}/quickshare"), Some(&body), true) {
+                    Ok(v) => v,
+                    // Only a rejected session on a NEW private link may fall back. Bans, moderation, budgets and
+                    // all existing account-owned updates keep their refusal; no anonymous reset of an old pack.
+                    Err(e) if !anonymous && e.code == ErrorCode::AuthFailed => {
+                        let o = ownership::Owner { pack: None, key: crate::hash::hex(&crate::util::random_bytes::<32>()?) };
+                        ownership::save(dirs, &c.ep.api, &req.profile, &o)?;
+                        let ac = Crucible { ep: c.ep, transport: c.transport, session: None, owner_key: Some(o.key.clone()), agent: c.agent.clone() };
+                        let v = ac.call(Method::Post, "/anonymous/quickshare", Some(&body), true)?;
+                        owner = Some(o);
+                        expired_fallback = Some(ac);
+                        v
+                    }
+                    Err(e) => return Err(e),
+                };
+                serde_json::from_value(value).map_err(|_| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?
+            },
         };
         (files, answer)
     };
+    let c = expired_fallback.as_ref().unwrap_or(c);
     let pack_view = answer.pack.clone().ok_or_else(|| err(ErrorCode::Network, "Crucible sent an answer Kiln cannot read."))?;
+    if let Some(o) = owner.as_mut() {
+        o.pack = Some(pack_view.id.clone());
+        ownership::save(dirs, &c.ep.api, &req.profile, o)?;
+    }
     // remember it at once: the link works when the upload finishes, and a stopped upload resumes from here
     all.profiles.insert(req.profile.clone(), SharedPack { pack: pack_view.clone(), version: answer.version.clone(), index: files.index.clone(), shared: crate::util::now_rfc3339(), pending: !answer.uploads.is_empty() });
     shared_save(dirs, &all)?;
     let to_send = send(c, &answer.uploads, &files, "canceled: the share continues the next time you press Share", progress)?;
-    let version = c.call(Method::Get, &format!("/versions/{}", answer.version.id), None, true)
+    let version = c.call(Method::Get, &format!("/versions/{}", answer.version.id), None, false)
         .ok()
         .and_then(|v| v.get("version").cloned())
         .and_then(|v| serde_json::from_value::<CrucibleVersion>(v).ok())

@@ -30,9 +30,10 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
   const [signIn, setSignIn] = useState(false);
   const signedIn = !!status.data?.signedIn;
   const s = shared.data;
+  const needsSignIn = (!signedIn && !!(s?.requiresSignIn ?? s?.pack.owner?.id)) || run?.error?.code === "auth_failed";
   const changed = s?.changed && anyChange(countsOf(s.changed)) ? s.changed : null;
   const uploading = !!run && !run.result && !run.error && !run.pendingSignIn;
-  // a first share asks first (what goes up); A then shares, or signs in and shares
+  // A new unlisted link asks what goes up, then A shares without a login; old account shares keep their sign-in.
   const confirm = !!status.data && !shared.isLoading && !s && !run;
   const pack = run?.result?.pack ?? s?.pack ?? null;
   let body;
@@ -46,7 +47,7 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
         <p className="deck-note">{t("crucible.share.keepsGoing")}</p>
       </div>
     );
-  } else if (!signedIn && !s) {
+  } else if (needsSignIn && !pack) {
     body = <p className="deck-line" data-testid="deck-crucible-signin">{t("crucible.share.signInText")}</p>;
   } else if (run?.error && run.error.code !== "auth_failed") {
     body = <p className="deck-line"><Word tone="err">{crucibleError(run.error)}</Word></p>;
@@ -64,9 +65,8 @@ export function DeckShareDialog({ profileId, profileName, onClose }: { profileId
     );
   } else body = <p className="deck-line">{t("crucible.share.starting")}</p>;
   const buttons = uploading ? undefined
-    : confirm && signedIn ? <DeckButton primary onClick={() => void startShare(qc, profileId)} id="crucible-share-confirm" autoFocus>{t("crucible.share.confirmShare")}</DeckButton>
-    : confirm ? <DeckButton primary onClick={() => setSignIn(true)} id="crucible-share-confirm" autoFocus>{t("crucible.share.confirmSignIn")}</DeckButton>
-    : !signedIn && (!s || changed) ? <DeckButton primary onClick={() => setSignIn(true)}>{t("crucible.share.signIn")}</DeckButton>
+    : confirm ? <DeckButton primary onClick={() => void startShare(qc, profileId)} id="crucible-share-confirm" autoFocus>{t("crucible.share.confirmShare")}</DeckButton>
+    : needsSignIn && (changed || !pack) ? <DeckButton primary onClick={() => setSignIn(true)}>{t("crucible.share.signIn")}</DeckButton>
     : changed ? <DeckButton primary onClick={() => void startShare(qc, profileId)}>{t("crucible.share.updateLink")}</DeckButton>
     : run?.error && run.error.code !== "auth_failed" ? <DeckButton primary onClick={() => void startShare(qc, profileId)}>{t("common.retry")}</DeckButton>
     : <DeckButton primary onClick={onClose}>{t("common.ok")}</DeckButton>;

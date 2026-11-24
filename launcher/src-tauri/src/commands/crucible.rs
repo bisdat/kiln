@@ -1,5 +1,5 @@
 //! Tauri commands: Crucible, the modpack platform (kiln_manage::crucible; docs/kiln/launcher/crucible.md, "The launcher's
-//! Crucible client"). Receiving needs no sign-in; sharing uses the Discord sign-in the Community page made (its relay
+//! Crucible client"). Receiving and new unlisted shares need no sign-in; account-owned shares use the Community relay
 //! session as the Bearer key, sent to Crucible's API only). kiln:// links (`kiln://crucible/<CODE>`) arrive through
 //! `<data>/crucible/inbox/` and the event `kiln://crucible-link`.
 //!
@@ -183,12 +183,13 @@ pub async fn crucible_update(app: AppHandle, game_id: Option<String>, request: c
     }))
 }
 
-/// Share to Crucible (a task; result `crucible::ShareResult`). Not signed in: `auth_failed` before anything happens.
+/// Share to Crucible (a task; result `crucible::ShareResult`). New signed-out shares use native owner capabilities;
+/// existing account-owned shares still use the Community session. Owner keys never cross IPC.
 #[tauri::command]
 pub async fn crucible_share(app: AppHandle, game_id: Option<String>, request: crucible::ShareRequest) -> Result<TaskId, Error> {
     let (d, g, key) = blocking(move || {
         enabled()?;
-        let key = super::community::session_key().ok_or_else(|| Error::new(ErrorCode::AuthFailed, "Sign in with Discord to share. Your friends don't need to."))?;
+        let key = super::community::session_key();
         let g = game_id.as_deref().map(game).transpose().ok().flatten();
         Ok((dirs()?, g, key))
     })
@@ -196,7 +197,7 @@ pub async fn crucible_share(app: AppHandle, game_id: Option<String>, request: cr
     let title = "Sharing to Crucible".to_string();
     Ok(spawn_task(&app, "crucible_share", title, move |p| {
         let (ep, t) = enabled()?;
-        let c = Crucible::new(&ep, t.as_ref(), &version()).with_session(Some(key));
+        let c = Crucible::new(&ep, t.as_ref(), &version()).with_session(key);
         let r = crucible::share(&d, &c, &request, g.as_ref(), p)?;
         launcher_log("crucible", &format!("shared profile {} as {} version {}", request.profile, r.pack.id, r.version.number));
         to_value(r)

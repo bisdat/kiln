@@ -1,9 +1,9 @@
 // Share to Crucible on Play (DESIGN 1.2), with "What is Crucible?" beside it (the wiki page in the browser). A profile's
 // first share asks first (dev.30.2, players did not expect one click to upload ~20 MB): one screen says what goes up (the
 // mod list and the mods' files Crucible doesn't have yet, about how much), what stays (settings, saves, personal files),
-// and that the pack is link-only; Share turns the loaded profile into an unlisted pack and copies its link (signed out:
-// the Discord sign-in first, then the share goes on by itself), and the popover shows the upload, then "Link copied.
-// Paste it to your friends." with the link and the code. Save as file is the way without an account. A profile that
+// and that the pack is link-only; Share turns the loaded profile into an unlisted pack and copies its link without
+// requiring a Discord login. Existing account-owned shares still need their sign-in to update. The popover shows
+// the upload, then "Link copied. Paste it to your friends." with the link and code. A profile that
 // changed since it was shared carries a "Pack changed" pill, and the popover offers Update link (same link, a new
 // version, no confirm). "Got a code?" opens a pack by its code (the clipboard's code is filled in when it opens, and by
 // its Paste button; the backend reads the clipboard: ./prefill.ts).
@@ -27,12 +27,9 @@ import { copyText, crk, crucibleError, readClipboard, shortLink, useCrucibleStat
 export const CRUCIBLE_WIKI = "https://frostdev.io/kiln/wiki/crucible-share";
 export const openCrucibleWiki = () => void api.appOpenUrl(CRUCIBLE_WIKI).catch((e) => toast.error(e));
 
-/** Starts the first share after its confirm: signed in, at once; signed out, after the Discord sign-in (Host.tsx's
- *  useShareAfterSignIn starts it then). */
-export function confirmShare(qc: QueryClient, profileId: ProfileId, signedIn: boolean, openSignIn: () => void) {
-  if (signedIn) { void startShare(qc, profileId); return; }
-  useShareRun.getState().set({ profileId, taskId: null, result: null, error: null, copied: null, seen: false, pendingSignIn: true });
-  openSignIn();
+/** A new link-only share needs no account on desktop or Deck. Existing account shares keep their sign-in. */
+export function confirmShare(qc: QueryClient, profileId: ProfileId) {
+  void startShare(qc, profileId);
 }
 
 /** What a profile's first share sends at most (code.ts shareEstimate over the profile and the Library). */
@@ -201,7 +198,7 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
       </Panel>
     );
   }
-  const needSignIn = !signedIn && (!s || !!changed || run?.error?.code === "auth_failed");
+  const needSignIn = (!signedIn && !!(s?.requiresSignIn ?? s?.pack.owner?.id)) || run?.error?.code === "auth_failed";
   if (status.isLoading || shared.isLoading) return <Panel title={t("crucible.share.button")} testid="crucible-share-pop"><Spinner /></Panel>;
   // never shared and nothing started: say what goes up first (the confirm), then Share or Cancel
   if (!s && !run && !shared.error) {
@@ -210,8 +207,8 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
         <ShareConfirm profileId={profileId} signedIn={signedIn} />
         <div className="kcr-pop-actions">
           <Button size="s" variant="primary" data-testid="crucible-share-confirm"
-            onClick={() => confirmShare(qc, profileId, signedIn, () => useCommunityUi.getState().openSignIn(false))}>
-            {signedIn ? t("crucible.share.confirmShare") : t("crucible.share.confirmSignIn")}
+            onClick={() => confirmShare(qc, profileId)}>
+            {t("crucible.share.confirmShare")}
           </Button>
           <Button size="s" variant="ghost" onClick={() => useDock.getState().set(null)} data-testid="crucible-share-cancel">{t("common.cancel")}</Button>
           {!signedIn && <Button size="s" variant="ghost" loading={saving} onClick={() => void save()} data-testid="crucible-save-file">{t("crucible.share.saveInstead")}</Button>}
@@ -257,7 +254,7 @@ function SharePanel({ profileId, profileName }: { game: GameInstall; profileId: 
 /** The first share's confirm (dev.30.2): what Crucible is, what goes up and about how much, what never does, and that
  *  the pack is link-only (public packs are made in Pack Studio: they need credits, a summary and finished checks).
  *  Shared by the desktop popover and the Deck's dialog. */
-export function ShareConfirm({ profileId, signedIn, deck = false }: { profileId: ProfileId; signedIn: boolean; deck?: boolean }) {
+export function ShareConfirm({ profileId, deck = false }: { profileId: ProfileId; signedIn: boolean; deck?: boolean }) {
   const t = useT();
   const est = useShareEstimate(profileId);
   const line = deck ? "deck-line" : "kcr-p";
@@ -277,7 +274,7 @@ export function ShareConfirm({ profileId, signedIn, deck = false }: { profileId:
         <label className="kcr-tick k-muted"><input type="radio" name={"kcr-vis-" + profileId} checked={false} disabled readOnly className="k-check" data-testid="crucible-share-public" />
           <span><b>{t("crucible.share.public")}</b> {t("crucible.share.publicText")}</span></label>
       </div>
-      {!signedIn && <p className={deck ? "deck-note" : "k-hint"} data-testid="crucible-share-signin-first">{t("crucible.share.signInText")}</p>}
+      <p className={deck ? "deck-note" : "k-hint"}>{t("crucible.share.noAccount")}</p>
     </div>
   );
 }

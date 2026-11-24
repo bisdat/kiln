@@ -317,9 +317,18 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
   what stays (mod settings, the player layer; the Play share sends no overrides, Pack Studio does) and what is never
   sent (saves, worlds, characters, personal files), and that the pack is link-only (Public is shown off: public packs
   come from Pack Studio, which has the credits, the summary and the finished checks the service asks for). Share or
-  Cancel; signed out, "Sign in and share" (the share starts after the sign-in). Update link for a pack shared before,
+  Cancel; creating an unlisted share while signed out needs no Discord login on desktop or Deck. Anyone with the
+  code can install; unlisted is not access-controlled. Update link for a pack shared before,
   Retry and a share stopped midway need no confirm. The Deck's Share dialog shows the same confirm.
-- **Sharing** (the Discord sign-in, its relay session as Bearer): `pack::build` from the profile (version `1.0.0`, then
+- **Sharing**: new signed-out shares use `/anonymous/quickshare`, then `/anonymous/packs/<id>/versions`;
+  a random 256-bit per-pack owner capability authorizes only those writes and scoped upload completion/resume.
+  Native-only `<data>/crucible/owners/<hash-of-api-and-profile>.key` is atomically 0600 on Unix and DPAPI-encrypted
+  for the Windows user. No owner key crosses IPC or enters a link, preview, log or `shared.json`. Keep the launcher
+  data to update the same code; losing the key does not remove the pack or allow account recovery. Public publishing
+  and existing account-owned shares keep their Discord session and existing gates. An account sign-out/forget does
+  not delete unlinked anonymous packs. `SharedState.requiresSignIn` distinguishes account shares for the UI.
+  Both paths reuse the same exact-import hashing, deterministic archives, override allowlist and secret scan.
+  The authenticated flow remains: `pack::build` from the profile (version `1.0.0`, then
   the next patch; the change note "1 added, 1 updated" from the last share), `pack::mod_archive` per mod and
   `pack::folder_archive` for a layer (deterministic, cached by sha256), `POST /quickshare` (or `POST /packs/<id>/versions`
   for a profile shared before; a pack gone on Crucible is shared anew), PUT only what Crucible lacks (single PUT with its

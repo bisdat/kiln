@@ -108,7 +108,7 @@ pub fn sign_out(store: &SessionStore, forget: bool, remote: impl FnOnce() -> Res
 }
 
 /// Writes a file only the user can read (0600 on Unix), atomically.
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     let dir = path.parent().ok_or_else(|| Error::invalid("no folder"))?;
     std::fs::create_dir_all(dir).map_err(crate::util::io_at(dir, "creating"))?;

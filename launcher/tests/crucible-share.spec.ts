@@ -81,15 +81,16 @@ test("offline while sharing: the error speaks to the sharer (check the internet,
   await expect(page.getByTestId("crucible-save-file")).toBeVisible();
 });
 
-test("not signed in: the confirm, sign in with Discord, then the share starts by itself", async ({ page }) => {
+test("not signed in: confirm creates an unlisted link without opening Discord", async ({ page }) => {
   await open(page, "/?mock=1#/");
   await page.getByTestId("crucible-share").click();
-  await expect(page.getByTestId("crucible-share-signin-first")).toHaveText("Sign in with Discord to share. Your friends don't need to.");
-  await expect(page.getByTestId("crucible-share-confirm")).toHaveText("Sign in and share");
+  await expect(page.getByTestId("crucible-share-signin-first")).toHaveCount(0);
+  await expect(page.getByTestId("crucible-share-confirm")).toHaveText("Share");
+  await expect(page.getByTestId("crucible-share-confirm-text")).toContainText("Anyone with the link or code can install");
   await shot(page, "desktop-share-signin");
   expect((await requests(page)).filter((r) => r.cmd === "crucible_share")).toHaveLength(0);
   await page.getByTestId("crucible-share-confirm").click();
-  await page.getByTestId("kc-signin-open").click();
+  await expect(page.getByTestId("kc-signin-open")).toHaveCount(0);
   await expect(page.getByTestId("crucible-share-pop")).toContainText("Link copied", { timeout: 20_000 });
   await expect(page.getByTestId("crucible-code")).toHaveText("H7QK-3MZP");
 });
@@ -103,8 +104,8 @@ test("not signed in: Save as file instead builds a .kilnpack in the folder picke
   expect(build?.args).toEqual({ request: { profile: "ember-run", version: "1.0.0", name: "Ember run" }, outDir: "/mnt/games" });
 });
 
-test("the pack changed since it was shared: the pill, then Update link (same link, version 2)", async ({ page }) => {
-  await open(page, "/?mock=1&discord=in&crucible=shared#/");
+for (const signedIn of [false, true]) test(`the pack changed: same link, version 2 (${signedIn ? "account" : "signed-out capability"})`, async ({ page }) => {
+  await open(page, `/?mock=1${signedIn ? "&discord=in" : ""}&crucible=shared#/`);
   await expect(page.getByTestId("crucible-pack-changed")).toHaveText("Pack changed");
   await page.getByTestId("crucible-share").click();
   await expect(page.getByTestId("crucible-share-changed")).toContainText("Update the link for friends? 1 added, 1 updated");
@@ -116,6 +117,23 @@ test("the pack changed since it was shared: the pill, then Update link (same lin
   await expect(page.getByTestId("crucible-share-pop")).toContainText("Version 2");
   await expect(page.getByTestId("crucible-link")).toHaveText("frostdev.io/kiln/crucible/p/H7QK-3MZP");
   await expect(page.getByTestId("crucible-pack-changed")).toHaveCount(0);
+});
+
+test("an existing account-owned share signed out still offers sign-in, not an unauthorized update", async ({ page }) => {
+  await open(page, "/?mock=1&crucible=shared,accountshare#/");
+  await page.getByTestId("crucible-share").click();
+  await expect(page.getByTestId("crucible-share-changed")).toContainText("Sign in with Discord to update this account-owned share");
+  await expect(page.getByTestId("crucible-update-link")).toHaveCount(0);
+  expect((await requests(page)).filter((r) => r.cmd === "crucible_share")).toHaveLength(0);
+});
+
+test("a rejected cached account session shows an actionable sign-in rather than a spinner", async ({ page }) => {
+  await open(page, "/?mock=1&discord=in&crucible=shared#/");
+  await page.evaluate(() => (window as unknown as { __kilnMock: { planCommand: (cmd: string, plan: unknown) => void } }).__kilnMock.planCommand("crucible_share", { error: { code: "auth_failed", message: "This sign-in has ended." } }));
+  await page.getByTestId("crucible-share").click();
+  await page.getByTestId("crucible-update-link").click();
+  await expect(page.getByTestId("crucible-share-changed").getByRole("button", { name: "Sign in with Discord" })).toBeVisible();
+  await expect(page.getByTestId("crucible-share-progress")).toHaveCount(0);
 });
 
 test("Crucible off in this build: no share button", async ({ page }) => {

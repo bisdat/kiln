@@ -23,8 +23,11 @@ struct State {
     installs: u64,
     tamper: Option<String>,
     foreign_url: bool,
+    reject_sessions: bool,
     seq: u64,
     public: std::collections::BTreeSet<String>,
+    anonymous_keys: BTreeMap<String, String>,
+    upload_packs: BTreeMap<String, String>,
     credits: BTreeMap<String, Value>, // version -> the credits PUT
     patches: Vec<Value>,
     fail_credits: u32,                 // the next PUT /credits calls that answer 503
@@ -81,7 +84,7 @@ impl Fake {
     fn pack_view(s: &State, id: &str) -> Value {
         let (code, slug, title, latest) = &s.packs[id];
         serde_json::json!({ "id": id, "slug": slug, "code": show_code(code), "url": format!("https://frostdev.io/kiln/crucible/p/{}", show_code(code)),
-            "title": title, "summary": "", "icon": null, "owner": { "id": OWNER, "name": "Emberfox" }, "visibility": if s.public.contains(id) { "public" } else { "link" },
+            "title": title, "summary": "", "icon": null, "owner": if s.anonymous_keys.contains_key(id) { serde_json::json!({ "id": "", "name": "Anonymous" }) } else { serde_json::json!({ "id": OWNER, "name": "Emberfox" }) }, "visibility": if s.public.contains(id) { "public" } else { "link" },
             "upvotes": 0, "comments": 0, "installs": s.installs, "mods": 0, "builds": [], "latest": latest })
     }
 
@@ -127,6 +130,7 @@ impl Fake {
         let files = Self::files_of(&index);
         s.versions.insert(vid.clone(), (pack.into(), number, index, "uploading".into()));
         let (uploads, have) = Self::plan(s, &files);
+        for u in &uploads { s.upload_packs.insert(u["id"].as_str().unwrap().into(), pack.into()); }
         Self::finish(s);
         (vid, uploads, have)
     }
@@ -189,10 +193,24 @@ impl Fake {
         }
         assert_eq!(host, "api.crucible.test", "a host outside the fake");
         let p = path.strip_prefix("/kiln/crucible/api/v1").unwrap().to_string();
+        let anonymous = p.starts_with("/anonymous/");
+        let p = p.strip_prefix("/anonymous").unwrap_or(&p);
         let parts: Vec<&str> = p.trim_start_matches('/').split('/').collect();
+        let owner_key = req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).and_then(|(_, v)| v.strip_prefix("CrucibleOwner "));
+        if anonymous {
+            let pack = match parts.as_slice() {
+                ["packs", id, ..] => Some(*id),
+                ["versions", vid, ..] => s.versions.get(*vid).map(|v| v.0.as_str()),
+                ["uploads", id, ..] => s.upload_packs.get(*id).map(String::as_str),
+                _ => None,
+            };
+            let ok = if parts.as_slice() == ["quickshare"] { owner_key.is_some_and(|k| k.len() == 64) }
+                else { pack.and_then(|id| s.anonymous_keys.get(id)).map(String::as_str) == owner_key && owner_key.is_some() };
+            if !ok { return json(403, serde_json::json!({ "error": "refused", "message": "Wrong owner key." })); }
+        }
         let need_auth = matches!((req.method, parts.as_slice()), (Method::Post, ["quickshare"]) | (Method::Post, ["packs"]) | (Method::Post, ["packs", _, "versions"]) | (Method::Post, ["uploads", ..])
             | (Method::Put, _) | (Method::Patch, _));
-        if need_auth && !authed {
+        if need_auth && (!authed || s.reject_sessions) && !anonymous {
             return json(401, serde_json::json!({ "error": "signed-out", "message": "Sign in with Discord first." }));
         }
         match (req.method, parts.as_slice()) {
@@ -201,6 +219,7 @@ impl Fake {
                 let id = format!("pck_{}", s.seq);
                 let code = format!("H7QK3MZ{}", &CODE_ALPHABET[s.packs.len()..s.packs.len() + 1]);
                 s.packs.insert(id.clone(), (code, "ember-run".into(), jbody["title"].as_str().unwrap_or("x").into(), None));
+                if anonymous { s.anonymous_keys.insert(id.clone(), owner_key.unwrap().into()); }
                 let (vid, uploads, have) = Self::add_version(&mut s, &id, jbody["index"].clone());
                 json(201, serde_json::json!({ "pack": Self::pack_view(&s, &id), "version": Self::version_view(&s, &vid), "uploads": uploads, "have": have }))
             }
@@ -239,6 +258,13 @@ impl Fake {
             (Method::Get, ["packs", id, "head"]) => {
                 let latest = s.packs[*id].3.clone();
                 json(200, serde_json::json!({ "pack": id, "title": "x", "version": latest.map(|v| Self::version_view(&s, &v)) }))
+            }
+            (Method::Post, ["versions", vid, "uploads"]) if anonymous => {
+                let pack = s.versions[*vid].0.clone();
+                let files = Self::files_of(&s.versions[*vid].2);
+                let (uploads, have) = Self::plan(&mut s, &files);
+                for u in &uploads { s.upload_packs.insert(u["id"].as_str().unwrap().into(), pack.clone()); }
+                json(200, serde_json::json!({ "uploads": uploads, "have": have }))
             }
             (Method::Post, ["uploads"]) => {
                 let files: Vec<(String, String, u64)> = jbody["files"].as_array().into_iter().flatten()
@@ -447,15 +473,66 @@ fn a_game_client_downloads_no_server_only_mod() {
 }
 
 #[test]
-fn sharing_needs_the_sign_in_and_sends_nothing_without_it() {
-    let t = tmp("signin");
+fn signed_out_sharing_keeps_a_private_owner_key_and_updates_the_same_link() {
+    let t = tmp("anonymous");
     let fake = Fake::new();
     let ep = endpoints(&fake.signer.key);
     let (a, pid) = creator(&t);
-    let e = share(&a, &Crucible::new(&ep, &fake, "0"), &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap_err();
-    assert_eq!(e.code, ErrorCode::AuthFailed);
-    assert!(e.message.contains("Your friends don't need to"), "{}", e.message);
-    assert!(fake.sent().is_empty());
+    let c = Crucible::new(&ep, &fake, "0");
+    let req = ShareRequest { profile: pid.clone(), ..Default::default() };
+    let first = share(&a, &c, &req, None, &mut NoProgress).unwrap();
+    assert_eq!(first.pack.owner.as_ref().unwrap().id, "");
+    let state = shared(&a, &pid).unwrap().unwrap();
+    assert!(!state.requires_sign_in);
+    let owner = ownership::load(&a, &ep.api, &pid).unwrap().unwrap();
+    let visible = serde_json::to_string(&state).unwrap() + &serde_json::to_string(&first).unwrap();
+    assert!(!visible.contains(&owner.key));
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(ownership::path(&a, &ep.api, &pid)).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    let b = DataDirs::at(t.0.join("friend"));
+    let (pv, _) = preview(&b, &c, &first.pack.code, None).unwrap();
+    let installed = install(&b, &c, None, &InstallRequest { target: pv.version.id, consent: true, trust_always: true, ..Default::default() }, pv.pack.owner.as_ref(), false, &mut NoProgress).unwrap();
+    assert_eq!(installed.profile.mods.kiln.len(), 2);
+    assert!(trusted(&b).is_empty(), "anonymous authors have no account identity to trust permanently");
+    add_mods(&a, &pid, &t.0, &["gamma"]);
+    let second = share(&a, &c, &req, None, &mut NoProgress).unwrap();
+    assert_eq!(second.pack.code, first.pack.code);
+    assert_eq!(second.version.number, 2);
+    // Simulate an interrupted upload: resume only that version's files, without creating version 3.
+    let mut state = shared_all(&a);
+    state.profiles.get_mut(&pid).unwrap().pending = true;
+    shared_save(&a, &state).unwrap();
+    assert_eq!(share(&a, &c, &req, None, &mut NoProgress).unwrap().version.number, 2);
+    let mut wrong = owner;
+    wrong.key = "f".repeat(64);
+    ownership::save(&a, &ep.api, &pid, &wrong).unwrap();
+    add_mods(&a, &pid, &t.0, &["delta"]);
+    assert_eq!(share(&a, &c, &req, None, &mut NoProgress).unwrap_err().code, ErrorCode::Refused);
+    std::fs::remove_file(ownership::path(&a, &ep.api, &pid)).unwrap();
+    assert_eq!(share(&a, &c, &req, None, &mut NoProgress).unwrap_err().code, ErrorCode::Refused);
+}
+
+#[test]
+fn expired_sessions_allow_new_unlisted_links_but_not_account_owned_updates() {
+    let t = tmp("expired-session");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let c = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    // Existing authenticated shares must not silently become anonymous when their session expires.
+    let legacy = share(&a, &c, &ShareRequest { profile: pid.clone(), ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert!(shared(&a, &pid).unwrap().unwrap().requires_sign_in);
+    fake.s.lock().unwrap().reject_sessions = true;
+    add_mods(&a, &pid, &t.0, &["gamma"]);
+    assert_eq!(share(&a, &c, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap_err().code, ErrorCode::AuthFailed);
+    let fresh = crate::profile::create(&a, "New private link", None).unwrap();
+    add_mods(&a, &fresh.id, &t.0, &["alpha"]);
+    let link = share(&a, &c, &ShareRequest { profile: fresh.id.clone(), ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert_eq!(link.pack.owner.unwrap().id, "");
+    assert!(!shared(&a, &fresh.id).unwrap().unwrap().requires_sign_in);
+    assert_ne!(link.pack.code, legacy.pack.code);
 }
 
 #[test]

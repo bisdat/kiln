@@ -48,15 +48,40 @@ test("Share to Crucible: the confirm, then the QR code and the big code", async 
   await expect(page.locator('[data-deck-dialog="crucible-share"]')).toHaveCount(0);
 });
 
-test("Share signed out: the sign-in comes first", async ({ page }) => {
+test("Share signed out: confirm uploads without a Discord sign-in", async ({ page }) => {
   await openDeck(page, "/?deck=steamdeck#/");
   await focusOn(page, "crucible-share");
   await pad(page, "a");
-  await expect(page.getByTestId("crucible-share-signin-first")).toHaveText("Sign in with Discord to share. Your friends don't need to.");
+  await expect(page.getByTestId("crucible-share-signin-first")).toHaveCount(0);
+  await expect(page.getByTestId("deck-crucible-confirm")).toContainText("Anyone with the link or code can install");
   await focusOn(page, "crucible-share-confirm");
-  await expect(page.locator('[data-deck-id="crucible-share-confirm"]')).toHaveText("Sign in and share");
+  await expect(page.locator('[data-deck-id="crucible-share-confirm"]')).toHaveText("Share");
   await pad(page, "a");
-  await expect(page.getByTestId("deck-qr")).toBeVisible();
+  await expect(page.getByTestId("deck-crucible-code")).toHaveText("H7QK-3MZP", { timeout: 15_000 });
+  await expect(page.getByTestId("deck-qr")).toHaveCount(0);
+});
+
+test("an anonymous Deck link updates signed out on the same code", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck&crucible=shared#/");
+  await focusOn(page, "crucible-share");
+  await pad(page, "a");
+  const dialog = page.locator('[data-deck-dialog="crucible-share"]');
+  await expect(dialog).toContainText("Update link");
+  await dialog.getByRole("button", { name: "Update link" }).click();
+  await expect(page.getByTestId("deck-crucible-code")).toHaveText("H7QK-3MZP", { timeout: 15_000 });
+  await expect(page.getByTestId("deck-qr")).toHaveCount(0);
+  const shared = await page.evaluate(async () => (await import("/src/api/commands.ts")).crucibleShared("ember-run"));
+  expect(shared?.version.number).toBe(2);
+  expect(shared?.requiresSignIn).toBe(false);
+});
+
+test("account-owned Deck updates still offer Discord sign-in", async ({ page }) => {
+  await openDeck(page, "/?deck=steamdeck&crucible=shared,accountshare#/");
+  await focusOn(page, "crucible-share");
+  await pad(page, "a");
+  const dialog = page.locator('[data-deck-dialog="crucible-share"]');
+  await expect(dialog.getByRole("button", { name: "Sign in with Discord" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Update link" })).toHaveCount(0);
 });
 
 test("Enter a code: the preview with focus on Install and play, trust, install", async ({ page }) => {

@@ -2892,6 +2892,8 @@ export interface CrucibleShared {
   profile: string; pack: CruciblePack; version: CrucibleVersion;
   /** null: the profile matches what was shared. */
   changed: { added: string[]; updated: string[]; removed: string[] } | null;
+  /** Account-owned shares still require sign-in to update; native owner capabilities never cross IPC. */
+  requiresSignIn: boolean;
 }
 export interface CrucibleTrust { id: string; name: string; since: string }
 
