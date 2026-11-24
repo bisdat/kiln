@@ -31,6 +31,7 @@ been seen in a game.
 | dev.30.8 | 0.2.16 | dev.30.7 | runtime only (player storage starts again: the client guard reads only PlayerInput.fromClient's struct members (#135); Kiln building tools change terrain: the impact binding reads the world from the job, Remove skips the material pre-check (#133); crafting menus count linked sources in their ingredient rows, station screens show transferable counts (#132); EMF 0.6.20 / EmfApi v48) |
 | dev.30.9 | 0.2.16 | dev.30.7 | runtime only (Kiln terrain save boxes only in the world save, by the stack-placed caller, and split at the writer's 4,096 chunks per record (#136); Kiln.Admin KAP: `metrics` topic, `server_restart`, `login_mint` / `login_redeem`, staged updates `update_*`, command form data in `commands_describe`, `command_run` with `source` + `level`) |
 | dev.31 | 0.2.17 | dev.31 | registry stage, typed entry operations and conflict reports; character values and richer UI blocks; markers, station tabs, replication inspector and sidecars; survivor recruitment, NPC bodies and routines; camera leases and transport; inventory owner kinds, base containers and opt-in slider steps. See the dev.31 release notes for coverage and limits. |
+| dev.31.1 | 0.2.17 | dev.31 | runtime only (crafting preview diagnostics for linked storage (#132): kiln.log says why the client preview left a recipe to the game; a failed code-state check names its state and the first foreign byte) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 

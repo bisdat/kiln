@@ -3358,8 +3358,22 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.32",
+      "version": "0.2.0-dev.31.1",
       "status": "next",
+      "title": "Crafting diagnostics for linked storage",
+      "summary": "Clearer kiln.log lines for crafting from linked storage, to find why it still fails for some players.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Crafting diagnostics",
+          "text": "kiln.log says why the crafting menu left a recipe to the game, and where another mod changed a game function Kiln hooks (thanks Fuzen777).",
+          "area": "core"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.32",
+      "status": "planned",
       "title": "Camera, pets and taming",
       "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
       "features": [
