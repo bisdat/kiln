@@ -6,7 +6,7 @@ struct Xmm {
     float f32[4]{};
 };
 struct Context {
-    uintptr_t rbp = 0, rdi = 0, rsp = 0, rsi = 0, rax = 0;
+    uintptr_t rbp = 0, rdi = 0, rsp = 0, rsi = 0, rax = 0, rbx = 0;
     Xmm xmm2, xmm6, xmm14;
 };
 struct InlineHook {

@@ -4,6 +4,7 @@
 // A test may also set `target` directly to give a hook a fake original without installing it.
 // The same file sits in each host test's stub folder (keep the copies identical).
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 #include "kiln_api.h"
@@ -97,3 +98,9 @@ private:
     const char* error_ = nullptr;
 };
 }  // namespace kiln
+
+// kiln.items' qualified_code (items/qualified_code.h) takes the real hooks table; hooks_v2 above has none, so a code
+// check fails closed here, as with a table too old to qualify code (the rules host test builds items/pide.cpp).
+namespace kitems {
+template <size_t N> bool qualified_code(const void*, uintptr_t, const uint8_t (&)[N]) { return false; }
+}  // namespace kitems
