@@ -7,6 +7,14 @@ namespace Kiln;
 /// <summary>One Creative contribution. Effective and Restore are display text, not a parseable rules API.
 /// Requested describes Creative's own granting fields, not the merged result. Locked is null when restoring is allowed,
 /// otherwise a reason; an existing contribution can still be withdrawn. OtherOwners reports other scoped grants.</summary>
+/// <param name="Name">The effect's stable name, as /creative effect and <c>Creative.SetEffect</c> take it.</param>
+/// <param name="Label">The effect's display name for menus.</param>
+/// <param name="Requested">Whether Creative itself currently grants this effect for the player.</param>
+/// <param name="Effective">Display text for the merged result the player gets now, after other rules and server limits.</param>
+/// <param name="Restore">Display text for what switching the effect back on would grant.</param>
+/// <param name="Locked">Null when the effect can be switched back on; otherwise the reason it can't (server preset or
+/// policy, a limit that cancels it out, another owner's rule).</param>
+/// <param name="OtherOwners">Whether other mods or rule sets also grant this effect for the player.</param>
 public sealed record CreativeEffectState(string Name, string Label, bool Requested, string Effective, string Restore,
     string? Locked, bool OtherOwners);
 
