@@ -176,38 +176,117 @@ internal static class CreativeNet
 
     internal static CreativeStateMsg DecodeState(ref NetReader r)
     {
+        // The prefix is the state itself: a broken prefix is a broken message.
         var state = new CreativeStateMsg((CreativeAccess)r.UInt32(), (TimeCycle)r.Byte(), r.Double(),
             r.String() ?? "", r.String() ?? "");
         if (r.Remaining == 0) return state;
+        // Everything after it is the optional effect list. One this client cannot use (a newer version, effects it does
+        // not know, malformed or hostile rows) never costs the rest of the state: the menu shows without those rows.
+        // Reads stay bounded: at most 255 rows of three strings of at most 2048 bytes, from a message the channel caps
+        // at 64 KiB, and only known, unique, well-formed rows are kept (at most one per known effect).
+        string? why;
+        List<CreativeEffectState>? effects;
+        try
+        {
+            effects = DecodeEffects(ref r, out why);
+        }
+        catch (NetFormatException e)
+        {
+            (effects, why) = (null, "a truncated or oversized effect list (" + e.Message + ")");
+        }
+        if (why is not null) NoteSuffix(why);
+        return effects is null ? state : state with { Effects = effects };
+    }
+
+    // null: no rows to show (an older server's padding, or a list this client cannot use: then `why` says so).
+    private static List<CreativeEffectState>? DecodeEffects(ref NetReader r, out string? why)
+    {
+        why = null;
         if (r.Remaining <= 3)
         {
-            var tail = r.Rest();
-            if (tail.IndexOfAnyExcept((byte)0) < 0) return state;
-            throw new NetFormatException("Truncated Creative effect state.");
+            if (r.Rest().IndexOfAnyExcept((byte)0) >= 0) why = "a truncated effect list";
+            return null;  // zero to three bytes of transport padding: an older server without effects
         }
-        if (r.Byte() != 0xce || r.Byte() != 1) throw new NetFormatException("Unknown Creative effect state version.");
+        if (r.Byte() != 0xce)
+        {
+            why = "data this Kiln does not know after the state";
+            return null;
+        }
+        var version = r.Byte();
+        if (version != 1)
+        {
+            why = $"effect list version {version}, newer than this Kiln";
+            return null;
+        }
         var count = r.Byte();
-        if (count == 0 || count > CreativeEffects.All.Length) throw new NetFormatException("Invalid Creative effect count.");
-        var effects = new List<CreativeEffectState>(count);
+        if (count == 0)
+        {
+            why = "an empty effect list";
+            return null;
+        }
+        var effects = new List<CreativeEffectState>(Math.Min((int)count, CreativeEffects.All.Length));
         var seen = new HashSet<byte>();
+        var unknown = 0;
         for (var i = 0; i < count; i++)
         {
             var id = r.Byte();
-            var effect = CreativeEffects.Find((uint)id) ?? throw new NetFormatException("Unknown Creative effect ID.");
             var requested = r.Byte();
             var others = r.Byte();
-            if (!seen.Add(id) || requested > 1 || others > 1) throw new NetFormatException("Invalid Creative effect flags.");
-            var effective = r.String(2048) ?? "";
-            var restore = r.String(2048) ?? "";
+            var effective = r.String(2048);
+            var restore = r.String(2048);
             var lockedText = r.String(2048);
-            string? locked = lockedText.Length == 0 ? null : lockedText;
-            if (effective.Length > 512 || restore.Length > 512 || locked?.Length > 512)
-                throw new NetFormatException("Oversized Creative effect display.");
-            effects.Add(new(effect.Name, effect.Label, requested == 1, effective, restore, locked, others == 1));
+            if (!seen.Add(id) || requested > 1 || others > 1 || effective.Length > 512 || restore.Length > 512 || lockedText.Length > 512)
+            {
+                why = "a malformed effect row";
+                return null;
+            }
+            if (CreativeEffects.Find((uint)id) is not { } effect)
+            {
+                unknown++;  // a newer server's effect: skipped, the known rows still show
+                continue;
+            }
+            effects.Add(new(effect.Name, effect.Label, requested == 1, effective, restore, lockedText.Length == 0 ? null : lockedText,
+                others == 1));
         }
         if (r.Remaining > 3 || r.Remaining > 0 && r.Rest().IndexOfAnyExcept((byte)0) >= 0)
-            throw new NetFormatException("Invalid Creative effect state tail.");
-        return state with { Effects = effects };
+        {
+            why = "unexpected data after the effect list";
+            return null;
+        }
+        if (unknown > 0) why = $"{unknown} effect(s) this Kiln does not know, shown without them";
+        return effects.Count > 0 ? effects : null;
+    }
+
+    // At most one log line a minute about effect lists this client could not (fully) use; the rest are counted.
+    internal static Func<long> SuffixClock = static () => Environment.TickCount64;
+    internal static Action<string> SuffixLog = static text => RulesRuntime.Log(LogLevel.Warn, text);
+    private static long _suffixNoted = long.MinValue;
+    private static int _suffixQuiet;
+
+    private static void NoteSuffix(string why)
+    {
+        var now = SuffixClock();
+        var last = Interlocked.Read(ref _suffixNoted);
+        if (last != long.MinValue && now - last < 60_000 || Interlocked.CompareExchange(ref _suffixNoted, now, last) != last)
+        {
+            Interlocked.Increment(ref _suffixQuiet);
+            return;
+        }
+        var quiet = Interlocked.Exchange(ref _suffixQuiet, 0);
+        try
+        {
+            SuffixLog($"creative state: {why}; the rest of the menu still shows" + (quiet > 0 ? $" ({quiet} more since the last note)" : ""));
+        }
+        catch (Exception)
+        {
+            // logging must never cost the state
+        }
+    }
+
+    internal static void ResetSuffixNotes()
+    {
+        Interlocked.Exchange(ref _suffixNoted, long.MinValue);
+        Interlocked.Exchange(ref _suffixQuiet, 0);
     }
 
     internal static bool ValidEffectRequest(CreativeRequest r) => r.Kind == CreativeAsk.Effect &&

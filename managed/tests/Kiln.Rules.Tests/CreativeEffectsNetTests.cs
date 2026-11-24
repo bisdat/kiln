@@ -50,35 +50,141 @@ public sealed class CreativeEffectsNetTests
         Assert.True(old.Remaining > 0); // historical decoder deliberately does not consume the optional suffix
     }
 
+    private static CreativeStateMsg Decode(byte[] bytes)
+    {
+        var r = new NetReader(bytes);
+        return CreativeNet.DecodeState(ref r);
+    }
+
+    // The v1 suffix written by hand: marker, version, count, then rows (id, requested, others, three strings).
+    private static byte[] Suffix(byte version, int count, params (byte Id, byte Requested, byte Others, string Locked)[] rows)
+    {
+        var w = new NetWriter();
+        CreativeNet.EncodeState(Legacy, w);
+        w.Byte(0xce).Byte(version).Byte((byte)count);
+        foreach (var (id, requested, others, locked) in rows)
+            w.Byte(id).Byte(requested).Byte(others).String("effective " + id).String("restore " + id).String(locked);
+        return w.ToArray();
+    }
+
+    private static void StateWithoutEffects(CreativeStateMsg decoded)
+    {
+        Assert.Equal(Legacy, decoded);
+        CreativeMenu.OnState(decoded);
+        try
+        {
+            Assert.False(CreativeMenu.SupportsEffects);
+            Assert.False(CreativeNet.Ask(new(CreativeAsk.Effect, Item: 13, Count: 1)));
+        }
+        finally { CreativeMenu.OnDisconnected(); }
+    }
+
+    // A suffix this client cannot use never costs the state message: the menu shows, without effect rows.
     [Theory]
-    [InlineData(new byte[] { 0xce })]
-    [InlineData(new byte[] { 0xce, 1, 1 })]
-    [InlineData(new byte[] { 0, 0, 0, 0 })]
-    [InlineData(new byte[] { 0xce, 2, 1, 1 })]
-    [InlineData(new byte[] { 0xce, 1, 23, 1 })]
-    [InlineData(new byte[] { 0xce, 1, 0, 0 })]
-    [InlineData(new byte[] { 0xce, 1, 1, 255 })]
-    [InlineData(new byte[] { 0xce, 1, 1, 13, 2, 0 })]
+    [InlineData(new byte[] { 0xce })]                      // truncated marker
+    [InlineData(new byte[] { 0xce, 1, 1 })]                // truncated header
+    [InlineData(new byte[] { 0, 0, 0, 0 })]                // no marker
+    [InlineData(new byte[] { 0xab, 1, 1, 13 })]            // another marker
+    [InlineData(new byte[] { 0xce, 2, 1, 1 })]             // a newer suffix version
+    [InlineData(new byte[] { 0xce, 9, 0xff, 0xff, 0xff })] // a newer version with a layout this client cannot read
+    [InlineData(new byte[] { 0xce, 1, 23, 1 })]            // more rows than sent
+    [InlineData(new byte[] { 0xce, 1, 0, 0 })]             // empty list
+    [InlineData(new byte[] { 0xce, 1, 1, 255 })]           // a truncated row
+    [InlineData(new byte[] { 0xce, 1, 1, 13, 2, 0 })]      // bad flags, truncated
     [InlineData(new byte[] { 0xce, 1, 1, 13, 0, 2 })]
-    public void MalformedSuffixFailsClosed(byte[] suffix) =>
-        Assert.Throws<NetFormatException>(() => { var r = new NetReader(State(suffix)); CreativeNet.DecodeState(ref r); });
+    public void UnusableSuffixKeepsTheStateWithoutEffectRows(byte[] suffix) => StateWithoutEffects(Decode(State(suffix)));
 
     [Fact]
-    public void DuplicateIdsOversizedDisplaysAndNonPaddingTailAreRejected()
+    public void NewerServerEffectsAreSkippedAndKnownRowsStillShow()
     {
-        var duplicate = new NetWriter();
-        CreativeNet.EncodeState(Legacy, duplicate);
-        duplicate.Byte(0xce).Byte(1).Byte(2);
-        for (var i = 0; i < 2; i++) duplicate.Byte(13).Byte(0).Byte(0).String("effective").String("restore").String(null);
-        Assert.Throws<NetFormatException>(() => { var r = new NetReader(duplicate.ToArray()); CreativeNet.DecodeState(ref r); });
+        // More than 22 effects: every known one plus three this Kiln does not know, interleaved.
+        var rows = CreativeEffects.All.Select(e => (e.Id, (byte)(e.Id % 2), (byte)0, e.Id % 3 == 0 ? "locked " + e.Id : ""))
+            .Concat([((byte)23, (byte)1, (byte)1, ""), ((byte)24, (byte)0, (byte)0, "future lock"), ((byte)200, (byte)1, (byte)0, "")])
+            .OrderBy(r => r.Item1 % 5).ToArray();
+        var decoded = Decode(Suffix(1, rows.Length, rows));
+        Assert.Equal(Legacy, decoded with { Effects = null });
+        Assert.NotNull(decoded.Effects);
+        Assert.Equal(CreativeEffects.All.Length, decoded.Effects!.Count);
+        foreach (var e in decoded.Effects)
+        {
+            var id = CreativeEffects.Find(e.Name)!.Id;
+            Assert.Equal(id % 2 == 1, e.Requested);
+            Assert.Equal("effective " + id, e.Effective);
+            Assert.Equal(id % 3 == 0 ? "locked " + id : null, e.Locked);
+        }
+        var one = Decode(Suffix(1, 2, ((byte)23, (byte)1, (byte)1, ""), ((byte)13, (byte)0, (byte)1, "")));
+        Assert.Equal(new[] { "stamina" }, one.Effects!.Select(e => e.Name));
+        CreativeMenu.OnState(one);
+        try { Assert.True(CreativeMenu.SupportsEffects); }
+        finally { CreativeMenu.OnDisconnected(); }
+        // Only effects this Kiln does not know: the menu shows without rows.
+        StateWithoutEffects(Decode(Suffix(1, 1, ((byte)23, (byte)1, (byte)0, ""))));
+    }
+
+    // Malformed or hostile rows keep their limits: nothing from them is shown, but the state still arrives.
+    [Fact]
+    public void MalformedOrOversizedRowsDropOnlyTheEffectRows()
+    {
+        StateWithoutEffects(Decode(Suffix(1, 2, ((byte)13, (byte)0, (byte)0, ""), ((byte)13, (byte)0, (byte)0, ""))));   // duplicate
+        StateWithoutEffects(Decode(Suffix(1, 2, ((byte)23, (byte)0, (byte)0, ""), ((byte)23, (byte)0, (byte)0, ""))));   // duplicate unknown
+        StateWithoutEffects(Decode(Suffix(1, 1, ((byte)23, (byte)2, (byte)0, ""))));                                  // bad flag, unknown row
+        StateWithoutEffects(Decode(Suffix(1, 1, ((byte)13, (byte)0, (byte)0, new string('x', 513)))));               // display over 512
         var big = new NetWriter();
         CreativeNet.EncodeState(Legacy, big);
-        big.Byte(0xce).Byte(1).Byte(1).Byte(13).Byte(0).Byte(0).String(new string('x', 513)).String("").String("");
-        Assert.Throws<NetFormatException>(() => { var r = new NetReader(big.ToArray()); CreativeNet.DecodeState(ref r); });
+        big.Byte(0xce).Byte(1).Byte(1).Byte(13).Byte(0).Byte(0).String(new string('x', 2049)).String("").String("");
+        StateWithoutEffects(Decode(big.ToArray()));                                                                  // over 2048 bytes
+        var huge = new NetWriter();
+        CreativeNet.EncodeState(Legacy, huge);
+        huge.Byte(0xce).Byte(1).Byte(1).Byte(13).Byte(0).Byte(0).VarUInt(1u << 30);                                  // a 1 GiB length claim
+        StateWithoutEffects(Decode(huge.ToArray()));
         var trailing = new NetWriter();
         CreativeNet.EncodeState(Legacy with { Effects = [new("stamina", "Stamina", false, "off", "1", null, false)] }, trailing);
         trailing.Byte(7);
-        Assert.Throws<NetFormatException>(() => { var r = new NetReader(trailing.ToArray()); CreativeNet.DecodeState(ref r); });
+        StateWithoutEffects(Decode(trailing.ToArray()));
+    }
+
+    [Fact]
+    public void ABrokenStatePrefixIsStillABrokenMessage()
+    {
+        var bytes = State();
+        Assert.Throws<NetFormatException>(() => Decode(bytes[..^2]));
+    }
+
+    [Fact]
+    public void UnusableSuffixesAreLoggedAtMostOnceAMinute()
+    {
+        var lines = new List<string>();
+        var now = 1_000L;
+        var (clock, log) = (CreativeNet.SuffixClock, CreativeNet.SuffixLog);
+        CreativeNet.SuffixClock = () => now;
+        CreativeNet.SuffixLog = lines.Add;
+        CreativeNet.ResetSuffixNotes();
+        try
+        {
+            var newer = State(0xce, 2, 1, 1);
+            for (var i = 0; i < 3; i++) Assert.Equal(Legacy, Decode(newer));
+            now += 59_999;
+            Decode(newer);
+            Assert.Single(lines);
+            Assert.Contains("version 2", lines[0]);
+            now += 1;
+            Decode(Suffix(1, 2, ((byte)23, (byte)1, (byte)1, ""), ((byte)13, (byte)0, (byte)1, "")));
+            Assert.Equal(2, lines.Count);
+            Assert.Contains("does not know", lines[1]);
+            Assert.Contains("3 more", lines[1]);
+            // A well-formed list of known effects and an older server's padding are not notes.
+            Decode(State(0, 0, 0));
+            now += 60_000;
+            var w = new NetWriter();
+            CreativeNet.EncodeState(Legacy with { Effects = [new("stamina", "Stamina", false, "off", "1", null, false)] }, w);
+            Decode(w.ToArray());
+            Assert.Equal(2, lines.Count);
+        }
+        finally
+        {
+            (CreativeNet.SuffixClock, CreativeNet.SuffixLog) = (clock, log);
+            CreativeNet.ResetSuffixNotes();
+        }
     }
 
     [Fact]
