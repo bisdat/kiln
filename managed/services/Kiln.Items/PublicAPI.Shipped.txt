@@ -628,6 +628,22 @@ Kiln.InventoryKinds.NonEmpty = 8 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.Npcs = 4 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.PlayerStorage = 16 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.Players = 2 -> Kiln.InventoryKinds
+Kiln.InventoryOwnerInfo
+Kiln.InventoryOwnerInfo.Deconstruct(out Kiln.EntityId Entity, out Kiln.InventoryOwnerKind Kind) -> void
+Kiln.InventoryOwnerInfo.Entity.get -> Kiln.EntityId
+Kiln.InventoryOwnerInfo.Entity.init -> void
+Kiln.InventoryOwnerInfo.Equals(Kiln.InventoryOwnerInfo other) -> bool
+Kiln.InventoryOwnerInfo.InventoryOwnerInfo() -> void
+Kiln.InventoryOwnerInfo.InventoryOwnerInfo(Kiln.EntityId Entity, Kiln.InventoryOwnerKind Kind) -> void
+Kiln.InventoryOwnerInfo.Kind.get -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerInfo.Kind.init -> void
+Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.BaseStorage = 5 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Npc = 2 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Player = 1 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.PlayerStorage = 3 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.ProductionStation = 4 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Unknown = 0 -> Kiln.InventoryOwnerKind
 Kiln.InventorySlot
 Kiln.InventorySlot.<Clone>$() -> Kiln.InventorySlot!
 Kiln.InventorySlot.Category.get -> Kiln.InventoryCategory
@@ -1342,6 +1358,7 @@ const Kiln.EquipmentSetJson.Schema = 1 -> int
 const Kiln.Items.ContainerNameMaxBytes = 64 -> int
 const Kiln.Items.ContainerNameMaxChars = 48 -> int
 const Kiln.Items.Fuel.UnitsPerCharge = 64 -> int
+const Kiln.Items.InventoryKindsCapability = "items.inventory_kinds" -> string!
 const Kiln.Items.MaxScale = 100 -> double
 const Kiln.Items.MinScale = 0.01 -> double
 const Kiln.PlayerStorage.Capability = "items.storage" -> string!
@@ -1440,6 +1457,7 @@ override Kiln.InstanceEquipment.ToString() -> string!
 override Kiln.InventoryContents.Equals(object? obj) -> bool
 override Kiln.InventoryContents.GetHashCode() -> int
 override Kiln.InventoryContents.ToString() -> string!
+override Kiln.InventoryOwnerInfo.GetHashCode() -> int
 override Kiln.InventorySlot.Equals(object? obj) -> bool
 override Kiln.InventorySlot.GetHashCode() -> int
 override Kiln.InventorySlot.ToString() -> string!
@@ -1596,6 +1614,8 @@ static Kiln.InstanceEquipment.operator !=(Kiln.InstanceEquipment? left, Kiln.Ins
 static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
 static Kiln.InventoryContents.operator !=(Kiln.InventoryContents? left, Kiln.InventoryContents? right) -> bool
 static Kiln.InventoryContents.operator ==(Kiln.InventoryContents? left, Kiln.InventoryContents? right) -> bool
+static Kiln.InventoryOwnerInfo.operator !=(Kiln.InventoryOwnerInfo left, Kiln.InventoryOwnerInfo right) -> bool
+static Kiln.InventoryOwnerInfo.operator ==(Kiln.InventoryOwnerInfo left, Kiln.InventoryOwnerInfo right) -> bool
 static Kiln.InventorySlot.operator !=(Kiln.InventorySlot? left, Kiln.InventorySlot? right) -> bool
 static Kiln.InventorySlot.operator ==(Kiln.InventorySlot? left, Kiln.InventorySlot? right) -> bool
 static Kiln.InventorySnapshotToken.operator !=(Kiln.InventorySnapshotToken left, Kiln.InventorySnapshotToken right) -> bool
@@ -1624,6 +1644,7 @@ static Kiln.Items.EquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.Eq
 static Kiln.Items.EquipSet(Kiln.EquipmentSetPlan! plan, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
 static Kiln.Items.Equipped(Kiln.EntityId player, Kiln.EquipmentSlot slot) -> Kiln.ItemInstanceRef
 static Kiln.Items.FindInventories(Kiln.InventoryKinds kinds = Kiln.InventoryKinds.Containers) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+static Kiln.Items.FindInventoryOwners(Kiln.InventoryKinds kinds = Kiln.InventoryKinds.Containers) -> System.Collections.Generic.IReadOnlyList<Kiln.InventoryOwnerInfo>!
 static Kiln.Items.Fuel.Add(Kiln.EntityId container, int units, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.FuelResult!>!
 static Kiln.Items.Fuel.Available.get -> bool
 static Kiln.Items.Fuel.Fill(Kiln.EntityId container, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.FuelResult!>!
@@ -1755,6 +1776,8 @@ virtual Kiln.EquipmentSetSelection.PrintMembers(System.Text.StringBuilder! build
 ~override Kiln.FuelLevel.Equals(object obj) -> bool
 ~override Kiln.Gear.Equals(object obj) -> bool
 ~override Kiln.Gear.ToString() -> string
+~override Kiln.InventoryOwnerInfo.Equals(object obj) -> bool
+~override Kiln.InventoryOwnerInfo.ToString() -> string
 ~override Kiln.InventorySnapshotToken.Equals(object obj) -> bool
 ~override Kiln.InventorySnapshotToken.ToString() -> string
 ~override Kiln.ItemChange.Equals(object obj) -> bool

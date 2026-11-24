@@ -68,6 +68,33 @@ Kiln.TestKit.FakeBlobRegistration.Override.get -> bool
 Kiln.TestKit.FakeBlobRegistration.Override.init -> void
 Kiln.TestKit.FakeBlobRegistration.Owner.get -> ulong
 Kiln.TestKit.FakeBlobRegistration.Owner.init -> void
+Kiln.TestKit.FakeCameraCall
+Kiln.TestKit.FakeCameraCall.Deconstruct(out ulong Step, out Kiln.TestKit.FakeCameraCallKind Kind, out ulong Lease, out uint Endpoint, out Kiln.EntityId Player, out uint Parts, out uint DurationMs, out int Priority, out uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.DurationMs.get -> uint
+Kiln.TestKit.FakeCameraCall.DurationMs.init -> void
+Kiln.TestKit.FakeCameraCall.Endpoint.get -> uint
+Kiln.TestKit.FakeCameraCall.Endpoint.init -> void
+Kiln.TestKit.FakeCameraCall.Equals(Kiln.TestKit.FakeCameraCall other) -> bool
+Kiln.TestKit.FakeCameraCall.FakeCameraCall() -> void
+Kiln.TestKit.FakeCameraCall.FakeCameraCall(ulong Step, Kiln.TestKit.FakeCameraCallKind Kind, ulong Lease, uint Endpoint, Kiln.EntityId Player, uint Parts, uint DurationMs, int Priority, uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.Kind.get -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCall.Kind.init -> void
+Kiln.TestKit.FakeCameraCall.Lease.get -> ulong
+Kiln.TestKit.FakeCameraCall.Lease.init -> void
+Kiln.TestKit.FakeCameraCall.Parts.get -> uint
+Kiln.TestKit.FakeCameraCall.Parts.init -> void
+Kiln.TestKit.FakeCameraCall.Player.get -> Kiln.EntityId
+Kiln.TestKit.FakeCameraCall.Player.init -> void
+Kiln.TestKit.FakeCameraCall.Priority.get -> int
+Kiln.TestKit.FakeCameraCall.Priority.init -> void
+Kiln.TestKit.FakeCameraCall.Refusal.get -> uint
+Kiln.TestKit.FakeCameraCall.Refusal.init -> void
+Kiln.TestKit.FakeCameraCall.Step.get -> ulong
+Kiln.TestKit.FakeCameraCall.Step.init -> void
+Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Apply = 0 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.End = 2 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Update = 1 -> Kiln.TestKit.FakeCameraCallKind
 Kiln.TestKit.FakeChatLine
 Kiln.TestKit.FakeChatLine.ModId.get -> string?
 Kiln.TestKit.FakeChatLine.Speaker.get -> string?
@@ -199,6 +226,8 @@ Kiln.TestKit.FakeInventory
 Kiln.TestKit.FakeInventory.Clear() -> void
 Kiln.TestKit.FakeInventory.Count(Kiln.ItemId item) -> int
 Kiln.TestKit.FakeInventory.Count(string! name) -> int
+Kiln.TestKit.FakeInventory.Kind.get -> Kiln.InventoryOwnerKind
+Kiln.TestKit.FakeInventory.Kind.set -> void
 Kiln.TestKit.FakeInventory.Owner.get -> Kiln.EntityId
 Kiln.TestKit.FakeInventory.Put(Kiln.ItemId item, int count = 1) -> int
 Kiln.TestKit.FakeInventory.Slots.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeSlot!>!
@@ -285,6 +314,14 @@ Kiln.TestKit.FakePathRequest.To.get -> Kiln.WorldPosition
 Kiln.TestKit.FakePathRequest.To.init -> void
 Kiln.TestKit.FakePathRequest.VerticalSpace.get -> double
 Kiln.TestKit.FakePathRequest.VerticalSpace.init -> void
+Kiln.TestKit.FakePhysicsCookHost
+Kiln.TestKit.FakePhysicsCookHost.Cook(string! model, System.Collections.Generic.IEnumerable<string!>! needs, System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>! outputs, string? refusal = null) -> Kiln.TestKit.PhysicsCookResult!
+Kiln.TestKit.FakePhysicsCookHost.FakePhysicsCookHost(params string![]! experimental) -> void
+Kiln.TestKit.FakePhysicsCookHost.Files.get -> System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>!
+Kiln.TestKit.FakePhysicsCookHost.Held.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Kiln.TestKit.FakePhysicsCookHost.Held.init -> void
+Kiln.TestKit.FakePhysicsCookHost.IsOn(string! feature) -> bool
+Kiln.TestKit.FakePhysicsCookHost.Registrations.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.FakePlayer
 Kiln.TestKit.FakePlayer.Chat.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeChatLine!>!
 Kiln.TestKit.FakePlayer.Entity.get -> Kiln.EntityId
@@ -364,6 +401,60 @@ Kiln.TestKit.FakeProgramSlice.Program.get -> string!
 Kiln.TestKit.FakeProgramSlice.Program.init -> void
 Kiln.TestKit.FakeProgramSlice.Step.get -> ulong
 Kiln.TestKit.FakeProgramSlice.Step.init -> void
+Kiln.TestKit.FakeReplComponent
+Kiln.TestKit.FakeReplComponent.<Clone>$() -> Kiln.TestKit.FakeReplComponent!
+Kiln.TestKit.FakeReplComponent.ClientChannel.get -> bool
+Kiln.TestKit.FakeReplComponent.ClientChannel.init -> void
+Kiln.TestKit.FakeReplComponent.CustomCodec.get -> bool
+Kiln.TestKit.FakeReplComponent.CustomCodec.init -> void
+Kiln.TestKit.FakeReplComponent.Deconstruct(out string! Name, out ushort Index, out ushort Size, out bool Replicated, out bool Versioned, out bool CustomCodec, out bool ClientChannel, out bool PredictionChannel) -> void
+Kiln.TestKit.FakeReplComponent.Equals(Kiln.TestKit.FakeReplComponent? other) -> bool
+Kiln.TestKit.FakeReplComponent.FakeReplComponent(string! Name, ushort Index, ushort Size, bool Replicated = true, bool Versioned = false, bool CustomCodec = false, bool ClientChannel = true, bool PredictionChannel = false) -> void
+Kiln.TestKit.FakeReplComponent.Index.get -> ushort
+Kiln.TestKit.FakeReplComponent.Index.init -> void
+Kiln.TestKit.FakeReplComponent.Name.get -> string!
+Kiln.TestKit.FakeReplComponent.Name.init -> void
+Kiln.TestKit.FakeReplComponent.PredictionChannel.get -> bool
+Kiln.TestKit.FakeReplComponent.PredictionChannel.init -> void
+Kiln.TestKit.FakeReplComponent.Replicated.get -> bool
+Kiln.TestKit.FakeReplComponent.Replicated.init -> void
+Kiln.TestKit.FakeReplComponent.Size.get -> ushort
+Kiln.TestKit.FakeReplComponent.Size.init -> void
+Kiln.TestKit.FakeReplComponent.Versioned.get -> bool
+Kiln.TestKit.FakeReplComponent.Versioned.init -> void
+Kiln.TestKit.FakeReplItemSite
+Kiln.TestKit.FakeReplItemSite.Component.get -> string!
+Kiln.TestKit.FakeReplItemSite.Count.get -> ushort
+Kiln.TestKit.FakeReplItemSite.FakeReplItemSite() -> void
+Kiln.TestKit.FakeReplItemSite.FakeReplItemSite(string! component, ushort offset, ushort count = 1, ushort stride = 0) -> void
+Kiln.TestKit.FakeReplItemSite.Offset.get -> ushort
+Kiln.TestKit.FakeReplItemSite.Stride.get -> ushort
+Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplKind.Create = 2 -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplKind.Update = 3 -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplMessage
+Kiln.TestKit.FakeReplMessage.<Clone>$() -> Kiln.TestKit.FakeReplMessage!
+Kiln.TestKit.FakeReplMessage.BaselineTick.get -> uint
+Kiln.TestKit.FakeReplMessage.BaselineTick.init -> void
+Kiln.TestKit.FakeReplMessage.Channel.get -> byte
+Kiln.TestKit.FakeReplMessage.Channel.init -> void
+Kiln.TestKit.FakeReplMessage.Components.get -> System.Collections.Generic.IReadOnlyList<(string! Component, byte[]! Bytes)>!
+Kiln.TestKit.FakeReplMessage.Components.init -> void
+Kiln.TestKit.FakeReplMessage.Deconstruct(out Kiln.EntityId Entity, out Kiln.TestKit.FakeReplKind Kind, out uint Tick) -> void
+Kiln.TestKit.FakeReplMessage.Entity.get -> Kiln.EntityId
+Kiln.TestKit.FakeReplMessage.Entity.init -> void
+Kiln.TestKit.FakeReplMessage.Equals(Kiln.TestKit.FakeReplMessage? other) -> bool
+Kiln.TestKit.FakeReplMessage.FakeReplMessage(Kiln.EntityId Entity, Kiln.TestKit.FakeReplKind Kind, uint Tick) -> void
+Kiln.TestKit.FakeReplMessage.Gap.get -> bool
+Kiln.TestKit.FakeReplMessage.Gap.init -> void
+Kiln.TestKit.FakeReplMessage.Kind.get -> Kiln.TestKit.FakeReplKind
+Kiln.TestKit.FakeReplMessage.Kind.init -> void
+Kiln.TestKit.FakeReplMessage.PayloadBytes.get -> uint
+Kiln.TestKit.FakeReplMessage.PayloadBytes.init -> void
+Kiln.TestKit.FakeReplMessage.Seq.get -> uint
+Kiln.TestKit.FakeReplMessage.Seq.init -> void
+Kiln.TestKit.FakeReplMessage.Tick.get -> uint
+Kiln.TestKit.FakeReplMessage.Tick.init -> void
 Kiln.TestKit.FakeSlot
 Kiln.TestKit.FakeSlot.Count.get -> int
 Kiln.TestKit.FakeSlot.IsEmpty.get -> bool
@@ -483,6 +574,23 @@ Kiln.TestKit.FakeUiItem.SlotIndex.get -> byte
 Kiln.TestKit.FakeUiItem.SlotIndex.init -> void
 Kiln.TestKit.FakeUiItem.UnitsPerCharge.get -> uint
 Kiln.TestKit.FakeUiItem.UnitsPerCharge.init -> void
+Kiln.TestKit.FakeVitals
+Kiln.TestKit.FakeVitals.Deconstruct(out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax) -> void
+Kiln.TestKit.FakeVitals.Equals(Kiln.TestKit.FakeVitals other) -> bool
+Kiln.TestKit.FakeVitals.FakeVitals() -> void
+Kiln.TestKit.FakeVitals.FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0) -> void
+Kiln.TestKit.FakeVitals.Health.get -> uint
+Kiln.TestKit.FakeVitals.Health.init -> void
+Kiln.TestKit.FakeVitals.HealthMax.get -> uint
+Kiln.TestKit.FakeVitals.HealthMax.init -> void
+Kiln.TestKit.FakeVitals.Mana.get -> uint
+Kiln.TestKit.FakeVitals.Mana.init -> void
+Kiln.TestKit.FakeVitals.ManaMax.get -> uint
+Kiln.TestKit.FakeVitals.ManaMax.init -> void
+Kiln.TestKit.FakeVitals.Stamina.get -> uint
+Kiln.TestKit.FakeVitals.Stamina.init -> void
+Kiln.TestKit.FakeVitals.StaminaMax.get -> uint
+Kiln.TestKit.FakeVitals.StaminaMax.init -> void
 Kiln.TestKit.FakeVoxelAnswer
 Kiln.TestKit.FakeVoxelAnswer.Equals(Kiln.TestKit.FakeVoxelAnswer other) -> bool
 Kiln.TestKit.FakeVoxelAnswer.FakeVoxelAnswer() -> void
@@ -517,6 +625,48 @@ Kiln.TestKit.FakeWorld.SetPosition(Kiln.EntityId entity, Kiln.WorldPosition posi
 Kiln.TestKit.FakeWorld.Track(string! component, bool save, bool replication) -> void
 Kiln.TestKit.FakeWorld.TryGet<T>(Kiln.EntityId entity, out T value) -> bool
 Kiln.TestKit.FakeWorld.Writes.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeWorldWrite!>!
+Kiln.TestKit.FakeWorldPosition
+Kiln.TestKit.FakeWorldPosition.Deconstruct(out double X, out double Y, out double Z) -> void
+Kiln.TestKit.FakeWorldPosition.Equals(Kiln.TestKit.FakeWorldPosition other) -> bool
+Kiln.TestKit.FakeWorldPosition.FakeWorldPosition() -> void
+Kiln.TestKit.FakeWorldPosition.FakeWorldPosition(double X, double Y, double Z) -> void
+Kiln.TestKit.FakeWorldPosition.X.get -> double
+Kiln.TestKit.FakeWorldPosition.X.init -> void
+Kiln.TestKit.FakeWorldPosition.Y.get -> double
+Kiln.TestKit.FakeWorldPosition.Y.init -> void
+Kiln.TestKit.FakeWorldPosition.Z.get -> double
+Kiln.TestKit.FakeWorldPosition.Z.init -> void
+Kiln.TestKit.FakeWorldSample
+Kiln.TestKit.FakeWorldSample.<Clone>$() -> Kiln.TestKit.FakeWorldSample!
+Kiln.TestKit.FakeWorldSample.Equals(Kiln.TestKit.FakeWorldSample? other) -> bool
+Kiln.TestKit.FakeWorldSample.FakeWorldSample() -> void
+Kiln.TestKit.FakeWorldSample.HostHours.get -> double?
+Kiln.TestKit.FakeWorldSample.HostHours.init -> void
+Kiln.TestKit.FakeWorldSample.Inventory.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeWorldSlot>?
+Kiln.TestKit.FakeWorldSample.Inventory.init -> void
+Kiln.TestKit.FakeWorldSample.LocalPlayer.get -> uint
+Kiln.TestKit.FakeWorldSample.LocalPlayer.init -> void
+Kiln.TestKit.FakeWorldSample.Position.get -> Kiln.TestKit.FakeWorldPosition?
+Kiln.TestKit.FakeWorldSample.Position.init -> void
+Kiln.TestKit.FakeWorldSample.Unavailable.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWorldFields, string!>?
+Kiln.TestKit.FakeWorldSample.Unavailable.init -> void
+Kiln.TestKit.FakeWorldSample.Vitals.get -> Kiln.TestKit.FakeVitals?
+Kiln.TestKit.FakeWorldSample.Vitals.init -> void
+Kiln.TestKit.FakeWorldSlot
+Kiln.TestKit.FakeWorldSlot.Count.get -> uint
+Kiln.TestKit.FakeWorldSlot.Count.init -> void
+Kiln.TestKit.FakeWorldSlot.Deconstruct(out uint Item, out uint Count, out uint InventoryPage, out uint SlotIndex, out uint Pide) -> void
+Kiln.TestKit.FakeWorldSlot.Equals(Kiln.TestKit.FakeWorldSlot other) -> bool
+Kiln.TestKit.FakeWorldSlot.FakeWorldSlot() -> void
+Kiln.TestKit.FakeWorldSlot.FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0) -> void
+Kiln.TestKit.FakeWorldSlot.InventoryPage.get -> uint
+Kiln.TestKit.FakeWorldSlot.InventoryPage.init -> void
+Kiln.TestKit.FakeWorldSlot.Item.get -> uint
+Kiln.TestKit.FakeWorldSlot.Item.init -> void
+Kiln.TestKit.FakeWorldSlot.Pide.get -> uint
+Kiln.TestKit.FakeWorldSlot.Pide.init -> void
+Kiln.TestKit.FakeWorldSlot.SlotIndex.get -> uint
+Kiln.TestKit.FakeWorldSlot.SlotIndex.init -> void
 Kiln.TestKit.FakeWorldWrite
 Kiln.TestKit.FakeWorldWrite.<Clone>$() -> Kiln.TestKit.FakeWorldWrite!
 Kiln.TestKit.FakeWorldWrite.After.get -> byte[]!
@@ -564,6 +714,14 @@ Kiln.TestKit.HarnessBootPhase
 Kiln.TestKit.HarnessBootPhase.Run(string! folder, bool commit = true) -> Kiln.TestKit.BootRun!
 Kiln.TestKit.HarnessBootPhase.Runs.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.BootRun!>!
 Kiln.TestKit.HarnessBootPhase.SetRecord(string! key, string! valueJson, System.Guid resourceId = default(System.Guid), uint typeHash = 0, int part = 0) -> void
+Kiln.TestKit.HarnessCamera
+Kiln.TestKit.HarnessCamera.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCameraCall>!
+Kiln.TestKit.HarnessCamera.End(ulong lease, uint endReason) -> bool
+Kiln.TestKit.HarnessCamera.Expire(ulong lease) -> bool
+Kiln.TestKit.HarnessCamera.KilnClient(Kiln.EntityId player, ulong parts = 30) -> void
+Kiln.TestKit.HarnessCamera.Leases.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.TestKit.HarnessCamera.RefuseNext(uint reason) -> void
+Kiln.TestKit.HarnessCamera.StopWorld() -> int
 Kiln.TestKit.HarnessCapabilities
 Kiln.TestKit.HarnessCapabilities.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.CapabilityRow>!
 Kiln.TestKit.HarnessCapabilities.ClearOverride(string! name) -> void
@@ -619,6 +777,17 @@ Kiln.TestKit.HarnessItems.SetEquipmentSlotType(Kiln.ItemId item, Kiln.EquipmentS
 Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void
 Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void
 Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void
+Kiln.TestKit.HarnessModValues
+Kiln.TestKit.HarnessModValues.Join(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Leave(Kiln.CharacterKey character) -> void
+Kiln.TestKit.HarnessModValues.Record(Kiln.CharacterKey character, string! mod, string! partition = "world") -> string?
+Kiln.TestKit.HarnessModValues.World.get -> System.Guid
+Kiln.TestKit.HarnessModValues.World.set -> void
+Kiln.TestKit.HarnessNpcBodies
+Kiln.TestKit.HarnessNpcBodies.Clear() -> void
+Kiln.TestKit.HarnessNpcBodies.Failed(string! mod, string! npc, string! reason, ulong generation = 0) -> void
+Kiln.TestKit.HarnessNpcBodies.Ready(string! mod, string! npc, System.Guid template = default(System.Guid), System.Guid model = default(System.Guid), System.Guid graph = default(System.Guid), string? closure = null, ulong generation = 1) -> void
+Kiln.TestKit.HarnessNpcBodies.Removed(string! mod, string! npc, ulong generation = 0) -> void
 Kiln.TestKit.HarnessOutlines
 Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
 Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int
@@ -665,6 +834,37 @@ Kiln.TestKit.HarnessQueries.Rays.get -> System.Collections.Generic.IReadOnlyList
 Kiln.TestKit.HarnessQueries.Voxels.get -> System.Func<Kiln.TestKit.FakeVoxelRay, Kiln.TestKit.FakeVoxelAnswer>?
 Kiln.TestKit.HarnessQueries.Voxels.set -> void
 Kiln.TestKit.HarnessQueries.WithoutSpawnTime(Kiln.EntityId entity) -> void
+Kiln.TestKit.HarnessRepl
+Kiln.TestKit.HarnessRepl.AddComponent(Kiln.TestKit.FakeReplComponent! component) -> void
+Kiln.TestKit.HarnessRepl.Connect(uint machine, uint peer) -> void
+Kiln.TestKit.HarnessRepl.ConnectFake(uint machine, uint? labPeer = null) -> uint
+Kiln.TestKit.HarnessRepl.ConnectLocal(uint peer) -> void
+Kiln.TestKit.HarnessRepl.Count(uint peer, byte channel = 4, long unchanged = 0, long tooBig = 0, long refused = 0, long acks = 0, long resets = 0) -> void
+Kiln.TestKit.HarnessRepl.Counting.get -> bool
+Kiln.TestKit.HarnessRepl.Destroy(uint peer, Kiln.EntityId entity, uint tick, uint seq = 0, byte channel = 4) -> void
+Kiln.TestKit.HarnessRepl.Drop(uint peer, byte channel = 4, int records = 1) -> void
+Kiln.TestKit.HarnessRepl.Leave(uint peer) -> void
+Kiln.TestKit.HarnessRepl.Receive(Kiln.TestKit.FakeReplMessage! message) -> void
+Kiln.TestKit.HarnessRepl.ReceiveDestroy(Kiln.EntityId entity, uint tick) -> void
+Kiln.TestKit.HarnessRepl.ReuseId(Kiln.EntityId entity) -> void
+Kiln.TestKit.HarnessRepl.Send(uint peer, Kiln.TestKit.FakeReplMessage! message) -> void
+Kiln.TestKit.HarnessRepl.StatsCalls.get -> System.Collections.Generic.IReadOnlyList<(string! Owner, bool On)>!
+Kiln.TestKit.HarnessRepl.StopWorld() -> void
+Kiln.TestKit.HarnessRepl.WatchSlots.get -> int
+Kiln.TestKit.HarnessReplNet
+Kiln.TestKit.HarnessReplNet.ConfigureItemRemap(System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeReplItemSite>! sites, System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>! gameItems, System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, Kiln.ItemId>! lookAlikes) -> void
+Kiln.TestKit.HarnessReplNet.Connect(uint machine, uint peer, bool vanilla = true) -> Kiln.NetPeer!
+Kiln.TestKit.HarnessReplNet.DriveMessage(uint peer, Kiln.GameChannel channel, Kiln.MessageDirection direction, System.ReadOnlySpan<byte> bytes) -> byte[]?
+Kiln.TestKit.HarnessReplNet.Injections.get -> System.Collections.Generic.IReadOnlyList<(uint Peer, Kiln.GameChannel Channel, byte[]! Bytes)>!
+Kiln.TestKit.HarnessReplNet.Touches.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.TestKit.HarnessReplNet.ValidateSend.get -> System.Func<Kiln.GameChannel, System.ReadOnlyMemory<byte>, bool>?
+Kiln.TestKit.HarnessReplNet.ValidateSend.set -> void
+Kiln.TestKit.HarnessRoutines
+Kiln.TestKit.HarnessRoutines.Decide(uint npcId) -> string?
+Kiln.TestKit.HarnessRoutines.Finish(uint npcId, bool ok, string? reason = null) -> void
+Kiln.TestKit.HarnessRoutines.Queued.get -> int
+Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
+Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
 Kiln.TestKit.HarnessSide
 Kiln.TestKit.HarnessSide.DedicatedServer = 0 -> Kiln.TestKit.HarnessSide
 Kiln.TestKit.HarnessSide.HostingClient = 1 -> Kiln.TestKit.HarnessSide
@@ -743,6 +943,10 @@ Kiln.TestKit.HarnessTombstoneMode
 Kiln.TestKit.HarnessTombstoneMode.AddBackpackMaterials = 0 -> Kiln.TestKit.HarnessTombstoneMode
 Kiln.TestKit.HarnessTombstoneMode.Everything = 1 -> Kiln.TestKit.HarnessTombstoneMode
 Kiln.TestKit.HarnessTombstoneMode.NoTombstone = 2 -> Kiln.TestKit.HarnessTombstoneMode
+Kiln.TestKit.HarnessUiChest
+Kiln.TestKit.HarnessUiChest.Buttons.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessUiChest.HarnessUiChest(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiChest.Press(int index) -> bool
 Kiln.TestKit.HarnessUiInventory
 Kiln.TestKit.HarnessUiInventory.Click(int index, Kiln.SlotButton button = Kiln.SlotButton.Left, Kiln.SlotModifiers modifiers = Kiln.SlotModifiers.None) -> Kiln.TestKit.FakeSlotClickResult
 Kiln.TestKit.HarnessUiInventory.ClickSubscriptions.get -> int
@@ -760,6 +964,16 @@ Kiln.TestKit.HarnessUiInventory.Select(int? index) -> void
 Kiln.TestKit.HarnessUiItemDetail
 Kiln.TestKit.HarnessUiItemDetail.Capture(Kiln.ItemId item, Kiln.EntityId entity, int level, Kiln.ItemRarity? rarity, params Kiln.UiItemDetailLine![]! lines) -> void
 Kiln.TestKit.HarnessUiItemDetail.Clear() -> void
+Kiln.TestKit.HarnessUiNativeTints
+Kiln.TestKit.HarnessUiNativeTints.HarnessUiNativeTints(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiNativeTints.TintOf(Kiln.TestKit.FakeInventorySlot slot, Kiln.Color background) -> Kiln.Color
+Kiln.TestKit.HarnessUiSnapshot
+Kiln.TestKit.HarnessUiSnapshot.Demanded.get -> Kiln.UiWorldFields
+Kiln.TestKit.HarnessUiSnapshot.Demands.get -> int
+Kiln.TestKit.HarnessUiSnapshot.EndWorld() -> void
+Kiln.TestKit.HarnessUiSnapshot.Publication.get -> ulong
+Kiln.TestKit.HarnessUiSnapshot.Publish(Kiln.TestKit.FakeWorldSample! sample) -> ulong
+Kiln.TestKit.HarnessUiSnapshot.Tokens.get -> int
 Kiln.TestKit.HarnessUiValues
 Kiln.TestKit.HarnessUiValues.Decisions.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeUiDecision>!
 Kiln.TestKit.HarnessUiValues.DetailLines(Kiln.TestKit.FakeUiItem item) -> System.Collections.Generic.IReadOnlyList<string!>!
@@ -792,6 +1006,7 @@ Kiln.TestKit.KilnHarness.As<T>(Kiln.TestKit.ModHandle! mod, System.Func<T>! func
 Kiln.TestKit.KilnHarness.Assets.get -> Kiln.TestKit.HarnessAssets!
 Kiln.TestKit.KilnHarness.Boot() -> void
 Kiln.TestKit.KilnHarness.BootPhase.get -> Kiln.TestKit.HarnessBootPhase!
+Kiln.TestKit.KilnHarness.Camera.get -> Kiln.TestKit.HarnessCamera!
 Kiln.TestKit.KilnHarness.Capabilities.get -> Kiln.TestKit.HarnessCapabilities!
 Kiln.TestKit.KilnHarness.Chat.get -> Kiln.TestKit.HarnessChat!
 Kiln.TestKit.KilnHarness.Combat.get -> Kiln.TestKit.HarnessCombat!
@@ -827,7 +1042,9 @@ Kiln.TestKit.KilnHarness.LogsOf(Kiln.TestKit.ModHandle! mod) -> System.Collectio
 Kiln.TestKit.KilnHarness.LogsOf(string! modId) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!
 Kiln.TestKit.KilnHarness.MenuFrame() -> int
 Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.ModHandle!
+Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
 Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!
+Kiln.TestKit.KilnHarness.NpcBodies.get -> Kiln.TestKit.HarnessNpcBodies!
 Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
 Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
 Kiln.TestKit.KilnHarness.PlayerStorage.get -> Kiln.TestKit.HarnessPlayerStorage!
@@ -836,7 +1053,10 @@ Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
 Kiln.TestKit.KilnHarness.ReadLogFile() -> string!
 Kiln.TestKit.KilnHarness.Reload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> Kiln.TestKit.ModHandle!
+Kiln.TestKit.KilnHarness.Repl.get -> Kiln.TestKit.HarnessRepl!
+Kiln.TestKit.KilnHarness.ReplNet.get -> Kiln.TestKit.HarnessReplNet!
 Kiln.TestKit.KilnHarness.ReportWorldRunning() -> void
+Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
 Kiln.TestKit.KilnHarness.Run(System.Action! action) -> void
 Kiln.TestKit.KilnHarness.Run<T>(System.Func<T>! func) -> T
 Kiln.TestKit.KilnHarness.RunCommand(Kiln.CommandSource! source, string! line) -> Kiln.CommandResult!
@@ -854,8 +1074,11 @@ Kiln.TestKit.KilnHarness.Stop(string! reason = "SIGINT") -> void
 Kiln.TestKit.KilnHarness.Tasks.get -> Kiln.TestKit.HarnessTasks!
 Kiln.TestKit.KilnHarness.Terrain.get -> Kiln.TestKit.HarnessTerrain!
 Kiln.TestKit.KilnHarness.Time.get -> Kiln.TestKit.HarnessTime!
+Kiln.TestKit.KilnHarness.UiChest.get -> Kiln.TestKit.HarnessUiChest!
 Kiln.TestKit.KilnHarness.UiInventory.get -> Kiln.TestKit.HarnessUiInventory!
 Kiln.TestKit.KilnHarness.UiItemDetail.get -> Kiln.TestKit.HarnessUiItemDetail!
+Kiln.TestKit.KilnHarness.UiNativeTints.get -> Kiln.TestKit.HarnessUiNativeTints!
+Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!
 Kiln.TestKit.KilnHarness.UiValues.get -> Kiln.TestKit.HarnessUiValues!
 Kiln.TestKit.KilnHarness.Unload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> void
 Kiln.TestKit.KilnHarness.World.get -> Kiln.TestKit.HarnessWorld!
@@ -990,6 +1213,17 @@ Kiln.TestKit.ModManifest.ToJson(string! entryAssembly, string? entryType) -> str
 Kiln.TestKit.ModManifest.Version.get -> string!
 Kiln.TestKit.ModManifest.Version.set -> void
 Kiln.TestKit.ModManifest.Writes(params string![]! components) -> Kiln.TestKit.ModManifest!
+Kiln.TestKit.PhysicsCookResult
+Kiln.TestKit.PhysicsCookResult.<Clone>$() -> Kiln.TestKit.PhysicsCookResult!
+Kiln.TestKit.PhysicsCookResult.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<string!>! Files) -> void
+Kiln.TestKit.PhysicsCookResult.Equals(Kiln.TestKit.PhysicsCookResult? other) -> bool
+Kiln.TestKit.PhysicsCookResult.Files.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.PhysicsCookResult.Files.init -> void
+Kiln.TestKit.PhysicsCookResult.Ok.get -> bool
+Kiln.TestKit.PhysicsCookResult.Ok.init -> void
+Kiln.TestKit.PhysicsCookResult.PhysicsCookResult(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<string!>! Files) -> void
+Kiln.TestKit.PhysicsCookResult.Reason.get -> string?
+Kiln.TestKit.PhysicsCookResult.Reason.init -> void
 Kiln.TestKit.Xunit.KilnSuiteLifetime
 Kiln.TestKit.Xunit.KilnSuiteLifetime.Dispose() -> void
 Kiln.TestKit.Xunit.KilnSuiteLifetime.KilnSuiteLifetime() -> void
@@ -999,6 +1233,11 @@ Kiln.TestKit.Xunit.KilnTestOrderer.OrderTestCases<TTestCase>(System.Collections.
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTest(string! name) -> void
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTestSuite() -> void
+[KILNX031]Kiln.TestKit.HarnessRegistry
+[KILNX031]Kiln.TestKit.HarnessRegistry.Author(Kiln.TestKit.ModHandle! mod, Kiln.RegistryEntryPoint point = Kiln.RegistryEntryPoint.GameStart, Kiln.RegistryPhase phase = Kiln.RegistryPhase.Alter, Kiln.RegistryWorld? world = null) -> string?
+[KILNX031]Kiln.TestKit.HarnessRegistry.Seed(string! registry, string! id, string! field, string! valueJson) -> void
+[KILNX031]Kiln.TestKit.KilnHarness.Registry.get -> Kiln.TestKit.HarnessRegistry!
+const Kiln.TestKit.FakePhysicsCookHost.PendingReason = "game test pending: 16e-cc16e" -> string!
 const Kiln.TestKit.HarnessSpawn.PickupTemplate = "Base_LootPickup_Generic_Gravity" -> string!
 override Kiln.TestKit.BootRun.Equals(object? obj) -> bool
 override Kiln.TestKit.BootRun.GetHashCode() -> int
@@ -1011,6 +1250,7 @@ override Kiln.TestKit.CoverageRow.Equals(object? obj) -> bool
 override Kiln.TestKit.CoverageRow.GetHashCode() -> int
 override Kiln.TestKit.CoverageRow.ToString() -> string!
 override Kiln.TestKit.FakeBlobRegistration.GetHashCode() -> int
+override Kiln.TestKit.FakeCameraCall.GetHashCode() -> int
 override Kiln.TestKit.FakeChatLine.ToString() -> string!
 override Kiln.TestKit.FakeChatMessage.ToString() -> string!
 override Kiln.TestKit.FakeControlCall.Equals(object? obj) -> bool
@@ -1042,6 +1282,12 @@ override Kiln.TestKit.FakeProgramMark.GetHashCode() -> int
 override Kiln.TestKit.FakeProgramSlice.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeProgramSlice.GetHashCode() -> int
 override Kiln.TestKit.FakeProgramSlice.ToString() -> string!
+override Kiln.TestKit.FakeReplComponent.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeReplComponent.GetHashCode() -> int
+override Kiln.TestKit.FakeReplComponent.ToString() -> string!
+override Kiln.TestKit.FakeReplMessage.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeReplMessage.GetHashCode() -> int
+override Kiln.TestKit.FakeReplMessage.ToString() -> string!
 override Kiln.TestKit.FakeSlot.ToString() -> string!
 override Kiln.TestKit.FakeSlotClickResult.GetHashCode() -> int
 override Kiln.TestKit.FakeSpawnCall.ToString() -> string!
@@ -1051,8 +1297,14 @@ override Kiln.TestKit.FakeTimeCall.ToString() -> string!
 override Kiln.TestKit.FakeUiBar.GetHashCode() -> int
 override Kiln.TestKit.FakeUiDecision.GetHashCode() -> int
 override Kiln.TestKit.FakeUiItem.GetHashCode() -> int
+override Kiln.TestKit.FakeVitals.GetHashCode() -> int
 override Kiln.TestKit.FakeVoxelAnswer.GetHashCode() -> int
 override Kiln.TestKit.FakeVoxelRay.GetHashCode() -> int
+override Kiln.TestKit.FakeWorldPosition.GetHashCode() -> int
+override Kiln.TestKit.FakeWorldSample.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeWorldSample.GetHashCode() -> int
+override Kiln.TestKit.FakeWorldSample.ToString() -> string!
+override Kiln.TestKit.FakeWorldSlot.GetHashCode() -> int
 override Kiln.TestKit.FakeWorldWrite.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeWorldWrite.GetHashCode() -> int
 override Kiln.TestKit.FakeWorldWrite.ToString() -> string!
@@ -1067,6 +1319,9 @@ override Kiln.TestKit.LogLine.Equals(object? obj) -> bool
 override Kiln.TestKit.LogLine.GetHashCode() -> int
 override Kiln.TestKit.LogLine.ToString() -> string!
 override Kiln.TestKit.ModHandle.ToString() -> string!
+override Kiln.TestKit.PhysicsCookResult.Equals(object? obj) -> bool
+override Kiln.TestKit.PhysicsCookResult.GetHashCode() -> int
+override Kiln.TestKit.PhysicsCookResult.ToString() -> string!
 static Kiln.TestKit.BootRun.operator !=(Kiln.TestKit.BootRun? left, Kiln.TestKit.BootRun? right) -> bool
 static Kiln.TestKit.BootRun.operator ==(Kiln.TestKit.BootRun? left, Kiln.TestKit.BootRun? right) -> bool
 static Kiln.TestKit.BootRunDefinition.operator !=(Kiln.TestKit.BootRunDefinition? left, Kiln.TestKit.BootRunDefinition? right) -> bool
@@ -1078,6 +1333,8 @@ static Kiln.TestKit.CoverageRow.operator !=(Kiln.TestKit.CoverageRow? left, Kiln
 static Kiln.TestKit.CoverageRow.operator ==(Kiln.TestKit.CoverageRow? left, Kiln.TestKit.CoverageRow? right) -> bool
 static Kiln.TestKit.FakeBlobRegistration.operator !=(Kiln.TestKit.FakeBlobRegistration left, Kiln.TestKit.FakeBlobRegistration right) -> bool
 static Kiln.TestKit.FakeBlobRegistration.operator ==(Kiln.TestKit.FakeBlobRegistration left, Kiln.TestKit.FakeBlobRegistration right) -> bool
+static Kiln.TestKit.FakeCameraCall.operator !=(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
+static Kiln.TestKit.FakeCameraCall.operator ==(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
 static Kiln.TestKit.FakeControlCall.operator !=(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
 static Kiln.TestKit.FakeControlCall.operator ==(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
 static Kiln.TestKit.FakeCraftSourceRegistration.operator !=(Kiln.TestKit.FakeCraftSourceRegistration? left, Kiln.TestKit.FakeCraftSourceRegistration? right) -> bool
@@ -1111,12 +1368,18 @@ static Kiln.TestKit.FakePathAnswer.RouteWithMove(byte move, params Kiln.WorldPos
 static Kiln.TestKit.FakePathAnswer.TimedOut.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathRequest.operator !=(Kiln.TestKit.FakePathRequest? left, Kiln.TestKit.FakePathRequest? right) -> bool
 static Kiln.TestKit.FakePathRequest.operator ==(Kiln.TestKit.FakePathRequest? left, Kiln.TestKit.FakePathRequest? right) -> bool
+static Kiln.TestKit.FakePhysicsCookHost.ContentHashOf(byte[]! bytes) -> string!
+static Kiln.TestKit.FakePhysicsCookHost.Features.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.FakeProgramLists.operator !=(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
 static Kiln.TestKit.FakeProgramLists.operator ==(Kiln.TestKit.FakeProgramLists? left, Kiln.TestKit.FakeProgramLists? right) -> bool
 static Kiln.TestKit.FakeProgramMark.operator !=(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
 static Kiln.TestKit.FakeProgramMark.operator ==(Kiln.TestKit.FakeProgramMark left, Kiln.TestKit.FakeProgramMark right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator !=(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
 static Kiln.TestKit.FakeProgramSlice.operator ==(Kiln.TestKit.FakeProgramSlice? left, Kiln.TestKit.FakeProgramSlice? right) -> bool
+static Kiln.TestKit.FakeReplComponent.operator !=(Kiln.TestKit.FakeReplComponent? left, Kiln.TestKit.FakeReplComponent? right) -> bool
+static Kiln.TestKit.FakeReplComponent.operator ==(Kiln.TestKit.FakeReplComponent? left, Kiln.TestKit.FakeReplComponent? right) -> bool
+static Kiln.TestKit.FakeReplMessage.operator !=(Kiln.TestKit.FakeReplMessage? left, Kiln.TestKit.FakeReplMessage? right) -> bool
+static Kiln.TestKit.FakeReplMessage.operator ==(Kiln.TestKit.FakeReplMessage? left, Kiln.TestKit.FakeReplMessage? right) -> bool
 static Kiln.TestKit.FakeSlotClickResult.operator !=(Kiln.TestKit.FakeSlotClickResult left, Kiln.TestKit.FakeSlotClickResult right) -> bool
 static Kiln.TestKit.FakeSlotClickResult.operator ==(Kiln.TestKit.FakeSlotClickResult left, Kiln.TestKit.FakeSlotClickResult right) -> bool
 static Kiln.TestKit.FakeTerrainWrite.operator !=(Kiln.TestKit.FakeTerrainWrite left, Kiln.TestKit.FakeTerrainWrite right) -> bool
@@ -1127,6 +1390,8 @@ static Kiln.TestKit.FakeUiDecision.operator !=(Kiln.TestKit.FakeUiDecision left,
 static Kiln.TestKit.FakeUiDecision.operator ==(Kiln.TestKit.FakeUiDecision left, Kiln.TestKit.FakeUiDecision right) -> bool
 static Kiln.TestKit.FakeUiItem.operator !=(Kiln.TestKit.FakeUiItem left, Kiln.TestKit.FakeUiItem right) -> bool
 static Kiln.TestKit.FakeUiItem.operator ==(Kiln.TestKit.FakeUiItem left, Kiln.TestKit.FakeUiItem right) -> bool
+static Kiln.TestKit.FakeVitals.operator !=(Kiln.TestKit.FakeVitals left, Kiln.TestKit.FakeVitals right) -> bool
+static Kiln.TestKit.FakeVitals.operator ==(Kiln.TestKit.FakeVitals left, Kiln.TestKit.FakeVitals right) -> bool
 static Kiln.TestKit.FakeVoxelAnswer.Clear.get -> Kiln.TestKit.FakeVoxelAnswer
 static Kiln.TestKit.FakeVoxelAnswer.Hit(Kiln.WorldPosition at, uint material = 1, ushort voxel = 65281) -> Kiln.TestKit.FakeVoxelAnswer
 static Kiln.TestKit.FakeVoxelAnswer.Refused(string! reason) -> Kiln.TestKit.FakeVoxelAnswer
@@ -1134,8 +1399,15 @@ static Kiln.TestKit.FakeVoxelAnswer.operator !=(Kiln.TestKit.FakeVoxelAnswer lef
 static Kiln.TestKit.FakeVoxelAnswer.operator ==(Kiln.TestKit.FakeVoxelAnswer left, Kiln.TestKit.FakeVoxelAnswer right) -> bool
 static Kiln.TestKit.FakeVoxelRay.operator !=(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
 static Kiln.TestKit.FakeVoxelRay.operator ==(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
+static Kiln.TestKit.FakeWorldPosition.operator !=(Kiln.TestKit.FakeWorldPosition left, Kiln.TestKit.FakeWorldPosition right) -> bool
+static Kiln.TestKit.FakeWorldPosition.operator ==(Kiln.TestKit.FakeWorldPosition left, Kiln.TestKit.FakeWorldPosition right) -> bool
+static Kiln.TestKit.FakeWorldSample.operator !=(Kiln.TestKit.FakeWorldSample? left, Kiln.TestKit.FakeWorldSample? right) -> bool
+static Kiln.TestKit.FakeWorldSample.operator ==(Kiln.TestKit.FakeWorldSample? left, Kiln.TestKit.FakeWorldSample? right) -> bool
+static Kiln.TestKit.FakeWorldSlot.operator !=(Kiln.TestKit.FakeWorldSlot left, Kiln.TestKit.FakeWorldSlot right) -> bool
+static Kiln.TestKit.FakeWorldSlot.operator ==(Kiln.TestKit.FakeWorldSlot left, Kiln.TestKit.FakeWorldSlot right) -> bool
 static Kiln.TestKit.FakeWorldWrite.operator !=(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool
 static Kiln.TestKit.FakeWorldWrite.operator ==(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool
+static Kiln.TestKit.HarnessModValues.Character(int n) -> Kiln.CharacterKey
 static Kiln.TestKit.HarnessStorageCopy.operator !=(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool
 static Kiln.TestKit.HarnessStorageCopy.operator ==(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool
 static Kiln.TestKit.HarnessStorageRecord.operator !=(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool
@@ -1146,6 +1418,8 @@ static Kiln.TestKit.KilnTestResult.operator !=(Kiln.TestKit.KilnTestResult? left
 static Kiln.TestKit.KilnTestResult.operator ==(Kiln.TestKit.KilnTestResult? left, Kiln.TestKit.KilnTestResult? right) -> bool
 static Kiln.TestKit.LogLine.operator !=(Kiln.TestKit.LogLine? left, Kiln.TestKit.LogLine? right) -> bool
 static Kiln.TestKit.LogLine.operator ==(Kiln.TestKit.LogLine? left, Kiln.TestKit.LogLine? right) -> bool
+static Kiln.TestKit.PhysicsCookResult.operator !=(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
+static Kiln.TestKit.PhysicsCookResult.operator ==(Kiln.TestKit.PhysicsCookResult? left, Kiln.TestKit.PhysicsCookResult? right) -> bool
 static Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTests.get -> System.Collections.Generic.IEnumerable<Xunit.TheoryDataRow<string!>!>!
 virtual Kiln.TestKit.FakeGameNativeHandler.Invoke(Kiln.TestKit.FakeGameNativeCall call) -> byte
 virtual Kiln.TestKit.FakeGameWriter<T>.Invoke(Kiln.EntityId entity, ref T value) -> void
@@ -1158,6 +1432,8 @@ virtual Kiln.TestKit.Xunit.KilnTestSuite<TMod>.WatchdogGrace.get -> System.TimeS
 ~override Kiln.TestKit.CapabilityRow.ToString() -> string
 ~override Kiln.TestKit.FakeBlobRegistration.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeBlobRegistration.ToString() -> string
+~override Kiln.TestKit.FakeCameraCall.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeCameraCall.ToString() -> string
 ~override Kiln.TestKit.FakeEcall.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeEcall.ToString() -> string
 ~override Kiln.TestKit.FakeInventorySlot.Equals(object obj) -> bool
@@ -1174,9 +1450,15 @@ virtual Kiln.TestKit.Xunit.KilnTestSuite<TMod>.WatchdogGrace.get -> System.TimeS
 ~override Kiln.TestKit.FakeUiDecision.ToString() -> string
 ~override Kiln.TestKit.FakeUiItem.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeUiItem.ToString() -> string
+~override Kiln.TestKit.FakeVitals.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeVitals.ToString() -> string
 ~override Kiln.TestKit.FakeVoxelAnswer.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeVoxelAnswer.ToString() -> string
 ~override Kiln.TestKit.FakeVoxelRay.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeVoxelRay.ToString() -> string
+~override Kiln.TestKit.FakeWorldPosition.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeWorldPosition.ToString() -> string
+~override Kiln.TestKit.FakeWorldSlot.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeWorldSlot.ToString() -> string
 ~override Kiln.TestKit.HarnessStorageRecord.Equals(object obj) -> bool
 ~override Kiln.TestKit.HarnessStorageRecord.ToString() -> string

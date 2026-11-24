@@ -1,4 +1,317 @@
 #nullable enable
+Kiln.ComponentFilter<T>
+Kiln.ExtensionProvider<T>
+Kiln.FilterContext
+Kiln.FilterContext.Channel.get -> Kiln.ReplChannel
+Kiln.FilterContext.Entity.get -> Kiln.EntityId
+Kiln.FilterContext.FilterContext() -> void
+Kiln.FilterContext.Peer.get -> Kiln.NetPeer?
+Kiln.FilterContext.PeerId.get -> uint
+Kiln.FilterContext.Tick.get -> uint
+Kiln.FilterContext.TryRead<TC>(Kiln.EntityId entity, out TC value) -> bool
+Kiln.FilterOptions
+Kiln.FilterOptions.<Clone>$() -> Kiln.FilterOptions!
+Kiln.FilterOptions.AllowPrediction.get -> bool
+Kiln.FilterOptions.AllowPrediction.init -> void
+Kiln.FilterOptions.Channels.get -> Kiln.ReplChannels
+Kiln.FilterOptions.Channels.init -> void
+Kiln.FilterOptions.Equals(Kiln.FilterOptions? other) -> bool
+Kiln.FilterOptions.FilterOptions() -> void
+Kiln.FilterOptions.Priority.get -> int
+Kiln.FilterOptions.Priority.init -> void
+Kiln.FilterOptions.Sources.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.FilterOptions.Sources.init -> void
+Kiln.GameChannel
+Kiln.GameChannel.AdminInfo = 21 -> Kiln.GameChannel
+Kiln.GameChannel.BaseSharing = 20 -> Kiln.GameChannel
+Kiln.GameChannel.ChatMessages = 19 -> Kiln.GameChannel
+Kiln.GameChannel.Commerce = 22 -> Kiln.GameChannel
+Kiln.GameChannel.CustomPlayerStrings = 15 -> Kiln.GameChannel
+Kiln.GameChannel.Debug = 12 -> Kiln.GameChannel
+Kiln.GameChannel.EcsClient = 4 -> Kiln.GameChannel
+Kiln.GameChannel.EcsPrediction = 5 -> Kiln.GameChannel
+Kiln.GameChannel.EcsReset = 13 -> Kiln.GameChannel
+Kiln.GameChannel.EcsSnapping = 6 -> Kiln.GameChannel
+Kiln.GameChannel.EntityProxies = 7 -> Kiln.GameChannel
+Kiln.GameChannel.FactoryInfo = 24 -> Kiln.GameChannel
+Kiln.GameChannel.FogVoxelData = 3 -> Kiln.GameChannel
+Kiln.GameChannel.Input = 8 -> Kiln.GameChannel
+Kiln.GameChannel.Knowledge = 10 -> Kiln.GameChannel
+Kiln.GameChannel.LogicGraph = 11 -> Kiln.GameChannel
+Kiln.GameChannel.Login = 0 -> Kiln.GameChannel
+Kiln.GameChannel.SaveGame = 9 -> Kiln.GameChannel
+Kiln.GameChannel.ServerInfo = 1 -> Kiln.GameChannel
+Kiln.GameChannel.TwitchDrop = 17 -> Kiln.GameChannel
+Kiln.GameChannel.VoiceChat = 14 -> Kiln.GameChannel
+Kiln.GameChannel.VoxelDamageSystem = 23 -> Kiln.GameChannel
+Kiln.GameChannel.VoxelData = 2 -> Kiln.GameChannel
+Kiln.GameChannel.Water = 16 -> Kiln.GameChannel
+Kiln.GameChannel.Weather = 18 -> Kiln.GameChannel
+Kiln.IGameMessage
+Kiln.IGameMessage.SchemaName.get -> string!
+Kiln.InjectResult
+Kiln.InjectResult.<Clone>$() -> Kiln.InjectResult!
+Kiln.InjectResult.Channel.get -> Kiln.GameChannel
+Kiln.InjectResult.Channel.init -> void
+Kiln.InjectResult.Deconstruct(out bool Ok, out string? Reason) -> void
+Kiln.InjectResult.Equals(Kiln.InjectResult? other) -> bool
+Kiln.InjectResult.InjectResult(bool Ok, string? Reason) -> void
+Kiln.InjectResult.Ok.get -> bool
+Kiln.InjectResult.Ok.init -> void
+Kiln.InjectResult.Peer.get -> Kiln.NetPeer?
+Kiln.InjectResult.Peer.init -> void
+Kiln.InjectResult.Reason.get -> string?
+Kiln.InjectResult.Reason.init -> void
+Kiln.MessageAction
+Kiln.MessageAction.Drop = 1 -> Kiln.MessageAction
+Kiln.MessageAction.Pass = 0 -> Kiln.MessageAction
+Kiln.MessageAction.Rewrite = 2 -> Kiln.MessageAction
+Kiln.MessageDirection
+Kiln.MessageDirection.Receive = 2 -> Kiln.MessageDirection
+Kiln.MessageDirection.Send = 1 -> Kiln.MessageDirection
+Kiln.MessageField
+Kiln.MessageField.<Clone>$() -> Kiln.MessageField!
+Kiln.MessageField.CountOffset.get -> int
+Kiln.MessageField.CountOffset.init -> void
+Kiln.MessageField.Deconstruct(out string! Name, out int Type, out int Element, out int Shape, out int Offset, out int CountOffset, out int FixedCount) -> void
+Kiln.MessageField.Element.get -> int
+Kiln.MessageField.Element.init -> void
+Kiln.MessageField.Equals(Kiln.MessageField? other) -> bool
+Kiln.MessageField.FixedCount.get -> int
+Kiln.MessageField.FixedCount.init -> void
+Kiln.MessageField.MessageField(string! Name, int Type, int Element, int Shape, int Offset, int CountOffset, int FixedCount) -> void
+Kiln.MessageField.Name.get -> string!
+Kiln.MessageField.Name.init -> void
+Kiln.MessageField.Offset.get -> int
+Kiln.MessageField.Offset.init -> void
+Kiln.MessageField.Shape.get -> int
+Kiln.MessageField.Shape.init -> void
+Kiln.MessageField.Type.get -> int
+Kiln.MessageField.Type.init -> void
+Kiln.MessageHandler
+Kiln.MessageRewrite
+Kiln.MessageRewrite.Buffer.get -> System.Span<byte>
+Kiln.MessageRewrite.Length.get -> int
+Kiln.MessageRewrite.Length.set -> void
+Kiln.MessageRewrite.MessageRewrite() -> void
+Kiln.MessageRewrite.PeerId.get -> uint
+Kiln.MessageRewrite.PeerUnknown.get -> bool
+Kiln.MessageSchema
+Kiln.MessageSchema.<Clone>$() -> Kiln.MessageSchema!
+Kiln.MessageSchema.Deconstruct(out string! Name, out int Size, out System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>! Fields) -> void
+Kiln.MessageSchema.Equals(Kiln.MessageSchema? other) -> bool
+Kiln.MessageSchema.Fields.get -> System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>!
+Kiln.MessageSchema.Fields.init -> void
+Kiln.MessageSchema.MessageSchema(string! Name, int Size, System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>! Fields) -> void
+Kiln.MessageSchema.Name.get -> string!
+Kiln.MessageSchema.Name.init -> void
+Kiln.MessageSchema.Size.get -> int
+Kiln.MessageSchema.Size.init -> void
+Kiln.PeerSelector
+Kiln.PeerSelector.Description.get -> string!
+Kiln.PeerSelector.Matches(Kiln.NetPeer! peer) -> bool
+Kiln.Peers
+Kiln.ReceiveFilter<T>
+Kiln.ReplChannel
+Kiln.ReplChannel.Client = 4 -> Kiln.ReplChannel
+Kiln.ReplChannel.Prediction = 5 -> Kiln.ReplChannel
+Kiln.ReplChannels
+Kiln.ReplChannels.Client = 1 -> Kiln.ReplChannels
+Kiln.ReplChannels.Prediction = 2 -> Kiln.ReplChannels
+Kiln.ReplComponentInfo
+Kiln.ReplComponentInfo.<Clone>$() -> Kiln.ReplComponentInfo!
+Kiln.ReplComponentInfo.CustomCodec.get -> bool
+Kiln.ReplComponentInfo.CustomCodec.init -> void
+Kiln.ReplComponentInfo.Deconstruct(out string! Name, out int Index, out int Size, out uint Hash, out bool ReplicationBit, out bool Versioned, out bool CustomCodec, out bool MayBeOnClientChannel, out bool MayBeOnPredictionChannel) -> void
+Kiln.ReplComponentInfo.Equals(Kiln.ReplComponentInfo? other) -> bool
+Kiln.ReplComponentInfo.Hash.get -> uint
+Kiln.ReplComponentInfo.Hash.init -> void
+Kiln.ReplComponentInfo.Index.get -> int
+Kiln.ReplComponentInfo.Index.init -> void
+Kiln.ReplComponentInfo.MayBeOnClientChannel.get -> bool
+Kiln.ReplComponentInfo.MayBeOnClientChannel.init -> void
+Kiln.ReplComponentInfo.MayBeOnPredictionChannel.get -> bool
+Kiln.ReplComponentInfo.MayBeOnPredictionChannel.init -> void
+Kiln.ReplComponentInfo.Name.get -> string!
+Kiln.ReplComponentInfo.Name.init -> void
+Kiln.ReplComponentInfo.ReplComponentInfo(string! Name, int Index, int Size, uint Hash, bool ReplicationBit, bool Versioned, bool CustomCodec, bool MayBeOnClientChannel, bool MayBeOnPredictionChannel) -> void
+Kiln.ReplComponentInfo.ReplicationBit.get -> bool
+Kiln.ReplComponentInfo.ReplicationBit.init -> void
+Kiln.ReplComponentInfo.Size.get -> int
+Kiln.ReplComponentInfo.Size.init -> void
+Kiln.ReplComponentInfo.Versioned.get -> bool
+Kiln.ReplComponentInfo.Versioned.init -> void
+Kiln.ReplExtensionChanged<T>
+Kiln.ReplExtensionChanged<T>.<Clone>$() -> Kiln.ReplExtensionChanged<T>!
+Kiln.ReplExtensionChanged<T>.CreateTick.get -> uint
+Kiln.ReplExtensionChanged<T>.CreateTick.init -> void
+Kiln.ReplExtensionChanged<T>.Deconstruct(out Kiln.EntityId Entity, out uint CreateTick, out T? Value, out Kiln.NetPeer? Peer) -> void
+Kiln.ReplExtensionChanged<T>.Entity.get -> Kiln.EntityId
+Kiln.ReplExtensionChanged<T>.Entity.init -> void
+Kiln.ReplExtensionChanged<T>.Equals(Kiln.ReplExtensionChanged<T>? other) -> bool
+Kiln.ReplExtensionChanged<T>.Peer.get -> Kiln.NetPeer?
+Kiln.ReplExtensionChanged<T>.Peer.init -> void
+Kiln.ReplExtensionChanged<T>.ReplExtensionChanged(Kiln.EntityId Entity, uint CreateTick, T? Value, Kiln.NetPeer? Peer) -> void
+Kiln.ReplExtensionChanged<T>.Value.get -> T?
+Kiln.ReplExtensionChanged<T>.Value.init -> void
+Kiln.ReplKind
+Kiln.ReplKind.Create = 2 -> Kiln.ReplKind
+Kiln.ReplKind.Destroyed = 4 -> Kiln.ReplKind
+Kiln.ReplKind.Update = 3 -> Kiln.ReplKind
+Kiln.ReplPeerStats
+Kiln.ReplPeerStats.<Clone>$() -> Kiln.ReplPeerStats!
+Kiln.ReplPeerStats.Acks.get -> long
+Kiln.ReplPeerStats.Acks.init -> void
+Kiln.ReplPeerStats.Bytes.get -> long
+Kiln.ReplPeerStats.Bytes.init -> void
+Kiln.ReplPeerStats.Channel.get -> Kiln.ReplChannel
+Kiln.ReplPeerStats.Channel.init -> void
+Kiln.ReplPeerStats.Creates.get -> long
+Kiln.ReplPeerStats.Creates.init -> void
+Kiln.ReplPeerStats.Deconstruct(out Kiln.NetPeer? Peer, out Kiln.ReplChannel Channel, out long Frames, out long Messages, out long Bytes, out long Refused, out long Creates, out long Updates, out long DestroyLists, out long DestroyedIds, out long Unchanged, out long TooBig, out long Acks, out long Resets, out long Dropped) -> void
+Kiln.ReplPeerStats.DestroyLists.get -> long
+Kiln.ReplPeerStats.DestroyLists.init -> void
+Kiln.ReplPeerStats.DestroyedIds.get -> long
+Kiln.ReplPeerStats.DestroyedIds.init -> void
+Kiln.ReplPeerStats.Dropped.get -> long
+Kiln.ReplPeerStats.Dropped.init -> void
+Kiln.ReplPeerStats.Equals(Kiln.ReplPeerStats? other) -> bool
+Kiln.ReplPeerStats.Fake.get -> bool
+Kiln.ReplPeerStats.Fake.init -> void
+Kiln.ReplPeerStats.Frames.get -> long
+Kiln.ReplPeerStats.Frames.init -> void
+Kiln.ReplPeerStats.Local.get -> bool
+Kiln.ReplPeerStats.Local.init -> void
+Kiln.ReplPeerStats.Messages.get -> long
+Kiln.ReplPeerStats.Messages.init -> void
+Kiln.ReplPeerStats.Peer.get -> Kiln.NetPeer?
+Kiln.ReplPeerStats.Peer.init -> void
+Kiln.ReplPeerStats.PeerId.get -> uint
+Kiln.ReplPeerStats.PeerId.init -> void
+Kiln.ReplPeerStats.Received.get -> bool
+Kiln.ReplPeerStats.Received.init -> void
+Kiln.ReplPeerStats.Refused.get -> long
+Kiln.ReplPeerStats.Refused.init -> void
+Kiln.ReplPeerStats.ReplPeerStats(Kiln.NetPeer? Peer, Kiln.ReplChannel Channel, long Frames, long Messages, long Bytes, long Refused, long Creates, long Updates, long DestroyLists, long DestroyedIds, long Unchanged, long TooBig, long Acks, long Resets, long Dropped) -> void
+Kiln.ReplPeerStats.Resets.get -> long
+Kiln.ReplPeerStats.Resets.init -> void
+Kiln.ReplPeerStats.TooBig.get -> long
+Kiln.ReplPeerStats.TooBig.init -> void
+Kiln.ReplPeerStats.Unchanged.get -> long
+Kiln.ReplPeerStats.Unchanged.init -> void
+Kiln.ReplPeerStats.Updates.get -> long
+Kiln.ReplPeerStats.Updates.init -> void
+Kiln.ReplReceived
+Kiln.ReplReceived.<Clone>$() -> Kiln.ReplReceived!
+Kiln.ReplReceived.Components.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>!
+Kiln.ReplReceived.Components.init -> void
+Kiln.ReplReceived.Deconstruct(out Kiln.ReplKind Kind, out Kiln.EntityId Entity, out uint Tick, out bool Gap, out System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>! Components) -> void
+Kiln.ReplReceived.Entity.get -> Kiln.EntityId
+Kiln.ReplReceived.Entity.init -> void
+Kiln.ReplReceived.Equals(Kiln.ReplReceived? other) -> bool
+Kiln.ReplReceived.Gap.get -> bool
+Kiln.ReplReceived.Gap.init -> void
+Kiln.ReplReceived.Kind.get -> Kiln.ReplKind
+Kiln.ReplReceived.Kind.init -> void
+Kiln.ReplReceived.ReplReceived(Kiln.ReplKind Kind, Kiln.EntityId Entity, uint Tick, bool Gap, System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>! Components) -> void
+Kiln.ReplReceived.Tick.get -> uint
+Kiln.ReplReceived.Tick.init -> void
+Kiln.ReplRemapStats
+Kiln.ReplRemapStats.<Clone>$() -> Kiln.ReplRemapStats!
+Kiln.ReplRemapStats.Active.get -> bool
+Kiln.ReplRemapStats.Active.init -> void
+Kiln.ReplRemapStats.Deconstruct(out bool Active, out int Sites, out int KilnOnlyItems, out int WithoutLookAlike, out long Snapshots, out long Remapped, out long Zeroed, out long Faults) -> void
+Kiln.ReplRemapStats.Equals(Kiln.ReplRemapStats? other) -> bool
+Kiln.ReplRemapStats.Faults.get -> long
+Kiln.ReplRemapStats.Faults.init -> void
+Kiln.ReplRemapStats.KilnOnlyItems.get -> int
+Kiln.ReplRemapStats.KilnOnlyItems.init -> void
+Kiln.ReplRemapStats.Remapped.get -> long
+Kiln.ReplRemapStats.Remapped.init -> void
+Kiln.ReplRemapStats.ReplRemapStats(bool Active, int Sites, int KilnOnlyItems, int WithoutLookAlike, long Snapshots, long Remapped, long Zeroed, long Faults) -> void
+Kiln.ReplRemapStats.Sites.get -> int
+Kiln.ReplRemapStats.Sites.init -> void
+Kiln.ReplRemapStats.Snapshots.get -> long
+Kiln.ReplRemapStats.Snapshots.init -> void
+Kiln.ReplRemapStats.WithoutLookAlike.get -> int
+Kiln.ReplRemapStats.WithoutLookAlike.init -> void
+Kiln.ReplRemapStats.Zeroed.get -> long
+Kiln.ReplRemapStats.Zeroed.init -> void
+Kiln.ReplSent
+Kiln.ReplSent.<Clone>$() -> Kiln.ReplSent!
+Kiln.ReplSent.BaselineTick.get -> uint
+Kiln.ReplSent.BaselineTick.init -> void
+Kiln.ReplSent.Channel.get -> Kiln.ReplChannel
+Kiln.ReplSent.Channel.init -> void
+Kiln.ReplSent.Components.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>!
+Kiln.ReplSent.Components.init -> void
+Kiln.ReplSent.Deconstruct(out Kiln.NetPeer? Peer, out Kiln.ReplChannel Channel, out Kiln.ReplKind Kind, out Kiln.EntityId Entity, out uint Tick, out uint Seq, out uint BaselineTick, out int PayloadBytes, out bool Gap, out System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>! Components, out System.Collections.Generic.IReadOnlySet<string!>! PackedByGame) -> void
+Kiln.ReplSent.Entity.get -> Kiln.EntityId
+Kiln.ReplSent.Entity.init -> void
+Kiln.ReplSent.Equals(Kiln.ReplSent? other) -> bool
+Kiln.ReplSent.Fake.get -> bool
+Kiln.ReplSent.Fake.init -> void
+Kiln.ReplSent.Gap.get -> bool
+Kiln.ReplSent.Gap.init -> void
+Kiln.ReplSent.Kind.get -> Kiln.ReplKind
+Kiln.ReplSent.Kind.init -> void
+Kiln.ReplSent.Local.get -> bool
+Kiln.ReplSent.Local.init -> void
+Kiln.ReplSent.PackedByGame.get -> System.Collections.Generic.IReadOnlySet<string!>!
+Kiln.ReplSent.PackedByGame.init -> void
+Kiln.ReplSent.PayloadBytes.get -> int
+Kiln.ReplSent.PayloadBytes.init -> void
+Kiln.ReplSent.Peer.get -> Kiln.NetPeer?
+Kiln.ReplSent.Peer.init -> void
+Kiln.ReplSent.PeerId.get -> uint
+Kiln.ReplSent.PeerId.init -> void
+Kiln.ReplSent.ReplSent(Kiln.NetPeer? Peer, Kiln.ReplChannel Channel, Kiln.ReplKind Kind, Kiln.EntityId Entity, uint Tick, uint Seq, uint BaselineTick, int PayloadBytes, bool Gap, System.Collections.Generic.IReadOnlyDictionary<string!, System.ReadOnlyMemory<byte>>! Components, System.Collections.Generic.IReadOnlySet<string!>! PackedByGame) -> void
+Kiln.ReplSent.Seq.get -> uint
+Kiln.ReplSent.Seq.init -> void
+Kiln.ReplSent.Tick.get -> uint
+Kiln.ReplSent.Tick.init -> void
+Kiln.ReplWatch
+Kiln.ReplWatch.Dispose() -> void
+Kiln.ReplWatch.Ended -> System.Action<Kiln.ReplWatchEnded!>?
+Kiln.ReplWatch.Entity.get -> Kiln.EntityId
+Kiln.ReplWatch.HasEnded.get -> bool
+Kiln.ReplWatch.IsActive.get -> bool
+Kiln.ReplWatch.Peer.get -> Kiln.NetPeer?
+Kiln.ReplWatch.Received -> System.Action<Kiln.ReplReceived!>?
+Kiln.ReplWatch.Sent -> System.Action<Kiln.ReplSent!>?
+Kiln.ReplWatchEnded
+Kiln.ReplWatchEnded.<Clone>$() -> Kiln.ReplWatchEnded!
+Kiln.ReplWatchEnded.Deconstruct(out Kiln.EntityId Entity, out string! Reason) -> void
+Kiln.ReplWatchEnded.Entity.get -> Kiln.EntityId
+Kiln.ReplWatchEnded.Entity.init -> void
+Kiln.ReplWatchEnded.Equals(Kiln.ReplWatchEnded? other) -> bool
+Kiln.ReplWatchEnded.Reason.get -> string!
+Kiln.ReplWatchEnded.Reason.init -> void
+Kiln.ReplWatchEnded.ReplWatchEnded(Kiln.EntityId Entity, string! Reason) -> void
+Kiln.ReplicatedExtension
+Kiln.ReplicatedExtension.IsAvailableFor(Kiln.NetPeer! peer) -> bool
+Kiln.ReplicatedExtension.IsRegistered.get -> bool
+Kiln.ReplicatedExtension.LayoutHash.get -> uint
+Kiln.ReplicatedExtension.Name.get -> string!
+Kiln.ReplicatedExtension.Size.get -> int
+Kiln.ReplicatedExtension.Version.get -> int
+Kiln.ReplicatedExtension<T>
+Kiln.ReplicatedExtension<T>.Changed -> System.Action<Kiln.ReplExtensionChanged<T>!>?
+Kiln.ReplicatedExtension<T>.Dispose() -> void
+Kiln.ReplicatedExtension<T>.On<TComponent>(Kiln.ExtensionProvider<T>! provider) -> System.IDisposable!
+Kiln.ReplicatedExtension<T>.TryGet(Kiln.EntityId entity, out T value) -> bool
+Kiln.Replication
+Kiln.TouchResult
+Kiln.TouchResult.<Clone>$() -> Kiln.TouchResult!
+Kiln.TouchResult.Deconstruct(out bool Ok, out string? Reason) -> void
+Kiln.TouchResult.Entity.get -> Kiln.EntityId
+Kiln.TouchResult.Entity.init -> void
+Kiln.TouchResult.Equals(Kiln.TouchResult? other) -> bool
+Kiln.TouchResult.Ok.get -> bool
+Kiln.TouchResult.Ok.init -> void
+Kiln.TouchResult.Reason.get -> string?
+Kiln.TouchResult.Reason.init -> void
+Kiln.TouchResult.TouchResult(bool Ok, string? Reason) -> void
 [KILNX001]Kiln.ReplLabDecoded
 [KILNX001]Kiln.ReplLabDecoded.<Clone>$() -> Kiln.ReplLabDecoded!
 [KILNX001]Kiln.ReplLabDecoded.Bytes.get -> System.ReadOnlyMemory<byte>
@@ -57,3 +370,91 @@
 [KILNX001]static Kiln.ReplicationLab.ForceRelevant(int machine, Kiln.EntityId entity) -> void
 [KILNX001]static Kiln.ReplicationLab.LoopbackStats() -> Kiln.ReplLoopbackStats!
 [KILNX001]static Kiln.ReplicationLab.RemoveFakePeers() -> void
+override Kiln.FilterOptions.Equals(object? obj) -> bool
+override Kiln.FilterOptions.GetHashCode() -> int
+override Kiln.FilterOptions.ToString() -> string!
+override Kiln.InjectResult.Equals(object? obj) -> bool
+override Kiln.InjectResult.GetHashCode() -> int
+override Kiln.InjectResult.ToString() -> string!
+override Kiln.MessageField.Equals(object? obj) -> bool
+override Kiln.MessageField.GetHashCode() -> int
+override Kiln.MessageField.ToString() -> string!
+override Kiln.MessageSchema.Equals(object? obj) -> bool
+override Kiln.MessageSchema.GetHashCode() -> int
+override Kiln.MessageSchema.ToString() -> string!
+override Kiln.PeerSelector.ToString() -> string!
+override Kiln.ReplComponentInfo.Equals(object? obj) -> bool
+override Kiln.ReplComponentInfo.GetHashCode() -> int
+override Kiln.ReplComponentInfo.ToString() -> string!
+override Kiln.ReplExtensionChanged<T>.Equals(object? obj) -> bool
+override Kiln.ReplExtensionChanged<T>.GetHashCode() -> int
+override Kiln.ReplExtensionChanged<T>.ToString() -> string!
+override Kiln.ReplPeerStats.Equals(object? obj) -> bool
+override Kiln.ReplPeerStats.GetHashCode() -> int
+override Kiln.ReplPeerStats.ToString() -> string!
+override Kiln.ReplReceived.Equals(object? obj) -> bool
+override Kiln.ReplReceived.GetHashCode() -> int
+override Kiln.ReplReceived.ToString() -> string!
+override Kiln.ReplRemapStats.Equals(object? obj) -> bool
+override Kiln.ReplRemapStats.GetHashCode() -> int
+override Kiln.ReplRemapStats.ToString() -> string!
+override Kiln.ReplSent.Equals(object? obj) -> bool
+override Kiln.ReplSent.GetHashCode() -> int
+override Kiln.ReplSent.ToString() -> string!
+override Kiln.ReplWatchEnded.Equals(object? obj) -> bool
+override Kiln.ReplWatchEnded.GetHashCode() -> int
+override Kiln.ReplWatchEnded.ToString() -> string!
+override Kiln.ReplicatedExtension.ToString() -> string!
+override Kiln.TouchResult.Equals(object? obj) -> bool
+override Kiln.TouchResult.GetHashCode() -> int
+override Kiln.TouchResult.ToString() -> string!
+static Kiln.FilterOptions.operator !=(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
+static Kiln.FilterOptions.operator ==(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
+static Kiln.InjectResult.operator !=(Kiln.InjectResult? left, Kiln.InjectResult? right) -> bool
+static Kiln.InjectResult.operator ==(Kiln.InjectResult? left, Kiln.InjectResult? right) -> bool
+static Kiln.MessageField.operator !=(Kiln.MessageField? left, Kiln.MessageField? right) -> bool
+static Kiln.MessageField.operator ==(Kiln.MessageField? left, Kiln.MessageField? right) -> bool
+static Kiln.MessageSchema.operator !=(Kiln.MessageSchema? left, Kiln.MessageSchema? right) -> bool
+static Kiln.MessageSchema.operator ==(Kiln.MessageSchema? left, Kiln.MessageSchema? right) -> bool
+static Kiln.Peers.All.get -> Kiln.PeerSelector!
+static Kiln.Peers.LackingContent.get -> Kiln.PeerSelector!
+static Kiln.Peers.Vanilla.get -> Kiln.PeerSelector!
+static Kiln.Peers.With(Kiln.ReplicatedExtension! extension) -> Kiln.PeerSelector!
+static Kiln.Peers.Without(Kiln.ReplicatedExtension! extension) -> Kiln.PeerSelector!
+static Kiln.ReplComponentInfo.operator !=(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
+static Kiln.ReplComponentInfo.operator ==(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
+static Kiln.ReplExtensionChanged<T>.operator !=(Kiln.ReplExtensionChanged<T>? left, Kiln.ReplExtensionChanged<T>? right) -> bool
+static Kiln.ReplExtensionChanged<T>.operator ==(Kiln.ReplExtensionChanged<T>? left, Kiln.ReplExtensionChanged<T>? right) -> bool
+static Kiln.ReplPeerStats.operator !=(Kiln.ReplPeerStats? left, Kiln.ReplPeerStats? right) -> bool
+static Kiln.ReplPeerStats.operator ==(Kiln.ReplPeerStats? left, Kiln.ReplPeerStats? right) -> bool
+static Kiln.ReplReceived.operator !=(Kiln.ReplReceived? left, Kiln.ReplReceived? right) -> bool
+static Kiln.ReplReceived.operator ==(Kiln.ReplReceived? left, Kiln.ReplReceived? right) -> bool
+static Kiln.ReplRemapStats.operator !=(Kiln.ReplRemapStats? left, Kiln.ReplRemapStats? right) -> bool
+static Kiln.ReplRemapStats.operator ==(Kiln.ReplRemapStats? left, Kiln.ReplRemapStats? right) -> bool
+static Kiln.ReplSent.operator !=(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
+static Kiln.ReplSent.operator ==(Kiln.ReplSent? left, Kiln.ReplSent? right) -> bool
+static Kiln.ReplWatchEnded.operator !=(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
+static Kiln.ReplWatchEnded.operator ==(Kiln.ReplWatchEnded? left, Kiln.ReplWatchEnded? right) -> bool
+static Kiln.Replication.Component(string! name) -> Kiln.ReplComponentInfo?
+static Kiln.Replication.Decode<T>(System.ReadOnlySpan<byte> bytes) -> T
+static Kiln.Replication.Encode<T>(in T message) -> byte[]!
+static Kiln.Replication.Extension<T>(string! name, int version) -> Kiln.ReplicatedExtension<T>!
+static Kiln.Replication.Filter<TComponent>(Kiln.PeerSelector! peers, Kiln.ComponentFilter<TComponent>! filter, Kiln.FilterOptions? options = null) -> System.IDisposable!
+static Kiln.Replication.Inject(Kiln.NetPeer! peer, Kiln.GameChannel channel, System.ReadOnlySpan<byte> bytes) -> Kiln.InjectResult!
+static Kiln.Replication.Injected -> System.Action<Kiln.InjectResult!>?
+static Kiln.Replication.OnMessage(Kiln.GameChannel channel, Kiln.MessageDirection direction, Kiln.MessageHandler! handler) -> System.IDisposable!
+static Kiln.Replication.ReceivedStats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!
+static Kiln.Replication.RemapItems(Kiln.PeerSelector! peers) -> System.IDisposable!
+static Kiln.Replication.RemapStats() -> Kiln.ReplRemapStats!
+static Kiln.Replication.Schema(string! name) -> Kiln.MessageSchema?
+static Kiln.Replication.Stats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!
+static Kiln.Replication.Touch(Kiln.EntityId entity) -> Kiln.TouchResult!
+static Kiln.Replication.Touched -> System.Action<Kiln.TouchResult!>?
+static Kiln.Replication.Watch(Kiln.EntityId entity, Kiln.NetPeer? peer = null) -> Kiln.ReplWatch!
+static Kiln.Replication.WatchReceived(Kiln.EntityId entity) -> Kiln.ReplWatch!
+static Kiln.TouchResult.operator !=(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
+static Kiln.TouchResult.operator ==(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
+virtual Kiln.ComponentFilter<T>.Invoke(ref T value, in Kiln.FilterContext context) -> void
+virtual Kiln.ExtensionProvider<T>.Invoke(Kiln.EntityId entity, ref T value) -> bool
+virtual Kiln.MessageHandler.Invoke(Kiln.NetPeer? peer, System.ReadOnlySpan<byte> data, ref Kiln.MessageRewrite rewrite) -> Kiln.MessageAction
+virtual Kiln.ReceiveFilter<T>.Invoke(ref T value, Kiln.EntityId entity) -> void

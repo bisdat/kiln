@@ -548,6 +548,18 @@ Kiln.BaseInfo.WaterCount.get -> int
 Kiln.BaseInfo.WaterCount.init -> void
 Kiln.BaseInfo.ZoneCount.get -> int
 Kiln.BaseInfo.ZoneCount.init -> void
+Kiln.BaseRulesBlock
+Kiln.BaseRulesBlock.<Clone>$() -> Kiln.BaseRulesBlock!
+Kiln.BaseRulesBlock.BaseRulesBlock() -> void
+Kiln.BaseRulesBlock.BuildAreaPercent.get -> int?
+Kiln.BaseRulesBlock.BuildAreaPercent.init -> void
+Kiln.BaseRulesBlock.Equals(Kiln.BaseRulesBlock? other) -> bool
+Kiln.BaseRulesBlock.ExtraAltars.get -> int
+Kiln.BaseRulesBlock.ExtraAltars.init -> void
+Kiln.BaseRulesBlock.MinimumAltars.get -> int?
+Kiln.BaseRulesBlock.MinimumAltars.init -> void
+Kiln.BaseRulesBlock.Sizes.get -> System.Collections.Generic.IReadOnlyList<Kiln.AltarSize!>?
+Kiln.BaseRulesBlock.Sizes.init -> void
 Kiln.Bases
 Kiln.BasesChangedEvent
 Kiln.BasesChangedEvent.Added.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseId>!
@@ -753,6 +765,8 @@ Kiln.BlockRef<T>.BlockRef(string! Value) -> void
 Kiln.BlockRef<T>.Deconstruct(out string! Value) -> void
 Kiln.BlockRef<T>.Value.get -> string!
 Kiln.BlockRef<T>.Value.init -> void
+Kiln.BlockUi
+Kiln.BlockUi.Bindings
 Kiln.Blocks
 Kiln.BlueprintBlock
 Kiln.BlueprintBlock.<Clone>$() -> Kiln.BlueprintBlock!
@@ -780,6 +794,10 @@ Kiln.Bodies
 Kiln.BodyBlock
 Kiln.BodyBlock.<Clone>$() -> Kiln.BodyBlock!
 Kiln.BodyBlock.BodyBlock() -> void
+Kiln.BodyBlock.Chains.get -> System.Collections.Generic.IReadOnlyList<Kiln.ModelChainBlock!>?
+Kiln.BodyBlock.Chains.init -> void
+Kiln.BodyBlock.Cloth.get -> System.Collections.Generic.IReadOnlyList<Kiln.ModelClothBlock!>?
+Kiln.BodyBlock.Cloth.init -> void
 Kiln.BodyBlock.Colliders.get -> System.Collections.Generic.IReadOnlyList<Kiln.ColliderBlock!>?
 Kiln.BodyBlock.Colliders.init -> void
 Kiln.BodyBlock.Equals(Kiln.BodyBlock? other) -> bool
@@ -1067,6 +1085,31 @@ Kiln.Clip.Speed.get -> double?
 Kiln.Clip.Speed.init -> void
 Kiln.Clip.Then.get -> Kiln.AnimState?
 Kiln.Clip.Then.init -> void
+Kiln.ClothCapsuleBlock
+Kiln.ClothCapsuleBlock.A.get -> Kiln.ClothSphereBlock!
+Kiln.ClothCapsuleBlock.A.init -> void
+Kiln.ClothCapsuleBlock.B.get -> Kiln.ClothSphereBlock!
+Kiln.ClothCapsuleBlock.B.init -> void
+Kiln.ClothCapsuleBlock.ClothCapsuleBlock(Kiln.ClothSphereBlock! A, Kiln.ClothSphereBlock! B) -> void
+Kiln.ClothCapsuleBlock.Deconstruct(out Kiln.ClothSphereBlock! A, out Kiln.ClothSphereBlock! B) -> void
+Kiln.ClothCapsuleBlock.Equals(Kiln.ClothCapsuleBlock? other) -> bool
+Kiln.ClothColliderBlock
+Kiln.ClothColliderBlock.ClothColliderBlock() -> void
+Kiln.ClothColliderBlock.ClothColliderBlock(Kiln.ClothColliderBlock! original) -> void
+Kiln.ClothSphereBlock
+Kiln.ClothSphereBlock.ClothSphereBlock(double X, double Y, double Z, double Radius, string? Joint = null) -> void
+Kiln.ClothSphereBlock.Deconstruct(out double X, out double Y, out double Z, out double Radius, out string? Joint) -> void
+Kiln.ClothSphereBlock.Equals(Kiln.ClothSphereBlock? other) -> bool
+Kiln.ClothSphereBlock.Joint.get -> string?
+Kiln.ClothSphereBlock.Joint.init -> void
+Kiln.ClothSphereBlock.Radius.get -> double
+Kiln.ClothSphereBlock.Radius.init -> void
+Kiln.ClothSphereBlock.X.get -> double
+Kiln.ClothSphereBlock.X.init -> void
+Kiln.ClothSphereBlock.Y.get -> double
+Kiln.ClothSphereBlock.Y.init -> void
+Kiln.ClothSphereBlock.Z.get -> double
+Kiln.ClothSphereBlock.Z.init -> void
 Kiln.CollectGoal
 Kiln.CollectGoal.<Clone>$() -> Kiln.CollectGoal!
 Kiln.CollectGoal.CollectGoal() -> void
@@ -1777,6 +1820,22 @@ Kiln.IQuestBlock
 Kiln.ITweakable
 Kiln.ITweakable.Tweak.get -> Kiln.FieldValues!
 Kiln.IUiBlock
+Kiln.IdleTask
+Kiln.IdleTask.Equals(Kiln.IdleTask? other) -> bool
+Kiln.IdleTask.IdleTask() -> void
+Kiln.ImageRow
+Kiln.ImageRow.Asset.get -> string!
+Kiln.ImageRow.Asset.init -> void
+Kiln.ImageRow.Does.get -> Kiln.UiAction?
+Kiln.ImageRow.Does.init -> void
+Kiln.ImageRow.Equals(Kiln.ImageRow? other) -> bool
+Kiln.ImageRow.Height.get -> float
+Kiln.ImageRow.Height.init -> void
+Kiln.ImageRow.Id.get -> string!
+Kiln.ImageRow.Id.init -> void
+Kiln.ImageRow.ImageRow() -> void
+Kiln.ImageRow.Width.get -> float
+Kiln.ImageRow.Width.init -> void
 Kiln.IngredientCategory
 Kiln.IngredientCategory.<Clone>$() -> Kiln.IngredientCategory!
 Kiln.IngredientCategory.Deconstruct(out uint Id, out System.Collections.Generic.IReadOnlyList<Kiln.IngredientOption>! Options) -> void
@@ -1795,6 +1854,24 @@ Kiln.IngredientOption.Item.get -> Kiln.ItemId
 Kiln.IngredientOption.Item.init -> void
 Kiln.IngredientOption.Scaling.get -> float
 Kiln.IngredientOption.Scaling.init -> void
+Kiln.InputRow
+Kiln.InputRow.Bind.get -> string!
+Kiln.InputRow.Bind.init -> void
+Kiln.InputRow.Commit.get -> Kiln.UiInputCommit
+Kiln.InputRow.Commit.init -> void
+Kiln.InputRow.Equals(Kiln.InputRow? other) -> bool
+Kiln.InputRow.Id.get -> string!
+Kiln.InputRow.Id.init -> void
+Kiln.InputRow.InputRow() -> void
+Kiln.InputRow.Label.get -> Kiln.UiText!
+Kiln.InputRow.Label.init -> void
+Kiln.InputRow.MaxBytes.get -> int
+Kiln.InputRow.MaxBytes.init -> void
+Kiln.InputRow.Multiline.get -> bool
+Kiln.InputRow.Multiline.init -> void
+Kiln.InspectTask
+Kiln.InspectTask.Equals(Kiln.InspectTask? other) -> bool
+Kiln.InspectTask.InspectTask() -> void
 Kiln.InteractBlock
 Kiln.InteractBlock.<Clone>$() -> Kiln.InteractBlock!
 Kiln.InteractBlock.Effects.get -> System.Collections.Generic.IReadOnlyList<Kiln.EffectRef!>?
@@ -1862,6 +1939,8 @@ Kiln.ItemBlock.Identity.init -> void
 Kiln.ItemBlock.ItemBlock() -> void
 Kiln.ItemBlock.Kind.get -> Kiln.ItemKind?
 Kiln.ItemBlock.Kind.init -> void
+Kiln.ItemBlock.LargeHolds.get -> bool
+Kiln.ItemBlock.LargeHolds.init -> void
 Kiln.ItemBlock.Level.get -> int?
 Kiln.ItemBlock.Level.init -> void
 Kiln.ItemBlock.Loot.get -> Kiln.LootBlock?
@@ -1886,6 +1965,8 @@ Kiln.ItemBlock.Tool.get -> Kiln.ToolBlock?
 Kiln.ItemBlock.Tool.init -> void
 Kiln.ItemBlock.Tweak.get -> Kiln.FieldValues!
 Kiln.ItemBlock.Tweak.init -> void
+Kiln.ItemBlock.VanillaLook.get -> string?
+Kiln.ItemBlock.VanillaLook.init -> void
 Kiln.ItemBlock.Visual.get -> Kiln.PartRef<Kiln.VisualBlock!>?
 Kiln.ItemBlock.Visual.init -> void
 Kiln.ItemBlock.Was.get -> string?
@@ -2208,6 +2289,60 @@ Kiln.MenuBlock.Equals(Kiln.MenuBlock? other) -> bool
 Kiln.MenuBlock.Like.get -> Kiln.StationKind?
 Kiln.MenuBlock.Like.init -> void
 Kiln.MenuBlock.MenuBlock() -> void
+Kiln.MenuBlock.Tabs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuTabBlock!>?
+Kiln.MenuBlock.Tabs.init -> void
+Kiln.MenuDefinitionResult
+Kiln.MenuDefinitionResult.<Clone>$() -> Kiln.MenuDefinitionResult!
+Kiln.MenuDefinitionResult.Equals(Kiln.MenuDefinitionResult? other) -> bool
+Kiln.MenuDefinitionResult.Generation.get -> ulong
+Kiln.MenuDefinitionResult.Generation.init -> void
+Kiln.MenuDefinitionResult.MenuDefinitionResult() -> void
+Kiln.MenuDefinitionResult.Ok.get -> bool
+Kiln.MenuDefinitionResult.Ok.init -> void
+Kiln.MenuDefinitionResult.Reason.get -> string!
+Kiln.MenuDefinitionResult.Reason.init -> void
+Kiln.MenuDefinitionResult.Registration.get -> Kiln.StationMenuRegistration?
+Kiln.MenuDefinitionResult.Registration.init -> void
+Kiln.ModelChainBlock
+Kiln.ModelChainBlock.<Clone>$() -> Kiln.ModelChainBlock!
+Kiln.ModelChainBlock.BendStiffness.get -> double
+Kiln.ModelChainBlock.BendStiffness.init -> void
+Kiln.ModelChainBlock.Damping.get -> double
+Kiln.ModelChainBlock.Damping.init -> void
+Kiln.ModelChainBlock.Equals(Kiln.ModelChainBlock? other) -> bool
+Kiln.ModelChainBlock.ModelChainBlock() -> void
+Kiln.ModelChainBlock.ParticleMassKg.get -> double
+Kiln.ModelChainBlock.ParticleMassKg.init -> void
+Kiln.ModelChainBlock.ParticleRadius.get -> double
+Kiln.ModelChainBlock.ParticleRadius.init -> void
+Kiln.ModelChainBlock.RootJoint.get -> string!
+Kiln.ModelChainBlock.RootJoint.init -> void
+Kiln.ModelChainBlock.Stiffness.get -> double
+Kiln.ModelChainBlock.Stiffness.init -> void
+Kiln.ModelChainBlock.TipJoint.get -> string!
+Kiln.ModelChainBlock.TipJoint.init -> void
+Kiln.ModelClothBlock
+Kiln.ModelClothBlock.<Clone>$() -> Kiln.ModelClothBlock!
+Kiln.ModelClothBlock.Colliders.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClothColliderBlock!>!
+Kiln.ModelClothBlock.Colliders.init -> void
+Kiln.ModelClothBlock.Damping.get -> double
+Kiln.ModelClothBlock.Damping.init -> void
+Kiln.ModelClothBlock.Equals(Kiln.ModelClothBlock? other) -> bool
+Kiln.ModelClothBlock.Gravity.get -> double
+Kiln.ModelClothBlock.Gravity.init -> void
+Kiln.ModelClothBlock.MassKg.get -> double
+Kiln.ModelClothBlock.MassKg.init -> void
+Kiln.ModelClothBlock.Mesh.get -> int
+Kiln.ModelClothBlock.Mesh.init -> void
+Kiln.ModelClothBlock.ModelClothBlock() -> void
+Kiln.ModelClothBlock.ParticleIds.get -> System.Collections.Generic.IReadOnlyList<int>?
+Kiln.ModelClothBlock.ParticleIds.init -> void
+Kiln.ModelClothBlock.Pin.get -> System.Collections.Generic.IReadOnlyList<double>!
+Kiln.ModelClothBlock.Pin.init -> void
+Kiln.ModelClothBlock.Primitive.get -> int
+Kiln.ModelClothBlock.Primitive.init -> void
+Kiln.ModelClothBlock.Stiffness.get -> double
+Kiln.ModelClothBlock.Stiffness.init -> void
 Kiln.MoveAnimation
 Kiln.MoveAnimation.Add(string? name) -> void
 Kiln.MoveAnimation.Count.get -> int
@@ -2300,6 +2435,8 @@ Kiln.NpcBlock.Behaviour.init -> void
 Kiln.NpcBlock.Body.get -> Kiln.PartRef<Kiln.BodyBlock!>!
 Kiln.NpcBlock.Body.init -> void
 Kiln.NpcBlock.Equals(Kiln.NpcBlock? other) -> bool
+Kiln.NpcBlock.Motions.get -> Kiln.PartRef<Kiln.NpcMotionsBlock!>?
+Kiln.NpcBlock.Motions.init -> void
 Kiln.NpcBlock.Name.get -> string!
 Kiln.NpcBlock.Name.init -> void
 Kiln.NpcBlock.Names.get -> System.Collections.Generic.IDictionary<string!, string!>?
@@ -2309,6 +2446,8 @@ Kiln.NpcBlock.Place.get -> Kiln.NpcPlace?
 Kiln.NpcBlock.Place.init -> void
 Kiln.NpcBlock.Roster.get -> Kiln.RosterBlock?
 Kiln.NpcBlock.Roster.init -> void
+Kiln.NpcBlock.Routine.get -> Kiln.PartRef<Kiln.RoutineBlock!>?
+Kiln.NpcBlock.Routine.init -> void
 Kiln.NpcBlock.Talk.get -> Kiln.DialogueDefinition?
 Kiln.NpcBlock.Talk.init -> void
 Kiln.NpcBlock.TalkName.get -> string?
@@ -2320,6 +2459,40 @@ Kiln.NpcBlock.Was.init -> void
 Kiln.NpcBlocksApi
 Kiln.NpcBlocksApi.extension(Kiln.Act!)
 Kiln.NpcBlocksApi.extension(Kiln.Blocks!)
+Kiln.NpcBodies
+Kiln.NpcBodyBuildChangedEvent
+Kiln.NpcBodyBuildChangedEvent.After.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.Before.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.ClientSide.get -> bool
+Kiln.NpcBodyBuildResult
+Kiln.NpcBodyBuildResult.<Clone>$() -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildResult.BlockKey.get -> string!
+Kiln.NpcBodyBuildResult.BlockKey.init -> void
+Kiln.NpcBodyBuildResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.NpcBodyBuildState State, out string! ModId, out string! BlockKey, out System.Guid Template, out System.Guid Model, out System.Guid Graph, out ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Equals(Kiln.NpcBodyBuildResult? other) -> bool
+Kiln.NpcBodyBuildResult.Generation.get -> ulong
+Kiln.NpcBodyBuildResult.Generation.init -> void
+Kiln.NpcBodyBuildResult.Graph.get -> System.Guid
+Kiln.NpcBodyBuildResult.Graph.init -> void
+Kiln.NpcBodyBuildResult.ModId.get -> string!
+Kiln.NpcBodyBuildResult.ModId.init -> void
+Kiln.NpcBodyBuildResult.Model.get -> System.Guid
+Kiln.NpcBodyBuildResult.Model.init -> void
+Kiln.NpcBodyBuildResult.NpcBodyBuildResult(bool Ok, string? Reason, Kiln.NpcBodyBuildState State, string! ModId, string! BlockKey, System.Guid Template, System.Guid Model, System.Guid Graph, ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Ok.get -> bool
+Kiln.NpcBodyBuildResult.Ok.init -> void
+Kiln.NpcBodyBuildResult.Reason.get -> string?
+Kiln.NpcBodyBuildResult.Reason.init -> void
+Kiln.NpcBodyBuildResult.State.get -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildResult.State.init -> void
+Kiln.NpcBodyBuildResult.Template.get -> System.Guid
+Kiln.NpcBodyBuildResult.Template.init -> void
+Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Failed = 2 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.PendingRestart = 0 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Ready = 1 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.RemovalPendingRestart = 3 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Removed = 4 -> Kiln.NpcBodyBuildState
 Kiln.NpcBrain
 Kiln.NpcBrain.NpcBrain() -> void
 Kiln.NpcControl
@@ -2345,6 +2518,49 @@ Kiln.NpcControl.View.get -> Kiln.NpcView!
 Kiln.NpcEffectOn
 Kiln.NpcEffectOn.Self = 1 -> Kiln.NpcEffectOn
 Kiln.NpcEffectOn.Target = 0 -> Kiln.NpcEffectOn
+Kiln.NpcMotionBinding
+Kiln.NpcMotionBinding.<Clone>$() -> Kiln.NpcMotionBinding!
+Kiln.NpcMotionBinding.Deconstruct(out Kiln.NpcMotionRole Role, out int Variant, out Kiln.AnimState! State, out System.Guid? InteractionKey) -> void
+Kiln.NpcMotionBinding.Equals(Kiln.NpcMotionBinding? other) -> bool
+Kiln.NpcMotionBinding.InteractionKey.get -> System.Guid?
+Kiln.NpcMotionBinding.InteractionKey.init -> void
+Kiln.NpcMotionBinding.NpcMotionBinding(Kiln.NpcMotionRole Role, int Variant, Kiln.AnimState! State, System.Guid? InteractionKey = null) -> void
+Kiln.NpcMotionBinding.Role.get -> Kiln.NpcMotionRole
+Kiln.NpcMotionBinding.Role.init -> void
+Kiln.NpcMotionBinding.State.get -> Kiln.AnimState!
+Kiln.NpcMotionBinding.State.init -> void
+Kiln.NpcMotionBinding.Variant.get -> int
+Kiln.NpcMotionBinding.Variant.init -> void
+Kiln.NpcMotionRole
+Kiln.NpcMotionRole.AttentionGreeting = 14 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.DialogOption = 13 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Door = 20 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Farewell = 12 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Greet = 3 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.GreetingExtra = 11 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.IdleGesture0 = 8 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.IdleGesture1 = 9 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Inspect = 2 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Interaction = 10 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Jump = 19 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Reaction0 = 5 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Reaction1 = 6 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Refuse = 7 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Sit = 0 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Sleep = 1 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Talk = 4 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnLeftBig = 16 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnLeftSmall = 15 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnRightBig = 18 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnRightSmall = 17 -> Kiln.NpcMotionRole
+Kiln.NpcMotionsBlock
+Kiln.NpcMotionsBlock.<Clone>$() -> Kiln.NpcMotionsBlock!
+Kiln.NpcMotionsBlock.Bindings.get -> System.Collections.Generic.IReadOnlyList<Kiln.NpcMotionBinding!>!
+Kiln.NpcMotionsBlock.Bindings.init -> void
+Kiln.NpcMotionsBlock.Equals(Kiln.NpcMotionsBlock? other) -> bool
+Kiln.NpcMotionsBlock.NpcMotionsBlock() -> void
+Kiln.NpcMotionsBlock.OptionalFallback.get -> Kiln.AnimState?
+Kiln.NpcMotionsBlock.OptionalFallback.init -> void
 Kiln.NpcOcclusionMode
 Kiln.NpcOcclusionMode.DistanceAndFaction = 0 -> Kiln.NpcOcclusionMode
 Kiln.NpcOcclusionMode.Voxels = 1 -> Kiln.NpcOcclusionMode
@@ -2822,6 +3038,8 @@ Kiln.RecipeBlock.Makes.get -> int
 Kiln.RecipeBlock.Makes.init -> void
 Kiln.RecipeBlock.MenuGroup.get -> Kiln.CraftingGroupRef?
 Kiln.RecipeBlock.MenuGroup.init -> void
+Kiln.RecipeBlock.MenuKey.get -> string?
+Kiln.RecipeBlock.MenuKey.init -> void
 Kiln.RecipeBlock.Needs.get -> System.Collections.Generic.IDictionary<Kiln.ItemRef, int>!
 Kiln.RecipeBlock.Needs.init -> void
 Kiln.RecipeBlock.NeedsProps.get -> System.Collections.Generic.IReadOnlyList<Kiln.PropRef>?
@@ -2988,6 +3206,9 @@ Kiln.RoamBlock.Max.init -> void
 Kiln.RoamBlock.Min.get -> double?
 Kiln.RoamBlock.Min.init -> void
 Kiln.RoamBlock.RoamBlock() -> void
+Kiln.RoamTask
+Kiln.RoamTask.Equals(Kiln.RoamTask? other) -> bool
+Kiln.RoamTask.RoamTask() -> void
 Kiln.RolledAffix
 Kiln.RolledAffix.<Clone>$() -> Kiln.RolledAffix!
 Kiln.RolledAffix.Affix.get -> string!
@@ -3017,6 +3238,107 @@ Kiln.RosterBlock.SummonTool.get -> string?
 Kiln.RosterBlock.SummonTool.init -> void
 Kiln.RosterBlock.UnlockedBy.get -> string?
 Kiln.RosterBlock.UnlockedBy.init -> void
+Kiln.RoutineAssignmentChangedEvent
+Kiln.RoutineAssignmentChangedEvent.After.get -> Kiln.RoutineSnapshot!
+Kiln.RoutineAssignmentChangedEvent.Before.get -> Kiln.RoutineSnapshot?
+Kiln.RoutineAssignmentChangedEvent.Reason.get -> string!
+Kiln.RoutineAssignmentChangedEvent.Teardown.get -> bool
+Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.Assigned = 0 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.ManualSuspended = 1 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.PendingSpawn = 2 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.Removed = 4 -> Kiln.RoutineAssignmentState
+Kiln.RoutineAssignmentState.VersionMismatch = 3 -> Kiln.RoutineAssignmentState
+Kiln.RoutineBlock
+Kiln.RoutineBlock.<Clone>$() -> Kiln.RoutineBlock!
+Kiln.RoutineBlock.Equals(Kiln.RoutineBlock? other) -> bool
+Kiln.RoutineBlock.Fallback.get -> Kiln.RoutineTask!
+Kiln.RoutineBlock.Fallback.init -> void
+Kiln.RoutineBlock.RoutineBlock() -> void
+Kiln.RoutineBlock.Version.get -> uint
+Kiln.RoutineBlock.Version.init -> void
+Kiln.RoutineBlock.Was.get -> string?
+Kiln.RoutineBlock.Was.init -> void
+Kiln.RoutineBlock.Windows.get -> System.Collections.Generic.IReadOnlyList<Kiln.RoutineWindow!>!
+Kiln.RoutineBlock.Windows.init -> void
+Kiln.RoutineResult
+Kiln.RoutineResult.<Clone>$() -> Kiln.RoutineResult!
+Kiln.RoutineResult.Deconstruct(out bool Ok, out string? Reason, out uint NpcId, out ulong Revision) -> void
+Kiln.RoutineResult.Equals(Kiln.RoutineResult? other) -> bool
+Kiln.RoutineResult.NpcId.get -> uint
+Kiln.RoutineResult.NpcId.init -> void
+Kiln.RoutineResult.Ok.get -> bool
+Kiln.RoutineResult.Ok.init -> void
+Kiln.RoutineResult.Reason.get -> string?
+Kiln.RoutineResult.Reason.init -> void
+Kiln.RoutineResult.Revision.get -> ulong
+Kiln.RoutineResult.Revision.init -> void
+Kiln.RoutineResult.RoutineResult(bool Ok, string? Reason, uint NpcId, ulong Revision) -> void
+Kiln.RoutineSnapshot
+Kiln.RoutineSnapshot.<Clone>$() -> Kiln.RoutineSnapshot!
+Kiln.RoutineSnapshot.Assignment.get -> Kiln.RoutineAssignmentState
+Kiln.RoutineSnapshot.Assignment.init -> void
+Kiln.RoutineSnapshot.Deconstruct(out uint NpcId, out string! Owner, out string! Key, out uint PlanVersion, out ulong Revision, out Kiln.RoutineAssignmentState Assignment, out int WindowIndex, out ulong Invocation, out Kiln.RoutineTask? Task, out Kiln.RoutineTaskState TaskState, out Kiln.VillagerState NativeState, out string? LastReason) -> void
+Kiln.RoutineSnapshot.Equals(Kiln.RoutineSnapshot? other) -> bool
+Kiln.RoutineSnapshot.Invocation.get -> ulong
+Kiln.RoutineSnapshot.Invocation.init -> void
+Kiln.RoutineSnapshot.Key.get -> string!
+Kiln.RoutineSnapshot.Key.init -> void
+Kiln.RoutineSnapshot.LastReason.get -> string?
+Kiln.RoutineSnapshot.LastReason.init -> void
+Kiln.RoutineSnapshot.NativeState.get -> Kiln.VillagerState
+Kiln.RoutineSnapshot.NativeState.init -> void
+Kiln.RoutineSnapshot.NpcId.get -> uint
+Kiln.RoutineSnapshot.NpcId.init -> void
+Kiln.RoutineSnapshot.Owner.get -> string!
+Kiln.RoutineSnapshot.Owner.init -> void
+Kiln.RoutineSnapshot.PlanVersion.get -> uint
+Kiln.RoutineSnapshot.PlanVersion.init -> void
+Kiln.RoutineSnapshot.Revision.get -> ulong
+Kiln.RoutineSnapshot.Revision.init -> void
+Kiln.RoutineSnapshot.RoutineSnapshot(uint NpcId, string! Owner, string! Key, uint PlanVersion, ulong Revision, Kiln.RoutineAssignmentState Assignment, int WindowIndex, ulong Invocation, Kiln.RoutineTask? Task, Kiln.RoutineTaskState TaskState, Kiln.VillagerState NativeState, string? LastReason) -> void
+Kiln.RoutineSnapshot.Task.get -> Kiln.RoutineTask?
+Kiln.RoutineSnapshot.Task.init -> void
+Kiln.RoutineSnapshot.TaskState.get -> Kiln.RoutineTaskState
+Kiln.RoutineSnapshot.TaskState.init -> void
+Kiln.RoutineSnapshot.WindowIndex.get -> int
+Kiln.RoutineSnapshot.WindowIndex.init -> void
+Kiln.RoutineTask
+Kiln.RoutineTask.RoutineTask(Kiln.RoutineTask! original) -> void
+Kiln.RoutineTaskChangedEvent
+Kiln.RoutineTaskChangedEvent.From.get -> Kiln.RoutineTaskState
+Kiln.RoutineTaskChangedEvent.Invocation.get -> ulong
+Kiln.RoutineTaskChangedEvent.Key.get -> string!
+Kiln.RoutineTaskChangedEvent.NpcId.get -> uint
+Kiln.RoutineTaskChangedEvent.PlanVersion.get -> uint
+Kiln.RoutineTaskChangedEvent.Reason.get -> string?
+Kiln.RoutineTaskChangedEvent.Revision.get -> ulong
+Kiln.RoutineTaskChangedEvent.Task.get -> Kiln.RoutineTask?
+Kiln.RoutineTaskChangedEvent.Teardown.get -> bool
+Kiln.RoutineTaskChangedEvent.To.get -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Chosen = 1 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Completed = 3 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.None = 0 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Refused = 4 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Started = 2 -> Kiln.RoutineTaskState
+Kiln.RoutineTaskState.Suspended = 5 -> Kiln.RoutineTaskState
+Kiln.RoutineWindow
+Kiln.RoutineWindow.<Clone>$() -> Kiln.RoutineWindow!
+Kiln.RoutineWindow.AllDay.get -> bool
+Kiln.RoutineWindow.AllDay.init -> void
+Kiln.RoutineWindow.Deconstruct(out int StartMinute, out int EndMinute, out Kiln.RoutineTask! Task, out int Priority, out bool AllDay) -> void
+Kiln.RoutineWindow.EndMinute.get -> int
+Kiln.RoutineWindow.EndMinute.init -> void
+Kiln.RoutineWindow.Equals(Kiln.RoutineWindow? other) -> bool
+Kiln.RoutineWindow.Priority.get -> int
+Kiln.RoutineWindow.Priority.init -> void
+Kiln.RoutineWindow.RoutineWindow(int StartMinute, int EndMinute, Kiln.RoutineTask! Task, int Priority = 0, bool AllDay = false) -> void
+Kiln.RoutineWindow.StartMinute.get -> int
+Kiln.RoutineWindow.StartMinute.init -> void
+Kiln.RoutineWindow.Task.get -> Kiln.RoutineTask!
+Kiln.RoutineWindow.Task.init -> void
+Kiln.Routines
 Kiln.RuleBlock
 Kiln.RuleBlock.<Clone>$() -> Kiln.RuleBlock!
 Kiln.RuleBlock.Chance.get -> double
@@ -3078,6 +3400,12 @@ Kiln.Shape
 Kiln.Shape.<Clone>$() -> Kiln.Shape!
 Kiln.Shape.Equals(Kiln.Shape? other) -> bool
 Kiln.Shape.Shape() -> void
+Kiln.SitTask
+Kiln.SitTask.Equals(Kiln.SitTask? other) -> bool
+Kiln.SitTask.SitTask() -> void
+Kiln.SleepTask
+Kiln.SleepTask.Equals(Kiln.SleepTask? other) -> bool
+Kiln.SleepTask.SleepTask() -> void
 Kiln.SliderRow
 Kiln.SliderRow.Bind.get -> string!
 Kiln.SliderRow.Bind.init -> void
@@ -3306,6 +3634,41 @@ Kiln.StationKind.Timed.get -> bool
 Kiln.StationKind.Timed.init -> void
 Kiln.StationKind.Workshop.get -> string!
 Kiln.StationKind.Workshop.init -> void
+Kiln.StationMenuDefinition
+Kiln.StationMenuDefinition.<Clone>$() -> Kiln.StationMenuDefinition!
+Kiln.StationMenuDefinition.Equals(Kiln.StationMenuDefinition? other) -> bool
+Kiln.StationMenuDefinition.Key.get -> string!
+Kiln.StationMenuDefinition.Key.init -> void
+Kiln.StationMenuDefinition.StationMenuDefinition() -> void
+Kiln.StationMenuDefinition.Tabs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuTabBlock!>!
+Kiln.StationMenuDefinition.Tabs.init -> void
+Kiln.StationMenuRegistration
+Kiln.StationMenuRegistration.DefinitionId.get -> System.Guid
+Kiln.StationMenuRegistration.Dispose() -> void
+Kiln.StationMenuRegistration.Generation.get -> ulong
+Kiln.StationMenuSetBlock
+Kiln.StationMenuSetBlock.<Clone>$() -> Kiln.StationMenuSetBlock!
+Kiln.StationMenuSetBlock.Equals(Kiln.StationMenuSetBlock? other) -> bool
+Kiln.StationMenuSetBlock.Heading.get -> Kiln.UiText?
+Kiln.StationMenuSetBlock.Heading.init -> void
+Kiln.StationMenuSetBlock.Key.get -> string!
+Kiln.StationMenuSetBlock.Key.init -> void
+Kiln.StationMenuSetBlock.Recipes.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationRecipeRef>!
+Kiln.StationMenuSetBlock.Recipes.init -> void
+Kiln.StationMenuSetBlock.StationMenuSetBlock() -> void
+Kiln.StationMenuTabBlock
+Kiln.StationMenuTabBlock.<Clone>$() -> Kiln.StationMenuTabBlock!
+Kiln.StationMenuTabBlock.Equals(Kiln.StationMenuTabBlock? other) -> bool
+Kiln.StationMenuTabBlock.IconFromTab.get -> int
+Kiln.StationMenuTabBlock.IconFromTab.init -> void
+Kiln.StationMenuTabBlock.Key.get -> string!
+Kiln.StationMenuTabBlock.Key.init -> void
+Kiln.StationMenuTabBlock.Name.get -> Kiln.UiText!
+Kiln.StationMenuTabBlock.Name.init -> void
+Kiln.StationMenuTabBlock.Sets.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationMenuSetBlock!>!
+Kiln.StationMenuTabBlock.Sets.init -> void
+Kiln.StationMenuTabBlock.StationMenuTabBlock() -> void
+Kiln.StationMenus
 Kiln.StationNeeds
 Kiln.StationNeeds.AboveWater = 32 -> Kiln.StationNeeds
 Kiln.StationNeeds.EnergyAmount = 4 -> Kiln.StationNeeds
@@ -3361,6 +3724,13 @@ Kiln.StationRecipe.WaterCharges.get -> int
 Kiln.StationRecipe.WaterCharges.init -> void
 Kiln.StationRecipe.Workshop.get -> uint
 Kiln.StationRecipe.Workshop.init -> void
+Kiln.StationRecipeRef
+Kiln.StationRecipeRef.Deconstruct(out string! Value) -> void
+Kiln.StationRecipeRef.Equals(Kiln.StationRecipeRef other) -> bool
+Kiln.StationRecipeRef.StationRecipeRef() -> void
+Kiln.StationRecipeRef.StationRecipeRef(string! Value) -> void
+Kiln.StationRecipeRef.Value.get -> string!
+Kiln.StationRecipeRef.Value.init -> void
 Kiln.StationRef
 Kiln.StationRef.Deconstruct(out string! Value) -> void
 Kiln.StationRef.Equals(Kiln.StationRef other) -> bool
@@ -3733,6 +4103,28 @@ Kiln.TableBlockStatus
 Kiln.TableBlockStatus.Off = 2 -> Kiln.TableBlockStatus
 Kiln.TableBlockStatus.Pending = 1 -> Kiln.TableBlockStatus
 Kiln.TableBlockStatus.Registered = 0 -> Kiln.TableBlockStatus
+Kiln.TableRow
+Kiln.TableRow.Columns.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiColumn!>!
+Kiln.TableRow.Columns.init -> void
+Kiln.TableRow.Equals(Kiln.TableRow? other) -> bool
+Kiln.TableRow.Id.get -> string!
+Kiln.TableRow.Id.init -> void
+Kiln.TableRow.Items.get -> string!
+Kiln.TableRow.Items.init -> void
+Kiln.TableRow.MaxRows.get -> int
+Kiln.TableRow.MaxRows.init -> void
+Kiln.TableRow.Selected.get -> string?
+Kiln.TableRow.Selected.init -> void
+Kiln.TableRow.TableRow() -> void
+Kiln.TabsRow
+Kiln.TabsRow.Equals(Kiln.TabsRow? other) -> bool
+Kiln.TabsRow.Id.get -> string!
+Kiln.TabsRow.Id.init -> void
+Kiln.TabsRow.Selected.get -> string?
+Kiln.TabsRow.Selected.init -> void
+Kiln.TabsRow.Tabs.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiTab!>!
+Kiln.TabsRow.Tabs.init -> void
+Kiln.TabsRow.TabsRow() -> void
 Kiln.TalentBlock
 Kiln.TalentBlock.<Clone>$() -> Kiln.TalentBlock!
 Kiln.TalentBlock.CharacterLevel.get -> int
@@ -3975,6 +4367,23 @@ Kiln.TrackingScope
 Kiln.TrackingScope.Both = 2 -> Kiln.TrackingScope
 Kiln.TrackingScope.Player = 0 -> Kiln.TrackingScope
 Kiln.TrackingScope.World = 1 -> Kiln.TrackingScope
+Kiln.TreeRow
+Kiln.TreeRow.Equals(Kiln.TreeRow? other) -> bool
+Kiln.TreeRow.Expanded.get -> string?
+Kiln.TreeRow.Expanded.init -> void
+Kiln.TreeRow.Fields.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiField!>?
+Kiln.TreeRow.Fields.init -> void
+Kiln.TreeRow.Id.get -> string!
+Kiln.TreeRow.Id.init -> void
+Kiln.TreeRow.NodeRows.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiRow!>?
+Kiln.TreeRow.NodeRows.init -> void
+Kiln.TreeRow.Nodes.get -> string?
+Kiln.TreeRow.Nodes.init -> void
+Kiln.TreeRow.Roots.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiTreeNodeDefinition!>?
+Kiln.TreeRow.Roots.init -> void
+Kiln.TreeRow.Selected.get -> string?
+Kiln.TreeRow.Selected.init -> void
+Kiln.TreeRow.TreeRow() -> void
 Kiln.TriggerBlock
 Kiln.TriggerBlock.<Clone>$() -> Kiln.TriggerBlock!
 Kiln.TriggerBlock.Cooldown.get -> double
@@ -4009,6 +4418,8 @@ Kiln.UiAction.CloseWindow.get -> Kiln.WindowRef?
 Kiln.UiAction.CloseWindow.init -> void
 Kiln.UiAction.Command.get -> string?
 Kiln.UiAction.Command.init -> void
+Kiln.UiAction.CommandTarget.get -> Kiln.UiCommandTarget?
+Kiln.UiAction.CommandTarget.init -> void
 Kiln.UiAction.Equals(Kiln.UiAction? other) -> bool
 Kiln.UiAction.OpenWindow.get -> Kiln.WindowRef?
 Kiln.UiAction.OpenWindow.init -> void
@@ -4018,7 +4429,229 @@ Kiln.UiAction.Toast.get -> Kiln.UiText?
 Kiln.UiAction.Toast.init -> void
 Kiln.UiAction.Toggle.get -> string?
 Kiln.UiAction.Toggle.init -> void
+Kiln.UiAction.ToggleWindow.get -> Kiln.WindowRef?
+Kiln.UiAction.ToggleWindow.init -> void
 Kiln.UiAction.UiAction() -> void
+Kiln.UiBindingValueChangedEvent
+Kiln.UiBindingValueChangedEvent.Id.get -> string!
+Kiln.UiBindingValueChangedEvent.Mod.get -> string!
+Kiln.UiBindingValueChangedEvent.NewVersion.get -> ulong
+Kiln.UiBindingValueChangedEvent.OldVersion.get -> ulong
+Kiln.UiBindingValueChangedEvent.UiBindingValueChangedEvent(string! mod, string! id, ulong oldVersion, ulong newVersion) -> void
+Kiln.UiBoolState
+Kiln.UiBoolState.Deconstruct(out bool Initial) -> void
+Kiln.UiBoolState.Equals(Kiln.UiBoolState? other) -> bool
+Kiln.UiBoolState.Initial.get -> bool
+Kiln.UiBoolState.Initial.init -> void
+Kiln.UiBoolState.UiBoolState(bool Initial = false) -> void
+Kiln.UiColumn
+Kiln.UiColumn.<Clone>$() -> Kiln.UiColumn!
+Kiln.UiColumn.Cell.get -> Kiln.UiText!
+Kiln.UiColumn.Cell.init -> void
+Kiln.UiColumn.Deconstruct(out string! Id, out Kiln.UiText! Label, out Kiln.UiText! Cell) -> void
+Kiln.UiColumn.Equals(Kiln.UiColumn? other) -> bool
+Kiln.UiColumn.Id.get -> string!
+Kiln.UiColumn.Id.init -> void
+Kiln.UiColumn.Label.get -> Kiln.UiText!
+Kiln.UiColumn.Label.init -> void
+Kiln.UiColumn.UiColumn(string! Id, Kiln.UiText! Label, Kiln.UiText! Cell) -> void
+Kiln.UiCommandCode
+Kiln.UiCommandCode.AssociationChanged = 9 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledAfterStart = 16 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledBeforeSend = 15 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledBeforeStart = 7 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.CanceledByCommandEvent = 3 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ExpiredBeforeStart = 6 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.HandlerFailure = 10 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.None = 0 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ParseFailure = 2 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.PermissionDenied = 1 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ProtocolConflict = 13 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.QueueFull = 4 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.RateLimited = 5 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.ReplayExpired = 12 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.RunningTimeout = 11 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.TimedOutUnknown = 17 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.TooLateToCancel = 8 -> Kiln.UiCommandCode
+Kiln.UiCommandCode.UnknownRequest = 14 -> Kiln.UiCommandCode
+Kiln.UiCommandCompletedEvent
+Kiln.UiCommandCompletedEvent.Result.get -> Kiln.UiCommandResult!
+Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.Completed = 2 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.NotSent = 0 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.NotStarted = 1 -> Kiln.UiCommandOutcome
+Kiln.UiCommandOutcome.Unknown = 3 -> Kiln.UiCommandOutcome
+Kiln.UiCommandResult
+Kiln.UiCommandResult.<Clone>$() -> Kiln.UiCommandResult!
+Kiln.UiCommandResult.Code.get -> Kiln.UiCommandCode
+Kiln.UiCommandResult.Code.init -> void
+Kiln.UiCommandResult.Deconstruct(out bool Ok, out string? Reason, out System.Collections.Generic.IReadOnlyList<string!>! Output, out ulong RequestId, out string! Nonce, out Kiln.UiCommandState State, out Kiln.UiCommandOutcome Outcome, out Kiln.UiCommandCode Code, out bool Truncated) -> void
+Kiln.UiCommandResult.Equals(Kiln.UiCommandResult? other) -> bool
+Kiln.UiCommandResult.Nonce.get -> string!
+Kiln.UiCommandResult.Nonce.init -> void
+Kiln.UiCommandResult.Ok.get -> bool
+Kiln.UiCommandResult.Ok.init -> void
+Kiln.UiCommandResult.Outcome.get -> Kiln.UiCommandOutcome
+Kiln.UiCommandResult.Outcome.init -> void
+Kiln.UiCommandResult.Output.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.UiCommandResult.Output.init -> void
+Kiln.UiCommandResult.Reason.get -> string?
+Kiln.UiCommandResult.Reason.init -> void
+Kiln.UiCommandResult.RequestId.get -> ulong
+Kiln.UiCommandResult.RequestId.init -> void
+Kiln.UiCommandResult.State.get -> Kiln.UiCommandState
+Kiln.UiCommandResult.State.init -> void
+Kiln.UiCommandResult.Truncated.get -> bool
+Kiln.UiCommandResult.Truncated.init -> void
+Kiln.UiCommandResult.UiCommandResult(bool Ok, string? Reason, System.Collections.Generic.IReadOnlyList<string!>! Output, ulong RequestId, string! Nonce, Kiln.UiCommandState State, Kiln.UiCommandOutcome Outcome, Kiln.UiCommandCode Code, bool Truncated) -> void
+Kiln.UiCommandState
+Kiln.UiCommandState.Final = 3 -> Kiln.UiCommandState
+Kiln.UiCommandState.Queued = 0 -> Kiln.UiCommandState
+Kiln.UiCommandState.RunningOverBudget = 2 -> Kiln.UiCommandState
+Kiln.UiCommandState.Started = 1 -> Kiln.UiCommandState
+Kiln.UiCommandStatusChangedEvent
+Kiln.UiCommandStatusChangedEvent.Nonce.get -> string!
+Kiln.UiCommandStatusChangedEvent.RequestId.get -> ulong
+Kiln.UiCommandStatusChangedEvent.Result.get -> Kiln.UiCommandResult?
+Kiln.UiCommandStatusChangedEvent.State.get -> Kiln.UiCommandState
+Kiln.UiCommandTarget
+Kiln.UiCommandTarget.Local = 0 -> Kiln.UiCommandTarget
+Kiln.UiCommandTarget.Server = 1 -> Kiln.UiCommandTarget
+Kiln.UiControlState
+Kiln.UiControlState.<Clone>$() -> Kiln.UiControlState!
+Kiln.UiControlState.Deconstruct(out string? Selected, out System.Collections.Generic.IReadOnlyList<string!>! Expanded) -> void
+Kiln.UiControlState.Equals(Kiln.UiControlState? other) -> bool
+Kiln.UiControlState.Expanded.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.UiControlState.Expanded.init -> void
+Kiln.UiControlState.Selected.get -> string?
+Kiln.UiControlState.Selected.init -> void
+Kiln.UiControlState.UiControlState(string? Selected, System.Collections.Generic.IReadOnlyList<string!>! Expanded) -> void
+Kiln.UiControlStateChangedEvent
+Kiln.UiControlStateChangedEvent.After.get -> Kiln.UiControlState!
+Kiln.UiControlStateChangedEvent.Before.get -> Kiln.UiControlState?
+Kiln.UiControlStateChangedEvent.Cause.get -> Kiln.UiStateChangeCause
+Kiln.UiControlStateChangedEvent.RowId.get -> string!
+Kiln.UiControlStateChangedEvent.UiControlStateChangedEvent(Kiln.WindowRef window, string! rowId, Kiln.UiControlState? before, Kiln.UiControlState! after, Kiln.UiStateVersion version, Kiln.UiStateChangeCause cause) -> void
+Kiln.UiControlStateChangedEvent.Version.get -> Kiln.UiStateVersion
+Kiln.UiControlStateChangedEvent.Window.get -> Kiln.WindowRef
+Kiln.UiDataPublishResult
+Kiln.UiDataPublishResult.<Clone>$() -> Kiln.UiDataPublishResult!
+Kiln.UiDataPublishResult.Deconstruct(out bool Ok, out string? Reason, out ulong Version) -> void
+Kiln.UiDataPublishResult.Equals(Kiln.UiDataPublishResult? other) -> bool
+Kiln.UiDataPublishResult.Ok.get -> bool
+Kiln.UiDataPublishResult.Ok.init -> void
+Kiln.UiDataPublishResult.Reason.get -> string?
+Kiln.UiDataPublishResult.Reason.init -> void
+Kiln.UiDataPublishResult.UiDataPublishResult(bool Ok, string? Reason, ulong Version) -> void
+Kiln.UiDataPublishResult.Version.get -> ulong
+Kiln.UiDataPublishResult.Version.init -> void
+Kiln.UiDataRegistration
+Kiln.UiDataRegistration.Dispose() -> void
+Kiln.UiDataRegistration.Id.get -> string!
+Kiln.UiDataRegistration.Ok.get -> bool
+Kiln.UiDataRegistration.Reason.get -> string?
+Kiln.UiDataRow
+Kiln.UiDataRow.<Clone>$() -> Kiln.UiDataRow!
+Kiln.UiDataRow.Deconstruct(out string! Key, out System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>! Values) -> void
+Kiln.UiDataRow.Equals(Kiln.UiDataRow? other) -> bool
+Kiln.UiDataRow.Key.get -> string!
+Kiln.UiDataRow.Key.init -> void
+Kiln.UiDataRow.UiDataRow(string! Key, System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>! Values) -> void
+Kiln.UiDataRow.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>!
+Kiln.UiDataRow.Values.init -> void
+Kiln.UiDataSchema
+Kiln.UiDataSchema.<Clone>$() -> Kiln.UiDataSchema!
+Kiln.UiDataSchema.Deconstruct(out Kiln.UiDataShape Shape, out Kiln.UiScalarType? ScalarType, out System.Collections.Generic.IReadOnlyList<Kiln.UiField!>? Fields) -> void
+Kiln.UiDataSchema.Equals(Kiln.UiDataSchema? other) -> bool
+Kiln.UiDataSchema.Fields.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiField!>?
+Kiln.UiDataSchema.Fields.init -> void
+Kiln.UiDataSchema.ScalarType.get -> Kiln.UiScalarType?
+Kiln.UiDataSchema.ScalarType.init -> void
+Kiln.UiDataSchema.Shape.get -> Kiln.UiDataShape
+Kiln.UiDataSchema.Shape.init -> void
+Kiln.UiDataSchema.UiDataSchema(Kiln.UiDataShape Shape, Kiln.UiScalarType? ScalarType = null, System.Collections.Generic.IReadOnlyList<Kiln.UiField!>? Fields = null) -> void
+Kiln.UiDataShape
+Kiln.UiDataShape.Rows = 1 -> Kiln.UiDataShape
+Kiln.UiDataShape.Scalar = 0 -> Kiln.UiDataShape
+Kiln.UiDataShape.Tree = 2 -> Kiln.UiDataShape
+Kiln.UiDataSnapshot
+Kiln.UiDataSnapshot.Rows
+Kiln.UiDataSnapshot.Rows.Deconstruct(out System.Collections.Generic.IReadOnlyList<Kiln.UiDataRow!>! Values) -> void
+Kiln.UiDataSnapshot.Rows.Equals(Kiln.UiDataSnapshot.Rows? other) -> bool
+Kiln.UiDataSnapshot.Rows.Rows(System.Collections.Generic.IReadOnlyList<Kiln.UiDataRow!>! Values) -> void
+Kiln.UiDataSnapshot.Rows.Values.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiDataRow!>!
+Kiln.UiDataSnapshot.Rows.Values.init -> void
+Kiln.UiDataSnapshot.Scalar
+Kiln.UiDataSnapshot.Scalar.Deconstruct(out Kiln.UiScalar! Value) -> void
+Kiln.UiDataSnapshot.Scalar.Equals(Kiln.UiDataSnapshot.Scalar? other) -> bool
+Kiln.UiDataSnapshot.Scalar.Scalar(Kiln.UiScalar! Value) -> void
+Kiln.UiDataSnapshot.Scalar.Value.get -> Kiln.UiScalar!
+Kiln.UiDataSnapshot.Scalar.Value.init -> void
+Kiln.UiDataSnapshot.Tree
+Kiln.UiDataSnapshot.Tree.Deconstruct(out System.Collections.Generic.IReadOnlyList<Kiln.UiTreeDataNode!>! Values) -> void
+Kiln.UiDataSnapshot.Tree.Equals(Kiln.UiDataSnapshot.Tree? other) -> bool
+Kiln.UiDataSnapshot.Tree.Tree(System.Collections.Generic.IReadOnlyList<Kiln.UiTreeDataNode!>! Values) -> void
+Kiln.UiDataSnapshot.Tree.Values.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiTreeDataNode!>!
+Kiln.UiDataSnapshot.Tree.Values.init -> void
+Kiln.UiDataSnapshot.UiDataSnapshot(Kiln.UiDataSnapshot! original) -> void
+Kiln.UiDecimalState
+Kiln.UiDecimalState.Deconstruct(out decimal Initial, out decimal Min, out decimal Max, out int Scale) -> void
+Kiln.UiDecimalState.Equals(Kiln.UiDecimalState? other) -> bool
+Kiln.UiDecimalState.Initial.get -> decimal
+Kiln.UiDecimalState.Initial.init -> void
+Kiln.UiDecimalState.Max.get -> decimal
+Kiln.UiDecimalState.Max.init -> void
+Kiln.UiDecimalState.Min.get -> decimal
+Kiln.UiDecimalState.Min.init -> void
+Kiln.UiDecimalState.Scale.get -> int
+Kiln.UiDecimalState.Scale.init -> void
+Kiln.UiDecimalState.UiDecimalState(decimal Initial, decimal Min = -79228162514264337593543950335, decimal Max = 79228162514264337593543950335, int Scale = 6) -> void
+Kiln.UiDemandRegistration
+Kiln.UiDemandRegistration.Dispose() -> void
+Kiln.UiDemandRegistration.Handle.get -> ulong
+Kiln.UiDemandRegistration.Ok.get -> bool
+Kiln.UiDemandRegistration.Reason.get -> string?
+Kiln.UiField
+Kiln.UiField.<Clone>$() -> Kiln.UiField!
+Kiln.UiField.Deconstruct(out string! Id, out Kiln.UiScalarType Type) -> void
+Kiln.UiField.Equals(Kiln.UiField? other) -> bool
+Kiln.UiField.Id.get -> string!
+Kiln.UiField.Id.init -> void
+Kiln.UiField.Type.get -> Kiln.UiScalarType
+Kiln.UiField.Type.init -> void
+Kiln.UiField.UiField(string! Id, Kiln.UiScalarType Type) -> void
+Kiln.UiInputCommit
+Kiln.UiInputCommit.Blur = 0 -> Kiln.UiInputCommit
+Kiln.UiInputCommit.Enter = 1 -> Kiln.UiInputCommit
+Kiln.UiInt64State
+Kiln.UiInt64State.Deconstruct(out long Initial, out long Min, out long Max) -> void
+Kiln.UiInt64State.Equals(Kiln.UiInt64State? other) -> bool
+Kiln.UiInt64State.Initial.get -> long
+Kiln.UiInt64State.Initial.init -> void
+Kiln.UiInt64State.Max.get -> long
+Kiln.UiInt64State.Max.init -> void
+Kiln.UiInt64State.Min.get -> long
+Kiln.UiInt64State.Min.init -> void
+Kiln.UiInt64State.UiInt64State(long Initial, long Min = -9223372036854775808, long Max = 9223372036854775807) -> void
+Kiln.UiInventoryValue
+Kiln.UiInventoryValue.<Clone>$() -> Kiln.UiInventoryValue!
+Kiln.UiInventoryValue.Count.get -> uint
+Kiln.UiInventoryValue.Count.init -> void
+Kiln.UiInventoryValue.Deconstruct(out string! Key, out uint Holder, out uint InventoryPage, out byte SlotIndex, out uint Item, out uint Count, out uint Pide) -> void
+Kiln.UiInventoryValue.Equals(Kiln.UiInventoryValue? other) -> bool
+Kiln.UiInventoryValue.Holder.get -> uint
+Kiln.UiInventoryValue.Holder.init -> void
+Kiln.UiInventoryValue.InventoryPage.get -> uint
+Kiln.UiInventoryValue.InventoryPage.init -> void
+Kiln.UiInventoryValue.Item.get -> uint
+Kiln.UiInventoryValue.Item.init -> void
+Kiln.UiInventoryValue.Key.get -> string!
+Kiln.UiInventoryValue.Key.init -> void
+Kiln.UiInventoryValue.Pide.get -> uint
+Kiln.UiInventoryValue.Pide.init -> void
+Kiln.UiInventoryValue.SlotIndex.get -> byte
+Kiln.UiInventoryValue.SlotIndex.init -> void
+Kiln.UiInventoryValue.UiInventoryValue(string! Key, uint Holder, uint InventoryPage, byte SlotIndex, uint Item, uint Count, uint Pide) -> void
 Kiln.UiMenu
 Kiln.UiMenu.<Clone>$() -> Kiln.UiMenu!
 Kiln.UiMenu.Equals(Kiln.UiMenu? other) -> bool
@@ -4042,6 +4675,51 @@ Kiln.UiRow.UiRow() -> void
 Kiln.UiRow.UiRow(Kiln.UiRow! original) -> void
 Kiln.UiRow.When.get -> string?
 Kiln.UiRow.When.init -> void
+Kiln.UiScalar
+Kiln.UiScalar.Bool
+Kiln.UiScalar.Bool.Bool(bool Value) -> void
+Kiln.UiScalar.Bool.Deconstruct(out bool Value) -> void
+Kiln.UiScalar.Bool.Equals(Kiln.UiScalar.Bool? other) -> bool
+Kiln.UiScalar.Bool.Value.get -> bool
+Kiln.UiScalar.Bool.Value.init -> void
+Kiln.UiScalar.Decimal
+Kiln.UiScalar.Decimal.Decimal(decimal Value) -> void
+Kiln.UiScalar.Decimal.Deconstruct(out decimal Value) -> void
+Kiln.UiScalar.Decimal.Equals(Kiln.UiScalar.Decimal? other) -> bool
+Kiln.UiScalar.Decimal.Value.get -> decimal
+Kiln.UiScalar.Decimal.Value.init -> void
+Kiln.UiScalar.Float64
+Kiln.UiScalar.Float64.Deconstruct(out double Value) -> void
+Kiln.UiScalar.Float64.Equals(Kiln.UiScalar.Float64? other) -> bool
+Kiln.UiScalar.Float64.Float64(double Value) -> void
+Kiln.UiScalar.Float64.Value.get -> double
+Kiln.UiScalar.Float64.Value.init -> void
+Kiln.UiScalar.Int64
+Kiln.UiScalar.Int64.Deconstruct(out long Value) -> void
+Kiln.UiScalar.Int64.Equals(Kiln.UiScalar.Int64? other) -> bool
+Kiln.UiScalar.Int64.Int64(long Value) -> void
+Kiln.UiScalar.Int64.Value.get -> long
+Kiln.UiScalar.Int64.Value.init -> void
+Kiln.UiScalar.String
+Kiln.UiScalar.String.Deconstruct(out string! Value) -> void
+Kiln.UiScalar.String.Equals(Kiln.UiScalar.String? other) -> bool
+Kiln.UiScalar.String.String(string! Value) -> void
+Kiln.UiScalar.String.Value.get -> string!
+Kiln.UiScalar.String.Value.init -> void
+Kiln.UiScalar.UInt64
+Kiln.UiScalar.UInt64.Deconstruct(out ulong Value) -> void
+Kiln.UiScalar.UInt64.Equals(Kiln.UiScalar.UInt64? other) -> bool
+Kiln.UiScalar.UInt64.UInt64(ulong Value) -> void
+Kiln.UiScalar.UInt64.Value.get -> ulong
+Kiln.UiScalar.UInt64.Value.init -> void
+Kiln.UiScalar.UiScalar(Kiln.UiScalar! original) -> void
+Kiln.UiScalarType
+Kiln.UiScalarType.Bool = 0 -> Kiln.UiScalarType
+Kiln.UiScalarType.Decimal = 3 -> Kiln.UiScalarType
+Kiln.UiScalarType.Float64 = 4 -> Kiln.UiScalarType
+Kiln.UiScalarType.Int64 = 1 -> Kiln.UiScalarType
+Kiln.UiScalarType.String = 5 -> Kiln.UiScalarType
+Kiln.UiScalarType.UInt64 = 2 -> Kiln.UiScalarType
 Kiln.UiSet
 Kiln.UiSet.<Clone>$() -> Kiln.UiSet!
 Kiln.UiSet.Bind.get -> string!
@@ -4050,6 +4728,238 @@ Kiln.UiSet.Equals(Kiln.UiSet? other) -> bool
 Kiln.UiSet.To.get -> object!
 Kiln.UiSet.To.init -> void
 Kiln.UiSet.UiSet() -> void
+Kiln.UiSnapshotStamp
+Kiln.UiSnapshotStamp.<Clone>$() -> Kiln.UiSnapshotStamp!
+Kiln.UiSnapshotStamp.CaptureMs.get -> ulong
+Kiln.UiSnapshotStamp.CaptureMs.init -> void
+Kiln.UiSnapshotStamp.Deconstruct(out ulong Session, out ulong Step, out ulong CaptureMs) -> void
+Kiln.UiSnapshotStamp.Equals(Kiln.UiSnapshotStamp? other) -> bool
+Kiln.UiSnapshotStamp.Session.get -> ulong
+Kiln.UiSnapshotStamp.Session.init -> void
+Kiln.UiSnapshotStamp.Step.get -> ulong
+Kiln.UiSnapshotStamp.Step.init -> void
+Kiln.UiSnapshotStamp.UiSnapshotStamp(ulong Session, ulong Step, ulong CaptureMs) -> void
+Kiln.UiStatImportRegistration
+Kiln.UiStatImportRegistration.Dispose() -> void
+Kiln.UiStatImportRegistration.Key.get -> Kiln.ModValueKey
+Kiln.UiStatImportRegistration.Ok.get -> bool
+Kiln.UiStatImportRegistration.Reason.get -> string?
+Kiln.UiStateChangeCause
+Kiln.UiStateChangeCause.Action = 1 -> Kiln.UiStateChangeCause
+Kiln.UiStateChangeCause.Api = 2 -> Kiln.UiStateChangeCause
+Kiln.UiStateChangeCause.Pruned = 4 -> Kiln.UiStateChangeCause
+Kiln.UiStateChangeCause.SelectionInvalidated = 3 -> Kiln.UiStateChangeCause
+Kiln.UiStateChangeCause.Widget = 0 -> Kiln.UiStateChangeCause
+Kiln.UiStateDefinition
+Kiln.UiStateDefinition.UiStateDefinition() -> void
+Kiln.UiStateDefinition.UiStateDefinition(Kiln.UiStateDefinition! original) -> void
+Kiln.UiStateReadResult
+Kiln.UiStateReadResult.<Clone>$() -> Kiln.UiStateReadResult!
+Kiln.UiStateReadResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiStateSnapshot? Snapshot) -> void
+Kiln.UiStateReadResult.Equals(Kiln.UiStateReadResult? other) -> bool
+Kiln.UiStateReadResult.Ok.get -> bool
+Kiln.UiStateReadResult.Ok.init -> void
+Kiln.UiStateReadResult.Reason.get -> string?
+Kiln.UiStateReadResult.Reason.init -> void
+Kiln.UiStateReadResult.Snapshot.get -> Kiln.UiStateSnapshot?
+Kiln.UiStateReadResult.Snapshot.init -> void
+Kiln.UiStateReadResult.UiStateReadResult(bool Ok, string? Reason, Kiln.UiStateSnapshot? Snapshot) -> void
+Kiln.UiStateReasons
+Kiln.UiStateResult
+Kiln.UiStateResult.<Clone>$() -> Kiln.UiStateResult!
+Kiln.UiStateResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiStateSnapshot? Snapshot) -> void
+Kiln.UiStateResult.Equals(Kiln.UiStateResult? other) -> bool
+Kiln.UiStateResult.Ok.get -> bool
+Kiln.UiStateResult.Ok.init -> void
+Kiln.UiStateResult.Reason.get -> string?
+Kiln.UiStateResult.Reason.init -> void
+Kiln.UiStateResult.Snapshot.get -> Kiln.UiStateSnapshot?
+Kiln.UiStateResult.Snapshot.init -> void
+Kiln.UiStateResult.UiStateResult(bool Ok, string? Reason, Kiln.UiStateSnapshot? Snapshot) -> void
+Kiln.UiStateSnapshot
+Kiln.UiStateSnapshot.<Clone>$() -> Kiln.UiStateSnapshot!
+Kiln.UiStateSnapshot.Controls.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiControlState!>!
+Kiln.UiStateSnapshot.Controls.init -> void
+Kiln.UiStateSnapshot.Deconstruct(out Kiln.WindowRef Window, out Kiln.UiStateVersion Version, out System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiStateValue!>! Values, out System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiControlState!>! Controls) -> void
+Kiln.UiStateSnapshot.Equals(Kiln.UiStateSnapshot? other) -> bool
+Kiln.UiStateSnapshot.UiStateSnapshot(Kiln.WindowRef Window, Kiln.UiStateVersion Version, System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiStateValue!>! Values, System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiControlState!>! Controls) -> void
+Kiln.UiStateSnapshot.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiStateValue!>!
+Kiln.UiStateSnapshot.Values.init -> void
+Kiln.UiStateSnapshot.Version.get -> Kiln.UiStateVersion
+Kiln.UiStateSnapshot.Version.init -> void
+Kiln.UiStateSnapshot.Window.get -> Kiln.WindowRef
+Kiln.UiStateSnapshot.Window.init -> void
+Kiln.UiStateValue
+Kiln.UiStateValue.Bool
+Kiln.UiStateValue.Bool.Bool(bool Value) -> void
+Kiln.UiStateValue.Bool.Deconstruct(out bool Value) -> void
+Kiln.UiStateValue.Bool.Equals(Kiln.UiStateValue.Bool? other) -> bool
+Kiln.UiStateValue.Bool.Value.get -> bool
+Kiln.UiStateValue.Bool.Value.init -> void
+Kiln.UiStateValue.Decimal
+Kiln.UiStateValue.Decimal.Decimal(decimal Value) -> void
+Kiln.UiStateValue.Decimal.Deconstruct(out decimal Value) -> void
+Kiln.UiStateValue.Decimal.Equals(Kiln.UiStateValue.Decimal? other) -> bool
+Kiln.UiStateValue.Decimal.Value.get -> decimal
+Kiln.UiStateValue.Decimal.Value.init -> void
+Kiln.UiStateValue.Int64
+Kiln.UiStateValue.Int64.Deconstruct(out long Value) -> void
+Kiln.UiStateValue.Int64.Equals(Kiln.UiStateValue.Int64? other) -> bool
+Kiln.UiStateValue.Int64.Int64(long Value) -> void
+Kiln.UiStateValue.Int64.Value.get -> long
+Kiln.UiStateValue.Int64.Value.init -> void
+Kiln.UiStateValue.String
+Kiln.UiStateValue.String.Deconstruct(out string! Value) -> void
+Kiln.UiStateValue.String.Equals(Kiln.UiStateValue.String? other) -> bool
+Kiln.UiStateValue.String.String(string! Value) -> void
+Kiln.UiStateValue.String.Value.get -> string!
+Kiln.UiStateValue.String.Value.init -> void
+Kiln.UiStateValue.StringSet
+Kiln.UiStateValue.StringSet.Deconstruct(out System.Collections.Generic.IReadOnlyList<string!>! Value) -> void
+Kiln.UiStateValue.StringSet.Equals(Kiln.UiStateValue.StringSet? other) -> bool
+Kiln.UiStateValue.StringSet.StringSet(System.Collections.Generic.IReadOnlyList<string!>! Value) -> void
+Kiln.UiStateValue.StringSet.Value.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.UiStateValue.StringSet.Value.init -> void
+Kiln.UiStateValue.UiStateValue(Kiln.UiStateValue! original) -> void
+Kiln.UiStateVersion
+Kiln.UiStateVersion.Deconstruct(out ulong Session, out ulong Revision) -> void
+Kiln.UiStateVersion.Equals(Kiln.UiStateVersion other) -> bool
+Kiln.UiStateVersion.Revision.get -> ulong
+Kiln.UiStateVersion.Revision.init -> void
+Kiln.UiStateVersion.Session.get -> ulong
+Kiln.UiStateVersion.Session.init -> void
+Kiln.UiStateVersion.UiStateVersion() -> void
+Kiln.UiStateVersion.UiStateVersion(ulong Session, ulong Revision) -> void
+Kiln.UiStringSetState
+Kiln.UiStringSetState.Deconstruct(out System.Collections.Generic.IReadOnlyList<string!>! Initial, out int MaxItems, out int MaxItemBytes) -> void
+Kiln.UiStringSetState.Equals(Kiln.UiStringSetState? other) -> bool
+Kiln.UiStringSetState.Initial.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.UiStringSetState.Initial.init -> void
+Kiln.UiStringSetState.MaxItemBytes.get -> int
+Kiln.UiStringSetState.MaxItemBytes.init -> void
+Kiln.UiStringSetState.MaxItems.get -> int
+Kiln.UiStringSetState.MaxItems.init -> void
+Kiln.UiStringSetState.UiStringSetState(System.Collections.Generic.IReadOnlyList<string!>! Initial, int MaxItems = 512, int MaxItemBytes = 128) -> void
+Kiln.UiStringState
+Kiln.UiStringState.Deconstruct(out string! Initial, out int MaxBytes) -> void
+Kiln.UiStringState.Equals(Kiln.UiStringState? other) -> bool
+Kiln.UiStringState.Initial.get -> string!
+Kiln.UiStringState.Initial.init -> void
+Kiln.UiStringState.MaxBytes.get -> int
+Kiln.UiStringState.MaxBytes.init -> void
+Kiln.UiStringState.UiStringState(string! Initial = "", int MaxBytes = 256) -> void
+Kiln.UiTab
+Kiln.UiTab.<Clone>$() -> Kiln.UiTab!
+Kiln.UiTab.Deconstruct(out string! Id, out Kiln.UiText! Label, out System.Collections.Generic.IReadOnlyList<Kiln.UiRow!>! Rows, out string? When) -> void
+Kiln.UiTab.Equals(Kiln.UiTab? other) -> bool
+Kiln.UiTab.Id.get -> string!
+Kiln.UiTab.Id.init -> void
+Kiln.UiTab.Label.get -> Kiln.UiText!
+Kiln.UiTab.Label.init -> void
+Kiln.UiTab.Rows.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiRow!>!
+Kiln.UiTab.Rows.init -> void
+Kiln.UiTab.UiTab(string! Id, Kiln.UiText! Label, System.Collections.Generic.IReadOnlyList<Kiln.UiRow!>! Rows, string? When = null) -> void
+Kiln.UiTab.When.get -> string?
+Kiln.UiTab.When.init -> void
+Kiln.UiTreeDataNode
+Kiln.UiTreeDataNode.<Clone>$() -> Kiln.UiTreeDataNode!
+Kiln.UiTreeDataNode.Deconstruct(out string! Key, out string? ParentKey, out Kiln.UiText! Label, out System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>! Values) -> void
+Kiln.UiTreeDataNode.Equals(Kiln.UiTreeDataNode? other) -> bool
+Kiln.UiTreeDataNode.Key.get -> string!
+Kiln.UiTreeDataNode.Key.init -> void
+Kiln.UiTreeDataNode.Label.get -> Kiln.UiText!
+Kiln.UiTreeDataNode.Label.init -> void
+Kiln.UiTreeDataNode.ParentKey.get -> string?
+Kiln.UiTreeDataNode.ParentKey.init -> void
+Kiln.UiTreeDataNode.UiTreeDataNode(string! Key, string? ParentKey, Kiln.UiText! Label, System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>! Values) -> void
+Kiln.UiTreeDataNode.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>!
+Kiln.UiTreeDataNode.Values.init -> void
+Kiln.UiTreeNodeDefinition
+Kiln.UiTreeNodeDefinition.<Clone>$() -> Kiln.UiTreeNodeDefinition!
+Kiln.UiTreeNodeDefinition.Children.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiTreeNodeDefinition!>?
+Kiln.UiTreeNodeDefinition.Children.init -> void
+Kiln.UiTreeNodeDefinition.Deconstruct(out string! Key, out Kiln.UiText! Label, out System.Collections.Generic.IReadOnlyList<Kiln.UiTreeNodeDefinition!>? Children, out System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>? Values) -> void
+Kiln.UiTreeNodeDefinition.Equals(Kiln.UiTreeNodeDefinition? other) -> bool
+Kiln.UiTreeNodeDefinition.Key.get -> string!
+Kiln.UiTreeNodeDefinition.Key.init -> void
+Kiln.UiTreeNodeDefinition.Label.get -> Kiln.UiText!
+Kiln.UiTreeNodeDefinition.Label.init -> void
+Kiln.UiTreeNodeDefinition.UiTreeNodeDefinition(string! Key, Kiln.UiText! Label, System.Collections.Generic.IReadOnlyList<Kiln.UiTreeNodeDefinition!>? Children = null, System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>? Values = null) -> void
+Kiln.UiTreeNodeDefinition.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiScalar!>?
+Kiln.UiTreeNodeDefinition.Values.init -> void
+Kiln.UiWindowStateChangedEvent
+Kiln.UiWindowStateChangedEvent.After.get -> Kiln.UiStateValue?
+Kiln.UiWindowStateChangedEvent.Before.get -> Kiln.UiStateValue?
+Kiln.UiWindowStateChangedEvent.Cause.get -> Kiln.UiStateChangeCause
+Kiln.UiWindowStateChangedEvent.Key.get -> string!
+Kiln.UiWindowStateChangedEvent.UiWindowStateChangedEvent(Kiln.WindowRef window, string! key, Kiln.UiStateValue? before, Kiln.UiStateValue? after, Kiln.UiStateVersion version, Kiln.UiStateChangeCause cause) -> void
+Kiln.UiWindowStateChangedEvent.Version.get -> Kiln.UiStateVersion
+Kiln.UiWindowStateChangedEvent.Window.get -> Kiln.WindowRef
+Kiln.UiWindowStateResetEvent
+Kiln.UiWindowStateResetEvent.NewVersion.get -> Kiln.UiStateVersion
+Kiln.UiWindowStateResetEvent.OldVersion.get -> Kiln.UiStateVersion
+Kiln.UiWindowStateResetEvent.UiWindowStateResetEvent(Kiln.WindowRef window, Kiln.UiStateVersion oldVersion, Kiln.UiStateVersion newVersion) -> void
+Kiln.UiWindowStateResetEvent.Window.get -> Kiln.WindowRef
+Kiln.UiWorldFields
+Kiln.UiWorldFields.HostTime = 8 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalInventory = 4 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalPosition = 2 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.LocalVitals = 1 -> Kiln.UiWorldFields
+Kiln.UiWorldFields.None = 0 -> Kiln.UiWorldFields
+Kiln.UiWorldReadResult
+Kiln.UiWorldReadResult.<Clone>$() -> Kiln.UiWorldReadResult!
+Kiln.UiWorldReadResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiWorldSnapshot? Snapshot) -> void
+Kiln.UiWorldReadResult.Equals(Kiln.UiWorldReadResult? other) -> bool
+Kiln.UiWorldReadResult.Ok.get -> bool
+Kiln.UiWorldReadResult.Ok.init -> void
+Kiln.UiWorldReadResult.Reason.get -> string?
+Kiln.UiWorldReadResult.Reason.init -> void
+Kiln.UiWorldReadResult.Snapshot.get -> Kiln.UiWorldSnapshot?
+Kiln.UiWorldReadResult.Snapshot.init -> void
+Kiln.UiWorldReadResult.UiWorldReadResult(bool Ok, string? Reason, Kiln.UiWorldSnapshot? Snapshot) -> void
+Kiln.UiWorldSnapshot
+Kiln.UiWorldSnapshot.<Clone>$() -> Kiln.UiWorldSnapshot!
+Kiln.UiWorldSnapshot.AvailableMask.get -> uint
+Kiln.UiWorldSnapshot.AvailableMask.init -> void
+Kiln.UiWorldSnapshot.Deconstruct(out ulong Publication, out uint AvailableMask, out Kiln.UiSnapshotStamp! Local, out Kiln.UiSnapshotStamp! Server, out uint LocalPlayer, out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax, out long XFixed, out long YFixed, out long ZFixed, out decimal ServerHours, out System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>! Inventory, out System.Collections.Generic.IReadOnlyList<string?>! UnavailableReasons) -> void
+Kiln.UiWorldSnapshot.Equals(Kiln.UiWorldSnapshot? other) -> bool
+Kiln.UiWorldSnapshot.Has(Kiln.UiWorldFields fields) -> bool
+Kiln.UiWorldSnapshot.Health.get -> uint
+Kiln.UiWorldSnapshot.Health.init -> void
+Kiln.UiWorldSnapshot.HealthMax.get -> uint
+Kiln.UiWorldSnapshot.HealthMax.init -> void
+Kiln.UiWorldSnapshot.Inventory.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>!
+Kiln.UiWorldSnapshot.Inventory.init -> void
+Kiln.UiWorldSnapshot.Local.get -> Kiln.UiSnapshotStamp!
+Kiln.UiWorldSnapshot.Local.init -> void
+Kiln.UiWorldSnapshot.LocalPlayer.get -> uint
+Kiln.UiWorldSnapshot.LocalPlayer.init -> void
+Kiln.UiWorldSnapshot.Mana.get -> uint
+Kiln.UiWorldSnapshot.Mana.init -> void
+Kiln.UiWorldSnapshot.ManaMax.get -> uint
+Kiln.UiWorldSnapshot.ManaMax.init -> void
+Kiln.UiWorldSnapshot.Publication.get -> ulong
+Kiln.UiWorldSnapshot.Publication.init -> void
+Kiln.UiWorldSnapshot.Server.get -> Kiln.UiSnapshotStamp!
+Kiln.UiWorldSnapshot.Server.init -> void
+Kiln.UiWorldSnapshot.ServerHours.get -> decimal
+Kiln.UiWorldSnapshot.ServerHours.init -> void
+Kiln.UiWorldSnapshot.Stamina.get -> uint
+Kiln.UiWorldSnapshot.Stamina.init -> void
+Kiln.UiWorldSnapshot.StaminaMax.get -> uint
+Kiln.UiWorldSnapshot.StaminaMax.init -> void
+Kiln.UiWorldSnapshot.UiWorldSnapshot(ulong Publication, uint AvailableMask, Kiln.UiSnapshotStamp! Local, Kiln.UiSnapshotStamp! Server, uint LocalPlayer, uint Health, uint HealthMax, uint Stamina, uint StaminaMax, uint Mana, uint ManaMax, long XFixed, long YFixed, long ZFixed, decimal ServerHours, System.Collections.Generic.IReadOnlyList<Kiln.UiInventoryValue!>! Inventory, System.Collections.Generic.IReadOnlyList<string?>! UnavailableReasons) -> void
+Kiln.UiWorldSnapshot.UnavailableReasons.get -> System.Collections.Generic.IReadOnlyList<string?>!
+Kiln.UiWorldSnapshot.UnavailableReasons.init -> void
+Kiln.UiWorldSnapshot.XFixed.get -> long
+Kiln.UiWorldSnapshot.XFixed.init -> void
+Kiln.UiWorldSnapshot.YFixed.get -> long
+Kiln.UiWorldSnapshot.YFixed.init -> void
+Kiln.UiWorldSnapshot.ZFixed.get -> long
+Kiln.UiWorldSnapshot.ZFixed.init -> void
+Kiln.UiWorldSnapshotChangedEvent
+Kiln.UiWorldSnapshotChangedEvent.NewSnapshot.get -> Kiln.UiWorldSnapshot!
+Kiln.UiWorldSnapshotChangedEvent.OldPublication.get -> ulong
 Kiln.UpgradeAction
 Kiln.UpgradeAction.<Clone>$() -> Kiln.UpgradeAction!
 Kiln.UpgradeAction.Equals(Kiln.UpgradeAction? other) -> bool
@@ -4073,6 +4983,9 @@ Kiln.ValueRow.Format.init -> void
 Kiln.ValueRow.Label.get -> Kiln.UiText!
 Kiln.ValueRow.Label.init -> void
 Kiln.ValueRow.ValueRow() -> void
+Kiln.VanillaTask
+Kiln.VanillaTask.Equals(Kiln.VanillaTask? other) -> bool
+Kiln.VanillaTask.VanillaTask() -> void
 Kiln.VendorBlock
 Kiln.VendorBlock.<Clone>$() -> Kiln.VendorBlock!
 Kiln.VendorBlock.Equals(Kiln.VendorBlock? other) -> bool
@@ -4365,6 +5278,8 @@ Kiln.WindowBlock.Refresh.get -> double
 Kiln.WindowBlock.Refresh.init -> void
 Kiln.WindowBlock.Rows.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiRow!>!
 Kiln.WindowBlock.Rows.init -> void
+Kiln.WindowBlock.State.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.UiStateDefinition!>?
+Kiln.WindowBlock.State.init -> void
 Kiln.WindowBlock.Title.get -> Kiln.UiText!
 Kiln.WindowBlock.Title.init -> void
 Kiln.WindowBlock.TitleBar.get -> bool
@@ -4468,13 +5383,23 @@ Kiln.ZoneBlock.ZoneBlock() -> void
 [KILNX001]static Kiln.Blocks.LabFailMoveWrites(int count) -> void
 [KILNX001]static Kiln.Blocks.LabRefuseMoveClones(int count) -> void
 [KILNX001]static Kiln.Blocks.LabRetryMoves(Kiln.BlockHandle<Kiln.WeaponBlock!>! weapon) -> bool
+abstract Kiln.ClothColliderBlock.<Clone>$() -> Kiln.ClothColliderBlock!
 abstract Kiln.NpcBrain.Tick(Kiln.NpcControl! npc) -> void
 abstract Kiln.PlacedDelivery.<Clone>$() -> Kiln.PlacedDelivery!
+abstract Kiln.RoutineTask.<Clone>$() -> Kiln.RoutineTask!
+abstract Kiln.UiDataSnapshot.<Clone>$() -> Kiln.UiDataSnapshot!
 abstract Kiln.UiRow.<Clone>$() -> Kiln.UiRow!
+abstract Kiln.UiScalar.<Clone>$() -> Kiln.UiScalar!
+abstract Kiln.UiScalar.Type.get -> Kiln.UiScalarType
+abstract Kiln.UiStateDefinition.<Clone>$() -> Kiln.UiStateDefinition!
+abstract Kiln.UiStateValue.<Clone>$() -> Kiln.UiStateValue!
 const Kiln.Affixes.DataKey = "affixes" -> string!
 const Kiln.Affixes.DataMod = "kiln-affixes" -> string!
 const Kiln.Affixes.MaxPerItem = 8 -> int
+const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
 const Kiln.Bases.Capability = "stations.read" -> string!
+const Kiln.BlockUi.Bindings.Capability = "ui.blocks.bindings" -> string!
+const Kiln.BlockUi.StateCapability = "ui.blocks.state" -> string!
 const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!
 const Kiln.Crafting.SourcesCapability = "crafting.sources" -> string!
 const Kiln.Stations.ControlCapability = "stations.control" -> string!
@@ -4486,6 +5411,16 @@ const Kiln.Stations.Hand = "hand" -> string!
 const Kiln.Stations.OutputSourcesCapability = "stations.output_sources" -> string!
 const Kiln.Stations.ReadCapability = "stations.read" -> string!
 const Kiln.StrengthBlock.OwnBlock = "block" -> string!
+const Kiln.UiStateReasons.AccessDenied = "AccessDenied" -> string!
+const Kiln.UiStateReasons.Budget = "Budget" -> string!
+const Kiln.UiStateReasons.StaleSession = "StaleSession" -> string!
+const Kiln.UiStateReasons.StaleSource = "StaleSource" -> string!
+const Kiln.UiStateReasons.StaleVersion = "StaleVersion" -> string!
+const Kiln.UiStateReasons.Superseded = "Superseded" -> string!
+const Kiln.UiStateReasons.UnknownKey = "UnknownKey" -> string!
+const Kiln.UiStateReasons.UnknownSelection = "UnknownSelection" -> string!
+const Kiln.UiStateReasons.UnknownWindow = "UnknownWindow" -> string!
+const Kiln.UiStateReasons.Unloaded = "Unloaded" -> string!
 const Kiln.UpgradeAction.DefaultRange = 6 -> double
 const Kiln.UpgradeStation.Capability = "blocks.upgrade_station" -> string!
 const Kiln.WornAttach.ArmLeft = "ArmL" -> string!
@@ -4576,6 +5511,9 @@ override Kiln.BaseIdChange.GetHashCode() -> int
 override Kiln.BaseInfo.Equals(object? obj) -> bool
 override Kiln.BaseInfo.GetHashCode() -> int
 override Kiln.BaseInfo.ToString() -> string!
+override Kiln.BaseRulesBlock.Equals(object? obj) -> bool
+override Kiln.BaseRulesBlock.GetHashCode() -> int
+override Kiln.BaseRulesBlock.ToString() -> string!
 override Kiln.BasesChangedEvent.ToString() -> string!
 override Kiln.BeamBlock.<Clone>$() -> Kiln.BeamBlock!
 override Kiln.BeamBlock.Equals(object? obj) -> bool
@@ -4666,6 +5604,17 @@ override Kiln.ChoiceRow.ToString() -> string!
 override Kiln.Clip.Equals(object? obj) -> bool
 override Kiln.Clip.GetHashCode() -> int
 override Kiln.Clip.ToString() -> string!
+override Kiln.ClothCapsuleBlock.<Clone>$() -> Kiln.ClothCapsuleBlock!
+override Kiln.ClothCapsuleBlock.Equals(object? obj) -> bool
+override Kiln.ClothCapsuleBlock.GetHashCode() -> int
+override Kiln.ClothCapsuleBlock.ToString() -> string!
+override Kiln.ClothColliderBlock.Equals(object? obj) -> bool
+override Kiln.ClothColliderBlock.GetHashCode() -> int
+override Kiln.ClothColliderBlock.ToString() -> string!
+override Kiln.ClothSphereBlock.<Clone>$() -> Kiln.ClothSphereBlock!
+override Kiln.ClothSphereBlock.Equals(object? obj) -> bool
+override Kiln.ClothSphereBlock.GetHashCode() -> int
+override Kiln.ClothSphereBlock.ToString() -> string!
 override Kiln.CollectGoal.Equals(object? obj) -> bool
 override Kiln.CollectGoal.GetHashCode() -> int
 override Kiln.CollectGoal.ToString() -> string!
@@ -4775,10 +5724,26 @@ override Kiln.HomingBlock.ToString() -> string!
 override Kiln.HudLineBlock.Equals(object? obj) -> bool
 override Kiln.HudLineBlock.GetHashCode() -> int
 override Kiln.HudLineBlock.ToString() -> string!
+override Kiln.IdleTask.<Clone>$() -> Kiln.IdleTask!
+override Kiln.IdleTask.Equals(object? obj) -> bool
+override Kiln.IdleTask.GetHashCode() -> int
+override Kiln.IdleTask.ToString() -> string!
+override Kiln.ImageRow.<Clone>$() -> Kiln.ImageRow!
+override Kiln.ImageRow.Equals(object? obj) -> bool
+override Kiln.ImageRow.GetHashCode() -> int
+override Kiln.ImageRow.ToString() -> string!
 override Kiln.IngredientCategory.Equals(object? obj) -> bool
 override Kiln.IngredientCategory.GetHashCode() -> int
 override Kiln.IngredientCategory.ToString() -> string!
 override Kiln.IngredientOption.GetHashCode() -> int
+override Kiln.InputRow.<Clone>$() -> Kiln.InputRow!
+override Kiln.InputRow.Equals(object? obj) -> bool
+override Kiln.InputRow.GetHashCode() -> int
+override Kiln.InputRow.ToString() -> string!
+override Kiln.InspectTask.<Clone>$() -> Kiln.InspectTask!
+override Kiln.InspectTask.Equals(object? obj) -> bool
+override Kiln.InspectTask.GetHashCode() -> int
+override Kiln.InspectTask.ToString() -> string!
 override Kiln.InteractBlock.Equals(object? obj) -> bool
 override Kiln.InteractBlock.GetHashCode() -> int
 override Kiln.InteractBlock.ToString() -> string!
@@ -4840,6 +5805,15 @@ override Kiln.MaterialUvScale.GetHashCode() -> int
 override Kiln.MenuBlock.Equals(object? obj) -> bool
 override Kiln.MenuBlock.GetHashCode() -> int
 override Kiln.MenuBlock.ToString() -> string!
+override Kiln.MenuDefinitionResult.Equals(object? obj) -> bool
+override Kiln.MenuDefinitionResult.GetHashCode() -> int
+override Kiln.MenuDefinitionResult.ToString() -> string!
+override Kiln.ModelChainBlock.Equals(object? obj) -> bool
+override Kiln.ModelChainBlock.GetHashCode() -> int
+override Kiln.ModelChainBlock.ToString() -> string!
+override Kiln.ModelClothBlock.Equals(object? obj) -> bool
+override Kiln.ModelClothBlock.GetHashCode() -> int
+override Kiln.ModelClothBlock.ToString() -> string!
 override Kiln.MoveAnimation.ToString() -> string!
 override Kiln.MoveApplicationResult.Equals(object? obj) -> bool
 override Kiln.MoveApplicationResult.GetHashCode() -> int
@@ -4856,6 +5830,16 @@ override Kiln.NormalMap.ToString() -> string!
 override Kiln.NpcBlock.Equals(object? obj) -> bool
 override Kiln.NpcBlock.GetHashCode() -> int
 override Kiln.NpcBlock.ToString() -> string!
+override Kiln.NpcBodyBuildChangedEvent.ToString() -> string!
+override Kiln.NpcBodyBuildResult.Equals(object? obj) -> bool
+override Kiln.NpcBodyBuildResult.GetHashCode() -> int
+override Kiln.NpcBodyBuildResult.ToString() -> string!
+override Kiln.NpcMotionBinding.Equals(object? obj) -> bool
+override Kiln.NpcMotionBinding.GetHashCode() -> int
+override Kiln.NpcMotionBinding.ToString() -> string!
+override Kiln.NpcMotionsBlock.Equals(object? obj) -> bool
+override Kiln.NpcMotionsBlock.GetHashCode() -> int
+override Kiln.NpcMotionsBlock.ToString() -> string!
 override Kiln.NpcPerceptionPolicy.Equals(object? obj) -> bool
 override Kiln.NpcPerceptionPolicy.GetHashCode() -> int
 override Kiln.NpcPerceptionPolicy.ToString() -> string!
@@ -4959,12 +5943,33 @@ override Kiln.RewardBlock.ToString() -> string!
 override Kiln.RoamBlock.Equals(object? obj) -> bool
 override Kiln.RoamBlock.GetHashCode() -> int
 override Kiln.RoamBlock.ToString() -> string!
+override Kiln.RoamTask.<Clone>$() -> Kiln.RoamTask!
+override Kiln.RoamTask.Equals(object? obj) -> bool
+override Kiln.RoamTask.GetHashCode() -> int
+override Kiln.RoamTask.ToString() -> string!
 override Kiln.RolledAffix.Equals(object? obj) -> bool
 override Kiln.RolledAffix.GetHashCode() -> int
 override Kiln.RolledAffix.ToString() -> string!
 override Kiln.RosterBlock.Equals(object? obj) -> bool
 override Kiln.RosterBlock.GetHashCode() -> int
 override Kiln.RosterBlock.ToString() -> string!
+override Kiln.RoutineAssignmentChangedEvent.ToString() -> string!
+override Kiln.RoutineBlock.Equals(object? obj) -> bool
+override Kiln.RoutineBlock.GetHashCode() -> int
+override Kiln.RoutineBlock.ToString() -> string!
+override Kiln.RoutineResult.Equals(object? obj) -> bool
+override Kiln.RoutineResult.GetHashCode() -> int
+override Kiln.RoutineResult.ToString() -> string!
+override Kiln.RoutineSnapshot.Equals(object? obj) -> bool
+override Kiln.RoutineSnapshot.GetHashCode() -> int
+override Kiln.RoutineSnapshot.ToString() -> string!
+override Kiln.RoutineTask.Equals(object? obj) -> bool
+override Kiln.RoutineTask.GetHashCode() -> int
+override Kiln.RoutineTask.ToString() -> string!
+override Kiln.RoutineTaskChangedEvent.ToString() -> string!
+override Kiln.RoutineWindow.Equals(object? obj) -> bool
+override Kiln.RoutineWindow.GetHashCode() -> int
+override Kiln.RoutineWindow.ToString() -> string!
 override Kiln.RuleBlock.Equals(object? obj) -> bool
 override Kiln.RuleBlock.GetHashCode() -> int
 override Kiln.RuleBlock.ToString() -> string!
@@ -4990,6 +5995,14 @@ override Kiln.SeparatorRow.ToString() -> string!
 override Kiln.Shape.Equals(object? obj) -> bool
 override Kiln.Shape.GetHashCode() -> int
 override Kiln.Shape.ToString() -> string!
+override Kiln.SitTask.<Clone>$() -> Kiln.SitTask!
+override Kiln.SitTask.Equals(object? obj) -> bool
+override Kiln.SitTask.GetHashCode() -> int
+override Kiln.SitTask.ToString() -> string!
+override Kiln.SleepTask.<Clone>$() -> Kiln.SleepTask!
+override Kiln.SleepTask.Equals(object? obj) -> bool
+override Kiln.SleepTask.GetHashCode() -> int
+override Kiln.SleepTask.ToString() -> string!
 override Kiln.SliderRow.<Clone>$() -> Kiln.SliderRow!
 override Kiln.SliderRow.Equals(object? obj) -> bool
 override Kiln.SliderRow.GetHashCode() -> int
@@ -5027,11 +6040,22 @@ override Kiln.StationInput.GetHashCode() -> int
 override Kiln.StationKind.Equals(object? obj) -> bool
 override Kiln.StationKind.GetHashCode() -> int
 override Kiln.StationKind.ToString() -> string!
+override Kiln.StationMenuDefinition.Equals(object? obj) -> bool
+override Kiln.StationMenuDefinition.GetHashCode() -> int
+override Kiln.StationMenuDefinition.ToString() -> string!
+override Kiln.StationMenuSetBlock.Equals(object? obj) -> bool
+override Kiln.StationMenuSetBlock.GetHashCode() -> int
+override Kiln.StationMenuSetBlock.ToString() -> string!
+override Kiln.StationMenuTabBlock.Equals(object? obj) -> bool
+override Kiln.StationMenuTabBlock.GetHashCode() -> int
+override Kiln.StationMenuTabBlock.ToString() -> string!
 override Kiln.StationPlacedEvent.ToString() -> string!
 override Kiln.StationPlayerActionEvent.ToString() -> string!
 override Kiln.StationRecipe.Equals(object? obj) -> bool
 override Kiln.StationRecipe.GetHashCode() -> int
 override Kiln.StationRecipe.ToString() -> string!
+override Kiln.StationRecipeRef.GetHashCode() -> int
+override Kiln.StationRecipeRef.ToString() -> string!
 override Kiln.StationRef.GetHashCode() -> int
 override Kiln.StationRef.ToString() -> string!
 override Kiln.StationRemovedEvent.ToString() -> string!
@@ -5083,6 +6107,14 @@ override Kiln.SurfaceValue.GetHashCode() -> int
 override Kiln.SyncedAffixes.Equals(object? obj) -> bool
 override Kiln.SyncedAffixes.GetHashCode() -> int
 override Kiln.SyncedAffixes.ToString() -> string!
+override Kiln.TableRow.<Clone>$() -> Kiln.TableRow!
+override Kiln.TableRow.Equals(object? obj) -> bool
+override Kiln.TableRow.GetHashCode() -> int
+override Kiln.TableRow.ToString() -> string!
+override Kiln.TabsRow.<Clone>$() -> Kiln.TabsRow!
+override Kiln.TabsRow.Equals(object? obj) -> bool
+override Kiln.TabsRow.GetHashCode() -> int
+override Kiln.TabsRow.ToString() -> string!
 override Kiln.TalentBlock.Equals(object? obj) -> bool
 override Kiln.TalentBlock.GetHashCode() -> int
 override Kiln.TalentBlock.ToString() -> string!
@@ -5126,21 +6158,171 @@ override Kiln.ToolMaterialPoolBlock.ToString() -> string!
 override Kiln.ToolMaterialPoolEntry.Equals(object? obj) -> bool
 override Kiln.ToolMaterialPoolEntry.GetHashCode() -> int
 override Kiln.ToolMaterialPoolEntry.ToString() -> string!
+override Kiln.TreeRow.<Clone>$() -> Kiln.TreeRow!
+override Kiln.TreeRow.Equals(object? obj) -> bool
+override Kiln.TreeRow.GetHashCode() -> int
+override Kiln.TreeRow.ToString() -> string!
 override Kiln.TriggerBlock.Equals(object? obj) -> bool
 override Kiln.TriggerBlock.GetHashCode() -> int
 override Kiln.TriggerBlock.ToString() -> string!
 override Kiln.UiAction.Equals(object? obj) -> bool
 override Kiln.UiAction.GetHashCode() -> int
 override Kiln.UiAction.ToString() -> string!
+override Kiln.UiBoolState.<Clone>$() -> Kiln.UiBoolState!
+override Kiln.UiBoolState.Equals(object? obj) -> bool
+override Kiln.UiBoolState.GetHashCode() -> int
+override Kiln.UiBoolState.ToString() -> string!
+override Kiln.UiColumn.Equals(object? obj) -> bool
+override Kiln.UiColumn.GetHashCode() -> int
+override Kiln.UiColumn.ToString() -> string!
+override Kiln.UiCommandResult.Equals(object? obj) -> bool
+override Kiln.UiCommandResult.GetHashCode() -> int
+override Kiln.UiCommandResult.ToString() -> string!
+override Kiln.UiControlState.Equals(object? obj) -> bool
+override Kiln.UiControlState.GetHashCode() -> int
+override Kiln.UiControlState.ToString() -> string!
+override Kiln.UiDataPublishResult.Equals(object? obj) -> bool
+override Kiln.UiDataPublishResult.GetHashCode() -> int
+override Kiln.UiDataPublishResult.ToString() -> string!
+override Kiln.UiDataRow.Equals(object? obj) -> bool
+override Kiln.UiDataRow.GetHashCode() -> int
+override Kiln.UiDataRow.ToString() -> string!
+override Kiln.UiDataSchema.Equals(object? obj) -> bool
+override Kiln.UiDataSchema.GetHashCode() -> int
+override Kiln.UiDataSchema.ToString() -> string!
+override Kiln.UiDataSnapshot.Equals(object? obj) -> bool
+override Kiln.UiDataSnapshot.GetHashCode() -> int
+override Kiln.UiDataSnapshot.Rows.<Clone>$() -> Kiln.UiDataSnapshot.Rows!
+override Kiln.UiDataSnapshot.Rows.Equals(object? obj) -> bool
+override Kiln.UiDataSnapshot.Rows.GetHashCode() -> int
+override Kiln.UiDataSnapshot.Rows.ToString() -> string!
+override Kiln.UiDataSnapshot.Scalar.<Clone>$() -> Kiln.UiDataSnapshot.Scalar!
+override Kiln.UiDataSnapshot.Scalar.Equals(object? obj) -> bool
+override Kiln.UiDataSnapshot.Scalar.GetHashCode() -> int
+override Kiln.UiDataSnapshot.Scalar.ToString() -> string!
+override Kiln.UiDataSnapshot.ToString() -> string!
+override Kiln.UiDataSnapshot.Tree.<Clone>$() -> Kiln.UiDataSnapshot.Tree!
+override Kiln.UiDataSnapshot.Tree.Equals(object? obj) -> bool
+override Kiln.UiDataSnapshot.Tree.GetHashCode() -> int
+override Kiln.UiDataSnapshot.Tree.ToString() -> string!
+override Kiln.UiDecimalState.<Clone>$() -> Kiln.UiDecimalState!
+override Kiln.UiDecimalState.Equals(object? obj) -> bool
+override Kiln.UiDecimalState.GetHashCode() -> int
+override Kiln.UiDecimalState.ToString() -> string!
+override Kiln.UiField.Equals(object? obj) -> bool
+override Kiln.UiField.GetHashCode() -> int
+override Kiln.UiField.ToString() -> string!
+override Kiln.UiInt64State.<Clone>$() -> Kiln.UiInt64State!
+override Kiln.UiInt64State.Equals(object? obj) -> bool
+override Kiln.UiInt64State.GetHashCode() -> int
+override Kiln.UiInt64State.ToString() -> string!
+override Kiln.UiInventoryValue.Equals(object? obj) -> bool
+override Kiln.UiInventoryValue.GetHashCode() -> int
+override Kiln.UiInventoryValue.ToString() -> string!
 override Kiln.UiMenu.Equals(object? obj) -> bool
 override Kiln.UiMenu.GetHashCode() -> int
 override Kiln.UiMenu.ToString() -> string!
 override Kiln.UiRow.Equals(object? obj) -> bool
 override Kiln.UiRow.GetHashCode() -> int
 override Kiln.UiRow.ToString() -> string!
+override Kiln.UiScalar.Bool.<Clone>$() -> Kiln.UiScalar.Bool!
+override Kiln.UiScalar.Bool.Equals(object? obj) -> bool
+override Kiln.UiScalar.Bool.GetHashCode() -> int
+override Kiln.UiScalar.Bool.ToString() -> string!
+override Kiln.UiScalar.Bool.Type.get -> Kiln.UiScalarType
+override Kiln.UiScalar.Decimal.<Clone>$() -> Kiln.UiScalar.Decimal!
+override Kiln.UiScalar.Decimal.Equals(object? obj) -> bool
+override Kiln.UiScalar.Decimal.GetHashCode() -> int
+override Kiln.UiScalar.Decimal.ToString() -> string!
+override Kiln.UiScalar.Decimal.Type.get -> Kiln.UiScalarType
+override Kiln.UiScalar.Equals(object? obj) -> bool
+override Kiln.UiScalar.Float64.<Clone>$() -> Kiln.UiScalar.Float64!
+override Kiln.UiScalar.Float64.Equals(object? obj) -> bool
+override Kiln.UiScalar.Float64.GetHashCode() -> int
+override Kiln.UiScalar.Float64.ToString() -> string!
+override Kiln.UiScalar.Float64.Type.get -> Kiln.UiScalarType
+override Kiln.UiScalar.GetHashCode() -> int
+override Kiln.UiScalar.Int64.<Clone>$() -> Kiln.UiScalar.Int64!
+override Kiln.UiScalar.Int64.Equals(object? obj) -> bool
+override Kiln.UiScalar.Int64.GetHashCode() -> int
+override Kiln.UiScalar.Int64.ToString() -> string!
+override Kiln.UiScalar.Int64.Type.get -> Kiln.UiScalarType
+override Kiln.UiScalar.String.<Clone>$() -> Kiln.UiScalar.String!
+override Kiln.UiScalar.String.Equals(object? obj) -> bool
+override Kiln.UiScalar.String.GetHashCode() -> int
+override Kiln.UiScalar.String.ToString() -> string!
+override Kiln.UiScalar.String.Type.get -> Kiln.UiScalarType
+override Kiln.UiScalar.ToString() -> string!
+override Kiln.UiScalar.UInt64.<Clone>$() -> Kiln.UiScalar.UInt64!
+override Kiln.UiScalar.UInt64.Equals(object? obj) -> bool
+override Kiln.UiScalar.UInt64.GetHashCode() -> int
+override Kiln.UiScalar.UInt64.ToString() -> string!
+override Kiln.UiScalar.UInt64.Type.get -> Kiln.UiScalarType
 override Kiln.UiSet.Equals(object? obj) -> bool
 override Kiln.UiSet.GetHashCode() -> int
 override Kiln.UiSet.ToString() -> string!
+override Kiln.UiSnapshotStamp.Equals(object? obj) -> bool
+override Kiln.UiSnapshotStamp.GetHashCode() -> int
+override Kiln.UiSnapshotStamp.ToString() -> string!
+override Kiln.UiStateDefinition.Equals(object? obj) -> bool
+override Kiln.UiStateDefinition.GetHashCode() -> int
+override Kiln.UiStateDefinition.ToString() -> string!
+override Kiln.UiStateReadResult.Equals(object? obj) -> bool
+override Kiln.UiStateReadResult.GetHashCode() -> int
+override Kiln.UiStateReadResult.ToString() -> string!
+override Kiln.UiStateResult.Equals(object? obj) -> bool
+override Kiln.UiStateResult.GetHashCode() -> int
+override Kiln.UiStateResult.ToString() -> string!
+override Kiln.UiStateSnapshot.Equals(object? obj) -> bool
+override Kiln.UiStateSnapshot.GetHashCode() -> int
+override Kiln.UiStateSnapshot.ToString() -> string!
+override Kiln.UiStateValue.Bool.<Clone>$() -> Kiln.UiStateValue.Bool!
+override Kiln.UiStateValue.Bool.Equals(object? obj) -> bool
+override Kiln.UiStateValue.Bool.GetHashCode() -> int
+override Kiln.UiStateValue.Bool.ToString() -> string!
+override Kiln.UiStateValue.Decimal.<Clone>$() -> Kiln.UiStateValue.Decimal!
+override Kiln.UiStateValue.Decimal.Equals(object? obj) -> bool
+override Kiln.UiStateValue.Decimal.GetHashCode() -> int
+override Kiln.UiStateValue.Decimal.ToString() -> string!
+override Kiln.UiStateValue.Equals(object? obj) -> bool
+override Kiln.UiStateValue.GetHashCode() -> int
+override Kiln.UiStateValue.Int64.<Clone>$() -> Kiln.UiStateValue.Int64!
+override Kiln.UiStateValue.Int64.Equals(object? obj) -> bool
+override Kiln.UiStateValue.Int64.GetHashCode() -> int
+override Kiln.UiStateValue.Int64.ToString() -> string!
+override Kiln.UiStateValue.String.<Clone>$() -> Kiln.UiStateValue.String!
+override Kiln.UiStateValue.String.Equals(object? obj) -> bool
+override Kiln.UiStateValue.String.GetHashCode() -> int
+override Kiln.UiStateValue.String.ToString() -> string!
+override Kiln.UiStateValue.StringSet.<Clone>$() -> Kiln.UiStateValue.StringSet!
+override Kiln.UiStateValue.StringSet.Equals(object? obj) -> bool
+override Kiln.UiStateValue.StringSet.GetHashCode() -> int
+override Kiln.UiStateValue.StringSet.ToString() -> string!
+override Kiln.UiStateValue.ToString() -> string!
+override Kiln.UiStateVersion.GetHashCode() -> int
+override Kiln.UiStringSetState.<Clone>$() -> Kiln.UiStringSetState!
+override Kiln.UiStringSetState.Equals(object? obj) -> bool
+override Kiln.UiStringSetState.GetHashCode() -> int
+override Kiln.UiStringSetState.ToString() -> string!
+override Kiln.UiStringState.<Clone>$() -> Kiln.UiStringState!
+override Kiln.UiStringState.Equals(object? obj) -> bool
+override Kiln.UiStringState.GetHashCode() -> int
+override Kiln.UiStringState.ToString() -> string!
+override Kiln.UiTab.Equals(object? obj) -> bool
+override Kiln.UiTab.GetHashCode() -> int
+override Kiln.UiTab.ToString() -> string!
+override Kiln.UiTreeDataNode.Equals(object? obj) -> bool
+override Kiln.UiTreeDataNode.GetHashCode() -> int
+override Kiln.UiTreeDataNode.ToString() -> string!
+override Kiln.UiTreeNodeDefinition.Equals(object? obj) -> bool
+override Kiln.UiTreeNodeDefinition.GetHashCode() -> int
+override Kiln.UiTreeNodeDefinition.ToString() -> string!
+override Kiln.UiWorldReadResult.Equals(object? obj) -> bool
+override Kiln.UiWorldReadResult.GetHashCode() -> int
+override Kiln.UiWorldReadResult.ToString() -> string!
+override Kiln.UiWorldSnapshot.Equals(object? obj) -> bool
+override Kiln.UiWorldSnapshot.GetHashCode() -> int
+override Kiln.UiWorldSnapshot.ToString() -> string!
 override Kiln.UpgradeAction.Equals(object? obj) -> bool
 override Kiln.UpgradeAction.GetHashCode() -> int
 override Kiln.UpgradeAction.ToString() -> string!
@@ -5148,6 +6330,10 @@ override Kiln.ValueRow.<Clone>$() -> Kiln.ValueRow!
 override Kiln.ValueRow.Equals(object? obj) -> bool
 override Kiln.ValueRow.GetHashCode() -> int
 override Kiln.ValueRow.ToString() -> string!
+override Kiln.VanillaTask.<Clone>$() -> Kiln.VanillaTask!
+override Kiln.VanillaTask.Equals(object? obj) -> bool
+override Kiln.VanillaTask.GetHashCode() -> int
+override Kiln.VanillaTask.ToString() -> string!
 override Kiln.VendorBlock.Equals(object? obj) -> bool
 override Kiln.VendorBlock.GetHashCode() -> int
 override Kiln.VendorBlock.ToString() -> string!
@@ -5210,20 +6396,52 @@ override sealed Kiln.BedBlock.Equals(Kiln.PropBlock? other) -> bool
 override sealed Kiln.ButtonRow.Equals(Kiln.UiRow? other) -> bool
 override sealed Kiln.ChainBlock.Equals(Kiln.PlacedDelivery? other) -> bool
 override sealed Kiln.ChoiceRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.ClothCapsuleBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
+override sealed Kiln.ClothSphereBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
 override sealed Kiln.ConeBlock.Equals(Kiln.PlacedDelivery? other) -> bool
 override sealed Kiln.ContainerBlock.Equals(Kiln.PropBlock? other) -> bool
 override sealed Kiln.DoorBlock.Equals(Kiln.PropBlock? other) -> bool
+override sealed Kiln.IdleTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.ImageRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.InputRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.InspectTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.RoamTask.Equals(Kiln.RoutineTask? other) -> bool
 override sealed Kiln.ScreenEffectBlock.Equals(Kiln.ScreenEffect? other) -> bool
 override sealed Kiln.SeatBlock.Equals(Kiln.PropBlock? other) -> bool
 override sealed Kiln.SelfBlock.Equals(Kiln.PlacedDelivery? other) -> bool
 override sealed Kiln.SeparatorRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.SitTask.Equals(Kiln.RoutineTask? other) -> bool
+override sealed Kiln.SleepTask.Equals(Kiln.RoutineTask? other) -> bool
 override sealed Kiln.SliderRow.Equals(Kiln.UiRow? other) -> bool
 override sealed Kiln.StationBlock.Equals(Kiln.PropBlock? other) -> bool
 override sealed Kiln.StepSpawnBlock.Equals(Kiln.PlaceBlock? other) -> bool
 override sealed Kiln.SummonBlock.Equals(Kiln.PlacedDelivery? other) -> bool
+override sealed Kiln.TableRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.TabsRow.Equals(Kiln.UiRow? other) -> bool
 override sealed Kiln.TextRow.Equals(Kiln.UiRow? other) -> bool
 override sealed Kiln.ToggleRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.TreeRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.UiBoolState.Equals(Kiln.UiStateDefinition? other) -> bool
+override sealed Kiln.UiDataSnapshot.Rows.Equals(Kiln.UiDataSnapshot? other) -> bool
+override sealed Kiln.UiDataSnapshot.Scalar.Equals(Kiln.UiDataSnapshot? other) -> bool
+override sealed Kiln.UiDataSnapshot.Tree.Equals(Kiln.UiDataSnapshot? other) -> bool
+override sealed Kiln.UiDecimalState.Equals(Kiln.UiStateDefinition? other) -> bool
+override sealed Kiln.UiInt64State.Equals(Kiln.UiStateDefinition? other) -> bool
+override sealed Kiln.UiScalar.Bool.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiScalar.Decimal.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiScalar.Float64.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiScalar.Int64.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiScalar.String.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiScalar.UInt64.Equals(Kiln.UiScalar? other) -> bool
+override sealed Kiln.UiStateValue.Bool.Equals(Kiln.UiStateValue? other) -> bool
+override sealed Kiln.UiStateValue.Decimal.Equals(Kiln.UiStateValue? other) -> bool
+override sealed Kiln.UiStateValue.Int64.Equals(Kiln.UiStateValue? other) -> bool
+override sealed Kiln.UiStateValue.String.Equals(Kiln.UiStateValue? other) -> bool
+override sealed Kiln.UiStateValue.StringSet.Equals(Kiln.UiStateValue? other) -> bool
+override sealed Kiln.UiStringSetState.Equals(Kiln.UiStateDefinition? other) -> bool
+override sealed Kiln.UiStringState.Equals(Kiln.UiStateDefinition? other) -> bool
 override sealed Kiln.ValueRow.Equals(Kiln.UiRow? other) -> bool
+override sealed Kiln.VanillaTask.Equals(Kiln.RoutineTask? other) -> bool
 override sealed Kiln.ZoneBlock.Equals(Kiln.PlacedDelivery? other) -> bool
 static Kiln.AIBlock.operator !=(Kiln.AIBlock? left, Kiln.AIBlock? right) -> bool
 static Kiln.AIBlock.operator ==(Kiln.AIBlock? left, Kiln.AIBlock? right) -> bool
@@ -5367,9 +6585,12 @@ static Kiln.BaseIdChange.operator !=(Kiln.BaseIdChange left, Kiln.BaseIdChange r
 static Kiln.BaseIdChange.operator ==(Kiln.BaseIdChange left, Kiln.BaseIdChange right) -> bool
 static Kiln.BaseInfo.operator !=(Kiln.BaseInfo? left, Kiln.BaseInfo? right) -> bool
 static Kiln.BaseInfo.operator ==(Kiln.BaseInfo? left, Kiln.BaseInfo? right) -> bool
+static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
 static Kiln.Bases.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.BaseInfo!>!
 static Kiln.Bases.At(Kiln.WorldPosition position) -> Kiln.BaseInfo?
 static Kiln.Bases.Available.get -> bool
+static Kiln.Bases.Chests(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
 static Kiln.Bases.FindRoomFor(Kiln.BaseId id, Kiln.ItemId item) -> Kiln.EntityId?
 static Kiln.Bases.Get(Kiln.BaseId id) -> Kiln.BaseInfo?
 static Kiln.Bases.Of(Kiln.EntityId entity) -> Kiln.BaseInfo?
@@ -5403,6 +6624,14 @@ static Kiln.BlockKindDescriptor.operator !=(Kiln.BlockKindDescriptor? left, Kiln
 static Kiln.BlockKindDescriptor.operator ==(Kiln.BlockKindDescriptor? left, Kiln.BlockKindDescriptor? right) -> bool
 static Kiln.BlockKindResult.operator !=(Kiln.BlockKindResult? left, Kiln.BlockKindResult? right) -> bool
 static Kiln.BlockKindResult.operator ==(Kiln.BlockKindResult? left, Kiln.BlockKindResult? right) -> bool
+static Kiln.BlockUi.Bindings.Define(string! id, Kiln.UiDataSchema! schema) -> Kiln.UiDataRegistration!
+static Kiln.BlockUi.Bindings.Publish(string! id, Kiln.UiDataSnapshot! snapshot) -> System.Threading.Tasks.Task<Kiln.UiDataPublishResult!>!
+static Kiln.BlockUi.CommandStatus(string! nonce, ulong requestId) -> System.Threading.Tasks.Task<Kiln.UiCommandResult!>!
+static Kiln.BlockUi.DemandWorld(Kiln.UiWorldFields fields) -> Kiln.UiDemandRegistration!
+static Kiln.BlockUi.ExecuteOnServer(string! literalCommand, System.Threading.CancellationToken cancellation = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.UiCommandResult!>!
+static Kiln.BlockUi.ReadWorld() -> Kiln.UiWorldReadResult!
+static Kiln.BlockUi.SetState(Kiln.WindowRef window, string! key, Kiln.UiStateValue! value, Kiln.UiStateVersion? expected = null) -> System.Threading.Tasks.Task<Kiln.UiStateResult!>!
+static Kiln.BlockUi.State(Kiln.WindowRef window) -> Kiln.UiStateReadResult!
 static Kiln.Blocks.Application(Kiln.BlockHandle! block) -> Kiln.BlockApplyResult!
 static Kiln.Blocks.Application(Kiln.BlockPlan! plan) -> Kiln.BlockApplyResult!
 static Kiln.Blocks.Apply(Kiln.BlockPlan! plan) -> Kiln.BlockApplyResult!
@@ -5426,6 +6655,7 @@ static Kiln.Blocks.Define<T>(string! name, T! block) -> Kiln.BlockHandle<T!>!
 static Kiln.Blocks.DumpPrograms(string! directory) -> int
 static Kiln.Blocks.Find(string! name, string? mod = null) -> Kiln.BlockHandle?
 static Kiln.Blocks.GetVfxRegistration(System.Guid registrationId) -> Kiln.DefinitionRegistrationResult!
+static Kiln.Blocks.ImportStat(Kiln.ModValueKey key) -> Kiln.UiStatImportRegistration!
 static Kiln.Blocks.Lowered(string! name, string? mod = null) -> string?
 static Kiln.Blocks.MovesStatus(Kiln.BlockHandle<Kiln.WeaponBlock!>! weapon) -> Kiln.MoveApplicationResult!
 static Kiln.Blocks.RegisterKind<T>(Kiln.BlockKindDescriptor! descriptor, Kiln.IBlockKind<T!>! compiler) -> Kiln.BlockKindResult!
@@ -5468,6 +6698,12 @@ static Kiln.ChoiceRow.operator ==(Kiln.ChoiceRow? left, Kiln.ChoiceRow? right) -
 static Kiln.Clip.implicit operator Kiln.Clip!(string! name) -> Kiln.Clip!
 static Kiln.Clip.operator !=(Kiln.Clip? left, Kiln.Clip? right) -> bool
 static Kiln.Clip.operator ==(Kiln.Clip? left, Kiln.Clip? right) -> bool
+static Kiln.ClothCapsuleBlock.operator !=(Kiln.ClothCapsuleBlock? left, Kiln.ClothCapsuleBlock? right) -> bool
+static Kiln.ClothCapsuleBlock.operator ==(Kiln.ClothCapsuleBlock? left, Kiln.ClothCapsuleBlock? right) -> bool
+static Kiln.ClothColliderBlock.operator !=(Kiln.ClothColliderBlock? left, Kiln.ClothColliderBlock? right) -> bool
+static Kiln.ClothColliderBlock.operator ==(Kiln.ClothColliderBlock? left, Kiln.ClothColliderBlock? right) -> bool
+static Kiln.ClothSphereBlock.operator !=(Kiln.ClothSphereBlock? left, Kiln.ClothSphereBlock? right) -> bool
+static Kiln.ClothSphereBlock.operator ==(Kiln.ClothSphereBlock? left, Kiln.ClothSphereBlock? right) -> bool
 static Kiln.CollectGoal.operator !=(Kiln.CollectGoal? left, Kiln.CollectGoal? right) -> bool
 static Kiln.CollectGoal.operator ==(Kiln.CollectGoal? left, Kiln.CollectGoal? right) -> bool
 static Kiln.ColliderBlock.operator !=(Kiln.ColliderBlock? left, Kiln.ColliderBlock? right) -> bool
@@ -5599,10 +6835,18 @@ static Kiln.HomingBlock.operator !=(Kiln.HomingBlock? left, Kiln.HomingBlock? ri
 static Kiln.HomingBlock.operator ==(Kiln.HomingBlock? left, Kiln.HomingBlock? right) -> bool
 static Kiln.HudLineBlock.operator !=(Kiln.HudLineBlock? left, Kiln.HudLineBlock? right) -> bool
 static Kiln.HudLineBlock.operator ==(Kiln.HudLineBlock? left, Kiln.HudLineBlock? right) -> bool
+static Kiln.IdleTask.operator !=(Kiln.IdleTask? left, Kiln.IdleTask? right) -> bool
+static Kiln.IdleTask.operator ==(Kiln.IdleTask? left, Kiln.IdleTask? right) -> bool
+static Kiln.ImageRow.operator !=(Kiln.ImageRow? left, Kiln.ImageRow? right) -> bool
+static Kiln.ImageRow.operator ==(Kiln.ImageRow? left, Kiln.ImageRow? right) -> bool
 static Kiln.IngredientCategory.operator !=(Kiln.IngredientCategory? left, Kiln.IngredientCategory? right) -> bool
 static Kiln.IngredientCategory.operator ==(Kiln.IngredientCategory? left, Kiln.IngredientCategory? right) -> bool
 static Kiln.IngredientOption.operator !=(Kiln.IngredientOption left, Kiln.IngredientOption right) -> bool
 static Kiln.IngredientOption.operator ==(Kiln.IngredientOption left, Kiln.IngredientOption right) -> bool
+static Kiln.InputRow.operator !=(Kiln.InputRow? left, Kiln.InputRow? right) -> bool
+static Kiln.InputRow.operator ==(Kiln.InputRow? left, Kiln.InputRow? right) -> bool
+static Kiln.InspectTask.operator !=(Kiln.InspectTask? left, Kiln.InspectTask? right) -> bool
+static Kiln.InspectTask.operator ==(Kiln.InspectTask? left, Kiln.InspectTask? right) -> bool
 static Kiln.InteractBlock.operator !=(Kiln.InteractBlock? left, Kiln.InteractBlock? right) -> bool
 static Kiln.InteractBlock.operator ==(Kiln.InteractBlock? left, Kiln.InteractBlock? right) -> bool
 static Kiln.InteractPlay.operator !=(Kiln.InteractPlay? left, Kiln.InteractPlay? right) -> bool
@@ -5661,6 +6905,12 @@ static Kiln.MaterialUvScale.operator !=(Kiln.MaterialUvScale left, Kiln.Material
 static Kiln.MaterialUvScale.operator ==(Kiln.MaterialUvScale left, Kiln.MaterialUvScale right) -> bool
 static Kiln.MenuBlock.operator !=(Kiln.MenuBlock? left, Kiln.MenuBlock? right) -> bool
 static Kiln.MenuBlock.operator ==(Kiln.MenuBlock? left, Kiln.MenuBlock? right) -> bool
+static Kiln.MenuDefinitionResult.operator !=(Kiln.MenuDefinitionResult? left, Kiln.MenuDefinitionResult? right) -> bool
+static Kiln.MenuDefinitionResult.operator ==(Kiln.MenuDefinitionResult? left, Kiln.MenuDefinitionResult? right) -> bool
+static Kiln.ModelChainBlock.operator !=(Kiln.ModelChainBlock? left, Kiln.ModelChainBlock? right) -> bool
+static Kiln.ModelChainBlock.operator ==(Kiln.ModelChainBlock? left, Kiln.ModelChainBlock? right) -> bool
+static Kiln.ModelClothBlock.operator !=(Kiln.ModelClothBlock? left, Kiln.ModelClothBlock? right) -> bool
+static Kiln.ModelClothBlock.operator ==(Kiln.ModelClothBlock? left, Kiln.ModelClothBlock? right) -> bool
 static Kiln.MoveAnimation.implicit operator Kiln.MoveAnimation!(string! name) -> Kiln.MoveAnimation!
 static Kiln.MoveAnimation.implicit operator Kiln.MoveAnimation!(string?[]! names) -> Kiln.MoveAnimation!
 static Kiln.MoveApplicationResult.operator !=(Kiln.MoveApplicationResult? left, Kiln.MoveApplicationResult? right) -> bool
@@ -5690,6 +6940,14 @@ static Kiln.NpcBlocksApi.extension(Kiln.Blocks!).Brain(string! name, System.Func
 static Kiln.NpcBlocksApi.extension(Kiln.Blocks!).Condition(string! name, System.Func<Kiln.NpcView!, bool>! check, double every = 1) -> void
 static Kiln.NpcBlocksApi.extension(Kiln.Blocks!).Spawn(string! creature, Kiln.WorldPosition at, float yawDegrees = 0, Kiln.CreatureSpawnOptions? options = null) -> System.Threading.Tasks.Task<Kiln.EntityId>!
 static Kiln.NpcBlocksApi.extension(Kiln.Blocks!).Target(string! name, System.Func<Kiln.NpcView!, Kiln.EntityId>! pick) -> void
+static Kiln.NpcBodies.Status(Kiln.BlockHandle<Kiln.NpcBlock!>! npc) -> Kiln.NpcBodyBuildResult!
+static Kiln.NpcBodies.Status(string! qualifiedBlockKey) -> Kiln.NpcBodyBuildResult!
+static Kiln.NpcBodyBuildResult.operator !=(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+static Kiln.NpcBodyBuildResult.operator ==(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+static Kiln.NpcMotionBinding.operator !=(Kiln.NpcMotionBinding? left, Kiln.NpcMotionBinding? right) -> bool
+static Kiln.NpcMotionBinding.operator ==(Kiln.NpcMotionBinding? left, Kiln.NpcMotionBinding? right) -> bool
+static Kiln.NpcMotionsBlock.operator !=(Kiln.NpcMotionsBlock? left, Kiln.NpcMotionsBlock? right) -> bool
+static Kiln.NpcMotionsBlock.operator ==(Kiln.NpcMotionsBlock? left, Kiln.NpcMotionsBlock? right) -> bool
 static Kiln.NpcPerceptionPolicy.operator !=(Kiln.NpcPerceptionPolicy? left, Kiln.NpcPerceptionPolicy? right) -> bool
 static Kiln.NpcPerceptionPolicy.operator ==(Kiln.NpcPerceptionPolicy? left, Kiln.NpcPerceptionPolicy? right) -> bool
 static Kiln.NpcPerceptionStats.operator !=(Kiln.NpcPerceptionStats? left, Kiln.NpcPerceptionStats? right) -> bool
@@ -5793,10 +7051,26 @@ static Kiln.RewardBlock.operator !=(Kiln.RewardBlock? left, Kiln.RewardBlock? ri
 static Kiln.RewardBlock.operator ==(Kiln.RewardBlock? left, Kiln.RewardBlock? right) -> bool
 static Kiln.RoamBlock.operator !=(Kiln.RoamBlock? left, Kiln.RoamBlock? right) -> bool
 static Kiln.RoamBlock.operator ==(Kiln.RoamBlock? left, Kiln.RoamBlock? right) -> bool
+static Kiln.RoamTask.operator !=(Kiln.RoamTask? left, Kiln.RoamTask? right) -> bool
+static Kiln.RoamTask.operator ==(Kiln.RoamTask? left, Kiln.RoamTask? right) -> bool
 static Kiln.RolledAffix.operator !=(Kiln.RolledAffix? left, Kiln.RolledAffix? right) -> bool
 static Kiln.RolledAffix.operator ==(Kiln.RolledAffix? left, Kiln.RolledAffix? right) -> bool
 static Kiln.RosterBlock.operator !=(Kiln.RosterBlock? left, Kiln.RosterBlock? right) -> bool
 static Kiln.RosterBlock.operator ==(Kiln.RosterBlock? left, Kiln.RosterBlock? right) -> bool
+static Kiln.RoutineBlock.operator !=(Kiln.RoutineBlock? left, Kiln.RoutineBlock? right) -> bool
+static Kiln.RoutineBlock.operator ==(Kiln.RoutineBlock? left, Kiln.RoutineBlock? right) -> bool
+static Kiln.RoutineResult.operator !=(Kiln.RoutineResult? left, Kiln.RoutineResult? right) -> bool
+static Kiln.RoutineResult.operator ==(Kiln.RoutineResult? left, Kiln.RoutineResult? right) -> bool
+static Kiln.RoutineSnapshot.operator !=(Kiln.RoutineSnapshot? left, Kiln.RoutineSnapshot? right) -> bool
+static Kiln.RoutineSnapshot.operator ==(Kiln.RoutineSnapshot? left, Kiln.RoutineSnapshot? right) -> bool
+static Kiln.RoutineTask.operator !=(Kiln.RoutineTask? left, Kiln.RoutineTask? right) -> bool
+static Kiln.RoutineTask.operator ==(Kiln.RoutineTask? left, Kiln.RoutineTask? right) -> bool
+static Kiln.RoutineWindow.operator !=(Kiln.RoutineWindow? left, Kiln.RoutineWindow? right) -> bool
+static Kiln.RoutineWindow.operator ==(Kiln.RoutineWindow? left, Kiln.RoutineWindow? right) -> bool
+static Kiln.Routines.Assign(Kiln.Villager! npc, Kiln.BlockHandle<Kiln.RoutineBlock!>! plan) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Inspect(Kiln.Villager! npc) -> Kiln.RoutineSnapshot?
+static Kiln.Routines.Remove(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+static Kiln.Routines.Resume(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
 static Kiln.RuleBlock.operator !=(Kiln.RuleBlock? left, Kiln.RuleBlock? right) -> bool
 static Kiln.RuleBlock.operator ==(Kiln.RuleBlock? left, Kiln.RuleBlock? right) -> bool
 static Kiln.RunningBlock.operator !=(Kiln.RunningBlock? left, Kiln.RunningBlock? right) -> bool
@@ -5815,6 +7089,10 @@ static Kiln.SeparatorRow.operator ==(Kiln.SeparatorRow? left, Kiln.SeparatorRow?
 static Kiln.Shape.Cone(float degrees) -> Kiln.Shape!
 static Kiln.Shape.operator !=(Kiln.Shape? left, Kiln.Shape? right) -> bool
 static Kiln.Shape.operator ==(Kiln.Shape? left, Kiln.Shape? right) -> bool
+static Kiln.SitTask.operator !=(Kiln.SitTask? left, Kiln.SitTask? right) -> bool
+static Kiln.SitTask.operator ==(Kiln.SitTask? left, Kiln.SitTask? right) -> bool
+static Kiln.SleepTask.operator !=(Kiln.SleepTask? left, Kiln.SleepTask? right) -> bool
+static Kiln.SleepTask.operator ==(Kiln.SleepTask? left, Kiln.SleepTask? right) -> bool
 static Kiln.SliderRow.operator !=(Kiln.SliderRow? left, Kiln.SliderRow? right) -> bool
 static Kiln.SliderRow.operator ==(Kiln.SliderRow? left, Kiln.SliderRow? right) -> bool
 static Kiln.SoundBlock.operator !=(Kiln.SoundBlock? left, Kiln.SoundBlock? right) -> bool
@@ -5851,8 +7129,18 @@ static Kiln.StationInput.operator !=(Kiln.StationInput left, Kiln.StationInput r
 static Kiln.StationInput.operator ==(Kiln.StationInput left, Kiln.StationInput right) -> bool
 static Kiln.StationKind.operator !=(Kiln.StationKind? left, Kiln.StationKind? right) -> bool
 static Kiln.StationKind.operator ==(Kiln.StationKind? left, Kiln.StationKind? right) -> bool
+static Kiln.StationMenuDefinition.operator !=(Kiln.StationMenuDefinition? left, Kiln.StationMenuDefinition? right) -> bool
+static Kiln.StationMenuDefinition.operator ==(Kiln.StationMenuDefinition? left, Kiln.StationMenuDefinition? right) -> bool
+static Kiln.StationMenuSetBlock.operator !=(Kiln.StationMenuSetBlock? left, Kiln.StationMenuSetBlock? right) -> bool
+static Kiln.StationMenuSetBlock.operator ==(Kiln.StationMenuSetBlock? left, Kiln.StationMenuSetBlock? right) -> bool
+static Kiln.StationMenuTabBlock.operator !=(Kiln.StationMenuTabBlock? left, Kiln.StationMenuTabBlock? right) -> bool
+static Kiln.StationMenuTabBlock.operator ==(Kiln.StationMenuTabBlock? left, Kiln.StationMenuTabBlock? right) -> bool
+static Kiln.StationMenus.Define(Kiln.BlockHandle<Kiln.StationBlock!>! station, Kiln.StationMenuDefinition! definition) -> Kiln.MenuDefinitionResult!
 static Kiln.StationRecipe.operator !=(Kiln.StationRecipe? left, Kiln.StationRecipe? right) -> bool
 static Kiln.StationRecipe.operator ==(Kiln.StationRecipe? left, Kiln.StationRecipe? right) -> bool
+static Kiln.StationRecipeRef.implicit operator Kiln.StationRecipeRef(string! value) -> Kiln.StationRecipeRef
+static Kiln.StationRecipeRef.operator !=(Kiln.StationRecipeRef left, Kiln.StationRecipeRef right) -> bool
+static Kiln.StationRecipeRef.operator ==(Kiln.StationRecipeRef left, Kiln.StationRecipeRef right) -> bool
 static Kiln.StationRef.implicit operator Kiln.StationRef(Kiln.BlockHandle<Kiln.StationBlock!>! handle) -> Kiln.StationRef
 static Kiln.StationRef.implicit operator Kiln.StationRef(string! value) -> Kiln.StationRef
 static Kiln.StationRef.operator !=(Kiln.StationRef left, Kiln.StationRef right) -> bool
@@ -5927,6 +7215,10 @@ static Kiln.SurfaceValue.operator !=(Kiln.SurfaceValue left, Kiln.SurfaceValue r
 static Kiln.SurfaceValue.operator ==(Kiln.SurfaceValue left, Kiln.SurfaceValue right) -> bool
 static Kiln.SyncedAffixes.operator !=(Kiln.SyncedAffixes? left, Kiln.SyncedAffixes? right) -> bool
 static Kiln.SyncedAffixes.operator ==(Kiln.SyncedAffixes? left, Kiln.SyncedAffixes? right) -> bool
+static Kiln.TableRow.operator !=(Kiln.TableRow? left, Kiln.TableRow? right) -> bool
+static Kiln.TableRow.operator ==(Kiln.TableRow? left, Kiln.TableRow? right) -> bool
+static Kiln.TabsRow.operator !=(Kiln.TabsRow? left, Kiln.TabsRow? right) -> bool
+static Kiln.TabsRow.operator ==(Kiln.TabsRow? left, Kiln.TabsRow? right) -> bool
 static Kiln.TalentBlock.operator !=(Kiln.TalentBlock? left, Kiln.TalentBlock? right) -> bool
 static Kiln.TalentBlock.operator ==(Kiln.TalentBlock? left, Kiln.TalentBlock? right) -> bool
 static Kiln.TalentPointsBlock.operator !=(Kiln.TalentPointsBlock? left, Kiln.TalentPointsBlock? right) -> bool
@@ -5957,16 +7249,100 @@ static Kiln.ToolMaterialPoolBlock.operator !=(Kiln.ToolMaterialPoolBlock? left, 
 static Kiln.ToolMaterialPoolBlock.operator ==(Kiln.ToolMaterialPoolBlock? left, Kiln.ToolMaterialPoolBlock? right) -> bool
 static Kiln.ToolMaterialPoolEntry.operator !=(Kiln.ToolMaterialPoolEntry? left, Kiln.ToolMaterialPoolEntry? right) -> bool
 static Kiln.ToolMaterialPoolEntry.operator ==(Kiln.ToolMaterialPoolEntry? left, Kiln.ToolMaterialPoolEntry? right) -> bool
+static Kiln.TreeRow.operator !=(Kiln.TreeRow? left, Kiln.TreeRow? right) -> bool
+static Kiln.TreeRow.operator ==(Kiln.TreeRow? left, Kiln.TreeRow? right) -> bool
 static Kiln.TriggerBlock.operator !=(Kiln.TriggerBlock? left, Kiln.TriggerBlock? right) -> bool
 static Kiln.TriggerBlock.operator ==(Kiln.TriggerBlock? left, Kiln.TriggerBlock? right) -> bool
 static Kiln.UiAction.operator !=(Kiln.UiAction? left, Kiln.UiAction? right) -> bool
 static Kiln.UiAction.operator ==(Kiln.UiAction? left, Kiln.UiAction? right) -> bool
+static Kiln.UiBoolState.operator !=(Kiln.UiBoolState? left, Kiln.UiBoolState? right) -> bool
+static Kiln.UiBoolState.operator ==(Kiln.UiBoolState? left, Kiln.UiBoolState? right) -> bool
+static Kiln.UiColumn.operator !=(Kiln.UiColumn? left, Kiln.UiColumn? right) -> bool
+static Kiln.UiColumn.operator ==(Kiln.UiColumn? left, Kiln.UiColumn? right) -> bool
+static Kiln.UiCommandResult.operator !=(Kiln.UiCommandResult? left, Kiln.UiCommandResult? right) -> bool
+static Kiln.UiCommandResult.operator ==(Kiln.UiCommandResult? left, Kiln.UiCommandResult? right) -> bool
+static Kiln.UiControlState.operator !=(Kiln.UiControlState? left, Kiln.UiControlState? right) -> bool
+static Kiln.UiControlState.operator ==(Kiln.UiControlState? left, Kiln.UiControlState? right) -> bool
+static Kiln.UiDataPublishResult.operator !=(Kiln.UiDataPublishResult? left, Kiln.UiDataPublishResult? right) -> bool
+static Kiln.UiDataPublishResult.operator ==(Kiln.UiDataPublishResult? left, Kiln.UiDataPublishResult? right) -> bool
+static Kiln.UiDataRow.operator !=(Kiln.UiDataRow? left, Kiln.UiDataRow? right) -> bool
+static Kiln.UiDataRow.operator ==(Kiln.UiDataRow? left, Kiln.UiDataRow? right) -> bool
+static Kiln.UiDataSchema.operator !=(Kiln.UiDataSchema? left, Kiln.UiDataSchema? right) -> bool
+static Kiln.UiDataSchema.operator ==(Kiln.UiDataSchema? left, Kiln.UiDataSchema? right) -> bool
+static Kiln.UiDataSnapshot.Rows.operator !=(Kiln.UiDataSnapshot.Rows? left, Kiln.UiDataSnapshot.Rows? right) -> bool
+static Kiln.UiDataSnapshot.Rows.operator ==(Kiln.UiDataSnapshot.Rows? left, Kiln.UiDataSnapshot.Rows? right) -> bool
+static Kiln.UiDataSnapshot.Scalar.operator !=(Kiln.UiDataSnapshot.Scalar? left, Kiln.UiDataSnapshot.Scalar? right) -> bool
+static Kiln.UiDataSnapshot.Scalar.operator ==(Kiln.UiDataSnapshot.Scalar? left, Kiln.UiDataSnapshot.Scalar? right) -> bool
+static Kiln.UiDataSnapshot.Tree.operator !=(Kiln.UiDataSnapshot.Tree? left, Kiln.UiDataSnapshot.Tree? right) -> bool
+static Kiln.UiDataSnapshot.Tree.operator ==(Kiln.UiDataSnapshot.Tree? left, Kiln.UiDataSnapshot.Tree? right) -> bool
+static Kiln.UiDataSnapshot.operator !=(Kiln.UiDataSnapshot? left, Kiln.UiDataSnapshot? right) -> bool
+static Kiln.UiDataSnapshot.operator ==(Kiln.UiDataSnapshot? left, Kiln.UiDataSnapshot? right) -> bool
+static Kiln.UiDecimalState.operator !=(Kiln.UiDecimalState? left, Kiln.UiDecimalState? right) -> bool
+static Kiln.UiDecimalState.operator ==(Kiln.UiDecimalState? left, Kiln.UiDecimalState? right) -> bool
+static Kiln.UiField.operator !=(Kiln.UiField? left, Kiln.UiField? right) -> bool
+static Kiln.UiField.operator ==(Kiln.UiField? left, Kiln.UiField? right) -> bool
+static Kiln.UiInt64State.operator !=(Kiln.UiInt64State? left, Kiln.UiInt64State? right) -> bool
+static Kiln.UiInt64State.operator ==(Kiln.UiInt64State? left, Kiln.UiInt64State? right) -> bool
+static Kiln.UiInventoryValue.operator !=(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
+static Kiln.UiInventoryValue.operator ==(Kiln.UiInventoryValue? left, Kiln.UiInventoryValue? right) -> bool
 static Kiln.UiMenu.operator !=(Kiln.UiMenu? left, Kiln.UiMenu? right) -> bool
 static Kiln.UiMenu.operator ==(Kiln.UiMenu? left, Kiln.UiMenu? right) -> bool
 static Kiln.UiRow.operator !=(Kiln.UiRow? left, Kiln.UiRow? right) -> bool
 static Kiln.UiRow.operator ==(Kiln.UiRow? left, Kiln.UiRow? right) -> bool
+static Kiln.UiScalar.Bool.operator !=(Kiln.UiScalar.Bool? left, Kiln.UiScalar.Bool? right) -> bool
+static Kiln.UiScalar.Bool.operator ==(Kiln.UiScalar.Bool? left, Kiln.UiScalar.Bool? right) -> bool
+static Kiln.UiScalar.Decimal.operator !=(Kiln.UiScalar.Decimal? left, Kiln.UiScalar.Decimal? right) -> bool
+static Kiln.UiScalar.Decimal.operator ==(Kiln.UiScalar.Decimal? left, Kiln.UiScalar.Decimal? right) -> bool
+static Kiln.UiScalar.Float64.operator !=(Kiln.UiScalar.Float64? left, Kiln.UiScalar.Float64? right) -> bool
+static Kiln.UiScalar.Float64.operator ==(Kiln.UiScalar.Float64? left, Kiln.UiScalar.Float64? right) -> bool
+static Kiln.UiScalar.Int64.operator !=(Kiln.UiScalar.Int64? left, Kiln.UiScalar.Int64? right) -> bool
+static Kiln.UiScalar.Int64.operator ==(Kiln.UiScalar.Int64? left, Kiln.UiScalar.Int64? right) -> bool
+static Kiln.UiScalar.String.operator !=(Kiln.UiScalar.String? left, Kiln.UiScalar.String? right) -> bool
+static Kiln.UiScalar.String.operator ==(Kiln.UiScalar.String? left, Kiln.UiScalar.String? right) -> bool
+static Kiln.UiScalar.UInt64.operator !=(Kiln.UiScalar.UInt64? left, Kiln.UiScalar.UInt64? right) -> bool
+static Kiln.UiScalar.UInt64.operator ==(Kiln.UiScalar.UInt64? left, Kiln.UiScalar.UInt64? right) -> bool
+static Kiln.UiScalar.operator !=(Kiln.UiScalar? left, Kiln.UiScalar? right) -> bool
+static Kiln.UiScalar.operator ==(Kiln.UiScalar? left, Kiln.UiScalar? right) -> bool
 static Kiln.UiSet.operator !=(Kiln.UiSet? left, Kiln.UiSet? right) -> bool
 static Kiln.UiSet.operator ==(Kiln.UiSet? left, Kiln.UiSet? right) -> bool
+static Kiln.UiSnapshotStamp.operator !=(Kiln.UiSnapshotStamp? left, Kiln.UiSnapshotStamp? right) -> bool
+static Kiln.UiSnapshotStamp.operator ==(Kiln.UiSnapshotStamp? left, Kiln.UiSnapshotStamp? right) -> bool
+static Kiln.UiStateDefinition.operator !=(Kiln.UiStateDefinition? left, Kiln.UiStateDefinition? right) -> bool
+static Kiln.UiStateDefinition.operator ==(Kiln.UiStateDefinition? left, Kiln.UiStateDefinition? right) -> bool
+static Kiln.UiStateReadResult.operator !=(Kiln.UiStateReadResult? left, Kiln.UiStateReadResult? right) -> bool
+static Kiln.UiStateReadResult.operator ==(Kiln.UiStateReadResult? left, Kiln.UiStateReadResult? right) -> bool
+static Kiln.UiStateResult.operator !=(Kiln.UiStateResult? left, Kiln.UiStateResult? right) -> bool
+static Kiln.UiStateResult.operator ==(Kiln.UiStateResult? left, Kiln.UiStateResult? right) -> bool
+static Kiln.UiStateSnapshot.operator !=(Kiln.UiStateSnapshot? left, Kiln.UiStateSnapshot? right) -> bool
+static Kiln.UiStateSnapshot.operator ==(Kiln.UiStateSnapshot? left, Kiln.UiStateSnapshot? right) -> bool
+static Kiln.UiStateValue.Bool.operator !=(Kiln.UiStateValue.Bool? left, Kiln.UiStateValue.Bool? right) -> bool
+static Kiln.UiStateValue.Bool.operator ==(Kiln.UiStateValue.Bool? left, Kiln.UiStateValue.Bool? right) -> bool
+static Kiln.UiStateValue.Decimal.operator !=(Kiln.UiStateValue.Decimal? left, Kiln.UiStateValue.Decimal? right) -> bool
+static Kiln.UiStateValue.Decimal.operator ==(Kiln.UiStateValue.Decimal? left, Kiln.UiStateValue.Decimal? right) -> bool
+static Kiln.UiStateValue.Int64.operator !=(Kiln.UiStateValue.Int64? left, Kiln.UiStateValue.Int64? right) -> bool
+static Kiln.UiStateValue.Int64.operator ==(Kiln.UiStateValue.Int64? left, Kiln.UiStateValue.Int64? right) -> bool
+static Kiln.UiStateValue.String.operator !=(Kiln.UiStateValue.String? left, Kiln.UiStateValue.String? right) -> bool
+static Kiln.UiStateValue.String.operator ==(Kiln.UiStateValue.String? left, Kiln.UiStateValue.String? right) -> bool
+static Kiln.UiStateValue.StringSet.operator !=(Kiln.UiStateValue.StringSet? left, Kiln.UiStateValue.StringSet? right) -> bool
+static Kiln.UiStateValue.StringSet.operator ==(Kiln.UiStateValue.StringSet? left, Kiln.UiStateValue.StringSet? right) -> bool
+static Kiln.UiStateValue.operator !=(Kiln.UiStateValue? left, Kiln.UiStateValue? right) -> bool
+static Kiln.UiStateValue.operator ==(Kiln.UiStateValue? left, Kiln.UiStateValue? right) -> bool
+static Kiln.UiStateVersion.operator !=(Kiln.UiStateVersion left, Kiln.UiStateVersion right) -> bool
+static Kiln.UiStateVersion.operator ==(Kiln.UiStateVersion left, Kiln.UiStateVersion right) -> bool
+static Kiln.UiStringSetState.operator !=(Kiln.UiStringSetState? left, Kiln.UiStringSetState? right) -> bool
+static Kiln.UiStringSetState.operator ==(Kiln.UiStringSetState? left, Kiln.UiStringSetState? right) -> bool
+static Kiln.UiStringState.operator !=(Kiln.UiStringState? left, Kiln.UiStringState? right) -> bool
+static Kiln.UiStringState.operator ==(Kiln.UiStringState? left, Kiln.UiStringState? right) -> bool
+static Kiln.UiTab.operator !=(Kiln.UiTab? left, Kiln.UiTab? right) -> bool
+static Kiln.UiTab.operator ==(Kiln.UiTab? left, Kiln.UiTab? right) -> bool
+static Kiln.UiTreeDataNode.operator !=(Kiln.UiTreeDataNode? left, Kiln.UiTreeDataNode? right) -> bool
+static Kiln.UiTreeDataNode.operator ==(Kiln.UiTreeDataNode? left, Kiln.UiTreeDataNode? right) -> bool
+static Kiln.UiTreeNodeDefinition.operator !=(Kiln.UiTreeNodeDefinition? left, Kiln.UiTreeNodeDefinition? right) -> bool
+static Kiln.UiTreeNodeDefinition.operator ==(Kiln.UiTreeNodeDefinition? left, Kiln.UiTreeNodeDefinition? right) -> bool
+static Kiln.UiWorldReadResult.operator !=(Kiln.UiWorldReadResult? left, Kiln.UiWorldReadResult? right) -> bool
+static Kiln.UiWorldReadResult.operator ==(Kiln.UiWorldReadResult? left, Kiln.UiWorldReadResult? right) -> bool
+static Kiln.UiWorldSnapshot.operator !=(Kiln.UiWorldSnapshot? left, Kiln.UiWorldSnapshot? right) -> bool
+static Kiln.UiWorldSnapshot.operator ==(Kiln.UiWorldSnapshot? left, Kiln.UiWorldSnapshot? right) -> bool
 static Kiln.UpgradeAction.operator !=(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
 static Kiln.UpgradeAction.operator ==(Kiln.UpgradeAction? left, Kiln.UpgradeAction? right) -> bool
 static Kiln.UpgradeStation.Available.get -> bool
@@ -5974,6 +7350,8 @@ static Kiln.UpgradeStation.Offer(Kiln.EntityId entity, Kiln.UpgradeAction! actio
 static Kiln.UpgradeStation.Use(Kiln.EntityId player, Kiln.EntityId station, Kiln.UpgradeAction! action) -> System.Threading.Tasks.Task<Kiln.UpgradeResult?>!
 static Kiln.ValueRow.operator !=(Kiln.ValueRow? left, Kiln.ValueRow? right) -> bool
 static Kiln.ValueRow.operator ==(Kiln.ValueRow? left, Kiln.ValueRow? right) -> bool
+static Kiln.VanillaTask.operator !=(Kiln.VanillaTask? left, Kiln.VanillaTask? right) -> bool
+static Kiln.VanillaTask.operator ==(Kiln.VanillaTask? left, Kiln.VanillaTask? right) -> bool
 static Kiln.VendorBlock.operator !=(Kiln.VendorBlock? left, Kiln.VendorBlock? right) -> bool
 static Kiln.VendorBlock.operator ==(Kiln.VendorBlock? left, Kiln.VendorBlock? right) -> bool
 static Kiln.VfxBlock.operator !=(Kiln.VfxBlock? left, Kiln.VfxBlock? right) -> bool
@@ -6208,6 +7586,9 @@ static readonly Kiln.WeaponClass.Shield -> Kiln.WeaponClass!
 static readonly Kiln.WeaponClass.Staff -> Kiln.WeaponClass!
 static readonly Kiln.WeaponClass.Sword -> Kiln.WeaponClass!
 static readonly Kiln.WeaponClass.Wand -> Kiln.WeaponClass!
+virtual Kiln.ClothColliderBlock.EqualityContract.get -> System.Type!
+virtual Kiln.ClothColliderBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
+virtual Kiln.ClothColliderBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
 virtual Kiln.NpcBrain.Start(Kiln.NpcControl! npc) -> void
 virtual Kiln.NpcBrain.Stop(Kiln.NpcControl! npc) -> void
 virtual Kiln.PlaceBlock.<Clone>$() -> Kiln.PlaceBlock!
@@ -6221,9 +7602,24 @@ virtual Kiln.PropBlock.<Clone>$() -> Kiln.PropBlock!
 virtual Kiln.PropBlock.EqualityContract.get -> System.Type!
 virtual Kiln.PropBlock.Equals(Kiln.PropBlock? other) -> bool
 virtual Kiln.PropBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.RoutineTask.EqualityContract.get -> System.Type!
+virtual Kiln.RoutineTask.Equals(Kiln.RoutineTask? other) -> bool
+virtual Kiln.RoutineTask.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.UiDataSnapshot.EqualityContract.get -> System.Type!
+virtual Kiln.UiDataSnapshot.Equals(Kiln.UiDataSnapshot? other) -> bool
+virtual Kiln.UiDataSnapshot.PrintMembers(System.Text.StringBuilder! builder) -> bool
 virtual Kiln.UiRow.EqualityContract.get -> System.Type!
 virtual Kiln.UiRow.Equals(Kiln.UiRow? other) -> bool
 virtual Kiln.UiRow.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.UiScalar.EqualityContract.get -> System.Type!
+virtual Kiln.UiScalar.Equals(Kiln.UiScalar? other) -> bool
+virtual Kiln.UiScalar.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.UiStateDefinition.EqualityContract.get -> System.Type!
+virtual Kiln.UiStateDefinition.Equals(Kiln.UiStateDefinition? other) -> bool
+virtual Kiln.UiStateDefinition.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Kiln.UiStateValue.EqualityContract.get -> System.Type!
+virtual Kiln.UiStateValue.Equals(Kiln.UiStateValue? other) -> bool
+virtual Kiln.UiStateValue.PrintMembers(System.Text.StringBuilder! builder) -> bool
 ~Kiln.BlockRef<T>.Equals(Kiln.BlockRef<T> other) -> bool
 ~Kiln.BootBlockId<T>.<Clone>$() -> Kiln.BootBlockId<T>!
 ~Kiln.BootBlockId<T>.Equals(Kiln.BootBlockId<T>? other) -> bool
@@ -6264,11 +7660,14 @@ virtual Kiln.UiRow.PrintMembers(System.Text.StringBuilder! builder) -> bool
 ~override Kiln.SoundRef.Equals(object obj) -> bool
 ~override Kiln.StationInput.Equals(object obj) -> bool
 ~override Kiln.StationInput.ToString() -> string
+~override Kiln.StationRecipeRef.Equals(object obj) -> bool
 ~override Kiln.StationRef.Equals(object obj) -> bool
 ~override Kiln.StationStack.Equals(object obj) -> bool
 ~override Kiln.SurfaceValue.Equals(object obj) -> bool
 ~override Kiln.SurfaceValue.ToString() -> string
 ~override Kiln.TemplateRef.Equals(object obj) -> bool
+~override Kiln.UiStateVersion.Equals(object obj) -> bool
+~override Kiln.UiStateVersion.ToString() -> string
 ~override Kiln.VfxRange.Equals(object obj) -> bool
 ~override Kiln.VfxRange.ToString() -> string
 ~override Kiln.VfxValue.Equals(object obj) -> bool

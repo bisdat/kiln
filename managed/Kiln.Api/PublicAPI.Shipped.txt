@@ -242,6 +242,8 @@ Kiln.ConfigEntry.Path.init -> void
 Kiln.ConfigEntry.PendingRestart.get -> bool
 Kiln.ConfigEntry.RequiresRestart.get -> bool
 Kiln.ConfigEntry.RequiresRestart.init -> void
+Kiln.ConfigEntry.Step.get -> double?
+Kiln.ConfigEntry.Step.init -> void
 Kiln.ConfigEntry.Synced.get -> bool
 Kiln.ConfigEntry.Synced.init -> void
 Kiln.ConfigEntry.Type.get -> string!
@@ -1218,6 +1220,8 @@ Kiln.RangeAttribute
 Kiln.RangeAttribute.Max.get -> double
 Kiln.RangeAttribute.Min.get -> double
 Kiln.RangeAttribute.RangeAttribute(double min, double max) -> void
+Kiln.RangeAttribute.RangeAttribute(double min, double max, double step) -> void
+Kiln.RangeAttribute.Step.get -> double?
 Kiln.Reflected
 Kiln.ReflectedResource
 Kiln.ReflectedResource.Bytes.get -> byte[]!
@@ -1246,6 +1250,8 @@ Kiln.ReflectedValue.Get<T>(string! path) -> T
 Kiln.ReflectedValue.Type.get -> Kiln.GameType!
 Kiln.ReflectedValue.this[string! path].get -> object?
 Kiln.ReflectedValue.this[string! path].set -> void
+Kiln.RegistryThreadOnlyAttribute
+Kiln.RegistryThreadOnlyAttribute.RegistryThreadOnlyAttribute() -> void
 Kiln.RenderThreadAttribute
 Kiln.RenderThreadAttribute.RenderThreadAttribute() -> void
 Kiln.RequiresCapabilityAttribute
@@ -1350,6 +1356,54 @@ Kiln.WorldPosition.Z.init -> void
 [KILNX001]static Kiln.Decisions.LabDecide(Kiln.EntityId subject, bool? allow) -> Kiln.DecisionId
 [KILNX001]static Kiln.Decisions.LabResolveEntity(Kiln.EntityId entity, out Kiln.EventEntityKey key, out Kiln.WorldPosition? position) -> int
 [KILNX001]static Kiln.Decisions.LabWindow(out ulong worldEpoch, out ulong step) -> int
+[KILNX031]Kiln.RegistryContext
+[KILNX031]Kiln.RegistryContext.EntryPoint.get -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryContext.Identity.get -> string!
+[KILNX031]Kiln.RegistryContext.ModId.get -> string!
+[KILNX031]Kiln.RegistryContext.Phase.get -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryContext.World.get -> Kiln.RegistryWorld?
+[KILNX031]Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.Closed = 0 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.ReadOnly = 5 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.RuntimeExportUnavailable = 6 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.Unloaded = 1 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WorldChanged = 4 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WorldSettingsUnavailable = 3 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WrongThread = 2 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextException
+[KILNX031]Kiln.RegistryContextException.Code.get -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextException.RegistryContextException(Kiln.RegistryContextError code, string! message) -> void
+[KILNX031]Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.GameStart = 1 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.HotReload = 8 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.Manual = 16 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.ModLoad = 2 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.WorldLoad = 4 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPointsAttribute
+[KILNX031]Kiln.RegistryEntryPointsAttribute.Points.get -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPointsAttribute.RegistryEntryPointsAttribute(Kiln.RegistryEntryPoint points) -> void
+[KILNX031]Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Add = 1 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Alter = 2 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Final = 3 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryReadyPhase
+[KILNX031]Kiln.RegistryReadyPhase.Start = 4 -> Kiln.RegistryReadyPhase
+[KILNX031]Kiln.RegistryReadyPhase.WorldLoad = 5 -> Kiln.RegistryReadyPhase
+[KILNX031]Kiln.RegistryWorld
+[KILNX031]Kiln.RegistryWorld.Deconstruct(out ulong Token, out Kiln.WorldKind Kind, out string? Id) -> void
+[KILNX031]Kiln.RegistryWorld.Equals(Kiln.RegistryWorld other) -> bool
+[KILNX031]Kiln.RegistryWorld.Id.get -> string?
+[KILNX031]Kiln.RegistryWorld.Id.init -> void
+[KILNX031]Kiln.RegistryWorld.Kind.get -> Kiln.WorldKind
+[KILNX031]Kiln.RegistryWorld.Kind.init -> void
+[KILNX031]Kiln.RegistryWorld.RegistryWorld() -> void
+[KILNX031]Kiln.RegistryWorld.RegistryWorld(ulong Token, Kiln.WorldKind Kind, string? Id) -> void
+[KILNX031]Kiln.RegistryWorld.Token.get -> ulong
+[KILNX031]Kiln.RegistryWorld.Token.init -> void
+[KILNX031]override Kiln.RegistryWorld.GetHashCode() -> int
+[KILNX031]static Kiln.RegistryWorld.operator !=(Kiln.RegistryWorld left, Kiln.RegistryWorld right) -> bool
+[KILNX031]static Kiln.RegistryWorld.operator ==(Kiln.RegistryWorld left, Kiln.RegistryWorld right) -> bool
+[KILNX031]virtual Kiln.Mod.OnRegistry(Kiln.RegistryContext! context) -> void
 const Kiln.EcsPrograms.ClientWorldCapability = "world.programs.client" -> string!
 const Kiln.Events.MaxDepth = 32 -> int
 const Kiln.Events.MaxFaults = 5 -> int
@@ -1678,6 +1732,8 @@ virtual Kiln.Mod.OnLoad() -> void
 virtual Kiln.Mod.OnUnload() -> void
 virtual Kiln.ServerWaitHandler.Invoke(ref long waitNanoseconds) -> void
 virtual Kiln.TickHandler.Invoke(in Kiln.TickInfo tick) -> void
+~[KILNX031]override Kiln.RegistryWorld.Equals(object obj) -> bool
+~[KILNX031]override Kiln.RegistryWorld.ToString() -> string
 ~override Kiln.Capability.Equals(object obj) -> bool
 ~override Kiln.Capability.ToString() -> string
 ~override Kiln.CapacityWorldToken.Equals(object obj) -> bool

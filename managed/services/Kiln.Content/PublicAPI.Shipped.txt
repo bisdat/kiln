@@ -619,6 +619,8 @@ Kiln.ItemDefinition.Source.get -> string?
 Kiln.ItemDefinition.Source.init -> void
 Kiln.ItemDefinition.Texts.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Kiln.ItemTexts!>?
 Kiln.ItemDefinition.Texts.init -> void
+Kiln.ItemDefinition.VanillaLook.get -> string?
+Kiln.ItemDefinition.VanillaLook.init -> void
 Kiln.ItemDefinition.VisualModels.get -> System.Collections.Generic.IReadOnlyList<(uint Mask, string! Model)>?
 Kiln.ItemDefinition.VisualModels.init -> void
 Kiln.ItemDefinition.WeaponType.get -> string?
@@ -749,6 +751,20 @@ Kiln.RecipeStack.RecipeStack(Kiln.ItemId Item, int Count, uint Category = 0) -> 
 Kiln.RecipeUnlock
 Kiln.RecipeUnlock.Always = 0 -> Kiln.RecipeUnlock
 Kiln.RecipeUnlock.LikeBase = 1 -> Kiln.RecipeUnlock
+Kiln.StationMenuAppliedEvent
+Kiln.StationMenuAppliedEvent.DefinitionId.get -> System.Guid
+Kiln.StationMenuAppliedEvent.FromServer.get -> bool
+Kiln.StationMenuAppliedEvent.Generation.get -> ulong
+Kiln.StationMenuAppliedEvent.Ok.get -> bool
+Kiln.StationMenuAppliedEvent.Reason.get -> string!
+Kiln.StationMenuAppliedEvent.Session.get -> System.Guid
+Kiln.StationMenuAppliedEvent.Workshop.get -> uint
+Kiln.StationMenuDefinitionChangedEvent
+Kiln.StationMenuDefinitionChangedEvent.DefinitionId.get -> System.Guid
+Kiln.StationMenuDefinitionChangedEvent.Generation.get -> ulong
+Kiln.StationMenuDefinitionChangedEvent.ModId.get -> string!
+Kiln.StationMenuDefinitionChangedEvent.Removed.get -> bool
+Kiln.StationMenuDefinitionChangedEvent.Workshop.get -> uint
 Kiln.Texts
 Kiln.TextsStatus
 Kiln.TextsStatus.<Clone>$() -> Kiln.TextsStatus!

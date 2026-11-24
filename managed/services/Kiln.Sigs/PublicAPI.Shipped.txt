@@ -75,6 +75,81 @@ Kiln.Sigs.OptS32
 Kiln.Sigs.OptS32.Has -> byte
 Kiln.Sigs.OptS32.OptS32() -> void
 Kiln.Sigs.OptS32.Value -> int
+Kiln.Sigs.Routines.DecideTask
+Kiln.Sigs.Routines.DecideTask.Call
+Kiln.Sigs.Routines.DecideTask.Call.Call() -> void
+Kiln.Sigs.Routines.DecideTask.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.DecideTask.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.DecideTask.Call.Ctx.set -> void
+Kiln.Sigs.Routines.DecideTask.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.DecideTask.Call.Phase.get -> byte
+Kiln.Sigs.Routines.DecideTask.Call.Phase.set -> void
+Kiln.Sigs.Routines.DecideTask.Call.Skip() -> void
+Kiln.Sigs.Routines.DecideTask.Handler
+Kiln.Sigs.Routines.FinishState
+Kiln.Sigs.Routines.FinishState.Call
+Kiln.Sigs.Routines.FinishState.Call.Call() -> void
+Kiln.Sigs.Routines.FinishState.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.FinishState.Call.Condition.get -> byte
+Kiln.Sigs.Routines.FinishState.Call.Condition.set -> void
+Kiln.Sigs.Routines.FinishState.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.FinishState.Call.Ctx.set -> void
+Kiln.Sigs.Routines.FinishState.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.FinishState.Call.Result.get -> bool
+Kiln.Sigs.Routines.FinishState.Call.Result.set -> void
+Kiln.Sigs.Routines.FinishState.Call.Skip() -> void
+Kiln.Sigs.Routines.FinishState.Handler
+Kiln.Sigs.Routines.ProcessCommands
+Kiln.Sigs.Routines.ProcessCommands.Call
+Kiln.Sigs.Routines.ProcessCommands.Call.Call() -> void
+Kiln.Sigs.Routines.ProcessCommands.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.ProcessCommands.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.ProcessCommands.Call.Ctx.set -> void
+Kiln.Sigs.Routines.ProcessCommands.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.ProcessCommands.Call.Skip() -> void
+Kiln.Sigs.Routines.ProcessCommands.Handler
+Kiln.Sigs.Routines.SetDecision
+Kiln.Sigs.Routines.SetDecision.Call
+Kiln.Sigs.Routines.SetDecision.Call.Call() -> void
+Kiln.Sigs.Routines.SetDecision.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.SetDecision.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.SetDecision.Call.Ctx.set -> void
+Kiln.Sigs.Routines.SetDecision.Call.Decision.get -> byte
+Kiln.Sigs.Routines.SetDecision.Call.Decision.set -> void
+Kiln.Sigs.Routines.SetDecision.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.SetDecision.Call.Skip() -> void
+Kiln.Sigs.Routines.SetDecision.Handler
+Kiln.Sigs.Routines.SetState
+Kiln.Sigs.Routines.SetState.Call
+Kiln.Sigs.Routines.SetState.Call.Call() -> void
+Kiln.Sigs.Routines.SetState.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.SetState.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.SetState.Call.Ctx.set -> void
+Kiln.Sigs.Routines.SetState.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.SetState.Call.Skip() -> void
+Kiln.Sigs.Routines.SetState.Call.State.get -> byte
+Kiln.Sigs.Routines.SetState.Call.State.set -> void
+Kiln.Sigs.Routines.SetState.Handler
+Kiln.Sigs.Routines.SleepCheck
+Kiln.Sigs.Routines.SleepCheck.Call
+Kiln.Sigs.Routines.SleepCheck.Call.Call() -> void
+Kiln.Sigs.Routines.SleepCheck.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.SleepCheck.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.SleepCheck.Call.Ctx.set -> void
+Kiln.Sigs.Routines.SleepCheck.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.SleepCheck.Call.Result.get -> bool
+Kiln.Sigs.Routines.SleepCheck.Call.Result.set -> void
+Kiln.Sigs.Routines.SleepCheck.Call.Skip() -> void
+Kiln.Sigs.Routines.SleepCheck.Handler
+Kiln.Sigs.Routines.VillagerWorker
+Kiln.Sigs.Routines.VillagerWorker.Call
+Kiln.Sigs.Routines.VillagerWorker.Call.Call() -> void
+Kiln.Sigs.Routines.VillagerWorker.Call.CallOriginal() -> void
+Kiln.Sigs.Routines.VillagerWorker.Call.Ctx.get -> nint
+Kiln.Sigs.Routines.VillagerWorker.Call.Ctx.set -> void
+Kiln.Sigs.Routines.VillagerWorker.Call.OriginalCalled.get -> bool
+Kiln.Sigs.Routines.VillagerWorker.Call.Skip() -> void
+Kiln.Sigs.Routines.VillagerWorker.Handler
 Kiln.Sigs.Rules.QuatRotate
 Kiln.Sigs.Rules.QuatRotate.Call
 Kiln.Sigs.Rules.QuatRotate.Call.Call() -> void
@@ -165,6 +240,20 @@ const Kiln.Sigs.Items.AttrFind.Symbol = "items/AttrFind" -> string!
 const Kiln.Sigs.Items.GetItemVolume.Capability = "sig/items/GetItemVolume" -> string!
 const Kiln.Sigs.Items.GetItemVolume.Symbol = "items/GetItemVolume" -> string!
 const Kiln.Sigs.OptS32.SizeOf = 8 -> int
+const Kiln.Sigs.Routines.DecideTask.Capability = "sig/routines/DecideTask" -> string!
+const Kiln.Sigs.Routines.DecideTask.Symbol = "routines/DecideTask" -> string!
+const Kiln.Sigs.Routines.FinishState.Capability = "sig/routines/FinishState" -> string!
+const Kiln.Sigs.Routines.FinishState.Symbol = "routines/FinishState" -> string!
+const Kiln.Sigs.Routines.ProcessCommands.Capability = "sig/routines/ProcessCommands" -> string!
+const Kiln.Sigs.Routines.ProcessCommands.Symbol = "routines/ProcessCommands" -> string!
+const Kiln.Sigs.Routines.SetDecision.Capability = "sig/routines/SetDecision" -> string!
+const Kiln.Sigs.Routines.SetDecision.Symbol = "routines/SetDecision" -> string!
+const Kiln.Sigs.Routines.SetState.Capability = "sig/routines/SetState" -> string!
+const Kiln.Sigs.Routines.SetState.Symbol = "routines/SetState" -> string!
+const Kiln.Sigs.Routines.SleepCheck.Capability = "sig/routines/SleepCheck" -> string!
+const Kiln.Sigs.Routines.SleepCheck.Symbol = "routines/SleepCheck" -> string!
+const Kiln.Sigs.Routines.VillagerWorker.Capability = "sig/routines/VillagerWorker" -> string!
+const Kiln.Sigs.Routines.VillagerWorker.Symbol = "routines/VillagerWorker" -> string!
 const Kiln.Sigs.Rules.QuatRotate.Capability = "sig/rules/QuatRotate" -> string!
 const Kiln.Sigs.Rules.QuatRotate.Symbol = "rules/QuatRotate" -> string!
 const Kiln.Sigs.Time.GetGameTime.Capability = "sig/time/GetGameTime" -> string!
@@ -184,6 +273,13 @@ static Kiln.Sigs.Items.AttrFind.Detour(Kiln.Sigs.Items.AttrFind.Handler! handler
 static Kiln.Sigs.Items.AttrFind.Invoke(uint attribute, nint registry) -> Kiln.Sigs.AttrRef
 static Kiln.Sigs.Items.GetItemVolume.Detour(Kiln.Sigs.Items.GetItemVolume.Handler! handler, int priority = 0) -> Kiln.HookResult!
 static Kiln.Sigs.Items.GetItemVolume.Invoke(nint item) -> Kiln.Sigs.OptS32
+static Kiln.Sigs.Routines.DecideTask.Detour(Kiln.Sigs.Routines.DecideTask.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.FinishState.Detour(Kiln.Sigs.Routines.FinishState.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.ProcessCommands.Detour(Kiln.Sigs.Routines.ProcessCommands.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.SetDecision.Detour(Kiln.Sigs.Routines.SetDecision.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.SetState.Detour(Kiln.Sigs.Routines.SetState.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.SleepCheck.Detour(Kiln.Sigs.Routines.SleepCheck.Handler! handler, int priority = 0) -> Kiln.HookResult!
+static Kiln.Sigs.Routines.VillagerWorker.Detour(Kiln.Sigs.Routines.VillagerWorker.Handler! handler, int priority = 0) -> Kiln.HookResult!
 static Kiln.Sigs.Rules.QuatRotate.Detour(Kiln.Sigs.Rules.QuatRotate.Handler! handler, int priority = 0) -> Kiln.HookResult!
 static Kiln.Sigs.Rules.QuatRotate.Invoke(nint output, nint rotation, nint vector) -> nint
 static Kiln.Sigs.Time.GetGameTime.Detour(Kiln.Sigs.Time.GetGameTime.Handler! handler, int priority = 0) -> Kiln.HookResult!
@@ -198,6 +294,13 @@ static readonly Kiln.Sigs.Core.GetComponent.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Items.AttrChanged.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Items.AttrFind.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Items.GetItemVolume.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.DecideTask.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.FinishState.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.ProcessCommands.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.SetDecision.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.SetState.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.SleepCheck.Descriptor -> Kiln.SigDescriptor!
+static readonly Kiln.Sigs.Routines.VillagerWorker.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Rules.QuatRotate.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Time.GetGameTime.Descriptor -> Kiln.SigDescriptor!
 static readonly Kiln.Sigs.Time.SetTimeScale.Descriptor -> Kiln.SigDescriptor!
@@ -208,6 +311,13 @@ virtual Kiln.Sigs.Core.GetComponent.Handler.Invoke(ref Kiln.Sigs.Core.GetCompone
 virtual Kiln.Sigs.Items.AttrChanged.Handler.Invoke(ref Kiln.Sigs.Items.AttrChanged.Call call) -> void
 virtual Kiln.Sigs.Items.AttrFind.Handler.Invoke(ref Kiln.Sigs.Items.AttrFind.Call call) -> void
 virtual Kiln.Sigs.Items.GetItemVolume.Handler.Invoke(ref Kiln.Sigs.Items.GetItemVolume.Call call) -> void
+virtual Kiln.Sigs.Routines.DecideTask.Handler.Invoke(ref Kiln.Sigs.Routines.DecideTask.Call call) -> void
+virtual Kiln.Sigs.Routines.FinishState.Handler.Invoke(ref Kiln.Sigs.Routines.FinishState.Call call) -> void
+virtual Kiln.Sigs.Routines.ProcessCommands.Handler.Invoke(ref Kiln.Sigs.Routines.ProcessCommands.Call call) -> void
+virtual Kiln.Sigs.Routines.SetDecision.Handler.Invoke(ref Kiln.Sigs.Routines.SetDecision.Call call) -> void
+virtual Kiln.Sigs.Routines.SetState.Handler.Invoke(ref Kiln.Sigs.Routines.SetState.Call call) -> void
+virtual Kiln.Sigs.Routines.SleepCheck.Handler.Invoke(ref Kiln.Sigs.Routines.SleepCheck.Call call) -> void
+virtual Kiln.Sigs.Routines.VillagerWorker.Handler.Invoke(ref Kiln.Sigs.Routines.VillagerWorker.Call call) -> void
 virtual Kiln.Sigs.Rules.QuatRotate.Handler.Invoke(ref Kiln.Sigs.Rules.QuatRotate.Call call) -> void
 virtual Kiln.Sigs.Time.GetGameTime.Handler.Invoke(ref Kiln.Sigs.Time.GetGameTime.Call call) -> void
 virtual Kiln.Sigs.Time.SetTimeScale.Handler.Invoke(ref Kiln.Sigs.Time.SetTimeScale.Call call) -> void

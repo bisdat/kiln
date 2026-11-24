@@ -506,6 +506,7 @@ Kiln.RenderFrameEvent.Scale.get -> float
 Kiln.RenderFrameEvent.Screen.get -> Kiln.GameScreen
 Kiln.RenderFrameEvent.Width.get -> float
 Kiln.RenderFrameEvent.World.get -> Kiln.WorldDraw!
+Kiln.RenderFrameEvent.WorldOverMenus.get -> Kiln.WorldDraw!
 Kiln.RenderStats
 Kiln.RenderStats.Camera.get -> bool
 Kiln.RenderStats.Camera.init -> void
@@ -765,6 +766,7 @@ Kiln.UiCursor.Y.init -> void
 Kiln.UiDraw
 Kiln.UiDraw.BeginChild(string! id, float width = 0, float height = 0) -> bool
 Kiln.UiDraw.BeginChild(string! id, float width, float height, Kiln.UiChildFlags flags, Kiln.UiWindowFlags windowFlags = Kiln.UiWindowFlags.None) -> bool
+Kiln.UiDraw.BeginControlledTab(string! label, bool select) -> bool
 Kiln.UiDraw.BeginTab(string! label) -> bool
 Kiln.UiDraw.BeginTabBar(string! id) -> bool
 Kiln.UiDraw.BeginTable(string! id, params string![]! columns) -> bool
@@ -802,6 +804,7 @@ Kiln.UiDraw.FontScope.FontScope() -> void
 Kiln.UiDraw.FontScope.FontScope(bool pushed) -> void
 Kiln.UiDraw.FontSize(float size) -> Kiln.UiDraw.FontScope
 Kiln.UiDraw.FrameNumber.get -> ulong
+Kiln.UiDraw.HasBlockWidgets.get -> bool
 Kiln.UiDraw.HasLayout.get -> bool
 Kiln.UiDraw.Height.get -> float
 Kiln.UiDraw.HeldMods.get -> Kiln.KeyMods
@@ -822,6 +825,7 @@ Kiln.UiDraw.ItemIcon(Kiln.ItemId item, float size = 0) -> void
 Kiln.UiDraw.ItemIconTrimmed(Kiln.ItemId item, float size) -> void
 Kiln.UiDraw.KeyPressed(Kiln.UiKey key, bool repeat = false, bool claim = false) -> bool
 Kiln.UiDraw.LastItem.get -> Kiln.UiItem
+Kiln.UiDraw.LastItemState.get -> Kiln.UiItemState
 Kiln.UiDraw.Look(Kiln.UiStyle style) -> Kiln.UiDraw.LookScope
 Kiln.UiDraw.LookScope
 Kiln.UiDraw.LookScope.Dispose() -> void
@@ -851,6 +855,7 @@ Kiln.UiDraw.Selectable(string! label, bool selected, float width, float height =
 Kiln.UiDraw.Separator() -> void
 Kiln.UiDraw.Separator(string! text) -> void
 Kiln.UiDraw.SetCursor(float x, float y) -> void
+Kiln.UiDraw.SetNextItemOpen(bool open) -> void
 Kiln.UiDraw.Slider(string! label, ref float value, float min, float max) -> bool
 Kiln.UiDraw.Slider(string! label, ref int value, int min, int max) -> bool
 Kiln.UiDraw.SmallButton(string! label) -> bool
@@ -859,6 +864,7 @@ Kiln.UiDraw.Spacing() -> void
 Kiln.UiDraw.Text(Kiln.Color color, string! text) -> void
 Kiln.UiDraw.Text(string! text) -> void
 Kiln.UiDraw.TextDisabled(string! text) -> void
+Kiln.UiDraw.TextField(string! label, ref string! value, int maxBytes, Kiln.UiTextFieldFlags flags = Kiln.UiTextFieldFlags.None, float width = 0, float height = 0) -> bool
 Kiln.UiDraw.TextWrapped(string! text) -> void
 Kiln.UiDraw.Theme(Kiln.UiTheme! theme) -> Kiln.UiDraw.LookScope
 Kiln.UiDraw.Tooltip(string! text) -> void
@@ -951,6 +957,12 @@ Kiln.UiItemDetailSnapshot.Rarity.init -> void
 Kiln.UiItemDetailSnapshot.Session.get -> ulong
 Kiln.UiItemDetailSnapshot.Session.init -> void
 Kiln.UiItemDetailSnapshot.UiItemDetailSnapshot(Kiln.ItemId Item, Kiln.EntityId Entity, int Level, Kiln.ItemRarity? Rarity, ulong Session, ulong Frame, ulong CaptureMs, System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>! Lines) -> void
+Kiln.UiItemState
+Kiln.UiItemState.Active = 1 -> Kiln.UiItemState
+Kiln.UiItemState.Deactivated = 2 -> Kiln.UiItemState
+Kiln.UiItemState.DeactivatedAfterEdit = 4 -> Kiln.UiItemState
+Kiln.UiItemState.Edited = 8 -> Kiln.UiItemState
+Kiln.UiItemState.None = 0 -> Kiln.UiItemState
 Kiln.UiItemView
 Kiln.UiItemView.ClientEntity.get -> Kiln.EntityId
 Kiln.UiItemView.ClientEntity.init -> void
@@ -1210,6 +1222,11 @@ Kiln.UiText.For(string! languageKey) -> string!
 Kiln.UiText.Languages.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
 Kiln.UiText.UiText(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! texts) -> void
 Kiln.UiText.UiText(string! text) -> void
+Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.EnterReturns = 1 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.Multiline = 4 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.None = 0 -> Kiln.UiTextFieldFlags
+Kiln.UiTextFieldFlags.ReadOnly = 2 -> Kiln.UiTextFieldFlags
 Kiln.UiTheme
 Kiln.UiTheme.Base.get -> Kiln.UiStyle
 Kiln.UiTheme.DisplayName.get -> Kiln.UiText!
@@ -1550,9 +1567,11 @@ Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason
 Kiln.WorldOutline.State.get -> Kiln.OutlineState
 const Kiln.Ui.AmmoList.ListCapability = "ui.ammo.list" -> string!
 const Kiln.Ui.AmmoList.PickCapability = "ui.ammo.pick" -> string!
+const Kiln.Ui.Inventory.ChestButtonCapability = "ui.chest.buttons" -> string!
 const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!
 const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!
 const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!
+const Kiln.Ui.Inventory.TintCapability = "ui.slots.tint" -> string!
 const Kiln.Ui.Tooltip.LinesCapability = "ui.tooltip.lines" -> string!
 const Kiln.Ui.Tooltip.ValuesCapability = "ui.tooltip.values" -> string!
 const Kiln.Ui.Values.DetailCapability = "ui.values.detail" -> string!
@@ -1771,6 +1790,7 @@ static Kiln.Ui.Crafting.Current.get -> Kiln.CraftingScreen?
 static Kiln.Ui.Crafting.Describe(uint workshop = 0) -> string!
 static Kiln.Ui.Crafting.MenuAvailable.get -> bool
 static Kiln.Ui.Frame -> System.Action<Kiln.UiDraw!>?
+static Kiln.Ui.Inventory.AddChestButton(string! caption, System.Action<Kiln.InventoryScreen>! handler) -> System.IDisposable!
 static Kiln.Ui.Inventory.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.InventoryScreen>! draw, Kiln.InventoryPanelOptions? options = null) -> System.IDisposable!
 static Kiln.Ui.Inventory.ClearMarks() -> void
 static Kiln.Ui.Inventory.Hovered.get -> Kiln.VisibleSlot?
@@ -1780,6 +1800,7 @@ static Kiln.Ui.Inventory.OnClick(Kiln.SlotClickOptions! options, System.Action<K
 static Kiln.Ui.Inventory.Screen.get -> Kiln.InventoryScreen?
 static Kiln.Ui.Inventory.ScreenChanged -> System.Action<Kiln.InventoryScreen?, Kiln.InventoryScreen?>?
 static Kiln.Ui.Inventory.Selected.get -> Kiln.VisibleSlot?
+static Kiln.Ui.Inventory.TintWhen(System.Func<Kiln.UiItemView, Kiln.Color?>! rule, Kiln.ItemId item = default(Kiln.ItemId)) -> System.IDisposable!
 static Kiln.Ui.Inventory.Unmark(Kiln.EntityId item) -> void
 static Kiln.Ui.ItemIconsAvailable.get -> bool
 static Kiln.Ui.ItemImage(Kiln.ItemId item) -> Kiln.UiImage?

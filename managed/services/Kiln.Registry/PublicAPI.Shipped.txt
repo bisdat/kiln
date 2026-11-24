@@ -1,1 +1,427 @@
 #nullable enable
+[KILNX031]Kiln.Registry.BalanceDurability
+[KILNX031]Kiln.Registry.BalanceDurability.Growth.get -> double
+[KILNX031]Kiln.Registry.BalanceDurability.Growth.set -> void
+[KILNX031]Kiln.Registry.BalanceDurability.Start.get -> double
+[KILNX031]Kiln.Registry.BalanceDurability.Start.set -> void
+[KILNX031]Kiln.Registry.BalanceEntry
+[KILNX031]Kiln.Registry.BalanceEntry.AltarsPerFlameLevel.get -> Kiln.Registry.RegistryFixedList<int>!
+[KILNX031]Kiln.Registry.BalanceEntry.BuildzoneSizesPerAltarLevel.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.BalanceZoneSize!>!
+[KILNX031]Kiln.Registry.BalanceEntry.Durability.get -> Kiln.Registry.BalanceDurability!
+[KILNX031]Kiln.Registry.BalanceEntry.FlameLevelMax.get -> int
+[KILNX031]Kiln.Registry.BalanceEntry.FogResistance.get -> Kiln.Registry.BalanceFogResistance!
+[KILNX031]Kiln.Registry.BalanceEntry.Gear.get -> Kiln.Registry.BalanceGear!
+[KILNX031]Kiln.Registry.BalanceEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.BalanceEntry.LevelCap.get -> int
+[KILNX031]Kiln.Registry.BalanceEntry.LevelCap.set -> void
+[KILNX031]Kiln.Registry.BalanceEntry.RarityDurability.get -> Kiln.Registry.BalanceRarityDurability!
+[KILNX031]Kiln.Registry.BalanceEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.BalanceEntry.SkillPointsPerLevel.get -> int
+[KILNX031]Kiln.Registry.BalanceEntry.SkillPointsPerLevel.set -> void
+[KILNX031]Kiln.Registry.BalanceEntry.SocketChance.get -> Kiln.Registry.BalanceSocketChance!
+[KILNX031]Kiln.Registry.BalanceEntry.UnlockCost.get -> Kiln.Registry.BalanceUnlockCost!
+[KILNX031]Kiln.Registry.BalanceEntry.WaterSourcesPerFlameLevel.get -> Kiln.Registry.RegistryFixedList<int>!
+[KILNX031]Kiln.Registry.BalanceEntry.XpCurve.get -> Kiln.Registry.BalanceXpCurve!
+[KILNX031]Kiln.Registry.BalanceEntry.XpPerLevel.get -> Kiln.Registry.RegistryFixedList<int>!
+[KILNX031]Kiln.Registry.BalanceFogResistance
+[KILNX031]Kiln.Registry.BalanceFogResistance.Base.get -> int
+[KILNX031]Kiln.Registry.BalanceFogResistance.Base.set -> void
+[KILNX031]Kiln.Registry.BalanceFogResistance.PerFlameLevel.get -> int
+[KILNX031]Kiln.Registry.BalanceFogResistance.PerFlameLevel.set -> void
+[KILNX031]Kiln.Registry.BalanceGear
+[KILNX031]Kiln.Registry.BalanceGear.ArmorGradient.get -> double
+[KILNX031]Kiln.Registry.BalanceGear.ArmorOffset.get -> double
+[KILNX031]Kiln.Registry.BalanceGear.Creep.get -> double
+[KILNX031]Kiln.Registry.BalanceGear.Seed.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Common.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Common.set -> void
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Epic.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Epic.set -> void
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Legendary.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Legendary.set -> void
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Rare.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Rare.set -> void
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Uncommon.get -> double
+[KILNX031]Kiln.Registry.BalanceRarityDurability.Uncommon.set -> void
+[KILNX031]Kiln.Registry.BalanceSocketChance
+[KILNX031]Kiln.Registry.BalanceSocketChance.Common.get -> double
+[KILNX031]Kiln.Registry.BalanceSocketChance.Common.set -> void
+[KILNX031]Kiln.Registry.BalanceSocketChance.Epic.get -> double
+[KILNX031]Kiln.Registry.BalanceSocketChance.Epic.set -> void
+[KILNX031]Kiln.Registry.BalanceSocketChance.Legendary.get -> double
+[KILNX031]Kiln.Registry.BalanceSocketChance.Legendary.set -> void
+[KILNX031]Kiln.Registry.BalanceSocketChance.Rare.get -> double
+[KILNX031]Kiln.Registry.BalanceSocketChance.Rare.set -> void
+[KILNX031]Kiln.Registry.BalanceSocketChance.Uncommon.get -> double
+[KILNX031]Kiln.Registry.BalanceSocketChance.Uncommon.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Advanced.get -> double
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Advanced.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.AdvancedFrom.get -> int
+[KILNX031]Kiln.Registry.BalanceUnlockCost.AdvancedFrom.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Armor.get -> double
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Armor.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Creep.get -> double
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Creep.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Rings.get -> double
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Rings.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Seed.get -> int
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Seed.set -> void
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Weapons.get -> double
+[KILNX031]Kiln.Registry.BalanceUnlockCost.Weapons.set -> void
+[KILNX031]Kiln.Registry.BalanceXpCurve
+[KILNX031]Kiln.Registry.BalanceXpCurve.End.get -> int
+[KILNX031]Kiln.Registry.BalanceXpCurve.End.set -> void
+[KILNX031]Kiln.Registry.BalanceXpCurve.FromKnowledge.get -> int
+[KILNX031]Kiln.Registry.BalanceXpCurve.FromKnowledge.set -> void
+[KILNX031]Kiln.Registry.BalanceXpCurve.LevelMax.get -> int
+[KILNX031]Kiln.Registry.BalanceXpCurve.LevelMax.set -> void
+[KILNX031]Kiln.Registry.BalanceXpCurve.Seed.get -> int
+[KILNX031]Kiln.Registry.BalanceXpCurve.Seed.set -> void
+[KILNX031]Kiln.Registry.BalanceXpCurve.Start.get -> int
+[KILNX031]Kiln.Registry.BalanceXpCurve.Start.set -> void
+[KILNX031]Kiln.Registry.BalanceZoneSize
+[KILNX031]Kiln.Registry.BalanceZoneSize.Index.get -> int
+[KILNX031]Kiln.Registry.BalanceZoneSize.X.get -> double
+[KILNX031]Kiln.Registry.BalanceZoneSize.X.set -> void
+[KILNX031]Kiln.Registry.BalanceZoneSize.Y.get -> double
+[KILNX031]Kiln.Registry.BalanceZoneSize.Y.set -> void
+[KILNX031]Kiln.Registry.BalanceZoneSize.Z.get -> double
+[KILNX031]Kiln.Registry.BalanceZoneSize.Z.set -> void
+[KILNX031]Kiln.Registry.DropEntry
+[KILNX031]Kiln.Registry.DropEntry.Chance.get -> double
+[KILNX031]Kiln.Registry.DropEntry.Chance.set -> void
+[KILNX031]Kiln.Registry.DropEntry.Count.get -> Kiln.Registry.DropEntryCount!
+[KILNX031]Kiln.Registry.DropEntry.Index.get -> int
+[KILNX031]Kiln.Registry.DropEntry.Item.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.DropEntry.Weight.get -> double
+[KILNX031]Kiln.Registry.DropEntry.Weight.set -> void
+[KILNX031]Kiln.Registry.DropEntryCount
+[KILNX031]Kiln.Registry.DropEntryCount.Max.get -> int
+[KILNX031]Kiln.Registry.DropEntryCount.Max.set -> void
+[KILNX031]Kiln.Registry.DropEntryCount.Min.get -> int
+[KILNX031]Kiln.Registry.DropEntryCount.Min.set -> void
+[KILNX031]Kiln.Registry.DropTableEntry
+[KILNX031]Kiln.Registry.DropTableEntry.Entries.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.DropEntry!>!
+[KILNX031]Kiln.Registry.DropTableEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.DropTableEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.IRegistryEntry
+[KILNX031]Kiln.Registry.IRegistryEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.IRegistryEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.ItemArmor
+[KILNX031]Kiln.Registry.ItemArmor.Blunt.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Blunt.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Cut.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Cut.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Fire.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Fire.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Ice.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Ice.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Lightning.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Lightning.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Magical.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Magical.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Physical.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Physical.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Pierce.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Pierce.set -> void
+[KILNX031]Kiln.Registry.ItemArmor.Shroud.get -> int
+[KILNX031]Kiln.Registry.ItemArmor.Shroud.set -> void
+[KILNX031]Kiln.Registry.ItemDamage
+[KILNX031]Kiln.Registry.ItemDamage.Blunt.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Blunt.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Cut.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Cut.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Explosion.get -> int
+[KILNX031]Kiln.Registry.ItemDamage.Explosion.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Fire.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Fire.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Healing.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Healing.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Ice.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Ice.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Lightning.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Lightning.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Metal.get -> int
+[KILNX031]Kiln.Registry.ItemDamage.Metal.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Pierce.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Pierce.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Poison.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Poison.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Shroud.get -> double
+[KILNX031]Kiln.Registry.ItemDamage.Shroud.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Stone.get -> int
+[KILNX031]Kiln.Registry.ItemDamage.Stone.set -> void
+[KILNX031]Kiln.Registry.ItemDamage.Wood.get -> int
+[KILNX031]Kiln.Registry.ItemDamage.Wood.set -> void
+[KILNX031]Kiln.Registry.ItemEntry
+[KILNX031]Kiln.Registry.ItemEntry.Armor.get -> Kiln.Registry.ItemArmor!
+[KILNX031]Kiln.Registry.ItemEntry.Block.get -> double
+[KILNX031]Kiln.Registry.ItemEntry.Block.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Comfort.get -> int
+[KILNX031]Kiln.Registry.ItemEntry.Comfort.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Damage.get -> Kiln.Registry.ItemDamage!
+[KILNX031]Kiln.Registry.ItemEntry.Fuel.get -> Kiln.Registry.ItemFuel!
+[KILNX031]Kiln.Registry.ItemEntry.HasArmor.get -> bool
+[KILNX031]Kiln.Registry.ItemEntry.HasDamage.get -> bool
+[KILNX031]Kiln.Registry.ItemEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.ItemEntry.Levels.get -> Kiln.Registry.ItemLevels!
+[KILNX031]Kiln.Registry.ItemEntry.ManaCost.get -> double
+[KILNX031]Kiln.Registry.ItemEntry.ManaCost.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.MaxStack.get -> int
+[KILNX031]Kiln.Registry.ItemEntry.MaxStack.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Perks.get -> Kiln.Registry.RegistryValueList<Kiln.Registry.RegistryId>!
+[KILNX031]Kiln.Registry.ItemEntry.Power.get -> int
+[KILNX031]Kiln.Registry.ItemEntry.Power.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Rarity.get -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.ItemEntry.Rarity.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.ItemEntry.Rolled.get -> bool
+[KILNX031]Kiln.Registry.ItemEntry.Rolled.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Socket.get -> bool
+[KILNX031]Kiln.Registry.ItemEntry.Socket.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.Speed.get -> double
+[KILNX031]Kiln.Registry.ItemEntry.Speed.set -> void
+[KILNX031]Kiln.Registry.ItemEntry.StaminaCost.get -> double
+[KILNX031]Kiln.Registry.ItemEntry.StaminaCost.set -> void
+[KILNX031]Kiln.Registry.ItemFuel
+[KILNX031]Kiln.Registry.ItemFuel.BurnTime.get -> System.TimeSpan
+[KILNX031]Kiln.Registry.ItemFuel.BurnTime.set -> void
+[KILNX031]Kiln.Registry.ItemLevels
+[KILNX031]Kiln.Registry.ItemLevels.Max.get -> int
+[KILNX031]Kiln.Registry.ItemLevels.Max.set -> void
+[KILNX031]Kiln.Registry.ItemLevels.Min.get -> int
+[KILNX031]Kiln.Registry.ItemLevels.Min.set -> void
+[KILNX031]Kiln.Registry.ItemLootEntry
+[KILNX031]Kiln.Registry.ItemLootEntry.FixedRarity.get -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootEntry.FixedRarity.set -> void
+[KILNX031]Kiln.Registry.ItemLootEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.ItemLootEntry.Rarities.get -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.ItemLootEntry.Rarities.set -> void
+[KILNX031]Kiln.Registry.ItemLootEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.ItemLootEntry.Stack.get -> Kiln.Registry.ItemLootStack!
+[KILNX031]Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.Common = 1 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.Epic = 4 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.Legendary = 5 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.None = 0 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.Rare = 3 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootRarity.Uncommon = 2 -> Kiln.Registry.ItemLootRarity
+[KILNX031]Kiln.Registry.ItemLootStack
+[KILNX031]Kiln.Registry.ItemLootStack.Max.get -> int
+[KILNX031]Kiln.Registry.ItemLootStack.Max.set -> void
+[KILNX031]Kiln.Registry.ItemLootStack.MaxScaled.get -> int
+[KILNX031]Kiln.Registry.ItemLootStack.MaxScaled.set -> void
+[KILNX031]Kiln.Registry.ItemLootStack.Min.get -> int
+[KILNX031]Kiln.Registry.ItemLootStack.Min.set -> void
+[KILNX031]Kiln.Registry.ItemLootStack.Scalable.get -> bool
+[KILNX031]Kiln.Registry.ItemLootStack.Scalable.set -> void
+[KILNX031]Kiln.Registry.RecipeEntry
+[KILNX031]Kiln.Registry.RecipeEntry.Duration.get -> System.TimeSpan
+[KILNX031]Kiln.Registry.RecipeEntry.Duration.set -> void
+[KILNX031]Kiln.Registry.RecipeEntry.Id.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RecipeEntry.Inputs.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.RecipeInput!>!
+[KILNX031]Kiln.Registry.RecipeEntry.Outputs.get -> Kiln.Registry.RegistryEntryList<Kiln.Registry.RecipeOutput!>!
+[KILNX031]Kiln.Registry.RecipeEntry.Registry.get -> string!
+[KILNX031]Kiln.Registry.RecipeEntry.Station.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RecipeEntry.Unlock.get -> Kiln.Registry.RecipeUnlockMode
+[KILNX031]Kiln.Registry.RecipeEntry.Unlock.set -> void
+[KILNX031]Kiln.Registry.RecipeInput
+[KILNX031]Kiln.Registry.RecipeInput.Category.get -> Kiln.Registry.RegistryId?
+[KILNX031]Kiln.Registry.RecipeInput.Category.set -> void
+[KILNX031]Kiln.Registry.RecipeInput.Count.get -> int
+[KILNX031]Kiln.Registry.RecipeInput.Count.set -> void
+[KILNX031]Kiln.Registry.RecipeInput.Index.get -> int
+[KILNX031]Kiln.Registry.RecipeInput.Item.get -> Kiln.Registry.RegistryId?
+[KILNX031]Kiln.Registry.RecipeInput.Item.set -> void
+[KILNX031]Kiln.Registry.RecipeOutput
+[KILNX031]Kiln.Registry.RecipeOutput.Count.get -> int
+[KILNX031]Kiln.Registry.RecipeOutput.Count.set -> void
+[KILNX031]Kiln.Registry.RecipeOutput.Index.get -> int
+[KILNX031]Kiln.Registry.RecipeOutput.Item.get -> Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RecipeOutput.Item.set -> void
+[KILNX031]Kiln.Registry.RecipeUnlockMode
+[KILNX031]Kiln.Registry.RecipeUnlockMode.Always = 1 -> Kiln.Registry.RecipeUnlockMode
+[KILNX031]Kiln.Registry.RecipeUnlockMode.Game = 0 -> Kiln.Registry.RecipeUnlockMode
+[KILNX031]Kiln.Registry.Registry
+[KILNX031]Kiln.Registry.RegistryChange
+[KILNX031]Kiln.Registry.RegistryChange.Result.get -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChange.Revert() -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Applied = 0 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.PendingResource = 8 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.PendingWorld = 1 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Refused = 2 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.RestartRequired = 3 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Reverted = 5 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Skipped = 6 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Unverified = 7 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.WorldRequired = 4 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeResult
+[KILNX031]Kiln.Registry.RegistryChangeResult.<Clone>$() -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChangeResult.Accepted.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Accepted.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Deconstruct(out Kiln.Registry.RegistryChangeOutcome Outcome, out uint Accepted, out uint Refused, out uint Skipped, out ulong World, out ulong Generation, out string? Reason) -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Equals(Kiln.Registry.RegistryChangeResult? other) -> bool
+[KILNX031]Kiln.Registry.RegistryChangeResult.Generation.get -> ulong
+[KILNX031]Kiln.Registry.RegistryChangeResult.Generation.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Ok.get -> bool
+[KILNX031]Kiln.Registry.RegistryChangeResult.Outcome.get -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeResult.Outcome.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Reason.get -> string?
+[KILNX031]Kiln.Registry.RegistryChangeResult.Reason.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Refused.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Refused.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.RegistryChangeResult(Kiln.Registry.RegistryChangeOutcome Outcome, uint Accepted, uint Refused, uint Skipped, ulong World, ulong Generation, string? Reason) -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Skipped.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Skipped.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.World.get -> ulong
+[KILNX031]Kiln.Registry.RegistryChangeResult.World.init -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Alter(string! pattern, System.Action<T>! edit) -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Final(string! pattern, System.Action<T>! edit) -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Select(string! pattern = "*") -> System.Collections.Generic.IReadOnlyList<T>!
+[KILNX031]Kiln.Registry.RegistryEntries<T>.this[Kiln.Registry.RegistryId id].get -> T
+[KILNX031]Kiln.Registry.RegistryEntries<T>.this[string! id].get -> T
+[KILNX031]Kiln.Registry.RegistryEntryList<T>
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.AppendNew() -> T
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.Clear() -> void
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.RemoveWhere(System.Func<T, bool>! where) -> int
+[KILNX031]Kiln.Registry.RegistryEntryList<T>.this[int index].get -> T
+[KILNX031]Kiln.Registry.RegistryEntryOperations
+[KILNX031]Kiln.Registry.RegistryFieldAttribute
+[KILNX031]Kiln.Registry.RegistryFieldAttribute.Applies.get -> Kiln.RegistryApplies
+[KILNX031]Kiln.Registry.RegistryFieldAttribute.Field.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldAttribute.RegistryFieldAttribute(string! field, Kiln.RegistryApplies applies) -> void
+[KILNX031]Kiln.Registry.RegistryFieldSpec
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Applies.get -> Kiln.RegistryApplies
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Element.get -> Kiln.Registry.RegistryFieldType?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Field.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldSpec.FixedLength.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Formula.get -> string?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Id.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthField.get -> string?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthOffset.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Max.get -> double?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.MaxItems.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Min.get -> double?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Ops.get -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Optional.get -> bool
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Path.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldSpec.ReadOnly.get -> bool
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Reference.get -> string?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Registry.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Since.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Type.get -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Unit.get -> string?
+[KILNX031]Kiln.Registry.RegistryFieldSpec.Values.get -> System.Collections.Generic.IReadOnlyList<string!>!
+[KILNX031]Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Bool = 2 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Enum = 3 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Flags = 4 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Float = 1 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Int = 0 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.List = 7 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Ref = 5 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Struct = 8 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFieldType.Time = 6 -> Kiln.Registry.RegistryFieldType
+[KILNX031]Kiln.Registry.RegistryFixedList<T>
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.this[int index].get -> T
+[KILNX031]Kiln.Registry.RegistryFixedList<T>.this[int index].set -> void
+[KILNX031]Kiln.Registry.RegistryId
+[KILNX031]Kiln.Registry.RegistryId.Equals(Kiln.Registry.RegistryId other) -> bool
+[KILNX031]Kiln.Registry.RegistryId.IsGame.get -> bool
+[KILNX031]Kiln.Registry.RegistryId.Mod.get -> string!
+[KILNX031]Kiln.Registry.RegistryId.Name.get -> string!
+[KILNX031]Kiln.Registry.RegistryId.RegistryId() -> void
+[KILNX031]Kiln.Registry.RegistryId.RegistryId(string! value) -> void
+[KILNX031]Kiln.Registry.RegistryId.Value.get -> string!
+[KILNX031]Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.Indexed = 4 -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.List = 3 -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.None = 0 -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.Number = 2 -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryOps.Set = 1 -> Kiln.Registry.RegistryOps
+[KILNX031]Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.Common = 1 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.Epic = 8 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.Legendary = 16 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.None = 0 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.Rare = 4 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarities.Uncommon = 2 -> Kiln.Registry.RegistryRarities
+[KILNX031]Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryRarity.Common = 0 -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryRarity.Epic = 3 -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryRarity.Legendary = 4 -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryRarity.Rare = 2 -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryRarity.Uncommon = 1 -> Kiln.Registry.RegistryRarity
+[KILNX031]Kiln.Registry.RegistryReady
+[KILNX031]Kiln.Registry.RegistryReady.<Clone>$() -> Kiln.Registry.RegistryReady!
+[KILNX031]Kiln.Registry.RegistryReady.Deconstruct(out Kiln.RegistryReadyPhase Phase, out ulong Generation, out Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.Equals(Kiln.Registry.RegistryReady? other) -> bool
+[KILNX031]Kiln.Registry.RegistryReady.Generation.get -> ulong
+[KILNX031]Kiln.Registry.RegistryReady.Generation.init -> void
+[KILNX031]Kiln.Registry.RegistryReady.Phase.get -> Kiln.RegistryReadyPhase
+[KILNX031]Kiln.Registry.RegistryReady.Phase.init -> void
+[KILNX031]Kiln.Registry.RegistryReady.RegistryReady(Kiln.RegistryReadyPhase Phase, ulong Generation, Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.World.get -> Kiln.RegistryWorld?
+[KILNX031]Kiln.Registry.RegistryReady.World.init -> void
+[KILNX031]Kiln.Registry.RegistrySchema
+[KILNX031]Kiln.Registry.RegistryStage
+[KILNX031]Kiln.Registry.RegistryStage.Add(System.Action<Kiln.Registry.RegistryStage!>! entries) -> void
+[KILNX031]Kiln.Registry.RegistryStage.Alter(System.Action<Kiln.Registry.RegistryStage!>! edits) -> void
+[KILNX031]Kiln.Registry.RegistryStage.Balance.get -> Kiln.Registry.BalanceEntry!
+[KILNX031]Kiln.Registry.RegistryStage.Drops.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.DropTableEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Final(System.Action<Kiln.Registry.RegistryStage!>! edits) -> void
+[KILNX031]Kiln.Registry.RegistryStage.Items.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Loot.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.ItemLootEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Recipes.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>!
+[KILNX031]Kiln.Registry.RegistryValueList<T>
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Append(params T[]! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Clear() -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Count.get -> int
+[KILNX031]Kiln.Registry.RegistryValueList<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Remove(params T[]! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.Replace(System.Collections.Generic.IEnumerable<T>! values) -> void
+[KILNX031]Kiln.Registry.RegistryValueList<T>.this[int index].get -> T
+[KILNX031]Kiln.RegistryApplies
+[KILNX031]Kiln.RegistryApplies.Now = 1 -> Kiln.RegistryApplies
+[KILNX031]Kiln.RegistryApplies.Restart = 3 -> Kiln.RegistryApplies
+[KILNX031]Kiln.RegistryApplies.WorldLoad = 2 -> Kiln.RegistryApplies
+[KILNX031]const Kiln.Registry.RegistrySchema.Format = 1 -> int
+[KILNX031]override Kiln.Registry.RegistryChangeResult.Equals(object? obj) -> bool
+[KILNX031]override Kiln.Registry.RegistryChangeResult.GetHashCode() -> int
+[KILNX031]override Kiln.Registry.RegistryChangeResult.ToString() -> string!
+[KILNX031]override Kiln.Registry.RegistryFieldSpec.ToString() -> string!
+[KILNX031]override Kiln.Registry.RegistryId.GetHashCode() -> int
+[KILNX031]override Kiln.Registry.RegistryId.ToString() -> string!
+[KILNX031]override Kiln.Registry.RegistryReady.Equals(object? obj) -> bool
+[KILNX031]override Kiln.Registry.RegistryReady.GetHashCode() -> int
+[KILNX031]override Kiln.Registry.RegistryReady.ToString() -> string!
+[KILNX031]static Kiln.Registry.Registry.Available.get -> bool
+[KILNX031]static Kiln.Registry.Registry.Change(System.Action<Kiln.Registry.RegistryStage!>! edits) -> Kiln.Registry.RegistryChange!
+[KILNX031]static Kiln.Registry.Registry.For(Kiln.RegistryContext! context) -> Kiln.Registry.RegistryStage!
+[KILNX031]static Kiln.Registry.Registry.Read(System.Action<Kiln.Registry.RegistryStage!>! read) -> void
+[KILNX031]static Kiln.Registry.Registry.Ready -> System.Action<Kiln.Registry.RegistryReady!>!
+[KILNX031]static Kiln.Registry.RegistryChangeResult.operator !=(Kiln.Registry.RegistryChangeResult? left, Kiln.Registry.RegistryChangeResult? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryChangeResult.operator ==(Kiln.Registry.RegistryChangeResult? left, Kiln.Registry.RegistryChangeResult? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.AddLike(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>! entries, Kiln.Registry.RegistryId id, Kiln.Registry.RegistryId like, System.Action<Kiln.Registry.ItemEntry!>! configure) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.AddLike(this Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>! entries, Kiln.Registry.RegistryId id, Kiln.Registry.RegistryId like, System.Action<Kiln.Registry.RecipeEntry!>! configure) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>! entries, string! pattern) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemLootEntry!>! entries, string! pattern) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>! entries, string! pattern) -> void
+[KILNX031]static Kiln.Registry.RegistryId.Game(string! name) -> Kiln.Registry.RegistryId
+[KILNX031]static Kiln.Registry.RegistryId.TryParse(string? text, out Kiln.Registry.RegistryId id) -> bool
+[KILNX031]static Kiln.Registry.RegistryId.operator !=(Kiln.Registry.RegistryId left, Kiln.Registry.RegistryId right) -> bool
+[KILNX031]static Kiln.Registry.RegistryId.operator ==(Kiln.Registry.RegistryId left, Kiln.Registry.RegistryId right) -> bool
+[KILNX031]static Kiln.Registry.RegistryReady.operator !=(Kiln.Registry.RegistryReady? left, Kiln.Registry.RegistryReady? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryReady.operator ==(Kiln.Registry.RegistryReady? left, Kiln.Registry.RegistryReady? right) -> bool
+[KILNX031]static Kiln.Registry.RegistrySchema.Fields.get -> System.Collections.Generic.IReadOnlyList<Kiln.Registry.RegistryFieldSpec!>!
+[KILNX031]static Kiln.Registry.RegistrySchema.Find(string! qualifiedField) -> Kiln.Registry.RegistryFieldSpec?
+[KILNX031]static Kiln.Registry.RegistrySchema.Versions.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+~[KILNX031]override Kiln.Registry.RegistryId.Equals(object obj) -> bool

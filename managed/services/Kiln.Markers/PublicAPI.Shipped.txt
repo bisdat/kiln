@@ -1,1 +1,221 @@
 #nullable enable
+Kiln.MarkerAnchor
+Kiln.MarkerAnchor.Dispose() -> void
+Kiln.MarkerAnchor.Entity.get -> Kiln.EntityId
+Kiln.MarkerAnchor.WorldEpoch.get -> ulong
+Kiln.MarkerAnchor.WorldKind.get -> uint
+Kiln.MarkerAnchorResult
+Kiln.MarkerAnchorResult.<Clone>$() -> Kiln.MarkerAnchorResult!
+Kiln.MarkerAnchorResult.Anchor.get -> Kiln.MarkerAnchor?
+Kiln.MarkerAnchorResult.Anchor.init -> void
+Kiln.MarkerAnchorResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.MarkerAnchor? Anchor) -> void
+Kiln.MarkerAnchorResult.Equals(Kiln.MarkerAnchorResult? other) -> bool
+Kiln.MarkerAnchorResult.MarkerAnchorResult(bool Ok, string? Reason, Kiln.MarkerAnchor? Anchor) -> void
+Kiln.MarkerAnchorResult.Ok.get -> bool
+Kiln.MarkerAnchorResult.Ok.init -> void
+Kiln.MarkerAnchorResult.Reason.get -> string?
+Kiln.MarkerAnchorResult.Reason.init -> void
+Kiln.MarkerCatalogChangedEvent
+Kiln.MarkerCatalogChangedEvent.Count.get -> int
+Kiln.MarkerCatalogChangedEvent.Generation.get -> ulong
+Kiln.MarkerCatalogChangedEvent.Ready.get -> bool
+Kiln.MarkerCatalogChangedEvent.Reason.get -> string?
+Kiln.MarkerCatalogChangedEvent.Role.get -> uint
+Kiln.MarkerChangeKind
+Kiln.MarkerChangeKind.Added = 0 -> Kiln.MarkerChangeKind
+Kiln.MarkerChangeKind.Cleared = 3 -> Kiln.MarkerChangeKind
+Kiln.MarkerChangeKind.Removed = 2 -> Kiln.MarkerChangeKind
+Kiln.MarkerChangeKind.Updated = 1 -> Kiln.MarkerChangeKind
+Kiln.MarkerChangedEvent
+Kiln.MarkerChangedEvent.Affected.get -> int
+Kiln.MarkerChangedEvent.Audience.get -> Kiln.MarkerSource
+Kiln.MarkerChangedEvent.Cause.get -> string!
+Kiln.MarkerChangedEvent.Id.get -> string!
+Kiln.MarkerChangedEvent.Kind.get -> Kiln.MarkerChangeKind
+Kiln.MarkerChangedEvent.Owner.get -> string!
+Kiln.MarkerChangedEvent.PeerGeneration.get -> ulong
+Kiln.MarkerChangedEvent.PublisherGeneration.get -> ulong
+Kiln.MarkerChangedEvent.Recipient.get -> Kiln.EntityId
+Kiln.MarkerChangedEvent.Sequence.get -> ulong
+Kiln.MarkerChangedEvent.WorldEpoch.get -> ulong
+Kiln.MarkerIcon
+Kiln.MarkerIcon.Deconstruct(out uint Id) -> void
+Kiln.MarkerIcon.Equals(Kiln.MarkerIcon other) -> bool
+Kiln.MarkerIcon.Id.get -> uint
+Kiln.MarkerIcon.Id.init -> void
+Kiln.MarkerIcon.MarkerIcon() -> void
+Kiln.MarkerIcon.MarkerIcon(uint Id) -> void
+Kiln.MarkerIconInfo
+Kiln.MarkerIconInfo.<Clone>$() -> Kiln.MarkerIconInfo!
+Kiln.MarkerIconInfo.Alias.get -> string!
+Kiln.MarkerIconInfo.Alias.init -> void
+Kiln.MarkerIconInfo.Deconstruct(out Kiln.MarkerIcon Icon, out string! Key, out string! Alias, out string! TextureName, out System.Guid Texture, out uint Flags, out Kiln.MarkerSurface Surfaces) -> void
+Kiln.MarkerIconInfo.Equals(Kiln.MarkerIconInfo? other) -> bool
+Kiln.MarkerIconInfo.Flags.get -> uint
+Kiln.MarkerIconInfo.Flags.init -> void
+Kiln.MarkerIconInfo.Icon.get -> Kiln.MarkerIcon
+Kiln.MarkerIconInfo.Icon.init -> void
+Kiln.MarkerIconInfo.Key.get -> string!
+Kiln.MarkerIconInfo.Key.init -> void
+Kiln.MarkerIconInfo.MarkerIconInfo(Kiln.MarkerIcon Icon, string! Key, string! Alias, string! TextureName, System.Guid Texture, uint Flags, Kiln.MarkerSurface Surfaces) -> void
+Kiln.MarkerIconInfo.Surfaces.get -> Kiln.MarkerSurface
+Kiln.MarkerIconInfo.Surfaces.init -> void
+Kiln.MarkerIconInfo.Texture.get -> System.Guid
+Kiln.MarkerIconInfo.Texture.init -> void
+Kiln.MarkerIconInfo.TextureName.get -> string!
+Kiln.MarkerIconInfo.TextureName.init -> void
+Kiln.MarkerIconResult
+Kiln.MarkerIconResult.<Clone>$() -> Kiln.MarkerIconResult!
+Kiln.MarkerIconResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.MarkerIconInfo? Icon) -> void
+Kiln.MarkerIconResult.Equals(Kiln.MarkerIconResult? other) -> bool
+Kiln.MarkerIconResult.Icon.get -> Kiln.MarkerIconInfo?
+Kiln.MarkerIconResult.Icon.init -> void
+Kiln.MarkerIconResult.MarkerIconResult(bool Ok, string? Reason, Kiln.MarkerIconInfo? Icon) -> void
+Kiln.MarkerIconResult.Ok.get -> bool
+Kiln.MarkerIconResult.Ok.init -> void
+Kiln.MarkerIconResult.Reason.get -> string?
+Kiln.MarkerIconResult.Reason.init -> void
+Kiln.MarkerMapLabel
+Kiln.MarkerMapLabel.NativeTooltip = 1 -> Kiln.MarkerMapLabel
+Kiln.MarkerMapLabel.None = 0 -> Kiln.MarkerMapLabel
+Kiln.MarkerResult
+Kiln.MarkerResult.<Clone>$() -> Kiln.MarkerResult!
+Kiln.MarkerResult.Affected.get -> int
+Kiln.MarkerResult.Affected.init -> void
+Kiln.MarkerResult.Committed.get -> bool
+Kiln.MarkerResult.Committed.init -> void
+Kiln.MarkerResult.Deconstruct(out bool Ok, out string? Reason, out bool Committed, out int Queued, out int Refused, out int Affected) -> void
+Kiln.MarkerResult.Equals(Kiln.MarkerResult? other) -> bool
+Kiln.MarkerResult.MarkerResult(bool Ok, string? Reason, bool Committed, int Queued, int Refused, int Affected) -> void
+Kiln.MarkerResult.Ok.get -> bool
+Kiln.MarkerResult.Ok.init -> void
+Kiln.MarkerResult.Queued.get -> int
+Kiln.MarkerResult.Queued.init -> void
+Kiln.MarkerResult.Reason.get -> string?
+Kiln.MarkerResult.Reason.init -> void
+Kiln.MarkerResult.Refused.get -> int
+Kiln.MarkerResult.Refused.init -> void
+Kiln.MarkerSource
+Kiln.MarkerSource.Local = 0 -> Kiln.MarkerSource
+Kiln.MarkerSource.Received = 3 -> Kiln.MarkerSource
+Kiln.MarkerSource.ServerBroadcast = 1 -> Kiln.MarkerSource
+Kiln.MarkerSource.ServerTarget = 2 -> Kiln.MarkerSource
+Kiln.MarkerSpec
+Kiln.MarkerSpec.<Clone>$() -> Kiln.MarkerSpec!
+Kiln.MarkerSpec.Deconstruct(out string! Id, out Kiln.WorldPosition Position, out string! Text, out Kiln.MarkerIcon Icon, out Kiln.MarkerSurface Surfaces, out Kiln.MarkerAnchor? Follow, out float Height, out float MaxDistance, out int Priority, out uint Rgba, out Kiln.MarkerMapLabel MapLabel) -> void
+Kiln.MarkerSpec.Equals(Kiln.MarkerSpec? other) -> bool
+Kiln.MarkerSpec.Follow.get -> Kiln.MarkerAnchor?
+Kiln.MarkerSpec.Follow.init -> void
+Kiln.MarkerSpec.Height.get -> float
+Kiln.MarkerSpec.Height.init -> void
+Kiln.MarkerSpec.Icon.get -> Kiln.MarkerIcon
+Kiln.MarkerSpec.Icon.init -> void
+Kiln.MarkerSpec.Id.get -> string!
+Kiln.MarkerSpec.Id.init -> void
+Kiln.MarkerSpec.MapLabel.get -> Kiln.MarkerMapLabel
+Kiln.MarkerSpec.MapLabel.init -> void
+Kiln.MarkerSpec.MarkerSpec(string! Id, Kiln.WorldPosition Position, string! Text, Kiln.MarkerIcon Icon, Kiln.MarkerSurface Surfaces = Kiln.MarkerSurface.Map | Kiln.MarkerSurface.Compass, Kiln.MarkerAnchor? Follow = null, float Height = 0, float MaxDistance = 0, int Priority = 0, uint Rgba = 4294967295, Kiln.MarkerMapLabel MapLabel = Kiln.MarkerMapLabel.None) -> void
+Kiln.MarkerSpec.MaxDistance.get -> float
+Kiln.MarkerSpec.MaxDistance.init -> void
+Kiln.MarkerSpec.Position.get -> Kiln.WorldPosition
+Kiln.MarkerSpec.Position.init -> void
+Kiln.MarkerSpec.Priority.get -> int
+Kiln.MarkerSpec.Priority.init -> void
+Kiln.MarkerSpec.Rgba.get -> uint
+Kiln.MarkerSpec.Rgba.init -> void
+Kiln.MarkerSpec.Surfaces.get -> Kiln.MarkerSurface
+Kiln.MarkerSpec.Surfaces.init -> void
+Kiln.MarkerSpec.Text.get -> string!
+Kiln.MarkerSpec.Text.init -> void
+Kiln.MarkerSpec.ToJson() -> string!
+Kiln.MarkerSurface
+Kiln.MarkerSurface.Compass = 2 -> Kiln.MarkerSurface
+Kiln.MarkerSurface.Map = 1 -> Kiln.MarkerSurface
+Kiln.MarkerSurface.World = 4 -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent
+Kiln.MarkerVisibilityChangedEvent.After.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Audience.get -> Kiln.MarkerSource
+Kiln.MarkerVisibilityChangedEvent.Before.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Compass.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.Id.get -> string!
+Kiln.MarkerVisibilityChangedEvent.Initial.get -> bool
+Kiln.MarkerVisibilityChangedEvent.Map.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.Owner.get -> string!
+Kiln.MarkerVisibilityChangedEvent.PeerGeneration.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.PublisherGeneration.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.Recipient.get -> Kiln.EntityId
+Kiln.MarkerVisibilityChangedEvent.Requested.get -> Kiln.MarkerSurface
+Kiln.MarkerVisibilityChangedEvent.Sequence.get -> ulong
+Kiln.MarkerVisibilityChangedEvent.World.get -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityChangedEvent.WorldEpoch.get -> ulong
+Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.AnchorEnded = 7 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.BehindCamera = 4 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.CameraUnavailable = 3 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.CapabilityOff = 9 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.FollowMissing = 6 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.InvalidPosition = 11 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.MapCapacity = 1 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.NotRequested = 13 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.OutOfRange = 5 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.Ready = 0 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.Removed = 12 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.SourceStale = 10 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.SurfaceBudget = 2 -> Kiln.MarkerVisibilityReason
+Kiln.MarkerVisibilityReason.WorldInactive = 8 -> Kiln.MarkerVisibilityReason
+Kiln.Markers
+Kiln.Markers.Icons
+[KILNX001]Kiln.MarkersLab
+[KILNX001]static Kiln.MarkersLab.Available.get -> bool
+[KILNX001]static Kiln.MarkersLab.Counters() -> (int Threads, int OtherThreads, int Watched, int Leases, int References, ulong Creates, ulong Destroys, ulong NetworkCreates, ulong Ended, ulong Serials)?
+[KILNX001]static Kiln.MarkersLab.CreateRaw(uint requestedId, System.Guid template, Kiln.WorldPosition position) -> Kiln.EntityId
+[KILNX001]static Kiln.MarkersLab.FollowNow(Kiln.MarkerAnchor! anchor) -> (string! State, ulong Incarnation, Kiln.EntityId Entity, Kiln.WorldPosition Position)?
+override Kiln.MarkerAnchorResult.Equals(object? obj) -> bool
+override Kiln.MarkerAnchorResult.GetHashCode() -> int
+override Kiln.MarkerAnchorResult.ToString() -> string!
+override Kiln.MarkerIcon.GetHashCode() -> int
+override Kiln.MarkerIconInfo.Equals(object? obj) -> bool
+override Kiln.MarkerIconInfo.GetHashCode() -> int
+override Kiln.MarkerIconInfo.ToString() -> string!
+override Kiln.MarkerIconResult.Equals(object? obj) -> bool
+override Kiln.MarkerIconResult.GetHashCode() -> int
+override Kiln.MarkerIconResult.ToString() -> string!
+override Kiln.MarkerResult.Equals(object? obj) -> bool
+override Kiln.MarkerResult.GetHashCode() -> int
+override Kiln.MarkerResult.ToString() -> string!
+override Kiln.MarkerSpec.Equals(object? obj) -> bool
+override Kiln.MarkerSpec.GetHashCode() -> int
+override Kiln.MarkerSpec.ToString() -> string!
+static Kiln.MarkerAnchorResult.operator !=(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
+static Kiln.MarkerAnchorResult.operator ==(Kiln.MarkerAnchorResult? left, Kiln.MarkerAnchorResult? right) -> bool
+static Kiln.MarkerIcon.None.get -> Kiln.MarkerIcon
+static Kiln.MarkerIcon.operator !=(Kiln.MarkerIcon left, Kiln.MarkerIcon right) -> bool
+static Kiln.MarkerIcon.operator ==(Kiln.MarkerIcon left, Kiln.MarkerIcon right) -> bool
+static Kiln.MarkerIconInfo.operator !=(Kiln.MarkerIconInfo? left, Kiln.MarkerIconInfo? right) -> bool
+static Kiln.MarkerIconInfo.operator ==(Kiln.MarkerIconInfo? left, Kiln.MarkerIconInfo? right) -> bool
+static Kiln.MarkerIconResult.operator !=(Kiln.MarkerIconResult? left, Kiln.MarkerIconResult? right) -> bool
+static Kiln.MarkerIconResult.operator ==(Kiln.MarkerIconResult? left, Kiln.MarkerIconResult? right) -> bool
+static Kiln.MarkerResult.operator !=(Kiln.MarkerResult? left, Kiln.MarkerResult? right) -> bool
+static Kiln.MarkerResult.operator ==(Kiln.MarkerResult? left, Kiln.MarkerResult? right) -> bool
+static Kiln.MarkerSpec.FromJson(System.Text.Json.JsonElement json) -> Kiln.MarkerSpec!
+static Kiln.MarkerSpec.FromJson(string! json) -> Kiln.MarkerSpec!
+static Kiln.MarkerSpec.operator !=(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right) -> bool
+static Kiln.MarkerSpec.operator ==(Kiln.MarkerSpec? left, Kiln.MarkerSpec? right) -> bool
+static Kiln.Markers.CaptureAnchorAsync(Kiln.EntityId entity, System.Threading.CancellationToken cancel = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.MarkerAnchorResult!>!
+static Kiln.Markers.CaptureServerAnchor(Kiln.EntityId entity) -> Kiln.MarkerAnchorResult!
+static Kiln.Markers.CatalogChanged -> System.Action<Kiln.MarkerCatalogChangedEvent!>?
+static Kiln.Markers.Changed -> System.Action<Kiln.MarkerChangedEvent!>?
+static Kiln.Markers.Clear() -> Kiln.MarkerResult!
+static Kiln.Markers.ClearSent(Kiln.EntityId player = default(Kiln.EntityId)) -> Kiln.MarkerResult!
+static Kiln.Markers.Icons.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.MarkerIconInfo!>!
+static Kiln.Markers.Icons.IsReady.get -> bool
+static Kiln.Markers.Icons.Resolve(string! name) -> Kiln.MarkerIconResult!
+static Kiln.Markers.Remove(string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.Send(Kiln.EntityId player, Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
+static Kiln.Markers.Set(Kiln.MarkerSpec! marker) -> Kiln.MarkerResult!
+static Kiln.Markers.SetNameplate(string! id, Kiln.EntityId entity, string! text, float height = 2) -> System.Threading.Tasks.Task<Kiln.MarkerResult!>!
+static Kiln.Markers.SuppressSent(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.Unsend(Kiln.EntityId player, string! id) -> Kiln.MarkerResult!
+static Kiln.Markers.VisibilityChanged -> System.Action<Kiln.MarkerVisibilityChangedEvent!>?
+~override Kiln.MarkerIcon.Equals(object obj) -> bool
+~override Kiln.MarkerIcon.ToString() -> string
