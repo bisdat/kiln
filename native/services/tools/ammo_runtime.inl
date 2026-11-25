@@ -290,8 +290,47 @@ void publish_handoffs() {
         if(len>0)api->log(parent_owner,KILN_LOG_DEBUG,{text,std::min<size_t>(size_t(len),sizeof text-1)});
     } catch(...) {}
 }
+// The HUD list shows again (GitHub issue 140). The game's list draw fades from the latest of three change times; one
+// of them is stamped by the HUD's watcher whenever G38UiPlayData's stock-cycle count changes, and player_ui adds one to
+// that count for each UiInventoryStockCycleEvent the host sends for the local player once it has consumed an
+// inventoryStockCycleAction. A synthetic pick sends no action, so for the user's own cycle or direct selection (by the
+// game's return address) Kiln adds the one itself, for the list the HUD shows. Nothing else reads the count.
+struct Reveal {uintptr_t cycle{},select{};int64_t groups{},count{};};
+Reveal reveal_sites;
+std::atomic<bool> reveal_ready{};
+bool reveal_setup(uintptr_t pick) {
+    reveal_ready.store(false,std::memory_order_release);
+    // The feature covers the whole chain Kiln relies on, not only the names read here: the watcher's stamp
+    // (ui/AmmoCycleWatch) and the list draw's read of it (ui/AmmoListRevealRead, ui/ammo.reveal_time). Without them a
+    // count change could play the UI sound with no list to show.
+    if(!api||!api->symbol||!api->constant||!api->feature||!api->feature({"ui.ammo.reveal",14})||!hooks||
+       hooks->header.size<offsetof(KilnHooksApi,caller)+sizeof(hooks->caller)||!hooks->read_original||!hooks->caller)return false;
+    Reveal r{};
+    if(api->symbol({"ui/AmmoCycleReturn",18},&r.cycle)!=KILN_OK||api->symbol({"ui/AmmoSelectReturn",19},&r.select)!=KILN_OK||
+       api->constant({"ui/ammo.groups",14},&r.groups)!=KILN_OK||api->constant({"ui/ammo.cycle_count",19},&r.count)!=KILN_OK)return false;
+    // The count is a u32 of the play data before its selector groups.
+    if(r.groups<=0||r.groups%8||r.count<0||r.count%4||r.count+4>r.groups)return false;
+    for(const uintptr_t site:{r.cycle,r.select}) {
+        uint8_t call[5]{};int32_t rel=0;
+        if(site<5||!qualify(site-5,"E8 ?? ?? ?? ??")||hooks->read_original(site-5,call,5)!=KILN_OK||call[0]!=0xe8)return false;
+        std::memcpy(&rel,call+1,4);if(int64_t(site)+rel!=int64_t(pick))return false;
+    }
+    reveal_sites=r;reveal_ready.store(true,std::memory_order_release);return true;
+}
+// Caller holds the mutex; a synthetic pick of category's row was just queued.
+void reveal(SelectorGroup* groups,uint8_t category) {
+    static_assert(sizeof(SelectorGroup)*7==0x2bf8);
+    const uintptr_t at=reinterpret_cast<uintptr_t>(groups);
+    uint8_t active=7;
+    if(at<uintptr_t(reveal_sites.groups)||!read(active,reinterpret_cast<const uint8_t*>(groups)+0x2bf8)||active!=category)return;
+    auto* count=reinterpret_cast<uint32_t*>(at-uintptr_t(reveal_sites.groups)+uintptr_t(reveal_sites.count));
+    uint32_t n=0;if(!read(n,count))return;
+    ++n;copy_game_value(count,&n,sizeof n);
+}
 void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t item,uint32_t version) try {
     kt::ToolPolicyScope no_impact_policy(nullptr);
+    // Read before any call: caller() is the game's call site only until the handler calls on.
+    const uintptr_t from=reveal_ready.load(std::memory_order_acquire)?pick_hook.caller():0;
     std::shared_ptr<const Publication> p;Observation original{};KilnUiAmmoRow picked{};
     bool provided=false,bound=false;int stocked=-1; // stocked: the index of the bound game row of the item with stock
     uint64_t stock=0; // the game's count of the item: the bound row's, or without a binding the row the group shows now
@@ -349,6 +388,8 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     pending.emplace_back(p->owner,KilnUiAmmoPick{sizeof(KilnUiAmmoPick),p->kind,item,picked.count,picked.row,before.client_session,before.client_steps});
     // Deliberately do not call the continuation: no inventoryStockCycleAction version/item or pending native
     // selection at group+0x63c/+0x640 is written for a non-backpack row. The server half alone performs a swap.
+    // The game's own automatic selections (other call sites) never show the list.
+    if(from&&reveal_ready.load(std::memory_order_acquire)&&(from==reveal_sites.cycle||from==reveal_sites.select))reveal(groups,category);
 }
 catch(...) {fault(nullptr);}
 void KILN_CALL finalizer(SelectorGroup* groups,void* a,void* b,void* c,void* d,void* e) {
@@ -431,10 +472,15 @@ bool start() {
     std::memcpy(&rel,call+1,4);if(int64_t(lookup)+26+rel!=int64_t(map))return false;
     const bool final=install(finalizer_hook,"ui/AmmoFinalizer","48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 50 4C 8B 6D 50 49 8B F1 4C 8B 65 58",reinterpret_cast<void*>(&finalizer));
     const bool pick_ok=install(pick_hook,"ui/AmmoPick","4C 8B D9 41 80 F8 07 0F 83 91 00 00 00 48 8D 0D ?? ?? ?? ?? 41 0F B6 C0 8B 84 81 F0 C1 40 00 48 03 C1 FF E0",reinterpret_cast<void*>(&pick));
+    uintptr_t pick_at=0;
+    if(final&&pick_ok&&api->symbol({"ui/AmmoPick",11},&pick_at)==KILN_OK&&!reveal_setup(pick_at)&&api->log) {
+        constexpr char line[]="ui.ammo: picks of mod rows do not show the HUD list again on this game build (the stock-cycle reveal is not qualified)";
+        api->log(parent_owner,KILN_LOG_INFO,{line,sizeof line-1});
+    }
     ready.store(final&&pick_ok,std::memory_order_release);return available();
 }
 void stop() {
-    ready.store(false,std::memory_order_release);
+    ready.store(false,std::memory_order_release);reveal_ready.store(false,std::memory_order_release);
     if(report_tick&&client&&client->unsubscribe)client->unsubscribe(report_tick);report_tick=0;
     if(lifecycle_handle&&api&&api->unsubscribe)api->unsubscribe(lifecycle_handle);lifecycle_handle=0;
     std::lock_guard lock(mutex);clear_session();

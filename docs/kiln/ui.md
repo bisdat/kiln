@@ -612,6 +612,12 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   weapon's current ammunition is not in a replaced list, so it selects the first or the kept row) raises it too. Kiln
   never moves an item; your server half validates the wish (the player owns the item, the weapon takes it) and ignores
   repeats.
+- **The list shows again.** When the player cycles to a mod row or selects one directly, the HUD shows the list again
+  for its usual time, as for the game's own rows (since 0.2.0-dev.31.12, GitHub issue 140, thanks Fuzen777). Nothing
+  to call: Kiln does what the game does when the host answers its own selection, for the list the HUD shows (a spell
+  row's pick while the bow's arrows show does not open the spell list), and the list hides again by itself. The game's
+  automatic selection does not show it, as before. On a game build where Kiln cannot find this, picks work as before
+  and `kiln.log` says once that mod rows do not show the list again.
 - **Refusals.** `Provide` throws `KilnUnavailableException` when `ui.ammo.list` is off (a server, a game build Kiln has
   not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
   and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of
