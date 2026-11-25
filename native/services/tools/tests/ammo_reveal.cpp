@@ -42,6 +42,9 @@ static KilnResult KILN_CALL fake_symbol(KilnStr name,uintptr_t* out) {
 static KilnResult KILN_CALL fake_constant(KilnStr name,int64_t* out) {
     const auto i=constants.find(std::string(name.ptr,name.len));if(i==constants.end())return KILN_ERR_NOT_FOUND;*out=i->second;return KILN_OK;
 }
+// sigdb's feature ui.ammo.reveal: every link of the chain (the watcher and the list draw too) resolved on this build.
+static bool reveal_feature=true;
+static bool KILN_CALL fake_feature(KilnStr name){return reveal_feature&&std::string(name.ptr,name.len)=="ui.ammo.reveal";}
 // The image's bytes before each return site: E8 rel32 to the pick, unless a case says otherwise.
 static uintptr_t call_target=kPick;
 static uint8_t call_opcode=0xe8;
@@ -60,7 +63,7 @@ int main() {
     qualification_state=KILN_CODE_ORIGINAL;
     KilnClientApi client_table{};client_table.state=&ammo_state;client_table.on_client_thread=&ammo_thread;
     KilnApi fake{};fake.size=sizeof fake;fake.abi_version=KILN_ABI_VERSION;fake.subscribe_tick=&tick;fake.unsubscribe=&unsubscribe;fake.service=&service;
-    fake.symbol=&fake_symbol;fake.constant=&fake_constant;
+    fake.symbol=&fake_symbol;fake.constant=&fake_constant;fake.feature=&fake_feature;
     api=&fake;hooks=&fake_hooks;child=88;retiring=99;
     ammo::client=&client_table;ammo::ready.store(true);ammo::backpack_probe=&backpack_fixture;
     ammo_client_state.size=sizeof ammo_client_state;ammo_client_state.side=KILN_SIDE_CLIENT;ammo_client_state.session=KILN_SESSION_HOST;
@@ -111,6 +114,11 @@ int main() {
     constants["ui/ammo.cycle_count"]=kCount;
     fake_hooks.caller=nullptr;CHECK(!ammo::reveal_setup(kPick));fake_hooks.caller=&fake_caller;
     symbols.erase("ui/AmmoSelectReturn");CHECK(!ammo::reveal_setup(kPick));symbols["ui/AmmoSelectReturn"]=kSelectRet;
+    // The symbols and constants Kiln reads resolve, but another link of the chain did not (the list draw no longer fades
+    // from the stamped time, or the watcher moved): the feature is off, so the count is never touched. Without a
+    // feature query at all, the same.
+    reveal_feature=false;CHECK(!ammo::reveal_setup(kPick));reveal_feature=true;
+    fake.feature=nullptr;CHECK(!ammo::reveal_setup(kPick));fake.feature=&fake_feature;
     CHECK(ammo::reveal_setup(kPick));
 
     // A user's cycle to a mod row (arrows, the bow's list is the active one): the list shows once, the wish reaches the

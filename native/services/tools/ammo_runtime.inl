@@ -300,8 +300,11 @@ Reveal reveal_sites;
 std::atomic<bool> reveal_ready{};
 bool reveal_setup(uintptr_t pick) {
     reveal_ready.store(false,std::memory_order_release);
-    if(!api||!api->symbol||!api->constant||!hooks||hooks->header.size<offsetof(KilnHooksApi,caller)+sizeof(hooks->caller)||
-       !hooks->read_original||!hooks->caller)return false;
+    // The feature covers the whole chain Kiln relies on, not only the names read here: the watcher's stamp
+    // (ui/AmmoCycleWatch) and the list draw's read of it (ui/AmmoListRevealRead, ui/ammo.reveal_time). Without them a
+    // count change could play the UI sound with no list to show.
+    if(!api||!api->symbol||!api->constant||!api->feature||!api->feature({"ui.ammo.reveal",14})||!hooks||
+       hooks->header.size<offsetof(KilnHooksApi,caller)+sizeof(hooks->caller)||!hooks->read_original||!hooks->caller)return false;
     Reveal r{};
     if(api->symbol({"ui/AmmoCycleReturn",18},&r.cycle)!=KILN_OK||api->symbol({"ui/AmmoSelectReturn",19},&r.select)!=KILN_OK||
        api->constant({"ui/ammo.groups",14},&r.groups)!=KILN_OK||api->constant({"ui/ammo.cycle_count",19},&r.count)!=KILN_OK)return false;

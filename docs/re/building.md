@@ -288,7 +288,9 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   event shows those). sigdb: `ui/AmmoCycleReturn`, `ui/AmmoSelectReturn`, `ui/AmmoEventWishReturn`, `ui/AmmoCycle`,
   `ui/AmmoCycleEventCount`, `ui/AmmoCycleWatch`, `ui/AmmoListRevealRead`; constants `ui/ammo.groups` (0x14fd0, three
   captures), `ui/ammo.cycle_count` (0x2fe8, producer and watcher), `ui/ammo.reveal_time` (0x31b48, watcher and draw);
-  feature `ui.ammo.reveal`. When they do not resolve, picks work as before and `kiln.log` says once that mod rows do
+  feature `ui.ammo.reveal`, which kiln-tools requires as a whole (the watcher's stamp and the list draw's read of it
+  too, not only the names it reads), so a build where the draw no longer fades from that time never gets the count
+  changed (no lone UI sound). When it does not resolve, picks work as before and `kiln.log` says once that mod rows do
   not show the list again. Not established: whether the client and the HUD run on one thread in every session (the
   record of this build saw the client world on the main thread), and the event's delivery to a joined client.
 
