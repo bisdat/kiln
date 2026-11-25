@@ -400,6 +400,14 @@ the game gets the click as without Kiln. A click still waiting for its UI frame 
 **Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
 player's game only. Two mods marking one item: one of the marks shows (no layering in this version).
 
+**The game's popups** (since 0.2.0-dev.31.5, GitHub issue 117, thanks Fuzen777). The overlay draws above the game's UI, so
+through 0.2.0-dev.31.3 a mark under the game's item menu (right-click an item: Equip, Salvage, Delete) sat on top of the
+menu. Kiln now reads the game's popup panels (that menu, drop-downs, context menus: feature `ui.popups`) and leaves out the
+mark of every slot a panel covers, for as long as it is open; the other slots keep theirs. While a panel's rectangle is not
+known (its first frame) or the game's error popup shows, no mark is drawn at all. On a game build where Kiln cannot read
+the popups (`ui.popups` off) marks are drawn as before. A rule (`MarkWhen`) is not asked for a covered slot. Read from the
+game's code, not yet seen in a running game.
+
 **Coordinates.** Kiln maps the game's UI units to pixels from the game's own viewport and pixels per unit
 (pixel = viewport + unit * pixels per unit), then scales the game's picture (the viewport's size in pixels) to the window
 or the overlay when their sizes differ. The canvas size is in UI units (1920x1080 times the UI scale, wider or taller to
@@ -1303,7 +1311,7 @@ Kiln.Ui follows [the API contract](modding/contract.md) as far as it applies. It
 `[ClientOnly]`; on a dedicated server their calls draw nothing and answer null or false, as before.
 
 - **Capabilities.** `kiln.ui`, `kiln.render` and the client's sigdb features (`ui.screens`, `ui.main_menu`,
-  `ui.menu_page`, `ui.menu_page_sound`, `ui.system_menu`, `ui.crafting`, `ui.error_popup`, `ui.language`,
+  `ui.menu_page`, `ui.menu_page_sound`, `ui.system_menu`, `ui.crafting`, `ui.error_popup`, `ui.language`, `ui.popups`,
   `render.camera`), lowered by Kiln.Ui when their service is not loaded. No member throws for a missing capability, so
   none carries `[RequiresCapability]`; the `Available` properties answer as before.
 - **Threads.** `UiDraw` is `[RenderThread]` (it exists only inside a draw callback). `Ui.Screens.Current`,

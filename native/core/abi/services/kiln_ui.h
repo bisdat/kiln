@@ -325,6 +325,28 @@ typedef struct KilnUiScreen {
     uint64_t frame;       /* game UI frames since start */
 } KilnUiScreen;
 
+/* popups (0.2.0-dev.31.5, GitHub issue 117): the game's own popup panels over its UI in the last completed UI frame (the
+ * item menu an RMB on an inventory slot opens, drop-downs, context menus) and its error popup. Rectangles are in the
+ * game's UI units, the space of KilnUiVisibleSlot.outer_ui (kiln_ui_values.h): map them the same way. */
+#define KILN_UI_POPUPS_MAX 4u
+enum {
+    KILN_UI_POPUP_PANEL = 1u,   /* at least one popup panel was drawn */
+    KILN_UI_POPUP_UNKNOWN = 2u, /* a panel whose rectangle Kiln could not read (its first frame, more than
+                                   KILN_UI_POPUPS_MAX panels): treat everything as covered */
+    KILN_UI_POPUP_ERROR = 4u,   /* the game's error popup (a modal window over the whole canvas) */
+};
+typedef struct KilnUiPopupRect {
+    float x, y, width, height;
+} KilnUiPopupRect;
+typedef struct KilnUiPopups {
+    uint32_t size;      /* set to sizeof(KilnUiPopups) before calling popups() */
+    uint32_t available; /* 1: Kiln reads the game's popup panels on this build (feature ui.popups) */
+    uint32_t flags;     /* KILN_UI_POPUP_* of the last completed UI frame (0: none open) */
+    uint32_t count;     /* rect[0 .. count) are the panels' rectangles */
+    uint64_t frame;     /* the game UI frame they are of (KilnUiScreen.frame; 0 = none yet) */
+    KilnUiPopupRect rect[KILN_UI_POPUPS_MAX];
+} KilnUiPopups;
+
 typedef void(KILN_CALL* KilnUiScreenFn)(const KilnUiScreen* now, const KilnUiScreen* before, void* user);
 typedef void(KILN_CALL* KilnUiTickFn)(const KilnUiScreen* now, void* user);
 typedef void(KILN_CALL* KilnUiMenuFn)(KilnHandle entry, void* user);
@@ -1374,6 +1396,14 @@ typedef struct KilnUiApi {
     bool(KILN_CALL* pointer)(KilnUiPointer* out);
     bool(KILN_CALL* drag_source)(KilnStr kind, const void* payload, size_t len, KilnStr preview);
     bool(KILN_CALL* drop_target)(KilnStr kind, void* out, size_t capacity, size_t* len);
+    /* Additive size-guarded tail (0.2.0-dev.31.5; check header.size >= offsetof(KilnUiApi, popups) + sizeof(void*) and the
+     * pointer): the game's popup panels over its UI as of the last completed UI frame (KilnUiPopups; set out->size first).
+     * Kiln.Ui leaves out Ui.Inventory marks under them (GitHub issue 117). Feature ui.popups (a raw link on the game's
+     * popup-panel builder, docs/re/game-ui.md "Popup panels over the inventory"); without it: KILN_ERR_UNAVAILABLE with
+     * out->available 0. A panel's rectangle is the previous UI frame's layout: on a panel's first frame, and with more
+     * than KILN_UI_POPUPS_MAX panels, KILN_UI_POPUP_UNKNOWN says that some panel has no rectangle. Any thread.
+     * INVALID_ARGUMENT: NULL or size too small. */
+    KilnResult(KILN_CALL* popups)(KilnUiPopups* out);
 } KilnUiApi;
 
 /* ====================================================================================================================

@@ -146,6 +146,9 @@ public sealed unsafe class HookRowTests : FakeTableTest
             Assert.Equal(CapabilityReason.Faulted, Capabilities.Get(f).Reason);
         }
         Assert.True(Capabilities.Is("ui.language"));  // not carried by that hook
+        // a kiln.ui table without popups (older than 0.2.0-dev.31.5): ui.popups is lowered, marks ignore the game's popups
+        Assert.False(Capabilities.Is("ui.popups"));
+        Assert.Equal(CapabilityReason.ServiceOlder, Capabilities.Get("ui.popups").Reason);
     }
 
     [Fact]

@@ -5519,6 +5519,20 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiScreen, language) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiScreen, ui_thread) == 28);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiScreen, frame) == 32);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiPopupRect>() == 16);
+    assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiPopupRect>() == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopupRect, x) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopupRect, y) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopupRect, width) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopupRect, height) == 12);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiPopups>() == 88);
+    assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiPopups>() == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, size) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, available) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, flags) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, count) == 12);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, frame) == 16);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, rect) == 24);
     assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiPreOverlay>() == 112);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiPreOverlay>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPreOverlay, size) == 0);
@@ -5764,7 +5778,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, y) == 12);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, held) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, reserved) == 20);
-    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1080);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1088);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, status) == 8);
@@ -5901,6 +5915,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, pointer) == 1056);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drag_source) == 1064);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drop_target) == 1072);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, popups) == 1080);
     assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiTickApi>() == 32);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiTickApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiTickApi, header) == 0);

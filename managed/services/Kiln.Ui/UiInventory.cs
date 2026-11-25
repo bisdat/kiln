@@ -604,19 +604,46 @@ internal static unsafe class UiInventoryBridge
         try { slots = UiSlotsBridge.Read(); }
         catch (Exception) { return; }  // the row went off: nothing to mark
         if (!slots.Ok || slots.Snapshot is not { } snap || snap.Session != m.Session) return;
-        var rules = Rules.Snapshot();
-        var byItem = ByItem();
-        foreach (var s in snap.Slots)
+        foreach (var d in MarksToDraw(snap.Slots, m, ByItem(), Rules.Snapshot(), UiNative.ReadPopups()))
+            DrawMark(ui, d.Mark, d.X0, d.Y0, d.X1, d.Y1);
+    }
+
+    /// <summary>A mark DrawMarks draws: the slot, its mark and its box in the overlay's pixels.</summary>
+    internal readonly record struct MarkDraw(VisibleSlot Slot, SlotMark Mark, float X0, float Y0, float X1, float Y1);
+
+    // The marks of a frame's slots, in the overlay's pixels. Not under the game's popups (GitHub issue 117): see UnderPopup.
+    internal static List<MarkDraw> MarksToDraw(IReadOnlyList<VisibleSlot> slots, in UiInventoryNative.Mapping m,
+        Dictionary<uint, SlotMark> byItem, (Func<VisibleSlot, SlotMark?> Fn, ModContext? Owner)[] rules, UiNative.Popups? popups)
+    {
+        var list = new List<MarkDraw>();
+        foreach (var s in slots)
         {
-            if (s.OuterUi is not { } r) continue;
+            if (s.OuterUi is not { } r || UnderPopup(r, popups)) continue;
             var mark = Find(s, byItem, rules);
             if (mark is not { } k) continue;
             var x0 = m.OffsetX + r.X * m.ScaleX;
             var y0 = m.OffsetY + r.Y * m.ScaleY;
-            var x1 = x0 + r.Width * m.ScaleX;
-            var y1 = y0 + r.Height * m.ScaleY;
-            DrawMark(ui, k, x0, y0, x1, y1);
+            list.Add(new MarkDraw(s, k, x0, y0, x0 + r.Width * m.ScaleX, y0 + r.Height * m.ScaleY));
         }
+        return list;
+    }
+
+    /// <summary>Does one of the game's popups cover the slot (GitHub issue 117)? Rectangles in UI units (the slot's
+    /// <see cref="VisibleSlot.OuterUi"/> and the popups' share the space, so no mapping is needed). null: Kiln does not
+    /// read the game's popups (an older kiln.ui, feature ui.popups off): nothing is covered, marks as before.</summary>
+    internal static bool UnderPopup(UiRect slot, UiNative.Popups? popups)
+    {
+        if (popups is not { } p || p.Flags == 0) return false;
+        // a panel without a rectangle (its first frame, too many) or the modal error popup: nothing is known to be clear
+        if ((p.Flags & (UiNative.PopupUnknown | UiNative.PopupError)) != 0) return true;
+        var n = Math.Min((int)p.Count, UiNative.PopupsMax);
+        for (var i = 0; i < n; i++)
+        {
+            var r = p.Rect(i);
+            if (slot.X < r.X + r.Width && r.X < slot.X + slot.Width && slot.Y < r.Y + r.Height && r.Y < slot.Y + slot.Height)
+                return true;
+        }
+        return false;
     }
 
     // the marks by item, for one frame (the mod that marked an item first... any one: marks of two mods on one item are

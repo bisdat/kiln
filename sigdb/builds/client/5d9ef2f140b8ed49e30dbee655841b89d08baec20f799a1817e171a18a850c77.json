@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 1044,
-    "constants": 1096,
-    "features": 285
+    "symbols": 1048,
+    "constants": 1099,
+    "features": 286
   },
   "features": {
     "abilities.attributes": true,
@@ -267,6 +267,7 @@
     "ui.menu_page": true,
     "ui.menu_page_sound": true,
     "ui.menu_scroll": true,
+    "ui.popups": true,
     "ui.screens": true,
     "ui.slots.click": true,
     "ui.slots.inspect": true,
@@ -913,6 +914,7 @@
     "ui/PlayStateUi": "0xc603d0",
     "ui/PlayerUiPlayCapture": "0x2b8c1e",
     "ui/PlayerUiUpdate": "0x2b8430",
+    "ui/PopupWindowBegin": "0xb1c880",
     "ui/PreGameCredits": "0xb81b20",
     "ui/PreGameCreditsRet": "0xc6aac5",
     "ui/PreGameGoTo": "0xd49a60",
@@ -1890,6 +1892,7 @@
     "ui/model.stride": "0x8f70",
     "ui/model.views": "0x2d8",
     "ui/model.viewsCount": "0x2e0",
+    "ui/node.rect": "0x114",
     "ui/play.balancing": "0x4667d8",
     "ui/play.health": "0x578",
     "ui/play.healthMax": "0x57c",
@@ -1905,6 +1908,8 @@
     "ui/play.stamina": "0x584",
     "ui/play.staminaMax": "0x588",
     "ui/play.target": "0x2c50",
+    "ui/popup.panel": "0x1a8",
+    "ui/popup.subframe": "0x1a0",
     "ui/popups.error": "0x550",
     "ui/pregame.main_menu": "0x8",
     "ui/pregame.page": "0x24c",
@@ -5055,7 +5060,6 @@
         "ui/UiFrameEnd": "static",
         "ui/UiFrameState": "static",
         "ui/UiNodeAlign": "static",
-        "ui/UiNodeRect": "static",
         "ui/UiPlaySound": "static",
         "ui/UiStateIsNew": "static",
         "ui/UiStateNop": "static",
@@ -5124,6 +5128,26 @@
       "features": {
         "ui.inventory.panels": "static",
         "ui.slots.click": "static"
+      }
+    },
+    "ui-popups": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@ui/PopupWindowBegin.panel": "static",
+        "@ui/PopupWindowBegin.subframe": "static",
+        "@ui/UiNodeRect.offset": "static",
+        "ui/PopupWindowBegin": "static",
+        "ui/UiNodeRect": "static"
+      },
+      "constants": {
+        "ui/node.rect": "static",
+        "ui/popup.panel": "static",
+        "ui/popup.subframe": "static"
+      },
+      "features": {
+        "ui.popups": "static"
       }
     },
     "upscale": {

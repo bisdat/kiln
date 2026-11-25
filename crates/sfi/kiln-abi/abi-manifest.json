@@ -7765,6 +7765,7 @@
             "pop_id": 248,
             "pop_style": 480,
             "pop_var": 760,
+            "popups": 1080,
             "progress_bar": 280,
             "push_color": 736,
             "push_font": 824,
@@ -7834,7 +7835,7 @@
             "wheel_open": 608,
             "window_rect": 560
           },
-          "size": 1080
+          "size": 1088
         },
         "KilnUiChatCompletion": {
           "align": 4,
@@ -8121,6 +8122,28 @@
           },
           "size": 32
         },
+        "KilnUiPopupRect": {
+          "align": 4,
+          "fields": {
+            "height": 12,
+            "width": 8,
+            "x": 0,
+            "y": 4
+          },
+          "size": 16
+        },
+        "KilnUiPopups": {
+          "align": 8,
+          "fields": {
+            "available": 4,
+            "count": 12,
+            "flags": 8,
+            "frame": 16,
+            "rect": 24,
+            "size": 0
+          },
+          "size": 88
+        },
         "KilnUiPreOverlay": {
           "align": 8,
           "fields": {
@@ -8257,7 +8280,7 @@
           "size": 48
         }
       },
-      "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
+      "sha256": "2666b37150e2d7cf6dfdce6a89b6320a7e05dfaae1fbafaf8a93cd1494905331"
     },
     "native/core/abi/services/kiln_ui_ammo.h": {
       "function_macros": [],
@@ -10044,7 +10067,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "5ba216bee7e3e22795239b22ecc1648836b44e38e3ee8a4af6cef6052bd3a10e",
+    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10110,7 +10133,7 @@
     "src/services/kiln_tools.rs": "29589637b553d897c23d3ab438dabb493f4ebe359dba5cc1cec5d5f978b341c9",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
-    "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui.rs": "2c68e06c25019ed9772a97af9886812dde74b1f49faf3e86fed9776ade93af8d",
     "src/services/kiln_ui_ammo.rs": "6533ca816d68b06c9cd461564a7a15fa56df804e22e0f26dc6d590e93171ffa7",
     "src/services/kiln_ui_blocks.rs": "cf0d0e1760465229c8b1c2f2e0c6a0a9764476feffa231677c78f87c5921d011",
     "src/services/kiln_ui_chest.rs": "9f1aaa1a9f8e9f0fb65f3f6e3339f325cec6f92a743bfba5211110b802567315",

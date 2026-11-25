@@ -20,7 +20,7 @@ internal static unsafe class UiCaps
     public static readonly string[] Features =
     [
         "ui.screens", "ui.main_menu", "ui.menu_page", "ui.menu_page_sound", "ui.system_menu", "ui.crafting", "ui.error_popup",
-        "ui.language",
+        "ui.language", "ui.popups",
     ];
 
     /// <summary>kiln.ui.values' sigdb features (in-core, client only): Ui.Values' rows.</summary>
@@ -41,6 +41,10 @@ internal static unsafe class UiCaps
             foreach (var name in (string[])["ui.screens", "ui.main_menu", "ui.system_menu", "ui.crafting"])
                 ServiceCaps.LowerOff(name, CapabilityReason.Faulted,
                     "kiln.ui could not hook the game's UI frame (see kiln.log): no game-UI integration");
+        // the game's popup panels for Ui.Inventory's marks (0.2.0-dev.31.5, GitHub issue 117)
+        if (UiNative.T != null && UiNative.PopupsSlot == null)
+            ServiceCaps.LowerOff("ui.popups", CapabilityReason.ServiceOlder,
+                "kiln.ui has no popups (older than 0.2.0-dev.31.5): Ui.Inventory marks ignore the game's popups");
         if (UiValuesNative.T == null) ServiceCaps.LowerFeatures(UiValuesNative.Service, ValueFeatures);
         else if (UiValuesNative.GemForgeT == null)
             ServiceCaps.LowerOff("ui.gemforge.inspect", CapabilityReason.ServiceOlder,

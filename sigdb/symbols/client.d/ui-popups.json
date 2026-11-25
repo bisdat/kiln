@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.ui's popup panels (feature ui.popups, GitHub issue 117; client 26430625, enshrouded.exe 5d9ef2f1, static analysis only, nothing of it run). Evidence: docs/re/game-ui.md \"Popup panels over the inventory\". PopupWindowBegin(frame*, u8* closed, params*, name*) returns frame: the game's builder of its popup panels (\"ContextMenuWindow\", the item menu an RMB on an inventory slot opens with Equip / Salvage / Delete, reached through 0xb7bab0 from the backpack 0xb507e0 and the chest window 0xb9d0f0; also drop-downs, the map's and the settings' context menus, \"mainMenuSubmenu\"). It opens a window at the params' layer (params+0x174) over the canvas and the panel as a child frame at frame+popup.subframe, whose layout node is at frame+popup.panel (= subframe + 8). UiNodeRect(node) is lea rax,[node+node.rect]: the node's laid-out rect {x, y, w, h} in UI units, the same space as ItemSlot's result rect (ItemSlot copies it from its slot node at 0xc05302). Read right after the builder returns, the panel's rect is the previous UI frame's layout (the builder itself clamps the panel by it).",
+  "symbols": {
+    "ui/PopupWindowBegin": {
+      "find": [
+        {
+          "pattern": "48 8B C4 48 89 58 18 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 0F 29 70 B8 4D 8B D1 45 8B 88 ?? ?? 00 00 4D 8B F0"
+        }
+      ]
+    },
+    "@ui/PopupWindowBegin.subframe": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/PopupWindowBegin",
+            "size": 256
+          },
+          "pattern": "4C 89 AE ?? ?? 00 00 48 8D 8E {ui/popup.subframe:d32} E8"
+        }
+      ]
+    },
+    "@ui/PopupWindowBegin.panel": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/PopupWindowBegin",
+            "size": 2048
+          },
+          "pattern": "48 8B 8E {ui/popup.panel:d32} E8 {ui/UiNodeRect:rel32} C7 85 ?? ?? 00 00 FF FF FF FF"
+        }
+      ]
+    },
+    "@ui/UiNodeRect.offset": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/UiNodeRect",
+            "size": 8
+          },
+          "pattern": "48 8D 81 {ui/node.rect:d32} C3"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "ui/popup.subframe": {
+      "min_votes": 1
+    },
+    "ui/popup.panel": {
+      "min_votes": 1
+    },
+    "ui/node.rect": {
+      "min_votes": 1
+    }
+  },
+  "features": {
+    "ui.popups": {
+      "symbols": [
+        "ui/GameUiFrame",
+        "ui/PopupWindowBegin",
+        "ui/UiNodeRect"
+      ],
+      "constants": [
+        "ui/popup.subframe",
+        "ui/popup.panel",
+        "ui/node.rect"
+      ]
+    }
+  }
+}

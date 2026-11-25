@@ -120,6 +120,12 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/chain_
 "$out/wndproc_chain_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/../../../core/abi" "$here/menu_page_host_test.cpp" -o "$out/menu_page_host_test"
+# the game's popup panels over its UI, for Ui.Inventory's marks (popups.cpp, GitHub issue 117): a fake builder, frame and
+# node, the error popup byte; and the sigdb definitions' anchors on the client exe when it is installed (read only)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
+    -I"$here/stubs" -I"$here/../../../core/abi" "$here/popups_host_test.cpp" -o "$out/popups_host_test"
+"$out/popups_host_test"
+python3 -I "$here/popups_sigdb_test.py"
 "$out/menu_page_host_test"
 # Kiln's line in the main menu's footer: its text, its mark's place, when Kiln's copy runs (menu_footer.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/menu_footer_test.cpp" -o "$out/menu_footer_test"
