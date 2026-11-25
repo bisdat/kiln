@@ -239,7 +239,12 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   (the #139 notes in [items.md](items.md)), so its game row counts it and the backpack read finds it. A binding's rows can
   therefore be older than the backpack at a pick: once per set of bound rows Kiln reads the backpack (one walk) for the
   game rows with stock whose item the publication provides, and a provided row held then and absent at the pick goes to
-  the mod. When the game's rows change, Kiln binds nothing until the provider publishes for the new serial, so the
+  the mod. Since 0.2.0-dev.31.12 a held answer also carries over to new rows of the same client session, generation and
+  player when that item's row still has stock and no more than before (each arrow shot lowers one count; the build
+  counts the same graph the read walks, so no unseen stack came in); a count that rose, or any other answer, is read
+  again. `Ui.AmmoList` in `Append` now publishes a mod's row of an item the game lists (with stock or at 0) behind the
+  game's row, which `compose_ammo` keeps in its place (game rows win duplicates in `Append`, and take the room), so
+  these reads and decisions cover its rows too. When the game's rows change, Kiln binds nothing until the provider publishes for the new serial, so the
   game's own rows show for that interval; a pick of a provided item there is decided by its row as the group shows it at
   the pick: with stock the game's, at count 0 as for a bound one. `0x40ca70` (equip reconciliation) returns the
   pending item `+0x63c` while its version `+0x640` differs from the input's, else the equipped stack's item via
