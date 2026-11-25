@@ -117,18 +117,27 @@ game's Vulkan device only when an upscaler other than the game's own is chosen *
 the first time while the game runs applies from the next start (the reason `restart`). The game's own FSR quality modes
 and render scale stay what decides the render size.
 
-**What each graphics card gets** (AMD's and Intel's lists; nothing of it has run in a real game yet):
+**What each graphics card gets** (AMD's and Intel's lists; in a real game so far: FSR 4 on an RX 9070 XT, dark scenes too dark
+(0.2.0-dev.29.19), and on an RX 6900 XT, a black screen (0.2.0-dev.31.11); FSR 3.1 and XeSS on an NVIDIA card):
 
 | card | AMD FSR (`fsr4`, experimental) | AMD FSR (`auto`, `fsr3`) | Intel XeSS |
 |---|---|---|---|
 | AMD RX 9000 | FSR 4 (FP8 model) | FSR 3.1 | XeSS |
-| AMD RX 7000, RX 6000 | FSR 4 (INT8 model, new in SDK 2.4.0) | FSR 3.1 | XeSS |
+| AMD RX 7000 | FSR 4 (INT8 model, new in SDK 2.4.0) | FSR 3.1 | XeSS |
+| AMD RX 6000 | FSR 4 (AMD's RDNA 2 INT8 model, new in SDK 2.4.0; black on an RX 6900 XT in 0.2.0-dev.31.11, see below) | FSR 3.1 | XeSS |
 | AMD Strix Halo, Strix Point, Ryzen Z2 handhelds | FSR 4 (INT8, a lightweight model on the smaller chips) | FSR 3.1 | XeSS |
 | Steam Deck (Van Gogh) and older AMD cards | FSR 3.1 (AMD's list has no FSR 4 for them; AMD's selection decides) | FSR 3.1 | XeSS |
 | NVIDIA, Intel | FSR 3.1 | FSR 3.1 | XeSS |
 
 AMD's selection needs no particular driver version for FSR 4 on Vulkan (AMD's notes); whether a card gets it is AMD's
 answer at the FSR set-up, and the status says which ran.
+
+**No black picture (0.2.0-dev.31.12).** After each set-up Kiln looks once at the upscaler's picture: about 30 frames in,
+it reads a grid of 1,024 points of the upscaler's output and of the game's own picture going into it. If the output is
+black or not a number while the game's picture is not black, FSR 4 gives way to FSR 3.1 for the rest of the game (any
+other upscaler to the game's own FSR 3), kiln.log says what it read, and the readout says "AMD FSR 4 is not running: its
+picture came out wrong on this graphics card (...): FSR 3.1 runs until the game restarts". A loading screen or a fade is
+not judged: Kiln looks again a second later. After the check nothing of it runs.
 
 ### The files
 AMD's and Intel's libraries are not inside Kiln. The launcher downloads them when the player asks: Settings, Graphics,
@@ -196,7 +205,9 @@ pass already patched by another module, and Kiln's overlay hooks off. DLSSTweaks
 - Kiln finds the game's FSR 3 pass by pattern in each game build; on a build it does not know yet the swap is off
   (`noSignatures`) until a Kiln update.
 - Steam Deck: AMD FSR 3.1 and XeSS; FSR 4 only where AMD's selection says it runs.
-- Not yet run in a real game on an AMD, Intel or NVIDIA card. First reports from testers decide the defaults.
+- FSR 4 has not drawn a correct picture in this game yet (RX 9070 XT: dark scenes too dark; RX 6900 XT: black up to
+  0.2.0-dev.31.11). Kiln checks its picture once after each set-up and runs FSR 3.1 when it is black or not a number.
+  First reports from testers decide the defaults.
 
 ## Readout
 A few lines in the top right corner of the game, drawn by Kiln's overlay:
@@ -323,7 +334,8 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   1 and 3, RX 9070 XT) and was not dark through OptiScaler, fed from the game's DLSS path with pre-exposure 1 and no masks.
   So FSR 4 gets pre-exposure 1 and none of the game's masks; FSR 3.1 keeps the game's (which part matters is not proven).
   Test knobs, one per line in `<game>/kiln/control/amd`, read at each FSR set-up and named in kiln.log's `set up for`
-  line (the first value is the default): `exposure auto|one`, `preexposure auto|game|one`, `reactive auto|on|off`,
+  line (the first value is the default): `check auto|off` (off: no output check, so a black FSR 4 stays, for an A/B),
+  `exposure auto|one`, `preexposure auto|game|one`, `reactive auto|on|off`,
   `transparency auto|on|off`, `masks auto|on|off` (both), `hdr on|off`, `colour linear|srgb|pq`, `dynres auto|on|off` (auto: no DYNAMIC_RESOLUTION flag for FSR 4, which
   otherwise runs its dynamic-resolution network; OptiScaler never sets it), `planes auto|game|swap` (auto: the camera planes
   swapped for FSR 4, as OptiScaler passes them with inverted depth). kiln.log's `upscaled N frames` lines
@@ -337,11 +349,35 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   chosen but does not start, Kiln runs FSR 3.1 instead and says so in kiln.log. The device additions: everything AMD's
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing), 16-bit storage, float16/int8 and integer dot product, each only
-  where the GPU has it. Not, since 0.2.0-dev.29.21, AMD's sample's native FSR 4 set (cooperative matrix, FP8,
-  compute-shader derivatives, 8-bit storage, the memory model, maintenance4): with it AMD's Vulkan FSR 4 drew dark scenes
-  too dark on an RX 9070 XT (29.19), while OptiScaler's pure-Vulkan FSR 4 from the same DLL ran correctly on a device
-  without it. `kiln/control/amd` `fsr4ext on` adds it back from the next game start; kiln.log says at the game's start
-  which way the device was made, and the AMD FSR set-up line names the device path.
+  where the GPU has it. Of AMD's sample's FSR 4 set (cooperative matrix, FP8, compute-shader derivatives, 8-bit storage,
+  the memory model, maintenance4), since 0.2.0-dev.31.12 what the GPU's own FSR 4 model declares
+  (`upscale_amd_map.h` `choose_fsr4_set`, from the SPIR-V inside AMD's 4.1.2 DLL):
+  - **where AMD's selection takes an INT8 model** (an AMD GPU without cooperative matrix + FP8: RX 6000, RX 7000, the
+    APUs): `VK_KHR_compute_shader_derivatives` (`computeDerivativeGroupLinear`), the "INT8 set". FSR 4's own auto
+    exposure declares it on every model, and RDNA 3's and the lite model's INT8 prepass too; no INT8 shader declares
+    8-bit storage, the memory model or maintenance4, so they stay off. Up to 0.2.0-dev.31.11 these GPUs got none of the
+    six, and FSR 4 drew a black screen on an RX 6900 XT;
+  - **where AMD's selection takes the FP8 model** (RX 9000): none of the six, as since 0.2.0-dev.29.21 (with all of them
+    AMD's Vulkan FSR 4 drew dark scenes too dark on an RX 9070 XT, 29.19, while OptiScaler's pure-Vulkan FSR 4 from the
+    same DLL ran correctly on a device without them);
+  - not an AMD GPU: none (AMD's selection runs FSR 3.1 there).
+  `kiln/control/amd` `fsr4ext auto|off|on`, read when the game makes its device (from the next game start): `off` none
+  of the six (as 29.21 to 31.11), `on` all six (as up to 29.20). kiln.log says at the game's start which set the device
+  got and why ("AMD FSR on AMD Radeon RX 6900 XT: the game's device also gets FSR 4's INT8 set, ..."), and the AMD FSR
+  set-up line names it ("INT8 device: compute-shader derivatives on").
+- **The output check (0.2.0-dev.31.12).** `upscale_probe.h`, `upscale_probe_logic.h`, `shaders/output_probe.comp`. Once
+  per context, 30 FSR frames after its first, Kiln records one 256-thread compute dispatch of its own into the frame's
+  command buffer right after the upscaler's work: it reads a 32x32 grid of the game's colour (through the game's view,
+  SHADER_READ_ONLY_OPTIMAL) and of the output (the game's R16G16B16A16_SFLOAT view as a storage image, GENERAL), changes
+  no layout, and writes per point whether it is finite and its luminance into an 8 KB host-visible buffer. Eight FSR
+  frames later (the GPU is done with that frame) Kiln reads it: black (output mean and brightest point at most 2% of the
+  colour's) or NaN (a quarter of the points or more not finite), while the colour is not black and is finite. FSR 4 then
+  gives way to FSR 3.1 for the rest of the game (the context is made again for the same sizes; FSR 3.1 is checked too),
+  any other upscaler to the game's own FSR 3 (reason `runtimeFailed`). kiln.log: one line with the readout, for
+  example `AMD FSR 4.1.2's output check: the picture is black (output: mean luminance 0, brightest 0, 0 of 1024 points
+  not finite; the game's colour: mean 0.183, brightest 4.21, 0 not finite): AMD FSR 3.1.6 runs in its place until the
+  game restarts`, or `...'s output check: the picture is fine (...)`. A black or not-finite game picture (a load, a
+  fade) is not judged: again 60 frames later, up to 120 times. Nothing of it runs per frame after the check.
 - **Intel XeSS.** XeSS Super Resolution from the XeSS SDK 3.0.2: Intel's own `libxess.dll`, from
   `<game>/kiln/vendor/intel/3.0.2/` (the launcher's Settings, Graphics card), checked and kept open as AMD's files are,
   mapped only from that folder, and never patched or hooked (Intel's licence: the software unmodified, also while it
@@ -355,7 +391,8 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   `tests/xess_test.cpp`), `upscale_xess.cpp`; needs the VC++ runtime 14.40 or later, as Proton and current Windows have.
 - **Failures.** A missing or changed file, a GPU without what the upscaler needs, a set-up that fails: the game's own
   FSR 3 runs and the status says why. A failure while upscaling: that frame gets a plain stretch of the image, then
-  the game's own FSR 3 for the rest of the session. Every call of Kiln's around the game's runs under a fault guard.
+  the game's own FSR 3 for the rest of the session. A black or NaN picture (the output check above): FSR 3.1 in place
+  of FSR 4, else the game's own FSR 3. Every call of Kiln's around the game's runs under a fault guard.
 - **Stepping aside.** The swap stays off, with the reason, for OptiScaler, NVIDIA Streamline, a DLSS frame generation
   mod (`EnshroudedVKFG.ini`), AMD FidelityFX or Intel XeSS DLLs in the game folder (another tool's; `ASIDE_UPSCALER`),
   the game's FSR 3 pass already patched by another module, and Kiln's overlay hooks being off (the swap needs Kiln's
@@ -363,13 +400,21 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 - **What the player sees.** The readout's line `Behind FSR 3: AMD FSR 4 (4.1.2): 960x540 -> 1920x1080`, or the game's
   own FSR 3 with the reason the chosen one does not run (kiln.log's short words, `upscale_logic.h` `why_text`); the
   Graphics page and the launcher read the same status and say the reason in the players' sentences.
+  After the output check made FSR 3.1 run in place of FSR 4, the readout's line `Behind FSR 3: AMD FSR 3.1 (3.1.6): ...` has
+  `AMD FSR 4 is not running: its picture came out wrong on this graphics card (the picture is black): FSR 3.1 runs until
+  the game restarts` under it, and the status's English detail says the same (`upscale_logic.h` `fsr4_black_text`); the
+  Graphics page and the launcher show AMD FSR 3.1 running (their text for FSR 3.1 behind an FSR 4 choice: "AMD's
+  selection chose FSR 3.1").
 - **kiln.log** (`graphics: upscaler: ...`): the choice at start and the hooks, the files' check, what was added to the
   Vulkan device and what the GPU lacks, the versions AMD offers for the GPU, each set-up (`AMD FSR 4.1.2 set up for
   960x540 -> 1920x1080`), and every fallback with its reason.
 - **Limits:** after a fault inside an upscaler's own code Kiln never calls that upscaler again (it may hold a lock), so
   its GPU memory stays allocated until the game ends; the game's FSR 3 runs meanwhile.
-- **Not proven yet:** a real game with AMD FSR on any GPU; FSR 4 needs an AMD tester (RX 9000, or RX 6000/7000), the
-  Steam Deck too. The swap itself was proven on the real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).
+- **Not proven yet:** FSR 4 with a correct picture on any GPU (seen: dark scenes too dark on an RX 9070 XT, 29.19;
+  black on an RX 6900 XT, 31.11); whether the INT8 set of 0.2.0-dev.31.12 gives the RX 6900 XT a picture (else the
+  output check runs FSR 3.1 there); the output check in a real game; FSR 4 on RX 7000, the APUs and the Steam Deck;
+  AMD FSR 3.1 on an AMD card on Windows. Seen: AMD FSR 3.1 and XeSS on an NVIDIA card (Proton); the swap itself on the
+  real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).
 
 Status reasons (`KilnUiGraphicsStatus.upscale_reason`, stable numbers): the table in
 [What runs now, and why not](#what-runs-now-and-why-not); its texts are the game's and the launcher's.
