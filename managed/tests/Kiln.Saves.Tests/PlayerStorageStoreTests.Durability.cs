@@ -141,6 +141,63 @@ public sealed partial class PlayerStorageStoreTests
     }
 
     [Fact]
+    public void The_catch_up_is_the_staging_the_world_write_waited_for_not_the_save_requests()
+    {
+        using var h = new InstanceHarness();
+        using var native = new FakeSavesTable();
+        using var reached1 = new ManualResetEventSlim();
+        using var gate1 = new ManualResetEventSlim();
+        using var reached2 = new ManualResetEventSlim();
+        using var gate2 = new ManualResetEventSlim();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        var oldHook = WorldStore.IoHook;
+        var backend = Backend.Current;
+        var tap = new Tap();
+        try
+        {
+            Backend.Current = tap;
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            SaveInTime(h, 1);
+            FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromSeconds(5));
+            var before = FakeSavesTable.Done;
+            var tick = Environment.CurrentManagedThreadId;
+            // The save request's staging holds until gate1; the snapshot staging (after it, once its done is reported) until gate2.
+            WorldStore.IoHook = op =>
+            {
+                if (Environment.CurrentManagedThreadId == tick) return;
+                if (FakeSavesTable.Done == before) { reached1.Set(); Assert.True(gate1.Wait(TimeSpan.FromSeconds(20))); }
+                else { reached2.Set(); Assert.True(gate2.Wait(TimeSpan.FromSeconds(20))); }
+            };
+            persist.Frozen = new("second", PlayerStorageDocumentTests.Storages(2));
+            h.StageOnly(2);
+            Assert.True(reached1.Wait(TimeSpan.FromSeconds(10)));
+            InstanceHarness.Store.Commit(2, 1002, SaveReason.Autosave);    // late: the world write waited for the snapshot staging
+            gate1.Set();                                                    // the save request's staging finishes
+            Assert.True(reached2.Wait(TimeSpan.FromSeconds(10)));           // ... the snapshot staging is still being written
+            store.PollWrites();
+            Assert.Empty(tap.With("'s storage reached the disk"));
+            Assert.True(store.Lag.IsLate(2));
+            gate2.Set();
+            InstanceHarness.Written();
+            store.PollWrites();
+            Assert.Single(tap.With("player-storage: generation 2's storage reached the disk"));
+            Assert.Empty(tap.Errors());
+        }
+        finally
+        {
+            gate1.Set();
+            gate2.Set();
+            WorldStore.IoHook = oldHook;
+            InstanceHarness.Written();
+            Backend.Current = backend;
+            store.Native = null;
+        }
+    }
+
+    [Fact]
     public void A_staging_still_not_on_disk_two_minutes_after_its_world_write_is_an_error()
     {
         using var h = new InstanceHarness();

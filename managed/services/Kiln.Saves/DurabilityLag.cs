@@ -24,7 +24,7 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
 
     private const int KeepLate = 8;  // generations; the writer is one staging behind, never more, when it is only slow
 
-    private readonly Dictionary<uint, (TimeSpan Since, bool Stuck)> _late = [];
+    private readonly Dictionary<uint, (TimeSpan Since, bool Stuck, object? Job)> _late = [];
     private bool _warned, _caughtSaid;
     private TimeSpan _lastLine;
     private int _lateCount, _caughtCount;
@@ -33,12 +33,13 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
     /// <summary>The world write of <paramref name="generation"/> completed and its staging is not on disk yet.</summary>
     internal bool IsLate(uint generation) => _late.ContainsKey(generation);
 
-    /// <summary>The world write of <paramref name="generation"/> completed while the writer still had its staging queued or
-    /// being written. A warning the first time in a world session; counted after that.</summary>
-    internal (LogLevel Level, string Text)? Late(uint generation)
+    /// <summary>The world write of <paramref name="generation"/> completed while the writer still had its staging
+    /// (<paramref name="job"/>: the one the world write waited for) queued or being written. A warning the first time in a
+    /// world session; counted after that.</summary>
+    internal (LogLevel Level, string Text)? Late(uint generation, object? job = null)
     {
         var t = now();
-        _late[generation] = (t, false);
+        _late[generation] = (t, false, job);
         while (_late.Count > KeepLate) _late.Remove(_late.Keys.Min());
         if (_warned)
         {
@@ -53,11 +54,15 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
                                "further delays at most every 5 minutes");
     }
 
-    /// <summary>The writer finished the staging of <paramref name="generation"/> (<paramref name="success"/>: on disk). A late
-    /// one's first catch-up of a world session is an info line, later ones are counted; a failure is the caller's to log.</summary>
-    internal (LogLevel Level, string Text)? Landed(uint generation, bool success)
+    /// <summary>The writer finished a staging of <paramref name="generation"/> (<paramref name="success"/>: on disk). Only
+    /// the late one counts (<paramref name="job"/>; the save request's staging of the same generation can finish after the
+    /// world write too, while the snapshot staging it waited for is still queued). A late one's first catch-up of a world
+    /// session is an info line, later ones are counted; a failure is the caller's to log.</summary>
+    internal (LogLevel Level, string Text)? Landed(uint generation, bool success, object? job = null)
     {
-        if (!_late.Remove(generation, out var late) || !success) return null;
+        if (!_late.TryGetValue(generation, out var late) || (late.Job != null && !ReferenceEquals(late.Job, job))) return null;
+        _late.Remove(generation);
+        if (!success) return null;
         var t = now();
         var lag = t - late.Since;
         if (late.Stuck)
@@ -83,7 +88,7 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
         foreach (var (gen, late) in _late.ToArray())
             if (!late.Stuck && t - late.Since >= StuckAfter)
             {
-                _late[gen] = (late.Since, true);
+                _late[gen] = late with { Stuck = true };
                 stuck.Add((gen, t - late.Since));
             }
         return stuck;

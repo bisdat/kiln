@@ -55,6 +55,19 @@ public sealed class DurabilityLagTests
     }
 
     [Fact]
+    public void Only_the_staging_the_world_write_waited_for_is_its_catch_up()
+    {
+        object request = new(), snapshot = new();
+        _lag.Late(10, snapshot);
+        _now += TimeSpan.FromSeconds(3);
+        Assert.Null(_lag.Landed(10, success: true, request));          // the save request's staging, finished late too
+        Assert.True(_lag.IsLate(10));
+        _now += TimeSpan.FromSeconds(5);
+        Assert.Contains("reached the disk 8.0 s after", _lag.Landed(10, success: true, snapshot)!.Value.Text);
+        Assert.False(_lag.IsLate(10));
+    }
+
+    [Fact]
     public void A_staging_that_failed_is_not_a_catch_up_and_is_left_to_the_caller_as_an_error()
     {
         _lag.Late(10);

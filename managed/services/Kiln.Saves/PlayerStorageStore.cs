@@ -42,7 +42,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     private readonly HashSet<uint> _ordinaryHolders = [];
     private readonly Dictionary<uint, SaveWriter.StageJob> _stages = [];
     private readonly Dictionary<uint, string> _carriedBlocked = [];
-    private readonly System.Collections.Concurrent.ConcurrentQueue<(uint Generation, bool Success)> _outcomes = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(uint Generation, bool Success, SaveWriter.StageJob Job)> _outcomes = new();
     /// <summary>Generations whose newest staging could not be written (its tries failed): a world write of one is a failure.</summary>
     private readonly HashSet<uint> _unwritten = [];
     /// <summary>World writes that completed before their staging was on disk (since 0.2.0-dev.31.5): a delay, not a failure,
@@ -72,17 +72,21 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     {
         if (!_pending.ContainsKey(job.Gen)) return;
         _stages[job.Gen] = job;
-        job.Finished = success => _outcomes.Enqueue((job.Gen, success));
+        job.Finished = success => _outcomes.Enqueue((job.Gen, success, job));
         foreach (var older in _stages.Keys.OrderByDescending(x => x).Skip(2).ToArray()) _stages.Remove(older);
     }
     internal void PollWrites()
     {
         while (_outcomes.TryDequeue(out var result))
         {
-            Say(Lag.Landed(result.Generation, result.Success));
+            Say(Lag.Landed(result.Generation, result.Success, result.Job));
             if (result.Success) continue;
-            _unwritten.Add(result.Generation);
-            while (_unwritten.Count > 16) _unwritten.Remove(_unwritten.Min());
+            // the generation's world write is a failure when the staging that failed is the one it waits for (the newest)
+            if (!_stages.TryGetValue(result.Generation, out var newest) || ReferenceEquals(newest, result.Job))
+            {
+                _unwritten.Add(result.Generation);
+                while (_unwritten.Count > 16) _unwritten.Remove(_unwritten.Min());
+            }
             Failed($"pending generation {result.Generation} could not be written");
         }
         foreach (var (generation, age) in Lag.Stuck())
@@ -534,7 +538,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
                 // The world write's bounded wait ran out while the writer still had this staging queued or being written: a
                 // delay, not a failure (since 0.2.0-dev.31.5). Said once per world session and summed up; it becomes a failure
                 // when its staging cannot be written (PollWrites) or is still not on disk after DurabilityLag.StuckAfter.
-                Say(Lag.Late(generation));
+                Say(Lag.Late(generation, stage));
                 return;
             }
             Failed($"world generation {generation} completed before storage became durable ({(stage is null ? "no staging of it was tracked" : "its staging could not be written")})");
