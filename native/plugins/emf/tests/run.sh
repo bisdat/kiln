@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers and v31 on_hit (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers, v31 on_hit and v33 markers (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -40,6 +40,12 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/terrain_test.cpp" "$here/../src/api_terrain.cpp" -o "$out/terrain_test"
 "$out/terrain_test"
+# v33 markers and v47 bars on kiln.markers (0.2.0-dev.31.13): the production adapter with a fake kiln.markers.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/markers_test.cpp" "$here/../src/api_markers.cpp" -o "$out/markers_test"
+"$out/markers_test"
+"$out/markers_test" no-service
 # Spawn-time yaw and component forwarding use the production adapter (no game).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \

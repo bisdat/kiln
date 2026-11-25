@@ -23,6 +23,7 @@ kiln_plugin(emf
     src/api_v40.cpp
     src/api_orders.cpp
     src/orders_model.cpp
+    src/api_markers.cpp
     src/api_hits.cpp
     src/hits_model.cpp
     src/net/net_service.cpp
@@ -81,6 +82,12 @@ add_executable(emf-terrain-test tests/terrain_test.cpp src/api_terrain.cpp)
 target_include_directories(emf-terrain-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
 set_target_properties(emf-terrain-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
+
+# EMF v33 markers and v47 bars on kiln.markers through the production api_markers.cpp with a fake kiln.markers (no game).
+add_executable(emf-markers-test tests/markers_test.cpp src/api_markers.cpp)
+target_include_directories(emf-markers-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
+set_target_properties(emf-markers-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
 
 # Headless actual plugin/Lua boot fixture: a fake core and no game engine.
 add_executable(emf-bundled-lua-test tests/bundled_lua_wine.cpp)

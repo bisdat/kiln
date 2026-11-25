@@ -11,10 +11,11 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **83 full, 22 partial, 39 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
-  v40 append 45: four full (`world_to_screen`; `enemy_order_cancel`, `enemy_move_cancel`, `enemy_moving` since
-  0.2.0-dev.31.13), six partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since 0.2.0-dev.30.3; `enemy_order`,
-  `enemy_target`, `enemy_move` since 0.2.0-dev.31.13) and 35 not yet
+- Counts: **86 full, 25 partial, 33 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+  v40 append 45: seven full (`world_to_screen`; since 0.2.0-dev.31.13 `enemy_order_cancel`, `enemy_move_cancel`,
+  `enemy_moving`, `marker_remove`, `marker_clear` and `marker_unsend`), nine partial (`chat_tell_ex`,
+  `chat_broadcast_ex`, `on_hit` since 0.2.0-dev.30.3; `enemy_order`, `enemy_target`, `enemy_move`, `marker_set`,
+  `marker_types` and `marker_send` since 0.2.0-dev.31.13) and 29 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7: two full, one partial and four not yet
   ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2, both full (`spawn_facing`,
   `find_wall_ex`; [v47](#v47-emf-0619)); v48 and v49 append none ([v48](#v48-emf-0620), [v49](#v49-emf-0622)). Counts are C table slots, not
@@ -138,7 +139,11 @@ not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`;
 | `on_hit` (31) | Since 0.2.0-dev.30.3. The game's HitEvents of the server world, as EMF's core takes them: kiln-emf's own relay program for HitEvent (the one `on_event` uses: a `kiln.world` SYSTEM program, host only) copies them in the step, and after the step, on the tick thread, each becomes EMF's `EmfHit`: attacker = root source, part, target = root target (else the part), amount and stamina (positive = damage), the game's flags (`EMF_HIT_KILLED` on the killing blow), damage types, attack kinds, weapon category, program, impact, reaction, target faction, position; `health_before` -1; `health_after` = `kiln.combat` `health()` of the part, else of the target; `weapon_item` = the weapon entity's ItemState item; `from_mod` = a `damage()` hit (kiln.combat's impact ids, so a Kiln mod's damage counts too). Terrain and building hits are never passed. At most 16 callbacks, null refused; a faulting callback is switched off. A call before the worlds are set up is kept (EMF: any time). | partial: entity hits only: fall, shroud, cold and drowning damage (`EMF_HIT_KIND_FALL` to `_DROWNING`, which EMF reads from its own hooks on four game programs) never arrive; `health_after` of a placed object whose Health is gone is -1 (EMF: the object's maximum). The mod's log says so once, at its first `on_hit`. | host (`tests/hits_test.cpp`); probe (lab: passed 2026-11-21, the Vukah killing blow reached `on_hit` with `EMF_HIT_KILLED`) |
 | `on_hit_before`, `hit_rule_add`, `hit_rule_remove` (31) | Answer: `false` / 0. Hits are not changed. | not yet | host, probe |
 | `buff_types`, `buff_type`, `buff_text`, `buffs_of`, `buff_apply`, `buff_remove`, `on_buff` (32) | Answer: 0 / `false`; `done` is not called. | not yet | host, probe |
-| `marker_set`, `marker_remove`, `marker_clear`, `marker_types`, `marker_send`, `marker_unsend` (33) | Answer: `false` / 0. No marker is drawn or sent. | not yet | host, probe |
+| `marker_set` (33) | Since 0.2.0-dev.31.13. `kiln.markers`' local store (`set_local`) of the client world, under the mod's own namespace `emf:<id>`: [markers on Kiln](#markers-on-kiln-v33-and-v47s-bar) has the mapping. False on the dedicated server (it draws nothing, as EMF), for EMF's bad ids and numbers, without a client world, or over Kiln's limits. | partial: Kiln's diamond for every shape, no `icon` pictures, the distance on the compass strip only, no minimap; 128 markers per mod and 512 in all (EMF 256 and 1024); a mod's markers end with the client world (EMF keeps them across worlds) | host (`tests/markers_test.cpp`); probe (dedicated-server answers; not run yet) |
+| `marker_remove`, `marker_clear` (33) | Since 0.2.0-dev.31.13. The mod's own markers on this game (`remove_local`, `clear_local`): false / how many it had. | full | host; probe (not run yet) |
+| `marker_types` (33) | Since 0.2.0-dev.31.13. Kiln's icon catalog: the game's marker types usable on Kiln's map (id, `EMF_MAP_TYPE_CUSTOM` for the game's pin types, the alias as `name`). 0 while the catalog warms up. | partial: every map type of this game build, not only those this world's map used so far; fast-travel types are not listed (Kiln refuses them on the map); a dedicated server answers once the first verified Kiln player sent the catalog (EMF: 0 there) | host; probe (not run yet) |
+| `marker_send` (33) | Since 0.2.0-dev.31.13. `kiln.markers`' server layers (`send`): player 0 = the broadcast layer (also players who join later), else that player's own value; a followed entity is a server anchor, so the player sees it move where their game does not know it. Answers how many players with Kiln it reached; players without Kiln get nothing, as EMF's answer for players without EMF. At most 256 a call; bad markers are left out. Off the server's tick thread: carried out at the next server step, in order, answering 0. | partial: the receiving game needs Kiln 0.2.0-dev.31.12 or later, not EMF (EMF's `emf/markers` channel is not spoken: a player with EMF but no Kiln sees none); 128 sent markers per mod across all players; the drawing differences of `marker_set` | host; probe (not run yet); client (a joined player sees them) |
+| `marker_unsend` (33) | Since 0.2.0-dev.31.13. One player: their own value goes (`unsend`); a marker sent to every player is hidden from that game (`suppress_sent`) until it is sent to every player again. Player 0: from every game (the broadcast and every player's own value or hiding). How many players it reached. | full | host; probe (not run yet) |
 | `map_cursor`, `on_map_click`, `map_action`, `ground_at` (34) | Answer: `false`; no callback. | not yet | host, probe |
 | `player_view`, `fog_at`, `map_markers`, `canvas_set`, `canvas_draw` (35) | Answer: `false` / 0. No canvas is drawn. | not yet | host, probe |
 | `remove_building` (36) | Answer: `false`, `refunded` 0, `why` "not available on Kiln yet". Nothing is removed. | not yet | host, probe |
@@ -175,6 +180,43 @@ raw links for `hook_pattern`), EMF's rule matcher (MIT, `src/core/hits.cpp`, `hi
 target's parts, write-back into the HitCandidate (kiln.combat's `HitOffsets`), and a lab check that a cancelled hit
 leaves no number, reaction, aggro or credit. Best estimate: 2 to 3 days with host tests and one lab run. Fall, shroud,
 cold and drowning damage for `on_hit` would come with it (EMF reads them around four game programs), about 1 more day.
+
+### Markers on Kiln (v33 and v47's bar)
+
+Since 0.2.0-dev.31.13 kiln-emf (`src/api_markers.cpp`) puts EMF's markers on Kiln's own marker service,
+[kiln.markers](services/markers.md). Each EMF mod is one publisher, namespace `emf:<id>`: two mods never share an id,
+and EMF's Lua host (one mod, `lua`) keeps its scripts apart with its own `<script>:<id>` ids and removes a script's
+markers when the script goes.
+
+| EMF | Kiln |
+|---|---|
+| `EMF_MARKER_WORLD` | the world label (`World`): a diamond and the text over the point, `height` metres above (clamped to Kiln's ±128 m; EMF allows 1000) |
+| `EMF_MARKER_EDGE_ARROW` | Kiln's compass strip (`Compass`): the direction and the distance in metres, also behind the player |
+| `EMF_MARKER_GAME_MAP` | the game's map (`Map`) with `game_icon` when Kiln's catalog has it for the map; else one of the game's pin types by `shape` (diamond, circle, square: the first, second and third custom-pin type by id). `EMF_MARKER_NONE` (text only) gets no map icon: Kiln's map draws no text |
+| `EMF_MARKER_DISTANCE`, `EMF_MARKER_MINIMAP` | no surface of their own (the compass shows the distance; no canvases) |
+| `EMF_MARKER_BAR`, `bar` | ten cells after the text (see the v47 row) |
+| `text` | EMF's cut at 64 bytes, then Kiln's rules: broken UTF-8 bytes are left out, control characters become spaces |
+| `rgba` | the colour of the diamond and the text; 0 (EMF: the HUD's accent colour) is Kiln's white |
+| `icon` (an `image_load` picture) | not drawn: the shape's diamond |
+| `entity` | a lease of that entity (`capture_anchor`, the server world's for `marker_send`). One the world does not know yet is drawn at x, y, z and followed once it is there (tried once a second); a `marker_set` from another thread than the client world's is placed at once and follows from that world's next step |
+| `max_distance` | `max_distance` (Kiln measures from the camera, EMF from the player) |
+| `id` | the key; EMF 0.6.22 allows `,`, Kiln's keys do not: an id with a comma gets `.` and the suffix `::` + its 48-bit comma mask in hex (an id that already ends like that gets the suffix too, so no two ids share a key) |
+
+A surface whose capability is off on this game build (`markers.map`, `markers.compass`, `markers.world`) is left
+out and the rest is drawn (kiln.markers refuses a spec whole); with every asked surface off the call is refused.
+While the icon catalog warms up (a dedicated server: until the first verified Kiln player sends it) a map marker shows
+on its other surfaces and gets the map at the next step after the catalog is ready. Following that is off
+(`markers.anchors.*`) leaves the marker at x, y, z.
+
+Limits are kiln.markers' ([Limits](services/markers.md#limits)): 128 markers per mod and 512 local ones on a game, 128
+sent markers per mod across every player and broadcast, 512 effective per player, 64 followed per player, 64 mods with
+markers. A call over one answers EMF's failure: `marker_set` false, that marker left out of `marker_send`'s count; the
+mod's log says why once per kind (`marker_set refused: Kiln's limit: Full: ...`). Players without Kiln get nothing
+and are not counted, as EMF counts no player without EMF.
+
+Ownership: a world's stop ends that world's markers of every mod (the client world's local ones, the server world's
+sent ones and the calls still waiting); kiln-emf's unload releases every mod's owner (`release_owner`), which clears
+what was left. kiln-emf never unloads one EMF mod alone.
 
 ### Buffs (v32): plan
 
@@ -228,7 +270,7 @@ EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or stru
 | `spawn_facing` | Same as `spawn_ex`: immediate, inside a callback on the supplied server world, with at most 15 extra components (never `CurrentTransform`). Finite `yaw_deg` is forwarded to `kiln.spawn`'s creation-time transform: degrees about +Y, quaternion `(0, sin(yaw/2), 0, cos(yaw/2))`, no range clamp; 0 keeps the template's own facing. No post-spawn teleport. Bad yaw, world/thread/context, component list or unavailable service: 0, under the calling function's name. | full | host; native Windows stand-in; probe (not run in game) |
 | `find_wall_ex` | `kiln.build.find_wall`: flags 0 = buildings; `EMF_FIND_TERRAIN` → `KILN_BUILD_FIND_PLAYER_TERRAIN`, adding only terrain with PlayerPlaced provenance. Natural/unknown terrain passed over; when provenance support is unavailable, the adapter still queries buildings, as EMF does. Unknown flags or any read refusal: false, output untouched. | full | host; native Windows stand-in; in-game check pending |
 | `EMF_BREAK_TERRAIN`, terrain `EmfBlockInfo.world`, `hardness`, `health` | Player terrain only, including with `EMF_BREAK_WORLD`; natural/unknown terrain never breaks. `world` maps Natural/PlayerPlaced/Unknown to 1/0/-1; hardness class and raw integer material health match EMF, damage stays -1. Missing qualified metadata/provenance/mode refuses rather than unrestricted editing. | full queries; partial breaking (existing slots) | host; native Windows stand-in; in-game check pending |
-| `EMF_MARKER_BAR`, `EmfMarker.bar` | Markers are not carried: `marker_set` false, `marker_send` 0; no bar is drawn or sent. | not yet (existing slots) | host; probe (not run in game) |
+| `EMF_MARKER_BAR`, `EmfMarker.bar` | Since 0.2.0-dev.31.13: ten cells after the text, `bar` of them filled (`Rex [########..]` at 0.75; clamped to 0..1, a `bar` that is not a number is EMF's "bad numbers"), on every surface that shows the text. | partial (existing slots): Kiln's labels have no bar of their own, so it is text on the same line, not a bar under it | host; probe (not run in game) |
 
 ### Block-family details and differences (since 0.2.0-dev.30.6)
 
@@ -355,7 +397,7 @@ Kiln the functions still marked not yet below return what EMF's Lua guide docume
 | `emf.on_hit` (1.23) | v31 `on_hit` | partial (since 0.2.0-dev.30.3): entity hits, the default, arrive after the server step with every field of EMF's hit table; `{kinds = ...}` with fall, shroud, cold or drowning gets none of those |
 | `emf.hit_rule`, `emf.hit_rule_remove` | v31 `hit_rule_add`, `hit_rule_remove` | not yet (`nil` / `false`) |
 | `emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff` | v32 | not yet |
-| `emf.marker`, `emf.remove_marker`, `emf.clear_markers`, `emf.marker_types`, `emf.send_marker`, `emf.unsend_marker` | v33 | not yet |
+| `emf.marker`, `emf.remove_marker`, `emf.clear_markers`, `emf.marker_types`, `emf.send_marker`, `emf.unsend_marker` | v33 | since 0.2.0-dev.31.13: partial / full / full / partial / partial / full (as C) |
 | `emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at` | v34 | not yet |
 | `emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw` | v35 | not yet |
 | `emf.remove_building` | v36 | not yet |
@@ -367,7 +409,7 @@ Kiln the functions still marked not yet below return what EMF's Lua guide docume
 | `emf.villager_move`, `emf.villager_move_cancel`, `emf.villager_moving` (1.39) | v46 | not yet |
 | `emf.spawn(..., components, {yaw = degrees})` (1.40) | v47 `spawn_facing` through `kiln.spawn` | full |
 | `emf.find_wall(..., {terrain = true})`, `emf.break_blocks` terrain option (1.40) | v47 block additions above | query full; breaking partial (as C) |
-| marker `bar` (1.40) | v47 marker addition above | not yet |
+| marker `bar` (1.40) | v47 marker addition above | partial (as C, since 0.2.0-dev.31.13) |
 | `emf.path_find(world, from, to, {as = entity}, fn)`, `result.used` (1.41) | v48 `EmfPathQuery.as_entity`, `EmfPathResult`'s used values | not yet (`nil`, as every `emf.path_find`) |
 
 ## Lifetime and host checks

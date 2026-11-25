@@ -215,6 +215,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     }
     if (e->kind == KILN_WORLD_CLIENT) events_world_stopping(EMF_WORLD_CLIENT);  // the client world's relays (0.2.0-dev.29)
     windows_world_stopping(static_cast<uint8_t>(e->kind));
+    markers_world_stopping(static_cast<uint8_t>(e->kind));  // v33: that world's markers of every mod (0.2.0-dev.31.13)
 }
 
 void KILN_CALL on_ready(void*) {
@@ -301,6 +302,7 @@ void KILN_CALL on_unload(void*) {
     program_hooks_shutdown();
     components_world_stopping();
     windows_shutdown();
+    markers_shutdown();  // release_owner of every mod with markers (kiln.markers requires it before a publisher goes)
     write_status();
     io_stop(2000);  // the last emf.json (on_unload's own limit is 3 s)
 }

@@ -273,13 +273,27 @@ void v40_checks(EmfWorld* w) {
               A->buffs_of(w, 1, &bf, 1) == 0 && !A->buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) &&
               !A->buff_remove(w, 1, 2, buff_cb, nullptr) && !A->on_buff(buff_cb, nullptr),
           "buffs: the seven functions answer false / 0");
+    // markers since 0.2.0-dev.31.13 (kiln.markers): a dedicated server draws nothing of its own, it sends
     EmfMarker mk{};
     mk.size = sizeof mk;
     mk.id = "probe";
+    mk.x = 100;
+    mk.y = 50;
+    mk.z = 100;
+    mk.text = "EMF probe";
+    mk.flags = EMF_MARKER_WORLD | EMF_MARKER_EDGE_ARROW;
     EmfMapMarkerType mt{};
-    check(!A->marker_set(&mk) && !A->marker_remove("probe") && A->marker_clear() == 0 && A->marker_types(&mt, 1) == 0 &&
-              A->marker_send(0, &mk, 1) == 0 && A->marker_unsend(0, "probe") == 0,
-          "markers: the six functions answer false / 0");
+    check(!A->marker_set(&mk) && !A->marker_remove("probe") && A->marker_clear() == 0,
+          "markers: marker_set, marker_remove, marker_clear answer false / 0 on a dedicated server (it draws nothing)");
+    const uint32_t types = A->marker_types(&mt, 1);
+    check(types == 0 || (mt.size == sizeof mt && mt.id != 0), "markers: marker_types answers the catalog's map types or 0",
+          std::to_string(types));
+    const uint32_t reached = A->marker_send(0, &mk, 1);
+    check(reached <= 32, "markers: marker_send to every player answers how many Kiln players it reached", std::to_string(reached));
+    EmfMarker badid = mk;
+    badid.id = "bad id";
+    check(A->marker_send(0, &badid, 1) == 0 && A->marker_unsend(0, "bad id") == 0, "markers: a bad id is refused (0)");
+    check(A->marker_unsend(0, "probe") <= 32 && A->marker_unsend(0, "probe") == 0, "markers: marker_unsend takes it off every game, once");
     double mx = 7, mz = 9;
     check(!A->map_cursor(&mx, &mz) && mx == 7 && mz == 9 && !A->on_map_click([](const EmfMapClick*, void*) { ++g_v40_callbacks; }, nullptr) &&
               !A->map_action("probe", "Probe", 0, [](EmfWorld*, const EmfMapDone*, void*) { ++g_v40_callbacks; }, nullptr) &&
@@ -386,7 +400,8 @@ void v40_checks(EmfWorld* w) {
     bar.id = "emf_probe.bar";
     bar.flags = EMF_MARKER_BAR;
     bar.bar = 0.5f;
-    check(!A->marker_set(&bar) && A->marker_send(1, &bar, 1) == 0, "marker bars are not carried yet");
+    check(!A->marker_set(&bar) && A->marker_send(0x7FFFFF01u, &bar, 1) == 0,
+          "marker bars: no marker_set on a dedicated server; nobody gets a marker sent to an entity that is no player");
     check(g_v40_callbacks == 0, "no callback of a function that is not carried was called");
 }
 
