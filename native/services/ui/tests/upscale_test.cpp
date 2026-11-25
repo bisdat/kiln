@@ -588,10 +588,11 @@ static void amd_map() {
     CHECK(!need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
           !need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT));
     // ... and with kiln/control/amd "fsr4ext on" (read when the game makes its device) the whole set as before
-    const DeviceNeeds n4 = amd::device_needs(true);
+    const DeviceNeeds n4 = amd::device_needs(amd::Fsr4Set::native);
     for (const char* e : fsr4_native) CHECK(has_ext(n4, e));
     CHECK(need_of(n4, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) && n4.extensions.size() == n.extensions.size() + 6);
-    CHECK(amd::parse_tuning("fsr4ext on").fsr4ext && !amd::parse_tuning("").fsr4ext && amd::parse_tuning("fsr4ext on").changed());
+    CHECK(amd::parse_tuning("fsr4ext on").fsr4ext == amd::Fsr4Ext::on && amd::parse_tuning("").fsr4ext == amd::Fsr4Ext::automatic &&
+          amd::parse_tuning("fsr4ext on").changed());
     for (const auto& f : n.features) CHECK(!f.required && f.bytes.size() > 16);
     const FeatureNeed* ssc = need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
     CHECK(ssc);
@@ -716,6 +717,71 @@ static void amd_map() {
     CHECK(ffxApiGetSurfaceFormatVK(VK_FORMAT_R16G16_SNORM) == FFX_API_SURFACE_FORMAT_UNKNOWN);
 }
 
+// FSR 4's sets on the game's device (0.2.0-dev.31.12): what AMD's selection takes on a GPU decides it, as the 2.4.0 DLL's
+// providers do (ffxProvider_FSR4::IsSupported for FP8; the INT8 models otherwise). On an RX 6900 XT (31.11, kiln-win1)
+// FSR 4 4.1.2's INT8 model drew a black screen on a device without compute-shader derivatives, which FSR 4's auto exposure
+// and the RDNA 3 / lite INT8 prepass declare; the RX 9070 XT's FP8 device stays without AMD's sample's set (29.21).
+static void amd_fsr4_sets() {
+    amd::GpuFacts rx6900;  // RDNA 2: no cooperative matrix, derivatives offered
+    rx6900.vendor = amd::kVendorAmd;
+    rx6900.type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    rx6900.derivatives_ext = rx6900.derivative_linear = true;
+    amd::GpuFacts rx7900 = rx6900;  // RDNA 3: cooperative matrix, no FP8
+    rx7900.coop_matrix_ext = rx7900.coop_matrix = true;
+    amd::GpuFacts rx9070 = rx7900;  // RDNA 4: cooperative matrix + FP8
+    rx9070.float8_ext = true;
+    amd::GpuFacts apu = rx9070;     // an integrated AMD GPU with both: AMD's FP8 test leaves it to the INT8 models
+    apu.type = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    amd::GpuFacts nv = rx9070;
+    nv.vendor = 0x10de;
+    CHECK(!amd::amd_fp8_gpu(rx6900) && !amd::amd_fp8_gpu(rx7900) && amd::amd_fp8_gpu(rx9070) && !amd::amd_fp8_gpu(apu) && !amd::amd_fp8_gpu(nv));
+    amd::GpuFacts no_coop_feature = rx9070;  // offers both extensions but has no cooperativeMatrix: not FP8 for AMD
+    no_coop_feature.coop_matrix = false;
+    CHECK(!amd::amd_fp8_gpu(no_coop_feature));
+    using S = amd::Fsr4Set;
+    using E = amd::Fsr4Ext;
+    CHECK(amd::choose_fsr4_set(rx6900, E::automatic).set == S::int8 && amd::choose_fsr4_set(rx7900, E::automatic).set == S::int8);
+    CHECK(amd::choose_fsr4_set(apu, E::automatic).set == S::int8 && amd::choose_fsr4_set(no_coop_feature, E::automatic).set == S::int8);
+    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).set == S::none);  // the 9070 XT stays as 29.21 to 31.11
+    CHECK(amd::choose_fsr4_set(nv, E::automatic).set == S::none);
+    CHECK(amd::choose_fsr4_set(rx6900, E::off).set == S::none && amd::choose_fsr4_set(rx9070, E::on).set == S::native &&
+          amd::choose_fsr4_set(nv, E::on).set == S::native);
+    // the kiln.log reasons say which and why
+    const amd::Fsr4SetChoice c6 = amd::choose_fsr4_set(rx6900, E::automatic);
+    CHECK(c6.why.find("INT8") != std::string::npos && c6.why.find("compute-shader derivatives") != std::string::npos &&
+          c6.why.find("cannot be added") == std::string::npos);
+    amd::GpuFacts old_driver = rx6900;
+    old_driver.derivatives_ext = false;
+    CHECK(amd::choose_fsr4_set(old_driver, E::automatic).set == S::int8 &&
+          amd::choose_fsr4_set(old_driver, E::automatic).why.find("does not offer VK_KHR_compute_shader_derivatives") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).why.find("FP8") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(nv, E::automatic).why.find("not an AMD GPU") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(rx6900, E::off).why.find("fsr4ext off") != std::string::npos);
+    // the INT8 set: compute-shader derivatives (linear groups, what the SPIR-V declares), nothing else of the six
+    const DeviceNeeds base = amd::device_needs(S::none), int8 = amd::device_needs(S::int8);
+    CHECK(int8.extensions.size() == base.extensions.size() + 1 && has_ext(int8, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME));
+    for (const char* e : {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                          VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME})
+        CHECK(!has_ext(int8, e) && !has_ext(base, e));
+    CHECK(!has_ext(base, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME));
+    const FeatureNeed* dv = need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR);
+    CHECK(dv && !dv->required && !need_of(base, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR));
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR dvv;
+    std::memcpy(&dvv, dv->bytes.data(), sizeof dvv);
+    CHECK(dvv.computeDerivativeGroupLinear == VK_TRUE && dvv.computeDerivativeGroupQuads == VK_FALSE);
+    CHECK(!need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
+          !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES) &&
+          !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES));
+    // the knob: fsr4ext auto|off|on (anything else is not understood, and says so)
+    CHECK(amd::parse_tuning("fsr4ext auto").fsr4ext == E::automatic && !amd::parse_tuning("fsr4ext auto").changed());
+    CHECK(amd::parse_tuning("fsr4ext off").fsr4ext == E::off && amd::parse_tuning("fsr4ext off").changed());
+    CHECK(amd::parse_tuning("FSR4EXT=On").fsr4ext == E::on && amd::parse_tuning("fsr4ext int8").notes.size() == 1);
+    // the set-up line's device words
+    CHECK(amd::fsr4_device_text(S::int8, true) == "INT8 device: compute-shader derivatives on");
+    CHECK(amd::fsr4_device_text(S::int8, false).find("not on") != std::string::npos);
+    CHECK(amd::fsr4_device_text(S::none, false) == "device without FSR 4's sets" && amd::fsr4_device_text(S::native, true).find("fsr4ext on") != std::string::npos);
+}
+
 int main(int argc, char** argv) {
     const std::string tmp = argc > 1 ? argv[1] : "/tmp";
     settings();
@@ -732,6 +798,7 @@ int main(int argc, char** argv) {
     amd_fsr4_model();
     amd_optiscaler_knobs();
     amd_fsr4_inputs();
+    amd_fsr4_sets();
     exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);
     return 0;

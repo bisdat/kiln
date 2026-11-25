@@ -5,6 +5,7 @@
 // its core struct, every wanted feature lands under one of its names, extensions are added once; required needs the
 // device lacks leave the create info as the game made it; the instance's extensions and apiVersion; the device query
 // through a fake vkGetInstanceProcAddr.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -654,6 +655,77 @@ static void amd_on_the_game_device() {
     CHECK(upscale::amd::missing_used_if_offered(vk, s.extensions, gpu).empty());
 }
 
+// FSR 4's INT8 set (0.2.0-dev.31.12) on the game's device, on an RX 6900 XT-like GPU (31.11, kiln-win1: FSR 4 4.1.2's
+// INT8 model drew black on a device without it): VK_KHR_compute_shader_derivatives goes on with computeDerivativeGroupLinear,
+// which upscale_amd.cpp's device_ready reads back as "compute-shader derivatives on"; nothing else of AMD's sample's six. A
+// GPU without the extension: skipped (optional), the rest still goes on.
+static void amd_int8_set_on_the_game_device() {
+    const upscale::DeviceNeeds needs = upscale::amd::device_needs(upscale::amd::Fsr4Set::int8);
+    for (const auto& f : needs.features) CHECK(find_struct(type_of(f.bytes.data(), f.bytes.size())));
+    auto support_for = [&](bool derivatives) {
+        DeviceSupport s = rtx();
+        s.extensions.erase(std::remove(s.extensions.begin(), s.extensions.end(), std::string(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)), s.extensions.end());
+        if (!derivatives)
+            s.extensions.erase(std::remove(s.extensions.begin(), s.extensions.end(), std::string(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)),
+                               s.extensions.end());
+        for (const auto& e : needs.extensions)
+            if (!s.has_extension(e.name) && (derivatives || e.name != VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) s.extensions.push_back(e.name);
+        for (const auto& f : needs.features) {
+            const VkStructureType t = type_of(f.bytes.data(), f.bytes.size());
+            if (!derivatives && t == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR) continue;
+            bool have = false;
+            for (const auto& x : s.features) have |= type_of(x.bytes.data(), x.bytes.size()) == t;
+            if (have) continue;
+            upscale::FeatureNeed all;
+            all.bytes.assign(find_struct(t)->size, 0);
+            std::memcpy(all.bytes.data(), &t, sizeof t);
+            for (uint32_t o = kHeader; o + sizeof(VkBool32) <= all.bytes.size(); o += sizeof(VkBool32)) set_at(all.bytes.data(), all.bytes.size(), o);
+            s.features.push_back(all);
+        }
+        return s;
+    };
+    {
+        GameDevice g;
+        const auto before = g.snapshot();
+        const DeviceSupport s = support_for(true);
+        DeviceMerge m;
+        Report r;
+        const VkDeviceCreateInfo* out = m.merge(&g.ci, needs, s, &r);
+        CHECK(r.ok() && r.changed && g.snapshot() == before);
+        valid_chain(out);
+        const auto e = exts_of(out);
+        CHECK(std::find(e.begin(), e.end(), std::string(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) != e.end());
+        for (const char* x : {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                              VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME})
+            CHECK(std::find(e.begin(), e.end(), std::string(x)) == e.end());
+        const auto* dv = find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR);
+        CHECK(dv && on(dv, offsetof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR, computeDerivativeGroupLinear)) &&
+              !on(dv, offsetof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR, computeDerivativeGroupQuads)));
+        CHECK(!find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR));
+        // what device_ready reads back from the VkContext upscale.cpp fills
+        upscale::VkContext vk;
+        vk.extensions = r.extensions;
+        vk.features = r.features;
+        CHECK(vk.has_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME) &&
+              vk.has_feature(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+                             offsetof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR, computeDerivativeGroupLinear)));
+    }
+    {
+        GameDevice g;
+        const DeviceSupport s = support_for(false);
+        DeviceMerge m;
+        Report r;
+        const VkDeviceCreateInfo* out = m.merge(&g.ci, needs, s, &r);
+        CHECK(r.ok() && r.changed);
+        valid_chain(out);
+        const auto e = exts_of(out);
+        CHECK(std::find(e.begin(), e.end(), std::string(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) == e.end());
+        CHECK(std::find(r.skipped_optional.begin(), r.skipped_optional.end(), std::string(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) !=
+              r.skipped_optional.end());
+        CHECK(!find(out, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR));
+    }
+}
+
 static void tables() {
     // every struct's size and every promoted field's two offsets are within their structs; no type twice
     std::set<uint32_t> types;
@@ -680,6 +752,7 @@ int main() {
     tables();
     xess_on_the_game_device();
     amd_on_the_game_device();
+    amd_int8_set_on_the_game_device();
     required_missing_changes_nothing();
     optional_missing_is_skipped();
     nothing_to_do();

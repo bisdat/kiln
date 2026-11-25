@@ -64,12 +64,11 @@ inline std::string missing_used_if_offered(const VkContext& vk, const std::vecto
     return {};
 }
 
-// The six extensions (with their features) of AMD's sample for FSR 4 that Kiln adds to the game's device only with
-// kiln/control/amd "fsr4ext on": cooperative matrix, FP8, compute-shader derivatives, 8-bit storage, the memory model,
-// maintenance4. With them, AMD's Vulkan FSR 4 (SDK 2.4.0, 4.1.2) drew dark scenes too dark on an RX 9070 XT (29.19);
-// OptiScaler 0.9.5's pure-Vulkan FSR 4 from the same DLL ran FP8 FSR 4 correctly on the same card on a device without
-// them (its log: the game's 26 device extensions, of these only float16/int8 and integer dot product). FSR 3.1, XeSS and
-// Kiln's own passes need none of the six.
+// The six extensions (with their features) of AMD's sample for FSR 4 (Cauldron2 device_vk.cpp): cooperative matrix, FP8,
+// compute-shader derivatives, 8-bit storage, the memory model, maintenance4. With all of them, AMD's Vulkan FSR 4 (SDK
+// 2.4.0, 4.1.2) drew dark scenes too dark on an RX 9070 XT (29.19); OptiScaler 0.9.5's pure-Vulkan FSR 4 from the same
+// DLL ran FP8 FSR 4 correctly on the same card on a device without them (its log: the game's 26 device extensions, of
+// these only float16/int8 and integer dot product). Kiln's own passes and XeSS need none of the six.
 inline const std::vector<const char*>& fsr4_native_extensions() {
     static const std::vector<const char*> v = {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
                                                VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
@@ -77,7 +76,73 @@ inline const std::vector<const char*>& fsr4_native_extensions() {
     return v;
 }
 
-inline DeviceNeeds device_needs(bool fsr4_native = false) {
+// ---- FSR 4's sets on the game's device (0.2.0-dev.31.12) -----------------------------------------------------------
+// AMD's selection in amd_fidelityfx_upscaler_vk.dll 4.1.2 (SDK 2.4.0) has four FSR 4 providers (their RTTI names), each
+// with its own model and shaders (out/fsr4-black/ROOT-CAUSE.md: the SPIR-V the DLL carries, deflated and read):
+//  - ffxProvider_FSR4, the FP8 model: an AMD GPU that is not integrated, offers VK_KHR_cooperative_matrix and
+//    VK_EXT_shader_float8, and has cooperativeMatrix (its IsSupported; RX 9000). Its shaders declare cooperative matrix,
+//    FP8, the memory model, 64-bit atomics and more;
+//  - ffxProvider_FSR4_Int8 (RDNA 3, 3.5: RX 7000, Strix Halo), ffxProvider_FSR4_Int8_Navi2 (RDNA 2 discrete: RX 6000)
+//    and ffxProvider_FSR4Lite_Int8 (the smaller APUs), chosen by the driver's chip family and revision. Their networks
+//    declare integer dot product (4x8 packed) and float16 (RDNA 3's also Int8: shaderInt8); RDNA 3's and the lite
+//    model's prepass also ComputeDerivativeGroupLinearKHR (SPV_KHR_compute_shader_derivatives, for quad operations);
+//  - FSR 4's own auto exposure (every model, with FFX_UPSCALE_ENABLE_AUTO_EXPOSURE, which Kiln sets) declares
+//    ComputeDerivativeGroupLinearKHR too, as FSR 3.1.6's own SPD passes do.
+// No FSR 4 INT8 shader declares 8-bit storage, the memory model or anything of maintenance4. So where AMD's selection
+// takes an INT8 model, the game's device gets compute-shader derivatives (computeDerivativeGroupLinear: the "INT8 set"),
+// and the FP8 device keeps 0.2.0-dev.29.21's: none of the six.
+enum class Fsr4Set : uint32_t { none = 0, int8 = 1, native = 2 };
+// kiln/control/amd "fsr4ext" (read when the game makes its device): auto (the set this GPU's FSR 4 model needs), off
+// (none of the six, as 0.2.0-dev.29.21 to 31.11 everywhere), on (AMD's sample's six, as up to 29.20).
+enum class Fsr4Ext : uint32_t { automatic = 0, off = 1, on = 2 };
+inline constexpr uint32_t kVendorAmd = 0x1002;
+// What Kiln reads of the GPU before the game's device exists (the physical device; AMD's DLL is mapped only later).
+struct GpuFacts {
+    uint32_t vendor = 0;
+    VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
+    bool coop_matrix_ext = false, float8_ext = false;  // offered: VK_KHR_cooperative_matrix, VK_EXT_shader_float8
+    bool coop_matrix = false;                          // VkPhysicalDeviceCooperativeMatrixFeaturesKHR.cooperativeMatrix
+    bool derivatives_ext = false;                      // offered: VK_KHR_compute_shader_derivatives
+    bool derivative_linear = false;                    // ...computeDerivativeGroupLinear
+};
+// AMD's own test for its FP8 provider (ffxProvider_FSR4::IsSupported in the 2.4.0 DLL): the FP8 model runs here.
+inline bool amd_fp8_gpu(const GpuFacts& g) {
+    return g.vendor == kVendorAmd && g.type != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && g.coop_matrix_ext && g.float8_ext && g.coop_matrix;
+}
+struct Fsr4SetChoice {
+    Fsr4Set set = Fsr4Set::none;
+    std::string why;  // for kiln.log, at the game's start
+};
+// Which set the game's device gets, and why. Not the player's FSR 4 / FSR 3.1 choice: that can change while the game
+// runs (it applies at the next FSR set-up), the device cannot.
+inline Fsr4SetChoice choose_fsr4_set(const GpuFacts& g, Fsr4Ext ext) {
+    if (ext == Fsr4Ext::on)
+        return {Fsr4Set::native, "kiln/control/amd \"fsr4ext on\": AMD's sample's whole FSR 4 set, as up to 0.2.0-dev.29.20"};
+    if (ext == Fsr4Ext::off)
+        return {Fsr4Set::none, "kiln/control/amd \"fsr4ext off\": none of FSR 4's sets, as 0.2.0-dev.29.21 to 31.11"};
+    if (g.vendor != kVendorAmd) return {Fsr4Set::none, "not an AMD GPU: AMD's selection runs FSR 3.1 here"};
+    if (amd_fp8_gpu(g))
+        return {Fsr4Set::none, "AMD's selection takes FSR 4's FP8 model on this GPU (cooperative matrix + FP8): its device stays without "
+                               "AMD's sample's set, as since 0.2.0-dev.29.21 (with it FSR 4 drew dark scenes too dark on an RX 9070 XT)"};
+    std::string why = "AMD's selection takes an FSR 4 INT8 model on this GPU (no cooperative matrix + FP8), else FSR 3.1: the INT8 "
+                      "shaders and FSR 4's auto exposure declare compute-shader derivatives (as FSR 3.1's SPD passes do), not 8-bit "
+                      "storage, the memory model or maintenance4";
+    if (!g.derivatives_ext || !g.derivative_linear)
+        why += "; the GPU does not offer VK_KHR_compute_shader_derivatives with computeDerivativeGroupLinear, so it cannot be added";
+    return {Fsr4Set::int8, why};
+}
+// What the set is on the game's device, in words (the AMD FSR set-up line names it).
+inline std::string fsr4_device_text(Fsr4Set set, bool derivatives_on) {
+    switch (set) {
+        case Fsr4Set::native: return "device with AMD's sample's FSR 4 set (fsr4ext on)";
+        case Fsr4Set::int8:
+            return derivatives_on ? "INT8 device: compute-shader derivatives on" : "INT8 device: compute-shader derivatives not on (the GPU lacks them)";
+        case Fsr4Set::none: break;
+    }
+    return "device without FSR 4's sets";
+}
+
+inline DeviceNeeds device_needs(Fsr4Set set = Fsr4Set::none) {
     DeviceNeeds n;
     // what FSR 3.1's Vulkan backend uses when the GPU offers it
     n.want_extension(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -118,7 +183,14 @@ inline DeviceNeeds device_needs(bool fsr4_native = false) {
     // integer dot product (OptiScaler's device had it too)
     n.want_extension(VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME);
     n.want(VkPhysicalDeviceShaderIntegerDotProductFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr, VK_TRUE});
-    if (!fsr4_native) return n;
+    if (set == Fsr4Set::int8) {
+        // the INT8 set: what FSR 4's INT8 prepass and its auto exposure declare beyond the above (choose_fsr4_set)
+        n.want_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+        n.want(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, nullptr,
+                                                                  VK_FALSE, VK_TRUE});
+        return n;
+    }
+    if (set != Fsr4Set::native) return n;
     // FSR 4's native set (AMD's sample's), only with "fsr4ext on": see fsr4_native_extensions
     n.want_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
     n.want(VkPhysicalDeviceCooperativeMatrixFeaturesKHR{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, nullptr, VK_TRUE, VK_FALSE});
@@ -195,8 +267,10 @@ enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 //   keyvalues off|optiscaler        OptiScaler's five FFX key-values (velocity 0.5, reactiveness 0.25, shading change
 //                                   0.5/ratio, accumulation ratio/10, disocclusion ratio/20)
 //   debug off|on                    FSR's own debug view in the output (what it makes of the inputs)
-//   fsr4ext off|on                  read when the game makes its device (the next game start): off, the game's device
-//                                   without FSR 4's native set (fsr4_native_extensions); on, with it (as up to 29.20)
+//   fsr4ext auto|off|on             read when the game makes its device (the next game start): auto, the set this
+//                                   GPU's FSR 4 model needs (choose_fsr4_set: compute-shader derivatives where AMD's
+//                                   selection takes an INT8 model, nothing on the FP8 one); off, none (as 29.21 to
+//                                   31.11); on, AMD's sample's whole set (fsr4_native_extensions, as up to 29.20)
 enum class Planes : uint32_t { automatic = 0, game = 1, swap = 2 };
 struct Tuning {
     Exposure exposure = Exposure::automatic;
@@ -207,12 +281,12 @@ struct Tuning {
     Mask dynres = Mask::automatic;
     Planes planes = Planes::automatic;
     bool usage_rw = false, maxrender_output = false, keyvalues = false, debug = false;
-    bool fsr4ext = false;  // read when the game makes its device (from the next game start)
+    Fsr4Ext fsr4ext = Fsr4Ext::automatic;  // read when the game makes its device (from the next game start)
     std::vector<std::string> notes;  // lines Kiln did not understand
     bool changed() const {
         return exposure != Exposure::automatic || pre_exposure != PreExposure::automatic || reactive != Mask::automatic ||
                transparency != Mask::automatic || hdr_off || colour != Colour::linear || dynres != Mask::automatic ||
-               planes != Planes::automatic || usage_rw || maxrender_output || keyvalues || debug || fsr4ext;
+               planes != Planes::automatic || usage_rw || maxrender_output || keyvalues || debug || fsr4ext != Fsr4Ext::automatic;
     }
 };
 inline Tuning parse_tuning(std::string_view text) {
@@ -255,7 +329,8 @@ inline Tuning parse_tuning(std::string_view text) {
         else if (w[0] == "maxrender" && (v == "texture" || v == "output")) t.maxrender_output = v == "output";
         else if (w[0] == "keyvalues" && (v == "off" || v == "optiscaler")) t.keyvalues = v == "optiscaler";
         else if (w[0] == "debug" && (v == "off" || v == "on")) t.debug = v == "on";
-        else if (w[0] == "fsr4ext" && (v == "off" || v == "on")) t.fsr4ext = v == "on";
+        else if (w[0] == "fsr4ext" && (v == "auto" || v == "off" || v == "on"))
+            t.fsr4ext = v == "on" ? Fsr4Ext::on : v == "off" ? Fsr4Ext::off : Fsr4Ext::automatic;
         else if (w[0] == "planes" && (v == "auto" || v == "game" || v == "swap"))
             t.planes = v == "game" ? Planes::game : v == "swap" ? Planes::swap : Planes::automatic;
         else t.notes.push_back(line);
