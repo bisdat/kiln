@@ -246,6 +246,7 @@ internal static class SkillsStartup
         try
         {
             GameTree.Rows.Ensure();  // the capability rows, before a mod asks for them
+            ClientSkills.Rows.Ensure();  // skills.client_view (0.2.0-dev.31.13): lowered when kiln.skills.client is not here
             Skills.EnsureStarted();
             var n = 0;
             foreach (var m in Mods.All)
