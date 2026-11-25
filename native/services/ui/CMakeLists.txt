@@ -15,20 +15,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upscale_xess.cpp")
 else()
     list(APPEND KILN_UI_UPSCALE upscale_xess_none.cpp)
 endif()
-kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp keys.cpp game.cpp menu_page.cpp popups.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp outline.cpp wheel.cpp chat_input_probe.cpp ${KILN_UI_UPSCALE})
+kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp input_own.cpp keys.cpp game.cpp menu_page.cpp popups.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp outline.cpp wheel.cpp chat_input_probe.cpp ${KILN_UI_UPSCALE})
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 target_include_directories(kiln-ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party/ffx)  # AMD's FSR API headers (MIT)
 
 
 # Opt-in build target, never packaged: real third-party addon against Kiln's production input and startup gate.
-add_executable(ui-addon-harness EXCLUDE_FROM_ALL tests/addon_harness/harness.cpp input.cpp keys.cpp
+add_executable(ui-addon-harness EXCLUDE_FROM_ALL tests/addon_harness/harness.cpp input.cpp input_own.cpp keys.cpp
     ${CMAKE_SOURCE_DIR}/core/src/foreign_scan.cpp)
 target_include_directories(ui-addon-harness PRIVATE . ${CMAKE_SOURCE_DIR}/core/src ${CMAKE_SOURCE_DIR}/core/abi
     ${KILN_GENERATED_DIR} ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(ui-addon-harness PRIVATE kiln-safetyhook kiln-imgui user32 imm32 dwmapi gdi32)
 # Opt-in build target, never packaged: the window procedure's input records for native subscribers (kiln_ui.h v5) on a
 # message-only window under Wine (tests/test-window-input-wine.sh).
-add_executable(ui-window-input-test EXCLUDE_FROM_ALL tests/window_input/harness.cpp input.cpp keys.cpp)
+add_executable(ui-window-input-test EXCLUDE_FROM_ALL tests/window_input/harness.cpp input.cpp input_own.cpp keys.cpp)
 target_include_directories(ui-window-input-test PRIVATE . ${CMAKE_SOURCE_DIR}/core/abi ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(ui-window-input-test PRIVATE kiln-safetyhook kiln-imgui user32 imm32 dwmapi gdi32)
 # Production outline_info against the released 24-byte, 4-aligned caller record, without a game or renderer.
