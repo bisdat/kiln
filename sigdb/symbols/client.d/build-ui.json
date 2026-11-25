@@ -1,13 +1,33 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "GitHub #132, since 0.2.0-dev.31.12: the build menu's material counts count a player's building links too, so the menu, the cursor (server.d/build-sources.json) and the placement agree. The material selector's gatherer (C 0x40e5d0, void(selectorState, access, bool currentOnly), docs/re/building.md 1.2.2) rebuilds up to seven groups of 0x648 bytes (rows {ptr, count, capacity} at +0/+8/+0x10; 24-byte rows: item +0, the key (u32, u8) +4, the aggregate stock u64 +0x10): it zeroes a group it rebuilds, adds a zero row per known pool material, the bag's stacks, then per pool material the client's published base stock map's u16 (build/client.StockRowsRet is that add's return; build/client.MaterialRowAdd finds a row by item and adds the count at +0x10). kiln-items wraps the gatherer and adds the server's building snapshot to the rows of its items afterwards, taking its own earlier addition back first where the game left the row alone. Client 26430625 (5d9ef2f1). Evidence: docs/re/stations.md section 13.",
+  "comment": "GitHub #132, since 0.2.0-dev.31.12: the build menu's material counts count a player's building links too, so the menu, the cursor (server.d/build-sources.json) and the placement agree. The material selector's gatherer (C 0x40e5d0, void(selectorState, access, bool currentOnly), docs/re/building.md 1.2.2) rebuilds up to seven groups of 0x648 bytes (rows {ptr, count, capacity} at +0/+8/+0x10; 24-byte rows: item +0, the key (u32, u8) +4, the aggregate stock u64 +0x10): it zeroes a group it rebuilds, adds a zero row per known pool material, the bag's stacks, then per pool material the client's published base stock map's u16 (build/client.StockRowsRet is that add's return; build/client.MaterialRowAdd finds a row by item and adds the count at +0x10). kiln-items wraps the gatherer from inside (build/client.MaterialRowsBody and build/client.MaterialRowsDone, since 0.2.0-dev.31.13; never its entry, which Building Tools finds by its bytes) and adds the server's building snapshot to the rows of its items afterwards, taking its own earlier addition back first where the game left the row alone. Client 26430625 (5d9ef2f1). Evidence: docs/re/stations.md section 13.",
   "symbols": {
     "build/client.MaterialRows": {
       "comment": "the material selector's gatherer: its prologue, then lea r15,[rcx+0x638] (the first group's mode byte; 0x638 + 0x10 = 0x648, the group stride). Client 0x40e5d0",
       "find": [
         {
           "pattern": "48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00"
+        }
+      ]
+    },
+    "build/client.MaterialRowsBody": {
+      "comment": "kiln-items' first half of the gatherer (build_rows_enter: its own earlier additions taken back): the first instruction after the prologue, lea r15,[rcx+0x638] (entry + 0x23): rcx the selector state, rsp the function's (the same at build/client.MaterialRowsDone). The same site as kiln-tools' tools/MaterialSelectorBody; not the entry, which Building Tools (0.34.0) finds by its first 35 bytes. Client 0x40e5f3",
+      "find": [
+        {
+          "scope": { "symbol": "build/client.MaterialRows", "size": 64 },
+          "pattern": "48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",
+          "offset": 9
+        }
+      ]
+    },
+    "build/client.MaterialRowsDone": {
+      "comment": "kiln-items' second half (build_rows_leave: the links added): the epilogue's first instruction, mov rbx,[rsp+0x1d0] (entry + 0xa8a), after the finalizer on every path; rsi the selector state. The same site as kiln-tools' tools/MaterialSelectorDone. Client 0x40f05a",
+      "find": [
+        {
+          "scope": { "symbol": "build/client.MaterialRows", "size": 2876 },
+          "pattern": "45 33 C0 48 8D 4C 24 60 33 D2 E8 ?? ?? ?? ?? 48 8B 9C 24 D0 01 00 00 48 81 C4 90 01 00 00 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3",
+          "offset": 15
         }
       ]
     },
@@ -41,6 +61,8 @@
     "crafting.build_ui": {
       "symbols": [
         "build/client.MaterialRows",
+        "build/client.MaterialRowsBody",
+        "build/client.MaterialRowsDone",
         "build/client.StockRowsRet",
         "build/client.MaterialRowAdd",
         "build/client.MaterialRowStock"
