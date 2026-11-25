@@ -12,9 +12,11 @@ namespace {
 int failures = 0;
 uint32_t code_kind = KILN_CODE_ORIGINAL;
 bool bad_original = false;
-KilnResult KILN_CALL original_code(uintptr_t, void* out, size_t size) {
-    if (size != sizeof(kitems::kSelectEquipmentCode)) return KILN_ERR_INVALID_ARGUMENT;
-    std::memcpy(out, kitems::kSelectEquipmentCode, size);
+KilnResult KILN_CALL original_code(uintptr_t address, void* out, size_t size) {
+    const uint8_t* code = address == 2 ? kitems::kEquipLocationKindCode : kitems::kSelectEquipmentCode;
+    if (size != (address == 2 ? sizeof(kitems::kEquipLocationKindCode) : sizeof(kitems::kSelectEquipmentCode)))
+        return KILN_ERR_INVALID_ARGUMENT;
+    std::memcpy(out, code, size);
     if (bad_original) static_cast<uint8_t*>(out)[0] ^= 1;
     return KILN_OK;
 }
@@ -52,6 +54,12 @@ int main() {
     KilnHooksApi hooks{}; hooks.header.size=sizeof hooks;
     hooks.read_original=&original_code; hooks.code_state=&live_code;
     check(qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: the verified original helper entry is callable");
+    check(qualified_code(&hooks, 2, kEquipLocationKindCode), "#139 GiveEquip: the original EquipLocationKind entry is callable");
+    bad_original=true;
+    check(!qualified_code(&hooks, 2, kEquipLocationKindCode), "#139 GiveEquip: an EquipLocationKind whose bytes differ is refused");
+    bad_original=false; code_kind=KILN_CODE_FOREIGN;
+    check(!qualified_code(&hooks, 2, kEquipLocationKindCode), "#139 GiveEquip: a foreign-patched EquipLocationKind is refused");
+    code_kind=KILN_CODE_ORIGINAL;
     code_kind=KILN_CODE_MANAGED;
     check(qualified_code(&hooks, 1, kSelectEquipmentCode), "GiveEquip: a registry-owned helper detour is callable");
     code_kind=KILN_CODE_FOREIGN;

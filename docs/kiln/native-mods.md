@@ -131,6 +131,17 @@ world in safe idle, a dllmain mod not in chain.ini, a drop-in the profile overri
 `kiln.log` has one line per mod (`native mod <id> <version> loaded (boot, 1 DLL(s), kiln_native_init ok, 1.2 ms)`), and
 boot.json a summary (`native: {loaded, failed, pending}`).
 
+**Off, but its DLL is also a proxy** (0.2.0-dev.31.12). Kiln's proxy loads `kiln/chain.ini [chain]` (the `dinput8.dll` the
+installer moved to `kiln/chain/`) and `dinput8-chain.ini` in its `DllMain`, before kiln-core reads the profile. So a
+mod that is off (in the profile, in `<configDir>/native.json`, or by default) whose DLL the player also put in as such
+a proxy (the same bytes) runs all the same. Its row keeps the reason it is off and adds that its DLL loads as a chain
+proxy, which line names it and how to take it out (`;` in front of the line in `kiln\chain.ini`, or the line out of
+`dinput8-chain.ini`, or the file out of the game folder); `chainProxy` is that path, and `kiln.log` has a warning with
+the same text. A phase dllmain mod then reads `loaded` when every one of its DLLs loads that way (loading its DLLs is
+the mod); with only some of them chained it stays `disabled` and the reason says how many load. Any other phase stays
+`disabled`, since Kiln does not call its `init` (its `DllMain` still ran). Host test: `native/core/tests/test-chain-copy.sh`
+(`src/chain_copy.h`).
+
 ## Testing
 - `mods/tests/native-test/stage.py`: 18 cases (each phase, ordering, requires, a cycle, a failing / unsupported /
   faulting init, side, switches, a missing DLL, an old `kiln` range, an untested build) as drop-ins or as a profile

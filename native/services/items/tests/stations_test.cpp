@@ -53,31 +53,39 @@ int main() {
                   offsetof(KilnStationRequest, keep) == 64 && offsetof(KilnStationRequest, chest_count) == KILN_STATION_REQUEST_V1 &&
                   offsetof(KilnStationRequest, chests) == 96);
     static_assert(sizeof(KilnItemsMoveChange) == 32);
-    static_assert(sizeof(KilnStationResult) == 1240 && offsetof(KilnStationResult, limited_by) == 52 &&
+    // since 0.2.0-dev.31.12 (GitHub #132): from_linked appended to the result, linked[] to the plan
+    static_assert(sizeof(KilnStationResult) == 1248 && offsetof(KilnStationResult, from_linked) == 1240 && offsetof(KilnStationResult, limited_by) == 52 &&
                   offsetof(KilnStationResult, short_item) == 56 && offsetof(KilnStationResult, ticket) == 64 &&
                   offsetof(KilnStationResult, changes) == 80 && offsetof(KilnStationResult, message) == 1104 &&
                   offsetof(KilnStationResult, from_chests) == 1232);
-    static_assert(sizeof(KilnStationPlan) == 952 && offsetof(KilnStationPlan, outputs) == 696 && offsetof(KilnStationPlan, chests) == 824 &&
+    static_assert(sizeof(KilnStationPlan) == 1080 && offsetof(KilnStationPlan, linked) == 952 && offsetof(KilnStationPlan, outputs) == 696 && offsetof(KilnStationPlan, chests) == 824 &&
                   offsetof(KilnStationPlan, short_item) == 36 && offsetof(KilnStationPlan, water_per_craft) == 44 &&
                   offsetof(KilnStationPlan, inputs) == 56);
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 35 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+    static_assert(sizeof(KilnStationsApi) == 8 + 38 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
                   offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
                   offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8 &&
                   offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8 &&
                   offsetof(KilnStationsApi, set_fill_answers) == 8 + 28 * 8 && offsetof(KilnStationsApi, fill_asks) == 8 + 29 * 8);
-    static_assert(sizeof(KilnCraftSourceRequest) == 32 && offsetof(KilnStationsApi, add_source) == 248 &&
+    static_assert(sizeof(KilnCraftSourceRequest) == 40 && offsetof(KilnCraftSourceRequest, flags) == KILN_CRAFT_SOURCE_REQUEST_V1 &&
+                  offsetof(KilnStationsApi, add_source) == 248 &&
                   offsetof(KilnStationsApi, remove_source) == 256 && offsetof(KilnStationsApi, cancel_sources) == 264 &&
                   offsetof(KilnStationsApi, source_stock) == 272 && offsetof(KilnStationsApi, set_dye_stock) == 280);
+    // GitHub #147 (0.2.0-dev.31.12): the lock members after set_dye_stock; a 32-byte request is the older caller's
+    static_assert(offsetof(KilnStationsApi, set_lock_stock) == 288 && offsetof(KilnStationsApi, lock_asks) == 296 &&
+                  KILN_CRAFT_SOURCE_REQUEST_V1 == 32 && KILN_STATIONS_MAX_LOCK_STOCK == 256 && KILN_STATIONS_MAX_LOCK_ASKS == 16);
+    static_assert(offsetof(KilnStationsApi, set_build_stock) == 304 && sizeof(KilnStationsApi) == 312);  // after #147's members
+    static_assert(KILN_CRAFT_SOURCE_FILLS == 2 && KILN_CRAFT_SOURCE_BUILDING == 4 && KILN_CRAFT_SOURCE_STOCK_FILLS == 4 &&
+                  KILN_CRAFT_SOURCE_STOCK_BUILDING == 8 && KILN_STATION_FILL_LINKED == 0x100);
     static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024 && KILN_STATIONS_MAX_FILL_KEYS == 16);
     static_assert(sizeof(KilnStationCollect) == 24 && offsetof(KilnStationCollect, flags) == 16);
     // a collect's flags travel in KilnStationResult.flags: they share no bit with a request flag (DRY_RUN above all)
     static_assert(((KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS | KILN_STATION_COLLECT_TO_BASE) &
                    (KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
                     KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
-                    KILN_STATION_FILL_NO_OUTPUTS)) == 0);
+                    KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED)) == 0);
     static_assert(KILN_STATION_COLLECT_OUTPUTS == 0x10000u && KILN_STATION_COLLECT_LEFTOVERS == 0x20000u &&
                   KILN_STATION_COLLECT_TO_BASE == 0x40000u);
     static_assert(offsetof(KilnStationResult, from_outputs) == 60);
@@ -117,6 +125,19 @@ int main() {
     r = req(KILN_STATION_RESUME);
     r.flags = KILN_STATION_ALLOW_LOCKED;
     CHECK(!request_valid(r));
+    // GitHub #132 (0.2.0-dev.31.12): a fill from linked sources names their player; no other action takes the flag
+    r = req(KILN_STATION_FILL);
+    r.flags = KILN_STATION_FILL_LINKED;
+    CHECK(!request_valid(r));
+    r.player = 1;
+    CHECK(request_valid(r));
+    r.player = 1024;
+    CHECK(!request_valid(r));
+    for (uint32_t action : {KILN_STATION_STOP, KILN_STATION_RESUME, KILN_STATION_SELECT}) {
+        r = req(action);
+        r.flags = KILN_STATION_FILL_LINKED;
+        CHECK(!request_valid(r));
+    }
     r = req(KILN_STATION_FILL);
     r.station = 0;
     CHECK(!request_valid(r));

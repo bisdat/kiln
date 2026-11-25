@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Ui.AmmoList (0.2.0-dev.30.6, GitHub issue 127) against a fake kiln.ui.ammo table (kiln_ui_ammo.h): providers composed
-// into one snapshot per list (registration order, first row of an item wins, Replace wins, Append leaves out the game's
-// items, 64 rows), published under one owner with the context's serial and session; nothing asked again until the
+// into one snapshot per list (registration order, first row of an item wins, Replace wins, Append keeps a mod's row of a
+// game item behind the game's row without room, 64 rows), published under one owner with the context's serial and session; nothing asked again until the
 // context changes; dispose and a mod's retirement publish the game's list again; picks routed to the mod whose row it was
 // and old-session picks dropped; the error rule (ui.ammo.list, ui.ammo.pick: display only). The hook, the selection
 // by item and the pick seam are native's (native/services/tools/tests).
@@ -192,26 +192,78 @@ public sealed unsafe class AmmoListTests : IDisposable
     }
 
     [Fact]
-    public void Append_leaves_out_the_games_own_items_and_the_first_row_of_an_item_wins()
+    public void Append_keeps_a_mods_row_of_a_game_item_behind_the_games_row_and_the_first_row_of_an_item_wins()
     {
+        // GitHub issue 145: the mod's row of an item the game lists with stock is published (native shows the game's row and
+        // count in its place), so a pick of it after its stack left the backpack is known as the mod's row.
         FakeAmmo.Context(Arrow, 1, game: (0x10, 20));
         using var a = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x10, 99), R(0x30, 1), R(0, 4), R(0x31, -5)]);
-        using var b = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x30, 2), R(0x32, 3)]);
+        using var b = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x30, 2), R(0x32, 3), R(0x10, 1)]);
         UiAmmoListBridge.Tick();
-        Assert.Equal([(0x30u, 1u), (0x31u, 0u), (0x32u, 3u)], FakeAmmo.Last(Arrow).Rows);
+        Assert.Equal([(0x10u, 99u), (0x30u, 1u), (0x31u, 0u), (0x32u, 3u)], FakeAmmo.Last(Arrow).Rows);
+        Assert.Equal([0x10u, 0x30u, 0x31u, 0x32u], UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Keys.Select(k => k.Item));
+    }
+
+    [Fact]
+    public void In_Append_a_mods_row_behind_a_game_row_with_stock_takes_no_room()
+    {
+        // the game's 63 rows leave one: the mod's rows of its items take none of it, so the next new item still fits
+        FakeAmmo.Context(Arrow, 1, game: Enumerable.Range(1, 63).Select(i => ((uint)i, 1u)).ToArray());
+        using var p = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(5, 7), R(0x100, 1), R(63, 2), R(0x101, 1)]);
+        UiAmmoListBridge.Tick();
+        Assert.Equal([(5u, 7u), (0x100u, 1u), (63u, 2u)], FakeAmmo.Last(Arrow).Rows);
+        // the game's 64 leave none: still its items' rows, no new one
+        FakeAmmo.Context(Arrow, 2, game: Enumerable.Range(1, 64).Select(i => ((uint)i, 1u)).ToArray());
+        UiAmmoListBridge.Tick();
+        Assert.Equal([(5u, 7u), (63u, 2u)], FakeAmmo.Last(Arrow).Rows);
+    }
+
+    [Fact]
+    public void In_Append_a_pick_of_a_mods_row_whose_stack_just_left_the_backpack_reaches_that_mod()
+    {
+        // GitHub issue 145 in Append: the book lists the equipped 0x41 (in the backpack, so the game lists it with stock)
+        // and 0x40. Its server half swaps 0x40 in and 0x41 out; native finds no stack of 0x41 at the pick, before and after
+        // the game's rebuild, and queues it under the key of the book's row. Kiln.Ui hands it to the book.
+        FakeAmmo.Context(Spell, 1, game: (0x41, 1));
+        var book = Mod("book", 75);
+        var other = Mod("other", 76);
+        var toBook = new List<AmmoListPick>();
+        var toOther = new List<AmmoListPick>();
+        using var p = As(book, () => Ui.AmmoList.Provide(AmmoListKind.Spell, c => c.Revision == 1 ? [R(0x41, 1), R(0x40, 1)] : [R(0x41, 1)]));
+        using var q = As(other, () => Ui.AmmoList.Provide(AmmoListKind.Spell, _ => [R(0x41, 5)]));
+        As(book, () => { Ui.AmmoList.Picked += toBook.Add; return 0; });
+        As(other, () => { Ui.AmmoList.Picked += toOther.Add; return 0; });
+        UiAmmoListBridge.Tick();
+        var (mode, rows) = FakeAmmo.Last(Spell);
+        Assert.Equal(UiAmmoNative.ModeAppend, mode);
+        Assert.Equal([(0x41u, 1u), (0x40u, 1u)], rows);
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Spell, Item = 0x41, Count = 1, Key = 0, Session = 1 });
+        UiAmmoListBridge.Tick();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Spell, new ItemId(0x41), 1)], toBook);
+        // the game's rebuild keeps 0x41 at count 0 and lists 0x40 with stock: both rows go behind the game's
+        FakeAmmo.Context(Spell, 2, game: [(0x41, 0), (0x40, 1)]);
+        UiAmmoListBridge.Tick();
+        Assert.Equal([(0x41u, 1u)], FakeAmmo.Last(Spell).Rows);
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Spell, Item = 0x41, Count = 1, Key = 0, Session = 1 });
+        UiAmmoListBridge.Tick();
+        Assert.Equal(2, toBook.Count);
+        Assert.Empty(toOther);
+        book.Retire();
+        other.Retire();
     }
 
     [Fact]
     public void In_Append_a_game_row_at_count_0_leaves_the_mods_row_in_and_takes_no_room()
     {
-        // GitHub issue 131: the game keeps the row of a used-up stack at count 0. Only a game row with stock leaves the mod's
-        // row of its item out; native shows the game's row and sends its pick to the mod when the backpack does not hold it.
+        // GitHub issue 131: the game keeps the row of a used-up stack at count 0. The mod's row of its item is published
+        // (since 0.2.0-dev.31.12 also of an item with stock, GitHub issue 145); native shows the game's row and sends its
+        // pick to the mod when the backpack does not hold it.
         FakeAmmo.Context(Arrow, 1, game: [(0x10, 0), (0x11, 4)]);
         using var p = Ui.AmmoList.Provide(AmmoListKind.Arrow, c => c.Revision == 1
             ? [R(0x10, 7), R(0x11, 2), R(0x30, 1)]
             : [R(1, 7), R(0x100, 1), R(0x101, 1)]);
         UiAmmoListBridge.Tick();
-        Assert.Equal([(0x10u, 7u), (0x30u, 1u)], FakeAmmo.Last(Arrow).Rows);
+        Assert.Equal([(0x10u, 7u), (0x11u, 2u), (0x30u, 1u)], FakeAmmo.Last(Arrow).Rows);
         Assert.Contains(0x10u, UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Keys.Select(k => k.Item));
         // the game's 63 rows leave one: its count-0 item shows as the game's row, so the next item still fits
         FakeAmmo.Context(Arrow, 2, game: Enumerable.Range(1, 63).Select(i => ((uint)i, i == 1 ? 0u : 1u)).ToArray());

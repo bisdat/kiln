@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "Kiln clients: CraftableAmount is a type-1 RecipeApply dry-run STATUS, not a count (GitHub #132). The exact call below always rolls back. Only its native InventoryPay material-shortfall may use per-ingredient server stock to continue the preview; native eligibility/output guards and authoritative server payment are unchanged.",
+  "comment": "Kiln clients: CraftableAmount is a type-1 RecipeApply dry-run STATUS, not a count (GitHub #132). The exact call below always rolls back. Its descriptor (tx+0xb0 = 0x40, | 0x08 at a workshop; C 0x2bd88b, 0x2bdda4) makes RecipeApply pay it with RecipePayAlt (C 0x3f9700), not InventoryPay: mode 0 takes the owner's whole line (return 0x3f9777), mode 2 subtracts the client stock table (C 0x4709a0: bases + 0x1610) and takes the rest from the owner (return 0x3f98a3). Only that payer's material shortfall may use per-ingredient server stock to continue the preview; native eligibility/water/output guards and authoritative server payment are unchanged. Since 0.2.0-dev.31.12.",
   "features": {
     "stations.craft_ui": {
       "symbols": [
@@ -18,7 +18,12 @@
         "items/InventoryPageFetch",
         "stations/MaterialPageFetchRet",
         "stations/MaterialPreferredPageFetchRet",
-        "stations/BaseStockForPlayer"
+        "stations/BaseStockForPlayer",
+        "rules/RecipePayAlt",
+        "stations/client.CraftAltTakeRet",
+        "stations/client.CraftAltStockRead",
+        "stations/client.CraftStockTable",
+        "stations/client.CraftAltStockTakeRet"
       ]
     },
     "crafting.source_ui": {
@@ -36,7 +41,12 @@
         "items/InventoryPageFetch",
         "stations/MaterialPageFetchRet",
         "stations/MaterialPreferredPageFetchRet",
-        "stations/BaseStockForPlayer"
+        "stations/BaseStockForPlayer",
+        "rules/RecipePayAlt",
+        "stations/client.CraftAltTakeRet",
+        "stations/client.CraftAltStockRead",
+        "stations/client.CraftStockTable",
+        "stations/client.CraftAltStockTakeRet"
       ]
     }
   },
@@ -46,6 +56,45 @@
         {
           "pattern": "48 8D 8D 80 9C 00 00 E8 {items/RecipeApply:rel32} 48 8D 8D 80 9C 00 00 8B F8 E8 {items/InventoryRollback:rel32} 45 33 C0",
           "offset": 12
+        }
+      ]
+    },
+    "stations/client.CraftAltTakeRet": {
+      "comment": "RecipePayAlt mode 0: PayMaterial(out, tx, owner, item, multiplier x count)'s return (client 26430625 0x3f9777)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "rules/RecipePayAlt",
+            "size": 500
+          },
+          "pattern": "48 8D 4C 24 30 44 8B C3 89 7C 24 20 E8 {gems/PayMaterial:rel32} 44 38 64 24 30 0F 44 7C 24 38",
+          "offset": 17
+        }
+      ]
+    },
+    "stations/client.CraftAltStockRead": {
+      "comment": "RecipePayAlt modes other than 0: the client stock table getter's call on tx+0x68 (bases) and its return (0x3f97d4); captures stations/client.CraftStockTable (0x4709a0: lea rax,[rcx+0x1610]; ret)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "rules/RecipePayAlt",
+            "size": 500
+          },
+          "pattern": "48 8B 49 68 4C 89 AC 24 98 00 00 00 E8 {stations/client.CraftStockTable:rel32} 45 33 E4",
+          "offset": 17
+        }
+      ]
+    },
+    "stations/client.CraftAltStockTakeRet": {
+      "comment": "RecipePayAlt modes other than 0: PayMaterial for what the client stock table does not cover; its return (0x3f98a3)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "rules/RecipePayAlt",
+            "size": 500
+          },
+          "pattern": "48 8D 4C 24 40 44 8B C3 89 7C 24 20 E8 {gems/PayMaterial:rel32} 44 38 64 24 40 0F 44 7C 24 48",
+          "offset": 17
         }
       ]
     }

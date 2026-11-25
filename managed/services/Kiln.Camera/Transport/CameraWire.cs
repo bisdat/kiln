@@ -154,11 +154,30 @@ internal readonly record struct HeartbeatMessage(WireBinding Binding, ulong Sequ
 internal readonly record struct StatusMessage(WireBinding Binding, ulong Sequence, ulong Lease, ulong Revision, uint ElapsedMs, uint RemainingMs);
 
 /// <summary>Encoding and decoding of the nine messages. Decode methods return false for any body that is not exactly a
-/// valid message: too long, truncated, trailing bytes, an unknown enum value, a non-finite float, a part the request does
+/// valid message (but for the transport's zero padding to 4 bytes, <see cref="EndsAt"/>): too long, truncated, trailing bytes, an unknown enum value, a non-finite float, a part the request does
 /// not announce; a refused body leaves the out value default (null for a mutation), never a partly read message. Nothing
 /// is allocated for a body before its length and counts were checked.</summary>
 internal static class CameraWire
 {
+    // ---- the transport's padding ----
+
+    /// <summary>True when the body ends at <paramref name="end"/>, or only kiln.net's zero padding follows it. The game
+    /// transport pads every frame with zeros to a multiple of 4 bytes (native/services/net/game.cpp send: the game's bit
+    /// writers flush 32-bit words), and Kiln.Network's Data frame header is 8 bytes, so a joined peer's body arrives with up
+    /// to 3 zero bytes after its end whenever its length is not a multiple of 4 (a fragmented body arrives exact; the lab
+    /// transport and the hosting loopback pad nothing). Anything else after the end, more than 3 bytes, or a zero byte
+    /// that leaves the length unaligned is refused, as kiln.markers' wire does since 0.2.0-dev.31.12.</summary>
+    internal static bool EndsAt(ReadOnlySpan<byte> s, int end)
+    {
+        if (end < 0 || end > s.Length) return false;
+        if (end == s.Length) return true;
+        return s.Length % 4 == 0 && s.Length - end <= 3 && s[end..].IndexOfAnyExcept((byte)0) < 0;
+    }
+
+    /// <summary>The longest body a decoder looks at for a message of at most <paramref name="max"/> bytes: the transport
+    /// may add up to 3 zero bytes. The message itself is still checked against <paramref name="max"/>.</summary>
+    private static int Padded(int max) => max > int.MaxValue - 3 ? int.MaxValue : max + 3;
+
     // ---- the request blob ----
 
     /// <summary>The blob's size in bytes, or -1 when its structure cannot be encoded (a key count past 65535).</summary>
@@ -377,7 +396,7 @@ internal static class CameraWire
     public static bool TryHello(ReadOnlySpan<byte> s, out HelloMessage m)
     {
         m = default;
-        if (s.Length != 32) return false;
+        if (!EndsAt(s, 32)) return false;
         var at = 0;
         var h = new HelloMessage(RU16(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at), RU16(s, ref at), RU32(s, ref at));
         if (h.Protocol != CameraWireAbi.Protocol || h.ClientNonce == 0 || h.ClientEpoch == 0 || h.LocalEntity == 0 || h.MaxKeys < 1 || h.MaxBody < 1) return false;
@@ -405,7 +424,7 @@ internal static class CameraWire
     public static bool TryWelcome(ReadOnlySpan<byte> s, out WelcomeMessage m)
     {
         m = default;
-        if (s.Length != 58) return false;
+        if (!EndsAt(s, 58)) return false;
         var at = 0;
         var w = new WelcomeMessage(RU64(s, ref at), RU32(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at),
             RU64(s, ref at), RU64(s, ref at), RU32(s, ref at), RU16(s, ref at));
@@ -441,13 +460,14 @@ internal static class CameraWire
     public static bool TryMutation(CameraMessage kind, ReadOnlySpan<byte> s, int maxBody, int maxKeys, out MutationMessage? m)
     {
         m = null;
-        if (s.Length > Math.Min(maxBody, CameraWireAbi.MaxBody) || s.Length < CameraWireAbi.CommonHeaderBytes) return false;
+        var limit = Math.Min(maxBody, CameraWireAbi.MaxBody);
+        if (s.Length > Padded(limit) || s.Length < CameraWireAbi.CommonHeaderBytes) return false;
         var at = 0;
         var h = ReadHeader(s, ref at);
         switch (kind)
         {
             case CameraMessage.End:
-                if (at != s.Length) return false;
+                if (!EndsAt(s, at)) return false;
                 m = new MutationMessage(kind, h, 0, null);
                 return true;
             case CameraMessage.Apply:
@@ -460,7 +480,7 @@ internal static class CameraWire
                     if (timing > CameraWireAbi.TimingRestart) return false;
                 }
                 var r = ReadBlob(s, ref at, maxKeys);
-                if (r is null || at != s.Length) return false;
+                if (r is null || at > limit || !EndsAt(s, at)) return false;
                 m = new MutationMessage(kind, h, timing, r);
                 return true;
             default:
@@ -472,7 +492,7 @@ internal static class CameraWire
     public static bool TryHeaderOnly(ReadOnlySpan<byte> s, int maxBody, out WireHeader h)
     {
         h = default;
-        if (s.Length > Math.Min(maxBody, CameraWireAbi.MaxBody) || s.Length < CameraWireAbi.CommonHeaderBytes) return false;
+        if (s.Length > Padded(Math.Min(maxBody, CameraWireAbi.MaxBody)) || s.Length < CameraWireAbi.CommonHeaderBytes) return false;
         var at = 0;
         h = ReadHeader(s, ref at);
         return true;
@@ -500,7 +520,7 @@ internal static class CameraWire
     {
         m = default;
         const int fixedBytes = CameraWireAbi.CommonHeaderBytes + 1 + 2 + 1 + 4 + 8 + 4 + 4 + 2;
-        if (s.Length < fixedBytes || s.Length > fixedBytes + CameraWireAbi.MaxDiagnosticBytes) return false;
+        if (s.Length < fixedBytes || s.Length > Padded(fixedBytes + CameraWireAbi.MaxDiagnosticBytes)) return false;
         var at = 0;
         var h = ReadHeader(s, ref at);
         byte ok = RU8(s, ref at);
@@ -511,11 +531,12 @@ internal static class CameraWire
         uint elapsed = RU32(s, ref at), remaining = RU32(s, ref at);
         int len = RU16(s, ref at);
         if (ok > 1 || reason > CameraWireAbi.MaxReason || scope > CameraWireAbi.CommitClientFrame ||
-            (flags & ~(CameraWireAbi.FlagMayHaveApplied | CameraWireAbi.FlagAlreadyEnded)) != 0 || len != s.Length - at) return false;
+            (flags & ~(CameraWireAbi.FlagMayHaveApplied | CameraWireAbi.FlagAlreadyEnded)) != 0 || len > CameraWireAbi.MaxDiagnosticBytes ||
+            !EndsAt(s, at + len)) return false;
         string text;
         try
         {
-            text = new UTF8Encoding(false, true).GetString(s[at..]);
+            text = new UTF8Encoding(false, true).GetString(s.Slice(at, len));
         }
         catch (DecoderFallbackException)
         {
@@ -539,7 +560,7 @@ internal static class CameraWire
     public static bool TryEnded(ReadOnlySpan<byte> s, out EndedMessage m)
     {
         m = default;
-        if (s.Length != CameraWireAbi.CommonHeaderBytes + 11) return false;
+        if (!EndsAt(s, CameraWireAbi.CommonHeaderBytes + 11)) return false;
         var at = 0;
         var e = new EndedMessage(ReadHeader(s, ref at), RU8(s, ref at), RU16(s, ref at), RU64(s, ref at));
         if (e.EndReason is CameraEndReasons.None or > CameraWireAbi.MaxEndReason || e.Reason > CameraWireAbi.MaxReason) return false;
@@ -562,7 +583,7 @@ internal static class CameraWire
     public static bool TryHeartbeat(ReadOnlySpan<byte> s, out HeartbeatMessage m)
     {
         m = default;
-        if (s.Length != CameraWireAbi.BindingBytes + 32) return false;
+        if (!EndsAt(s, CameraWireAbi.BindingBytes + 32)) return false;
         var at = 0;
         var hb = new HeartbeatMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at));
         if ((hb.Lease == 0) != (hb.Revision == 0)) return false;
@@ -586,7 +607,7 @@ internal static class CameraWire
     public static bool TryStatus(ReadOnlySpan<byte> s, out StatusMessage m)
     {
         m = default;
-        if (s.Length != CameraWireAbi.BindingBytes + 32) return false;
+        if (!EndsAt(s, CameraWireAbi.BindingBytes + 32)) return false;
         var at = 0;
         var st = new StatusMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at));
         if ((st.Lease == 0) != (st.Revision == 0)) return false;

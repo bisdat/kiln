@@ -231,6 +231,13 @@ enum {
     KILN_STATION_ALLOW_LOCKED = 0x0040u, /* SELECT: also a recipe no one on the server has unlocked */
     KILN_STATION_FILL_NO_OUTPUTS = 0x0080u, /* FILL: never take from the outputs of opted-in stations (the game's sources
                                                only; since 0.2.0-dev.29.17) */
+    KILN_STATION_FILL_LINKED = 0x0100u,  /* FILL (since 0.2.0-dev.31.12, GitHub #132): also take from the named player's
+                                            linked crafting sources registered with KILN_CRAFT_SOURCE_FILLS, in any base or
+                                            none: after the bag, the Magic chests and the named chests; a link's order puts
+                                            it before or after opted-in station outputs. Needs a player. Each link is
+                                            revalidated in the transaction (the player's CanAccessInventories and login, an
+                                            initialized container that is no person and no production station, its item
+                                            filter); a container is taken from once per item */
 };
 
 typedef struct KilnStationRequest {
@@ -314,6 +321,10 @@ typedef struct KilnStationResult {
        kiln.stations passes a 1232-byte result, which ends at message): */
     uint32_t from_chests;   /* FILL: items taken from the named ordinary chests; 0 when they were not needed */
     uint32_t reserved_tail; /* 0 */
+    /* since 0.2.0-dev.31.12: read only when size >= offsetof(KilnStationResult, reserved_linked) + 4 (an older
+       kiln.stations passes a 1240-byte result) */
+    uint32_t from_linked;     /* FILL with KILN_STATION_FILL_LINKED: items taken from the player's linked sources */
+    uint32_t reserved_linked; /* 0 */
 } KilnStationResult;
 
 typedef void(KILN_CALL* KilnStationDoneFn)(const KilnStationResult* result, void* user);
@@ -347,6 +358,10 @@ typedef struct KilnStationPlan {
     /* since ordinary chests (a caller's size up to outputs still works and gets no chests[]): */
     uint32_t chests[KILN_STATIONS_MAX_INPUTS];         /* what the named ordinary chests hold of each input; taken after
                                                           stock and before outputs. crafts_affordable counts it */
+    /* since 0.2.0-dev.31.12 (a caller's size up to chests still works and gets no linked[]): */
+    uint32_t linked[KILN_STATIONS_MAX_INPUTS];         /* KILN_STATION_FILL_LINKED: what the named player's fill-opted
+                                                          linked sources hold of each input (after chests; before or
+                                                          after outputs by each link's order). crafts_affordable counts it */
 } KilnStationPlan;
 
 /* KilnStationEvent.kind */
@@ -399,6 +414,20 @@ typedef struct KilnStationCollect KilnStationCollect;
  * order: 0 before station outputs, 1 after. filter: 0 deny set, 1 allow set. Empty deny set allows every item.
  * items is copied at registration; no callbacks run during native payment. All reserved fields must be zero. */
 enum { KILN_CRAFT_SOURCE_STOCK_ALL = 1u }; /* source_stock: include overlaps with bag/base/station stock */
+/* source_stock (since 0.2.0-dev.31.12, GitHub #147): only the registrations made with KILN_CRAFT_SOURCE_LOCKS, every
+ * container once per item, the filter applied, no base and no bag; KILN_CRAFT_SOURCE_STOCK_ALL is implied. */
+enum { KILN_CRAFT_SOURCE_STOCK_LOCKS = 2u };
+/* KilnCraftSourceRequest.flags (since 0.2.0-dev.31.12, GitHub #147): the link also counts and pays the item an
+ * InteractionLock requires (capability items.lock_sources). Unknown bits: KILN_ERR_INVALID_ARGUMENT. */
+enum { KILN_CRAFT_SOURCE_LOCKS = 1u };
+/* Since 0.2.0-dev.31.12 (GitHub #132): FILLS, production-station fills named with KILN_STATION_FILL_LINKED take from the
+ * link (the station screen's "+1" / "+10" through Kiln.Blocks); BUILDING, the player's block placements count and pay
+ * from it (capability crafting.build_sources). Both default off: a link serves crafting only. */
+enum { KILN_CRAFT_SOURCE_FILLS = 2u, KILN_CRAFT_SOURCE_BUILDING = 4u };
+/* source_stock: only the FILLS / BUILDING links, as KILN_CRAFT_SOURCE_STOCK_LOCKS does for locks (since 0.2.0-dev.31.12) */
+enum { KILN_CRAFT_SOURCE_STOCK_FILLS = 4u, KILN_CRAFT_SOURCE_STOCK_BUILDING = 8u };
+/* The request's size before flags: an older caller's request (no flags, no lock use). */
+#define KILN_CRAFT_SOURCE_REQUEST_V1 32u
 typedef struct KilnCraftSourceRequest {
     uint32_t size;
     KilnEntity player;
@@ -407,7 +436,16 @@ typedef struct KilnCraftSourceRequest {
     uint32_t filter;
     uint32_t item_count;
     const KilnItemId* items;
+    /* ---- since 0.2.0-dev.31.12: read only when size covers them ---- */
+    uint32_t flags;    /* KILN_CRAFT_SOURCE_* */
+    uint32_t reserved; /* 0 */
 } KilnCraftSourceRequest;
+
+/* A Kiln client's lock snapshot (GitHub #147): rows the server sends for the lock items this client asked about, at
+ * most KILN_STATIONS_MAX_LOCK_STOCK; the items the client's lock checks met with no row, at most
+ * KILN_STATIONS_MAX_LOCK_ASKS. */
+#define KILN_STATIONS_MAX_LOCK_STOCK 256u
+#define KILN_STATIONS_MAX_LOCK_ASKS 16u
 
 typedef struct KilnStationsApi {
     KilnServiceHeader header; /* { sizeof(KilnStationsApi), KILN_STATIONS_VERSION } */
@@ -511,7 +549,8 @@ typedef struct KilnStationsApi {
     void(KILN_CALL* cancel_sources)(KilnOwner owner);
     /* Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and opted-in
      * station outputs. No base required. Access is checked again, never inferred from a client's message.
-     * flags 0: crafting extras; KILN_CRAFT_SOURCE_STOCK_ALL: all registered counts (e.g. for dyes). Unknown bits: INVALID_ARGUMENT.
+     * flags 0: crafting extras; KILN_CRAFT_SOURCE_STOCK_ALL: all registered counts (e.g. for dyes); KILN_CRAFT_SOURCE_STOCK_LOCKS:
+ * the lock-opted registrations' counts (since 0.2.0-dev.31.12). Unknown bits: INVALID_ARGUMENT.
      * BUFFER_TOO_SMALL reports the whole needed count: never send a truncated crafting snapshot. */
     KilnResult(KILN_CALL* source_stock)(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
     /* Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player. Client only,
@@ -521,6 +560,29 @@ typedef struct KilnStationsApi {
      * UNAVAILABLE: wrong side, no client world, unqualified wire/palette hooks. INVALID_ARGUMENT: malformed rows.
      * This is Kiln's own transport bridge, not a way for a mod to grant access to a source. */
     KilnResult(KILN_CALL* set_dye_stock)(KilnEntity player, const KilnStationStack* rows, uint32_t count);
+    /* ---- locks from linked sources, since 0.2.0-dev.31.12 (GitHub #147; capability items.lock_sources; header.size
+     * tells whether these are here) ---- */
+    /* A Kiln client: the server's lock snapshot for the local player. on 1: the server counts and pays lock items from
+     * the player's opted-in links (KILN_CRAFT_SOURCE_LOCKS); rows are per item the count those links hold (the bag not
+     * included; a row of 0 names an item the links do not hold). on 0 clears it (rows ignored): the game's own lock
+     * checks again. While on, the client's lock checks count the bag plus the row of the lock's item. Not authority: the
+     * server checks the interaction again and pays from the bag first. Any thread. KILN_ERR_INVALID_ARGUMENT: on over
+     * 1, count over KILN_STATIONS_MAX_LOCK_STOCK, rows null with count set, an item 0. */
+    KilnResult(KILN_CALL* set_lock_stock)(uint32_t on, const KilnStationStack* rows, uint32_t count);
+    /* A Kiln client: the lock items its lock checks (the press and the locked prompt) met while the snapshot was on and
+     * that no row names, oldest first, at most KILN_STATIONS_MAX_LOCK_ASKS. They stay until a row names them or the
+     * snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
+    KilnResult(KILN_CALL* lock_asks)(KilnItemId* out, uint32_t capacity, uint32_t* out_count);
+    /* ---- block placements from linked sources, since 0.2.0-dev.31.12 (GitHub #132; capability crafting.build_sources;
+     * header.size tells whether this is here) ---- */
+    /* A Kiln client: the server's building snapshot for the local player. on 1: the server counts and pays block
+     * placements from the player's links registered with KILN_CRAFT_SOURCE_BUILDING; rows are per item the count those
+     * links hold (the bag and the base not included), at most KILN_STATIONS_MAX_CRAFT_STOCK. on 0 clears it (rows
+     * ignored). While on, the client's build cursor counts the bag, the base's stock and the item's row when the first two
+     * fall short of a blueprint's blocks. Not authority: the server checks the placement again and pays bag and base first,
+     * all or nothing. Any thread. KILN_ERR_INVALID_ARGUMENT: on over 1, count over the limit, rows null with count set, an
+     * item 0. */
+    KilnResult(KILN_CALL* set_build_stock)(uint32_t on, const KilnStationStack* rows, uint32_t count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

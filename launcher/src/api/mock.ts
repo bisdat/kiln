@@ -139,6 +139,8 @@ let preStart: PreStart | null = null;
 const otherFolder: Record<string, { id: string; root?: string | null } | null> = {};
 /** GameStatus.newerMods per game (tests: `__kilnMock.setNewerMods`). */
 const newerMods: Record<string, NewerKilnMod[]> = {};
+/** Steam is updating the game (GameStatus.steamUpdating; tests: `__kilnMock.setSteamUpdating(true)`). */
+const steamUpdating: Record<string, boolean> = {};
 /** GameStatus.graphicsTools per game (tests: `__kilnMock.setGraphicsTools`). */
 const graphicsTools: Record<string, GraphicsToolNote[]> = {};
 /** GameStatus.graphicsStepAside per game (tests: `__kilnMock.setGraphicsStepAside`). The preview's Steam client has
@@ -371,7 +373,12 @@ const ownFolders = new Map<string, { path: string; renameTo?: string; refusal?: 
 /** engine_mods::own_folder's sentence for a ShroudForge entry the player's own folder serves. */
 const ownFolderNote = (id: string, path: string, on: boolean) => on
   ? `shroudforge:${id}: the game uses your own folder ${path} for this mod; Kiln leaves it as it is and places no copy of its own.`
-  : `shroudforge:${id}: your own folder ${path} stays as it is; Kiln never switches a folder it did not place.`;
+  : `shroudforge:${id}: it is off in the profile, and your own folder ${path} stays as it is (Kiln never writes into a folder it did not place). `
+    + `While Kiln hosts ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list `
+    + `(Kiln's bundled runtime does from 0.2.0-dev.31.12 on); kiln.log says at each start whether it was skipped. Another runtime (your `
+    + `installed ShroudForge, "Use my installed ShroudForge") or ShroudForge's own loader still runs it while its own ShroudForge switch `
+    + `is on: to stop that, switch it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, choose "Let Kiln manage `
+    + `this folder" in Notes, or move the folder out of the mods folder.`;
 /** kiln_manage::cook in the fake game: the mods with something to cook (by id), why each is due, and what its tools
  *  say when its cook fails. Tests: `__kilnMock.setCook`. */
 const cookMods = new Map<string, { reason: CookReason | null; fails?: string; last?: CookedMod }>();
@@ -695,7 +702,7 @@ function status(gameId: string): GameStatus {
   const g = gameOf(gameId);
   const r = live(gameId);
   return {
-    id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: false, runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
+    id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: !!steamUpdating[gameId], runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
     activeProfile: otherFolder[gameId] ? null : activations[gameId]?.profileId ?? null,
     ...(otherFolder[gameId] ? { otherFolderProfile: otherFolder[gameId]! } : {}), playOncePending: !!r && r.mode !== "profile" && (noProxy || Date.now() - r.at < 2500),
     boot: bootFor(gameId), launchOptions: MODE === "native-runner"
@@ -2494,6 +2501,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     const values = setPath(f.values, path, value);
     Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
   },
+  setSteamUpdating: (on: boolean, gameId = "client-steam") => { steamUpdating[gameId] = on; emitGame(gameId, "status"); },
   setUpgradeAvailable: (version: string | null, gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], upgradeAvailable: version }; emitGame(gameId, "status"); },
   /** (dev.29) The game's Kiln came with a test build and the launcher ships the older `to` (InstallState.switchBack);
    *  null clears it. An install (runtime_install) clears it too, as the backend's next status does. */

@@ -390,6 +390,10 @@ pub struct NativeModStatus {
     pub dlls: Vec<NativeDll>,
     #[serde(default)]
     pub init: Option<NativeInit>,
+    /// Off, but a DLL of it also loads as a chain proxy (kiln/chain.ini [chain], dinput8-chain.ini): that file (since
+    /// 0.2.0-dev.31.12; null or absent otherwise).
+    #[serde(default)]
+    pub chain_proxy: Option<String>,
 }
 
 /// `kiln/state/native.json`

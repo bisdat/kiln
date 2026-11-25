@@ -872,7 +872,8 @@ internal sealed unsafe partial class ItemsFake
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature, GiveEquipFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature, GiveEquipFeature,
+        InstanceAmmoFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
         "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
@@ -975,6 +976,7 @@ internal sealed unsafe partial class ItemsFake
             _renamePending.Clear();
             _giveEquipPending.Clear();
             _equipment.Clear();
+            _ammoCells.Clear();
         }
     }
 

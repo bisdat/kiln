@@ -60,6 +60,70 @@
           "pattern": "89 4C 24 08 48 83 EC 28 85 C9 74 1B 48 8D 4A 38 48 8D 54 24 30 E8 {ui/AmmoItemMap:rel32} 48 85 C0 74 08 48 8B 00"
         }
       ]
+    },
+    "ui/AmmoCycle": {
+      "find": [
+        {
+          "pattern": "4C 8B 5A 08 4C 8B D2 49 0F BE C0 4C 8B C9 4D 85 DB 0F 84 ?? ?? ?? ?? 80 BA 30 06 00 00 00 74 ?? 45 84 C0 75 0D 33 C0 C6 01 06"
+        }
+      ]
+    },
+    "ui/AmmoSelectReturn": {
+      "find": [
+        {
+          "pattern": "41 80 BE A6 05 00 00 00 0F B6 AC 24 58 01 00 00 74 ?? 40 80 FD 07 0F 83 ?? ?? ?? ?? 48 8B 84 24 50 01 00 00 41 0F B6 9E A7 05 00 00 48 8B B8 A8 3D 00 00 49 3B 9C 3C ?? ?? ?? ?? 0F 83 ?? ?? ?? ?? 48 8B 48 08 E8 ?? ?? ?? ?? 4D 8B 8C 3C ?? ?? ?? ?? 48 8D 14 5B 4C 8B A4 24 50 01 00 00 44 0F B6 C5 89 44 24 20 45 8B 0C D1 49 8B D6 49 8B 8C 24 A8 3D 00 00 48 81 C1 {ui/ammo.groups:d32} E8 {ui/AmmoPick:rel32}",
+          "offset": 129
+        }
+      ]
+    },
+    "ui/AmmoCycleReturn": {
+      "find": [
+        {
+          "pattern": "48 8B 44 24 38 80 78 01 00 74 ?? 80 78 02 00 75 ?? 40 80 FD 07 73 ?? 48 8B 84 24 50 01 00 00 48 8D 8C 24 88 00 00 00 45 0F B6 86 A7 05 00 00 48 8B 90 A8 3D 00 00 48 81 C2 ?? ?? ?? ?? 49 03 D4 E8 {ui/AmmoCycle:rel32} 80 BC 24 88 00 00 00 00 4C 8B A4 24 50 01 00 00 75 ?? 49 8B 4C 24 08 E8 ?? ?? ?? ?? 49 8B 8C 24 A8 3D 00 00 44 0F B6 C5 44 8B 8C 24 90 00 00 00 48 81 C1 {ui/ammo.groups:d32} 49 8B D6 89 44 24 20 E8 {ui/AmmoPick:rel32}",
+          "offset": 136
+        }
+      ]
+    },
+    "ui/AmmoEventWishReturn": {
+      "find": [
+        {
+          "pattern": "44 0F B6 85 ?? ?? ?? ?? 48 8D 8E {ui/ammo.groups:d32} 48 8B 95 ?? ?? ?? ?? 44 8B CB 89 44 24 20 E8 {ui/AmmoPick:rel32}",
+          "offset": 34
+        }
+      ]
+    },
+    "ui/AmmoCycleEventCount": {
+      "find": [
+        {
+          "pattern": "48 8D 95 ?? ?? ?? ?? 49 8B CE E8 ?? ?? ?? ?? 8B 08 48 8B 44 24 40 39 08 75 ?? 48 8B 44 24 50 0F B6 00 88 86 ?? ?? ?? ?? FF 86 {ui/ammo.cycle_count:d32}",
+          "offset": 40
+        }
+      ]
+    },
+    "ui/AmmoCycleWatch": {
+      "find": [
+        {
+          "pattern": "44 8B B7 {ui/ammo.cycle_count:d32} 40 38 B3 ?? ?? ?? ?? 74 05 45 85 F6 74 ?? 44 3B B3 ?? ?? ?? ?? 8B D6 0F 95 C0 40 38 B3 ?? ?? ?? ?? 0F B6 C8 0F 44 D1 84 D2 74 ?? 48 8B 0D ?? ?? ?? ?? 48 8D 55 ?? E8 ?? ?? ?? ?? 48 8D 54 24 20 48 8B 08 48 89 8B {ui/ammo.reveal_time:d32}"
+        }
+      ]
+    },
+    "ui/AmmoListRevealRead": {
+      "find": [
+        {
+          "pattern": "48 8B 89 ?? ?? ?? ?? 49 39 4D 00 4C 8B 80 {ui/ammo.reveal_time:d32} 49 0F 4F 4D 00 4C 3B C1 49 0F 4F C8 80 FB 0B"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "ui/ammo.groups": {
+      "min_votes": 3
+    },
+    "ui/ammo.cycle_count": {
+      "min_votes": 2
+    },
+    "ui/ammo.reveal_time": {
+      "min_votes": 2
     }
   },
   "features": {
@@ -102,6 +166,23 @@
         "ui/AmmoPick",
         "ui/AmmoItemLookup",
         "ui/AmmoItemMap"
+      ]
+    },
+    "ui.ammo.reveal": {
+      "symbols": [
+        "ui/AmmoPick",
+        "ui/AmmoCycle",
+        "ui/AmmoCycleReturn",
+        "ui/AmmoSelectReturn",
+        "ui/AmmoEventWishReturn",
+        "ui/AmmoCycleEventCount",
+        "ui/AmmoCycleWatch",
+        "ui/AmmoListRevealRead"
+      ],
+      "constants": [
+        "ui/ammo.groups",
+        "ui/ammo.cycle_count",
+        "ui/ammo.reveal_time"
       ]
     }
   }

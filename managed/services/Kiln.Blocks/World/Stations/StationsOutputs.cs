@@ -101,7 +101,9 @@ internal static partial class StationsCore
         if (!Backend.HasOutputSources || Backend.Status() is not { Read: true }) return;
         StationOutputKeeper.Register();
         if (step % 25 == 0) StationOutputKeeper.Prune();
-        var want = StationOutputKeeper.Count > 0 && Capabilities.Is(Stations.OutputSourcesCapability) && Capabilities.Is(Stations.FillCapability);
+        // GitHub #132: a player's fill-opted link wants the button's follow too (outputs or not)
+        var want = ((StationOutputKeeper.Count > 0 && Capabilities.Is(Stations.OutputSourcesCapability)) || LinkPurposes.Fills.Any) &&
+                   Capabilities.Is(Stations.FillCapability);
         Follow(ref _sourceFills, want, () => Events.On<PlayerClientActionEvent>(OnSourceFill, EventPriority.Low));
     }
 
@@ -137,8 +139,9 @@ internal static partial class StationsCore
         {
             var r = t.IsCompletedSuccessfully ? t.Result : null;
             Kiln.Backend.Current.Log(0, r is { Ok: true } ? LogLevel.Info : LogLevel.Warn,
-                $"kiln.stations: player {player}'s fill of station {at} ran as Kiln's fill with station outputs: " +
-                (r is null ? $"failed ({t.Exception?.GetBaseException().Message})" : $"{r} ({r.FromOutputs} item(s) from station outputs)"));
+                $"kiln.stations: player {player}'s fill of station {at} ran as Kiln's fill with station outputs and linked sources: " +
+                (r is null ? $"failed ({t.Exception?.GetBaseException().Message})"
+                           : $"{r} ({r.FromOutputs} item(s) from station outputs, {r.FromLinked} from linked sources)"));
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
@@ -160,7 +163,8 @@ internal static partial class StationsCore
         var water = BinaryPrimitives.ReadUInt32LittleEndian(p[0x10..]);
         // the game's item and water fills, and an empty one, stay the game's
         if (recipe == 0 || item != 0 || water != 0 || amount == 0) return null;
-        if (StationOutputKeeper.Count == 0 || station.IsNone) return null;
+        var linked = FillLinksOf(player);
+        if ((StationOutputKeeper.Count == 0 && !linked) || station.IsNone) return null;
         if (amount > 1000) return Pass(out why, $"{amount} crafts is more than Kiln's fill takes (1000)");
         if (!SourceFillAllowed(player, station, mayAccess, out why)) return null;
         var choices = new List<CategoryChoice>();
@@ -172,11 +176,13 @@ internal static partial class StationsCore
         var options = new FillOptions
         {
             Crafts = amount, Mode = FillMode.Add, Exact = true, Recipe = recipe, Choices = choices.Count > 0 ? choices : null, Player = player,
+            UseLinkedSources = linked,
         };
-        var plain = Stations.Plan(station, options with { UseStationOutputs = false });
+        var plain = Stations.Plan(station, options with { UseStationOutputs = false, UseLinkedSources = false });
         if (plain.Status == StationActionStatus.Done) return Pass(out why, "the player and the Magic chests cover it");
         var lent = Stations.Plan(station, options);
-        if (lent.Status != StationActionStatus.Done) return Pass(out why, $"not even with station outputs: {lent.Reason}");
+        if (lent.Status != StationActionStatus.Done)
+            return Pass(out why, $"not even with station outputs{(linked ? " and linked sources" : "")}: {lent.Reason}");
         return options;
     }
 
@@ -191,9 +197,14 @@ internal static partial class StationsCore
         var at = Bases.Of(station);
         var mine = Bases.Of(player);
         if (at is null || mine is null || at.Id != mine.Id) return Pass(out why, "the player stands in another base than the station (or in none)") is not null;
-        if (Stations.OutputSources(at.Id).All(s => s == station)) return Pass(out why, "no other station of the base is opted in") is not null;
+        if (!FillLinksOf(player) && (StationOutputKeeper.Count == 0 || Stations.OutputSources(at.Id).All(s => s == station)))
+            return Pass(out why, "no other station of the base is opted in, and the player has no fill-opted linked source") is not null;
         return true;
     }
+
+    /// <summary>GitHub #132: whether the player has a link registered with <see cref="CraftSourceOptions.Fills"/> (a hint;
+    /// the native fill checks every link again) and this kiln-items.dll takes FILL_LINKED.</summary>
+    internal static bool FillLinksOf(EntityId player) => LinkPurposes.Fills.Has(player) && Backend.HasLinkedFills;
 
     /// <summary>
     /// GitHub #68, the station screen on a Kiln client: how many more complete crafts the button's fill (this recipe and
@@ -204,12 +215,13 @@ internal static partial class StationsCore
     /// </summary>
     internal static uint FillCrafts(EntityId player, EntityId station, uint recipe, IReadOnlyList<CategoryChoice>? choices, bool? mayAccess)
     {
-        if (StationOutputKeeper.Count == 0 || station.IsNone || player.IsNone || recipe == 0) return 0;
+        var linked = FillLinksOf(player);
+        if ((StationOutputKeeper.Count == 0 && !linked) || station.IsNone || player.IsNone || recipe == 0) return 0;
         if (!SourceFillAllowed(player, station, mayAccess, out _)) return 0;
         var plan = Stations.Plan(station, new FillOptions
         {
             Crafts = MaxFillCrafts, Mode = FillMode.Add, Exact = false, Recipe = recipe, Choices = choices is { Count: > 0 } ? choices : null,
-            Player = player,
+            Player = player, UseLinkedSources = linked,
         });
         return plan.Status is StationActionStatus.Done or StationActionStatus.Partial && plan.CraftsPlanned > 0 ? (uint)plan.CraftsPlanned : 0;
     }

@@ -32,7 +32,8 @@ public sealed unsafe class UiAmmoFakeTests
         Assert.Equal([R(0x10, 20)], kiln.AmmoList.Shown(AmmoListKind.Arrow));  // nothing until the next UI frame
         kiln.Step();
         Assert.Equal([R(0x10, 20), R(0x30, 12)], kiln.AmmoList.Shown(AmmoListKind.Arrow));  // the game's own 0x10 stays
-        Assert.Equal([R(0x30, 12)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        // the mod's 0x10 is published behind the game's row (GitHub issue 145), which the HUD shows with its own count
+        Assert.Equal([R(0x30, 12), R(0x10, 5)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
         Assert.Equal(AmmoListMode.Append, kiln.AmmoList.ModeOf(AmmoListKind.Arrow));
         Assert.False(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x10)));  // the game equips its own row
         Assert.True(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x30)));
@@ -91,6 +92,37 @@ public sealed unsafe class UiAmmoFakeTests
     }
 
     [Fact]
+    public void InAppendAPickOfTheSwappedOutItemAfterTheGamesNewRowsReachesTheModThatListsIt()
+    {
+        // GitHub issue 145 in Append: the book lists the equipped 0x41, which the game lists with stock (its row shows),
+        // and its stored 0x40. Its server half swaps 0x40 in and 0x41 out; the game builds its rows again (0x41 kept at
+        // count 0) and Kiln.Ui has not published for them yet. As native, the pick of 0x41 reaches the book.
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var picks = new List<AmmoListPick>();
+        kiln.AmmoList.Hold(AmmoListKind.Spell, Staff, R(0x41, 1));
+        using var p = kiln.Run(() => Ui.AmmoList.Provide(AmmoListKind.Spell, c => [R(0x41, 1), R(0x40, 1)]));
+        kiln.Run(() => Ui.AmmoList.Picked += picks.Add);
+        kiln.Step();
+        Assert.Equal([R(0x41, 1), R(0x40, 1)], kiln.AmmoList.Shown(AmmoListKind.Spell));  // 0x41 once: the game's row
+        Assert.Equal([R(0x41, 1), R(0x40, 1)], kiln.AmmoList.Provided(AmmoListKind.Spell));
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x41)));  // equipped and carried: the game's own
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));
+        kiln.Step();
+        kiln.AmmoList.SetGameRows(AmmoListKind.Spell, R(0x41, 0), R(0x40, 1));  // the swap, before Kiln.Ui's next frame
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x41)));
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));  // now in the backpack: the game's
+        kiln.Step();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Spell, new ItemId(0x40), 1), new AmmoListPick(AmmoListKind.Spell, new ItemId(0x41), 1)],
+            picks);
+        // and once Kiln.Ui published for the new rows: both rows behind the game's, the count-0 one still the book's
+        Assert.Equal([R(0x41, 0), R(0x40, 1)], kiln.AmmoList.Shown(AmmoListKind.Spell));
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x41)));
+        kiln.Step();
+        Assert.Equal(3, picks.Count);
+    }
+
+    [Fact]
     public void InAppendAGameRowAtCountZeroShowsAndAPickOfItReachesTheModWithARowOfItsItem()
     {
         using var kiln = new KilnHarness();
@@ -101,7 +133,7 @@ public sealed unsafe class UiAmmoFakeTests
         kiln.Run(() => Ui.AmmoList.Picked += picks.Add);
         kiln.Step();
         Assert.Equal([R(0x10, 0), R(0x11, 4), R(0x30, 12)], kiln.AmmoList.Shown(AmmoListKind.Arrow));  // the game's rows first
-        Assert.Equal([R(0x10, 7), R(0x30, 12)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        Assert.Equal([R(0x10, 7), R(0x11, 2), R(0x30, 12)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
         Assert.True(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x10)));
         Assert.False(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x11)));  // the game's own stock
         kiln.Step();

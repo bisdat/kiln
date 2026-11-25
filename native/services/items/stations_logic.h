@@ -59,13 +59,14 @@ inline bool request_valid(const KilnStationRequest& r) {
         if (c.reserved[0] || c.reserved[1] || c.reserved[2]) return false;
     constexpr uint32_t all = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
                              KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
-                             KILN_STATION_FILL_NO_OUTPUTS;
+                             KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED;
     if (r.flags & ~all) return false;
     switch (r.action) {
     case KILN_STATION_FILL: {
         constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
-                                KILN_STATION_FILL_NO_OUTPUTS;
+                                KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED;
         if (r.flags & ~ok) return false;
+        if ((r.flags & KILN_STATION_FILL_LINKED) && r.player == 0) return false;  // linked sources are a player's
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
         if (any_choice(r.choices) && r.recipe == 0) return false;  // choices name a recipe's categories
@@ -100,6 +101,9 @@ struct InputNow {
     uint64_t room = UINT64_MAX;
     uint64_t chests = 0;   // of `stock`: named ordinary chests, after the player and the Magic chests, before outputs
     uint64_t outputs = 0;  // of `stock`: what opted-in stations of the base lend (their Outputs), taken last
+    // of `stock` (since 0.2.0-dev.31.12, KILN_STATION_FILL_LINKED): the player's fill-opted linked sources, after the
+    // chests; `linked` before the outputs (BeforeStationOutputs links), `linked_after` after them
+    uint64_t linked = 0, linked_after = 0;
 };
 
 // The water input of a recipe with `charges` per craft (none when 0, or when the request pours no water).
@@ -493,25 +497,53 @@ inline std::vector<uint32_t> eligible_chests(const std::vector<NamedChest>& all,
 // bag and the Magic chests (stock - chests - outputs, after the reserves) pay what they can first; chests pay the next
 // slice; outputs pay only the rest. Water comes from neither. False when those two cannot cover the rest (the plan
 // should not have asked for n). With chests == 0 this is the station-output share alone.
-inline bool pay_layers(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* chest_shares,
-                       std::vector<uint32_t>* output_shares) {
-    chest_shares->assign(in.size(), 0);
-    output_shares->assign(in.size(), 0);
+// What each later source pays of a fill of n crafts, per input: the player and the Magic chests first (the game's own
+// call), then the named chests, the linked sources before outputs, the outputs, the linked sources after outputs. False
+// when they cannot cover a shortfall (then the fill asks the game for fewer crafts, or nothing moves).
+struct FillShares {
+    std::vector<uint32_t> chests, linked, outputs, linked_after;
+    std::vector<uint32_t> linked_all() const {
+        std::vector<uint32_t> o(linked.size(), 0);
+        for (size_t k = 0; k < o.size(); ++k) o[k] = linked[k] + (k < linked_after.size() ? linked_after[k] : 0);
+        return o;
+    }
+    std::vector<uint32_t> all() const {
+        std::vector<uint32_t> o(chests.size(), 0);
+        for (size_t k = 0; k < o.size(); ++k) o[k] = chests[k] + linked[k] + outputs[k] + linked_after[k];
+        return o;
+    }
+};
+inline bool pay_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, FillShares* s) {
+    for (auto* v : {&s->chests, &s->linked, &s->outputs, &s->linked_after}) v->assign(in.size(), 0);
     for (size_t k = 0; k < in.size(); ++k) {
         const InputNow& i = in[k];
         if (i.item == kWaterItem || i.count == 0) continue;
         const uint64_t need = game_need(i, n, loaded);
-        const uint64_t extra = std::min(i.stock, i.chests + i.outputs);
+        const uint64_t extra = std::min(i.stock, i.chests + i.linked + i.outputs + i.linked_after);
         const uint64_t first = i.stock - extra;
         if (need <= first) continue;
-        const uint64_t after = need - first;
-        const uint64_t from_chests = std::min(i.chests, after);
-        const uint64_t rest = after - from_chests;
-        if (rest > i.outputs) return false;
-        (*chest_shares)[k] = static_cast<uint32_t>(from_chests);
-        (*output_shares)[k] = static_cast<uint32_t>(rest);
+        uint64_t after = need - first;
+        auto take = [&](uint64_t have, std::vector<uint32_t>* to) {
+            const uint64_t t = std::min(have, after);
+            (*to)[k] = static_cast<uint32_t>(t);
+            after -= t;
+        };
+        take(i.chests, &s->chests);
+        take(i.linked, &s->linked);
+        take(i.outputs, &s->outputs);
+        take(i.linked_after, &s->linked_after);
+        if (after) return false;
     }
     return true;
+}
+inline bool pay_layers(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* chest_shares,
+                       std::vector<uint32_t>* output_shares) {
+    FillShares s;
+    const bool ok = pay_shares(in, n, loaded, &s);
+    // the callers before linked sources: their inputs never carry linked counts
+    *chest_shares = ok ? s.chests : std::vector<uint32_t>(in.size(), 0);
+    *output_shares = ok ? s.outputs : std::vector<uint32_t>(in.size(), 0);
+    return ok;
 }
 
 inline bool output_shares(const std::vector<InputNow>& in, uint32_t n, uint32_t loaded, std::vector<uint32_t>* shares) {

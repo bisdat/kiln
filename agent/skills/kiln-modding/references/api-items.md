@@ -151,3 +151,13 @@ source.Dispose();                                        // any thread; unload r
   player's own in the tinting palette.
 - Links last for the session only: save them in your own data and add them again, and dispose them when a player leaves.
   Capabilities `crafting.sources`, `crafting.source_ui`, `crafting.dye_sources`. Not seen in a real game yet.
+- **Locks too (since 0.2.0-dev.31.12, mod API 0.2.21):** `new CraftSourceOptions { Locks = true }` lets the same link supply a lock's
+  required item (the game's `InteractionLock`: lockpicks, keys; a furniture block's `requires.item`). The link's filter
+  applies. The bag counts and pays first, then the opted-in links in link order; a lock with `uses` (Consume) takes the
+  item in the game's own all-or-nothing interaction transaction, one without only needs it held. Off by default: a link
+  without `Locks` never serves a lock. Needs `Crafting.LockSourcesCapability` (`items.lock_sources`) on the server or
+  host; the server's own lock check decides every press, so the lock opens for a vanilla client too, but only a Kiln
+  client's locked prompt and predicted press count the link (a vanilla client still shows it locked). Without the capability the link still
+  serves crafting and kiln.log says why once. Every refusal logs one `locks:` line (no snapshot, not opted in, short
+  count, a stack the server no longer sees, a foreign patch). TestKit: `h.Crafting.Sources[i].Locks`,
+  `h.Crafting.LockStock(player)`; no lock check or interaction payment is simulated. Not seen in a real game yet.

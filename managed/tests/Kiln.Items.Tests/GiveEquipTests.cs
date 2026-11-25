@@ -114,6 +114,123 @@ public sealed unsafe class GiveEquipTests
         Assert.True(task.Result.ItemEntity.IsNone);
     }
 
+    // #139: arrows, spells and bait are selected in place in a backpack cell, never in a spare equipment cell.
+    [Fact]
+    public void AmmoNeedsTheAmmunitionCategoryAndAFreeBackpackCell()
+    {
+        using var kiln = new KilnHarness();
+        var player = kiln.Players.Join("Player", 76561198000000955, position: new WorldPosition(0, 0, 0));
+        var spell = kiln.Items.AddItem("Spell", 99, ItemCategory.Ammunition);
+        kiln.Items.SetEquipmentSlotType(spell, EquipmentSlot.Spell);
+        var notAmmo = kiln.Items.AddItem("SpellShapedMaterial", 99, ItemCategory.Materials);
+        kiln.Items.SetEquipmentSlotType(notAmmo, EquipmentSlot.Spell);
+        var wood = kiln.Items.AddItem("Wood", 1000, ItemCategory.Materials);
+        kiln.Items.PlayerInventories = 1;
+        kiln.Step(2);
+        Task<EquipResult> Give(ItemId item, int count = 50, GiveEquipOptions? o = null) =>
+            kiln.Run(() => Items.GiveEquip(player.Entity, item, count, EquipmentSlot.Spell, o));
+        var wrong = Give(notAmmo); kiln.Step();
+        Assert.Equal(ItemsStatus.Refused, wrong.Result.Status);
+        Assert.Contains("Ammunition", wrong.Result.Reason);
+        var inventory = kiln.Items.Of(player.Entity)!;
+        inventory.Put(wood, 8000);
+        var full = Give(spell, o: new() { Replaced = Replaced.Take }); kiln.Step();
+        Assert.Equal(ItemsStatus.NoRoom, full.Result.Status);
+        inventory.Clear();
+        var given = Give(spell); kiln.Step();
+        Assert.True(given.Result.Ok);
+        Assert.Equal(given.Result.To, inventory.Slots.Single(s => s.Item == spell).Slot);
+        Assert.Equal(50, inventory.Count(spell));
+    }
+
+    // #139: an eternal spell is an item entity. GiveEquip creates it once in its backpack cell and keeps entities apart.
+    [Fact]
+    public void EternalSpellsAreCreatedWithTheirEntityAndReplacedEntitiesKeepTheirIdentity()
+    {
+        using var kiln = new KilnHarness();
+        var player = kiln.Players.Join("Player", 76561198000000956, position: new WorldPosition(0, 0, 0));
+        var eternal = kiln.Items.AddItem("EternalPillarOfFlames", 1, ItemCategory.Ammunition, gear: true);
+        var other = kiln.Items.AddItem("EternalIceBolt", 1, ItemCategory.Ammunition, gear: true);
+        var plain = kiln.Items.AddItem("Fireball", 99, ItemCategory.Ammunition);
+        foreach (var item in new[] { eternal, other, plain }) kiln.Items.SetEquipmentSlotType(item, EquipmentSlot.Spell);
+        kiln.Items.PlayerInventories = 1;
+        kiln.Step(2);
+        var inventory = kiln.Items.Of(player.Entity)!;
+        Task<EquipResult> Give(ItemId item, int count = 1, GiveEquipOptions? o = null) =>
+            kiln.Run(() => Items.GiveEquip(player.Entity, item, count, EquipmentSlot.Spell, o));
+        var two = Give(eternal, 2); kiln.Step();
+        Assert.Equal(ItemsStatus.Refused, two.Result.Status);
+        var first = Give(eternal); kiln.Step();
+        Assert.True(first.Result.Ok);
+        Assert.False(first.Result.ItemEntity.IsNone);
+        var cell = inventory.Slots.Single(s => s.Item == eternal);
+        Assert.Equal(first.Result.To, cell.Slot);
+        Assert.Equal(first.Result.ItemEntity, cell.ItemEntity);
+        var dry = Give(other, o: new() { DryRun = true }); kiln.Step();
+        Assert.True(dry.Result.Ok);
+        Assert.Equal(first.Result.ItemEntity, dry.Result.ReplacedEntity);
+        Assert.Equal(0, inventory.Count(other));
+        var second = Give(other); kiln.Step();
+        Assert.True(second.Result.Ok);
+        Assert.Equal(first.Result.To, second.Result.To);
+        Assert.Equal(first.Result.ItemEntity, second.Result.ReplacedEntity);
+        var kept = inventory.Slots.Single(s => s.Item == eternal);
+        Assert.Equal(second.Result.ReplacedTo, kept.Slot);
+        Assert.Equal(first.Result.ItemEntity, kept.ItemEntity);
+        var taken = Give(plain, 20, new() { Replaced = Replaced.Take }); kiln.Step();
+        Assert.True(taken.Result.Ok);
+        Assert.Equal(second.Result.ItemEntity, taken.Result.ReplacedEntity);
+        Assert.Equal(0, inventory.Count(other));
+        Assert.Equal(20, inventory.Count(plain));
+        Assert.Equal(1, inventory.Count(eternal));
+    }
+
+    // #139 review: a selected eternal whose item entity is gone is stale; nothing is moved, destroyed or created.
+    [Fact]
+    public void ASelectedEternalWhoseItemEntityIsGoneIsRefusedBeforeAnyChange()
+    {
+        using var kiln = new KilnHarness();
+        var player = kiln.Players.Join("Player", 76561198000000958, position: new WorldPosition(0, 0, 0));
+        var eternal = kiln.Items.AddItem("EternalPillarOfFlames", 1, ItemCategory.Ammunition, gear: true);
+        var plain = kiln.Items.AddItem("Fireball", 99, ItemCategory.Ammunition);
+        kiln.Items.SetEquipmentSlotType(eternal, EquipmentSlot.Spell);
+        kiln.Items.SetEquipmentSlotType(plain, EquipmentSlot.Spell);
+        kiln.Items.PlayerInventories = 1;
+        kiln.Step(2);
+        var inventory = kiln.Items.Of(player.Entity)!;
+        var first = kiln.Run(() => Items.GiveEquip(player.Entity, eternal, 1, EquipmentSlot.Spell)); kiln.Step();
+        Assert.True(first.Result.Ok);
+        Assert.True(kiln.Entities.Destroy(first.Result.ItemEntity));
+        foreach (var replaced in new[] { Replaced.Backpack, Replaced.Take })
+        {
+            var again = kiln.Run(() => Items.GiveEquip(player.Entity, plain, 5, EquipmentSlot.Spell, new() { Replaced = replaced }));
+            kiln.Step();
+            Assert.Equal(ItemsStatus.SlotChanged, again.Result.Status);
+            Assert.Equal(1, inventory.Count(eternal));
+            Assert.Equal(0, inventory.Count(plain));
+        }
+    }
+
+    [Fact]
+    public void WithoutTheInstanceAmmoFeatureEternalSpellsAreRefusedAndPlainAmmoIsNot()
+    {
+        using var kiln = new KilnHarness();
+        var player = kiln.Players.Join("Player", 76561198000000957, position: new WorldPosition(0, 0, 0));
+        var eternal = kiln.Items.AddItem("EternalSpell", 1, ItemCategory.Ammunition, gear: true);
+        var plain = kiln.Items.AddItem("Spell", 99, ItemCategory.Ammunition);
+        kiln.Items.SetEquipmentSlotType(eternal, EquipmentSlot.Spell);
+        kiln.Items.SetEquipmentSlotType(plain, EquipmentSlot.Spell);
+        kiln.Items.PlayerInventories = 1;
+        kiln.Capabilities.Override("items.give_equip.instance_ammo", false, "not resolved on this build");
+        kiln.Step(2);
+        var eternalGive = kiln.Run(() => Items.GiveEquip(player.Entity, eternal, 1, EquipmentSlot.Spell)); kiln.Step();
+        Assert.Equal(ItemsStatus.Refused, eternalGive.Result.Status);
+        Assert.Contains("items.give_equip.instance_ammo", eternalGive.Result.Reason);
+        Assert.Equal(0, kiln.Items.Of(player.Entity)!.Count(eternal));
+        var plainGive = kiln.Run(() => Items.GiveEquip(player.Entity, plain, 5, EquipmentSlot.Spell)); kiln.Step();
+        Assert.True(plainGive.Result.Ok);
+    }
+
     [Fact]
     public void AJoinedClientHasNoAuthoritativeGiveEquip()
     {

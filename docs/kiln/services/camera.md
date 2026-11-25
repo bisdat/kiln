@@ -222,4 +222,8 @@ on a fake network (`Kiln.Camera.Tests`, `BridgeHostTests`), and a dedicated-serv
 against `camnet.py`, fake Kiln clients on kiln.net's lab transport that speak `kiln.camera` v1 (an applied request with
 the client's frame, an update and an end, the client's own end, an update the client never answers, and the refusals
 `ClientCapability`, `RequiresKilnClient`, `Negotiation` and `PeerUnavailable`). A real guest's game client and the
-host's own route in a real hosted game have not run.
+host's own route in a real hosted game have not run. The lab transport pads nothing; kiln.net's game transport pads every
+frame with zeros to a multiple of 4 bytes, so a joined guest's body arrives with up to 3 zero bytes after its end. Since
+0.2.0-dev.31.12 every decoder takes exactly that padding and nothing else (`CameraWire.EndsAt`, as kiln.markers'
+wire); before, a joined guest refused every Welcome (58 bytes, 60 on the wire), so its binding never came up. Both ends
+need 0.2.0-dev.31.12. `Kiln.Camera.Tests` runs the protocol over a padding rig (`Rig.PadLikeGameTransport`).

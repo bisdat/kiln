@@ -14,6 +14,7 @@
 
 #include "../../proxy/image_match.h"
 #include "api.h"
+#include "chain_copy.h"
 #include "chain_status.h"
 #include "config.h"
 #include "compat.h"
@@ -84,6 +85,8 @@ struct Mod {
     // phase dllmain with a DLL chain.ini [late] deferred: why that DLL must not be loaded (the mod was not loadable when
     // the proxy's results were matched), else empty
     std::string late_block;
+    // off (disabled), but one of its DLLs also loads as a proxy (kiln/chain.ini [chain], dinput8-chain.ini): that path
+    std::string chain_proxy;
     // init call
     bool init_called = false, init_faulted = false;
     int init_result = 0;
@@ -650,6 +653,37 @@ void resolve() {
             m.load_index = g_next_index++;
         }
     }
+    // 3b. a mod that is off whose DLL the player also put in as a proxy (the installer moved his dinput8.dll to
+    // kiln/chain/ and listed it in [chain], or dinput8-chain.ini lists it): the proxy loaded that copy before kiln-core
+    // read the profile, so it runs whatever the profile says (0.2.0-dev.31.12, chain_copy.h). Say so, and how to take
+    // it out; a phase dllmain mod is loaded then (its DllMain is the mod), any other stays disabled (no init call).
+    std::vector<chain_copy::Row> proxies;
+    for (uint32_t i = 0; i < bi.chain_count; ++i) {
+        const KilnChainEntry& e = bi.chain[i];
+        if (e.source == KILN_CHAIN_SOURCE_PROFILE) continue;
+        const std::string path(sv(e.path));
+        proxies.push_back({fs::path(to_wide(path)), path, e.source == KILN_CHAIN_SOURCE_EMF, chain_status_name(e.status)});
+    }
+    for (Mod& m : g_mods) {
+        if (proxies.empty() || m.state != St::Disabled) continue;
+        std::vector<chain_copy::ModDll> dlls;
+        for (const Dll& d : m.dlls) {
+            std::string f = d.file;
+            std::replace(f.begin(), f.end(), '/', '\\');
+            dlls.push_back({d.file, fs::path(to_wide(m.folder)) / to_wide(f)});
+        }
+        // loaded: a phase dllmain mod all of whose DLLs load as chain proxies (a part of a mod is not the mod)
+        const auto hit = chain_copy::match(m.reason, dlls, proxies, m.phase == KILN_NATIVE_PHASE_DLLMAIN);
+        if (hit.row < 0) continue;
+        m.chain_proxy = proxies[static_cast<size_t>(hit.row)].path_text;
+        m.reason = hit.reason;
+        m.notes.push_back("loads as a chain proxy: " + m.chain_proxy);
+        if (hit.loaded) {
+            m.state = St::Loaded;
+            m.load_index = g_next_index++;
+        }
+        KLOG_W("native mod %s %s: %s", m.key.c_str(), m.version.c_str(), m.reason.c_str());
+    }
     // 4. requires / incompatible to a fixpoint, then order per phase; cycles fail together, then again
     for (;;) {
         for (bool changed = true; changed;) {
@@ -715,6 +749,7 @@ void write_state() {
                         {"reason", m.reason.empty() ? json(nullptr) : json(m.reason)},
                         {"notes", m.notes},
                         {"loadIndex", m.load_index >= 0 ? json(m.load_index) : json(nullptr)},
+                        {"chainProxy", m.chain_proxy.empty() ? json(nullptr) : json(m.chain_proxy)},
                         {"dlls", dlls},
                         {"init", init}});
     }

@@ -24,7 +24,7 @@ export function isOlder(a: string, b: string, list: RuntimeBundle[]): boolean {
 
 /** Runs `start` (a TaskId command) as the game's runtime change. True when it finished; false when it failed (the
  *  error is toasted and kept in useRuntimeChanges). `lead`: a line before the done toast's own (why it ran). */
-export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundles: RuntimeBundle[], what: string, version: string | null, label: string,
+export async function runRuntimeChange(qc: QueryClient, game: GameInstall, what: string, version: string | null, label: string,
   start: () => Promise<string>, lead?: string): Promise<boolean> {
   const { put } = useRuntimeChanges.getState();
   const gid = game.id;
@@ -42,9 +42,11 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
     notifyInstall(r);
     put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "done" });
     if (r && "runtime" in r) {
-      const newer = bundles.find((b) => b.sides.includes(game.kind) && isOlder(r.runtime.version, b.version, bundles))?.version ?? null;
-      // an install leaves no default part out unless the player turned it off: nothing is missing after it
-      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], missingFiles: [], upgradeAvailable: newer, missingParts: [] };
+      // an install leaves no default part out unless the player turned it off: nothing is missing after it. No offer
+      // until the fresh status names one: the backend decides it (a release build offers only the Kiln it ships, never a
+      // newer test build's left in the Library; src-tauri state.rs runtime_policy), and the newest bundle here made Play's
+      // Update game banner offer that one for a moment (0.2.0-dev.31.12)
+      const fix = (s: InstallState | undefined) => s && { ...s, installed: true, receipt: r, modified: [], missingFiles: [], upgradeAvailable: null, missingParts: [] };
       qc.setQueryData<InstallState>(qk.runtimeStatus(gid), fix);
       qc.setQueryData<api.GameStatus>(qk.gameStatus(gid), (s) => s && { ...s, runtime: fix(s.runtime)! });
     }
@@ -62,7 +64,17 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
 export function installBundle(qc: QueryClient, game: GameInstall, b: RuntimeBundle, bundles: RuntimeBundle[], current: string | null, opts: api.InstallOptions = {}) {
   const back = !!current && b.version !== current && isOlder(b.version, current, bundles);
   const what = !current ? t("shell.runtimeChange.installOf", { version: b.version }) : back ? t("shell.runtimeChange.rollbackTo", { version: b.version }) : t("shell.runtimeChange.updateTo", { version: b.version });
-  return runRuntimeChange(qc, game, bundles, what, b.version, t("shell.play.kilnInstalled", { version: b.version }),
+  return runRuntimeChange(qc, game, what, b.version, t("shell.play.kilnInstalled", { version: b.version }),
     () => (back && opts.components == null && !opts.switchFromShroudforge
       ? api.runtimeRollback(game.id, b.version) : api.runtimeInstall(game.id, b.version, opts)));
+}
+
+/** Update game: `version` (the launcher's newer Kiln, or a switch back's) into the game through the ordinary install. No
+ *  explicit parts: the backend keeps the game's parts and adds the ones that are new or became defaults, unless the
+ *  player turned them off (passing the receipt's list froze it and skipped new parts). A DLL Windows refused (an
+ *  antivirus, inbox 92) is said in its plain words. The one path of the update notice's Update game, its install by
+ *  itself after an update (`lead`: why it ran) and (0.2.0-dev.31.12) Play's Update game banner. */
+export function updateGame(qc: QueryClient, game: GameInstall, version: string, lead?: string) {
+  return runRuntimeChange(qc, game, t("shell.runtimeChange.updateTo", { version }), version, t("shell.play.kilnInstalled", { version }),
+    () => api.runtimeInstall(game.id, version, {}), lead);
 }

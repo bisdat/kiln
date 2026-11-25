@@ -200,6 +200,17 @@ Direct builds only (the Nexus Mods build has none, above).
   the start sends fresh game statuses and the update status, so the notice and its runtime are
   there from the start (a player on 0.2.0-dev.30.3 got a notice without Update game until a poll his unfocused window
   never sent).
+  Play says it too (0.2.0-dev.31.12, after HTR's feedback on 31.9: a launcher update whose Kiln had not gone into the
+  game showed only a small orange "update ready" by the Kiln fact): while the game's Kiln is older than the launcher's
+  (`InstallState.upgradeAvailable`), a banner says "This game has Kiln <x>; this launcher has Kiln <y>." with Update
+  game, the notice's own install (`updateGame` in `shell/runtimeChange.ts`; a click counts as the update's one try by
+  itself, and a failed install of that Kiln in the session counts too, also one clicked before the update status
+  answered). It holds Update game with "Close the game first." while the game runs (and while it starts, Steam updates
+  it or another runtime change runs), says a failed install's reason with Send to support (one strip, not two), and
+  goes once the Kiln is in (by itself or by the click). Right after an install the cached status offers nothing until
+  the backend's next status says what is on offer: the newest bundle in the Library made the banner offer a test
+  build's Kiln to a release build for a moment. The Nexus build shows it as well: it ships
+  the runtime, only the self-update is gone, so the banner is how its players hear that the game's Kiln is behind.
 - **The game's Kiln after a switch back (0.2.0-dev.29):** a newer Kiln in the game than the launcher's own is left as it
   is and offers nothing (as before), with one exception: a test build of the launcher writes `kiln-launcher <version>
   beta <n>` as the receipt's installer, and when such a game meets a launcher that is no test build and ships an older

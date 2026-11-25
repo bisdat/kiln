@@ -2232,6 +2232,14 @@ void resolve() {
     }
     E.give_equip_ok=E.sets_ok && E.move_ok && feat("items.give_equip") && sym("items/SelectEquipment",&E.select_equipment) &&
         qualified_code(kiln::hooks_v2(g_api), reinterpret_cast<uintptr_t>(E.select_equipment), kSelectEquipmentCode);
+    // #139 (docs/re/items.md section 22): instance-backed arrows, spells and bait (eternal spells). The feature's probes
+    // are the in-place branches of EquipItem and UnequipItem and the commit's IsEquipped write; the kind leaf is called.
+    E.give_equip_instance_ammo_ok=E.give_equip_ok && feat("items.give_equip.instance_ammo") &&
+        sym("items/EquipLocationKind",&E.equip_location_kind) &&
+        qualified_code(kiln::hooks_v2(g_api), reinterpret_cast<uintptr_t>(E.equip_location_kind), kEquipLocationKindCode);
+    if (!E.give_equip_instance_ammo_ok) E.equip_location_kind=nullptr;
+    if (E.give_equip_ok)
+        LOGI("give-and-equip: instance-backed ammo (eternal spells) %s", E.give_equip_instance_ammo_ok ? "on" : "OFF");
     if (E.tx_ok) {
         g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE,
                                                   PAGE_READWRITE));

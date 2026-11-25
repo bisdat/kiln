@@ -210,12 +210,74 @@ int main() {
     pub.mode=KUA_MODE_REPLACE;pub.serial=context.game_serial;CHECK(ammo::publish(7,&pub)==KILN_OK);
     backpack_reads=backpack_reads_999=0;selector(groups,acc,0);CHECK(backpack_reads==2&&backpack_reads_999==1);
     selector(groups,acc,0);selector(groups,acc,0);CHECK(backpack_reads==2);
-    // An Append publication that leaves out the items the game lists with stock (as Ui.AmmoList does) reads nothing.
+    // An Append publication that provides none of the items the game lists with stock reads nothing.
     {
         KilnUiAmmoRow only[]={{555,12,0,3}};game_555_count=0;selector(groups,acc,0);
         CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK);
         KilnUiAmmoPublish append{sizeof append,KUA_KIND_ARROW,KUA_MODE_APPEND,1,9,0,context.game_serial,only};
         CHECK(ammo::publish(7,&append)==KILN_OK);backpack_reads=0;selector(groups,acc,0);CHECK(backpack_reads==0);
+    }
+    // Append as Ui.AmmoList publishes it since 0.2.0-dev.31.12 (GitHub issue 145): a mod's row of an item the game lists
+    // itself goes in behind the game's row (the HUD shows the game's row and count), so a pick of it is known as the mod's
+    // row. The quiver lists 555, whose stack the backpack holds (the game's row 555), and 556, which only it holds.
+    {
+        ammo::catalog[0]={999,1257792166u,555,556};
+        KilnUiAmmoRow quiver[]={{555,30,0,0},{556,4,0,1}};
+        KilnUiAmmoPublish append{sizeof append,KUA_KIND_ARROW,KUA_MODE_APPEND,2,9,0,0,quiver};
+        auto bind=[&] {
+            selector(groups,acc,0);CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK&&context.ok);
+            append.serial=context.game_serial;CHECK(ammo::publish(7,&append)==KILN_OK);selector(groups,acc,0);
+        };
+        game_555_count=3;backpack_answer=1;backpack_reads=backpack_reads_999=0;bind();
+        CHECK(backpack_reads==1&&backpack_reads_999==0); // one walk, for the provided row with stock
+        CHECK(groups[0].count==4&&groups[0].data[2].item==555&&groups[0].data[2].count==3&&groups[0].data[3].item==556&&
+              groups[0].data[3].count==4); // the game's 555 with its own count; the quiver's 556 after the game's rows
+        // Shots: only 555's count changes. New rows each time, so one walk each at the bind (no answer carries over).
+        game_555_count=2;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        game_555_count=1;bind();CHECK(backpack_reads==2);
+        // The real stocked game row: the game's own pick, exactly once, and no event.
+        equip_calls=0;backpack_answer=1;ammo::pick(groups,nullptr,0,555,700);CHECK(equip_calls==1);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // The quiver's server half swaps 556 in and 555 out. Before the game builds its rows again 555 still shows count
+        // 1: the pick raises Picked for the quiver's row, and the game's equip (which would empty the slot) never runs.
+        backpack_answer=0;ammo::pick(groups,nullptr,0,555,701);CHECK(equip_calls==1);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].count==30&&picks[0].row==0);
+        // The game's rebuild keeps 555 at count 0; before Kiln.Ui publishes for the new rows, the game's own rows show.
+        game_555_count=0;selector(groups,acc,0);CHECK(groups[0].count==3&&groups[0].data[2].item==555&&groups[0].data[2].count==0);
+        ammo::pick(groups,nullptr,0,555,702);CHECK(equip_calls==1);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].row==0);
+        // Kiln.Ui's publication for them (555's row again behind the game's count-0 row): as issue 131 decides it.
+        bind();ammo::pick(groups,nullptr,0,555,703);CHECK(equip_calls==1);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555);
+        // The stack comes back with stock: read again once, then the game's.
+        game_555_count=4;backpack_answer=1;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        ammo::pick(groups,nullptr,0,555,704);CHECK(equip_calls==2);
+        // More stock than before: read again, as any new rows.
+        game_555_count=7;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        // A row the backpack read did not find (issue 127: a reader that cannot see that stock) is read again when the rows
+        // change, and stays the game's.
+        game_555_count=0;bind();game_555_count=6;backpack_answer=0;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        game_555_count=5;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        ammo::pick(groups,nullptr,0,555,705);CHECK(equip_calls==3);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // Another client generation reads again too.
+        backpack_answer=1;bind();++ammo_client_state.generation;game_555_count=4;backpack_reads=0;bind();CHECK(backpack_reads==1);
+        --ammo_client_state.generation;bind();
+        // The quiver's own row 556 (not in the backpack) is the quiver's, as always.
+        backpack_answer=0;ammo::pick(groups,nullptr,0,556,706);CHECK(equip_calls==3);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==556&&picks[0].row==1);
+        ammo::catalog[0]={999,1257792166u,555};
+    }
+    // New rows are read again even when a count only fell, in either mode: the stack the read found may have left while a
+    // smaller one the reader cannot see came in or stayed (issue 127's case, as pick 503). A held answer carried from the
+    // rows before would send that pick to the mod; the read finds no stack, so the pick is the game's, which equips it.
+    for(const uint32_t mode:{KUA_MODE_REPLACE,KUA_MODE_APPEND}) {
+        game_555_count=3;backpack_answer=1;republish(mode); // bound: the read found the stacks of 555 and 999
+        game_555_count=2;backpack_answer=0;backpack_reads=0;republish(mode);
+        CHECK(backpack_reads==2); // 555 (fell) and 999 (same count) in the one walk of the new rows
+        equip_calls=0;ammo::pick(groups,nullptr,0,555,510);CHECK(equip_calls==1);
+        ammo::pick(groups,nullptr,0,999,511);CHECK(equip_calls==2);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
     }
     backpack_answer=0;
     // A debug line for every pick of a provided row that went to the game, at most 8 a second, from the client Post tick.
