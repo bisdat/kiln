@@ -32,7 +32,8 @@ CORE = [("Kiln.Api", None, "managed/Kiln.Api"), ("Kiln.Game", "Game", "managed/K
 GUIDES = {
     "Kiln.Api": ["docs/kiln/modding/contract.md", "docs/kiln/modding/lifecycle.md", "docs/kiln/modding/README.md"],
     "Kiln.Blocks": ["docs/kiln/modding/blocks.md"],
-    "Kiln.Client": ["docs/kiln/modding/client-hooks.md", "docs/kiln/services/client-building-input.md"],
+    "Kiln.Client": ["docs/kiln/modding/client-hooks.md", "docs/kiln/services/client-building-input.md",
+                    "docs/kiln/services/client-crosshair.md"],
     "Kiln.CreatureControl": ["docs/kiln/services/creature-control.md"],
     "Kiln.Eml": ["docs/kiln/services/eml-archive.md", "docs/kiln/services/eml-startup.md", "docs/kiln/services/eml-values.md"],
     "Kiln.Game": ["docs/kiln/typegen.md"],

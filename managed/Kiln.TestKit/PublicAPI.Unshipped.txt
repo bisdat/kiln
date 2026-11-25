@@ -1,1 +1,12 @@
 #nullable enable
+const Kiln.TestKit.FakeCrosshair.Session = 1 -> uint
+Kiln.TestKit.FakeCrosshair
+Kiln.TestKit.HarnessCrosshair
+Kiln.TestKit.HarnessCrosshair.Age(System.TimeSpan age) -> void
+Kiln.TestKit.HarnessCrosshair.AimAtNothing() -> void
+Kiln.TestKit.HarnessCrosshair.Aim(Kiln.WorldPosition position, System.Numerics.Vector3? normal = null, float? distance = null, Kiln.EntityId entity = default(Kiln.EntityId), byte? voxelMaterial = null) -> void
+Kiln.TestKit.HarnessCrosshair.Clear() -> void
+Kiln.TestKit.HarnessCrosshair.Fault() -> void
+Kiln.TestKit.HarnessCrosshair.HarnessCrosshair(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessCrosshair.Reads.get -> int
+Kiln.TestKit.KilnHarness.Crosshair.get -> Kiln.TestKit.HarnessCrosshair!

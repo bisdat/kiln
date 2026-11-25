@@ -19,6 +19,7 @@ inline unsigned long GetCurrentProcessId() { return 4242; }
 #include "../src/config.cpp"
 #include "../src/services/caps.cpp"
 #include "../src/services/client_building_input.cpp"  // the building input row asks it whether its producer is bound
+#include "../src/services/client_crosshair.cpp"  // the crosshair row asks it whether its producer is ready or bound
 
 #include <cstdarg>
 #include <barrier>
@@ -159,6 +160,7 @@ KILN_SERVICE(fakeok, "kiln.fakeok", 3, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeno, "kiln.fakeno", 2, &kFakeTable, &init_no);
 KILN_SERVICE(fakehooks, "kiln.hooks", 2, &kFakeTable, &init_yes);
 KILN_SERVICE(fakeclient, "kiln.client", 1, &kFakeTable, &init_yes);
+KILN_SERVICE(fakecrosshair, "kiln.client.crosshair", 1, &kFakeTable, &init_yes);
 
 namespace {
 namespace caps = kiln::caps;
@@ -711,6 +713,61 @@ void core_rows(const std::filesystem::path& dir) {
         kiln::gates::use_list_for_tests(no_inspection_gate);
         kiln::gates::configure(KILN_SIDE_SERVER, false, {});
         kiln::building_input::reset_for_tests();
+        kiln::test_image.side = side;
+        reset();
+        caps::core_rows(true, true, "");
+    }
+    // kiln.client.crosshair: the client only, its service running, its producer ready (hooked at the first read) or
+    // bound; a failed first install is faulted; the producer's reason is the row's text while unbound
+    {
+        namespace ch = kiln::crosshair;
+        const uint32_t side = kiln::test_image.side;
+        kiln::test_image.side = KILN_SIDE_CLIENT;
+        ch::reset_for_tests();
+        caps::core_rows(true, true, "");
+        const char* why = nullptr;
+        ch::usable(&why, nullptr);
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_SYMBOL_MISSING) && get("client.crosshair").text == why &&
+                  get("client.crosshair").source == "core",
+              "crosshair: no verified trace on this build: unavailable, symbol-missing, with the producer's reason (%s)",
+              get("client.crosshair").text.c_str());
+        ch::set_installer(+[](uint32_t* hit, const char**) { *hit = 0xa90; return ch::Install::Bound; });
+        CHECK(is("client.crosshair", A, 0) && get("client.crosshair").text.find("hooked at the first read") != std::string::npos,
+              "crosshair: a ready producer reads available, hooked at the first read, without a rebuild (%s)",
+              get("client.crosshair").text.c_str());
+        KilnCrosshairHit hit{};
+        hit.size = sizeof hit;
+        uint32_t reason = 0;
+        CHECK(ch::get({true, true}, &hit, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE,
+              "crosshair: the first read installs and answers no sample");
+        CHECK(is("client.crosshair", A, 0) && get("client.crosshair").text == "the game's crosshair trace is hooked",
+              "crosshair: hooked after the rows were built: the row follows (%s)", get("client.crosshair").text.c_str());
+        ch::reset_for_tests();
+        ch::set_installer(+[](uint32_t*, const char** w) { *w = "the test install failed"; return ch::Install::Failed; });
+        caps::core_rows(true, true, "");
+        CHECK(ch::get({true, true}, &hit, &reason) == KILN_ERR_UNAVAILABLE, "crosshair: a failed first install refuses the read");
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_FAULTED) && get("client.crosshair").text == "the test install failed",
+              "crosshair: a failed first install: unavailable, faulted, with its reason (%s)", get("client.crosshair").text.c_str());
+        ch::reset_for_tests();
+        ch::bind(0xa90);
+        kiln_service_fakecrosshair.available = false;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_SERVICE_MISSING), "crosshair: kiln.client.crosshair missing refuses");
+        kiln_service_fakecrosshair.available = true;
+        caps::core_rows(false, false, "test idle");
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_POLICY) && get("client.crosshair").text == "not started in safe idle: test idle",
+              "crosshair: safe idle says policy");
+        kiln::test_image.side = KILN_SIDE_SERVER;
+        caps::core_rows(true, true, "");
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_WRONG_SIDE), "crosshair: a dedicated server says wrong side");
+        kiln::test_image.side = KILN_SIDE_CLIENT;
+        ch::reset_for_tests();
+        ch::unbound_reason("held by the client gate until its guided client checks pass");
+        caps::core_rows(true, true, "");
+        CHECK(is("client.crosshair", U, KILN_CAP_REASON_SYMBOL_MISSING) &&
+                  get("client.crosshair").text == "held by the client gate until its guided client checks pass",
+              "crosshair: unbound, the row says the binder's reason");
+        ch::reset_for_tests();
         kiln::test_image.side = side;
         reset();
         caps::core_rows(true, true, "");

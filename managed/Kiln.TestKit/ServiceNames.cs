@@ -21,6 +21,7 @@ internal static class ServiceNames
         "kiln.characters",
         "kiln.chat",
         "kiln.client",
+        "kiln.client.crosshair",
         "kiln.combat",
         "kiln.component_changes",
         "kiln.content",
