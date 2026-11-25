@@ -89,6 +89,29 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public void Over_the_game_transport_s_zero_padding_a_joined_client_binds_applies_and_its_end_reaches_the_server()
+    {
+        // kiln.net pads every game-transport frame to whole 4-byte words: Welcome (58 bytes), an Apply of a lens (110), the
+        // Acks and Ended (95) arrive up to 3 bytes longer. Before 0.2.0-dev.31.12 the client refused every Welcome.
+        var rig = new Rig { PadLikeGameTransport = true };
+        rig.Bind();
+        Assert.Equal(ServerBindingState.Bound, rig.Server.State);
+        Assert.Equal(ClientBindingState.Bound, rig.Client.State);
+        Assert.Equal(rig.Server.Binding, rig.Client.Binding);
+        Assert.Contains(rig.SentToClient, m => m.Id == CameraMessage.Welcome && m.Body.Length % 4 != 0);
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 2000));
+        rig.Tick();
+        var r = Last(rig);
+        Assert.True(r.Ok);
+        Assert.Equal((CameraWireAbi.CommitClientFrame, 1000ul), (r.Scope, r.Lease));
+        Assert.Contains(rig.SentToServer, m => m.Id == CameraMessage.Ack && m.Body.Length % 4 != 0);
+        Assert.Equal(1000ul, rig.Client.ActiveLease);
+        rig.Advance(2100, 100);   // the client's own expiry: its Ended (95 bytes, 96 on the wire) reaches the server
+        Assert.Equal(0ul, rig.Client.ActiveLease);
+        Assert.Contains(rig.Ended, e => e.Lease == 1000 && e.EndReason == CameraEndReasons.Expired);
+    }
+
+    [Fact]
     public void A_request_round_trips_to_a_client_frame()
     {
         var rig = Bound();

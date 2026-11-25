@@ -106,7 +106,11 @@ public sealed class DecoderFuzzTests
             return false;
         }
         var again = c.Encode(r.Message!);
-        Assert.True(again.AsSpan().SequenceEqual(body), $"{c.Name}: an accepted {body.Length}-byte body does not re-encode to its own bytes");
+        // the bytes after the message can only be the game transport's zero padding to 4 (CameraWire.EndsAt)
+        var padding = body.Length - again.Length;
+        Assert.True(padding == 0 || (padding is > 0 and <= 3 && body.Length % 4 == 0 && body.AsSpan(again.Length).IndexOfAnyExcept((byte)0) < 0),
+            $"{c.Name}: an accepted {body.Length}-byte body is {padding} bytes longer than its message");
+        Assert.True(again.AsSpan().SequenceEqual(body.AsSpan(0, again.Length)), $"{c.Name}: an accepted {body.Length}-byte body does not re-encode to its own bytes");
         Assert.True(c.Valid(r.Message!), $"{c.Name}: an accepted {body.Length}-byte body does not pass Validate");
         return true;
     }
@@ -115,6 +119,13 @@ public sealed class DecoderFuzzTests
     {
         var b = new byte[n];
         rng.NextBytes(b);
+        return b;
+    }
+
+    /// <summary>Trailing bytes that can never be the transport's zero padding.</summary>
+    private static byte[] NonzeroFirst(byte[] b)
+    {
+        b[0] |= 1;
         return b;
     }
 
@@ -136,9 +147,14 @@ public sealed class DecoderFuzzTests
                 Assert.True(Run(c, sample), $"{c.Name}: the valid {sample.Length}-byte sample is refused");
                 for (var n = 0; n < sample.Length; n++)
                     Assert.False(Run(c, sample[..n]), $"{c.Name}: a body truncated to {n} of {sample.Length} bytes is accepted");
-                Assert.False(Run(c, [.. sample, 0]), $"{c.Name}: a trailing zero byte is accepted");
+                // the game transport's zero padding to 4 bytes is accepted (Run checks it decodes to the same message);
+                // a zero byte that leaves the length unaligned, and more than the padding, are refused
+                var pad = (4 - sample.Length % 4) % 4;
+                if (pad > 0) Assert.True(Run(c, [.. sample, .. new byte[pad]]), $"{c.Name}: the transport's {pad} bytes of padding are refused");
+                if (sample.Length % 4 != 3) Assert.False(Run(c, [.. sample, 0]), $"{c.Name}: a trailing zero byte that leaves the length unaligned is accepted");
+                Assert.False(Run(c, [.. sample, .. new byte[pad + 4]]), $"{c.Name}: {pad + 4} trailing zero bytes are accepted");
                 for (var k = 1; k <= 8; k++)
-                    Assert.False(Run(c, [.. sample, .. RandomBytes(rng, k)]), $"{c.Name}: {k} trailing bytes are accepted");
+                    Assert.False(Run(c, [.. sample, .. NonzeroFirst(RandomBytes(rng, k))]), $"{c.Name}: {k} trailing bytes are accepted");
             }
     }
 
