@@ -1005,6 +1005,40 @@ fn loading_a_pack_profile_with_a_missing_mod() {
     assert!(!rp.warnings.iter().any(|w| w.contains("not in the library")), "{:?}", rp.warnings);
 }
 
+/// pack_lacking runs for every pack profile Settings lists and with every preview: it reads the Library as the Library's
+/// own list does (each entry's record, a full hash only when its manifest is newer than its record), never every file
+/// of every mod. A mod file Kiln could not even read leaves the answer as it is; a mod gone, or one whose manifest was
+/// edited, is still missing.
+#[cfg(unix)]
+#[test]
+fn lacking_of_reads_the_library_without_hashing_every_mod_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tmp("repair-cheap");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    let (alpha, beta) = (lib_ref(&b, &ir.profile, "alpha"), lib_ref(&b, &ir.profile, "beta"));
+    let dll = crate::library::path_of(&b, &beta).unwrap().join("M.dll");
+    std::fs::set_permissions(&dll, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // root reads it anyway: then there is nothing to tell
+    let unreadable = std::fs::read(&dll).is_err();
+    let lack = pack::lacking_of(&b, &pid);
+    std::fs::set_permissions(&dll, std::fs::Permissions::from_mode(0o644)).unwrap();
+    if unreadable {
+        assert_eq!(lack.unwrap().missing, [], "beta's files were not read");
+    }
+    crate::library::remove_with(&b, &alpha, true, &mut |_, _| Ok(None)).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha.clone()]);
+    // an edited manifest: the Library reads the entry as changed, so it is missing as it was imported
+    let manifest = crate::library::path_of(&b, &beta).unwrap().join("kiln.mod.json");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let text = std::fs::read_to_string(&manifest).unwrap().replace("\"side\": \"both\"", "\"side\": \"client\"");
+    std::fs::write(&manifest, text).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha, beta]);
+}
+
 /// Two kinds of mod under one id (a Kiln and a SET "alpha"): the repair tells them apart by kind and stored file, so
 /// only the one that left the Library is downloaded and imported.
 #[test]

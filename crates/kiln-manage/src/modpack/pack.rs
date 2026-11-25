@@ -2706,10 +2706,26 @@ fn lacking_parts(dirs: &DataDirs, pid: &str) -> Result<(Instance, PackIndex, Vec
         .filter(|(id, lr, _)| {
             // a mod only a server uses is never in a client's instance; the profile decides the rest
             let server_only = base.mods.iter().any(|m| &m.id == id && m.kind == lr.kind && client_skips(m));
-            !server_only && profile_loads(&profile, lr.kind, &lr.id, &lr.hash) && library_part(dirs, lr).is_none()
+            // the layer is hashed in full: a repair from Crucible puts it in the partial pack from the Library
+            // ([`assemble_for`] takes it from there only when it hashes to its name), and it is small
+            let is_layer = base.layer.as_ref().is_some_and(|l| &l.id == id && lr.kind == ModKind::Kiln);
+            let have = if is_layer { library_part(dirs, lr).is_some() } else { library_has(dirs, lr) };
+            !server_only && profile_loads(&profile, lr.kind, &lr.id, &lr.hash) && !have
         })
         .collect();
     Ok((inst, base, parts))
+}
+
+/// Whether the Library has a mod as it was imported, read as the Library's own list reads it: its record names this
+/// kind, id, version and hash, its folder (a plugin's DLL) is there, and [`crate::library::changed_on_disk`] does not
+/// read it as changed (a full hash only when its manifest or folder is newer than its record; an engine mod's own
+/// output beside it is no change). Never every file of every mod: [`lacking_of`] runs for every pack profile Settings
+/// lists and with every preview.
+fn library_has(dirs: &DataDirs, r: &LibraryRef) -> bool {
+    let (Ok(rec), Ok(at), Ok(folder)) = (crate::library::record(dirs, r), crate::library::path_of(dirs, r), dirs.library_entry(r.kind, &r.id, &r.version, &r.hash)) else {
+        return false;
+    };
+    at.exists() && !crate::library::changed_on_disk(&folder, &rec)
 }
 
 /// [`Lacking`] of an instance (nothing written, nothing downloaded).
