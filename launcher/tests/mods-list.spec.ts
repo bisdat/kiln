@@ -566,7 +566,9 @@ test("the player's own folder of a ShroudForge mod that is off says Kiln-hosted 
   await page.locator(".k-hero").getByRole("button", { name: /^Notes \(\d+\)$/ }).click();
   const dialog = page.getByRole("dialog", { name: "Notes about your mod folders" });
   await expect(dialog).toContainText(`shroudforge:better-chests: it is off in the profile, and your own folder ${OWN} stays as it is`);
-  await expect(dialog).toContainText("While Kiln hosts ShroudForge, Kiln's bundled runtime skips this folder at each start.");
+  await expect(dialog).toContainText("While Kiln hosts ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list");
+  await expect(dialog).toContainText("kiln.log says at each start whether it was skipped.");
+  await expect(dialog).not.toContainText("Kiln's bundled runtime skips this folder at each start");
   await expect(dialog).toContainText("switch it off in Kiln's in-game menu (Mods > ShroudForge)");
   await expect(dialog).not.toContainText("Kiln never switches a folder it did not place");
 });

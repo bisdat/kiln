@@ -2956,16 +2956,19 @@ fn own_folder(rep: &mut PlaceReport, tag: String, path: &Path, on: bool, kind: M
 }
 
 /// The player's own folder `path` in ShroudForge's mods folder serves the entry `tag`, which the profile has off, and
-/// ShroudForge may run it there (its own switch, which Kiln never writes). While Kiln hosts ShroudForge, its bundled
-/// runtime skips the folder at each start: kiln-shroudforge (ShroudForge entries) and kiln-eml (EML entries) name it
-/// to the runtime (0.2.0-dev.31.12, the fork's shroudforge_host_skip_packages). ShroudForge's own loader and an
-/// installed ShroudForge runtime take no such list and still run it. A safety note, in plain words. `adopt`: "Let Kiln
+/// ShroudForge may run it there (its own switch, which Kiln never writes). While Kiln hosts ShroudForge, kiln-shroudforge
+/// (ShroudForge entries) and kiln-eml (EML entries) name it to the runtime at each start (0.2.0-dev.31.12, the fork's
+/// optional export shroudforge_host_skip_packages), which skips it when it has that export; kiln.log says which. A
+/// runtime without the export (an installed ShroudForge, a bundled one before the pin that has it) and ShroudForge's
+/// own loader still run it, so the note promises the skip only for a runtime that takes the list. A safety note, in plain words. `adopt`: "Let Kiln
 /// manage this folder" is offered for it (ShroudForge folders only, [`adopt`]).
 fn own_off_in_shroudforge(rep: &mut PlaceReport, tag: String, path: &Path, adopt: bool) {
     let note = format!("{tag}: it is off in the profile, and your own folder {} stays as it is (Kiln never writes into a folder it did not \
-        place). While Kiln hosts ShroudForge, Kiln's bundled runtime skips this folder at each start. ShroudForge's own loader, or your \
-        installed ShroudForge (\"Use my installed ShroudForge\"), still runs it while its own ShroudForge switch is on: to stop that, switch \
-        it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, {}or move the folder out of the mods folder.",
+        place). While Kiln hosts ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list \
+        (Kiln's bundled runtime does from 0.2.0-dev.31.12 on); kiln.log says at each start whether it was skipped. Another runtime (your \
+        installed ShroudForge, \"Use my installed ShroudForge\") or ShroudForge's own loader still runs it while its own ShroudForge switch \
+        is on: to stop that, switch it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, {}or move the folder \
+        out of the mods folder.",
         path.display(), if adopt { "choose \"Let Kiln manage this folder\" in Notes, " } else { "" });
     rep.safety_notes.push(note.clone());
     rep.own_notes.push(note);

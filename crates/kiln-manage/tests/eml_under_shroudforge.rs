@@ -537,7 +537,8 @@ fn a_players_own_eml_folder_of_a_mod_that_is_off_says_what_hosted_shroudforge_do
     let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
     let note = rep.safety_notes.iter().find(|n| n.starts_with("eml:quiver-slots")).unwrap_or_else(|| panic!("a safety note: {rep:?}"));
     assert!(note.starts_with(&format!("eml:quiver-slots: it is off in the profile, and your own folder {} ", hand.display())), "{note}");
-    assert!(note.contains("Kiln's bundled runtime skips this folder at each start") && note.contains("Mods > ShroudForge")
+    assert!(note.contains("when that runtime takes Kiln's skip list") && note.contains("kiln.log says at each start whether it was skipped")
+        && !note.contains("Kiln's bundled runtime skips this folder at each start") && note.contains("Mods > ShroudForge")
         && note.contains("move the folder out"), "{note}");
     assert!(!note.contains("Let Kiln manage this folder"), "Kiln takes over ShroudForge folders only: {note}");
     assert!(rep.own_notes.contains(note), "{rep:?}");

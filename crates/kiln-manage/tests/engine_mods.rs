@@ -1621,7 +1621,10 @@ fn a_players_own_folder_of_a_mod_that_is_off_is_a_safety_note() {
     // to stop it where Kiln cannot
     let note = &a.safety_notes[0];
     assert!(note.starts_with("shroudforge:hoardershelper: it is off in the profile, and your own folder "), "{note}");
-    assert!(note.contains("Kiln never writes into a folder it did not place") && note.contains("Kiln's bundled runtime skips this folder at each start"), "{note}");
+    assert!(note.contains("Kiln never writes into a folder it did not place") && note.contains("skip this folder at each start"), "{note}");
+    // review: no promise for a runtime that takes no skip list (a bundled runtime before the pin with the export)
+    assert!(!note.contains("Kiln's bundled runtime skips this folder at each start"), "{note}");
+    assert!(note.contains("when that runtime takes Kiln's skip list") && note.contains("kiln.log says at each start whether it was skipped"), "{note}");
     assert!(note.contains("Mods > ShroudForge") && note.contains("Let Kiln manage this folder") && note.contains("move the folder out"), "{note}");
     assert!(kiln_manage::shroudforge::read_mod(&game.path.join("mods/hoardershelper")).is_ok(), "the folder is still there");
 }
