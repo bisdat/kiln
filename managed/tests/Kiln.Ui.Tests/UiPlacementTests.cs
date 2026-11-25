@@ -496,6 +496,22 @@ public sealed unsafe class UiPlacementTests : IDisposable
     }
 
     [Fact]
+    public void A_hand_edited_file_with_a_key_twice_neither_throws_nor_loses_the_other_entries()
+    {
+        // a player pasted an entry in again: JSON with a duplicate property name
+        Write("""
+        {"mods": {"grimoire": {"screens": {
+          "Grimoire": {"x": 0.2, "y": 0.5, "width": 600, "height": 400},
+          "Grimoire": {"x": 0.25, "y": 0.5, "width": 600, "height": 400},
+          "Other": {"x": 0.7, "y": 0.5, "width": 300, "height": 200}}}}}
+        """);
+        var s = Screen(new UiScreenOptions { DimBackground = false, Resizable = true, RememberPlacement = true });  // reads the file
+        s.Open();
+        Assert.Equal((480f, 540f, Appearing, 0.5f, 0.5f), FrameScreens().Pos);  // the last one wins, as a JSON reader reads it
+        Assert.Equal(new UiPlacements.Entry(0.7f, 0.5f, 300, 200), UiPlacements.Get("grimoire", window: false, "Other"));
+    }
+
+    [Fact]
     public void A_good_entry_beside_a_bad_one_is_still_read()
     {
         Write("""{"mods": {"grimoire": {"screens": {"bad": {"x": null}, "good": {"x": 0.2, "y": 0.3, "width": 100, "height": 50}}}}}""");

@@ -420,44 +420,51 @@ internal static class UiPlacements
             UiEngine.Log(LogLevel.Warn, $"{path}: {e.Message} (no remembered placements this start)");
             return entries;
         }
-        JsonNode? root;
+        // JsonDocument, not JsonNode: a key given twice (a hand-edited file) is read as the last one, where JsonObject throws
+        // ArgumentException out of the read (the first Ui.Screen that remembers would throw in its mod's OnLoad)
+        JsonDocument doc;
         try
         {
-            root = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            doc = JsonDocument.Parse(text, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         }
         catch (JsonException e)
         {
             Corrupt(path, e.Message);
             return entries;
         }
-        if (root is not JsonObject top || top["mods"] is not JsonObject mods)
+        using (doc)
         {
-            if (root is not JsonObject) Corrupt(path, "not a JSON object");
-            return entries;
-        }
-        foreach (var (mod, m) in mods)
-        {
-            if (m is not JsonObject kinds) continue;
-            foreach (var (kind, window) in new[] { ("screens", false), ("windows", true) })
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
-                if (kinds[kind] is not JsonObject ids) continue;
-                foreach (var (id, v) in ids)
-                    if (Parse(v) is { } e) entries[(mod, window, id)] = e;
+                Corrupt(path, "not a JSON object");
+                return entries;
+            }
+            if (!root.TryGetProperty("mods", out var mods) || mods.ValueKind != JsonValueKind.Object) return entries;
+            foreach (var m in mods.EnumerateObject())
+            {
+                if (m.Value.ValueKind != JsonValueKind.Object) continue;
+                foreach (var (kind, window) in new[] { ("screens", false), ("windows", true) })
+                {
+                    if (!m.Value.TryGetProperty(kind, out var ids) || ids.ValueKind != JsonValueKind.Object) continue;
+                    foreach (var id in ids.EnumerateObject())
+                        if (Parse(id.Value) is { } e) entries[(m.Name, window, id.Name)] = e;
+                }
             }
         }
         return entries;
     }
 
-    private static Entry? Parse(JsonNode? v)
+    private static Entry? Parse(JsonElement v)
     {
-        if (v is not JsonObject o) return null;
-        static float? Num(JsonObject o, string k)
+        if (v.ValueKind != JsonValueKind.Object) return null;
+        static float? Num(JsonElement o, string k)
         {
-            if (o[k] is not JsonValue n || n.GetValueKind() != JsonValueKind.Number || !n.TryGetValue<double>(out var d)) return null;
+            if (!o.TryGetProperty(k, out var n) || n.ValueKind != JsonValueKind.Number || !n.TryGetDouble(out var d)) return null;
             var f = (float)d;
             return float.IsFinite(f) ? f : null;
         }
-        if (Num(o, "x") is not { } x || Num(o, "y") is not { } y || Num(o, "width") is not { } w || Num(o, "height") is not { } h) return null;
+        if (Num(v, "x") is not { } x || Num(v, "y") is not { } y || Num(v, "width") is not { } w || Num(v, "height") is not { } h) return null;
         if (!(w > 0 && h > 0)) return null;
         return new Entry(x, y, w, h);
     }
