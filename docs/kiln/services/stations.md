@@ -451,7 +451,10 @@ debug level why the press stayed the game's.
   materials" when they fall short of the blocks it needs. Kiln adds the building links' count of that material when they
   fall short. The server's own check (which decides the placement) counts the links itself; a Kiln client's cursor counts
   them from a snapshot the server sends (`kiln:craftstock`, `required: false`: what the player's building links hold
-  per item, again when a count changes, about every 1.2 s).
+  per item, again when a count changes, about every 1.2 s). A link to a Magic chest of the base the player stands in is
+  left out of both counts: the game counts that chest as the base's already, and the payment takes it as the base's, so
+  a player who links every chest does not see it counted twice. At a base's border, where the cursor is in another base than the player, the two can still differ for a
+  moment: the payment decides.
 - **The payment** (`ApplyMaterials` -> `InventoryPay` in the blueprint program): the bag and the base's Magic chests pay
   first, in the game's own order (for a placement: the base's chests, then the bag), then the building links for what is
   still missing, in the placement's own all-or-nothing payment. Short, refused or faulting: nothing is placed and nothing
