@@ -4,9 +4,9 @@
 //! stuck WebKitWebProcess showed one thread in fontconfig's FcPatternGetString (called from libwebkit2gtk-4.1) and the
 //! rest in pthread_cond_timedwait; clearing the fontconfig cache fixed it, and GNOME Web had hung the same way. So, when
 //! the page has not started at the render watchdog's late point (crate::render: [`crate::render::TIMEOUT`] after the
-//! window, [`LOADED_LATE`] on a busy box, [`Load::loaded`]):
+//! window, whatever the load: a renderer problem gets its restart as soon as before):
 //! - **look** ([`probe`]): cheap /proc reads of each web process below the launcher (also behind bwrap), twice,
-//!   [`PROBE_GAP`] apart: each thread's state, CPU time, voluntary context switches and read/write system calls; which
+//!   [`PROBE_GAP`] apart: each thread's state, CPU time, page faults, voluntary context switches and read/write system calls; which
 //!   pages of libfontconfig's code it touched in between (`clear_refs`, then smaps' Referenced); the font cache files it
 //!   maps or holds open; wchan and the kernel stack for the log. No ptrace, no eu-stack, no signal;
 //! - **decide** ([`decide`]): the specific hint only on evidence in fontconfig ([`Kind::Fonts`]); anything else is
@@ -15,6 +15,7 @@
 //! - **the hint** ([`message`], crate::dialog::hint): native, never through the page. "Fix it and restart" moves the
 //!   font cache aside ([`fix`]: renamed to a dated backup, never deleted), runs `fc-cache -r` and starts the launcher
 //!   again; "Keep waiting" looks again after [`KEEP_WAITING`]; "Quit". A page that starts while it is up closes it.
+//!   Once per chain of starts ([`FIXED_VAR`]): after the fix, the watchdog goes on as before.
 //!
 //! docs/kiln/launcher/app.md, "A window that can't draw: a broken font cache (Linux)".
 
@@ -23,9 +24,6 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// The watchdog's late point on a busy box ([`Load::loaded`]) instead of [`crate::render::TIMEOUT`]: a slow but healthy
-/// start gets more time before anything is decided or restarted.
-pub const LOADED_LATE: Duration = Duration::from_secs(30);
 /// The time between the probe's two looks at the web process.
 pub const PROBE_GAP: Duration = Duration::from_secs(2);
 /// A stuck thread ran at least this share of [`PROBE_GAP`] (on a box under load a runnable thread gets less, so the
@@ -33,6 +31,10 @@ pub const PROBE_GAP: Duration = Duration::from_secs(2);
 pub const BUSY_SHARE: f64 = 0.5;
 /// ... and has used at least this much CPU since it started: a long first layout is not a hang.
 pub const STUCK_CPU: Duration = Duration::from_secs(8);
+/// ... and faulted at most this many pages in during the gap: a font scan maps font files in (FreeType's Unix streams
+/// are mmap'ed, so how many read calls a scan makes depends on the build) and faults by the thousand; a loop over a
+/// mapped cache faults none.
+pub const SCAN_FAULTS: u64 = 100;
 /// A process "does nothing" when all its threads together ran at most this share of [`PROBE_GAP`].
 pub const IDLE_SHARE: f64 = 0.1;
 /// "Keep waiting": the next look this long after the player's click.
@@ -50,7 +52,8 @@ fn log(msg: &str) {
 
 // ---------------------------------------------------------------- the box's load
 
-/// /proc/loadavg's one-minute average and the CPUs this process may use.
+/// /proc/loadavg's one-minute average and the CPUs this process may use (for the `fonts:` line: on a busy box a stuck
+/// thread gets less than [`BUSY_SHARE`] of the CPU, so rule A stays away).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Load {
     pub load1: Option<f64>,
@@ -58,10 +61,6 @@ pub struct Load {
 }
 
 impl Load {
-    /// At least one runnable task per CPU: a healthy start can be slow.
-    pub fn loaded(&self) -> bool {
-        self.load1.is_some_and(|l| l >= self.cpus.unwrap_or(1).max(1) as f64)
-    }
     pub fn says(&self) -> String {
         match (self.load1, self.cpus) {
             (Some(l), Some(n)) => format!("load {l:.2} on {n} CPUs"),
@@ -81,17 +80,20 @@ pub fn load_now() -> Load {
 
 // ---------------------------------------------------------------- /proc as the kernel writes it
 
-/// `/proc/<pid>/task/<tid>/stat`: the thread's name, its state letter and its CPU time (utime + stime, clock ticks).
-pub fn parse_task_stat(text: &str) -> Option<(String, char, u64)> {
+/// `/proc/<pid>/task/<tid>/stat`: the thread's name, its state letter, its CPU time (utime + stime, clock ticks) and its
+/// page faults (minflt + majflt).
+pub fn parse_task_stat(text: &str) -> Option<(String, char, u64, u64)> {
     let open = text.find('(')?;
     let close = text.rfind(')')?;
     let name = text.get(open + 1..close)?.to_string();
     let rest: Vec<&str> = text.get(close + 1..)?.split_whitespace().collect();
     let state = rest.first()?.chars().next()?;
-    // fields 14 and 15 of proc(5); `rest` starts at field 3
+    // fields 10, 12, 14 and 15 of proc(5); `rest` starts at field 3
+    let minflt: u64 = rest.get(7)?.parse().ok()?;
+    let majflt: u64 = rest.get(9)?.parse().ok()?;
     let utime: u64 = rest.get(11)?.parse().ok()?;
     let stime: u64 = rest.get(12)?.parse().ok()?;
-    Some((name, state, utime + stime))
+    Some((name, state, utime + stime, minflt + majflt))
 }
 
 /// A `Key: 123` line of a /proc file (status, io).
@@ -157,6 +159,8 @@ pub struct Thread {
     pub state: char,
     /// utime + stime, clock ticks.
     pub ticks: u64,
+    /// minflt + majflt.
+    pub faults: u64,
     pub voluntary: Option<u64>,
     /// syscr + syscw (/proc/<pid>/task/<tid>/io; None: not readable).
     pub syscalls: Option<u64>,
@@ -189,10 +193,10 @@ pub fn read_snap(root: &Path, pid: u32, maps: Maps) -> Option<Snap> {
     for e in std::fs::read_dir(dir.join("task")).ok()?.flatten() {
         let Some(tid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
         let t = e.path();
-        let Some((name, state, ticks)) = read(t.join("stat")).as_deref().and_then(parse_task_stat) else { continue };
+        let Some((name, state, ticks, faults)) = read(t.join("stat")).as_deref().and_then(parse_task_stat) else { continue };
         let voluntary = read(t.join("status")).and_then(|s| number_of(&s, "voluntary_ctxt_switches"));
         let syscalls = read(t.join("io")).and_then(|s| Some(number_of(&s, "syscr")? + number_of(&s, "syscw")?));
-        threads.push(Thread { tid, name, state, ticks, voluntary, syscalls });
+        threads.push(Thread { tid, name, state, ticks, faults, voluntary, syscalls });
     }
     threads.sort_by_key(|t| t.tid);
     let maps = match maps {
@@ -210,8 +214,11 @@ pub fn read_snap(root: &Path, pid: u32, maps: Maps) -> Option<Snap> {
     Some(Snap { threads, maps, fds, wchan, stack })
 }
 
-/// Clears the page references of `pid` (`/proc/<pid>/clear_refs`, "1": the accessed bits only; nothing else changes
-/// for the process), so smaps' Referenced says what it touched since. False: not allowed or gone.
+/// Clears the page references of `pid` (`/proc/<pid>/clear_refs`, "1"), so smaps' Referenced says what it touched since.
+/// The kernel walks its page tables (the mm's read lock), clears the accessed bits and the pages' referenced flags (for
+/// shared library pages the system's), and flushes its TLB: 12 to 16 ms for 1 GB resident. Its memory, data and
+/// soft-dirty bits stay as they are; its pages only look unused to reclaim for a while. The file is mode 0200 and the
+/// process's own: the same user, and not a process that made itself non-dumpable. False: not allowed or gone.
 pub fn clear_refs(root: &Path, pid: u32) -> bool {
     use std::io::Write;
     std::fs::OpenOptions::new().write(true).open(root.join(pid.to_string()).join("clear_refs"))
@@ -224,11 +231,12 @@ pub fn clear_refs(root: &Path, pid: u32) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Seen {
     /// Rule A: the process's main thread (where WebKit lays out text and asks fontconfig) busy without pause (running
-    /// at both looks, at least [`BUSY_SHARE`] of the gap on the CPU, not one read or write system call and not one
-    /// voluntary switch in between, [`STUCK_CPU`] in all), its other threads idle (together at most [`IDLE_SHARE`] of
-    /// the gap: the player's were in pthread_cond_timedwait), and libfontconfig's code touched in that gap. The last
-    /// alone proves little: smaps' Referenced also counts a page's shared flags, which other processes using the same
-    /// library can set (an idle test process showed 32 kB), so the main thread's loop and the idle rest carry the rule.
+    /// at both looks, at least [`BUSY_SHARE`] of the gap on the CPU, not one read or write system call, not one
+    /// voluntary switch and at most [`SCAN_FAULTS`] page faults in between, [`STUCK_CPU`] in all), its other threads
+    /// idle (together at most [`IDLE_SHARE`] of the gap: the player's were in pthread_cond_timedwait), and
+    /// libfontconfig's code touched in that gap. The last alone proves little: smaps' Referenced also counts a page's
+    /// shared flags, which other processes using the same library can set (an idle test process showed 32 kB), so the
+    /// main thread's loop and the idle rest carry the rule.
     Busy { tid: u32, name: String, ran: Duration, gap: Duration, total: Duration },
     /// Rule B: the process holds a font cache file open at both looks and does nothing else (all threads together at
     /// most [`IDLE_SHARE`] of the gap).
@@ -281,8 +289,9 @@ pub fn decide(pid: u32, a: &Snap, b: &Snap, gap: Duration, hz: u64, refs_cleared
         .collect();
     let calls = |s: &Step| Some(s.t.syscalls?.saturating_sub(s.before.syscalls?));
     let switches = |s: &Step| Some(s.t.voluntary?.saturating_sub(s.before.voluntary?));
+    let faults = |s: &Step| s.t.faults.saturating_sub(s.before.faults);
     let busy = |s: &Step| s.before.state == 'R' && s.t.state == 'R' && s.ran.as_secs_f64() >= BUSY_SHARE * gap_s
-        && calls(s) == Some(0) && switches(s) == Some(0) && secs(s.t.ticks, hz) >= STUCK_CPU;
+        && calls(s) == Some(0) && switches(s) == Some(0) && faults(s) <= SCAN_FAULTS && secs(s.t.ticks, hz) >= STUCK_CPU;
     // (fold from 0.0: an empty f64 sum is -0.0, "-0.00 s" in the line)
     let all_ran = steps.iter().map(|s| s.ran.as_secs_f64()).fold(0.0, |x, y| x + y);
     let others_ran = steps.iter().filter(|s| s.t.tid != pid).map(|s| s.ran.as_secs_f64()).fold(0.0, |x, y| x + y);
@@ -309,9 +318,9 @@ pub fn decide(pid: u32, a: &Snap, b: &Snap, gap: Duration, hz: u64, refs_cleared
     let sleeping = b.threads.iter().filter(|t| matches!(t.state, 'S' | 'D')).count();
     let thread = match spinner.or_else(|| steps.iter().find(|s| s.t.tid == pid)).or_else(|| steps.iter().max_by_key(|s| s.ran)) {
         Some(s) => format!("{} {} ({}) {}->{}, ran {:.2} s of {:.2} s, {} read/write system calls, {} voluntary switches, \
-            {:.1} s of CPU in all", if s.t.tid == pid { "main thread" } else { "busiest thread" }, s.t.tid, s.t.name, s.before.state, s.t.state, s.ran.as_secs_f64(), gap_s,
+            {} page faults, {:.1} s of CPU in all", if s.t.tid == pid { "main thread" } else { "busiest thread" }, s.t.tid, s.t.name, s.before.state, s.t.state, s.ran.as_secs_f64(), gap_s,
             calls(s).map_or("? (io not readable)".into(), |n| n.to_string()), switches(s).map_or("?".into(), |n| n.to_string()),
-            secs(s.t.ticks, hz).as_secs_f64()),
+            faults(s), secs(s.t.ticks, hz).as_secs_f64()),
         None => "no thread seen twice".into(),
     };
     let fc = match (fc_mapped, fc_touched) {
@@ -339,16 +348,22 @@ pub fn pick(list: Vec<Verdict>) -> Option<Verdict> {
 
 // ---------------------------------------------------------------- the user's font cache
 
-/// fontconfig's user cache: `$XDG_CACHE_HOME/fontconfig` (an absolute value only, as the XDG spec says), else
-/// `$HOME/.cache/fontconfig`. A flatpak sets XDG_CACHE_HOME to its own folder; the AppImage and the .deb use the host's.
-pub fn cache_dir(xdg_cache_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
-    let abs = |v: Option<&OsStr>| v.map(PathBuf::from).filter(|p| p.is_absolute());
-    abs(xdg_cache_home).or_else(|| abs(home).map(|h| h.join(".cache"))).map(|c| c.join("fontconfig"))
+/// fontconfig's user cache as fontconfig itself finds it (FcConfigXdgCacheHome): `$XDG_CACHE_HOME/fontconfig` when it
+/// is set and not empty, a relative value from the current folder `cwd` (fontconfig takes it as it is, unlike the XDG
+/// spec; the web process has the launcher's folder), else `$HOME/.cache/fontconfig`.
+pub fn cache_dir(xdg_cache_home: Option<&OsStr>, home: Option<&OsStr>, cwd: Option<&Path>) -> Option<PathBuf> {
+    let set = |v: Option<&OsStr>| v.filter(|v| !v.is_empty()).map(PathBuf::from);
+    let from_cwd = |p: PathBuf| if p.is_absolute() { Some(p) } else { cwd.filter(|c| c.is_absolute()).map(|c| c.join(&p)) };
+    match set(xdg_cache_home) {
+        Some(x) => from_cwd(x),
+        None => set(home).and_then(from_cwd).map(|h| h.join(".cache")),
+    }
+    .map(|c| c.join("fontconfig"))
 }
 
 /// This process's.
 pub fn user_cache_dir() -> Option<PathBuf> {
-    cache_dir(std::env::var_os("XDG_CACHE_HOME").as_deref(), std::env::var_os("HOME").as_deref())
+    cache_dir(std::env::var_os("XDG_CACHE_HOME").as_deref(), std::env::var_os("HOME").as_deref(), std::env::current_dir().ok().as_deref())
 }
 
 /// `dir` as the player reads it: `~/.cache/fontconfig` under their home.
@@ -454,7 +469,7 @@ impl Fixed {
 pub fn fix(dir: Option<&Path>, secs: i64, fc_cache: Option<std::process::Command>, within: Duration) -> Fixed {
     let moved = match dir {
         Some(d) => move_aside(d, secs).map_err(|e| e.to_string()),
-        None => Err("neither XDG_CACHE_HOME nor HOME is set".into()),
+        None => Err("the font cache folder is not known (no HOME, or a relative XDG_CACHE_HOME without a current folder)".into()),
     };
     let fc_cache = fc_cache.map_or(FcCache::NotFound, |c| run_fc_cache(c, within));
     Fixed { dir: dir.map(Path::to_path_buf), moved, fc_cache }
@@ -486,6 +501,82 @@ pub fn message(v: &Verdict, dir: &str, log: &str) -> Message {
             font cache too. \"{KEEP_LABEL}\" looks again in {} s.\n\nlauncher.log has the details:\n{log}",
             seen_text(v), KEEP_WAITING.as_secs()),
         buttons: vec![(Action::FixFonts, FIX_LABEL), (Action::KeepWaiting, KEEP_LABEL), (Action::Quit, "Quit")],
+    }
+}
+
+// ---------------------------------------------------------------- once per chain of starts
+
+/// Set by the fix's restart and carried along by the watchdog's later restarts ([`keep`]): the font cache was rebuilt
+/// in this chain of starts, so the hint is not shown again (a wrong verdict would otherwise offer the same fix forever
+/// and never let the watchdog reach the renderer step that may help).
+pub const FIXED_VAR: &str = "KILN_LAUNCHER_FONTS_FIXED";
+static FIXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// crate::render::prepare, before any thread: whether this start came from the fix ([`FIXED_VAR`], which it removes
+/// from the environment then, so a program the launcher starts never gets it).
+pub fn seen_fixed(set: bool) {
+    let _ = FIXED.set(set);
+}
+
+/// This start came after the fix, in this chain of starts.
+pub fn fixed_before() -> bool {
+    FIXED.get().copied().unwrap_or(false)
+}
+
+/// crate::render::Relaunch::keeping: a restart after the fix says so too.
+pub fn keep(r: &mut crate::render::Relaunch, fixed: bool) {
+    if fixed {
+        r.add(FIXED_VAR, "1");
+    }
+}
+
+/// The fix's restart: the same arguments and the watchdog's restart variables, and [`FIXED_VAR`].
+pub fn fix_relaunch() -> crate::render::Relaunch {
+    crate::render::Relaunch { set: vec![(FIXED_VAR, "1".into())], ..Default::default() }.keeping()
+}
+
+/// What a look leads to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// No web process found: on as before.
+    NoProcess,
+    /// Not conclusive: on as before.
+    Unclear,
+    /// Evidence in fontconfig, but the fix already ran in this chain of starts: on as before.
+    FixedBefore,
+    /// The font cache hint.
+    Hint,
+}
+
+pub fn step(found: Option<&Verdict>, fixed_before: bool) -> Step {
+    match found {
+        None => Step::NoProcess,
+        Some(v) if !v.fonts() => Step::Unclear,
+        Some(_) if fixed_before => Step::FixedBefore,
+        Some(_) => Step::Hint,
+    }
+}
+
+/// What the hint's outcome leads to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum After {
+    Started,
+    Fix,
+    Quit,
+    /// "Keep waiting", or closed: another look after [`KEEP_WAITING`].
+    LookAgain,
+    /// Nobody can answer it (a notice without buttons): on as before, instead of a notice every [`KEEP_WAITING`].
+    GoOn,
+}
+
+pub fn after(h: crate::dialog::Hint) -> After {
+    use crate::dialog::Hint;
+    match h {
+        Hint::Started => After::Started,
+        Hint::Chose(Action::FixFonts) => After::Fix,
+        Hint::Chose(Action::Quit) => After::Quit,
+        Hint::Notice => After::GoOn,
+        Hint::Chose(_) | Hint::Closed => After::LookAgain,
     }
 }
 
@@ -557,35 +648,46 @@ pub fn check(what: &str, started: &dyn Fn() -> bool) -> Checked {
             log(&format!("{what}; the page started during the check: no hint"));
             return Checked::Started;
         }
-        let v = match found {
-            None => {
+        let load = load_now().says();
+        let v = match (step(found.as_ref(), fixed_before()), found) {
+            (Step::NoProcess, _) | (_, None) => {
                 log(&format!("{what}; no web process found below the launcher: not conclusive, going on as before"));
                 return Checked::GoOn;
             }
-            Some(v) if !v.fonts() => {
-                log(&format!("{what}; {}; not conclusive: going on as before (the last message lists the font cache step)", v.said));
+            (Step::Unclear, Some(v)) => {
+                log(&format!("{what}; {}; {load}; not conclusive: going on as before (the last message lists the font cache step)", v.said));
                 return Checked::GoOn;
             }
-            Some(v) => v,
+            (Step::FixedBefore, Some(v)) => {
+                log(&format!("{what}; {}; {load}; stuck in the font library again, but the font cache was rebuilt before this start \
+                    ({FIXED_VAR}): no hint again, going on as before", v.said));
+                return Checked::GoOn;
+            }
+            (Step::Hint, Some(v)) => v,
         };
-        log(&format!("{what}; {}; stuck in the font library: the font cache hint (look {look})", v.said));
+        log(&format!("{what}; {}; {load}; stuck in the font library: the font cache hint (look {look})", v.said));
         let m = message(&v, &shown_dir(), &crate::dialog::log_path());
-        match crate::dialog::hint(&m, started) {
-            crate::dialog::Hint::Started => {
+        let shown = crate::dialog::hint(&m, started);
+        match after(shown) {
+            After::Started => {
                 log(&format!("{}; the page started while the hint was up: the hint closed by itself", v.short()));
                 return Checked::Started;
             }
-            crate::dialog::Hint::Chose(Action::FixFonts) => {
+            After::Fix => {
                 fix_and_restart(&v.short(), FIX_LABEL);
                 return Checked::GoOn;
             }
-            crate::dialog::Hint::Chose(Action::Quit) => {
+            After::Quit => {
                 log(&format!("{}; the player chose \"Quit\"", v.short()));
                 crate::dialog::quit(false);
                 return Checked::GoOn;
             }
-            other => {
-                let how = if other == crate::dialog::Hint::Chose(Action::KeepWaiting) { "chose \"Keep waiting\"" } else { "closed the hint" };
+            After::GoOn => {
+                log(&format!("{}; the hint had no buttons (a notice, or nothing could show it): going on as before", v.short()));
+                return Checked::GoOn;
+            }
+            After::LookAgain => {
+                let how = if shown == crate::dialog::Hint::Chose(Action::KeepWaiting) { "chose \"Keep waiting\"" } else { "closed the hint" };
                 log(&format!("{}; the player {how}: looking again in {} s", v.short(), KEEP_WAITING.as_secs()));
                 let until = std::time::Instant::now() + KEEP_WAITING;
                 while std::time::Instant::now() < until {
@@ -607,7 +709,7 @@ pub fn fix_and_restart(seen: &str, label: &str) {
     let dir = user_cache_dir();
     let fixed = fix(dir.as_deref(), kiln_manage::util::now_unix(), Some(fc_cache_command()), FC_CACHE_WITHIN);
     log(&format!("{seen}; the player chose \"{label}\": {}; starting the launcher again", fixed.says()));
-    let err = crate::render::restart(&crate::render::Relaunch::default().keeping());
+    let err = crate::render::restart(&fix_relaunch());
     log(&format!("PROBLEM: could not start again: {err}; start the launcher again yourself"));
     eprintln!("Kiln Launcher: the font cache was rebuilt ({}); could not start again: {err}. Start the launcher again.", fixed.says());
 }
@@ -628,8 +730,15 @@ mod tests {
     const GAP: Duration = Duration::from_secs(2);
 
     fn stat(tid: u32, name: &str, state: char, ticks: u64) -> String {
+        stat_faults(tid, name, state, ticks, FAULTS)
+    }
+
+    /// The page faults a fake thread has made (minflt, field 10; majflt, field 12, stays 0).
+    const FAULTS: u64 = 2286;
+
+    fn stat_faults(tid: u32, name: &str, state: char, ticks: u64, minflt: u64) -> String {
         // utime = ticks, stime = 0 (fields 14 and 15)
-        format!("{tid} ({name}) {state} 4100 4100 4100 0 -1 4194560 2286 0 0 0 {ticks} 0 0 0 20 0 18 0 180222222 1234 997 18446744073709551615")
+        format!("{tid} ({name}) {state} 4100 4100 4100 0 -1 4194560 {minflt} 0 0 0 {ticks} 0 0 0 20 0 18 0 180222222 1234 997 18446744073709551615")
     }
 
     /// (tid, name, state, ticks, voluntary switches, read/write system calls; None: io not readable)
@@ -708,6 +817,38 @@ Referenced:          132 kB
         std::iter::once(main).chain(rest.iter().copied()).collect()
     }
 
+    /// [`looks`] (refs cleared, nothing open) with the main thread (4242) at `minflt` page faults at the second look.
+    fn looks_faulting(a: &[T], b: &[T], fc_code_kb: u64, minflt: u64) -> Verdict {
+        let tmp = kiln_manage::library::TempDir::new(&std::env::temp_dir(), "fonthang-proc").unwrap();
+        let root = tmp.path();
+        fake(root, 4242, a, &smaps(0, 0), &[], "0");
+        let first = read_snap(root, 4242, Maps::No).unwrap();
+        assert!(clear_refs(root, 4242));
+        fake(root, 4242, b, &smaps(fc_code_kb, 40), &[], "0");
+        let main = b.iter().find(|t| t.0 == 4242).unwrap();
+        fs::write(root.join("4242/task/4242/stat"), stat_faults(main.0, main.1, main.2, main.3, minflt)).unwrap();
+        let second = read_snap(root, 4242, Maps::Smaps).unwrap();
+        decide(4242, &first, &second, GAP, HZ, true, Some(Path::new(USER)))
+    }
+
+    /// (review) A healthy font scan (a first start, new fonts, a fontconfig update's new cache version) with no read or
+    /// write system call in the gap: FreeType's Unix streams map font files with mmap, so the read count of a scan
+    /// depends on the build; its page faults do not. Measured on Arch (fontconfig 2.18.3, 2 s looks): python3 spinning
+    /// in FcPatternGetString 0 faults (and a loop outside fontconfig 0); a loop of FcFreeTypeQuery over 710 fonts 39 000
+    /// to 55 000 faults (and there about 10 000 read calls a second as well, so the system call rule held too).
+    #[test]
+    fn a_font_scan_that_faults_pages_in_is_not_a_hang() {
+        let a = with((4242, "WebKitWebProces", 'R', 1400, 310, Some(5210)), &WAITERS_A);
+        let b = with((4242, "WebKitWebProces", 'R', 1597, 310, Some(5210)), &WAITERS_B);
+        let v = looks_faulting(&a, &b, 112, FAULTS + 39_357);
+        assert_eq!(v.kind, Kind::Unclear, "{}", v.said);
+        assert!(v.said.contains("39357 page faults"), "{}", v.said);
+        // a few faults (the allocator, a JIT) do not hide the loop
+        let v = looks_faulting(&a, &b, 12, FAULTS + 20);
+        assert!(v.fonts(), "{}", v.said);
+        assert!(v.said.contains("20 page faults"), "{}", v.said);
+    }
+
     #[test]
     fn the_players_hang_is_stuck_in_fontconfig() {
         let a = with((4242, "WebKitWebProces", 'R', 1400, 310, Some(5210)), &WAITERS_A);
@@ -717,7 +858,7 @@ Referenced:          132 kB
         assert_eq!((*tid, name.as_str()), (4242, "WebKitWebProces"));
         assert!((ran.as_secs_f64() - 1.97).abs() < 0.001 && (total.as_secs_f64() - 15.97).abs() < 0.001);
         for part in ["web process 4242: 3 threads (2 sleeping", "0.00 s outside the main thread", "main thread 4242 (WebKitWebProces) R->R, ran 1.97 s of 2.00 s, \
-            0 read/write system calls, 0 voluntary switches, 16.0 s of CPU in all", "libfontconfig mapped, 12 kB of its code touched",
+            0 read/write system calls, 0 voluntary switches, 0 page faults, 16.0 s of CPU in all", "libfontconfig mapped, 12 kB of its code touched",
             "font caches mapped: 2 (1 in /home/player/.cache/fontconfig), 40 kB touched", "font cache files open: none", "wchan 0",
             "kernel stack not readable"] {
             assert!(v.said.contains(part), "{part:?} in {}", v.said);
@@ -794,9 +935,9 @@ Referenced:          132 kB
 
     #[test]
     fn proc_files_are_read_as_the_kernel_writes_them() {
-        assert_eq!(parse_task_stat(&stat(7, "a (b) c", 'R', 140)), Some(("a (b) c".into(), 'R', 140)));
-        assert_eq!(parse_task_stat("454718 (bash) R 454716 454716 454716 0 -1 4194304 226 0 0 0 140 3 0 0 25 5 1 0 180222222"),
-            Some(("bash".into(), 'R', 143)));
+        assert_eq!(parse_task_stat(&stat(7, "a (b) c", 'R', 140)), Some(("a (b) c".into(), 'R', 140, FAULTS)));
+        assert_eq!(parse_task_stat("454718 (bash) R 454716 454716 454716 0 -1 4194304 226 0 7 0 140 3 0 0 25 5 1 0 180222222"),
+            Some(("bash".into(), 'R', 143, 233)));
         assert_eq!(parse_task_stat("1 (x) R 0 0"), None);
         let m = parse_maps(&smaps(12, 40));
         assert_eq!(m.len(), 6);
@@ -819,27 +960,28 @@ Referenced:          132 kB
     }
 
     #[test]
-    fn a_busy_box_waits_longer() {
-        assert!(Load { load1: Some(54.1), cpus: Some(16) }.loaded());
-        assert!(Load { load1: Some(16.0), cpus: Some(16) }.loaded());
-        assert!(!Load { load1: Some(3.2), cpus: Some(16) }.loaded());
-        assert!(Load { load1: Some(1.5), cpus: None }.loaded(), "CPUs not known: one");
-        assert!(!Load { load1: None, cpus: Some(4) }.loaded());
+    fn the_load_goes_into_the_line() {
         assert_eq!(Load { load1: Some(54.1), cpus: Some(16) }.says(), "load 54.10 on 16 CPUs");
-        assert!(LOADED_LATE > crate::render::TIMEOUT);
+        assert_eq!(Load { load1: Some(1.5), cpus: None }.says(), "load 1.50");
+        assert_eq!(Load { load1: None, cpus: Some(4) }.says(), "load not known");
     }
 
+    /// (review) The folder fontconfig itself uses: it takes a relative XDG_CACHE_HOME from the current folder (checked
+    /// with fontconfig 2.18.3: `XDG_CACHE_HOME=relcache fc-cache -r` wrote `<cwd>/relcache/fontconfig`), so moving
+    /// `$HOME/.cache/fontconfig` then would move a folder the web process does not use.
     #[test]
-    fn the_cache_folder_follows_xdg() {
+    fn the_cache_folder_is_the_one_fontconfig_uses() {
         let os = |s: &str| std::ffi::OsString::from(s);
-        assert_eq!(cache_dir(Some(&os("/x/cache")), Some(&os("/home/p"))), Some(PathBuf::from("/x/cache/fontconfig")));
-        // empty or relative XDG_CACHE_HOME is ignored (the XDG spec)
-        assert_eq!(cache_dir(Some(&os("")), Some(&os("/home/p"))), Some(PathBuf::from("/home/p/.cache/fontconfig")));
-        assert_eq!(cache_dir(Some(&os("rel/cache")), Some(&os("/home/p"))), Some(PathBuf::from("/home/p/.cache/fontconfig")));
-        // a flatpak's own cache folder
-        assert_eq!(cache_dir(Some(&os("/home/p/.var/app/io.frostdev.Kiln/cache")), Some(&os("/home/p"))),
-            Some(PathBuf::from("/home/p/.var/app/io.frostdev.Kiln/cache/fontconfig")));
-        assert_eq!(cache_dir(None, None), None);
+        let cwd = Some(Path::new("/run/cwd"));
+        assert_eq!(cache_dir(Some(&os("/x/cache")), Some(&os("/home/p")), cwd), Some(PathBuf::from("/x/cache/fontconfig")));
+        // empty: unset
+        assert_eq!(cache_dir(Some(&os("")), Some(&os("/home/p")), cwd), Some(PathBuf::from("/home/p/.cache/fontconfig")));
+        assert_eq!(cache_dir(None, Some(&os("/home/p")), cwd), Some(PathBuf::from("/home/p/.cache/fontconfig")));
+        // relative: from the current folder, as fontconfig reads it
+        assert_eq!(cache_dir(Some(&os("rel/cache")), Some(&os("/home/p")), cwd), Some(PathBuf::from("/run/cwd/rel/cache/fontconfig")));
+        // not known where that is: nothing is moved
+        assert_eq!(cache_dir(Some(&os("rel/cache")), Some(&os("/home/p")), None), None);
+        assert_eq!(cache_dir(None, None, cwd), None);
         let home = Path::new("/home/p");
         assert_eq!(shown(Some(Path::new("/home/p/.cache/fontconfig")), Some(home)), "~/.cache/fontconfig");
         assert_eq!(shown(Some(Path::new("/x/cache/fontconfig")), Some(home)), "/x/cache/fontconfig");
@@ -851,7 +993,7 @@ Referenced:          132 kB
     fn the_fix_moves_the_cache_aside_and_runs_fc_cache() {
         let tmp = kiln_manage::library::TempDir::new(&std::env::temp_dir(), "fonthang-home").unwrap();
         let home = tmp.path();
-        let dir = cache_dir(None, Some(home.as_os_str())).unwrap();
+        let dir = cache_dir(None, Some(home.as_os_str()), None).unwrap();
         assert!(dir.starts_with(home));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("3830d5c3ddfd5cd38a049b759396e72e-le64.cache-9"), b"broken").unwrap();
@@ -884,6 +1026,16 @@ Referenced:          132 kB
         assert!(f.says().starts_with(&format!("there was no {}", dir.display())), "{}", f.says());
         // no HOME and no XDG_CACHE_HOME
         assert!(fix(None, secs, None, Duration::from_secs(1)).moved.is_err());
+        // a symlinked cache folder: the link is renamed, its target (elsewhere) is left as it is
+        let target = home.join("elsewhere/fc");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("x-le64.cache-9"), b"broken").unwrap();
+        std::os::unix::fs::symlink(&target, &dir).unwrap();
+        let f = fix(Some(&dir), secs + 60, None, Duration::from_secs(1));
+        let link = home.join(".cache/fontconfig.broken-20261125-142239Z");
+        assert_eq!(f.moved, Ok(Some(link.clone())), "{f:?}");
+        assert_eq!(fs::read_link(&link).unwrap(), target);
+        assert!(fs::symlink_metadata(&dir).is_err() && target.join("x-le64.cache-9").is_file());
     }
 
     #[test]
@@ -934,6 +1086,42 @@ Referenced:          132 kB
         assert_eq!(v[1].kind, Kind::Unclear, "a shell's loop: {}", v[1].said);
         assert_eq!(v[2].kind, Kind::Unclear, "asleep: {}", v[2].said);
         assert_eq!(pick(v).map(|x| x.fonts()), Some(true));
+    }
+
+    /// (review) After "Fix it and restart" the new start, and every restart of the watchdog after it, carries
+    /// [`FIXED_VAR`]; such a start never shows the hint again, so a wrong verdict (another loop on the main thread, a
+    /// broken system cache) cannot offer the same fix forever and keep the watchdog from its renderer steps.
+    #[test]
+    fn the_hint_comes_once_per_chain_of_starts() {
+        let fonts = Verdict { pid: 1, kind: Kind::Fonts(Seen::Waiting { file: "/x/a-le64.cache-9".into() }), said: String::new() };
+        let unclear = Verdict { pid: 1, kind: Kind::Unclear, said: String::new() };
+        assert_eq!(step(Some(&fonts), false), Step::Hint);
+        assert_eq!(step(Some(&fonts), true), Step::FixedBefore);
+        assert_eq!(step(Some(&unclear), false), Step::Unclear);
+        assert_eq!(step(Some(&unclear), true), Step::Unclear);
+        assert_eq!(step(None, false), Step::NoProcess);
+        assert!(fix_relaunch().set.contains(&(FIXED_VAR, "1".to_string())));
+        // the watchdog's restarts after the fix keep it; before it, they do not set it
+        let mut r = crate::render::Relaunch::dmabuf_fallback();
+        keep(&mut r, true);
+        assert!(r.set.contains(&(FIXED_VAR, "1".to_string())), "{r:?}");
+        let mut r = crate::render::Relaunch::dmabuf_fallback();
+        keep(&mut r, false);
+        assert!(!r.set.iter().any(|(k, _)| *k == FIXED_VAR), "{r:?}");
+    }
+
+    /// (review) What each outcome of the hint leads to: a notice without buttons (notify-send, when the window's main
+    /// loop does not answer and there is no zenity or kdialog) goes on as before, instead of a critical notice every
+    /// 30 s for as long as the window can't draw.
+    #[test]
+    fn a_hint_nobody_can_answer_is_not_sent_again() {
+        use crate::dialog::Hint as H;
+        assert_eq!(after(H::Notice), After::GoOn);
+        assert_eq!(after(H::Closed), After::LookAgain);
+        assert_eq!(after(H::Chose(Action::KeepWaiting)), After::LookAgain);
+        assert_eq!(after(H::Chose(Action::FixFonts)), After::Fix);
+        assert_eq!(after(H::Chose(Action::Quit)), After::Quit);
+        assert_eq!(after(H::Started), After::Started);
     }
 
     #[test]

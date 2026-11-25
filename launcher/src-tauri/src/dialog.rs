@@ -236,8 +236,10 @@ pub fn quit(main_thread: bool) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hint {
     Chose(Action),
-    /// Closed without a button, or no tool could show it.
+    /// Closed without a button.
     Closed,
+    /// Only a notice without buttons could show it (notify-send), or nothing could: nobody can answer it.
+    Notice,
     /// The page started while it was up: it closed by itself.
     Started,
 }
@@ -268,9 +270,13 @@ pub fn hint(m: &Message, started: &dyn Fn() -> bool) -> Hint {
     if !up {
         gone.store(true, Ordering::SeqCst);
         log("the window's main loop did not put the hint up: the desktop's tools");
-        return match ask_tools(m, Closed::Nothing) {
+        return match zenity(m, Closed::Nothing).or_else(|| kdialog(m, Closed::Nothing)) {
             Some(Some(a)) => Hint::Chose(a),
-            _ => Hint::Closed,
+            Some(None) => Hint::Closed,
+            None => {
+                notice(m);
+                Hint::Notice
+            }
         };
     }
     loop {
@@ -402,6 +408,11 @@ fn ask_tools(m: &Message, closed: Closed) -> Option<Option<Action>> {
     if let Some(a) = kdialog(m, closed) {
         return Some(a);
     }
+    notice(m).then_some(None)
+}
+
+/// notify-send: the message without buttons (the text names the flags). False: it could not show it either.
+fn notice(m: &Message) -> bool {
     let mut body = m.body.clone();
     let flags: Vec<&str> = m.buttons.iter().filter_map(|b| match b.0 {
         Action::SandboxOff => Some(crate::sandbox::ARG_OFF),
@@ -415,7 +426,7 @@ fn ask_tools(m: &Message, closed: Closed) -> Option<Option<Action>> {
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
         .status().is_ok_and(|s| s.success());
     log(if ok { "the message went out as a desktop notice (notify-send)" } else { "no tool could show the message (zenity, kdialog, notify-send)" });
-    ok.then_some(None)
+    ok
 }
 
 /// The buttons as a tool shows them.
