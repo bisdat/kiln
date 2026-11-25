@@ -80,3 +80,43 @@ fn changed_copies_are_pruned_to_the_newest_three_of_their_entry() {
         "1.0.0+aaaaaaaa.notes", "1.0.0+bbbbbbbb.20261101T000000Z"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The import's copy cannot be put in place (here: its staging folder cannot be changed): the changed folder is moved
+/// back, so the entry is as it was, with its folder and record, and nothing is kept aside or logged.
+#[cfg(unix)]
+#[test]
+fn a_failed_put_back_moves_the_changed_folder_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("km-library-restore-back-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dirs = DataDirs::at(root.join("data"));
+    let src = root.join("src/stacks");
+    put(&src, "mod.json", br#"{"id":"stacks","name":"Stacks","version":"1.2.0","capabilities":["patch"]}"#);
+    put(&src, "src/mod.lua", b"return {}");
+    let r = import(&dirs, std::slice::from_ref(&src), &mut crate::task::NoProgress).unwrap().imported[0].clone();
+    let folder = path_of(&dirs, &r).unwrap();
+    let rec = record(&dirs, &r).unwrap();
+    put(&folder, "src/mod.lua", b"return { edited = true }");
+    let changed = tree(&folder);
+    let tmp = TempDir::new(&dirs.library(), "import").unwrap();
+    copy_mod_tree(&src, &tmp.path().join("m")).unwrap();
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(tmp.path().join("probe"), b"").is_ok() {
+        // root: permissions do not stop it, so the failure cannot be made here
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+    let mut report = ImportReport::default();
+    let err = commit_folder_with(&dirs, &tmp.path().join("m"), rec, &mut report, &mut |_, _| Ok(None)).unwrap_err();
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(err.message.contains("could not be put in place"), "{}", err.message);
+    assert_eq!(tree(&folder), changed, "the changed folder is back");
+    assert!(record_path(&folder).is_file());
+    let kept = dirs.library().join(CHANGED_DIR).join(r.kind.as_str()).join(&r.id);
+    assert!(std::fs::read_dir(&kept).map(|d| d.count()).unwrap_or(0) == 0, "nothing kept aside");
+    assert!(!dirs.library().join(CHANGED_DIR).join(CHANGED_LOG).exists());
+    assert!(report.existing.is_empty() && report.notes.is_empty());
+    drop(tmp);
+    let _ = std::fs::remove_dir_all(&root);
+}
