@@ -1597,10 +1597,13 @@ Result12* __fastcall ge_remove(Result12* out, void* tx, uint32_t owner, uint32_t
     fake_remove(out,tx,owner,item,slot,count); ge_maybe_fault(3); return out;
 }
 uint64_t ge_target = 0;
+bool ge_transfer_keeps_pide = false;  // a vacated cell that still names the moved instance in its pide field
 Result12* __fastcall ge_transfer(Result12* out, void* tx, uint64_t dst, uint64_t src, int32_t mode) {
     const auto pide = pide_at(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src));
     const auto item = item_at(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src));
     fake_transfer(out, tx, dst, src, mode);
+    if (ge_transfer_keeps_pide && !out->error && !count_at(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src)))
+        std::memcpy(stack(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src)) + 8, &pide, 4);
     if (!out->error && out->value && pide) push_op(5, dst, item, static_cast<uint16_t>(out->value), pide);
     ge_maybe_fault(2);
     return out;
@@ -1642,8 +1645,20 @@ Result12* __fastcall ge_select(Result12* out, void*, uint8_t remove, uint32_t, c
     ge_maybe_fault(5);
     return out;
 }
+// EquipItem's first decision, as the jump table of both approved builds has it (docs/re/items.md section 22):
+// types 1-12 and 36 are selected in place in Generic (4); 13-18, 34, 35, 37, 38 move to Equipment (2); others 0.
+int ge_kind_override = -1;  // -1: the table below
+uint8_t __fastcall ge_kind(const void* info) {
+    if (ge_kind_override >= 0) return static_cast<uint8_t>(ge_kind_override);
+    const uint8_t t = static_cast<const uint8_t*>(info)[0x104];
+    if ((t >= 1 && t <= 12) || t == 36) return 4;
+    if ((t >= 13 && t <= 18) || t == 34 || t == 35 || t == 37 || t == 38) return 2;
+    return 0;
+}
+int ge_equip_calls = 0;
 Result12* __fastcall ge_equip(Result12* out, void* tx, uint64_t source, uint8_t slot) {
     *out = {};
+    ++ge_equip_calls;
     if (ge_equip_fail) return out->error = 0x11, out;
     uint64_t target=0;
     std::memcpy(&target,comp(T_SEL,P,216).data()+selection_index(slot)*8,8);
@@ -1717,10 +1732,197 @@ void __fastcall ge_free(void*) {
     ++ge_frees;
     if (ge_free_fault) { ge_free_fault=false; RaiseException(EXCEPTION_ACCESS_VIOLATION,0,0,nullptr); }
 }
+// #139: instance-backed Arrow/Spell/FishingBait (eternal spells). The game equips these in place exactly like plain
+// ammo (EquipLocationKind 4) and passes the stack's own pide to op7, whose commit ORs ItemState.IsEquipped (0x08).
+// GiveEquip creates the instance once at its final Generic cell and gives it that bit through the scoped creation
+// hook, as for gear; replacement deselects (op7 remove + pide) and moves or destroys the old instance.
+template <class Run, class Reset, class Refusal>
+void eternal_ammo_tests(Run& run, Reset& reset, Refusal& unchanged_refusal) {
+    constexpr uint32_t ETERNAL = 13, ETERNAL2 = 14, PLAIN = 12;
+    const uint32_t flag_sets[] = {0,KILN_ITEMS_GIVE_EQUIP_TAKE,KILN_ITEMS_GIVE_EQUIP_DRY_RUN,
+                                  KILN_ITEMS_GIVE_EQUIP_TAKE|KILN_ITEMS_GIVE_EQUIP_DRY_RUN};
+    auto set_ids = [] {
+        for (uint32_t id : {ETERNAL, ETERNAL2, PLAIN, ARROW}) std::memcpy(g_item_bytes[id%8],&id,4);
+    };
+    auto eternal_reset = [&](uint8_t slot) {
+        reset();
+        set_item(ETERNAL,1,true,slot_type_of(slot),8);
+        set_item(ETERNAL2,1,true,slot_type_of(slot),8);
+        set_item(PLAIN,99,false,slot_type_of(slot),8);
+        set_item(ARROW,99,false,slot_type_of(slot),8);
+        set_ids();
+    };
+    // An existing equipped instance in a Generic cell, as the game leaves one after its own in-place Equip.
+    auto existing = [&](uint32_t pide, uint32_t item, uint64_t cell, uint8_t flags) {
+        put(KILN_SLOT_INVENTORY(cell),KILN_SLOT_INDEX(cell),item,1,pide);
+        auto& state=comp(T_ITEMSTATE,pide,20);
+        std::memcpy(state.data(),&cell,8); std::memcpy(state.data()+8,&item,4);
+        state[0x0e]=flags; state[0x10]=2; state[0x11]=3;
+        const uint32_t page=KILN_SLOT_INVENTORY(cell);
+        std::memcpy(comp(T_OWNER,pide,4).data(),&page,4);
+    };
+    auto select = [&](uint8_t slot, uint64_t cell) { std::memcpy(comp(T_SEL,P,216).data()+slot*8,&cell,8); };
+    auto sel = [&](uint8_t slot) { return rd<uint64_t>(comp(T_SEL,P,216).data(),slot*8); };
+    const uint64_t cell=KILN_SLOT_ID(101,0), spare=KILN_SLOT_ID(101,3);
+    KilnItemsEquipResult r{};
+
+    // Zero selection: one instance, created once in the final verified Generic cell, selected and IsEquipped.
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : flag_sets) {
+        eternal_reset(slot); put(101,0,0,0);
+        const auto before=g_comps; const auto next=g_next_pide;
+        r=run(flags,slot,ETERNAL,1);
+        const bool dry=(flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;
+        char text[200];
+        std::snprintf(text,sizeof text,"#139 eternal ammo, zero selection (slot=%u flags=0x%x): one instance created in "
+                      "its final Generic cell, IsEquipped, selected in place, never Equipment",slot,flags);
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && !r.replaced && ge_ctors==1 && ge_frees==1 &&
+              ge_commits==!dry && ge_rollbacks==dry && ge_equip_calls==0 &&
+              (dry ? g_comps==before && g_next_pide==next && !r.pide
+                   : r.pide==next && g_next_pide==next+1 && item_at(101,0)==ETERNAL && count_at(101,0)==1 &&
+                     pide_at(101,0)==r.pide && comp(T_ITEMSTATE,r.pide,20)[0x0e]==0x48 &&
+                     rd<uint64_t>(comp(T_ITEMSTATE,r.pide,20).data(),0)==cell &&
+                     rd<uint32_t>(comp(T_OWNER,r.pide,4).data(),0)==101 && sel(slot)==cell && page_empty(100)),
+              text);
+    }
+    // The same final bytes as the game's own path: the instance given into that backpack cell, then equipped in place
+    // (EquipItem kind 4: SelectEquipment with the stack's pide; commit sets IsEquipped).
+    eternal_reset(15); put(101,0,0,0); r=run(0,15,ETERNAL,1);
+    const auto route_state=comp(T_ITEMSTATE,r.pide,20), route_owner=comp(T_OWNER,r.pide,4), route_sel=comp(T_SEL,P,216);
+    eternal_reset(15); existing(777,ETERNAL,cell,0x40);
+    alignas(16) uint8_t vanilla_tx[512]{}; ge_ctor(vanilla_tx); Result12 vanilla_out{};
+    ge_equip(&vanilla_out,vanilla_tx,cell,15); ge_commit(vanilla_tx);
+    check(vanilla_out.error==0 && comp(T_ITEMSTATE,777,20)==route_state && comp(T_OWNER,777,4)==route_owner &&
+          comp(T_SEL,P,216)==route_sel && item_at(101,0)==ETERNAL && count_at(101,0)==1,
+          "#139 eternal route matches the fixture's vanilla Give + in-place Equip bytes (state, owner, selection)");
+
+    // A selected cell is reused in place. The instance path never calls EquipItem on the pending stack: the new
+    // instance is selected with pide 0 (the creation hook sets its bit), so no stale pide field can be marked.
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : flag_sets) {
+        const bool dry=(flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0, take=(flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0;
+        // empty selected cell whose stale pide field names a live instance elsewhere
+        eternal_reset(slot); existing(555,ETERNAL2,KILN_SLOT_ID(101,5),0x40); put(101,0,0,0,555); select(slot,cell);
+        auto before=g_comps; auto next=g_next_pide;
+        r=run(flags,slot,ETERNAL,1);
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && !r.replaced && !r.replaced_to && ge_equip_calls==0 &&
+              (dry ? g_comps==before && g_next_pide==next
+                   : pide_at(101,0)==r.pide && r.pide==next && comp(T_ITEMSTATE,r.pide,20)[0x0e]==0x48 &&
+                     comp(T_ITEMSTATE,555,20)[0x0e]==0x40 && sel(slot)==cell),
+              "#139 eternal ammo, empty selected cell: reused in place; a stale pide field is never marked equipped");
+        // occupied by an equipped eternal: Backpack keeps its identity (same pide) and clears its IsEquipped
+        eternal_reset(slot); existing(555,ETERNAL2,cell,0x48); put(101,3,0,0); select(slot,cell);
+        before=g_comps; next=g_next_pide;
+        r=run(flags,slot,ETERNAL,1);
+        char text[220];
+        std::snprintf(text,sizeof text,"#139 eternal replaces an equipped eternal (slot=%u flags=0x%x): old instance %s, "
+                      "new one created once in the same cell",slot,flags,take ? "destroyed" : "moved with its identity, unequipped");
+        check(r.status==KILN_ITEMS_DONE && r.to==cell && r.replaced==ETERNAL2 && r.replaced_pide==555 && r.reserved[0]==1 &&
+              r.replaced_to==(take ? 0 : spare) && ge_equip_calls==0 && ge_commits==!dry && ge_rollbacks==dry &&
+              (dry ? g_comps==before && g_next_pide==next
+                   : item_at(101,0)==ETERNAL && pide_at(101,0)==r.pide && r.pide==next &&
+                     comp(T_ITEMSTATE,r.pide,20)[0x0e]==0x48 && sel(slot)==cell &&
+                     (take ? count_at(101,3)==0 && !g_comps.count({T_ITEMSTATE,555}) && !g_comps.count({T_OWNER,555})
+                           : item_at(101,3)==ETERNAL2 && count_at(101,3)==1 && pide_at(101,3)==555 &&
+                             comp(T_ITEMSTATE,555,20)[0x0e]==0x40 &&
+                             rd<uint64_t>(comp(T_ITEMSTATE,555,20).data(),0)==spare)),
+              text);
+        // plain ammo replaced by an eternal, and an eternal replaced by plain ammo
+        eternal_reset(slot); put(101,0,PLAIN,20); put(101,3,0,0); select(slot,cell);
+        before=g_comps;
+        r=run(flags,slot,ETERNAL,1);
+        check(r.status==KILN_ITEMS_DONE && r.replaced==PLAIN && r.reserved[0]==20 && !r.replaced_pide &&
+              (dry ? g_comps==before : pide_at(101,0)==r.pide && r.pide &&
+                     (take ? count_at(101,3)==0 : item_at(101,3)==PLAIN && count_at(101,3)==20)),
+              "#139 an eternal replaces plain ammo: Backpack/Take/DryRun as for plain");
+        eternal_reset(slot); existing(555,ETERNAL2,cell,0x48); put(101,3,0,0); select(slot,cell);
+        before=g_comps; next=g_next_pide;
+        r=run(flags,slot,ARROW,50);
+        check(r.status==KILN_ITEMS_DONE && r.replaced==ETERNAL2 && r.replaced_pide==555 && !r.pide && g_next_pide==next &&
+              (dry ? g_comps==before
+                   : item_at(101,0)==ARROW && count_at(101,0)==50 &&
+                     (take ? !g_comps.count({T_ITEMSTATE,555})
+                           : pide_at(101,3)==555 && comp(T_ITEMSTATE,555,20)[0x0e]==0x40)),
+              "#139 plain ammo replaces an eternal: the old instance is unequipped and kept (Backpack) or destroyed (Take)");
+    }
+    // Even if the game's transfer left the moved instance's id in the vacated cell, Backpack never marks it equipped
+    // again: neither the new eternal nor plain ammo replacing an instance goes through EquipItem's stack read.
+    for (uint32_t item : {ETERNAL, ARROW}) {
+        eternal_reset(15); existing(555,ETERNAL2,cell,0x48); put(101,3,0,0); select(15,cell); ge_transfer_keeps_pide=true;
+        r=run(0,15,item,item==ARROW ? 50 : 1);
+        check(r.status==KILN_ITEMS_DONE && ge_equip_calls==0 && pide_at(101,3)==555 && comp(T_ITEMSTATE,555,20)[0x0e]==0x40,
+              item==ARROW ? "#139 plain ammo over an eternal: a stale pide field never re-marks the moved instance"
+                          : "#139 eternal over an eternal: a stale pide field never re-marks the moved instance");
+    }
+    // Plain over plain keeps the existing EquipItem route exactly.
+    eternal_reset(15); put(101,0,PLAIN,20); put(101,3,0,0); select(15,cell);
+    r=run(0,15,ARROW,50);
+    check(r.status==KILN_ITEMS_DONE && ge_equip_calls==1 && item_at(101,3)==PLAIN,
+          "#139 plain over plain ammo still runs the game's EquipItem in place (unchanged route)");
+    // Refusals before any transaction.
+    for (uint32_t flags : flag_sets) {
+        eternal_reset(15); put(101,0,0,0);
+        auto before=g_comps; r=run(flags,15,ETERNAL,2);
+        unchanged_refusal(before,r,KILN_ITEMS_REFUSED,"#139 an eternal is one item: count 2 refused");
+        eternal_reset(15); put(101,0,0,0); E.give_equip_instance_ammo_ok=false;
+        before=g_comps; r=run(flags,15,ETERNAL,1);
+        unchanged_refusal(before,r,KILN_ITEMS_REFUSED,"#139 without items.give_equip.instance_ammo an eternal is refused");
+        check(std::strstr(r.message,"instance-backed")!=nullptr,"#139 that refusal names instance-backed ammo");
+        eternal_reset(15); put(101,0,0,0); E.give_equip_instance_ammo_ok=false; r=run(flags,15,ARROW,50);
+        check(r.status==KILN_ITEMS_DONE && r.to==cell,"#139 plain ammo does not need items.give_equip.instance_ammo");
+        eternal_reset(15); existing(555,ETERNAL2,cell,0x48); select(15,cell); E.give_equip_instance_ammo_ok=false;
+        before=g_comps; r=run(flags,15,ARROW,50);
+        unchanged_refusal(before,r,KILN_ITEMS_SLOT_CHANGED,
+                          "#139 without the feature an eternal in the selected cell is neither moved nor destroyed");
+        for (int kind : {2, 0}) {
+            eternal_reset(15); put(101,0,0,0); ge_kind_override=kind;
+            before=g_comps; r=run(flags,15,ETERNAL,1);
+            unchanged_refusal(before,r,KILN_ITEMS_REFUSED,"#139 the game's own EquipLocationKind must say in place (Generic)");
+            eternal_reset(15); put(101,0,0,0); ge_kind_override=kind; r=run(flags,15,ARROW,50);
+            check(r.status==KILN_ITEMS_DONE,"#139 plain ammo does not consult EquipLocationKind (unchanged)");
+        }
+        for (uint32_t stale : {0u, UINT32_MAX}) {
+            eternal_reset(15); put(101,0,ETERNAL2,1,stale); put(101,3,0,0); select(15,cell);
+            before=g_comps; r=run(flags,15,ETERNAL,1);
+            unchanged_refusal(before,r,KILN_ITEMS_SLOT_CHANGED,
+                              "#139 a selected instance-backed stack without its item entity is stale: SlotChanged");
+        }
+        // Review: a nonzero pide field is not yet an item entity. It must have an ItemState that says it lies in this
+        // very cell and is this item; otherwise Backpack would move (and op7 unequip) or Take destroy the wrong entity.
+        for (int bad=0; bad<4; ++bad) for (uint32_t item : {ETERNAL, ARROW}) {
+            eternal_reset(15); put(101,3,0,0); select(15,cell);
+            if (bad==0) put(101,0,ETERNAL2,1,999);                                  // no ItemState at all
+            if (bad==1) { existing(555,ETERNAL2,KILN_SLOT_ID(101,5),0x48); put(101,0,ETERNAL2,1,555); }  // lies elsewhere
+            if (bad==2) { existing(555,ETERNAL,cell,0x48); put(101,0,ETERNAL2,1,555); }  // another item's entity
+            if (bad==3) { existing(555,ETERNAL2,cell,0x48); g_comps[{T_ITEMSTATE,555}].resize(12); }  // short component
+            const auto before=g_comps; const auto next=g_next_pide;
+            r=run(flags,15,item,item==ARROW ? 50 : 1);
+            unchanged_refusal(before,r,KILN_ITEMS_SLOT_CHANGED,
+                              "#139 review: a selected instance-backed stack whose ItemState is missing, short, elsewhere or "
+                              "another item's is refused (SlotChanged) before any change");
+            check(g_next_pide==next && ge_ctors==0,"#139 review: that refusal builds no transaction and creates no instance");
+        }
+    }
+    // Failures roll back once with no instance; a post-commit invariant fault never rolls back.
+    for (bool occupied : {false,true}) for (bool take : {false,true}) for (int fault=0; fault<6; ++fault) {
+        eternal_reset(15); put(101,3,0,0);
+        if (occupied) { existing(555,ETERNAL2,cell,0x48); select(15,cell); } else put(101,0,0,0);
+        const auto before=g_comps; const auto next=g_next_pide;
+        g_add_fails=fault==0; ge_equip_fail=fault==1; ge_spill=fault==2; ge_guard=fault==3; ge_empty_guard=fault==4;
+        ge_invalid_pide=fault==5;
+        r=run(take ? KILN_ITEMS_GIVE_EQUIP_TAKE : 0,15,ETERNAL,1);
+        if (fault==5) check(r.status==KILN_ITEMS_UNAVAILABLE && ge_commits==1 && !ge_rollbacks && ge_frees==1,
+                            "#139 eternal: a committed stack without a valid instance turns equipment off, never rolls back");
+        else check(r.status==KILN_ITEMS_REFUSED && g_comps==before && g_next_pide==next && !ge_commits &&
+                   ge_rollbacks==1 && ge_frees==1,
+                   "#139 eternal add/select/spill/guard failure restores every byte once, no instance, old one untouched");
+    }
+    reset();
+}
+
 void give_equip_test() {
     E.tx_ctor = &ge_ctor; E.tx_init = &ge_init; E.add_items = &ge_add; E.remove_items = &ge_remove; E.item_find = &ge_find;
     E.equip_item = &ge_equip; E.select_equipment=&ge_select; E.commit = &ge_commit; E.rollback = &ge_rollback; E.free_arrays = &ge_free;
     E.slot_transfer = &ge_transfer;
+    E.equip_location_kind = &ge_kind; E.give_equip_instance_ammo_ok = true;
     E.tx_ops = 0x100; E.tx_guard_flags = 0x170; E.tx_empty_state = 0xa0; E.tx_touched_count = 0x178;
     g_item_bytes[SWORD % 8][0x104] = 37;
     std::memcpy(g_item_bytes[SWORD%8],&SWORD,4);
@@ -1733,6 +1935,7 @@ void give_equip_test() {
         ge_ctors=ge_commits=ge_rollbacks=ge_frees=0; ge_equip_fail=ge_guard=g_add_fails=false;
         ge_target=0; ge_free_fault=ge_preflight_fault=ge_steal_replaced=false; ge_fault=0;
         ge_spill=ge_move_new=ge_empty_guard=ge_invalid_pide=false;
+        ge_equip_calls=0; ge_kind_override=-1; E.give_equip_instance_ammo_ok=true; ge_transfer_keeps_pide=false;
     };
     auto run = [&](uint32_t flags=0, uint8_t slot=10, uint32_t item=SWORD, uint32_t count=1) {
         alignas(16) uint8_t tx[512]{};
@@ -1980,12 +2183,13 @@ void give_equip_test() {
     for (int bad=0; bad<3; ++bad) {
         ammo_reset(15); put(101,0,0,0);
         if (bad==0) g_item_bytes[ARROW%8][0xCC]=9;
-        if (bad==1) g_item_bytes[ARROW%8][E.item_flags]=2;
+        if (bad==1) g_item_bytes[ARROW%8][E.item_flags]=4;
         if (bad==2) g_item_bytes[ARROW%8][0x104]=6;
-        const auto before_type=g_comps; r=run(0,15,ARROW,bad==1 ? 1 : 50);
+        const auto before_type=g_comps; r=run(0,15,ARROW,50);
         unchanged_refusal(before_type,r,KILN_ITEMS_REFUSED,
-                          "#139 ammo requires matching physical type and plain Ammunition category, not gear or material");
+                          "#139 ammo requires matching physical type and Ammunition category, no own inventory or material");
     }
+    eternal_ammo_tests(run, reset, unchanged_refusal);
     // Free evacuation cells must also be real Generic, not action bars or another equipment reference.
     for (bool take : {false,true}) {
         ammo_reset(15); const uint64_t cell=KILN_SLOT_ID(101,0), reserved=KILN_SLOT_ID(101,3);

@@ -28,6 +28,8 @@ internal static unsafe partial class ItemsTable
 internal sealed unsafe partial class ItemsFake
 {
     public const string GiveEquipFeature = "items.give_equip";
+    // #139: instance-backed arrows, spells and bait (eternal spells); a sigdb feature on a real game build.
+    public const string InstanceAmmoFeature = "items.give_equip.instance_ammo";
     private sealed class GiveEquipJob
     {
         public required ulong Ticket, Owner;
@@ -38,6 +40,9 @@ internal sealed unsafe partial class ItemsFake
     private readonly List<GiveEquipJob> _giveEquipPending = [];
     // The kit models logical equipment separately; it does not pretend to reproduce the game's page layout.
     private readonly Dictionary<(Inv Inventory, byte Slot), Stack> _equipment = [];
+    // Arrow, Spell and FishingBait are selected in place: the backpack cell (index into Inv.Slots) each one names.
+    private readonly Dictionary<(Inv Inventory, byte Slot), int> _ammoCells = [];
+    private static bool IsAmmoSlot(byte slot) => slot is 14 or 15 or 16;
     internal static byte EquipmentType(byte slot) => slot switch
     {
         <= 4 => (byte)(13 + slot), <= 9 => (byte)(8 + slot), 10 or 11 => 37, 12 => 5, 13 => 18,
@@ -97,7 +102,12 @@ internal sealed unsafe partial class ItemsFake
             else if (q.EquipmentSlot == 23) { result.Status = ItemsAbi.Refused; why = "backpack items can't be given straight into the bag slot yet"; }
             else if (item == null) { result.Status = ItemsAbi.UnknownItem; why = "unknown item"; }
             else if (item.EquipmentSlotType != EquipmentType(q.EquipmentSlot)) { result.Status = ItemsAbi.Refused; why = "the item does not fit that equipment slot"; }
+            else if (IsAmmoSlot(q.EquipmentSlot) && item.Category != ItemCategory.Ammunition)
+            { result.Status = ItemsAbi.Refused; why = "ammo equipment requires an Ammunition item without its own inventory"; }
+            else if (IsAmmoSlot(q.EquipmentSlot) && item.Gear && FakeTables.Off(InstanceAmmoFeature))
+            { result.Status = ItemsAbi.Refused; why = "instance-backed ammo (eternal spells) needs feature items.give_equip.instance_ammo, which this game build did not resolve"; }
             else if (q.Count > item.MaxStack || (item.Gear && q.Count != 1)) { result.Status = ItemsAbi.Refused; why = "count must fit one equipment stack"; }
+            else if (IsAmmoSlot(q.EquipmentSlot)) why = RunAmmo(q, item, inventory!, take, dry, ref result);
             else if (old != null && !take && destination < 0) { result.Status = ItemsAbi.NoRoom; why = "no free backpack slot for the replaced item"; }
             else
             {
@@ -136,5 +146,70 @@ internal sealed unsafe partial class ItemsFake
             SpawnAbi.CopyText(why, result.Message, ItemsAbi.MessageMax);
             if (job.Done != 0) ((delegate* unmanaged[Cdecl]<ItemsNative.EquipResult*, void*, void>)job.Done)(&result, (void*)job.User);
         }
+    }
+
+    // kiln.items' ammo rules (native engine.cpp give_equip_run): the selected backpack cell is reused; with none, a free
+    // cell no other ammo selection names. An old stack must still be Ammunition of the slot's type (an eternal with
+    // its entity); Backpack moves it to another free cell and unequips an eternal, Take destroys it.
+    private string RunAmmo(ItemsAbi.GiveEquipRequest q, FakeItem item, Inv inventory, bool take, bool dry, ref ItemsNative.EquipResult result)
+    {
+        var key = (inventory, q.EquipmentSlot);
+        bool Reserved(int i) => _ammoCells.Any(c => c.Key.Inventory == inventory && c.Key.Slot != q.EquipmentSlot && c.Value == i);
+        int Free(int except) =>
+            Enumerable.Range(0, inventory.Slots.Length).FirstOrDefault(i => i != except && inventory.Slots[i].Count == 0 && !Reserved(i), -1);
+        Stack? old = null;
+        if (_ammoCells.TryGetValue(key, out var cell))
+        {
+            if (cell >= inventory.Slots.Length || Reserved(cell))
+            { result.Status = ItemsAbi.SlotChanged; return "the ammo selection is not a verified unshared Generic backpack cell"; }
+            var there = inventory.Slots[cell];
+            if (there.Count > 0)
+            {
+                var previous = Item(there.Item);
+                if (previous == null || previous.Category != ItemCategory.Ammunition || previous.EquipmentSlotType != EquipmentType(q.EquipmentSlot) ||
+                    (previous.Gear && FakeTables.Off(InstanceAmmoFeature)))
+                { result.Status = ItemsAbi.SlotChanged; return "the selected ammo cell no longer holds matching Ammunition"; }
+                if (previous.Gear && there.Pide == 0)
+                { result.Status = ItemsAbi.SlotChanged; return "the selected instance-backed ammo has no item entity"; }
+                // native: the entity's ItemState must still say it lies in that cell and is that item
+                if (previous.Gear && (!_gear.ContainsKey(there.Pide) || !World.Exists(there.Pide)))
+                { result.Status = ItemsAbi.SlotChanged; return "the selected instance-backed ammo's item entity does not lie in that cell"; }
+                old = there;
+            }
+        }
+        else if ((cell = Free(-1)) < 0) { result.Status = ItemsAbi.NoRoom; return "no verified empty unselected Generic backpack cell is available"; }
+        var destination = old != null && !take ? Free(cell) : -1;
+        if (old != null && !take && destination < 0)
+        { result.Status = ItemsAbi.NoRoom; return "no free slot in the player's backpack for the replaced item"; }
+        result.Status = ItemsAbi.Done;
+        result.Item = q.Item;
+        result.To = inventory.SlotId(cell);
+        if (old != null)
+        {
+            result.Replaced = old.Item; result.ReplacedPide = old.Pide;
+            result.ReplacedStamp = StampOf(old.Pide); result.Reserved[0] = (uint)old.Count;
+            if (!take) result.ReplacedTo = inventory.SlotId(destination);
+        }
+        if (dry) return "";
+        if (old != null)
+        {
+            if (!take)
+            {
+                inventory.Slots[destination] = old;
+                if (_gear.TryGetValue(old.Pide, out var oldGear)) oldGear.State &= unchecked((ushort)~8);
+            }
+            else if (old.Pide != 0) DestroyGear(old.Pide);
+        }
+        var stack = new Stack { Item = q.Item, Count = (int)q.Count, Level = (ushort)Math.Max(item.LevelMin, 0), Rarity = (byte)item.Rarity };
+        if (item.Gear)
+        {
+            stack.Pide = World.Create(null);
+            NewGear(stack.Pide, item, stack.Level, stack.Rarity);
+            _gear[stack.Pide].State |= 8;
+            result.Pide = stack.Pide; result.Stamp = StampOf(stack.Pide);
+        }
+        inventory.Slots[cell] = stack;
+        _ammoCells[key] = cell;
+        return "";
     }
 }
