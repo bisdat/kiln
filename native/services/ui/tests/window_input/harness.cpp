@@ -1749,10 +1749,38 @@ KilnResult KILN_CALL fake_client_state(KilnClientState* out) {
     return KILN_OK;
 }
 KilnClientApi g_fake_client{};
+bool g_client_missing = false;  // kiln.client not registered yet
 const void* KILN_CALL fake_service(KilnStr name, uint32_t) {
-    return std::string(name.ptr, name.len) == KILN_CLIENT_SERVICE ? &g_fake_client : nullptr;
+    return !g_client_missing && std::string(name.ptr, name.len) == KILN_CLIENT_SERVICE ? &g_fake_client : nullptr;
 }
 KilnApi g_fake_api{};
+
+// kiln.client registered after kiln.ui.input first asked for it: it is asked again (at most once a second), so a world
+// change still ends ownership (review 31.13).
+void late_client() {
+    g_fake_client.header = {sizeof g_fake_client, KILN_CLIENT_VERSION};
+    g_fake_client.state = &fake_client_state;
+    g_fake_api.service = &fake_service;
+    g_client_missing = true;
+    kui::g_api = &g_fake_api;
+    OwnLog o;
+    o.take = {KILN_UI_VK_PAD_A};
+    check(kui::own_subscribe(39, KILN_UI_OWN_PAD, &own_collect, &o, &o.handle) == KILN_OK, "late kiln.client: a pad owner");
+    kui::pad_key(0, KILN_UI_VK_PAD_A, true, 0, false);  // asks for kiln.client: not there yet
+    kui::pad_key(0, KILN_UI_VK_PAD_A, false, 0, false);
+    g_client_missing = false;  // registered now
+    Sleep(1100);
+    kui::pad_key(0, KILN_UI_VK_PAD_A, true, 0, false);
+    kui::own_world_poll();
+    g_generation = 2;  // the player left the world
+    kui::own_world_poll();
+    kui::pad_key(0, KILN_UI_VK_PAD_A, false, 0, false);
+    check(o.lines == std::vector<std::string>{"press 20c", "release 20c", "press 20c", "end 20c world"} && !kui::own_claimed(),
+          "late kiln.client: found later, a world change ends ownership:%s", join(o.lines).c_str());
+    g_generation = 1;
+    kui::g_api = nullptr;
+    kui::own_unsubscribe(o.handle);
+}
 
 void owned_input() {
     fresh();
@@ -2138,6 +2166,7 @@ int main() {
     mouse_wheel_bound();
     mouse_buttons();
     pointer_presses();
+    late_client();
     owned_input();
     synthetic_escape();
     owned_key_game_saw();
