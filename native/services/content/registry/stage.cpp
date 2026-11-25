@@ -887,7 +887,30 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     if (d.env.read_data) {
         if (const auto t = d.env.read_data("plans/index.json")) {
             const json idx = json::parse(*t, nullptr, false);
-            if (idx.is_object()) d.index = idx;
+            if (idx.is_object()) {
+                d.index = idx;
+            } else {
+                // review: a write cut short or a bad hand edit. Kept for a person to read; the next world's start writes a new
+                // index. The highest max stacks worlds started with are unknown now: the stack guard keeps every saved stack whole.
+                if (d.env.write_data) d.env.write_data("plans/index.unreadable.json", *t);
+                std::string w;
+                const bool guarded = d.env.stack_guard && d.env.stack_guard(&w);
+                d.log(1, "registry: kiln/data/content/registry/plans/index.json cannot be read (kept as plans/index.unreadable.json): the last good plan and "
+                         "the highest max stack a world started with are not known, so this start has no previous plan; " +
+                         std::string(guarded ? "Kiln's stack guard is on, so saved stacks stay whole"
+                                             : "Kiln's stack guard is not available here" + (w.empty() ? std::string() : " (" + w + ")") +
+                                                   ": a saved stack above an item's max stack loses the rest at its next move"));
+            }
+        }
+        // review: only plan hashes name plans (a hand-edited index is never passed on as registry.json plan.previous)
+        for (const char* k : {"good", "world"}) {
+            if (!d.index.contains(k)) continue;
+            json& row = d.index[k];
+            if (!row.is_object() || !row.contains("plan") || !row["plan"].is_string() || !is_hash(row["plan"].get<std::string>())) {
+                d.index.erase(k);
+                continue;
+            }
+            if (row.contains("previous") && !(row["previous"].is_string() && is_hash(row["previous"].get<std::string>()))) row["previous"] = nullptr;
         }
         if (const auto req = d.env.read_data("rollback.json")) {
             std::vector<ModInput> plan_inputs;
@@ -1484,7 +1507,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                         json& top = idx["stacks"][ref.text()];
                         if (!top.is_number() || top.get<double>() < fo.result.as_double()) top = fo.result.to_json();
                     }
-                    if (r.refused.empty()) {
+                    // review: a start whose stage had no base to read applied nothing of its plan: never the last good plan
+                    if (r.refused.empty() && !d_->counts.failed) {
                         const json good = idx.contains("good") && idx["good"].is_object() ? idx["good"] : json::object();
                         const std::string g = good.contains("plan") && good["plan"].is_string() ? good["plan"].get<std::string>() : "";
                         if (g != d_->meta.plan.hash) idx["good"] = {{"plan", d_->meta.plan.hash}, {"previous", g.empty() ? json(nullptr) : json(g)}, {"at", at}};

@@ -335,8 +335,11 @@ stage composed them over the base), the entries added and removed, and the game 
 with the same edits give the same plan. Plans are never deleted.
 
 **The last good plan** is the last one a world started on without a refused edit (`plans/index.json` keeps it, the good one
-before it, the plan the last world ran on, and the highest max stack a world started with per item). registry.json `plan.previous` names the last good plan that is not this
-start's: what a rollback goes back to.
+before it, the plan the last world ran on, and the highest max stack a world started with per item); a start whose stage had
+no base to read applied nothing and is never good. registry.json `plan.previous` names the last good plan that is not this
+start's: what a rollback goes back to. On a rolled-back start it is the `previous` that plan was written with. An index that
+cannot be read is kept as `plans/index.unreadable.json` with a kiln.log warning; that start has no previous plan, and since
+the highest stacks are unknown Kiln's stack guard goes on. An index entry that names no plan hash is ignored.
 
 **Rollback.** `kilnctl registry rollback <server instance>` (a client: `--dir <game folder>`, or the client Steam knows with
 `--real`) says what changes back, then writes `kiln/data/content/registry/rollback.json`. From the next start on, until
@@ -440,7 +443,7 @@ template, which take the `drops_` form. The table's GUID also selects it, as dat
 | `schema/registry-schema.schema.json` | the schema of those files |
 | `schema/registry/ids.lock.json` | every published registry and field name with its numeric id; never reused |
 | `schema/registry/migrations/` | id and field renames a breaking schema version ships (applied to every edit, "Versions" above) |
-| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan; the last good plan and the plan the last world ran on ("Plans and rollback") |
+| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan; the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
 | `<game>/kiln/data/content/registry/rollback.json` | a rollback request (`kilnctl registry rollback`), kept until `--clear` |
 | `schema/registry-section.schema.json` | the data section's schema (generated) |
 | `regmap/` | how each field maps onto the game, per game build (Kiln's part: mods never read it) |

@@ -839,6 +839,51 @@ void rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(const std::strin
     PlanStart ok = plan_start(dir, &files, &v4);
     check(ok.report["rollback"]["state"] == "applied" && g_guard_calls > 0, "with the guard: applied, the guard asked at the stage: " + ok.report["rollback"].dump());
 }
+
+// plans/index.json that cannot be read: kiln.log says so, the file is kept beside it, and since the highest stacks a world
+// started with are unknown the stack guard goes on; a hand-edited index naming no plan hash is never passed on as previous.
+void an_unreadable_index_is_kept_and_reported(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    const std::string cut = "{\"format\": 1, \"good\": {\"plan\": \"" + ha + "\"}, \"stacks\": {\"items[game:plank].maxStack\": 8";  // a write cut short
+    files.data["plans/index.json"] = cut;
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+    g_guard_calls = 0;
+    TreeView v2 = world();
+    PlanStart s = plan_start(dir, &files, &v2);
+    check(logged(s.log, "1 registry: kiln/data/content/registry/plans/index.json cannot be read"), "a warning in kiln.log");
+    check(files.data.count("plans/index.unreadable.json") && files.data["plans/index.unreadable.json"] == cut, "the unreadable index is kept beside it");
+    check(g_guard_calls > 0, "the highest max stacks a world started with are unknown: the stack guard is asked");
+    files.data["plans/index.json"] = json{{"format", 1}, {"good", {{"plan", "../../savegame/x"}, {"previous", 7}}}, {"stacks", {{"items[game:plank].maxStack", "big"}}}}.dump();
+    TreeView v3 = world();
+    PlanStart t = plan_start(dir, &files, &v3);
+    check(t.report["plan"]["previous"].is_null(), "an index entry that is no plan hash is not a previous plan: " + t.report["plan"].dump());
+}
+
+// A start whose stage had no base to read applied nothing: a world on it does not make it the last good plan
+void a_start_without_a_base_is_not_a_good_plan(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kChanged;
+    TreeView v2 = world();
+    stage::Env env = env_of(&v2, &files, dir, &stacks);
+    env.source = [](std::string* why) -> std::unique_ptr<model::Source> { *why = "the view is not ready"; return nullptr; };
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"}])") == KILN_OK, "set_order");
+    std::function<void(const Result&, bool)> world_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { world_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    check(bool(world_report) && live_result, "the live back-end is handed over");
+    world_report(*live_result, true);
+    const json idx = json::parse(files.data["plans/index.json"]);
+    check(idx["good"]["plan"] == ha, "the last good plan stays A: " + idx.dump());
+}
 }  // namespace
 
 // review3 S4: registry.json does not call a record verified when it was proven on another regmap/common (every row is off)
@@ -872,7 +917,9 @@ int main(int argc, char** argv) {
         {"rollback_changed_back_names_every_value", [&] { rollback_changed_back_names_every_value(dir); }},
         {"rollback_judged_against_the_plan_rolled_away_from", [&] { rollback_judged_against_the_plan_rolled_away_from(dir); }},
         {"a_start_below_the_last_worlds_range_warns", [&] { a_start_below_the_last_worlds_range_warns(dir); }},
-        {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }}};
+        {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }},
+        {"an_unreadable_index_is_kept_and_reported", [&] { an_unreadable_index_is_kept_and_reported(dir); }},
+        {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
