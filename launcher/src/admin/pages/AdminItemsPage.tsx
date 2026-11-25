@@ -25,6 +25,8 @@ function ItemsPage() {
   const count = dq.length < 2 ? "" : search.isFetching ? t("admin.items.searching") : rows.length === 50 ? t("admin.items.foundMore", { n: rows.length }) : t("admin.items.found", { n: rows.length });
   return (
     <Page fill>
+      {/* the page's name for screen readers and outlines: the table and its form are the page, no visible header */}
+      <h1 className="k-sr-only">{t("admin.pages.items")}</h1>
       <OfflineNote />
       <NeedsOp ops="item_search" what={t("admin.items.what")}>
         <SplitPage form aside={sel ? <GiveForm key={sel.id} item={sel} players={players} /> : <span className="k-empty-title">{t("admin.items.pickAside")}</span>}>
