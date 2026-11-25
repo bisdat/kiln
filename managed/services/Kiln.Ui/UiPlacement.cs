@@ -296,8 +296,8 @@ internal sealed class UiPlacer
 /// <summary>ui-placement.json: the placements of remembering screens and windows, per mod and id, in the config folder
 /// beside keybinds.json. Read once (on the thread that creates the first remembering screen or window), written on a
 /// worker a moment after a change and at once when a mod unloads (a whole new file put in place, so a crash mid-write
-/// leaves the old one). A file that is no JSON is kept aside as ui-placement.json.bad with a warning; an entry that is no
-/// placement is skipped.</summary>
+/// leaves the old one; a write that fails is tried again by the next flush). A file that is no JSON is kept aside as
+/// ui-placement.json.bad with a warning; an entry that is no placement is skipped.</summary>
 internal static class UiPlacements
 {
     internal const string FileName = "ui-placement.json";
@@ -393,8 +393,11 @@ internal static class UiPlacements
                 path = _unreadable ? null : _path;
                 copy = [.. _entries];
             }
-            if (path is null) return;
-            Write(path, copy);
+            if (path is null || Write(path, copy)) return;
+            // not written (a virus scanner or sync tool holding the file, a full disk): still to be written by the next
+            // flush (the next change, a mod's unload, the game's quit), unless the file was read again from elsewhere
+            lock (Lock)
+                if (_path == path && !_unreadable) _dirty = true;
         }
     }
 
@@ -495,7 +498,7 @@ internal static class UiPlacements
         UiEngine.Log(LogLevel.Warn, $"{path}: {why} (kept as {FileName}.bad; screens and windows start from their options)");
     }
 
-    private static void Write(string path, KeyValuePair<(string Mod, bool Window, string Id), Entry>[] entries)
+    private static bool Write(string path, KeyValuePair<(string Mod, bool Window, string Id), Entry>[] entries)
     {
         try
         {
@@ -529,10 +532,12 @@ internal static class UiPlacements
             var tmp = path + ".tmp";
             File.WriteAllText(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
             File.Move(tmp, path, overwrite: true);
+            return true;
         }
         catch (Exception e)
         {
             UiEngine.Log(LogLevel.Warn, $"saving {path}: {e.Message}");
+            return false;
         }
     }
 }

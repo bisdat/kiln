@@ -550,6 +550,24 @@ public sealed unsafe class UiPlacementTests : IDisposable
     }
 
     [Fact]
+    public void A_write_that_fails_is_tried_again_at_the_next_flush()
+    {
+        // the write fails once (here a folder where the temp file goes; in a game a virus scanner or a sync tool holding the
+        // file for a moment): the placement stays to be written, so the next flush (the next change, a mod's unload, the
+        // game's quit) still saves it
+        Directory.CreateDirectory(PlacementFile + ".tmp");
+        UiPlacements.Put("grimoire", window: false, "Grimoire", new UiPlacements.Entry(0.3f, 0.4f, 500, 400));
+        UiPlacements.Flush();
+        Assert.False(File.Exists(PlacementFile));
+        Assert.Contains(_backend.Logs, l => l.StartsWith("Warn", StringComparison.Ordinal) && l.Contains("ui-placement.json", StringComparison.Ordinal));
+        Directory.Delete(PlacementFile + ".tmp");
+        UiPlacements.Flush();
+        Assert.True(File.Exists(PlacementFile));
+        UiPlacements.ResetForTests();
+        Assert.Equal(new UiPlacements.Entry(0.3f, 0.4f, 500, 400), UiPlacements.Get("grimoire", window: false, "Grimoire"));
+    }
+
+    [Fact]
     public void A_mod_that_unloads_writes_its_placement_at_once()
     {
         // the player drags the screen and the game quits (the host unloads every mod) before the debounce runs out
