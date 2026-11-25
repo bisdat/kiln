@@ -83,7 +83,7 @@ public readonly record struct CrosshairHit
     /// <summary>The client world's step count at the sample (<see cref="Client.ClientWorldSteps"/>).</summary>
     public ulong ClientStep { get; init; }
 
-    /// <summary>How old the sample was when it was read.</summary>
+    /// <summary>How old the sample was when it was read, rounded up to a whole tick (100 ns).</summary>
     public TimeSpan Age { get; init; }
 
     /// <summary>True when the hit is an entity (<see cref="Entity"/> is not <see cref="EntityId.None"/>).</summary>
@@ -195,7 +195,8 @@ public static unsafe class Crosshair
                 Sequence = p->Sequence,
                 ClientSession = p->ClientSession,
                 ClientStep = p->ClientStep,
-                Age = TimeSpan.FromTicks((long)Math.Min(p->AgeNs / 100, (ulong)TimeSpan.MaxValue.Ticks)),
+                // rounded up to a whole 100 ns tick, so IsFresh (Age <= FreshFor) agrees with Kiln's STALE (age_ns > 250 ms)
+                Age = TimeSpan.FromTicks((long)Math.Min(p->AgeNs / 100 + (p->AgeNs % 100 != 0 ? 1ul : 0ul), (ulong)TimeSpan.MaxValue.Ticks)),
             };
         }
     }
