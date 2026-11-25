@@ -115,7 +115,7 @@ void ready_producer() {
 }
 
 KilnResult KILN_CALL c_get(KilnCrosshairHit* out, uint32_t* out_reason) {
-    return crosshair::get({image().side == KILN_SIDE_CLIENT, hooks_enabled()}, out, out_reason);
+    return crosshair::get({image().side == KILN_SIDE_CLIENT, hooks_enabled(), live_client_session()}, out, out_reason);
 }
 
 const KilnClientCrosshairApi kTable = {

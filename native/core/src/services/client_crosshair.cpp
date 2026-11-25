@@ -262,7 +262,10 @@ KilnResult get(const Env& env, KilnCrosshairHit* out, uint32_t* out_reason) {
         }
     }
     uint32_t reason = KILN_CROSSHAIR_REASON_NO_SAMPLE;
-    const uint32_t live = g_live.load(std::memory_order_acquire);
+    // the session the last Pre named, and only while the live process names it too (env.live_session): without the
+    // client world's STOPPING (world.lifecycle's destroy hook) an ended session's sample would read STALE forever
+    const uint32_t pre = g_live.load(std::memory_order_acquire);
+    const uint32_t live = pre == env.live_session ? pre : 0;
     Sample s{};
     if (live && live > g_ended.load(std::memory_order_acquire) && g_faulted.load(std::memory_order_acquire) == live) {
         reason = KILN_CROSSHAIR_REASON_FAULT;

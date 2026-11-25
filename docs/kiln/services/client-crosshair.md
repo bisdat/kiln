@@ -92,7 +92,8 @@ the process: the row turns `faulted` and reads throw (`Read`) or say false (`Try
 ## Sessions
 
 A sample belongs to the client session it was taken in. A new session (a hosted or joined game) starts with no sample;
-after the client world stops nothing is given. A guarded copy that faults stops samples for the rest of that session
+after the client world stops nothing is given (each read checks the session the game names live at that moment, so this
+holds even when Kiln missed the world's stop event). A guarded copy that faults stops samples for the rest of that session
 (`Faulted`); the next session copies again.
 
 ## Capability row `client.crosshair`
