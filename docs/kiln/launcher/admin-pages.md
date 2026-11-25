@@ -141,3 +141,25 @@ hub over a fake transport), `admin-tauri-transport.test.ts` (the launcher's tran
 `admin-ws-transport.test.ts` (a fake KAP-over-WebSocket server); `tests/admin-ui-web.spec.ts` runs the pages in a plain
 page (`src/admin/harness/index.html?kap=<ws url>`, served by the launcher's dev server, not part of a build) against
 the browser mock's world behind a fake socket, with a Tauri stand-in that must never be called.
+
+### A strict Content-Security-Policy (0.2.0-dev.31.13)
+The pages run under Kiln Web Admin's header (`default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self';
+connect-src 'self'; img-src 'self' data: blob:; ...`, no `'unsafe-inline'`, no `'unsafe-eval'`). What that refuses, and
+so what the package never does: a `style="..."` in HTML a module writes (an `innerHTML`, a Leaflet `divIcon`'s or
+tooltip's `html`) or sets with `setAttribute("style")`, a `<style>` element, inline script, `eval`. What it allows and the
+pages use: React's `style={{...}}` and `element.style` / `style.setProperty` (React writes through the CSSOM, which CSP
+does not govern), classes, SVG presentation attributes. The map's player labels set their health bar's `--hp` through
+the CSSOM once Leaflet has built the icon (`PlayerIcon` in `map/engine.ts`), as the label rows set `--row`.
+Every page has one `h1`: Items and Map, which show no header, have a visually hidden one (`k-sr-only`) with the page's
+name, so the launcher looks the same.
+
+The package's CSS carries its fonts as `data:` URLs (a Vite library build inlines assets): a host under `font-src 'self'`
+turns them into files when it builds (Kiln Web Admin's `inlineFonts` plugin does).
+
+Checks: `tests/admin-ui-csp.spec.ts` builds the harness for production (the dev server injects inline scripts and
+styles itself), serves it from a fake origin with that exact header, and opens every page the mod vendors (the 13 admin
+pages and Configs) over the fake socket: it fails on any CSP violation (the `securitypolicyviolation` events, the
+console's CSP messages, page errors) and on a page without exactly one `h1`, and checks the map's health bars have their
+width; a second test proves the probe sees an inline style attribute. `unit-tests/admin-ui-package.test.ts` also scans
+every module the entry reaches for a style attribute in an HTML string, `setAttribute("style")`, `<style>`, raw HTML
+and `eval`.
