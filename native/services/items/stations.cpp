@@ -1208,12 +1208,18 @@ int craft_adjust_impl(uint32_t, uint32_t, uint32_t, const void*, uint32_t*) { re
 
 // Only player_ui's type-1 RecipeApply call is a preview. The hosted server uses the same RecipeApply/InventoryPay
 // functions but not this call site. The caller ALWAYS rolls this transaction back, including after success.
-kiln::RawHook h_preview_apply, h_preview_take, h_preview_fetch;
+// That preview's descriptor byte tx+0xb0 is 0x40 (| 0x08 at a workshop) on client 26430625, so RecipeApply pays it with
+// RecipePayAlt, not InventoryPay (GitHub #132, docs/re/stations.md §10.5; since 0.2.0-dev.31.12 observed here too).
+kiln::RawHook h_preview_apply, h_preview_take, h_preview_fetch, h_preview_alt;
 uintptr_t g_preview_apply = 0, g_preview_ret = 0, g_preview_pay = 0, g_preview_paid = 0, g_preview_take = 0;
 uintptr_t g_preview_remove = 0, g_preview_fetch = 0, g_preview_fetch_ret = 0, g_preview_preferred_ret = 0;
 uintptr_t g_preview_stock = 0, g_preview_rollback = 0;
-bool g_preview_feat = false, g_preview_failed = false;
-std::atomic<bool> g_preview_hooked{false};
+// RecipePayAlt, its call's return in RecipeApply (RecipePaid + 7), its two PayMaterial return sites (mode 0: the owner's
+// whole line; other modes: the remainder after the client stock table) and that table's getter (bases + 0x1610).
+uintptr_t g_preview_alt = 0, g_preview_alt_ret = 0, g_preview_alt_take_ret = 0, g_preview_alt_stock_take_ret = 0;
+uintptr_t g_preview_alt_table = 0;
+bool g_preview_feat = false;
+std::atomic<bool> g_preview_failed{false}, g_preview_hooked{false};
 LogLimit g_log_preview{12}, g_log_preview_entry{12}, g_log_preview_payment{16}, g_log_preview_native{8};
 struct PreviewCall {
     void* tx = nullptr;
@@ -1221,8 +1227,21 @@ struct PreviewCall {
     RawCosts costs{};
     bool saw_take = false;
     const char* take_error = nullptr;
+    // From the descriptor: the payer RecipeApply calls (its return address) and, for RecipePayAlt, where every take of
+    // that payer returns (0 = not checked: InventoryPay also pays from bases' stock through other sites).
+    uintptr_t pay_ret = 0, take_ret = 0;
+    uint8_t route = 0;  // kPreviewPayRoute or kPreviewAltRoute once the descriptor was read
 };
 thread_local PreviewCall t_preview;
+
+// Which payer the preview's descriptor makes RecipeApply call (C 0x3f8fe3: tx+0xb0 bit 0x40 calls RecipePayAlt, else
+// InventoryPay). Each route is checked only on the code it runs through (GitHub #132): a foreign patch inside InventoryPay
+// (Building Tools 0.34.0 at 0x3f8aee) or BaseStockForPlayer (Unified Tweaks Live at 0x46fb65, Cross-Base Storage) is not
+// on the RecipePayAlt route the pinned client's preview takes, so it no longer stands the whole preview down.
+enum : uint8_t { kPreviewInstall = 0, kPreviewPayRoute = 1, kPreviewAltRoute = 2 };
+const char* preview_route_name(uint8_t route) {
+    return route == kPreviewPayRoute ? "InventoryPay" : route == kPreviewAltRoute ? "RecipePayAlt" : "install";
+}
 
 // Foreign (e.g. CBS), unreadable and unknown code stays vanilla. RawHook may join Kiln's existing physical detour,
 // never patch over a foreign one. Recheck at entry as another loader can install later.
@@ -1233,18 +1252,24 @@ struct PreviewCodeRefusal {
     uint32_t state = KILN_CODE_UNKNOWN;
     KilnResult rc = KILN_ERR_UNAVAILABLE;
 };
-bool preview_code_ok(PreviewCodeRefusal* why = nullptr) {
+bool preview_code_ok(PreviewCodeRefusal* why, uint8_t route) {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
         if (why) why->name = "kiln.hooks' code-state check";
         return false;
     }
-    struct Dep { uintptr_t at; size_t size; const char* name; };
-    for (const Dep& d : {Dep{g_preview_apply, 0x275, "RecipeApply"}, Dep{g_preview_pay, 0x286, "InventoryPay"},
-                         Dep{g_preview_take, 0x2b, "PayMaterial"}, Dep{g_preview_remove, 0x2dd, "InventoryRemoveItems"},
-                         Dep{g_preview_fetch, 0x10c, "InventoryPageFetch"}, Dep{g_preview_stock, 0x174, "BaseStockForPlayer"},
-                         Dep{g_preview_rollback, 0x508, "InventoryRollback"},
-                         Dep{g_preview_ret ? g_preview_ret - 5 : 0, 19, "the crafting menu's RecipeApply call"}}) {
+    struct Dep { uintptr_t at; size_t size; const char* name; uint8_t route; };
+    // route 0: every preview; kPreviewPayRoute / kPreviewAltRoute: that payer's own code. Installing checks the routes the
+    // pinned client uses (common + RecipePayAlt); InventoryPay's route is checked on a call that takes it.
+    for (const Dep& d : {Dep{g_preview_apply, 0x275, "RecipeApply", 0}, Dep{g_preview_take, 0x2b, "PayMaterial", 0},
+                         Dep{g_preview_remove, 0x2dd, "InventoryRemoveItems", 0}, Dep{g_preview_fetch, 0x10c, "InventoryPageFetch", 0},
+                         Dep{g_preview_rollback, 0x508, "InventoryRollback", 0},
+                         Dep{g_preview_ret ? g_preview_ret - 5 : 0, 19, "the crafting menu's RecipeApply call", 0},
+                         Dep{g_preview_pay, 0x286, "InventoryPay", kPreviewPayRoute},
+                         Dep{g_preview_stock, 0x174, "BaseStockForPlayer", kPreviewPayRoute},
+                         Dep{g_preview_alt, 0x1f4, "RecipePayAlt", kPreviewAltRoute},
+                         Dep{g_preview_alt_table, 8, "the client stock table read", kPreviewAltRoute}}) {
+        if (d.route && d.route != (route == kPreviewInstall ? kPreviewAltRoute : route)) continue;
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
         const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
@@ -1279,6 +1304,7 @@ struct PreviewDiagnostic {
     uint64_t need = 0, have = 0;
     unsigned long fault = 0;
     bool saw_payment = false;
+    uint8_t route = 0, flags = 0xff, mode = 0xff;  // the descriptor as read (0xff: not read)
 };
 thread_local PreviewDiagnostic* t_preview_diag = nullptr;
 
@@ -1290,10 +1316,11 @@ void log_preview_refusal(const PreviewDiagnostic& diag, int32_t amount, uint32_t
     preview_code_note(diag.code, note, sizeof note);
     if (diag.saw_payment) std::snprintf(payment, sizeof payment, "%u", diag.game_payment);
     else std::snprintf(payment, sizeof payment, "not-observed");
-    LOGI("stations: linked craft preview left recipe 0x%08x x%d to native result %u: %s (payment %s, item 0x%08x, "
-         "need %llu, counted %llu, fault 0x%lx)%s", diag.recipe, amount, result,
-         diag.entry ? diag.entry : diag.payment ? diag.payment : "native-check-after-supplement", payment, diag.item,
-         static_cast<unsigned long long>(diag.need), static_cast<unsigned long long>(diag.have), diag.fault, note);
+    LOGI("stations: linked craft preview left recipe 0x%08x x%d to native result %u: %s (payment %s via %s, descriptor "
+         "0x%02x mode %u, item 0x%08x, need %llu, counted %llu, fault 0x%lx)%s", diag.recipe, amount, result,
+         diag.entry ? diag.entry : diag.payment ? diag.payment : "native-check-after-supplement", payment,
+         diag.route ? preview_route_name(diag.route) : "no payer", static_cast<unsigned>(diag.flags), static_cast<unsigned>(diag.mode),
+         diag.item, static_cast<unsigned long long>(diag.need), static_cast<unsigned long long>(diag.have), diag.fault, note);
 }
 
 // InventoryRemoveItems can skip failed page fetches and still answer {error=0,left=remaining}. Observe its actual
@@ -1325,12 +1352,16 @@ PayOut* preview_native_take(PayOut* out, void* tx, uint32_t entity, uint32_t ite
     t_preview_fetch = t_preview.tx == tx && tx ? read : nullptr;
     return h_preview_take.original<PayFn>()(out, tx, entity, item, count);
 }
-// Preserve every native result. An unobserved/incomplete fetch or any outer error prevents complementing code 4.
+// Preserve every native result. An unobserved/incomplete fetch or any outer error prevents complementing code 4. Inside
+// RecipePayAlt every take must return to the one site its mode uses (the owner's take: the table is never taken from).
 PayOut* __fastcall hk_preview_take(PayOut* out, void* tx, uint32_t entity, uint32_t item, uint32_t count) {
+    const uintptr_t ret = h_preview_take.caller();  // before the original
     PreviewFetchRead read{tx};
     PayOut* const result = preview_native_take(out, tx, entity, item, count, &read);
     if (t_preview.tx == tx && tx) {
         t_preview.saw_take = true;
+        if (!t_preview.take_error && t_preview.take_ret && ret != t_preview.take_ret)
+            t_preview.take_error = "unrecognized-take-caller";
         uint8_t error = 0xff;
         __try { if (result && result == out && result->left <= count) error = result->error; }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -1348,13 +1379,28 @@ struct PreviewRead {
     const void* inputs;
     const char* stage = "transaction-layout";
     bool ok = false;
+    uint8_t flags = 0xff, mode = 0xff;
 };
 void preview_read_impl(void* arg) {
     auto& j = *static_cast<PreviewRead*>(arg);
     auto* tx = static_cast<uint8_t*>(j.call.tx);
     if (!E.tx_ok) return;  // no client layout reads when the transaction feature did not qualify
     j.stage = "transaction-mode-or-flags";
-    if ((tx[0xb0] & ~0x08u) || (tx[0xb1] != 0 && tx[0xb1] != 2)) return;
+    // 0x08 = inputs only (a workshop); 0x40 = RecipePayAlt pays; any other bit (0x10 skips payment) stays native.
+    // Mode tx+0xb1: 0 = the owner alone, 2 = the bases' stock too (RecipePayAlt: the client stock table first).
+    j.flags = tx[0xb0];
+    j.mode = tx[0xb1];
+    const auto flags = static_cast<uint8_t>(tx[0xb0] & ~0x08u);
+    if ((flags != 0 && flags != 0x40) || (tx[0xb1] != 0 && tx[0xb1] != 2)) return;
+    if (flags == 0x40) {
+        if (!g_preview_alt_ret || !g_preview_alt_take_ret || !g_preview_alt_stock_take_ret) return;
+        j.call.pay_ret = g_preview_alt_ret;
+        j.call.take_ret = tx[0xb1] ? g_preview_alt_stock_take_ret : g_preview_alt_take_ret;
+        j.call.route = kPreviewAltRoute;
+    } else {
+        j.call.pay_ret = g_preview_paid;
+        j.call.route = kPreviewPayRoute;
+    }
     j.stage = "client-recipe-identity";
     j.call.recipe = rd<uint32_t>(j.recipe, kRecipeId);
     void* const reg = g_client_recipes.load(std::memory_order_acquire);
@@ -1412,13 +1458,15 @@ uint32_t __fastcall hk_preview_apply(void* tx, const void* recipe, const void* i
     if (scoped) {
         t_preview_diag = &diag;
         if (tx && recipe && inputs && owner && owner <= kMaxPlayerEntity && amount > 0 && amount <= 1000) {
-            if (!preview_code_ok(&diag.code)) diag.entry = "entry-code";
-            else {
-                PreviewRead j{{tx, owner, static_cast<uint32_t>(amount)}, recipe, inputs};
-                const bool readable = guard(&preview_read_impl, &j, &diag.fault);
-                diag.recipe = j.call.recipe;
-                diag.entry = readable && j.ok ? nullptr : j.stage;
-                if (readable && j.ok) t_preview = j.call;
+            // The descriptor first (a guarded read): it names the payer, and only that payer's code is checked.
+            PreviewRead j{{tx, owner, static_cast<uint32_t>(amount)}, recipe, inputs};
+            const bool readable = guard(&preview_read_impl, &j, &diag.fault);
+            diag.recipe = j.call.recipe;
+            diag.route = j.call.route, diag.flags = j.flags, diag.mode = j.mode;
+            diag.entry = readable && j.ok ? nullptr : j.stage;
+            if (readable && j.ok) {
+                if (!preview_code_ok(&diag.code, j.call.route)) diag.entry = "entry-code";
+                else t_preview = j.call;
             }
         }
     }
@@ -1428,8 +1476,9 @@ uint32_t __fastcall hk_preview_apply(void* tx, const void* recipe, const void* i
     return result;
 }
 
-// Called AFTER the original InventoryPay, through its already existing kiln.rules hook. Only its material-shortfall
-// code can be complemented. No stock is taken here: the UI caller rolls back. The server's real payment still checks
+// Called AFTER the original InventoryPay, through its already existing kiln.rules hook, or after the original
+// RecipePayAlt (hk_preview_alt). Only the payer the descriptor names, returning to RecipeApply, counts. Only its
+// material-shortfall code can be complemented. No stock is taken here: the UI caller rolls back. The server's real payment still checks
 // live authorizations/inventories and performs every take, bag first, with the existing no-overdraw rollback.
 uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amount, void* extra, uintptr_t ret, uint32_t game) {
     PreviewDiagnostic* const diag = t_preview_diag && tx && t_preview_diag->tx == tx ? t_preview_diag : nullptr;
@@ -1441,11 +1490,11 @@ uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amou
     if (game != 4) return refuse("native-payment-result");
     if (!tx || t_preview.tx != tx || t_preview.owner != owner || t_preview.amount != amount || extra)
         return refuse("payment-scope");
-    if (ret != g_preview_paid || !g_preview_paid) return refuse("payment-caller");
+    if (!t_preview.pay_ret || ret != t_preview.pay_ret) return refuse("payment-caller");
     if (!t_preview.saw_take) return refuse("no-native-material-take");
     if (t_preview.take_error) return refuse(t_preview.take_error);
     if (!g_craft_on.load(std::memory_order_acquire) || g_off.load()) return refuse("snapshot-off");
-    if (!preview_code_ok(diag ? &diag->code : nullptr)) return refuse("payment-code");
+    if (!preview_code_ok(diag ? &diag->code : nullptr, t_preview.route)) return refuse("payment-code");
     RawCosts rc{static_cast<const uint8_t*>(costs), nullptr, 0, {}, {}, 0};
     unsigned long fault = 0;
     if (!guard(&costs_impl, &rc, &fault) || !rc.n || rc.n != t_preview.costs.n) {
@@ -1474,13 +1523,23 @@ uint32_t craft_preview_impl(void* tx, void* costs, uint32_t owner, uint32_t amou
              n > 1 ? " (more held back)" : "");
     return 0;
 }
+// RecipePayAlt (tx, costs, owner, multiplier, extra) -> 0 or 4: the same arguments as InventoryPay. kiln.rules' free
+// crafting may already have a link here; RawHook joins it. Outside the exact preview scope the native result is returned.
+using AltPayFn = uint32_t(__fastcall*)(void* tx, void* costs, uint32_t owner, uint32_t multiplier, void* extra);
+uint32_t __fastcall hk_preview_alt(void* tx, void* costs, uint32_t owner, uint32_t multiplier, void* extra) {
+    const uintptr_t ret = h_preview_alt.caller();  // before the original
+    const uint32_t game = h_preview_alt.original<AltPayFn>()(tx, costs, owner, multiplier, extra);
+    if (!tx || (t_preview.tx != tx && !(t_preview_diag && t_preview_diag->tx == tx))) return game;
+    return craft_preview_impl(tx, costs, owner, multiplier, extra, ret, game);
+}
 void preview_hook_on_demand() {
     if (!g_preview_feat || g_preview_failed || g_preview_hooked.load() || !g_craft_on.load()) return;
-    if (PreviewCodeRefusal why; !preview_code_ok(&why)) {
-        g_preview_failed = true;
+    if (PreviewCodeRefusal why; !preview_code_ok(&why, kPreviewInstall)) {
+        g_preview_failed = true;  // retried in the next client world (client_world, KILN_WORLD_STOPPING)
         char note[512]{};
         preview_code_note(why, note, sizeof note);
-        LOGW("stations: linked craft preview stands down%s (existing hooks kept; the game's own craft status is used)", note);
+        LOGW("stations: linked craft preview stands down%s (the crafting menus' RecipeApply/RecipePayAlt route; existing hooks "
+             "kept; the game's own craft status is used; checked again in the next world)", note);
         return;
     }
     if (!h_preview_fetch && !h_preview_fetch.install(g_api, g_owner, g_preview_fetch, reinterpret_cast<void*>(&hk_preview_fetch),
@@ -1494,6 +1553,13 @@ void preview_hook_on_demand() {
         g_preview_failed = true;
         LOGW("stations: linked craft preview stands down: native material errors cannot be observed (%s)",
              h_preview_take.error() ? h_preview_take.error() : "hook refused");
+        return;
+    }
+    if (!h_preview_alt && !h_preview_alt.install(g_api, g_owner, g_preview_alt, reinterpret_cast<void*>(&hk_preview_alt),
+                                                "stations/client.CraftPreviewAltPay")) {
+        g_preview_failed = true;
+        LOGW("stations: linked craft preview stands down: the crafting menu's payer cannot be observed (%s)",
+             h_preview_alt.error() ? h_preview_alt.error() : "hook refused");
         return;
     }
     if (!h_preview_apply.install(g_api, g_owner, g_preview_apply, reinterpret_cast<void*>(&hk_preview_apply), "stations/client.CraftPreview")) {
@@ -4379,6 +4445,8 @@ void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
     t_set_lock_stock(0, nullptr, 0);  // the lock snapshot named this session's lock items
     g_client_recipes.store(nullptr, std::memory_order_release);
+    // A stand-down is checked again in the next world (GitHub #132: it was decided once per session); hooks already in stay.
+    if (!g_preview_hooked.load()) g_preview_failed.store(false);
     {
         std::lock_guard lock(g_craft_mu);
         g_craft_have.clear();
@@ -4441,13 +4509,21 @@ void stations_resolve() {
     }
     // Exact client-only type-1 dry run, with its unconditional rollback. A joined client need not have a server world.
     if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.craft_ui")) {
+        uintptr_t alt_read = 0;
         g_preview_feat = sym("items/RecipeApply", &g_preview_apply) && sym("stations/client.CraftPreviewReturn", &g_preview_ret) &&
             sym("rules/InventoryPay", &g_preview_pay) && sym("rules/RecipePaid", &g_preview_paid) && sym("gems/PayMaterial", &g_preview_take) &&
             sym("items/InventoryRemoveItems", &g_preview_remove) && sym("items/InventoryPageFetch", &g_preview_fetch) &&
             sym("stations/MaterialPageFetchRet", &g_preview_fetch_ret) && sym("stations/MaterialPreferredPageFetchRet", &g_preview_preferred_ret) &&
             sym("stations/BaseStockForPlayer", &g_preview_stock) && sym("items/InventoryRollback", &g_preview_rollback) &&
             call_matches(g_preview_fetch_ret, g_preview_fetch) && call_matches(g_preview_preferred_ret, g_preview_fetch) &&
-            call_matches(g_preview_ret, g_preview_apply) && call_matches(g_preview_paid, g_preview_pay) && G.recipe_find && E.tx_ok;
+            call_matches(g_preview_ret, g_preview_apply) && call_matches(g_preview_paid, g_preview_pay) &&
+            sym("rules/RecipePayAlt", &g_preview_alt) && sym("stations/client.CraftAltTakeRet", &g_preview_alt_take_ret) &&
+            sym("stations/client.CraftAltStockTakeRet", &g_preview_alt_stock_take_ret) &&
+            sym("stations/client.CraftStockTable", &g_preview_alt_table) && sym("stations/client.CraftAltStockRead", &alt_read) &&
+            call_matches(alt_read, g_preview_alt_table) &&
+            call_matches(g_preview_paid + 7, g_preview_alt) && call_matches(g_preview_alt_take_ret, g_preview_take) &&
+            call_matches(g_preview_alt_stock_take_ret, g_preview_take) && G.recipe_find && E.tx_ok;
+        if (g_preview_feat) g_preview_alt_ret = g_preview_paid + 7;
         if (!g_preview_feat) LOGW("stations: linked craft preview unavailable: the scoped dry run did not resolve; native status kept");
     }
     // The ingredient rows' "available" count (the same snapshot). Hooked on demand.

@@ -136,6 +136,41 @@ def main():
         b[loop - 4] ^= 1
         altered.img = bytes(b)
         check(not Resolver(altered, dep_doc).run()[2]['reads'], side + ' disagreeing page-fetch targets disable reads')
+    # GitHub #132 (0.2.0-dev.31.12): the crafting menu's type-1 query starts its descriptor at 0x40 (| 0x08 for one
+    # workshop), so RecipeApply pays the dry run with RecipePayAlt, never InventoryPay. Resolve that route's sites.
+    check(raw[0x2bd88b:0x2bd894] == bytes.fromhex('66C78580070000' '4000'), 'the craft query descriptor starts at 0x40')
+    check(raw[0x2bdda4:0x2bddab] == bytes.fromhex('808D8007000008'), 'one workshop adds only the inputs-only bit 0x08')
+    check(raw[0x2bdcec:0x2bdcf3] == bytes.fromhex('C6858107000000') and raw[0x2bdd01:0x2bdd08] == bytes.fromhex('C6858107000002'),
+          'the query sets stock mode 0 or 2')
+    check(raw[0x3f8fe3:0x3f8fe7] == bytes.fromhex('A8407507') and rel(0x3f8fee) == 0x3f9700,
+          'RecipeApply: descriptor bit 0x40 calls RecipePayAlt (returns to 0x3f8ff3)')
+    alt_symbols = {}
+    for _, part, _ in compose('client'):
+        alt_symbols.update(part.get('symbols', {}))
+    alt_names = ['rules/RecipePayAlt', 'stations/client.CraftAltTakeRet', 'stations/client.CraftAltStockRead',
+                 'stations/client.CraftStockTable', 'stations/client.CraftAltStockTakeRet']
+    alt_doc = {'symbols': alt_symbols, 'features': {'alt': {'symbols': alt_names}}}
+    found, _, features = Resolver(c, alt_doc).run()
+    check(features['alt'], 'complete RecipePayAlt preview route resolves')
+    for name, rva in zip(alt_names, [0x3f9700, 0x3f9777, 0x3f97d4, 0x4709a0, 0x3f98a3]):
+        check(found[name]['rva'] == rva, f'{name} = {rva:#x}')
+    check(rel(0x3f9772) == 0x411330 and rel(0x3f989e) == 0x411330, 'both RecipePayAlt takes are the observed PayMaterial')
+    check(raw[0x3f9718:0x3f971f] == bytes.fromhex('80B9B100000000'), 'RecipePayAlt branches on stock mode tx+0xb1')
+    check(raw[0x4709a0:0x4709a8] == bytes.fromhex('488D8110160000C3'), 'the client stock table getter is bases + 0x1610')
+    check(raw[0x3f97ab:0x3f97b1] == bytes.fromhex('41BC04000000') and raw[0x3f98d4:0x3f98d9] == bytes.fromhex('B804000000'),
+          'RecipePayAlt answers 4 only after a short owner take, in both modes')
+    check(raw[0xeb3ab0:0xeb3ab3] == bytes.fromhex('32C0C3'), 'the short-line override check is compiled out (always false)')
+    check(unwind_covers(client, 0x3f9700, 0x1f4), 'client full code-state extent covers RecipePayAlt')
+    server_names = set()
+    for _, part, _ in compose('server'):
+        server_names.update(part.get('symbols', {}))
+    check(not any(n in server_names for n in alt_names[1:]), 'the RecipePayAlt preview sites are declared for clients only')
+    for at in [0x3f9772, 0x3f989e, 0x3f97cf]:
+        altered = copy.copy(c)
+        b = bytearray(raw)
+        b[at] = 0x90
+        altered.img = bytes(b)
+        check(not Resolver(altered, alt_doc).run()[2]['alt'], f'changed RecipePayAlt call at {at:#x} disables the route')
     print(f'craft preview sigdb: {checks} passed, 0 failed')
 
 
