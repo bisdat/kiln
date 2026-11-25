@@ -113,12 +113,29 @@ public sealed class BootGateTests : IDisposable
         if (warned) { Assert.Contains("restart", text); Assert.Contains("registry", Log()); }
     }
 
-    [Fact]
-    public void Registry_order_difference_names_the_server_modpack()
+    // The values part covers every compared field's resolved value, so equal values mean the client runs what the server runs: another
+    // order or other intermediate contributions (a setting a later mod overrides) change nothing the player could see or fix.
+    [Theory]
+    [InlineData(ModSyncPolicy.Refuse)]
+    [InlineData(ModSyncPolicy.Warn)]
+    [InlineData(null)]
+    public void Registry_order_difference_alone_neither_refuses_nor_warns(ModSyncPolicy? policy)
     {
+        RegistryHello(policy, "1:" + new string('a', 64) + ":" + new string('d', 64));
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+        Assert.Contains("registry boot edits or load order differ", Log());  // the operator's log still says it
+    }
+
+    [Fact]
+    public void Registry_order_difference_stays_out_of_the_handshake_events_missing_list()
+    {
+        IReadOnlyList<string>? missing = null;
+        using var sub = Events.On<NetClientHandshakeEvent>(e => missing = e.Missing);
         RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('a', 64) + ":" + new string('d', 64));
-        Assert.Contains("boot edits or load order", LastReject()!.Reason);
-        Assert.Contains("modpack", LastReject()!.Reason);
+        Assert.NotNull(missing);
+        Assert.DoesNotContain(missing!, m => m.Contains("registry", StringComparison.Ordinal));
+        Assert.Null(LastReject());
     }
 
     [Theory]
@@ -196,7 +213,7 @@ public sealed class BootGateTests : IDisposable
     private static ModEntry Loaded(string id, string version) =>
         new(id, id, version, "/mods/" + id, ModSide.Both, ModState.Loaded, null, [], 0, null);
 
-    private void RegistryHello(ModSyncPolicy policy, string? remote, List<Wire.ModEntry>? mods = null, Func<NetworkConfig, NetworkConfig>? config = null, bool own = true)
+    private void RegistryHello(ModSyncPolicy? policy, string? remote, List<Wire.ModEntry>? mods = null, Func<NetworkConfig, NetworkConfig>? config = null, bool own = true)
     {
         // Resolve the same private Host seam the real handshake reads; no boot mod is required for a data-only pack.
         global::Kiln.Host.BootFingerprint.RegistrySource = () =>

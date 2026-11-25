@@ -162,11 +162,14 @@ over all mods cannot honour those rules per mod, so it does not try. Client- and
 the comparison.
 
 A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
-restart. Only when values match is the order compared; an order/contribution mismatch says **registry boot edits or load order differ** and
-asks for the server's modpack/load order and a restart. Both use the ordinary handshake missing-details/report line,
-REJECT under `modSync: refuse`, WELCOME warning under `warn` (including the default), and no player warning under
-`off`. This detects data-only registry packs too, without requiring an `OnBoot` override. It does not transfer boot
-values or rebuild them after joining.
+restart. It uses the ordinary handshake missing-details/report line: REJECT under `modSync: refuse`, WELCOME warning
+under `warn` (including the default), and no player warning under `off` (the line stays in
+`NetClientHandshakeEvent.Missing`). The values cover the resolved value of every compared field, so when they match the
+player's game runs what the server runs. An order or contribution difference alone (another load order, or a setting
+that a later mod overrides) is then only named in the server's log line for that player (**registry boot edits or load
+order differ**, with the same resulting values); it is never refused, warned about or put in `Missing`. This detects
+data-only registry packs too, without requiring an `OnBoot` override. It does not transfer boot values or rebuild them
+after joining.
 
 ## NPC bodies at the join
 Since 0.2.0-dev.31. An NPC block with a body of its own ([modding/npc-blocks.md](modding/npc-blocks.md)) is built by each
