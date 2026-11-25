@@ -738,14 +738,14 @@ void core_rows(const std::filesystem::path& dir) {
         KilnCrosshairHit hit{};
         hit.size = sizeof hit;
         uint32_t reason = 0;
-        CHECK(ch::get({true, true}, &hit, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE,
+        CHECK(ch::get({true, true, 0}, &hit, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE,
               "crosshair: the first read installs and answers no sample");
         CHECK(is("client.crosshair", A, 0) && get("client.crosshair").text == "the game's crosshair trace is hooked",
               "crosshair: hooked after the rows were built: the row follows (%s)", get("client.crosshair").text.c_str());
         ch::reset_for_tests();
         ch::set_installer(+[](uint32_t*, const char** w) { *w = "the test install failed"; return ch::Install::Failed; });
         caps::core_rows(true, true, "");
-        CHECK(ch::get({true, true}, &hit, &reason) == KILN_ERR_UNAVAILABLE, "crosshair: a failed first install refuses the read");
+        CHECK(ch::get({true, true, 0}, &hit, &reason) == KILN_ERR_UNAVAILABLE, "crosshair: a failed first install refuses the read");
         CHECK(is("client.crosshair", U, KILN_CAP_REASON_FAULTED) && get("client.crosshair").text == "the test install failed",
               "crosshair: a failed first install: unavailable, faulted, with its reason (%s)", get("client.crosshair").text.c_str());
         ch::reset_for_tests();
