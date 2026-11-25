@@ -1133,6 +1133,52 @@ mod safety_tests {
         fn forward(&self, _: &Previous, _: &str) -> Result<()> { Ok(()) }
     }
 
+    /// Whether the user of this process owns `path` (its owner SID is the token's user SID).
+    #[cfg(windows)]
+    fn owned_by_this_user(path: &Path) -> bool {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{EqualSid, GetFileSecurityW, GetSecurityDescriptorOwner, GetTokenInformation, OWNER_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: NUL-terminated name, buffers sized by the size queries, the token handle closed before returning.
+        unsafe {
+            let mut needed = 0;
+            GetFileSecurityW(name.as_ptr(), OWNER_SECURITY_INFORMATION, std::ptr::null_mut(), 0, &mut needed);
+            let mut sd = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetFileSecurityW(name.as_ptr(), OWNER_SECURITY_INFORMATION, sd.as_mut_ptr().cast(), needed, &mut needed), 0);
+            let (mut owner, mut defaulted) = (std::ptr::null_mut(), 0);
+            assert_ne!(GetSecurityDescriptorOwner(sd.as_mut_ptr().cast(), &mut owner, &mut defaulted), 0);
+            let mut token: HANDLE = std::ptr::null_mut();
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token), 0);
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            let mut user = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetTokenInformation(token, TokenUser, user.as_mut_ptr().cast(), needed, &mut needed), 0);
+            CloseHandle(token);
+            EqualSid(owner, (*(user.as_ptr() as *const TOKEN_USER)).User.Sid) != 0
+        }
+    }
+
+    /// A launcher started as administrator makes its folders owned by BUILTIN\Administrators, not by the user (an
+    /// elevated token's default owner; the win1 runner's SSH session is elevated too). Its Nexus state works and becomes
+    /// the user's, so a start without elevation can use it later; without elevation the user owns it from the start.
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_this_account_made_is_secured_and_becomes_the_users() {
+        let root = temp();
+        let made_here = root.join("state");
+        std::fs::create_dir(&made_here).unwrap(); // owned by the token's default owner, as private_dir makes it
+        private_dir_inner(&made_here).expect("a folder this process made is its own");
+        assert!(owned_by_this_user(&made_here), "the folder is the user's after securing");
+        let lock = open_lock(&made_here, "test.lock").expect("a lock file in it");
+        drop(lock);
+        assert!(owned_by_this_user(&made_here.join("test.lock")));
+        // secured again (the next start): still accepted, still the user's
+        private_dir_inner(&made_here).unwrap();
+        assert!(owned_by_this_user(&made_here));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn registration_is_serialized_and_does_not_override_a_later_choice() {
         let root = temp();
