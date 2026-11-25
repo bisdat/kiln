@@ -9,11 +9,14 @@ namespace RegistryEntriesTest;
 
 public sealed class RegistryEntriesTestMod : Mod
 {
+    // the removed item: in one drop table only (the cheat chest below, 34 stacks), an input of game recipes and a random-loot
+    // candidate; the mod's added entries clone wood, so removing wood would refuse them as dependents of a removed entry
+    private const string Flint = "game:material_t1_stone_flint";
     private const string Wood = "game:material_t1_wood_logs", Parent = "registry-entries-test:logs", Child = "registry-entries-test:logs_child", Recipe = "registry-entries-test:recipe";
     private bool _ran;
     private int _pass, _fail, _loadedTicks;
     private string Mode => File.Exists(Path.Combine(Context.DataDirectory, "incompatible")) ? "incompatible" : File.Exists(Path.Combine(Context.DataDirectory, "corrupt")) ? "corrupt" : File.Exists(Path.Combine(Context.DataDirectory, "item-only")) ? "item-only" : File.Exists(Path.Combine(Context.DataDirectory, "reload")) ? "reload" : "normal";
-    // a drop table that names the removed item (its wood stack: chance 1, up to 50): the slot must stay inert while the removal is on
+    // a drop table that names the removed item (its flint stack: chance 1, up to 50): the slot must stay inert while the removal is on
     internal const string WoodChest = "lootchest_cheat_new13_loot_grassland";
     // the spot of the lab world the other spawn tests use (blocks-loot-test, registry-proof-test)
     internal static readonly WorldPosition LabSpot = new(3855.8, 834.5, 1399.8);
@@ -51,7 +54,7 @@ public sealed class RegistryEntriesTestMod : Mod
             }
             // with the drop rows proven on this build (registry-proof, 31.x) the whole removal applies: hidden from random loot,
             // the recipes naming it and the drop slots naming it (disabled in place); its record stays
-            view.Items.Remove(Wood);
+            view.Items.Remove(Flint);
         });
     }
     public override void OnLoad()
@@ -101,12 +104,12 @@ public sealed class RegistryEntriesTestMod : Mod
         Check(changed.Revert().Ok && Stack(Child) == 67, "revert restores the definition's GameStart baseline");
         var manual = DataRegistry.Change(view => { view.Recipes.Remove(Recipe); view.Items[Child].MaxStack = 99; });
         Check(manual.Result.Outcome == RegistryChangeOutcome.RestartRequired && Stack(Child) == 67, "Manual entry refusal commits none of its valid fields");
-        Check(Content.Items.Get("Material_T1_Wood_Logs") is { } w && w.GetNumber("maxStackSize") > 0, "the removed item's record stays addressable: hidden, never deleted");
+        Check(FlintEntry() is { } w && w.GetNumber("maxStackSize") > 0, "the removed item's record stays addressable: hidden, never deleted");
         var loot = JsonNode.Parse(NewContent.InfoJson())?["loot"];
         var candidates = loot?["getter"]?["count"]?.GetValue<int>() ?? -1;
         var records = Content.Status()?.Loot ?? -1;
-        Check(loot?["on"]?.GetValue<bool>() == true && records > 0 && candidates == records - 1,
-            "the actual random-loot getter excludes only the removed item's candidate while retaining its record");
+        Check(loot?["on"]?.GetValue<bool>() == true && records > 0 && candidates == records - (Mode == "item-only" ? 1 : 2),
+            "the actual random-loot getter excludes only the removed item's and the loot-only removal's candidates while retaining their records");
         return true;
     }
 
@@ -115,6 +118,8 @@ public sealed class RegistryEntriesTestMod : Mod
         for (var i = 0; i < n; i++) await Context.Scheduler.NextTick();
     }
 
+    internal static ContentEntry? FlintEntry() => Content.Items.FirstOrDefault(e => e.Name.Equals(Flint["game:".Length..], StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The removal in the running world: owned copies of the removed item keep working and survive the save and a
     /// reload; a drop table naming it, loaded now, has that slot disabled (the chest gets everything else).</summary>
     private async Task Removal()
@@ -122,7 +127,7 @@ public sealed class RegistryEntriesTestMod : Mod
         try
         {
             for (var i = 0; i < 25 * 120 && !(Spawn.WorldRunning && Items.Status() is { Transactions: true, Read: true }); i++) await Context.Scheduler.NextTick();
-            var wood = new ItemId(Content.Items.Get("Material_T1_Wood_Logs")!.Id);
+            var wood = new ItemId(FlintEntry()!.Id);  // the removed item
             int Owned() => Items.FindInventories(InventoryKinds.Containers).Sum(c => Items.Read(c)?.Count(wood) ?? 0);
             // owned copies: a container of the lab's world, when it has one the server runs (a player's chest is built, not spawned)
             var chest = Items.FindInventories(InventoryKinds.Containers).FirstOrDefault(c => Items.Read(c) is { } inv && inv.FreeSlots() >= 1);

@@ -48,7 +48,8 @@ public sealed class RegistryEntryReplayTestMod : Mod
         try
         {
             for (var i = 0; i < 25 * 120 && !(Spawn.WorldRunning && Items.Status() is { Read: true }); i++) await Context.Scheduler.NextTick();
-            var wood = new ItemId(Content.Items.Get("Material_T1_Wood_Logs")!.Id);
+            // the item registry-entries-test removed (it names no entry of its own: this mod has no registry reference)
+            var wood = new ItemId(Content.Items.First(e => e.Name.Equals("material_t1_stone_flint", StringComparison.OrdinalIgnoreCase)).Id);
             var at = Items.FindInventories(InventoryKinds.Containers).Select(c => Spawn.Inspect(c)).FirstOrDefault(i => i != null)?.Position ?? new WorldPosition(3855.8, 834.5, 1399.8);
             var template = Spawn.Templates.FirstOrDefault(t => t.Name.Equals("lootchest_cheat_new13_loot_grassland", StringComparison.OrdinalIgnoreCase));
             if (template is null) { Check(false, "no template for the drop table check"); return; }
