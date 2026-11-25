@@ -244,6 +244,7 @@ void boot_sync(const std::string& dir) {
         bool cap_unmapped = false;    // this game build's record does not map balance.levelCap
         bool code_fault = false;      // a side-both mod's native stage callback faults
         bool no_base = false;         // the stage cannot read the game's base
+        std::string unwritten;        // a boot field no write outcome reaches (the bridge never saw it)
     };
     auto run = [&](const Opt& o) -> json {
         TreeView view = world();
@@ -284,6 +285,7 @@ void boot_sync(const std::string& dir) {
                 const bool cap = f.field.field == "levelCap";
                 const int value = cap && o.b_field == "levelCap" ? (b_last ? o.points : o.cap) : cap ? o.cap : o.points;
                 const bool refused = o.refused == "*" || o.refused == f.field.field;
+                if (o.unwritten == f.field.field) continue;
                 outcomes.push_back({f.field, !refused, Value::integer(value), "test refusal"});
             }
         r.finish(outcomes);
@@ -321,6 +323,9 @@ void boot_sync(const std::string& dir) {
     check(run(with([](Opt& o) { o.cap_unmapped = true; })).is_null(), "a client-held edit this build's mapping refused: no registry part");
     check(run(with([](Opt& o) { o.code_fault = true; })).is_null(), "a shared mod's stage callback faulted (its edits unknown): no registry part");
     check(run(with([](Opt& o) { o.no_base = true; })).is_null(), "a stage that could not read the base: no registry part");
+    check(run(with([](Opt& o) { o.unwritten = "levelCap"; })).is_null(), "a shared mod's client-held boot field no write reached: no registry part");
+    check(run(with([](Opt& o) { o.needs = false; o.unwritten = "skillPointsPerLevel"; })) == run(with([](Opt& o) { o.needs = false; })),
+          "a server-only boot field no write reached does not stop the part");
     check(run(with([](Opt& o) { o.needs = false; o.refused = "skillPointsPerLevel"; })) == run(with([](Opt& o) { o.needs = false; })),
           "a refused server-only write does not stop the part");
     check(run(with([](Opt& o) { o.b_side = "order:server"; o.refused = "skillPointsPerLevel"; })) == shared_only,

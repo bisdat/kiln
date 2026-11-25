@@ -148,12 +148,12 @@ left out, because the other side never runs that mod; `kiln.boot` leaves such mo
 Each side hashes its own fields, so a field that one side leaves out and the other keeps would make every join differ,
 with nothing the player can change. A start therefore sends no `kiln.registry.boot` (and registry.json has no
 `bootSync`) when it could not apply the client-held boot edits of its side-`both` mods as asked: such an edit was
-refused (by this game build's mapping, by composition or by the write), a refusal names no field (a stage callback
-that faulted, a registry section that could not be read), the stage could not read the game's base, or a side
-`server`/`client` mod writes a field that a side-`both` mod edits too. kiln.log says which (`registry: this start's
-registry boot values are not compared at joins (...)`). Nothing is compared with that process then: the mod-list rules
-and `kiln.boot` decide alone, as for an older peer. A side `server`/`client` mod on fields no side-`both` mod edits
-does not stop the part.
+refused (by this game build's mapping, by composition or by the write) or no write reached it, a refusal names no
+field (a stage callback that faulted, a registry section that could not be read), the stage could not read the game's
+base, or a side `server`/`client` mod writes a field that a side-`both` mod edits too. kiln.log says which (`registry:
+this start's registry boot values are not compared at joins (...)`). Nothing is compared with that process then: the
+mod-list rules and `kiln.boot` decide alone, as for an older peer. A side `server`/`client` mod on fields no
+side-`both` mod edits does not stop the part.
 
 The server compares the part only when both peers run the same side-`both` mods in the same versions. When the mod
 lists differ, the mod-list rules above decide alone, as before: a missing required mod, a version difference, an

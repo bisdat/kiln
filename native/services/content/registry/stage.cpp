@@ -1056,7 +1056,14 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                 not_compared = "mod " + x.mod + "'s edit of " + x.registry + " " + x.field + " was refused on this game";
         }
         for (const auto& [ref, fo] : d.boot_fields) {
-            if (!written.count(ref)) continue;
+            if (!written.count(ref)) {
+                // a refused write left d.result (the refusal scan above names it); this one no write reached at all
+                if (not_compared.empty() && client_held(ref.registry, ref.field) &&
+                    std::any_of(fo.chain.begin(), fo.chain.end(),
+                                [&](const ChainRow& c) { return c.kind == WriterKind::Registry && !c.mod.empty() && !one_side(c.mod); }))
+                    not_compared = ref.text() + " has a side-both mod's edit that no boot write reached";
+                continue;
+            }
             auto reg = d.rm.registries.find(ref.registry);
             if (reg == d.rm.registries.end()) continue;
             auto row = reg->second.rows.find(ref.field);
