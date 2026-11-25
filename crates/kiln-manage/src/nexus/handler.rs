@@ -812,12 +812,14 @@ fn private_dir_inner(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Secures a Nexus state folder or file: owned by this user, with a protected DACL for its owner and SYSTEM only.
+/// Secures a Nexus state folder or file: owned by this user, with a protected DACL for this user and SYSTEM only.
 ///
 /// The owner check accepts what this user's own launcher makes. A launcher started "as administrator" makes its folders
-/// owned by BUILTIN\Administrators (an elevated token's default owner), not by the user; such a folder (also one an
-/// older build left by an elevated start) is taken over: its owner becomes the user, so a later start without elevation
-/// can still use it. Anything owned by another account is refused.
+/// and files owned by BUILTIN\Administrators (an elevated token's default owner), not by the user; such a folder (also
+/// one an older build left by an elevated start) is taken over: its owner becomes the user. Anything owned by another
+/// account is refused. The DACL names the user's SID, not OWNER RIGHTS: a record an elevated start writes into the
+/// folder later (owned by Administrators, never secured on its own) inherits access for the user, so a start without
+/// elevation can still read and replace it.
 #[cfg(windows)]
 fn secure_windows_dir(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -855,12 +857,12 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
         }
     }
     let mut name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // Check ownership before applying an OWNER RIGHTS DACL: a precreated foreign directory must not retain access.
+    // Check ownership before applying the DACL: a precreated foreign directory must not be adopted.
     let mut owner = std::ptr::null_mut();
     let mut original = std::ptr::null_mut();
     let mut token = std::ptr::null_mut();
-    // The user's SID as SDDL text when the owner must become the user, None when the user owns it already.
-    let new_owner: Option<String>;
+    // The user's SID as SDDL text, and whether the owner must become the user (false: the user owns it already).
+    let (user_text, take_over): (String, bool);
     // SAFETY: valid NUL-terminated name and system-owned handles/descriptors freed before returning; the SID pointers
     // read from the token buffers live as long as those buffers.
     unsafe {
@@ -882,26 +884,20 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
             let count = w[0] as u32 as usize;
             (0..count).filter_map(|i| w.get(1 + 2 * i)).any(|&sid| sid != 0 && IsWellKnownSid(sid as *const core::ffi::c_void, WIN_BUILTIN_ADMINISTRATORS_SID) != 0)
         });
-        new_owner = if owned_by_user {
-            None
-        } else if owned_by_default || owned_by_our_admins {
-            let mut text = std::ptr::null_mut();
-            if ConvertSidToStringSidW(user_sid, &mut text) == 0 { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
-            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
-            let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
-            LocalFree(text.cast());
-            Some(sid)
-        } else {
-            None
-        };
         LocalFree(original);
-        if !owned_by_user && new_owner.is_none() { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
+        if !owned_by_user && !owned_by_default && !owned_by_our_admins { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
+        take_over = !owned_by_user;
+        let mut text = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user_sid, &mut text) == 0 { return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
+        let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+        user_text = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+        LocalFree(text.cast());
     }
-    // Protected DACL, inherited by files/subdirectories: only object owner and SYSTEM have access. The owner becomes the
+    // Protected DACL, inherited by files/subdirectories: only this user and SYSTEM have access. The owner becomes the
     // user in the same call when it was Administrators.
-    let owner_part = new_owner.as_deref().map(|sid| format!("O:{sid}")).unwrap_or_default();
-    let sddl: Vec<u16> = format!("{owner_part}D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)").encode_utf16().chain(Some(0)).collect();
-    let information = if new_owner.is_some() { 0x80000005 } else { 0x80000004 }; // PROTECTED_DACL | DACL (| OWNER)
+    let owner_part = if take_over { format!("O:{user_text}") } else { String::new() };
+    let sddl: Vec<u16> = format!("{owner_part}D:P(A;OICI;FA;;;{user_text})(A;OICI;FA;;;SY)").encode_utf16().chain(Some(0)).collect();
+    let information = if take_over { 0x80000005 } else { 0x80000004 }; // PROTECTED_DACL | DACL (| OWNER)
     let mut descriptor = std::ptr::null_mut();
     // SAFETY: NUL-terminated buffers and descriptor allocated by the system, released with LocalFree.
     unsafe {
