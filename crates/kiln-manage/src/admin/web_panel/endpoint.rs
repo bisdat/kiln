@@ -6,7 +6,7 @@
 use super::ids::{self, PanelMod};
 use crate::admin::datadir;
 use crate::server::instance::ServerInstance;
-use crate::{Error, ErrorCode, Result};
+use crate::{Error, Result};
 use serde::Deserialize;
 use std::net::IpAddr;
 
@@ -65,15 +65,23 @@ pub fn read_in(server: &ServerInstance, root: &datadir::DataRoot) -> Result<Endp
     find_in(server, root).map(|(_, ep)| ep)
 }
 
-/// (0.2.0-dev.31.14) The first web panel mod in [`ids::ALL`] with an endpoint in the data root `root`, and that
-/// endpoint: the mod whose id the one-time login is minted for.
+/// (0.2.0-dev.31.14) The web panel mod with an endpoint in the data root `root` ([`ids::find`]: Kilnwarden first, the
+/// old copy when both have one and the server's `kiln/state/mods.json` has the old copy loaded), and that endpoint: the
+/// mod whose id the one-time login is minted for.
 pub fn find_in(server: &ServerInstance, root: &datadir::DataRoot) -> Result<(PanelMod, Endpoint)> {
+    let mods_json = crate::paths::game::MODS_JSON;
     let (panel, bytes) = match (&server.remote, root) {
-        (Some(spec), datadir::DataRoot::Remote(_)) => ids::find(|m| {
-            let dir = root.remote_mod(m.id).unwrap_or_default();
-            crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}"))
-        })?,
-        (None, datadir::DataRoot::Local(_)) => ids::find(|m| std::fs::read(root.local_mod(m.id).unwrap_or_default().join(FILE)))?,
+        (Some(spec), datadir::DataRoot::Remote(_)) => ids::find(
+            |m| {
+                let dir = root.remote_mod(m.id).unwrap_or_default();
+                crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}"))
+            },
+            || crate::server::remote::read_file(spec, mods_json).is_ok_and(|b| ids::old_copy_in_mods_json(&b)),
+        )?,
+        (None, datadir::DataRoot::Local(_)) => ids::find(
+            |m| std::fs::read(root.local_mod(m.id).unwrap_or_default().join(FILE)),
+            || server.dir.as_deref().and_then(|d| std::fs::read(d.join(mods_json)).ok()).is_some_and(|b| ids::old_copy_in_mods_json(&b)),
+        )?,
         _ => return Err(Error::invalid("a local server's data folder is on this machine, a remote server's on that one")),
     };
     Ok((panel, Endpoint::parse(&bytes)?))
