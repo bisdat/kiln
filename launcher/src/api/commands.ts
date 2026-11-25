@@ -2229,7 +2229,27 @@ export const serverConsoleClose = (subscription: string) => call<null>("server_c
 // admin.rs (hooks in ./admin.ts)
 export const adminConnect = (serverId: ServerId, transport: AdminTransport = "auto") => call<AdminSession>("admin_connect", { serverId, transport });
 export const adminDisconnect = (session: string) => call<null>("admin_disconnect", { session });
-export const adminOpenWebPanel = (serverId: ServerId) => call<null>("admin_open_web_panel", { serverId });
+/** An open web panel (kiln_manage::admin::web_panel::WebPanelInfo, 0.2.0-dev.31.12): the server's own loopback origin,
+ *  reached through the launcher's gateway (a TCP connection on this machine, or ssh -W to a remote server). */
+export interface WebPanelInfo {
+  serverId: ServerId;
+  /** `https://127.x.y.z:port` (`http://` for a panel without TLS). */
+  origin: string;
+  /** The pinned certificate's SHA-256 (hex), null without TLS. */
+  fingerprint: string | null;
+  via: "local" | "ssh";
+  /** False when this system could not give the server its own loopback address (cookies shared on 127.0.0.1). */
+  isolated: boolean;
+  /** The gateway closes this long after the panel's last tab. */
+  idleCloseS: number;
+  connections: number;
+}
+/** Opens the server's web panel in the browser, signed in as the owner; the panel as the window shows it. */
+export const adminOpenWebPanel = (serverId: ServerId) => call<WebPanelInfo>("admin_open_web_panel", { serverId });
+/** Closes the server's web panel gateway: whether one was open. */
+export const adminCloseWebPanel = (serverId: ServerId) => call<boolean>("admin_close_web_panel", { serverId });
+/** The web panels open now. */
+export const adminWebPanels = () => call<WebPanelInfo[]>("admin_web_panels");
 export const adminSessions = () => call<AdminSession[]>("admin_sessions");
 /** The op's `data`; rejects with op_failed (message = the op's error) when it answers ok=false. */
 export const adminCall = <T = Json>(session: string, op: string, args: Record<string, Json> = {}) => call<T>("admin_call", { session, op, args });
@@ -2436,7 +2456,7 @@ export const COMMANDS = [
   "server_restart", "server_update", "server_deploy", "server_settings_get", "server_settings_set", "server_mods",
   "server_mods_sync", "server_mod_enable", "server_backups", "server_backup_create", "server_backup_restore", "server_query",
   "server_modpack_status", "server_modpack_build", "server_modpack_publish",
-  "admin_connect", "admin_open_web_panel", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
+  "admin_connect", "admin_open_web_panel", "admin_close_web_panel", "admin_web_panels", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
   "modpack_pending", "modpack_inspect", "modpack_install", "modpack_dismiss",
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   // Settings' ShroudForge card
