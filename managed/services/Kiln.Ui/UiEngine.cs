@@ -301,6 +301,7 @@ internal static unsafe class UiEngine
         KeyInput.RemoveOwnedBy(mod);
         FrameHandlers.RemoveOwnedBy(mod);
         Recount();
+        UiPlacements.Flush();  // a remembered placement changed under a second ago is not lost with the unload (or the game's quit)
     }
 
     /// <summary>Tells the native overlay how much there is to draw and whether input must be captured.</summary>

@@ -226,7 +226,8 @@ player put it (GitHub issue 146). The same units as `UiWindowOptions.Position` a
 - **Where it is kept.** `ui-placement.json` in Kiln's config folder, beside `keybinds.json` (the active profile's config
   folder when the launcher runs one, else `kiln/config`), per mod id, then `screens` or `windows`, then the id: `x`, `y`
   (the centre, fractions) and `width`, `height` (pixels at UI scale 1). Kiln writes it about a second after the player
-  stops moving a window, as a whole new file put in place. A file that is not JSON is kept aside as
+  stops moving a window, and at once when the mod unloads (also when the game quits and unloads every mod), as a whole
+  new file put in place. A file that is not JSON is kept aside as
   `ui-placement.json.bad` with a warning in the log, and every screen and window starts from its options; an entry that
   is not a placement (a missing or non-number field, a size of 0 or less) is skipped. Delete an entry, or the file, to
   forget it.

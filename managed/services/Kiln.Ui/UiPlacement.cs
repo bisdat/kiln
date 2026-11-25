@@ -295,8 +295,9 @@ internal sealed class UiPlacer
 
 /// <summary>ui-placement.json: the placements of remembering screens and windows, per mod and id, in the config folder
 /// beside keybinds.json. Read once (on the thread that creates the first remembering screen or window), written on a
-/// worker a moment after a change (a whole new file put in place, so a crash mid-write leaves the old one). A file that is
-/// no JSON is kept aside as ui-placement.json.bad with a warning; an entry that is no placement is skipped.</summary>
+/// worker a moment after a change and at once when a mod unloads (a whole new file put in place, so a crash mid-write
+/// leaves the old one). A file that is no JSON is kept aside as ui-placement.json.bad with a warning; an entry that is no
+/// placement is skipped.</summary>
 internal static class UiPlacements
 {
     internal const string FileName = "ui-placement.json";
@@ -371,21 +372,28 @@ internal static class UiPlacements
         });
     }
 
-    /// <summary>Writes what changed now (on the calling thread); nothing when nothing changed.</summary>
+    /// <summary>Writes what changed now (on the calling thread); nothing when nothing changed. The debounce worker calls it,
+    /// and so does a mod's unload (<see cref="UiEngine.Retire"/>: also the game's shutdown, which unloads every mod), so a
+    /// drag just before a quit is kept. Not on the render thread.</summary>
     public static void Flush()
     {
-        string? path;
-        KeyValuePair<(string Mod, bool Window, string Id), Entry>[] copy;
-        lock (Lock)
+        // the snapshot is taken under WriteLock: two flushes at once (the worker and an unload) write in the order they
+        // copied, so an older copy never lands over a newer one
+        lock (WriteLock)
         {
-            _scheduled = false;
-            if (!_dirty) return;
-            _dirty = false;
-            path = _path;
-            copy = [.. _entries];
+            string? path;
+            KeyValuePair<(string Mod, bool Window, string Id), Entry>[] copy;
+            lock (Lock)
+            {
+                _scheduled = false;
+                if (!_dirty) return;
+                _dirty = false;
+                path = _path;
+                copy = [.. _entries];
+            }
+            if (path is null) return;
+            Write(path, copy);
         }
-        if (path is null) return;
-        lock (WriteLock) Write(path, copy);
     }
 
     /// <summary>Forgets what was read and not written (a game start reads the file again; the test kit's Restart).</summary>

@@ -512,6 +512,22 @@ public sealed unsafe class UiPlacementTests : IDisposable
     }
 
     [Fact]
+    public void A_mod_that_unloads_writes_its_placement_at_once()
+    {
+        // the player drags the screen and the game quits (the host unloads every mod) before the debounce runs out
+        var s = Screen(new UiScreenOptions { DimBackground = false, Resizable = true, RememberPlacement = true });
+        s.Open();
+        FrameScreens();
+        _rect = (100, 200, 800, 600);
+        FrameScreens();
+        Assert.False(File.Exists(PlacementFile));  // Debounce is an hour here
+        UiEngine.Retire(_mod);
+        Assert.True(File.Exists(PlacementFile));
+        var saved = JsonNode.Parse(File.ReadAllText(PlacementFile))!["mods"]!["grimoire"]!["screens"]!["Grimoire"]!;
+        Assert.Equal(800.0, (double)saved["width"]!);
+    }
+
+    [Fact]
     public void A_good_entry_beside_a_bad_one_is_still_read()
     {
         Write("""{"mods": {"grimoire": {"screens": {"bad": {"x": null}, "good": {"x": 0.2, "y": 0.3, "width": 100, "height": 50}}}}}""");
