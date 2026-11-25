@@ -38,6 +38,7 @@ been seen in a game.
 | dev.31.5 | 0.2.18 | dev.31.2 | runtime and launcher (`Abilities.UseItem` covers the repair kit and pays the item's own costs: scrolls and mana grenades take their ManaCost, C flag `KILN_ITEM_USE_COST_ITEM` in `KilnItemUse.flags` (#118); kiln:// and nxm:// links that start the launcher reach its window, warm starts hand over once) |
 | dev.31.6 | 0.2.18 | dev.31.2 | runtime and launcher (a slow Kiln.Saves writer is a delay: one Warn per world, a catch-up Info and a 5-minute summary instead of an [E] per autosave; `Saves.PlayerStoragePersistenceFailure` / `saves.player_storage` report only failed or 2-minute-stuck stagings; the launcher no longer counts the old line) |
 | dev.31.7 | 0.2.18 | dev.31.2 | launcher only (an installed Crucible pack that lacks Library mods says so and offers Download missing mods: the installed version's missing archives only, verified like an install; Tauri `crucible_repair`, `pack_lacking`) |
+| dev.31.8 | 0.2.18 | dev.31.2 | launcher and kilnctl (an import of exactly an entry's files puts back a Library entry changed on disk; the changed copy goes to `<library>/kiln-changed/<kind>/<id>/<ver>+<h8>.<stamp>/`, newest 3 kept, `changes.log`; refused while a game or server using it runs) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 
