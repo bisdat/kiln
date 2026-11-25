@@ -86,19 +86,52 @@ int main() {
     // a dedicated server: the client-only package does not run there
     const auto server = ksf::profile_off_folders(profile, mods, kiln, true);
     EXPECT(server.size() == 4 && find(server, "client-only") == nullptr);
-    // the runtime's list, one id per line
-    EXPECT(ksf::skip_list(client).find("climb-tweaks\nglide-boost") != std::string::npos);
     // the lines
-    EXPECT(ksf::off_folder_line(*own, true, true, "F", "M", false) ==
+    EXPECT(ksf::off_folder_line(*own, ksf::Skip::skipped, "F", "M", false) ==
            "climb-tweaks is off in the profile: your own folder F is skipped this start; Kiln leaves its files as they are");
-    const auto runs = ksf::off_folder_line(*own, false, true, "F", "M", false);
+    const auto runs = ksf::off_folder_line(*own, ksf::Skip::no_export, "F", "M", false);
     EXPECT(runs.find("climb-tweaks is off in the profile, but your own folder F runs this start") == 0);
     EXPECT(runs.find("Mods > ShroudForge") != std::string::npos && runs.find("Let Kiln manage this folder") != std::string::npos &&
            runs.find("move the folder out of M") != std::string::npos);
     EXPECT(runs.find("takes no skip list from Kiln") != std::string::npos);
-    EXPECT(ksf::off_folder_line(*own, false, true, "F", "M", true).find("\"enabled\": false") != std::string::npos);
-    EXPECT(ksf::off_folder_line(*own, false, false, "F", "M", false).find("ShroudForge's own loader runs this start, so Kiln cannot have it skipped") != std::string::npos);
-    EXPECT(ksf::off_folder_line(*copy, true, true, "F", "M", false).find("Kiln's copy F has ShroudForge's switch on and is skipped") != std::string::npos);
+    EXPECT(ksf::off_folder_line(*own, ksf::Skip::no_export, "F", "M", true).find("\"enabled\": false") != std::string::npos);
+    EXPECT(ksf::off_folder_line(*own, ksf::Skip::self_hosted, "F", "M", false).find("ShroudForge's own loader runs this start, so Kiln cannot have it skipped") != std::string::npos);
+    EXPECT(ksf::off_folder_line(*copy, ksf::Skip::skipped, "F", "M", false).find("Kiln's copy F has ShroudForge's switch on and is skipped") != std::string::npos);
+    // Review 0.2.0-dev.31.12: a folder without mod.json that the launcher placed as `mods/XHL-Auto-Loot` for the
+    // Library id `xhl-auto-loot`. Windows (and Proton) open `mods/xhl-auto-loot` all the same, but ShroudForge's DLL
+    // Manager matches the folder's own name exactly: the runtime must be given the name on disk.
+    {
+        const fs::path cased = root / "cased";
+        fs::create_directories(lib / "xhl-auto-loot");
+        write(lib / "xhl-auto-loot/xhl-auto-loot.dll", "MZ");
+        write(cased / "XHL-Auto-Loot/XHL-Auto-Loot.dll", "MZ");
+        write(cased / "XHL-Auto-Loot/native-plugin.ini", "[Plugin]\nEnabled=true\nDll=XHL-Auto-Loot.dll\n");
+        const nlohmann::json p = {{"mods", {{"shroudforge", {entry("xhl-auto-loot", false)}}}}};
+        const auto off = ksf::profile_off_folders(p, cased, kiln, false);
+        EXPECT(off.size() == 1);
+        EXPECT(!off.empty() && off[0].package == "XHL-Auto-Loot" && off[0].folder == cased / "XHL-Auto-Loot");
+    }
+    // Review 0.2.0-dev.31.12: one call per package. The runtime refuses a whole call for one name it does not take; one
+    // such name must not keep the others running, and its line must not say the runtime takes no skip list.
+    {
+        std::vector<std::string> asked;
+        const auto results = ksf::ask_each(client, true, [&](const std::string& package) {
+            asked.push_back(package);
+            return package != "glide-boost";
+        });
+        EXPECT(asked.size() == client.size());
+        EXPECT(results.size() == client.size());
+        for (size_t i = 0; i < client.size() && i < results.size(); ++i)
+            EXPECT(results[i] == (client[i].package == "glide-boost" ? ksf::Skip::refused : ksf::Skip::skipped));
+        const auto none = ksf::ask_each(client, true, {});
+        for (const auto r : none) EXPECT(r == ksf::Skip::no_export);
+        const auto self = ksf::ask_each(client, false, {});
+        for (const auto r : self) EXPECT(r == ksf::Skip::self_hosted);
+        const auto refused = ksf::off_folder_line(*renamed, ksf::Skip::refused, "F", "M", false);
+        EXPECT(refused.find("glide-boost is off in the profile, but your own folder F runs this start") == 0);
+        EXPECT(refused.find("takes no skip list") == std::string::npos);
+        EXPECT(refused.find("did not take its name (glide-boost)") != std::string::npos);
+    }
     // nothing in the mods folder changed
     std::ifstream ext(mods / "climb-tweaks/extended.mod.json");
     EXPECT(std::string((std::istreambuf_iterator<char>(ext)), std::istreambuf_iterator<char>()) == ON);

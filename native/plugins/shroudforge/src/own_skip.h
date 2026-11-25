@@ -12,6 +12,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -93,6 +94,19 @@ inline bool kilns_copy(const std::filesystem::path& dir, const std::string& id) 
     return j && j->is_object() && j->value("kind", std::string{}) == "shroudforge" && j->value("id", std::string{}) == id;
 }
 
+// The folder `<mods>/<name>` as the folder itself spells it: the exact name first, else the one whose name differs only
+// in case (the one Windows opens). Empty when there is none.
+inline std::filesystem::path on_disk(const std::filesystem::path& mods, const std::string& name) {
+    std::error_code ec;
+    std::filesystem::path other;
+    for (auto it = std::filesystem::directory_iterator(mods, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const auto here = utf8(it->path().filename());
+        if (here == name) return it->path();
+        if (other.empty() && same_name(here, name)) other = it->path();
+    }
+    return other;
+}
+
 inline std::filesystem::path entry_path(const nlohmann::json& e, const std::filesystem::path& kiln) {
     if (!e.contains("path") || !e["path"].is_string()) return {};
     std::filesystem::path p = u8path(e["path"].get<std::string>());
@@ -140,10 +154,12 @@ inline std::vector<OffFolder> profile_off_folders(const nlohmann::json& profile,
         const auto library = entry_path(e, kiln);
         const std::string package = library.empty() ? std::string{} : mod_id(library);
         if (is_on(id) || (!package.empty() && is_on(package))) continue;
-        // <mods>/<id> when it holds this package (or, for a package without mod.json, has none either)
+        // <mods>/<id> when it holds this package (or, for a package without mod.json, has none either), named as on disk:
+        // Windows (and Proton) open `mods/xhl-auto-loot` for a folder `mods/XHL-Auto-Loot`, but ShroudForge's DLL Manager
+        // matches a folder without mod.json by its own name, exactly
         std::filesystem::path folder;
-        const auto named = mods / u8path(id);
-        if (std::filesystem::is_directory(named, ec) && !std::filesystem::is_symlink(named, ec)) {
+        const auto named = on_disk(mods, id);
+        if (!named.empty() && std::filesystem::is_directory(named, ec) && !std::filesystem::is_symlink(named, ec)) {
             const auto there = mod_id(named);
             if (package.empty() ? there.empty() || there == id : there == package) folder = named;
         }
@@ -166,30 +182,35 @@ inline std::vector<OffFolder> profile_off_folders(const nlohmann::json& profile,
     return out;
 }
 
-// The ids of `folders`, one per line: the list shroudforge_host_skip_packages takes.
-inline std::string skip_list(const std::vector<OffFolder>& folders) {
-    std::string s;
-    for (const auto& f : folders) {
-        if (!s.empty()) s += '\n';
-        s += f.package;
-    }
-    return s;
+// What became of one folder: the runtime skips it (`skipped`), it refused its name (`refused`: ShroudForge takes ids of
+// letters, digits, '.', '-' and '_' and refuses a whole call for one it does not), the runtime Kiln hosts has no skip
+// list (`no_export`), or ShroudForge's own loader runs this start (`self_hosted`).
+enum class Skip { skipped, refused, no_export, self_hosted };
+
+// Asks the runtime to skip each folder's package, one call per package (a refused name keeps only its own package
+// running). `hosted`: Kiln hosts the runtime; `skip`: its export shroudforge_host_skip_packages, empty without one.
+inline std::vector<Skip> ask_each(const std::vector<OffFolder>& folders, bool hosted, const std::function<bool(const std::string&)>& skip) {
+    std::vector<Skip> out;
+    for (const auto& f : folders)
+        out.push_back(!hosted ? Skip::self_hosted : !skip ? Skip::no_export : skip(f.package) ? Skip::skipped : Skip::refused);
+    return out;
 }
 
-// The kiln.log line of one folder: skipped (`skipped`), or it runs: the runtime Kiln hosts takes no skip list (`hosted`),
-// or ShroudForge's own loader runs this start. `mods`: ShroudForge's mods folder. Kiln never writes into the player's
-// own folder.
-inline std::string off_folder_line(const OffFolder& f, bool skipped, bool hosted, const std::string& folder, const std::string& mods,
-                                   bool server) {
-    if (skipped)
+// The kiln.log line of one folder: skipped, or it runs and why (`what`). `mods`: ShroudForge's mods folder. Kiln never
+// writes into the player's own folder.
+inline std::string off_folder_line(const OffFolder& f, Skip what, const std::string& folder, const std::string& mods, bool server) {
+    if (what == Skip::skipped)
         return f.kilns ? f.id + " is off in the profile: Kiln's copy " + folder + " has ShroudForge's switch on and is skipped this "
                              "start; press Play in the Kiln launcher (or activate the profile again) and Kiln switches it off"
                        : f.id + " is off in the profile: your own folder " + folder + " is skipped this start; Kiln leaves its files "
                              "as they are";
-    const std::string why = hosted ? "this ShroudForge runtime takes no skip list from Kiln (Kiln's bundled runtime takes one from "
-                                     "0.2.0-dev.31.12 on, an installed ShroudForge does not: launcher Settings, \"Use my installed "
-                                     "ShroudForge\")"
-                                   : "ShroudForge's own loader runs this start, so Kiln cannot have it skipped";
+    const std::string why = what == Skip::refused
+        ? "the ShroudForge runtime did not take its name (" + f.package + ") into its skip list (it takes ids of letters, digits, "
+          "'.', '-' and '_')"
+        : what == Skip::no_export ? "this ShroudForge runtime takes no skip list from Kiln (Kiln's bundled runtime takes one from "
+                                    "0.2.0-dev.31.12 on, an installed ShroudForge does not: launcher Settings, \"Use my installed "
+                                    "ShroudForge\")"
+                                  : "ShroudForge's own loader runs this start, so Kiln cannot have it skipped";
     if (f.kilns)
         return f.id + " is off in the profile, but Kiln's copy " + folder + " runs this start: ShroudForge's switch is on in it, and " +
                why + ". Press Play in the Kiln launcher (or activate the profile again): Kiln then switches it off";

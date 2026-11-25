@@ -757,14 +757,21 @@ void skip_profile_off(HMODULE runtime) {
     if (off.empty()) return;
     using SkipPackages = bool(__cdecl*)(const wchar_t*);
     const auto skip = runtime ? reinterpret_cast<SkipPackages>(GetProcAddress(runtime, "shroudforge_host_skip_packages")) : nullptr;
-    const std::wstring list = to_wide(skip_list(off));
-    bool skipped = false;
-    if (skip && !invoke(skip, &skipped, list.c_str())) skipped = false;
+    // one package per call: the runtime refuses a whole call for one name it does not take
+    std::function<bool(const std::string&)> ask;
+    if (skip) ask = [skip](const std::string& package) {
+        const std::wstring id = to_wide(package);
+        bool taken = false;
+        return invoke(skip, &taken, id.c_str()) && taken;
+    };
+    const auto results = ask_each(off, runtime != nullptr, ask);
     nlohmann::json rows = nlohmann::json::array();
-    for (const auto& f : off) {
+    for (size_t i = 0; i < off.size(); ++i) {
+        const auto& f = off[i];
+        const bool skipped = results[i] == Skip::skipped;
         const std::string folder = to_utf8(f.folder.wstring());
         logf(skipped ? KILN_LOG_INFO : KILN_LOG_WARN, "%s",
-             off_folder_line(f, skipped, runtime != nullptr, folder, to_utf8(mods.wstring()), g_server).c_str());
+             off_folder_line(f, results[i], folder, to_utf8(mods.wstring()), g_server).c_str());
         rows.push_back({{"id", f.id}, {"package", f.package}, {"path", folder}, {"own", !f.kilns}, {"skipped", skipped}});
     }
     set_status("profileOff", std::move(rows));
