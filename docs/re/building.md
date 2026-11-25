@@ -297,8 +297,12 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   feature `ui.ammo.reveal`, which kiln-tools requires as a whole (the watcher's stamp and the list draw's read of it
   too, not only the names it reads), so a build where the draw no longer fades from that time never gets the count
   changed (no lone UI sound). When it does not resolve, picks work as before and `kiln.log` says once that mod rows do
-  not show the list again. Not established: whether the client and the HUD run on one thread in every session (the
-  record of this build saw the client world on the main thread), and the event's delivery to a joined client.
+  not show the list again. The write takes no access the game does not take on the same call: the pick it stands in
+  for writes the same `G38UiPlayData` (the group's pending selection +0x63c/+0x640) there, and `0x40c320` before it
+  the group's index. Should it still overlap player_ui's `inc`, at worst two changes merge into one reveal (the watcher
+  only compares for a change; an aligned 4-byte store does not tear). Not established: whether the client and the HUD
+  run on one thread in every session (the record of this build saw the client world on the main thread), and the
+  event's delivery to a joined client.
 
 Real menu behaviour, the server half of a swap and controller cycling remain the owner's in-game check.
 
