@@ -96,8 +96,9 @@ EMF 0.6.10 (API v41) and 0.6.11 (v42) only raised the version: v41 gave move ord
 `EMF_MOVE_PEACEFUL_ALL`, v42 gave path results the door each point goes through (`EmfPathResult.doors`); the table
 stayed 1088 bytes. Since 0.2.0-dev.28 kiln-emf says version 42, so a mod whose `mod.json` says `"emf": 41` or `42`
 loads instead of being refused ("needs EMF API v42; kiln-emf provides v40"), and `emf::has_v41()` and `has_v42()`
-answer true. The functions those fields belong to, `enemy_move` and `path_find`, are still among the ones Kiln does not
-carry: a move order of either size (128 or 136 bytes) is refused with its reason, and no path result reaches a mod.
+answer true. Since 0.2.0-dev.31.13 `enemy_move` is carried and reads `stuck_seconds` when a 136-byte order has it (a
+128-byte order gets the 15 s default); `EMF_MOVE_PEACEFUL_ALL` is refused with its reason. `path_find` is still among
+the functions Kiln does not carry: no path result reaches a mod.
 
 EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) grew the table to 1144 bytes: the game's own permissions of a player
 (`player_permissions`), breaking player-built blocks (`break_blocks`, `block_at`, `find_wall`; v45 spares the world's
@@ -142,7 +143,8 @@ admits manifest requirements through `"emf": 49`; version 50 and later remain re
 layouts are preserved. `has_v49()` now reports the contract version, **not path or movement availability**.
 `EmfPathQuery.as_state` adds calm/Guard planning (56 to 60 bytes); `EMF_MOVE_CLEAR` requests wall-clear arrival.
 Neither feature is implemented here: all `path_find` queries return 0, logged, without a callback or result;
-all valid-size `enemy_move` orders return 0 and `why = "not available on Kiln yet"`, without a callback or movement.
+an `enemy_move` order with `EMF_MOVE_CLEAR` returns 0 with its reason (`enemy_move` itself is carried since
+0.2.0-dev.31.13, below), without a callback or movement.
 Unknown states and flags are also no-action refusals, never downgraded to calm planning or movement without the flag.
 This does not enable Kiln-native path/orders hooks or establish gameplay parity for EMF 0.6.22's mods.
 
@@ -165,7 +167,7 @@ since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the s
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
 Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
 language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
+minimap's parts, `remove_building`, paths, doors, a player's game permissions
 and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
@@ -174,8 +176,21 @@ says once per mod and function `emf: <mod> called <fn>, not supported (not avail
 What that means for EMF's own mods of 0.6.8, read from their source (not seen with a player):
 - **minimap** draws nothing (`emf.canvas`, `emf.player_view` and `emf.map_markers` are not carried).
 - **Beastmaster**: its markers sent to players (`emf.send_marker`), its buff reads and removals (`emf.buffs`,
-  `emf.remove_buff`) and its reads of `emf.player_view` and `emf.enemy_moving` give nothing; the rest runs as
-  before.
+  `emf.remove_buff`) and its reads of `emf.player_view` give nothing; the rest runs as before. Since
+  0.2.0-dev.31.13 its enemy orders and move checks work on Kiln alone (read from Beastmaster 1.22.0's source; not
+  yet seen with a player):
+  - `emf.enemy_order(world, beast, target, {seconds = ..., allies = true})` (grounds.lua: a beast at a Training
+    Grounds attacks the dummy's invisible target, renewed every few seconds) answers the order's id: kiln-emf takes a
+    `kiln.creature_control` combat lease on the beast, holds the target as its pick through `kiln.creatures` and
+    sends the game's threat, so the beast goes for it; `emf.enemy_order_cancel` (grounds.lua, home.lua: the scene
+    ends, the player pets it) ends it at once and gives the lease back. Before, every call answered `nil` and the
+    beast sniffed about instead.
+  - `emf.enemy_moving(world, beast)` (home.lua, pack.lua) answers another mod's move on the beast (its id, else
+    `nil`), so Beastmaster does not turn, settle, leash or send back a beast that another EMF mod walks somewhere.
+  - Orders and moves are server-side, as on EMF: a host or a dedicated server. A beast another Kiln mod controls
+    (a Kiln pet's follow lease) cannot be moved by an EMF mod: the move answers `nil` and "creature control: Busy:
+    ...". Orders with `damage` and moves with the peaceful or clear options are refused with their reason; see
+    [emf-parity.md](emf-parity.md#v28-to-v40-emf-063-to-068).
 - **teleports**: the map action (Shift and hold on the map) is not offered and it cannot look the ground up for a
   spot (`map_action`, `ground_at`); its commands work as before.
 

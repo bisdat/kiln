@@ -11,9 +11,10 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **80 full, 19 partial, 45 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
-  v40 append 45: one full (`world_to_screen`), three partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since
-  0.2.0-dev.30.3) and 41 not yet
+- Counts: **83 full, 22 partial, 39 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+  v40 append 45: four full (`world_to_screen`; `enemy_order_cancel`, `enemy_move_cancel`, `enemy_moving` since
+  0.2.0-dev.31.13), six partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since 0.2.0-dev.30.3; `enemy_order`,
+  `enemy_target`, `enemy_move` since 0.2.0-dev.31.13) and 35 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7: two full, one partial and four not yet
   ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2, both full (`spawn_facing`,
   `find_wall_ex`; [v47](#v47-emf-0619)); v48 and v49 append none ([v48](#v48-emf-0620), [v49](#v49-emf-0622)). Counts are C table slots, not
@@ -51,9 +52,9 @@ Structs passed in are read up to their `size` field (EMF's `api_sizes.h` rules):
 `widget_size` (44..4096 bytes, at most 256 widgets), and a v24/v25 mod's 56-byte widgets read `icon`, `fps` and
 `height` as 0. A v36 to v46 request (`EmfRemoveBuilding`, `EmfEnemyOrder`, `EmfMoveOrder` for `enemy_move` and
 `villager_move`, `EmfBreakBlocks`) whose `size` is smaller than EMF's minimum (144, 120, 128 and 160 bytes) is refused
-untouched, as in EMF. v41's `EmfMoveOrder.stuck_seconds` (136 bytes) and v42's
-`EmfPathResult.doors` (32 bytes) change nothing on Kiln: `enemy_move` refuses every order and `path_find` never answers
-(both not yet). The same holds for v48's `EmfPathQuery.as_entity` (52 to 56 bytes) and `EmfPathResult`'s used values
+untouched, as in EMF. v41's `EmfMoveOrder.stuck_seconds` (136 bytes) is read by `enemy_move` when the order's `size`
+covers it (since 0.2.0-dev.31.13; a v40 mod's 128-byte order gets the 15 s default and nothing past `why` is read);
+v42's `EmfPathResult.doors` (32 bytes) changes nothing on Kiln: `path_find` never answers (not yet). The same holds for v48's `EmfPathQuery.as_entity` (52 to 56 bytes) and `EmfPathResult`'s used values
 (32 to 48 bytes): `path_find` answers 0 without reading the query, so a v47 mod's 52-byte query and a v48 mod's
 56-byte one are treated alike, and no result of either size is written. v45's `EmfBlockInfo.world` (40 to 44 bytes) is written only when covered by the caller's size; the block
 queries and `EMF_BREAK_WORLD` are translated onto `kiln.build` since 0.2.0-dev.30.6. v46's
@@ -124,8 +125,8 @@ queries and `EMF_BREAK_WORLD` are translated onto `kiln.build` since 0.2.0-dev.3
 ## v28 to v40 (EMF 0.6.3 to 0.6.8)
 
 What a mod gets from each function EMF added after 0.6.0. "Answer" is the value a mod sees from a function Kiln does
-not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`); the probe checks them on a
-dedicated server.
+not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`; the six order functions:
+`tests/orders_test.cpp`); the probe checks them on a dedicated server.
 
 | EMF function (since) | On Kiln | Status | Tested |
 |---|---|---|---|
@@ -143,8 +144,12 @@ dedicated server.
 | `remove_building` (36) | Answer: `false`, `refunded` 0, `why` "not available on Kiln yet". Nothing is removed. | not yet | host, probe |
 | `path_find`, `path_cancel` (37) | Answer: 0 / `false`; no callback. | not yet | host, probe |
 | `door_state`, `door_set`, `door_lock` (38) | Answer: `EMF_DOOR_NONE` / `false`. | not yet | host, probe |
-| `enemy_order`, `enemy_order_cancel`, `enemy_target` (39) | Answer: 0 with `why` in the order / `false` / 0. | not yet | host, probe |
-| `enemy_move`, `enemy_move_cancel`, `enemy_moving` (40) | Answer: 0 with `why` in the order / `false` / 0; no callback. | not yet | host, probe |
+| `enemy_order` (39) | Since 0.2.0-dev.31.13. EMF's checks and `why` texts (server world callback, flags, seconds, damage 0..100000, a player, no enemy AI, a boss, a player's ally without `EMF_ORDER_ALLIES`, no or dead target, 256 orders); a new order on the enemy ends its old one (and takes over its live lease, so an order renewed every few seconds keeps its hold without a gap), a move on it ends (cancelled) once the order holds. Kiln: an AI-on PetCombat lease of `kiln.creature_control` on the enemy (the broker's refusal is the `why`: "creature control: Busy: ..."); once the lease is Active, `kiln.creatures` holds the target as its pick (`target_prefer`: SelectedTargets slot 0, the game's next target change at "never", re-asserted every Pre) and sends the game's AddThreatTargetEvent (threat 100, again every 3 s while it is out of its fight with the target). Ends: its time, the target gone or dead, the enemy dead, gone, a player or a player's ally without the flag, cancel, the broker ending the lease, the mod stopping, the world closing; then the hold is let go and the lease and binding released. While a higher lease holds the body (a ride) nothing is held; it is held again on resume. | partial: `damage` > 0 is refused ("its damage could not be added (hit rules are off on this game build)": Kiln carries no hit rules); the hold starts with the lease Active (the next step), not at once; the threat stands in for EMF's alarmed aggro entry and Combat state (an enemy at rest goes to Combat on AddThreatTargetEvent, docs/re/creatures.md §11, lab); EMF's Combat to Idle when the order ends without a pick is not written (the game picks again) | host (`tests/orders_test.cpp`); probe (refusal) |
+| `enemy_order_cancel` (39) | Since 0.2.0-dev.31.13. At once inside a world callback on the server world, else at the next step; false for no such order. | full | host; probe |
+| `enemy_target` (39) | Since 0.2.0-dev.31.13. `kiln.creatures` inspect: SelectedTargets slot 0, 0 for nothing or no creature. | partial: the server world on its thread only; a joined client's world, or another thread, answers 0 | host; probe |
+| `enemy_move` (40) | Since 0.2.0-dev.31.13. EMF's checks and `why` texts (flags, 1..16 points copied under a guard, arrive 0.5..50 with 0 = 2, seconds 0..3600, v41 `stuck_seconds` 2..120 with 0 = 15, a player, no enemy AI, a boss, a player's ally without `EMF_MOVE_ALLIES`, dead, 256 moves, no waypoint). Kiln: an AI-on EngineGuard lease of `kiln.creature_control` (another owner's pet lease on the body: Busy, refused with the broker's reason); EMF's hidden waypoint (the TestTransform template) spawned through `kiln.spawn` at each point; once the lease is Active, the game's guard order on it (StartGuardingEvent through `kiln.creatures`), sent again every 3 s while it is not guarding the waypoint. Arrive: within `arrive` across and `arrive` + 2 m up or down, or, once it guards the waypoint, within its guard distance + 1 m (it stops short). Statuses as EMF: ARRIVED, STUCK (no metre closer for `stuck_seconds` while not fighting; a vanished waypoint placed again 3 times; the broker ending the lease, e.g. BodyNotReady), TIMEOUT, GONE (dead, despawned, a player, an ally without the flag, the body gone), CANCELLED (cancel, a new move or enemy order on it, world NULL when the world closes). Afterwards it guards whom it guarded before (a tamed beast: its owner), else its home is the last point (`kiln.creatures` home, no layer). The callback runs once, after the move is gone, and may start another. | partial: `EMF_MOVE_PEACEFUL`, `EMF_MOVE_PEACEFUL_ALL` and v49 `EMF_MOVE_CLEAR` are refused with their `why` ("... is not available on Kiln yet"); `EMF_MOVE_HOLD` gets EMF's "EMF_MOVE_HOLD is for villager_move"; the guard order goes out with the lease Active (the next step); a roaming or sleeping creature is not put in Idle first (EMF writes it: such a creature may finish its roam step before it walks); the guard distance is the template's `guardSetup.targetDistance` x 1.2 (the upper end of the game's random factor), not the creature's drawn value; the guard given back goes out as an event (a step later; EMF also writes `guardEntityId` at once) | host (`tests/orders_test.cpp`); probe (refusal) |
+| `enemy_move_cancel` (40) | Since 0.2.0-dev.31.13. CANCELLED: at once inside a world callback on the server world, else at the next step; false for no such move. | full | host; probe |
+| `enemy_moving` (40) | Since 0.2.0-dev.31.13. The move's id, 0 when it is not moving (a move cancelled for the next step already answers 0); any thread. | full | host; probe |
 
 A mod that registers a callback through a function that is not carried and ignores the `false` runs without that
 feature and without an error of its own: the one log line and `state/emf.json` `unsupported` are where it shows.
@@ -294,7 +299,7 @@ See the [source/header and loader audit](../re/emf-compat.md#pinned-emf-0622-v49
 | Addition | On Kiln | Evidence/limit |
 |---|---|---|
 | `uint32_t EmfPathQuery.as_state` at 56, `sizeof` 60, calm 0 / Guard 1 | All path queries remain refused: 0, unsupported log, no callback or result. Unknown states are not masked to calm. | Production adapter host tests: exact 52/56/60-byte allocations, calm/Guard/unknown, with/without `as_entity`. |
-| `EMF_MOVE_CLEAR = 0x10` (existing `uint32_t flags`; move order still 136 bytes) | Every valid-size `enemy_move` is refused with `why`; no point reads, callback, or entity mutation. CLEAR and unknown flags cannot become unqualified moves. | Production adapter host tests: exact 128/136-byte orders, CLEAR/mixed/unknown flags and inaccessible point pointer. |
+| `EMF_MOVE_CLEAR = 0x10` (existing `uint32_t flags`; move order still 136 bytes) | Since 0.2.0-dev.31.13 `enemy_move` is carried (v40 table above); an order with CLEAR is refused with `why` "EMF_MOVE_CLEAR is not available on Kiln yet (no wall check at a point)", before any point is read: no callback, lease, waypoint or entity change. Unknown flags are refused too and never become a move. | Production adapter host tests (`tests/orders_test.cpp`): 128/136-byte orders, CLEAR/HOLD/PEACEFUL/unknown flags, an unreadable point pointer. |
 | Lua 1.42 `sequence = "chest"`, `EMF_SEQUENCE_CHEST = 0x3E49C160` | Existing C offer model preserves this sequence in runtime component bytes. No inventory is created by an offer. | Model test only; upstream Lua DLL and storage screen not run. |
 | Lua 1.43 `state = "calm"/"guard"`, `clear = true` | Source-pinned parsing; underlying C functions remain unavailable (`nil`, or `nil` and reason). | Source audit plus C refusal tests, not Lua execution. |
 | `keys`, key-setting `shared`, EML content-owner detection | Upstream tooling, no new C API slots. No keys-list UI is supplied here; `shared` is ignored. Upstream EMF defers EML to Kiln when `kiln/kiln.json` exists. | Source audit; no loader/UI/content code changed in this task. |
@@ -356,7 +361,7 @@ Kiln the functions still marked not yet below return what EMF's Lua guide docume
 | `emf.remove_building` | v36 | not yet |
 | `emf.path_find`, `emf.path_cancel` | v37 | not yet |
 | `emf.door`, `emf.door_open`, `emf.door_close`, `emf.door_lock` | v38 | not yet |
-| `emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`, `emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving` | v39, v40 | not yet |
+| `emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`, `emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving` | v39, v40 | as C (since 0.2.0-dev.31.13): cancels and `enemy_moving` full; `enemy_order` partial (no `damage`), `enemy_target` partial (server world only), `enemy_move` partial (the peaceful and clear options are refused with their reason) |
 | `world:permissions` (1.36) | v43 `player_permissions` | not yet |
 | `emf.break_blocks`, `emf.block_at`, `emf.find_wall` (1.37; a block's `world` and the break option `world`, 1.38) | v44, v45 | queries full; breaking partial (as C) |
 | `emf.villager_move`, `emf.villager_move_cancel`, `emf.villager_moving` (1.39) | v46 | not yet |
