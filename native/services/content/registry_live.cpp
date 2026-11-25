@@ -430,6 +430,8 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
     if (!put(b, index_of(b->kind, swf), -1, base + sw.offset, sw.bytes, std::move(sw_ev)) ||
         !put(b, index_of(b->kind, enf), -1, base + en.offset, en.bytes, std::move(en_ev)))
         return (void)fail(b, "the field is not readable");
+    // a roll reads the switch, then the enum: the switch turns on after the enum lands and off before it changes
+    if (!g.reading) store_set_gate(base + sw.offset);
     fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{base + sw.offset, sw.bytes}, {base + en.offset, en.bytes}},
         [b, sw, en](const std::vector<SlotBytes>& bytes, std::vector<double>*) -> std::optional<Value> {
             return optional_kiln(sw, en, b->row ? &*b->row : nullptr, bytes[0].data(), bytes[1].data());

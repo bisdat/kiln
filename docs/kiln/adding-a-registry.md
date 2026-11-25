@@ -135,7 +135,8 @@ Scalar convs (`int`, `float`, `bool`, `time`, `enum`) already bind generically (
 (`bind_flags`: the bitmask's bits for the row's names, written over the value below so bits Kiln has no name for stay the
 game's; a name this build's enum lacks is refused, named), and so does `optionalEnum` (`bind_optional_enum`: two slots, the
 switch and the enum, each evaluated over the other's value below the registry; `none` turns the switch off and leaves the
-enum below it as it is). Both keep compare-before-write, rollback and per-entry refusals (31.x; tests `loot_flags_*`,
+enum below it as it is; the switch is a store gate, `store_set_gate`, so a flush writes it after the enum when it turns on
+and before the enum when it turns off). Both keep compare-before-write, rollback and per-entry refusals (31.x; tests `loot_flags_*`,
 `loot_fixed_rarity_*` in registry_live_transactions_test.cpp). Lists, references, impact configs, unlock and drop walks each
 have their own binder (`bind_recipe_list`, `bind_perks`, `bind_impact`, `bind_unlock`, `bind_drops`) tied to their store
 kind, so a list or ref field in a new registry needs its own.
@@ -292,6 +293,7 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 | P34 | drop entries' counts and chances got no sample; a chance of 1.0 was probed to 1.25 | kiln.registry.live's struct values have flat dotted keys (`"count.min"`) and the producer looked them up nested; probes ignored the range | leaves read flat keys first; a list element's probe changes a count first and halves a chance; a float probe refused for its range is tried again at 0.75 x on the same entry | `Leaf`, `SetLeaf`, `Probe`, `LowerProbe`; host tests `Element_leaves_read_and_write_flat_dotted_keys`, `Drop_entry_probe_stays_in_range`, `A_float_probe_refused_for_its_range_is_tried_lower` |
 | P35 | a later `none` over a fixed rarity seemed to leave the earlier change's enum | live changes compose into one registry layer per slot, evaluated over the bytes below the registry, not one layer per change | expected: `none` leaves the game's own enum below the switch; reverting the later change restores the earlier one | `bind_optional_enum`; test `loot_fixed_rarity_read_write_revert` |
 | P36 | with an item removal active, every Manual change (an item's maxStack) reported PendingResource, so `Result.Ok` was false | the commit's outcome looked at every drop-table field waiting for its table (the removal's disabled slots in tables the world had not loaded), not at the change's own | the outcome is PendingResource only when a pending field's chain holds a row of this change | `registry_live.cpp` `registry_live_commit` (`own_pending`); test `unrelated_pending_table_keeps_a_change_applied`; lab: registry-entries-test "later field edits bind the stable added id" |
+| P37 | a fixed rarity turned on was, for one write, on over the enum it had before (a roll on a game thread could take that rarity); a failed enum write left the switch on over it until the rollback | the switch (+5) and the enum (+6) are two slots of one flush, and write_batch writes in address order: switch first | a gate slot (`store_set_gate`, the switch) is written after the flush's other writes when it opens and before them when it closes; it does not open when another write of its entry failed | `store.cpp` `store_flush_checked`; `bind_optional_enum`; test `loot_fixed_rarity_switch_never_on_over_a_stale_enum` |
 
 ### Composition, live changes, entry points
 

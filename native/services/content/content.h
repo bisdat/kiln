@@ -219,6 +219,7 @@ struct Slot {
     bool registry = false;  // a registry layer was on it at the last flush or since (its revert is compared too)
     bool foreign = false;   // another writer wrote it after Kiln's registry layer: registry layers left out for this world
     bool old_changed = false;  // a layer of an older path (not the registry) was put or dropped since the last flush
+    bool gate = false;      // store_set_gate: written after a flush's other writes when it opens, before them when it closes
     std::vector<Layer> layers;
 };
 struct Conflict {
@@ -289,6 +290,10 @@ bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
 // it as they are: what a registry reader sees without some registry rows (review4 NS5). Memory when there is no slot or
 // another writer owns it for this world.
 bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out);
+// The slot at addr (one that exists: after a put) is a gate, a switch the game reads before the slots it gates (a fixed
+// rarity's useUiRarity before uiRarity): a flush writes it last when it opens (any byte not zero) and first when it closes
+// (all zero), and does not open it when another write of its entry did not land, so no reader sees it on over stale values.
+void store_set_gate(uintptr_t addr);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is

@@ -34,6 +34,8 @@ Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
 std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
 std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::function<void()> g_after_each_write; // test-only: after every single write lands (what a game thread could read between two)
+std::set<uintptr_t> g_fail_addrs; // test-only: writes to these addresses fail; the batch goes on with the others (as write_batch does)
 std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
@@ -56,9 +58,13 @@ size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
     for (size_t i = 0; i < writes.size(); ++i) {
         const Write& w = writes[i];
         if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        if (g_fail_addrs.count(w.addr)) { if (failed && !*failed) *failed = w.addr; continue; }
         std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+        if (g_after_each_write) g_after_each_write();
     }
-    return writes.size();
+    size_t done = writes.size();
+    for (const Write& w : writes) done -= g_fail_addrs.count(w.addr);
+    return done;
 }
 void* near_alloc(uintptr_t, size_t n) {
     void* p = g_arena + g_near;
@@ -200,7 +206,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
-    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_write_limits.clear(); g_before_write = {}; g_after_each_write = {}; g_fail_addrs.clear(); g_integer_impacts.clear();
     g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);

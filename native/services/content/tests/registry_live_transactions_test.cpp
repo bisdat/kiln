@@ -1037,10 +1037,49 @@ void loot_fixed_rarity_foreign_revert_is_skipped() {
 void loot_fixed_rarity_write_failure_rolls_back() {
     fresh_loot(); RegistryLiveReply reply;
     const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])");
-    g_write_limits = {1};  // the switch writes, the enum's write fails; the rollback writes normally
+    g_fail_addrs = {A(FIXED_AT)};  // the enum's write fails, whatever order the slots are written in
     registry_live_commit(71, h, &reply);
+    g_fail_addrs.clear();
     check(reply.outcome == RegistryLiveOutcome::Refused && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2,
           "a half-written optional enum is rolled back whole: " + reply.reason);
+}
+// review registry-proof: a roll reads useUiRarity and then uiRarity on a game thread while Kiln writes them (the real
+// write_batch goes in address order: the switch +5 before the enum +6). Turning a fixed rarity on lands the enum before the
+// switch, turning it off the switch before the enum: after no single write is the switch on over an enum it was not set with.
+void loot_fixed_rarity_switch_never_on_over_a_stale_enum() {
+    fresh_loot(); RegistryLiveReply reply;
+    std::string bad;
+    int allowed = 3;  // the enum the switch may be on over while it is on (-1: the switch must stay off)
+    g_after_each_write = [&] {
+        if (at<uint8_t>(SWITCH_AT) && at<uint8_t>(FIXED_AT) != allowed) bad += " [on over " + std::to_string(at<uint8_t>(FIXED_AT)) + "]";
+    };
+    const auto a = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 3 && bad.empty(),
+          "turning a fixed rarity on writes the enum before the switch:" + bad);
+    const auto b = change(72, "b", "[{" + loot_wood + R"("field":"fixedRarity","op":"none"}])");
+    registry_live_commit(72, b, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2 && bad.empty(),
+          "turning it off writes the switch before the enum goes back to the game's:" + bad);
+    registry_live_revert(72, b, &reply);
+    check(at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 3 && bad.empty(), "a revert that turns it on again writes the enum first:" + bad);
+    registry_live_revert(71, a, &reply);
+    check(at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2 && bad.empty(), "the last revert turns the switch off first:" + bad);
+    allowed = -1;
+    const auto c = change(73, "c", "[{" + loot_wood + R"("field":"fixedRarity","op":"legendary"}])");
+    g_fail_addrs = {A(FIXED_AT)};  // the enum's write fails
+    registry_live_commit(73, c, &reply);
+    g_fail_addrs.clear();
+    check(reply.outcome == RegistryLiveOutcome::Refused && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2 && bad.empty(),
+          "a failed enum write never turns the switch on over the old enum:" + bad);
+    allowed = 4;
+    const auto d = change(74, "d", "[{" + loot_wood + R"("field":"fixedRarity","op":"legendary"}])");
+    g_fail_addrs = {A(SWITCH_AT)};  // the switch's write fails after the enum landed
+    registry_live_commit(74, d, &reply);
+    g_fail_addrs.clear();
+    check(reply.outcome == RegistryLiveOutcome::Refused && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2 && bad.empty(),
+          "a failed switch write leaves the switch off and the enum is rolled back:" + bad);
+    g_after_each_write = {};
 }
 void staged_loot_flags_and_fixed_rarity_bind() {
     world(); map_loot_rarity_rows();
@@ -1128,6 +1167,7 @@ int main() {
         {"loot_fixed_rarity_value_missing_on_the_build_is_refused", loot_fixed_rarity_value_missing_on_the_build_is_refused},
         {"loot_fixed_rarity_foreign_revert_is_skipped", loot_fixed_rarity_foreign_revert_is_skipped},
         {"loot_fixed_rarity_write_failure_rolls_back", loot_fixed_rarity_write_failure_rolls_back},
+        {"loot_fixed_rarity_switch_never_on_over_a_stale_enum", loot_fixed_rarity_switch_never_on_over_a_stale_enum},
         {"staged_loot_flags_and_fixed_rarity_bind", staged_loot_flags_and_fixed_rarity_bind}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
