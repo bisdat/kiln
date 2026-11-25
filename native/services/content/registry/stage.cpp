@@ -1127,6 +1127,14 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         const json f = t ? json::parse(*t, nullptr, false) : json();
         return f.is_object() && f.contains("values") && f["values"].is_object() ? f["values"] : json::object();
     };
+    // a verdict's text against another plan: "<what changes> against plan <hash12>, <which>: <what it does to saves>" (a refusal's
+    // "this edit was not applied" left out: the caller says what happens)
+    auto against_text = [](std::string text, const std::string& plan, const std::string& which) {
+        if (const size_t cut = text.rfind("; this edit was not applied"); cut != std::string::npos) text.resize(cut);
+        const std::string where = " against plan " + short_hash(plan) + ", " + which;
+        const size_t colon = text.find(": ");
+        return plan.empty() ? text : colon == std::string::npos ? text + where : text.substr(0, colon) + where + text.substr(colon);
+    };
     const std::string world_plan = d.index.contains("world") && d.index["world"].is_object() && d.index["world"].contains("plan") &&
                                            d.index["world"]["plan"].is_string() ? d.index["world"]["plan"].get<std::string>() : "";
     if (src) r = compose_checked(inputs, rolled);
@@ -1143,15 +1151,15 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         }
         std::vector<std::string> needs_guard = plan_guards;
         std::vector<saves::SaveNote> guard_notes;  // a lower max stack against that plan: the guard keeps such stacks whole
-        const std::string vs = against_plan.empty() ? std::string() : " against plan " + short_hash(against_plan) + ", which it rolls away from";
         judge_against(against, [&](const FieldRef& ref, const std::string& k, const saves::Verdict& v) {
+            const std::string text = against_text(v.text, against_plan, "which it rolls away from");
             if (v.decision == saves::Decision::Guard) {
-                needs_guard.push_back(k + " " + v.text.substr(0, v.text.find(':')) + vs);
-                guard_notes.push_back({ref, v.cls, "guard", v.text + vs});
+                needs_guard.push_back(k + " " + text.substr(0, text.find(": ")));
+                guard_notes.push_back({ref, v.cls, "guard", text});
             }
-            if (v.decision == saves::Decision::Refuse && plan_why.empty()) plan_why = "saves: " + k + " " + v.text + vs;
+            if (v.decision == saves::Decision::Refuse && plan_why.empty()) plan_why = "saves: " + k + " " + text;
             if (v.decision == saves::Decision::Warn || v.decision == saves::Decision::Report)
-                rollback_notes.push_back({ref, v.cls, saves::decision_name(v.decision), v.text + vs});
+                rollback_notes.push_back({ref, v.cls, saves::decision_name(v.decision), text});
         });
         const auto lowered = stacks_lowered(r);
         if (plan_why.empty() && (!lowered.empty() || !needs_guard.empty()) && !(d.env.stack_guard && d.env.stack_guard(&guard_why))) {
@@ -1207,10 +1215,8 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     if (src && !rolled && !world_plan.empty())
         judge_against(plan_values(world_plan), [&](const FieldRef& ref, const std::string&, const saves::Verdict& v) {
             if (v.decision != saves::Decision::Refuse) return;
-            std::string text = v.text;
-            if (const size_t cut = text.rfind("; this edit was not applied"); cut != std::string::npos) text.resize(cut);
-            d.stage_notes.push_back({ref, v.cls, "warn", text + " against plan " + short_hash(world_plan) + ", which the last world ran on (a world on it can " +
-                                                         "have saved that; without this start's value the game's applies, narrower still)"});
+            d.stage_notes.push_back({ref, v.cls, "warn", against_text(v.text, world_plan, "which the last world ran on") +
+                                                         " (nothing to refuse: without this start's value the game's applies, narrower still)"});
         });
     if (rolled) {
         // exactly what changed back: every value of the plan rolled away from, and of this start, that differs
