@@ -2958,8 +2958,8 @@ export const packLocalSave = (profileId: ProfileId) => call<Profile>("pack_local
 export const packCheck = (path: string) => call<PackCheckReport>("pack_check", { path });
 export const packInstance = (profileId: ProfileId) => call<PackInstance | null>("pack_instance", { profileId });
 export const packInstances = () => call<[ProfileId, PackInstance][]>("pack_instances");
-/** What a pack profile loads from its installed version and the Library lacks (nothing downloaded; hashes the pack's
- *  Library entries, so it may take a moment for a large pack). */
+/** What a pack profile loads from its installed version and the Library lacks (nothing downloaded; reads the
+ *  Library's records and its cheap changed check, no full hash of the pack's mods). */
 export const packLacking = (profileId: ProfileId) => call<PackLacking>("pack_lacking", { profileId });
 export const packUndo = (profileId: ProfileId) => call<Profile>("pack_undo", { profileId });
 export const packUninstall = (profileId: ProfileId) => call<{ profile: Profile; unused: LibraryRef[] }>("pack_uninstall", { profileId });

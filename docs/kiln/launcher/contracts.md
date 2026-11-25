@@ -1694,7 +1694,7 @@ line, the last one wins, else `KILN_LAUNCHER_UI=deck|desktop`). The UI: `forced`
 | pack | `pack_install` | gameId?, request: `pack::InstallRequest` (local source, consent) | TaskId -> `pack::InstallResult` |
 | pack | `pack_instance` | profileId | `Instance` \| null |
 | pack | `pack_instances` | - | [profileId, `Instance`][] |
-| pack | `pack_lacking` | profileId | `pack::Lacking` {version, missing, names, download}: what the profile loads (listed with the pack's hash, on) of its installed version and the Library lacks; read-only (hashes the pack's Library entries) |
+| pack | `pack_lacking` | profileId | `pack::Lacking` {version, missing, names, download}: what the profile loads (listed with the pack's hash, on) of its installed version and the Library lacks; read-only and cheap (the Library's records and its own changed check, as its list reads them; only the pack layer is hashed in full) |
 | pack | `pack_update_plan` | profileId, source (local), optional? | `UpdatePlan` |
 | pack | `pack_update` | request: `pack::UpdateRequest` (local source) | TaskId -> `UpdateResult` (error `conflict`, plan in detail) |
 | pack | `pack_undo` | profileId | `Profile` |

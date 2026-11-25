@@ -35,8 +35,8 @@ export function useLibraryStamp(): number {
   const qc = useQueryClient();
   return Math.max(0, ...qc.getQueryCache().findAll({ queryKey: ["library_list"] }).map((q) => q.state.dataUpdatedAt));
 }
-/** What pack profiles lack of their installed version (pack_lacking: read-only, but it hashes the pack's Library
- *  entries): asked when a list shows and again after a Library change or refreshCrucible, not on focus; 5 minutes fresh. */
+/** What pack profiles lack of their installed version (pack_lacking: read-only, the Library's records and its
+ *  cheap changed check): asked when a list shows and again after a Library change or refreshCrucible, not on focus; 5 minutes fresh. */
 export function usePackLacking(profileIds: ProfileId[], enabled = true): Map<ProfileId, api.PackLacking> {
   const stamp = useLibraryStamp();
   const qs = useQueries({ queries: profileIds.map((pid) => ({

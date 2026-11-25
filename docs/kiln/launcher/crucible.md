@@ -181,11 +181,12 @@ overrides added/changed/removed, server settings changed): Crucible's automatic 
 
 ## Repairing: Download missing mods
 An instance whose profile loads mods of its installed version that the Library lacks (the player removed one from the
-Library, or a Library entry no longer hashes to its name) says so in the preview of the same code or file ("Load it
+Library, or the Library reads an entry as changed: `library::changed_on_disk`, the cheap check of its list) says so in the preview of the same code or file ("Load it
 would start the game without it") and offers **Download missing mods (N, size)**, in the preview next to See changes
 or Load it and in the pack profile's "…" menu in Settings > Profiles. What counts: a part the profile lists switched on
 with the pack's hash (`pack::lacking_of`); an optional mod the player switched off, a mod taken out of the profile or
-swapped for another version, and a server-only mod do not.
+swapped for another version, and a server-only mod do not. The preview reads it afresh at each open (`pack_lacking`), without asking
+Crucible or the pack file again.
 - `crucible::repair(dirs, c, pid, progress)`: nothing missing, nothing is asked of Crucible. Otherwise the installed
   version's signed index (it must name the same archives as `pack/base/`), only the lacking archives downloaded (the
   install's `download_parts`: each checked against its sha256 and size; a cached archive is reused), put together with
