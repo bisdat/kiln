@@ -6,7 +6,9 @@
  *
  *  - get: the newest sample. Any thread (the client tick thread, a mod's UI thread, a worker); never waits, never calls
  *    into the game. The game's trace is copied by a mid hook that Kiln adds at the first get of the process (a game
- *    without a mod that reads it never has the hook), so the first get answers KILN_CROSSHAIR_REASON_NO_SAMPLE.
+ *    without a mod that reads it never has the hook), so the first get answers KILN_CROSSHAIR_REASON_NO_SAMPLE. An
+ *    install refused because some thread could not be checked is tried again by a get at least a second later (three
+ *    attempts in all); until then get keeps answering NO_SAMPLE.
  *  - The capability row client.crosshair says whether it works here: the game client, kiln.client.crosshair started,
  *    the sigdb feature client.crosshair_trace resolved on this build, and the hook not failed. Off: get answers
  *    KILN_ERR_UNAVAILABLE.

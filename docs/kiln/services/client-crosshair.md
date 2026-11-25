@@ -85,8 +85,9 @@ visit that finds one publishing skips its copy), and a reader that meets a publi
 Kiln adds its observation of the game's trace at the **first read of the process**, never at boot: a game without a mod
 that reads the crosshair never has the hook. That first read answers `NoSample`; samples start at the game's next cursor
 step. The install is a checked one (every other thread stopped and checked to stand outside the replaced bytes); when
-some thread could not be checked nothing is written and a later read tries again, up to three times. Any other failure is
-final for the process: the row turns `faulted` and reads throw (`Read`) or say false (`TryGet`).
+some thread could not be checked nothing is written, reads keep answering `NoSample` (the row stays available) and a
+read at least a second later tries again, up to three times in all. Any other failure, or the third refusal, is final for
+the process: the row turns `faulted` and reads throw (`Read`) or say false (`TryGet`).
 
 ## Sessions
 

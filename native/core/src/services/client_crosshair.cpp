@@ -60,6 +60,7 @@ std::atomic<uint64_t> g_samples{0}, g_skipped{0}, g_faults{0}, g_installs{0};
 std::mutex g_install_mu;  // one install at a time
 std::atomic<Installer> g_installer{nullptr};
 std::atomic<bool> g_install_failed{false};
+int64_t g_last_attempt_ns = 0;  // the clock when the last attempt returned (under g_install_mu)
 std::atomic<const char*> g_why{kUnbound};
 std::atomic<uint64_t> g_generation{1};
 
@@ -100,14 +101,19 @@ void clear_samples() {
 
 bool finite(float v) { return std::isfinite(v); }
 
-// The first get's install. True when the hook is in.
-bool install_once() {
+// The first get's install. Bound: the hook is in. Pending: not in yet but not final (an attempt refused for threads
+// that could not be checked, one that refused while this get waited, or too soon after the last refusal); get answers
+// NO_SAMPLE. Off: no installer, or the install failed for good; get answers UNAVAILABLE.
+enum class Ready { Bound, Pending, Off };
+Ready install_once() {
     const uint64_t seen = g_installs.load(std::memory_order_acquire);
     std::lock_guard install(g_install_mu);
-    if (g_offset.load(std::memory_order_acquire)) return true;
+    if (g_offset.load(std::memory_order_acquire)) return Ready::Bound;
     const Installer fn = g_installer.load(std::memory_order_acquire);
-    if (!fn) return false;
-    if (g_installs.load(std::memory_order_relaxed) != seen) return false;  // refused while this one waited
+    if (!fn) return Ready::Off;
+    if (g_installs.load(std::memory_order_relaxed) != seen) return Ready::Pending;  // refused while this one waited
+    const int64_t now = g_clock.load(std::memory_order_relaxed)();
+    if (seen && now - g_last_attempt_ns < kInstallRetryNs) return Ready::Pending;  // a brief condition: wait it out
     const uint64_t attempt = seen + 1;
     uint32_t offset = 0;
     const char* why = nullptr;
@@ -117,18 +123,19 @@ bool install_once() {
     } catch (...) {
         why = kInstallThrew;
     }
+    g_last_attempt_ns = g_clock.load(std::memory_order_relaxed)();
     g_installs.store(attempt, std::memory_order_release);
     if (result == Install::Bound && offset && offset < kMaxFrameOffset) {
         bind(offset);
-        return true;
+        return Ready::Bound;
     }
     if (result == Install::Bound) why = "the crosshair trace's result offset is outside client_cursor's frame";
-    else if (result == Install::Again && attempt < kInstallAttempts) return false;
+    else if (result == Install::Again && attempt < kInstallAttempts) return Ready::Pending;
     g_install_failed.store(true, std::memory_order_release);
     g_why.store(why ? why : kInstallFailed, std::memory_order_release);
     g_installer.store(nullptr, std::memory_order_release);
     changed();
-    return false;
+    return Ready::Off;
 }
 
 }  // namespace
@@ -243,12 +250,17 @@ void session_ended(uint32_t session) {
 KilnResult get(const Env& env, KilnCrosshairHit* out, uint32_t* out_reason) {
     if (!out || out->size < sizeof(KilnCrosshairHit)) return KILN_ERR_INVALID_ARGUMENT;
     if (!env.client_side || !env.hooks) return KILN_ERR_UNAVAILABLE;
-    if (!g_offset.load(std::memory_order_acquire) && !install_once()) {
-        // an install refused for threads that could not be checked: a later get tries again; else final, or none
-        return KILN_ERR_UNAVAILABLE;
-    }
     KilnCrosshairHit h{};
     h.size = sizeof h;
+    if (!g_offset.load(std::memory_order_acquire)) {
+        const Ready ready = install_once();
+        if (ready == Ready::Off) return KILN_ERR_UNAVAILABLE;  // no installer, or it failed for good: the row is off
+        if (ready == Ready::Pending) {  // refused for threads that could not be checked: a later get tries again
+            *out = h;
+            if (out_reason) *out_reason = KILN_CROSSHAIR_REASON_NO_SAMPLE;
+            return KILN_OK;
+        }
+    }
     uint32_t reason = KILN_CROSSHAIR_REASON_NO_SAMPLE;
     const uint32_t live = g_live.load(std::memory_order_acquire);
     Sample s{};
@@ -321,6 +333,7 @@ void reset_for_tests() {
     g_samples = g_skipped = g_faults = g_installs = 0;
     g_installer = nullptr;
     g_install_failed = false;
+    g_last_attempt_ns = 0;
     g_why = kUnbound;
     changed();
 }

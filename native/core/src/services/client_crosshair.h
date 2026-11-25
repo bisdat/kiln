@@ -66,9 +66,10 @@ KilnResult get(const Env& env, KilnCrosshairHit* out, uint32_t* out_reason);
 // The lazy producer, as kiln.client's building input does it (client_building_input.h): on a build where the hook can
 // go in, client_crosshair_service.cpp gives an installer at its start and installs nothing; the first get() that passes
 // its own checks calls it, once at a time, on the calling thread. Install::Again (kiln.hooks could not check every
-// thread and wrote nothing) lets a later get try again, up to kInstallAttempts in all; anything else, or the last
-// attempt, is final for the process: the installer goes, install_failed() turns true, its reason (a static string)
-// becomes usable()'s answer, and get() answers KILN_ERR_UNAVAILABLE.
+// thread and wrote nothing) lets a later get try again, at least kInstallRetryNs later and up to kInstallAttempts in
+// all; until then get() answers NO_SAMPLE (the row stays on), and so does a get that waited on such an attempt.
+// Anything else, or the last attempt, is final for the process: the installer goes, install_failed() turns true, its
+// reason (a static string) becomes usable()'s answer, and get() answers KILN_ERR_UNAVAILABLE.
 enum class Install { Bound, Again, Failed };
 constexpr uint32_t kInstallAttempts = 3;
 constexpr int64_t kInstallRetryNs = 1'000'000'000;  // the least time between two attempts, on the service's clock
