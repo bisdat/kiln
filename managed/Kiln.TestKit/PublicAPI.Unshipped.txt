@@ -1,1 +1,16 @@
 #nullable enable
+Kiln.TestKit.HarnessInput
+Kiln.TestKit.HarnessInput.ClearLogs() -> void
+Kiln.TestKit.HarnessInput.Down(Kiln.KeyChord chord, int controller = 0) -> bool
+Kiln.TestKit.HarnessInput.Down(uint code, int controller = 0, Kiln.KeyMods mods = Kiln.KeyMods.None, System.Numerics.Vector2? at = null) -> bool
+Kiln.TestKit.HarnessInput.FocusLost() -> void
+Kiln.TestKit.HarnessInput.Game.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessInput.HiddenFromGame(uint code, int controller = 0) -> bool
+Kiln.TestKit.HarnessInput.Leak(uint code, int controller = 0) -> void
+Kiln.TestKit.HarnessInput.Others.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessInput.Repeat(uint code, Kiln.KeyMods mods = Kiln.KeyMods.None) -> bool
+Kiln.TestKit.HarnessInput.SetPad(int controller, Kiln.PadButtons held, System.Numerics.Vector2 leftStick = default(System.Numerics.Vector2), System.Numerics.Vector2 rightStick = default(System.Numerics.Vector2), float leftTrigger = 0, float rightTrigger = 0) -> void
+Kiln.TestKit.HarnessInput.Unplug(int controller) -> void
+Kiln.TestKit.HarnessInput.Up(uint code, int controller = 0, System.Numerics.Vector2? at = null) -> bool
+Kiln.TestKit.HarnessInput.WorldChange() -> void
+Kiln.TestKit.KilnHarness.Input.get -> Kiln.TestKit.HarnessInput!
