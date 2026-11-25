@@ -175,3 +175,45 @@ bridge; seen in the game's own UI:
 3. `AdminSetCharacterLevel` sets needed = XpForLevel(level + 1); natural leveling uses XpForLevel(level). Kiln follows
    natural leveling; the game's admin command is probably off by one.
 4. The label the client shows for `ExperienceSource.None` and `Quest` grants (Combat shows "Enemy slain").
+
+## 8. The local player's tree on a game client (since 0.2.0-dev.31.13)
+
+What `ClientSkills` / `kiln.skills.client` read on a game client, joined or hosting. Read on client Steam 26430625 (exe
+`5d9ef2f1…`), static copy, never run; started from XHL's reference (BD Manager, "Read the complete displayed skill graph
+and the joined player's current skill state"), checked again here. Symbols: `sigdb/symbols/client.d/skills-client-view.json`
+(feature `skills.client_view`); test `native/services/skills/tests/client_view_sigdb_test.py` (41 checks); logic
+`native/services/skills/client_view_logic.h` (host test `test_client_view.cpp`).
+
+- **XHL's "snapshot" is `G38UiPlayData`.** Their snapshot `+0x449198` (the tree builder's argument) is
+  `skills/ui.records`, the map Kiln's screen hook already writes (`client.d/skills.json`); their point counts
+  `+0x72c/+0x730/+0x734` are fields of the same resource. Kiln reads it through the client world's singleton
+  (`G38UiPlayData`), not through the UI root (`0x283f4a8`): no page needs to be open.
+- **Who writes what [dis][sig].** `skilltree_ui` (`skills/TreeUi`, C `0x318540`; catalog: reads `PlayerSkillsUi`, sys-reads
+  `LocalPlayerData` and the tree, sys-writes `G38UiPlayData`) runs every client step and updates only the entity equal to
+  `LocalPlayerData+4` (gate C `0x3bb740`: `cmp [rdx+4], ecx; sete al`). For every id of the tree's id list it finds the
+  node (`NodeById`) and its record in the map at `+0x449198` (bits `+0x08`, capacity `+0x10`, keys `+0x28`, values
+  `+0x40`, 0x44-byte values: captured from its own code), writes the record's level `+0x41` = the decoded byte
+  `PlayerSkillsUi.unlockLevel[node.levelIndex]` (node `+0x89`; a plain node's levelIndex is 0, so this byte means
+  nothing for it), `+0x42` the byte's low bits, `+0x43` = 0, then sets `+0x43` = 1 for every set mask bit; copies the
+  masks to `+0x44b218` (`skills/ui.masks`); calls `PointsSpent` (C `0xe7b170`, the function Kiln hooks so shadow costs
+  count) on the masks and the levels at `PlayerSkillsUi+0x20` into `+0x730` (spent) and writes `+0x734` = `+0x72c` -
+  spent when that is larger, else 0 (available). `+0x72c` (the total) is `player_ui`'s (C `0x2b8d2d`), from the player's
+  replicated attributes.
+- **The tree.** The client world's `g38_skilltree::SkillTree` holds the loaded `SkillTreeResource` at `+0x20`
+  (`skills/tree.data`) and the ids by tree index at `+0x150` (`skills/tree.ids`): the same layout as on the server
+  (`server.d/skills.json`, shared). The resource's header has the node array (rel32 `+0`, count `+4`, 0x8c-byte
+  `keen::SkillTreeNode`) and the link array (rel32 `+8`, count `+12`, 16-byte `{id, from, to, bidirectional}`); Kiln's
+  tree loader serves the expanded resource to every world, so a client's tree has the mods' nodes (`tree.cpp`).
+- **What Kiln reports.** Per node by tree index: id, type, class, cost, max level, screen position, link counts from the
+  resource; level = the record's level (at least 1, at most the max) for an unlocked node with levels, 1 for an unlocked
+  plain node, 0 when the record says locked or has no record; shadow = kiln.skills' table knows it as a shadow node. The
+  points: total, spent, available, refused (the copy keeps the last good one) when they are not one triple
+  (`available = max(0, total - spent)`). The links as the resource has them.
+- **Threads.** Copied after the client world's step (Post) while some caller read in the last 5 s; nothing written, no
+  game function called (byte copies under SEH).
+
+Not verified without a running game: that `skilltree_ui` updates the records while the skill screen is closed (the
+program has no screen check in its code; not seen live); that the points match the server's after a level-up, a respec
+or a given skill point (the replicated attributes and masks); a client that joins before its character's skills arrive
+(the triple check holds the copy back until the points are one); the shadow nodes' records on a joined client (Kiln's
+screen hook writes them; that hook's own client checks are in docs/kiln/services/skills.md).

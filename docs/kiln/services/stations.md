@@ -29,9 +29,11 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.craft_ui` | a Kiln client's crafting menu can offer a craft those outputs complete: since 0.2.0-dev.31 through the game's own dry run, when its payment is short only of materials the server's snapshot covers ([What each client shows](#what-each-client-shows), `client.d/stations-craft-ui.json`); lowered when kiln.rules' payment hook is not in. A vanilla client has neither |
 | `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows. Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 | `stations.fill_ui` | a Kiln client's station screen offers its "+1" / "+10" fill when only those outputs can cover it ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); its hook goes in only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
+| `stations.client_view` | `ClientStations` (since 0.2.0-dev.31.13, mod API 0.2.22): a game client's own station cache, read-only, also on a joined client ([On a joined client: the client's own station view](#on-a-joined-client-the-clients-own-station-view), `client.d/stations-client-view.json`). Off on a dedicated server, on a build sigdb does not qualify, after a fault |
 
 Where: the server world, on its tick thread: a dedicated server, or a game client while it hosts. A client that joined
-another's world has no server world: `Stations.Available` is false there and every call throws `KilnUnavailableException`.
+another's world has no server world: `Stations.Available` is false there and every call throws `KilnUnavailableException`. What the
+client itself knows about the stations near its player is `ClientStations` (below), read-only.
 
 ## Bases
 A base, for the game's crafting code, is the union of overlapping flame-altar zones. The game rebuilds its list of bases
@@ -129,6 +131,81 @@ the names are null.
 there gets ids from its server half and names them in its own player's language. `Ui.ItemImage(item)` draws the items'
 icons ([ui.md](../ui.md#item-icons-and-names)). A new recipe of kiln.content is not in the game's registry: `RecipeName` is null for it
 (name it by its output's `Items.DisplayName`).
+
+## On a joined client: the client's own station view
+`ClientStations` (since 0.2.0-dev.31.13, mod API 0.2.22, `Kiln.Blocks`; native `kiln.stations.client`,
+`native/core/abi/services/kiln_stations_client.h`) reads the production stations the way the game client itself knows
+them: its world's station cache (`ClientFactoryInfo`), the one the game's own station HUD and station screen read. It
+works on a joined client, where `Stations` throws, and on a hosting player's own client. Read-only: it writes nothing and
+sends nothing. Thanks XHL (Easy HUD), whose reference named the cache.
+
+| Member | What |
+|---|---|
+| `ClientStations.Available`, `Status` | the view works here; `Status`: `On`, `World`, `Copying`, `Rows`, `Step`, `Age`, `Detail` (why it is off) |
+| `All()` | every station of the cache (grouped by base) |
+| `Near(center, radius = 16)` | those within `radius` metres of `center`, nearest first (pass your player's or the camera's position) |
+| `Read(station)` | one station, null when the cache does not have it |
+| `Open` | the station whose screen the local player has open (`Ui.Screens.Current.Target` on the production-station screen), from the cache |
+| `ClientStationInfo` | `Station`, `Workshop`, `SelectedRecipe`, `Base`, `Position`, `State`, `Needs`, `SelectedChoices`, `UseAllOptions`, `CraftsLoaded`, `Water`, `WaterMax`, `NeedsEnergy`, `CraftDuration`, `CraftRemaining`, `Remaining`, `Progress`, `Outputs`, `Step`; `IsRunning`, `DisplayName` (the workshop's name), `RecipeName` |
+
+All members work on any thread: Kiln copies the cache on the client world's thread after each of its steps, while some
+mod read it in the last 5 seconds, and every read answers from that copy. The first read after a pause starts the copying
+and answers from the previous copy (or none: empty, null): poll it every frame or every second, as a HUD does.
+
+**What the client has, and what may be stale.** The server sends each player rows of the stations around them
+(`ServerFactoryInfo`, from the game's `factory_station_info`) and sends a row again at least when the station's state
+changes or a player acts on it (the game's `FactoryInfoInvalidate`); whether other changes (fewer crafts loaded, water)
+resend it at once was not traced, so such a value can lag. The client keeps a row only for a station standing in a base (a flame altar's zone) its
+own base list knows; which stations the server sends to which player, and from how far, was not traced: filter by
+distance yourself (`Near`). A row has the station, its workshop, the selected recipe and its category choices, "use all
+options", the state and what it lacks, the complete crafts still loaded after the cycle in progress, the water and its
+capacity, the base and the position (0.25 m steps), and the start of the cycle in progress. Not in it:
+
+- the running recipe. When a player changed the selection during a cycle, the cycle in progress is of the earlier recipe
+  while the row (and the times below) is of the new one;
+- the pause time, and a "stop after the current craft" that waits (`Stations.Stop(..., AfterCurrentCraft)`);
+- the station's outputs. Kiln reads them from the client world's copy of the station's inventory (every 15th copy),
+  when the client has one: `Outputs` is null when it has none.
+
+**The times are the game HUD's.** `CraftDuration` is the selected recipe's time in the client's data scaled by the
+client's own copy of the production speed setting (through the game's `FactorySpeed`); while `State` is `Running`,
+`CraftRemaining` is what is left of the cycle in progress and `Remaining` the time until every loaded craft is done
+(`craft x (crafts + 1) - elapsed`, the game's helper re-implemented, never below zero), `Progress` 0..1. In any other
+state they are null, as on the game's HUD. A recipe the client's data does not have (a mod's new recipe) has no time and
+no outputs.
+
+```csharp
+// Easy HUD-like: "Charcoal Kiln: finishes in 2:13" over the stations near the player, on a joined client
+public sealed class StationTimers : Mod
+{
+    public override void OnLoad() => Events.On<RenderFrameEvent>(OnFrame);
+
+    private void OnFrame(RenderFrameEvent e)                       // the render thread; ClientStations reads on any thread
+    {
+        if (!e.Camera.Valid || !ClientStations.Available) return;   // a dedicated server, an unqualified build: nothing
+        foreach (var s in ClientStations.Near(e.Camera.Pivot, 12))  // the camera's pivot: about the character's head
+        {
+            var name = s.DisplayName ?? "Station";
+            var text = s.Remaining is { } left
+                ? $"{name}: finishes in {(int)left.TotalMinutes}:{left.Seconds:00}"
+                : $"{name}: {s.State}";
+            if (s.Outputs is { Count: > 0 } done) text += $" ({done.Sum(o => o.Count)} ready)";
+            e.World.Label(s.Position, text);
+        }
+    }
+}
+
+// the station screen the player has open
+if (ClientStations.Open is { } open && open.CraftRemaining is { } cycle)
+    Log.Info($"{open.RecipeName}: this craft in {cycle.TotalSeconds:F0} s, {open.CraftsLoaded} more loaded");
+```
+
+Acting on a station stays your server half's (`Stations`, through `Kiln.Network` messages): the view never authorizes
+anything. Capability `stations.client_view` (sigdb, `client.d/stations-client-view.json`); off, every member but
+`Available` and `Status` throws `KilnUnavailableException` naming it. TestKit: `KilnHarness.ClientStations` (`Add`,
+`SetRecipe`, `Clock`, `SpeedFactor`; the times as kiln-items.dll computes them). C: `kiln.stations.client` v1 (`status`,
+`stations`, `station`; any thread). Evidence: [docs/re/stations.md section 13](../../re/stations.md#13-a-game-clients-own-station-cache-clientfactoryinfo-since-020-dev3113).
+Not yet seen in a running game: see the note's "not verified" list.
 
 ## Fill from chests
 `Stations.Fill(station, options)` runs **the game's own "fill from chests"** (the function behind the station screen's
@@ -790,7 +867,8 @@ unavailable here: ...` or `linked craft preview stands down: ...` means a check 
   `craft paid` line.
 
 ## Limits
-- Server world only (dedicated server, hosting client). A joined client has none.
+- Server world only (dedicated server, hosting client). A joined client has none; it has the read-only
+  `ClientStations` (since 0.2.0-dev.31.13).
 - The game's own stock is Magic chests and refilling plants. Ordinary chests are used when a fill names them, or when a mod registers a player crafting source.
 - At most 1024 actions wait at once; 16 a step run.
 - `StopWhen.Now` loses the running cycle's progress (the game's rule); `AfterCurrentCraft` keeps it, but is not saved.
@@ -838,6 +916,9 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.31.13:** `ClientStations`, a read-only view of the game client's own station cache for a joined client:
+  state, selected recipe, crafts loaded, water, the game HUD's remaining time and progress, finished outputs (mod API
+  0.2.22, capability `stations.client_view`, native `kiln.stations.client`). Thanks XHL.
 - **0.2.0-dev.31:** a Kiln client's crafting menu treats the game's cached craft value as the status it is: only the dry
   run's material shortfall can be covered by the server's snapshot, every other refusal stays the game's, and the
   preview stands down when another module patched the code it reads. Thanks Fuzen777 (kiln#132).
