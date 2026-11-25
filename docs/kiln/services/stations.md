@@ -284,11 +284,11 @@ containers before opted-in station outputs; `AfterStationOutputs` pays them afte
 registration order. Every container counts once **per item**, even if multiple registrations name it or it is already
 in the base's own stock. A linked container offers every item the filter allows. Production stations are refused:
 `PayMaterial` cannot separate their queued inputs from their finished outputs. Production stations lend their outputs
-through `Stations.SetOutputSource`, under its existing per-item safety rules. This does not change `Stations.Fill` or
-its fill buttons: a production station's fill and its "+1" / "+10" take from the bag, the base's Magic chests and opted-in
-station outputs, and the transfer buttons of its ingredient rows (the game's own item transfer) from the bag and the Magic
-chests; none of them takes from linked containers. Since 0.2.0-dev.30.8 its ingredient rows show the game's own counts
-(see below).
+through `Stations.SetOutputSource`, under its existing per-item safety rules. A link serves crafting. Since
+0.2.0-dev.31.12 it can also serve production-station fills (`Fills`, [below](#fills-from-linked-sources)), block
+placements (`Building`, [below](#building-from-linked-sources)) and locks (`Locks`); each is off by default. The
+transfer buttons of a production station's ingredient rows (the game's own item transfer) still move only from the bag and
+the Magic chests, and since 0.2.0-dev.30.8 those rows show the game's own counts (see below).
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -349,6 +349,7 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | --- | --- |
 | `crafting.sources` (`Crafting.SourcesCapability`) | Server or host. Missing payment/access symbols or the permission layout, missing/old `kiln.stations`, or a missing/disabled `kiln.rules` payment hook refuses it. A joined client is the wrong side; offline and no-server-session calls refuse without taking items. |
 | `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
+| `crafting.build_sources` (`Crafting.BuildSourcesCapability`, since 0.2.0-dev.31.12) | Server or host: the build cursor's material check and the blueprint placement's payment ([Building from linked sources](#building-from-linked-sources)); a Kiln client: its own build cursor. Off when a symbol of `sigdb/symbols/server.d/build-sources.json` does not resolve; faulted when a hook could not go in, faulted at run time, or another module patched the code it relies on (kiln.log names it). |
 | `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12, mod API 0.2.21) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in, a hook faulted at run time, or another module patched the code a lock hook reads (kiln.log names it). |
 
 `Kiln.TestKit` records the real managed API on its fake native table: `h.Crafting.Sources` lists live registrations and
@@ -412,6 +413,77 @@ stand-down names the function and any foreign module found on it (`locks: ... st
 check, the interaction payment or a client's snapshot. Native host tests (`items-lock-sources-test`) run the real hooks'
 handlers on fake registers and a fake transaction; `lock_sources_sigdb_test.py` qualifies the sites on the pinned builds.
 Not seen in a real game yet (0.2.0-dev.31.12).
+
+### Fills from linked sources
+
+**Since 0.2.0-dev.31.12**, a link registered with `new CraftSourceOptions { Fills = true }` also feeds production
+stations (a forge, a smelter, a charcoal kiln...) for its player:
+- **The station screen's "+1" / "+10"** (the game's "fill from chests"): when the player's bag and the station base's
+  Magic chests cannot cover the fill but the fill-opted links can, Kiln.Blocks runs the press as Kiln's fill (the game's
+  is canceled). A Kiln client's "+1" / "+10" light up from the server's answer; a vanilla client's stay greyed when the bag
+  and the Magic chests alone fall short (its game never sends that press).
+- **`Stations.Fill` and `Stations.Plan`** take from them when the options say `UseLinkedSources = true` and name the
+  `Player` (default false: a mod's fill never empties a player's links unless it asks). `FillInput.Linked` and
+  `StationResult.FromLinked` say what the links hold and gave.
+
+Order per input: the player's bag and the Magic chests (the game's own call), named ordinary chests, then the fill-opted
+links: `BeforeStationOutputs` links before opted-in station outputs, `AfterStationOutputs` links after, each group in
+registration order, every container once per item, each input only from the links whose filter allows it. All of it is one
+inventory transaction: any refusal moves nothing. Every link is checked again inside that transaction: the player's
+`CanAccessInventories` and current login, an initialized container that is no person's and no production station's.
+The link may be in any base or none (the station's base still decides the Magic chests and the outputs).
+
+Why off by default: a fill moves whole crafts' worth of inputs (10 crafts of a smelter can be a hundred ore) out of chests
+in other bases at once, and a link made for crafting did not ask for that (Streamlined Logistics' Auto-Stations, for one,
+restocks stations itself). A link opts in with one flag.
+
+Not covered: the ingredient rows' transfer control (`+N` of one ingredient, the game's item transfer) stays the game's,
+as does a station's own production cycle. kiln.log on the server: `kiln.stations: player P's fill of station S ran as
+Kiln's fill with station outputs and linked sources: ... (n item(s) from station outputs, m from linked sources)`, or at
+debug level why the press stayed the game's.
+
+### Building from linked sources
+
+**Since 0.2.0-dev.31.12**, a link registered with `new CraftSourceOptions { Building = true }` also pays its player's
+**block placements** with the Construction Hammer (blocks and terrain shapes: the game's blueprint placement):
+- **The build cursor**: the game counts the bag plus the current base's Magic chests and marks a placement "missing
+  materials" when they fall short of the blocks it needs. Kiln adds the building links' count of that material when they
+  fall short. The server's own check (which decides the placement) counts the links itself; a Kiln client's cursor counts
+  them from a snapshot the server sends (`kiln:craftstock`, `required: false`: what the player's building links hold
+  per item, again when a count changes, about every 1.2 s).
+- **The payment** (`ApplyMaterials` -> `InventoryPay` in the blueprint program): the bag and the base's Magic chests pay
+  first, in the game's own order (for a placement: the base's chests, then the bag), then the building links for what is
+  still missing, in the placement's own all-or-nothing payment. Short, refused or faulting: nothing is placed and nothing
+  moves. Station outputs never pay a placement.
+
+Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, the build
+menu's material counts (they show the bag and the base; the cursor and the placement count the links), and a vanilla
+client's cursor (it shows missing materials and its game does not send the placement). Cross-Base Storage's
+`inventory_first` option (bag before chests) has no Kiln equivalent: Kiln keeps the game's order.
+
+Needs `crafting.build_sources` on the server or host. Where another module patched the code it relies on (the cursor's
+stock-count call, the stock count itself, as Cross-Base Storage's build check does, or ApplyMaterials), Kiln stands the
+building half down with one kiln.log line naming the function, the first foreign byte and its module, and leaves that
+module's behaviour alone; crafting, fills and locks from the same links keep working. kiln.log: `build: a link opted in
+with Building: ...` once, then per change `build: the server world's material check of item 0x... (player P) counts the
+building links: bag b + base s + linked l, needs n` (or `refused: short count`), and `stations: a block placement paid n
+from additional crafting sources ...` / `... left to the game ...` / `... rolled back ...`.
+
+### Beside other native mods
+
+Each path checks only the code it runs through, and a foreign patch stands down only that path, once, with one kiln.log
+line naming the function, its state (`FOREIGN` / `UNKNOWN`), the first differing offset and the module it branches into:
+- The crafting menus' preview (a Kiln client): RecipeApply, RecipePayAlt and the client stock table's getter, the material
+  take (PayMaterial, InventoryRemoveItems, InventoryPageFetch), the rollback and the menu's call. Since 0.2.0-dev.31.12
+  **InventoryPay and BaseStockForPlayer are no longer on it**: the menu's dry run never calls them (its descriptor routes
+  it through RecipePayAlt, docs/re/stations.md 10.2), so Building Tools 0.34.0 (a call redirected inside InventoryPay) and
+  Unified Tweaks Live's native DLL (a hook inside BaseStockForPlayer) no longer stand it down. A stand-down is checked
+  again in the next world instead of once per session.
+- The craft and placement payment (server or host): kiln.rules' hook on InventoryPay's entry. With Cross-Base Storage, the
+  game's base stock list already holds every base's Magic chests; Kiln counts them once and adds only links not in it.
+- Building: the cursor's stock-count call and the stock count (Cross-Base Storage patches the latter: the building half
+  stands down, Cross-Base Storage's own cross-base building applies), ApplyMaterials and the blueprint program's call.
+- Fills run inside Kiln's own program through the game's `AutoTransferRecipe`; nothing of the game's is patched.
 
 ### Dyes from the same links
 
@@ -561,7 +633,10 @@ player, while the player stands in a base where they may access inventories, wha
 the Magic chests and the opted-in stations' finished items, only for the items of the recipes that take something those
 stations make, again whenever a count changes. Since 0.2.0-dev.31, when the dry run's payment refuses only because
 materials are short, and every native inventory read of that payment succeeded, the client lets the dry run go on if the
-snapshot covers every ingredient times the amount asked. The dry run's other checks (workshop, shelter, level, comfort,
+snapshot covers every ingredient times the amount asked. **Since 0.2.0-dev.31.12** that payment is the one the game
+actually uses for the menu: the dry run's descriptor (0x40) makes `RecipeApply` pay it with `RecipePayAlt` (the client's
+cached base stock, then the bag), not `InventoryPay`, so every earlier build left every preview native with
+`transaction-mode-or-flags` and the Craft button never sent (GitHub #132; docs/re/stations.md 10.2). The dry run's other checks (workshop, shelter, level, comfort,
 progress, props, water, output space) stay the game's, and the server still checks and pays the real craft. Before
 0.2.0-dev.31 the client raised the menu's cached value as if it were a count, which did not enable the craft button
 (docs/re/stations.md, section 10.2). Where another module (Cross-Base Storage, say) patched the code the dry run reads,
@@ -897,6 +972,13 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.31.12 (GitHub #132):** the crafting menus' preview is bridged on the payer the game really uses for it
+  (`RecipePayAlt`): crafting from linked sources at a crafting station, at an NPC and in the inventory no longer needs
+  Cross-Base Storage; Building Tools' and Unified Tweaks Live's patches no longer stand it down, and a stand-down is
+  checked again in the next world. `CraftSourceOptions.Fills` (production-station fills, `FillOptions.UseLinkedSources`,
+  `FillInput.Linked`, `StationResult.FromLinked`) and `CraftSourceOptions.Building` (the build cursor and the blueprint
+  placement, capability `crafting.build_sources`). Thanks Fuzen777, and CharosDX's Cross-Base Storage (MIT) for the map
+  of the game's stock paths.
 - **0.2.0-dev.31.12:** `CraftSourceOptions.Locks`: a lock's required item counts and pays from the player's opted-in
   links (the bag first, link order, all or nothing), with a Kiln client's lock snapshot; capability `items.lock_sources`.
   Thanks Fuzen777 (kiln#147).
