@@ -27,7 +27,7 @@ import { chainMockHandlers } from "./mockChain";
 import { crucibleMockHandlers } from "./mockCrucible";
 import { studioMockHandlers } from "./mockStudio";
 import { dataFolderBlocks, dataFolderMockHandlers, mockDataDir, mockPickFolder } from "./mockDataFolder";
-import { mockSpeak, bootJsonAt, clearStartHistory, mockBegin, mockProgress, mockStartEnded, ownerScript, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
+import { mockSpeak, bootJsonAt, clearStartHistory, mockAsked, mockBegin, mockHoldsNextStart, mockProgress, mockStartEnded, ownerScript, persistStarts, processAt, scriptedStart, setStartScript, type StartScript } from "./mockProgress";
 import bootExample from "../../../schema/examples/state-boot.json";
 import modsExample from "../../../schema/examples/state-mods.json";
 import nativeExample from "../../../schema/examples/state-native.json";
@@ -739,6 +739,10 @@ function mockExternalStart(gameId: string, at = Date.now()) {
   setTimeout(() => emitGame(gameId, "boot"), 2600);
 }
 export function scriptStoppedStart(kind: StopScript) { stopScript = kind; }
+/** (0.2.0-dev.31.13) commands/launch.rs refuse_pending: another start of the game is pending (Steam asked, no game yet). */
+function refusePending(gameId: string) {
+  if (mockHoldsNextStart(gameId, !!live(gameId))) reject("busy", "The game is already starting.", { kind: "already_starting" });
+}
 function launch(gameId: string, req: LaunchRequest): LaunchResult {
   // launch_play never starts a start whose warnings nobody acknowledged
   if (!sfConfirming) sfChecks.push(`play ${gameId} ${req.mode}`);
@@ -747,8 +751,9 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
   stoppedStarts[gameId] = null;
   localStorage.setItem(stopStorage, JSON.stringify(stoppedStarts));
   const stop = stopScript; stopScript = null;
-  // a scripted start Steam never made a game for (noProcess) is no game: Play again replaces it
+  // a scripted start Steam never made a game for (noProcess) is no game: Play again replaces it (once its wait is over)
   if (running[gameId] && running[gameId]!.from !== Infinity) reject("game_running", "The game is already running.");
+  refusePending(gameId);
   if (req.mode === "once" && !req.profileId) reject("invalid_argument", "Pick a profile to play once.");
   const st = runtime[gameId];
   if (!st?.installed && req.mode !== "vanilla") reject("unsupported", "Kiln is not installed in this game.");
@@ -774,6 +779,7 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
   }, 250);
 
   const sc = scriptedStart(gameId);
+  if (sc) mockAsked(gameId);
   if (sc) {
     // the scripted start: Steam starts the process when the script says, boot.json comes at the end of Kiln's boot
     // (a safe idle start: where it stops, with its reason)
@@ -1794,9 +1800,12 @@ const handlers: Record<string, Handler> = {
   launch_play: (a) => launch(S(a.gameId), a.request as LaunchRequest),
   // what a start is doing (mockProgress.ts): only a scripted start has a timeline; a plain one is a dev.26 runtime's
   launch_begin: (a) => {
-    gameOf(S(a.gameId)); mockBegin(S(a.gameId), S(a.mode));
-    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked)
-    if (S(a.mode) === "vanilla") startsBegun.delete(S(a.gameId)); else startsBegun.add(S(a.gameId));
+    gameOf(S(a.gameId));
+    refusePending(S(a.gameId));
+    mockBegin(S(a.gameId), S(a.mode));
+    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked; a Vanilla start
+    // too since 0.2.0-dev.31.13)
+    startsBegun.add(S(a.gameId));
     return null;
   },
   launch_progress: (a) => {
@@ -2039,11 +2048,14 @@ const handlers: Record<string, Handler> = {
 Object.assign(handlers, adminMockHandlers(mockEmit));
 // the update's restart waits while a game starts (launch_begin and no process yet, a scripted start before its process
 // exists), not while one runs (selfupdate.rs restart_refusal)
-Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () => {
+/** commands/launch.rs start_tracked as the mock has it: a start launch_begin began (any mode: the backend tracks a
+ *  Vanilla start too since 0.2.0-dev.31.13) whose game process has not come yet, or a scripted start before its process. */
+export function mockStartTracked(): boolean {
   for (const g of [...startsBegun]) if (live(g)) startsBegun.delete(g);
-  const starting = startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
-  return starting ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null;
-}));
+  return startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
+}
+Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () =>
+  mockStartTracked() ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null));
 Object.assign(handlers, deckMockHandlers(handlers));
 // the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
 Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));
@@ -2364,6 +2376,8 @@ if (PERSIST) {
     Object.assign(remembered, st.remembered);
     library.splice(0, library.length, ...st.library);
   } else saveState();
+  // (0.2.0-dev.31.13) the starts the backend follows (launch_begin, Steam asked) survive the reload too
+  persistStarts(sessionStorage.getItem(`${STATE_KEY}:starts`), (text) => sessionStorage.setItem(`${STATE_KEY}:starts`, text));
 }
 
 const loaderParams = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
