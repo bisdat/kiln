@@ -51,6 +51,13 @@ pub async fn pack_instances() -> Result<Vec<(String, Instance)>, Error> {
     blocking(|| pack::instances(&dirs()?)).await
 }
 
+/// What an instance's profile loads from its installed version and the Library lacks (Settings > Profiles' "Download
+/// missing mods"; nothing downloaded).
+#[tauri::command]
+pub async fn pack_lacking(profile_id: String) -> Result<pack::Lacking, Error> {
+    blocking(move || pack::lacking_of(&dirs()?, &profile_id)).await
+}
+
 #[tauri::command]
 pub async fn pack_update_plan(profile_id: String, source: ModpackSource, optional: Option<BTreeMap<String, bool>>) -> Result<UpdatePlan, Error> {
     blocking(move || {

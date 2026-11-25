@@ -131,6 +131,41 @@ pub async fn crucible_install(app: AppHandle, game_id: Option<String>, request: 
     }))
 }
 
+/// "Download missing mods" of a pack profile.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairArgs {
+    pub profile: String,
+    /// A pack installed from a file: the file of its installed version (the dropped .kilnpack).
+    #[serde(default)]
+    pub path: Option<std::path::PathBuf>,
+}
+
+/// Downloads what a pack profile loads from its installed version and the Library lacks back into the Library (a task;
+/// result `pack::RepairResult`): from Crucible for a Crucible instance (crucible::repair), from the given file for one
+/// installed from a file (pack::repair). Writes only the Library: no profile, version or setting changes, no activation,
+/// allowed while the game runs.
+#[tauri::command]
+pub async fn crucible_repair(app: AppHandle, game_id: Option<String>, request: RepairArgs) -> Result<TaskId, Error> {
+    let _ = game_id;
+    let d = blocking(dirs).await?;
+    let title = format!("Downloading the missing mods of {}", request.profile);
+    Ok(spawn_task(&app, "crucible_repair", title, move |p| {
+        let from_crucible = kiln_manage::modpack::pack::instance(&d, &request.profile)?
+            .is_some_and(|i| i.crucible.as_ref().is_some_and(|c| c.version.is_some()));
+        let r = if from_crucible && request.path.is_none() {
+            let (ep, t) = enabled()?;
+            let c = Crucible::new(&ep, t.as_ref(), &version());
+            crucible::repair(&d, &c, &request.profile, p)?
+        } else {
+            let source = request.path.clone().map(|path| kiln_manage::modpack::ModpackSource::Path { path, sha256: None });
+            kiln_manage::modpack::pack::repair(&d, &kiln_manage::modpack::pack::RepairRequest { profile: request.profile.clone(), source, allow_http: false }, p)?
+        };
+        launcher_log("crucible", &format!("repaired profile {}: {} back in the Library, {} still missing", r.profile, r.imported.len(), r.left.len()));
+        to_value(r)
+    }))
+}
+
 /// Instances with a newer version on Crucible (cached 5 minutes; `force` asks again).
 #[tauri::command]
 pub async fn crucible_updates(game_id: Option<String>, force: Option<bool>) -> Result<Vec<crucible::UpdateAvailable>, Error> {

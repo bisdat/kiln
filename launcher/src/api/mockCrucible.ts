@@ -11,13 +11,14 @@
 //   ?crucible=waiting   the first start after a pack page's Get Kiln whose name lost its code: the clipboard is read once
 //   ?crucible=resume    the download carried a pack code (Cinder Trails, K4TW-9XRB): its preview opens at start
 // Tests and the console: __kilnCrucibleMock.link(url) (a kiln://crucible link arrives), .setOnline(bool),
+// .dropFromLibrary(kind, id) (a mod's versions leave the Library, as Library > Remove past the profiles that list it),
 // .requests() (every crucible/pack call with its arguments), .state(), .setChecks(versionId, checks) (Crucible's check
 // of a version: Cinder Trails passed, Frost Hollow still running, Deep Shroud one warning, shared packs queued).
 import type {
   Activation, BuiltPack, CrucibleInstallRequest, CrucibleInstallResult, CruciblePack, CruciblePreview, CrucibleShareRequest, CrucibleShareResult,
   CrucibleChecks, CrucibleShared, CrucibleStatus, CrucibleTrust, CrucibleUpdate, CrucibleUpdatePlan, CrucibleUpdateRequest, CrucibleUpdateResult, CrucibleVersion,
-  ImportReport, KilnError, LibraryEntry, LibraryRef, ModKind, PackIndex, PackInstallRequest, PackInstallResult, PackInstance, PackMod, PackPreview,
-  PackUpdatePlan, Profile, SaveBackup,
+  ImportReport, KilnError, LibraryEntry, LibraryRef, ModKind, PackIndex, PackInstallRequest, PackInstallResult, PackInstance, PackLacking, PackMod, PackPreview,
+  PackRepairResult, PackUpdatePlan, Profile, SaveBackup,
 } from "./commands";
 import { MOD_KINDS, emptyMods } from "./kinds";
 
@@ -129,6 +130,8 @@ for (const p of packs) p.pack.mods = p.versions.at(-1)?.mods.length ?? 0;
 interface Shared { pack: CruciblePack; version: CrucibleVersion; snapshot: string[] }
 const shared = new Map<string, Shared>();
 const instances = new Map<string, PackInstance>();
+/** Packs installed from a file that is no pack of the mock Crucible (by slug). */
+const filePacks = new Map<string, MockPack>();
 const undos = new Map<string, { profile: Profile; instance: PackInstance }>();
 /** The player layers (local.<pid>) by profile. */
 const localFiles = new Map<string, { path: string; text: string }[]>();
@@ -178,7 +181,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     const g = (d.handlers.game_list?.({}) as { kind: string; buildId: string | null }[] | undefined)?.find((x) => x.kind === "client");
     return g?.buildId ? Number(g.buildId) : null;
   };
-  const fileName = (x: { kind: ModKind; id: string; version: string }) => (x.kind === "native" ? x.id + "-native-" : x.id + "-") + x.version + ".zip";
+  // a native mod as its DLL (the mock's import calls a .dll without kiln_plugin_main native, under its own id; a
+  // "<id>-native-<version>.zip" came in as "<id>-native", so the instance always lacked it)
+  const fileName = (x: { kind: ModKind; id: string; version: string }) => x.kind === "native" ? x.id + "-" + x.version + ".dll" : x.id + "-" + x.version + ".zip";
 
   /** `name`, or "name (2)"... when a profile has it (the backend's profile::unique_name). */
   const uniqueMockName = (name: string) => {
@@ -232,11 +237,41 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       missing, present, code: v.mods.filter((x) => x.code || x.kind === "native" || x.kind === "plugin").map((x) => x.id),
       optional: Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])),
       instance: instanceOf(p.pack.slug),
+      // an instance without its base has nothing to repair from (crucible::preview_of: lacking_of(..).ok())
+      ...(instanceOf(p.pack.slug) ? { repair: (() => { try { return lackingOf(instanceOf(p.pack.slug)!); } catch { return null; } })() } : {}),
       game: { builds: p.builds, current: cur, fits: !p.builds.length || cur === null || p.builds.includes(cur) },
       kiln: { needs: p.kiln ?? null, ok: p.kilnOk !== false },
       trusted: !!p.pack.owner && trust.some((x) => x.id === p.pack.owner!.id),
     };
     return r;
+  };
+
+  /** The Library's entries carry the hashes and names the index gives (the mock's import makes up its own). */
+  const indexHashes = (mods: MockMod[]) => {
+    for (const x of mods) {
+      const e = d.library.find((l) => l.kind === x.kind && l.id === x.id);
+      const ver = e?.versions.find((v) => v.version === x.version);
+      if (ver) ver.hash = kdh(x.kind, x.id, x.version);
+      if (e && x.name && e.name.toLowerCase() === x.id.replace(/-/g, " ")) e.name = x.name;
+    }
+  };
+  /** The pack and installed version of an instance (a file's pack too). */
+  const installedOf = (pid: string): { p: MockPack; v: MockVersion; inst: PackInstance } => {
+    const inst = instances.get(pid) ?? err("not_found", "profile " + pid + " is not a Crucible instance");
+    const p = [...packs, ...ownPacks()].find((x) => x.pack.slug === inst.pack) ?? filePacks.get(inst.pack) ?? err("not_found", "profile " + pid + " has no pack base");
+    return { p, v: p.versions.find((x) => x.version === inst.version) ?? p.versions[0], inst };
+  };
+  /** kiln_manage::modpack::pack::lacking_of: what the profile loads (listed with the pack's hash, on) of its installed
+   *  version and the Library lacks. */
+  const lackingOf = (pid: string): PackLacking => {
+    const { p, v } = installedOf(pid);
+    const prof = d.profiles.get(pid) ?? err("not_found", "No profile '" + pid + "'.");
+    const loads = (kind: ModKind, id: string, hash: string) => (prof.mods[kind] ?? []).some((x) => x.id === id && x.hash === hash && x.enabled);
+    const mods = v.mods.filter((x) => loads(x.kind, x.id, kdh(x.kind, x.id, x.version)) && !inLibrary(x.kind, x.id, x.version));
+    const layer = { kind: "kiln" as ModKind, id: "pack." + p.pack.slug, version: v.version, hash: kdh("kiln", "pack." + p.pack.slug, v.version) };
+    const noLayer = (prof.mods.kiln ?? []).some((x) => x.id === layer.id && x.enabled) && !inLibrary("kiln", layer.id, layer.version);
+    return { version: v.version, missing: [...mods.map(refOf), ...(noLayer ? [layer] : [])], names: [...mods.map((x) => x.name), ...(noLayer ? [layer.id] : [])],
+      download: Math.round(mods.reduce((s, x) => s + x.mb, 0) * MB) + (noLayer ? 40_960 : 0) };
   };
 
   /** A new profile holding the mods and the layer, its instance, activated in the game (kiln_manage::modpack::pack::install). */
@@ -249,13 +284,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
     for (const x of mods) prof.mods[x.kind].push({ id: x.id, version: x.version, hash: kdh(x.kind, x.id, x.version), enabled: x.optional ? optional[x.id] ?? !!x.on : true });
     const layer = [...rep.imported, ...rep.existing].find((r) => r.id === "pack." + p.slug);
     if (layer) prof.mods.kiln.push({ id: layer.id, version: layer.version, hash: layer.hash, enabled: true });
-    // the Library's entries carry the hashes and names the index gives (the mock's import makes up its own)
-    for (const x of mods) {
-      const e = d.library.find((l) => l.kind === x.kind && l.id === x.id);
-      const ver = e?.versions.find((v) => v.version === x.version);
-      if (ver) ver.hash = kdh(x.kind, x.id, x.version);
-      if (e && x.name && e.name.toLowerCase() === x.id.replace(/-/g, " ")) e.name = x.name;
-    }
+    indexHashes(mods);
     d.profiles.set(prof.id, prof);
     const inst: PackInstance = { format: 1, pack: p.slug, name: p.title, version, sha256: hex("pack" + p.slug + version),
       ...(p.packId ? { crucible: { pack: p.packId, version: p.versionId, slug: p.slug, code: p.code } } : {}), optional, installed: now() };
@@ -450,6 +479,27 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
         return { plan, profile: clone(prof), instance: clone(next), imported: rep.imported, backups };
       }, 300);
     },
+    pack_lacking: (a): PackLacking => lackingOf(String(a.profileId)),
+    // Download missing mods: writes only the Library (allowed while the game runs); the profile, the instance and its
+    // version stay (kiln_manage::crucible::repair, pack::repair for a file)
+    crucible_repair: (a) => {
+      const req = a.request as { profile: string; path?: string };
+      const { p, v, inst } = installedOf(req.profile);
+      if (inst.crucible?.version && !req.path && !online) err("network", "Kiln can't reach Crucible.");
+      if (!inst.crucible?.version && !req.path) err("not_found", "Pick the file of " + inst.name + " " + inst.version + " to put its missing mods back.");
+      const lack = lackingOf(req.profile);
+      const mods = v.mods.filter((x) => lack.missing.some((r) => r.kind === x.kind && r.id === x.id));
+      return d.startTask("crucible_repair", "Download the missing mods of " + p.pack.title, [
+        ...(req.path ? ["Checking the file"] : ["Downloading " + mods.length + " mods (" + (lack.download / MB).toFixed(1) + " MB)", "Checking the files"]), "Adding to your Library",
+      ], (): PackRepairResult => {
+        const files = [...mods.map(fileName), ...(lack.missing.some((r) => r.id.startsWith("pack.")) ? ["pack." + p.pack.slug + "-" + v.version + ".zip"] : [])];
+        if (files.length) d.importPaths(files);
+        indexHashes(mods);
+        const left = lackingOf(req.profile).missing;
+        return { profile: req.profile, version: inst.version, imported: lack.missing.filter((r) => !left.some((x) => x.kind === r.kind && x.id === r.id)),
+          downloaded: req.path ? 0 : lack.download, left };
+      }, 350);
+    },
     crucible_share: (a) => {
       const req = a.request as CrucibleShareRequest;
       if (!account() && shared.get(req.profile)?.pack.owner?.id) err("auth_failed", "Sign in with Discord to update this account-owned share.");
@@ -549,7 +599,9 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       const path = String((a.source as { path?: string })?.path ?? "");
       const p = fromFile(path);
       const pv = preview(p, latest(p));
-      return { index: { ...pv.index, crucible: undefined }, sha256: hex("file" + path), size: pv.size, missing: pv.missing, present: pv.present, code: pv.code, optional: pv.optional, instance: pv.instance };
+      const installed = pv.instance ? instances.get(pv.instance) : undefined;
+      return { index: { ...pv.index, crucible: undefined }, sha256: hex("file" + path), size: pv.size, missing: pv.missing, present: pv.present, code: pv.code, optional: pv.optional, instance: pv.instance,
+        ...(pv.instance ? { repair: pv.repair, installedVersion: installed?.version === latest(p).version } : {}) };
     },
     pack_install: (a) => {
       const gameId = String(a.gameId);
@@ -557,6 +609,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       if (!req?.consent) err("consent_required", "Tick \"I trust this pack\" first.");
       if (req.activate !== false && d.isRunning(gameId)) err("game_running", "Close Enshrouded first.");
       const p = fromFile(req.source.path);
+      if (!packs.includes(p)) filePacks.set(p.pack.slug, p);
       const v = latest(p);
       return d.startTask("pack_install", "Install " + p.pack.title, ["Checking the file", "Adding to your Library", "Making the profile", "Backing up your saves"], (): PackInstallResult => {
         const opt = { ...Object.fromEntries(v.mods.filter((x) => x.optional).map((x) => [x.id, !!x.on])), ...(req.optional ?? {}) };
@@ -575,6 +628,7 @@ export function crucibleMockHandlers(d: CrucibleMockDeps): Record<string, Handle
       link: (url: string) => { links.push(url); d.emit("kiln://crucible-link", { count: links.length }); },
       setOnline: (on: boolean) => { online = on; },
       setChecks: (versionId: string, c: CrucibleChecks) => { checks.set(versionId, clone(c)); },
+      dropFromLibrary: (kind: ModKind, id: string) => { const i = d.library.findIndex((e) => e.kind === kind && e.id === id); if (i >= 0) d.library.splice(i, 1); },
       requests: () => clone(requests),
       state: () => clone({ shared: [...shared.entries()], instances: [...instances.entries()], trust, undo: [...undos.keys()], lastPrevious }),
     };
