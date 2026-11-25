@@ -233,6 +233,49 @@ std::vector<boothook::OldDoc> old_patch() {
     return {d};
 }
 
+void boot_sync(const std::string& dir) {
+    auto run = [&](int cap, int points, bool reverse, bool needs, bool accepted) {
+        TreeView view = world();
+        Files files;
+        auto e = env_of(&view, &files, dir, nullptr);
+        e.data = [=](const Schema& schema) {
+            auto a = stage::read_sections("a", "1", {{"content/a.json", json{{"registry", {{"alter", json::array({
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "levelCap"}, {"op", cap}}
+            })}}}}.dump()}}, schema);
+            auto b = stage::read_sections("b", "1", {{"content/b.json", json{{"registry", {{"alter", json::array({
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "skillPointsPerLevel"}, {"op", points}}
+            })}}}}.dump()}}, schema);
+            a.insert(a.end(), b.begin(), b.end());
+            return a;
+        };
+        auto mapping = e.regmap;
+        e.regmap = [=](map::RegMap* rm, std::vector<std::string>* errors) {
+            bool ok = mapping(rm, errors);
+            rm->registries.at("balance").rows.at("skillPointsPerLevel").client_needs = needs;
+            return ok;
+        };
+        stage::Runner r(std::move(e));
+        r.set_order(reverse ? R"([{"mod":"b"},{"mod":"a"}])" : R"([{"mod":"a"},{"mod":"b"}])");
+        auto boot = r.run({});
+        std::vector<stage::BootOutcome> outcomes;
+        for (const auto& resource : boot)
+            for (const auto& f : resource.fields)
+                outcomes.push_back({f.field, accepted, Value::integer(f.field.field == "levelCap" ? cap : points), "test refusal"});
+        r.finish(outcomes);
+        auto report = json::parse(files.report);
+        check(report.contains("bootSync"), "resolved boot registry fingerprint is in registry.json");
+        return report["bootSync"];
+    };
+    const auto base = run(60, 3, false, true, true);
+    check(base["values"].is_string() && base["values"].get<std::string>().size() == 64, "full resolved values hash");
+    check(base == run(60, 3, false, true, true), "deterministic across starts");
+    check(base["values"] != run(61, 3, false, true, true)["values"], "resolved boot value changes hash");
+    auto reverse = run(60, 3, true, true, true);
+    check(base["values"] == reverse["values"] && base["order"] != reverse["order"], "same values, other registry order detected");
+    check(run(60, 3, false, false, true) == run(60, 9, false, false, true), "server-only values and writers excluded");
+    check(run(60, 3, false, true, false) == run(90, 9, true, true, false), "refused writes excluded");
+}
+
 void one_start(const std::string& dir) {
     TreeView view = world();
     Files files;
@@ -249,6 +292,8 @@ void one_start(const std::string& dir) {
     r.finish({{boot[0].fields[0].field, true, Value::integer(60), ""}});
     check(r.phase() == stage::Phase::Start && r.generation() == 1, "phase start, generation 1");
     const json rep = json::parse(files.report);
+    check(json::parse(r.schema_json())["bootSync"] == rep["bootSync"], "small native schema query carries the fingerprint without report-size limits");
+    check(json::parse(r.schema_json())["registries"]["items"]["fields"]["maxStack"]["joinedClient"] == "worldLoad", "native schema exposes the joined-client marker");
     check(rep["phase"] == "start" && rep["orderSource"] == "folders" && rep["regmap"]["verified"] == true, "registry.json: phase, order source, the verified record");
     check(rep["order"].size() == 2 && rep["order"][0]["mod"] == "bigmod" && rep["order"][1]["mod"] == "late", "the order: the mod folders' (late after bigmod)");
     const std::string text = rep.dump();  // compact: the file itself is indented
@@ -288,6 +333,7 @@ void one_start(const std::string& dir) {
     check(live_report != nullptr, "the live back-end got its handoff with a report callback");
     const std::string start_report = files.report;
     live_report(*live_result, true);
+    check(json::parse(files.report)["bootSync"] == rep["bootSync"], "runtime report preserves the immutable boot fingerprint");
     check(r.phase() == stage::Phase::WorldLoad && r.generation() == 2 && json::parse(files.report)["phase"] == "worldLoad",
           "the live back-end's report: phase worldLoad, generation 2");
 
@@ -413,7 +459,7 @@ int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
-        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
+        {"boot_sync", [&] { boot_sync(dir); }}, {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
         {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {

@@ -40,6 +40,7 @@ struct ReportMeta {
         std::string mod, version, edits_hash;
     };
     std::vector<Order> order;                // the mods, in the order the stage ran them
+    json boot_sync = nullptr;  // immutable start snapshot: resolved client-needed boot values + participating registry order
     std::string order_source = "kiln.host";  // "kiln.host" (Kiln.Host's runtime load order) | "folders" (no .NET: kiln.content's mod folders)
     struct Plan {
         std::string hash, file, previous;  // the lowered plan (P1-PLAN.md section 6); empty: none written

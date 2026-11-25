@@ -83,6 +83,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     }
     doc["order"] = std::move(order);
     doc["orderSource"] = meta.order_source;
+    if (!meta.boot_sync.is_null()) doc["bootSync"] = meta.boot_sync;
     if (meta.plan.hash.empty()) {
         doc["plan"] = nullptr;
     } else {

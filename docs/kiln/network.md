@@ -129,6 +129,28 @@ and the server compares.
   operator or modpack) and restart the game. The boot content is made at the start, so a config sync or a reload of the
   mod cannot change it.
 
+### Registry boot values and order
+
+Registry edits have a separate additive property, `kiln.registry.boot`, in HELLO and WELCOME:
+`1:<64 lower-case SHA-256 hex digits of values>:<64 lower-case SHA-256 hex digits of order>`.
+It does **not** change the existing `kiln.boot` hashes. A new peer compares this part only when both peers send a
+valid version-1 property. An absent property (older managed or native Kiln), malformed property or unknown version
+compares nothing; old peers ignore the new property and join exactly as before.
+
+The native stage fingerprints successfully resolved, boot-routed registry fields whose mapping says a client needs
+its own copy. It uses Kiln registry/entry/field names and the values actually written, not archive bytes, resource
+addresses, game executable hashes, runtime live layers or report truncation. Server-only fields do not contribute.
+The order hash covers participating mods and their resolved field contributions in registry load order; mods with no
+participating boot edits do not contribute. The immutable start snapshot remains available as `bootSync` in
+`kiln/state/registry.json` after world load and hot reload too.
+
+A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
+restart. Only when values match is the order compared; an order/contribution mismatch says **registry boot edits or load order differ** and
+asks for the server's modpack/load order and a restart. Both use the ordinary handshake missing-details/report line,
+REJECT under `modSync: refuse`, WELCOME warning under `warn` (including the default), and no player warning under
+`off`. This detects data-only registry packs too, without requiring an `OnBoot` override. It does not transfer boot
+values or rebuild them after joining.
+
 ## NPC bodies at the join
 Since 0.2.0-dev.31. An NPC block with a body of its own ([modding/npc-blocks.md](modding/npc-blocks.md)) is built by each
 side's game at its start: model, skeleton, graph and motion sequences. A player whose game built it differently, or not at

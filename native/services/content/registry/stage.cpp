@@ -1008,6 +1008,38 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             const FieldSpec* f = rs && !is_raw_field(ref.field) ? rs->field(ref.field) : nullptr;
             if (f && f->applies == Applies::Restart) d.boot_fields[ref] = fo;
         }
+        // A separate additive fingerprint: never change kiln.boot for old peers. Use only successful boot writes,
+        // after their actual resource values are known, and only mappings whose client needs its own copy. Compute
+        // before report caps; preserve it across runtime reports (live changes cannot rebuild these boot values).
+        std::set<FieldRef> written;
+        for (const auto& o : outcomes) if (o.ok) written.insert(o.field);
+        json values = json::array(), order = json::array();
+        std::map<std::string, json> contributions;
+        for (const auto& [ref, fo] : d.boot_fields) {
+            if (!written.count(ref)) continue;
+            auto reg = d.rm.registries.find(ref.registry);
+            if (reg == d.rm.registries.end()) continue;
+            auto row = reg->second.rows.find(ref.field);
+            if (row == reg->second.rows.end() || row->second.backend != map::Backend::Boot || !row->second.client_needs) continue;
+            bool edited = false;
+            for (const auto& c : fo.chain) {
+                if (c.kind != WriterKind::Registry) continue;
+                edited = true;
+                auto& edits = contributions[c.mod];
+                if (edits.is_null()) edits = json::array();
+                edits.push_back({ref.registry, ref.id, ref.field, stage_name(c.stage), c.after.to_json()});
+            }
+            if (edited) values.push_back({ref.registry, ref.id, ref.field, fo.result.to_json()});
+        }
+        for (const auto& o : d.meta.order) {
+            auto it = contributions.find(o.mod);
+            if (it == contributions.end()) continue;
+            order.push_back({o.mod, sha_hex(it->second.dump())});
+            contributions.erase(it);
+        }
+        for (const auto& [mod, edits] : contributions) order.push_back({mod, sha_hex(edits.dump())});
+        d.meta.boot_sync = {{"values", sha_hex("kiln-registry-boot-values 1\n" + values.dump())},
+                            {"order", sha_hex("kiln-registry-boot-order 1\n" + order.dump())}};
         d.generation = 1;
         d.meta.generation = 1;
         d.meta.world_load = false;
@@ -1133,6 +1165,8 @@ std::string Runner::schema_json() {
             const map::Mapping mp = d_->rm.mapping(name, fn, &reason);
             json row = {{"applies", applies_word(f.applies)}, {"readOnly", f.read_only},
                         {"mapping", mp == map::Mapping::Mapped ? "mapped" : mp == map::Mapping::Unmapped ? "unmapped" : mp == map::Mapping::Unproven ? "unproven" : "removed"}};
+            for (const auto& generated : gen::kFields)
+                if (name == generated.registry && fn == generated.path) { row["joinedClient"] = generated.joined_client; break; }
             if (!reason.empty()) row["reason"] = reason;
             if (f.min) row["min"] = *f.min;
             if (f.max) row["max"] = *f.max;
@@ -1142,7 +1176,9 @@ std::string Runner::schema_json() {
         }
         regs[name] = {{"version", reg.version}, {"experimental", "KILNX031"}, {"fields", fields}};
     }
-    return json{{"registrySchema", d_->schema.format}, {"registries", regs}}.dump();
+    json doc = {{"registrySchema", d_->schema.format}, {"registries", regs}};
+    if (!d_->meta.boot_sync.is_null()) doc["bootSync"] = d_->meta.boot_sync;
+    return doc.dump();
 }
 
 bool Runner::field_info(const std::string& q, FieldInfo* out) {

@@ -15,6 +15,39 @@ internal static class BootGate
 {
     /// <summary>The handshake property: <c>id=&lt;16 hex&gt;</c> or <c>id=out</c>, comma-separated, ids in ordinal order.</summary>
     public const string Key = "kiln.boot";
+    internal const string RegistryKey = "kiln.registry.boot";
+    private static Func<string?>? _registryHost;
+
+    private static string? RegistryOwn()
+    {
+        try
+        {
+            if (_registryHost is null)
+            {
+                var host = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Kiln.Host");
+                var method = host?.GetType("Kiln.Host.BootFingerprint")?.GetMethod("RegistryCurrent", BindingFlags.Static | BindingFlags.NonPublic, Type.EmptyTypes);
+                if (method?.ReturnType == typeof(string)) _registryHost = method.CreateDelegate<Func<string?>>();
+            }
+            return RegistryValue(_registryHost?.Invoke());
+        }
+        catch (Exception) { return null; }
+    }
+
+    private static string? RegistryValue(string? value) => value is { Length: 131 } && value.StartsWith("1:", StringComparison.Ordinal) &&
+        value[66] == ':' && value.AsSpan(2, 64).IndexOfAnyExcept("0123456789abcdef") < 0 &&
+        value.AsSpan(67, 64).IndexOfAnyExcept("0123456789abcdef") < 0 ? value : null;
+
+    internal static string? RegistryDifference(IReadOnlyDictionary<string, string> properties)
+    {
+        var own = RegistryOwn();
+        var peer = RegistryValue(properties.GetValueOrDefault(RegistryKey));
+        if (own is null || peer is null) return null; // additive: old peers compare nothing
+        if (!own.AsSpan(2, 64).SequenceEqual(peer.AsSpan(2, 64)))
+            return "The registry boot values differ from this server's. Use the server's modpack and settings, then restart the game.";
+        if (!own.AsSpan(67, 64).SequenceEqual(peer.AsSpan(67, 64)))
+            return "The registry boot edits or load order differ from this server's. Use the server's modpack and load order, then restart the game.";
+        return null;
+    }
 
     /// <summary>A boot mod in this process's generation that was left out of it (or whose content faulted since).</summary>
     public const string Out = "out";
@@ -83,11 +116,13 @@ internal static class BootGate
     public static Dictionary<string, string> Properties()
     {
         var own = Own();
-        if (own.Count == 0) return [];
         var value = Encode(own, out var left);
         if (left > 0 && Interlocked.Exchange(ref _cutLogged, 1) == 0)
             NetEngine.Log(LogLevel.Warn, $"boot content: {left} boot mod(s) do not fit the handshake ({MaxValueBytes} bytes): their boot content is not compared at the join");
-        return value.Length == 0 ? [] : new Dictionary<string, string>(StringComparer.Ordinal) { [Key] = value };
+        var properties = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (value.Length != 0) properties[Key] = value;
+        if (RegistryOwn() is { } registry) properties[RegistryKey] = registry;
+        return properties;
     }
 
     /// <summary>The property's value: <c>id=fp</c> pairs in ordinal id order, within <see cref="MaxValueBytes"/>; <paramref name="left"/>:

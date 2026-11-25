@@ -54,6 +54,7 @@ public sealed class BootGateTests : IDisposable
         NetNative.TestTransport = null;
         NetEngine.TestServerRole = null;
         BootGate.TestSource = null;
+        global::Kiln.Host.BootFingerprint.RegistrySource = null;
         ModsBackend.Current = null;
         Backend.Current = _previousBackend;
     }
@@ -97,6 +98,68 @@ public sealed class BootGateTests : IDisposable
         if (boot != null) props[BootGate.Key] = boot;
         var mods = withMod ? new List<Wire.ModEntry> { new(Altars, version, ModSide.Both) } : [];
         NetEngine.OnFrame(P, Wire.EncodeHello(new Wire.Hello(Wire.Protocol, "0.2.0-dev.29", 7, mods, [], props)));
+    }
+
+    [Theory]
+    [InlineData(ModSyncPolicy.Refuse, true, true)]
+    [InlineData(ModSyncPolicy.Warn, false, true)]
+    [InlineData(ModSyncPolicy.Off, false, false)]
+    public void Registry_boot_values_follow_modSync_and_report_the_difference(ModSyncPolicy policy, bool rejected, bool warned)
+    {
+        RegistryHello(policy, "1:" + new string('c', 64) + ":" + new string('b', 64));
+        Assert.Equal(rejected, LastReject() != null);
+        var text = rejected ? LastReject()!.Reason : string.Join(" ", LastWelcome()!.Warnings);
+        Assert.Equal(warned, text.Contains("registry", StringComparison.Ordinal));
+        if (warned) { Assert.Contains("restart", text); Assert.Contains("registry", Log()); }
+    }
+
+    [Fact]
+    public void Registry_order_difference_names_the_server_modpack()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('a', 64) + ":" + new string('d', 64));
+        Assert.Contains("boot edits or load order", LastReject()!.Reason);
+        Assert.Contains("modpack", LastReject()!.Reason);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("malformed")]
+    [InlineData("2:future")]
+    public void Older_or_unknown_registry_fingerprints_do_not_change_admission(string? remote)
+    {
+        RegistryHello(ModSyncPolicy.Refuse, remote);
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    [Fact]
+    public void Matching_registry_fingerprints_join_without_warning()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('a', 64) + ":" + new string('b', 64));
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    [Fact]
+    public void A_new_client_keeps_joining_a_server_without_the_extension()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('c', 64) + ":" + new string('d', 64), false);
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    private void RegistryHello(ModSyncPolicy policy, string? remote, bool own = true)
+    {
+        // Resolve the same private Host seam the real handshake reads; no boot mod is required for a data-only pack.
+        global::Kiln.Host.BootFingerprint.RegistrySource = () =>
+            "{\"bootSync\":{\"values\":\"" + new string('a', 64) + "\",\"order\":\"" + new string('b', 64) + "\"}}";
+        if (!own) global::Kiln.Host.BootFingerprint.RegistrySource = null;
+        NetEngine.UseConfigForTests(Policy(policy));
+        Up();
+        var props = new Dictionary<string, string>();
+        if (remote != null) props["kiln.registry.boot"] = remote;
+        NetEngine.OnFrame(P, Wire.EncodeHello(new Wire.Hello(Wire.Protocol, "test", 7, [new(Altars, "1.0.0", ModSide.Both)], [], props)));
+        global::Kiln.Host.BootFingerprint.RegistrySource = null;
     }
 
     private Wire.Reject? LastReject() => _net.Sent.Where(s => s.Peer == P && Wire.TryHeader(s.Frame, out var t) && t == Wire.Type.Reject)

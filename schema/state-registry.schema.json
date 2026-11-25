@@ -346,6 +346,25 @@
         }
       },
       "additionalProperties": false
+    },
+    "bootSync": {
+      "type": "object",
+      "description": "Immutable successful client-needed boot registry values and participating mod-order hashes. Optional for old writers; full hashes are computed before report caps. Neither server-only fields nor live layers contribute.",
+      "required": [
+        "values",
+        "order"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "values": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "order": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     }
   },
   "additionalProperties": false,
