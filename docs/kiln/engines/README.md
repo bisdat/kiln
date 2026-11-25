@@ -485,18 +485,18 @@ says:
 | EMF, Kiln's own runner | not loaded: the profile's entry comes first and keeps the id, the folder is "a second copy … ignored" | `emf.json` `disabled` |
 | Native mods (Kiln's loader, drop-ins on) | not loaded: "the profile lists … too (the profile wins over the drop-in folder)" | `native.json` |
 
-Not changed yet, and listed here so that nobody takes the state for the truth there:
+Since 0.2.0-dev.31.12 the other loaders say it too (see "A mod the profile has off, while the engine's own loader runs"
+above):
 
-- **EMF's, Greeneye Loader's and Shroudtopia's own loaders** (the adapter stands aside): `kcompat::aside_report`
-  (`native/plugins/compat/compat.h`) answers `disabled` ("switched off in the profile") for every entry that is off
-  without looking into the loader's folder, so a folder of the player's there that the loader runs is reported
-  `disabled`. kiln-emf's `hand_copy` finds such a folder for entries that are on only. Each of these loaders has its
-  own switch (EMF: `emf/config/<id>.ini`; Shroudtopia: its `shroudtopia.json`), which would have to be read to say
-  truthfully whether it runs.
-- **A native mod whose DLL the player also put in as a proxy** (`dinput8.dll` that the installer moved to `kiln/chain/`,
-  the `[chain]` section of `chain.ini`): the `[chain]` lines load whatever the profile says, while `native.json` says
-  the Library entry is `disabled in the profile`. Both rows are in the support report (`chain loaded`), but nothing
-  ties them together.
+| Engine, who runs it | The player's own folder of a mod that is off | State |
+|---|---|---|
+| EMF's, Greeneye Loader's, Shroudtopia's or Flame's own loader | runs while that loader's own switch is on (Kiln reads the switch; it changes nothing) | `emf.json`, `greeneye.json`, `shroudtopia.json`, `flame.json` `status` `own-loader`, "runs (your own folder …; …) although it is off in the profile", and how to turn it off there; `disabled` when that switch keeps it off too |
+| Native mods, a DLL of it also loads as a chain proxy (`kiln/chain.ini` `[chain]`, `dinput8-chain.ini`) | its DllMain runs whatever the profile says | `native.json` `chainProxy` (the proxy's file) and the reason; a phase dllmain mod is `loaded` |
+
+The support report's `off-but-runs` warning names every such mod of a folder of the player's own (`own-loader` rows
+with `state` or `status`, `chainProxy`), never Kiln's copy that is still there ("runs (Kiln's copy …"), which the next
+Play takes out. Left for a later release: an enabled native mod whose DLL is also chained loads twice (Kiln and the
+proxy).
 
 ## Status files and logs
 

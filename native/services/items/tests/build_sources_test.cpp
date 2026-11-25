@@ -134,6 +134,14 @@ const void* KILN_CALL service(KilnStr name,uint32_t) {
     return s == KILN_HOOKS_SERVICE ? static_cast<const void*>(&hooks) : s == KILN_CAPS_SERVICE ? static_cast<const void*>(&caps) : nullptr;
 }
 uint32_t KILN_CALL side() { return KILN_SIDE_CLIENT; }  // a hosting client: its server world and its client world
+// review of 31.12: where the player stands (kiln.world's position) and the game's base lookup (base 0, or none)
+bool player_placed = false, in_base = true;
+KilnResult KILN_CALL world_position(KilnEntity e, KilnVec3* out) {
+    if (!player_placed || e != 1) return KILN_ERR_NOT_FOUND;
+    *out = {1000, 50, 1000};
+    return KILN_OK;
+}
+BaseHit* __fastcall base_at(BaseHit* out, void*, const float*) { *out = {}; out->error = in_base ? 0 : 0x1f; out->index = 0; return out; }
 }
 int main() {
     using namespace kitems;
@@ -198,6 +206,38 @@ int main() {
      CHECK(r.rax==1 && g_build_off.load() && logged("material hook faulted"));
      r.rsi=reinterpret_cast<uintptr_t>(query);r.rax=10;r.rbx=5;r.rbp=40;fixture::world_kind=0;hk_build_cursor(r);CHECK(r.rax==10);  // off: the game's
      g_build_off.store(false);}
+    // ---- review of 31.12: a building link to a Magic chest of the base the player stands in counts once ----
+    // The cursor adds the links to the game's own count of the base (eax), and the placement pays the base list first and
+    // leaves it out of the links: a player who links every chest (Streamlined Logistics) had the base's chest counted
+    // twice, a green cursor and a build menu over the real count, and then a placement that came up short.
+    {
+        KilnWorldApi world{}; world.position = &world_position; g_w = &world;
+        G.base_at = &base_at; G.bases_count = 0x100; G.stride = 0x80; G.stock_items = 0x108; G.stock_items_count = 0x110;
+        G.stock_water = 0x118; G.stock_water_count = 0x120; G.aabb_y = 0x134; G.zone_mask_rel = 0x20;
+        uint32_t chests[1] = {BUILD};  // the base's stock list names the linked chest BUILD (30 stone, 4 wood)
+        wr(bases, 0x100, uint32_t{1}); wr(bases, 0x108, static_cast<uint32_t*>(chests)); wr(bases, 0x110, uint64_t{1});
+        auto building = [&] {
+            KilnStationStack out[8] = {}; uint32_t n = 0;
+            std::map<uint32_t, uint32_t> m;
+            if (t_source_stock(PLAYER, KILN_CRAFT_SOURCE_STOCK_BUILDING, out, 8, &n) == KILN_OK)
+                for (uint32_t i = 0; i < n; ++i) m[out[i].item] = out[i].count;
+            return m;
+        };
+        CHECK((building() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));  // nowhere: every building link
+        player_placed = true; g_build_dirty.store(true); build_cache_refresh(5);
+        CHECK((building() == std::map<uint32_t, uint32_t>{{STONE, 5}}));              // in the base: BUILD is the base's count
+        CHECK(look(0,10,5,40)==10 && logged("refused: short count: bag 5 + base 10 + linked 5, needs 40"));
+        CHECK(look(0,10,5,20)==15);                                                     // BUILD2's 5 stone still count
+        material=WOOD;CHECK(look(0,0,0,4)==0);material=STONE;                          // BUILD's wood is the base's now
+        in_base = false; g_build_dirty.store(true); build_cache_refresh(6);
+        CHECK((building() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));  // in no base: every link again
+        CHECK(look(0,10,5,40)==45);
+        in_base = true; player_placed = false; g_build_dirty.store(true); build_cache_refresh(7);
+        CHECK(look(0,10,5,40)==45);                                                     // no position: nothing left out
+        g_w = nullptr; G.base_at = nullptr; G.bases_count = G.stride = G.stock_items = G.stock_items_count = 0;
+        G.stock_water = G.stock_water_count = G.aabb_y = G.zone_mask_rel = 0; std::memset(bases + 0x100, 0, 0x100);
+        g_build_dirty.store(true); build_cache_refresh(8);
+    }
     // ---- the payment's scope: only the blueprint program's own take ----
     apply_caller=g_build.blueprint_ret;
     {

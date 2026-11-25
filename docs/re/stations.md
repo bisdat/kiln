@@ -1083,7 +1083,9 @@ kiln.stations' adapter) sees it with the return address `build/ApplyMaterialsPai
 **What Kiln does.** A mid hook at `build/CursorStockRet` (on demand: a server once a link has `KILN_CRAFT_SOURCE_BUILDING`, a
 client once its server's building snapshot is on) adds the player's building links to `eax` when `eax + ebx < ebp`: a server
 world from the server's count of those links (cached on the tick thread every 30 steps and on a registration change, so the
-check never calls kiln.world), a client world from the snapshot (`set_build_stock`). A RawHook on `ApplyMaterials` sets a
+check never calls kiln.world), a client world from the snapshot (`set_build_stock`). Both leave out the links to the
+Magic chests of the base the player stands in (`player_base_chests`): `eax` holds those already, and the payment's base
+list pays them and keeps them out of the links. A RawHook on `ApplyMaterials` sets a
 thread-local scope only for a take whose caller is `build/BlueprintApplyRet`; inside it, the craft adapter (§10.1, §10.7)
 accepts `build/ApplyMaterialsPaid` and pays with the building links only (no station outputs): the owner and the base list
 in the game's order first, then the links, all or nothing; any fault or remainder returns 4, `ApplyMaterials` answers false

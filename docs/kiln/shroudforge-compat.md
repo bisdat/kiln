@@ -739,9 +739,10 @@ bundled build before this) runs them, and the lines and `eml.json` say so. Tests
 shroudforge-package kiln_host_skip` and `cargo test -p shroudforge-modloader --lib kiln_host_skip`; Kiln's
 `native/plugins/shroudforge/tests/test-own-skip.sh` (host, `own_skip.h`) and kiln-eml's `own_folder_off_tests`.
 
-**Pin.** The fork change is the patch `sf-skip-own-folders-fork.patch` of the dev.31 task `sf-own-folder-off`, on fork
-branch `kiln-dev31/sf-skip-own-folders` from `465aad9f` (the 0.2.0-dev.31 pin). It is not pushed yet: until the
-submodule moves to it, the bundled runtime has no export, and Kiln reports such folders as running, as above.
+**Pin.** The fork change (`c115e6c3`, the same bytes as the dev.31 task `sf-own-folder-off`'s `8f9358d`) rides in fork
+branch `kiln-dev31-exports-reuse` at `1672d8af`, which 0.2.0-dev.31.12 pins (with the pass reuse of section 5.0). A
+runtime without the export (an installed ShroudForge, or a bundled build before 0.2.0-dev.31.12) reports such folders as
+running, as above.
 
 ## 6. What other agents need to do (detect, launcher)
 

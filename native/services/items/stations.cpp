@@ -3917,10 +3917,12 @@ void lock_counts(void* bases, uint32_t player, const std::vector<CraftSource>& s
 }
 
 // GitHub #132: what one purpose's links (fills, building) hold, every container once per item, the filters applied, no
-// bag and no base; sorted by item. Tick thread (kiln.world reads), as the payment's own checks.
-std::vector<KilnStationStack> link_rows(void* bases, uint32_t player, const std::vector<CraftSource>& sources, bool CraftSource::*opt) {
+// bag and no container in `skip`; sorted by item. Tick thread (kiln.world reads), as the payment's own checks.
+std::vector<KilnStationStack> link_rows(void* bases, uint32_t player, const std::vector<CraftSource>& sources, bool CraftSource::*opt,
+                                        const std::unordered_set<uint32_t>& skip = {}) {
     std::unordered_map<uint32_t, uint64_t> sum;
-    std::unordered_set<uint32_t> seen{player};
+    std::unordered_set<uint32_t> seen(skip.begin(), skip.end());
+    seen.insert(player);
     for (const auto& s : sources) {
         if (!(s.*opt) || seen.count(s.container) || !source_access(bases, player, s.container)) continue;
         seen.insert(s.container);
@@ -3936,6 +3938,24 @@ std::vector<KilnStationStack> link_rows(void* bases, uint32_t player, const std:
     for (const auto& [item, count] : sum) rows.push_back({item, static_cast<uint32_t>(std::min<uint64_t>(count, UINT32_MAX))});
     std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.item < b.item; });
     return rows;
+}
+
+// GitHub #132 (review of 31.12): the Magic chests of the base the player stands in. The build cursor adds a building link
+// to the game's own count of the base's stock (the server's StockCount counts the base at the cursor, a client's the
+// published map of the player's base), and the placement pays the base list first and leaves it out of the links
+// (merge_craft_sources skips the payment's order), so a link to one of these chests must not count again: a player who
+// links every chest (Streamlined Logistics) saw the cursor and the build menu count a base chest twice, and the placement
+// then came up short. Tick thread (kiln.world reads). Empty when the player stands in no base or nothing could be read.
+std::unordered_set<uint32_t> player_base_chests(uint32_t player) {
+    std::unordered_set<uint32_t> out;
+    RawBases rb{};
+    KilnVec3 position{};
+    if (!position_of(player, &position) || !read_bases(&rb)) return out;
+    const int32_t base = base_index_at(rb.sys, position);
+    std::vector<KilnEntity> chests;
+    if (base >= 0 && static_cast<uint32_t>(base) < rb.count && base_list(rb, static_cast<uint32_t>(base), false, &chests))
+        out.insert(chests.begin(), chests.end());
+    return out;
 }
 
 // Tick thread, the server world's Pre: the cache, every 30 steps and when a registration changed.
@@ -4276,8 +4296,9 @@ KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStati
     if (flags & (KILN_CRAFT_SOURCE_STOCK_FILLS | KILN_CRAFT_SOURCE_STOCK_BUILDING)) {  // GitHub #132: one purpose's links alone
         void* const bases = singleton("PlayerBasesSystemServer");
         if (!bases) return KILN_ERR_UNAVAILABLE;
-        const auto rows = link_rows(bases, player, craft_sources_copy(player),
-                                    (flags & KILN_CRAFT_SOURCE_STOCK_FILLS) ? &CraftSource::fills : &CraftSource::building);
+        const bool building = (flags & KILN_CRAFT_SOURCE_STOCK_BUILDING) != 0;
+        const auto rows = link_rows(bases, player, craft_sources_copy(player), building ? &CraftSource::building : &CraftSource::fills,
+                                    building ? player_base_chests(player) : std::unordered_set<uint32_t>{});
         *out_count = static_cast<uint32_t>(rows.size());
         if (capacity < rows.size()) return KILN_ERR_BUFFER_TOO_SMALL;
         if (!rows.empty()) std::memcpy(out, rows.data(), rows.size() * sizeof rows[0]);
@@ -4367,7 +4388,8 @@ void build_cache_refresh(uint64_t step) {
         const auto sources = craft_sources_copy(player);  // this login's links
         if (std::none_of(sources.begin(), sources.end(), [](const CraftSource& s) { return s.building; })) continue;
         auto& counts = next[player];
-        for (const KilnStationStack& row : link_rows(bases, player, sources, &CraftSource::building)) counts[row.item] = row.count;
+        for (const KilnStationStack& row : link_rows(bases, player, sources, &CraftSource::building, player_base_chests(player)))
+            counts[row.item] = row.count;
     }
     std::lock_guard lock(g_build_mu);
     g_build_cache = std::move(next);
