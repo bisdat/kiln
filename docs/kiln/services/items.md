@@ -52,7 +52,8 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
   Its identity is that entity: the result's `ItemEntity` and `Ref` name it, and nothing moves it afterwards. A
   replaced eternal keeps its entity: `Replaced.Backpack` unequips it and moves it to a free Generic cell
   (`ReplacedEntity` names the same entity), `Replaced.Take` destroys it. Plain and eternal ammo can replace each other.
-  A selected eternal whose item entity is missing is stale and returns `SlotChanged` before mutation. This needs the
+  A selected eternal whose item entity is missing, or whose entity's own state no longer says it lies in that cell
+  as that item, is stale and returns `SlotChanged` before mutation. This needs the
   sigdb feature `items.give_equip.instance_ammo` (both approved builds have it); without it, or if the game's own
   equip decision does not place this item in the backpack, an eternal is refused before any change with a reason
   naming it. Plain ammo is unchanged and never needs that feature.

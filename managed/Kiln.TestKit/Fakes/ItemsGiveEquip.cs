@@ -171,6 +171,9 @@ internal sealed unsafe partial class ItemsFake
                 { result.Status = ItemsAbi.SlotChanged; return "the selected ammo cell no longer holds matching Ammunition"; }
                 if (previous.Gear && there.Pide == 0)
                 { result.Status = ItemsAbi.SlotChanged; return "the selected instance-backed ammo has no item entity"; }
+                // native: the entity's ItemState must still say it lies in that cell and is that item
+                if (previous.Gear && (!_gear.ContainsKey(there.Pide) || !World.Exists(there.Pide)))
+                { result.Status = ItemsAbi.SlotChanged; return "the selected instance-backed ammo's item entity does not lie in that cell"; }
                 old = there;
             }
         }

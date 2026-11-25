@@ -1885,6 +1885,21 @@ void eternal_ammo_tests(Run& run, Reset& reset, Refusal& unchanged_refusal) {
             unchanged_refusal(before,r,KILN_ITEMS_SLOT_CHANGED,
                               "#139 a selected instance-backed stack without its item entity is stale: SlotChanged");
         }
+        // Review: a nonzero pide field is not yet an item entity. It must have an ItemState that says it lies in this
+        // very cell and is this item; otherwise Backpack would move (and op7 unequip) or Take destroy the wrong entity.
+        for (int bad=0; bad<4; ++bad) for (uint32_t item : {ETERNAL, ARROW}) {
+            eternal_reset(15); put(101,3,0,0); select(15,cell);
+            if (bad==0) put(101,0,ETERNAL2,1,999);                                  // no ItemState at all
+            if (bad==1) { existing(555,ETERNAL2,KILN_SLOT_ID(101,5),0x48); put(101,0,ETERNAL2,1,555); }  // lies elsewhere
+            if (bad==2) { existing(555,ETERNAL,cell,0x48); put(101,0,ETERNAL2,1,555); }  // another item's entity
+            if (bad==3) { existing(555,ETERNAL2,cell,0x48); g_comps[{T_ITEMSTATE,555}].resize(12); }  // short component
+            const auto before=g_comps; const auto next=g_next_pide;
+            r=run(flags,15,item,item==ARROW ? 50 : 1);
+            unchanged_refusal(before,r,KILN_ITEMS_SLOT_CHANGED,
+                              "#139 review: a selected instance-backed stack whose ItemState is missing, short, elsewhere or "
+                              "another item's is refused (SlotChanged) before any change");
+            check(g_next_pide==next && ge_ctors==0,"#139 review: that refusal builds no transaction and creates no instance");
+        }
     }
     // Failures roll back once with no instance; a post-commit invariant fault never rolls back.
     for (bool occupied : {false,true}) for (bool take : {false,true}) for (int fault=0; fault<6; ++fault) {

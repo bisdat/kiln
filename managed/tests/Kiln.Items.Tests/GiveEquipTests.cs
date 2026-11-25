@@ -185,6 +185,32 @@ public sealed unsafe class GiveEquipTests
         Assert.Equal(1, inventory.Count(eternal));
     }
 
+    // #139 review: a selected eternal whose item entity is gone is stale; nothing is moved, destroyed or created.
+    [Fact]
+    public void ASelectedEternalWhoseItemEntityIsGoneIsRefusedBeforeAnyChange()
+    {
+        using var kiln = new KilnHarness();
+        var player = kiln.Players.Join("Player", 76561198000000958, position: new WorldPosition(0, 0, 0));
+        var eternal = kiln.Items.AddItem("EternalPillarOfFlames", 1, ItemCategory.Ammunition, gear: true);
+        var plain = kiln.Items.AddItem("Fireball", 99, ItemCategory.Ammunition);
+        kiln.Items.SetEquipmentSlotType(eternal, EquipmentSlot.Spell);
+        kiln.Items.SetEquipmentSlotType(plain, EquipmentSlot.Spell);
+        kiln.Items.PlayerInventories = 1;
+        kiln.Step(2);
+        var inventory = kiln.Items.Of(player.Entity)!;
+        var first = kiln.Run(() => Items.GiveEquip(player.Entity, eternal, 1, EquipmentSlot.Spell)); kiln.Step();
+        Assert.True(first.Result.Ok);
+        Assert.True(kiln.Entities.Destroy(first.Result.ItemEntity));
+        foreach (var replaced in new[] { Replaced.Backpack, Replaced.Take })
+        {
+            var again = kiln.Run(() => Items.GiveEquip(player.Entity, plain, 5, EquipmentSlot.Spell, new() { Replaced = replaced }));
+            kiln.Step();
+            Assert.Equal(ItemsStatus.SlotChanged, again.Result.Status);
+            Assert.Equal(1, inventory.Count(eternal));
+            Assert.Equal(0, inventory.Count(plain));
+        }
+    }
+
     [Fact]
     public void WithoutTheInstanceAmmoFeatureEternalSpellsAreRefusedAndPlainAmmoIsNot()
     {

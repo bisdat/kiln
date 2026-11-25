@@ -1650,6 +1650,14 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
         // An instance-backed stack is only itself with its item entity: without one the reference is stale.
         if ((previous_flags&2) && !pide_of(old))
             return fail(KILN_ITEMS_SLOT_CHANGED,"the selected instance-backed ammo has no item entity");
+        // A pide field is only that entity when its ItemState (contained slot +0, item +8; docs/re/items.md section 13)
+        // says it lies in this cell and is this item. Otherwise Backpack would unequip and move, or Take destroy, an
+        // entity this cell does not own.
+        if (previous_flags&2) {
+            const auto* state=static_cast<const uint8_t*>(other_sized(a,A_ITEMSTATE,pide_of(old),kItemStateSize));
+            if (!state || (rd<uint64_t>(state,0)&0xffffffffffull)!=target || rd<uint32_t>(state,8)!=old.item)
+                return fail(KILN_ITEMS_SLOT_CHANGED,"the selected instance-backed ammo's item entity does not lie in that cell");
+        }
     }
     uint64_t backpack=0;
     const bool take=(r.flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0, dry=(r.flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;

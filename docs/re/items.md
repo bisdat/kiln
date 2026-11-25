@@ -931,7 +931,15 @@ IsEquipped bit of its ItemState.
 - A replaced instance keeps its behaviour as the game's unequip leaves it: Backpack queues op7 remove with its pide
   (IsEquipped cleared at commit) and moves it with the game's transfer to a free Generic cell, keeping its pide (checked
   before commit); Take removes it (removeItems' destroy at commit). A selected instance-backed stack with no pide
-  (0 or 0xFFFFFFFF) is stale: SlotChanged before the transaction.
+  (0 or 0xFFFFFFFF) is stale: SlotChanged before the transaction. So is one whose pide has no 20-byte ItemState, or
+  whose ItemState's contained slot (`+0`, the 40-bit cell) or item (`+8`) is not that cell and item (review, the
+  layout of section 13): the commit keeps `+0` current on every transfer (`0x1b0148..0x1b0163`, op.slot into
+  ItemState+0, then OwnerRelationship), so a mismatch means the pide field does not name this stack's entity.
+- Static note (review): the game's whole-stack removal (`0x1b9460`, used by moveStack and removeItems) zeroes the
+  vacated cell's pide field (`mov [rsi+4], 0` over count and pide, or item and pide), so after a Backpack
+  evacuation the cell's pide field is 0 in the game, not the moved instance's id. EquipItem would therefore pass 0
+  as well; the direct select with pide 0 is the same op7 the game would queue, not a different one. The fixture's
+  `ge_transfer_keeps_pide` case is a stricter assumption than the game.
 
 Gates: `items.give_equip.instance_ammo` (`server.d/give-equip-instance-ammo.json`, composed unchanged for the client)
 requires `items.give_equip` and matches the four sites above as probes (`@items/EquipItem.inPlace`,
