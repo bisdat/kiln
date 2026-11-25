@@ -2069,7 +2069,14 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                     g.refused.push_back({mod, "live:" + std::to_string(handle), registry::Stage::Alter, 0, reply.reason, ""});
                     queue_change_report();
                 } else {
-                    reply.outcome = g.pending_tables.empty() ? RegistryLiveOutcome::Applied : RegistryLiveOutcome::PendingResource;
+                    // pending only for this change's own fields: a drop table another change or a GameStart item removal's
+                    // disabled slots wait for leaves an unrelated change Applied (registry-proof, 31.x)
+                    const bool own_pending = std::any_of(g.pending_tables.begin(), g.pending_tables.end(), [&](const LiveState::Pending& p) {
+                        const auto it = g.in->result.fields.find(p.field);
+                        return it != g.in->result.fields.end() && std::any_of(it->second.chain.begin(), it->second.chain.end(),
+                            [&](const ChainRow& row) { return row.source.rfind(prefix, 0) == 0; });
+                    });
+                    reply.outcome = own_pending ? RegistryLiveOutcome::PendingResource : RegistryLiveOutcome::Applied;
                     // review2 S2: a worldLoad field is in place before a world's save is read. Written into a running world by
                     // any point but WORLD_LOAD, it is applied now and named: its full effect starts at the next world load.
                     if (change->point != KILN_REGISTRY_LIVE_WORLD_LOAD)

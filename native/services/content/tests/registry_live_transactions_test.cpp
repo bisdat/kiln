@@ -186,6 +186,20 @@ void drop_table_change_is_pending_resource() {
     check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(0x31018) == 3,
           "revert restores the stacks");
 }
+// registry-proof (31.x): a drop table another change (or a GameStart item removal's disabled slots) waits for does not make an
+// unrelated change pending: the outcome is the change's own (an item's maxStack written now is Applied, Ok in C#).
+void unrelated_pending_table_keeps_a_change_applied() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto pending = change(71, "a", R"([{"registry":"drops","select":"game:dt_wolf","field":"entries[*].count.max","op":{"mul":2}}])");
+    check(registry_live_commit(71, pending, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingResource, "the drop-table change waits for its table");
+    const auto h = change(72, "b", "[{" + wood + R"("op":75}])");
+    check(registry_live_commit(72, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 75,
+          "an item change written now is Applied while another change's table is pending");
+    const auto mixed = change(73, "c", "[{" + stone + R"("op":70},{"registry":"drops","select":"game:dt_wolf","field":"entries[*].weight","op":{"mul":2}}])");
+    check(registry_live_commit(73, mixed, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingResource,
+          "a change with a field of its own on the pending table still waits for it");
+    registry_live_revert(73, mixed, &reply); registry_live_revert(72, h, &reply); registry_live_revert(71, pending, &reply);
+}
 // review2 S5: a formula transaction (power) writes its input, and its revert leaves another writer's bytes alone.
 void formula_transaction_with_foreign_write() {
     fresh_live(); RegistryLiveReply reply;
@@ -1095,6 +1109,7 @@ int main() {
         {"world_stop_reports_without_its_live_rows", world_stop_reports_without_its_live_rows},
 
         {"drop_table_change_is_pending_resource", drop_table_change_is_pending_resource},
+        {"unrelated_pending_table_keeps_a_change_applied", unrelated_pending_table_keeps_a_change_applied},
         {"formula_transaction_with_foreign_write", formula_transaction_with_foreign_write},
         {"draft_cannot_cross_worlds", draft_cannot_cross_worlds},
         {"process_change_reverts_without_a_world", process_change_reverts_without_a_world},
