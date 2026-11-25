@@ -2,7 +2,7 @@
 // (src/api/mockProgress.ts: the owner's start of 13 Nov, the port of kiln_manage::start_progress::estimate).
 import { expect, test } from "bun:test";
 import type { StartStep, StartTimeline } from "../src/api/commands";
-import { aboutText, preStartLine, quietText, startWords, stepLine, tookText } from "../src/shell/startProgress";
+import { aboutText, askedSteamAt, preStartLine, quietText, startWords, stepLine, tookText } from "../src/shell/startProgress";
 import { clearStartHistory, endAt, estimate, mockBegin, mockProgress, ownerScript, setStartScript, type KeptStart, type StepNow } from "../src/api/mockProgress";
 import shared from "../../crates/kiln-manage/tests/start-progress/estimate-cases.json";
 
@@ -128,4 +128,25 @@ test("a silent start names its step; at the last step it says the game is loadin
   expect(game).toBe("Kiln has loaded the mods. The game is still loading, or it is at its menu and Kiln did not see the menu appear; this goes away once you load a world.");
   // the mods that load at the first world, as before
   expect(quietText(quiet(step({ id: "mods", label: "Waiting for the game to load the mods" })))).toMatch(/^The game is waiting at its menu/);
+});
+
+// (review, 0.2.0-dev.31.13) a page loaded again after its web process ended knew nothing of a start Steam was asked
+// for and offered Play again: a second press could ask Steam again or start a second Proton. The backend's timeline
+// says when Steam was asked; shell/play.ts seeds the page's wait from it.
+test("a start Steam was asked for, as the backend follows it, is found after the page loads again", () => {
+  const step = (id: string, state: StartStep["state"], ms: number | null, tookMs: number | null = null): StartStep =>
+    ({ id, label: id, state, ms, tookMs, launcher: true });
+  const tl = (phase: StartTimeline["phase"], steps: StartStep[], atMs: number, launcher = true): StartTimeline => ({
+    phase, started: "2026-11-25T21:00:00.000Z", atMs, steps, launcher,
+    estimate: { leftMs: null, starts: 0, same: false, slow: null, fraction: 0, byTime: false, stepsDone: 0, stepsPlanned: 3, usual: [] },
+  });
+  const now = 1_000_000;
+  // Steam asked 40 s ago (the start began 52 s ago: the profile took 12 s)
+  const asking = tl("launcher", [step("profile", "done", 0, 12_000), step("steam", "running", 12_000)], 52_000);
+  expect(askedSteamAt(asking, now)).toBe(now - 40_000);
+  // not yet asked, the game runs, the start is not the launcher's, or nothing at all: no wait to seed
+  expect(askedSteamAt(tl("launcher", [step("profile", "running", 0), step("steam", "next", null)], 5_000), now)).toBeNull();
+  expect(askedSteamAt(tl("booting", [step("steam", "done", 12_000, 30_000)], 60_000), now)).toBeNull();
+  expect(askedSteamAt(tl("launcher", [step("steam", "running", 12_000)], 52_000, false), now)).toBeNull();
+  expect(askedSteamAt(null, now)).toBeNull();
 });

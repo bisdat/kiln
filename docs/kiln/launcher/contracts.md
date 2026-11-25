@@ -1375,6 +1375,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage), sandbox?: `SandboxInfo` (Linux, dev.29.18), preview?: string[] (dev.29)} |
 | app | `app_render_frame` | painted: boolean, visible: boolean | string \| null (visibility updates alone are not success; two consecutive visible animation frames in a shown, non-minimized main window confirm startup; the first automatic recovery attempt returns its explanation once; not sent while the data folder is held, see the data folder's commands) |
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
+| app | `app_close_seen` | asking: boolean | null (the page's close guard took the window's close request: `asking` the player about unsaved work, else closing; without it the Linux launcher closes the window by itself, app.md "When the page's web process ends"; answers in every data folder state) |
+| app | `app_close_unsaved` | unsaved: boolean | null (whether closing the window now would lose work, at the page's start and whenever it changes: a slow page with unsaved work gets 30 s instead of 5 s to answer a close on Linux; answers in every data folder state) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_render_force_set` | on: boolean | `RenderInfo` (dev.30.7; NVIDIA shared-memory drawing, off on clean starts; explicit off vetoes automatic recovery; `state/force-dmabuf.json`, next start; startup failure disables it; `unsupported` off Linux) |
 | app | `app_sandbox_set` | on: boolean | `SandboxInfo` (dev.29.18; on removes `state/webkit-sandbox.json`, off writes it, for the next start; `unsupported` off Linux) |
@@ -1663,7 +1665,9 @@ or removes an unfinished copy, only `app_info`, `task_*`, `data_folder_get`, `_r
 `deck_fullscreen`, `deck_gamepad`, `app_open_path` and `app_open_url` (the others: `busy`). New tasks fail at once
 with `busy` then, except the move, the removal of an old copy and the removal of an unfinished copy.
 `app_started` (the page's ready call for the render watchdog, which writes nothing) answers in all three states, so a
-window that shows only the data folder's dialog is not taken for a black one. `app_render_frame` (the renderer keeps its
+window that shows only the data folder's dialog is not taken for a black one. `app_close_seen` and `app_close_unsaved`
+(the close path, writing nothing) answer in every state too, so closing the window never waits for the folder.
+`app_render_frame` (the renderer keeps its
 startup state in the data folder) is refused in all three: the page sends it only once the data folder gate lets the
 launcher mount, and the backend writes no renderer state into a held folder.
 

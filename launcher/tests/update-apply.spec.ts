@@ -122,7 +122,17 @@ test("Escape or the header word closes the notice and stops the restart by itsel
   await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
   await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
 
-  // the header word, on a fresh page
+  // (0.2.0-dev.31.13) the page loaded again in the same run of the launcher (its web process ended): Later still holds
+  await page.reload();
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  ready = await updateNow(page);
+  await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
+  await page.waitForTimeout(5000);
+  await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
+  expect(await restarts(page)).toBe(0);
+
+  // the header word, on a fresh start of the launcher (sessionStorage is this run's: a new start has none)
+  await page.evaluate(() => sessionStorage.clear());
   await page.reload();
   await page.locator(".k-splash").waitFor({ state: "detached" });
   ready = await updateNow(page);

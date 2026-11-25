@@ -295,6 +295,16 @@ pub async fn server_console_open(app: AppHandle, server_id: String, max_lines: O
     .await
 }
 
+/// The page's web process ended (crate::webproc): its consoles stop, a crashed page never closes them. How many.
+pub fn close_all_consoles() -> usize {
+    let mut subs = CONSOLES.lock().unwrap_or_else(|e| e.into_inner());
+    let n = subs.len();
+    for (_, stop) in subs.drain(..) {
+        stop.store(true, Ordering::Relaxed);
+    }
+    n
+}
+
 #[tauri::command]
 pub async fn server_console_close(subscription: String) -> Result<(), Error> {
     let mut subs = CONSOLES.lock().unwrap();

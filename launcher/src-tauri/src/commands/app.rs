@@ -400,6 +400,26 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, Error> {
 #[tauri::command]
 pub async fn app_started() -> Result<(), Error> {
     crate::render::page_started();
+    // a page after a web process ended: closes go through it again (webproc.rs)
+    crate::webproc::page_started();
+    Ok(())
+}
+
+/// The page took the window's close request (launcher/src/shell/closeGuard.ts): `asking` the player about unsaved work,
+/// or closing the window. Without this answer the window closes by itself shortly after (crate::webproc). Open behind
+/// every gate of the data folder (lib.rs `gated`).
+#[tauri::command]
+pub async fn app_close_seen(asking: bool) -> Result<(), Error> {
+    crate::webproc::page_answered(asking);
+    Ok(())
+}
+
+/// The page says whether closing the window now would lose work (launcher/src/shell/closeGuard.ts, at its start and at
+/// every change): a slow page with unsaved work gets longer to answer a close (crate::webproc). Open behind every gate of
+/// the data folder (lib.rs `gated`).
+#[tauri::command]
+pub async fn app_close_unsaved(unsaved: bool) -> Result<(), Error> {
+    crate::webproc::page_unsaved(unsaved);
     Ok(())
 }
 

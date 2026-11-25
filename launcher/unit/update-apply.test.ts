@@ -2,7 +2,7 @@
 // by itself after the restart.
 import { describe, expect, test } from "bun:test";
 import type { GameStatus, InstallState } from "../src/api/commands";
-import { applyKey, applyWait, gameBehind, restartHold, runtimeToApply } from "../src/shell/updateApply";
+import { applyKey, applyWait, gameBehind, loadDecided, restartHold, runtimeToApply, saveDecided } from "../src/shell/updateApply";
 import { unsavedKind } from "../src/shell/unsaved";
 
 const rt = (p: Partial<InstallState>): InstallState => ({ installed: true, receipt: null, proxy: null, modified: [], upgradeAvailable: null, ...p } as InstallState);
@@ -80,5 +80,28 @@ describe("Play's Update game banner (0.2.0-dev.31.12)", () => {
     expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "failed", version: next } })?.failed).toBe(true);
     expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "failed", version: "0.1.9+1" } })?.failed).toBe(false);
     expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "done", version: next } })?.failed).toBe(false);
+  });
+});
+
+// (review, 0.2.0-dev.31.13) Later was React state only: a page loaded again after its web process ended
+// (src-tauri/src/webproc.rs) counted down and restarted into the update the player had put off
+describe("the player's Later lasts for this run of the launcher", () => {
+  const store = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); } }; };
+  test("a page loaded again reads what the page before it decided", () => {
+    const s = store();
+    expect(loadDecided(s)).toEqual({});
+    saveDecided(s, { "0.2.0-dev.31.14": "stopped", "0.2.0-dev.31.15": "held" });
+    expect(loadDecided(s)).toEqual({ "0.2.0-dev.31.14": "stopped", "0.2.0-dev.31.15": "held" });
+  });
+  test("nothing stored, no storage, or anything unreadable is no decision", () => {
+    expect(loadDecided(null)).toEqual({});
+    saveDecided(null, { a: "stopped" });
+    for (const bad of ["not json", "[1]", "null", "{\"a\":\"go\",\"b\":\"stopped\"}"]) {
+      const s = store(); s.setItem("kiln.update.decided", bad);
+      expect(loadDecided(s)).toEqual(bad.includes("stopped") ? { b: "stopped" } : {});
+    }
+    const throwing = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } };
+    expect(loadDecided(throwing)).toEqual({});
+    expect(() => saveDecided(throwing, { a: "held" })).not.toThrow();
   });
 });
