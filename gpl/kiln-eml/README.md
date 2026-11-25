@@ -555,6 +555,21 @@ Each is marked `kiln-eml:` in the source.
     `KILN_EML_ENCODE_THREADS` overriding (1 = serial, at most 64, `0` or a non-number ignored), and puts the old count
     back when it ends, also on an error or a panic. Kiln mode stays serial: its pass can run while a package DLL holds the loader lock,
     where a new thread cannot start. EMF Beastmaster's three packs spent 397 of their 401 s of Lua in BC7.
+42. `mod-loader-lua` `steam_files.rs` (new) and `load.rs` (`create_backup_with`) (kiln-eml's own code, 0.2.0-dev.31.13):
+    a new working baseline is never taken from game files that Steam does not list as they are. `create_backup_with`
+    copies the game files over the backups when there are none, they are of another game build or they are stale.
+    The archive's own checks show that the game files are a whole archive, not that no program changed them since
+    Steam wrote them. Steam's record does: `steamapps/appmanifest_<app>.acf` names the installed depot manifests,
+    `<Steam>/depotcache/<depot>_<manifest>.manifest` lists each file's size and SHA-1 (Windows: also the depotcache of
+    the Steam installation the registry names). Where it lists `<stem>.kfc` and `<stem>.kfc_resources` otherwise, the
+    copy is refused ("... are not the files Steam installed for build <id> ... Verify the game files in Steam, then start
+    through Kiln again") and the pair present stays (after a game update the only clean copy there is); listed as they
+    are, or no manifest, the copy goes on as before. Only those two files are hashed, only on that path; nothing is
+    written. The same reader and rule as Kiln's ShroudForge fork (`check_steam_installed_files.rs`,
+    `verify_working_baseline.rs`), so both writers of the shared pair decide alike. Tests: load.rs
+    `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
+    adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
+    is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
