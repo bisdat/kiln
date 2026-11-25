@@ -1,1 +1,84 @@
 #nullable enable
+Kiln.ClientStationInfo
+Kiln.ClientStationInfo.<Clone>$() -> Kiln.ClientStationInfo!
+Kiln.ClientStationInfo.Base.get -> Kiln.BaseId
+Kiln.ClientStationInfo.Base.init -> void
+Kiln.ClientStationInfo.ClientStationInfo(Kiln.EntityId Station, uint Workshop, uint SelectedRecipe, Kiln.BaseId Base, Kiln.WorldPosition Position, Kiln.StationState State, Kiln.StationNeeds Needs, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, bool UseAllOptions, int CraftsLoaded, int Water, int WaterMax, bool NeedsEnergy, System.TimeSpan? CraftDuration, System.TimeSpan? CraftRemaining, System.TimeSpan? Remaining, float? Progress, System.Collections.Generic.IReadOnlyList<Kiln.StationStack>? Outputs, ulong Step) -> void
+Kiln.ClientStationInfo.CraftDuration.get -> System.TimeSpan?
+Kiln.ClientStationInfo.CraftDuration.init -> void
+Kiln.ClientStationInfo.CraftRemaining.get -> System.TimeSpan?
+Kiln.ClientStationInfo.CraftRemaining.init -> void
+Kiln.ClientStationInfo.CraftsLoaded.get -> int
+Kiln.ClientStationInfo.CraftsLoaded.init -> void
+Kiln.ClientStationInfo.Deconstruct(out Kiln.EntityId Station, out uint Workshop, out uint SelectedRecipe, out Kiln.BaseId Base, out Kiln.WorldPosition Position, out Kiln.StationState State, out Kiln.StationNeeds Needs, out System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, out bool UseAllOptions, out int CraftsLoaded, out int Water, out int WaterMax, out bool NeedsEnergy, out System.TimeSpan? CraftDuration, out System.TimeSpan? CraftRemaining, out System.TimeSpan? Remaining, out float? Progress, out System.Collections.Generic.IReadOnlyList<Kiln.StationStack>? Outputs, out ulong Step) -> void
+Kiln.ClientStationInfo.DisplayName.get -> string?
+Kiln.ClientStationInfo.Equals(Kiln.ClientStationInfo? other) -> bool
+Kiln.ClientStationInfo.IsRunning.get -> bool
+Kiln.ClientStationInfo.Needs.get -> Kiln.StationNeeds
+Kiln.ClientStationInfo.Needs.init -> void
+Kiln.ClientStationInfo.NeedsEnergy.get -> bool
+Kiln.ClientStationInfo.NeedsEnergy.init -> void
+Kiln.ClientStationInfo.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>?
+Kiln.ClientStationInfo.Outputs.init -> void
+Kiln.ClientStationInfo.Position.get -> Kiln.WorldPosition
+Kiln.ClientStationInfo.Position.init -> void
+Kiln.ClientStationInfo.Progress.get -> float?
+Kiln.ClientStationInfo.Progress.init -> void
+Kiln.ClientStationInfo.RecipeName.get -> string?
+Kiln.ClientStationInfo.Remaining.get -> System.TimeSpan?
+Kiln.ClientStationInfo.Remaining.init -> void
+Kiln.ClientStationInfo.SelectedChoices.get -> System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>!
+Kiln.ClientStationInfo.SelectedChoices.init -> void
+Kiln.ClientStationInfo.SelectedRecipe.get -> uint
+Kiln.ClientStationInfo.SelectedRecipe.init -> void
+Kiln.ClientStationInfo.State.get -> Kiln.StationState
+Kiln.ClientStationInfo.State.init -> void
+Kiln.ClientStationInfo.Station.get -> Kiln.EntityId
+Kiln.ClientStationInfo.Station.init -> void
+Kiln.ClientStationInfo.Step.get -> ulong
+Kiln.ClientStationInfo.Step.init -> void
+Kiln.ClientStationInfo.UseAllOptions.get -> bool
+Kiln.ClientStationInfo.UseAllOptions.init -> void
+Kiln.ClientStationInfo.Water.get -> int
+Kiln.ClientStationInfo.Water.init -> void
+Kiln.ClientStationInfo.WaterMax.get -> int
+Kiln.ClientStationInfo.WaterMax.init -> void
+Kiln.ClientStationInfo.Workshop.get -> uint
+Kiln.ClientStationInfo.Workshop.init -> void
+Kiln.ClientStations
+Kiln.ClientStationsStatus
+Kiln.ClientStationsStatus.Age.get -> System.TimeSpan?
+Kiln.ClientStationsStatus.Age.init -> void
+Kiln.ClientStationsStatus.ClientStationsStatus() -> void
+Kiln.ClientStationsStatus.ClientStationsStatus(bool On, bool World, bool Copying, int Rows, ulong Step, System.TimeSpan? Age, string! Detail) -> void
+Kiln.ClientStationsStatus.Copying.get -> bool
+Kiln.ClientStationsStatus.Copying.init -> void
+Kiln.ClientStationsStatus.Deconstruct(out bool On, out bool World, out bool Copying, out int Rows, out ulong Step, out System.TimeSpan? Age, out string! Detail) -> void
+Kiln.ClientStationsStatus.Detail.get -> string!
+Kiln.ClientStationsStatus.Detail.init -> void
+Kiln.ClientStationsStatus.Equals(Kiln.ClientStationsStatus other) -> bool
+Kiln.ClientStationsStatus.On.get -> bool
+Kiln.ClientStationsStatus.On.init -> void
+Kiln.ClientStationsStatus.Rows.get -> int
+Kiln.ClientStationsStatus.Rows.init -> void
+Kiln.ClientStationsStatus.Step.get -> ulong
+Kiln.ClientStationsStatus.Step.init -> void
+Kiln.ClientStationsStatus.World.get -> bool
+Kiln.ClientStationsStatus.World.init -> void
+const Kiln.ClientStations.Capability = "stations.client_view" -> string!
+override Kiln.ClientStationInfo.Equals(object? obj) -> bool
+override Kiln.ClientStationInfo.GetHashCode() -> int
+override Kiln.ClientStationInfo.ToString() -> string!
+override Kiln.ClientStationsStatus.GetHashCode() -> int
+static Kiln.ClientStationInfo.operator !=(Kiln.ClientStationInfo? left, Kiln.ClientStationInfo? right) -> bool
+static Kiln.ClientStationInfo.operator ==(Kiln.ClientStationInfo? left, Kiln.ClientStationInfo? right) -> bool
+static Kiln.ClientStations.All() -> System.Collections.Generic.IReadOnlyList<Kiln.ClientStationInfo!>!
+static Kiln.ClientStations.Available.get -> bool
+static Kiln.ClientStations.Near(Kiln.WorldPosition center, double radius = 16) -> System.Collections.Generic.IReadOnlyList<Kiln.ClientStationInfo!>!
+static Kiln.ClientStations.Open.get -> Kiln.ClientStationInfo?
+static Kiln.ClientStations.Read(Kiln.EntityId station) -> Kiln.ClientStationInfo?
+static Kiln.ClientStations.Status.get -> Kiln.ClientStationsStatus?
+static Kiln.ClientStationsStatus.operator !=(Kiln.ClientStationsStatus left, Kiln.ClientStationsStatus right) -> bool
+static Kiln.ClientStationsStatus.operator ==(Kiln.ClientStationsStatus left, Kiln.ClientStationsStatus right) -> bool
+~override Kiln.ClientStationsStatus.Equals(object obj) -> bool
+~override Kiln.ClientStationsStatus.ToString() -> string

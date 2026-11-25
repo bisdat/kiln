@@ -438,6 +438,7 @@ KilnResult KILN_CALL t_unsubscribe(KilnHandle h) {
     if (const KilnResult r = keys_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // key callbacks (keys.cpp)
     if (const KilnResult r = input_feed_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // window input (v5)
     if (const KilnResult r = input_pointer_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // pointer presses (dev.30)
+    if (const KilnResult r = own_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // owned input (kiln.ui.input, 31.13)
     if (game_unsubscribe(h)) return KILN_OK;  // menu entries, screen and UI-tick subscriptions
     // Frame callbacks run under Vulkan's mutex. Look up local handles first to avoid recursively locking it.
     if (t_in_frame) return KILN_ERR_WRONG_THREAD;
@@ -893,6 +894,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
     api->register_service(owner, KilnStr{KILN_UI_BLOCKS_SERVICE, sizeof(KILN_UI_BLOCKS_SERVICE) - 1}, &kBlocksTable);
+    // input a plugin owns from press to release, and the controllers' view (0.2.0-dev.31.13, input_own.cpp)
+    api->register_service(owner, KilnStr{KILN_UI_INPUT_SERVICE, sizeof(KILN_UI_INPUT_SERVICE) - 1}, input_table());
     const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
     if (!overlay_drawing_on()) report_drawing_off(g_overlay_reason);
     return result;

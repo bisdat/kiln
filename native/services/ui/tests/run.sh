@@ -81,6 +81,17 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_pr
 # a game controller's buttons as key presses (0.2.0-dev.30.5): codes, pad modifiers, order, what the game keeps (pad_keys.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_keys_test.cpp" -o "$out/pad_keys_test"
 "$out/pad_keys_test"
+# kiln.ui.input (0.2.0-dev.31.13): a press an owner takes is its own until the release; focus loss, a world change, unload,
+# the stuck-press guard, the controllers' view; own_parity.json, which the test kit's fake replays too (input_own.h, pad_view.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$here/../../../third_party" -I"$here/../../../core/abi" \
+    "$here/input_own_test.cpp" -o "$out/input_own_test"
+"$out/input_own_test" "$here/own_parity.json"
+# the same tables under ThreadSanitizer: the window thread and the pads' polling threads share them
+g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread -I"$here/../../../third_party" -I"$here/../../../core/abi" \
+    "$here/input_own_test.cpp" -o "$out/input_own_tsan_test"
+"$out/input_own_tsan_test" "$here/own_parity.json" >/dev/null
+# the game input paths kiln.ui.input relies on, on the client exe when it is installed (read only; docs/re/input-ownership.md)
+PYTHONDONTWRITEBYTECODE=1 python3 "$here/input_own_re_test.py"
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"

@@ -1,0 +1,114 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.skills.client (kiln-skills.dll, since 0.2.0-dev.31.13): the local player's skill tree as the client world holds it. Read-only. The game's skilltree_ui (skills/TreeUi, client 26430625 0x318540; it runs every client step for the entity equal to LocalPlayerData+4) fills one 0x44-byte record per tree node in G38UiPlayData's map at +skills/ui.records (bits +0x08, capacity +0x10, keys +0x28, values +0x40): level +0x41 (PlayerSkillsUi.unlockLevel[node.levelIndex] decoded; a plain node reads slot 0), +0x42 the level byte's low bits, unlocked +0x43 (from the mask bits); then copies the masks to +skills/ui.masks, calls PointsSpent (client 0xe7b170) on PlayerSkillsUi's masks and levels (+0x20) into +skills/ui.points_spent and writes available = total - spent (0 when spent >= total) into +skills/ui.points_available. The total at +skills/ui.points_total is player_ui's, from the replicated player attributes. Kiln's screen hook (client.d/skills.json) writes the shadow nodes' records after the program. docs/re/progression.md section 8.",
+  "symbols": {
+    "@skills/TreeUi.points": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "skills/TreeUi",
+            "size": 1792
+          },
+          "pattern": "48 8B 4D ?? 4C 8B 45 ?? 48 8D 51 {skills/ui.unlock_levels:d8} E8 ?? ?? ?? ?? 8B 8F {skills/ui.points_total:d32} 45 33 E4 89 87 {skills/ui.points_spent:d32} 44 89 A7 {skills/ui.points_available:d32} 3B C8 76 08 2B C8 89 8F {skills/ui.points_available:d32}"
+        }
+      ]
+    },
+    "@skills/TreeUi.record": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "skills/TreeUi",
+            "size": 512
+          },
+          "pattern": "48 3B 46 {skills/ui.map_cap:d8} 73 ?? 4C 6B E8 {skills/ui.record_size:d8} 4C 03 6E {skills/ui.map_values:d8} 74 ?? 0F B6 8B {skills/node.level_index:d32} 48 8B 45 ?? 0F B6 4C 01 {skills/ui.unlock_levels:d8} E8 ?? ?? ?? ?? 41 88 45 {skills/ui.rec_level:d8} 0F B6 8B ?? ?? ?? ?? 48 8B 45 ?? 0F B6 4C 01 ?? E8 ?? ?? ?? ?? 41 88 45 ?? 41 C6 45 {skills/ui.rec_unlocked:d8} 00"
+        }
+      ]
+    },
+    "@skills/TreeUi.map": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "skills/TreeUi",
+            "size": 1024
+          },
+          "pattern": "48 8B 9F {skills/ui.records_cap_at:d32} 8B 04 88 74 ?? 48 8B B7 {skills/ui.records_bits_at:d32} 4C 8D 4B FF 4C 23 C8 49 8B D1 41 0F B6 C9 48 C1 EA 06 4C 8B 04 D6 49 D3 E8 41 F6 C0 01 74 ?? 4C 8B 9F {skills/ui.records_keys_at:d32} 43 39 04 8B"
+        },
+        {
+          "scope": {
+            "symbol": "skills/TreeUi",
+            "size": 1792
+          },
+          "pattern": "48 6B CA {skills/ui.record_size:d8} 48 8B 97 {skills/ui.records_values_at:d32} 48 03 D1 74 08 C6 42 {skills/ui.rec_unlocked:d8} 01"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "skills/ui.unlock_levels": {
+      "value": 32
+    },
+    "skills/ui.points_total": {
+      "min_votes": 1
+    },
+    "skills/ui.points_spent": {
+      "min_votes": 1
+    },
+    "skills/ui.points_available": {
+      "min_votes": 2
+    },
+    "skills/ui.map_cap": {
+      "value": 16
+    },
+    "skills/ui.map_values": {
+      "value": 64
+    },
+    "skills/node.level_index": {
+      "value": 137
+    },
+    "skills/ui.rec_level": {
+      "min_votes": 1
+    },
+    "skills/ui.rec_unlocked": {
+      "min_votes": 2
+    },
+    "skills/ui.records_cap_at": {
+      "min_votes": 1
+    },
+    "skills/ui.records_bits_at": {
+      "min_votes": 1
+    },
+    "skills/ui.records_keys_at": {
+      "min_votes": 1
+    },
+    "skills/ui.records_values_at": {
+      "min_votes": 1
+    }
+  },
+  "features": {
+    "skills.client_view": {
+      "symbols": [
+        "skills/TreeUi"
+      ],
+      "constants": [
+        "skills/ui.records",
+        "skills/ui.record_size",
+        "skills/ui.unlock_levels",
+        "skills/ui.points_total",
+        "skills/ui.points_spent",
+        "skills/ui.points_available",
+        "skills/ui.map_cap",
+        "skills/ui.map_values",
+        "skills/node.level_index",
+        "skills/ui.rec_level",
+        "skills/ui.rec_unlocked",
+        "skills/ui.records_cap_at",
+        "skills/ui.records_bits_at",
+        "skills/ui.records_keys_at",
+        "skills/ui.records_values_at",
+        "skills/tree.data",
+        "skills/tree.ids"
+      ]
+    }
+  }
+}

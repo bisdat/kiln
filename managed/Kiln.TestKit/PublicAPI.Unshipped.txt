@@ -1,1 +1,111 @@
 #nullable enable
+Kiln.TestKit.FakeClientSkillNode
+Kiln.TestKit.FakeClientSkillNode.ClassAlignment.get -> int
+Kiln.TestKit.FakeClientSkillNode.ClassAlignment.set -> void
+Kiln.TestKit.FakeClientSkillNode.Cost.get -> int
+Kiln.TestKit.FakeClientSkillNode.Cost.set -> void
+Kiln.TestKit.FakeClientSkillNode.Id.get -> uint
+Kiln.TestKit.FakeClientSkillNode.Level.get -> int
+Kiln.TestKit.FakeClientSkillNode.Level.set -> void
+Kiln.TestKit.FakeClientSkillNode.MaxLevel.get -> int
+Kiln.TestKit.FakeClientSkillNode.MaxLevel.set -> void
+Kiln.TestKit.FakeClientSkillNode.Shadow.get -> bool
+Kiln.TestKit.FakeClientSkillNode.Shadow.set -> void
+Kiln.TestKit.FakeClientSkillNode.Type.get -> Kiln.SkillNodeType
+Kiln.TestKit.FakeClientSkillNode.Type.set -> void
+Kiln.TestKit.FakeClientSkillNode.UiX.get -> float
+Kiln.TestKit.FakeClientSkillNode.UiX.set -> void
+Kiln.TestKit.FakeClientSkillNode.UiY.get -> float
+Kiln.TestKit.FakeClientSkillNode.UiY.set -> void
+Kiln.TestKit.FakeClientStation
+Kiln.TestKit.FakeClientStation.Base.get -> Kiln.BaseId
+Kiln.TestKit.FakeClientStation.Base.set -> void
+Kiln.TestKit.FakeClientStation.Choices.get -> System.Collections.Generic.List<Kiln.CategoryChoice>!
+Kiln.TestKit.FakeClientStation.CraftsLoaded.get -> int
+Kiln.TestKit.FakeClientStation.CraftsLoaded.set -> void
+Kiln.TestKit.FakeClientStation.Inventory.get -> System.Collections.Generic.List<Kiln.StationStack>?
+Kiln.TestKit.FakeClientStation.Inventory.set -> void
+Kiln.TestKit.FakeClientStation.Needs.get -> Kiln.StationNeeds
+Kiln.TestKit.FakeClientStation.Needs.set -> void
+Kiln.TestKit.FakeClientStation.NeedsEnergy.get -> bool
+Kiln.TestKit.FakeClientStation.NeedsEnergy.set -> void
+Kiln.TestKit.FakeClientStation.Position.get -> Kiln.WorldPosition
+Kiln.TestKit.FakeClientStation.Position.set -> void
+Kiln.TestKit.FakeClientStation.Recipe.get -> uint
+Kiln.TestKit.FakeClientStation.Recipe.set -> void
+Kiln.TestKit.FakeClientStation.Run(uint recipe, int craftsLoaded, System.TimeSpan started) -> Kiln.TestKit.FakeClientStation!
+Kiln.TestKit.FakeClientStation.Started.get -> System.TimeSpan
+Kiln.TestKit.FakeClientStation.Started.set -> void
+Kiln.TestKit.FakeClientStation.State.get -> Kiln.StationState
+Kiln.TestKit.FakeClientStation.State.set -> void
+Kiln.TestKit.FakeClientStation.Station.get -> Kiln.EntityId
+Kiln.TestKit.FakeClientStation.UseAllOptions.get -> bool
+Kiln.TestKit.FakeClientStation.UseAllOptions.set -> void
+Kiln.TestKit.FakeClientStation.Water.get -> int
+Kiln.TestKit.FakeClientStation.Water.set -> void
+Kiln.TestKit.FakeClientStation.WaterMax.get -> int
+Kiln.TestKit.FakeClientStation.WaterMax.set -> void
+Kiln.TestKit.FakeClientStation.Workshop.get -> uint
+Kiln.TestKit.FakeClientStation.Workshop.set -> void
+Kiln.TestKit.FakeCrosshair
+Kiln.TestKit.HarnessClientSkills
+Kiln.TestKit.HarnessClientSkills.AddNode(uint id, Kiln.SkillNodeType type = Kiln.SkillNodeType.PassiveSkill, int cost = 1, int maxLevel = 0, float uiX = 0, float uiY = 0, int classAlignment = 3, bool shadow = false) -> Kiln.TestKit.FakeClientSkillNode!
+Kiln.TestKit.HarnessClientSkills.Clear() -> void
+Kiln.TestKit.HarnessClientSkills.Link(uint from, uint to, bool bidirectional = false) -> uint
+Kiln.TestKit.HarnessClientSkills.Loaded.get -> bool
+Kiln.TestKit.HarnessClientSkills.Loaded.set -> void
+Kiln.TestKit.HarnessClientSkills.Lock(uint id) -> void
+Kiln.TestKit.HarnessClientSkills.Player.get -> Kiln.EntityId
+Kiln.TestKit.HarnessClientSkills.Player.set -> void
+Kiln.TestKit.HarnessClientSkills.Reads.get -> int
+Kiln.TestKit.HarnessClientSkills.Total.get -> int
+Kiln.TestKit.HarnessClientSkills.Total.set -> void
+Kiln.TestKit.HarnessClientSkills.Unlock(uint id, int level = 1) -> void
+Kiln.TestKit.HarnessClientStations
+Kiln.TestKit.HarnessClientStations.Add(Kiln.EntityId station, uint workshop, Kiln.WorldPosition position, Kiln.BaseId baseId = default(Kiln.BaseId)) -> Kiln.TestKit.FakeClientStation!
+Kiln.TestKit.HarnessClientStations.Clear() -> void
+Kiln.TestKit.HarnessClientStations.Clock.get -> System.TimeSpan
+Kiln.TestKit.HarnessClientStations.Clock.set -> void
+Kiln.TestKit.HarnessClientStations.Get(Kiln.EntityId station) -> Kiln.TestKit.FakeClientStation?
+Kiln.TestKit.HarnessClientStations.Reads.get -> int
+Kiln.TestKit.HarnessClientStations.Remove(Kiln.EntityId station) -> bool
+Kiln.TestKit.HarnessClientStations.SetRecipe(uint recipe, System.TimeSpan duration, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! outputs, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? inputs = null) -> void
+Kiln.TestKit.HarnessClientStations.SpeedFactor.get -> float
+Kiln.TestKit.HarnessClientStations.SpeedFactor.set -> void
+Kiln.TestKit.HarnessCrosshair
+Kiln.TestKit.HarnessCrosshair.Age(System.TimeSpan age) -> void
+Kiln.TestKit.HarnessCrosshair.Aim(Kiln.WorldPosition position, System.Numerics.Vector3? normal = null, float? distance = null, Kiln.EntityId entity = default(Kiln.EntityId), byte? voxelMaterial = null) -> void
+Kiln.TestKit.HarnessCrosshair.AimAtNothing() -> void
+Kiln.TestKit.HarnessCrosshair.Clear() -> void
+Kiln.TestKit.HarnessCrosshair.Fault() -> void
+Kiln.TestKit.HarnessCrosshair.HarnessCrosshair(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessCrosshair.Reads.get -> int
+Kiln.TestKit.HarnessGameTexts
+Kiln.TestKit.HarnessGameTexts.Add(string! language, uint locaId, string! text) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.AddItem(Kiln.ItemId item, Kiln.ItemTextTags tags) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.Languages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessGameTexts.Reads.get -> int
+Kiln.TestKit.HarnessInput
+Kiln.TestKit.HarnessInput.ClearLogs() -> void
+Kiln.TestKit.HarnessInput.Down(Kiln.KeyChord chord, int controller = 0) -> bool
+Kiln.TestKit.HarnessInput.Down(uint code, int controller = 0, Kiln.KeyMods mods = Kiln.KeyMods.None, System.Numerics.Vector2? at = null) -> bool
+Kiln.TestKit.HarnessInput.FocusLost() -> void
+Kiln.TestKit.HarnessInput.Game.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessInput.HiddenFromGame(uint code, int controller = 0) -> bool
+Kiln.TestKit.HarnessInput.Leak(uint code, int controller = 0) -> void
+Kiln.TestKit.HarnessInput.Others.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessInput.Repeat(uint code, Kiln.KeyMods mods = Kiln.KeyMods.None) -> bool
+Kiln.TestKit.HarnessInput.SetPad(int controller, Kiln.PadButtons held, System.Numerics.Vector2 leftStick = default(System.Numerics.Vector2), System.Numerics.Vector2 rightStick = default(System.Numerics.Vector2), float leftTrigger = 0, float rightTrigger = 0) -> void
+Kiln.TestKit.HarnessInput.Unplug(int controller) -> void
+Kiln.TestKit.HarnessInput.Up(uint code, int controller = 0, System.Numerics.Vector2? at = null) -> bool
+Kiln.TestKit.HarnessInput.WorldChange() -> void
+Kiln.TestKit.HarnessVoxelMaterials
+Kiln.TestKit.HarnessVoxelMaterials.Add(int cellId, string! name, Kiln.ItemId lootItem = default(Kiln.ItemId), int? exchangeRate = null, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? placingItems = null, string? hardness = null, int healthPoints = 0, System.Guid guid = default(System.Guid)) -> Kiln.TestKit.HarnessVoxelMaterials!
+Kiln.TestKit.HarnessVoxelMaterials.Reads.get -> int
+Kiln.TestKit.KilnHarness.ClientSkills.get -> Kiln.TestKit.HarnessClientSkills!
+Kiln.TestKit.KilnHarness.ClientStations.get -> Kiln.TestKit.HarnessClientStations!
+Kiln.TestKit.KilnHarness.Crosshair.get -> Kiln.TestKit.HarnessCrosshair!
+Kiln.TestKit.KilnHarness.GameTexts.get -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.KilnHarness.Input.get -> Kiln.TestKit.HarnessInput!
+Kiln.TestKit.KilnHarness.VoxelMaterials.get -> Kiln.TestKit.HarnessVoxelMaterials!
+const Kiln.TestKit.FakeCrosshair.Session = 1 -> uint
