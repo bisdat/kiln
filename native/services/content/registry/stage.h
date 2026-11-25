@@ -63,6 +63,10 @@ struct Env {
     std::function<void(uint64_t owner)> owner_gone; // queued live-layer cleanup, outside the runner lock
     bool prepare_live = false; // support a cached full stable base, deferred until the first registry user
     std::function<bool(const std::string& registry, bool add, std::string* why)> entry_support;
+    // kiln.content's stack guard on (store.cpp guard_set): before a start (or a rollback) gives an item a lower max stack than a
+    // world already started with (plans/index.json "stacks"), so the game keeps the bigger stacks a save holds whole
+    // (registry/saves.h). false + *why: not available here. Unset: not available.
+    std::function<bool(std::string* why)> stack_guard;
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;

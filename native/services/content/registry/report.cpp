@@ -90,6 +90,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
         doc["plan"]["previous"] = meta.plan.previous.empty() ? json(nullptr) : json(meta.plan.previous);
     }
     doc["rollback"] = meta.rollback.is_object() ? meta.rollback : json(nullptr);
+    if (meta.saves.is_array() && !meta.saves.empty()) doc["saves"] = meta.saves;
     if (meta.migrated.is_array() && !meta.migrated.empty()) doc["migrated"] = meta.migrated;
 
     std::set<EntryRef> added(r.added.begin(), r.added.end());

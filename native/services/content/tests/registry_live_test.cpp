@@ -765,8 +765,59 @@ void live_transaction_points_and_revoke() {
 }
 }  // namespace
 
+// registry-rollback, package K (registry/saves.h): a write that would change what existing saves hold, at the world's load
+int g_guard_calls = 0;
+bool g_guard_ok = true;
+bool fake_guard(std::string* why) {
+    ++g_guard_calls;
+    if (!g_guard_ok) *why = "not on this build";
+    return g_guard_ok;
+}
+void save_checks_at_world_load() {
+    world();
+    g_registry_stack_guard = &fake_guard;
+    g_guard_calls = 0, g_guard_ok = true;
+    // a lower max stack than the old pack's (30): the stack guard goes on, then the layer is written
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 20}]}})"}};
+    auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    put_pack(WOOD_AT, 30);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20 && g_guard_calls > 0, "lowering the old pack's 30 to 20: written, the stack guard on first (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    check(!reported("saves:"), "and not refused");
+    // the guard not available here: refused for that entry, the pack's 30 stays (no saved stack loses items)
+    world();
+    g_guard_ok = false;
+    stage(files);
+    put_pack(WOOD_AT, 30);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 30 && reported("stack guard is not available here") && reported("this edit was not applied"),
+          "without the guard the lowering is refused, with why; the value under it stays (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    // raising needs no guard from the registry (the store's own guard follows a raise, as before)
+    world();
+    g_guard_calls = 0, g_guard_ok = false;
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 40 && g_guard_calls == 0 && !reported("saves:"), "a raise is written without asking the guard");
+    // a narrower level range: refused (a load would clamp saved copies and the save keep it); a wider one is written
+    world();
+    g_guard_ok = true;
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:sword_t2"}, "field": "levels.max", "op": 12}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(SWORD_AT + 0x14) == 15 && reported("narrows the level range"), "levels.max 15 -> 12: refused, the range stays 15");
+    world();
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:sword_t2"}, "field": "levels.max", "op": 20}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(SWORD_AT + 0x14) == 20 && !reported("saves:"), "levels.max 15 -> 20: written");
+    g_registry_stack_guard = &fake_guard, g_guard_ok = true;
+}
+
 int main() {
     std::vector<std::string> errs;
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     g_regmap = std::make_shared<registry::map::RegMap>();
     if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errs) || !g_regmap->has_build) {
         std::printf("FAIL cannot load the regmap at %s\n", KILN_REGMAP_DIR);
@@ -786,6 +837,7 @@ int main() {
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
+        {"save_checks_at_world_load", save_checks_at_world_load},
     };
     int failed = 0;
     for (auto& [name, fn] : tests) {

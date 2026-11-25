@@ -3,6 +3,7 @@
 #include "registry_live_test.cpp"
 #undef main
 int main() {
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     int failures = 0, entry_checks = 0;
     auto entry_check = [&](bool yes, const char* text) { ++entry_checks; if (!yes) { ++failures; std::printf("FAIL %s\n", text); } };
     std::vector<std::string> errors;

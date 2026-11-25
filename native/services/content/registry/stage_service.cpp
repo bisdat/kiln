@@ -226,6 +226,7 @@ Env make_env() {
     e.write_data = [](const std::string& rel, const std::string& text) { return write_whole(data_root() / u8(rel), text); };
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
     e.entry_support = &nc_registry_supports;
+    e.stack_guard = [](std::string* why) { return guard_set(true, why); };
     e.log = [](int level, const std::string& line) {
         if (level >= 2) LOGE("%s", line.c_str());
         else if (level == 1) LOGW("%s", line.c_str());

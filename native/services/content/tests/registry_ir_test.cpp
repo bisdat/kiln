@@ -349,7 +349,7 @@ int main() {
             {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "duration", "op": {"mul": 2}},
             {"registry": "recipes", "select": "game:arrow", "field": "inputs[1].count", "op": 5},
             {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"append": [{"item": "game:stone", "count": 4}]}}]})"), m, &new_b, &rf, &err);
-        old_b.edits.pop_back();
+        if (!old_b.edits.empty()) old_b.edits.pop_back();  // the glob edit has no counterpart below
         const Result a = compose(m, b, {}, {mod("a", {old_b})}), c = compose(m, b, {}, {mod("a", {new_b})});
         CHECK(!a.fields.empty() && a.fields.size() == c.fields.size() && a.refused.size() == c.refused.size(), "the same fields and refusals");
         for (const auto& [ref, fo] : a.fields) {

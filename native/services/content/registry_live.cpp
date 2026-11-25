@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.content: the registry's live back-end (registry P1 slice S9). What it does and why: registry_live.h.
 #include "registry_live.h"
+#include "registry/saves.h"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,7 @@
 namespace kc {
 
 uint32_t (*g_registry_type_size)(const char* qname) = &type_size;
+bool (*g_registry_stack_guard)(std::string* why) = [](std::string* why) { return guard_set(true, why); };
 
 namespace {
 
@@ -312,13 +314,29 @@ void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field
         }});
 }
 
+// ---- saves (registry/saves.h): a write that would change what existing saves hold ----
+// Refuse: the layer is not written (the value under it stays), the edit refused for this entry with why. Guard: the stack
+// guard goes on before the lowered max stack is written; where it cannot, the edit is refused for this entry. A read (no
+// write) only evaluates.
+bool save_check(const std::shared_ptr<Binding>& b, const Value& under, const Value& v, std::string* why) {
+    if (!b->row) return true;  // a raw member (Advanced tier): composed with its field or refused at composition
+    const auto verdict = registry::saves::judge(b->ref.registry, b->ref.field, under, v);
+    if (!verdict) return true;
+    if (verdict->decision == registry::saves::Decision::Refuse) return *why = "saves: " + b->ref.text() + " " + verdict->text, false;
+    if (verdict->decision != registry::saves::Decision::Guard || g.reading) return true;
+    std::string w;
+    if (g_registry_stack_guard && g_registry_stack_guard(&w)) return true;
+    return *why = "saves: " + b->ref.text() + " " + verdict->unguarded + (w.empty() ? "" : " (" + w + ")"), false;
+}
+
 // ---- scalars: int, float, bool, time, enum; raw members ----
 void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
     const Field fc = *f;
     LayerEval ev = [b, fc](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
-        const Value v = registry::evaluate(b->rows, to_kiln(fc, row, b->spec, below), b->spec);
-        if (!in_range(b->spec, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
+        const Value under = to_kiln(fc, row, b->spec, below);
+        const Value v = registry::evaluate(b->rows, under, b->spec);
+        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");

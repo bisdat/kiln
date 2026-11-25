@@ -47,6 +47,8 @@ struct ReportMeta {
     // registry.json "rollback" (stage.cpp fills it when kiln/data/content/registry/rollback.json asks for one): {plan, from,
     // requested, state applied | refused, reason, changedBack [{field, from, to}], changedBackTotal, leftOut}; null: none asked.
     json rollback;
+    // registry.json "saves": edits that change what existing saves hold (saves.h), one row each; null: none.
+    json saves;
     // registry.json "migrated": what the schemas' id migrations renamed in this start's edits ({mod, source, stage, note}).
     json migrated;
     // A game entry's base origin per field (S5 / S10); unset: "archive" (the game's data as the archive writer published it).

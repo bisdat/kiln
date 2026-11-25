@@ -138,6 +138,10 @@ void registry_live_world_stop();
 void registry_live_owner_gone(KilnOwner owner); // notification thread: mark only, never call the game
 // How the live back-end sizes a game type (type_size; tests replace it).
 extern uint32_t (*g_registry_type_size)(const char* qname);
+// Switches kiln.content's stack guard on (store.cpp guard_set) before a registry layer lowers a max stack below the value
+// under it, so the game keeps the stacks a save holds whole (registry/saves.h "stackCut"); false + *why: not available
+// (the edit is refused for that entry). Tests replace it.
+extern bool (*g_registry_stack_guard)(std::string* why);
 // The owner of the registry's layers (created on first use).
 KilnOwner registry_owner();
 
