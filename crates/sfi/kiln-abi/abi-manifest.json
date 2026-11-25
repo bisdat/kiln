@@ -5230,9 +5230,9 @@
             "end_ns": 24,
             "entity": 4,
             "id": 0,
+            "index": 36,
             "level": 32,
             "life_ns": 16,
-            "reserved": 36,
             "slot": 8
           },
           "size": 40
@@ -5406,7 +5406,7 @@
           "size": 200
         }
       },
-      "sha256": "56150438d635351bfa988df5b40d7eec21b2f36aae5ad408010003f19116bab0"
+      "sha256": "fd0daeea227ca9042e2b7a6b367c2703344f5b8ec5936ecd7905d8a7f54bc356"
     },
     "native/core/abi/services/kiln_profile.h": {
       "function_macros": [],
@@ -10067,7 +10067,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
+    "src/layout.rs": "312885a3f646281f36e5da9a822eaa29597a8f1b2240f7e3e2cb5bf05a9ebdbb",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10109,7 +10109,7 @@
     "src/services/kiln_pacing.rs": "2cc1f9c6c389216b999d3cccf105d3fb348c7605400e76858ec40628e40c04b3",
     "src/services/kiln_playeranim.rs": "6c643167c2d27d84553f2756f7942b58194c8552574e1724980b54b1d7fd5dd8",
     "src/services/kiln_players.rs": "dc3f63ebf4167a06131ce27f55bfc771f00a802eca21fe04ae2541bc5f76a5cd",
-    "src/services/kiln_playerstate.rs": "a213ae19dc85d0c8a850b33bba1e92fe093fa32253121b7eaebd3aacf122cada",
+    "src/services/kiln_playerstate.rs": "468998db3a9d85c2e9bb900c633a850f433f73493607c918c12498f14453e7cc",
     "src/services/kiln_profile.rs": "7ef9dd4e62ad6ba9c56a88be48c9eda6c26074a6a40405f38c609c8a77d6210c",
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",

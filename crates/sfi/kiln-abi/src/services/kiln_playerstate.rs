@@ -140,7 +140,7 @@ pub struct KilnPlayerBuff {
     pub life_ns: i64,
     pub end_ns: i64,
     pub level: u32,
-    pub reserved: u32,
+    pub index: u32,
 }
 
 #[repr(C)]
