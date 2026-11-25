@@ -191,14 +191,18 @@ function useApplyAfterUpdate(s: UpdateStatus | null): ApplyPlan {
   const next = to ? runtimeToApply(gs.data, s?.shippedRuntime) : null;
   const wait = to && game ? applyWait(gs.data) : null;
   const applying = change?.state === "running";
+  // (0.2.0-dev.31.12) an install of this very Kiln already failed in this session (Play's Update game clicked before the
+  // update status answered, which can take up to 10 s, or Runtime): that was the try, none follows by itself
+  const triedNext = change?.state === "failed" && change.version === next;
   useEffect(() => {
     if (!to || !game || !next || wait || applying) return;
     const key = applyKey(to, game.id);
     if (applied.has(key)) return;
     applied.add(key);
+    if (triedNext) return;
     void updateGame(qc, game, next, t("shell.updateNotice.appliedLead", { build: buildLabel(to) }))
       .then((ok) => { if (ok) api.updateAck().catch(() => {}); });
-  }, [to, game, next, wait, applying, qc]);
+  }, [to, game, next, wait, applying, triedNext, qc]);
   return { next, wait, applying };
 }
 

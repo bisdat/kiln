@@ -149,3 +149,17 @@ test("after its install the banner offers no other Kiln of the Library: the back
   await game(page, "openGate", "fresh-status");
   expect(await game(page, "installs")).toEqual([NEXT]);
 });
+
+test("a failed click before the update status answered counts as the try: no install by itself follows it", async ({ page }) => {
+  await open(page);
+  await game(page, "failNextInstall", "No space left on device");
+  await behind(page, true);
+  // the backend answers the first update_status only once it read update.json (up to 10 s): the banner can be first
+  await button(page).click();
+  await expect(banner(page).getByTestId("game-behind-failed")).toContainText("No space left on device", { timeout: 15_000 });
+  await upd(page, "justUpdated", "0.2.0-dev.41");
+  await expect(page.getByRole("dialog", { name: "Updated to 0.2.0-dev.42" })).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(await game(page, "installs")).toEqual([NEXT]);
+  await expect(button(page)).toBeEnabled();
+});
