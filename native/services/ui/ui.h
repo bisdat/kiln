@@ -169,6 +169,9 @@ bool keys_mouse_wanted();                  // a subscriber gets mouse presses (a
 // none of the subscribers gets it. `controller`: a pad's XInput user (KILN_UI_KEYS_PAD), 0 otherwise.
 bool keys_dispatch_to(const KilnUiKey& key, uint32_t need, uint32_t controller = 0);
 bool keys_pad_wanted();                    // a subscriber gets pad presses (KILN_UI_KEYS_PAD; any thread)
+// A key Kiln makes itself is dispatched on this thread while on (input_synth_escape): keys_dispatch_to never offers it to
+// the owning subscribers (kiln.ui.input). Returns the previous value (to restore).
+bool keys_synthetic(bool on);
 size_t keys_count();
 
 // ---- input_own.cpp (kiln.ui.input, kiln_ui_input.h, 0.2.0-dev.31.13): a press an owning subscriber took is its own
@@ -201,7 +204,7 @@ KilnResult input_pad_state(uint32_t controller, KilnUiPadState* out);
 // then the key subscribers. true = keep this press from the game until its release. Polling thread.
 bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured);
 // input.cpp: a pad's B as Escape while Kiln has the input (the XInput hook, polling thread): its press and release to Kiln's
-// own Escape and the key subscribers.
+// own Escape and the key subscribers, never to the owning subscribers (kiln.ui.input: they were offered the B itself).
 void input_synth_escape();
 
 // ---- ui.cpp ----

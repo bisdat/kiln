@@ -1087,9 +1087,11 @@ void input_synth_escape() {
     k.down = 1;
     k.text_input = g_text_input.load() ? 1 : 0;
     k.captured = 1;
+    const bool outer = keys_synthetic(true);  // never offered to an owner: its release does not come through on_key
     dispatch_key(k);
     k.down = 0;
     dispatch_key(k);
+    keys_synthetic(outer);
 }
 
 bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured) {
