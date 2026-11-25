@@ -210,14 +210,16 @@ internal static class LookupCaps
 
     internal static readonly ServiceCapRows Rows = new("kiln.content lookups", Report, everySteps: 25);
 
+    // The fallback reason when no needed row is off with its own: service-missing (kiln.assets' reads or kiln.types' game
+    // types are not here), never Unknown, which ServiceCaps refuses to store (the row was left out before review 31.13).
     private static void Report()
     {
         var why = GameTextStore.Unavailable;
         if (why == GameTextStore.ServerReason)
             ServiceCaps.Report(Content.GameTextsCapability, CapabilityState.Unavailable, CapabilityReason.WrongSide, why);
         else
-            ServiceCaps.Static(Content.GameTextsCapability, why is null, CapabilityReason.Unknown, why ?? "", AssetsResources, Types);
+            ServiceCaps.Static(Content.GameTextsCapability, why is null, CapabilityReason.ServiceMissing, why ?? "", AssetsResources, Types);
         var materials = VoxelMaterialData.Unavailable;
-        ServiceCaps.Static(Content.VoxelMaterialsCapability, materials is null, CapabilityReason.Unknown, materials ?? "", AssetsResources, Types);
+        ServiceCaps.Static(Content.VoxelMaterialsCapability, materials is null, CapabilityReason.ServiceMissing, materials ?? "", AssetsResources, Types);
     }
 }

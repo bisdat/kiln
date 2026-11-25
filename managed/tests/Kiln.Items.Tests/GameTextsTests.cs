@@ -211,10 +211,15 @@ public sealed class GameTextsTests : IDisposable
         {
             LookupCaps.Rows.Ensure();
             ServiceCapRows.RefreshStarted();
-            var texts = Capabilities.Get(Content.GameTextsCapability);
-            Assert.Equal((CapabilityState.Unavailable, CapabilityReason.ServiceMissing, why), (texts.State, texts.Reason, texts.ReasonText));
-            var materials = Capabilities.Get(Content.VoxelMaterialsCapability);
-            Assert.Equal((CapabilityState.Unavailable, CapabilityReason.ServiceMissing, why), (materials.State, materials.Reason, materials.ReasonText));
+            // the source's own reason, or (when another test left a needed row off in this process) that row's
+            foreach (var name in new[] { Content.GameTextsCapability, Content.VoxelMaterialsCapability })
+            {
+                var row = Capabilities.Get(name);
+                Assert.Equal(CapabilityState.Unavailable, row.State);
+                Assert.NotEqual(CapabilityReason.Unknown, row.Reason);
+                Assert.True(row.ReasonText == why && row.Reason == CapabilityReason.ServiceMissing || row.ReasonText.StartsWith("needs ", StringComparison.Ordinal),
+                    $"{name}: {row.Reason} {row.ReasonText}");
+            }
         }
         finally
         {
