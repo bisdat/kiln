@@ -595,10 +595,20 @@ void aside_mods() {
         if (!read_manifest(folder, m.get())) m->reason.clear();  // only name/version are wanted here
         if (m->id.empty()) m->id = lower(m->profile_id.empty() ? to_utf8(folder.filename().wstring()) : m->profile_id);
         m->enabled = e.enabled != 0;
-        auto rep = kcompat::aside_report(m->profile_id, folder, e.enabled != 0, "emf", P.emf / L"mods", "EMF", "emf\\mods");
+        // Off in the profile: EMF still runs the player's own folder of it (or Kiln's copy left there) while EMF's own
+        // switch emf\config\<id>.ini lets it (0.2.0-dev.31.12, compat/own_off.h); `disabled` only when nothing runs.
+        const bool off = e.enabled == 0;
+        auto rep = off ? kcompat::aside_off(kcompat::own_off::emf(P.game, g_side == KILN_SIDE_SERVER), m->profile_id, {lower(m->id)})
+                       : kcompat::aside_report(m->profile_id, folder, true, "emf", P.emf / L"mods", "EMF", "emf\\mods");
         if (rep.state == kcompat::Aside::NotLoaded) hand_copy(*m, &rep);
         if (rep.state == kcompat::Aside::Off) {
             m->status = EMF_MOD_DISABLED;
+            if (rep.reason != "switched off in the profile")
+                kcompat::log_aside(kcompat::Host{g_api, g_owner, "emf"}, m->profile_id.empty() ? m->id : m->profile_id, rep);
+        } else if (off) {
+            m->state = kcompat::aside_word(rep.state);
+            m->folder = rep.copy;
+            kcompat::log_aside(kcompat::Host{g_api, g_owner, "emf"}, m->profile_id.empty() ? m->id : m->profile_id, rep, true);
         } else {
             m->state = kcompat::aside_word(rep.state);
             if (rep.state == kcompat::Aside::OwnLoader) {

@@ -186,6 +186,51 @@ public sealed class CameraWireTests
         Assert.False(CameraWire.TryWelcome(CameraWire.Welcome(new WelcomeMessage(1, 1, 1, 1, 1, 1, 1, 1ul << 6, 100, 1)), out _));  // remote bit is not a part
     }
 
+    // kiln.net's game transport pads every frame with zeros to a multiple of 4 bytes and Kiln.Network's Data header is 8
+    // bytes, so a joined peer's body arrives with up to 3 zero bytes after its end (CameraWire.EndsAt). Every message decodes
+    // with that padding to the same message, and with nothing else after its end.
+    [Fact]
+    public void Every_message_decodes_with_the_transport_s_zero_padding_and_nothing_else()
+    {
+        var ack = new AckMessage(H, false, CameraReasons.NoCameraFrame, CameraWireAbi.CommitNone, 0, 9, 10, 20, "no frame");
+        var bodies = new (string Name, byte[] Body, Func<byte[], object?> Decode)[]
+        {
+            ("Hello", CameraWire.Hello(new HelloMessage(1, 0xC11E47, 3, 1001, CameraWireAbi.RemoteParts, 256, 16384)),
+                b => CameraWire.TryHello(b, out var m) ? m : null),
+            ("Welcome", CameraWire.Welcome(new WelcomeMessage(0xC11E47, 3, 0x5E4E, 9, 42, 77, 0xABCDEF, CameraWireAbi.CapLocalFov, 9000, 128)),
+                b => CameraWire.TryWelcome(b, out var m) ? m : null),
+            ("Apply", CameraWire.Mutation(CameraMessage.Apply, H, 0, Requests.Lens(), CameraWireAbi.MaxBody)!,
+                b => CameraWire.TryMutation(CameraMessage.Apply, b, CameraWireAbi.MaxBody, 256, out var m) ? m!.Request : null),
+            ("Update", CameraWire.Mutation(CameraMessage.Update, H, CameraWireAbi.TimingRestart, Requests.Path(3, 2000), CameraWireAbi.MaxBody)!,
+                b => CameraWire.TryMutation(CameraMessage.Update, b, CameraWireAbi.MaxBody, 256, out var m) ? m!.Request : null),
+            ("End", CameraWire.Mutation(CameraMessage.End, H, 0, null, CameraWireAbi.MaxBody)!,
+                b => CameraWire.TryMutation(CameraMessage.End, b, CameraWireAbi.MaxBody, 256, out var m) ? m!.Header : null),
+            ("Ack", CameraWire.Ack(ack), b => CameraWire.TryAck(b, out var m) ? m : null),
+            ("Ack, 256-byte diagnostic", CameraWire.Ack(ack with { Diagnostic = new string('a', 255) + "b" }), b => CameraWire.TryAck(b, out var m) ? m : null),
+            ("Ended", CameraWire.Ended(new EndedMessage(H, CameraEndReasons.Expired, CameraReasons.None, 77)), b => CameraWire.TryEnded(b, out var m) ? m : null),
+            ("Heartbeat", CameraWire.Heartbeat(new HeartbeatMessage(B, 4, 17, 1000, 2)), b => CameraWire.TryHeartbeat(b, out var m) ? m : null),
+            ("Status", CameraWire.Status(new StatusMessage(B, 4, 0, 0, 0, 0)), b => CameraWire.TryStatus(b, out var m) ? m : null),
+        };
+        Assert.Contains(bodies, x => x.Body.Length % 4 != 0);   // Welcome 58, Apply 110, Ack 122, Ended 95 ...
+        foreach (var (name, body, decode) in bodies)
+        {
+            var exact = decode(body);
+            Assert.NotNull(exact);
+            var pad = (4 - body.Length % 4) % 4;
+            byte[] padded = [.. body, .. new byte[pad]];
+            var got = decode(padded);
+            Assert.True(got is CameraWireRequest r ? r.SameAs((CameraWireRequest)exact!) : Equals(got, exact), $"{name}: with {pad} bytes of padding");
+            if (pad > 0)
+            {
+                var nonzero = (byte[])padded.Clone();
+                nonzero[^1] = 1;
+                Assert.Null(decode(nonzero));                                              // a nonzero byte in it
+            }
+            Assert.Null(decode([.. padded, 0, 0, 0, 0]));                                  // more than the padding
+            if (body.Length % 4 != 3) Assert.Null(decode([.. body, 0]));                   // a zero byte that leaves it unaligned
+        }
+    }
+
     [Fact]
     public void A_diagnostic_is_cut_to_256_bytes_at_a_character_boundary()
     {

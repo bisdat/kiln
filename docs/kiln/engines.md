@@ -92,6 +92,12 @@ same, so the check compares the loaded image with the file: the PE headers' time
 point and section count, and Wine's builtin marker after the DOS header (`native/proxy/image_match.h`). A file or
 module header that cannot be read counts as no mismatch.
 
+A `[chain]` or `dinput8-chain.ini` line loads whatever the profile says. When it holds the DLL of a native mod that is
+off (the player also put that mod's `dinput8.dll` in as a proxy, and the installer chained it), `state/native.json`
+no longer says only "disabled in the profile": the row says its DLL loads as a chain proxy, names the line (`chainProxy`)
+and how to take it out, and `kiln.log` has the same warning (0.2.0-dev.31.12, [native-mods.md](native-mods.md#status-gamekilnstatenativejson)).
+The engines' own loaders and a mod the profile has off: [engines/README.md](engines/README.md#a-mod-the-profile-has-off-while-the-engines-own-loader-runs-020-dev3112).
+
 ### Loading a chained DLL late (`[late]`)
 
 A DLL mod that hooks game functions (XHL-Core, Auto Loot Plus and similar closed-source mods) hooks them in its
@@ -394,6 +400,25 @@ engines' mods") and 5.8.
     would get, without writing anything.
   Only ShroudForge folders are offered. A player's own SET folder, and the folders the other engines' own loaders
   read, stay the player's as before.
+  - *Off in the profile* (0.2.0-dev.31.12). Kiln never writes into such a folder, so ShroudForge's own switch there
+    can be on while the profile has the mod off, and ShroudForge ran it (a player's report: an EML package in
+    ShroudForge's mods folder, which kiln-eml also reported as `disabled`). When Kiln hosts ShroudForge, it now has the
+    runtime skip it for that start, without touching its files: kiln-shroudforge names the profile's ShroudForge
+    entries that are off (`own_skip.h`: the entry's folder `<mods>/<id>` or the player's folder of the same package id,
+    one ShroudForge would run: its switch on for this side, or a folder without mod.json, which the DLL Manager loads
+    and which is named as the folder spells it on disk, since the DLL Manager matches that name exactly; never a
+    package that an entry the profile has on stands for), kiln-eml the EML entries (eml.md, "A profile mod that is
+    off"), each package in a call of its own (the runtime refuses a whole call for one name it does not take) through
+    the runtime's optional export `shroudforge_host_skip_packages` (the fork's `kiln/abi/host_skip.h`) before
+    `shroudforge_prepare_startup`. The
+    runtime then reads them switched off (asset pass, DLL Manager, live runtime). One kiln.log line each: `<id> is off
+    in the profile: your own folder <path> is skipped this start; Kiln leaves its files as they are`, and
+    `shroudforge.json` `profileOff` lists them (`id`, `package`, `path`, `own`, `skipped`). Where nothing can skip it
+    (an installed ShroudForge runtime without the export, ShroudForge's own loader, or a name the runtime refused), the
+    line is a warning that says it runs, why, and how to turn it off: ShroudForge's switch in Kiln's in-game menu (Mods > ShroudForge) or ShroudForge's
+    Modloader, "Let Kiln manage this folder", or moving the folder out of the mods folder. The activation's safety
+    note for such a folder says the same (`engine_mods::own_off_in_shroudforge`; for EML entries without "Let Kiln
+    manage this folder", which takes ShroudForge folders only).
   Enshwick's loader also reads only `<game>/mods/`, but kiln-enshwick copies the profile's enabled entries there
   itself (with its own receipts in `kiln/data/enshwick-managed.json`), so its list names the library folder like
   the other kinds; kiln-shroudlink and kiln-ember read the library folder in place.

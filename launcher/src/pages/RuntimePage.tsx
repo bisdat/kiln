@@ -66,7 +66,7 @@ export default function RuntimePage() {
   // the change is kept per game (useRuntimeChanges): its outcome outlives this page, and Play shows a failure
   // (shell/runtimeChange.ts, shared with Play's Install Kiln)
   const go = (what: string, version: string | null, label: string, start: () => Promise<string>) =>
-    runRuntimeChange(qc, game, bundles.data ?? [], what, version, label, start).then(() => undefined);
+    runRuntimeChange(qc, game, what, version, label, start).then(() => undefined);
   const install = (b: RuntimeBundle, opts: api.InstallOptions = {}) => installBundle(qc, game, b, bundles.data ?? [], current, opts).then(() => undefined);
 
   const cols: Column<RuntimeBundle>[] = [

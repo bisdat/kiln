@@ -68,7 +68,7 @@ export default function Kiln() {
               <DeckButton id="update" primary autoFocus disabled={blocked} onClick={() => setOpen("update")}>{t("deck.shared.updateTo", { version: kilnLabel(upgrade) })}</DeckButton>
             )}
             {rt.installed && (
-              <HoldButton id="uninstall" disabled={blocked} onConfirm={() => void runRuntimeChange(qc, game, k.bundles, t("deck.kiln.uninstall"), null, t("deck.kiln.removed"), () => api.runtimeUninstall(game.id))}>
+              <HoldButton id="uninstall" disabled={blocked} onConfirm={() => void runRuntimeChange(qc, game, t("deck.kiln.uninstall"), null, t("deck.kiln.removed"), () => api.runtimeUninstall(game.id))}>
                 {t("deck.kiln.holdUninstall")}
               </HoldButton>
             )}

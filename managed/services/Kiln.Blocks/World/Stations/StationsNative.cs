@@ -19,7 +19,7 @@ internal static unsafe class StationsNative
     public const uint CollectOutputs = 0x10000, CollectLeftovers = 0x20000, CollectToBase = 0x40000;  // native collect's own bits
     // request flags
     public const uint FillAdd = 0x1, FillExact = 0x2, DryRun = 0x4, NoWater = 0x8, AfterCraft = 0x10, KeepStopped = 0x20,
-        AllowLocked = 0x40, FillNoOutputs = 0x80;
+        AllowLocked = 0x40, FillNoOutputs = 0x80, FillLinked = 0x100;  // FillLinked: 0.2.0-dev.31.12 (GitHub #132)
     // event kinds
     public const uint EvState = 1, EvPlaced = 2, EvRemoved = 3, EvBases = 4;
     // KilnStation.flags
@@ -133,6 +133,7 @@ internal static unsafe class StationsNative
         public fixed byte Changes[MaxChanges * 32];  // MoveChange x 32
         public fixed byte Message[128];
         public uint FromChests, ReservedTail;
+        public uint FromLinked, ReservedLinked;  // 0.2.0-dev.31.12: read only when Size covers them (OnDone copies Size bytes)
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -151,6 +152,7 @@ internal static unsafe class StationsNative
         public fixed byte Message[128];
         public fixed uint Outputs[MaxInputs];  // 0.2.0-dev.29.17: an older kiln.stations answers INVALID_ARGUMENT for a plan smaller than it knows
         public fixed uint Chests[MaxInputs];   // ordinary chests named on the fill; 0 when the plan's size stops before this
+        public fixed uint Linked[MaxInputs];   // 0.2.0-dev.31.12: the player's fill-opted links; 0 from an older kiln.stations
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -219,6 +221,11 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<ulong, void> CancelSources;
         public delegate* unmanaged[Cdecl]<uint, uint, Stack*, uint, uint*, int> SourceStock;
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetDyeStock;
+        // ---- locks from linked sources (GitHub #147, 0.2.0-dev.31.12). Header.Size tells whether they are here. ----
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetLockStock;
+        public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> LockAsks;
+        // ---- block placements from linked sources (GitHub #132, 0.2.0-dev.31.12). Header.Size tells whether it is here. ----
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetBuildStock;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -226,7 +233,16 @@ internal static unsafe class StationsNative
     {
         public uint Size, Player, Container, Order, Filter, ItemCount;
         public uint* Items;
+        // since 0.2.0-dev.31.12 (GitHub #147): an older kiln.stations reads the first 32 bytes only
+        public uint Flags, Reserved;
     }
+
+    /// <summary>KilnCraftSourceRequest.flags: KILN_CRAFT_SOURCE_LOCKS (GitHub #147), _FILLS and _BUILDING (GitHub #132).</summary>
+    public const uint SourceLocks = 1, SourceFills = 2, SourceBuilding = 4;
+    /// <summary>source_stock's flags: KILN_CRAFT_SOURCE_STOCK_ALL, _LOCKS (GitHub #147), _FILLS and _BUILDING (GitHub #132).</summary>
+    public const uint StockAll = 1, StockLocks = 2, StockFills = 4, StockBuilding = 8;
+    /// <summary>KILN_STATIONS_MAX_LOCK_STOCK / KILN_STATIONS_MAX_LOCK_ASKS.</summary>
+    public const int MaxLockStock = 256, MaxLockAsks = 16;
 
     /// <summary>KilnStationFillKey: a fill the station screen asks the game about (40 bytes).</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -270,10 +286,18 @@ internal static unsafe class StationsNative
     public static readonly int TableCraftStock = TableStock + 2 * sizeof(nint);
     /// <summary>The table size through <see cref="Table.FillAsks"/>: the station screen's fill buttons (0.2.0-dev.29.19).</summary>
     public static readonly int TableFillUi = TableCraftStock + 2 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.SetDyeStock"/> (crafting sources and dyes, 0.2.0-dev.30.6).</summary>
+    public static readonly int TableDyes = TableFillUi + 5 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.LockAsks"/>: locks from linked sources (0.2.0-dev.31.12).</summary>
+    public static readonly int TableLocks = TableDyes + 2 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.SetBuildStock"/>: fills and building from linked sources (0.2.0-dev.31.12).</summary>
+    public static readonly int TableBuild = TableLocks + sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
-    public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
+    public static readonly int PlanV1 = sizeof(Plan) - 3 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>
-    public static readonly int PlanChests = sizeof(Plan) - MaxInputs * sizeof(uint);
+    public static readonly int PlanChests = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
+    /// <summary>The plan's size with chests and without <see cref="Plan.Linked"/> (before 0.2.0-dev.31.12).</summary>
+    public static readonly int PlanLinked = sizeof(Plan) - MaxInputs * sizeof(uint);
 
     public static string Text(byte* p, int max)
     {

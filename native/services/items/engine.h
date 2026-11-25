@@ -90,6 +90,10 @@ using EquipFn = Result12*(__fastcall*)(Result12* out, void* tx, uint64_t slot, u
 // The selection half of EquipItem, queues op7; it never moves the stack or commits (docs/re/items.md section 21).
 using SelectEquipmentFn = Result12*(__fastcall*)(Result12*, void* tx, uint8_t remove, uint32_t player,
                                                  const void* selection, uint8_t slot, uint64_t cell, const void* info, uint32_t pide);
+// EquipItem's first decision (docs/re/items.md section 22): the inventory link category an item of this ItemInfo's
+// EquipmentSlotType is equipped in. 4 (Generic) = selected in place where it lies, 2 (Equipment) = moved to an
+// equipment page, 0 = not equippable. A pure leaf: it reads ItemInfo+0x104 and a jump table.
+using EquipLocationKindFn = uint8_t(__fastcall*)(const void* info);
 
 // ---- what the service resolved at boot ----
 struct Engine {
@@ -126,6 +130,10 @@ struct Engine {
     EquipFn unequip_item = nullptr;
     SelectEquipmentFn select_equipment = nullptr;
     bool give_equip_ok = false;
+    // feature items.give_equip.instance_ammo (#139): instance-backed Arrow/Spell/FishingBait (eternal spells) given in
+    // place. Needs give_equip_ok, the game's EquipLocationKind and the in-place equip/unequip/commit probes.
+    EquipLocationKindFn equip_location_kind = nullptr;
+    bool give_equip_instance_ammo_ok = false;
     // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
     // (sigdb @items/CommitGuards): flags byte (bit 0x40 = roll back), the InventoryEmptyState accessor's slot, the touched
     // inventories' count. A set refuses before the commit when either would make the commit roll back by itself.
@@ -346,6 +354,10 @@ uint32_t read_slots(const Access& a, KilnEntity e, KilnItemsSlot* out, uint32_t 
 // game's own): the accessors are words of the transaction (docs/re/items.md section 3). Checks them once against the
 // world's component map; false when they do not hold (the hooks then do nothing but pass through).
 bool access_from_tx(void* tx, Access* a);
+// GitHub #147: the reads of a server-world transaction whose program declares no Fuel (interaction_attempt's lock
+// payment): ctx, items and the InventorySetup / Inventory accessors, checked against the registry, the server world only.
+// The other accessors are copied as the transaction holds them (0 when it has none). For read_pages / setup_flags only.
+bool access_from_tx_reads(void* tx, Access* a);
 
 // Runs a move request inside the program update: validates, builds a transaction, moves, commits (or rolls back for
 // a dry run), and fills the result including the ledger. Guarded: false on a fault.

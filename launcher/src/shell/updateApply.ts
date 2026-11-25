@@ -45,3 +45,33 @@ export function applyWait(status: GameStatus | undefined): ApplyWait {
   if (status.steamUpdating) return "steam";
   return null;
 }
+
+/** The keys the automatic install already tried (applyKey), in this session: shell/UpdateNotice.tsx's install by itself
+ *  tries each once, and Play's Update game marks its own try, so a failed click is not followed by a try by itself (a
+ *  click before the update status answered has no key yet: the install by itself also skips a Kiln whose install
+ *  already failed in this session). */
+export const autoTried = new Set<string>();
+
+/** (0.2.0-dev.31.12) Play's "Update game" banner (pages/PlayPage.tsx): the game's Kiln is older than the one this
+ *  launcher has for it (InstallState.upgradeAvailable: in a release build the runtime the launcher ships, in a test
+ *  build the newest offered bundle), the same in the Nexus build (its runtime ships too; only the self-update is gone).
+ *  Null when the game has no Kiln or an equal or newer one (no offer), after a switch back (Play's own line puts the
+ *  launcher's in), and while the channel notice speaks for it (`channel`: a test build of the launcher with the release's
+ *  Kiln in the game). `hold`: why Update game is held (the game runs or starts, Steam updates it, a change runs);
+ *  `failed`: the last change of this game failed while putting this very version in (the banner says its short reason). */
+export interface GameBehind {
+  has: string;
+  next: string;
+  hold: "running" | "starting" | "steam" | "applying" | null;
+  failed: boolean;
+}
+export function gameBehind(status: GameStatus | undefined, o: { channel: boolean; starting?: boolean; change?: { state: string; version: string | null } | null }): GameBehind | null {
+  const rt = status?.runtime;
+  const has = rt?.installed ? rt.receipt?.runtime.version ?? null : null;
+  const next = rt?.upgradeAvailable ?? null;
+  if (!status || !has || !next || next === has || rt?.switchBack || o.channel) return null;
+  const c = o.change ?? null;
+  const hold = c?.state === "running" ? "applying" : status.running ? "running" : o.starting ? "starting" : status.steamUpdating ? "steam" : null;
+  const failed = c?.state === "failed" && c.version === next;
+  return { has, next, hold, failed };
+}

@@ -40,10 +40,13 @@ public static unsafe partial class Items
     /// is needed for an empty gear/vanity target or Replaced.Take of existing gear. Arrow, Spell and FishingBait instead
     /// require a verified Generic backpack cell: reuse the selected cell, or choose an empty unselected cell when the
     /// selection is zero. A non-Generic ammo selection is refused, never repaired or relocated. Existing occupied
-    /// ammo contents must still resolve to plain Ammunition of that slot's type, or SlotChanged is returned before
+    /// ammo contents must still resolve to Ammunition of that slot's type, or SlotChanged is returned before
     /// mutation, even for Take/DryRun. Different valid ammo of the matching type remains replaceable. New ammo must
-    /// also be a plain Ammunition-category stack. EquipmentSlotType must fit. Count must fit one stack (one for gear).
-    /// Backpack items cannot yet be given into the bag slot.
+    /// also be in the Ammunition category. Since 0.2.0-dev.31.12 that includes instance-backed ammo (eternal spells and
+    /// arrows, count 1): created once with its item entity in that Generic cell and selected there, as the game equips
+    /// one from the backpack; a replaced eternal keeps its entity (Backpack) or is destroyed (Take). Without the sigdb
+    /// feature items.give_equip.instance_ammo an eternal is refused before any change. EquipmentSlotType must fit.
+    /// Count must fit one stack (one for gear and eternal ammo). Backpack items cannot yet be given into the bag slot.
     /// Since 0.2.0-dev.30.6.</summary>
     /// <returns>One transaction's outcome. A refusal or DryRun changes nothing. A committed change posts
     /// EquipChangedEvent; ReplacedItem and ReplacedCount report the old stack. From is None: no intermediate backpack

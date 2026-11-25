@@ -52,6 +52,7 @@
 #include "nlohmann/json.hpp"
 #include "services/kiln_profile.h"
 #include "log_level.h"
+#include "own_skip.h"
 #include "sf_internal.h"
 #include "contract.h"
 #include "kfc_host.h"
@@ -732,6 +733,50 @@ void start_worker(bool plugin_step_later) {
     }
 }
 
+// The profile's ShroudForge mods that are off whose folder ShroudForge would still run (own_skip.h): the player's own
+// folder, which Kiln never writes into, with ShroudForge's own switch on (or Kiln's copy switched on since the last
+// activation). The runtime `runtime` skips them this start when it takes a skip list (the fork's optional export
+// shroudforge_host_skip_packages, kiln/abi/host_skip.h); one kiln.log line each says what happens, and shroudforge.json
+// "profileOff" lists them. EML entries are kiln-eml's (it names its own when kiln-eml stands aside). Before
+// shroudforge_prepare_startup: from there on the runtime takes no more. `runtime` null: ShroudForge's own loader runs this
+// start (self-hosted), nothing can skip them, and the lines say that they run.
+void skip_profile_off(HMODULE runtime) {
+    const auto* profile = static_cast<const KilnProfileApi*>(g_api->service(KilnStr{KILN_PROFILE_SERVICE, sizeof(KILN_PROFILE_SERVICE) - 1}, 1));
+    if (!profile || profile->header.version < 1 || profile->header.size < offsetof(KilnProfileApi, json) + sizeof profile->json ||
+        !profile->mode || !profile->json) return;
+    const uint32_t mode = profile->mode();
+    if (mode != KILN_PROFILE_ACTIVE && mode != KILN_PROFILE_ONCE) return;
+    const auto mods = sf_directory(g_game, "mods", "mods");
+    std::vector<OffFolder> off;
+    try {
+        const KilnStr js = profile->json();
+        off = profile_off_folders(nlohmann::json::parse(std::string(js.ptr, js.len)), mods, api_path(KILN_PATH_KILN), g_server);
+    } catch (...) {
+        return;
+    }
+    if (off.empty()) return;
+    using SkipPackages = bool(__cdecl*)(const wchar_t*);
+    const auto skip = runtime ? reinterpret_cast<SkipPackages>(GetProcAddress(runtime, "shroudforge_host_skip_packages")) : nullptr;
+    // one package per call: the runtime refuses a whole call for one name it does not take
+    std::function<bool(const std::string&)> ask;
+    if (skip) ask = [skip](const std::string& package) {
+        const std::wstring id = to_wide(package);
+        bool taken = false;
+        return invoke(skip, &taken, id.c_str()) && taken;
+    };
+    const auto results = ask_each(off, runtime != nullptr, ask);
+    nlohmann::json rows = nlohmann::json::array();
+    for (size_t i = 0; i < off.size(); ++i) {
+        const auto& f = off[i];
+        const bool skipped = results[i] == Skip::skipped;
+        const std::string folder = to_utf8(f.folder.wstring());
+        logf(skipped ? KILN_LOG_INFO : KILN_LOG_WARN, "%s",
+             off_folder_line(f, results[i], folder, to_utf8(mods.wstring()), g_server).c_str());
+        rows.push_back({{"id", f.id}, {"package", f.package}, {"path", folder}, {"own", !f.kilns}, {"skipped", skipped}});
+    }
+    set_status("profileOff", std::move(rows));
+}
+
 bool reserve_writer() {
     HMODULE eml = GetModuleHandleW(L"kiln-eml.dll");
     if (!eml) {
@@ -857,6 +902,9 @@ void KILN_CALL on_ready(void*) {
              other.c_str());
         set_status("loaderFile", other);
         set_status("source", "installed");
+        // its own loader runs the profile's mods that are off in folders Kiln never writes into: said, once per process
+        static std::atomic<bool> told_off{false};
+        if (!told_off.exchange(true)) skip_profile_off(nullptr);
         return finish("self-hosted", "ShroudForge's own loader (" + other + ") runs it. Kiln's adapter steps aside. Managed package switches still apply.");
     }
     if (!preference.aside.empty()) {
@@ -968,6 +1016,7 @@ void KILN_CALL on_ready(void*) {
          chosen->version.empty() ? "?" : chosen->version.c_str(), chosen->build.empty() ? "" : " ",
          chosen->build.c_str(), to_utf8(chosen->dir.wstring()).c_str());
     if (chosen == &bundled) seed_profiles(bundled.dir / L"profiles");
+    skip_profile_off(g_runtime);
     if (!reserve_writer()) {
         logf(KILN_LOG_ERROR, "ShroudForge cannot reserve the startup data writer (requires kiln-eml v2 in its early phase)");
         return finish("failed", "EML writer is already active or incompatible; refusing a second KFC writer");

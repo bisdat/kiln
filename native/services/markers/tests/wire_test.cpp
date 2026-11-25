@@ -215,10 +215,80 @@ void golden_frames() {
     kmk_test::end("wire.golden_frames");
 }
 
-std::vector<uint8_t> cut(std::vector<uint8_t> b, int delta) {
+std::vector<uint8_t> cut(std::vector<uint8_t> b, int delta, uint8_t fill = 0xA5) {
     if (delta < 0) b.resize(b.size() - static_cast<size_t>(-delta));
-    else b.insert(b.end(), static_cast<size_t>(delta), 0);
+    else b.insert(b.end(), static_cast<size_t>(delta), fill);
     return b;
+}
+
+// kiln.net's game transport pads every payload with zeros to a multiple of 4 (net/game.cpp send). A 31.10 server
+// refused a same-build client's 126-byte HELLO that arrived as 128 bytes ("bytes after its end", every 5 s): every
+// message decodes with that padding, and with nothing else after its end.
+template <class Decode>
+void padded(const std::vector<uint8_t>& b, Decode decode) {
+    const size_t pad = (4 - b.size() % 4) % 4;
+    auto p = cut(b, static_cast<int>(pad), 0);
+    CHECK(decode(p.data(), p.size()));                       // the transport's padding: accepted
+    if (pad) {
+        auto nz = cut(b, static_cast<int>(pad), 0);
+        nz.back() = 1;
+        CHECK(!decode(nz.data(), nz.size()));                // a nonzero byte in it: refused
+    }
+    auto four = cut(b, static_cast<int>(pad + 4), 0);
+    CHECK(!decode(four.data(), four.size()));                // more than the padding: refused
+    if (b.size() % 4 != 3) {
+        auto odd = cut(b, 1, 0);
+        CHECK(!decode(odd.data(), odd.size()));              // a zero byte that leaves the length unaligned: refused
+    }
+}
+
+void transport_padding() {
+    kmk_test::begin();
+    const Header h = head();
+    Header rh;
+    const char* why = nullptr;
+    Hello hello;
+    const auto hb = encode_hello(h, hello);
+    CHECK_EQ(hb.size() % 4, size_t{2});  // the live case: 126 bytes, 128 on the wire
+    padded(hb, [&](const uint8_t* p, size_t n) { Hello x; return decode_hello(p, n, &rh, &x, &why); });
+    Welcome w;
+    padded(encode_welcome(h, w), [&](const uint8_t* p, size_t n) { Welcome x; return decode_welcome(p, n, &rh, &x, &why); });
+    Catalog c;
+    padded(encode_catalog(h, c), [&](const uint8_t* p, size_t n) { Catalog x; return decode_catalog(p, n, &rh, &x, &why); });
+    SnapBegin sb;
+    sb.snapshot_id = 9;
+    sb.total_records = 1;
+    sb.total_chunks = 1;
+    padded(encode_snap_begin(h, sb), [&](const uint8_t* p, size_t n) { SnapBegin x; return decode_snap_begin(p, n, &rh, &x, &why); });
+    const auto chunk = encode_snap_chunk(h, 9, 0, {record()});
+    padded(chunk, [&](const uint8_t* p, size_t n) { SnapChunk x; return decode_snap_chunk(p, n, &rh, &x, &why); });
+    {   // the snapshot digest covers the records' bytes only, never the padding
+        SnapChunk a, b;
+        auto p = cut(chunk, static_cast<int>((4 - chunk.size() % 4) % 4), 0);
+        CHECK(decode_snap_chunk(chunk.data(), chunk.size(), &rh, &a, &why) && decode_snap_chunk(p.data(), p.size(), &rh, &b, &why));
+        CHECK(a.record_bytes == b.record_bytes);
+    }
+    SnapEnd se;
+    se.snapshot_id = 9;
+    padded(encode_snap_end(h, se), [&](const uint8_t* p, size_t n) { SnapEnd x; return decode_snap_end(p, n, &rh, &x, &why); });
+    DeltaOp op;
+    op.record = record();
+    padded(encode_delta(h, {op}), [&](const uint8_t* p, size_t n) { std::vector<DeltaOp> x; return decode_delta(p, n, &rh, &x, &why); });
+    Pose q;
+    q.wire_id = 5;
+    q.revision = 3;
+    padded(encode_pose(h, {q}), [&](const uint8_t* p, size_t n) { std::vector<Pose> x; return decode_pose(p, n, &rh, &x, &why); });
+    Ack a;
+    a.applied = 4;
+    a.status = kAckFull;
+    a.reason = "full";
+    padded(encode_ack(h, a), [&](const uint8_t* p, size_t n) { Ack x; return decode_ack(p, n, &rh, &x, &why); });
+    Resync rs;
+    rs.last_applied = 4;
+    rs.reason = kResyncGap;
+    padded(encode_resync(h, rs), [&](const uint8_t* p, size_t n) { Resync x; return decode_resync(p, n, &rh, &x, &why); });
+    padded(encode_heartbeat(h), [&](const uint8_t* p, size_t n) { return decode_heartbeat(p, n, &rh, &why); });
+    kmk_test::end("wire.transport_padding");
 }
 
 void strict_reads() {
@@ -406,6 +476,7 @@ void record_meaning() {
 int main() {
     golden_frames();
     strict_reads();
+    transport_padding();
     record_meaning();
     return kmk_test::finish("wire_test");
 }

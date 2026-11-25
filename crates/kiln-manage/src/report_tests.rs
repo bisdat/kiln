@@ -1272,6 +1272,92 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     assert!(ids(&r).contains(&"own-loader") && !r.findings.iter().any(|x| x.id == "eml-under-shroudforge"), "{:?}", ids(&r));
 }
 
+/// 0.2.0-dev.31.12, a player's report: a folder of his own in ShroudForge's mods folder, of a mod his profile had off, ran
+/// while the summary said "disabled: switched off in the profile". Skipped now when Kiln hosts ShroudForge; where nothing
+/// could skip it, kiln-eml's row says it runs (`own-loader`) and the summary has a warning naming it. A skipped row is no
+/// finding.
+#[test]
+fn a_mod_that_is_off_but_ran_from_the_players_own_folder_is_a_warning() {
+    const WHY: &str = "ShroudForge owns startup asset patching and runs EML packages in its mods folder";
+    let f = Fx::healthy("off-but-runs");
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"installed","runtime":"running",
+        "profileOff":[{"id":"glide-boost","package":"glide-boost","path":"S:\\mods\\glide-boost","own":true,"skipped":false}]}"#);
+    let row = |state: &str, reason: &str| format!(r#"{{"pid":412,"phase":"aside","aside":"{WHY}","mods":[{{"id":"quiver-slots","state":"{state}","reason":"{reason}"}}]}}"#);
+    f.w("kiln/state/eml.json", row("own-loader", "runs under ShroudForge (hosted by Kiln) although it is off in the profile: it is your own folder S:/mods/quiver-slots").as_bytes());
+    let r = build(&f.input());
+    let n = finding(&r, "off-but-runs");
+    assert_eq!(n.level, Level::Warning);
+    assert!(n.text.contains("quiver-slots") && n.text.contains("ran at the last start although the profile has"), "{}", n.text);
+    assert!(r.findings.iter().any(|x| x.id == "off-but-runs" && x.text.contains("glide-boost")), "{:?}", ids(&r));
+    // skipped: nothing to warn about
+    f.w("kiln/state/eml.json", row("disabled", "quiver-slots is off in the profile: your own folder S:/mods/quiver-slots is skipped this start; Kiln leaves its files as they are").as_bytes());
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"bundled","runtime":"running",
+        "profileOff":[{"id":"glide-boost","package":"glide-boost","path":"S:\\mods\\glide-boost","own":true,"skipped":true}]}"#);
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", ids(&r));
+}
+
+/// Review (0.2.0-dev.31.12): `off-but-runs` is about a folder of the player's own. Kiln's copy that runs although the
+/// profile has its mod off (switched on in the game's menu since the last activation) is Kiln's, and the next Play
+/// switches it off: the finding must not call it "a folder of the player's own, which Kiln never writes into".
+#[test]
+fn kilns_own_copy_that_ran_although_off_is_no_players_own_folder_finding() {
+    const WHY: &str = "ShroudForge owns startup asset patching and runs EML packages in its mods folder";
+    let f = Fx::healthy("off-but-runs-copy");
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"installed","runtime":"running",
+        "profileOff":[{"id":"stack-copy","package":"stack-copy","path":"S:\\mods\\stack-copy","own":false,"skipped":false}]}"#);
+    f.w("kiln/state/eml.json", format!(r#"{{"pid":412,"phase":"aside","aside":"{WHY}","mods":[{{"id":"stack-tweaks","state":"own-loader",
+        "reason":"runs under ShroudForge (hosted by Kiln) although it is off in the profile: ShroudForge's switch is on in Kiln's copy S:/mods/stack-tweaks, and this ShroudForge runtime takes no skip list from Kiln. Press Play in the Kiln launcher (or activate the profile again): Kiln then takes its copy out (or switches it off)"}}]}}"#).as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", r.findings.iter().filter(|x| x.id == "off-but-runs").collect::<Vec<_>>());
+}
+
+/// Review of the 31.12 bundle: compat-aside-truth's plugins (emf.json, greeneye.json, shroudtopia.json, flame.json) name
+/// their rows' state `status`, and say "runs (your own folder …; …) although it is off in the profile: …". Those are a
+/// player's own folders: `off-but-runs`. Their "runs (Kiln's copy … is still there; …)" rows are Kiln's copy, which the next
+/// Play takes out: no finding.
+#[test]
+fn an_own_loader_status_row_of_the_players_own_folder_is_off_but_runs_and_kilns_copy_is_not() {
+    let f = Fx::healthy("off-but-runs-compat");
+    f.w("kiln/state/emf.json", br#"{"format":1,"plugin":"kiln-emf","mods":[{"id":"mage_skills","status":"own-loader",
+        "reason":"runs (your own folder E:/Enshrouded/emf/mods/mage_skills; EMF's own switch is on) although it is off in the profile: EMF's own loader runs this start and reads only <game>/emf/mods, not the profile, and Kiln never changes a folder you put there. To turn it off in EMF: enabled=0 in emf/config/mage_skills.ini"}]}"#);
+    f.w("kiln/state/flame.json", br#"{"status":"running","mods":[{"name":"BiggerTorch","status":"own-loader",
+        "reason":"runs (your own folder E:/Enshrouded/mods/BiggerTorch; Flame's own loader has no switch) although it is off in the profile: Flame's own loader runs this start and reads only <game>/mods, not the profile, and Kiln never changes a folder you put there. To turn it off in Flame: move the folder"}]}"#);
+    f.w("kiln/state/greeneye.json", br#"{"status":"running","mods":[{"id":"fast-swim","status":"own-loader",
+        "reason":"runs (Kiln's copy E:/Enshrouded/greeneye/fast-swim is still there; Greeneye Loader's own switch is on) although it is off in the profile: Greeneye Loader's own loader runs this start and reads only <game>/greeneye, not the profile. Activate the profile again in the Kiln launcher to take Kiln's copy out, or enabled false in that mod.json"}]}"#);
+    let r = build(&f.input());
+    let warned: Vec<&str> = r.findings.iter().filter(|x| x.id == "off-but-runs").map(|x| x.text.as_str()).collect();
+    assert!(warned.iter().any(|t| t.contains("mage_skills")), "{warned:?}");
+    assert!(warned.iter().any(|t| t.contains("BiggerTorch")), "{warned:?}");
+    assert!(!warned.iter().any(|t| t.contains("fast-swim")), "Kiln's copy is no player's own folder: {warned:?}");
+    assert!(r.findings.iter().filter(|x| x.id == "off-but-runs").all(|x| x.level == Level::Warning));
+    // switched off in the loader too: nothing ran, nothing to warn about
+    f.w("kiln/state/emf.json", br#"{"format":1,"plugin":"kiln-emf","mods":[{"id":"mage_skills","status":"disabled",
+        "reason":"switched off in the profile; your own folder E:/Enshrouded/emf/mods/mage_skills is in <game>/emf/mods too, and EMF's own loader keeps it off as well (enabled=0 in its ini)"}]}"#);
+    f.w("kiln/state/flame.json", br#"{"status":"running","mods":[]}"#);
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", r.findings.iter().filter(|x| x.id == "off-but-runs").collect::<Vec<_>>());
+}
+
+/// Review of the 31.12 bundle: an off native mod whose DLL the player also chained (native.json `chainProxy`, kiln-core's
+/// step 3b) ran its DllMain before the profile was read: `off-but-runs` names it; without `chainProxy` nothing ran.
+#[test]
+fn an_off_native_mod_that_loads_as_a_chain_proxy_is_off_but_runs() {
+    let f = Fx::healthy("off-but-runs-native");
+    let native = |proxy: &str| format!(r#"{{"format":1,"pid":412,"written":"2026-11-25T11:00:01Z","policy":"always","mods":[
+        {{"id":"fps-unlock","state":"disabled","reason":"disabled in the profile, but its DLL fpsunlock.dll loads all the same as a chain proxy","chainProxy":{proxy}}},
+        {{"id":"clock","state":"disabled","reason":"disabled in the profile"}}]}}"#);
+    f.w("kiln/state/native.json", native(r#""E:/Enshrouded/kiln/chain/fps-unlock-dinput8.dll""#).as_bytes());
+    let r = build(&f.input());
+    let n = finding(&r, "off-but-runs");
+    assert_eq!(n.level, Level::Warning);
+    assert!(n.text.starts_with("1 native mod ran at the last start although it is off: fps-unlock.") && n.text.contains("chain proxy")
+        && !n.text.contains("clock"), "{}", n.text);
+    f.w("kiln/state/native.json", native("null").as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", ids(&r));
+}
+
 /// Review of 6a78171d: two files of one OLDER start said "hosted" and "aside for ShroudForge" while neither plugin ran
 /// in the last start; and a file without a pid stood for any start. Neither proves anything about the last start, so
 /// neither takes the place of the own-loader finding.

@@ -1380,6 +1380,15 @@ pub fn engine_mod_lines(state: &serde_json::Value) -> Vec<(String, Option<String
         .collect()
 }
 
+/// An engine plugin's `own-loader` reason for a mod the profile has off that ran from a folder or file of the player's own,
+/// which Kiln never writes into: kiln-eml's "… although it is off in the profile: it is your own folder …", the compat
+/// loaders' "runs (your own folder …; …) although it is off in the profile: …" (compat-aside-truth, own_off.h). Kiln's copy
+/// ("runs (Kiln's copy … is still there; …)") is not: the next Play takes it out.
+fn ran_off_from_own(reason: &str) -> bool {
+    let Some((head, tail)) = reason.split_once(" although it is off in the profile: ") else { return false };
+    tail.starts_with("it is your own folder ") || head.starts_with("runs (your own folder ") || head.starts_with("runs (your own file ")
+}
+
 /// The plugin stood aside for the engine's own loader (EML `aside`, ShroudForge `self-hosted`, `steppedAside`).
 fn stood_aside(state: &serde_json::Value) -> bool {
     state.get("steppedAside").and_then(|v| v.as_bool()) == Some(true)
@@ -1948,6 +1957,19 @@ pub fn build(input: &ReportInput) -> Report {
     }
     if let Some(n) = &native {
         let _ = writeln!(ls, "Native mods (native.json, {}, policy {}):", n.written, n.policy);
+        // 0.2.0-dev.31.12 (compat-aside-truth): an off native mod whose DLL the player also put in as a chain proxy
+        // (kiln\chain.ini [chain], EMF's dinput8-chain.ini; never Kiln's own [profile] rows): Kiln's proxy loaded it
+        // before kiln-core read the profile, so its DllMain ran (`chainProxy` names the line's file)
+        let proxied: Vec<&str> = n.mods.iter().filter(|x| x.chain_proxy.is_some()).map(|x| x.id.as_str()).collect();
+        if !proxied.is_empty() {
+            let one = proxied.len() == 1;
+            cx.find("off-but-runs", Level::Warning, format!(
+                "{} ran at the last start although {} off: {}. A DLL of {} also loads as a chain proxy (kiln\\chain.ini [chain] or \
+                 dinput8-chain.ini), which Kiln's proxy loads before kiln-core reads the profile. The lines under \"Native mods\" in \
+                 \"The last start\" name the file and how to take {} out.",
+                plural(proxied.len(), "native mod", "native mods"), if one { "it is" } else { "they are" }, proxied.join(", "),
+                if one { "it" } else { "each" }, if one { "it" } else { "each" }));
+        }
         for x in &n.mods {
             let st = format!("{:?}", x.state).to_lowercase();
             let _ = writeln!(ls, "  {:<32} {:<16} {:<9}{}", x.id, x.version.as_deref().unwrap_or("-"), st, x.reason.as_deref().map(|r| format!(" {r}")).unwrap_or_default());
@@ -2006,6 +2028,30 @@ pub fn build(input: &ReportInput) -> Report {
             if state.as_deref().is_some_and(failed_word) {
                 failed.push(format!("{id} ({}): {}", kind_name(e.kind), why.as_deref().unwrap_or("no reason given")));
             }
+        }
+        // 0.2.0-dev.31.12: a mod the profile has off that ran all the same, from a folder of the player's that nothing could
+        // skip (kiln-eml's `own-loader` row "… although it is off in the profile: it is your own folder …"; the `status`
+        // rows of emf.json, greeneye.json, shroudtopia.json and flame.json "runs (your own folder …; …) although it is off in
+        // the profile: …" (compat-aside-truth); kiln-shroudforge's `profileOff` rows with `own`). Kiln's copy that ran so
+        // is Kiln's ("runs (Kiln's copy … is still there; …)"), and the next Play switches it off: no finding about a
+        // player's folder.
+        let ran_off: Vec<String> = match e.kind {
+            ModKind::ShroudForge => st.get("profileOff").and_then(|v| v.as_array()).into_iter().flatten()
+                .filter(|r| r.get("skipped").and_then(|b| b.as_bool()) == Some(false) && r.get("own").and_then(|b| b.as_bool()) == Some(true))
+                .filter_map(|r| jstr(r.get("id"))).collect(),
+            _ => st.get("mods").and_then(|v| v.as_array()).into_iter().flatten()
+                .filter(|m| [m.get("state"), m.get("status")].into_iter().any(|s| jstr(s).as_deref() == Some("own-loader"))
+                    && jstr(m.get("reason")).is_some_and(|r| ran_off_from_own(&r)))
+                .filter_map(|m| jstr(m.get("id")).or_else(|| jstr(m.get("name")))).collect(),
+        };
+        if !ran_off.is_empty() {
+            cx.find("off-but-runs", Level::Warning, format!(
+                "{} ran at the last start although the profile has {} off: {}. {} in a folder of the player's own, which Kiln never \
+                 writes into, and nothing skipped {}. The lines under {} in \"The last start\" say why and how to turn {} off.",
+                plural(ran_off.len(), &format!("{} mod", kind_name(e.kind)), &format!("{} mods", kind_name(e.kind))),
+                if ran_off.len() == 1 { "it" } else { "them" }, ran_off.join(", "),
+                if ran_off.len() == 1 { "It is" } else { "They are" }, if ran_off.len() == 1 { "it" } else { "them" },
+                e.plugin, if ran_off.len() == 1 { "it" } else { "each" }));
         }
         if stood_aside(st) && let Some((id, engine, file)) = native_loaders.iter().find(|(_, en, _)| Some(*en) == e.kind.engine()) {
             cx.find("native-loader", Level::Problem, format!("{} stood aside at the last start: the profile's {}.",

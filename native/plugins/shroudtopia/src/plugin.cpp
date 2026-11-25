@@ -669,11 +669,16 @@ void report_aside() {
     std::vector<AsideLine> lines;
     for (const auto& r : g_plan.listed) {
         if (registered.count(kcompat::lower(r.id))) continue;  // started by Kiln before the loader arrived
-        const auto rep = kcompat::aside_report(r.id, r.path, r.enabled, "shroudtopia", g_game / L"mods", "Shroudtopia", "mods");
+        // Off in the profile: Shroudtopia's loader still loads the player's own copy of its DLL in <game>\mods (or Kiln's
+        // copy left there) while its settings have "active" on (0.2.0-dev.31.12, compat/own_off.h).
+        const auto rep = r.enabled
+                             ? kcompat::aside_report(r.id, r.path, true, "shroudtopia", g_game / L"mods", "Shroudtopia", "mods")
+                             : kcompat::aside_off(kcompat::own_off::shroudtopia(g_game), r.id, kcompat::own_off::dll_keys(r.path));
         lines.push_back({r.id.empty() ? to_utf8(r.path.filename().wstring()) : r.id,
                          rep.state == kcompat::Aside::Off ? "skipped" : kcompat::aside_word(rep.state), rep.reason,
                          rep.copy.empty() ? r.path : rep.copy});
-        if (rep.state != kcompat::Aside::Off) kcompat::log_aside(H, lines.back().id, rep);
+        if (rep.state != kcompat::Aside::Off || rep.reason != "switched off in the profile")
+            kcompat::log_aside(H, lines.back().id, rep, !r.enabled);
     }
     std::lock_guard lock(g_mu);
     if (g_aside.empty()) g_aside = std::move(lines);

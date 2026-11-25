@@ -23,6 +23,8 @@
 
 #include "../../compat/compat.h"
 #include "greeneye_internal.h"
+#include "greeneye_json.h"
+#include "own_off_greeneye.h"
 
 namespace kgreeneye {
 namespace {
@@ -58,48 +60,7 @@ void file_line(const std::string& text) {
     std::fflush(g_file);
 }
 
-// --- mod.json: the flat fields Greeneye Loader reads, read the way it reads them (a lenient key search, so a file
-// it accepts is accepted here too). Ported from Greeneye Loader src/main.cpp (MIT).
-const char* FindKey(const std::string& json, const char* key) {
-    std::string quoted = std::string("\"") + key + "\"";
-    size_t at = json.find(quoted);
-    if (at == std::string::npos) return nullptr;
-    at = json.find(':', at + quoted.size());
-    if (at == std::string::npos) return nullptr;
-    const char* p = json.c_str() + at + 1;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
-    return p;
-}
-
-std::string JsonString(const std::string& json, const char* key, const std::string& fallback) {
-    const char* p = FindKey(json, key);
-    if (!p || *p != '"') return fallback;
-    std::string out;
-    for (++p; *p && *p != '"'; ++p) {
-        if (*p == '\\' && p[1]) ++p;
-        out += *p;
-    }
-    return out;
-}
-
-bool JsonBool(const std::string& json, const char* key, bool fallback) {
-    const char* p = FindKey(json, key);
-    if (!p) return fallback;
-    if (std::strncmp(p, "true", 4) == 0) return true;
-    if (std::strncmp(p, "false", 5) == 0) return false;
-    return fallback;
-}
-
-int JsonInt(const std::string& json, const char* key, int fallback) {
-    const char* p = FindKey(json, key);
-    if (!p || (*p != '-' && (*p < '0' || *p > '9'))) return fallback;
-    errno = 0;
-    const long long value = std::strtoll(p, nullptr, 10);
-    if (errno == ERANGE) return *p == '-' ? (std::numeric_limits<int>::min)() : (std::numeric_limits<int>::max)();
-    if (value > (std::numeric_limits<int>::max)()) return (std::numeric_limits<int>::max)();
-    if (value < (std::numeric_limits<int>::min)()) return (std::numeric_limits<int>::min)();
-    return static_cast<int>(value);
-}
+// mod.json: greeneye_json.h (FindKey, JsonString, JsonBool, JsonInt, the reader Greeneye Loader uses).
 
 // Greeneye Loader's own claim: "Local\Greeneye-Loader-<pid>" (greeneye.h ClaimProcess). Held for the process life.
 bool claim_loader(bool* already) {
@@ -306,6 +267,19 @@ void KILN_CALL on_ready(void*) {
                     e.dir = rep.copy;
                 }
                 kcompat::log_aside(H, e.id, rep);
+            } else if (!r.enabled && e.status == "disabled") {
+                // Off in the profile: Greeneye Loader still runs the player's own folder of it in greeneye\ (or Kiln's
+                // copy left there) while that folder's mod.json lets it (0.2.0-dev.31.12, own_off_greeneye.h).
+                const auto rep = kcompat::aside_off(
+                    greeneye_own_loader(game, g_side == KILN_SIDE_SERVER, static_cast<int>(kGreeneyeApiVersion)), r.id,
+                    {kcompat::lower(e.manifest_id)});
+                e.status = kcompat::aside_word(rep.state);
+                e.reason = rep.reason;
+                if (!rep.copy.empty()) {
+                    if (!e.dll.empty()) e.dll = rep.copy / e.dll.lexically_relative(e.dir);
+                    e.dir = rep.copy;
+                }
+                if (rep.reason != "switched off in the profile") kcompat::log_aside(H, e.id, rep, true);
             }
             g_entries.push_back(std::move(e));
         }

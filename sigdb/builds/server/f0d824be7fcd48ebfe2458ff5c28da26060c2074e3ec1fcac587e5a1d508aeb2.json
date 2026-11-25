@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 741,
-    "constants": 795,
-    "features": 210
+    "symbols": 755,
+    "constants": 798,
+    "features": 213
   },
   "features": {
     "abilities.attributes": true,
@@ -50,6 +50,7 @@
     "content.recipes": true,
     "content.reflection": true,
     "content.stack_guard": true,
+    "crafting.build_sources": true,
     "crafting.dye_sources": true,
     "crafting.sources": true,
     "creatures.ai": true,
@@ -99,7 +100,9 @@
     "items.gear.power": true,
     "items.gear.rolls": true,
     "items.give_equip": true,
+    "items.give_equip.instance_ammo": true,
     "items.instances": true,
+    "items.lock_sources": true,
     "items.move": true,
     "items.names": true,
     "items.pide_options": true,
@@ -252,19 +255,23 @@
     "assets/ResourceInit": "0x828510",
     "assets/ResourceKeyOf": "0x827ec0",
     "assets/ResourcesByType": "0x82a8a0",
+    "build/ApplyMaterialsPaid": "0x22d562",
     "build/BaseBrickDecode": "0x8514b0",
     "build/BaseColumnAcquire": "0x82f840",
     "build/BaseColumnRelease": "0x851430",
     "build/BaseColumnSeekBrick": "0x84adc0",
     "build/BlockKernel": "0x22dc40",
+    "build/BlueprintApplyRet": "0xc4b50",
     "build/BuildZoneAppend": "0x952ad0",
     "build/BuildingConfigFind": "0x933af0",
+    "build/CursorStockRet": "0x99a50",
     "build/ItemFind": "0x93b5b0",
     "build/RetSaveRegionsBaseQuery": "0x7b4546",
     "build/RetSaveRegionsBaseZones": "0x7bc7d5",
     "build/RetSaveRegionsWorldSave": "0x7c3d99",
     "build/SaveRegions": "0x932a30",
     "build/SetVoxelInterface": "0x67f4e0",
+    "build/StockCount": "0x209210",
     "build/StoreCommit": "0x83f6e0",
     "build/VoxelBoxFillAir": "0xa453c0",
     "build/VoxelDamageAdd": "0x2405a0",
@@ -408,7 +415,9 @@
     "items/CreateEntity": "0x620ce0",
     "items/CreatePide": "0x1b1920",
     "items/EnableDurability": "0x94a050",
+    "items/EquipInPlaceOwned": "0x1b6ef0",
     "items/EquipItem": "0x1b4e70",
+    "items/EquipLocationKind": "0x1b6760",
     "items/GetItemVolume": "0x1bb380",
     "items/GuidToItemId": "0x40720",
     "items/HashMapFindEntity": "0x650c50",
@@ -461,6 +470,9 @@
     "items/WearItem": "0x1608d0",
     "items/WriteComponentTick": "0x64edb0",
     "items/WriteOther": "0x64e790",
+    "locks/InventoryItemCount": "0x93a2a0",
+    "locks/LockCountRet": "0xb0a97",
+    "locks/LockPaid": "0xa536e",
     "net/CreateEntityReader": "0x5fd6e0",
     "net/CreateTemplateCall": "0x5fd857",
     "net/MachineLogin": "0x7af4e0",
@@ -1052,6 +1064,9 @@
     "items/tx.touched_inline": "0x7168",
     "items/world.program_count": "0xe16f50",
     "items/world.program_stride": "0x1f28",
+    "locks/lock.amount": "0x16",
+    "locks/lock.item": "0x10",
+    "locks/lock.mask": "0x18",
     "net/after_sync.gs_register": "0xd",
     "net/channel": "0xc",
     "net/channel.mode": "0x3",
@@ -1688,6 +1703,21 @@
         "build.read": "lab",
         "build.write": "lab",
         "build.zones": "lab"
+      }
+    },
+    "build-sources": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "build/ApplyMaterialsPaid": "static",
+        "build/BlueprintApplyRet": "static",
+        "build/CursorStockRet": "static",
+        "build/StockCount": "static"
+      },
+      "constants": {},
+      "features": {
+        "crafting.build_sources": "static"
       }
     },
     "build-terrain": {
@@ -2661,6 +2691,24 @@
         "gems.sockets": "static"
       }
     },
+    "give-equip-instance-ammo": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@items/EquipItem.inPlace": "static",
+        "@items/EquipItem.stackPide": "static",
+        "@items/EquipLocationKind.body": "static",
+        "@items/InventoryCommit.equippedBit": "static",
+        "@items/UnequipItem.inPlace": "static",
+        "items/EquipInPlaceOwned": "static",
+        "items/EquipLocationKind": "static"
+      },
+      "constants": {},
+      "features": {
+        "items.give_equip.instance_ammo": "static"
+      }
+    },
     "impact-pool": {
       "level": "static",
       "date": "2026-11-19",
@@ -2837,6 +2885,24 @@
         "items.scan": "lab",
         "items.transaction": "lab",
         "items.transfer": "lab"
+      }
+    },
+    "lock-sources": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "locks/InventoryItemCount": "static",
+        "locks/LockCountRet": "static",
+        "locks/LockPaid": "static"
+      },
+      "constants": {
+        "locks/lock.amount": "static",
+        "locks/lock.item": "static",
+        "locks/lock.mask": "static"
+      },
+      "features": {
+        "items.lock_sources": "static"
       }
     },
     "net": {

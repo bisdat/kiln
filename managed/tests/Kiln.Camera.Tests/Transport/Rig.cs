@@ -37,6 +37,8 @@ internal sealed class Rig
     public readonly List<(CameraMessage Id, byte[] Body)> SentToClient = [], SentToServer = [];
     public Func<CameraMessage, byte[], bool> DropToClient = (_, _) => false;
     public Func<CameraMessage, byte[], bool> DropToServer = (_, _) => false;
+    /// <summary>Delivers every body as a joined peer receives it over kiln.net's game transport (<see cref="GamePad"/>).</summary>
+    public bool PadLikeGameTransport;
     public readonly FakeEndpoint Endpoint = new();
     public readonly List<TransportResult> Results = [];
     public readonly List<RemoteEnded> Ended = [];
@@ -83,12 +85,12 @@ internal sealed class Rig
         {
             if (ToServer.TryDequeue(out var up))
             {
-                if (!DropToServer(up.Id, up.Body)) Server.Receive(up.Id, up.Body);
+                if (!DropToServer(up.Id, up.Body)) Server.Receive(up.Id, PadLikeGameTransport ? GamePad(up.Body) : up.Body);
                 continue;
             }
             if (ToClient.TryDequeue(out var down))
             {
-                if (!DropToClient(down.Id, down.Body)) Client.Receive(down.Id, down.Body);
+                if (!DropToClient(down.Id, down.Body)) Client.Receive(down.Id, PadLikeGameTransport ? GamePad(down.Body) : down.Body);
                 continue;
             }
             if (Endpoint.ToComplete.TryDequeue(out var serial))
@@ -131,6 +133,11 @@ internal sealed class Rig
 
     public void Submit(TransportOp op, ulong lease, ulong revision = 1, CameraWireRequest? request = null, ulong owner = 5) =>
         Server.Submit(op, owner, lease, revision, op == TransportOp.End ? null : request ?? Requests.Lens(), Results.Add);
+
+    /// <summary>A body as it arrives over kiln.net's game transport: the frame is padded with zeros to a multiple of 4 bytes
+    /// and Kiln.Network's Data header is 8 bytes, so the body gets up to 3 zero bytes; one over 7992 bytes (8000 minus the
+    /// header) goes in fragments and arrives exact.</summary>
+    public static byte[] GamePad(byte[] body) => body.Length > 7992 || body.Length % 4 == 0 ? body : [.. body, .. new byte[4 - body.Length % 4]];
 
     public int Count(CameraMessage id, bool toClient = true) => (toClient ? SentToClient : SentToServer).Count(m => m.Id == id);
 }
