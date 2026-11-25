@@ -1,4 +1,4 @@
-# Kiln mod API index (mod API 0.2.18)
+# Kiln mod API index (mod API 0.2.19)
 
 Every public type and member of the mod API, one line each, to grep: a name (`BlockAt`), a word of what it does (`refusal`), a mod API (`0.2.15` finds what that release added). Then open that assembly's file: its name is the `KilnServices` entry (`Items.md` needs `<KilnServices>Items</KilnServices>`; `Api.md` needs none). A file that was too large is a map (`Blocks.md`) of its parts (`Blocks-items.md`).
 
@@ -51,9 +51,9 @@ Every public type and member of the mod API, one line each, to grep: a name (`Bl
 | Kiln.Testing | `Testing` | In-server tests: [KilnTest], Assert, [ClientCheck] | [testing.md](../testing.md) | `modding/testing.md` | 16 | 92 | [Testing.md](Testing.md) (10 KB) |
 | Kiln.Time | `Time` | Time of day and weather | [api-world.md](../api-world.md) | `services/time.md` | 13 | 93 | [Time.md](Time.md) (11 KB) |
 | Kiln.Tools | `Tools` | Building tools: terrain tool actions, modes, tool materials | [api-world.md](../api-world.md) | `services/tools.md`, `services/tool-actions.md`, `services/tool-payment.md` | 5 | 20 | [Tools.md](Tools.md) (3 KB) |
-| Kiln.Ui | `Ui` | Menus, screens, HUD, key bindings, themes, item icons, tooltips, values in the game's UI | [api-ui.md](../api-ui.md) | `services/ui.md`, `modding/ui-blocks.md` | 147 | 1152 | [Ui.md](Ui.md) (map of 2 parts) |
+| Kiln.Ui | `Ui` | Menus, screens, HUD, key bindings, themes, item icons, tooltips, values in the game's UI | [api-ui.md](../api-ui.md) | `services/ui.md`, `modding/ui-blocks.md` | 147 | 1153 | [Ui.md](Ui.md) (map of 2 parts) |
 | Kiln.Vfx | `Vfx` | The game's particles, lights and screen effects | [vfx.md](../vfx.md) | `services/vfx.md`, `services/screen.md`, `modding/vfx.md` | 16 | 193 | [Vfx.md](Vfx.md) (15 KB) |
 | Kiln.World | `World` | Typed ECS reads, tracked writes, teleport, nearby queries, concurrent reads | [api-world.md](../api-world.md) | `services/world.md` | 53 | 402 | [World.md](World.md) (41 KB) |
-| Native ABI | C plugins | The function tables of native/core/abi: 85 tables, 1205 rows | - | `services/README.md` | 85 | 1205 | [native.md](native.md) (map of 3 parts) |
+| Native ABI | C plugins | The function tables of native/core/abi: 85 tables, 1206 rows | - | `services/README.md` | 85 | 1206 | [native.md](native.md) (map of 3 parts) |
 
 Left out as experimental: KILNX001 Kiln.Abilities 3; KILNX001 Kiln.Api 3; KILNX001 Kiln.Blocks 5; KILNX001 Kiln.Creatures 1; KILNX001 Kiln.Items 14; KILNX001 Kiln.Markers 5; KILNX001 Kiln.Players 35; KILNX001 Kiln.Quests 12; KILNX001 Kiln.Replication 58; KILNX001 Kiln.Rules 1; KILNX001 Kiln.Saves 2; KILNX001 Kiln.Skills 51; KILNX001 Kiln.Testing 8; KILNX001 Kiln.Vfx 10; KILNX001 Kiln.World 2; KILNX002 Kiln.Client 32; KILNX002 Kiln.Network 8; KILNX031 Kiln.Api 50; KILNX031 Kiln.Registry 426; KILNX031 Kiln.TestKit 4. KILNX001 is lab and test API. KILNX002 (Kiln.Client SteamGuard) is real but unproven: a mod opts in with `NoWarn` for the id, and it may change in any release (docs/kiln/services/steamguard.md).
