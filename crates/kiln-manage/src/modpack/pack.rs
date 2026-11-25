@@ -2675,8 +2675,8 @@ impl Lacking {
     }
 }
 
-/// What a repair did: the parts imported back into the Library, and what still lacks (a Library entry edited in place
-/// keeps its record: the Library's own "changed" flow takes it over).
+/// What a repair did: the parts back in the Library (imported, or an entry changed in place given its original files
+/// again, which keeps its record), and what still lacks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairResult {
@@ -2801,8 +2801,15 @@ pub fn repair_from(dirs: &DataDirs, pid: &str, zip_file: &Path, sha256: Option<&
         return Err(err(ErrorCode::Refused, format!("That file is {} {}, not the {} {} this profile has installed.", ix.name, ix.version, base.name, base.version)));
     }
     // the bytes just checked, and no other: a file the player picked has no sha256 of its own, and may change meanwhile
-    let (_, imported) = import_pack(dirs, zip_file, Some(&checked.sha256), &wanted, progress)?;
+    let (_, mut imported) = import_pack(dirs, zip_file, Some(&checked.sha256), &wanted, progress)?;
     let left = lacking_of(dirs, pid)?.missing;
+    // a lacking part whose entry was there but changed is back too: the import put its original files back and
+    // reported it as already in the Library
+    for (_, lr, _) in &parts {
+        if !left.contains(lr) && !imported.contains(lr) {
+            imported.push(lr.clone());
+        }
+    }
     progress.report(Some(1.0), &format!("{} of {} back in the Library", parts.len() - left.len(), parts.len()));
     Ok(RepairResult { profile: pid.into(), version: inst.version, imported, downloaded: 0, left })
 }

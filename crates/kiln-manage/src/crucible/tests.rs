@@ -1068,6 +1068,28 @@ fn lacking_of_reads_the_library_without_hashing_every_mod_file() {
     assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha, beta]);
 }
 
+/// A pack mod whose files were changed in its Library folder is missing as it was imported: the repair puts its
+/// original files back (the import's put back, 0.2.0-dev.31.8) and says it is back, never "nothing is missing".
+#[test]
+fn a_repair_of_a_mod_changed_in_the_library_says_it_is_back() {
+    let t = tmp("repair-changed");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    let beta = lib_ref(&b, &ir.profile, "beta");
+    let manifest = crate::library::path_of(&b, &beta).unwrap().join("kiln.mod.json");
+    let original = std::fs::read(&manifest).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&manifest, String::from_utf8_lossy(&original).replace("\"side\": \"both\"", "\"side\": \"client\"")).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [beta.clone()]);
+    let done = repair(&b, &cb, &pid, &mut NoProgress).unwrap();
+    assert_eq!((done.imported.as_slice(), done.left.len()), (std::slice::from_ref(&beta), 0), "{done:?}");
+    assert_eq!(std::fs::read(&manifest).unwrap(), original, "its original files are back");
+    assert!(pack::lacking_of(&b, &pid).unwrap().is_empty());
+}
+
 /// Two kinds of mod under one id (a Kiln and a SET "alpha"): the repair tells them apart by kind and stored file, so
 /// only the one that left the Library is downloaded and imported.
 #[test]
