@@ -20,6 +20,7 @@
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
 //   api_v40.cpp   v28-v49: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
+//   api_markers.cpp v33 markers and v47 marker bars through kiln.markers (since 0.2.0-dev.31.13)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
 //   seh.cpp       structured-exception guards around every call into a mod
@@ -257,6 +258,10 @@ void terrain_world_stopping(); // cancellations delivered at the next server Pos
 void terrain_world_started();
 std::string terrain_status_json();
 void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v48, without the two chat functions of api_game.cpp)
+void fill_markers(EmfApi* t);  // api_markers.cpp (v33 markers and v47 bars on kiln.markers), after fill_v40
+void markers_after_step(EmfWorld* w, uint8_t kind);  // queued server calls, follow and map retries
+void markers_world_stopping(uint8_t kind);           // that world's markers of every mod go
+void markers_shutdown();                             // releases every mod's kiln.markers owner
 void net_on_ready();
 void net_server_pre();
 void net_after_step(EmfWorld* w, uint8_t kind);

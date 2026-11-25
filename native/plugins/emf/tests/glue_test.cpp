@@ -918,13 +918,17 @@ static void test_v40(KilnApi &api) {
         CHECK(good == 8 && render_lookups == 1);
     }
     // the two chat functions come from fill_game (api_game.cpp, not built into this test), on_hit from fill_hits
-    // (api_hits.cpp: tests/hits_test.cpp)
+    // (api_hits.cpp: tests/hits_test.cpp), the six marker functions from fill_markers (api_markers.cpp: tests/markers_test.cpp)
     const size_t first = offsetof(EmfApi, on_player) / sizeof(void *), n = sizeof(EmfApi) / sizeof(void *);
     const auto *slots = reinterpret_cast<void *const *>(&t);
     int empty = 0;
+    const size_t markers[] = {offsetof(EmfApi, marker_set), offsetof(EmfApi, marker_remove), offsetof(EmfApi, marker_clear),
+                              offsetof(EmfApi, marker_types), offsetof(EmfApi, marker_send), offsetof(EmfApi, marker_unsend)};
+    for (size_t o : markers) CHECK(!slots[o / sizeof(void *)]);
     for (size_t i = first; i < n; ++i)
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
-            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *))
+            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *) &&
+            std::find(std::begin(markers), std::end(markers), i * sizeof(void *)) == std::end(markers))
             ++empty;
     CHECK(n - first == 54 && empty == 1 && !t.spawn_facing);  // spawn_facing is filled by fill_spawn, not fill_v40
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
@@ -954,12 +958,6 @@ static void test_v40(KilnApi &api) {
     auto buff_cb = [](EmfWorld *, const EmfBuffEvent *, void *) { ++v40_callbacks; };
     CHECK(!t.buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) && !t.buff_remove(w, 1, 2, buff_cb, nullptr) &&
           !t.on_buff(buff_cb, nullptr));
-    EmfMarker mk{};
-    mk.size = sizeof mk;
-    mk.id = "m";
-    EmfMapMarkerType mt{};
-    CHECK(!t.marker_set(&mk) && !t.marker_remove("m") && t.marker_clear() == 0 && t.marker_types(&mt, 1) == 0);
-    CHECK(t.marker_send(0, &mk, 1) == 0 && t.marker_unsend(0, "m") == 0);
     double x = 7, z = 9;
     CHECK(!t.map_cursor(&x, &z) && x == 7 && z == 9);
     CHECK(!t.on_map_click([](const EmfMapClick *, void *) { ++v40_callbacks; }, nullptr));
@@ -1010,7 +1008,7 @@ static void test_v40(KilnApi &api) {
     mo.size = 128;
     CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && std::string(mo.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
-    CHECK(counted >= 42);  // every function that is not carried reported itself at least once
+    CHECK(counted >= 36);  // every function that is not carried reported itself at least once (the markers are, since 31.13)
     rb = {};
     rb.size = sizeof rb - 1;
     rb.refunded = 77;
@@ -1125,7 +1123,7 @@ static void test_v46() {
     CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
 }
 
-// A missing kiln.build and the unimplemented markers keep their documented unavailable answers.
+// A missing kiln.build keeps its documented unavailable answers (marker bars: tests/markers_test.cpp).
 static void test_v47() {
     EmfApi t{};
     fill_v40(&t);
@@ -1154,13 +1152,6 @@ static void test_v47() {
     std::memset(bb.why, 'x', sizeof bb.why);
     const auto saved = bb;
     CHECK(t.break_blocks(w, &bb, nullptr, nullptr) == 0 && std::memcmp(&saved, &bb, sizeof bb) == 0);
-    EmfMarker marker{};
-    marker.size = sizeof marker;
-    marker.id = "test.bar";
-    marker.flags = EMF_MARKER_BAR;
-    marker.bar = 0.5f;
-    CHECK(!t.marker_set(&marker) && t.marker_send(7, &marker, 1) == 0);
-    CHECK(unsupported_fns.count("marker_set") == 1 && unsupported_fns.count("marker_send") == 1);
 }
 
 static void test_wheel_and_right_clicks(KilnUiApi &ui) {
