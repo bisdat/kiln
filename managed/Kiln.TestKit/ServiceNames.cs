@@ -84,6 +84,7 @@ internal static class ServiceNames
         "kiln.ui.ammo",
         "kiln.ui.blocks",
         "kiln.ui.chest",
+        "kiln.ui.input",
         "kiln.ui.inventory",
         "kiln.ui.item_detail",
         "kiln.ui.slots",

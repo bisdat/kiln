@@ -1148,6 +1148,102 @@ listener.Dispose();                           // or let the mod's unload end it
 - The listener belongs to the calling mod (kiln.ui is told whose it is) and ends when the mod unloads. A handler that
   throws is logged under its mod and keeps nothing. `Listen` returns a listener that is not `Ok`, with a `Reason`, where
   there is no Kiln overlay; it never throws for that.
+- A press kept this way is kept alone: its release still reaches the game and the other listeners. To own the release too
+  (a gesture, an overlay that closes on a button), add `KeyListenFlags.Own` (below).
+
+### Owning a press until its release (`KeyListenFlags.Own`, since 0.2.0-dev.31.13, mod API 0.2.22)
+A listener that keeps a press keeps only that press: before 0.2.0-dev.31.13 its release still reached the game and every
+other listener, and a mouse button the game never saw go down still showed as held in the game's mouse messages. With
+`KeyListenFlags.Own` the press is the listener's own until it is let go: the press, its repeats and its release go to that
+listener alone, and none of them reaches the game. This is what a gesture needs (press, drag, release), and an overlay that
+closes on a button: the game never sees that button's release either. Thanks to XHL, whose Blueprint and overlays asked
+for it.
+
+**Blueprint's right-button gesture** (press, drag, release; the camera aims while the button is held):
+```csharp
+// Owns the right button while a blueprint is in the hammer: the game neither opens its build menu on the press nor
+// sees the release, and is not told the button is held while the player drags.
+var gesture = KeyInput.Listen(p =>
+{
+    if (!p.IsPointer || p.VirtualKey != 0x02) return false;  // the right button only
+    if (p.Ended != KeyOwnEnd.None)                            // focus loss, a world change: drop the half-made selection
+    {
+        Selection.Cancel();
+        return false;
+    }
+    if (p.Owned)                                              // the release of the press below (or a repeat)
+    {
+        if (!p.Down) Selection.Commit();                      // the answer to a release counts for nothing
+        return false;
+    }
+    if (!Blueprint.Active || p.Captured) return false;        // not ours: the game gets the press and its release
+    Selection.Begin(p.Position!.Value);                       // the drag: the mod follows the aim each frame until the release
+    return true;                                              // own this press until its release
+}, KeyListenFlags.Own | KeyListenFlags.Pointer);
+if (!gesture.Ok) Context.Log.Warn(gesture.Reason!);           // a Kiln older than 0.2.0-dev.31.13, or a dedicated server
+```
+
+**An overlay that closes on a controller button** (B, or Escape on the keyboard) without the game seeing the release:
+```csharp
+KeyListener? close = null;
+close = KeyInput.Listen(p =>
+{
+    if (!p.Down || p.Owned || !Overlay.IsOpen) return false;            // presses only, while the overlay is open
+    if (!(p.IsPad && p.VirtualKey == 0x20D) && p.VirtualKey != 0x1B) return false;  // Pad:B or Escape
+    Overlay.Close();
+    close!.Disown(p.VirtualKey, p.Controller);  // closed: nobody wants the release; it still never reaches the game
+    return true;
+}, KeyListenFlags.Own | KeyListenFlags.Pad);
+```
+A button held before the overlay opened is not the overlay's (it went down before), so its release reaches the game as
+usual.
+
+- **Who is asked.** Owning listeners are asked about a new press before every listener without `Own` and every key
+  binding, after Kiln's own menu key and Escape (which close Kiln's menu and screens first). They are asked in the order
+  they were made; the first that returns true owns it, and the ones after it never see it. One that returned false saw the
+  press and gets nothing more of it.
+- **What the owner gets.** The repeats of a held key (`Down`, `Repeat`, `Owned`) and the release (`Down` false, `Owned`);
+  what it returns for them counts for nothing. `KeyPress.Position` is the cursor (client pixels) for the left and right
+  buttons; `KeyPress.Controller` the controller (0 to 3) for a pad's buttons. `listener.Owns(vk, controller)` says
+  whether it owns a press now.
+- **What the game gets.** Nothing of the press: not the key or button message, not its raw input record (a record that
+  also carries motion or another button reaches the game without the owned flag, through Kiln's hook on the game's
+  `GetRawInputData` import), not the button's held bit in its mouse messages (`MK_RBUTTON` and the like) while the owner
+  holds it, not a controller button (it reads as up, a trigger as not pulled) until the release.
+- **When it ends early.** `KeyPress.Ended` says why on a release that is no real release: `Focus` (the game window lost
+  the focus: the real release goes to another window; if it comes back it reaches the game, which never saw the press, so
+  nothing is held), `World` (the client world started or stopped), `Lost` (the input went down again before its release
+  came). `listener.Disown()` (one press, or all), `Dispose()` and the mod's unload end it without a call. After a world
+  change, a disown or an unload the press is nobody's: its release reaches nobody, and still not the game.
+- **Stuck-press guard.** Where the game saw the press go down after all, the release must reach it, or the game would hold
+  the button: Alt+F4 (always the game's), or a raw mouse record with other input on a build where Kiln could not hook the
+  game's `GetRawInputData`. The owner still gets the repeats and the release, with `KeyPress.Leaked` true.
+- **What can be owned.** Keyboard keys always; with `KeyListenFlags.Mouse` the middle and side buttons; with
+  `KeyListenFlags.Pointer` the left and right buttons (over the game's own view: not while a Kiln screen or the Kiln menu
+  has the input, nor over a Kiln panel; the release comes wherever the cursor is then); with `KeyListenFlags.Pad` a
+  controller's buttons and triggers (XInput's: an Xbox pad, or any pad Steam Input presents as one). The wheel cannot be
+  owned (a notch has no release): an owning listener gets no notches, so listen without `Own` for them.
+- **Threads.** Keys and mouse buttons come on the game's window thread, a controller's buttons on the thread the game
+  polls it from, an end for a world change on the game's UI thread. Keep the handler short.
+- **Where.** It needs kiln.ui.input (Kiln 0.2.0-dev.31.13 or later, on the game client): elsewhere the listener is not
+  `Ok` and its `Reason` says so. Native plugins use the same service in C: `kiln_ui_input.h` (`subscribe_owned`,
+  `disown`, `owns`), with the rules in `native/services/ui/input_own.h`.
+- **Tests.** `KilnHarness.Input` (Kiln.TestKit) plays presses, releases, a focus loss, a world change and a leaked press
+  against the real `KeyInput` and records what reached the game (`Game`) and the other handlers (`Others`).
+
+### The controllers' sticks and triggers (`PadInput`, since 0.2.0-dev.31.13, mod API 0.2.22)
+A read-only view of each XInput controller as the game's last poll read it (before Kiln hid a kept or owned button from
+the game), for a mod that follows the sticks or the triggers rather than presses:
+```csharp
+var pad = PadInput.Read();                       // controller 0; Read(1..3) for the others
+if (pad.Connected && pad.RightTrigger > 0.5f && pad.LeftStick.Y > 0) Climb.Up(pad.LeftStick);
+if (pad.IsDown(PadButtons.LB | PadButtons.A)) Climb.Jump();
+```
+Sticks are -1 to 1 with XInput's radial dead zone taken out (0 inside it), triggers 0 to 1 (above 0 from a pull of 30 of
+255, when `PadButtons.LT` / `RT` count as held, as "Pad:LT" bindings do). `Owned` and `Hidden` say which buttons an owning
+listener holds and which the game reads as up. `RawSticks` and `RawTriggers` are XInput's values. It never changes what the
+game reads. `PadInput.Available` is false where Kiln does not read controllers (no XInput loaded yet, a dedicated server,
+an older Kiln). A pad the game reads through DirectInput (some controllers without Steam Input) is not seen.
 
 ### XHL-Core (Kiln): from reflection to public members (0.2.0-dev.29.19)
 XHL-Core (Kiln) 0.1.0 reads a few Kiln internals by name. They stay as they are (Kiln.Ui.Tests' XhlKilnCoreReflectionTests
@@ -1331,6 +1427,14 @@ subscriber that got a press can take it; releases always pass.
 While Kiln captures input they come with `captured` 1. Left and right clicks never come. With no `KILN_UI_KEYS_MOUSE`
 subscriber the mouse costs nothing and reaches the game untouched. Kiln.Ui subscribes this way; kiln-emf and kiln-set
 stay on `subscribe_key`. `set_menu_key` takes the buttons, not the wheel; `take_pressed_key` stays keyboard only.
+
+Owned presses (0.2.0-dev.31.13, mod API 0.2.22): the service `kiln.ui.input` v1 (`kiln_ui_input.h`, a table of its own):
+`subscribe_owned(owner, sources, fn, user, &handle)` with `KILN_UI_OWN_KEYS` / `MOUSE` / `POINTER` / `PAD`; `fn` gets
+`KilnUiOwnedInput` records: `KILN_UI_OWNED_PRESS` (answer `KILN_UI_OWN_TAKE` to own it), then `REPEAT`, `RELEASE` or `END`
+(`end`: `FOCUS`, `WORLD`, `LOST`) of the presses it took; `KILN_UI_OWNED_LEAKED` marks a repeat or release the game gets
+too (the stuck-press guard). `disown(handle, vk, controller)` (vk 0: all), `owns(handle, vk, controller)`, `unsubscribe`.
+`pad_state(controller, &KilnUiPadState)` is the controllers' view `PadInput` reads. The rules are
+`native/services/ui/input_own.h`; `KeyListenFlags.Own` above describes them.
 
 The pointer and drag and drop (0.2.0-dev.30.3): `pointer(&KilnUiPointer)`, `drag_source(kind, payload, len, preview)` and
 `drop_target(kind, out, capacity, &len)`, inside a frame callback, a size-guarded tail at byte 1056

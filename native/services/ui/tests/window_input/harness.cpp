@@ -24,6 +24,13 @@
 //     keyboard only; key_name names them; only subscribe_key_ex(KILN_UI_KEYS_MOUSE) subscribers get mouse presses
 //     (keys.cpp, linked here): a subscribe_key subscriber gets none and cannot take one, and with no mouse subscriber
 //     the mouse reaches the game untouched.
+//   - kiln.ui.input (0.2.0-dev.31.13, input_own.cpp linked here): a press an owning subscriber takes is its own until the
+//     release, for a key (raw record and key message, its repeats), the right button (Blueprint's gesture: message only,
+//     raw record + message twins, a release record with motion), the middle button and a pad's button: the game gets
+//     none of the press, its repeats or its release, and the button's MK_* bit leaves the game's mouse messages while
+//     held; the pointer and key subscribers are not asked; focus loss, unsubscribe and a world change (a fake
+//     kiln.client) end it; Alt+F4 and a mixed raw record without the GetRawInputData hook (stuck-press guard) let the
+//     release reach the game; an owner that passes changes nothing; a faulting owner is removed.
 // Lines: "PASS ...", "FAIL ...". Exit code 0 = no FAIL.
 #include <windows.h>
 
@@ -37,6 +44,8 @@
 #include <vector>
 
 #include "key_names.h"
+#include "services/kiln_client.h"
+#include "services/kiln_ui_input.h"
 #include "ui.h"
 #include "raw_input_source.h"
 #include "backends/imgui_impl_win32.h"
@@ -1691,6 +1700,320 @@ void pointer_presses() {
     check(kui::input_pointer_subscribe(13, nullptr, nullptr, &f) == KILN_ERR_INVALID_ARGUMENT, "pointer: no fn -> INVALID_ARGUMENT");
 }
 
+// ---- kiln.ui.input (0.2.0-dev.31.13): a press an owner takes is its own until the release ----
+struct OwnLog {
+    std::vector<std::string> lines;
+    std::vector<uint32_t> take;  // codes it takes
+    bool all = false;
+    KilnHandle handle = 0;
+    uint32_t disown_vk = 0;  // gives this press up inside its own call (an overlay that closes on it)
+};
+uint32_t KILN_CALL own_collect(const KilnUiOwnedInput* in, void* user) {
+    auto* log = static_cast<OwnLog*>(user);
+    static const char* kinds[] = {"?", "press", "repeat", "release", "end"};
+    static const char* ends[] = {"", " focus", " world", " lost"};
+    char b[96];
+    std::snprintf(b, sizeof b, "%s %x%s%s%s", kinds[in->kind < 5 ? in->kind : 0], in->vk, in->end < 4 ? ends[in->end] : " ?",
+                  (in->flags & KILN_UI_OWNED_LEAKED) ? " leaked" : "", in->controller ? (in->controller == 1 ? " @1" : " @?") : "");
+    log->lines.push_back(b);
+    if (in->size != sizeof(KilnUiOwnedInput)) log->lines.push_back("bad size");
+    if (in->kind != KILN_UI_OWNED_PRESS) return KILN_UI_OWN_PASS;
+    bool take = log->all;
+    for (const uint32_t t : log->take) take = take || t == in->vk;
+    if (take && in->vk == log->disown_vk && kui::own_disown(log->handle, in->vk, in->controller) != 1) log->lines.push_back("disown said 0");
+    return take ? KILN_UI_OWN_TAKE : KILN_UI_OWN_PASS;
+}
+uint32_t KILN_CALL own_fault(const KilnUiOwnedInput*, void*) {
+    volatile int* null = nullptr;
+    return static_cast<uint32_t>(*null);
+}
+bool has_exact(const std::vector<std::string>& v, const std::string& x) { return std::find(v.begin(), v.end(), x) != v.end(); }
+// the game's mouse message lines with this message id: their wParam
+std::vector<unsigned long long> wparams(const Run& r, UINT msg) {
+    std::vector<unsigned long long> out;
+    for (const auto& x : r.game) {
+        unsigned id = 0;
+        unsigned long long w = 0, l = 0;
+        if (std::sscanf(x.c_str(), "%x %llx %llx", &id, &w, &l) == 3 && id == msg) out.push_back(w);
+    }
+    return out;
+}
+
+// a fake kiln.client for the world poll: its generation is the test's
+uint32_t g_generation = 1;
+KilnResult KILN_CALL fake_client_state(KilnClientState* out) {
+    if (!out || out->size < sizeof(KilnClientState)) return KILN_ERR_INVALID_ARGUMENT;
+    *out = KilnClientState{};
+    out->size = sizeof *out;
+    out->generation = g_generation;
+    return KILN_OK;
+}
+KilnClientApi g_fake_client{};
+const void* KILN_CALL fake_service(KilnStr name, uint32_t) {
+    return std::string(name.ptr, name.len) == KILN_CLIENT_SERVICE ? &g_fake_client : nullptr;
+}
+KilnApi g_fake_api{};
+
+void owned_input() {
+    fresh();
+    PointerLog plog;  // the core's slot clicks (subscribe_pointer_press): a later handler, never asked for an owned press
+    plog.take_mods = ~0u;
+    KilnHandle ph = 0;
+    check(kui::input_pointer_subscribe(21, &pointer_collect, &plog, &ph) == KILN_OK, "own: a pointer subscriber too");
+    OwnLog bp;  // Blueprint: owns the right button
+    bp.take = {VK_RBUTTON};
+    check(kui::own_subscribe(30, 0, &own_collect, &bp, &bp.handle) == KILN_ERR_INVALID_ARGUMENT &&
+              kui::own_subscribe(30, 16, &own_collect, &bp, &bp.handle) == KILN_ERR_INVALID_ARGUMENT &&
+              kui::own_subscribe(30, KILN_UI_OWN_POINTER, nullptr, &bp, &bp.handle) == KILN_ERR_INVALID_ARGUMENT,
+          "own: no source, an unknown source bit or no fn -> INVALID_ARGUMENT");
+    check(kui::own_subscribe(30, KILN_UI_OWN_POINTER, &own_collect, &bp, &bp.handle) == KILN_OK && bp.handle,
+          "own: Blueprint subscribes for the pointer");
+    check(kui::input_table()->header.size == sizeof(KilnUiInputApi) && kui::input_table()->header.version == KILN_UI_INPUT_VERSION &&
+              kui::input_table()->subscribe_owned && kui::input_table()->pad_state,
+          "own: the kiln.ui.input table is v1, every slot set");
+
+    // Blueprint's gesture as window messages: press, drag with the button held, release
+    Run r = run([] {
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        send(WM_MOUSEMOVE, MK_RBUTTON | MK_SHIFT, MAKELPARAM(35, 44));
+        send(WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(40, 48));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(40, 48));
+        send(WM_MOUSEMOVE, 0, MAKELPARAM(41, 48));
+    }, nullptr);
+    check(bp.lines == std::vector<std::string>{"press 2", "release 2"},
+          "own: Blueprint gets the right press and its release, once each:%s", join(bp.lines).c_str());
+    check(!contains(r.game, "0204 ") && !contains(r.game, "0205 "),
+          "own: the game gets neither the owned press nor its release:%s", game_text(r).c_str());
+    check(wparams(r, WM_MOUSEMOVE) == std::vector<unsigned long long>{MK_SHIFT, 0, 0},
+          "own: while Blueprint holds it, MK_RBUTTON leaves the game's WM_MOUSEMOVE (other bits stay):%s", game_text(r).c_str());
+    check(plog.asked.empty() && !kui::own_owns(bp.handle, VK_RBUTTON, 0), "own: the pointer subscriber was not asked; nothing owned now");
+
+    // the raw record and the message of each transition, with raw motion in between
+    bp.lines.clear();
+    fresh();
+    r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_RIGHT_BUTTON_DOWN));
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        send(WM_INPUT, RIM_INPUT, raw_mouse(0, 6, -2));
+        send(WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(36, 38));
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_RIGHT_BUTTON_UP, 3, 0));  // the release with motion: only the flag goes
+        send(WM_RBUTTONUP, 0, MAKELPARAM(39, 38));
+    }, nullptr);
+    check(bp.lines == std::vector<std::string>{"press 2", "release 2"},
+          "own: raw records + messages of one gesture: one press, one release:%s", join(bp.lines).c_str());
+    check(r.game == std::vector<std::string>{"00ff mouse 0 6 -2 0", "0200 0 260024", "00ff mouse 0 3 0 0"},
+          "own: the game gets the motion only (the release record without its flag, WM_MOUSEMOVE without MK_RBUTTON):%s",
+          game_text(r).c_str());
+
+    // a pass changes nothing: the left button is not Blueprint's
+    bp.lines.clear();
+    plog.asked.clear();
+    fresh();
+    r = run([] {
+        send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 20));
+        send(WM_LBUTTONUP, 0, MAKELPARAM(10, 20));
+    }, nullptr);
+    check(bp.lines == std::vector<std::string>{"press 1"} && plog.asked.size() == 1 && contains(r.game, "0201 ") &&
+              contains(r.game, "0202 "),
+          "own: a press the owner passes goes on to the pointer subscriber and the game, its release too:%s", game_text(r).c_str());
+
+    // focus loss mid-gesture: Blueprint hears it; the release that comes back later is the game's
+    bp.lines.clear();
+    fresh();
+    r = run([] {
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        send(WM_KILLFOCUS, 0, 0);
+        send(WM_ACTIVATEAPP, FALSE, 0);
+        send(WM_SETFOCUS, 0, 0);
+        send(WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(31, 40));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(31, 40));
+    }, nullptr);
+    check(bp.lines == std::vector<std::string>{"press 2", "end 2 focus"},
+          "own: focus loss ends ownership once (End Focus):%s", join(bp.lines).c_str());
+    check(!contains(r.game, "0204 ") && contains(r.game, "0205 ") && wparams(r, WM_MOUSEMOVE) == std::vector<unsigned long long>{MK_RBUTTON},
+          "own: after the loss the game gets the release and the held bit (it never saw the press: nothing held):%s",
+          game_text(r).c_str());
+
+    // unload mid-gesture: no callback, the release reaches nobody, the next press is everyone's
+    bp.lines.clear();
+    fresh();
+    r = run([&] {
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        check(kui::own_unsubscribe(bp.handle) == KILN_OK && kui::own_unsubscribe(bp.handle) == KILN_ERR_NOT_FOUND,
+              "own: Blueprint unsubscribes mid-gesture (once)");
+        send(WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(31, 40));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(31, 40));
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(32, 40));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(32, 40));
+    }, nullptr);
+    check(bp.lines == std::vector<std::string>{"press 2"}, "own: no callback after unsubscribe:%s", join(bp.lines).c_str());
+    check(r.game == std::vector<std::string>{"0200 0 28001f", "0204 2 280020", "0205 0 280020"},
+          "own: the orphan's release and held bit stay the game's secret; the next press reaches the game:%s",
+          game_text(r).c_str());
+
+    // a key: raw records and messages, repeats, the release
+    OwnLog ov;  // an overlay that owns the B key and the middle button
+    ov.take = {'B', VK_MBUTTON};
+    check(kui::own_subscribe(31, KILN_UI_OWN_KEYS | KILN_UI_OWN_MOUSE, &own_collect, &ov, &ov.handle) == KILN_OK,
+          "own: an overlay subscribes for keys and the mouse");
+    fresh();
+    r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x30, RI_KEY_MAKE, 'B'));
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x30, RI_KEY_MAKE, 'B'));       // the auto-repeat
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false) | (1 << 30));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x30, RI_KEY_BREAK, 'B'));
+        send(WM_KEYUP, 'B', key_l(0x30, false, true));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 42", "repeat 42", "release 42"},
+          "own: the overlay gets the B press, its repeat and its release:%s", join(ov.lines).c_str());
+    check(r.game.empty(), "own: the game gets nothing of the owned key (records, WM_KEYDOWN, WM_KEYUP):%s", game_text(r).c_str());
+    check(presses(r, 'B', true) == 1 && presses(r, 'B', true, true) == 0 && presses(r, 'B', false) == 0,
+          "own: Kiln's own key handling saw the press only (the menu key comes first), not the repeat or release:%s",
+          join(r.kiln).c_str());
+
+    // Alt+F4 always reaches the game: an owned F4's release does too (stuck-press guard), and the owner still hears it
+    ov.lines.clear();
+    ov.take = {'B', VK_MBUTTON, VK_F4};
+    fresh();
+    r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x3e, RI_KEY_MAKE, VK_F4));
+        send(WM_SYSKEYDOWN, VK_F4, key_l(0x3e, false, false, true));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x3e, RI_KEY_BREAK, VK_F4));
+        send(WM_SYSKEYUP, VK_F4, key_l(0x3e, false, true, true));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 73", "release 73 leaked"},
+          "own: Alt+F4 owned: the owner hears the press and the release (marked leaked):%s", join(ov.lines).c_str());
+    check(contains(r.game, "0104 73") && contains(r.game, "0105 73"),
+          "own: the game gets WM_SYSKEYDOWN F4 (Alt+F4 closes the game) and so its release:%s", game_text(r).c_str());
+
+    // the middle button: messages, held bit, release
+    ov.lines.clear();
+    fresh();
+    r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_MIDDLE_BUTTON_DOWN));
+        send(WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(5, 5));
+        send(WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(6, 5));
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_MIDDLE_BUTTON_UP));
+        send(WM_MBUTTONUP, 0, MAKELPARAM(6, 5));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 4", "release 4"}, "own: the middle button: one press, one release:%s",
+          join(ov.lines).c_str());
+    check(r.game == std::vector<std::string>{"0200 0 50006"}, "own: the game gets only the motion, without MK_MBUTTON:%s",
+          game_text(r).c_str());
+
+    // a pad's B, owned on controller 1 (the XInput hook's callback, pad_key): hidden until the release, which is the owner's
+    KeyLog pads;
+    KilnHandle pads_h = 0;
+    check(kui::keys_subscribe(32, &key_collect, &pads, KILN_UI_KEYS_PAD, &pads_h) == KILN_OK, "own: a pad key subscriber");
+    OwnLog pad_owner;
+    pad_owner.take = {KILN_UI_VK_PAD_B};
+    check(kui::own_subscribe(33, KILN_UI_OWN_PAD, &own_collect, &pad_owner, &pad_owner.handle) == KILN_OK, "own: a pad owner");
+    const bool kept_b = kui::pad_key(1, KILN_UI_VK_PAD_B, true, 0, false);
+    const bool owns_b = kui::own_owns(pad_owner.handle, KILN_UI_VK_PAD_B, 1) && !kui::own_owns(pad_owner.handle, KILN_UI_VK_PAD_B, 0);
+    KilnUiPadState ps{};
+    ps.size = sizeof ps;
+    const KilnResult pr = kui::input_pad_state(1, &ps);
+    const bool kept_up = kui::pad_key(1, KILN_UI_VK_PAD_B, false, 0, false);
+    const bool kept_a = kui::pad_key(1, KILN_UI_VK_PAD_A, true, 0, false);
+    kui::pad_key(1, KILN_UI_VK_PAD_A, false, 0, false);
+    check(kept_b && owns_b && !kept_up && !kept_a, "own: the owned B is kept from the game until its release; A is not owned");
+    check(pad_owner.lines == std::vector<std::string>{"press 20d @1", "release 20d @1", "press 20c @1"},
+          "own: the pad owner gets B's press and release on controller 1, and is offered A:%s", join(pad_owner.lines).c_str());
+    check(pads.lines == std::vector<std::string>{"vk=524 down=1", "vk=524 down=0"},
+          "own: the pad key subscriber never sees the owned B, only A:%s", join(pads.lines).c_str());
+    check(pr == KILN_ERR_UNAVAILABLE && ps.size == sizeof ps && ps.controller == 1 && !ps.connected && ps.owned == 0x2000 &&
+              ps.hidden == 0x2000,
+          "own: pad_state without XInput hooked: UNAVAILABLE, but the owned B shows (owned 0x%x hidden 0x%x)", ps.owned, ps.hidden);
+    ps.size = 8;
+    check(kui::input_pad_state(1, &ps) == KILN_ERR_INVALID_ARGUMENT && kui::input_pad_state(4, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+          "own: pad_state: a short record or controller 4 -> INVALID_ARGUMENT");
+    kui::keys_unsubscribe(pads_h);
+
+    // a world change (the fake kiln.client's generation): End World; the release still reaches nobody
+    g_fake_client.header = {sizeof g_fake_client, KILN_CLIENT_VERSION};
+    g_fake_client.state = &fake_client_state;
+    g_fake_api.service = &fake_service;
+    kui::g_api = &g_fake_api;
+    ov.lines.clear();
+    fresh();
+    r = run([] {
+        send(WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(5, 5));
+        kui::own_world_poll();
+        g_generation = 2;  // the player left the world
+        kui::own_world_poll();
+        kui::own_world_poll();
+        send(WM_MBUTTONUP, 0, MAKELPARAM(5, 5));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 4", "end 4 world"}, "own: a world change ends ownership once:%s",
+          join(ov.lines).c_str());
+    check(r.game.empty(), "own: the press's release still never reaches the game:%s", game_text(r).c_str());
+    // a disown as the overlay closes on its own press
+    ov.take = {VK_ESCAPE};
+    ov.lines.clear();
+    fresh();
+    r = run([&] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x01, RI_KEY_MAKE, VK_ESCAPE));
+        send(WM_KEYDOWN, VK_ESCAPE, key_l(0x01, false, false));
+        check(kui::own_disown(ov.handle, VK_ESCAPE, 0) == 1 && !kui::own_owns(ov.handle, VK_ESCAPE, 0), "own: the overlay disowns its Escape");
+        send(WM_INPUT, RIM_INPUT, raw_key(0x01, RI_KEY_BREAK, VK_ESCAPE));
+        send(WM_KEYUP, VK_ESCAPE, key_l(0x01, false, true));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 1b"} && r.game.empty(),
+          "own: a disowned press's release reaches nobody, not the game:%s", game_text(r).c_str());
+    // the same, given up inside the press's own call: taken, and nobody's at once
+    ov.take = {'Q'};
+    ov.disown_vk = 'Q';
+    ov.lines.clear();
+    fresh();
+    r = run([&] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_MAKE, 'Q'));
+        send(WM_KEYDOWN, 'Q', key_l(0x10, false, false));
+        check(!kui::own_owns(ov.handle, 'Q', 0), "own: a press disowned in its own call is not owned");
+        send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_BREAK, 'Q'));
+        send(WM_KEYUP, 'Q', key_l(0x10, false, true));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 51"} && r.game.empty(),
+          "own: disowned in its own call: kept from the game, its release reaches nobody:%s%s", join(ov.lines).c_str(),
+          game_text(r).c_str());
+    kui::g_api = nullptr;
+    kui::own_unsubscribe(ov.handle);
+    kui::own_unsubscribe(pad_owner.handle);
+
+    // a faulting owner is removed: the press goes on to the others
+    KilnHandle f = 0;
+    check(kui::own_subscribe(34, KILN_UI_OWN_POINTER, &own_fault, nullptr, &f) == KILN_OK, "own: a faulting owner");
+    plog.asked.clear();
+    fresh();
+    r = run([] { send(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 20)); send(WM_LBUTTONUP, 0, MAKELPARAM(10, 20)); }, nullptr);
+    check(contains(r.game, "0201 ") && contains(r.game, "0202 ") && plog.asked.size() == 1 && kui::own_unsubscribe(f) == KILN_ERR_NOT_FOUND,
+          "own: a fault removes the owner; the press reaches the pointer subscriber and the game:%s", game_text(r).c_str());
+    kui::input_pointer_unsubscribe(ph);
+}
+
+// Before the GetRawInputData hook: an owned press in a raw record with motion reaches the game whole, so its release must
+// too (the stuck-press guard), although the owner keeps hearing it.
+void owned_input_without_hook() {
+    fresh();
+    OwnLog bp;
+    bp.take = {VK_RBUTTON};
+    check(kui::own_subscribe(35, KILN_UI_OWN_POINTER, &own_collect, &bp, &bp.handle) == KILN_OK, "own (no hook): Blueprint subscribes");
+    const Run r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_RIGHT_BUTTON_DOWN, 4, 0));
+        send(WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(30, 40));
+        send(WM_MOUSEMOVE, MK_RBUTTON, MAKELPARAM(34, 40));
+        send(WM_INPUT, RIM_INPUT, raw_mouse(RI_MOUSE_RIGHT_BUTTON_UP));
+        send(WM_RBUTTONUP, 0, MAKELPARAM(34, 40));
+    }, nullptr);
+    const bool asked = !bp.lines.empty();  // raw-led: the cursor position is asked of the system (none without a display)
+    check(asked && bp.lines.back() == "release 2 leaked",
+          "own (no hook): the owner hears the release, marked leaked:%s", join(bp.lines).c_str());
+    check(contains(r.game, "00ff mouse 4 4 ") && contains(r.game, "00ff mouse 8 ") && contains(r.game, "0205 ") &&
+              wparams(r, WM_MOUSEMOVE) == std::vector<unsigned long long>{MK_RBUTTON},
+          "own (no hook): the game saw the press (whole record), so it gets the held bit and the release:%s", game_text(r).c_str());
+    kui::own_unsubscribe(bp.handle);
+}
+
 int main() {
     if (!patch_import("GetRawInputData", reinterpret_cast<void*>(&fake_raw), reinterpret_cast<void**>(&g_real_raw))) {
         std::printf("FAIL this exe imports no GetRawInputData to stand in for\n");
@@ -1751,12 +2074,14 @@ int main() {
     check(kui::keys_subscribe(10, &key_collect, &kiln_ui, KILN_UI_KEYS_MOUSE, &kiln_ui_h) == KILN_OK,
           "Kiln.Ui's key subscriber, with KILN_UI_KEYS_MOUSE");
     mouse_mixed_without_hook();
+    owned_input_without_hook();
     kui::input_install_iat();  // as at the game's start: the game's import slots, GetRawInputData among them
     mouse_wheel_presses();
     mouse_wheel_small_deltas();
     mouse_wheel_bound();
     mouse_buttons();
     pointer_presses();
+    owned_input();
     mouse_captured();
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();
