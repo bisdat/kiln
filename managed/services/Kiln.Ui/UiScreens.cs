@@ -116,10 +116,10 @@ public sealed class UiScreen : IDisposable
     public void Open()
     {
         if (Disposed || _open || UiNative.DrawingOffReason != null) return;
+        Placer.Opened();  // before _open: the render thread's first frame of this open is always its appearing one
         _open = true;
         OpenedAt = Interlocked.Increment(ref UiEngine.ScreenOrder);
         FocusNext = true;
-        Placer.Opened();
         UiEngine.Recount();
         if (Opened is { } o) UiModCalls.Invoke(Owner, static a => a(), o, "screen Opened");
     }

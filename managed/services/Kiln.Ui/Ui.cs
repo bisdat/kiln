@@ -712,8 +712,8 @@ public sealed class UiWindow : IDisposable
         {
             if (value && UiNative.DrawingOffReason != null) return;
             if (_open == value) return;
+            if (value) Placer.Opened();  // before _open: the render thread's first frame of this open is always its appearing one
             _open = value;
-            if (value) Placer.Opened();
             UiEngine.Recount();
         }
     }
