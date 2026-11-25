@@ -1448,8 +1448,16 @@ fn commit(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report: &mut Impo
 }
 
 /// For engine loaders (engines::Loader): moves a prepared folder (made in a [`TempDir`] below `dirs.library()`) into
-/// the library as `<kind>/<id>/<version>+<hash8>` with its record; an entry with the same hash is kept.
+/// the library as `<kind>/<id>/<version>+<hash8>` with its record; an entry with the same hash is kept. One whose
+/// folder changed since its import gets these files back ([`restore_changed`]).
 pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report: &mut ImportReport) -> Result<()> {
+    let mut finder = crate::proc::Finder::default();
+    commit_folder_with(dirs, prepared, rec, report, &mut |dir, exe| finder.find(dir, exe))
+}
+
+/// [`commit_folder`] with the process lookup given (`find(game folder, exe name)`), for tests.
+pub(crate) fn commit_folder_with(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report: &mut ImportReport,
+                                 find: &mut dyn FnMut(&Path, &str) -> Result<Option<crate::proc::ProcessInfo>>) -> Result<()> {
     crate::quick::validate_import_path(prepared)?;
     let r = LibraryRef { kind: rec.kind, id: rec.id.clone(), version: rec.version.clone(), hash: rec.hash.clone() };
     let folder = checked_entry(dirs, &r)?;
@@ -1460,8 +1468,11 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
     report.names.insert(format!("{}/{}", rec.kind.as_str(), rec.id), shown);
     if folder.is_dir() && record_path(&folder).is_file() {
         let old = record(dirs, &r)?;
-        if recorded_hash(&folder, &old)? != r.hash {
-            return Err(Error::new(ErrorCode::HashMismatch, format!("{}: existing library content does not match its hash", folder.display())));
+        // the prepared files are exactly what the entry's name says (checked above); its folder no longer is (a mod
+        // wrote into it while the game ran it from the Library): they are put back, the changed copy kept. What the mod
+        // only added beside its files (own_output) is no change anywhere else, so neither here: the entry stays as it is.
+        if recorded_hash(&folder, &old)? != r.hash && own_output(&folder, &old)?.is_none() {
+            restore_changed(dirs, &r, &old, &folder, prepared, report, find)?;
         }
         // An entry imported before Kiln knew its package's DLL reads it in the game folder learns that now (the same
         // archive dropped again); the content and everything else in the record stay.
@@ -1499,6 +1510,99 @@ pub fn commit_folder(dirs: &DataDirs, prepared: &Path, rec: ImportRecord, report
     report.order.push(r.clone());
     report.imported.push(r);
     Ok(())
+}
+
+/// `<library>/kiln-changed/`: the changed files of an entry an import put back ([`restore_changed`]), each copy at
+/// `kiln-changed/<kind>/<id>/<version>+<hash8>.<yyyymmddThhmmssZ>[-<n>]/` with the files as they were in the entry.
+/// Outside the `<kind>/` folders: no entry, never listed, never offered by Clean up ([`unused`]) or read by a scan of
+/// the entries; only [`restore_changed`] deletes one, past the newest [`CHANGED_COPIES`] of the same entry.
+pub const CHANGED_DIR: &str = "kiln-changed";
+
+/// How many changed copies of one entry are kept: the newest, as a game folder keeps a profile's changed copies
+/// (`profile::set_aside_copy`). A mod that writes into its folder at every run leaves one more at each import over it.
+const CHANGED_COPIES: usize = 3;
+
+/// Puts the files an entry's name says back into its folder, which changed since its import (`old`: its record;
+/// `prepared`: the import's copy, already checked against `r.hash`). A native mod run from its Library folder (the Z
+/// and native path modes) writes its log and settings beside its DLL there: Loot Rarity Leveler's `.log` and `.ini`
+/// made a Crucible pack install fail ("the library did not take native lootrarityleveler"). The record stays as it is
+/// (it names exactly these files), so every profile that lists the entry lists the original again; nothing in a game
+/// folder is touched (a copy placed there changes at its game's next activation, as always).
+///
+/// The changed folder is moved to [`CHANGED_DIR`] first, then the prepared copy is renamed into its place (both durable
+/// renames inside the Library): a stop between the two leaves the record without its folder, which the next import of
+/// the files puts in place as a half import (and the changed copy is already kept). A failed second rename moves the
+/// changed folder back. Refused (nothing moved) while a game, or a server that may read the entry, runs; Busy while a
+/// cook of a Kiln mod runs in it; and when the folder cannot be moved (a file in it is open).
+fn restore_changed(dirs: &DataDirs, r: &LibraryRef, old: &ImportRecord, folder: &Path, prepared: &Path, report: &mut ImportReport,
+                   find: &mut dyn FnMut(&Path, &str) -> Result<Option<crate::proc::ProcessInfo>>) -> Result<()> {
+    let name = old.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| r.id.clone());
+    let what = format!("{name} was changed in its Library folder ({}) and this import brings its original files", folder.display());
+    Guard::read(dirs, &mut *find)?.refuse_while_running(dirs, r)
+        .map_err(|e| Error { message: format!("{what}: Kiln puts them back once nothing reads the mod. {}", e.message), ..e })?;
+    // a cook of a Kiln mod in its Library folder writes there (and is one reason it reads as changed): held to the end
+    let _cook = if r.kind == ModKind::Kiln {
+        Some(crate::state::lock_cook_folder(folder, std::time::Duration::ZERO, &|| false,
+            &format!("{what}, but Kiln is cooking it right now: wait until that is done, then try again."))?)
+    } else { None };
+    let entry_name = file_name(folder);
+    let kept_in = dirs.library().join(CHANGED_DIR).join(r.kind.as_str()).join(&r.id);
+    crate::durable::ensure_dir(&kept_in)?;
+    // `<name>.<time>`, else `-<n>` after the highest n of that time: never a lower name a prune freed, which would sort
+    // as the oldest copy
+    let stamp = format!("{entry_name}.{}", crate::util::ts_compact(crate::util::now_unix()));
+    let last = std::fs::read_dir(&kept_in).into_iter().flatten().flatten()
+        .filter_map(|e| {
+            let rest = e.file_name().into_string().ok()?.strip_prefix(&stamp)?.to_string();
+            if rest.is_empty() { Some(1) } else { rest.strip_prefix('-')?.parse::<u32>().ok().filter(|n| *n >= 2) }
+        })
+        .max().unwrap_or(0);
+    let aside = (last + 1..).map(|n| kept_in.join(if n == 1 { stamp.clone() } else { format!("{stamp}-{n}") }))
+        .find(|p| std::fs::symlink_metadata(p).is_err()).expect("a free name");
+    crate::durable::flush_contents(prepared)?;
+    crate::durable::rename_dir(folder, &aside).map_err(|e| Error::new(e.code, format!(
+        "{what}, but its folder could not be moved aside ({}): close what has a file of it open, then try again.", e.message)))?;
+    if let Err(e) = crate::durable::rename_dir(prepared, folder) {
+        let _ = std::fs::rename(&aside, folder);
+        return Err(Error::new(e.code, format!("{what}, but they could not be put in place ({}): the entry is as it was.", e.message)));
+    }
+    // a take-over's leftover marker named the changed files: the folder holds the imported ones again
+    let _ = std::fs::remove_file(taken_over_path(folder));
+    prune_changed_copies(&kept_in, &entry_name, &aside);
+    let text = format!("{name} was changed in its Library folder: Kiln put back its original files (the ones this import brings) and kept \
+         the changed files in {}", aside.display());
+    // the import's notes reach the player for a drop; a pack install keeps only its result, so each put back is also
+    // one line of `kiln-changed/changes.log` (best effort)
+    let log = dirs.library().join(CHANGED_DIR).join(CHANGED_LOG);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        use std::io::Write;
+        let _ = writeln!(f, "{} {}/{} {}: {text}", crate::util::now_rfc3339(), r.kind.as_str(), r.id, r.version);
+    }
+    report.note(&folder.display().to_string(), text);
+    Ok(())
+}
+
+/// `<library>/kiln-changed/changes.log`: one line per entry an import put back, with where its changed files went.
+pub const CHANGED_LOG: &str = "changes.log";
+
+/// Deletes all but the newest [`CHANGED_COPIES`] copies of the entry `entry_name` (`<version>+<hash8>`) in `dir`, by the
+/// time in their names; `keep` (the copy just made) is never one of them. Best effort: what cannot go stays.
+fn prune_changed_copies(dir: &Path, entry_name: &str, keep: &Path) {
+    fn stamp(rest: &str) -> Option<(String, u32)> {
+        let (ts, n) = match rest.split_once('-') { Some((ts, n)) => (ts, n.parse::<u32>().ok().filter(|n| *n >= 2)?), None => (rest, 1) };
+        let b = ts.as_bytes();
+        (b.len() == 16 && b[8] == b'T' && b[15] == b'Z' && b[..8].iter().chain(&b[9..15]).all(u8::is_ascii_digit)).then(|| (ts.to_string(), n))
+    }
+    let prefix = format!("{entry_name}.");
+    let mut found: Vec<((String, u32), PathBuf)> = std::fs::read_dir(dir).into_iter().flatten().flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| { let n = e.file_name().into_string().ok()?; Some((stamp(n.strip_prefix(&prefix)?)?, e.path())) })
+        .collect();
+    found.sort();
+    let old = found.len().saturating_sub(CHANGED_COPIES);
+    for (_, p) in found.into_iter().take(old).filter(|(_, p)| p != keep) {
+        let _ = std::fs::remove_dir_all(p);
+    }
 }
 
 /// What an entry already in the Library learns from a drop of the same files: Some(new value) of its source's
@@ -3020,3 +3124,7 @@ pub fn path_of(dirs: &DataDirs, r: &LibraryRef) -> Result<PathBuf> {
     }
     Ok(dir)
 }
+
+#[cfg(test)]
+#[path = "library_restore_tests.rs"]
+mod library_restore_tests;
