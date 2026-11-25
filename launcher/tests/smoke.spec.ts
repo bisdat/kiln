@@ -577,7 +577,8 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
 
 test("Settings, kiln.json: the Developer debugging switch writes developer_debugging, off by default", async ({ page }) => {
   type Mock = { __kilnMock: { kilnJsonValues: () => { developer_debugging?: boolean } } };
-  await open(page, "/settings");
+  // since the Settings redesign (0.2.0-dev.30.8) the rest of kiln.json is in Advanced
+  await open(page, "/settings/advanced");
   const row = page.locator("label.k-toggle[for=\"sf-developer-debugging\"]");
   await expect(page.locator("label[for=\"sf-developer-debugging\"]").first()).toHaveText("Developer debugging");
   await expect(page.locator("#sf-developer-debugging")).not.toBeChecked();
