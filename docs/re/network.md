@@ -77,6 +77,47 @@ maximum message size(%u) for game channel %u`, `channel %u tried to send %u mess
 - Hosted worlds: the client exe contains the same GameServer code (`ServerReceive` `0xe61540`, `SyncSockets`
   `0xe60de0`, `SendLoginResult` `0xe5a030`), the GameServer register is r15 there.
 
+## Composed channel ids, acks, the packet pool and the server's stop (server f0d824be, svn 1287369)
+Read for the hung stop of 2026-11-25 (dev31 out/server-stop-hang). **[static]**: read in the code, not run;
+**[log]**: the live server's own log of that stop.
+
+- **Composed channel id** **[static]**: the socket lookup `0xa021c0(session, id)` takes `x = id - 10`,
+  `owner = x / N`, `channel = x % N` with `N = [session+0x11b20]` (the game channel count from the session config
+  `+0x50`, set in `0x9fcfc0`; 25 game channels). `owner` 0..32 and 33..65 are two banks of 33 (socket lists +0x1a0 /
+  +0x1b8 of a player, +0x368 / +0x380 of a machine): within a bank 0..15 = player index (`session+0x2b40 + i*0x1d8`),
+  16..32 = machine index (`session+0x48d8 + m*0xb68`). So `id = 10 + owner*25 + game channel`; ids 0..9 are the
+  session's own. Examples: 871 = bank 2, player 1, game channel 11; 846 = bank 2, player 0, channel 11; 1297 = bank 2,
+  machine 2, channel 12 (Kiln's); 1289 = machine 2, channel 4 (EcsClient). "Received message for channel with no
+  registered socket. ComposedChannelID: %i" (`0xa06a17`) is logged when the lookup finds no socket (the GameServer's
+  sockets are gone); the message is then not processed and its packet is not acknowledged, so the sender's session
+  sends it again.
+- **Acks** **[static]**: after a received packet's messages (`0xa058e0`), a reliable packet's id is appended to the
+  machine's ack list (`machine+0x398`: data, size, capacity, a grow call). "Could not store acknowledge of packet id:
+  %u (out of memory)." (`0xa061e4`) = that list could not grow: acks wait there until a packet to that machine can
+  carry them. Without a machine: the same line without "(out of memory)".
+- **Packet pool** **[static]**: the online layer's fixed pool (`online+0x38`, packets of at most 1500 bytes,
+  `0x9cb760`) is shared by every connection: the session's sends (`0x9cb6d0`, status 0x27 when empty) and Steam
+  receives (`0x9e2906`). "Could not allocate network packet, because packet pool is out of memory!" = it is empty; no
+  connection can send then, so no ack leaves for anyone.
+- **The GameServer's Shutdown state** **[static]** (`0x7b9060`): the first step marks each player record (16 at
+  `gs+0x1e0`, 0x148 each) for its final save (state 4) and asks for the world save (`0x7b9390`, when no save runs);
+  later steps wait while a world save runs, then while any record is still in use, at most 10 s (`0x2540be400` ns):
+  "[server] Shutdown Timeout". Destroying a record whose save2 state is still 1-3 logs "[server] Destroying a Player
+  that requested a save game is BAD!" (`0x7ad8b3`). The game's own path; Kiln.Saves is not in it.
+- **After the GameServer's Invalid** **[static]**: the GameServer thread's flow step CreateServer (`0x53cf7f`) polls
+  the session's state snapshot (`0xa024b0`), queues the session's leave (`0xa0c0d0`: a command into
+  `session+0x78c8`) and waits until the session has left Host_Online, calling the session update (`0xa120e0`, which
+  prints the "Session / Machines" block every 30 s) meanwhile. A normal stop goes on 50 ms later with "[Session]
+  started transition from 'Host_Online' to 'Lobby'", "[online] Removing all peers" and the app's destruction steps.
+- **The hung stop** **[log]**: one player's connection (machine 2) went bad (ping 999 ms, 2,191 packets lost, "Could
+  not prune enough replication states for player 1"); its ack list filled (03:47:50), then player 0's, then the packet
+  pool ran dry (03:47:58); the online layer ended both peers ("Session failed for peer ... with error 1000") with no
+  "[session] Remove player from session" after it, unlike every earlier timeout in the same log. Ctrl+C 1 s later: 10 s
+  Shutdown Timeout, the GameServer destroyed, then no session transition at all; the session kept both machines and
+  kept rejecting both clients' resent packets (ids 846, 871, 1264, 1289, 1272, 1297: 86 of the 6,566 were Kiln's
+  channel 12) for two minutes, until the process was killed. **[inferred]** The session waits on the two machines the
+  online layer dropped while the pool was empty: the leave transition did not start. Not run.
+
 ## Kiln's mod channel (design from the evidence)
 
 - **Channel**: game channel 12 on **machine** sockets in both directions. Channel 12 is the only game channel that
