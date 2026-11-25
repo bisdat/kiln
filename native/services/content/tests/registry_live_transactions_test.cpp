@@ -917,6 +917,126 @@ void retained_changes_are_capped_per_owner() {
     check(registry_live_begin(72, "b", 4, &h) == KILN_OK, "another owner is not starved");
     registry_live_revert(72, h, &reply);
 }
+// ---- flags (loot.rarities) and optionalEnum (loot.fixedRarity): the live back-end writes them like the other conventions ----
+// The back-end suite tests what a mapped row does; regmap/common may still mark a row unproven until a lab proves its read
+// time, so these cases treat both loot rows as mapped (the committed mapping's state is registry_regmap_test's).
+void map_loot_rarity_rows() {
+    for (const char* f : {"rarities", "fixedRarity"}) g_regmap->registries.at("loot").rows.at(f).state = registry::map::RowState::Mapped;
+}
+void fresh_loot() { world(); map_loot_rarity_rows(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({}); }
+const std::string loot_wood = R"("registry":"loot","select":"game:material_t1_wood_logs",)";
+constexpr size_t MASK_AT = 0x40008, SWITCH_AT = 0x40009, FIXED_AT = 0x4000A;
+std::string loot_read(const char* field) {
+    std::string v;
+    return registry_live_read("loot", "game:material_t1_wood_logs", field, &v) == KILN_OK ? registry::json::parse(v).dump() : "<refused>";
+}
+void loot_flags_read_write_revert() {
+    fresh_loot(); RegistryLiveReply reply;
+    check(loot_read("rarities") == R"(["common","uncommon","rare"])", "rarities reads the game's bitmask as Kiln names in the schema's order: " + loot_read("rarities"));
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"rarities","op":["legendary","epic"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(MASK_AT) == 0x18, "a flags set writes the game's bits (epic | legendary)");
+    check(loot_read("rarities") == R"(["epic","legendary"])", "the write reads back through the schema");
+    check(at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2, "a flags write touches only its own byte");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint8_t>(MASK_AT) == 0x07, "the revert puts the game's bits back");
+}
+void loot_flags_keep_bits_kiln_has_no_name_for() {
+    fresh_loot(); RegistryLiveReply reply;
+    mem<uint8_t>(MASK_AT, 0x87);  // bit 7: no ItemRarity value, no Kiln name
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"rarities","op":["common"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(MASK_AT) == 0x81, "a flags write changes only the bits Kiln names");
+    registry_live_revert(71, h, &reply);
+    check(at<uint8_t>(MASK_AT) == 0x87, "and reverts to every original bit");
+}
+void loot_flags_value_missing_on_the_build_is_refused() {
+    fresh_loot(); RegistryLiveReply reply;
+    auto& L = g_regs[KILN_CONTENT_LOOT];
+    auto fewer = std::make_shared<EnumInfo>();
+    fewer->values = {{"Common", 0}, {"Uncommon", 1}, {"Rare", 2}, {"Epic", 3}};  // a build without Legendary
+    L.schema.fields[L.schema.by_path.at("rarities")].en = fewer;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{)" + loot_wood + R"("field":"rarities","op":["legendary"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of rarities on this game build") != std::string::npos,
+          "a name the build's enum lacks is refused, named: " + reply.reason);
+    check(at<uint8_t>(MASK_AT) == 0x07 && at<uint32_t>(WOOD_AT) == 10, "nothing of the manual transaction is written");
+}
+void loot_flags_foreign_revert_is_skipped() {
+    fresh_loot(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"rarities","op":["epic"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(MASK_AT) == 0x08, "the flags change applies");
+    mem<uint8_t>(MASK_AT, 0x10);  // another writer
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(MASK_AT) == 0x10, "a flags revert keeps another writer's byte (compare before write)");
+}
+void loot_fixed_rarity_read_write_revert() {
+    fresh_loot(); RegistryLiveReply reply;
+    check(loot_read("fixedRarity") == R"("none")", "the switch off reads as none (the enum below it is the game's own)");
+    const auto a = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 3, "a name turns the switch on and writes the enum");
+    check(loot_read("fixedRarity") == R"("epic")" && at<uint8_t>(MASK_AT) == 0x07, "it reads back; the mask is untouched");
+    const auto b = change(72, "b", "[{" + loot_wood + R"("field":"fixedRarity","op":"none"}])");
+    registry_live_commit(72, b, &reply);
+    // live changes compose into one registry layer per slot over the bytes below the registry: none keeps the game's own enum
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2,
+          "a later none turns the switch off and leaves the game's own enum below it");
+    check(loot_read("fixedRarity") == R"("none")", "and reads none");
+    registry_live_revert(72, b, &reply);
+    check(at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 3 && loot_read("fixedRarity") == R"("epic")", "reverting the later change restores the earlier one");
+    registry_live_revert(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2, "both slots back to the game's bytes");
+}
+void loot_fixed_rarity_none_keeps_the_games_enum() {
+    fresh_loot(); RegistryLiveReply reply;
+    mem<uint8_t>(SWITCH_AT, 1), mem<uint8_t>(FIXED_AT, 4);
+    check(loot_read("fixedRarity") == R"("legendary")", "a game entry with a fixed rarity reads its name");
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"none"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 4, "none turns the switch off only");
+    registry_live_revert(71, h, &reply);
+    check(at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 4, "the revert turns it on again");
+}
+void loot_fixed_rarity_value_missing_on_the_build_is_refused() {
+    fresh_loot(); RegistryLiveReply reply;
+    auto& L = g_regs[KILN_CONTENT_LOOT];
+    auto fewer = std::make_shared<EnumInfo>();
+    fewer->values = {{"Common", 0}, {"Uncommon", 1}, {"Rare", 2}, {"Epic", 3}};
+    L.schema.fields[L.schema.by_path.at("uiRarity")].en = fewer;
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"legendary"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of uiRarity on this game build") != std::string::npos,
+          "a name the build's enum lacks is refused, named: " + reply.reason);
+    check(at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2, "neither slot is written");
+}
+void loot_fixed_rarity_foreign_revert_is_skipped() {
+    fresh_loot(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"rare"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 2, "the change applies");
+    mem<uint8_t>(FIXED_AT, 1);  // another writer changes the enum
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(FIXED_AT) == 1, "the revert keeps another writer's enum byte");
+}
+void loot_fixed_rarity_write_failure_rolls_back() {
+    fresh_loot(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])");
+    g_write_limits = {1};  // the switch writes, the enum's write fails; the rollback writes normally
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2,
+          "a half-written optional enum is rolled back whole: " + reply.reason);
+}
+void staged_loot_flags_and_fixed_rarity_bind() {
+    world(); map_loot_rarity_rows();
+    g_files = {{"a/content/loot.json", R"({"registry":{"alter":[{"registry":"loot","select":"game:material_t1_wood_logs","field":"rarities","op":["rare"]},)"
+                                       R"({"registry":"loot","select":"game:material_t1_wood_logs","field":"fixedRarity","op":"legendary"}]}})"}};
+    const auto files = files_of({{"a", "a/content/loot.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    check(at<uint8_t>(MASK_AT) == 0x04 && at<uint8_t>(SWITCH_AT) == 1 && at<uint8_t>(FIXED_AT) == 4, "start-time flags and optional enum edits bind at world load");
+    check(!reported("does not write"), "nothing is refused for its convention");
+}
 }
 int main() {
     std::vector<std::string> errs; g_regmap = std::make_shared<registry::map::RegMap>();
@@ -983,7 +1103,17 @@ int main() {
         {"world_load_field_mid_world_is_named", world_load_field_mid_world_is_named},
         {"entry_point_inexact_cost_drops_only_that_entry", entry_point_inexact_cost_drops_only_that_entry},
         {"entry_point_selector_refuses_per_entry", entry_point_selector_refuses_per_entry},
-        {"selector_conflict_refuses_one_entry_at_entry_points", selector_conflict_refuses_one_entry_at_entry_points}};
+        {"selector_conflict_refuses_one_entry_at_entry_points", selector_conflict_refuses_one_entry_at_entry_points},
+        {"loot_flags_read_write_revert", loot_flags_read_write_revert},
+        {"loot_flags_keep_bits_kiln_has_no_name_for", loot_flags_keep_bits_kiln_has_no_name_for},
+        {"loot_flags_value_missing_on_the_build_is_refused", loot_flags_value_missing_on_the_build_is_refused},
+        {"loot_flags_foreign_revert_is_skipped", loot_flags_foreign_revert_is_skipped},
+        {"loot_fixed_rarity_read_write_revert", loot_fixed_rarity_read_write_revert},
+        {"loot_fixed_rarity_none_keeps_the_games_enum", loot_fixed_rarity_none_keeps_the_games_enum},
+        {"loot_fixed_rarity_value_missing_on_the_build_is_refused", loot_fixed_rarity_value_missing_on_the_build_is_refused},
+        {"loot_fixed_rarity_foreign_revert_is_skipped", loot_fixed_rarity_foreign_revert_is_skipped},
+        {"loot_fixed_rarity_write_failure_rolls_back", loot_fixed_rarity_write_failure_rolls_back},
+        {"staged_loot_flags_and_fixed_rarity_bind", staged_loot_flags_and_fixed_rarity_bind}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;
