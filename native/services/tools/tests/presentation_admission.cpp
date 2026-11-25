@@ -49,7 +49,7 @@ int main() {
     api=&fake;hooks=&fake_hooks;child=88;retiring=99;
     for(uint32_t i=0;i<KILN_TOOL_HOOK_COUNT;++i)kiln_tools_report_hook(i,1);
     auto family=definition();KilnHandle handle=0;CHECK(kiln_tools_define_family(7,&family,&handle)==KILN_OK);
-    CHECK(selector_hook.install(&fake,child,2,reinterpret_cast<void*>(&selector),"selector fixture"));
+    selector_game=&policy_selector;
     CHECK(preview_hook.install(&fake,child,3,reinterpret_cast<void*>(&preview),"preview fixture"));
     kiln_tools_presentation_set_held_provider(&fixture_held_provider);
     uint32_t current_item=family.tool;const uint32_t* access[16]{};access[15]=&current_item;

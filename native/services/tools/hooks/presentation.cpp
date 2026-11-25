@@ -7,6 +7,7 @@
 #include "../internal.h"
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
+#include "kiln_mid_frames.hpp"
 #include "services/kiln_caps.h"
 #include "services/kiln_world.h"
 #include "../ammo_runtime.h"
@@ -31,7 +32,8 @@ struct Registration { KilnOwner owner; uint32_t tool; std::vector<uint32_t> ids;
 std::map<KilnHandle,Registration> registrations;
 std::map<uint32_t,std::array<uint8_t,16>> identities;
 KilnHandle next_handle=1;
-kiln::RawHook lookup_hook, preview_hook, identity_hook, selector_hook;
+kiln::RawHook lookup_hook, preview_hook, identity_hook;
+kiln::MidHook2 selector_body_hook, selector_done_hook; // tools/MaterialSelector's two halves (selector_enter)
 kiln::MidHook2 brush_frame_hook;
 std::atomic<uintptr_t> brush_query_resume{};
 BrushTrace brush_trace;
@@ -138,22 +140,52 @@ const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
     }
     return lookup_hook.call<const uint8_t*>(registry,cell);
 }
-void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only) {
-    kt::ToolPolicyScope no_impact_policy(nullptr);
-    ammo::Frame ammo_frame(groups,access,current_only);
+// tools/MaterialSelector (C 0x40e5d0, void(groups, access, currentOnly)) builds the picker's seven groups. Kiln's two halves
+// of it run inside the function, never at its entry: other mods find it by its first bytes (Building Tools 0.34.0 by its
+// first 35, once, 4 s after it loads; it then checks bytes up to + 0xa7a and redirects the finalizer's call at + 0xa76),
+// and an entry hook hid it from them ("full material list no", "partial area actions: not available"; XHL, 2026-11-25).
+// selector_enter runs at tools/MaterialSelectorBody (+ 0x23, the first instruction after the prologue: rcx the groups, rdx
+// the access, r8b currentOnly) and selector_leave at tools/MaterialSelectorDone (+ 0xa8a, the epilogue's first
+// instruction: after the finalizer, on every path to the one ret; rsi still holds the groups). The function's rsp is the
+// same at both sites and pairs them (kiln::MidFrames). presentation_sigdb_test.py checks all of this on the client.
+struct SelectorCall {
+    SelectorCall(SelectorGroup* g,void* a,uint8_t current_only):groups(g),access(a),ammo_frame(g,a,current_only),family(selector_family(a)) {}
     // A quiet-tick owned observation, sampled once per entry. Never borrow another preview's identity or policy TLS.
-    auto family=held_family();
-    // Access[15] is this update's resolved held ItemInfo, also used by the native category routing.
-    // A previous Post sample must not filter a vanilla item selected later in the same client step.
-    const uint32_t* item=nullptr;
-    if(family&&(!access||!copy_game_value(&item,static_cast<const uint8_t*>(access)+0x78,sizeof item)||
-        families.root(presentation_item(item))!=family->tool))family.reset();
-    selector_hook.call<void>(groups,access,current_only);
-    ammo::after(ammo_frame,groups,access);
-    // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
-    // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
-    if(groups&&family&&!filter_selector_view(groups+2,family->materials))clear_selector_view(groups+2);
+    static std::shared_ptr<const Family> selector_family(void* access) {
+        auto family=held_family();
+        // Access[15] is this update's resolved held ItemInfo, also used by the native category routing.
+        // A previous Post sample must not filter a vanilla item selected later in the same client step.
+        const uint32_t* item=nullptr;
+        if(family&&(!access||!copy_game_value(&item,static_cast<const uint8_t*>(access)+0x78,sizeof item)||
+            families.root(presentation_item(item))!=family->tool))family.reset();
+        return family;
+    }
+    SelectorGroup* groups;void* access;
+    kt::ToolPolicyScope no_impact_policy{nullptr}; // the game's selector body runs without a tool policy
+    ammo::Frame ammo_frame;
+    std::shared_ptr<const Family> family;
+};
+thread_local kiln::MidFrames<SelectorCall> selector_calls;
+// The first half, before the game's selector body (frame: the function's rsp).
+void selector_enter(SelectorGroup* groups,void* access,uint8_t current_only,uintptr_t frame) noexcept {
+    selector_calls.enter(frame,groups,access,current_only);
 }
+// The second half, after it: groups is what the function holds there (rsi); another value is not this call's.
+void selector_leave(uintptr_t frame,SelectorGroup* groups) noexcept {
+    SelectorCall* call=selector_calls.leave(frame);
+    if(!call)return;
+    if(call->groups==groups) {
+        ammo::after(call->ammo_frame,call->groups,call->access);
+        // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
+        // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
+        if(call->groups&&call->family&&!filter_selector_view(call->groups+2,call->family->materials))clear_selector_view(call->groups+2);
+    }
+    selector_calls.pop();
+}
+void selector_body(KilnRegisters& r) {
+    selector_enter(reinterpret_cast<SelectorGroup*>(r.rcx),reinterpret_cast<void*>(r.rdx),uint8_t(r.r8&0xff),r.rsp);
+}
+void selector_done(KilnRegisters& r) {selector_leave(r.rsp,reinterpret_cast<SelectorGroup*>(r.rsi));}
 void report_caps();
 // Hot path: every frame the picker draws. Each exit is counted (relaxed atomics); nothing here allocates or logs.
 void brush_query_frame(KilnRegisters& regs) {
@@ -268,6 +300,21 @@ bool install(kiln::RawHook& hook,const char* symbol,const char* pattern,void* fu
     return api->symbol({symbol,std::strlen(symbol)},&address)==KILN_OK&&address&&qualify(address,pattern)&&hook.install(api,child,address,function,symbol);
 }
 #include "../ammo_runtime.inl"
+// tools/MaterialSelector's two halves (selector_enter): the function qualified by its first bytes as the game wrote them,
+// each site by its own instructions, both inside it. The site after the body goes in first, so a call that is inside the
+// body while the hooks go in finds no first half at the second site and stays the game's.
+bool install_selector() {
+    constexpr char fn_symbol[]="tools/MaterialSelector",body_symbol[]="tools/MaterialSelectorBody",done_symbol[]="tools/MaterialSelectorDone";
+    uintptr_t fn=0,body=0,done=0;
+    if(api->symbol({fn_symbol,sizeof fn_symbol-1},&fn)!=KILN_OK||!fn||api->symbol({body_symbol,sizeof body_symbol-1},&body)!=KILN_OK||
+       api->symbol({done_symbol,sizeof done_symbol-1},&done)!=KILN_OK||body<=fn||body-fn>=0x40||done<=body||done-fn>=0xb3c||
+       !qualify(fn,"48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5")||
+       !qualify(body,"4C 8D B9 38 06 00 00 48 8B DA 44 8B F5")||
+       !qualify(done,"48 8B 9C 24 D0 01 00 00 48 81 C4 90 01 00 00 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3"))return false;
+    if(!selector_done_hook.install_checked(api,child,done,&selector_done,done_symbol))return false;
+    if(selector_body_hook.install_checked(api,child,body,&selector_body,body_symbol))return true;
+    selector_done_hook.revoke();return false;
+}
 bool install_brush_frame() {
     uintptr_t site=0,query=0;
     constexpr char site_symbol[]="tools/BrushQueryFrame",query_symbol[]="tools/BrushQuery";
@@ -397,7 +444,7 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
         kiln_tools_report_hook(KILN_TOOL_HOOK_PREVIEW,install(preview_hook,"tools/MaterialPreview","48 89 5C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F9 FF FF 48 81 EC 50 07 00 00",reinterpret_cast<void*>(&preview)));
         kiln_tools_report_hook(KILN_TOOL_HOOK_IDENTITY,install(identity_hook,"tools/RootIdentity","48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00",reinterpret_cast<void*>(&identity)));
         const bool held_ready=held_observer.start(api,child);
-        kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
+        kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install_selector());
         if(kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER))ammo::start();
         brush_trace.reset();trace_published={}; // before the frame hook can count
         kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,held_ready&&install_brush_frame());

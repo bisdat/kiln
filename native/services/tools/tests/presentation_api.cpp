@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Native service boundary fixtures. These simulate capability readiness, not game execution.
 #include "../hooks/presentation.cpp"
+// The game's selector as these fixtures stand it in: its body (selector_game) between Kiln's two halves of it, with this
+// call's own frame as the function's rsp (a nested call's is lower, as in the game).
+static void (*selector_game)(SelectorGroup*,void*,uint8_t){};
+static void selector(SelectorGroup* groups,void* access,uint8_t current_only) {
+    volatile uint8_t frame_mark=0;const auto frame=reinterpret_cast<uintptr_t>(&frame_mark);
+    selector_enter(groups,access,current_only,frame);
+    if(selector_game)selector_game(groups,access,current_only);
+    selector_leave(frame,groups);
+}
 #include <cstdlib>
 #include <iostream>
 static unsigned checks;
