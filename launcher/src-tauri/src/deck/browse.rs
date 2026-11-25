@@ -108,6 +108,13 @@ const MANIFESTS: &[&str] = &["kiln.mod.json", "native.json", "mod.json", "kiln-m
 type CacheKey = (PathBuf, u64, Option<SystemTime>);
 static CACHE: LazyLock<Mutex<HashMap<CacheKey, Option<Detected>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// `path` resolved (links, `..`), as the player reads it: on Windows without the `\\?\` prefix canonicalizing adds
+/// (`C:\Users\...`, not `\\?\C:\Users\...`), kept only where a name needs it (`winpath::plain`). Every path this
+/// module shows, returns or compares goes through here, so the places' roots and the folders below them agree.
+fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).map(kiln_manage::winpath::plain)
+}
+
 /// One folder: `dir` null is Downloads (Home when there is no Downloads folder).
 pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     let dir = match dir {
@@ -118,8 +125,8 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
         }
     };
     let places = places(env);
-    let roots: Vec<PathBuf> = places.iter().filter_map(|p| std::fs::canonicalize(&p.path).ok()).collect();
-    let dir = std::fs::canonicalize(&dir).map_err(kiln_manage::util::io_at(&dir, "opening"))?;
+    let roots: Vec<PathBuf> = places.iter().filter_map(|p| canonical(Path::new(&p.path)).ok()).collect();
+    let dir = canonical(&dir).map_err(kiln_manage::util::io_at(&dir, "opening"))?;
     let allowed = |p: &Path| roots.iter().any(|r| p.starts_with(r));
     if dir.to_str().is_none() || !allowed(&dir) {
         return Err(Error::new(ErrorCode::Refused, "Browse within Home, Downloads, Steam games or a mounted card."));
@@ -133,7 +140,7 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     for e in rd {
         let e = e.map_err(kiln_manage::util::io_at(&dir, "reading"))?;
         if e.file_name().to_str().is_none_or(|s| s.starts_with('.')) { continue; }
-        let Ok(path) = std::fs::canonicalize(e.path()) else { continue };
+        let Ok(path) = canonical(&e.path()) else { continue };
         if !allowed(&path) { continue; }
         let Ok(meta) = std::fs::metadata(&path) else { continue };
         if !meta.is_file() && !meta.is_dir() { continue; }
@@ -456,7 +463,9 @@ mod tests {
         std::fs::write(g.join("enshrouded.exe"), b"MZ").unwrap();
         let f = browse(Some(&g), &e).unwrap();
         assert!(f.has_game);
-        assert_eq!(f.parent.as_deref(), Some(e.home.join("lib/steamapps/common").display().to_string().as_str()));
+        // compared as a path: the expected one is joined with '/', which Windows reads as a separator too
+        assert_eq!(f.parent.as_deref().map(Path::new), Some(e.home.join("lib/steamapps/common").as_path()));
+        assert!(!f.dir.starts_with(r"\\?\") && !f.parent.as_deref().unwrap().starts_with(r"\\?\"), "shown as the player reads it: {f:?}");
         assert!(f.mods.is_empty());
         assert!(matches!(browse(Some(&t.0.join("nope")), &e), Err(err) if err.code == ErrorCode::NotFound));
     }

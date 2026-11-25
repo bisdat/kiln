@@ -72,6 +72,16 @@ pub(crate) fn plain_path(s: &str) -> std::borrow::Cow<'_, str> {
     if plain.len() == s.len() || is_absolute_game_path(&plain) { plain } else { s.into() }
 }
 
+/// A host path without Windows' verbatim prefix where it has a plain spelling ([`plain_path`]): what a player is shown
+/// for a canonicalized path (`C:\x`, not `\\?\C:\x`). Elsewhere, and for a path that is not UTF-8, the path as it is.
+pub fn plain(path: PathBuf) -> PathBuf {
+    let plain = match path.to_str() {
+        Some(s) if s.starts_with(r"\\?\") => plain_path(s).into_owned(),
+        _ => return path,
+    };
+    PathBuf::from(plain)
+}
+
 /// Where `path` is below `base`, compared as Windows compares folders: without Windows' verbatim prefix (`\\?\C:\x` is
 /// `C:\x`, `\\?\UNC\s\x` is `\\s\x`; ShroudForge writes its `paths.mods` from a canonical path, which carries it, and
 /// Kiln names the game folder without it), `/` and `\` alike, empty and `.` parts dropped, case ignored (each
