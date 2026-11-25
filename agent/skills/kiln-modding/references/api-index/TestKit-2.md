@@ -198,6 +198,20 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `HarnessUiNativeTints(TestKit.KilnHarness harness)`
 - `TintOf(TestKit.FakeInventorySlot slot, Color background) -> Color` — Runs the rules over this copied slot (including plain stacks or empty slots).
 
+## TestKit.HarnessUiPlacement `0.2.20` — The overlay's frames for a mod's `UiScreen` and `UiWindow` placement (`KilnHarness.UiPlacement`): Kiln.Ui's own code decides where each goes.
+- `ContentSize { get; set; } -> (float Width, float Height)` — The size, in pixels at UI scale 1, that a window sized by its contents takes (Width or Height 0, or AutoResize).
+- `FilePath { get; } -> string?` — ui-placement.json in the harness's config folder (it exists once something was remembered).
+- `Frame(UiScreen screen) -> UiPlacement?` — One overlay frame of `screen`: where it is now (fractions of the viewport, sizes at UI scale 1), or null when it is...
+- `Frame(UiWindow window) -> UiPlacement?` — One overlay frame of `window`: where it is now, or null when it is hidden or removed.
+- `PlayerPlaces(UiScreen screen, float x, float y, float width, float height) -> void` — The player drags and resizes `screen` in its next frame: its centre to (`x`, `y`), fractions of the viewport, at...
+- `PlayerPlaces(UiWindow window, float x, float y, float width, float height) -> void` — The player drags and resizes `window` in its next frame (as for a screen).
+- `Remembered(UiScreen screen) -> UiPlacement?` — What Kiln remembers for `screen` (null: nothing, or it does not remember).
+- `Remembered(UiWindow window) -> UiPlacement?` — What Kiln remembers for `window` (null: nothing, or it does not remember).
+- `Restart() -> void` — A game start for placements: what Kiln remembers is read from ui-placement.json again (write it first to script a...
+- `Scale { get; set; } -> float` — The UI scale (1 unless the test says): sizes at UI scale 1 are multiplied by it.
+- `ViewportHeight { get; set; } -> float` — The display's height in pixels (1080 unless the test says).
+- `ViewportWidth { get; set; } -> float` — The display's width in pixels (1920 unless the test says).
+
 ## TestKit.HarnessUiSnapshot `0.2.17` — The fake kiln.ui.snapshot of a harness (`KilnHarness.UiSnapshot`): Kiln.Blocks' BlockUi.ReadWorld, BlockUi.DemandWorld and the block runtime's `world.*` bindings run...
 - `Demanded { get; } -> UiWorldFields` — The groups the live demands ask for together (what the next publication carries).
 - `Demands { get; } -> int` — Demands held now (all mods, Kiln.Blocks' windows and HUD lines included).
@@ -311,6 +325,7 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `UiInventory { get; } -> TestKit.HarnessUiInventory` `0.2.12` — The fake kiln.ui.inventory of this harness: draw a screen's slots, hover and click one, and ask what mark a drawn...
 - `UiItemDetail { get; } -> TestKit.HarnessUiItemDetail` `0.2.14` — Recordings of the game's item-detail text and values (no game renderer is simulated).
 - `UiNativeTints { get; } -> TestKit.HarnessUiNativeTints` `0.2.17` — Offline native-background tint rules; no game drawing.
+- `UiPlacement { get; } -> TestKit.HarnessUiPlacement` `0.2.20` — Where a mod's screens and windows sit: play an overlay frame for one (`HarnessUiPlacement.Frame`), move it as the...
 - `UiSnapshot { get; } -> TestKit.HarnessUiSnapshot` `0.2.17` — The fake kiln.ui.snapshot of this harness (since 0.2.0-dev.31): publish the live game values that BlockUi.ReadWorld...
 - `UiValues { get; } -> TestKit.HarnessUiValues` `0.2.3` — The fake kiln.ui.values of this harness: draw a value or an item detail view through the registered Ui.Values providers.
 - `Unload(TestKit.ModHandle mod, bool checkCollected = true) -> void` — Unloads `mod`, and first every mod that depends on it (reverse order), as the control command `unload` does.
