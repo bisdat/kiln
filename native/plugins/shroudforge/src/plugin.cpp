@@ -987,6 +987,9 @@ void KILN_CALL on_ready(void*) {
         logf(KILN_LOG_ERROR, "ShroudForge's startup preparation failed (%.0f ms; see the [sf] lines): its mods do not "
                              "run this start, the game starts without them",
              prep_ms);
+        // ShroudForge's record of its pass (shroudforge/state.json "assets": error, recoveryError) is this start's
+        // word on why: the launcher reads it beside "failed" only with this (kiln-manage sf_startup.rs)
+        set_status("startupPrepared", false);
         stop_helper_processes();
         return finish("failed", "ShroudForge's startup preparation failed (startup asset mods or its DLL Manager)");
     }
