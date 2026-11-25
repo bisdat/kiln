@@ -25,7 +25,6 @@ import { useDistribution, useGame, useGameStatus, useRuntimeChanges } from "../a
 import { useUpdate, useUpdateFeed, useUpdateStore } from "../api/update";
 import { buildLabel } from "../api/channel";
 import { Button, IconButton, ProgressBar, toast, useTasks, waitTask } from "../ui";
-import { useKilnInstall } from "./firstRun";
 import { updateGame } from "./runtimeChange";
 import { useLaunchMemo } from "./play";
 import { useStartWarnings } from "./sfiWarnings";
@@ -188,20 +187,18 @@ function useApplyAfterUpdate(s: UpdateStatus | null): ApplyPlan {
   const { game } = useGame();
   const to = s?.justUpdated?.to ?? null;
   const gs = useGameStatus(game?.id);
-  const k = useKilnInstall(to ? game : null);
   const change = useRuntimeChanges((x) => (game ? x.last[game.id] : undefined));
   const next = to ? runtimeToApply(gs.data, s?.shippedRuntime) : null;
   const wait = to && game ? applyWait(gs.data) : null;
   const applying = change?.state === "running";
-  const bundles = k.bundles;
   useEffect(() => {
     if (!to || !game || !next || wait || applying) return;
     const key = applyKey(to, game.id);
     if (applied.has(key)) return;
     applied.add(key);
-    void updateGame(qc, game, bundles, next, t("shell.updateNotice.appliedLead", { build: buildLabel(to) }))
+    void updateGame(qc, game, next, t("shell.updateNotice.appliedLead", { build: buildLabel(to) }))
       .then((ok) => { if (ok) api.updateAck().catch(() => {}); });
-  }, [to, game, next, wait, applying, bundles, qc]);
+  }, [to, game, next, wait, applying, qc]);
   return { next, wait, applying };
 }
 
@@ -288,7 +285,6 @@ function JustUpdated({ s, apply, onClose }: { s: UpdateStatus; apply: ApplyPlan;
   const qc = useQueryClient();
   const { game } = useGame();
   const gs = useGameStatus(game?.id);
-  const k = useKilnInstall(game);
   const u = s.justUpdated!;
   const rt = gs.data?.runtime;
   const running = !!gs.data?.running;
@@ -299,7 +295,7 @@ function JustUpdated({ s, apply, onClose }: { s: UpdateStatus; apply: ApplyPlan;
   const ack = () => { api.updateAck().catch(() => {}); onClose(); };
   const onUpdateGame = async () => {
     if (!game || !next) return;
-    if (await updateGame(qc, game, k.bundles, next)) ack();
+    if (await updateGame(qc, game, next)) ack();
   };
   return (
     <Card title={t("shell.updateNotice.updatedTo", { build: buildLabel(u.to) })} onDismiss={ack}>

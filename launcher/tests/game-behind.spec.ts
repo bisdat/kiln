@@ -11,6 +11,7 @@ import { join } from "node:path";
 const SHOTS = process.env.SHOTS_DIR || join(import.meta.dirname, "..", "..", ".out", "launcher", "shots");
 const HAS = "0.2.0-dev+20261104.0f1ffa6"; // the mock game's Kiln
 const NEXT = "0.2.1-dev+20261120.beef001"; // a newer bundle, imported by the test
+const BETA = "0.2.2-dev+20261122.cafe002"; // a test build's Kiln still in the Library, newer than the launcher's
 const SENTENCE = "This game has Kiln 0.2.0-dev (20261104); this launcher has Kiln 0.2.1-dev (20261120).";
 
 async function open(page: Page, query = "") {
@@ -27,9 +28,11 @@ const game = (page: Page, fn: string, ...args: unknown[]) =>
   page.evaluate(([f, a]) => (window as unknown as { __kilnMock: Record<string, (...x: unknown[]) => unknown> }).__kilnMock[f as string](...(a as unknown[])), [fn, args] as const);
 const upd = (page: Page, fn: string, ...args: unknown[]) =>
   page.evaluate(([f, a]) => (window as unknown as { __kilnUpdateMock: Record<string, (...x: unknown[]) => unknown> }).__kilnUpdateMock[f as string](...(a as unknown[])), [fn, args] as const);
+const importBundle = (page: Page, version: string) =>
+  page.evaluate(async (n) => { await (await import("/src/api/commands.ts")).runtimeImport(`/home/player/Downloads/kiln-runtime-${n}.zip`); }, version);
 /** The launcher has a newer Kiln than the game: the bundle in its Library and the game's status offering it. */
 async function behind(page: Page, shipped = false) {
-  await page.evaluate(async (n) => { await (await import("/src/api/commands.ts")).runtimeImport(`/home/player/Downloads/kiln-runtime-${n}.zip`); }, NEXT);
+  await importBundle(page, NEXT);
   if (shipped) await upd(page, "set", { shippedRuntime: NEXT });
   await game(page, "setUpgradeAvailable", NEXT);
 }
@@ -127,4 +130,22 @@ test("no banner after a switch back (its own line) nor in a test build of the la
   await expect(page.getByTestId("channel-notice")).toContainText("This launcher is a test build");
   await page.waitForTimeout(500);
   await expect(banner(page)).toHaveCount(0);
+});
+
+test("after its install the banner offers no other Kiln of the Library: the backend's next status says what is on offer", async ({ page }) => {
+  await open(page);
+  // a test build's newer Kiln left in the Library (after a switch back): a release build never offers it
+  // (src-tauri state.rs runtime_policy), so Play must not offer it either while the fresh status is on its way
+  await importBundle(page, BETA);
+  await behind(page);
+  await expect(page.getByTestId("game-behind")).toHaveText(SENTENCE);
+  // the statuses after the install answer late, as the backend's full check of the game folder does
+  for (let i = 0; i < 12; i++) await game(page, "planCommand", "game_status", { gate: "fresh-status" });
+  await button(page).click();
+  await expect(page.locator(".k-toast", { hasText: `Kiln ${NEXT} installed` })).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(500);
+  await expect(banner(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "update ready" })).toHaveCount(0);
+  await game(page, "openGate", "fresh-status");
+  expect(await game(page, "installs")).toEqual([NEXT]);
 });

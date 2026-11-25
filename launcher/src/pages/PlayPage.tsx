@@ -441,7 +441,6 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
 function GameBehindBanner({ game, behind }: { game: GameInstall; behind: GameBehind }) {
   const t = useT();
   const qc = useQueryClient();
-  const k = useKilnInstall(game);
   const update = useUpdate();
   const change = useRuntimeChanges((x) => x.last[game.id]);
   const { has, next, hold } = behind;
@@ -451,7 +450,7 @@ function GameBehindBanner({ game, behind }: { game: GameInstall; behind: GameBeh
     // a click counts as this update's try: no install by itself follows a failed one (shell/UpdateNotice.tsx)
     const to = update?.justUpdated?.to;
     if (to) autoTried.add(applyKey(to, game.id));
-    if (await updateGame(qc, game, k.bundles, next) && to) api.updateAck().catch(() => {});
+    if (await updateGame(qc, game, next) && to) api.updateAck().catch(() => {});
   };
   return (
     <Banner tone="warn" title={t("play.banner.behindTitle")}
