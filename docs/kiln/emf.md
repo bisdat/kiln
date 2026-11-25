@@ -118,7 +118,7 @@ provenance and raw material hardness/health;
 `find_wall_ex(..., EMF_FIND_TERRAIN)` includes only player-placed terrain. Breaks never remove natural/unknown terrain,
 even with `EMF_BREAK_WORLD`. Damage uses native building cracks and caller-configured terrain health ×250 / 20-second
 healing. `EMF_BREAK_DROPS` still refuses the whole request (id 0, the documented unavailable reason, no callback).
-`EMF_MARKER_BAR` remains unavailable. Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
+Since 0.2.0-dev.31.13 `EMF_MARKER_BAR` is drawn as ten cells after the marker's text (below). Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
 cleanup just outside the box. Ruin protection still shrinks building spheres as EMF does; terrain keeps the original
 radius and its own natural/unknown-cell protection. Spheres crossing a grid edge skip only the outside cells;
 wholly outside or unloaded spheres are successful no-ops. A non-fault refusal fails only that request, not later
@@ -163,8 +163,11 @@ Kiln does not carry every function EMF added since. Carried: chat lines without 
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
 since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the server applies to a creature, player
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
-Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
-language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
+Kiln yet, and the mod's log says so once) and, since 0.2.0-dev.31.13, markers (`marker_set` ... `marker_unsend`, Lua
+`emf.marker` ... `emf.unsend_marker`, and v47's bar) on Kiln's own marker service: a world label, Kiln's compass strip
+for the edge arrow, and the game's map with one of its icons; the mapping and what differs are in
+[emf-parity.md](emf-parity.md#markers-on-kiln-v33-and-v47s-bar). Not yet: player join/leave/death events, item names and the game's
+language, character names, changing hits (`on_hit_before`, hit rules), buffs, map clicks and map actions, canvases and the
 minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
 and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
@@ -173,9 +176,13 @@ says once per mod and function `emf: <mod> called <fn>, not supported (not avail
 
 What that means for EMF's own mods of 0.6.8, read from their source (not seen with a player):
 - **minimap** draws nothing (`emf.canvas`, `emf.player_view` and `emf.map_markers` are not carried).
-- **Beastmaster**: its markers sent to players (`emf.send_marker`), its buff reads and removals (`emf.buffs`,
-  `emf.remove_buff`) and its reads of `emf.player_view` and `emf.enemy_moving` give nothing; the rest runs as
-  before.
+- **Beastmaster**: since 0.2.0-dev.31.13 its markers (`/beastmaster markers on`, `/beastmaster stable_markers on`)
+  show on Kiln alone: each beast you have out gets its name and its health as ten cells (`Rex [########..]`) over its
+  head, following it, on Kiln's compass strip (direction and distance) and on the map as one of the game's pin icons;
+  the stables show on the map, and within 200 m in the world. Players who joined need Kiln 0.2.0-dev.31.12 or later
+  on their own game (not EMF; Beastmaster there is not needed); a player without Kiln sees none. Its buff reads and
+  removals (`emf.buffs`, `emf.remove_buff`) and its reads of `emf.player_view` and `emf.enemy_moving` still give
+  nothing; the rest runs as before.
 - **teleports**: the map action (Shift and hold on the map) is not offered and it cannot look the ground up for a
   spot (`map_action`, `ground_at`); its commands work as before.
 
@@ -347,8 +354,7 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - Turned spawns: on a disposable world, ask a v47 mod to spawn a door/target at yaw 0 and 90 degrees with the
   same extra components. Check both the visible facing and a creature's interaction with the target, not just its
-  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below; marker bars
-  still log their unavailable answer without changes.
+  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,
   with the same mods in your own game. You stay connected after 60 s; `kiln.log` has `EMF mods check: against the
   server's mods: same mods`. With a mod missing on your side that the server requires, one note names it.

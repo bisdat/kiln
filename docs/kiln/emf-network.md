@@ -102,8 +102,9 @@ and unfinished hellos, a beacon worded for servers with content mods or a refusi
 [MIT protocol implementation](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core/net).
 Upstream 0.6.14 to 0.6.20 leaves every `src/core/net` and mod-check source file unchanged (0.6.20's core changes are path queries only). The separate
 `emf/markers` payload does grow: optional numeric JSON key `b` carries the bar when `EMF_MARKER_BAR` is set; older
-cores ignore it, and a flag without `b` is cleared. Kiln does not carry marker send/receive or bars yet, so that
-payload extension is not implemented here.
+cores ignore it, and a flag without `b` is cleared. Kiln carries EMF's markers and bars since 0.2.0-dev.31.13, on its
+own marker service ([kiln.markers](services/markers.md)), not on `emf/markers`: neither that payload nor its bar key is
+spoken, and a player who runs EMF without Kiln gets no marker from a Kiln server (one with Kiln gets them all).
 The copied implementation is attributed in `native/plugins/emf/src/net/`; its license is `licenses/EMF-LICENSE.txt`.
 
 `native/plugins/emf/tests/run.sh` checks the frozen ABI, production adapters, upstream wire peer, binary fragments,
