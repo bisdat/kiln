@@ -87,7 +87,7 @@ typedef struct KilnSkillsClientState {
     uint32_t reserved1;       /* 36 */
     uint64_t step;            /* 40: the client world's step of the copy */
     int64_t age_ms;           /* 48: since the copy was taken */
-    char detail[160];         /* 56: why it is off, in words; "" when it works */
+    char detail[160];         /* 56: why it is off; while on with no copy yet, why none was taken; "" else */
 } KilnSkillsClientState;      /* 216 */
 
 typedef struct KilnSkillsClientApi {

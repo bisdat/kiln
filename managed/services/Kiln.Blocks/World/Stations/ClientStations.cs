@@ -293,7 +293,8 @@ public static unsafe class ClientStations
 /// <param name="Rows">Stations in the copy.</param>
 /// <param name="Step">The client world's step of the copy (0: none yet).</param>
 /// <param name="Age">Since the copy was taken; null when there is none.</param>
-/// <param name="Detail">Why it is off, in words; empty when it works.</param>
+/// <param name="Detail">Why it is off, in words; while it is on and has no copy yet, why none was taken (the cache not
+/// in the client world yet, for one); empty otherwise.</param>
 public readonly record struct ClientStationsStatus(bool On, bool World, bool Copying, int Rows, ulong Step, TimeSpan? Age, string Detail);
 
 /// <summary>One production station as the game client's own station cache has it (<see cref="ClientStations"/>). Since
