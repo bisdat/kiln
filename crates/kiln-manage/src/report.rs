@@ -2007,6 +2007,25 @@ pub fn build(input: &ReportInput) -> Report {
                 failed.push(format!("{id} ({}): {}", kind_name(e.kind), why.as_deref().unwrap_or("no reason given")));
             }
         }
+        // 0.2.0-dev.31.12: a mod the profile has off that ran all the same, from a folder of the player's that nothing could
+        // skip (kiln-eml's `own-loader` row "… although it is off in the profile: …"; kiln-shroudforge's `profileOff`)
+        let ran_off: Vec<String> = match e.kind {
+            ModKind::ShroudForge => st.get("profileOff").and_then(|v| v.as_array()).into_iter().flatten()
+                .filter(|r| r.get("skipped").and_then(|b| b.as_bool()) == Some(false)).filter_map(|r| jstr(r.get("id"))).collect(),
+            _ => st.get("mods").and_then(|v| v.as_array()).into_iter().flatten()
+                .filter(|m| jstr(m.get("state")).as_deref() == Some("own-loader")
+                    && jstr(m.get("reason")).is_some_and(|r| r.contains(" although it is off in the profile: ")))
+                .filter_map(|m| jstr(m.get("id"))).collect(),
+        };
+        if !ran_off.is_empty() {
+            cx.find("off-but-runs", Level::Warning, format!(
+                "{} ran at the last start although the profile has {} off: {}. {} in a folder of the player's own, which Kiln never \
+                 writes into, and nothing skipped {}. The lines under {} in \"The last start\" say why and how to turn {} off.",
+                plural(ran_off.len(), &format!("{} mod", kind_name(e.kind)), &format!("{} mods", kind_name(e.kind))),
+                if ran_off.len() == 1 { "it" } else { "them" }, ran_off.join(", "),
+                if ran_off.len() == 1 { "It is" } else { "They are" }, if ran_off.len() == 1 { "it" } else { "them" },
+                e.plugin, if ran_off.len() == 1 { "it" } else { "each" }));
+        }
         if stood_aside(st) && let Some((id, engine, file)) = native_loaders.iter().find(|(_, en, _)| Some(*en) == e.kind.engine()) {
             cx.find("native-loader", Level::Problem, format!("{} stood aside at the last start: the profile's {}.",
                 e.plugin, crate::profile::native_loader_warning(id, *engine, file)));

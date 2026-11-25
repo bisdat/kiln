@@ -1272,6 +1272,31 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     assert!(ids(&r).contains(&"own-loader") && !r.findings.iter().any(|x| x.id == "eml-under-shroudforge"), "{:?}", ids(&r));
 }
 
+/// 0.2.0-dev.31.12, a player's report: a folder of his own in ShroudForge's mods folder, of a mod his profile had off, ran
+/// while the summary said "disabled: switched off in the profile". Skipped now when Kiln hosts ShroudForge; where nothing
+/// could skip it, kiln-eml's row says it runs (`own-loader`) and the summary has a warning naming it. A skipped row is no
+/// finding.
+#[test]
+fn a_mod_that_is_off_but_ran_from_the_players_own_folder_is_a_warning() {
+    const WHY: &str = "ShroudForge owns startup asset patching and runs EML packages in its mods folder";
+    let f = Fx::healthy("off-but-runs");
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"installed","runtime":"running",
+        "profileOff":[{"id":"glide-boost","package":"glide-boost","path":"S:\\mods\\glide-boost","own":true,"skipped":false}]}"#);
+    let row = |state: &str, reason: &str| format!(r#"{{"pid":412,"phase":"aside","aside":"{WHY}","mods":[{{"id":"quiver-slots","state":"{state}","reason":"{reason}"}}]}}"#);
+    f.w("kiln/state/eml.json", row("own-loader", "runs under ShroudForge (hosted by Kiln) although it is off in the profile: it is your own folder S:/mods/quiver-slots").as_bytes());
+    let r = build(&f.input());
+    let n = finding(&r, "off-but-runs");
+    assert_eq!(n.level, Level::Warning);
+    assert!(n.text.contains("quiver-slots") && n.text.contains("ran at the last start although the profile has"), "{}", n.text);
+    assert!(r.findings.iter().any(|x| x.id == "off-but-runs" && x.text.contains("glide-boost")), "{:?}", ids(&r));
+    // skipped: nothing to warn about
+    f.w("kiln/state/eml.json", row("disabled", "quiver-slots is off in the profile: your own folder S:/mods/quiver-slots is skipped this start; Kiln leaves its files as they are").as_bytes());
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"bundled","runtime":"running",
+        "profileOff":[{"id":"glide-boost","package":"glide-boost","path":"S:\\mods\\glide-boost","own":true,"skipped":true}]}"#);
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", ids(&r));
+}
+
 /// Review of 6a78171d: two files of one OLDER start said "hosted" and "aside for ShroudForge" while neither plugin ran
 /// in the last start; and a file without a pid stood for any start. Neither proves anything about the last start, so
 /// neither takes the place of the own-loader finding.

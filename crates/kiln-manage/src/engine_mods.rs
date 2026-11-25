@@ -2939,10 +2939,13 @@ fn retain_off(rep: &mut PlaceReport, tag: String, path: &Path, reason: impl Into
 }
 
 /// A profile entry the player's own folder serves (`own`): Kiln leaves the folder alone and places nothing. Said once
-/// per activation in plain words ([`PlaceReport::own_notes`]); it is the player's installation, not a problem.
-fn own_folder(rep: &mut PlaceReport, tag: String, path: &Path, on: bool) {
+/// per activation in plain words ([`PlaceReport::own_notes`]); it is the player's installation, not a problem. `kind`:
+/// a ShroudForge folder of a mod that is off says what hosted ShroudForge does with it ([`own_off_in_shroudforge`]).
+fn own_folder(rep: &mut PlaceReport, tag: String, path: &Path, on: bool, kind: ModKind) {
     if on {
         rep.own_notes.push(format!("{tag}: the game uses your own folder {} for this mod; Kiln leaves it as it is and places no copy of its own.", path.display()));
+    } else if kind == ModKind::ShroudForge {
+        return own_off_in_shroudforge(rep, tag, path, true);
     } else {
         // off in the profile, but its loader may still run it from there: a safety note
         let note = format!("{tag}: your own folder {} stays as it is; Kiln never switches a folder it did not place.", path.display());
@@ -2952,13 +2955,30 @@ fn own_folder(rep: &mut PlaceReport, tag: String, path: &Path, on: bool) {
     rep.own.push(tag);
 }
 
+/// The player's own folder `path` in ShroudForge's mods folder serves the entry `tag`, which the profile has off, and
+/// ShroudForge may run it there (its own switch, which Kiln never writes). While Kiln hosts ShroudForge, its bundled
+/// runtime skips the folder at each start: kiln-shroudforge (ShroudForge entries) and kiln-eml (EML entries) name it
+/// to the runtime (0.2.0-dev.31.12, the fork's shroudforge_host_skip_packages). ShroudForge's own loader and an
+/// installed ShroudForge runtime take no such list and still run it. A safety note, in plain words. `adopt`: "Let Kiln
+/// manage this folder" is offered for it (ShroudForge folders only, [`adopt`]).
+fn own_off_in_shroudforge(rep: &mut PlaceReport, tag: String, path: &Path, adopt: bool) {
+    let note = format!("{tag}: it is off in the profile, and your own folder {} stays as it is (Kiln never writes into a folder it did not \
+        place). While Kiln hosts ShroudForge, Kiln's bundled runtime skips this folder at each start. ShroudForge's own loader, or your \
+        installed ShroudForge (\"Use my installed ShroudForge\"), still runs it while its own ShroudForge switch is on: to stop that, switch \
+        it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, {}or move the folder out of the mods folder.",
+        path.display(), if adopt { "choose \"Let Kiln manage this folder\" in Notes, " } else { "" });
+    rep.safety_notes.push(note.clone());
+    rep.own_notes.push(note);
+    rep.own.push(tag);
+}
+
 /// [`own_folder`] for an EML entry the player's own folder serves. `sf`: the folder is the one ShroudForge reads while it
 /// runs the EML mods, and ShroudForge runs a package there only while its switch is on, for this side. Kiln never writes
 /// into the player's folder, so when ShroudForge does not run it the note says why, and where to switch it on when a
 /// switch helps.
 fn own_eml_folder(rep: &mut PlaceReport, tag: String, path: &Path, sf: bool, server: bool) {
     use crate::shroudforge::SfOff;
-    let Some(off) = sf.then(|| crate::shroudforge::switched_off(path, server)).flatten() else { return own_folder(rep, tag, path, true) };
+    let Some(off) = sf.then(|| crate::shroudforge::switched_off(path, server)).flatten() else { return own_folder(rep, tag, path, true, ModKind::Eml) };
     let folder = path.display();
     rep.own_notes.push(match off {
         // the words promised on Nexus (shroudforge::HAND_EML_OFF), then the folder; Kiln never writes into it
@@ -3151,7 +3171,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 Err(e) => { retain_runs(&mut rep, tag(&m.id), &dst, e.message, still_runs(kind, m.enabled, marker_at(&receipts, &dst), Some(&want))); continue; }
             };
             if have.is_none() && (dst.exists() || (kind == ModKind::ShroudForge && crate::shroudforge::other_holder(&root, &src, &dst).is_some())) {
-                own_folder(&mut rep, tag(&m.id), crate::shroudforge::other_holder(&root, &src, &dst).as_deref().filter(|_| !dst.exists()).unwrap_or(&dst), m.enabled);
+                own_folder(&mut rep, tag(&m.id), crate::shroudforge::other_holder(&root, &src, &dst).as_deref().filter(|_| !dst.exists()).unwrap_or(&dst), m.enabled, kind);
                 continue; // In particular, never apply a ShroudForge switch to a player's folder.
             }
             if kind == ModKind::Set && !m.enabled {
@@ -3398,6 +3418,22 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                 let Some(own) = own.filter(|p| std::fs::symlink_metadata(p).is_ok_and(|x| x.is_dir()) && has_xhl_plugin_ini(p)
                     && !receipts.iter().any(|r| same_folder(&r.path, p)) && !targets.iter().any(|(_, _, d, _)| d == p)) else { continue };
                 if *xhl_core.get_or_insert_with(|| xhl_host(game_dir).available) { own_xhl_folder_off(&mut rep, tag(&m.id), &own); }
+            }
+        }
+        // The player's own folder of an EML mod the profile has off, in the folder ShroudForge reads, with ShroudForge's
+        // own switch on: Kiln never writes into it; what hosted ShroudForge does with it ([`own_off_in_shroudforge`]).
+        if placing && kind == ModKind::Eml && let Some(root) = root.as_ref().filter(|_| sf_root.is_some()) {
+            for m in list.iter().filter(|m| !m.enabled) {
+                let dst = root.join(&m.id);
+                let theirs = if dst.is_dir() {
+                    matches!(owned(game_dir, &receipts, &dst, kind, &m.id), Ok(None)).then(|| dst.clone())
+                } else {
+                    crate::library::path_of(dirs, &crate::library::LibraryRef { kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() })
+                        .ok().and_then(|src| same_mod_elsewhere(root, kind, &src, &dst))
+                };
+                let Some(own) = theirs.filter(|p| sf_reads(p) && crate::shroudforge::switched_off(p, server).is_none()
+                    && !receipts.iter().any(|r| same_folder(&r.path, p))) else { continue };
+                own_off_in_shroudforge(&mut rep, tag(&m.id), &own, false);
             }
         }
         for (m, src, dst, game_folder) in targets.iter().filter(|_| placing) {

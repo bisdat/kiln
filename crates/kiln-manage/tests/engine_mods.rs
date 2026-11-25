@@ -1617,6 +1617,13 @@ fn a_players_own_folder_of_a_mod_that_is_off_is_a_safety_note() {
     assert_eq!(a.safety_notes.len(), 1, "{a:?}");
     assert!(a.safety_notes[0].contains("stays as it is") && a.warnings.contains(&a.safety_notes[0]), "{a:?}");
     assert_eq!(serde_json::to_value(&a).unwrap()["safetyNotes"][0], serde_json::json!(a.safety_notes[0]));
+    // 0.2.0-dev.31.12 (a player's report: such a folder ran under Kiln-hosted ShroudForge): what happens to it and how
+    // to stop it where Kiln cannot
+    let note = &a.safety_notes[0];
+    assert!(note.starts_with("shroudforge:hoardershelper: it is off in the profile, and your own folder "), "{note}");
+    assert!(note.contains("Kiln never writes into a folder it did not place") && note.contains("Kiln's bundled runtime skips this folder at each start"), "{note}");
+    assert!(note.contains("Mods > ShroudForge") && note.contains("Let Kiln manage this folder") && note.contains("move the folder out"), "{note}");
+    assert!(kiln_manage::shroudforge::read_mod(&game.path.join("mods/hoardershelper")).is_ok(), "the folder is still there");
 }
 
 // ---- "Let Kiln manage this folder": a player's own ShroudForge folder handed to Kiln (engine_mods::adopt) ----
