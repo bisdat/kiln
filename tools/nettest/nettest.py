@@ -1698,7 +1698,6 @@ struct Peer {
 };
 std::map<KilnPeer, Peer> g_peers;
 std::map<uint64_t, KilnPeer> g_lab_by_key;
-std::vector<int> g_retry;
 std::vector<Frame> g_inbox;
 std::vector<std::pair<KilnPeer, uint32_t>> g_pending_events;
 std::set<KilnPeer> g_cleared;
@@ -1710,11 +1709,23 @@ void recompute_withheld_locked() {}
 void deliver(const std::vector<Event>& events, std::vector<Frame>&, bool) { downs+=events.size(); }
 void client_set_up(bool, uintptr_t) {}
 void client_deliver() {}
+constexpr int KILN_WORLD_STARTED=1;
+// kiln.net's outbound gate (outbound.h): open unless a test closes it
+struct OutboundStub {
+    bool shutdown=false, down=false;
+    size_t queued=0;  // frames in the retry queue
+    bool server_open() const { return !shutdown && !down; }
+    bool server_world_down() const { return down; }
+    size_t server_world_stopped() { down=true; size_t n=queued; queued=0; return n; }
+    void server_world_started() { down=false; }
+} g_out;
+void log_traffic(const Peer&, const char*) {}
+constexpr bool is_local_machine(KilnPeer peer) { return (peer & KILN_NET_PEER_LAB) == 0 && (peer & 0x7F) == 0; }
 """
         harness += constant("kEndWaitMs") + "\n" + constant("kEndTries") + "\n" + struct("struct Ending {") + "\n"
         harness += "std::map<KilnPeer, Ending> g_ending;\n"
         for signature in ("bool gate_admit_locked(", "void forget_lab_locked(", "bool send_login_failure(", "KilnResult end_refused(",
-                          "void gate_pump(", "void refresh_game_peers(", "void server_stopped()", "void KILN_CALL on_world_event(",
+                          "void gate_pump(", "void refresh_game_peers(", "void server_stopped(", "void KILN_CALL on_world_event(",
                           "void watch_ending(", "KilnResult KILN_CALL t_kick("):
             harness += function(signature) + "\n"
         harness += '#define CHECK(test, message) do { if (!(test)) { std::fprintf(stderr, "%s\\n", message); return 1; } } while(0)\n'
@@ -1757,12 +1768,20 @@ int main() {
     CHECK(g_refused.empty(), "peer that vanished before UP retained its refusal");
     g_peers[0x81]=Peer{};
     g_refused.insert(0x81);
-    g_retry.push_back(1);
+    g_out.queued=1;
     g_held[0x81]=clock_ms;
     KilnWorldEvent stop{KILN_WORLD_STOPPING, KILN_WORLD_SERVER};
     on_world_event(&stop, nullptr);
     CHECK(g_gs==0 && !g_server_seen, "stopped server retained its game pointer");
-    CHECK(g_peers.empty() && g_held.empty() && g_refused.empty() && g_retry.empty(), "stopped server retained admission state");
+    CHECK(g_peers.empty() && g_held.empty() && g_refused.empty() && g_out.queued==0, "stopped server retained admission state");
+    CHECK(!g_out.server_open(), "the server role sends after the world's stop");
+    g_held[0x83]=clock_ms; g_let_in.insert(0x83);
+    gate_pump(1);
+    CHECK(admissions==1, "a held Gameplay Ready went on after the world's stop");
+    g_held.clear(); g_let_in.clear();
+    KilnWorldEvent start{KILN_WORLD_STARTED, KILN_WORLD_SERVER};
+    on_world_event(&start, nullptr);
+    CHECK(g_out.server_open(), "the next server world did not reopen the server role");
     CHECK(downs==1, "stopped server did not notify managed admission of DOWN");
     g_gate_mode=KILN_NET_GATE_HOLD_ALL;
     CHECK(!gate_admit_locked(0x81), "new server session inherited an admission exemption");

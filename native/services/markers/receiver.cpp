@@ -184,7 +184,17 @@ void Receiver::hello(uint64_t now) {
     caps_sent_ = m.capabilities;
     digest_sent_ = m.catalog_digest;
     ++hellos_;
-    next_hello_ = now + (hellos_ <= 5 ? 1000 : 5000);
+    next_hello_ = now + hello_interval(hellos_);
+}
+
+// 1 s five times, then 5 s doubling to at most 60 s: a server that never answers (an older Kiln whose markers refuse this
+// HELLO, a server world that is gone while its connection lingers) costs a HELLO a minute, not one every 5 s for ever.
+// A new link, a new client world or a lapsed lease start over at 1 s.
+uint64_t Receiver::hello_interval(uint32_t sent) {
+    if (sent <= 5) return 1000;
+    uint64_t ms = 5000;
+    for (uint32_t i = 6; i < sent && ms < 60000; ++i) ms *= 2;
+    return ms < 60000 ? ms : 60000;
 }
 
 void Receiver::send_catalog() {
