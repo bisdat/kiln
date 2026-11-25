@@ -247,6 +247,12 @@ int main() {
         CHECK(hk_build_apply(nullptr,list,0) && !seen_scope);                 // a give (refund) is never paid from links
         apply_caller=0x1400c6be9;CHECK(hk_build_apply(nullptr,list,1) && !seen_scope);  // place_prop's take: the game's
         apply_caller=g_build.blueprint_ret;g_build_off.store(true);CHECK(hk_build_apply(nullptr,list,1) && !seen_scope);
+        g_build_off.store(false);
+        // another module's code made the call (Building Tools 0.34.0 routes the blueprint program's payment through its own
+        // code): with no game call of ApplyMaterials behind it on this stack, the take is the game's, and kiln.log says so
+        apply_caller=0x7ff800001234;
+        CHECK(hk_build_apply(nullptr,list,1) && !seen_scope && logged("could not be traced to the game's call behind it"));
+        apply_caller=g_build.blueprint_ret;
         g_build_off.store(false);h_build_apply={};raw_links.clear();
     }
     // ---- the build menu's material counts: bag + base + links, once, whatever the gatherer rebuilt ----
@@ -312,6 +318,16 @@ int main() {
     build_server_pre(5);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1 && mid2_links[g_build_rows_body]==1);  // shared
     build_server_pre(6);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1);  // once
     t_set_build_stock(0,nullptr,0);
+    // ---- Building Tools 0.34.0 redirects the blueprint program's payment call and the cursor's stock count (their rel32
+    // only): the hooks follow the game's call, they do not stand down ----
+    g_build_apply_on.store(false);g_build_cursor_on.store(false);h_build_cursor={};h_build_apply={};mid2_links.clear();raw_links.clear();
+    lowered.clear();foreign={g_build.blueprint_ret-3,g_build.cursor_ret-2};logs.clear();
+    build_server_pre(9);
+    CHECK(!g_build_off.load() && g_build_apply_on.load() && g_build_cursor_on.load() && raw_links[g_build.apply]==1 &&
+          mid2_links[g_build.cursor_ret]==1 && !lowered.count("crafting.build_sources"));
+    CHECK(logged("build: the blueprint program's payment call (rva") && logged("build: the build cursor's stock-count call (rva") &&
+          logged("is redirected to another module's code: the building hooks follow the game's call through it"));
+    foreign.clear();
     // ---- the stand-down on foreign code (Cross-Base Storage's build check, say) ----
     // the menu's gatherer changed by another module: only the menu's counts stand down, the cursor stays
     g_build_rows_on.store(false);h_build_rows_body={};h_build_rows_done={};raw_links.clear();mid2_links.clear();foreign={g_build_rows_fn+8};logs.clear();

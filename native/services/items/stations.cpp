@@ -43,6 +43,7 @@
 #include "engine.h"
 #include "equip.h"
 #include "equip_logic.h"
+#include "kiln_call_site.hpp"
 #include "kiln_hook.hpp"
 #include "kiln_mid_frames.hpp"
 #include "../../core/src/hooks_protect_internal.h"
@@ -721,6 +722,18 @@ void lenders(KilnEntity target, int32_t base, const std::vector<uint32_t>& items
 // GetComponent reads. Every program that writes FactoryStation (the game's factory_station and player_crafting, Kiln's
 // kiln_items_stations) also writes Inventory, which the craft program writes too, so none runs while it does.
 
+// The game's call that ends at ret as the exe file has it calls target. Another module may have redirected the live call
+// (Building Tools 0.34.0 rewrites the blueprint program's payment call, and for its magic chests of all bases the build
+// cursor's stock count); kiln.hooks' read_original gives the file's bytes, else the live ones are read.
+bool call_matches(uintptr_t ret, uintptr_t target);
+bool call_matches_original(uintptr_t ret, uintptr_t target) {
+    const auto* h = kiln::hooks_v2(g_api);
+    uint8_t call[5] = {};
+    if (ret >= 5 && target && h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) &&
+        h->read_original && h->read_original(ret - 5, call, sizeof call) == KILN_OK)
+        return kiln::call_target(call, ret) == target;
+    return call_matches(ret, target);
+}
 bool call_matches(uintptr_t ret, uintptr_t target) {
     __try {
         if (!ret || !target) return false;
@@ -4470,34 +4483,112 @@ void hk_build_cursor(KilnRegisters& r) {
 // rules/ApplyMaterials(cost context, list, take): only the blueprint program's own take (build/BlueprintApplyRet) may pay
 // from building links; any other caller (props, undo, dismantling, terraforming, impact natives) and a give stay the game's.
 using BuildApplyFn = bool(__fastcall*)(void* ctx, void* list, uint8_t take);
+// Building Tools (0.34.0) redirects the blueprint program's call to its own code, which then calls ApplyMaterials (once
+// for the charge; its Replace refunds are gives): the caller is then in its DLL, and the game's call is found behind it
+// (kiln_call_site.hpp), so a placement it routes pays from the links as the game's own does. A take that cannot be
+// traced stays the game's payment (bag and base), with one kiln.log line per module.
+std::mutex g_build_foreign_mu;
+std::vector<std::string> g_build_foreign;
+void note_foreign_take(uintptr_t ret, uintptr_t site) {
+    char module[128];
+    kiln::module_name(ret, module, sizeof module);
+    const bool blueprint = site && site == g_build.blueprint_ret;
+    {
+        std::lock_guard lock(g_build_foreign_mu);
+        const std::string key = std::string(module) + (blueprint ? "|b" : site ? "|g" : "|-");
+        if (g_build_foreign.size() > 64 || std::find(g_build_foreign.begin(), g_build_foreign.end(), key) != g_build_foreign.end()) return;
+        g_build_foreign.push_back(key);
+    }
+    if (blueprint)
+        LOGI("build: %s makes the blueprint program's payments (its code calls ApplyMaterials for the game's call): block "
+             "placements through it pay from linked sources too", module);
+    else if (!site)
+        LOGW("build: a materials take from %s could not be traced to the game's call behind it: it pays from the bag and the "
+             "base only (the game's payment)", module);
+}
+uintptr_t build_payment_site(uintptr_t ret) {
+    const auto* h = kiln::hooks_v2(g_api);
+    const bool readable = h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) && h->read_original;
+    const uintptr_t site = kiln::game_call_of(ret, g_build.apply, [&](uintptr_t at, void* out, size_t n) {
+        return readable && h->read_original(at, out, n) == KILN_OK;
+    });
+    if (site != ret) note_foreign_take(ret, site);
+    return site;
+}
 bool __fastcall hk_build_apply(void* ctx, void* list, uint8_t take) {
     const uintptr_t ret = h_build_apply.caller();  // before the original
     struct Scope {
         bool saved = t_build_pay;
         ~Scope() { t_build_pay = saved; }
     } scope;
-    t_build_pay = take != 0 && ret == g_build.blueprint_ret && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
+    const bool candidate = take != 0 && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
+    const uintptr_t site = candidate && ret != g_build.blueprint_ret ? build_payment_site(ret) : ret;
+    t_build_pay = candidate && site == g_build.blueprint_ret;
     return h_build_apply.original<BuildApplyFn>()(ctx, list, take);
 }
 
+// True when the only bytes of [at, at + size) that are not the game's or Kiln's are the rel32 of the game's call that ends at
+// ret: another module redirected that call to its own code (Building Tools 0.34.0 does so with the blueprint program's
+// payment call and the build cursor's stock count). The cursor's hook reads the call's result whoever computed it; the
+// payment's scope finds the game's call behind the module's code (build_payment_site).
+bool only_call_redirected(const KilnHooksApi* h, uintptr_t at, size_t size, uintptr_t ret) {
+    if (!ret || !at || ret < at + 5 || ret > at + size) return false;
+    const auto ok = [&](uintptr_t a, size_t n) {
+        if (!n) return true;
+        uint32_t s = KILN_CODE_UNKNOWN;
+        uint64_t g = 0;
+        return h->code_state(a, n, &s, &g) == KILN_OK && (s == KILN_CODE_ORIGINAL || s == KILN_CODE_MANAGED);
+    };
+    return ok(at, ret - 4 - at) && ok(ret, at + size - ret);  // the E8 itself is the file's, its rel32 is not
+}
+std::mutex g_build_redirect_mu;
+std::vector<std::string> g_build_redirects;
+// Once per call site and module: which module the game's call now enters.
+void note_call_redirect_to(const char* what, uintptr_t ret, uintptr_t to) {
+    char module[128] = "another module";
+    if (to) kiln::module_name(to, module, sizeof module);
+    {
+        std::lock_guard lock(g_build_redirect_mu);
+        const std::string key = std::string(what) + "|" + module;
+        if (std::find(g_build_redirects.begin(), g_build_redirects.end(), key) != g_build_redirects.end()) return;
+        g_build_redirects.push_back(key);
+    }
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    LOGI("build: %s (rva 0x%llx) is redirected to %s's code: the building hooks follow the game's call through it", what,
+         static_cast<unsigned long long>(ret - 5 - base), module);
+}
+uintptr_t live_call_target(uintptr_t ret) {
+    __try {
+        return kiln::call_target(reinterpret_cast<const uint8_t*>(ret - 5), ret);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
 // Foreign code on what the building hooks read or rely on: the cursor's stock-count call and the count function (e.g.
 // Cross-Base Storage's build check), ApplyMaterials' entry and take, the blueprint program's call. Named once in kiln.log.
+// A redirect of the cursor's or the blueprint program's call alone is followed, not stood down for (only_call_redirected).
 bool build_code_ok(bool cursor, bool payment, PreviewCodeRefusal* why) {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
         why->name = "kiln.hooks' code-state check";
         return false;
     }
-    struct Dep { uintptr_t at; size_t size; const char* name; bool want; };
-    for (const Dep& d : {Dep{g_build.cursor_ret ? g_build.cursor_ret - 98 : 0, 98 + 6, "the build cursor's stock-count call", cursor},
-                         Dep{g_build.stock_fn, 0x40, "the base stock count (build check)", cursor},
-                         Dep{g_build.apply, 0x40, "ApplyMaterials", payment},
-                         Dep{g_build.paid ? g_build.paid - 17 : 0, 17 + 13, "ApplyMaterials' inventory payment call", payment},
-                         Dep{g_build.blueprint_ret ? g_build.blueprint_ret - 17 : 0, 17 + 4, "the blueprint program's payment call", payment}}) {
+    // call: the return address of the game's call in the range whose rel32 another module may redirect
+    struct Dep { uintptr_t at; size_t size; const char* name; bool want; uintptr_t call; };
+    for (const Dep& d : {Dep{g_build.cursor_ret ? g_build.cursor_ret - 98 : 0, 98 + 6, "the build cursor's stock-count call", cursor, g_build.cursor_ret},
+                         Dep{g_build.stock_fn, 0x40, "the base stock count (build check)", cursor, 0},
+                         Dep{g_build.apply, 0x40, "ApplyMaterials", payment, 0},
+                         Dep{g_build.paid ? g_build.paid - 17 : 0, 17 + 13, "ApplyMaterials' inventory payment call", payment, 0},
+                         Dep{g_build.blueprint_ret ? g_build.blueprint_ret - 17 : 0, 17 + 4, "the blueprint program's payment call", payment,
+                             g_build.blueprint_ret}}) {
         if (!d.want) continue;
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
         const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+        if (rc == KILN_OK && state == KILN_CODE_FOREIGN && only_call_redirected(h, d.at, d.size, d.call)) {
+            note_call_redirect_to(d.name, d.call, live_call_target(d.call));
+            continue;
+        }
         if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
             *why = {d.name, d.at, d.size, state, rc};
             return false;
