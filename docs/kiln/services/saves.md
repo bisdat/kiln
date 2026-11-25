@@ -626,11 +626,12 @@ known without that PC.
 
 What changed is what it means: a world write that goes ahead of a writer that is only slow is a delay, not an error
 (above), and player storage says the same (`player-storage: world generation N was written before its storage reached
-the disk ...` once per world session, at Warn, its first catch-up at Info, a summary at most every 5 minutes). Durability
+the disk ...` once per world session, at Warn, its first catch-up at Info, a summary at most every 5 minutes and when
+the world closes). Durability
 is unchanged: a crash in such a window loads the newest usable older generation, the pairs stay in memory and the next
 save retries, and the carried copy waits for a save whose staging is on disk in time, as before; `saves.player_storage`
 and `Saves.PlayerStoragePersistenceFailure` no longer report a fault for it. A staging that cannot be written is still
-an error, and so is one still not on disk 2 minutes after its world write.
+an error, and so is one still not on disk 2 minutes after its world write (however often the world saves meanwhile).
 
 What a player can try (only on that kind of PC, and only if they want to: it lowers protection): find out which security,
 backup or sync tool watches the game's folder, and as a test exclude only `<game>\kiln\data\worlds` (Kiln's mod data:
