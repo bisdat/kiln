@@ -1107,7 +1107,8 @@ rebuilds is zeroed first (`mov [r15-0x630],rbp` at `0x40e694`: its row count), t
 stock map's `u16` (`0x40ee46`, return `0x40ee4b`). `0x40c010` finds a row by item and adds the count at `+0x10` of a
 24-byte row (`0x40c0f4`). With `currentOnly` only the current group is rebuilt; the others keep their rows. CBS swaps the
 base's stock list for its merged one around the count rebuild (`0x46f460` on this build, "menu counts" in its log). Kiln
-wraps the gatherer instead: before it, each row that still shows exactly what Kiln wrote gets the game's value back; after
+wraps the gatherer instead, from inside (its mid hooks after the prologue and at the epilogue, the same two sites as
+kiln-tools' picker, docs/re/building.md 1.2.2; an entry hook until 0.2.0-dev.31.13): before the body, each row that still shows exactly what Kiln wrote gets the game's value back; after
 it, the first row of each item in the building snapshot gets the links' count added, and both values are noted per
 (selector, group, item). So a rebuilt row gets the links once, a kept row is not raised twice, a row the game changed in
 between keeps the game's value plus the links. A row that cannot be read stands the menu's half down (a fault guard). A

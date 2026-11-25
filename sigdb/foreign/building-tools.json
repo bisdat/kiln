@@ -261,7 +261,7 @@
       "source": "src/main.cpp SIG_PAY_PLACE",
       "feature": "creative building's payment of a placement",
       "kiln": {
-        "build/BlueprintApplyRet": "not hooked: the return address kiln-items compares ApplyMaterials' caller with. OPEN (other way round, from the code, not seen in a game): Building Tools redirects this call and the other building calls of ApplyMaterials (PayCost) to its own code, which then calls ApplyMaterials; Kiln's hook there sees Building Tools' code as the caller, so kiln-rules' building cost scaling (BuildCost, BuildRefund) and kiln-items' building-link payment, which recognise the building programs by that caller, would not apply while Building Tools runs"
+        "build/BlueprintApplyRet": "not hooked: the return address kiln-items compares ApplyMaterials' caller with. Building Tools redirects this call and the other building programs' calls of ApplyMaterials (PayCost) to its own code, which then calls ApplyMaterials, so Kiln's hook there sees its DLL as the caller. Since 0.2.0-dev.31.13 kiln-rules (BuildCost, BuildRefund) and kiln-items (building-link payments) find the game's call behind it on the stack (native/core/abi/kiln_call_site.hpp) and decide by that call; a payment they cannot trace stays the game's, logged once per module. Until then those rules did not apply while Building Tools ran (from its code, not seen in a game)"
       }
     },
     {
@@ -318,7 +318,7 @@
       "source": "src/main.cpp SIG_PAY",
       "feature": "creative building's payment",
       "kiln": {
-        "rules/ApplyMaterials": "hooked at its entry (kiln-rules' building costs, kiln-items' building links); Building Tools accepts a jump there (find_hookable, 7 bytes) and chains to it. See PAY_PLACE for what its redirected calls mean for Kiln's caller checks"
+        "rules/ApplyMaterials": "hooked at its entry (kiln-rules' building costs, kiln-items' building links); Building Tools accepts a jump there (find_hookable, 7 bytes) and chains to it. Its redirected calls of it reach Kiln's hook from its DLL; see PAY_PLACE for how Kiln finds the game's call behind them"
       }
     },
     {
