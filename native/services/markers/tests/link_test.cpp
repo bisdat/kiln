@@ -1338,6 +1338,42 @@ void respawn_keeps_target_layer() {
     kmk_test::end("link.respawn_keeps_target_layer: a player's per-player markers survive an entity id change on one connection");
 }
 
+void hello_backs_off() {  // a server that never answers (an older Kiln refusing this client's HELLO, a link gone silent)
+    kmk_test::begin();
+    World w;
+    Proc& p = w.client();
+    std::vector<uint64_t> hellos;  // when the client said HELLO
+    bool answer = false;
+    w.net.filter = [&](bool to_client, Conn&, uint32_t message, const std::vector<uint8_t>&) {
+        if (!to_client && message == wire::kHello) hellos.push_back(g_now);
+        return answer || to_client ? 1 : 0;  // the server never hears it
+    };
+    Conn& c = w.net.join(&p, 0x81, 101);
+    w.net.step(12000);  // 10 minutes
+    if (g_verbose) std::printf("    %zu HELLOs in 10 minutes\n", hellos.size());
+    CHECK(hellos.size() >= 9);   // the first five a second apart, then 5, 10, 20, 40 s
+    CHECK(hellos.size() <= 20);  // then one a minute: not one every 5 s for ever (124 in 10 minutes)
+    CHECK(hellos.size() >= 7 && hellos[1] - hellos[0] <= 1050 && hellos[5] - hellos[4] <= 1050);  // one a second at first
+    CHECK(hellos.size() >= 7 && hellos[6] - hellos[5] >= 4950 && hellos[6] - hellos[5] <= 5050);  // then after 5 s
+    CHECK(hellos.size() >= 2 && hellos[hellos.size() - 1] - hellos[hellos.size() - 2] >= 59950 &&
+          hellos[hellos.size() - 1] - hellos[hellos.size() - 2] <= 60050);  // capped at a minute
+    CHECK(p.receiver->info().phase == Receiver::Phase::Hello);
+    // the server answers again: the link comes up within a minute
+    answer = true;
+    w.net.step(1240);
+    Server::LinkInfo li;
+    CHECK(w.srv.server->link_info(0x81, &li) && li.welcomed);
+    CHECK(p.receiver->info().phase == Receiver::Phase::Linked);
+    // a new connection starts over at once, a second apart
+    w.net.leave(c);
+    answer = false;
+    hellos.clear();
+    w.net.join(&p, 0x81, 101);
+    w.net.step(30);
+    CHECK(hellos.size() >= 2 && hellos[1] - hellos[0] <= 1050);
+    kmk_test::end("link.hello_backs_off_while_the_server_does_not_answer");
+}
+
 int main(int argc, char** argv) {
     g_verbose = argc > 1 && std::strcmp(argv[1], "-v") == 0;
     g_digest_hex = synthetic_catalog()->digest_hex();
@@ -1361,5 +1397,6 @@ int main(int argc, char** argv) {
     error_rule();
     client_world_stop();
     bridge_rules();
+    hello_backs_off();
     return kmk_test::finish("link_test");
 }
