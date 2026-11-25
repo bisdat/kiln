@@ -483,6 +483,29 @@ class Outputs(unittest.TestCase):
         finally:
             t.close()
 
+    def test_native_carries_the_migrations(self):
+        """A synthetic breaking step 0.1.0 -> 0.2.0 (test fixture only): kiln.content gets its renames in schema.g.h."""
+        t = Tree()
+        try:
+            rg.update_lock(t.root)
+            s = copy.deepcopy(MINI)
+            s["version"] = "0.2.0"
+            s["fields"]["length"] = s["fields"].pop("size")
+            t.write(s)
+            rg.retire(t.root, "things.size", "0.2.0")
+            migration(t, "0.1.0", "0.2.0", ids={"game:old_thing": "game:new_thing"}, fields={"size": "length"})
+            rg.update_lock(t.root)
+            h = rg.render(rg.load(t.root), rg.read_lock(t.root))["native/services/content/registry/schema.g.h"]
+            self.assertIn('{"things", "0.1.0", "0.2.0", true, "size", "length"},', h)
+            self.assertIn('{"things", "0.1.0", "0.2.0", false, "game:old_thing", "game:new_thing"},', h)
+            self.assertLess(h.index('"size", "length"'), h.index("{nullptr, nullptr, nullptr, false, nullptr, nullptr}"), "rows before the end mark")
+        finally:
+            t.close()
+
+    def test_no_migration_no_rows(self):
+        h = self.out["native/services/content/registry/schema.g.h"]
+        self.assertIn("inline constexpr Rename kRenames[] = {\n    {nullptr, nullptr, nullptr, false, nullptr, nullptr},\n};", h)
+
     def test_check_finds_stale_files(self):
         rg.write_outputs(self.t.root, self.out)
         self.assertEqual(rg.stale(self.t.root, self.out), [])

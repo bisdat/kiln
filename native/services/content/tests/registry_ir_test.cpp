@@ -305,6 +305,70 @@ int main() {
         }
     }
 
+    // ---- id migrations at run time (registry-rollback): a synthetic schema change, test fixture only (no real bump) ----
+    // recipes 0.1.0 -> 0.2.0 renamed "time" to "craftTime", "ingredients" to "inputs", "ingredients[].amount" to "inputs[].count",
+    // the entry game:old_arrow to game:arrow; 0.2.0 -> 0.3.0 renamed "craftTime" (0.2's interim name) on, and items 0.1.0 -> 0.2.0
+    // renamed the entry game:stone_old to game:stone (a reference value a recipe edit names).
+    {
+        Schema m = s;
+        RegistrySpec& rec = m.registries["recipes"];
+        rec.version = "0.3.0";
+        for (FieldSpec& leaf : rec.fields["inputs"].element_fields)
+            if (leaf.name == "item") leaf.ref = "items";  // a reference leaf (the test schema leaves it unchecked elsewhere)
+        rec.fields["inputs[].item"].ref = "items";
+        rec.migrations = {{"0.1.0", "0.2.0", {{"game:old_arrow", "game:arrow"}}, {{"time", "craftTime"}, {"ingredients", "inputs"}, {"ingredients[].amount", "inputs[].count"}}},
+                          {"0.2.0", "0.3.0", {}, {{"craftTime", "duration"}, {"duration", "nowhere"}}}};
+        m.registries["items"].migrations = {{"0.1.0", "0.2.0", {{"game:stone_old", "game:stone"}}, {}}};
+        const std::string old_edits = R"([
+            {"registry": "recipes", "select": {"id": "game:old_arrow"}, "field": "time", "op": {"mul": 2}},
+            {"registry": "recipes", "select": "game:old_arrow", "field": "ingredients[1].amount", "op": 5},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "ingredients", "list": {"append": [{"item": "game:stone_old", "count": 4}]}},
+            {"registry": "recipes", "select": {"id": "game:old_*"}, "field": "craftTime", "op": {"add": 1}}])";
+        Batch old_b;
+        std::vector<Refusal> rf;
+        std::string err;
+        const bool ok = parse_batch(R"({"ir": 1, "mod": "a", "stage": "alter", "source": "content/old.json", "edits": )" + old_edits + "}", m, &old_b, &rf, &err);
+        CHECK(ok && rf.empty() && old_b.edits.size() == 4, "an edit written for recipes 0.1.0 is read whole by the 0.3.0 schema");
+        if (ok && old_b.edits.size() == 4) {
+            CHECK(old_b.edits[0].field == "duration" && old_b.edits[0].select.id == "game:arrow", "time -> craftTime -> duration through both steps; the id too");
+            CHECK(old_b.edits[1].field == "inputs[1].count" && old_b.edits[1].select.id == "game:arrow", "an element path: list and leaf renamed, the index kept");
+            CHECK(old_b.edits[2].field == "inputs" && old_b.edits[2].list_values.size() == 1 && old_b.edits[2].list_values[0].leaf("item") &&
+                      old_b.edits[2].list_values[0].leaf("item")->t == "game:stone", "a reference value is renamed by its own registry's step (items)");
+            CHECK(old_b.edits[3].field == "duration" && old_b.edits[3].select.id == "game:old_*", "an edit written for 0.2.0 starts at its own step; a glob is never renamed");
+        }
+        bool said = false;
+        for (const std::string& n : old_b.migrated) said = said || n.find("recipes.time -> recipes.duration (recipes schema 0.1.0 -> 0.3.0)") != std::string::npos;
+        CHECK(said && old_b.migrated.size() >= 6, "each rename is noted for kiln.log and registry.json");
+        // a field the running schema has is never renamed (old names are never reused, so a step naming one is a mistake)
+        Batch cur;
+        parse_batch(R"({"ir": 1, "mod": "a", "stage": "alter", "edits": )" + alter("recipes", "game:arrow", "duration", "op", "4") + "}", m, &cur, &rf, &err);
+        CHECK(cur.edits.size() == 1 && cur.edits[0].field == "duration" && cur.migrated.empty(), "a current name stays as it is");
+        // the migrated batch composes exactly as the same edits written with the 0.3.0 names
+        Batch new_b;
+        parse_batch(std::string(R"({"ir": 1, "mod": "a", "stage": "alter", "edits": [
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "duration", "op": {"mul": 2}},
+            {"registry": "recipes", "select": "game:arrow", "field": "inputs[1].count", "op": 5},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"append": [{"item": "game:stone", "count": 4}]}}]})"), m, &new_b, &rf, &err);
+        old_b.edits.pop_back();
+        const Result a = compose(m, b, {}, {mod("a", {old_b})}), c = compose(m, b, {}, {mod("a", {new_b})});
+        CHECK(!a.fields.empty() && a.fields.size() == c.fields.size() && a.refused.size() == c.refused.size(), "the same fields and refusals");
+        for (const auto& [ref, fo] : a.fields) {
+            const auto it = c.fields.find(ref);
+            CHECK(it != c.fields.end() && it->second.result == fo.result, ("migrated and current edits give the same " + ref.text()).c_str());
+        }
+        // a data pack's section goes through the same reader
+        std::vector<Batch> out;
+        CHECK(lower_section(json::parse(R"({"alter": [{"registry": "recipes", "select": {"id": "game:old_arrow"}, "field": "time", "op": 3}]})"),
+                            "pack", "1.0.0", "content/p.json", m, &out, &rf, &err) && out.size() == 1 && out[0].edits.size() == 1 &&
+                  out[0].edits[0].field == "duration" && !out[0].migrated.empty(),
+              "a data pack's registry section written for 0.1.0 is migrated too");
+        // without migrations nothing is renamed: the unknown name is refused as before
+        Batch plain;
+        std::vector<Refusal> rf2;
+        parse_batch(R"({"ir": 1, "mod": "a", "stage": "alter", "edits": )" + alter("recipes", "game:arrow", "time", "op", "4") + "}", s, &plain, &rf2, &err);
+        CHECK(plain.edits.empty() && rf2.size() == 1 && rf2[0].reason.find("no field \"time\"") != std::string::npos, "no migration: the old name is refused, with why");
+    }
+
     std::printf("registry-ir-test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

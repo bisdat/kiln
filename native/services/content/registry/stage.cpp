@@ -1055,6 +1055,16 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         }
         d.meta.order.push_back({in.id, versions[in.id], sha_hex(edits.dump()).substr(0, 16)});
     }
+    // the schemas' id migrations: what they renamed in the edits this start runs (ir.cpp parse_batch did the renaming)
+    json migrated = json::array();
+    size_t migrated_logged = 0;
+    for (const ModInput& in : inputs)
+        for (const Batch& b : in.batches)
+            for (const std::string& note : b.migrated) {
+                if (migrated.size() < 2000) migrated.push_back({{"mod", in.id}, {"source", b.source}, {"stage", stage_name(b.stage)}, {"note", note}});
+                if (++migrated_logged <= 50) d.log(0, "registry: migrated " + in.id + " " + (b.source.empty() ? std::string("(no source)") : b.source) + " " + note);
+            }
+    if (migrated_logged > 50) d.log(0, "registry: " + std::to_string(migrated_logged - 50) + " more migrated name(s): state/registry.json \"migrated\" lists them");
     // the edits refused before the stage are the report's too
     std::vector<Refusal> pre;
     for (const ModInput& in : inputs) pre.insert(pre.end(), in.refused.begin(), in.refused.end());
@@ -1092,6 +1102,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // A cache hit has not populated the model's entry locations yet. Locate boot targets before releasing its source.
     if (m) m->release();
     std::lock_guard lk(d.mu);
+    d.meta.migrated = std::move(migrated);
     d.meta.rollback = rb;
     if (rolled) {
         d.rollback = rb.value("plan", std::string());
