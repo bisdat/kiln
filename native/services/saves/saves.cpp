@@ -278,6 +278,9 @@ std::atomic<bool> g_can_snapshot_stage{false};
 // shutdown began at the latest. It is seen three ways, so no single optional signature decides it (review 1): the game's
 // own log line, a save request classified as the shutdown's (saves.reasons), the world's stop.
 ksaves::StageBarrier g_stage;
+// What kiln.log says about world writes that go ahead of a slow writer (stage_barrier.h WaitNotes, since 0.2.0-dev.31.5): a
+// delay, not an error; the first of a world session in full, later ones summed up at most every 5 minutes.
+ksaves::WaitNotes g_notes;
 using ksaves::kShutdownWait;
 using ksaves::kWorldWriteWait;
 constexpr std::string_view kShutdownLine = "Trigger gameflow shutdown";  // the game, ~100 ms before its shutdown save
@@ -302,6 +305,28 @@ void KILN_CALL on_game_log(int32_t, KilnStr text, void*) {  // Kiln's log thread
     if (!logged) return shutdown_begins("the game's shutdown line");  // no capture time: from its delivery
     shutdown_begins("the game's shutdown line",
                     SteadyClock::time_point(std::chrono::duration_cast<SteadyClock::duration>(std::chrono::nanoseconds(logged))), true);
+}
+
+// Kiln.Saves' writer is slow, not failing: what WaitNotes counted since its last line, when one is due (`force`: the
+// world stops). Any thread.
+constexpr const char* kSlowWriterLater =
+    "; a slow writer is a delay, not an error (a staging that cannot be written is logged as an error), and kiln.log says "
+    "when it catches up and sums up further delays at most every 5 minutes";
+
+void log_wait_summary(SteadyClock::time_point now, bool force = false) {
+    const auto s = g_notes.summary(now, force);
+    if (!s) return;
+    char ahead[256] = "";
+    if (s->waited + s->unwaited)
+        std::snprintf(ahead, sizeof ahead, "%u more world write(s) went ahead of Kiln.Saves' writer (%u after waiting, at most %.0f ms; "
+                      "%u without waiting while it was still behind)", s->waited + s->unwaited, s->waited, s->longest_wait_ms, s->unwaited);
+    char caught[160] = "";
+    if (s->caught)
+        std::snprintf(caught, sizeof caught, "%sthe writer caught up %u more time(s), at worst %.1f s after a world write went ahead",
+                      ahead[0] ? "; " : "", s->caught, s->slowest_catch_up_ms / 1000);
+    logf(KILN_LOG_WARN, "saves: Kiln.Saves' writer is still slow: in the last %.0f min %s%s%s; a crash in such a window loads an older "
+         "generation of mod data (a delay, not an error; summed up at most every 5 minutes)", std::max(1.0, s->minutes), ahead, caught,
+         g_stage.behind() ? "; it is behind now" : "");
 }
 
 std::atomic<uintptr_t> g_inst{0};
@@ -514,21 +539,31 @@ void __fastcall hk_write(uintptr_t save2, uintptr_t user) {
         }
         n_auto = reason == KILN_SAVE_REASON_AUTOSAVE ? g_autosaves_logged : 0;
     }
+    const auto now = SteadyClock::now();
     if (staged.needed) {
         const auto t = static_cast<unsigned long long>(staged.target), r = static_cast<unsigned long long>(staged.reached);
-        if (staged.off)
-            logf(KILN_LOG_WARN, "saves: the world write of revision %u did not wait for Kiln.Saves' writer, which is still "
-                 "behind since an earlier wait ran out (staging %llu of %llu on disk); a crash before it catches up loads "
-                 "an older generation of mod data", rev, r, t);
-        else if (!staged.caught)
-            logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead%s "
-                 "(staging %llu of %llu on disk); a crash before the writer finishes loads an older generation of mod data",
-                 rev, staged.ms, staged.capped ? " for the shutdown" : "", r, t);
-        else
+        // A world write ahead of the writer: the first of a world session in full, later ones counted (WaitNotes); one cut
+        // short by the shutdown is said every time.
+        if (staged.off) {
+            if (g_notes.went_ahead(staged, now) == ksaves::WaitNotes::Say::Full)
+                logf(KILN_LOG_WARN, "saves: the world write of revision %u did not wait for Kiln.Saves' writer, which is still "
+                     "behind since an earlier wait ran out (staging %llu of %llu on disk); a crash before it catches up loads "
+                     "an older generation of mod data%s", rev, r, t, kSlowWriterLater);
+        } else if (!staged.caught && staged.capped) {
+            logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead for "
+                 "the shutdown (staging %llu of %llu on disk); a crash before the writer finishes loads an older generation of "
+                 "mod data", rev, staged.ms, r, t);
+        } else if (!staged.caught) {
+            if (g_notes.went_ahead(staged, now) == ksaves::WaitNotes::Say::Full)
+                logf(KILN_LOG_WARN, "saves: the world write of revision %u waited %.0f ms for Kiln.Saves' writer and went ahead "
+                     "(staging %llu of %llu on disk); a crash before the writer finishes loads an older generation of mod data%s",
+                     rev, staged.ms, r, t, kSlowWriterLater);
+        } else
             logf(staged.ms > 250 ? KILN_LOG_INFO : KILN_LOG_DEBUG, "saves: the world write of revision %u waited %.1f ms "
                  "for Kiln.Saves' writer to put staging %llu on disk (on the Save2Thread; the server's steps went on)",
                  rev, staged.ms, t);
     }
+    log_wait_summary(now);
     if (result != 0)
         logf(KILN_LOG_WARN, "saves: world write #%llu FAILED (result %u, %s save #%llu); the game retries up to 4 times",
              static_cast<unsigned long long>(seq), result, reason_name(reason), static_cast<unsigned long long>(save_seq));
@@ -843,6 +878,7 @@ bool g_closed = false;  // tick thread
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
     if (ev->event == KILN_WORLD_STOPPING) {
+        log_wait_summary(SteadyClock::now(), true);  // what was counted of this world's delays, before it goes
         shutdown_begins("the world stops");
         drop_world("the game is closing it");
         g_closed = true;
@@ -850,6 +886,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
         if (ev->session > 1 && !g_closed) drop_world("a new server world started");
         g_closed = false;
         g_shutdown.world_started(SteadyClock::now());  // a game client hosts the next world: its saves wait with their own limit again
+        g_notes.world_started();                       // ... and its first delay is said in full again
     }
 }
 
@@ -924,9 +961,20 @@ KilnResult KILN_CALL t_set_pump_interval(uint32_t steps) {
     return KILN_OK;
 }
 
-KilnResult KILN_CALL t_stage_progress(uint64_t issued, uint64_t done) {
+KilnResult KILN_CALL t_stage_progress(uint64_t issued, uint64_t done) {  // the pump (issued), the writer's thread (done)
     if (issued) g_stage.issued(issued);
-    if (done) g_stage.done(done);
+    if (done) {
+        const auto c = g_stage.done(done);
+        if (c.caught_up) {  // after a world write went ahead without its staging: the first of a world session said, later ones counted
+            const auto now = SteadyClock::now();
+            const double ms = std::chrono::duration<double, std::milli>(now - c.went_ahead).count();
+            if (g_notes.caught_up(ms, now) == ksaves::WaitNotes::Say::Full)
+                logf(KILN_LOG_INFO, "saves: Kiln.Saves' writer caught up: staging %llu is on disk, %.1f s after the world write "
+                     "that waited for it went ahead; the next world writes wait for the writer again",
+                     static_cast<unsigned long long>(c.target), ms / 1000);
+            log_wait_summary(now);
+        }
+    }
     return KILN_OK;
 }
 

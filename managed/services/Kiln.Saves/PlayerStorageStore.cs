@@ -43,6 +43,11 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     private readonly Dictionary<uint, SaveWriter.StageJob> _stages = [];
     private readonly Dictionary<uint, string> _carriedBlocked = [];
     private readonly System.Collections.Concurrent.ConcurrentQueue<(uint Generation, bool Success)> _outcomes = new();
+    /// <summary>Generations whose newest staging could not be written (its tries failed): a world write of one is a failure.</summary>
+    private readonly HashSet<uint> _unwritten = [];
+    /// <summary>World writes that completed before their staging was on disk (since 0.2.0-dev.31.5): a delay, not a failure,
+    /// as long as the writer catches up (DurabilityLag). Tests give it their own clock.</summary>
+    internal DurabilityLag Lag { get; set; } = new(DurabilityLag.SystemClock);
     internal string? Failure { get; private set; }
     internal void Failed(string reason)
     {
@@ -73,7 +78,21 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     internal void PollWrites()
     {
         while (_outcomes.TryDequeue(out var result))
-            if (!result.Success) Failed($"pending generation {result.Generation} could not be written");
+        {
+            Say(Lag.Landed(result.Generation, result.Success));
+            if (result.Success) continue;
+            _unwritten.Add(result.Generation);
+            while (_unwritten.Count > 16) _unwritten.Remove(_unwritten.Min());
+            Failed($"pending generation {result.Generation} could not be written");
+        }
+        foreach (var (generation, age) in Lag.Stuck())
+            Failed($"world generation {generation} was written {age.TotalSeconds:F0} s ago and Kiln.Saves' writer has still not put its storage on disk");
+        Say(Lag.Summary());
+    }
+
+    private static void Say((LogLevel Level, string Text)? line)
+    {
+        if (line is var (level, text)) SavesRuntime.Log(level, text);
     }
     private sealed class Visit(EntityId player, PlayerStorageDocument document)
     {
@@ -98,6 +117,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         _visits.Clear(); _pending.Clear(); _committed.Clear(); _committedServer.Clear(); _pendingServer.Clear(); _stages.Clear(); _carriedBlocked.Clear();
         _instanceOwners.Clear(); _ordinaryHolders.Clear();
         while (_outcomes.TryDequeue(out _)) { }
+        _unwritten.Clear();
+        Lag.Clear();
         Failure = null;
     }
     internal string? Carried(CharacterKey character) => _committed.GetValueOrDefault(character);
@@ -507,7 +528,16 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         if (!_pending.TryGetValue(generation, out var pending)) return;
         if (!_stages.TryGetValue(generation, out var stage) || !Volatile.Read(ref stage.Written))
         {
-            Failed($"world generation {generation} completed before storage became durable (write failed or bounded barrier wait expired)");
+            // Durability as before in both cases: the pairs stay in memory, nothing undurable is carried, the next save retries.
+            if (stage is not null && !_unwritten.Contains(generation))
+            {
+                // The world write's bounded wait ran out while the writer still had this staging queued or being written: a
+                // delay, not a failure (since 0.2.0-dev.31.5). Said once per world session and summed up; it becomes a failure
+                // when its staging cannot be written (PollWrites) or is still not on disk after DurabilityLag.StuckAfter.
+                Say(Lag.Late(generation));
+                return;
+            }
+            Failed($"world generation {generation} completed before storage became durable ({(stage is null ? "no staging of it was tracked" : "its staging could not be written")})");
             return;
         }
         _pending.Remove(generation);
@@ -519,5 +549,6 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         foreach (var (character, json) in pending) _committed[character] = json;
         foreach (var older in _pending.Keys.Where(g => g < generation).ToArray())
         { _pending.Remove(older); _pendingServer.Remove(older); _carriedBlocked.Remove(older); }
+        _unwritten.RemoveWhere(g => g <= generation);
     }
 }
