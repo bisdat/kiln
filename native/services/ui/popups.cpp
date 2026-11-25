@@ -16,9 +16,12 @@
 // marks are drawn as before. A panel whose rectangle is not readable or not plausible (its first frame: the node has no
 // layout yet), and more than KILN_UI_POPUPS_MAX panels, set KILN_UI_POPUP_UNKNOWN: Kiln.Ui then hides every mark while
 // it lasts. Threads: the builder and the after-frame on the game's UI thread (a builder call outside a UI frame is not
-// counted); popups() on any (a mutex around a copy).
+// counted); popups() on any (a mutex around a copy). popups_install runs while the UI frame link is already in (game_install
+// hooks GameUiFrame first), so the layout is filled in before g_on says so (release / acquire): a UI frame never reads a
+// half-written layout.
 #include <windows.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -34,8 +37,9 @@ struct PopupLayout {
     uintptr_t begin = 0;
     int64_t subframe = 0, panel = 0, rect = 0;  // frame + subframe (the panel's frame), frame + panel -> node, node + rect
     int64_t popups = 0, error = 0;              // sys10 + popups + error: u8, the error popup (feature ui.error_popup)
-    bool on = false, error_on = false;
-} P;
+    bool error_on = false;
+} P;  // written by popups_install only while g_on is false; read on the UI thread after g_on's acquire
+std::atomic<bool> g_on{false};
 
 kiln::RawHook g_begin_hook;
 
@@ -101,48 +105,50 @@ bool feat(const char* n) { return g_api->feature(KilnStr{n, std::strlen(n)}); }
 }  // namespace
 
 bool popups_install() {
-    P = PopupLayout{};
+    g_on.store(false, std::memory_order_release);
     {
         std::lock_guard lk(g_mu);
         g_state = KilnUiPopups{};
     }
-    P.on = feat("ui.popups") && sym("ui/PopupWindowBegin", &P.begin) && cst("ui/popup.subframe", &P.subframe) &&
-           cst("ui/popup.panel", &P.panel) && cst("ui/node.rect", &P.rect);
+    PopupLayout l{};
+    bool on = feat("ui.popups") && sym("ui/PopupWindowBegin", &l.begin) && cst("ui/popup.subframe", &l.subframe) &&
+              cst("ui/popup.panel", &l.panel) && cst("ui/node.rect", &l.rect);
     // what the reads rely on: the panel's node is the child frame's second word, small offsets inside the frame and node
-    if (P.on && (P.subframe <= 0 || P.subframe > 0x1000 || P.panel != P.subframe + 8 || P.rect <= 0 || P.rect > 0x1000)) {
+    if (on && (l.subframe <= 0 || l.subframe > 0x1000 || l.panel != l.subframe + 8 || l.rect <= 0 || l.rect > 0x1000)) {
         logf(KILN_LOG_WARN, "ui: ui.popups constants look wrong on this build: Ui.Inventory marks ignore the game's popups");
-        P.on = false;
+        on = false;
     }
-    if (!P.on) {
+    if (!on) {
         logf(KILN_LOG_INFO, "ui: the game's popup panels are not read on this build (feature ui.popups off): "
                             "Ui.Inventory marks ignore them");
         return false;
     }
+    l.error_on = feat("ui.error_popup") && cst("ui/sys.popups", &l.popups) && cst("ui/popups.error", &l.error);
+    P = l;  // g_on is false: no UI frame reads it (hk_begin counts nothing before popups_frame_begin saw g_on)
     g_begin_hook.install(g_api, g_owner, P.begin, reinterpret_cast<void*>(&hk_begin), "ui/PopupWindowBegin");
     if (!g_begin_hook) {
         logf(KILN_LOG_WARN, "ui: hooking the game's popup-panel builder failed (%s): Ui.Inventory marks ignore the game's popups",
              g_begin_hook.error() ? g_begin_hook.error() : "?");
-        P.on = false;
         return false;
     }
-    P.error_on = feat("ui.error_popup") && cst("ui/sys.popups", &P.popups) && cst("ui/popups.error", &P.error);
     {
         std::lock_guard lk(g_mu);
         g_state.available = 1;
     }
+    g_on.store(true, std::memory_order_release);
     logf(KILN_LOG_INFO, "ui: the game's popup panels are read (error popup %s): Ui.Inventory marks step aside for them",
          P.error_on ? "on" : "off");
     return true;
 }
 
 void popups_frame_begin() {
-    if (!P.on) return;
+    if (!g_on.load(std::memory_order_acquire)) return;
     t_collect = Collect{};
     t_collect.active = true;
 }
 
 void popups_after_frame(uintptr_t sys10, uint64_t frame) {
-    if (!P.on) return;
+    if (!g_on.load(std::memory_order_acquire)) return;
     Collect c = t_collect;
     t_collect = Collect{};
     if (!c.active) c = Collect{};  // a frame that did not begin here (not seen): publish no panel rather than a stale one
@@ -169,6 +175,7 @@ KilnResult popups_state(KilnUiPopups* out) {
 
 #ifdef KILN_UI_POPUPS_TESTS
 void popups_reset_for_tests() {
+    g_on.store(false, std::memory_order_relaxed);
     P = PopupLayout{};
     t_collect = Collect{};
     std::lock_guard lk(g_mu);
