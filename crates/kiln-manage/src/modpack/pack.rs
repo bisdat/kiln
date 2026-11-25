@@ -1610,6 +1610,12 @@ pub struct PackPreview {
     pub optional: BTreeMap<String, bool>,
     /// The instance this pack would update (same pack id), if one is installed.
     pub instance: Option<String>,
+    /// What that instance's profile loads from its installed version and the Library lacks ([`lacking_of`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<Lacking>,
+    /// This file is the instance's installed version: [`repair`] can take the missing mods from it.
+    #[serde(default)]
+    pub installed_version: bool,
 }
 
 /// What the install preview shows (nothing is imported).
@@ -1626,7 +1632,9 @@ pub fn inspect(dirs: &DataDirs, zip_file: &Path, sha256: Option<&str>) -> Result
     let code = r.code.iter().cloned().collect::<Vec<_>>();
     let optional = r.index.mods.iter().filter(|m| m.dep == Dep::Optional).map(|m| (m.id.clone(), m.default.unwrap_or(true))).collect();
     let instance = instances(dirs)?.into_iter().find(|(_, i)| i.pack == r.index.id).map(|(p, _)| p);
-    Ok(PackPreview { index: r.index, sha256: r.sha256, size: r.size, missing, present, code, optional, instance })
+    let repair = instance.as_deref().and_then(|pid| lacking_of(dirs, pid).ok());
+    let installed_version = instance.as_deref().and_then(|pid| read_base(dirs, pid).ok()).is_some_and(|(base, _)| same_version(&base, &r.index));
+    Ok(PackPreview { index: r.index, sha256: r.sha256, size: r.size, missing, present, code, optional, instance, repair, installed_version })
 }
 
 // ================================================================================================= instances
@@ -2635,6 +2643,195 @@ pub fn uninstall(dirs: &DataDirs, pid: &str) -> Result<UninstallResult> {
         .chain(base.layer.iter().map(|l| (ModKind::Kiln, l.id.clone()))).collect();
     let unused = crate::library::unused(dirs)?.into_iter().filter(|r| ours.contains(&(r.kind, r.id.clone()))).collect();
     Ok(UninstallResult { profile: pid.to_string(), unused })
+}
+
+// ================================================================================================= repair
+
+/// What an instance's profile loads from its installed pack version that the Library lacks (removed from the Library,
+/// or edited so it no longer hashes to its name): the "Download missing mods" a pack profile offers. Counted as the
+/// profile has them: a part the profile lists switched on with the pack's hash. An optional mod the player switched off,
+/// a mod the player took out of the profile or gave another version, and a mod only a server uses (the profile never
+/// lists one) are not missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lacking {
+    /// The installed version (the base the parts come from).
+    pub version: String,
+    /// The mods and the layer (as `pack.<id>`) to download.
+    pub missing: Vec<LibraryRef>,
+    /// Their names as the pack gives them (the mod's id without one), in the order of `missing`.
+    pub names: Vec<String>,
+    /// Bytes to download (the stored archives' sizes the index gives; a pack file's own mods are read from the file).
+    pub download: u64,
+}
+
+impl Lacking {
+    pub fn is_empty(&self) -> bool {
+        self.missing.is_empty()
+    }
+    /// The mod and layer ids missing.
+    pub fn ids(&self) -> BTreeSet<String> {
+        self.missing.iter().map(|r| r.id.clone()).collect()
+    }
+}
+
+/// What a repair did: the parts imported back into the Library, and what still lacks (a Library entry edited in place
+/// keeps its record: the Library's own "changed" flow takes it over).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairResult {
+    pub profile: String,
+    /// The instance's version, unchanged.
+    pub version: String,
+    pub imported: Vec<LibraryRef>,
+    /// Bytes downloaded (0 for a pack file).
+    pub downloaded: u64,
+    /// Still missing after the repair.
+    pub left: Vec<LibraryRef>,
+}
+
+/// Whether the profile loads this part: listed with the same kind, id and hash, and switched on.
+fn profile_loads(profile: &Profile, kind: ModKind, id: &str, hash: &str) -> bool {
+    profile.mods.list(kind).iter().any(|m| m.id == id && m.hash == hash && m.enabled)
+}
+
+/// The installed version of an instance and the parts of it its profile loads that the Library lacks (the stored
+/// archive of each, from the base index: (id, file); a pack built locally names none).
+fn lacking_parts(dirs: &DataDirs, pid: &str) -> Result<(Instance, PackIndex, Vec<(String, LibraryRef, Option<StoredFile>)>)> {
+    let inst = instance(dirs, pid)?.ok_or_else(|| Error::not_found(format!("profile {pid} is not a Crucible instance")))?;
+    let profile = crate::profile::get(dirs, pid)?;
+    let (base, _) = read_base(dirs, pid)?;
+    let parts = parts(&base)
+        .into_iter()
+        .filter(|(id, lr, _)| {
+            // a mod only a server uses is never in a client's instance; the profile decides the rest
+            let server_only = base.mods.iter().any(|m| &m.id == id && m.kind == lr.kind && client_skips(m));
+            // the layer is hashed in full: a repair from Crucible puts it in the partial pack from the Library
+            // ([`assemble_for`] takes it from there only when it hashes to its name), and it is small
+            let is_layer = base.layer.as_ref().is_some_and(|l| &l.id == id && lr.kind == ModKind::Kiln);
+            let have = if is_layer { library_part(dirs, lr).is_some() } else { library_has(dirs, lr) };
+            !server_only && profile_loads(&profile, lr.kind, &lr.id, &lr.hash) && !have
+        })
+        .collect();
+    Ok((inst, base, parts))
+}
+
+/// Whether the Library has a mod as it was imported, read as the Library's own list reads it: its record names this
+/// kind, id, version and hash, its folder (a plugin's DLL) is there, and [`crate::library::changed_on_disk`] does not
+/// read it as changed (a full hash only when its manifest or folder is newer than its record; an engine mod's own
+/// output beside it is no change). Never every file of every mod: [`lacking_of`] runs for every pack profile Settings
+/// lists and with every preview.
+fn library_has(dirs: &DataDirs, r: &LibraryRef) -> bool {
+    let (Ok(rec), Ok(at), Ok(folder)) = (crate::library::record(dirs, r), crate::library::path_of(dirs, r), dirs.library_entry(r.kind, &r.id, &r.version, &r.hash)) else {
+        return false;
+    };
+    at.exists() && !crate::library::changed_on_disk(&folder, &rec)
+}
+
+/// [`Lacking`] of an instance (nothing written, nothing downloaded).
+pub fn lacking_of(dirs: &DataDirs, pid: &str) -> Result<Lacking> {
+    let (_, base, parts) = lacking_parts(dirs, pid)?;
+    // by kind and id: an EMF mod and a ShroudLink mod may both be called "expeditions"
+    let name = |lr: &LibraryRef| base.mods.iter().find(|m| m.id == lr.id && m.kind == lr.kind).and_then(|m| m.name.clone()).unwrap_or_else(|| lr.id.clone());
+    Ok(Lacking {
+        version: base.version.clone(),
+        names: parts.iter().map(|(_, lr, _)| name(lr)).collect(),
+        download: parts.iter().map(|(_, _, f)| f.as_ref().map_or(0, |f| f.size)).fold(0u64, u64::saturating_add),
+        missing: parts.into_iter().map(|(_, lr, _)| lr).collect(),
+    })
+}
+
+/// What a repair from Crucible needs to put the lacking parts together as a pack ([`assemble_for`]): the installed
+/// index, the lacking parts with their stored archives, and the installed overrides by sha256 (so no override is
+/// downloaded again).
+#[derive(Debug, Clone)]
+pub struct RepairParts {
+    pub index: PackIndex,
+    pub lacking: Vec<(String, StoredFile)>,
+    pub blobs: BTreeMap<String, Vec<u8>>,
+}
+
+impl RepairParts {
+    /// The mods an assembled repair pack leaves out: every mod that is not lacking, told by its stored file (two kinds
+    /// of mod may share an id); the layer is always in it, from the Library or its archive.
+    pub fn skip(&self) -> impl Fn(&PackMod) -> bool + '_ {
+        move |m: &PackMod| !m.file.as_ref().is_some_and(|f| self.lacking.iter().any(|(id, l)| id == &m.id && l.sha256 == f.sha256))
+    }
+}
+
+/// [`RepairParts`] of an instance. Refuses a lacking part the index names no stored archive for (a pack built locally:
+/// repair it from its file).
+pub fn repair_parts(dirs: &DataDirs, pid: &str) -> Result<RepairParts> {
+    let (_, base, parts) = lacking_parts(dirs, pid)?;
+    let (_, ov) = read_base(dirs, pid)?;
+    let mut lacking = Vec::new();
+    for (id, _, f) in parts {
+        lacking.push((id.clone(), f.ok_or_else(|| err(ErrorCode::Schema, format!("{id}: the index names no file for it")))?));
+    }
+    let blobs = ov.into_values().map(|b| (crate::hash::sha256_hex(&b), b)).collect();
+    Ok(RepairParts { index: base, lacking, blobs })
+}
+
+/// Two indexes of the same pack version: the same pack id and version, every part with the same kind, id and hash
+/// (Crucible's copy of the installed version may name its archives at other addresses).
+fn same_version(a: &PackIndex, b: &PackIndex) -> bool {
+    let key = |ix: &PackIndex| parts(ix).into_iter().map(|(id, lr, _)| (id, lr.kind, lr.hash)).collect::<BTreeSet<_>>();
+    a.id == b.id && a.version == b.version && key(a) == key(b)
+}
+
+/// Puts what an instance's profile loads from its installed version and the Library lacks back into the Library, from
+/// a pack file of that version (`zip_file`: the pack itself, or a partial pack [`assemble_for`] made of the lacking parts
+/// only). Every check of an install ([`read_partial`]: the sha256 when given, each part's kdh1, entry names and sizes;
+/// the Library must take each part with its hash). Nothing else changes: not the profile, not the instance, its
+/// version or its settings, no activation, nothing in a game folder, so it may run while the game does. A file of
+/// another version or pack is refused.
+pub fn repair_from(dirs: &DataDirs, pid: &str, zip_file: &Path, sha256: Option<&str>, progress: &mut dyn Progress) -> Result<RepairResult> {
+    let (inst, base, parts) = lacking_parts(dirs, pid)?;
+    if parts.is_empty() {
+        progress.report(Some(1.0), "nothing is missing");
+        return Ok(RepairResult { profile: pid.into(), version: inst.version, imported: Vec::new(), downloaded: 0, left: Vec::new() });
+    }
+    // by kind and id, never the id alone: two kinds of mod may share one
+    let want: BTreeSet<(ModKind, String)> = parts.iter().map(|(_, lr, _)| (lr.kind, lr.id.clone())).collect();
+    let wanted = |m: &PackMod| want.contains(&(m.kind, m.id.clone()));
+    progress.report(Some(0.1), "checking the pack");
+    let checked = read_partial(zip_file, sha256, None, &|m| !wanted(m))?;
+    let ix = &checked.index;
+    if !same_version(ix, &base) {
+        return Err(err(ErrorCode::Refused, format!("That file is {} {}, not the {} {} this profile has installed.", ix.name, ix.version, base.name, base.version)));
+    }
+    // the bytes just checked, and no other: a file the player picked has no sha256 of its own, and may change meanwhile
+    let (_, imported) = import_pack(dirs, zip_file, Some(&checked.sha256), &wanted, progress)?;
+    let left = lacking_of(dirs, pid)?.missing;
+    progress.report(Some(1.0), &format!("{} of {} back in the Library", parts.len() - left.len(), parts.len()));
+    Ok(RepairResult { profile: pid.into(), version: inst.version, imported, downloaded: 0, left })
+}
+
+/// Repairs a pack installed from a file ([`repair_from`]): from `source` (the pack file the player picked), or without
+/// one from the address it was downloaded from (the instance's url, the download cached by its sha256).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairRequest {
+    pub profile: String,
+    #[serde(default)]
+    pub source: Option<ModpackSource>,
+    #[serde(default)]
+    pub allow_http: bool,
+}
+
+pub fn repair(dirs: &DataDirs, req: &RepairRequest, progress: &mut dyn Progress) -> Result<RepairResult> {
+    let inst = instance(dirs, &req.profile)?.ok_or_else(|| Error::not_found(format!("profile {} is not a Crucible instance", req.profile)))?;
+    if lacking_of(dirs, &req.profile)?.is_empty() {
+        progress.report(Some(1.0), "nothing is missing");
+        return Ok(RepairResult { profile: req.profile.clone(), version: inst.version, imported: Vec::new(), downloaded: 0, left: Vec::new() });
+    }
+    let source = match (&req.source, &inst.url) {
+        (Some(s), _) => s.clone(),
+        (None, Some(url)) => ModpackSource::Url { url: url.clone(), sha256: inst.sha256.clone() },
+        (None, None) => return Err(err(ErrorCode::NotFound, format!("Pick the file of {} {} to put its missing mods back.", inst.name, inst.version))),
+    };
+    let (zip_file, sha, _) = fetch(dirs, &source, req.allow_http, &mut Scaled { inner: progress, from: 0.0, to: 0.4 })?;
+    repair_from(dirs, &req.profile, &zip_file, sha.as_deref(), &mut Scaled { inner: progress, from: 0.4, to: 1.0 })
 }
 
 // ================================================================================================= two packs

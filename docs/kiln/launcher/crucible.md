@@ -179,6 +179,28 @@ updates, with the value it left), theirs = the new file, mine = the profile, its
 `pack::diff(old, new) -> PackDiff` compares two versions of a pack (mods added/updated/removed, layer changed,
 overrides added/changed/removed, server settings changed): Crucible's automatic change list.
 
+## Repairing: Download missing mods
+An instance whose profile loads mods of its installed version that the Library lacks (the player removed one from the
+Library, or the Library reads an entry as changed: `library::changed_on_disk`, the cheap check of its list) says so in the preview of the same code or file ("Load it
+would start the game without it") and offers **Download missing mods (N, size)**, in the preview next to See changes
+or Load it and in the pack profile's "…" menu in Settings > Profiles. What counts: a part the profile lists switched on
+with the pack's hash (`pack::lacking_of`); an optional mod the player switched off, a mod taken out of the profile or
+swapped for another version, and a server-only mod do not. The preview reads it afresh at each open (`pack_lacking`), without asking
+Crucible or the pack file again.
+- `crucible::repair(dirs, c, pid, progress)`: nothing missing, nothing is asked of Crucible. Otherwise the installed
+  version's signed index (it must name the same archives as `pack/base/`), only the lacking archives downloaded (the
+  install's `download_parts`: each checked against its sha256 and size; a cached archive is reused), put together with
+  the layer and the installed overrides (from `pack/base/`, never downloaded) as a partial pack (`pack::assemble_for`:
+  every kdh1 checked), imported into the Library (`pack::repair_from`).
+- `pack::repair(dirs, RepairRequest {profile, source?}, progress)`: a pack installed from a file, from the pack file of
+  its installed version (another version's file is refused) or the address it was downloaded from.
+- Nothing else changes: not the profile, not instance.json, its version or settings (an update waiting stays the update
+  screen's), no activation, no start, nothing in a game folder, so it runs while the game does. `RepairResult.left`
+  names what still lacks (an entry edited in place: the Library's "changed" flow takes it over).
+- Load it without the repair: with direct paths (Windows, Z: under Proton) the activation succeeds and names the missing
+  Library folders, so the game starts without those mods (the resolve preview's warning "… is not in the library" is the
+  only sign); Copy mode refuses ("kiln alpha 1.0.0 is not in the library").
+
 ## Uninstalling
 `pack::uninstall(dirs, pid)` (`kilnctl pack uninstall`): refused while a game has the instance active; the profile goes
 to `backups/profiles/` like any deleted profile; the Library keeps the mods and the result lists the pack's entries no
@@ -246,10 +268,11 @@ Tauri commands (launcher/src-tauri/src/commands/pack.rs; the network side is "Th
 
 | Command | Arguments | Returns | Crate call |
 |---|---|---|---|
-| `pack_inspect` | `{source: {path, sha256?} \| {url, sha256}}` | `PackPreview {index, sha256, size, missing[], present[], code[], optional{id: bool}, instance?}` | `pack::inspect` (download first for a URL) |
+| `pack_inspect` | `{source: {path, sha256?} \| {url, sha256}}` | `PackPreview {index, sha256, size, missing[], present[], code[], optional{id: bool}, instance?, repair?, installedVersion}` | `pack::inspect` (download first for a URL) |
 | `pack_install` (task) | `gameId, InstallRequest {source, consent, allowHttp?, name?, optional{id: bool}, activate?}` | `InstallResult {profile, instance, imported[], overrides[], backup?, activation?}` | `pack::install` |
 | `pack_instance` | `profileId` | `Instance \| null` | `pack::instance` |
 | `pack_instances` | | `[profileId, Instance][]` | `pack::instances` |
+| `pack_lacking` | `profileId` | `Lacking {version, missing[], names[], download}` | `pack::lacking_of` (read-only) |
 | `pack_update_plan` | `profileId, source, optional?` | `UpdatePlan {profile, pack, from, to, changes?, mods{added, updated, removed, yours, keptSwitches}, layer{from, to, changed}, files[{path, side, mode, taken[], kept[], conflicts[{key, base, pack, mine}]}], conflicts}` | `pack::plan_update` |
 | `pack_update` (task) | `UpdateRequest {profile, source, consent, allowHttp?, optional?, resolve{"path#key": "pack"\|"mine"}, all?, drop?[]}` | `UpdateResult {plan, profile, instance, imported[]}`; error `conflict` with the plan in `detail` | `pack::update` |
 | `pack_undo` | `profileId` | `Profile` | `pack::undo` |
