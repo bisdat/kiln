@@ -37,7 +37,8 @@ static Value elem(std::vector<std::pair<std::string, Value>> kv) {
     return v;
 }
 
-static Schema schema() {
+// drop_leaves: the drop table's weight and count.max leaves too, which an item removal needs to judge a group (slice 5)
+static Schema schema(bool drop_leaves = false) {
     Schema s;
     RegistrySpec items;
     items.name = "items", items.raw = true;
@@ -73,6 +74,13 @@ static Schema schema() {
     FieldSpec ech = fs("entries[].chance", FieldType::Float, FieldOps::Number);
     ech.min = 0, ech.max = 1;
     for (const FieldSpec& f : {en, ei, ech}) drops.fields[f.name] = f;
+    if (drop_leaves) {
+        FieldSpec ew = fs("entries[].weight", FieldType::Float, FieldOps::Number);
+        ew.min = 0;
+        FieldSpec emax = fs("entries[].count.max", FieldType::Int, FieldOps::Number);
+        emax.min = 0, emax.max = 65535;
+        for (const FieldSpec& f : {ew, emax}) drops.fields[f.name] = f;
+    }
     RegistrySpec bal;
     bal.name = "balance", bal.add = bal.remove = false;
     FieldSpec xp = fs("xpPerLevel", FieldType::List, FieldOps::Indexed);
@@ -168,11 +176,29 @@ int main() {
     {
         const Result none = compose(s, b, {}, {});
         CHECK(none.removed.empty() && none.lines.empty() && none.refused.empty(), "no mods: a vanilla recipe naming an id the base has not got stays (the model may be partial)");
-        const Result rm = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])")})});
+        // slice 5 (6fa979f5, ruling 2026-11-23 4:35 PM): an item removal hides the item and the recipes naming it; a drop table keeps
+        // its physical slots and indexes, the slots naming the item are disabled (chance 0, weight 0). The table's group spans
+        // (BaseModel drop_groups) must be known and every group must keep a stack that can spawn, else the removal is refused whole.
+        const char* remove_wood = R"([{"registry": "items", "entry": "remove", "select": {"id": "game:wood"}}])";
+        const Schema sd = schema(true);
+        BaseModel bd = base();
+        for (BaseModel::Entry& t : bd.registries["drops"]) {
+            for (Value& el : t.fields["entries"].list)
+                el = elem({{"item", *el.leaf("item")}, {"chance", *el.leaf("chance")}, {"weight", Value::number(1)}, {"count.max", Value::integer(1)}});
+            t.drop_groups = {{0, 2}};
+        }
+        const Result rm = compose(sd, bd, {}, {mod("a", {batch(sd, "a", "alter", remove_wood)})});
         const Value rmd = result(rm, "drops", "game:table1", "entries");
+        auto leaf = [&](size_t i, const char* k) { return rmd.list.size() > i && rmd.list[i].leaf(k) ? rmd.list[i].leaf(k)->as_double() : -1.0; };
         CHECK(removed(rm, "items", "game:wood") && removed(rm, "recipes", "game:r1") && !removed(rm, "drops", "game:table1") && rm.removed.size() == 2 &&
-                  rmd.list.size() == 1 && rmd.list[0].leaf("item")->t == "game:stone" && !removed(rm, "recipes", "game:r2"),
-              "a mod's remove: the recipe naming it goes too; a drop table (its entries are never removed) loses only the element naming it");
+                  rmd.list.size() == 2 && rmd.list[0].leaf("item")->t == "game:wood" && leaf(0, "chance") == 0 && leaf(0, "weight") == 0 &&
+                  rmd.list[1].leaf("item")->t == "game:stone" && leaf(1, "chance") == 0.5 && leaf(1, "weight") == 1 && !removed(rm, "recipes", "game:r2"),
+              "a mod's remove: the recipe naming it goes too; a drop table (its entries are never removed) keeps its slots and disables the one naming it");
+        const Result ungrouped = compose(s, b, {}, {mod("a", {batch(s, "a", "alter", remove_wood)})});
+        CHECK(!removed(ungrouped, "items", "game:wood") && !removed(ungrouped, "recipes", "game:r1") && ungrouped.removed.empty() &&
+                  refusal(ungrouped, "drop grouping of game:table1 is not proven on this build") &&
+                  result(ungrouped, "drops", "game:table1", "entries").kind == Value::None,
+              "without the table's group spans the item removal is refused whole: nothing hidden, no slot disabled");
         Refusal pre;
         pre.mod = "a", pre.stage = Stage::Add, pre.entry = "items|a:gem", pre.reason = "Unmapped: items.power";
         ModInput a = mod("a", {batch(s, "a", "alter", R"([{"registry": "recipes", "select": {"id": "game:r1"}, "field": "inputs", "list": {"append": [{"item": "a:gem", "count": 1}]}}])")});
