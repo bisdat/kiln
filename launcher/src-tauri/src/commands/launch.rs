@@ -336,14 +336,38 @@ fn runtime_version(g: &kiln_manage::game::GameInstall) -> Option<String> {
 #[tauri::command]
 pub async fn launch_begin(game_id: String, mode: kiln_manage::launch::LaunchMode) -> Result<(), Error> {
     blocking(move || {
-        refuse_pending(&game_id, now_ms())?;
         let g = crate::state::game(&game_id)?;
-        let t = new_start(&dirs()?, &g, mode, now_ms());
-        STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(&game_id);
-        STARTS.lock().unwrap_or_else(|e| e.into_inner()).insert(game_id, t);
-        Ok(())
+        begin_start(&game_id, || crate::state::refuse_running(&g), || Ok(new_start(&dirs()?, &g, mode, now_ms())))
     })
     .await
+}
+
+/// launch_begin's steps for `game_id`: refused while another start is pending ([`refuse_pending`]), a game that runs
+/// already (`running`: `state::refuse_running`, asked only then) refused as such first, as launch_play refuses it;
+/// otherwise the record `make` builds becomes the game's start, checked again as it is put in.
+pub(crate) fn begin_start(
+    game_id: &str,
+    running: impl FnOnce() -> Result<(), Error>,
+    make: impl FnOnce() -> Result<kiln_manage::start_progress::LauncherStart, Error>,
+) -> Result<(), Error> {
+    if refuse_pending(game_id, now_ms()).is_err() {
+        running()?;
+        return Err(already_starting());
+    }
+    // (the record is built from the game's folder, which takes a while: a launch_play may claim and ask Steam meanwhile)
+    let t = make()?;
+    {
+        // the check again, with the insert under the locks claim takes, in its order (PLAYING, then STARTS): a start that
+        // was claimed or asked Steam meanwhile keeps its record, and this one is refused
+        let playing = PLAYING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut starts = STARTS.lock().unwrap_or_else(|e| e.into_inner());
+        if playing.contains(game_id) || starts.get(game_id).is_some_and(|s| s.holds_next_start(now_ms())) {
+            return Err(already_starting());
+        }
+        starts.insert(game_id.to_owned(), t);
+    }
+    STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(game_id);
+    Ok(())
 }
 
 /// The record of a start Play began at `at` with `mode`: a Vanilla start has no Kiln, no cook and no mods to time.
@@ -778,6 +802,51 @@ mod guard_tests {
         // and Play again goes through
         begin(id, LaunchMode::Vanilla, now_ms());
         play(id, &steam_ok).unwrap();
+        forget(id);
+    }
+
+    /// What launch_begin does for `id` (`running`: the game runs now), the record built as `begin` builds it.
+    fn launch_begin_with(id: &str, mode: LaunchMode, running: bool, meanwhile: impl FnOnce()) -> Result<(), Error> {
+        let up = || if running { Err(Error::new(kiln_manage::ErrorCode::GameRunning, "Close the game first.")) } else { Ok(()) };
+        begin_start(id, up, || {
+            // (the record is built from the game's folder: the cook plan, the fingerprint; another start goes on meanwhile)
+            meanwhile();
+            let mut t = LauncherStart::new(now_ms(), (mode == LaunchMode::Profile).then(Vec::new), None, None);
+            t.mode = Some(mode);
+            Ok(t)
+        })
+    }
+
+    #[test]
+    fn a_start_steam_was_asked_for_while_launch_begin_built_its_record_is_not_overwritten() {
+        // Play pressed in two windows: the first one's launch_play asks Steam while the second one's launch_begin reads
+        // the game's folder for its record. That record must not replace the asked one (its `asked` would be lost, and
+        // the second window's launch_play would then ask Steam again)
+        let id = "guard-begin-race";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        let r = launch_begin_with(id, LaunchMode::Vanilla, false, || play(id, &steam_ok).unwrap());
+        assert!(refused(r), "the second launch_begin is refused once the first start asked Steam");
+        assert!(STARTS.lock().unwrap().get(id).is_some_and(|t| t.asked), "the asked start stays the game's start");
+        assert!(refused(play(id, &|_| panic!("Steam asked a second time"))), "the second launch_play");
+        forget(id);
+    }
+
+    #[test]
+    fn launch_begin_says_game_running_first() {
+        // the game's process is there and the watcher's round has not marked the start seen yet: the game runs, which is
+        // what launch_play says too, not "already starting"
+        let id = "guard-begin-running";
+        begin(id, LaunchMode::Profile, now_ms());
+        play(id, &steam_ok).unwrap();
+        let e = launch_begin_with(id, LaunchMode::Vanilla, true, || {}).unwrap_err();
+        assert_eq!(e.code, kiln_manage::ErrorCode::GameRunning);
+        assert!(STARTS.lock().unwrap().get(id).is_some_and(|t| t.asked), "the pending start is left as it is");
+        // not running: the refusal of a pending start, as before
+        assert!(refused(launch_begin_with(id, LaunchMode::Vanilla, false, || {})));
+        // nothing pending: launch_begin records the new start
+        forget(id);
+        launch_begin_with(id, LaunchMode::Vanilla, false, || {}).unwrap();
+        assert!(STARTS.lock().unwrap().get(id).is_some_and(|t| t.vanilla() && !t.asked));
         forget(id);
     }
 
