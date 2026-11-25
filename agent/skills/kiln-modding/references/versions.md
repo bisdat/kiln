@@ -34,6 +34,7 @@ been seen in a game.
 | dev.31.1 | 0.2.17 | dev.31 | runtime and launcher (crafting preview diagnostics for linked storage (#132): kiln.log says why the client preview left a recipe to the game; a failed code-state check names its state and the first foreign byte. The launcher and kilnctl check `kiln` ranges against the release's own version, not 0.2.0-dev, so `>=0.2.0-dev.28` no longer reads as too new) |
 | dev.31.2 | 0.2.18 | dev.31.2 | Creative effects (Kiln.Rules: `Creative.SetEffect`, `Creative.Effects`, `CreativeEffectState`; each creative effect is its own toggle in F7, `/creative effect` and Kiln.Admin); runtime: `Items.GiveEquip` puts Arrow/Spell/FishingBait in a verified Generic backpack cell (#139); kiln-emf admits EmfApi v49 next to v48, `path_find` / `enemy_move` still refuse (#141); launcher: account-free unlisted Crucible shares, Deck local `.kilnpack` export, native preview against the installed runtime, Kiln Web Admin panel |
 | dev.31.3 | 0.2.18 | dev.31.2 | runtime and tools (the default `emf` component ships EMF 0.6.22's unmodified Lua host 1.43.0, used only when an enabled EMF Lua script needs it; `kiln new` installs missing templates on .NET SDKs with the newer "no templates were found" message; Korean translation review (#143)) |
+| dev.31.4 | 0.2.18 | dev.31.2 | launcher only (Crucible "Got a code" without a loaded profile; Settings creates an empty local profile; `profile::create` skips IDs of known games' rootless game pointers) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 

@@ -3701,6 +3701,11 @@
     "sub": "A profile is a saved set of mods and their switches.",
     "loadFirst": "Load a profile first",
     "saveAs": "Save current as…",
+    "createEmpty": "Create empty local profile…",
+    "createEmptyTitle": "Create empty local profile",
+    "createEmptyHint": "No mods or settings are copied. This only saves a profile in this launcher's data folder; it does not load it into the game.",
+    "createdLocal": "Created local profile {name}",
+    "createdLocalDetail": "Saved locally only. The game's loaded profile has not changed.",
     "unreadable": "Profiles are not readable",
     "saved": "Saved profiles",
     "line": {
