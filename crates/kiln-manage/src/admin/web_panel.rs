@@ -1,4 +1,5 @@
-//! Opens the installed Web Admin over loopback or through the instance's SSH host.
+//! Opens the installed web panel (Kilnwarden, or Kiln Web Admin, its old name: [`ids`]) over loopback or through the
+//! instance's SSH host.
 use super::client::{AdminClient, Transport};
 use super::tunnel::SshTunnel;
 use crate::server::{
@@ -16,7 +17,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
-const ENDPOINT: &str = "kiln/data/kiln-webadmin/launcher-endpoint.json";
+pub mod ids;
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize)]
@@ -29,7 +30,7 @@ struct Endpoint {
 
 impl Endpoint {
     fn parse(bytes: &[u8]) -> Result<Self> {
-        let invalid = || Error::invalid("invalid Kiln Web Admin listener description");
+        let invalid = || Error::invalid("invalid web panel listener description");
         if bytes.len() > 4096 {
             return Err(invalid());
         }
@@ -69,21 +70,19 @@ impl WebPanelTunnels {
     // Only the native launcher opens the returned URL. Its fragment may contain a one-use owner ticket.
     pub fn url(&mut self, server: &ServerInstance) -> Result<String> {
         let remote = server.remote.as_ref();
-        let bytes = match remote {
-            Some(spec) => remote::read_file(spec, ENDPOINT),
-            None => {
-                let dir = server
+        let dir = match remote {
+            Some(_) => None,
+            None => Some(
+                server
                     .dir
                     .as_deref()
-                    .ok_or_else(|| Error::invalid("server has no folder"))?;
-                std::fs::read(dir.join(ENDPOINT)).map_err(Error::from)
-            }
-        }
-        .map_err(|_| {
-            Error::new(
-                ErrorCode::AdminUnavailable,
-                "Kiln Web Admin is not listening. Check that the current mod is loaded.",
-            )
+                    .ok_or_else(|| Error::invalid("server has no folder"))?,
+            ),
+        };
+        let (panel, bytes) = ids::find(|m| match (remote, dir) {
+            (Some(spec), _) => remote::read_file(spec, &m.endpoint()),
+            (None, Some(dir)) => std::fs::read(dir.join(m.endpoint())).map_err(Error::from),
+            (None, None) => Err(Error::invalid("server has no folder")),
         })?;
         let endpoint = Endpoint::parse(&bytes)?;
         let target = SocketAddr::new(endpoint.host, endpoint.port);
@@ -115,7 +114,10 @@ impl WebPanelTunnels {
         };
 
         let socket = TcpStream::connect_timeout(&address, TIMEOUT).map_err(|_| {
-            Error::new(ErrorCode::AdminUnavailable, "Kiln Web Admin did not answer")
+            Error::new(
+                ErrorCode::AdminUnavailable,
+                format!("{} did not answer", panel.name),
+            )
         })?;
         let Some(pin) = endpoint.sha256 else {
             return if address.ip().is_loopback() {
@@ -135,13 +137,12 @@ impl WebPanelTunnels {
             Transport::Tcp
         };
         let admin = AdminClient::connect(server, transport)?;
-        let args = serde_json::json!({ "consumer": "kiln-webadmin", "label": "Kiln Launcher" });
         let ticket = admin
-            .call("login_mint", args.as_object().unwrap().clone())
+            .call("login_mint", panel.login_mint_args())
             .map_err(|_| {
                 Error::new(
                     ErrorCode::AdminUnavailable,
-                    "Kiln.Admin could not issue a one-time Web Admin login.",
+                    "Kiln.Admin could not issue a one-time web panel login.",
                 )
             })?;
         let secret = ticket["secret"]
@@ -167,17 +168,22 @@ fn verify_listener(mut socket: TcpStream, ip: IpAddr, pin: String) -> Result<()>
     });
     let config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|_| Error::new(ErrorCode::Internal, "could not configure Web Admin TLS"))?
+        .map_err(|_| {
+            Error::new(
+                ErrorCode::Internal,
+                "could not configure the web panel's TLS",
+            )
+        })?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     let mut tls = ClientConnection::new(Arc::new(config), ServerName::IpAddress(ip.into()))
-        .map_err(|_| Error::new(ErrorCode::Internal, "could not start Web Admin TLS"))?;
+        .map_err(|_| Error::new(ErrorCode::Internal, "could not start the web panel's TLS"))?;
     while tls.is_handshaking() {
         tls.complete_io(&mut socket).map_err(|e| {
             Error::new(
                 ErrorCode::Network,
-                format!("Web Admin TLS could not verify the server certificate: {e}"),
+                format!("the web panel's TLS could not verify the server certificate: {e}"),
             )
         })?;
     }
@@ -234,6 +240,89 @@ impl ServerCertVerifier for PinnedLeaf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+    use std::path::{Path, PathBuf};
+
+    fn temp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "kiln-webpanel-id-{tag}-{}-{}",
+            std::process::id(),
+            crate::hash::hex(&crate::util::random_bytes::<6>().unwrap())
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn server(dir: &Path) -> ServerInstance {
+        serde_json::from_value(serde_json::json!({
+            "id": "lab", "name": "lab", "kind": "local", "dir": dir, "port": 15636, "queryPort": 15637, "wine": null,
+            "policy": "verified-only", "source": "launcher", "remote": null
+        }))
+        .unwrap()
+    }
+
+    /// A plain-HTTP panel of mod `id` listening on loopback: its `launcher-endpoint.json` in `<dir>/kiln/data/<id>/`
+    /// (sha256 null, so `url` opens `/signin` without a Kiln.Admin login). The listener stays open with the test.
+    fn listen(dir: &Path, id: &str) -> TcpListener {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let data = dir.join("kiln/data").join(id);
+        std::fs::create_dir_all(&data).unwrap();
+        let doc = serde_json::json!({"format": 1, "host": "127.0.0.1", "port": l.local_addr().unwrap().port(), "sha256": null});
+        std::fs::write(data.join("launcher-endpoint.json"), doc.to_string()).unwrap();
+        l
+    }
+
+    fn signin(l: &TcpListener) -> String {
+        format!("http://{}/signin", l.local_addr().unwrap())
+    }
+
+    #[test]
+    fn kilnwarden_is_found_in_its_own_data_folder() {
+        let dir = temp("kilnwarden");
+        let panel = listen(&dir, "kilnwarden");
+        assert_eq!(
+            WebPanelTunnels::default().url(&server(&dir)).unwrap(),
+            signin(&panel)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn kiln_web_admin_test_builds_still_open() {
+        let dir = temp("legacy");
+        let panel = listen(&dir, "kiln-webadmin");
+        assert_eq!(
+            WebPanelTunnels::default().url(&server(&dir)).unwrap(),
+            signin(&panel)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn with_both_endpoints_kilnwarden_wins() {
+        let dir = temp("both");
+        let new = listen(&dir, "kilnwarden");
+        let _old = listen(&dir, "kiln-webadmin");
+        assert_eq!(
+            WebPanelTunnels::default().url(&server(&dir)).unwrap(),
+            signin(&new)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_panel_listening_names_kilnwarden() {
+        let dir = temp("none");
+        std::fs::create_dir_all(dir.join("kiln/data/kiln-admin")).unwrap();
+        let e = WebPanelTunnels::default().url(&server(&dir)).unwrap_err();
+        assert_eq!(e.code, ErrorCode::AdminUnavailable);
+        assert!(
+            e.message.contains("Kilnwarden is not listening"),
+            "{}",
+            e.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn endpoint_requires_ip_port_and_optional_fingerprint() {
