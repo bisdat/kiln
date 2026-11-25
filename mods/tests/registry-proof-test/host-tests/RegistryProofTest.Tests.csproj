@@ -17,5 +17,7 @@
     <ProjectReference Include="../../../../managed/services/Kiln.Assets/Kiln.Assets.csproj" />
     <ProjectReference Include="../../../../managed/services/Kiln.Items/Kiln.Items.csproj" />
     <ProjectReference Include="../../../../managed/services/Kiln.Spawn/Kiln.Spawn.csproj" />
+    <ProjectReference Include="../../../../managed/services/Kiln.Creatures/Kiln.Creatures.csproj" />
+    <ProjectReference Include="../../../../managed/services/Kiln.World/Kiln.World.csproj" />
   </ItemGroup>
 </Project>

@@ -178,16 +178,6 @@ public class ProducerTests
         Assert.Equal(expected, lower?.GetValue<double>());
     }
 
-    // The rarity a created gear item shows (docs/re/items.md section 10): the asked rarity when its perk slot is set, else the
-    // last filled slot (rebalance_perks_and_level), else the type's own rarity.
-    [Theory]
-    [InlineData(4, "11111", 0, 4)]
-    [InlineData(3, "11100", 0, 2)]
-    [InlineData(0, "11111", 2, 0)]
-    [InlineData(2, "00000", 1, 1)]
-    public void Shown_rarity_follows_the_perk_slots(int asked, string slots, int type, int expected) =>
-        Assert.Equal(expected, (int)Call("ShownRarity", asked, slots.Select(c => c == '1').ToArray(), type)!);
-
     // The roll's scaled stack (0x16db30): n x the world's loot amount, at least 1, at most maxScaled.
     [Theory]
     [InlineData(3, 2.0, 1000, 6)]

@@ -597,11 +597,10 @@ public sealed unsafe partial class RegistryProofTestMod : Mod
                 op = copy;
             }
             var (ok, refusal, exactRefusal) = Change(registry, id, element ? list : field, op, out var handle);
-            if (!ok && mode.Length == 0 && refusal.Contains("outside the field's range", StringComparison.Ordinal) && LowerProbe(read, row) is { } lower &&
-                !JsonNode.DeepEquals(lower, read))
+            // a float at the top of its range (a chance of 1.0): the parse refuses 1.25 x, sometimes without a reason text
+            if (!ok && mode.Length == 0 && !IsDisagreement(refusal) && LowerProbe(read, row) is { } lower && !JsonNode.DeepEquals(lower, read))
             {
-                // a float at the top of its range (a chance of 1.0): the same entry with 0.75 x
-                probe = lower;
+                probe = lower;  // the same entry with 0.75 x
                 op = probe;
                 if (element)
                 {
@@ -705,16 +704,6 @@ public sealed unsafe partial class RegistryProofTestMod : Mod
     /// Null for every other conversion (no second guess).</summary>
     private static JsonNode? LowerProbe(JsonNode? v, JsonObject row) =>
         (string?)row["conv"] == "float" && v is JsonValue f && f.TryGetValue<double>(out var x) && x != 0 ? JsonValue.Create(Math.Round(x * 0.75, 6)) : null;
-
-    /// <summary>The rarity a gear item created at <paramref name="asked"/> shows (docs/re/items.md section 10): the asked one
-    /// when its perk slot is set, else the last filled slot (rebalance_perks_and_level), else the type's own rarity.</summary>
-    private static int ShownRarity(int asked, bool[] perkSlots, int typeRarity)
-    {
-        if (asked >= 0 && asked < perkSlots.Length && perkSlots[asked]) return asked;
-        for (var i = perkSlots.Length - 1; i >= 0; i--)
-            if (perkSlots[i]) return i;
-        return typeRarity;
-    }
 
     /// <summary>A loot roll's scaled stack (0x16db30 on 26430253): n x the world's loot amount, at least 1, at most
     /// <paramref name="maxScaled"/> (for a whole product; the game rounds a fraction up by chance).</summary>
