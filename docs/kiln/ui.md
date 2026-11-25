@@ -141,6 +141,12 @@ Events.On<ScreenChangedEvent>(e => …);                                        
 `ScreenKind`: None, Title, MainMenu, Loading, Cinematic, Credits, InGame, PauseMenu, Settings, Inventory, Map, Journal,
 Character, Crafting, SkillTree, Storage, Dialog, Chat, Other. `GameScreen.StationWorkshop` is the workshop id of the
 crafting station the player uses (0 when none). The event observes only: the game's change has already happened (no cancel).
+`GameScreen.PopupOpen` (since 0.2.0-dev.31.5, mod API addition, GitHub issue 117) is true while one of the game's own
+popups is open over its UI in the frame the screen is of: the item menu a right-click on an inventory slot opens, a
+drop-down, a context menu, or the game's error popup. Kiln's overlay draws above the game's UI; step aside while it is
+true if you draw over the game's screens (`Ui.Inventory` marks already do). Opening or closing a popup is not a screen
+change: read it from `Ui.Screens.Current`, on `Ui.Screens.UiTick` or in a draw callback. False on a screen read longer
+ago and where capability `ui.popups` is off. Read from the game's code, not yet seen in a running game.
 
 ### Custom screens
 ```csharp
