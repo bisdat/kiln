@@ -125,25 +125,22 @@ fn tmp(name: &str) -> PathBuf {
     d
 }
 
-/// tests/lint/ajv-check.mjs on `files` against `schema`: its JSON lines, in the order of `files`. Run in batches: one
-/// command line for hundreds of files is longer than Windows allows (32767 characters; error 206).
+/// tests/lint/ajv-check.mjs on `files` against `schema`: its JSON lines, in the order of `files`. The files go in a list
+/// file (`@<list>`): hundreds of paths are longer than a command line may be on Windows (32767 characters, 8191 through
+/// cmd.exe, which a node shim such as Volta's may use).
 fn ajv_check(root: &Path, modules: &Path, schema: &str, files: &[PathBuf]) -> Vec<Value> {
-    const MAX_ARGS: usize = 16 * 1024;
-    let mut rows = Vec::new();
-    let mut start = 0;
-    while start < files.len() {
-        let mut end = start;
-        let mut len = 0;
-        while end < files.len() && (end == start || len + files[end].as_os_str().len() + 3 <= MAX_ARGS) {
-            len += files[end].as_os_str().len() + 3;
-            end += 1;
-        }
-        let out = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs")).arg(root.join("schema"))
-            .arg(modules).arg(schema).args(&files[start..end]).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        rows.extend(String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str::<Value>(l).unwrap()));
-        start = end;
-    }
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let list = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lint").join(format!("ajv-files-{}-{}.txt", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+    let text: String = files.iter().map(|f| f.to_str().expect("UTF-8 test paths").to_string() + "\n").collect();
+    std::fs::write(&list, text).unwrap();
+    let mut at = std::ffi::OsString::from("@");
+    at.push(&list);
+    let out = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs")).arg(root.join("schema"))
+        .arg(modules).arg(schema).arg(at).output().unwrap();
+    let _ = std::fs::remove_file(&list);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(rows.len(), files.len(), "one line per file");
     rows
 }
