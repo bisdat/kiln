@@ -268,9 +268,15 @@ int main(int argc, char** argv) {
         t.claim(id_of(0x41, 0), 8, 1);
         t.claim(id_of(0x20D, 2), 7, 1);
         t.end_all(kEndFocus, &notes);
-        check(notes.size() == 3 && notes[0].id == id_of(0x02, 0) && notes[0].kind == kEnd && notes[0].end == kEndFocus &&
-                  notes[1].sub == 8 && notes[2].id == id_of(0x20D, 2) && t.empty() && hidden_mk(t) == 0,
-              "focus loss: every owner hears End Focus (in id order), every claim goes");
+        check(notes.size() == 2 && notes[0].id == id_of(0x02, 0) && notes[0].kind == kEnd && notes[0].end == kEndFocus &&
+                  notes[1].sub == 8 && notes[1].id == id_of(0x41, 0) && t.size() == 1 && hidden_mk(t) == 0,
+              "focus loss: every key and mouse owner hears End Focus (in id order), those claims go");
+        check(t.owner(id_of(0x20D, 2)) == 7 && t.pad_owned(2) == 0x2000,
+              "focus loss: a controller's claim stays its owner's (XInput does not follow the window's focus)");
+        notes.clear();
+        const auto pad_up = t.transition(id_of(0x20D, 2), false, false, 1, &notes);
+        check(pad_up.handled && pad_up.keep && notes.size() == 1 && notes[0].sub == 7 && notes[0].kind == kRelease && t.empty(),
+              "focus loss: the controller button's later release goes to its owner, kept from the game");
         notes.clear();
         t.claim(id_of(0x02, 0), 7, 1);
         t.end_world(1, &notes);
