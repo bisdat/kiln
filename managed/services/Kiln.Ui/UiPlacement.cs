@@ -297,10 +297,14 @@ internal sealed class UiPlacer
 /// beside keybinds.json. Read once (on the thread that creates the first remembering screen or window), written on a
 /// worker a moment after a change and at once when a mod unloads (a whole new file put in place, so a crash mid-write
 /// leaves the old one; a write that fails is tried again by the next flush). A file that is no JSON is kept aside as
-/// ui-placement.json.bad with a warning; an entry that is no placement is skipped.</summary>
+/// ui-placement.json.bad with a warning; an entry that is no placement is skipped. A file of a newer format (a newer
+/// Kiln's, a higher version) is read for what this one understands and never written over that start.</summary>
 internal static class UiPlacements
 {
     internal const string FileName = "ui-placement.json";
+
+    /// <summary>The file's format ("version"); a file with a higher one is a newer Kiln's (the player went back).</summary>
+    internal const int FormatVersion = 1;
 
     /// <summary>One remembered placement: the centre as fractions of the viewport, the size in pixels at UI scale 1.</summary>
     internal readonly record struct Entry(float X, float Y, float Width, float Height);
@@ -310,8 +314,9 @@ internal static class UiPlacements
     private static Dictionary<(string Mod, bool Window, string Id), Entry> _entries = [];
     private static string? _path;
     private static bool _loaded, _dirty, _scheduled;
-    // the file is there but could not be read (locked, no permission): kept as it is this start, placements stay in memory
-    private static bool _unreadable;
+    // the file is left as it is this start, placements stay in memory: it could not be read (locked, no permission), or a
+    // newer Kiln wrote it (a higher version: writing it would drop what only that one reads, for every mod)
+    private static bool _readOnly;
 
     /// <summary>How long after a change the file is written (a drag changes it every frame). Tests set it.</summary>
     internal static TimeSpan Debounce = TimeSpan.FromSeconds(1);
@@ -344,7 +349,7 @@ internal static class UiPlacements
         _loaded = true;
         _path = path;
         _dirty = false;
-        _entries = Read(path, out _unreadable);
+        _entries = Read(path, out _readOnly);
     }
 
     public static Entry? Get(string mod, bool window, string id)
@@ -390,14 +395,14 @@ internal static class UiPlacements
                 _scheduled = false;
                 if (!_dirty) return;
                 _dirty = false;
-                path = _unreadable ? null : _path;
+                path = _readOnly ? null : _path;
                 copy = [.. _entries];
             }
             if (path is null || Write(path, copy)) return;
             // not written (a virus scanner or sync tool holding the file, a full disk): still to be written by the next
             // flush (the next change, a mod's unload, the game's quit), unless the file was read again from elsewhere
             lock (Lock)
-                if (_path == path && !_unreadable) _dirty = true;
+                if (_path == path && !_readOnly) _dirty = true;
         }
     }
 
@@ -408,7 +413,7 @@ internal static class UiPlacements
         {
             _entries = [];
             _path = null;
-            _loaded = _dirty = _scheduled = _unreadable = false;
+            _loaded = _dirty = _scheduled = _readOnly = false;
         }
     }
 
@@ -418,9 +423,9 @@ internal static class UiPlacements
         Debounce = TimeSpan.FromSeconds(1);
     }
 
-    private static Dictionary<(string, bool, string), Entry> Read(string? path, out bool unreadable)
+    private static Dictionary<(string, bool, string), Entry> Read(string? path, out bool readOnly)
     {
-        unreadable = false;
+        readOnly = false;
         var entries = new Dictionary<(string, bool, string), Entry>();
         if (path is null) return entries;
         string text;
@@ -432,7 +437,7 @@ internal static class UiPlacements
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // writing it later would put this start's few placements over every other one the file holds
-            unreadable = true;
+            readOnly = true;
             UiEngine.Log(LogLevel.Warn, $"{path}: {e.Message} (no remembered placements this start; the file is left as it is)");
             return entries;
         }
@@ -455,6 +460,13 @@ internal static class UiPlacements
             {
                 Corrupt(path, "not a JSON object");
                 return entries;
+            }
+            if (root.TryGetProperty("version", out var version) &&
+                !(version.ValueKind == JsonValueKind.Number && version.TryGetDouble(out var v) && v <= FormatVersion))
+            {
+                readOnly = true;
+                UiEngine.Log(LogLevel.Warn, $"{path}: written by a newer Kiln (version {version.GetRawText()}): its placements are used, " +
+                                            "the file is left as it is this start");
             }
             if (!root.TryGetProperty("mods", out var mods) || mods.ValueKind != JsonValueKind.Object) return entries;
             foreach (var m in mods.EnumerateObject())
@@ -525,7 +537,7 @@ internal static class UiPlacements
             {
                 ["comment"] = "Kiln: where the player left mods' screens and windows that remember their placement (RememberPlacement). " +
                               "x, y: the centre as a fraction of the screen; width, height: pixels at UI scale 1. Delete an entry, or the file, to forget it.",
-                ["version"] = 1,
+                ["version"] = FormatVersion,
                 ["mods"] = mods,
             };
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

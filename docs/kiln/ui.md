@@ -231,7 +231,8 @@ player put it (GitHub issue 146). The same units as `UiWindowOptions.Position` a
   `ui-placement.json.bad` with a warning in the log, and every screen and window starts from its options; an entry that
   is not a placement (a missing or non-number field, a size of 0 or less) is skipped; a key given twice counts once (the
   last one). A file Kiln cannot read (locked by another program, no permission) is left as it is for that game start,
-  with a warning. Delete an entry, or the file, to forget it.
+  with a warning; so is a file a newer Kiln wrote (a higher `version`, after going back from a beta), whose placements
+  Kiln still uses as far as it reads them. Delete an entry, or the file, to forget it.
 
 Grimoire (F3) opening beside Better Spells (Shift+F3) when both are loaded:
 ```csharp
