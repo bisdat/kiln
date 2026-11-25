@@ -426,6 +426,36 @@ public void QuiverArrowsFollowTheBackpacksAndAPickAsksTheServer()
 }
 ```
 
+- **Screen and window placement** (`kiln.UiPlacement`, since 0.2.0-dev.31.11, mod API 0.2.20) <a id="ui-placement"></a>.
+  Kiln.Ui's own placement code runs unchanged (`UiScreenOptions.Position`, `MoveTo`, `Resize`, `Placement`,
+  `RememberPlacement`; [the guide](../ui.md#placing-screens-and-windows-since-020-dev3111-mod-api-0220)); kiln.ui
+  itself stays offline, so nothing is drawn. `kiln.UiPlacement.Frame(screen)` (or a `UiWindow`) plays one overlay frame
+  of it on a viewport the test sets (`ViewportWidth`, `ViewportHeight`, `Scale`; 1920 x 1080 at 1 by default) and
+  returns where it is, or null while it is closed: ImGui's Always, FirstUseEver and Appearing and its 32-pixel minimum
+  are modelled, a window sized by its contents takes `ContentSize`. `PlayerPlaces(screen, x, y, width, height)` is the
+  player's drag in the next frame; `Remembered(screen)` reads what Kiln keeps in ui-placement.json in the harness's
+  config folder (`FilePath`, written at once offline); `Restart()` is a game start (the file is read again; write your
+  own file before it to script a moved or corrupt one). Not modelled: imgui.ini, size constraints a native plugin sets,
+  the title bar and scrolling.
+
+```csharp
+[Fact]
+public void GrimoireOpensBesideBetterSpells()
+{
+    using var kiln = new KilnHarness();
+    var spells = kiln.Load<BetterSpells>();   // its OnLoad: Ui.Screen("Better Spells", ...)
+    var grimoire = kiln.Load<Grimoire>();     // its OnLoad: Ui.Screen("Grimoire", ...)
+    kiln.Step();
+    var bs = ((BetterSpells)spells.Instance).Screen;
+    var g = ((Grimoire)grimoire.Instance).Screen;
+    bs.Open();
+    var b = kiln.UiPlacement.Frame(bs)!.Value;
+    g.MoveTo(b.Right, b.Y, pivotX: 0);        // what Grimoire does when it opens beside it
+    g.Open();
+    Assert.Equal(b.Right, kiln.UiPlacement.Frame(g)!.Value.Left, 3);
+}
+```
+
 - **Outlines in the world** (`kiln.Outlines`, since 0.2.0-dev.30.3) <a id="outlines"></a>. `Ui.World.Outline`'s own code
   runs on the kit's kiln.render, so what a mod outlines is tested offline. `kiln.Outlines.All` lists every request the
   harness got (`FakeOutline`: entity, colour, pulse, priority, duration, state, reason, group, `ColorShared`, the mod
@@ -604,6 +634,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | Game textures (GameTexture) | real |  | Kiln.Api's GameTexture decodes and encodes game pixel formats (BC1 to BC7, packed, 8 to 64-bit) as in the game: pure code on the test's bytes, with the same answers as kiln mode's image.decode_texture and image.encode_texture; the game's own textures are offline (read texture data from a blob the test adds) |
 | Game features | unavailable |  | Game.HasFeature is false for every game feature (sigdb) unless the test overrides it; an override changes the answer only, nothing behind the feature is faked |
 | Tests.RunAsync | unavailable |  | Kiln.Testing's Tests.RunAsync from mod code says "Kiln.Host is not running" offline |
+| Screen and window placement (since 0.2.0-dev.31.11) | real |  | Kiln.Ui's own placement code: UiScreenOptions.Position, MoveTo and Resize on UiScreen and UiWindow (applied once, on the next frame; on a closed screen when it next opens), Placement, RememberPlacement in ui-placement.json in the harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Offline: kiln.ui itself (nothing is drawn), imgui.ini, size constraints a native plugin sets |
 | Players | recording fake | `kiln.players` | Kiln.Players' own code on the kit's kiln.players: KilnHarness.Players.Join/Leave take effect at the next step (Players.All, Find, Joined/Left, PlayerJoinedEvent/PlayerLeftEvent); entity slot + 1, Steam id, admin bit, user-group rights, the test's positions; 16 slots. Unavailable: raw records, the game-log replay, the position probe for non-players, native subscribers |
 | Commands as a player, permissions | real |  | Kiln.Chat's Commands.Execute with a fake player as source (KilnHarness.RunCommand(player, line)) and Kiln.Permissions' real rules on permissions.json and enshrouded_server.json in the temp folder (WritePermissions, WriteServerConfig); @p and player names resolve against the fake players. Replies come back in the result and, through the fake kiln.chat, in the player's chat |
 | Saved data (WorldData, PlayerData) | recording fake | `kiln.saves` | Kiln.Saves' store on the kit's kiln.saves: a world id and revision per server folder, the save cycle on the steps (WorldSaving, staged generation, WorldSaved), the game's autosave (30 s virtual), player-left and shutdown saves; a harness on the same folder reads the last save (KilnHarness.Kill: no shutdown save). Unavailable: backups, the world file's path, the snapshot stage, a client's hosted world |

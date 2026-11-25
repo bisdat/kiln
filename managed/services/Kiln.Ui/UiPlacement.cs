@@ -162,8 +162,15 @@ internal sealed class UiPlacer
     /// <summary>The screen or window opened (any thread): the next frame is its first.</summary>
     public void Opened()
     {
-        lock (_lock) _appearing = true;
+        lock (_lock)
+        {
+            _appearing = true;
+            Opens++;
+        }
     }
+
+    /// <summary>How many times it opened (the test kit's frames: a reopen is a frame where it appears).</summary>
+    internal long Opens { get; private set; }
 
     private ((float X, float Y, float Px, float Py)? Move, (float W, float H)? Size, bool Appearing) Take()
     {
@@ -381,7 +388,8 @@ internal static class UiPlacements
         lock (WriteLock) Write(path, copy);
     }
 
-    internal static void ResetForTests()
+    /// <summary>Forgets what was read and not written (a game start reads the file again; the test kit's Restart).</summary>
+    internal static void Forget()
     {
         lock (Lock)
         {
@@ -389,6 +397,11 @@ internal static class UiPlacements
             _path = null;
             _loaded = _dirty = _scheduled = false;
         }
+    }
+
+    internal static void ResetForTests()
+    {
+        Forget();
         Debounce = TimeSpan.FromSeconds(1);
     }
 

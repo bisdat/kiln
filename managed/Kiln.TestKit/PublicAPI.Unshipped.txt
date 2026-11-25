@@ -1,1 +1,19 @@
 #nullable enable
+Kiln.TestKit.HarnessUiPlacement
+Kiln.TestKit.HarnessUiPlacement.ContentSize.get -> (float Width, float Height)
+Kiln.TestKit.HarnessUiPlacement.ContentSize.set -> void
+Kiln.TestKit.HarnessUiPlacement.FilePath.get -> string?
+Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiScreen! screen) -> Kiln.UiPlacement?
+Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiWindow! window) -> Kiln.UiPlacement?
+Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiScreen! screen, float x, float y, float width, float height) -> void
+Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiWindow! window, float x, float y, float width, float height) -> void
+Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiScreen! screen) -> Kiln.UiPlacement?
+Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiWindow! window) -> Kiln.UiPlacement?
+Kiln.TestKit.HarnessUiPlacement.Restart() -> void
+Kiln.TestKit.HarnessUiPlacement.Scale.get -> float
+Kiln.TestKit.HarnessUiPlacement.Scale.set -> void
+Kiln.TestKit.HarnessUiPlacement.ViewportHeight.get -> float
+Kiln.TestKit.HarnessUiPlacement.ViewportHeight.set -> void
+Kiln.TestKit.HarnessUiPlacement.ViewportWidth.get -> float
+Kiln.TestKit.HarnessUiPlacement.ViewportWidth.set -> void
+Kiln.TestKit.KilnHarness.UiPlacement.get -> Kiln.TestKit.HarnessUiPlacement!
