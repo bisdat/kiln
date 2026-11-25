@@ -50,6 +50,7 @@
 #include "services/kiln_rules.h"
 #ifndef KILN_RULES_HOST_TEST
 #include "creative.h"
+#include "kiln_call_site.hpp"
 #include "kiln_hook.hpp"
 #include "safetyhook.hpp"  // safetyhook::Context: the mid handlers' register view
 #include "services/kiln_client.h"
@@ -687,7 +688,7 @@ std::mutex g_site_mu;
 std::unordered_map<uintptr_t, bool> g_sites;
 
 bool from_building(uintptr_t ret) {
-    if (!g_build_fns_ready.load(std::memory_order_acquire)) return false;
+    if (!ret || !g_build_fns_ready.load(std::memory_order_acquire)) return false;
     {
         std::lock_guard lock(g_site_mu);
         if (auto it = g_sites.find(ret); it != g_sites.end()) return it->second;
@@ -698,6 +699,41 @@ bool from_building(uintptr_t ret) {
     std::lock_guard lock(g_site_mu);
     g_sites.emplace(ret, hit);
     return hit;
+}
+
+// The game's call a payment is for. Building Tools (0.34.0) redirects the building programs' calls of ApplyMaterials to its
+// own code (their E8s enter it), which then calls ApplyMaterials, so the caller kiln.hooks recorded is in its DLL and
+// from_building said no: BuildCost and BuildRefund did not apply while it ran. Behind such a caller the game's call is
+// found on the stack (kiln_call_site.hpp: unwound by unwind data, the exe file's bytes there a direct call of
+// ApplyMaterials); 0 when it cannot be (then the payment is not a building program's, as before). One kiln.log line per
+// module says which it was.
+std::mutex g_foreign_mu;
+std::unordered_map<std::string, bool> g_foreign_noted;
+void note_foreign_payment(uintptr_t ret, uintptr_t site) {
+    char name[128];
+    kiln::module_name(ret, name, sizeof name);
+    const bool building = site && from_building(site);
+    {
+        std::lock_guard lock(g_foreign_mu);
+        if (g_foreign_noted.size() > 64 || !g_foreign_noted.emplace(std::string(name) + (building ? "|b" : site ? "|g" : "|-"), true).second)
+            return;
+    }
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    if (building)
+        LOGI("costs: %s makes the building programs' payments (its code calls ApplyMaterials for the game's call at rva 0x%llx): "
+             "BuildCost and BuildRefund apply to them", name, static_cast<unsigned long long>(site - base));
+    else if (!site)
+        LOGW("costs: a materials payment from %s could not be traced to the game's call behind it: if it is a building action, "
+             "Kiln's building cost rules (BuildCost, BuildRefund) do not apply to it", name);
+}
+uintptr_t payment_site(uintptr_t ret) {
+    const auto* h = kiln::hooks_v2(g_api);
+    const bool readable = h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) && h->read_original;
+    const uintptr_t site = kiln::game_call_of(ret, reinterpret_cast<uintptr_t>(fn.apply), [&](uintptr_t at, void* out, size_t n) {
+        return readable && h->read_original(at, out, n) == KILN_OK;
+    });
+    if (site != ret) note_foreign_payment(ret, site);
+    return site;
 }
 
 struct Entry {  // one materials-list entry (0x18 bytes); the item at +0x10, the count at +0x14
@@ -717,7 +753,7 @@ bool scale(uint8_t* cost, int64_t* list, uint8_t take, uintptr_t ret, Entry* cop
     KilnRulesPlayer s;
     if (!player_rules(player, &s)) return false;
     const float m = take ? s.build_cost : s.build_refund;
-    const bool building = m != 1.0f && from_building(ret);
+    const bool building = m != 1.0f && from_building(payment_site(ret));
     const auto exact = g_exact_history.load(std::memory_order_acquire);
     if (!kiln::rules::scale_materials(m, building, building && exact && exact(list))) return false;
     const auto* src = reinterpret_cast<const Entry*>(list[0]);
