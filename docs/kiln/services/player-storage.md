@@ -248,7 +248,10 @@ of a quiver or spellbook, made in `OnLoad` on both sides:
 
 - **Game client:** the storage's items the server marked as arrows or spells (its catalog's equipment slot type 6 or 7)
   become rows of `Ui.AmmoList` (`ui.ammo.list`), one per item with the counts of its slots added up, in slot order,
-  Append unless `PlayerStorageAmmoOptions.Replace`. They are asked for again when the copy changes. A pick (`ui.ammo.pick`) of an
+  Append unless `PlayerStorageAmmoOptions.Replace`. In Append the HUD shows the game's own row for an item the backpack
+  holds too; since 0.2.0-dev.31.12 the storage's row of it is kept behind that row, so a pick of it once the backpack's
+  stack has left goes to the server rather than to the game, which would find no stack and empty the slot (GitHub
+  issue 145). They are asked for again when the copy changes. A pick (`ui.ammo.pick`) of an
   item of that storage goes to the server; a hosting game queues it for its own server tick. Without the HUD lists only
   the server half runs; `Shown` and `WhyNotShown` say so.
 - **Server:** after the checks above, the first slot holding the item is equipped with `Items.Equip` as the storage's

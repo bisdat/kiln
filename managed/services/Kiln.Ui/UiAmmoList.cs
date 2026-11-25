@@ -26,8 +26,9 @@ public enum AmmoListKind
 /// <summary>How a provider's rows go into the game's list. Since 0.2.0-dev.30.6.</summary>
 public enum AmmoListMode
 {
-    /// <summary>The mod's rows after the game's own rows. A row for an item the game already lists is left out (the
-    /// game's row, with its real count, stays).</summary>
+    /// <summary>The mod's rows after the game's own rows. For an item the game already lists, the game's row shows (with
+    /// its real count) and the mod's row is kept behind it, taking no room: since 0.2.0-dev.31.12 a pick of that row reaches
+    /// the mod once its stack has left the backpack (GitHub issue 145).</summary>
     Append = 1,
     /// <summary>Only the mods' rows: the game's own rows are not shown. When one provider of a list asks for Replace, the
     /// whole list is replaced (the rows of every provider of it, in registration order).</summary>
@@ -179,7 +180,8 @@ public static partial class Ui
         /// other mod row, also of an item whose used-up stack the game still lists at count 0, raises <see cref="Picked"/>
         /// for the mod that provided it. So does a pick of a provided item whose stack left the backpack after the game
         /// last built the list (the mod's server half swapped it out; since 0.2.0-dev.31.10, GitHub issue 145): the game's
-        /// rows still show its old count until the game builds them again. A pick of a provided row that goes to the game
+        /// rows still show its old count until the game builds them again. In Append that holds since 0.2.0-dev.31.12 for
+        /// a row the game's own row of the same item hid while the backpack held the stack: list the item then too. A pick of a provided row that goes to the game
         /// is logged at debug level (<c>ui.ammo: a pick of ... went to the game</c>).</para>
         /// </remarks>
         /// <exception cref="KilnUnavailableException">The row <c>ui.ammo.list</c> is off (an unmeasured game build, a
@@ -577,20 +579,23 @@ internal static unsafe class UiAmmoListBridge
         return rows;
     }
 
-    /// <summary>The list a set of providers' rows makes: their rows in registration order, the first row of an item wins,
-    /// in Append the game's own items with stock left out. A list holds 64 rows in all: in Append the mods' rows fit in
-    /// what the game's rows leave (none when the game's own were cut), in Replace 64.</summary>
+    /// <summary>The list a set of providers' rows makes: their rows in registration order, the first row of an item wins.
+    /// A list holds 64 rows in all: in Append the mods' rows fit in what the game's rows leave (none when the game's own
+    /// were cut), and a mod's row of an item the game lists itself takes no room (the HUD shows the game's row in its
+    /// place); in Replace 64.</summary>
     internal static (uint Mode, AmmoListRow[] Rows, (uint Item, ModContext? Mod)[] Owners, bool Cut) Compose(
         IReadOnlyList<(Provider P, List<AmmoListRow> Rows)> asked, AmmoListContext ctx)
     {
         var mode = asked.Any(a => a.P.Mode == AmmoListMode.Replace) ? UiAmmoNative.ModeReplace : UiAmmoNative.ModeAppend;
         var seen = new HashSet<uint>();
-        // A game row kept at count 0 for a used-up stack is no stock (GitHub issue 131): the mod's row of its item is
-        // published, the HUD shows the game's row in its place (no room taken), and native sends its pick to the mod
-        // when the backpack does not hold the item.
-        var zero = new HashSet<uint>();
+        // In Append a mod's row of an item the game lists itself is published behind the game's row: native keeps the
+        // game's row (and count) in its place, so it takes no room, and native knows the item is the mod's. A pick of it is
+        // the game's while the backpack holds the stack; it reaches the mod when the row is a used-up stack the game kept at
+        // count 0 (GitHub issue 131), and when the stack left the backpack after the game built its rows, still showing
+        // stock (the mod's swap; GitHub issue 145).
+        var game = new HashSet<uint>();
         if (mode == UiAmmoNative.ModeAppend)
-            foreach (var g in ctx.GameRows) (g.Count > 0 ? seen : zero).Add(g.Item.Value);
+            foreach (var g in ctx.GameRows) game.Add(g.Item.Value);
         // the room follows the game's rows seen (at most 64), never Truncated alone: native's LIMIT may be left from an
         // earlier overfull list, and a reason by itself changes no serial, so nothing would build the list again
         var room = mode == UiAmmoNative.ModeAppend ? Math.Max(0, UiAmmoNative.Capacity - ctx.GameRows.Count) : UiAmmoNative.Capacity;
@@ -602,7 +607,7 @@ internal static unsafe class UiAmmoListBridge
             foreach (var r in list)
             {
                 if (!seen.Add(r.Item.Value)) continue;
-                if (!zero.Contains(r.Item.Value))
+                if (!game.Contains(r.Item.Value))
                 {
                     if (used == room)
                     {

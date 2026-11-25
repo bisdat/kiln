@@ -28,7 +28,8 @@ public sealed partial class KilnHarness
 /// <para><b>Not modelled.</b> The game's hook and drawing, its equip request, the server half (a pick does nothing to any
 /// inventory), the pick queue's thread. The game's rows are the backpack here, so a stack that leaves the backpack before
 /// the game builds its rows again (a pick of its row reaches <c>Picked</c> in the game since 0.2.0-dev.31.10, GitHub issue
-/// 145) is not modelled; a pick after <see cref="SetGameRows"/> and before the next step is decided by the new rows, as in
+/// 145; in Append also for a mod's row kept behind the game's row of the same item, since 0.2.0-dev.31.12) is not
+/// modelled; a pick after <see cref="SetGameRows"/> and before the next step is decided by the new rows, as in
 /// the game, while <see cref="Shown"/> still composes the earlier snapshot with them (the game shows only its own rows
 /// until Kiln publishes for them).</para>
 /// </remarks>
@@ -142,7 +143,8 @@ public sealed class HarnessAmmoList
     }
 
     /// <summary>The mods' rows Kiln.Ui published for the list (composed, in order); empty while the game's list shows as
-    /// it is.</summary>
+    /// it is. In Append since 0.2.0-dev.31.12 also a mod's row of an item the game lists itself, which <see cref="Shown"/>
+    /// shows as the game's row.</summary>
     public IReadOnlyList<AmmoListRow> Provided(AmmoListKind kind)
     {
         lock (State.Lock)

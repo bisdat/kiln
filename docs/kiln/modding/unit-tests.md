@@ -403,7 +403,8 @@ public void CtrlClickAsksToMarkTheItem()
   `NewSession` starts another session (snapshots and queued picks cleared), `KnownItems` names the items of a kind (a
   row of any other item is refused, as the game refuses it), `Player` sets the context's player. Each `Step()` is a UI
   frame: the providers of a list whose context changed are asked and their composed rows published. `Shown(kind)` is the
-  list as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows,
+  list as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows (in
+  Append since 0.2.0-dev.31.12 also a mod's row of an item the game lists itself, kept behind the game's row),
   `ModeOf(kind)` Append, Replace or null (the game's list as is), `Publishes` counts the snapshots. `Select` and
   `Selected` model the selection, which stays on its item when the rows change. `Pick(kind, item)` is the player's pick:
   true when it is a mod row the game does not list with stock (a game row at count 0, a used-up stack, is none), which
