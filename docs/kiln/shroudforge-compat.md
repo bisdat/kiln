@@ -35,8 +35,9 @@ adds next to Kiln. 0.2.0-dev.30.7 pins fork branch `kiln-30.7-fixes` on top of `
 whole or not the source of the game files is never restored, and EML manifests may leave optional metadata null
 (section 5.0). 0.2.0-dev.31 pins fork branch `kiln-dev31/bodyheat-signed` (`465aad9f`, on top of `90b76e3e`, the
 30.8/30.9 pin): BodyHeat's attribute calculation runs as the resource's sint32 (section 5.0).
-0.2.0-dev.31.12 pins fork branch `kiln-dev31-exports-reuse` (`86c2f8db`): the host's skip list (`c115e6c3`, section 5.8)
-and, on top of it, a start reuses the last pass while runtime mods write into the export folder (section 5.0).
+0.2.0-dev.31.12 pins fork branch `kiln-dev31-exports-reuse` (`1672d8af`): the host's skip list (`c115e6c3`, section 5.8)
+and, on top of it, a start reuses the last pass while runtime mods write into the export folder (`86c2f8db` and its
+review fix `1672d8af`, section 5.0).
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -207,34 +208,45 @@ without the package; the recovery is upstream's (the saved baseline back, the ga
 (host and Wine): `name_failing_mod`, `report_startup_panic`, `kiln_retry_tests`.
 
 **A start reuses the last pass while runtime mods write into the export folder** (fork branch
-`kiln-dev31-exports-reuse`, `86c2f8db`, 0.2.0-dev.31.12). Since 0.2.0-dev.29.16 the fork skips an unchanged startup
-pass: after a successful pass it writes `<game>/<stem>.kfc.prepared.json` (the preparation fingerprint, the export
-switch, Steam's build id, `.kfc` and `.kfc_resources` by size, time and SHA-256, both working backups by size and time),
-and a start applies again only when that no longer holds (`modules/game-files/record_prepared_game_files.rs`,
-`check_asset_preparation.rs` `already_applied`). With a pregame exporter in the set (a package with `patch` and
-`export`, or `export` alone; `export_pass_needed`), that record (scheme 1) also listed every entry of
-`<game>/shroudforge/exports` with its size and time. Runtime mods write there while the game runs, so every start said
+`kiln-dev31-exports-reuse`, `86c2f8db` and `1672d8af`, 0.2.0-dev.31.12). Since 0.2.0-dev.29.16 the fork skips an
+unchanged startup pass: after a successful pass it writes `<game>/<stem>.kfc.prepared.json` (the preparation
+fingerprint, the export switch, Steam's build id, `.kfc` and `.kfc_resources` by size, time and SHA-256, both working
+backups by size and time), and a start applies again only when that no longer holds
+(`modules/game-files/record_prepared_game_files.rs`, `check_asset_preparation.rs` `already_applied`). With a pregame
+exporter in the set (a package with `patch` and `export`, or `export` alone; `export_pass_needed`), that record (scheme
+1) also listed every entry of `<game>/shroudforge/exports` with its size and time. Runtime mods write there while the
+game runs, so every start said
 `[startup] Startup asset mods are applied again target=enshrouded reason=exports differs from the last pass` and ran the
-whole pass: 17 to 20 s without, 623 to 638 s with the Beastmaster EML packs, "unusable" (a player's report,
-2026-11-25). His export folder: flat files at its top from pregame exporters (XHL Area Harvest's
-`xhl-area-harvest-*.tsv`/`.txt`, Auto Loot Plus's `auto-loot-plus-report.txt`), Unified EML Tweaks' own folder
-`unified-tweaks/` (a pregame exporter: `patch` and `export`), and Unified Tweaks Live's `unified-tweaks-live/`
-(`runtime` and `export`: written while the game runs). Pregame exporters are not scoped to a folder of their own, so
-the pass now notes what it uses: the loader hands the pregame session a note (`RunOptions::export_touches`; the in-game
-phase gets none), and `io.export`, `export_exists`, `read_export_to_string`, `export_rename`, `export_copy` and
-`export_delete` add each path, `export_list` the folder. The record (scheme `kiln-sf-prepared 2`) keeps each path's
-state (a file's size and SHA-256, over 16 MiB of its first and last MiB plus its time; a folder; nothing there) and
-each listed folder's names, and nothing else of the export folder. So an exporter's output changed or deleted, a file it
-read or looked for changed or appearing, or a file added to a folder it listed runs the pass again; a runtime mod's
-file, a native DLL's (Weapon Holster's `weapon_holster/`), World Editor's or the diagnostics' do not. A scheme 1 record
-means one pass at the first start of 0.2.0-dev.31.12, then reuse; `left_live_header` still reads scheme 1, so the
-working-baseline check keeps its proof across the update. The other parts of the record were checked for changes
-between starts and have none in a Kiln-hosted start: nothing writes the game files or the backups once the pass is
-done (kiln-eml stands aside and patches nothing, and marks the record stale only for a handoff an earlier kiln-mode
-start owes), the build id is Steam's, and the fingerprint skips dotfiles and `*.log` in package folders (a native DLL
-that writes other files into its own package folder at run time would still cost one pass a start; none of the
-player's does). Tests (host): the fork's `prepared_stamp` (12) and `kiln_exports_reuse_tests` (4 whole passes on a
-small archive), both shaped on the player's export folder, red before. Not seen in a game client.
+whole pass: 17 to 20 s without, 623 to 638 s with the Beastmaster EML packs, "unusable" (a player's report, 2026-11-25).
+His export folder: flat files at its top from pregame exporters (XHL Area Harvest's `xhl-area-harvest-*.tsv`/`.txt`,
+Auto Loot Plus's `auto-loot-plus-report.txt`), Unified EML Tweaks' own folder `unified-tweaks/` (a pregame exporter:
+`patch` and `export`), and Unified Tweaks Live's `unified-tweaks-live/` (`runtime` and `export`: written while the game
+runs). Pregame exporters are not scoped to a folder of their own, so the pass now notes what it uses: the loader hands
+the pregame session a note (`RunOptions::export_touches`; the in-game phase gets none), and `io.export`,
+`export_exists`, `read_export_to_string`, `export_rename`, `export_copy` and `export_delete` add each path,
+`export_list` the folder. The record (scheme `kiln-sf-prepared 2`) keeps each path's state (a file's size and SHA-256,
+over 16 MiB of its first and last MiB plus its time; a folder; nothing there; a link by where it leads and what is
+there, as the export API follows links) and each listed folder's names (a link entry with where it leads), and nothing
+else of the export folder. It keeps that whenever exports are on (`exports.enabled`), with or without a pregame
+exporter: the export API checks the switch, not the package's capability, so a pregame package with `patch` alone can
+read and write exports too. A pass that used a path the record cannot name (a part with `:`, such as an NTFS stream)
+leaves no record. So an exporter's output changed or deleted, a file it read or looked for changed or appearing, or a
+file added to a folder it listed runs the pass again; a runtime mod's file, a native DLL's (Weapon Holster's
+`weapon_holster/`), World Editor's or the diagnostics' do not. kiln-eml's proof of hosted ShroudForge output
+(`hosted_shroudforge_output` in `mod-loader-lua/src/ownership.rs`, which keeps the witness from taking that output for
+the game's own data) reads only the record's `files`, `target` and `build`, which scheme 2 kept as they were, and
+accepts both schemes; it took scheme 1 alone, so a scheme 2 record would have proved nothing. A scheme 1 record means
+one pass at the first start of 0.2.0-dev.31.12, then reuse; `left_live_header` still reads scheme 1, so the
+working-baseline check keeps its proof across the update. Back on an older Kiln, a scheme 2 record is one of another
+scheme there: the pass runs, and that Kiln's kiln-eml takes the record for no proof, as when there is none. The other
+parts of the record were checked for changes between starts and have none in a Kiln-hosted start: nothing writes the
+game files or the backups once the pass is done (kiln-eml stands aside and patches nothing, and marks the record stale
+only for a handoff an earlier kiln-mode start owes), the build id is Steam's, and the fingerprint skips dotfiles and
+`*.log` in package folders (a native DLL that writes other files into its own package folder at run time would still
+cost one pass a start; none of the player's does). Tests (host): the fork's `prepared_stamp` (16) and
+`kiln_exports_reuse_tests` (5 whole passes on a small archive), both shaped on the player's export folder, red before,
+and kiln-eml's `hosted_shroudforge_output_is_proven_by_its_whole_record_only` (a scheme 2 record proves the output, red
+before). Not seen in a game client.
 
 **BodyHeat's calculation is signed** (fork branch `kiln-dev31/bodyheat-signed`, `465aad9f`, 0.2.0-dev.31). SF
 Survival's Infinite Frost Timer (`BodyHeat_Min = BodyHeat_Max` through `runtime.overrides.attribute`) always answered

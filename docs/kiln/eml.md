@@ -270,8 +270,10 @@ It fails soft:
   record (`<exe>.kfc.prepared.json`) holds; kiln-eml's stamps and change cache are not part of it, and kiln-eml,
   standing aside, writes none of the files it records. With a pregame exporter on, that record held the whole
   `shroudforge/exports` folder, so a runtime mod writing there sent every start through the whole pass again (11
-  minutes with the Beastmaster packs); it now holds only what the pass used there (shroudforge-compat.md section 5.0,
-  "A start reuses the last pass while runtime mods write into the export folder").
+  minutes with the Beastmaster packs); it now holds only what the pass used there (scheme `kiln-sf-prepared 2`;
+  shroudforge-compat.md section 5.0, "A start reuses the last pass while runtime mods write into the export folder").
+  kiln-eml's proof that the live files are that ShroudForge's output (`hosted_shroudforge_output`) reads the record's
+  game-file part, which scheme 2 left as it was, and accepts schemes 1 and 2.
 - **A backup of an earlier game build.** After a game update the backup (`<exe>.kfc.bak`) is of the old build while
   the game data is of the new one. A start without EML mods then compares nothing, restores nothing and claims nothing
   about the data: one info line in kiln.log (`... the vanilla backup is of another game build ...`), `staleBackup:
