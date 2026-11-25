@@ -8,21 +8,27 @@
 // own lua 1.43 keeps it).
 // v41 (0.6.10) and v42 (0.6.11) added no function, only fields at the end of two structs: EmfMoveOrder.stuck_seconds
 // (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf's version (42 since 0.2.0-dev.28) lets a mod
-// whose mod.json says "emf": 41 or 42 load; enemy_move and path_find, the functions those fields belong to, are not carried yet
-// (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
+// whose mod.json says "emf": 41 or 42 load. enemy_move is carried since 0.2.0-dev.31.13 (api_orders.cpp: stuck_seconds
+// read when the order's size covers it; EMF_MOVE_PEACEFUL_ALL refused with its `why`); path_find is not carried yet
+// (below): no path result is ever handed to a mod.
 // v43-v46 permissions and villager moves remain unavailable. The v44/v45/v47 block family is filled by
-// api_terrain.cpp through kiln.build; spawn_facing by api_spawn.cpp through kiln.spawn. Marker bars stay unavailable.
+// api_terrain.cpp through kiln.build; spawn_facing by api_spawn.cpp through kiln.spawn. The v33 markers and v47's
+// marker bar are api_markers.cpp's (kiln.markers, since 0.2.0-dev.31.13).
 // v48 (0.6.20) added no function: EmfPathQuery.as_entity (plan as a given creature) and EmfPathResult's used values
 // belong to path_find, which is not carried: a query of either size is answered 0 unread, and no result is written.
 // v49 (0.6.22) adds no slots: path as_state (calm/guard) and enemy_move CLEAR remain unavailable, not
-// approximated. Unknown states/flags are also no-action refusals; no query, points or entity state are consumed.
+// approximated (CLEAR is refused with its `why` by api_orders.cpp). Unknown states/flags are also no-action refusals; no query, points or entity state are consumed.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
-// speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
+// speaker), world_to_screen (kiln.render's camera, below), on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3),
+// and since 0.2.0-dev.31.13: the seven v32 buff functions (api_buffs.cpp, fill_buffs), v35 player_view (api_view.cpp,
+// fill_view), the six v33 marker functions (api_markers.cpp, fill_markers) and the six v39/v40 order functions
+// (api_orders.cpp, fill_orders). fog_at, map_markers and the canvases answer "not yet" from api_view.cpp.
 //
-// Not carried yet (45 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
-// mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
-// the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
+// Not carried yet (25 functions; v35's fog_at, map_markers and canvases among them, in api_view.cpp): each answers as
+// EMF's own core answers where a feature is off on a game build, so a mod meets a state it already has to handle: the
+// documented failure value, out buffers cleared, `why` filled where the request has one, a request whose `size` is too
+// small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
 // A function leaves this file when Kiln carries it: docs/kiln/emf-parity.md has the list.
 #include <intrin.h>
@@ -95,64 +101,10 @@ bool api_hit_rule_remove(uint32_t) {
     return false;  // no rule has that id
 }
 
-// ---------------------------------------------------------------------------------------------- v32 -------------
-uint32_t api_buff_types(EmfWorld*, EmfBuffType*, uint32_t) {
-    KEMF_NOT_YET("buff_types");
-    return 0;  // "0 when the world's buff registry cannot be read"
-}
-
-bool api_buff_type(EmfWorld*, uint32_t, EmfBuffType*) {
-    KEMF_NOT_YET("buff_type");
-    return false;
-}
-
-bool api_buff_text(uint32_t, uint32_t, char* buf, uint32_t cap) {
-    KEMF_NOT_YET("buff_text");
-    clear(buf, cap);
-    return false;
-}
-
-uint32_t api_buffs_of(EmfWorld*, uint32_t, EmfBuff*, uint32_t) {
-    KEMF_NOT_YET("buffs_of");
-    return 0;
-}
-
-bool api_buff_apply(EmfWorld*, uint32_t, uint32_t, int64_t, uint32_t, uint32_t, EmfBuffCallback, void*) {
-    KEMF_NOT_YET("buff_apply");
-    return false;  // refused at once: `done` is not called
-}
-
-bool api_buff_remove(EmfWorld*, uint32_t, uint32_t, EmfBuffCallback, void*) {
-    KEMF_NOT_YET("buff_remove");
-    return false;
-}
-
-bool api_on_buff(EmfBuffCallback, void*) {
-    KEMF_NOT_YET("on_buff");
-    return false;
-}
+// v32 buffs: api_buffs.cpp (fill_buffs, since 0.2.0-dev.31.13)
 
 // ---------------------------------------------------------------------------------------------- v33 -------------
-bool api_marker_set(const EmfMarker*) {
-    KEMF_NOT_YET("marker_set");
-    return false;
-}
-
-bool api_marker_remove(const char*) {
-    KEMF_NOT_YET("marker_remove");
-    return false;  // the mod has no such marker
-}
-
-uint32_t api_marker_clear() {
-    KEMF_NOT_YET("marker_clear");
-    return 0;
-}
-
-uint32_t api_marker_types(EmfMapMarkerType*, uint32_t) {
-    KEMF_NOT_YET("marker_types");
-    return 0;
-}
-
+// marker_set ... marker_unsend: api_markers.cpp (fill_markers, after fill_v40).
 // kiln.render, looked up at the first call. A function-local static: concurrent first callers wait for the one lookup
 // (world_to_screen may be called from any thread), and the pointer never changes afterwards. Services are published
 // before any mod loads, so the first call cannot come too early.
@@ -183,16 +135,6 @@ bool api_world_to_screen(double x, double y, double z, float* px, float* py) {
     return true;
 }
 
-uint32_t api_marker_send(uint32_t, const EmfMarker*, uint32_t) {
-    KEMF_NOT_YET("marker_send");
-    return 0;  // it went to no player
-}
-
-uint32_t api_marker_unsend(uint32_t, const char*) {
-    KEMF_NOT_YET("marker_unsend");
-    return 0;
-}
-
 // ---------------------------------------------------------------------------------------------- v34 -------------
 bool api_map_cursor(double*, double*) {
     KEMF_NOT_YET("map_cursor");
@@ -214,31 +156,7 @@ bool api_ground_at(EmfWorld*, double, double, EmfGroundCallback, void*) {
     return false;  // refused at once: `cb` is not called
 }
 
-// ---------------------------------------------------------------------------------------------- v35 -------------
-bool api_player_view(EmfPlayerView*) {
-    KEMF_NOT_YET("player_view");
-    return false;
-}
-
-bool api_fog_at(double, double, float*) {
-    KEMF_NOT_YET("fog_at");
-    return false;
-}
-
-uint32_t api_map_markers(EmfGameMarker*, uint32_t) {
-    KEMF_NOT_YET("map_markers");
-    return 0;
-}
-
-bool api_canvas_set(const char*, const EmfCanvas*) {
-    KEMF_NOT_YET("canvas_set");
-    return false;
-}
-
-bool api_canvas_draw(const char*, const EmfCanvasCmd*, uint32_t) {
-    KEMF_NOT_YET("canvas_draw");
-    return false;  // an unknown canvas
-}
+// v35 player_view, fog_at, map_markers, canvas_set, canvas_draw: api_view.cpp (fill_view, since 0.2.0-dev.31.13)
 
 // ---------------------------------------------------------------------------------------------- v36 -------------
 bool api_remove_building(EmfWorld*, EmfRemoveBuilding* req) {
@@ -283,49 +201,7 @@ bool api_door_lock(EmfWorld*, uint32_t, uint32_t) {
     return false;
 }
 
-// ---------------------------------------------------------------------------------------------- v39 -------------
-uint32_t api_enemy_order(EmfWorld*, EmfEnemyOrder* order) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (!order || order->size < v26::kEnemyOrderV39Size) {
-        refuse(m, "enemy_order", "no order, or its size field is not sizeof(EmfEnemyOrder)", true);
-        return 0;
-    }
-    unsupported(m, "enemy_order", kNotYet);
-    say_why(order->why);
-    return 0;
-}
-
-bool api_enemy_order_cancel(uint32_t) {
-    KEMF_NOT_YET("enemy_order_cancel");
-    return false;
-}
-
-uint32_t api_enemy_target(EmfWorld*, uint32_t) {
-    KEMF_NOT_YET("enemy_target");
-    return 0;
-}
-
-// ---------------------------------------------------------------------------------------------- v40 -------------
-uint32_t api_enemy_move(EmfWorld*, EmfMoveOrder* order, EmfMoveCallback, void*) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (!order || order->size < v26::kMoveOrderV40Size) {
-        refuse(m, "enemy_move", "no order, or its size field is not sizeof(EmfMoveOrder)", true);
-        return 0;
-    }
-    unsupported(m, "enemy_move", kNotYet);
-    say_why(order->why);
-    return 0;  // refused: `cb` is not called
-}
-
-bool api_enemy_move_cancel(uint32_t) {
-    KEMF_NOT_YET("enemy_move_cancel");
-    return false;
-}
-
-uint32_t api_enemy_moving(EmfWorld*, uint32_t) {
-    KEMF_NOT_YET("enemy_moving");
-    return 0;
-}
+// v39 enemy orders and v40 move orders: api_orders.cpp (fill_orders, since 0.2.0-dev.31.13).
 
 // ---------------------------------------------------------------------------------------------- v43 -------------
 bool api_player_permissions(EmfWorld*, uint32_t, uint32_t* perms) {
@@ -360,7 +236,8 @@ uint32_t api_villager_moving(EmfWorld*, uint32_t) {
 
 }  // namespace
 
-// chat_tell_ex and chat_broadcast_ex are filled by fill_game (api_game.cpp), on_hit by fill_hits (api_hits.cpp).
+// chat_tell_ex and chat_broadcast_ex are filled by fill_game (api_game.cpp), on_hit by fill_hits (api_hits.cpp), the
+// six marker functions by fill_markers (api_markers.cpp).
 void fill_v40(EmfApi* t) {
     t->on_player = &api_on_player;
     t->item_name = &api_item_name;
@@ -370,41 +247,21 @@ void fill_v40(EmfApi* t) {
     t->on_hit_before = &api_on_hit_before;
     t->hit_rule_add = &api_hit_rule_add;
     t->hit_rule_remove = &api_hit_rule_remove;
-    t->buff_types = &api_buff_types;
-    t->buff_type = &api_buff_type;
-    t->buff_text = &api_buff_text;
-    t->buffs_of = &api_buffs_of;
-    t->buff_apply = &api_buff_apply;
-    t->buff_remove = &api_buff_remove;
-    t->on_buff = &api_on_buff;
-    t->marker_set = &api_marker_set;
-    t->marker_remove = &api_marker_remove;
-    t->marker_clear = &api_marker_clear;
-    t->marker_types = &api_marker_types;
+    // v32 buffs: fill_buffs (api_buffs.cpp), called after this
+    // marker_set, marker_remove, marker_clear, marker_types, marker_send, marker_unsend: fill_markers (api_markers.cpp)
     t->world_to_screen = &api_world_to_screen;
-    t->marker_send = &api_marker_send;
-    t->marker_unsend = &api_marker_unsend;
     t->map_cursor = &api_map_cursor;
     t->on_map_click = &api_on_map_click;
     t->map_action = &api_map_action;
     t->ground_at = &api_ground_at;
-    t->player_view = &api_player_view;
-    t->fog_at = &api_fog_at;
-    t->map_markers = &api_map_markers;
-    t->canvas_set = &api_canvas_set;
-    t->canvas_draw = &api_canvas_draw;
+    // v35: fill_view (api_view.cpp), called after this
     t->remove_building = &api_remove_building;
     t->path_find = &api_path_find;
     t->path_cancel = &api_path_cancel;
     t->door_state = &api_door_state;
     t->door_set = &api_door_set;
     t->door_lock = &api_door_lock;
-    t->enemy_order = &api_enemy_order;
-    t->enemy_order_cancel = &api_enemy_order_cancel;
-    t->enemy_target = &api_enemy_target;
-    t->enemy_move = &api_enemy_move;
-    t->enemy_move_cancel = &api_enemy_move_cancel;
-    t->enemy_moving = &api_enemy_moving;
+    // enemy_order .. enemy_moving (v39, v40): fill_orders (api_orders.cpp), called after this
     t->player_permissions = &api_player_permissions;  // v43
     t->villager_move = &api_villager_move;  // v46
     t->villager_move_cancel = &api_villager_move_cancel;

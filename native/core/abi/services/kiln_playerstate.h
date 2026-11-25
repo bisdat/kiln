@@ -113,7 +113,9 @@ typedef struct KilnPlayerBuff {
     uint32_t slot;      /* keen::BuffSlotType */
     uint32_t cleansed;
     int64_t life_ns, end_ns; /* BuffNetworkData of the buff entity; end 0 = unknown */
-    uint32_t level, reserved;
+    uint32_t level;
+    uint32_t index;     /* since 0.2.0-dev.31.13: its place in its slot group (BuffContainer's array index: food 0..3,
+                           buff and debuff 0..15, rested and terrain 0); an older kiln-players.dll leaves it 0 */
 } KilnPlayerBuff;
 
 /* Where a player's camera is and where it looks (aim, since 0.2.0-dev.27): PlayerInput.fromClient.camera, the camera

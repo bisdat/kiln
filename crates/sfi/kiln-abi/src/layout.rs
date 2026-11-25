@@ -3810,7 +3810,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerBuff, life_ns) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerBuff, end_ns) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerBuff, level) == 32);
-    assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerBuff, reserved) == 36);
+    assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerBuff, index) == 36);
     assert!(core::mem::size_of::<crate::services::kiln_playerstate::KilnPlayerAim>() == 64);
     assert!(core::mem::align_of::<crate::services::kiln_playerstate::KilnPlayerAim>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_playerstate::KilnPlayerAim, size) == 0);

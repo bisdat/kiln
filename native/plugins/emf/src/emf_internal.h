@@ -20,7 +20,13 @@
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
 //   api_v40.cpp   v28-v49: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
+//   api_orders.cpp v39 enemy orders and v40 move orders on kiln.creature_control leases, kiln.creatures and
+//                 kiln.spawn (the logic without the game: orders_model.*)
+//   api_markers.cpp v33 markers and v47 marker bars through kiln.markers (since 0.2.0-dev.31.13)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
+//   api_buffs.cpp v32 buffs: kiln.playerstate reads, the BuffRegistry's types, kiln.abilities programs that run the
+//                 game's applyBuff / removeBuff, kiln.content texts (buffs_model.* without the game)
+//   api_view.cpp  v35 player_view through kiln.client and kiln.render; fog_at, map_markers, canvases answer "not yet"
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
 //   seh.cpp       structured-exception guards around every call into a mod
 // Docs: docs/kiln/emf.md (users), docs/re/emf-compat.md (how each function maps onto Kiln).
@@ -257,6 +263,16 @@ void terrain_world_stopping(); // cancellations delivered at the next server Pos
 void terrain_world_started();
 std::string terrain_status_json();
 void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v48, without the two chat functions of api_game.cpp)
+// v39 enemy orders and v40 move orders (api_orders.cpp, orders_model.*; since 0.2.0-dev.31.13): after fill_v40
+void fill_orders(EmfApi* t);
+void orders_after_step(EmfWorld* w, uint8_t kind);  // the server world's: orders and moves walked on, callbacks
+void orders_world_stopping();                       // every move ends cancelled (world NULL), every order ends
+void orders_world_started();
+void orders_shutdown();                             // on_unload: kiln.creatures' holds of kiln-emf go
+void fill_markers(EmfApi* t);  // api_markers.cpp (v33 markers and v47 bars on kiln.markers), after fill_v40
+void markers_after_step(EmfWorld* w, uint8_t kind);  // queued server calls, follow and map retries
+void markers_world_stopping(uint8_t kind);           // that world's markers of every mod go
+void markers_shutdown();                             // releases every mod's kiln.markers owner
 void net_on_ready();
 void net_server_pre();
 void net_after_step(EmfWorld* w, uint8_t kind);
@@ -326,6 +342,13 @@ bool events_relay_registered(const char* name);
 void hits_on_ready(bool any_mod_loaded);
 void hits_after_ready();
 void fill_hits(EmfApi* t);  // after fill_v40: on_hit (on_hit_before and the hit rules stay in api_v40.cpp)
+// v32 buffs (api_buffs.cpp, since 0.2.0-dev.31.13): kiln.playerstate reads, kiln.abilities programs for giving and
+// removing, the players' buff events; v35 player_view (api_view.cpp). Both after fill_v40.
+void fill_buffs(EmfApi* t);
+void fill_view(EmfApi* t);  // player_view; fog_at, map_markers and the canvases answer "not yet" there
+void buffs_server_pre();                           // starts queued gives and removals (the server world's Pre)
+void buffs_after_step(EmfWorld* w, uint8_t kind);  // server: answers, on_buff; client: texts, the view's copy
+void buffs_world_stopping();                       // the server world's: waiting requests are refused at the next Post
 // a posted task that runs `f` on the server world's tick thread (Pre of the next step); false when it was not queued
 bool post_tick(std::function<void()> f);
 // kiln.ui v2 slots (a core with an older kiln.ui ends its table above them)
