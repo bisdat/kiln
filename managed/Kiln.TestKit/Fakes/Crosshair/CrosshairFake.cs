@@ -45,7 +45,8 @@ internal sealed unsafe class CrosshairFake : IKitFake
         [Service, Crosshair.Capability],
         "Crosshair.Read and TryGet read the sample the test aims (KilnHarness.Crosshair: Aim, AimAtNothing, Age, Fault, Clear): " +
         "hit or miss, position, normal, distance, entity, voxel material, the next sequence and the harness's step; stale past " +
-        "Crosshair.FreshFor. Not modelled: the game's trace (its reach, the held item, what it hits), the client session's start and end."));
+        "Crosshair.FreshFor. Not modelled: the game's trace (its reach, the held item, what it hits), the client session's start and end. " +
+        "In a game the first read of the process answers NoSample while Kiln's hook goes in; the fake answers the aimed sample at once."));
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Get(CrosshairNative.Hit* out_, uint* reason)

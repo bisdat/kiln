@@ -29,7 +29,9 @@ public static class FakeCrosshair
 /// The row <c>client.crosshair</c>, which a test can switch off (<c>Capabilities.Override</c>): then
 /// <c>Crosshair.Read</c> throws <see cref="KilnUnavailableException"/> and <c>TryGet</c> is false.</para>
 /// <para><b>Not modelled.</b> The game's trace: its reach (the held item's, 7 to 31 m), what it can hit, the 1 cm the
-/// game moves the point back. A field the test does not give is not set (null), as when the game gives none.</para>
+/// game moves the point. The first read of the process, which in a game answers <c>NoSample</c> while Kiln's hook
+/// goes in (the fake answers the aimed sample at once). A field the test does not give is not set (null), as when the
+/// game gives none.</para>
 /// </remarks>
 public sealed class HarnessCrosshair(KilnHarness harness)
 {

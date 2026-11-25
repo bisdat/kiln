@@ -44,10 +44,10 @@ if (why == CrosshairReason.Stale) Log.Info($"last target is {last!.Value.Age.Tot
 | Member | Meaning |
 |---|---|
 | `IsHit` | the game's trace hit something within its reach |
-| `Position` | `WorldPosition?`: the hit point in world metres. The game's own point: 1 cm back toward the camera, along the surface normal or the ray, where the game places things |
+| `Position` | `WorldPosition?`: the hit point in world metres, the game's own point: moved 1 cm, either against the surface normal (into the surface, when the hit collider and the held item ask for it) or back along the ray toward the trace's start |
 | `Normal` | `Vector3?`: the surface normal, unit length |
 | `Distance` | `float?`: metres from the trace's start (see below) |
-| `Entity` / `HasEntity` | the game's entity of the hit (a creature, a prop, a placed object); `EntityId.None` for terrain and a miss. A client-world id; on a host also the server world's |
+| `Entity` / `HasEntity` | the game's entity of the hit (a creature, a prop, a placed object); `EntityId.None` for terrain and a miss. A client-world id; on a host also the server world's. The game's own pick: in the case where it moves the point into the surface and its trace found two or more hits, the entity is the second-nearest hit's while position, normal and distance are the nearest's |
 | `VoxelMaterial` | `byte?`: the voxel material id the game reports for the hit surface (terrain and voxel building cells; some colliders carry one) |
 | `GameStatus` | the game's result byte: 0 hit, 31 nothing within reach, 21 no usable camera direction |
 | `Sequence` | game traces copied since the game started; never 0. The same sequence is the same trace |
@@ -85,13 +85,15 @@ visit that finds one publishing skips its copy), and a reader that meets a publi
 Kiln adds its observation of the game's trace at the **first read of the process**, never at boot: a game without a mod
 that reads the crosshair never has the hook. That first read answers `NoSample`; samples start at the game's next cursor
 step. The install is a checked one (every other thread stopped and checked to stand outside the replaced bytes); when
-some thread could not be checked nothing is written and a later read tries again, up to three times. Any other failure is
-final for the process: the row turns `faulted` and reads throw (`Read`) or say false (`TryGet`).
+some thread could not be checked nothing is written, reads keep answering `NoSample` (the row stays available) and a
+read at least a second later tries again, up to three times in all. Any other failure, or the third refusal, is final for
+the process: the row turns `faulted` and reads throw (`Read`) or say false (`TryGet`).
 
 ## Sessions
 
 A sample belongs to the client session it was taken in. A new session (a hosted or joined game) starts with no sample;
-after the client world stops nothing is given. A guarded copy that faults stops samples for the rest of that session
+after the client world stops nothing is given (each read checks the session the game names live at that moment, so this
+holds even when Kiln missed the world's stop event). A guarded copy that faults stops samples for the rest of that session
 (`Faulted`); the next session copies again.
 
 ## Capability row `client.crosshair`

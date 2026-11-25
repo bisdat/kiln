@@ -113,6 +113,23 @@ public sealed unsafe class CrosshairTests : IDisposable
         Assert.Equal(default, got);
     }
 
+    // Kiln says STALE for an age over 250 ms in nanoseconds; IsFresh agrees for an age a few ns past it (inside one
+    // 100 ns tick of TimeSpan) and at exactly 250 ms.
+    [Theory]
+    [InlineData(250_000_000ul, true)]
+    [InlineData(250_000_001ul, false)]
+    [InlineData(250_000_099ul, false)]
+    [InlineData(249_999_901ul, true)]
+    public void Is_fresh_agrees_with_kiln_at_the_nanosecond(ulong ageNs, bool fresh)
+    {
+        FakeCrosshairTable.Next = FakeCrosshairTable.Terrain(sequence: 9, ageNs: ageNs);
+        FakeCrosshairTable.Reason = ageNs > 250_000_000ul ? (uint)CrosshairReason.Stale : (uint)CrosshairReason.None;
+        var hit = Crosshair.Read(out var reason);
+        Assert.Equal(fresh ? CrosshairReason.None : CrosshairReason.Stale, reason);
+        Assert.Equal(fresh, hit!.Value.IsFresh);
+        Assert.Equal(fresh, Crosshair.TryGet(out _));
+    }
+
     [Theory]
     [InlineData(CrosshairReason.NoSample)]
     [InlineData(CrosshairReason.Faulted)]

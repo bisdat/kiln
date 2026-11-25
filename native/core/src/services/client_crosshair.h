@@ -9,7 +9,7 @@
 // observation is the instruction after that call: the result is complete there and nothing has read it yet. What the
 // result holds (client 26430625; the sigdb probes on the trace body pin each offset):
 //   +0x00 u8  status: 0 hit, 31 nothing within reach, 21 no usable camera direction
-//   +0x08 f32[3] the hit position, world metres (nudged 1 cm back along the normal or the ray, as the game uses it)
+//   +0x08 f32[3] the hit position, world metres (moved 1 cm against the normal or back along the ray, as the game uses it)
 //   +0x14 f32[3] the surface normal
 //   +0x60 u8  the hit's voxel material id, valid when +0x61 is not 0
 //   +0x64 u32 the hit's entity (0 for terrain)
@@ -58,6 +58,7 @@ void session_ended(uint32_t session);
 struct Env {
     bool client_side;  // the game client (a dedicated server has no cursor)
     bool hooks;        // not safe idle
+    uint32_t live_session;  // the client session live now (0: none), asked at this get: a sample of another is never given
 };
 // kiln.client.crosshair's get (kiln_client_crosshair.h). The first call on a ready build installs the hook (the lazy
 // installer below) and answers NO_SAMPLE.
@@ -66,11 +67,13 @@ KilnResult get(const Env& env, KilnCrosshairHit* out, uint32_t* out_reason);
 // The lazy producer, as kiln.client's building input does it (client_building_input.h): on a build where the hook can
 // go in, client_crosshair_service.cpp gives an installer at its start and installs nothing; the first get() that passes
 // its own checks calls it, once at a time, on the calling thread. Install::Again (kiln.hooks could not check every
-// thread and wrote nothing) lets a later get try again, up to kInstallAttempts in all; anything else, or the last
-// attempt, is final for the process: the installer goes, install_failed() turns true, its reason (a static string)
-// becomes usable()'s answer, and get() answers KILN_ERR_UNAVAILABLE.
+// thread and wrote nothing) lets a later get try again, at least kInstallRetryNs later and up to kInstallAttempts in
+// all; until then get() answers NO_SAMPLE (the row stays on), and so does a get that waited on such an attempt.
+// Anything else, or the last attempt, is final for the process: the installer goes, install_failed() turns true, its
+// reason (a static string) becomes usable()'s answer, and get() answers KILN_ERR_UNAVAILABLE.
 enum class Install { Bound, Again, Failed };
 constexpr uint32_t kInstallAttempts = 3;
+constexpr int64_t kInstallRetryNs = 1'000'000'000;  // the least time between two attempts, on the service's clock
 using Installer = Install (*)(uint32_t* hit_offset, const char** why);
 void set_installer(Installer install);  // nullptr: none (the default); clears install_failed()
 // The reason usable() gives while there is neither an installer nor a binding (a static string; nullptr: the default,

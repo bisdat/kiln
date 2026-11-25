@@ -6,7 +6,9 @@
  *
  *  - get: the newest sample. Any thread (the client tick thread, a mod's UI thread, a worker); never waits, never calls
  *    into the game. The game's trace is copied by a mid hook that Kiln adds at the first get of the process (a game
- *    without a mod that reads it never has the hook), so the first get answers KILN_CROSSHAIR_REASON_NO_SAMPLE.
+ *    without a mod that reads it never has the hook), so the first get answers KILN_CROSSHAIR_REASON_NO_SAMPLE. An
+ *    install refused because some thread could not be checked is tried again by a get at least a second later (three
+ *    attempts in all); until then get keeps answering NO_SAMPLE.
  *  - The capability row client.crosshair says whether it works here: the game client, kiln.client.crosshair started,
  *    the sigdb feature client.crosshair_trace resolved on this build, and the hook not failed. Off: get answers
  *    KILN_ERR_UNAVAILABLE.
@@ -34,7 +36,7 @@ extern "C" {
 /* KilnCrosshairHit.flags: which fields hold a value. Without HIT nothing else is set. */
 enum {
     KILN_CROSSHAIR_HIT = 1u << 0,      /* the game's trace hit something within its reach (status 0) */
-    KILN_CROSSHAIR_POSITION = 1u << 1, /* position: the hit point, world metres (the game's float, 1 cm toward the ray) */
+    KILN_CROSSHAIR_POSITION = 1u << 1, /* position: the hit point, world metres (the game's float, moved 1 cm) */
     KILN_CROSSHAIR_NORMAL = 1u << 2,   /* normal: the surface normal there, unit length (within 1e-2) */
     KILN_CROSSHAIR_DISTANCE = 1u << 3, /* distance: metres from the trace's start to the hit */
     KILN_CROSSHAIR_ENTITY = 1u << 4,   /* entity: the game's entity of the hit (0 and unset for terrain) */
