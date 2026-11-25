@@ -198,12 +198,17 @@ update or a real client.
 
 **Textures on every core, and blobs made earlier in the pass** (fork branch `kiln-dev31-fast-encode`, `6cb84f34`,
 0.2.0-dev.31.13). Players with EMF Beastmaster's creature packs, and any mod that needs ShroudForge's runtime beside
-them (ammo-slots' native DLL), waited about 10 minutes on their first ShroudForge pass.
+them (ammo-slots' native DLL), waited several minutes on their first ShroudForge pass (414 s offline here, below).
 - **Where the time went:** BC7 sRGB encode on one thread, 397 of the 401 s of Lua of the three packs (kiln-eml's
   profile of the same packs). In a pregame pass `image.encode_texture` now cuts a BC1-BC7 texture into strips of whole
   block rows (at least 64 blocks each) and encodes each strip with upstream's own `kfc::content::image::encode`: every
-  block depends only on its own 4x4 pixels, so the output is byte for byte the serial encode. It is kiln-eml's
-  `encode_with_threads` (0.2.0-dev.31.13) moved to the call site, since the fork's kfc-parser is upstream's submodule.
+  block depends only on its own 4x4 pixels, so the output is byte for byte the serial encode. It follows kiln-eml's
+  `encode_with_threads` (0.2.0-dev.31.13), but at the call site, since the fork's kfc-parser is upstream's submodule,
+  and with detached helpers instead of kiln-eml's scoped ones, so that the calling thread never waits for a helper
+  that has not started (below). The helpers therefore get their own copy of the texture's RGBA8 pixels, and each strip
+  is encoded into its own buffer: while one texture encodes it holds about twice the serial encode's memory for it
+  (an 8192x8192 BC7 texture: 320 MiB more, 256 MiB of pixels and 64 MiB of strips), whatever the thread count, freed
+  when that texture is done.
 - **When:** `run_with_api` sets the count for a pregame pass only and puts it back when the pass ends: the PC's
   threads, at most 16, or `KILN_SF_ENCODE_THREADS` (1 = the serial encode; a count at most 64). The in-game runtime
   keeps the serial encode. In a Kiln-hosted start the pass runs inside `shroudforge_prepare_startup`, which
