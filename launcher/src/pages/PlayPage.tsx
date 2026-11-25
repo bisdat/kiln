@@ -2,7 +2,8 @@ import { StoppedStartNotice } from "../shell/StoppedStartNotice";
 // / Play: in front of the stage. The game's name, one live sentence (how many mods are on, over every kind, and only the
 // exceptions a player must know), "Just once" (vanilla, without mods), the list of every mod with a switch
 // (pages/mods/MainList.tsx), the boot stages while the game starts, four facts, and the game folder. The mouth
-// (shell/AppShell.tsx) is the Play button. Banners (refusal, launch option, Steam update) sit above the name.
+// (shell/AppShell.tsx) is the Play button. Banners (refusal, launch option, Steam update, the game's Kiln older than the
+// launcher's with Update game) sit above the name.
 // A first start: the launcher looks for the game by itself (shell/firstRun.tsx), then Install Kiln runs right here (the
 // mouth and the link open its confirm; the task shows in place of the sentence's links).
 // Profiles are a background feature (Settings, Profiles): one is always loaded, "My mods" made by itself when there is
@@ -18,6 +19,8 @@ import { qk, useGame, useGameSel, useGameStatus, useLaunchState, usePoll, usePre
 import { detectGames, useDetect, useEnsureProfile, useInstallPrompt, useKilnInstall } from "../shell/firstRun";
 import { clock, usePlayControl, type PlayControl } from "../shell/play";
 import { RuntimeFailure } from "../shell/RuntimeFailure";
+import { updateGame } from "../shell/runtimeChange";
+import { applyKey, autoTried, gameBehind, type GameBehind } from "../shell/updateApply";
 import { isDefaultProfile, useMods } from "../shell/useMods";
 import { MainList } from "./mods/MainList";
 import { StartProgress } from "../shell/StartPanel";
@@ -352,7 +355,13 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
       </Banner>,
     );
   }
-  if (change?.state === "failed") {
+  // (0.2.0-dev.31.12) the game's Kiln is older than the launcher's: said in full with Update game (HTR's feedback on
+  // 31.9: after a launcher update only the small "update ready" next to the Kiln fact said so). A failure of that very
+  // install is said on it, not in a second strip; a test build of the launcher keeps its channel notice instead.
+  const channel = channelNotice(s?.runtime, update?.buildChannel === "beta", kilnLabel);
+  const behind = gameBehind(s, { channel: !!channel, starting: ctl.starting, change });
+  if (behind) out.push(<GameBehindBanner key="behind" game={game} behind={behind} />);
+  if (change?.state === "failed" && !behind?.failed) {
     const has = s?.runtime.receipt?.runtime.version;
     out.push(
       <Banner key="rt" tone="err" title={t("play.banner.changeFailed", { what: change.what })} actions={<>
@@ -369,7 +378,6 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   if (s?.steamUpdating) out.push(<Banner key="upd" tone="warn" title={t("play.banner.updating")}>{t("play.banner.steamUpdating")}</Banner>);
   // (dev.29) the game's Kiln and the launcher's channel differ: Kiln from a test build after a switch back (Play puts the
   // launcher's own in first: shell/play.ts), or a test build of the launcher with the release's Kiln in the game
-  const channel = channelNotice(s?.runtime, update?.buildChannel === "beta", kilnLabel);
   if (channel) {
     out.push(
       <Banner key="channel" tone="warn" title={s?.runtime.switchBack ? t("play.banner.fromBeta") : t("play.banner.fromRelease")} actions={!s?.runtime.switchBack ? <Button size="s" onClick={() => nav("/runtime")}>{t("play.banner.runtime")}</Button> : undefined}>
@@ -426,6 +434,41 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   else if (boot?.profile.mode === "invalid") out.push(<Banner key="inv" tone="err" title={t("play.banner.noModsLoaded")} actions={<SendToSupport from="banner" target={{ game: game.id }} kind="mod" />}>{boot.profile.error ?? t("play.banner.profileInvalid")}</Banner>);
   if (!out.length) return null;
   return <div className="k-stack k-hero-banner" style={{ gap: 6 }}>{out}</div>;
+}
+
+/** (0.2.0-dev.31.12) "This game has Kiln <x>; this launcher has Kiln <y>." with Update game: the update notice's own
+ *  install (shell/runtimeChange.ts updateGame), held while the game runs or starts, Steam updates it or a change runs. */
+function GameBehindBanner({ game, behind }: { game: GameInstall; behind: GameBehind }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const k = useKilnInstall(game);
+  const update = useUpdate();
+  const change = useRuntimeChanges((x) => x.last[game.id]);
+  const { has, next, hold } = behind;
+  const why = hold === "running" ? t("shell.updateNotice.closeGame") : hold === "starting" ? t("shell.updateNotice.holdLaunch")
+    : hold === "steam" ? t("play.banner.behindSteam") : hold === "applying" && change?.version !== next ? t("shell.runtimeChange.alreadyRunning") : null;
+  const go = async () => {
+    // a click counts as this update's try: no install by itself follows a failed one (shell/UpdateNotice.tsx)
+    const to = update?.justUpdated?.to;
+    if (to) autoTried.add(applyKey(to, game.id));
+    if (await updateGame(qc, game, k.bundles, next) && to) api.updateAck().catch(() => {});
+  };
+  return (
+    <Banner tone="warn" title={t("play.banner.behindTitle")}
+      actions={<Button variant="primary" size="s" data-testid="game-behind-update" loading={hold === "applying" && change?.version === next} disabled={!!hold} title={why ?? undefined} onClick={go}>{t("shell.updateNotice.updateGame")}</Button>}>
+      <span data-testid="game-behind">{t("play.banner.behind", { has: kilnLabel(has), next: kilnLabel(next) })}</span>
+      {hold === "applying" && change?.version === next && <> <span data-testid="game-behind-why">{t("shell.updateNotice.applying", { version: kilnLabel(next) })}</span></>}
+      {why && <> <span data-testid="game-behind-why">{why}</span></>}
+      {behind.failed && hold !== "applying" && (
+        <div data-testid="game-behind-failed">
+          {t("play.banner.behindFailed")}{" "}
+          <RuntimeFailure error={change?.error} platform={game.platform} fallback={t("play.banner.noReason")}>
+            {rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> })}
+          </RuntimeFailure>
+        </div>
+      )}
+    </Banner>
+  );
 }
 
 function VanillaOnceModal({ open, onClose, onPlay }: { open: boolean; onClose: () => void; onPlay: () => void }) {

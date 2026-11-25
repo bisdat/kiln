@@ -66,3 +66,13 @@ export function installBundle(qc: QueryClient, game: GameInstall, b: RuntimeBund
     () => (back && opts.components == null && !opts.switchFromShroudforge
       ? api.runtimeRollback(game.id, b.version) : api.runtimeInstall(game.id, b.version, opts)));
 }
+
+/** Update game: `version` (the launcher's newer Kiln, or a switch back's) into the game through the ordinary install. No
+ *  explicit parts: the backend keeps the game's parts and adds the ones that are new or became defaults, unless the
+ *  player turned them off (passing the receipt's list froze it and skipped new parts). A DLL Windows refused (an
+ *  antivirus, inbox 92) is said in its plain words. The one path of the update notice's Update game, its install by
+ *  itself after an update (`lead`: why it ran) and (0.2.0-dev.31.12) Play's Update game banner. */
+export function updateGame(qc: QueryClient, game: GameInstall, bundles: RuntimeBundle[], version: string, lead?: string) {
+  return runRuntimeChange(qc, game, bundles, t("shell.runtimeChange.updateTo", { version }), version, t("shell.play.kilnInstalled", { version }),
+    () => api.runtimeInstall(game.id, version, {}), lead);
+}

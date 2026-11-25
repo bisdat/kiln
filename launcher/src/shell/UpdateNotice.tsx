@@ -13,6 +13,7 @@
 //                                          refusals; a toast says so), then the notice goes. While the game runs: Later,
 //                                          Update game (held) and why. Any other runtime (a newer Library bundle, a switch
 //                                          back's older Kiln) keeps Update game (and Play puts a switch back's in).
+//                                          (0.2.0-dev.31.12) Play's banner offers the same Update game (updateGame).
 // Only in builds that update themselves: the Nexus Mods build (app_info.distribution "nexus") has no word, no notice
 // and no update feed (api/distribution.ts).
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
@@ -25,10 +26,10 @@ import { useUpdate, useUpdateFeed, useUpdateStore } from "../api/update";
 import { buildLabel } from "../api/channel";
 import { Button, IconButton, ProgressBar, toast, useTasks, waitTask } from "../ui";
 import { useKilnInstall } from "./firstRun";
-import { runRuntimeChange } from "./runtimeChange";
+import { updateGame } from "./runtimeChange";
 import { useLaunchMemo } from "./play";
 import { useStartWarnings } from "./sfiWarnings";
-import { applyKey, applyWait, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
+import { applyKey, applyWait, autoTried, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
 import { useUnsavedKind } from "./unsaved";
 import { usePendingEdits } from "../editor/kiln/pending";
 import { t, useT } from "../i18n";
@@ -176,9 +177,10 @@ interface ApplyPlan {
   applying: boolean;
 }
 
-/** One automatic install per update and game in this session: a failure keeps Update game (and its toast says why), and
- *  after it no second runtime follows by itself (the cache's next offer after an install can be a Library bundle). */
-const applied = new Set<string>();
+/** One automatic install per update and game in this session (updateApply.ts autoTried): a failure keeps Update game
+ *  (and its toast says why), and after it no second runtime follows by itself (the cache's next offer after an install
+ *  can be a Library bundle). */
+const applied = autoTried;
 
 /** After the restart into an update: the runtime it brought into the game, while the game is closed. */
 function useApplyAfterUpdate(s: UpdateStatus | null): ApplyPlan {
@@ -197,8 +199,7 @@ function useApplyAfterUpdate(s: UpdateStatus | null): ApplyPlan {
     const key = applyKey(to, game.id);
     if (applied.has(key)) return;
     applied.add(key);
-    void runRuntimeChange(qc, game, bundles, t("shell.runtimeChange.updateTo", { version: next }), next, t("shell.play.kilnInstalled", { version: next }),
-      () => api.runtimeInstall(game.id, next, {}), t("shell.updateNotice.appliedLead", { build: buildLabel(to) }))
+    void updateGame(qc, game, bundles, next, t("shell.updateNotice.appliedLead", { build: buildLabel(to) }))
       .then((ok) => { if (ok) api.updateAck().catch(() => {}); });
   }, [to, game, next, wait, applying, bundles, qc]);
   return { next, wait, applying };
@@ -296,14 +297,9 @@ function JustUpdated({ s, apply, onClose }: { s: UpdateStatus; apply: ApplyPlan;
   const back = rt?.installed ? rt.switchBack ?? null : null;
   const next = rt?.installed ? rt.upgradeAvailable ?? back?.to ?? null : null;
   const ack = () => { api.updateAck().catch(() => {}); onClose(); };
-  const updateGame = async () => {
+  const onUpdateGame = async () => {
     if (!game || !next) return;
-    // no explicit parts: the backend keeps the game's parts and adds the ones that are new or became defaults, unless
-    // the player turned them off (passing the receipt's list here froze it and skipped new parts). A DLL Windows refused
-    // (an antivirus, inbox 92) is said in its plain words (runRuntimeChange).
-    const ok = await runRuntimeChange(qc, game, k.bundles, t("shell.runtimeChange.updateTo", { version: next }), next, t("shell.play.kilnInstalled", { version: next }),
-      () => api.runtimeInstall(game.id, next, {}));
-    if (ok) ack();
+    if (await updateGame(qc, game, k.bundles, next)) ack();
   };
   return (
     <Card title={t("shell.updateNotice.updatedTo", { build: buildLabel(u.to) })} onDismiss={ack}>
@@ -315,7 +311,7 @@ function JustUpdated({ s, apply, onClose }: { s: UpdateStatus; apply: ApplyPlan;
       {next && !apply.applying && (
         <div className="k-upd-actions">
           <Button variant="ghost" onClick={onClose}>{t("shell.channelSwitch.later")}</Button>
-          <Button variant="primary" disabled={running} title={running ? t("shell.updateNotice.closeGame") : undefined} onClick={updateGame}>{t("shell.updateNotice.updateGame")}</Button>
+          <Button variant="primary" disabled={running} title={running ? t("shell.updateNotice.closeGame") : undefined} onClick={onUpdateGame}>{t("shell.updateNotice.updateGame")}</Button>
         </div>
       )}
     </Card>
