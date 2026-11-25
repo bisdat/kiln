@@ -191,7 +191,7 @@ pub fn run(a: NewArgs, json: bool) -> Result<i32> {
     let mut o = attempt(true)?;
     let missing = |o: &std::process::Output| {
         let s = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-        s.contains("No templates or subcommands found") || s.contains("No templates found") || s.contains("is not a valid")
+        missing_template(&s)
     };
     if !o.status.success() && missing(&o) {
         install_templates(feed.as_deref(), &hive, json)?;
@@ -213,6 +213,13 @@ pub fn run(a: NewArgs, json: bool) -> Result<i32> {
         println!("next: cd {} && kiln build && kiln deploy{}", dir.display(), if a.server.is_none() { " --server <folder>" } else { "" });
     }
     Ok(0)
+}
+
+fn missing_template(s: &str) -> bool {
+    s.contains("No templates or subcommands found")
+        || s.contains("No templates or subcommands were found")
+        || s.contains("No templates found")
+        || s.contains("is not a valid template")
 }
 
 fn install_templates(feed: Option<&Path>, hive: &[String], json: bool) -> Result<()> {
@@ -240,6 +247,35 @@ fn install_templates(feed: Option<&Path>, hive: &[String], json: bool) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_template_accepts_current_dotnet_wording() {
+        assert!(missing_template("No templates or subcommands were found that match: 'kiln-mod'."));
+    }
+
+    #[test]
+    fn missing_template_keeps_legacy_wording() {
+        for message in [
+            "No templates or subcommands found matching: 'kiln-mod'.",
+            "No templates found matching: kiln-mod.",
+            "'kiln-mod' is not a valid template name.",
+        ] {
+            assert!(missing_template(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn missing_template_rejects_other_errors() {
+        for message in [
+            "'invalid' is not a valid value for --side.",
+            "'invalid' is not a valid option.",
+            "Invalid option(s): --unknown",
+            "Creating this template will make changes to existing files.",
+            "Access to the path is denied.",
+        ] {
+            assert!(!missing_template(message), "{message}");
+        }
+    }
 
     /// Every templates/kiln-*/ folder is in TEMPLATES, and every entry parses with a short name of its own.
     #[test]
