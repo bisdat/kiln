@@ -12,7 +12,7 @@
 //  - the game's own bytes before that frame, as the exe file has them, are a direct call (E8 rel32) of the hooked target:
 //    the game called the target there, and the module redirected that call.
 // Otherwise 0, and the caller treats the call as before (not the game's). Header-only. Not a mod API: Kiln's services
-// share it.
+// share it. Host test: tests/test-call-site.sh (the decision; the stack walk itself runs only in the game).
 #ifndef KILN_CALL_SITE_HPP
 #define KILN_CALL_SITE_HPP
 

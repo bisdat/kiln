@@ -17,7 +17,7 @@
 //  - A first site whose second never came (a call that left the function another way) is dropped by the next call on
 //    that thread that cannot be inside it: an enclosing call has a higher rsp.
 //  - T is built in place (it may hold scopes that neither move nor copy) and destroyed by pop() or by a drop.
-// Header-only, no allocation, no locks. Not a mod API: Kiln's services share it.
+// Header-only, no allocation, no locks. Not a mod API: Kiln's services share it. Host test: tests/test-mid-frames.sh.
 #ifndef KILN_MID_FRAMES_HPP
 #define KILN_MID_FRAMES_HPP
 
