@@ -1,7 +1,7 @@
 {
   "name": "@kiln/admin-ui",
   "private": true,
-  "description": "The Kiln Launcher's server admin pages as a package for other hosts (Kiln Web Admin): pages, hooks, the KAP/1 hub and its transports. Sources: launcher/src/admin (entry src/admin/web.ts) and what it imports; built here by `bun run build:admin-ui` in launcher/. Never published.",
+  "description": "The Kiln Launcher's server admin pages as a package for other hosts (Kilnwarden): pages, hooks, the KAP/1 hub and its transports. Sources: launcher/src/admin (entry src/admin/web.ts) and what it imports; built here by `bun run build:admin-ui` in launcher/. Never published.",
   "license": "MIT",
   "type": "module",
   "exports": {

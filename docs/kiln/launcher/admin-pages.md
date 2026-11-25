@@ -104,8 +104,9 @@ live overlays on the plain world plane; Spawn falls back to the enemy types the 
 - Screenshots: `node tools/launcher/admin-shots.mjs [--server lab] [--prefix mock-]` → `.out/launcher/admin-shots/`.
 
 ## The @kiln/admin-ui package
-The admin pages are also a workspace package for web pages: Kiln Web Admin (`~/Work/kiln-mods/kiln-webadmin`, its
-DESIGN.md section 4) serves them from inside the server, so both panels get every page. Nothing is published.
+The admin pages are also a workspace package for web pages: Kilnwarden (the web panel mod, mod id `kilnwarden`,
+formerly Kiln Web Admin; its DESIGN.md section 4) serves them from inside the server, so both panels get every page.
+Nothing is published.
 
 | | |
 |---|---|

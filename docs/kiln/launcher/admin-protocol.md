@@ -6,8 +6,8 @@ Kiln.Admin (`mods/Kiln.Admin`) serves server administration over two transports 
 - **KAP/1** over TCP on 127.0.0.1, described here. The launcher's `kiln_manage::admin` client speaks it directly, or
   through an SSH tunnel for remote servers, and falls back to the file bridge.
 
-A web page (Kiln Web Admin's panel) gets the same KAP/1 frames as JSON over a WebSocket from its host, which holds the
-admin token and speaks TCP KAP/1 to Kiln.Admin (section 12).
+A web page (Kilnwarden's panel; Kiln Web Admin before its rename) gets the same KAP/1 frames as JSON over a WebSocket
+from its host, which holds the admin token and speaks TCP KAP/1 to Kiln.Admin (section 12).
 
 Rust types: `kiln_manage::admin::protocol`
 (`Frame`, `KapErrorCode`, `Endpoint`, `Limits`). Test vector: `schema/fixtures/kap/handshake.json`.
@@ -297,7 +297,7 @@ More ops (both transports serve them):
 Staged updates (0.2.0-dev.30.9, `Ops.Updates.cs` and `Staging.cs`; [staged-updates.md](../staged-updates.md)). A mod or
 Kiln update is staged while the server runs and applied at its next start, before anything loads it. The previous
 version is kept for a rollback. Kiln.Admin only stages from files that are already on the server: downloading and
-checking signatures is the caller's job (Kiln Web Admin). `unit` is `"kiln"` or `"mod.<folder>"` (a folder under
+checking signatures is the caller's job (Kilnwarden). `unit` is `"kiln"` or `"mod.<folder>"` (a folder under
 `kiln/mods`). `by` (optional, at most 120 characters, default `"kiln-admin"`) says who asked; it goes into the records
 and `kiln.log`. Dedicated servers only: on a game client `update_stage` and `update_rollback` are refused.
 
@@ -345,7 +345,7 @@ the two, or give Kiln.Admin its own folder with `"bridge"`. The launcher's `auto
 as soon as Kiln.Admin's listener answers, so it is not affected.
 
 ## 11. Restart, one-time login, commands as forms (0.2.0-dev.30.9)
-Additions for Kiln Web Admin, all within kap/1 (new ops, a new topic, new optional fields).
+Additions for Kilnwarden (then still Kiln Web Admin), all within kap/1 (new ops, a new topic, new optional fields).
 
 ### Restart
 `server_restart` counts down in chat, saves the world and stops the server the way a Ctrl-C does. Whether the server
@@ -381,8 +381,11 @@ was raised.
 
 ### One-time login
 For "Open web panel" in the launcher: the launcher holds the admin token, so it is the owner. It asks for a secret for
-a named consumer, and that consumer (the web admin mod, also connected with the admin token) exchanges it once for
-"owner".
+a named consumer, and that consumer (the web panel mod, also connected with the admin token) exchanges it once for
+"owner". (0.2.0-dev.31.14) The consumer is the id of the web panel mod whose `launcher-endpoint.json` the launcher read:
+`kilnwarden` for Kilnwarden, `kiln-webadmin` for a Kiln Web Admin 0.1.0 test build (its old name). Launchers
+0.2.0-dev.31.2 to 31.13 always mint for `kiln-webadmin`; Kilnwarden redeems those too (a refused redeem for `kilnwarden`
+is tried once for `kiln-webadmin`). Kiln.Admin takes any consumer name, so nothing changed on its side.
 - `login_mint {consumer, label?}` -> `{secret, consumer, expiresAt, ttlS: 60}`: 32 random bytes (64 hex characters),
   valid 60 s and for one `login_redeem`. At most 8 live secrets per consumer (minting a 9th drops the oldest).
 - `login_redeem {consumer, secret}` -> `{role: "owner", consumer, label, mintedBy, mintedAt}`; `mintedBy` is the
@@ -422,7 +425,7 @@ number, true/false, text, an enum value in lower case, a duration in seconds). P
 
 ## 12. KAP/1 over a WebSocket (web pages, 0.2.0-dev.30.9)
 The admin pages also run in a browser, outside the launcher (the `@kiln/admin-ui` package, [admin-pages.md](admin-pages.md)).
-There the page talks to its host over a WebSocket, and the host (Kiln Web Admin, inside the server) speaks TCP KAP/1 to
+There the page talks to its host over a WebSocket, and the host (Kilnwarden, inside the server) speaks TCP KAP/1 to
 Kiln.Admin with the admin token. The browser never sees the token and never authenticates in KAP: signing in is the host
 page's job (a session cookie, or a one-time ticket in the socket's URL), and the socket it hands to the page is already
 signed in. The page side is `launcher/src/api/adminWs.ts` (`createWebSocketTransport({url})`); the host decides which

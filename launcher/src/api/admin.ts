@@ -9,7 +9,7 @@
 // The transport is the seam between the pages and what carries KAP/1 (configureAdmin):
 //   - the launcher: ./adminTauri.ts, the Tauri commands admin_* and the `kiln://admin` event (the Rust AdminHub);
 //     src/main.tsx installs it;
-//   - a web page (Kiln Web Admin, through @kiln/admin-ui): ./adminWs.ts, KAP/1 frames as JSON over an
+//   - a web page (Kilnwarden, through @kiln/admin-ui): ./adminWs.ts, KAP/1 frames as JSON over an
 //     already-authenticated WebSocket.
 // This module and everything the admin pages import is Tauri-free (unit-tests/admin-ui-package.test.ts).
 //

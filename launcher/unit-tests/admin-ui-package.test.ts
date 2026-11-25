@@ -1,5 +1,5 @@
 // @kiln/admin-ui (launcher/packages/admin-ui, a workspace package built from launcher/src/admin): the launcher's admin
-// pages for hosts outside the Tauri app (Kiln Web Admin). Its entry (src/admin/web.ts) and the WebSocket transport must
+// pages for hosts outside the Tauri app (Kilnwarden). Its entry (src/admin/web.ts) and the WebSocket transport must
 // not reach Tauri, the launcher's command layer or its browser mock, neither at run time nor through the types its
 // declarations carry.
 import { describe, expect, test } from "bun:test";
