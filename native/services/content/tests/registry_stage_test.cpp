@@ -862,6 +862,35 @@ void an_unreadable_index_is_kept_and_reported(const std::string& dir) {
     check(t.report["plan"]["previous"].is_null(), "an index entry that is no plan hash is not a previous plan: " + t.report["plan"].dump());
 }
 
+// The schemas' id migrations inside a GameStart callback's batch are named in registry.json "migrated" like a data section's
+// (a synthetic items 0.0.9 -> 0.1.0 step renaming stackSize to maxStack: test fixture only)
+void migrated_names_of_a_callback_turn(const std::string& dir) {
+    Files files;
+    TreeView view = world();
+    stage::Env env = env_of(&view, &files, dir, &no_sections);
+    Schema m = generated_schema();
+    m.registries["items"].migrations = {{"0.0.9", "0.1.0", {}, {{"stackSize", "maxStack"}}}};
+    env.schema = m;
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"codemod","version":"1.0.0"}])") == KILN_OK, "set_order");
+    uint64_t h = 0;
+    check(r.subscribe_stage(9, "codemod", [&](Stage s, const View&) {
+              if (s != Stage::Alter) return true;
+              uint32_t a = 0, b = 0;
+              std::string rep;
+              r.submit(9, "codemod", R"({"ir":1,"mod":"codemod","stage":"alter","edits":[{"n":7,"registry":"items","select":{"id":"game:plank"},"field":"stackSize","op":30}]})", &a, &b, &rep);
+              return true;
+          }, &h) == KILN_OK, "a native stage callback");
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    bool named = false;
+    for (const auto& x : rep.value("migrated", json::array()))
+        named = named || (x.value("mod", "") == "codemod" && x.value("note", "").find("#0: items.stackSize -> items.maxStack") != std::string::npos);
+    check(field_row(rep, "game:plank", "maxStack")["result"] == 30, "the old name is read as maxStack (30)");
+    check(named, "registry.json migrated names the turn's rename, numbered as the turn's edit: " + rep.value("migrated", json::array()).dump());
+}
+
 // A start whose stage had no base to read applied nothing: a world on it does not make it the last good plan
 void a_start_without_a_base_is_not_a_good_plan(const std::string& dir) {
     Files files;
@@ -919,6 +948,7 @@ int main(int argc, char** argv) {
         {"a_start_below_the_last_worlds_range_warns", [&] { a_start_below_the_last_worlds_range_warns(dir); }},
         {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }},
         {"an_unreadable_index_is_kept_and_reported", [&] { an_unreadable_index_is_kept_and_reported(dir); }},
+        {"migrated_names_of_a_callback_turn", [&] { migrated_names_of_a_callback_turn(dir); }},
         {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {

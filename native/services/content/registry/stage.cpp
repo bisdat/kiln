@@ -557,7 +557,10 @@ struct Runner::Impl {
     }
 };
 
-Runner::Runner(Env env) : d_(std::make_unique<Impl>()) { d_->env = std::move(env); }
+Runner::Runner(Env env) : d_(std::make_unique<Impl>()) {
+    d_->env = std::move(env);
+    if (d_->env.schema) d_->schema = *d_->env.schema;
+}
 Runner::~Runner() = default;
 
 KilnResult Runner::set_order(const std::string& order_json) {
@@ -738,9 +741,20 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
     refuse_unmapped(d_->rm, d_->schema, &b, &refused, d_->env.entry_support);
     Batch* out = d_->turn->out;
     if (out->source.empty()) out->source = "code:" + b.mod;
+    std::map<uint32_t, uint32_t> renumbered;  // the batch's edit numbers -> the turn's
     for (Edit& e : b.edits) {
+        renumbered[e.n] = static_cast<uint32_t>(out->edits.size());
         e.n = static_cast<uint32_t>(out->edits.size());
         out->edits.push_back(e);
+    }
+    // review: the schemas' id migrations of this batch ("#<n>: ...") go with its edits into the turn (registry.json "migrated")
+    for (const std::string& note : b.migrated) {
+        const size_t colon = note.find(": ");
+        uint32_t n = 0;
+        const bool numbered = note.size() > 1 && note[0] == '#' && colon != std::string::npos &&
+                              std::from_chars(note.data() + 1, note.data() + colon, n).ec == std::errc{};
+        const auto it = numbered ? renumbered.find(n) : renumbered.end();
+        if (it != renumbered.end()) out->migrated.push_back("#" + std::to_string(it->second) + note.substr(colon));  // a refused edit's: not in the turn
     }
     d_->pre_refused.insert(d_->pre_refused.end(), refused.begin(), refused.end());
     return say(KILN_OK);
@@ -1249,12 +1263,26 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // the schemas' id migrations: what they renamed in the edits this start runs (ir.cpp parse_batch did the renaming)
     json migrated = json::array();
     size_t migrated_logged = 0;
-    for (const ModInput& in : inputs)
-        for (const Batch& b : in.batches)
-            for (const std::string& note : b.migrated) {
-                if (migrated.size() < 2000) migrated.push_back({{"mod", in.id}, {"source", b.source}, {"stage", stage_name(b.stage)}, {"note", note}});
-                if (++migrated_logged <= 50) d.log(0, "registry: migrated " + in.id + " " + (b.source.empty() ? std::string("(no source)") : b.source) + " " + note);
-            }
+    // review: with the GameStart callbacks' turns (recorded during compose, added to the inputs below)
+    std::vector<std::pair<std::string, Batch>> turns;
+    {
+        std::lock_guard lk(d.mu);
+        for (const ModInput& in : inputs)
+            if (const auto it = d.recorded.find(in.id); it != d.recorded.end())
+                for (const Batch& t : it->second)
+                    if (!t.migrated.empty()) turns.push_back({in.id, Batch{t.mod, t.mod_version, t.source, t.stage, {}, t.migrated}});
+    }
+    auto note_batch = [&](const std::string& mod, const Batch& b) {
+        for (const std::string& note : b.migrated) {
+            if (migrated.size() < 2000) migrated.push_back({{"mod", mod}, {"source", b.source}, {"stage", stage_name(b.stage)}, {"note", note}});
+            if (++migrated_logged <= 50) d.log(0, "registry: migrated " + mod + " " + (b.source.empty() ? std::string("(no source)") : b.source) + " " + note);
+        }
+    };
+    for (const ModInput& in : inputs) {
+        for (const Batch& b : in.batches) note_batch(in.id, b);
+        for (const auto& [mod, t] : turns)
+            if (mod == in.id) note_batch(mod, t);
+    }
     if (migrated_logged > 50) d.log(0, "registry: " + std::to_string(migrated_logged - 50) + " more migrated name(s): state/registry.json \"migrated\" lists them");
     // the edits refused before the stage are the report's too (and the saves check's: kept across a reload like them)
     std::vector<Refusal> pre;

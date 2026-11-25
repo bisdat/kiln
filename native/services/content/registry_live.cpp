@@ -1789,6 +1789,8 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
     if (entry_restart) change->restart = change->entry_restart = true;
     batch.source = "live:" + std::to_string(handle) + ":" + std::to_string(change->point) + ":" + std::to_string(change->batches.size()) + ":" + batch.source;
     for (auto& row : refused) row.source = batch.source;
+    // review: what the schemas' id migrations renamed in a live change (the stage's registry.json "migrated" lists a start's)
+    for (const std::string& note : batch.migrated) LOGI("registry (live): migrated %s %s %s", change->mod.c_str(), batch.source.c_str(), note.c_str());
     std::erase_if(batch.edits, [&](const registry::Edit& edit) {
         std::string reason;
         const auto* reg = g.in->schema->registry(edit.registry);

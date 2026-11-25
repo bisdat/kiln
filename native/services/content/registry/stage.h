@@ -67,6 +67,8 @@ struct Env {
     // world already started with (plans/index.json "stacks"), so the game keeps the bigger stacks a save holds whole
     // (registry/saves.h). false + *why: not available here. Unset: not available.
     std::function<bool(std::string* why)> stack_guard;
+    // The registries' schema (tests: a fixture's, with id migrations); unset: the generated one (schema_ir.h).
+    std::optional<Schema> schema;
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;
