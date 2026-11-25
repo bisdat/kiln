@@ -787,7 +787,8 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
 
 /// [`preview`] for an index already opened.
 pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion, index: PackIndex, game: Option<&GameInstall>) -> Result<Preview> {
-    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().collect();
+    // by the part's stored file, not its id: an EMF mod and a ShroudLink mod may both be called "expeditions"
+    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().map(|(_, f)| (f.sha256.clone(), f)).collect();
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut size = 0u64;
@@ -797,7 +798,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
         size = size.saturating_add(part_size(m.file.as_ref()));
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-        if let Some(f) = lacking.get(&m.id) {
+        if let Some(f) = m.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr.clone());
         } else {
@@ -815,7 +816,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     if let Some(l) = &index.layer {
         size = size.saturating_add(part_size(l.file.as_ref()));
         let lr = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
-        if let Some(f) = lacking.get(&l.id) {
+        if let Some(f) = l.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr);
         } else {
@@ -862,9 +863,12 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
     }
     let mut got = 0u64;
     let mut archives = BTreeMap::new();
-    let urls = |id: &str| -> Option<String> {
+    // the part with this id AND this stored file: two kinds of mod may share an id (each has its own file)
+    let urls = |id: &str, sha: &str| -> Option<String> {
         let mods = raw.get("mods")?.as_array()?;
-        let m = mods.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(id));
+        let m = mods.iter().find(|m| {
+            m.get("id").and_then(Value::as_str) == Some(id) && m.get("file").and_then(|f| f.get("sha256")).and_then(Value::as_str) == Some(sha)
+        });
         let f = match m {
             Some(m) => m.get("file"),
             None => raw.get("layer").and_then(|l| l.get("file")),
@@ -879,12 +883,12 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
         let dest = root(dirs).join("cache").join(if role == "layer" { "l" } else { "f" }).join(format!("{}.zip", f.sha256));
         let cached = dest.is_file() && crate::hash::sha256_file(&dest).is_ok_and(|(h, n)| h == f.sha256 && n == f.size);
         if !cached {
-            let name = ix.mods.iter().find(|m| &m.id == id).and_then(|m| m.name.clone()).unwrap_or_else(|| id.clone());
+            let name = ix.mods.iter().find(|m| &m.id == id && m.file.as_ref().is_some_and(|x| x.sha256 == f.sha256)).and_then(|m| m.name.clone()).unwrap_or_else(|| id.clone());
             progress.report(Some(got as f32 / total.max(1) as f32 * 0.8), &format!("downloading {name}"));
             let mut tick = |n: u64| {
                 got += n;
             };
-            c.download(urls(id).as_deref(), role, f, &dest, &mut tick).map_err(|e| {
+            c.download(urls(id, &f.sha256).as_deref(), role, f, &dest, &mut tick).map_err(|e| {
                 if e.code == ErrorCode::HashMismatch { err(ErrorCode::HashMismatch, format!("{name} didn't download correctly. Try again.")) } else { e }
             })?;
         } else {
