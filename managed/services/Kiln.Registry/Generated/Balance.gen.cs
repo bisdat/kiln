@@ -18,34 +18,34 @@ public sealed partial class BalanceEntry : IRegistryEntry
     public string Registry => "balance";
 
     /// <summary>The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]).</summary>
-    [RegistryField("balance.xpPerLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.xpPerLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public RegistryFixedList<int> XpPerLevel => new(_c, BalanceFields.XpPerLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.XpPerLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.XpPerLevel, i, v));
 
     /// <summary>The experience a level from 6 needs: base = min(start, end) + |end - start| * level / levelMax; need = round(base * seed * 1.5 + fromKnowledge).</summary>
     public BalanceXpCurve XpCurve => new(_c, _i);
 
     /// <summary>The highest player level.</summary>
-    [RegistryField("balance.levelCap", RegistryApplies.Restart)]
+    [RegistryField("balance.levelCap", RegistryApplies.Restart, JoinedClient = "restart")]
     public int LevelCap { get => RegistryCells.Int(_c, BalanceFields.LevelCap, _i); set => RegistryCells.Set(_c, BalanceFields.LevelCap, _i, value); }
 
     /// <summary>Skill points a level gives.</summary>
-    [RegistryField("balance.skillPointsPerLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.skillPointsPerLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public int SkillPointsPerLevel { get => RegistryCells.Int(_c, BalanceFields.SkillPointsPerLevel, _i); set => RegistryCells.Set(_c, BalanceFields.SkillPointsPerLevel, _i, value); }
 
     /// <summary>The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long.</summary>
-    [RegistryField("balance.flameLevelMax", RegistryApplies.Restart)]
+    [RegistryField("balance.flameLevelMax", RegistryApplies.Restart, JoinedClient = "restart")]
     public int FlameLevelMax => RegistryCells.Int(_c, BalanceFields.FlameLevelMax, _i);
 
     /// <summary>Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]).</summary>
-    [RegistryField("balance.altarsPerFlameLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.altarsPerFlameLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public RegistryFixedList<int> AltarsPerFlameLevel => new(_c, BalanceFields.AltarsPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.AltarsPerFlameLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.AltarsPerFlameLevel, i, v));
 
     /// <summary>Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time.</summary>
-    [RegistryField("balance.waterSourcesPerFlameLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.waterSourcesPerFlameLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public RegistryFixedList<int> WaterSourcesPerFlameLevel => new(_c, BalanceFields.WaterSourcesPerFlameLevel, static (c, i) => RegistryCells.Int(c, BalanceFields.WaterSourcesPerFlameLevel, i), static (c, i, v) => RegistryCells.Set(c, BalanceFields.WaterSourcesPerFlameLevel, i, v));
 
     /// <summary>The size of an altar's build zone at each altar level, in metres.</summary>
-    [RegistryField("balance.buildzoneSizesPerAltarLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.buildzoneSizesPerAltarLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public RegistryEntryList<BalanceZoneSize> BuildzoneSizesPerAltarLevel => new(_c, BalanceFields.BuildzoneSizesPerAltarLevel, static (c, i) => new BalanceZoneSize(c, i), static (c, i) => RegistryCells.Snapshot(c, i, BalanceFields.BuildzoneSizesPerAltarLevelElement));
 
     /// <summary>A player's shroud time.</summary>
@@ -79,15 +79,15 @@ public sealed partial class BalanceZoneSize
     public int Index => _i;
 
     /// <summary>The build zone's size along x, in metres.</summary>
-    [RegistryField("balance.buildzoneSizesPerAltarLevel[].x", RegistryApplies.Restart)]
+    [RegistryField("balance.buildzoneSizesPerAltarLevel[].x", RegistryApplies.Restart, JoinedClient = "restart")]
     public double X { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelX, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelX, _i, value); }
 
     /// <summary>The build zone's size along y (height), in metres.</summary>
-    [RegistryField("balance.buildzoneSizesPerAltarLevel[].y", RegistryApplies.Restart)]
+    [RegistryField("balance.buildzoneSizesPerAltarLevel[].y", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Y { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelY, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelY, _i, value); }
 
     /// <summary>The build zone's size along z, in metres.</summary>
-    [RegistryField("balance.buildzoneSizesPerAltarLevel[].z", RegistryApplies.Restart)]
+    [RegistryField("balance.buildzoneSizesPerAltarLevel[].z", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Z { get => RegistryCells.Double(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i); set => RegistryCells.Set(_c, BalanceFields.BuildzoneSizesPerAltarLevelZ, _i, value); }
 }
 
@@ -100,23 +100,23 @@ public sealed partial class BalanceXpCurve
     internal BalanceXpCurve(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>One end of the curve's base range (base = min(start, end) + |end - start| * level / levelMax).</summary>
-    [RegistryField("balance.xpCurve.start", RegistryApplies.Restart)]
+    [RegistryField("balance.xpCurve.start", RegistryApplies.Restart, JoinedClient = "restart")]
     public int Start { get => RegistryCells.Int(_c, BalanceFields.XpCurveStart, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveStart, _i, value); }
 
     /// <summary>The other end of the curve's base range.</summary>
-    [RegistryField("balance.xpCurve.end", RegistryApplies.Restart)]
+    [RegistryField("balance.xpCurve.end", RegistryApplies.Restart, JoinedClient = "restart")]
     public int End { get => RegistryCells.Int(_c, BalanceFields.XpCurveEnd, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveEnd, _i, value); }
 
     /// <summary>The level at which the base has moved the whole way from one end of the range to the other.</summary>
-    [RegistryField("balance.xpCurve.levelMax", RegistryApplies.Restart)]
+    [RegistryField("balance.xpCurve.levelMax", RegistryApplies.Restart, JoinedClient = "restart")]
     public int LevelMax { get => RegistryCells.Int(_c, BalanceFields.XpCurveLevelMax, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveLevelMax, _i, value); }
 
     /// <summary>The factor the base is multiplied by (with 1.5) to give the experience a level needs.</summary>
-    [RegistryField("balance.xpCurve.seed", RegistryApplies.Restart)]
+    [RegistryField("balance.xpCurve.seed", RegistryApplies.Restart, JoinedClient = "restart")]
     public int Seed { get => RegistryCells.Int(_c, BalanceFields.XpCurveSeed, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveSeed, _i, value); }
 
     /// <summary>Experience added to every level's need after the factor.</summary>
-    [RegistryField("balance.xpCurve.fromKnowledge", RegistryApplies.Restart)]
+    [RegistryField("balance.xpCurve.fromKnowledge", RegistryApplies.Restart, JoinedClient = "restart")]
     public int FromKnowledge { get => RegistryCells.Int(_c, BalanceFields.XpCurveFromKnowledge, _i); set => RegistryCells.Set(_c, BalanceFields.XpCurveFromKnowledge, _i, value); }
 }
 
@@ -129,11 +129,11 @@ public sealed partial class BalanceFogResistance
     internal BalanceFogResistance(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>A player's shroud time before any flame level.</summary>
-    [RegistryField("balance.fogResistance.base", RegistryApplies.Restart)]
+    [RegistryField("balance.fogResistance.base", RegistryApplies.Restart, JoinedClient = "restart")]
     public int Base { get => RegistryCells.Int(_c, BalanceFields.FogResistanceBase, _i); set => RegistryCells.Set(_c, BalanceFields.FogResistanceBase, _i, value); }
 
     /// <summary>The shroud time each flame level adds.</summary>
-    [RegistryField("balance.fogResistance.perFlameLevel", RegistryApplies.Restart)]
+    [RegistryField("balance.fogResistance.perFlameLevel", RegistryApplies.Restart, JoinedClient = "restart")]
     public int PerFlameLevel { get => RegistryCells.Int(_c, BalanceFields.FogResistancePerFlameLevel, _i); set => RegistryCells.Set(_c, BalanceFields.FogResistancePerFlameLevel, _i, value); }
 }
 
@@ -146,11 +146,11 @@ public sealed partial class BalanceDurability
     internal BalanceDurability(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The maximum durability of a level 1 item, before the rarity factor.</summary>
-    [RegistryField("balance.durability.start", RegistryApplies.Restart)]
+    [RegistryField("balance.durability.start", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Start { get => RegistryCells.Double(_c, BalanceFields.DurabilityStart, _i); set => RegistryCells.Set(_c, BalanceFields.DurabilityStart, _i, value); }
 
     /// <summary>The maximum durability each item level above 1 adds, before the rarity factor.</summary>
-    [RegistryField("balance.durability.growth", RegistryApplies.Restart)]
+    [RegistryField("balance.durability.growth", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Growth { get => RegistryCells.Double(_c, BalanceFields.DurabilityGrowth, _i); set => RegistryCells.Set(_c, BalanceFields.DurabilityGrowth, _i, value); }
 }
 
@@ -163,23 +163,23 @@ public sealed partial class BalanceRarityDurability
     internal BalanceRarityDurability(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The durability factor of common items.</summary>
-    [RegistryField("balance.rarityDurability.common", RegistryApplies.Restart)]
+    [RegistryField("balance.rarityDurability.common", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Common { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityCommon, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityCommon, _i, value); }
 
     /// <summary>The durability factor of uncommon items.</summary>
-    [RegistryField("balance.rarityDurability.uncommon", RegistryApplies.Restart)]
+    [RegistryField("balance.rarityDurability.uncommon", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Uncommon { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityUncommon, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityUncommon, _i, value); }
 
     /// <summary>The durability factor of rare items.</summary>
-    [RegistryField("balance.rarityDurability.rare", RegistryApplies.Restart)]
+    [RegistryField("balance.rarityDurability.rare", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Rare { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityRare, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityRare, _i, value); }
 
     /// <summary>The durability factor of epic items.</summary>
-    [RegistryField("balance.rarityDurability.epic", RegistryApplies.Restart)]
+    [RegistryField("balance.rarityDurability.epic", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Epic { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityEpic, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityEpic, _i, value); }
 
     /// <summary>The durability factor of legendary items.</summary>
-    [RegistryField("balance.rarityDurability.legendary", RegistryApplies.Restart)]
+    [RegistryField("balance.rarityDurability.legendary", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Legendary { get => RegistryCells.Double(_c, BalanceFields.RarityDurabilityLegendary, _i); set => RegistryCells.Set(_c, BalanceFields.RarityDurabilityLegendary, _i, value); }
 }
 
@@ -192,23 +192,23 @@ public sealed partial class BalanceSocketChance
     internal BalanceSocketChance(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The chance a new common weapon gets a gem socket.</summary>
-    [RegistryField("balance.socketChance.common", RegistryApplies.Restart)]
+    [RegistryField("balance.socketChance.common", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Common { get => RegistryCells.Double(_c, BalanceFields.SocketChanceCommon, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceCommon, _i, value); }
 
     /// <summary>The chance a new uncommon weapon gets a gem socket.</summary>
-    [RegistryField("balance.socketChance.uncommon", RegistryApplies.Restart)]
+    [RegistryField("balance.socketChance.uncommon", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Uncommon { get => RegistryCells.Double(_c, BalanceFields.SocketChanceUncommon, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceUncommon, _i, value); }
 
     /// <summary>The chance a new rare weapon gets a gem socket.</summary>
-    [RegistryField("balance.socketChance.rare", RegistryApplies.Restart)]
+    [RegistryField("balance.socketChance.rare", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Rare { get => RegistryCells.Double(_c, BalanceFields.SocketChanceRare, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceRare, _i, value); }
 
     /// <summary>The chance a new epic weapon gets a gem socket.</summary>
-    [RegistryField("balance.socketChance.epic", RegistryApplies.Restart)]
+    [RegistryField("balance.socketChance.epic", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Epic { get => RegistryCells.Double(_c, BalanceFields.SocketChanceEpic, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceEpic, _i, value); }
 
     /// <summary>The chance a new legendary weapon gets a gem socket.</summary>
-    [RegistryField("balance.socketChance.legendary", RegistryApplies.Restart)]
+    [RegistryField("balance.socketChance.legendary", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Legendary { get => RegistryCells.Double(_c, BalanceFields.SocketChanceLegendary, _i); set => RegistryCells.Set(_c, BalanceFields.SocketChanceLegendary, _i, value); }
 }
 
@@ -221,31 +221,31 @@ public sealed partial class BalanceUnlockCost
     internal BalanceUnlockCost(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The base cost of a perk unlock, before the creep and the kind's factor.</summary>
-    [RegistryField("balance.unlockCost.seed", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.seed", RegistryApplies.Restart, JoinedClient = "restart")]
     public int Seed { get => RegistryCells.Int(_c, BalanceFields.UnlockCostSeed, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostSeed, _i, value); }
 
     /// <summary>How much the cost grows with each unlock step, as a factor of the base.</summary>
-    [RegistryField("balance.unlockCost.creep", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.creep", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Creep { get => RegistryCells.Double(_c, BalanceFields.UnlockCostCreep, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostCreep, _i, value); }
 
     /// <summary>The cost factor of weapon and shield perks.</summary>
-    [RegistryField("balance.unlockCost.weapons", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.weapons", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Weapons { get => RegistryCells.Double(_c, BalanceFields.UnlockCostWeapons, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostWeapons, _i, value); }
 
     /// <summary>The cost factor of armour perks.</summary>
-    [RegistryField("balance.unlockCost.armor", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.armor", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Armor { get => RegistryCells.Double(_c, BalanceFields.UnlockCostArmor, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostArmor, _i, value); }
 
     /// <summary>The cost factor of ring perks.</summary>
-    [RegistryField("balance.unlockCost.rings", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.rings", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Rings { get => RegistryCells.Double(_c, BalanceFields.UnlockCostRings, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostRings, _i, value); }
 
     /// <summary>The numerator of an advanced perk's cost.</summary>
-    [RegistryField("balance.unlockCost.advanced", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.advanced", RegistryApplies.Restart, JoinedClient = "restart")]
     public double Advanced { get => RegistryCells.Double(_c, BalanceFields.UnlockCostAdvanced, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostAdvanced, _i, value); }
 
     /// <summary>The perk level (0 to 5) from which the advanced cost applies.</summary>
-    [RegistryField("balance.unlockCost.advancedFrom", RegistryApplies.Restart)]
+    [RegistryField("balance.unlockCost.advancedFrom", RegistryApplies.Restart, JoinedClient = "restart")]
     public int AdvancedFrom { get => RegistryCells.Int(_c, BalanceFields.UnlockCostAdvancedFrom, _i); set => RegistryCells.Set(_c, BalanceFields.UnlockCostAdvancedFrom, _i, value); }
 }
 
@@ -258,19 +258,19 @@ public sealed partial class BalanceGear
     internal BalanceGear(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The base of the damage power formula: base power = int(seed * creep * level + seed).</summary>
-    [RegistryField("balance.gear.seed", RegistryApplies.Restart)]
+    [RegistryField("balance.gear.seed", RegistryApplies.Restart, JoinedClient = "serverOnly")]
     public double Seed => RegistryCells.Double(_c, BalanceFields.GearSeed, _i);
 
     /// <summary>The share of seed the base power grows by with each level.</summary>
-    [RegistryField("balance.gear.creep", RegistryApplies.Restart)]
+    [RegistryField("balance.gear.creep", RegistryApplies.Restart, JoinedClient = "serverOnly")]
     public double Creep => RegistryCells.Double(_c, BalanceFields.GearCreep, _i);
 
     /// <summary>The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share).</summary>
-    [RegistryField("balance.gear.armorOffset", RegistryApplies.Restart)]
+    [RegistryField("balance.gear.armorOffset", RegistryApplies.Restart, JoinedClient = "serverOnly")]
     public double ArmorOffset => RegistryCells.Double(_c, BalanceFields.GearArmorOffset, _i);
 
     /// <summary>The armour each level adds in the armour formula, before the item's share.</summary>
-    [RegistryField("balance.gear.armorGradient", RegistryApplies.Restart)]
+    [RegistryField("balance.gear.armorGradient", RegistryApplies.Restart, JoinedClient = "serverOnly")]
     public double ArmorGradient => RegistryCells.Double(_c, BalanceFields.GearArmorGradient, _i);
 }
 

@@ -73,6 +73,27 @@ class SchemaChecks(unittest.TestCase):
         finally:
             t.close()
 
+    def test_joined_client_marker_is_additive_and_generated(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["size"]["joinedClient"] = "worldLoad"
+        t = Tree(s)
+        try:
+            model = rg.load(t.root)
+            self.assertEqual(model.errors, [])
+            rg.update_lock(t.root)
+            doc = rg.render_doc(model, t.lock(), model.registries["things"])
+            self.assertIn("Joined client", doc)
+            self.assertIn("worldLoad", doc)
+            cs = rg.render_cs_catalog(model, t.lock())
+            self.assertIn('JoinedClient = "worldLoad"', cs)
+        finally:
+            t.close()
+
+    def test_invalid_joined_client_marker_is_refused(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["size"]["joinedClient"] = "laterMaybe"
+        self.assertTrue(any("joinedClient" in e for e in self.errors_of(s)))
+
     def test_mini_is_valid(self):
         self.assertEqual(self.errors_of(MINI), [])
 
@@ -503,6 +524,7 @@ class Repository(unittest.TestCase):
         for r in m.registries.values():
             for f in r.rows:
                 self.assertIn(f.applies, ("now", "worldLoad", "restart"), f.qualified)
+                self.assertIn(f.spec.get("joinedClient"), rg.JOINED_CLIENT, f.qualified)
             self.assertEqual(r.version, "0.1.0")
 
 

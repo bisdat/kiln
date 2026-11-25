@@ -73,6 +73,8 @@ public class RegistryTests
             Assert.True(byField.TryGetValue(f.Field, out var props), $"{f.Field} has no property");
             Assert.Single(props!);
             Assert.Equal(f.Applies, props![0].Attr.Applies);
+            Assert.Equal(f.JoinedClient, props[0].Attr.JoinedClient);
+            Assert.Contains(f.JoinedClient, new[] { "now", "worldLoad", "rejoin", "restart", "serverOnly", "localOnly", "unknown" });
             Assert.Equal(f.ReadOnly || f.Type == RegistryFieldType.List, props[0].Prop.SetMethod is null);
             if (f.Type == RegistryFieldType.List)
             {

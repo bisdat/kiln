@@ -18,67 +18,67 @@ public sealed partial class ItemEntry : IRegistryEntry
     public string Registry => "items";
 
     /// <summary>The largest stack. In place before the world's save is read: a lower value cuts stacks in that save.</summary>
-    [RegistryField("items.maxStack", RegistryApplies.WorldLoad)]
+    [RegistryField("items.maxStack", RegistryApplies.WorldLoad, JoinedClient = "worldLoad")]
     public int MaxStack { get => RegistryCells.Int(_c, ItemFields.MaxStack, _i); set => RegistryCells.Set(_c, ItemFields.MaxStack, _i, value); }
 
     /// <summary>The rarity a new copy gets when it does not roll one. Copies that exist keep theirs.</summary>
-    [RegistryField("items.rarity", RegistryApplies.Now)]
+    [RegistryField("items.rarity", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryRarity Rarity { get => (RegistryRarity)RegistryCells.Enum(_c, ItemFields.Rarity, _i, RegistryRarityNames.All); set => RegistryCells.SetEnum(_c, ItemFields.Rarity, _i, RegistryRarityNames.All, (int)value); }
 
     /// <summary>New copies roll their rarity (and perks) instead of taking rarity. Copies that exist keep theirs.</summary>
-    [RegistryField("items.rolled", RegistryApplies.Now)]
+    [RegistryField("items.rolled", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public bool Rolled { get => RegistryCells.Bool(_c, ItemFields.Rolled, _i); set => RegistryCells.Set(_c, ItemFields.Rolled, _i, value); }
 
     /// <summary>The item's level range. New copies are made inside it; a save load clamps existing copies into it.</summary>
     public ItemLevels Levels => new(_c, _i);
 
     /// <summary>New copies get a gem socket.</summary>
-    [RegistryField("items.socket", RegistryApplies.Now)]
+    [RegistryField("items.socket", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public bool Socket { get => RegistryCells.Bool(_c, ItemFields.Socket, _i); set => RegistryCells.Set(_c, ItemFields.Socket, _i, value); }
 
     /// <summary>The perk of each rarity slot, common first. A copy fills rarity + 1 slots. New copies only.</summary>
-    [RegistryField("items.perks", RegistryApplies.Now)]
+    [RegistryField("items.perks", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryValueList<RegistryId> Perks => new(_c, ItemFields.Perks, static (c, i) => RegistryCells.Id(c, ItemFields.Perks, i));
 
     /// <summary>The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants.</summary>
-    [RegistryField("items.power", RegistryApplies.Now)]
+    [RegistryField("items.power", RegistryApplies.Now, JoinedClient = "now")]
     public int Power { get => RegistryCells.Int(_c, ItemFields.Power, _i); set => RegistryCells.Set(_c, ItemFields.Power, _i, value); }
 
     /// <summary>The speed factor of the weapon's damage (multiplies power).</summary>
-    [RegistryField("items.speed", RegistryApplies.Now)]
+    [RegistryField("items.speed", RegistryApplies.Now, JoinedClient = "now")]
     public double Speed { get => RegistryCells.Double(_c, ItemFields.Speed, _i); set => RegistryCells.Set(_c, ItemFields.Speed, _i, value); }
 
     /// <summary>The item deals damage (power, speed and damage apply).</summary>
-    [RegistryField("items.hasDamage", RegistryApplies.Now)]
+    [RegistryField("items.hasDamage", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public bool HasDamage => RegistryCells.Bool(_c, ItemFields.HasDamage, _i);
 
     /// <summary>The kinds of damage a hit deals. The hit kinds (cut to poison) are shares that should add up to 1; wood, stone, metal and explosion are whole numbers.</summary>
     public ItemDamage Damage => new(_c, _i);
 
     /// <summary>The item gives armour (armor applies).</summary>
-    [RegistryField("items.hasArmor", RegistryApplies.Now)]
+    [RegistryField("items.hasArmor", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public bool HasArmor => RegistryCells.Bool(_c, ItemFields.HasArmor, _i);
 
     /// <summary>The armour of each kind the tooltip shows at levels.min. Kiln solves the game's share for it with the balance table's constants.</summary>
     public ItemArmor Armor => new(_c, _i);
 
     /// <summary>How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
-    [RegistryField("items.block", RegistryApplies.WorldLoad)]
+    [RegistryField("items.block", RegistryApplies.WorldLoad, JoinedClient = "unknown")]
     public double Block { get => RegistryCells.Double(_c, ItemFields.Block, _i); set => RegistryCells.Set(_c, ItemFields.Block, _i, value); }
 
     /// <summary>The stamina a use costs, at the next payment.</summary>
-    [RegistryField("items.staminaCost", RegistryApplies.Now)]
+    [RegistryField("items.staminaCost", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public double StaminaCost { get => RegistryCells.Double(_c, ItemFields.StaminaCost, _i); set => RegistryCells.Set(_c, ItemFields.StaminaCost, _i, value); }
 
     /// <summary>The mana a use costs, at the next cast.</summary>
-    [RegistryField("items.manaCost", RegistryApplies.Now)]
+    [RegistryField("items.manaCost", RegistryApplies.Now, JoinedClient = "now")]
     public double ManaCost { get => RegistryCells.Double(_c, ItemFields.ManaCost, _i); set => RegistryCells.Set(_c, ItemFields.ManaCost, _i, value); }
 
     /// <summary>What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
     public ItemFuel Fuel => new(_c, _i);
 
     /// <summary>The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
-    [RegistryField("items.comfort", RegistryApplies.WorldLoad)]
+    [RegistryField("items.comfort", RegistryApplies.WorldLoad, JoinedClient = "unknown")]
     public int Comfort { get => RegistryCells.Int(_c, ItemFields.Comfort, _i); set => RegistryCells.Set(_c, ItemFields.Comfort, _i, value); }
 }
 
@@ -91,11 +91,11 @@ public sealed partial class ItemLevels
     internal ItemLevels(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The lowest level (also the level power and armour are shown at).</summary>
-    [RegistryField("items.levels.min", RegistryApplies.Now)]
+    [RegistryField("items.levels.min", RegistryApplies.Now, JoinedClient = "now")]
     public int Min { get => RegistryCells.Int(_c, ItemFields.LevelsMin, _i); set => RegistryCells.Set(_c, ItemFields.LevelsMin, _i, value); }
 
     /// <summary>The highest level.</summary>
-    [RegistryField("items.levels.max", RegistryApplies.Now)]
+    [RegistryField("items.levels.max", RegistryApplies.Now, JoinedClient = "now")]
     public int Max { get => RegistryCells.Int(_c, ItemFields.LevelsMax, _i); set => RegistryCells.Set(_c, ItemFields.LevelsMax, _i, value); }
 }
 
@@ -108,55 +108,55 @@ public sealed partial class ItemDamage
     internal ItemDamage(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The share of a hit dealt as cut damage.</summary>
-    [RegistryField("items.damage.cut", RegistryApplies.Now)]
+    [RegistryField("items.damage.cut", RegistryApplies.Now, JoinedClient = "now")]
     public double Cut { get => RegistryCells.Double(_c, ItemFields.DamageCut, _i); set => RegistryCells.Set(_c, ItemFields.DamageCut, _i, value); }
 
     /// <summary>The share of a hit dealt as pierce damage.</summary>
-    [RegistryField("items.damage.pierce", RegistryApplies.Now)]
+    [RegistryField("items.damage.pierce", RegistryApplies.Now, JoinedClient = "now")]
     public double Pierce { get => RegistryCells.Double(_c, ItemFields.DamagePierce, _i); set => RegistryCells.Set(_c, ItemFields.DamagePierce, _i, value); }
 
     /// <summary>The share of a hit dealt as blunt damage.</summary>
-    [RegistryField("items.damage.blunt", RegistryApplies.Now)]
+    [RegistryField("items.damage.blunt", RegistryApplies.Now, JoinedClient = "now")]
     public double Blunt { get => RegistryCells.Double(_c, ItemFields.DamageBlunt, _i); set => RegistryCells.Set(_c, ItemFields.DamageBlunt, _i, value); }
 
     /// <summary>The share of a hit dealt as fire damage.</summary>
-    [RegistryField("items.damage.fire", RegistryApplies.Now)]
+    [RegistryField("items.damage.fire", RegistryApplies.Now, JoinedClient = "now")]
     public double Fire { get => RegistryCells.Double(_c, ItemFields.DamageFire, _i); set => RegistryCells.Set(_c, ItemFields.DamageFire, _i, value); }
 
     /// <summary>The share of a hit dealt as ice damage.</summary>
-    [RegistryField("items.damage.ice", RegistryApplies.Now)]
+    [RegistryField("items.damage.ice", RegistryApplies.Now, JoinedClient = "now")]
     public double Ice { get => RegistryCells.Double(_c, ItemFields.DamageIce, _i); set => RegistryCells.Set(_c, ItemFields.DamageIce, _i, value); }
 
     /// <summary>The share of a hit dealt as shroud damage.</summary>
-    [RegistryField("items.damage.shroud", RegistryApplies.Now)]
+    [RegistryField("items.damage.shroud", RegistryApplies.Now, JoinedClient = "now")]
     public double Shroud { get => RegistryCells.Double(_c, ItemFields.DamageShroud, _i); set => RegistryCells.Set(_c, ItemFields.DamageShroud, _i, value); }
 
     /// <summary>The share of a hit dealt as lightning damage.</summary>
-    [RegistryField("items.damage.lightning", RegistryApplies.Now)]
+    [RegistryField("items.damage.lightning", RegistryApplies.Now, JoinedClient = "now")]
     public double Lightning { get => RegistryCells.Double(_c, ItemFields.DamageLightning, _i); set => RegistryCells.Set(_c, ItemFields.DamageLightning, _i, value); }
 
     /// <summary>The share of a hit dealt as poison damage.</summary>
-    [RegistryField("items.damage.poison", RegistryApplies.Now)]
+    [RegistryField("items.damage.poison", RegistryApplies.Now, JoinedClient = "now")]
     public double Poison { get => RegistryCells.Double(_c, ItemFields.DamagePoison, _i); set => RegistryCells.Set(_c, ItemFields.DamagePoison, _i, value); }
 
     /// <summary>The share of a hit that heals instead of hurting; not counted in the hit shares.</summary>
-    [RegistryField("items.damage.healing", RegistryApplies.Now)]
+    [RegistryField("items.damage.healing", RegistryApplies.Now, JoinedClient = "now")]
     public double Healing { get => RegistryCells.Double(_c, ItemFields.DamageHealing, _i); set => RegistryCells.Set(_c, ItemFields.DamageHealing, _i, value); }
 
     /// <summary>The damage a hit deals to wood, a whole number.</summary>
-    [RegistryField("items.damage.wood", RegistryApplies.Now)]
+    [RegistryField("items.damage.wood", RegistryApplies.Now, JoinedClient = "now")]
     public int Wood { get => RegistryCells.Int(_c, ItemFields.DamageWood, _i); set => RegistryCells.Set(_c, ItemFields.DamageWood, _i, value); }
 
     /// <summary>The damage a hit deals to stone, a whole number.</summary>
-    [RegistryField("items.damage.stone", RegistryApplies.Now)]
+    [RegistryField("items.damage.stone", RegistryApplies.Now, JoinedClient = "now")]
     public int Stone { get => RegistryCells.Int(_c, ItemFields.DamageStone, _i); set => RegistryCells.Set(_c, ItemFields.DamageStone, _i, value); }
 
     /// <summary>The damage a hit deals to metal, a whole number.</summary>
-    [RegistryField("items.damage.metal", RegistryApplies.Now)]
+    [RegistryField("items.damage.metal", RegistryApplies.Now, JoinedClient = "now")]
     public int Metal { get => RegistryCells.Int(_c, ItemFields.DamageMetal, _i); set => RegistryCells.Set(_c, ItemFields.DamageMetal, _i, value); }
 
     /// <summary>The explosion damage a hit deals, a whole number.</summary>
-    [RegistryField("items.damage.explosion", RegistryApplies.Now)]
+    [RegistryField("items.damage.explosion", RegistryApplies.Now, JoinedClient = "now")]
     public int Explosion { get => RegistryCells.Int(_c, ItemFields.DamageExplosion, _i); set => RegistryCells.Set(_c, ItemFields.DamageExplosion, _i, value); }
 }
 
@@ -169,39 +169,39 @@ public sealed partial class ItemArmor
     internal ItemArmor(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The physical armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.physical", RegistryApplies.Now)]
+    [RegistryField("items.armor.physical", RegistryApplies.Now, JoinedClient = "now")]
     public int Physical { get => RegistryCells.Int(_c, ItemFields.ArmorPhysical, _i); set => RegistryCells.Set(_c, ItemFields.ArmorPhysical, _i, value); }
 
     /// <summary>The magical armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.magical", RegistryApplies.Now)]
+    [RegistryField("items.armor.magical", RegistryApplies.Now, JoinedClient = "now")]
     public int Magical { get => RegistryCells.Int(_c, ItemFields.ArmorMagical, _i); set => RegistryCells.Set(_c, ItemFields.ArmorMagical, _i, value); }
 
     /// <summary>The cut armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.cut", RegistryApplies.Now)]
+    [RegistryField("items.armor.cut", RegistryApplies.Now, JoinedClient = "now")]
     public int Cut { get => RegistryCells.Int(_c, ItemFields.ArmorCut, _i); set => RegistryCells.Set(_c, ItemFields.ArmorCut, _i, value); }
 
     /// <summary>The pierce armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.pierce", RegistryApplies.Now)]
+    [RegistryField("items.armor.pierce", RegistryApplies.Now, JoinedClient = "now")]
     public int Pierce { get => RegistryCells.Int(_c, ItemFields.ArmorPierce, _i); set => RegistryCells.Set(_c, ItemFields.ArmorPierce, _i, value); }
 
     /// <summary>The blunt armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.blunt", RegistryApplies.Now)]
+    [RegistryField("items.armor.blunt", RegistryApplies.Now, JoinedClient = "now")]
     public int Blunt { get => RegistryCells.Int(_c, ItemFields.ArmorBlunt, _i); set => RegistryCells.Set(_c, ItemFields.ArmorBlunt, _i, value); }
 
     /// <summary>The fire armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.fire", RegistryApplies.Now)]
+    [RegistryField("items.armor.fire", RegistryApplies.Now, JoinedClient = "now")]
     public int Fire { get => RegistryCells.Int(_c, ItemFields.ArmorFire, _i); set => RegistryCells.Set(_c, ItemFields.ArmorFire, _i, value); }
 
     /// <summary>The ice armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.ice", RegistryApplies.Now)]
+    [RegistryField("items.armor.ice", RegistryApplies.Now, JoinedClient = "now")]
     public int Ice { get => RegistryCells.Int(_c, ItemFields.ArmorIce, _i); set => RegistryCells.Set(_c, ItemFields.ArmorIce, _i, value); }
 
     /// <summary>The shroud armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.shroud", RegistryApplies.Now)]
+    [RegistryField("items.armor.shroud", RegistryApplies.Now, JoinedClient = "now")]
     public int Shroud { get => RegistryCells.Int(_c, ItemFields.ArmorShroud, _i); set => RegistryCells.Set(_c, ItemFields.ArmorShroud, _i, value); }
 
     /// <summary>The lightning armour the tooltip shows at levels.min.</summary>
-    [RegistryField("items.armor.lightning", RegistryApplies.Now)]
+    [RegistryField("items.armor.lightning", RegistryApplies.Now, JoinedClient = "now")]
     public int Lightning { get => RegistryCells.Int(_c, ItemFields.ArmorLightning, _i); set => RegistryCells.Set(_c, ItemFields.ArmorLightning, _i, value); }
 }
 
@@ -214,7 +214,7 @@ public sealed partial class ItemFuel
     internal ItemFuel(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>How long one item burns.</summary>
-    [RegistryField("items.fuel.burnTime", RegistryApplies.WorldLoad)]
+    [RegistryField("items.fuel.burnTime", RegistryApplies.WorldLoad, JoinedClient = "unknown")]
     public global::System.TimeSpan BurnTime { get => RegistryCells.Time(_c, ItemFields.FuelBurnTime, _i); set => RegistryCells.Set(_c, ItemFields.FuelBurnTime, _i, value); }
 }
 

@@ -27,7 +27,8 @@
             "type": "ref",
             "registry": "items",
             "readOnly": true,
-            "doc": "The item. Given when an entry is appended; read-only afterwards."
+            "doc": "The item. Given when an entry is appended; read-only afterwards.",
+            "joinedClient": "serverOnly"
           },
           "count": {
             "type": "struct",
@@ -37,14 +38,16 @@
                 "min": 0,
                 "max": 1000000,
                 "ops": "number",
-                "doc": "The fewest the entry gives."
+                "doc": "The fewest the entry gives.",
+                "joinedClient": "serverOnly"
               },
               "max": {
                 "type": "int",
                 "min": 0,
                 "max": 1000000,
                 "ops": "number",
-                "doc": "The most the entry gives."
+                "doc": "The most the entry gives.",
+                "joinedClient": "serverOnly"
               }
             },
             "typeName": "DropEntryCount",
@@ -55,18 +58,21 @@
             "min": 0,
             "max": 1,
             "ops": "number",
-            "doc": "The chance the entry drops."
+            "doc": "The chance the entry drops.",
+            "joinedClient": "serverOnly"
           },
           "weight": {
             "type": "float",
             "min": 0,
             "max": 1000000,
             "ops": "number",
-            "doc": "The weight of the entry in a group that picks one."
+            "doc": "The weight of the entry in a group that picks one.",
+            "joinedClient": "serverOnly"
           }
         },
         "typeName": "DropEntry"
-      }
+      },
+      "joinedClient": "serverOnly"
     }
   },
   "entry": {
