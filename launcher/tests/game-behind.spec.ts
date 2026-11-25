@@ -60,8 +60,9 @@ test("held while the game runs: Update game is off and says Close the game first
   await page.locator(".k-door").click();
   await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 8000 });
   await expect(button(page)).toBeDisabled();
-  await expect(button(page)).toHaveAttribute("title", "Close the game first");
-  await expect(banner(page).getByTestId("game-behind-why")).toHaveText("Close the game first");
+  // a sentence after the banner's own (with its full stop), and the button's description
+  await expect(button(page)).toHaveAccessibleDescription("Close the game first.");
+  await expect(banner(page).getByTestId("game-behind-why")).toHaveText("Close the game first.");
   await shot(page, "play-game-behind-running");
   await game(page, "stopGame");
   await expect(button(page)).toBeEnabled({ timeout: 8000 });
@@ -97,8 +98,11 @@ test("a failed install by itself: the banner stays with the reason, in one strip
   await upd(page, "justUpdated", "0.2.0-dev.41");
   const failed = banner(page).getByTestId("game-behind-failed");
   await expect(failed).toContainText("No space left on device", { timeout: 15_000 });
-  await expect(failed).toContainText(`The game still has Kiln ${HAS}.`);
+  // the Kiln the game keeps is the banner's own first sentence: not said a second time
+  await expect(failed).not.toContainText("The game still has");
   await expect(page.getByTestId("game-behind")).toHaveText(SENTENCE);
+  // the failure strip's Send to support stays with the failure
+  await expect(banner(page).getByTestId("send-to-support")).toBeVisible();
   // the failure is said once: no second "Update to ... failed" strip
   await expect(page.locator(".k-banner", { hasText: `Update to ${NEXT} failed` })).toHaveCount(0);
   await expect(button(page)).toBeEnabled();
@@ -162,4 +166,18 @@ test("a failed click before the update status answered counts as the try: no ins
   await page.waitForTimeout(1500);
   expect(await game(page, "installs")).toEqual([NEXT]);
   await expect(button(page)).toBeEnabled();
+});
+
+test("while Steam updates the game, the Steam strip says it once and Update game is held with that reason", async ({ page }) => {
+  await open(page);
+  await behind(page);
+  await game(page, "setSteamUpdating", true);
+  await expect(page.locator(".k-banner", { hasText: "Steam is updating Enshrouded. Play waits until it is done." })).toBeVisible();
+  await expect(button(page)).toBeDisabled();
+  await expect(button(page)).toHaveAccessibleDescription("Steam is updating the game.");
+  // one message among Play's strips (the header and the Play button say it in their own places), no second line in the banner
+  await expect(page.locator(".k-hero-banner").getByText(/Steam is updating/)).toHaveCount(1);
+  await game(page, "setSteamUpdating", false);
+  await expect(button(page)).toBeEnabled();
+  expect(await game(page, "installs")).toEqual([]);
 });

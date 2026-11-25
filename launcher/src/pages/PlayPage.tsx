@@ -444,8 +444,12 @@ function GameBehindBanner({ game, behind }: { game: GameInstall; behind: GameBeh
   const update = useUpdate();
   const change = useRuntimeChanges((x) => x.last[game.id]);
   const { has, next, hold } = behind;
-  const why = hold === "running" ? t("shell.updateNotice.closeGame") : hold === "starting" ? t("shell.updateNotice.holdLaunch")
-    : hold === "steam" ? t("play.banner.behindSteam") : hold === "applying" && change?.version !== next ? t("shell.runtimeChange.alreadyRunning") : null;
+  // this banner's own install is running (its spinner), or why Update game is held: a sentence after the banner's (and
+  // the button's description). Steam's update has its own strip right here: only the button says it then.
+  const mine = hold === "applying" && change?.version === next;
+  const why = hold === "running" ? t("play.banner.behindRunning") : hold === "starting" ? t("play.banner.behindStarting")
+    : hold === "steam" ? t("play.banner.behindSteam") : hold === "applying" && !mine ? t("play.banner.behindChange") : null;
+  const failed = behind.failed && hold !== "applying";
   const go = async () => {
     // a click counts as this update's try: no install by itself follows a failed one (shell/UpdateNotice.tsx)
     const to = update?.justUpdated?.to;
@@ -454,16 +458,19 @@ function GameBehindBanner({ game, behind }: { game: GameInstall; behind: GameBeh
   };
   return (
     <Banner tone="warn" title={t("play.banner.behindTitle")}
-      actions={<Button variant="primary" size="s" data-testid="game-behind-update" loading={hold === "applying" && change?.version === next} disabled={!!hold} title={why ?? undefined} onClick={go}>{t("shell.updateNotice.updateGame")}</Button>}>
+      actions={<>
+        <Button variant="primary" size="s" data-testid="game-behind-update" loading={mine} disabled={!!hold} title={why ?? undefined} onClick={go}>{t("shell.updateNotice.updateGame")}</Button>
+        {/* the "<change> failed" strip's Send to support, which this banner stands in for */}
+        {failed && <SendToSupport from="banner" target={{ game: game.id }} kind="noload" />}
+      </>}>
       <span data-testid="game-behind">{t("play.banner.behind", { has: kilnLabel(has), next: kilnLabel(next) })}</span>
-      {hold === "applying" && change?.version === next && <> <span data-testid="game-behind-why">{t("shell.updateNotice.applying", { version: kilnLabel(next) })}</span></>}
-      {why && <> <span data-testid="game-behind-why">{why}</span></>}
-      {behind.failed && hold !== "applying" && (
+      {mine && <> <span data-testid="game-behind-why">{t("shell.updateNotice.applying", { version: kilnLabel(next) })}</span></>}
+      {why && hold !== "steam" && <> <span data-testid="game-behind-why">{why}</span></>}
+      {/* the Kiln the game keeps is the first sentence: the failure says only its reason */}
+      {failed && (
         <div data-testid="game-behind-failed">
           {t("play.banner.behindFailed")}{" "}
-          <RuntimeFailure error={change?.error} platform={game.platform} fallback={t("play.banner.noReason")}>
-            {rich("play.banner.stillHas", { version: <span className="k-mono">{has}</span> })}
-          </RuntimeFailure>
+          <RuntimeFailure error={change?.error} platform={game.platform} fallback={t("play.banner.noReason")} />
         </div>
       )}
     </Banner>
