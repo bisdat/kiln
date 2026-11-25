@@ -2795,19 +2795,16 @@ pub fn repair_from(dirs: &DataDirs, pid: &str, zip_file: &Path, sha256: Option<&
     let want: BTreeSet<(ModKind, String)> = parts.iter().map(|(_, lr, _)| (lr.kind, lr.id.clone())).collect();
     let wanted = |m: &PackMod| want.contains(&(m.kind, m.id.clone()));
     progress.report(Some(0.1), "checking the pack");
-    let ix = verify_partial(zip_file, sha256, &|m| !wanted(m))?;
-    if !same_version(&ix, &base) {
+    let checked = read_partial(zip_file, sha256, None, &|m| !wanted(m))?;
+    let ix = &checked.index;
+    if !same_version(ix, &base) {
         return Err(err(ErrorCode::Refused, format!("That file is {} {}, not the {} {} this profile has installed.", ix.name, ix.version, base.name, base.version)));
     }
-    let (_, imported) = import_pack(dirs, zip_file, sha256, &wanted, progress)?;
+    // the bytes just checked, and no other: a file the player picked has no sha256 of its own, and may change meanwhile
+    let (_, imported) = import_pack(dirs, zip_file, Some(&checked.sha256), &wanted, progress)?;
     let left = lacking_of(dirs, pid)?.missing;
     progress.report(Some(1.0), &format!("{} of {} back in the Library", parts.len() - left.len(), parts.len()));
     Ok(RepairResult { profile: pid.into(), version: inst.version, imported, downloaded: 0, left })
-}
-
-/// The index of a pack file after every check of [`read_partial`] (nothing extracted).
-fn verify_partial(zip_file: &Path, sha256: Option<&str>, absent_ok: &dyn Fn(&PackMod) -> bool) -> Result<PackIndex> {
-    Ok(read_partial(zip_file, sha256, None, absent_ok)?.index)
 }
 
 /// Repairs a pack installed from a file ([`repair_from`]): from `source` (the pack file the player picked), or without
