@@ -871,6 +871,8 @@ std::vector<PackFile> discover_packs(std::string* signature) {
         if (!m.is_discarded() && m.is_object() && m.contains("side") && m["side"].is_string()) side = m["side"].get<std::string>();
         if (std::any_of(out.begin(), out.end(), [&](const PackFile& f) { return f.mod == id && f.dir != reinterpret_cast<const char*>(d.u8string().c_str()); }))
             continue;  // the same mod id twice (profile + drop-in): the first wins, as in Kiln.Host
+        // what the packs take from kiln.mod.json: an edit of it is a change of the mod's packs (seen by the ~2 s scan)
+        *signature += "M:" + folder + "|" + id + "|" + version + "|" + side + ";";
         std::vector<fs::path> files;
         for (auto it = fs::directory_iterator(cdir, ec); !ec && it != fs::directory_iterator(); it.increment(ec))
             if (it->is_regular_file(ec) && lower(reinterpret_cast<const char*>(it->path().extension().u8string().c_str())) == ".json")
@@ -919,84 +921,224 @@ RegistrySection lower_registry_section(const PackFile& file, const registry::jso
 }
 
 struct ParsedPack {
-    const PackFile& file;
+    PackFile file;
     json doc;
     bool valid = false;
     ApplyResult report;
     ApplyResult registry_report;
 };
 
-ParsedPack read_pack(const PackFile& file, const registry::Schema* live_schema, std::vector<RegistrySection>* sections) {
+// One file's text as a pack (no registry stage yet): ok false = the file could not be read.
+ParsedPack parse_pack(const PackFile& file, const std::string& text, bool ok) {
     ParsedPack p{file, {}, false, {}, {}};
-    bool ok = false;
-    const std::string text = read_file(upath(file.path), &ok);
     if (!ok) {
         p.report.errors.push_back("cannot read the file");
         return p;
     }
     p.doc = json::parse(text, nullptr, false, true);
     p.valid = valid_pack(p.doc, file.rel, &p.report);
-    if (p.doc.is_object() && p.doc.contains("registry")) {
-        const registry::json section(p.doc["registry"]);
-        // The stage accepts a registry section independently of the legacy pack format.
-        if (live_schema) sections->push_back(lower_registry_section(file, section, *live_schema));
-        if (p.valid) {
-            std::vector<registry::Batch> batches;
-            std::vector<registry::Refusal> refused;
-            std::string err;
-            if (!registry::lower_section(section, "pack", "", section_source(file.rel), registry_schema(), &batches, &refused, &err))
-                p.registry_report.errors.push_back("registry: " + err);
-            else if (!refused.empty())
-                p.registry_report.warnings.push_back("registry: " + std::to_string(refused.size()) + " edit(s) refused (state/registry.json says why)");
-        }
-    }
     return p;
 }
+
+// The registry stage's part of a pack that will apply: its section for the live stage, and the checks of the legacy path.
+void stage_pack(ParsedPack& p, const registry::Schema* live_schema, std::vector<RegistrySection>* sections) {
+    if (!p.doc.is_object() || !p.doc.contains("registry")) return;
+    const registry::json section(p.doc["registry"]);
+    // The stage accepts a registry section independently of the legacy pack format.
+    if (live_schema) sections->push_back(lower_registry_section(p.file, section, *live_schema));
+    if (p.valid) {
+        std::vector<registry::Batch> batches;
+        std::vector<registry::Refusal> refused;
+        std::string err;
+        if (!registry::lower_section(section, "pack", "", section_source(p.file.rel), registry_schema(), &batches, &refused, &err))
+            p.registry_report.errors.push_back("registry: " + err);
+        else if (!refused.empty())
+            p.registry_report.warnings.push_back("registry: " + std::to_string(refused.size()) + " edit(s) refused (state/registry.json says why)");
+    }
+}
+
+// A mod's packs apply whole from one version (docs/kiln/services/content.md, "When a reload fails partway"): the texts of
+// each mod's last application in which every file of it read as a pack. When a later application finds a file of that
+// mod it cannot read or that is no pack (a deploy still writing, a broken edit), these apply again in its place, whole,
+// and the mod's layer stays the one it had. Forgotten when the mod's packs no longer apply (unloaded, files gone) and at
+// a world reset. Under g_kept_mu (apply_all_packs runs on the active world's thread; world_reset may run elsewhere).
+struct KeptFile {
+    PackFile file;
+    std::string text;
+};
+struct KeptMod {
+    uint64_t generation = 0;
+    std::vector<KeptFile> files;
+};
+std::mutex g_kept_mu;
+std::map<std::string, KeptMod> g_kept;
+
+// Seq base of a data-pack layer: the mod's place in the load order, then the file's place in the mod.
+uint64_t pack_base(uint64_t mod_index, uint32_t file_index) {
+    return ((mod_index + 1) << 44) | (static_cast<uint64_t>(file_index & 0xFFF) << 32);
+}
 }  // namespace
+
+void packs_forget_kept() {
+    std::lock_guard lock(g_kept_mu);
+    g_kept.clear();
+}
 
 PacksReport apply_all_packs(const std::vector<PackFile>& files) {
     const auto live_schema = registry_live_schema();
     std::vector<RegistrySection> sections;
-    std::vector<ParsedPack> packs;
-    packs.reserve(files.size());
-    std::vector<std::string> order;
+    std::vector<std::string> order;  // mods in load order
+    std::vector<ParsedPack> read;
+    std::vector<std::string> texts;
+    read.reserve(files.size());
+    texts.reserve(files.size());
+    std::map<std::string, std::string> broken;  // mod -> its first file that is no pack, and why
     for (const PackFile& file : files) {
         if (std::find(order.begin(), order.end(), file.mod) == order.end()) order.push_back(file.mod);
-        packs.push_back(read_pack(file, live_schema.get(), &sections));
+        bool ok = false;
+        std::string text = read_file(upath(file.path), &ok);
+        read.push_back(parse_pack(file, text, ok));
+        texts.push_back(ok ? std::move(text) : std::string());
+        if (!read.back().valid && !broken.count(file.mod))
+            broken[file.mod] = file.rel + " (" + (read.back().report.errors.empty() ? "not a pack" : read.back().report.errors.front()) + ")";
     }
 
+    // Each mod whole from one version: its files now, or (a file of them is no pack) what it had before.
+    std::vector<ParsedPack> packs;
+    std::vector<std::string> pack_texts;
+    std::vector<ParsedPack> refused;  // the new files of mods that keep their packs (their errors are reported)
+    std::set<std::string> kept_mods;
+    std::map<std::string, uint64_t> kept_generation;
+    {
+        std::lock_guard lock(g_kept_mu);
+        for (const std::string& mod : order) {
+            const auto k = broken.count(mod) ? g_kept.find(mod) : g_kept.end();
+            if (k == g_kept.end()) {
+                for (size_t i = 0; i < read.size(); ++i)
+                    if (read[i].file.mod == mod) packs.push_back(std::move(read[i])), pack_texts.push_back(std::move(texts[i]));
+                continue;
+            }
+            kept_mods.insert(mod);
+            kept_generation[mod] = k->second.generation;
+            for (size_t i = 0; i < read.size(); ++i)
+                if (read[i].file.mod == mod) refused.push_back(std::move(read[i]));
+            for (const KeptFile& kf : k->second.files) {
+                packs.push_back(parse_pack(kf.file, kf.text, true));
+                pack_texts.push_back(kf.text);
+            }
+        }
+    }
+    for (ParsedPack& p : packs) stage_pack(p, live_schema.get(), &sections);
+
     PacksReport rep;
+    std::set<std::string> threw;  // mods a pack of which threw while it applied
     {
         std::lock_guard lock(store_mutex());
         rep.generation = ++g_generation;
+        for (const std::string& mod : kept_mods)
+            LOGW("data packs of %s: %s cannot be applied: the packs it had before stay applied, whole (from generation %llu), "
+                 "until every file of it reads as a pack",
+                 mod.c_str(), broken[mod].c_str(), static_cast<unsigned long long>(kept_generation[mod]));
         for (auto& [id, owner] : g_pack_owners) {
             store_drop_owner(owner);
             drops_drop_owner(owner);
         }
+        auto owner_of = [&](const std::string& mod) {
+            auto it = g_pack_owners.find(mod);
+            if (it == g_pack_owners.end()) {
+                const std::string label = "content:" + mod;
+                const KilnOwner o = g_api->owner_create(KilnStr{label.data(), label.size()});
+                it = g_pack_owners.emplace(mod, o).first;
+                set_owner_label(o, "pack " + mod);
+            }
+            return it->second;
+        };
+        auto mod_index = [&](const std::string& mod) {
+            return static_cast<uint64_t>(std::find(order.begin(), order.end(), mod) - order.begin());
+        };
+        // Applies one pack; a pack that throws (an unexpected value type) is reported and its mod set apart below. False:
+        // it threw.
+        auto apply_one = [&](ParsedPack& pack, uint32_t file_index, ApplyResult* out) {
+            const PackFile& p = pack.file;
+            if (!pack.valid) return true;
+            PhaseTimer ft(PH_PACK_FILE);
+            t_pack_dir = p.dir;
+            bool ok = true;
+            try {
+                apply_parsed_pack(owner_of(p.mod), pack_base(mod_index(p.mod), file_index), pack.doc, p.rel, &pack.registry_report, out);
+            } catch (const std::exception& e) {
+                out->errors.push_back(p.rel + ": applying it failed (" + e.what() + ")");
+                threw.insert(p.mod);
+                ok = false;
+            }
+            t_pack_dir.clear();
+            return ok;
+        };
         uint32_t file_index = 0;
         for (ParsedPack& pack : packs) {
-            const PackFile& p = pack.file;
-            auto it = g_pack_owners.find(p.mod);
-            if (it == g_pack_owners.end()) {
-                const std::string label = "content:" + p.mod;
-                const KilnOwner o = g_api->owner_create(KilnStr{label.data(), label.size()});
-                it = g_pack_owners.emplace(p.mod, o).first;
-                set_owner_label(o, "pack " + p.mod);
+            apply_one(pack, ++file_index, &pack.report);
+            std::string rel = pack.file.rel;
+            if (kept_mods.count(pack.file.mod)) rel += " (kept from generation " + std::to_string(kept_generation[pack.file.mod]) + ")";
+            rep.files.emplace_back(rel, std::move(pack.report));
+        }
+        for (ParsedPack& r : refused) rep.files.emplace_back(r.file.rel + " (not applied)", std::move(r.report));
+        // A mod whose pack threw part-way: none of that application's layers stay. Its packs from before apply again
+        // when it has them (and they were not what threw), else none of its packs apply.
+        for (const std::string& mod : threw) {
+            const KilnOwner o = owner_of(mod);
+            store_drop_owner(o);
+            drops_drop_owner(o);
+            std::vector<KeptFile> again;
+            {
+                std::lock_guard kl(g_kept_mu);
+                if (auto k = g_kept.find(mod); k != g_kept.end() && !kept_mods.count(mod)) again = k->second.files;
             }
-            const uint64_t mod_index = static_cast<uint64_t>(std::find(order.begin(), order.end(), p.mod) - order.begin());
-            const uint64_t base = ((mod_index + 1) << 44) | (static_cast<uint64_t>(++file_index & 0xFFF) << 32);
-            if (pack.valid) {
-                PhaseTimer ft(PH_PACK_FILE);
-                t_pack_dir = p.dir;
-                apply_parsed_pack(it->second, base, pack.doc, p.rel, &pack.registry_report, &pack.report);
-                t_pack_dir.clear();
+            // The registry stage gets the sections of what applies: not this application's sections of the mod, the
+            // kept packs' (in the mod's place in the load order), or none.
+            std::erase_if(sections, [&](const RegistrySection& s) { return s.mod == mod; });
+            std::vector<RegistrySection> again_sections;
+            ApplyResult r;
+            uint32_t fi = 0x800;
+            bool again_ok = !again.empty();
+            for (const KeptFile& kf : again) {
+                ParsedPack p = parse_pack(kf.file, kf.text, true);
+                stage_pack(p, live_schema.get(), &again_sections);
+                again_ok = apply_one(p, ++fi, &r) && again_ok;  // an ordinary problem in r (a field error) is no reason to drop it
             }
-            rep.files.emplace_back(p.rel, std::move(pack.report));
+            if (again_ok) {
+                const uint64_t at = mod_index(mod);
+                const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > at; });
+                sections.insert(pos, std::make_move_iterator(again_sections.begin()), std::make_move_iterator(again_sections.end()));
+                LOGW("data packs of %s: a pack threw while it applied: the packs it had before apply again, whole", mod.c_str());
+            } else {
+                store_drop_owner(o);
+                drops_drop_owner(o);
+                LOGW("data packs of %s: a pack threw while it applied: none of its packs apply", mod.c_str());
+            }
+            rep.files.emplace_back(mod + " (set apart)", std::move(r));
         }
         registry_live_apply(sections, live_schema.get());  // re-evaluate over the legacy packs, recomposing when a section changed
         std::string ferr;
         store_flush(&ferr);
         rep.conflicts = store_conflicts();
+    }
+    {
+        // What applies whole now is what a later application keeps when a file of the mod stops reading.
+        std::lock_guard lock(g_kept_mu);
+        std::map<std::string, KeptMod> next;
+        for (size_t i = 0; i < packs.size(); ++i) {
+            const std::string& mod = packs[i].file.mod;
+            if (kept_mods.count(mod) || threw.count(mod)) continue;
+            if (broken.count(mod)) continue;  // applied without its broken file (no earlier version to keep): nothing to keep
+            KeptMod& k = next[mod];
+            k.generation = rep.generation;
+            k.files.push_back(KeptFile{packs[i].file, std::move(pack_texts[i])});
+        }
+        for (const std::string& mod : kept_mods)
+            if (auto k = g_kept.find(mod); k != g_kept.end()) next[mod] = std::move(k->second);
+        for (const std::string& mod : threw)
+            if (auto k = g_kept.find(mod); k != g_kept.end() && !kept_mods.count(mod)) next[mod] = std::move(k->second);
+        g_kept = std::move(next);
     }
     registry_live_publish();  // registry.json with the store's lock released (review finding 10)
     return rep;

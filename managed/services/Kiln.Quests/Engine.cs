@@ -71,6 +71,11 @@ public static partial class Quests
     private static readonly Dictionary<string, Func<QuestContext, bool>> NamedPredicates = new(StringComparer.Ordinal);
     private static readonly List<string> LoadErrorList = new();
     private static readonly HashSet<string> JsonMods = new(StringComparer.Ordinal);
+    // The load whose quests/*.json JsonMods holds, per mod (its owner: Kiln.Host makes one per load; 0 = not known). A
+    // reload, or an unload and a load between two checks, keeps the id: a new owner says the files are to be read again.
+    private static readonly Dictionary<string, ulong> JsonLoads = new(StringComparer.Ordinal);
+
+    private static ulong LoadOf(ModEntry? m) => m?.Info is { } info ? ModContext.FindLive(info)?.Owner ?? 0 : 0;
     private static readonly Dictionary<string, QuestBook> SessionBooks = new(StringComparer.Ordinal);
     private static bool _started, _commands, _dataFallbackLogged;
     private static ulong _ticks, _transitions;
@@ -148,7 +153,11 @@ public static partial class Quests
         {
             ServiceTick.Add("quests", Tick);
             QuestCharacters.Start();
-            Events.On<ModReloadedEvent>(e => ReloadMod(e.Id));
+            Events.On<ModReloadedEvent>(e =>
+            {
+                ReloadMod(e.Id);
+                foreach (var dependent in e.Cascade) ReloadMod(dependent);  // unloaded and loaded again with it
+            });
             NativeQuests.Start();  // the game's own journal, dialogue and markers (Native/)
         });
     }
@@ -331,6 +340,7 @@ public static partial class Quests
             foreach (var k in DialogueRegistry.Where(kv => kv.Value.FromJson && kv.Value.Def.ModId == modId).Select(kv => kv.Key).ToArray()) DialogueRegistry.Remove(k);
             foreach (var k in NpcRegistry.Where(kv => kv.Value.FromJson && kv.Value.Def.ModId == modId).Select(kv => kv.Key).ToArray()) NpcRegistry.Remove(k);
             JsonMods.Add(modId);
+            JsonLoads[modId] = LoadOf(Mods.Get(modId));
             foreach (var n in pack.Npcs)
             {
                 n.ModId = modId;
@@ -389,7 +399,7 @@ public static partial class Quests
     }
 
     /// <summary>Definitions from a mod that is no longer loaded go away (every ~5 s).</summary>
-    private static void CheckMods()
+    internal static void CheckMods()
     {
         string[] gone;
         var all = Mods.All;
@@ -397,8 +407,19 @@ public static partial class Quests
         foreach (var m in all)
         {
             bool known;
-            lock (Gate) known = JsonMods.Contains(m.Id);
+            ulong was = 0;
+            lock (Gate)
+            {
+                known = JsonMods.Contains(m.Id);
+                if (known) JsonLoads.TryGetValue(m.Id, out was);
+            }
             if (!known && m.IsLoaded && m.Directory.Length > 0 && Directory.Exists(Path.Combine(m.Directory, "quests"))) LoadMod(m.Id, m.Directory);
+            else if (known && m.IsLoaded && m.Directory.Length > 0 && was != 0 && LoadOf(m) is var load && load != 0 && load != was)
+            {
+                // an unload and a load since the last check (no ModReloadedEvent): this load's files, not the last one's
+                QuestsInternals.Info($"definitions of {m.Id} read again: it was loaded again");
+                LoadMod(m.Id, m.Directory);
+            }
         }
         lock (Gate)
             gone = JsonMods.Where(id => !all.Any(m => m.Id == id && m.IsLoaded)).ToArray();
@@ -407,6 +428,7 @@ public static partial class Quests
             lock (Gate)
             {
                 JsonMods.Remove(id);
+                JsonLoads.Remove(id);
                 foreach (var k in Registry.Where(kv => kv.Value.FromJson && kv.Value.Def.ModId == id).Select(kv => kv.Key).ToArray()) Registry.Remove(k);
                 foreach (var k in DialogueRegistry.Where(kv => kv.Value.FromJson && kv.Value.Def.ModId == id).Select(kv => kv.Key).ToArray()) DialogueRegistry.Remove(k);
                 foreach (var k in NpcRegistry.Where(kv => kv.Value.FromJson && kv.Value.Def.ModId == id).Select(kv => kv.Key).ToArray()) NpcRegistry.Remove(k);

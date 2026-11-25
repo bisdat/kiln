@@ -72,6 +72,54 @@ in mod load order and file-name order inside a mod. A pack follows its mod: unlo
   the clone's starting value (a block writes `none` until a game VFX's name is known, then a rule writes that VFX). Problems (unknown field, value out of range, selector matching nothing) are
   logged per file and never stop the other entries.
 
+### Reloads and edits (0.2.0-dev.31.13)
+A pack follows the mod's **load**, not only its id. `reload <id>` (kiln/control, `kiln reload`, the SDK's `KilnReload`,
+`Mods.ReloadAsync`) takes the mod's layer off and applies its current `content/*.json` again, exactly as `unload <id>`
+then `load <folder>` do; so does an unload and a load that fall between two of Kiln.Content's looks (every 25 steps).
+Before 0.2.0-dev.31.13 only a change in the list of loaded mod ids re-applied the packs. A reload keeps that list as it
+was when the mod stays in its place (the last loaded mod, for example one hot-loaded with `load`), so its old layer
+stayed until the next restart or file edit.
+
+- One line names the mod and the reason, then the usual summary:
+  `mod skilltest was reloaded (1.0.0 -> 1.0.1): re-applying data packs (its old layer comes off, its current files apply)`.
+  Other reasons: `was reloaded with <mod>` (a dependent reloaded with the mod it depends on), `was unloaded and loaded
+  again`. The list of loaded mods changing still logs `the set of loaded mods changed: re-applying data packs`.
+- Every data layer that comes from the packs follows: items, recipes, loot, drops, gear, the gamedata sections
+  (`kiln.gamedata`, including their `add` clones), the sections other services register (`creatures`, `abilities`,
+  `Content.RegisterSection`), new items and recipes from `add` lists, and the `registry` section.
+- The content generation grows by one, so the [content sync](../sync.md) sends joined Kiln clients the new state, and
+  `Content.OnReady` handlers and `ContentReadyEvent` run again (`Reload` true), as after any pack reload.
+- A reload of a mod without data packs re-applies nothing.
+- An edit of a mod's `kiln.mod.json` (its `id`, `version` or `side`) counts as a pack file change: the ~2 s scan
+  re-applies, without a reload.
+
+### When a reload fails partway (0.2.0-dev.31.13)
+A mod's packs apply whole from one version, never half:
+
+- **The mod does not load again** (its `OnLoad` throws, its manifest is invalid, a dependency is missing): it is not
+  loaded, so its layer comes off, as after `unload`. The reload's result and `kiln/logs/mods.txt` say why; the line
+  `data packs of <mod> skipped: Kiln.Host did not load the mod` follows.
+- **A file of the new version cannot be read or is no pack** (cut off while a deploy writes it, not JSON, a `format`
+  other than 1): the mod keeps the **old layer**, whole: the packs it had at its last application in which every file
+  of it read, from the files' text as it was then. The new files of that mod do not apply, not even the good ones. The
+  log says `data packs of <mod>: <file> (<why>) cannot be applied: the packs it had before stay applied, whole (from
+  generation N), until every file of it reads as a pack`, and `Content.PackReport()` lists the kept files as
+  `<file> (kept from generation N)` and the new ones as `<file> (not applied)`. The next reload or file edit tries the
+  files again.
+- With no old layer to keep, the files that read apply and the broken one is reported, as before. There is none when
+  this world has not yet applied the mod's packs with every file reading: the world's first load, the mod's first
+  application after its packs came off (an `unload` seen as a change of the list, its files gone), or every application
+  since then had a broken file. A world reset forgets every old layer.
+- **A pack throws while it applies** (an unexpected value type in a section's code): that mod's field and drop layers
+  of this application come off, and its packs from the last application in which every file read apply again, whole,
+  with their `registry` sections (ordinary problems in them, such as an unknown field, are reported as before and do not
+  stop them). Without such packs, or when one of them throws too, none of the mod's packs apply and no `registry` section
+  of it reaches the registry stage. The report lists the mod as `<mod> (set apart)`. Not rolled back: what the throwing
+  pack did before the throw outside the field and drop layers (new items or recipes of an `add` list, gamedata `add`
+  clones, a section another service registered); the next application without the throw puts them right.
+- Inside one application the layers change under one store lock: no reader that takes it (a drop table being acquired,
+  the content sync's export) sees a mix of the old and the new layer.
+
 ## Gear values
 A typed face over the item fields of gear, in the numbers the game's own tooltip shows: a server owner writes "power 30" or
 "physical armour 45" instead of solving `damageSetup.dmgMod` or `armorSetup.distribution.physical` by hand. The `gear`
