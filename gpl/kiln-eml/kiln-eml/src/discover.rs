@@ -193,6 +193,17 @@ pub fn without_profile_copies(candidates: Vec<Candidate>, profile: &[(String, bo
 /// runs a package only while its switch is on and on the sides it targets ([`shroudforge_switch`]): a package there it
 /// has off is `off-in-shroudforge`, one for the other side `other-side`.
 pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathBuf], who: &str, shroudforge: Option<bool>) -> Vec<Entry> {
+    aside_entries_with(profile_json, kiln_dir, roots, who, shroudforge, None)
+}
+
+/// [`aside_entries`] while Kiln hosts ShroudForge (`skip`): a profile mod that is off but whose folder in ShroudForge's
+/// mods folder ShroudForge would run (its own switch on: the player's own folder, which Kiln never writes into, or
+/// Kiln's copy switched on since the last activation) is named to `skip` by its package id. True: the runtime skips it
+/// this start (shroudforge_host_skip_packages), and its row is `disabled` with [`skipped_line`]. False (the runtime takes
+/// no skip list), or no `skip` (Kiln does not host ShroudForge, or another loader runs the EML mods): it runs, and its
+/// row says so (`own-loader`), why, and how to turn it off ([`off_but_present`]). Never `disabled` for what runs.
+pub fn aside_entries_with(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathBuf], who: &str, shroudforge: Option<bool>,
+                          mut skip: Option<&mut dyn FnMut(&str) -> bool>) -> Vec<Entry> {
     let mut ids = profile_ids(profile_json);
     // These entries are intentionally off on the kiln-eml route, including for older runners. SF's own switch
     // runs the package; report that delegation truthfully only while SF actually owns this start.
@@ -224,8 +235,13 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         } else { None };
         let own = copy.clone().or(manual);
         let what = if copy.is_some() { "Kiln's copy" } else { "hand-installed mod" };
+        // off in the profile: is its folder here one the loader runs anyway? (EML's own loader has no switch)
+        let runs_anyway = |c: &Utf8PathBuf| shroudforge.is_none_or(|server| shroudforge_switch(c, server).is_ok());
         let (state, reason) = if !enabled {
-            ("disabled", "switched off in the profile".to_string())
+            match own.as_ref().filter(|c| runs_anyway(c)) {
+                None => ("disabled", "switched off in the profile".to_string()),
+                Some(c) => off_but_present(&id, &wanted, c, copy.is_some(), who, shroudforge, &folder, skip.as_deref_mut()),
+            }
         } else if let Some(c) = &own {
             match shroudforge.map(|server| shroudforge_switch(c, server)) {
                 None => ("own-loader", format!("runs under {who} ({what} at {c})")),
@@ -257,6 +273,109 @@ pub fn aside_entries(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8PathB
         Entry { id: Some(id), version: None, name: None, source: "profile".into(),
             path: own.map(|c| c.to_string()).unwrap_or(path), state: state.into(), reason: Some(reason), capabilities: Vec::new() }
     }).collect()
+}
+
+/// The words of a profile-off package Kiln had ShroudForge skip this start, in the player's own folder `path`: its row's
+/// reason in eml.json and its kiln.log line. Kiln never writes into the folder.
+pub fn skipped_line(id: &str, path: &Utf8Path) -> String {
+    format!("{id} is off in the profile: your own folder {path} is skipped this start; Kiln leaves its files as they are")
+}
+
+/// In the reason of every skipped package ([`skipped_line`], and Kiln's copy).
+const SKIPPED: &str = " is skipped this start";
+/// In the reason of every package that runs although the profile has it off ([`off_but_present`]).
+const RUNS_OFF: &str = " although it is off in the profile: ";
+
+/// Has Kiln had this profile-off row skipped this start?
+fn is_skipped(e: &Entry) -> bool {
+    e.state == "disabled" && e.reason.as_deref().is_some_and(|r| r.contains(SKIPPED))
+}
+
+/// Does this row run although the profile has its mod off?
+fn runs_off(e: &Entry) -> bool {
+    e.state == "own-loader" && e.reason.as_deref().is_some_and(|r| r.contains(RUNS_OFF))
+}
+
+/// A profile mod that is off, with a folder `c` that `who` runs (`kilns`: Kiln's copy; else the player's own, which Kiln
+/// never writes into). `package`: its mod.json id. Under ShroudForge (`shroudforge`: Some(server)) Kiln asks `skip` to
+/// have it skipped this start; otherwise, or when the runtime refuses, the row says that it runs, why, and how to stop it.
+fn off_but_present(id: &str, package: &str, c: &Utf8Path, kilns: bool, who: &str, shroudforge: Option<bool>, folder: &str,
+                   skip: Option<&mut (dyn FnMut(&str) -> bool + '_)>) -> (&'static str, String) {
+    let hosted = skip.is_some();
+    let Some(server) = shroudforge else {
+        // EML's own loader: every mod of its folder runs, there is no switch
+        return ("own-loader", if kilns {
+            format!("runs under {who}{RUNS_OFF}Kiln's copy {c} is in its folder, and {who} runs every mod in {folder} (it has no \
+                switch). Press Play in the Kiln launcher (or activate the profile again): Kiln then takes its copy out")
+        } else {
+            format!("runs under {who}{RUNS_OFF}it is your own folder {c}, which Kiln never writes into, and {who} runs every mod \
+                in {folder} (it has no switch). To turn it off, move the folder out of {folder}")
+        });
+    };
+    // the runtime matches the folder's own mod.json id, exactly
+    let package = classify(c).map(|m| m.id).unwrap_or_else(|_| package.to_owned());
+    if let Some(skip) = skip {
+        if skip(&package) {
+            return ("disabled", if kilns {
+                format!("{id} is off in the profile: Kiln's copy {c} has ShroudForge's switch on and{SKIPPED}; press Play in \
+                    the Kiln launcher (or activate the profile again) and Kiln takes its copy out (or switches it off)")
+            } else { skipped_line(id, c) });
+        }
+    }
+    let why = if hosted {
+        "this ShroudForge runtime takes no skip list from Kiln (Kiln's bundled runtime takes one from 0.2.0-dev.31.12 on, an \
+            installed ShroudForge does not: launcher Settings, \"Use my installed ShroudForge\")"
+    } else {
+        "Kiln does not host ShroudForge this start, so it cannot have it skipped"
+    };
+    ("own-loader", if kilns {
+        format!("runs under {who}{RUNS_OFF}ShroudForge's switch is on in Kiln's copy {c}, and {why}. Press Play in the Kiln \
+            launcher (or activate the profile again): Kiln then takes its copy out (or switches it off)")
+    } else if server {
+        format!("runs under {who}{RUNS_OFF}it is your own folder {c}, which Kiln never writes into, and ShroudForge's own \
+            switch for it is on; {why}. To turn it off, put \"enabled\": false into its extended.mod.json or move the folder \
+            out of {folder}, then restart the server")
+    } else {
+        format!("runs under {who}{RUNS_OFF}it is your own folder {c}, which Kiln never writes into, and ShroudForge's own \
+            switch for it is on; {why}. To turn it off, switch it off in Kiln's in-game menu (Mods > ShroudForge) or in \
+            ShroudForge's Modloader, or move the folder out of {folder}")
+    })
+}
+
+/// The profile's EML mods that are off (`mods.eml` entries with `enabled: false`), as (Library id, package id): the
+/// package id from the entry's mod.json, else the Library id. A package the launcher handed to ShroudForge's runtime
+/// (`emlRuntime`) is on, whatever its entry says (engines.md, runtime EML packages).
+fn profile_off(profile_json: &str, kiln_dir: &Utf8Path) -> Vec<(String, String)> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(profile_json.trim_start_matches('\u{feff}')) else { return Vec::new() };
+    let runtime = |id: &str| v.get("emlRuntime").and_then(|r| r.as_array()).is_some_and(|r| r.iter().any(|x| x.as_str() == Some(id)));
+    let Some(list) = v.pointer("/mods/eml").and_then(|l| l.as_array()) else { return Vec::new() };
+    list.iter().filter_map(|e| {
+        let id = e.get("id")?.as_str()?;
+        if e.get("enabled").and_then(|b| b.as_bool()).unwrap_or(true) || runtime(id) { return None; }
+        let package = e.get("path").and_then(|p| p.as_str()).and_then(|p| classify(&resolve_profile_path(p, kiln_dir)).ok())
+            .map(|m| m.id).unwrap_or_else(|| id.to_owned());
+        Some((id.to_owned(), package))
+    }).collect()
+}
+
+/// Kiln's own runner: a drop-in (`game-mods`, `kiln-dropin`) whose package is an EML mod the profile has off is the
+/// player's own folder of that mod (Kiln's copies are no drop-ins, [`without_profile_copies`]). It ran beside the
+/// profile's `disabled` row; now it is left out of `run` and its row is `disabled` with [`skipped_line`]. Kiln reads it
+/// in place and never writes into it. Returns the kiln.log lines (info), one per folder.
+pub fn honor_profile_off(profile_json: &str, kiln_dir: &Utf8Path, run: &mut Vec<Utf8PathBuf>, entries: &mut [Entry]) -> Vec<String> {
+    let off = profile_off(profile_json, kiln_dir);
+    let mut lines = Vec::new();
+    if off.is_empty() { return lines; }
+    for e in entries.iter_mut().filter(|e| e.state == "pending" && matches!(e.source.as_str(), "game-mods" | "kiln-dropin")) {
+        let Some((id, _)) = off.iter().find(|(_, package)| e.id.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(package))) else { continue };
+        let path = Utf8PathBuf::from(&e.path);
+        run.retain(|p| p != &path);
+        let line = skipped_line(id, &path);
+        e.state = "disabled".into();
+        e.reason = Some(line.clone());
+        lines.push(format!("kiln-eml: {line}"));
+    }
+    lines
 }
 
 /// The extended.mod.json a dedicated server needs in an EML package of ShroudForge's mods folder: without it, or with
@@ -343,27 +462,42 @@ pub fn aside_dropins_log(entries: &[Entry], root: &Utf8Path, server: bool) -> Op
 /// dedicated server), its switch on for this side ([`shroudforge_switch`]), in folder order, and how many there are.
 /// The aside start says so in kiln.log ([`shroudforge_runs_log`]): sidelia's server (Nexus, 2026-11-21) ran its mods
 /// fine, but the log only warned about the ones nothing ran. Listing only.
-pub fn shroudforge_runs(root: &Utf8Path, server: bool) -> (Vec<String>, usize) {
+/// `skipped`: the folders Kiln had ShroudForge skip this start ([`aside_entries_with`]); they do not run.
+pub fn shroudforge_runs(root: &Utf8Path, server: bool, skipped: &[Utf8PathBuf]) -> (Vec<String>, usize) {
     let (mut runs, mut total) = (Vec::new(), 0);
     for c in folder_candidates(root, "game-mods") {
         let Ok(m) = classify(&c.path) else { continue };
         total += 1;
-        if shroudforge_switch(&c.path, server).is_ok() { runs.push(m.id); }
+        if shroudforge_switch(&c.path, server).is_ok() && !skipped.iter().any(|s| is_root(&c.path, s)) { runs.push(m.id); }
     }
     (runs, total)
 }
 
+/// The folders of the rows Kiln had ShroudForge skip this start (for [`shroudforge_runs`]) and their ids.
+pub fn skipped_rows(entries: &[Entry]) -> (Vec<Utf8PathBuf>, Vec<String>) {
+    entries.iter().filter(|e| is_skipped(e)).map(|e| (Utf8PathBuf::from(&e.path), e.id.clone().unwrap_or_default())).unzip()
+}
+
 /// The info line of [`shroudforge_runs`]: "kiln-eml: 3 of 5 EML packages in <root> run under ShroudForge: a, b, c";
 /// nothing when the folder holds no EML package. At most 40 ids are named, then how many more.
-pub fn shroudforge_runs_log(runs: &[String], total: usize, root: &Utf8Path) -> Option<String> {
+/// `skipped`: the ids of the packages Kiln had ShroudForge skip this start, named after the ones that run.
+pub fn shroudforge_runs_log(runs: &[String], total: usize, root: &Utf8Path, skipped: &[String]) -> Option<String> {
     if total == 0 { return None; }
     const NAMED: usize = 40;
+    let named = |ids: &[String]| {
+        let mut s = ids.iter().take(NAMED).map(String::as_str).collect::<Vec<_>>().join(", ");
+        if ids.len() > NAMED { s.push_str(&format!(" and {} more", ids.len() - NAMED)); }
+        s
+    };
     let mut line = format!("kiln-eml: {} of {total} EML package{} in {root} run{} under ShroudForge", runs.len(),
         if total == 1 { "" } else { "s" }, if total == 1 { "s" } else { "" });
     if !runs.is_empty() {
         line.push_str(": ");
-        line.push_str(&runs.iter().take(NAMED).map(String::as_str).collect::<Vec<_>>().join(", "));
-        if runs.len() > NAMED { line.push_str(&format!(" and {} more", runs.len() - NAMED)); }
+        line.push_str(&named(runs));
+    }
+    if !skipped.is_empty() {
+        line.push_str(&format!("; {} {} off in the profile and skipped this start: {}", skipped.len(),
+            if skipped.len() == 1 { "is" } else { "are" }, named(skipped)));
     }
     Some(line)
 }
@@ -481,18 +615,27 @@ pub fn aside_log(entries: &[Entry], who: &str) -> Vec<(i32, String)> {
     let mut out = Vec::new();
     let count = |state: &str| entries.iter().filter(|m| m.state == state).count();
     let (runs, lost, off, other) = (count("own-loader"), count("not-loaded"), count("off-in-shroudforge"), count("other-side"));
+    let anyway = entries.iter().filter(|m| runs_off(m)).count();
     for m in entries.iter().filter(|m| m.state == "not-loaded" || m.state == "off-in-shroudforge") {
         let verb = if m.state == "not-loaded" { "load" } else { "run" };
         out.push((2, format!("kiln-eml: profile EML mod {} does not {verb}: {}", m.id.as_deref().unwrap_or("?"), m.reason.as_deref().unwrap_or(""))));
     }
+    // off in the profile: one line each for what Kiln had skipped (info) and for what runs all the same (a warning)
+    for m in entries.iter().filter(|m| is_skipped(m)) {
+        out.push((3, format!("kiln-eml: {}", m.reason.as_deref().unwrap_or(""))));
+    }
+    for m in entries.iter().filter(|m| runs_off(m)) {
+        out.push((2, format!("kiln-eml: profile EML mod {} {}", m.id.as_deref().unwrap_or("?"), m.reason.as_deref().unwrap_or(""))));
+    }
     let total = runs + lost + off + other;
     if total > 0 {
         let mut line = format!("kiln-eml: {runs} of the profile's {total} EML mod(s) run under {who}");
+        if anyway > 0 { line.push_str(&format!("; {anyway} run although the profile has {} off", if anyway == 1 { "it" } else { "them" })); }
         if off > 0 { line.push_str(&format!("; {off} are switched off in ShroudForge, so nothing applies them")); }
         if other > 0 { line.push_str(&format!("; {other} run on the other side only")); }
         if lost > 0 { line.push_str(&format!("; {lost} do not load")); }
-        if lost + off > 0 { line.push_str(" (kiln/state/eml.json)"); }
-        out.push((if lost + off > 0 { 2 } else { 3 }, line));
+        if lost + off + anyway > 0 { line.push_str(" (kiln/state/eml.json)"); }
+        out.push((if lost + off + anyway > 0 { 2 } else { 3 }, line));
     }
     out
 }
@@ -810,14 +953,14 @@ mod tests {
         assert!(!windows_same_folder("C:", r"C:\"));
     }
 
-    fn tmp(name: &str) -> Utf8PathBuf {
+    pub(super) fn tmp(name: &str) -> Utf8PathBuf {
         let d = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-eml-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
     }
 
-    fn eml_mod(root: &Utf8Path, dir: &str, id: &str) -> Utf8PathBuf {
+    pub(super) fn eml_mod(root: &Utf8Path, dir: &str, id: &str) -> Utf8PathBuf {
         let p = root.join(dir);
         std::fs::create_dir_all(p.join("src")).unwrap();
         std::fs::write(p.join("mod.json"), format!(r#"{{"id":"{id}","name":"N","version":"1.0.0","capabilities":["patch"]}}"#)).unwrap();
@@ -1168,20 +1311,20 @@ mod tests {
             if let Some(ext) = ext { std::fs::write(p.join("extended.mod.json"), ext).unwrap(); }
         }
         std::fs::create_dir_all(root.join("not-a-mod")).unwrap();
-        let (runs, total) = shroudforge_runs(&root, true);
+        let (runs, total) = shroudforge_runs(&root, true, &[]);
         // a server: "legacy" (an EML package without targets) runs on both sides, "client" only on the client
         assert_eq!((runs.as_slice(), total), (["both".to_string(), "legacy".to_string()].as_slice(), 5), "server");
-        let line = shroudforge_runs_log(&runs, total, &root).unwrap();
+        let line = shroudforge_runs_log(&runs, total, &root, &[]).unwrap();
         assert_eq!(line, format!("kiln-eml: 2 of 5 EML packages in {root} run under ShroudForge: both, legacy"));
-        let (runs, total) = shroudforge_runs(&root, false);
+        let (runs, total) = shroudforge_runs(&root, false, &[]);
         assert_eq!((runs.as_slice(), total), (["both".to_string(), "client".to_string(), "legacy".to_string()].as_slice(), 5), "client");
         // none running: the count alone; one package: singular; an empty folder: nothing to say
-        assert_eq!(shroudforge_runs_log(&[], 5, &root).unwrap(), format!("kiln-eml: 0 of 5 EML packages in {root} run under ShroudForge"));
-        assert_eq!(shroudforge_runs_log(&["a".into()], 1, &root).unwrap(), format!("kiln-eml: 1 of 1 EML package in {root} runs under ShroudForge: a"));
-        assert!(shroudforge_runs_log(&[], 0, &root).is_none());
-        assert!(shroudforge_runs(&d.join("missing"), true) == (Vec::new(), 0));
+        assert_eq!(shroudforge_runs_log(&[], 5, &root, &[]).unwrap(), format!("kiln-eml: 0 of 5 EML packages in {root} run under ShroudForge"));
+        assert_eq!(shroudforge_runs_log(&["a".into()], 1, &root, &[]).unwrap(), format!("kiln-eml: 1 of 1 EML package in {root} runs under ShroudForge: a"));
+        assert!(shroudforge_runs_log(&[], 0, &root, &[]).is_none());
+        assert!(shroudforge_runs(&d.join("missing"), true, &[]) == (Vec::new(), 0));
         let many: Vec<String> = (0..45).map(|i| format!("m{i}")).collect();
-        assert!(shroudforge_runs_log(&many, 45, &root).unwrap().ends_with("m39 and 5 more"));
+        assert!(shroudforge_runs_log(&many, 45, &root, &[]).unwrap().ends_with("m39 and 5 more"));
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -1474,5 +1617,134 @@ mod runtime_delegation_tests {
         let rows = aside_entries(&json, &root, &[root.clone()], "ShroudForge (hosted by Kiln)", Some(true));
         assert_eq!(rows[0].state, "other-side", "{rows:?}");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+}
+
+// The profile's off for a player's own folder (0.2.0-dev.31.12)
+#[cfg(test)]
+mod own_folder_off_tests {
+    use super::*;
+    use super::tests::{eml_mod, tmp};
+
+    /// A player's report (Kiln 0.2.0-dev.31.9): the profile had an EML mod off, the player's own folder of it was in
+    /// ShroudForge's mods folder with ShroudForge's own switch on, Kiln hosted ShroudForge and ShroudForge ran it, and
+    /// eml.json said "disabled: switched off in the profile". Kiln never writes into such a folder. Hosted by Kiln,
+    /// ShroudForge now skips it this start (Kiln names its package); where nothing skips it, the row says that it runs,
+    /// why, and how to turn it off. A mod that is off with no folder of its own there, or one ShroudForge has off too,
+    /// stays plainly "disabled".
+    #[test]
+    fn a_profile_off_own_folder_under_shroudforge_is_skipped_or_said_to_run() {
+        let d = tmp("aside-off-own");
+        let switched = |p: &Utf8Path, on: bool| std::fs::write(p.join("extended.mod.json"),
+            format!(r#"{{"schemaVersion":1,"launcher":"EML","enabled":{on},"targets":["client","server"]}}"#)).unwrap();
+        let own = eml_mod(&d, "mods/quiver-slots", "quiver-slots");
+        switched(&own, true);
+        let shut = eml_mod(&d, "mods/shut-own", "shut-own");
+        switched(&shut, false);
+        let copy = eml_mod(&d, "mods/stack-tweaks", "stack-tweaks");
+        std::fs::write(copy.join(".kiln-library.json"), r#"{"format":1,"kind":"eml","id":"stack-tweaks","version":"1.0.0","hash":"h"}"#).unwrap();
+        switched(&copy, true);
+        let j = r#"{"mods":{"eml":[{"id":"quiver-slots","path":"/lib/quiver-slots","enabled":false},
+            {"id":"shut-own","path":"/lib/shut-own","enabled":false},{"id":"stack-tweaks","path":"/lib/stack-tweaks","enabled":false},
+            {"id":"elsewhere","path":"/lib/elsewhere","enabled":false}]}}"#;
+        let who = "ShroudForge (hosted by Kiln)";
+        let row = |rows: &[Entry], id: &str| rows.iter().find(|e| e.id.as_deref() == Some(id)).map(|e| (e.state.clone(), e.reason.clone().unwrap_or_default(), e.path.clone())).unwrap();
+
+        // hosted by Kiln, a runtime that takes the list: skipped, one line each, the player's files untouched
+        let mut asked = Vec::new();
+        let mut skip = |package: &str| { asked.push(package.to_owned()); true };
+        let rows = aside_entries_with(j, &d.join("kiln"), &[d.join("mods")], who, Some(false), Some(&mut skip));
+        assert_eq!(asked, ["quiver-slots", "stack-tweaks"], "only the packages that would run");
+        let (state, reason, path) = row(&rows, "quiver-slots");
+        assert_eq!(state, "disabled");
+        assert_eq!(reason, format!("quiver-slots is off in the profile: your own folder {own} is skipped this start; Kiln leaves its files as they are"));
+        assert_eq!(Utf8Path::new(&path), own.as_path());
+        let (state, reason, _) = row(&rows, "stack-tweaks");
+        assert_eq!(state, "disabled");
+        assert!(reason.starts_with(&format!("stack-tweaks is off in the profile: Kiln's copy {copy} has ShroudForge's switch on")), "{reason}");
+        for id in ["shut-own", "elsewhere"] {
+            assert_eq!(row(&rows, id).0, "disabled", "{id}");
+            assert_eq!(row(&rows, id).1, "switched off in the profile", "{id}");
+        }
+        let lines = aside_log(&rows, who);
+        assert!(lines.iter().any(|(level, line)| *level == 3 && line == &format!(
+            "kiln-eml: quiver-slots is off in the profile: your own folder {own} is skipped this start; Kiln leaves its files as they are")), "{lines:?}");
+        assert!(std::fs::read_to_string(own.join("extended.mod.json")).unwrap().contains(r#""enabled":true"#), "never written");
+
+        // a runtime that takes no skip list (an installed ShroudForge): it runs, and the row says so, why and how to stop it
+        let mut refuse = |_: &str| false;
+        let rows = aside_entries_with(j, &d.join("kiln"), &[d.join("mods")], who, Some(false), Some(&mut refuse));
+        let (state, reason, _) = row(&rows, "quiver-slots");
+        assert_eq!(state, "own-loader", "it runs: never \"disabled\"");
+        assert!(reason.starts_with("runs under ShroudForge (hosted by Kiln) although it is off in the profile: it is your own folder"), "{reason}");
+        assert!(reason.contains("ShroudForge's own switch for it is on") && reason.contains("takes no skip list from Kiln"), "{reason}");
+        assert!(reason.contains("Mods > ShroudForge") && reason.contains("ShroudForge's Modloader") && reason.contains("move the folder out of"), "{reason}");
+        assert!(row(&rows, "stack-tweaks").1.contains("Press Play in the Kiln launcher"), "{}", row(&rows, "stack-tweaks").1);
+        let summary = aside_log(&rows, who).last().unwrap().clone();
+        assert_eq!(summary.0, 2, "a warning: a mod runs that the profile has off");
+        assert!(summary.1.contains("2 run although the profile has them off"), "{summary:?}");
+        // a dedicated server has no in-game menu
+        let rows = aside_entries_with(j, &d.join("kiln"), &[d.join("mods")], who, Some(true), Some(&mut refuse));
+        let reason = row(&rows, "quiver-slots").1;
+        assert!(reason.contains(r#""enabled": false"#) && !reason.contains("Mods > ShroudForge"), "{reason}");
+
+        // ShroudForge's own loader (no Kiln host): it runs
+        let rows = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "ShroudForge's loader", Some(false));
+        let (state, reason, _) = row(&rows, "quiver-slots");
+        assert_eq!(state, "own-loader");
+        assert!(reason.contains("Kiln does not host ShroudForge this start, so it cannot have it skipped"), "{reason}");
+        // EML's own loader runs every mod of its folder: the same, with the one way it has
+        let rows = aside_entries(j, &d.join("kiln"), &[d.join("mods")], "EML's own loader", None);
+        let (state, reason, _) = row(&rows, "shut-own");
+        assert_eq!(state, "own-loader", "EML's own loader has no switch");
+        assert!(reason.contains("although it is off in the profile") && reason.contains("move the folder out of"), "{reason}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// The same, when ShroudForge skips the package: the count of what ShroudForge runs from its folder leaves it out and
+    /// names it.
+    #[test]
+    fn the_shroudforge_runs_line_leaves_out_what_kiln_had_it_skip() {
+        let d = tmp("sf-runs-skipped");
+        let root = d.join("mods");
+        for dir in ["kept", "quiver-slots"] {
+            let p = eml_mod(&d, &format!("mods/{dir}"), dir);
+            std::fs::write(p.join("extended.mod.json"), SERVER_SWITCH_FILE).unwrap();
+        }
+        let (runs, total) = shroudforge_runs(&root, false, &[root.join("quiver-slots")]);
+        assert_eq!((runs.as_slice(), total), (["kept".to_string()].as_slice(), 2));
+        let line = shroudforge_runs_log(&runs, total, &root, &["quiver-slots".to_string()]).unwrap();
+        assert_eq!(line, format!("kiln-eml: 1 of 2 EML packages in {root} run under ShroudForge: kept; 1 is off in the profile and \
+            skipped this start: quiver-slots"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Kiln's own runner with drop-ins on: the player's own folder in the game's mods folder of an EML mod the profile has
+    /// off ran as a drop-in beside the profile's "disabled" row. It is skipped now, with the same line; Kiln reads it in
+    /// place and never writes into it. A package delegated to ShroudForge's runtime (emlRuntime) is not "off".
+    #[test]
+    fn kilns_runner_skips_a_dropin_of_a_mod_the_profile_has_off() {
+        let d = tmp("runner-off-own");
+        let lib = eml_mod(&d, "lib/quiver-slots", "quiver-slots");
+        let delegated = eml_mod(&d, "lib/runtime-pack", "runtime-pack");
+        let own = eml_mod(&d, "mods/Quiver Slots", "quiver-slots");
+        let own_runtime = eml_mod(&d, "mods/runtime-pack", "runtime-pack");
+        let other = eml_mod(&d, "mods/other", "other");
+        let json = serde_json::json!({"dropins": true, "mods": {"eml": [
+            {"id": "quiver-slots", "path": lib.as_str(), "enabled": false},
+            {"id": "runtime-pack", "path": delegated.as_str(), "enabled": false}]}, "emlRuntime": ["runtime-pack"]}).to_string();
+        let mut candidates = profile_candidates(&json, &d.join("kiln"));
+        candidates.extend(folder_candidates(&d.join("mods"), "game-mods"));
+        let (mut run, mut entries) = resolve(&candidates);
+        assert!(run.contains(&own), "red before: the drop-in ran");
+        let lines = honor_profile_off(&json, &d.join("kiln"), &mut run, &mut entries);
+        assert!(!run.contains(&own) && run.contains(&other) && run.contains(&own_runtime), "{run:?}");
+        let row = entries.iter().find(|e| Utf8Path::new(&e.path) == own.as_path()).unwrap();
+        assert_eq!(row.state, "disabled");
+        let line = format!("quiver-slots is off in the profile: your own folder {own} is skipped this start; Kiln leaves its files as they are");
+        assert_eq!(row.reason.as_deref(), Some(line.as_str()));
+        assert_eq!(lines, [format!("kiln-eml: {line}")]);
+        std::fs::remove_dir_all(d).unwrap();
     }
 }

@@ -566,8 +566,11 @@ fn shroudforge_mode(game: &Utf8Path) -> bool {
 /// profile's drop-ins on), the drop-in folders' EML mods that nothing runs are listed too (discover::aside_dropins): one
 /// warning in kiln.log; their rows in the state file on a dedicated server only (a client's in-game menu already lists
 /// ShroudForge's folder as ShroudForge's rows) and for kiln/eml/mods. Under ShroudForge, one info line also counts the EML
-/// packages of its folder and names those it runs (discover::shroudforge_runs). Listing only: what runs stays as it was.
-fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
+/// packages of its folder and names those it runs (discover::shroudforge_runs). Listing only: what runs stays as it was,
+/// except while Kiln hosts ShroudForge (`skip`, discover::aside_entries_with): a profile mod that is off, whose folder
+/// ShroudForge would run (the player's own folder, which Kiln never writes into), is named to ShroudForge's runtime to be
+/// skipped this start ([`host_skip`]).
+fn aside_outcome(why: &str, who: &str, shroudforge: bool, skip: Option<&mut dyn FnMut(&str) -> bool>) -> Outcome {
     let mut out = Outcome::new(Phase::Aside, Vec::new());
     out.aside = Some(why.into());
     let (Some(game), Some(kiln)) = (kpath(KILN_PATH_GAME), kpath(KILN_PATH_KILN)) else { return out };
@@ -578,7 +581,7 @@ fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
     let server = exe_stem().is_some_and(|s| s == "enshrouded_server");
     let roots = if shroudforge { vec![shroudforge_root(&game)] } else { loader_roots(&game) };
     if let Some(json) = &json {
-        out.mods = discover::aside_entries(json, &kiln, &roots, who, shroudforge.then_some(server));
+        out.mods = discover::aside_entries_with(json, &kiln, &roots, who, shroudforge.then_some(server), skip);
         for (level, line) in discover::aside_log(&out.mods, who) {
             klog(level, &line);
         }
@@ -588,8 +591,9 @@ fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
     }
     // what ShroudForge does run from its folder, by name (info): a start that runs its mods says so too
     if shroudforge {
-        let (runs, total) = discover::shroudforge_runs(&roots[0], server);
-        if let Some(line) = discover::shroudforge_runs_log(&runs, total, &roots[0]) {
+        let (skipped, skipped_ids) = discover::skipped_rows(&out.mods);
+        let (runs, total) = discover::shroudforge_runs(&roots[0], server, &skipped);
+        if let Some(line) = discover::shroudforge_runs_log(&runs, total, &roots[0], &skipped_ids) {
             klog(3, &line);
         }
     }
@@ -721,7 +725,13 @@ fn run_now() {
             candidates.extend(kept);
         }
     }
-    let (mods, mut entries) = discover::resolve(&candidates);
+    let (mut mods, mut entries) = discover::resolve(&candidates);
+    // the player's own folder of an EML mod the profile has off ran as a drop-in: it is skipped now, its files untouched
+    if dropins && let Some(p) = profile().filter(|p| matches!(unsafe { (p.mode)() }, KILN_PROFILE_ACTIVE | KILN_PROFILE_ONCE)) {
+        for line in discover::honor_profile_off(&unsafe { (p.json)().to_string() }, &kiln, &mut mods, &mut entries) {
+            klog(3, &line);
+        }
+    }
     let (export, export_dir) = eml_json(&game);
     if let Some(d) = &export_dir {
         let _ = std::fs::create_dir_all(d);
@@ -914,7 +924,7 @@ fn start(api: *const KilnApi, owner: u64, info: *mut KilnPluginInfo, with_ready:
             klog(3, &format!("kiln-eml: standing aside: {why}. Remove it to let Kiln run the EML mods (kiln/state/eml.json)"));
         }
         let sf = who.starts_with("ShroudForge") && kpath(KILN_PATH_GAME).is_some_and(|g| shroudforge_mode(&g));
-        let mut out = aside_outcome(&why, who, sf);
+        let mut out = aside_outcome(&why, who, sf, None);
         out.loaders = paths;
         if several.is_some() {
             out.reason = several;
@@ -1025,10 +1035,41 @@ unsafe extern "C" fn eml_stand_aside(reason: KilnStr) -> i32 {
             settle_owed_handoff_under_hosted(&game);
         } else { return KILN_ERR_UNAVAILABLE; }
         RAN.store(true, Ordering::Release);
-        let out = aside_outcome(reason, "ShroudForge (hosted by Kiln)", true);
+        let out = aside_outcome(reason, "ShroudForge (hosted by Kiln)", true, Some(&mut host_skip));
         publish(&out, state_dir(kpath(KILN_PATH_KILN).as_deref()).as_deref());
         KILN_OK
     })).unwrap_or(KILN_ERR_INTERNAL)
+}
+
+/// Has the ShroudForge runtime Kiln hosts in this process skip the package `id` (its mod.json id) this start? Through its
+/// optional export shroudforge_host_skip_packages (the fork's kiln/abi/host_skip.h, 0.2.0-dev.31.12). kiln-shroudforge
+/// loaded `shroudforge-runtime.dll` and asks kiln-eml to stand aside (`eml_stand_aside`) before ShroudForge's startup
+/// pass, which is when the runtime takes the list. False: a runtime without the export (an installed ShroudForge, an
+/// older bundled one), one that refused, or none loaded; the package then runs, and its row says so.
+fn host_skip(id: &str) -> bool {
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+            fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+        }
+        let name: Vec<u16> = "shroudforge-runtime.dll".encode_utf16().chain(Some(0)).collect();
+        let module = unsafe { GetModuleHandleW(name.as_ptr()) };
+        if module.is_null() { return false; }
+        let export = unsafe { GetProcAddress(module, c"shroudforge_host_skip_packages".as_ptr().cast()) };
+        if export.is_null() { return false; }
+        // SAFETY: the fork's declaration, bool shroudforge_host_skip_packages(const uint16_t* ids)
+        let skip: unsafe extern "C" fn(*const u16) -> bool = unsafe { std::mem::transmute(export) };
+        let ids: Vec<u16> = id.encode_utf16().chain(Some(0)).collect();
+        unsafe { skip(ids.as_ptr()) }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        false
+    }
 }
 
 unsafe extern "C" fn eml_phase() -> u32 {
