@@ -32,6 +32,7 @@
 #include "kiln_api.h"
 #include "module_image.h"
 #include "nlohmann/json.hpp"
+#include "own_off.h"
 #include "services/kiln_profile.h"
 
 namespace kcompat {
@@ -567,6 +568,8 @@ struct AsideReport {
 
 // `own_folder`: the folder the own loader reads (<game>/mods ...); `folder_text`: the same for sentences ("mods",
 // "emf\\mods"); `loader`: the engine's name ("Flame").
+// An entry that is off (`enabled` false) reads `disabled` here without a look into that folder: callers whose engine
+// has an own loader that may run the player's copy ask aside_off() for such an entry instead.
 inline AsideReport aside_report(std::string_view id, const std::filesystem::path& path, bool enabled, std::string_view kind,
                                 const std::filesystem::path& own_folder, std::string_view loader, std::string_view folder_text) {
     AsideReport r;
@@ -600,9 +603,30 @@ inline AsideReport aside_report(std::string_view id, const std::filesystem::path
     return r;
 }
 
+// A profile entry that is off while the engine's own loader runs (0.2.0-dev.31.12, own_off.h): `disabled` only when
+// nothing of it runs. When the loader's folder holds a copy of it that the loader runs (the player's own folder, or a
+// Kiln copy still in place) and that loader's own switch is on, it is `own-loader`, and the reason says so and how to
+// turn it off in that loader; Kiln never writes into, switches or removes a folder the player put there. `want`: the
+// keys of the entry's mod as `loader.read` gives them (its manifest id in lower case; Shroudtopia: own_off::dll_keys).
+// Folders are read through CheckedPath (no links) and Kiln's marker reader.
+inline AsideReport aside_off(own_off::Loader loader, std::string_view profile_id, const std::vector<std::string>& want) {
+    loader.contained = [](const std::filesystem::path& root, const std::filesystem::path& p) { return contained_path(root, p); };
+    loader.marker = [](const std::filesystem::path& dir, std::string* kind, std::string* id) {
+        return read_library_marker(dir, kind, id);
+    };
+    const auto v = own_off::off_entry(loader, profile_id, want);
+    AsideReport r;
+    r.state = v.runs ? Aside::OwnLoader : Aside::Off;
+    r.reason = v.reason;
+    if (v.runs) r.copy = v.where;
+    return r;
+}
+
 // One log line per reported entry: WARN for a profile mod that does not load, INFO otherwise.
-inline void log_aside(const Host& host, std::string_view id, const AsideReport& r) {
-    host.logf(r.state == Aside::NotLoaded ? KILN_LOG_WARN : KILN_LOG_INFO, "profile mod %s: %s: %s",
+// A mod the profile has off that runs all the same (aside_off) is a WARN too.
+inline void log_aside(const Host& host, std::string_view id, const AsideReport& r, bool profile_off = false) {
+    host.logf(r.state == Aside::NotLoaded || (profile_off && r.state == Aside::OwnLoader) ? KILN_LOG_WARN : KILN_LOG_INFO,
+              "profile mod %s: %s: %s",
               std::string(id.empty() ? "?" : id).c_str(), aside_word(r.state), r.reason.c_str());
 }
 

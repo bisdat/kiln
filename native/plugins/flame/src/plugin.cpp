@@ -319,6 +319,21 @@ void mark_aside(Mod& m) {
     kcompat::log_aside(H, m.id, rep);
 }
 
+// A profile entry that is off while kiln-flame stands aside (g_mu held): Flame's loader has no switch of its own and
+// starts every folder of <game>/mods with a flame.json, so the player's own folder of this mod there (or Kiln's copy left
+// there) runs all the same (0.2.0-dev.31.12, compat/own_off.h); "switched off in the profile" only when none is there.
+void mark_aside_off(Mod& m, const fs::path& game) {
+    const auto rep = kcompat::aside_off(kcompat::own_off::flame(game), m.id,
+                                        {kcompat::lower(m.manifest_id.empty() ? m.id : m.manifest_id)});
+    if (rep.state != kcompat::Aside::OwnLoader) return;  // nothing of it in <game>/mods: off, as it says
+    m.state = kcompat::aside_word(rep.state);
+    m.reason = rep.reason;
+    m.folder = rep.copy;
+    m.folder_u8 = path_utf8(rep.copy);
+    m.own_loader = true;
+    kcompat::log_aside(H, m.id, rep, true);
+}
+
 // ---- start ------------------------------------------------------------------------------------------------------
 using FlameStartFn = void (*)();
 
@@ -452,6 +467,7 @@ void KILN_CALL on_ready(void*) {
         if (!g_stepped_aside.empty()) {
             for (auto& m : g_mods)
                 if (m->status.load() == KILN_FLAME_PENDING) mark_aside(*m);
+                else if (m->origin == "profile" && m->reason == "switched off in the profile") mark_aside_off(*m, game);
         }
         for (auto& m : g_mods) assess(*m, game);
     }
