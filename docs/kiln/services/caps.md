@@ -605,3 +605,10 @@ Player storage ([service contract](player-storage.md), [guide](../modding/player
 | Row | Kind | Reported by | What it says |
 |---|---|---|---|
 | `build.persist_callers` | native, static | kiln.build at its start, once it hooked the game's save-region builder (`build.persist` on) | whether Kiln tells the save-region builder's three callers apart, so its save boxes go into the world save's list only ([build.md](build.md#limits), [RE notes](../../re/build.md) §12). Available when the world save's call site resolved; its text says whether all three did, or names the base-zone or base-query names that did not (only the world save still gets the boxes), and that a call Kiln cannot place through the stack (another module's code on it, or a stack it cannot walk) gets them too. Unavailable, `symbol-missing`, when `build/RetSaveRegionsWorldSave` did not resolve: the text names the missing names and says that every caller gets the boxes, as up to 0.2.0-dev.30.8 |
+
+## Rows added in 0.2.0-dev.31.13 / mod API 0.2.22
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `client.crosshair_trace` | sigdb feature (`client.d/client-crosshair.json`), client only | core (sigdb) | - | the game's crosshair trace in `client_cursor` (the observation after its call and the result layout) resolved on this build; what `client.crosshair` builds on |
+| `client.crosshair` | core, static (it follows the producer) | core, from kiln.client.crosshair's producer; checked again at every registry call | not yet observed in a running client | `Crosshair.Read` / `TryGet` and `kiln.client.crosshair`'s `get` ([client-crosshair.md](client-crosshair.md)). Available on a game client with the service and `client.crosshair_trace`: "ready ... hooked at the first read", then "hooked". Unavailable: `wrong-side` (a dedicated server), `policy` (safe idle), `service-missing`, `symbol-missing` (the text names `client.crosshair_trace`), `faulted` (the first read's install failed for good) |
