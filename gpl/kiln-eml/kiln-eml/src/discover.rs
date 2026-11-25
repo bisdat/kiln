@@ -218,6 +218,7 @@ pub fn aside_entries_with(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8
         }
     }
     let paths = profile_candidates(profile_json, kiln_dir);
+    let on = profile_on(profile_json, kiln_dir);
     let folder = roots.first().map(|r| r.to_string()).unwrap_or_else(|| "mods".into());
     ids.into_iter().enumerate().map(|(i, (id, enabled))| {
         let path = paths.get(i).map(|c| c.path.to_string()).unwrap_or_default();
@@ -238,7 +239,8 @@ pub fn aside_entries_with(profile_json: &str, kiln_dir: &Utf8Path, roots: &[Utf8
         // off in the profile: is its folder here one the loader runs anyway? (EML's own loader has no switch)
         let runs_anyway = |c: &Utf8PathBuf| shroudforge.is_none_or(|server| shroudforge_switch(c, server).is_ok());
         let (state, reason) = if !enabled {
-            match own.as_ref().filter(|c| runs_anyway(c)) {
+            // (a package an entry that is on stands for runs for that entry: never skipped for this one)
+            match own.as_ref().filter(|c| runs_anyway(c) && !stands_on(&on, &wanted) && !classify(c).is_ok_and(|m| stands_on(&on, &m.id))) {
                 None => ("disabled", "switched off in the profile".to_string()),
                 Some(c) => off_but_present(&id, &wanted, c, copy.is_some(), who, shroudforge, &folder, skip.as_deref_mut()),
             }
@@ -342,6 +344,39 @@ fn off_but_present(id: &str, package: &str, c: &Utf8Path, kilns: bool, who: &str
     })
 }
 
+/// What the profile has on, by Library id and by package id (the entry's mod.json id): its EML entries that are on (and
+/// those the launcher handed to ShroudForge's runtime, `emlRuntime`, unless `emlRuntimeBlocked` names them) and its
+/// ShroudForge entries that are on. A package one of them stands for is never skipped for an entry that is off.
+fn profile_on(profile_json: &str, kiln_dir: &Utf8Path) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(profile_json.trim_start_matches('\u{feff}')) else { return Vec::new() };
+    let runtime = |id: &str| v.get("emlRuntime").and_then(|r| r.as_array()).is_some_and(|r| r.iter().any(|x| x.as_str() == Some(id)))
+        && v.get("emlRuntimeBlocked").and_then(|b| b.get(id)).is_none();
+    let mut on = Vec::new();
+    for kind in ["eml", "shroudforge"] {
+        for e in v.pointer(&format!("/mods/{kind}")).and_then(|l| l.as_array()).into_iter().flatten() {
+            let Some(id) = e.get("id").and_then(|i| i.as_str()) else { continue };
+            if !e.get("enabled").and_then(|b| b.as_bool()).unwrap_or(true) && !(kind == "eml" && runtime(id)) { continue; }
+            on.push(id.to_owned());
+            if let Some(package) = e.get("path").and_then(|p| p.as_str()).and_then(|p| manifest_id(&resolve_profile_path(p, kiln_dir))) {
+                on.push(package);
+            }
+        }
+    }
+    on
+}
+
+/// Does an entry the profile has on ([`profile_on`]) stand for the package `id`?
+fn stands_on(on: &[String], id: &str) -> bool {
+    on.iter().any(|o| o.eq_ignore_ascii_case(id))
+}
+
+/// The `id` of the mod.json in the folder `dir` (any package format: a ShroudForge package is no EML mod for
+/// [`classify`]).
+fn manifest_id(dir: &Utf8Path) -> Option<String> {
+    let v = bounded_json(&dir.join("mod.json"), 1024 * 1024)?;
+    v.get("id")?.as_str().map(str::to_owned)
+}
+
 /// The profile's EML mods that are off (`mods.eml` entries with `enabled: false`), as (Library id, package id): the
 /// package id from the entry's mod.json, else the Library id. A package the launcher handed to ShroudForge's runtime
 /// (`emlRuntime`) is on, whatever its entry says (engines.md, runtime EML packages).
@@ -363,7 +398,9 @@ fn profile_off(profile_json: &str, kiln_dir: &Utf8Path) -> Vec<(String, String)>
 /// profile's `disabled` row; now it is left out of `run` and its row is `disabled` with [`skipped_line`]. Kiln reads it
 /// in place and never writes into it. Returns the kiln.log lines (info), one per folder.
 pub fn honor_profile_off(profile_json: &str, kiln_dir: &Utf8Path, run: &mut Vec<Utf8PathBuf>, entries: &mut [Entry]) -> Vec<String> {
-    let off = profile_off(profile_json, kiln_dir);
+    let on = profile_on(profile_json, kiln_dir);
+    let mut off = profile_off(profile_json, kiln_dir);
+    off.retain(|(_, package)| !stands_on(&on, package));
     let mut lines = Vec::new();
     if off.is_empty() { return lines; }
     for e in entries.iter_mut().filter(|e| e.state == "pending" && matches!(e.source.as_str(), "game-mods" | "kiln-dropin")) {
@@ -1699,6 +1736,49 @@ mod own_folder_off_tests {
         let (state, reason, _) = row(&rows, "shut-own");
         assert_eq!(state, "own-loader", "EML's own loader has no switch");
         assert!(reason.contains("although it is off in the profile") && reason.contains("move the folder out of"), "{reason}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Review (0.2.0-dev.31.12): the runtime skips a package by its id, for every folder of it. An entry that is off must
+    /// not have a package skipped that an entry the profile has on stands for (another Library entry of the same package,
+    /// EML or ShroudForge, or the EML runtime list): that one would not run, while its row says it does. The lookup of
+    /// the player's folder found Kiln's copy of the entry that is on, and named it "your own folder".
+    #[test]
+    fn a_package_that_an_entry_which_is_on_stands_for_is_never_skipped() {
+        let d = tmp("aside-off-shared");
+        let switched = |p: &Utf8Path| std::fs::write(p.join("extended.mod.json"),
+            r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client","server"]}"#).unwrap();
+        // the entry that is on: Kiln's copy in ShroudForge's folder
+        let copy = eml_mod(&d, "mods/quiver-slots", "quiver-slots");
+        std::fs::write(copy.join(".kiln-library.json"), r#"{"format":1,"kind":"eml","id":"quiver-slots","version":"1.0.0","hash":"h"}"#).unwrap();
+        switched(&copy);
+        let lib_on = eml_mod(&d, "lib/quiver-slots", "quiver-slots");
+        // the entry that is off: an older Library entry of the same package
+        let lib_old = eml_mod(&d, "lib/quiver-slots-old", "quiver-slots");
+        // a package a ShroudForge entry that is on stands for, and one the EML runtime list does
+        let own_sf = eml_mod(&d, "mods/shared-sf", "shared-sf");
+        switched(&own_sf);
+        let lib_sf = eml_mod(&d, "lib/shared-sf", "shared-sf");
+        let own_rt = eml_mod(&d, "mods/runtime-pack", "runtime-pack");
+        switched(&own_rt);
+        let lib_rt = eml_mod(&d, "lib/runtime-pack-old", "runtime-pack");
+        let j = serde_json::json!({"mods": {
+            "eml": [{"id": "quiver-slots", "path": lib_on.as_str(), "enabled": true},
+                    {"id": "quiver-slots-old", "path": lib_old.as_str(), "enabled": false},
+                    {"id": "shared-sf-eml", "path": lib_sf.as_str(), "enabled": false},
+                    {"id": "runtime-pack-old", "path": lib_rt.as_str(), "enabled": false},
+                    {"id": "runtime-pack", "path": lib_rt.as_str(), "enabled": false}],
+            "shroudforge": [{"id": "shared-sf", "path": lib_sf.as_str(), "enabled": true}]},
+            "emlRuntime": ["runtime-pack"]}).to_string();
+        let mut asked = Vec::new();
+        let mut skip = |package: &str| { asked.push(package.to_owned()); true };
+        let rows = aside_entries_with(&j, &d.join("kiln"), &[d.join("mods")], "ShroudForge (hosted by Kiln)", Some(false), Some(&mut skip));
+        assert!(asked.is_empty(), "{asked:?}");
+        let row = |id: &str| rows.iter().find(|e| e.id.as_deref() == Some(id)).unwrap().clone();
+        assert_eq!(row("quiver-slots").state, "own-loader", "{:?}", row("quiver-slots"));
+        for id in ["quiver-slots-old", "shared-sf-eml", "runtime-pack-old"] {
+            assert_eq!((row(id).state.as_str(), row(id).reason.as_deref()), ("disabled", Some("switched off in the profile")), "{id}");
+        }
         std::fs::remove_dir_all(d).unwrap();
     }
 
