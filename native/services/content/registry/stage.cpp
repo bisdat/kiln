@@ -1040,7 +1040,8 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
             else if (const auto reg = base.registries.find("items"); reg != base.registries.end())
                 for (const BaseModel::Entry& e : reg->second)
                     if (e.id == ref.id && e.fields.count("maxStack")) now = e.fields.at("maxStack");
-            if (now.numeric() && now.as_double() < it.value().get<double>()) out.push_back({ref, {Value::number(it.value().get<double>()), now}});
+            const Value top = it.value().is_number_integer() ? Value::integer(it.value().get<int64_t>()) : Value::number(it.value().get<double>());
+            if (now.numeric() && now.as_double() < top.as_double()) out.push_back({ref, {top, now}});
         }
         return out;
     };

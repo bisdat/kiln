@@ -676,7 +676,7 @@ void stack_guard_against_the_last_world(const std::string& dir) {
     std::string row;
     for (const auto& n : s.report["saves"])
         if (n["field"] == "items[game:plank].maxStack") row = n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
-    check(g_guard_calls > 0 && row.rfind("guard: a world already started with the largest stack 80", 0) == 0 && row.find("this start gives 20") != std::string::npos,
+    check(g_guard_calls > 0 && row.rfind("guard: a world already started with the largest stack 80, this start gives 20:", 0) == 0,
           "a start that gives an item a lower max stack than a world already started with turns the stack guard on: " + row);
     check(json::parse(files.data["plans/index.json"])["stacks"]["items[game:plank].maxStack"] == 80,
           "plans/index.json keeps the highest max stack a world started with (never lowered by the later world on 20)");
