@@ -159,6 +159,31 @@ Audit (dev.22):
 | shroudlink | `shroudlink_mods/*.dll` (flat only) | a module exporting `CrashHandlerFactory` + `DirectInput8Create`, or `shroudlink_core.dll`, with shroudlink's strings; or its claim | only disabled entries listed | not delivered (the real core reads only flat DLLs): `not-loaded` with the reason, `own-loader` for an entry that is a DLL directly in `shroudlink_mods/` |
 | Ember | `ember/mods/<mod>/` | a DLL from the server folder or `kiln/chain/` carrying `ember-loader` | `skipped` | not delivered (no Ember loader exists yet): `not-loaded`, or `own-loader` for an entry that already lives in `ember/mods` |
 
+#### A mod the profile has off, while the engine's own loader runs (0.2.0-dev.31.12)
+
+The engine's own loader reads its own folder and its own switch there, never the profile, and Kiln never writes into,
+switches, replaces or removes a folder the player put there. So a mod the profile has off still runs when the player's
+own copy of it is in that folder and that loader's own switch is on (or a Kiln copy of it is still there, as after a
+profile change the launcher has not applied yet). Up to 0.2.0-dev.31.10 `kcompat::aside_report` answered `disabled`
+("switched off in the profile") for every such entry without looking. Now the plugin that stands aside looks
+(`native/plugins/compat/own_off.h`, through `kcompat::aside_off`): the state file lists the entry `own-loader`, with
+the reason `runs (your own folder <path>; <loader>'s own switch is on) although it is off in the profile: ...` and how
+to turn it off in that loader, and `kiln.log` has the same line as a warning. When that loader's own switch keeps the
+copy off, the entry stays `disabled` and the reason says both. `disabled` alone means nothing of it runs. None of these
+loaders offers a host call that skips one mod for a start, so Kiln states the truth and does not skip.
+
+| Own loader | Which copy is the entry's mod | Its own switch (what the reason names) | How to turn it off there |
+|---|---|---|---|
+| EMF (kiln-emf, `emf.json` `status`) | `emf/mods/<folder>/` whose mod.json `id` is the entry's, or `emf/mods/<id>.dll` | `emf/config/<id>.ini` `enabled=0/1`; without a value mod.json `"enabled"` (default on); a `side: client` mod does nothing on a server | `enabled=0` in that ini |
+| Greeneye Loader (kiln-greeneye, `greeneye.json` `status`) | `greeneye/<folder>/` whose mod.json `id` (else the folder name) is the entry's, read with Greeneye Loader's lenient reader | mod.json `"enabled"` (default on), `"side"` (default client), `"api"` up to 2, its DLL present | `"enabled": false` in that mod.json |
+| Shroudtopia (kiln-shroudtopia, `shroudtopia.json` `status`) | a DLL in `mods/` or `mods/<name>/` with the same bytes or the same file name as the entry's DLL | `<game>/shroudtopia.json` `"active"` (its loader loads no mod while it is false; without the file it starts with its defaults). The per-mod `"active"` only deactivates a mod after its DLL loaded, and its key is the name the DLL reports, which Kiln cannot read without loading it | none keeps the DLL from loading: move it out of `mods/` |
+| Flame (kiln-flame, `flame.json` `status`) | `mods/<folder>/` with `flame.json` whose mod.json `id` (else the folder name) is the entry's | none: every such folder starts | move the folder out of `mods/`, or switch Flame's loader off in `kiln/chain.ini` |
+
+Not changed: Enshrouded ModLoader (kiln-dllmod) switches each package per world in the world's Edit > MODS page,
+which Kiln cannot read before a world opens, and a player's own package is a package of its own there (its id is its
+path in `Mods/EnshroudedModLoader`), listed `own-loader` as a drop-in; shroudlink and Ember are unchanged (shroudlink
+reads only flat DLLs, no Ember loader exists yet). Host test: `native/plugins/compat/tests/test-own-off.sh`.
+
 Drop-ins with an active profile: every plugin reads its engine's folder when the profile has `"dropins": true` or a
 `dropins` list naming the engine (the list form was ignored by kiln-greeneye, kiln-flame, kiln-shroudtopia,
 kiln-enshwick, kiln-shroudlink and kiln-ember before dev.22; kiln-emf reads the core's bitmask, which has it).
