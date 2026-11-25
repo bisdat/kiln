@@ -182,10 +182,80 @@ KeyBindings.Register("mymod.waypoints", "F6", screen.Toggle);       // a key ope
 - Open from the game's menus (`Ui.Menus`), a key binding, a command or code (any thread).
 - `FullScreen = true`: the whole display, no title bar, not movable or resizable (Width/Height are ignored); draw your own
   title and layout with the calls in "Layout for full screens". Escape still closes it.
+- Where it opens: centred by default; `Position`, `MoveTo` / `Resize` and `RememberPlacement` since 0.2.0-dev.31.11
+  ([Placing screens and windows](#placing-screens-and-windows-since-020-dev3111-mod-api-0220)).
 - Screens are Kiln overlay windows (ImGui), not game widgets. Gamepad: while Kiln has the input the game sees an idle
   pad (XInputGetState hooked) and the pad drives ImGui's navigation (d-pad / left stick move, A activates, LB/RB
   switch tabs, B closes the top screen like Escape). Native menu entries use the game's own pad navigation. Under Proton the mouse works wherever the game leaves the pointer free (main menu, pause menu, crafting
   and inventory menus); see "Windows" below for in-game pointer lock.
+
+### Placing screens and windows (since 0.2.0-dev.31.11, mod API 0.2.20)
+A mod can say where its screen or window opens, move and resize it while it is open, and have Kiln remember where the
+player put it (GitHub issue 146). The same units as `UiWindowOptions.Position` always had:
+
+- a **position** is a fraction of the viewport, 0..1 on each axis (0 = the left or top edge, 1 = the right or bottom
+  edge), and places the window's **centre** unless a pivot names another point of it (0, 0 = its top left corner);
+- a **size** is pixels at UI scale 1 (the units of `Width` / `Height`; Kiln multiplies by `ui.Scale`).
+
+| Member | What it does |
+|---|---|
+| `UiScreenOptions.Position` | where the screen's centre opens; null (the default) = the middle, as before. Applied each time it opens |
+| `UiScreen.MoveTo(x, y, pivotX = 0.5f, pivotY = 0.5f)`, `UiWindow.MoveTo(...)` | puts the pivot point at (x, y), once |
+| `UiScreen.Resize(width, height)`, `UiWindow.Resize(...)` | sets the size, once; a resize alone keeps the top left corner |
+| `UiScreen.Placement`, `UiWindow.Placement` | a `UiPlacement` (`X`, `Y` = the centre, `Width`, `Height`, `Left`, `Top`, `Right`, `Bottom`): where it was drawn last; null before its first frame, kept while it is closed |
+| `UiScreenOptions.RememberPlacement`, `UiWindowOptions.RememberPlacement` | Kiln keeps where the player left it, across opens and game starts |
+| `UiScreenOptions.PlacementId`, `UiWindowOptions.PlacementId` | the id it is remembered under, unique among your mod's screens (or windows); null = the title (a screen's in English) |
+
+- **Once, on the next frame.** `MoveTo` and `Resize` are applied on the next frame the screen or window is drawn, with
+  ImGui's `Always` condition for that frame only; after it the player can drag and resize it again. Any thread. A later
+  call replaces one not yet applied.
+- **On a closed screen** (or a hidden window) the call waits and is applied on the first frame after it next opens, so
+  `screen.MoveTo(...); screen.Open();` and `screen.Open(); screen.MoveTo(...);` do the same. It is for that open only:
+  the next open starts from the remembered placement or the options again (call it in `Opened` to keep it). On a removed
+  screen or window, and on a `FullScreen` screen, the calls do nothing (bad values still throw).
+- **Precedence.** An explicit `MoveTo` / `Resize` wins over the remembered placement, which wins over the options
+  (`Position`, `Width`, `Height`). A remembered placement is applied whenever the screen or window appears; a window's
+  options still apply with `FirstUseEver`, as before, while nothing is remembered.
+- **Kept on the screen.** Kiln keeps the whole rect inside the current viewport when it places by a position (the option,
+  a remembered placement, `MoveTo`; a window whose size is not known yet: its pivot point), and caps every size it sets at
+  the viewport, so a screen saved on a bigger monitor or at another resolution cannot open off-screen. ImGui's own
+  minimum window size and any size constraints still apply on top (they are applied inside `Begin`). Without
+  `Position` or a remembered placement a screen opens centred at its size, exactly as before 0.2.0-dev.31.11.
+- **Remembered sizes** apply only where the player can resize: a `Resizable` screen, a window that is not `AutoResize`.
+  The position applies to every remembering screen and window.
+- **Where it is kept.** `ui-placement.json` in Kiln's config folder, beside `keybinds.json` (the active profile's config
+  folder when the launcher runs one, else `kiln/config`), per mod id, then `screens` or `windows`, then the id: `x`, `y`
+  (the centre, fractions) and `width`, `height` (pixels at UI scale 1). Kiln writes it about a second after the player
+  stops moving a window, as a whole new file put in place. A file that is not JSON is kept aside as
+  `ui-placement.json.bad` with a warning in the log, and every screen and window starts from its options; an entry that
+  is not a placement (a missing or non-number field, a size of 0 or less) is skipped. Delete an entry, or the file, to
+  forget it.
+
+Grimoire (F3) opening beside Better Spells (Shift+F3) when both are loaded:
+```csharp
+// Better Spells: tells Grimoire where its screen is whenever that changes (Mods.Send works from any thread)
+UiPlacement? sent = null;
+_screen = Ui.Screen("Better Spells", ui =>
+{
+    if (_screen!.Placement != sent && Mods.IsLoaded("grimoire")) Mods.Send("grimoire", "betterspells.placement", sent = _screen.Placement);
+    DrawSpells(ui);
+}, new UiScreenOptions { Resizable = true, RememberPlacement = true });
+_screen.Closed += () => Mods.Send("grimoire", "betterspells.placement", sent = null);
+KeyBindings.Register("betterspells.open", "Shift+F3", _screen.Toggle);
+
+// Grimoire: opens with its left edge on Better Spells' right edge while that is open, else where the player left it
+Context.Messages.On("betterspells.placement", m => _beside = m.Payload as UiPlacement?);
+_screen = Ui.Screen("Grimoire", DrawGrimoire, new UiScreenOptions { Resizable = true, RememberPlacement = true });
+KeyBindings.Register("grimoire.open", "F3", () =>
+{
+    if (!_screen.IsOpen && _beside is { } b) _screen.MoveTo(b.Right, b.Y, pivotX: 0);  // this open only
+    _screen.Toggle();
+});
+```
+Kiln clamps the move, so a Better Spells screen at the right edge puts Grimoire as far right as still fits. Placement
+needs nothing new in kiln.ui (the managed side uses the window position, size and rect slots it already had). Tested
+without a game, not yet seen in a running game. In the test kit: `KilnHarness.UiPlacement`
+([unit tests](modding/unit-tests.md#ui-placement)).
 
 ### Crafting menus
 ```csharp
@@ -593,6 +663,9 @@ w.Toggle();   // Show / Hide / Open = true; the X button closes it too
 - Threads: the draw callback runs on the game's **render thread** every frame while the window is open. Keep it short.
   Read state the mod keeps (copies, snapshots). Act through `Client.Post` (client world) or `Context.Scheduler.Post`
   (server world, when hosting).
+- `Width`, `Height` and `Position` place a window the first time it shows (ImGui's `FirstUseEver`); since
+  0.2.0-dev.31.11 `MoveTo` / `Resize` move it later and `RememberPlacement` keeps where the player left it
+  ([Placing screens and windows](#placing-screens-and-windows-since-020-dev3111-mod-api-0220)).
 - A window belongs to its mod and goes away when the mod unloads. A draw that throws 5 times closes the window.
 
 ### Layout for full screens

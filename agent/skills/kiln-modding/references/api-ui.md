@@ -71,6 +71,17 @@ JSON sections bind config and safe `game.*` values without draw code: [blocks.md
 dev.20+: `StatusLines.Add(() => cachedText)` / `Set("state", text)` report mod status when asked, including on servers.
 A source may run on a worker: use a tick-produced snapshot, never game state or tick-held locks. dev.21+: the menu and the
 dashboard never wait for a source. They show the lines read last and refresh on a worker, so a new line appears a moment later.
+**Placing screens and windows (0.2.0-dev.31.11+, mod API 0.2.20; tested offline, not yet seen in a game).** Positions are
+fractions of the viewport (0..1) of the centre unless a pivot says otherwise; sizes are pixels at UI scale 1.
+`UiScreenOptions.Position` = where a screen opens (null: the middle, as before). `screen.MoveTo(x, y, pivotX = 0.5f,
+pivotY = 0.5f)` / `screen.Resize(w, h)` (also on `UiWindow`; any thread) apply once on the next frame it draws (ImGui
+`Always` for that frame); on a closed screen they wait for its next open, on a removed or `FullScreen` one they do
+nothing. `screen.Placement` (`UiPlacement`: `X`, `Y`, `Width`, `Height`, `Left`, `Top`, `Right`, `Bottom`) is where it was
+drawn last. `RememberPlacement = true` (+ optional `PlacementId`, default the title) keeps the player's place and size per
+mod and id in `ui-placement.json` beside `keybinds.json` (config folder), across game starts. Precedence: MoveTo/Resize >
+remembered > options; everything Kiln places stays inside the viewport. Beside another mod's screen:
+`MoveTo(other.Right, other.Y, pivotX: 0)` with the other's `Placement` shared through `Mods.Send`. Tests:
+`kiln.UiPlacement.Frame(screen)`, `PlayerPlaces`, `Remembered`, `Restart` (docs/kiln/ui.md "Placing screens and windows").
 dev.22+: `new UiScreenOptions { FullScreen = true }` is a whole-display screen (no title bar, not movable); draw your own
 layout with `ui.FontSize(36)`, `ui.BeginChild(id, w, h, UiChildFlags.NavFlattened)`, `ui.Cursor` / `ui.SetCursor`, `ui.LastItem`,
 `ui.Selectable(label, selected, width, height)`, `ui.DrawRect(UiLayer.Window, ...)`, `ui.PushColor` / `PushVar` and
