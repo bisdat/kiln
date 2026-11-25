@@ -432,6 +432,7 @@ void after_frame(uintptr_t sys10) {
     ++g_frame_no;
     g_frames.store(g_frame_no, std::memory_order_relaxed);
     page_after_frame(sys10, g_frame_no);
+    popups_after_frame(sys10, g_frame_no);  // the game's popup panels this frame drew (popups.cpp)
     footer_after_frame(sys10);  // the canvas for the mark next to Kiln's line in the main menu's footer (menu_footer.cpp)
     scroll_after_frame(g_frame_no);  // the scrolling pause menu's crash guard (menu_scroll.cpp)
     g_ui_thread = GetCurrentThreadId();
@@ -520,6 +521,7 @@ void after_frame(uintptr_t sys10) {
 }
 
 void __fastcall hk_frame(void* sys10, void* p2) {
+    popups_frame_begin();
     g_frame_hook.call<void>(sys10, p2);
     after_frame(reinterpret_cast<uintptr_t>(sys10));
 }
@@ -614,6 +616,7 @@ bool game_install() {
         L.main_menu = static_cast<bool>(g_main_hook);
     }
     const bool page = page_install(L.main_menu);
+    const bool popups = popups_install();  // the game's popup panels, for Ui.Inventory's marks (issue 117)
     if (L.system_menu) {
         g_sys_hook.install(g_api, g_owner, sys_fn, reinterpret_cast<void*>(&hk_sys_entry), "ui/SystemMenuEntry");
         L.system_menu = static_cast<bool>(g_sys_hook);
@@ -627,9 +630,9 @@ bool game_install() {
     add_builtin_entries();
     chat_input_probe_install();  // opt-in read-only probe or KILN_CHAT_HISTORY preview; default no hook
     footer_install();  // Kiln's line in the main menu's footer (menu_footer.cpp): its own log line
-    logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s",
+    logf(KILN_LOG_INFO, "ui: game UI hooked: screens on, main menu %s, pause menu %s, crafting %s, language %s, main-menu page %s, popups %s",
          L.main_menu ? "on" : "off", L.system_menu ? "on" : "off", L.crafting ? "on" : "off", L.language ? "on" : "off",
-         page ? "on" : "off");
+         page ? "on" : "off", popups ? "on" : "off");
     return true;
 }
 

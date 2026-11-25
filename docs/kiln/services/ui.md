@@ -289,6 +289,26 @@ Managed: `UiDraw.Pointer`, `ButtonHeld`, `DragSource`, `DropTarget` ([ui.md](../
 - Coordinates are the overlay's pixels, the space of every drawing slot. Kiln feeds Dear ImGui the game window's client
   pixels, the same pixels as long as the window's client area and the swapchain match (they always have, so far).
 
+## The game's popup panels (0.2.0-dev.31.9, GitHub issue 117)
+
+One slot after `drop_target`, a size-guarded tail: `popups` at byte 1080; the table is 1088 bytes (1080 before). Check
+`header.size >= offsetof(KilnUiApi, popups) + sizeof(void*)` and the pointer.
+
+- `KilnResult popups(KilnUiPopups* out)`: set `out->size` (88 bytes: `size, available, flags, count, frame, rect[4]`)
+  first. The game's popup panels over its UI in the last completed UI frame: the item menu a right-click on an inventory
+  slot opens, drop-downs, context menus (all built by one game function, docs/re/game-ui.md "Popup panels over the
+  inventory"), and its error popup. `rect[0 .. count)` are the panels' rectangles `{x, y, width, height}` in the game's
+  UI units, the space of `KilnUiVisibleSlot.outer_ui`: map them with `kiln.ui.inventory`'s mapping like a slot. `flags`:
+  `KILN_UI_POPUP_PANEL` (a panel was drawn), `KILN_UI_POPUP_UNKNOWN` (a panel without a readable rectangle: its first
+  frame, or more than `KILN_UI_POPUPS_MAX` 4 panels; treat everything as covered), `KILN_UI_POPUP_ERROR` (the error
+  popup, modal over the whole canvas; feature `ui.error_popup`). `frame` is the UI frame (`KilnUiScreen.frame`).
+  Any thread. `KILN_ERR_UNAVAILABLE` with `available` 0: feature `ui.popups` off (a pattern or constant that does not
+  resolve on this build, the hook refused): nothing is known about popups. `INVALID_ARGUMENT`: NULL or too small.
+- How: a raw link on the game's popup-panel builder (`ui/PopupWindowBegin`) reads, after the builder returns, its panel
+  node's laid-out rectangle (`frame + ui/popup.panel`, then `node + ui/node.rect`), the previous frame's layout. No
+  game function is called and nothing is written. Kiln.Ui leaves out the `Ui.Inventory` marks of the slots under a panel
+  ([ui.md](../ui.md#the-games-inventory-slots-020-dev30)).
+
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 
 No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).

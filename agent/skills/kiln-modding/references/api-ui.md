@@ -112,6 +112,9 @@ Ui.Tooltip.AddValues(myItem, (in UiValueContext c, in UiItemView v) => UiTooltip
   chest's entity, which is the server's id for a chest the server sent). `InventoryScreens` is `Backpack`, `Chest` or `All`.
   Marks and clicks work on the backpack, the inventory menu, chests, stations and NPC crafting, never the play view's
   hotbar for clicks. Rows `ui.slots.click`, `ui.slots.inspect`, `ui.inventory.panels`, `ui.screens`.
+  dev.31.9+ (#117; read from the game's code, not yet seen in a game): marks under the game's item menu (right-click a
+  slot) and other popups are left out (row `ui.popups`), and `GameScreen.PopupOpen` (`Ui.Screens.Current`, `UiTick`) is
+  true while one is open, for a mod that draws over the game's screens itself.
 - **The item's identity.** `SlotClick.ItemEntity` / `VisibleSlot.ClientEntity` is this game's entity, only for items with an
   item entity of their own (weapons, tools, armour, cans); a plain stack has none. `VisibleSlot.ServerEntity` (30.5) is the
   server's id for the local player's slots and the open container. `VisibleSlot.Rarity` and `Level` (30.5; also on

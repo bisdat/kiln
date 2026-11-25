@@ -300,6 +300,21 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
     /// 0.2.0-dev.30.</summary>
     public EntityId Target { get; init; }
 
+    /// <summary>One of the game's own popups is open over its UI: the item menu a right-click on an inventory slot opens
+    /// (Equip, Salvage, Delete), a drop-down, a context menu, or the game's error popup. Kiln's overlay draws above the
+    /// game's UI, so a mod drawing over the game's screens can step aside while it is true (Ui.Inventory's marks already
+    /// do). As of the UI frame this screen is of: false on a screen read longer ago, and on a game build where Kiln does not
+    /// read the popups (capability <c>ui.popups</c> off). Opening or closing a popup is not a screen change
+    /// (<see cref="Ui.Screens.Changed"/> does not fire): read it from <see cref="Ui.Screens.Current"/>, on
+    /// <see cref="Ui.Screens.UiTick"/> or in a draw callback. Read from the game's code, not yet seen in a running game.
+    /// Since 0.2.0-dev.31.9 (GitHub issue 117).</summary>
+    public bool PopupOpen { get; init; }
+
+    /// <summary>Is a popup open in the UI frame <paramref name="frame"/> (kiln.ui's popups, read now)? The popups of that
+    /// frame or of the one after it (a frame may end between the two reads); anything older or unknown: false.</summary>
+    internal static bool PopupOpenAt(ulong frame, UiNative.Popups? popups) =>
+        popups is { } p && p.Flags != 0 && frame != 0 && (p.Frame == frame || p.Frame == frame + 1);
+
     /// <summary>The HUD screens whose <see cref="Target"/> Kiln reads (the chest-style transfer screen's three modes).</summary>
     internal static bool TargetScreen(HudScreen h) => h is HudScreen.StorageChest or HudScreen.CommerceProductChest or HudScreen.FactoryCrafting;
 
@@ -358,6 +373,7 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
         return new GameScreen(state, hud, KindOf(state, hud, s.Crafting), s.Interaction, c, s.Language, s.Frame)
         {
             Target = target != 0 ? new EntityId(target) : EntityId.None,
+            PopupOpen = PopupOpenAt(s.Frame, UiNative.ReadPopups()),
         };
     }
 }

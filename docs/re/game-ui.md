@@ -762,3 +762,31 @@ Four active native captions total and unique text prevent unbounded row growth a
 Host tests verify scoping, continuation counts, no game writes, copied current chest identity, deferred
 callbacks, duplicate/budget refusal, disposal and retirement. Native appearance/row sizing, mouse activation
 and controller focus/navigation remain real-game unverified; the generic native entry's semantics are static evidence.
+
+### Popup panels over the inventory (0.2.0-dev.31.9, GitHub issue 117; client 26430625, static, nothing of it run)
+Client 26430625 / `5d9ef2f1`, capstone disassembly and Ghidra 12 headless decompiles (no auto-analysis) of the copied exe.
+Kiln's use: `native/services/ui/popups.cpp`, feature `ui.popups` (`sigdb/symbols/client.d/ui-popups.json`); anchors:
+`native/services/ui/tests/popups_sigdb_test.py`.
+- **The item menu's state.** ItemSlot `0xc046c0`'s fourth argument (the inventory screen's UI state block: 0xbc8 bytes in
+  the UI's hash-keyed store, key `0x11893cd969aa4d3c`, made inside the screen's window, so only alive inside the frame)
+  holds the menu: `+0xb94` u64 = the item whose menu is open (zero = closed; ItemSlot writes the view's first word at
+  `0xc052d6` on the open action and plays `cfg+0x124b0`), `+0xb68` float rect = the focused slot's node rect (`0xc04f2b`).
+  The backpack (`0xb507e0`, "[GameUi] opened Backpack") and the chest window (`ChestWindow 0xb9d0f0`) test
+  `+0xb94`/`+0xb98` (`0xb51852`, `0xb9dfe7`), build the menu's params from `+0xb68` (330 units wide, `0xb9e01b`) and call
+  `0xb7bab0`, which draws it through PopupWindowBegin with the name "ContextMenuWindow" and zeroes `+0xb94` when it closes.
+  Five more callers of `0xb7bab0` and six more of PopupWindowBegin draw other popups (drop-downs `0xb9b0c0`, the map's
+  context menu `0xcc0b20`, "SettingsContextMenu" `0xc28720`, "NewNodeContextMenu", "mainMenuSubmenu"). **[dis]**
+- **PopupWindowBegin `0xb1c880`** `(frame*, u8* closed, params*, name*) -> frame`: opens the window through `0xa3f530` at
+  layer `params+0x174` over the canvas, the panel as a child frame at `frame+0x1a0` (`0xa3cbd0`, whose new layout node
+  `0x11c4c60` goes to the child's `+8`, so `frame+0x1a8`), places it from the params' anchor and clamps it by the node's
+  own rect (`0xb1cbc7`..`0xb1cdf2`). **[dis] [decomp]**
+- **The rectangle.** `UiNodeRect 0x11b67d0` is `lea rax,[rcx+0x114]; ret`: a node's laid-out `{x, y, w, h}` in UI units.
+  ItemSlot copies its result rect (what Kiln's slot frames and marks use) from the same field of its slot node
+  (`0xc05302`..`0xc05315`), so a panel's rect and a slot's share one space. Read when the builder returns, the panel's rect
+  is the previous frame's layout (the builder clamps by it); on a panel's first frame it has none yet. **[dis] [hyp: the
+  first-frame value]**
+- **What Kiln does.** A raw link on PopupWindowBegin: after the original returns, it reads `*(frame+0x1a8)+0x114` (guarded
+  reads, plausibility: finite, width and height > 0) for each panel of the UI frame (at most 4), and publishes them with the
+  error popup byte after the frame (kiln.ui's `popups`). Kiln.Ui leaves out the marks of covered slots, all of them while a
+  rect is unknown or the error popup shows. Not read: the menu's own `+0xb94` state (only alive inside the frame) and the
+  panel's layer. Unverified in a client: the panel rect lands on the menu as drawn, and the first-frame behaviour.

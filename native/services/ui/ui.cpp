@@ -528,6 +528,7 @@ KilnResult KILN_CALL t_subscribe_pre_overlay(KilnOwner, KilnUiPreOverlayFn fn, K
 
 // v4: the main-menu page and fonts
 KilnResult KILN_CALL t_menu_page(KilnUiMenuPage* out) { return page_state(out); }
+KilnResult KILN_CALL t_popups(KilnUiPopups* out) { return popups_state(out); }
 void KILN_CALL t_menu_page_drawn() { page_drawn(); }
 void KILN_CALL t_menu_page_leave() { page_leave(); }
 void KILN_CALL t_menu_page_host(uint32_t on) {
@@ -696,9 +697,12 @@ static_assert(offsetof(KilnUiApi, chat_search) == 1048 && offsetof(KilnUiApi, po
               sizeof(KilnUiChatSearch) == 10572,
               "internal chat search appends after native pointer subscription (managed TableSearch)");
 static_assert(offsetof(KilnUiApi, pointer) == 1056 && offsetof(KilnUiApi, drag_source) == 1064 &&
-                  offsetof(KilnUiApi, drop_target) == 1072 && sizeof(KilnUiApi) == 1080 &&
+                  offsetof(KilnUiApi, drop_target) == 1072 &&
                   sizeof(KilnUiPointer) == 24 && offsetof(KilnUiPointer, x) == 8 && offsetof(KilnUiPointer, held) == 16,
               "kiln.ui appends pointer, drag_source and drop_target after chat_search (0.2.0-dev.30.3; UiNative.TableDrag)");
+static_assert(offsetof(KilnUiApi, popups) == 1080 && sizeof(KilnUiApi) == 1088 && sizeof(KilnUiPopups) == 88 &&
+                  offsetof(KilnUiPopups, frame) == 16 && offsetof(KilnUiPopups, rect) == 24 && sizeof(KilnUiPopupRect) == 16,
+              "kiln.ui appends popups after drop_target (0.2.0-dev.31.9, issue 117; UiNative.TablePopups)");
 static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
               offsetof(KilnUiChatCompletion, replacement) == 317 &&
               sizeof(KilnUiChatCompletion) == 576,
@@ -776,6 +780,7 @@ const KilnUiApi kTable = {
     &t_subscribe_pointer_press,  // presses on the game's own UI (0.2.0-dev.30)
     &t_chat_search,  // issue #44 internal reverse-history search
     &t_pointer, &t_drag_source, &t_drop_target,  // the pointer, held buttons, drag and drop (0.2.0-dev.30.3, issue 113)
+    &t_popups,  // the game's popup panels (0.2.0-dev.31.9, issue 117)
 };
 
 // kiln.ui.blocks (kiln_ui_blocks.h, 0.2.0-dev.31): the richer UI blocks' slots, a table of its own while kiln.ui is frozen.

@@ -243,6 +243,14 @@ void page_drawn();                         // render thread: a host drew the pag
 void page_host(uint32_t on);
 KilnResult page_state(KilnUiMenuPage* out);
 void page_status_line(char* out, size_t cap);
+
+// ---- the game's popup panels over its UI (popups.cpp, feature ui.popups, GitHub issue 117) ----
+bool popups_install();                                    // game_install, after the frame hook: resolve, hook the builder
+void popups_frame_begin();                                // UI thread, GameUiFrame hook, before the game's frame
+void popups_after_frame(uintptr_t sys10, uint64_t frame);  // UI thread, after each UI frame: publish what it drew
+KilnResult popups_state(KilnUiPopups* out);                // any thread (kiln.ui's popups)
+bool popup_rect_plausible(const KilnUiPopupRect& r);
+
 bool style_push_font(uint32_t font);       // style.cpp: KILN_UI_FONT_*; false = not loaded (nothing pushed)
 
 // ---- style.cpp (the looks: Kiln's, the game's, the player's, mods' themes; the game's font and colours, mod fonts, images) ----
