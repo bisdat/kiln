@@ -28126,6 +28126,23 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessUiItemDetail.Clear() -> void	0.2.0-dev.
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiNativeTints	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiNativeTints.HarnessUiNativeTints(Kiln.TestKit.KilnHarness! harness) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiNativeTints.TintOf(Kiln.TestKit.FakeInventorySlot slot, Kiln.Color background) -> Kiln.Color	0.2.0-dev.31	0.2.17
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ContentSize.get -> (float Width, float Height)	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ContentSize.set -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.FilePath.get -> string?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiScreen! screen) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiWindow! window) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiScreen! screen, float x, float y, float width, float height) -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiWindow! window, float x, float y, float width, float height) -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiScreen! screen) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiWindow! window) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Restart() -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Scale.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Scale.set -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ViewportHeight.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ViewportHeight.set -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ViewportWidth.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ViewportWidth.set -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiSnapshot	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiSnapshot.Demanded.get -> Kiln.UiWorldFields	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiSnapshot.Demands.get -> int	0.2.0-dev.31	0.2.17
@@ -28237,6 +28254,7 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiChest.get -> Kiln.TestKit.Harnes
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiInventory.get -> Kiln.TestKit.HarnessUiInventory!	0.2.0-dev.30	0.2.12
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiItemDetail.get -> Kiln.TestKit.HarnessUiItemDetail!	0.2.0-dev.30.5	0.2.14
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiNativeTints.get -> Kiln.TestKit.HarnessUiNativeTints!	0.2.0-dev.31	0.2.17
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiPlacement.get -> Kiln.TestKit.HarnessUiPlacement!	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiValues.get -> Kiln.TestKit.HarnessUiValues!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Unload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> void	0.2.0-dev.26	0.2.1
@@ -30079,6 +30097,25 @@ managed	Kiln.Ui	Kiln.UiPalette.Warning.init -> void	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	Kiln.UiPalette.WindowBackground.get -> Kiln.Color	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	Kiln.UiPalette.WindowBackground.init -> void	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	Kiln.UiPalette.this[Kiln.UiThemeRole role].get -> Kiln.Color	0.2.0-dev.29.16	0.2.8
+managed	Kiln.Ui	Kiln.UiPlacement	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Bottom.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Bottom.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Equals(Kiln.UiPlacement other) -> bool	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Height.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Height.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Left.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Left.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Right.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Right.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Top.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Top.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.UiPlacement() -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Width.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Width.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.X.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.X.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Y.get -> float	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiPlacement.Y.init -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiPlayerLook	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	Kiln.UiPlayerLook.Background.get -> float	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	Kiln.UiPlayerLook.Background.init -> void	0.2.0-dev.29.16	0.2.8
@@ -30123,9 +30160,12 @@ managed	Kiln.Ui	Kiln.UiScreen.Close() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Closed -> System.Action?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Dispose() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.IsOpen.get -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiScreen.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiScreen.Open() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Opened -> System.Action?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Options.get -> Kiln.UiScreenOptions!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiScreen.Placement.get -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreen.Resize(float width, float height) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiScreen.Title.get -> Kiln.UiText!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Title.set -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreen.Toggle() -> void	<=0.2.0-dev.26	<=0.2.1
@@ -30155,6 +30195,12 @@ managed	Kiln.Ui	Kiln.UiScreenOptions.FullScreen.get -> bool	<=0.2.0-dev.26	<=0.2
 managed	Kiln.Ui	Kiln.UiScreenOptions.FullScreen.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreenOptions.Height.get -> float	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreenOptions.Height.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiScreenOptions.PlacementId.get -> string?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreenOptions.PlacementId.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreenOptions.Position.get -> (float X, float Y)?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreenOptions.Position.init -> void	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreenOptions.RememberPlacement.get -> bool	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiScreenOptions.RememberPlacement.init -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiScreenOptions.Resizable.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreenOptions.Resizable.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiScreenOptions.Style.get -> Kiln.UiStyle	<=0.2.0-dev.26	<=0.2.1
@@ -30432,9 +30478,12 @@ managed	Kiln.Ui	Kiln.UiWheelOptions.UiWheelOptions() -> void	<=0.2.0-dev.26	<=0.
 managed	Kiln.Ui	Kiln.UiWindow	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Dispose() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Hide() -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindow.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiWindow.Open.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Open.set -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Options.get -> Kiln.UiWindowOptions!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindow.Placement.get -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiWindow.Resize(float width, float height) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiWindow.Show() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Title.get -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Toggle() -> void	<=0.2.0-dev.26	<=0.2.1
@@ -30455,8 +30504,12 @@ managed	Kiln.Ui	Kiln.UiWindowOptions.Height.get -> float	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.Height.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.Interactive.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.Interactive.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindowOptions.PlacementId.get -> string?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiWindowOptions.PlacementId.init -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiWindowOptions.Position.get -> (float X, float Y)?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.Position.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindowOptions.RememberPlacement.get -> bool	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	Kiln.UiWindowOptions.RememberPlacement.init -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiWindowOptions.StartOpen.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.StartOpen.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.Style.get -> Kiln.UiStyle	0.2.0-dev.29.16	0.2.8
@@ -30659,6 +30712,7 @@ managed	Kiln.Ui	override Kiln.UiLabelEdit.Equals(object? obj) -> bool	0.2.0-dev.
 managed	Kiln.Ui	override Kiln.UiLabelEdit.GetHashCode() -> int	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	override Kiln.UiLabelEdit.ToString() -> string!	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	override Kiln.UiPalette.GetHashCode() -> int	0.2.0-dev.29.16	0.2.8
+managed	Kiln.Ui	override Kiln.UiPlacement.GetHashCode() -> int	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	override Kiln.UiPlayerLook.GetHashCode() -> int	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	override Kiln.UiProviderDecision.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	override Kiln.UiProviderDecision.GetHashCode() -> int	0.2.0-dev.28	0.2.3
@@ -30871,6 +30925,8 @@ managed	Kiln.Ui	static Kiln.UiLabelEdit.operator !=(Kiln.UiLabelEdit? left, Kiln
 managed	Kiln.Ui	static Kiln.UiLabelEdit.operator ==(Kiln.UiLabelEdit? left, Kiln.UiLabelEdit? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	static Kiln.UiPalette.operator !=(Kiln.UiPalette left, Kiln.UiPalette right) -> bool	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	static Kiln.UiPalette.operator ==(Kiln.UiPalette left, Kiln.UiPalette right) -> bool	0.2.0-dev.29.16	0.2.8
+managed	Kiln.Ui	static Kiln.UiPlacement.operator !=(Kiln.UiPlacement left, Kiln.UiPlacement right) -> bool	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	static Kiln.UiPlacement.operator ==(Kiln.UiPlacement left, Kiln.UiPlacement right) -> bool	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	static Kiln.UiPlayerLook.operator !=(Kiln.UiPlayerLook left, Kiln.UiPlayerLook right) -> bool	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	static Kiln.UiPlayerLook.operator ==(Kiln.UiPlayerLook left, Kiln.UiPlayerLook right) -> bool	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	static Kiln.UiProviderDecision.Refuse(string! reason) -> Kiln.UiProviderDecision!	0.2.0-dev.28	0.2.3
@@ -30967,6 +31023,8 @@ managed	Kiln.Ui	~override Kiln.UiItemView.Equals(object obj) -> bool	0.2.0-dev.2
 managed	Kiln.Ui	~override Kiln.UiItemView.ToString() -> string	0.2.0-dev.28	0.2.3
 managed	Kiln.Ui	~override Kiln.UiPalette.Equals(object obj) -> bool	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	~override Kiln.UiPalette.ToString() -> string	0.2.0-dev.29.16	0.2.8
+managed	Kiln.Ui	~override Kiln.UiPlacement.Equals(object obj) -> bool	0.2.0-dev.31.11	0.2.20
+managed	Kiln.Ui	~override Kiln.UiPlacement.ToString() -> string	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	~override Kiln.UiPlayerLook.Equals(object obj) -> bool	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	~override Kiln.UiPlayerLook.ToString() -> string	0.2.0-dev.29.16	0.2.8
 managed	Kiln.Ui	~override Kiln.UiRect.Equals(object obj) -> bool	0.2.0-dev.28	0.2.3

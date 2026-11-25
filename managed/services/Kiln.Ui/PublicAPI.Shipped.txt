@@ -1079,6 +1079,25 @@ Kiln.UiPalette.Warning.init -> void
 Kiln.UiPalette.WindowBackground.get -> Kiln.Color
 Kiln.UiPalette.WindowBackground.init -> void
 Kiln.UiPalette.this[Kiln.UiThemeRole role].get -> Kiln.Color
+Kiln.UiPlacement
+Kiln.UiPlacement.Bottom.get -> float
+Kiln.UiPlacement.Bottom.init -> void
+Kiln.UiPlacement.Equals(Kiln.UiPlacement other) -> bool
+Kiln.UiPlacement.Height.get -> float
+Kiln.UiPlacement.Height.init -> void
+Kiln.UiPlacement.Left.get -> float
+Kiln.UiPlacement.Left.init -> void
+Kiln.UiPlacement.Right.get -> float
+Kiln.UiPlacement.Right.init -> void
+Kiln.UiPlacement.Top.get -> float
+Kiln.UiPlacement.Top.init -> void
+Kiln.UiPlacement.UiPlacement() -> void
+Kiln.UiPlacement.Width.get -> float
+Kiln.UiPlacement.Width.init -> void
+Kiln.UiPlacement.X.get -> float
+Kiln.UiPlacement.X.init -> void
+Kiln.UiPlacement.Y.get -> float
+Kiln.UiPlacement.Y.init -> void
 Kiln.UiPlayerLook
 Kiln.UiPlayerLook.Background.get -> float
 Kiln.UiPlayerLook.Background.init -> void
@@ -1123,9 +1142,12 @@ Kiln.UiScreen.Close() -> void
 Kiln.UiScreen.Closed -> System.Action?
 Kiln.UiScreen.Dispose() -> void
 Kiln.UiScreen.IsOpen.get -> bool
+Kiln.UiScreen.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void
 Kiln.UiScreen.Open() -> void
 Kiln.UiScreen.Opened -> System.Action?
 Kiln.UiScreen.Options.get -> Kiln.UiScreenOptions!
+Kiln.UiScreen.Placement.get -> Kiln.UiPlacement?
+Kiln.UiScreen.Resize(float width, float height) -> void
 Kiln.UiScreen.Title.get -> Kiln.UiText!
 Kiln.UiScreen.Title.set -> void
 Kiln.UiScreen.Toggle() -> void
@@ -1155,6 +1177,12 @@ Kiln.UiScreenOptions.FullScreen.get -> bool
 Kiln.UiScreenOptions.FullScreen.init -> void
 Kiln.UiScreenOptions.Height.get -> float
 Kiln.UiScreenOptions.Height.init -> void
+Kiln.UiScreenOptions.PlacementId.get -> string?
+Kiln.UiScreenOptions.PlacementId.init -> void
+Kiln.UiScreenOptions.Position.get -> (float X, float Y)?
+Kiln.UiScreenOptions.Position.init -> void
+Kiln.UiScreenOptions.RememberPlacement.get -> bool
+Kiln.UiScreenOptions.RememberPlacement.init -> void
 Kiln.UiScreenOptions.Resizable.get -> bool
 Kiln.UiScreenOptions.Resizable.init -> void
 Kiln.UiScreenOptions.Style.get -> Kiln.UiStyle
@@ -1432,9 +1460,12 @@ Kiln.UiWheelOptions.UiWheelOptions() -> void
 Kiln.UiWindow
 Kiln.UiWindow.Dispose() -> void
 Kiln.UiWindow.Hide() -> void
+Kiln.UiWindow.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void
 Kiln.UiWindow.Open.get -> bool
 Kiln.UiWindow.Open.set -> void
 Kiln.UiWindow.Options.get -> Kiln.UiWindowOptions!
+Kiln.UiWindow.Placement.get -> Kiln.UiPlacement?
+Kiln.UiWindow.Resize(float width, float height) -> void
 Kiln.UiWindow.Show() -> void
 Kiln.UiWindow.Title.get -> string!
 Kiln.UiWindow.Toggle() -> void
@@ -1455,8 +1486,12 @@ Kiln.UiWindowOptions.Height.get -> float
 Kiln.UiWindowOptions.Height.init -> void
 Kiln.UiWindowOptions.Interactive.get -> bool
 Kiln.UiWindowOptions.Interactive.init -> void
+Kiln.UiWindowOptions.PlacementId.get -> string?
+Kiln.UiWindowOptions.PlacementId.init -> void
 Kiln.UiWindowOptions.Position.get -> (float X, float Y)?
 Kiln.UiWindowOptions.Position.init -> void
+Kiln.UiWindowOptions.RememberPlacement.get -> bool
+Kiln.UiWindowOptions.RememberPlacement.init -> void
 Kiln.UiWindowOptions.StartOpen.get -> bool
 Kiln.UiWindowOptions.StartOpen.init -> void
 Kiln.UiWindowOptions.Style.get -> Kiln.UiStyle
@@ -1659,6 +1694,7 @@ override Kiln.UiLabelEdit.Equals(object? obj) -> bool
 override Kiln.UiLabelEdit.GetHashCode() -> int
 override Kiln.UiLabelEdit.ToString() -> string!
 override Kiln.UiPalette.GetHashCode() -> int
+override Kiln.UiPlacement.GetHashCode() -> int
 override Kiln.UiPlayerLook.GetHashCode() -> int
 override Kiln.UiProviderDecision.Equals(object? obj) -> bool
 override Kiln.UiProviderDecision.GetHashCode() -> int
@@ -1871,6 +1907,8 @@ static Kiln.UiLabelEdit.operator !=(Kiln.UiLabelEdit? left, Kiln.UiLabelEdit? ri
 static Kiln.UiLabelEdit.operator ==(Kiln.UiLabelEdit? left, Kiln.UiLabelEdit? right) -> bool
 static Kiln.UiPalette.operator !=(Kiln.UiPalette left, Kiln.UiPalette right) -> bool
 static Kiln.UiPalette.operator ==(Kiln.UiPalette left, Kiln.UiPalette right) -> bool
+static Kiln.UiPlacement.operator !=(Kiln.UiPlacement left, Kiln.UiPlacement right) -> bool
+static Kiln.UiPlacement.operator ==(Kiln.UiPlacement left, Kiln.UiPlacement right) -> bool
 static Kiln.UiPlayerLook.operator !=(Kiln.UiPlayerLook left, Kiln.UiPlayerLook right) -> bool
 static Kiln.UiPlayerLook.operator ==(Kiln.UiPlayerLook left, Kiln.UiPlayerLook right) -> bool
 static Kiln.UiProviderDecision.Refuse(string! reason) -> Kiln.UiProviderDecision!
@@ -1967,6 +2005,8 @@ virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in K
 ~override Kiln.UiItemView.ToString() -> string
 ~override Kiln.UiPalette.Equals(object obj) -> bool
 ~override Kiln.UiPalette.ToString() -> string
+~override Kiln.UiPlacement.Equals(object obj) -> bool
+~override Kiln.UiPlacement.ToString() -> string
 ~override Kiln.UiPlayerLook.Equals(object obj) -> bool
 ~override Kiln.UiPlayerLook.ToString() -> string
 ~override Kiln.UiRect.Equals(object obj) -> bool
