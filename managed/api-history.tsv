@@ -29125,6 +29125,8 @@ managed	Kiln.Ui	Kiln.GameScreen.Kind.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.Language.get -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.LanguageId.get -> uint	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.LanguageId.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.GameScreen.PopupOpen.get -> bool	0.2.0-dev.31.9	0.2.19
+managed	Kiln.Ui	Kiln.GameScreen.PopupOpen.init -> void	0.2.0-dev.31.9	0.2.19
 managed	Kiln.Ui	Kiln.GameScreen.State.get -> Kiln.GameUiState	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.State.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.StationWorkshop.get -> uint	<=0.2.0-dev.26	<=0.2.1
@@ -33126,6 +33128,7 @@ native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:pop_font_size	0.2.0-dev.2
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:pop_id	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:pop_style	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:pop_var	0.2.0-dev.22	0.2.0
+native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:popups	0.2.0-dev.31.9	0.2.19
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:progress_bar	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:push_color	0.2.0-dev.22	0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:push_font	0.2.0-dev.22	0.2.0

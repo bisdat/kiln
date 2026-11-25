@@ -1,3 +1,1 @@
 #nullable enable
-Kiln.GameScreen.PopupOpen.get -> bool
-Kiln.GameScreen.PopupOpen.init -> void
