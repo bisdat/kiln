@@ -33,6 +33,16 @@ python3 -I "$here/wear_catalog_test.py" || fail=1
 # a side without a copy of the qualified build is skipped with a message
 echo "== storage_sigdb_test.py"
 python3 -I "$here/storage_sigdb_test.py" || fail=1
+# kiln.stations.client's pure part (client_stations_logic.h, 0.2.0-dev.31.13) on the host (no Wine, no game)
+echo "== client_stations_test (host)"
+g++ -std=c++20 -Wall -Wextra -I"$here/../../../core/abi" "$here/client_stations_test.cpp" -o "$KILN_OUT/client_stations_test" &&
+  "$KILN_OUT/client_stations_test" || fail=1
+echo "== client_stations_sigdb_test.py"
+if [[ -n ${KILN_CLIENT_EXE:-} && -n ${KILN_SERVER_EXE:-} ]]; then
+  python3 -I "$here/client_stations_sigdb_test.py" --client "$KILN_CLIENT_EXE" --server "$KILN_SERVER_EXE" || fail=1
+else
+  echo "SKIP client station view signatures: supply KILN_CLIENT_EXE and KILN_SERVER_EXE static copies"
+fi
 echo "== craft_preview_sigdb_test.py"
 if [[ -n ${KILN_CLIENT_EXE:-} && -n ${KILN_SERVER_EXE:-} ]]; then
   python3 -I "$here/craft_preview_sigdb_test.py" --client "$KILN_CLIENT_EXE" --server "$KILN_SERVER_EXE" || fail=1

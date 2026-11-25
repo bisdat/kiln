@@ -6492,6 +6492,76 @@
       },
       "sha256": "976a03e1a87cb493072cee94a4ece880ff876adccd24a64a78acecf7560b3dc1"
     },
+    "native/core/abi/services/kiln_skills_client.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnSkillsClientApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "links": 24,
+            "nodes": 16,
+            "state": 8
+          },
+          "size": 32
+        },
+        "KilnSkillsClientLink": {
+          "align": 4,
+          "fields": {
+            "bidirectional": 12,
+            "from": 4,
+            "id": 0,
+            "reserved": 13,
+            "to": 8
+          },
+          "size": 16
+        },
+        "KilnSkillsClientNode": {
+          "align": 4,
+          "fields": {
+            "class_alignment": 9,
+            "cost": 6,
+            "flags": 12,
+            "id": 0,
+            "incoming": 24,
+            "index": 4,
+            "level": 11,
+            "level_index": 13,
+            "max_level": 10,
+            "outgoing": 28,
+            "reserved": 14,
+            "type": 8,
+            "x": 16,
+            "y": 20
+          },
+          "size": 32
+        },
+        "KilnSkillsClientState": {
+          "align": 8,
+          "fields": {
+            "age_ms": 48,
+            "available": 20,
+            "copying": 6,
+            "detail": 56,
+            "links": 32,
+            "nodes": 24,
+            "on": 4,
+            "player": 8,
+            "reserved0": 7,
+            "reserved1": 36,
+            "size": 0,
+            "spent": 16,
+            "step": 40,
+            "total": 12,
+            "unlocked": 28,
+            "world": 5
+          },
+          "size": 216
+        }
+      },
+      "sha256": "d14db7fd301b9dccd0ea1894fa02c75c4332551a70bb1cd2cef4a6b470e6a560"
+    },
     "native/core/abi/services/kiln_spawn.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -6986,6 +7056,70 @@
         }
       },
       "sha256": "edc51fafe20ca385c28bc871569913bc13162c3872d2e3606304beb186ad0970"
+    },
+    "native/core/abi/services/kiln_stations_client.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnStationClientView": {
+          "align": 8,
+          "fields": {
+            "base": 16,
+            "craft_ns": 112,
+            "craft_remaining_ns": 120,
+            "crafts_loaded": 80,
+            "entity": 4,
+            "flags": 92,
+            "needs": 45,
+            "now_ns": 104,
+            "output_count": 140,
+            "outputs": 144,
+            "position": 32,
+            "progress": 136,
+            "recipe_start_ns": 96,
+            "remaining_ns": 128,
+            "reserved": 216,
+            "reserved0": 47,
+            "selected_choices": 48,
+            "selected_recipe": 12,
+            "size": 0,
+            "state": 44,
+            "step": 208,
+            "use_all_options": 46,
+            "water": 84,
+            "water_max": 88,
+            "workshop": 8
+          },
+          "size": 232
+        },
+        "KilnStationsClientApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "station": 24,
+            "stations": 16,
+            "status": 8
+          },
+          "size": 32
+        },
+        "KilnStationsClientStatus": {
+          "align": 8,
+          "fields": {
+            "age_ms": 24,
+            "copying": 6,
+            "detail": 32,
+            "on": 4,
+            "reserved0": 7,
+            "reserved1": 12,
+            "rows": 8,
+            "size": 0,
+            "step": 16,
+            "world": 5
+          },
+          "size": 192
+        }
+      },
+      "sha256": "15c3a2f286907cd78eea325e7687ae3135e447a900a62051774ff833f895d2d4"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -10180,7 +10314,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "0081c195cb1bd0b44a004cbd91461469df7591964276abd74c2b51cc6b11c743",
+    "src/layout.rs": "ef1d0793207dde925ce35e803548bb483f756fe721b6cb9e65a4e07ad95d61f9",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10236,9 +10370,11 @@
     "src/services/kiln_saves.rs": "0922e2870dc677c62608ab13147e609e5ea9d5109c34ea271e2e569874a1576b",
     "src/services/kiln_screen.rs": "16e368975e8826d818a3647791e26b2d35443263f8044e3e482f3eb97a49299e",
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
+    "src/services/kiln_skills_client.rs": "77c319c395ef94591f37bfb76a007a25a5b8a3f8f971a9613fb01bf133de21ed",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
     "src/services/kiln_station_menus.rs": "f9755639d612efc6c34785105f36e6798337387dfe8a642b78ca413a1e70cac8",
     "src/services/kiln_stations.rs": "fd739f6ddec50acd622a5474e32a3e1ea3de0c48f106dcba5f2afc51e511c154",
+    "src/services/kiln_stations_client.rs": "de710dc230986c0b606b9594a313660301616c2e4dfde3fdbcd80fbfd6c4eb4b",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_survivors.rs": "ed6f377e897d0236e33196f19d1be825b230e5d6575129a676ff32da08df2722",
@@ -10263,7 +10399,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "911e1b48802b03248cd6e31d686edebcfed1a100c04388cc69465a9530f68337"
+    "src/services/mod.rs": "e937c553198937325a60e4b2efaa80b62371af0a8c13bfa594c68bde09119a83"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

@@ -1,1 +1,90 @@
 #nullable enable
+Kiln.ClientSkillLink
+Kiln.ClientSkillLink.Bidirectional.get -> bool
+Kiln.ClientSkillLink.Bidirectional.init -> void
+Kiln.ClientSkillLink.ClientSkillLink() -> void
+Kiln.ClientSkillLink.ClientSkillLink(uint Id, uint From, uint To, bool Bidirectional) -> void
+Kiln.ClientSkillLink.Deconstruct(out uint Id, out uint From, out uint To, out bool Bidirectional) -> void
+Kiln.ClientSkillLink.Equals(Kiln.ClientSkillLink other) -> bool
+Kiln.ClientSkillLink.From.get -> uint
+Kiln.ClientSkillLink.From.init -> void
+Kiln.ClientSkillLink.Id.get -> uint
+Kiln.ClientSkillLink.Id.init -> void
+Kiln.ClientSkillLink.To.get -> uint
+Kiln.ClientSkillLink.To.init -> void
+Kiln.ClientSkillNode
+Kiln.ClientSkillNode.ClassAlignment.get -> int
+Kiln.ClientSkillNode.ClassAlignment.init -> void
+Kiln.ClientSkillNode.ClientSkillNode() -> void
+Kiln.ClientSkillNode.ClientSkillNode(uint Id, int Index, Kiln.SkillNodeType Type, int ClassAlignment, int Cost, int MaxLevel, int Level, bool Unlocked, bool Shadow, float UiX, float UiY, int Incoming, int Outgoing) -> void
+Kiln.ClientSkillNode.Cost.get -> int
+Kiln.ClientSkillNode.Cost.init -> void
+Kiln.ClientSkillNode.Deconstruct(out uint Id, out int Index, out Kiln.SkillNodeType Type, out int ClassAlignment, out int Cost, out int MaxLevel, out int Level, out bool Unlocked, out bool Shadow, out float UiX, out float UiY, out int Incoming, out int Outgoing) -> void
+Kiln.ClientSkillNode.Equals(Kiln.ClientSkillNode other) -> bool
+Kiln.ClientSkillNode.Id.get -> uint
+Kiln.ClientSkillNode.Id.init -> void
+Kiln.ClientSkillNode.Incoming.get -> int
+Kiln.ClientSkillNode.Incoming.init -> void
+Kiln.ClientSkillNode.Index.get -> int
+Kiln.ClientSkillNode.Index.init -> void
+Kiln.ClientSkillNode.Level.get -> int
+Kiln.ClientSkillNode.Level.init -> void
+Kiln.ClientSkillNode.MaxLevel.get -> int
+Kiln.ClientSkillNode.MaxLevel.init -> void
+Kiln.ClientSkillNode.Outgoing.get -> int
+Kiln.ClientSkillNode.Outgoing.init -> void
+Kiln.ClientSkillNode.Shadow.get -> bool
+Kiln.ClientSkillNode.Shadow.init -> void
+Kiln.ClientSkillNode.Spent.get -> int
+Kiln.ClientSkillNode.Type.get -> Kiln.SkillNodeType
+Kiln.ClientSkillNode.Type.init -> void
+Kiln.ClientSkillNode.UiX.get -> float
+Kiln.ClientSkillNode.UiX.init -> void
+Kiln.ClientSkillNode.UiY.get -> float
+Kiln.ClientSkillNode.UiY.init -> void
+Kiln.ClientSkillNode.Unlocked.get -> bool
+Kiln.ClientSkillNode.Unlocked.init -> void
+Kiln.ClientSkillPoints
+Kiln.ClientSkillPoints.Age.get -> System.TimeSpan
+Kiln.ClientSkillPoints.Age.init -> void
+Kiln.ClientSkillPoints.Available.get -> int
+Kiln.ClientSkillPoints.Available.init -> void
+Kiln.ClientSkillPoints.ClientSkillPoints() -> void
+Kiln.ClientSkillPoints.ClientSkillPoints(Kiln.EntityId Player, int Total, int Spent, int Available, int UnlockedNodes, int TreeNodes, ulong Step, System.TimeSpan Age) -> void
+Kiln.ClientSkillPoints.Deconstruct(out Kiln.EntityId Player, out int Total, out int Spent, out int Available, out int UnlockedNodes, out int TreeNodes, out ulong Step, out System.TimeSpan Age) -> void
+Kiln.ClientSkillPoints.Equals(Kiln.ClientSkillPoints other) -> bool
+Kiln.ClientSkillPoints.Player.get -> Kiln.EntityId
+Kiln.ClientSkillPoints.Player.init -> void
+Kiln.ClientSkillPoints.Spent.get -> int
+Kiln.ClientSkillPoints.Spent.init -> void
+Kiln.ClientSkillPoints.Step.get -> ulong
+Kiln.ClientSkillPoints.Step.init -> void
+Kiln.ClientSkillPoints.Total.get -> int
+Kiln.ClientSkillPoints.Total.init -> void
+Kiln.ClientSkillPoints.TreeNodes.get -> int
+Kiln.ClientSkillPoints.TreeNodes.init -> void
+Kiln.ClientSkillPoints.UnlockedNodes.get -> int
+Kiln.ClientSkillPoints.UnlockedNodes.init -> void
+Kiln.ClientSkills
+const Kiln.ClientSkills.Capability = "skills.client_view" -> string!
+override Kiln.ClientSkillLink.GetHashCode() -> int
+override Kiln.ClientSkillNode.GetHashCode() -> int
+override Kiln.ClientSkillNode.ToString() -> string!
+override Kiln.ClientSkillPoints.GetHashCode() -> int
+override Kiln.ClientSkillPoints.ToString() -> string!
+static Kiln.ClientSkillLink.operator !=(Kiln.ClientSkillLink left, Kiln.ClientSkillLink right) -> bool
+static Kiln.ClientSkillLink.operator ==(Kiln.ClientSkillLink left, Kiln.ClientSkillLink right) -> bool
+static Kiln.ClientSkillNode.operator !=(Kiln.ClientSkillNode left, Kiln.ClientSkillNode right) -> bool
+static Kiln.ClientSkillNode.operator ==(Kiln.ClientSkillNode left, Kiln.ClientSkillNode right) -> bool
+static Kiln.ClientSkillPoints.operator !=(Kiln.ClientSkillPoints left, Kiln.ClientSkillPoints right) -> bool
+static Kiln.ClientSkillPoints.operator ==(Kiln.ClientSkillPoints left, Kiln.ClientSkillPoints right) -> bool
+static Kiln.ClientSkills.Available.get -> bool
+static Kiln.ClientSkills.Find(uint id) -> Kiln.ClientSkillNode?
+static Kiln.ClientSkills.Links.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillLink>!
+static Kiln.ClientSkills.Nodes.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillNode>!
+static Kiln.ClientSkills.Points.get -> Kiln.ClientSkillPoints?
+static Kiln.ClientSkills.Unlocked.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillNode>!
+~override Kiln.ClientSkillLink.Equals(object obj) -> bool
+~override Kiln.ClientSkillLink.ToString() -> string
+~override Kiln.ClientSkillNode.Equals(object obj) -> bool
+~override Kiln.ClientSkillPoints.Equals(object obj) -> bool
