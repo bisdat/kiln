@@ -37,13 +37,13 @@ fn http_get(addr: SocketAddr, path: &str) -> (u16, String) {
 }
 
 /// A TLS listener with a fresh self-signed certificate (openssl at test time): (address, the leaf's SHA-256). RSA,
-/// since ring can't load the EC key macOS's LibreSSL writes.
+/// since ring can't load the EC key macOS's LibreSSL writes; an extension, so LibreSSL writes a v3 certificate (webpki refuses v1).
 fn tls_panel() -> Option<(SocketAddr, String)> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     let dir = temp("tls");
     let ok = std::process::Command::new("openssl")
-        .args(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=panel", "-days", "1"])
+        .args(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=panel", "-days", "1", "-addext", "basicConstraints=critical,CA:FALSE"])
         .arg("-keyout")
         .arg(dir.join("k.pem"))
         .arg("-out")
