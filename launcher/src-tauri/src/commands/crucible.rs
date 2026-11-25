@@ -1,7 +1,8 @@
 //! Tauri commands: Crucible, the modpack platform (kiln_manage::crucible; docs/kiln/launcher/crucible.md, "The launcher's
 //! Crucible client"). Receiving and new unlisted shares need no sign-in; account-owned shares use the Community relay
-//! session as the Bearer key, sent to Crucible's API only). kiln:// links (`kiln://crucible/<CODE>`) arrive through
-//! `<data>/crucible/inbox/` and the event `kiln://crucible-link`.
+//! session as the Bearer key, sent to Crucible's API only). kiln:// links (`kiln://crucible/<CODE>`) arrive with the
+//! launcher's own start (held until the window is up) or, from a later start while this launcher runs, through
+//! `<data>/crucible/inbox/`; the event `kiln://crucible-link` says they wait.
 //!
 //! Crucible is on only when a signing key is known: compiled in (`kiln_manage::crucible::KEYS`, empty until the owner
 //! approves the service's key) or, in debug builds and builds with the `crucible-dev` feature, a local service named by
@@ -262,38 +263,141 @@ fn clipboard_target(text: Option<String>) -> Option<String> {
 
 // ---------------------------------------------------------------- links arriving
 
-/// `main` calls this for `--link <url>` (or a bare kiln:// argument). True: start the window (the link waits in the
-/// inbox); false: a launcher already runs and takes it from there, this process ends.
+/// The link this process was started with while no launcher ran (`link_entry`): held in memory until the window can
+/// take it (`start`), then given to it once.
+static HELD: Mutex<Option<String>> = Mutex::new(None);
+
+/// `main` calls this for `--link <url>` (or a bare kiln:// argument), before Tauri and before the data folder's gates
+/// open: `state::dirs()` refuses until the beta copy is safe (crate::snapshot::startup; up to 0.2.0-dev.31.3 the link
+/// was lost here). True: start the window, the link waits for it (in memory, or in the inbox when the launcher that ran
+/// ended meanwhile); false: a launcher already runs and takes the link from its inbox, this process ends. The data
+/// folder is written only to hand the link to that launcher, and only while it is free for it
+/// (crate::folder::handoff_dirs); otherwise this start shows why, as any start would. A refused link starts the window
+/// without it, as before.
 pub fn link_entry(url: &str) -> bool {
-    let Ok(d) = dirs() else { return true };
     if !links::accepted(url) {
         launcher_log("crucible", "a kiln:// link that is not a Crucible link was refused");
         return true;
     }
-    if let Err(e) = links::queue(&d, url) {
-        launcher_log("crucible", &format!("could not queue a link: {}", e.message));
+    if let Some(d) = crate::folder::handoff_dirs() {
+        match links::find_instance(&d) {
+            Ok(links::Found::Running) => match links::queue(&d, url) {
+                Ok(_) => match links::find_instance(&d) {
+                    // the launcher that runs takes it from its inbox
+                    Ok(links::Found::Running) => return false,
+                    // it ended meanwhile: this start reads the inbox once its window is up
+                    Ok(links::Found::Free(i)) => {
+                        *INSTANCE.lock().unwrap() = i;
+                        return true;
+                    }
+                    Err(_) => return true,
+                },
+                Err(e) => launcher_log("crucible", &format!("could not hand a link to the running launcher: {}", e.message)),
+            },
+            // no launcher runs: this one holds the lock from now on (read-only; none is made before the gate)
+            Ok(links::Found::Free(i)) => *INSTANCE.lock().unwrap() = i,
+            Err(_) => {}
+        }
+    }
+    *HELD.lock().unwrap() = Some(url.to_string());
+    true
+}
+
+/// What the gate's opening (`start`) found.
+struct GateOpen {
+    /// The link this process was started with (at most once in a process).
+    held: Option<String>,
+    /// The data folder is usable (else nothing more runs, as before).
+    folder: bool,
+}
+
+/// The gate is open (lib.rs `after_snapshot`): the start's own link, and the instance lock unless another launcher has it.
+fn gate_open() -> GateOpen {
+    let held = HELD.lock().unwrap().take();
+    let Ok(d) = dirs() else { return GateOpen { held, folder: false } };
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_none() {
+        *inst = links::acquire_instance(&d).ok().flatten();
+    }
+    GateOpen { held, folder: true }
+}
+
+/// One round of the links thread: the inbox, read only by the launcher with the instance lock ([`reader`]).
+fn links_round() -> Vec<String> {
+    if !reader() { return Vec::new(); }
+    inbox_round()
+}
+
+/// This process holds the instance lock, or takes it now: the launcher that had it when this window's gate opened has
+/// ended since. Without that a second window stayed without a reader for good: a link handed to the launcher that
+/// ended, in its last moments before its next round, waited in the inbox for the next start, and the next start for a
+/// link opened another window. Read-only while the lock file is there; never while the folder is held or the beta
+/// copy's gate is closed.
+fn reader() -> bool {
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_some() {
         return true;
     }
-    match links::acquire_instance(&d) {
-        Ok(Some(i)) => {
-            *INSTANCE.lock().unwrap() = Some(i);
-            true
+    let taken = {
+        let _writing = crate::state::writing();
+        let Ok(d) = dirs() else { return false };
+        match links::find_instance(&d) {
+            Ok(links::Found::Free(Some(i))) => Some(i),
+            Ok(links::Found::Free(None)) => links::acquire_instance(&d).ok().flatten(),
+            Ok(links::Found::Running) | Err(_) => None,
         }
-        Ok(None) => false,
-        Err(_) => true,
+    };
+    let got = taken.is_some();
+    *inst = taken;
+    drop(inst);
+    if got {
+        launcher_log("crucible", "this window takes kiln:// links from now on: the launcher that had them ended");
+    }
+    got
+}
+
+/// One look into the inbox (the reader's round). Its files are removed once read: a writer of the data folder that a
+/// move or a restore of the beta copy waits for, refused while the folder is held.
+fn inbox_round() -> Vec<String> {
+    let _writing = crate::state::writing();
+    dirs().map(|d| links::take(&d)).unwrap_or_default()
+}
+
+/// Links for `crucible_links` (the newest 20 wait); how many wait now.
+fn keep(got: Vec<String>) -> usize {
+    let mut l = LINKS.lock().unwrap();
+    l.extend(got);
+    if l.len() > 20 {
+        let n = l.len() - 20;
+        l.drain(..n);
+    }
+    l.len()
+}
+
+/// The window gets the links: `kiln://crucible-link` says how many wait, and it comes to the front.
+fn to_window(app: &AppHandle, got: Vec<String>) {
+    let count = keep(got);
+    let _ = app.emit(LINK_EVENT, serde_json::json!({ "count": count }));
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
     }
 }
 
-/// Starts (once, at the launcher's start): the instance lock, the kiln:// registration while Crucible is on, and the
-/// inbox reader.
+/// Starts (once, when the gate opens): the link this process was started with goes to the window, the instance lock,
+/// the kiln:// registration while Crucible is on, and the links thread: the inbox is read only by the launcher that
+/// holds the lock (a second window never takes a link the other one was given), and a second window takes the lock
+/// over once that launcher ended ([`reader`]).
 pub fn start(app: &AppHandle) {
     let _ = VERSION.set(app.package_info().version.to_string());
-    let Ok(d) = dirs() else { return };
-    {
-        let mut inst = INSTANCE.lock().unwrap();
-        if inst.is_none() {
-            *inst = links::acquire_instance(&d).ok().flatten();
-        }
+    let open = gate_open();
+    if let Some(url) = open.held {
+        launcher_log("crucible", "the Crucible link this launcher was started with goes to the window");
+        to_window(app, vec![url]);
+    }
+    if !open.folder {
+        return;
     }
     if service().is_ok_and(|(ep, _)| ep.enabled() && !ep.dev)
         && let Ok(exe) = launcher_exe()
@@ -306,25 +410,10 @@ pub fn start(app: &AppHandle) {
     }
     let app = app.clone();
     let _ = std::thread::Builder::new().name("crucible links".into()).spawn(move || loop {
-        if let Ok(d) = dirs() {
-            let got = links::take(&d);
-            if !got.is_empty() {
-                let count = {
-                    let mut l = LINKS.lock().unwrap();
-                    l.extend(got);
-                    if l.len() > 20 {
-                        let n = l.len() - 20;
-                        l.drain(..n);
-                    }
-                    l.len()
-                };
-                let _ = app.emit(LINK_EVENT, serde_json::json!({ "count": count }));
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.unminimize();
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
-            }
+        let got = links_round();
+        if !got.is_empty() {
+            launcher_log("crucible", &format!("{} Crucible link(s) arrived from another start", got.len()));
+            to_window(&app, got);
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     });
@@ -368,6 +457,184 @@ mod tests {
         assert_eq!(some(&format!("H7QK-3MZP{}", " ".repeat(200))).as_deref(), Some("H7QK-3MZP"), "trimmed first");
         assert_eq!(some(&"x".repeat(201)), None);
         assert_eq!(clipboard_target(None), None, "an empty or unreadable clipboard");
+    }
+
+    const LINK: &str = "kiln://crucible/H7QK-3MZP";
+
+    /// A start for a link as `main` runs it in every production build: the process's data folder is opened (its lock
+    /// taken shared), the beta copy's gate is still "preparing" (a test run's would be "ready": that hid the bug), no
+    /// window yet. The link state of the process goes with it.
+    struct LinkStart {
+        root: std::path::PathBuf,
+        dirs: kiln_manage::paths::DataDirs,
+        gate: crate::snapshot::startup::TestGate,
+        _serial: crate::folder::TestGuard,
+    }
+
+    impl Drop for LinkStart {
+        fn drop(&mut self) {
+            HELD.lock().unwrap().take();
+            INSTANCE.lock().unwrap().take();
+            LINKS.lock().unwrap().clear();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn link_start(tag: &str, before: impl FnOnce(&std::path::Path)) -> LinkStart {
+        let serial = crate::folder::test_serial();
+        let root = std::env::temp_dir().join(format!("kl-crucible-link-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        before(&root);
+        let folder = std::sync::Arc::new(crate::folder::Folder::open(kiln_manage::paths::DataEnv {
+            kiln_data_dir: Some(root.clone().into()), ..Default::default()
+        }));
+        crate::folder::replace(folder);
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        LinkStart { dirs: kiln_manage::paths::DataDirs::at(root.clone()), root, gate, _serial: serial }
+    }
+
+    fn waiting() -> Vec<String> {
+        tauri::async_runtime::block_on(crucible_links()).unwrap()
+    }
+
+    /// 0.2.0-dev.31.3 (a player's report, Somamint): a pack link that started the launcher showed no preview. `main`
+    /// called `link_entry` before the gate opened, `state::dirs()` refused, and the link was dropped.
+    #[test]
+    fn a_link_that_starts_the_launcher_reaches_its_window_once_the_gate_opens() {
+        let s = link_start("cold", |_| {});
+        assert!(crate::state::dirs().is_err(), "the production start: the gate is not open yet");
+        let before = crate::commands::data_folder::tests::tree(&s.root);
+        assert!(link_entry(LINK), "no launcher runs: this one starts its window");
+        assert_eq!(crate::commands::data_folder::tests::tree(&s.root), before, "nothing is written before the gate opens");
+        assert!(waiting().is_empty(), "nothing for the window before the gate opens");
+        // lib.rs after_snapshot: the gate is open, `start` gives the window what waits
+        s.gate.open();
+        let open = gate_open();
+        assert!(open.folder && INSTANCE.lock().unwrap().is_some(), "this launcher holds the instance lock: later links come to it");
+        keep(open.held.into_iter().collect());
+        assert_eq!(waiting(), [LINK], "the preview opens with the start's link");
+        // once: neither a second look nor the inbox has it again
+        let again = gate_open();
+        assert!(again.held.is_none());
+        assert!(inbox_round().is_empty());
+        assert!(waiting().is_empty());
+        // a second start for a link finds this launcher running
+        assert!(matches!(links::find_instance(&s.dirs).unwrap(), links::Found::Running));
+    }
+
+    #[test]
+    fn a_link_for_the_running_launcher_goes_to_its_inbox_once_and_this_process_ends() {
+        let s = link_start("warm", |_| {});
+        // the launcher that runs (another process: its own lock on the file)
+        let running = links::acquire_instance(&s.dirs).unwrap().expect("the running launcher's lock");
+        assert!(!link_entry(LINK), "the process started for the link ends");
+        assert!(HELD.lock().unwrap().is_none(), "and keeps nothing for a window of its own");
+        assert!(INSTANCE.lock().unwrap().is_none());
+        // what the running launcher's reader takes: the link, once
+        assert_eq!(links::take(&s.dirs), [LINK]);
+        assert!(links::take(&s.dirs).is_empty());
+        drop(running);
+    }
+
+    #[test]
+    fn a_refused_link_starts_the_window_without_it() {
+        let s = link_start("refused", |_| {});
+        let before = crate::commands::data_folder::tests::tree(&s.root);
+        for bad in ["kiln://crucible/../../x", "kiln://other/H7QK-3MZP", "kiln://crucible/", "nxm://enshrouded/mods/1/files/2"] {
+            assert!(link_entry(bad), "{bad}");
+        }
+        assert!(HELD.lock().unwrap().is_none());
+        assert_eq!(crate::commands::data_folder::tests::tree(&s.root), before);
+        s.gate.open();
+        assert!(gate_open().held.is_none());
+        assert!(waiting().is_empty());
+    }
+
+    /// The handoff writes only while nothing else may change the folder. Another launcher holds the data-folder lock
+    /// exclusively (a move, the beta copy's capture or restore), a restore stopped half way, or this start will remove an
+    /// unfinished move's partial copy: nothing is written, the start shows why, as any start would.
+    #[test]
+    fn a_link_start_writes_nothing_while_the_folder_is_held() {
+        // another launcher moves the folder or protects the beta copy (the data-folder lock, exclusive)
+        let mut exclusive = None;
+        let s = link_start("elsewhere", |root| {
+            exclusive = kiln_manage::data_folder::DataLock::exclusive(root).unwrap();
+        });
+        assert!(exclusive.is_some());
+        assert_eq!(crate::folder::current().hold(), crate::folder::Hold::Elsewhere);
+        let running = links::acquire_instance(&s.dirs).unwrap().unwrap();
+        let before = crate::commands::data_folder::tests::tree(&s.root);
+        assert!(link_entry(LINK), "the window starts: it shows that the folder is held");
+        assert_eq!(crate::commands::data_folder::tests::tree(&s.root), before);
+        drop((running, exclusive, s));
+
+        // a restore of the beta copy stopped half way
+        let s = link_start("restore", |root| {
+            std::fs::create_dir_all(root.join("snapshots/restore-beta")).unwrap();
+            std::fs::write(root.join("snapshots/restore-beta/journal.json"), r#"{"format":1,"files":{}}"#).unwrap();
+        });
+        let running = links::acquire_instance(&s.dirs).unwrap().unwrap();
+        let before = crate::commands::data_folder::tests::tree(&s.root);
+        assert!(link_entry(LINK));
+        assert_eq!(crate::commands::data_folder::tests::tree(&s.root), before);
+        drop((running, s));
+
+        // this start holds the folder to remove an unfinished move's partial copy
+        let serial = crate::folder::test_serial();
+        let (t, f) = crate::commands::data_folder::tests::after_an_unfinished_move("crucible-link");
+        let dirs = f.located().unwrap().dirs.clone();
+        let running = links::acquire_instance(&dirs).unwrap().unwrap();
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        let before = crate::commands::data_folder::tests::tree(&dirs.root);
+        assert!(link_entry(LINK));
+        assert_eq!(crate::commands::data_folder::tests::tree(&dirs.root), before, "the removal's proof stays as it is");
+        drop((running, gate));
+        HELD.lock().unwrap().take();
+        crate::commands::data_folder::forget_start();
+        drop(serial);
+        let _ = std::fs::remove_dir_all(t);
+    }
+
+    /// A second window (its gate opened while another launcher held the instance lock) takes the lock over once that
+    /// launcher ended: a link handed to the one that ended, in its last moments before its next round, reaches this
+    /// window (it waited in the inbox for the next start before, and Crucible drops links older than an hour), and the
+    /// next start for a link finds this window running instead of opening another.
+    #[test]
+    fn a_second_window_takes_the_links_over_once_the_launcher_that_had_them_ended() {
+        let s = link_start("take-over", |_| {});
+        s.gate.open();
+        let first = links::acquire_instance(&s.dirs).unwrap().unwrap();
+        let open = gate_open();
+        assert!(open.folder && INSTANCE.lock().unwrap().is_none(), "the first launcher has the lock");
+        links::queue(&s.dirs, LINK).unwrap();
+        assert!(links_round().is_empty(), "while the first launcher runs its links stay for it");
+        assert!(INSTANCE.lock().unwrap().is_none());
+        // the first launcher ended before its next round
+        drop(first);
+        assert_eq!(links_round(), [LINK], "this window took the lock over and reads the inbox");
+        assert!(links_round().is_empty(), "once");
+        assert!(matches!(links::find_instance(&s.dirs).unwrap(), links::Found::Running), "a later link start hands over to this window");
+        // with the folder held (here: the beta copy's gate closed again) no lock is taken over
+        INSTANCE.lock().unwrap().take();
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        assert!(links_round().is_empty());
+        assert!(INSTANCE.lock().unwrap().is_none());
+        drop(gate);
+    }
+
+    #[test]
+    fn only_the_launcher_with_the_instance_lock_reads_the_inbox() {
+        let s = link_start("second-window", |_| {});
+        s.gate.open();
+        let running = links::acquire_instance(&s.dirs).unwrap().unwrap();
+        links::queue(&s.dirs, LINK).unwrap();
+        // a second window (started without a link) finds the lock taken: no reader, the link stays for the first
+        let open = gate_open();
+        assert!(open.folder && INSTANCE.lock().unwrap().is_none());
+        assert!(links_round().is_empty());
+        assert_eq!(links::take(&s.dirs), [LINK]);
+        drop(running);
     }
 
     /// End to end against a Crucible running on this machine (MinIO for R2 and the CDN, the fake relay for the

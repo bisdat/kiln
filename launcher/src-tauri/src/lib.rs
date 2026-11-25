@@ -45,13 +45,15 @@ pub fn selftest() -> i32 {
     selftest::run(&args)
 }
 
-/// The launcher was started with an nxm:// link: queue it (or hand another game's link on). False: exit, the link went
-/// to the running launcher or to another mod manager (commands/nexus.rs).
+/// The launcher was started with an nxm:// link (before Tauri, the data folder's gates still closed): hand it to the
+/// running launcher, or another game's link on, or hold it for this one's window. False: exit, the link went to the
+/// running launcher or to another mod manager (commands/nexus.rs).
 pub fn nxm_entry(url: &str) -> bool {
     commands::nexus::nxm_entry(url)
 }
 
-/// The launcher was started with a kiln:// link (Crucible): queue it. False: exit, the running launcher takes it.
+/// The launcher was started with a kiln:// link (Crucible), before Tauri: hand it to the running launcher or hold it for
+/// this one's window. False: exit, the running launcher takes it (commands/crucible.rs).
 pub fn link_entry(url: &str) -> bool {
     commands::crucible::link_entry(url)
 }
@@ -431,9 +433,11 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
     std::thread::spawn(move || commands::runtime::import_shipped(&shipped));
     // kiln://last-server comes from the modpack watcher (commands/modpack.rs)
     commands::modpack::watch_last_server(app);
-    // nxm:// links (Nexus Mods' Mod Manager Download): the instance lock and the link inbox (commands/nexus.rs)
+    // nxm:// links (Nexus Mods' Mod Manager Download): the start's own link, the instance lock and the link inbox
+    // (commands/nexus.rs)
     commands::nexus::start(app);
-    // kiln:// links (Crucible packs): the instance lock, the registration while Crucible is on, the inbox (commands/crucible.rs)
+    // kiln:// links (Crucible packs): the start's own link, the instance lock, the registration while Crucible is on, the
+    // inbox (commands/crucible.rs)
     commands::crucible::start(app);
     // the AppImage's app menu entry and icons, so taskbars and docks show Kiln's icon (desktop.rs)
     std::thread::spawn(desktop::start);

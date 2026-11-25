@@ -64,13 +64,15 @@ fn main() {
         kiln_manage::server::run::set_ctrl_c_helper(exe);
     }
     // `--nxm <link>` (what Kiln registers as the nxm:// handler) or a bare `nxm://` argument: the link goes to the
-    // running launcher (or to another game's mod manager) and this process ends; else it starts with the link queued
+    // running launcher (or to another game's mod manager) and this process ends; else it starts with the link held for
+    // its window (given to it once the data folder's gates open, lib.rs `after_snapshot`)
     if let Some(url) = nxm
         && !kiln_launcher_lib::nxm_entry(url)
     {
         std::process::exit(0);
     }
-    // `--link <kiln://...>`: a Crucible link goes to the running launcher (this process ends) or waits for this one
+    // `--link <kiln://...>`: a Crucible link goes to the running launcher (this process ends) or waits for this one's
+    // window, the same way
     if let Some(url) = link
         && !kiln_launcher_lib::link_entry(url)
     {

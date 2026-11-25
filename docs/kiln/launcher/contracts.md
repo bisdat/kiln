@@ -1774,12 +1774,14 @@ InstalledInfo}`, `NexusAccount {configured, signedIn, tokenPlace: 'keyring'|'fil
 
 Command line: `kiln-launcher --nxm <link>` (what Kiln registers) or a bare `nxm://` argument: an Enshrouded link is
 queued in `<data>/nexus/inbox/` and handed to the launcher that runs (this process exits), or this process starts with
-it; another game's well-formed link goes to the handler before Kiln and the process exits. URL invocations accept
-exactly `--nxm <link>` or one bare link, without additional launcher options; malformed invocations exit 1.
+it (held in memory, `kiln://nxm` once the data folder's gates open); another game's well-formed link goes to the handler
+before Kiln and the process exits. URL invocations accept exactly `--nxm <link>` or one bare link, without additional
+launcher options; malformed invocations exit 1.
 
 `kiln-launcher --link <kiln://crucible/...>` (what Kiln registers for kiln:// while Crucible is on) or a bare `kiln://`
 argument: the link is queued in `<data>/crucible/inbox/` and handed to the launcher that runs (this process exits), or
-this process starts with it; the same strict argument shape as nxm.
+this process starts with it (held in memory, `kiln://crucible-link` once the gates open); the same strict argument shape
+as nxm.
 
 ## 10. Events
 Emitted with `app.emit(name, payload)`; `launcher/src/api/commands.ts` exports `KilnEvents` with the payload types.

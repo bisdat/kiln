@@ -1,7 +1,8 @@
 //! kiln:// links: `kiln://crucible/<CODE>` and `kiln://crucible/pack/<slug>` (the pack page's "Open in Kiln", the
-//! share card). The system starts the launcher with `--link <url>`; that process puts the link into
-//! `<data>/crucible/inbox/` and ends when a launcher already runs (it holds `<data>/crucible/instance.lock`), else it
-//! starts with the link waiting. The running launcher takes the inbox every half second.
+//! share card). The system starts the launcher with `--link <url>`. When a launcher already runs (it holds
+//! `<data>/crucible/instance.lock`, [`find_instance`]) that process puts the link into `<data>/crucible/inbox/` and ends;
+//! else it starts with the link held in memory until its window is up (the launcher's commands/crucible.rs). The running
+//! launcher takes the inbox every half second.
 //!
 //! Kiln is the only program for kiln:// links, so registering takes nothing from anyone: Linux
 //! `$XDG_DATA_HOME/applications/kiln-launcher-links.desktop` (`MimeType=x-scheme-handler/kiln;`, `NoDisplay=true`) made the
@@ -151,15 +152,45 @@ pub struct Instance {
     _file: std::fs::File,
 }
 
+fn instance_lock(dirs: &DataDirs) -> PathBuf {
+    dirs.root.join("crucible").join("instance.lock")
+}
+
 /// Some: this process is the launcher (keep it while the window lives). None: another one runs.
 pub fn acquire_instance(dirs: &DataDirs) -> Result<Option<Instance>> {
     let dir = dirs.root.join("crucible");
     std::fs::create_dir_all(&dir).map_err(crate::util::io_at(&dir, "creating"))?;
-    let p = dir.join("instance.lock");
+    let p = instance_lock(dirs);
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&p).map_err(crate::util::io_at(&p, "opening"))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(Instance { _file: f })),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(Error::from(e)),
+    }
+}
+
+/// What a process started for a link finds ([`find_instance`]).
+pub enum Found {
+    /// No launcher holds the instance lock. Some: this process holds it now (keep it while the window lives); None:
+    /// there is no lock file yet (no launcher with Crucible took it in this data folder), nothing was created.
+    Free(Option<Instance>),
+    /// A launcher holds it: it takes links from the inbox.
+    Running,
+}
+
+/// Whether a launcher runs with this data folder, without writing anything into it (a process started for a link,
+/// before the data folder's gates open): the lock file is opened read-only and never created.
+pub fn find_instance(dirs: &DataDirs) -> Result<Found> {
+    let p = instance_lock(dirs);
+    let f = match std::fs::symlink_metadata(&p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Found::Free(None)),
+        Err(e) => return Err(crate::util::io_at(&p, "checking")(e)),
+        Ok(m) if !m.is_file() => return Err(Error::invalid(format!("{} is not a file", p.display()))),
+        Ok(_) => std::fs::File::open(&p).map_err(crate::util::io_at(&p, "opening"))?,
+    };
+    match f.try_lock() {
+        Ok(()) => Ok(Found::Free(Some(Instance { _file: f }))),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(Found::Running),
         Err(std::fs::TryLockError::Error(e)) => Err(Error::from(e)),
     }
 }
@@ -266,6 +297,32 @@ mod tests {
         assert!(take(&dirs).is_empty());
         let one = acquire_instance(&dirs).unwrap();
         assert!(one.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_process_for_a_link_finds_the_running_launcher_without_writing() {
+        let root = std::env::temp_dir().join(format!("km-find-instance-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = DataDirs::at(root.clone());
+        // no launcher with Crucible took the lock here yet: nothing to find, nothing created
+        assert!(matches!(find_instance(&dirs).unwrap(), Found::Free(None)));
+        assert!(!root.join("crucible").exists());
+        // a launcher runs
+        let running = acquire_instance(&dirs).unwrap().expect("the first launcher");
+        assert!(matches!(find_instance(&dirs).unwrap(), Found::Running));
+        drop(running);
+        // it ended: the lock is this process's now (read-only), and a later launcher sees it taken
+        let Found::Free(Some(mine)) = find_instance(&dirs).unwrap() else { panic!("the lock was free") };
+        assert!(acquire_instance(&dirs).unwrap().is_none());
+        assert!(matches!(find_instance(&dirs).unwrap(), Found::Running));
+        drop(mine);
+        assert_eq!(std::fs::metadata(instance_lock(&dirs)).unwrap().len(), 0, "the lock file was never written");
+        // a lock that is not a plain file is no answer
+        let _ = std::fs::remove_file(instance_lock(&dirs));
+        std::fs::create_dir_all(instance_lock(&dirs)).unwrap();
+        assert!(find_instance(&dirs).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 
