@@ -8,7 +8,8 @@ static KilnClientState ammo_client_state;
 static KilnResult KILN_CALL ammo_state(KilnClientState* out){*out=ammo_client_state;return KILN_OK;}
 static bool KILN_CALL ammo_thread(){return true;}
 static int backpack_answer;
-static int backpack_fixture(uint32_t,uint32_t){return backpack_answer;}
+static unsigned backpack_reads,backpack_reads_999; // probe calls (all items, item 999)
+static int backpack_fixture(uint32_t,uint32_t item){++backpack_reads;if(item==999)++backpack_reads_999;return backpack_answer;}
 static unsigned equip_calls,finalizer_calls;
 static void KILN_CALL equip_fixture(SelectorGroup*,void*,uint8_t,uint32_t,uint32_t){++equip_calls;}
 static void KILN_CALL finalizer_fixture(SelectorGroup* g,void*,void*,void*,void*,void*){++finalizer_calls;g[0].selected=0;g[0].has_selected=1;}
@@ -190,12 +191,33 @@ int main() {
         backpack_answer=-1;ammo::pick(groups,nullptr,0,555,505);CHECK(equip_calls==0); // unreadable: no equip, no event
         backpack_answer=1;ammo::pick(groups,nullptr,0,555,506);CHECK(equip_calls==1); // carried again: the game's
         backpack_answer=0;ammo::pick(groups,nullptr,0,999,507);CHECK(equip_calls==2); // the game's row with stock
+        // The window decides by the row the group shows now, not by the last observation (another selector state or a
+        // build Kiln did not observe may have changed it): a shown row with stock is the game's.
+        groups[0].data[2].count=5;ammo::pick(groups,nullptr,0,555,520);CHECK(equip_calls==3);
+        groups[0].data[2].count=0;CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // While the service is faulted Kiln leaves every pick in that window to the game, as before the window existed.
+        ammo::faulted.store(true);ammo::pick(groups,nullptr,0,555,521);CHECK(equip_calls==4);ammo::faulted.store(false);
+        equip_calls=2;
         ammo::pick(groups,nullptr,0,1257792166u,508);CHECK(equip_calls==3);           // a row no mod provided
         CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
         // A stale session is no permission for a synthetic pick in that window either; the game's row goes the game's way.
         ++ammo_client_state.generation;backpack_answer=0;ammo::pick(groups,nullptr,0,555,509);CHECK(equip_calls==4);
         --ammo_client_state.generation;CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
     }
+    // The bind-time backpack reads: only game rows with stock whose item the publication provides (555 and 999 here, not
+    // 1257792166), in one walk per binding, and none again while the game's rows stay the same.
+    game_555_count=3;backpack_answer=1;selector(groups,acc,0);CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK);
+    pub.mode=KUA_MODE_REPLACE;pub.serial=context.game_serial;CHECK(ammo::publish(7,&pub)==KILN_OK);
+    backpack_reads=backpack_reads_999=0;selector(groups,acc,0);CHECK(backpack_reads==2&&backpack_reads_999==1);
+    selector(groups,acc,0);selector(groups,acc,0);CHECK(backpack_reads==2);
+    // An Append publication that leaves out the items the game lists with stock (as Ui.AmmoList does) reads nothing.
+    {
+        KilnUiAmmoRow only[]={{555,12,0,3}};game_555_count=0;selector(groups,acc,0);
+        CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK);
+        KilnUiAmmoPublish append{sizeof append,KUA_KIND_ARROW,KUA_MODE_APPEND,1,9,0,context.game_serial,only};
+        CHECK(ammo::publish(7,&append)==KILN_OK);backpack_reads=0;selector(groups,acc,0);CHECK(backpack_reads==0);
+    }
+    backpack_answer=0;
     // A debug line for every pick of a provided row that went to the game, at most 8 a second, from the client Post tick.
     log_lines.clear();ammo::handoff_window={};ammo::report_post(nullptr,nullptr); // the lines of the cases above
     CHECK(!log_lines.empty()&&log_lines.size()<=8&&log_lines[0].first==KILN_LOG_DEBUG);log_lines.clear();ammo::handoff_window={};
