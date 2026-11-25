@@ -655,7 +655,7 @@ static void amd_on_the_game_device() {
     CHECK(upscale::amd::missing_used_if_offered(vk, s.extensions, gpu).empty());
 }
 
-// FSR 4's INT8 set (0.2.0-dev.31.12) on the game's device, on an RX 6900 XT-like GPU (31.11, kiln-win1: FSR 4 4.1.2's
+// FSR 4's INT8 set (0.2.0-dev.31.13) on the game's device, on an RX 6900 XT-like GPU (31.11, kiln-win1: FSR 4 4.1.2's
 // INT8 model drew black on a device without it): VK_KHR_compute_shader_derivatives goes on with computeDerivativeGroupLinear,
 // which upscale_amd.cpp's device_ready reads back as "compute-shader derivatives on"; nothing else of AMD's sample's six. A
 // GPU without the extension: skipped (optional), the rest still goes on.

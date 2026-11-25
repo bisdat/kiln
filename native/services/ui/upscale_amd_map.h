@@ -76,7 +76,7 @@ inline const std::vector<const char*>& fsr4_native_extensions() {
     return v;
 }
 
-// ---- FSR 4's sets on the game's device (0.2.0-dev.31.12) -----------------------------------------------------------
+// ---- FSR 4's sets on the game's device (0.2.0-dev.31.13) -----------------------------------------------------------
 // AMD's selection in amd_fidelityfx_upscaler_vk.dll 4.1.2 (SDK 2.4.0) has four FSR 4 providers (their RTTI names), each
 // with its own model and shaders (the SPIR-V the DLL carries, deflated and read: the dev.31 wave's out/fsr4-black/REPORT.md):
 //  - ffxProvider_FSR4, the FP8 model: an AMD GPU that is not integrated, offers VK_KHR_cooperative_matrix and
@@ -93,7 +93,7 @@ inline const std::vector<const char*>& fsr4_native_extensions() {
 // and the FP8 device keeps 0.2.0-dev.29.21's: none of the six.
 enum class Fsr4Set : uint32_t { none = 0, int8 = 1, native = 2 };
 // kiln/control/amd "fsr4ext" (read when the game makes its device): auto (the set this GPU's FSR 4 model needs), off
-// (none of the six, as 0.2.0-dev.29.21 to 31.11 everywhere), on (AMD's sample's six, as up to 29.20).
+// (none of the six, as 0.2.0-dev.29.21 to 31.12 everywhere), on (AMD's sample's six, as up to 29.20).
 enum class Fsr4Ext : uint32_t { automatic = 0, off = 1, on = 2 };
 inline constexpr uint32_t kVendorAmd = 0x1002;
 // What Kiln reads of the GPU before the game's device exists (the physical device; AMD's DLL is mapped only later).
@@ -119,7 +119,7 @@ inline Fsr4SetChoice choose_fsr4_set(const GpuFacts& g, Fsr4Ext ext) {
     if (ext == Fsr4Ext::on)
         return {Fsr4Set::native, "kiln/control/amd \"fsr4ext on\": AMD's sample's whole FSR 4 set, as up to 0.2.0-dev.29.20"};
     if (ext == Fsr4Ext::off)
-        return {Fsr4Set::none, "kiln/control/amd \"fsr4ext off\": none of FSR 4's sets, as 0.2.0-dev.29.21 to 31.11"};
+        return {Fsr4Set::none, "kiln/control/amd \"fsr4ext off\": none of FSR 4's sets, as 0.2.0-dev.29.21 to 31.12"};
     if (g.vendor != kVendorAmd) return {Fsr4Set::none, "not an AMD GPU: AMD's selection runs FSR 3.1 here"};
     if (amd_fp8_gpu(g))
         return {Fsr4Set::none, "AMD's selection takes FSR 4's FP8 model on this GPU (cooperative matrix + FP8): its device stays without "
@@ -270,7 +270,7 @@ enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 //   fsr4ext auto|off|on             read when the game makes its device (the next game start): auto, the set this
 //                                   GPU's FSR 4 model needs (choose_fsr4_set: compute-shader derivatives where AMD's
 //                                   selection takes an INT8 model, nothing on the FP8 one); off, none (as 29.21 to
-//                                   31.11); on, AMD's sample's whole set (fsr4_native_extensions, as up to 29.20)
+//                                   31.12); on, AMD's sample's whole set (fsr4_native_extensions, as up to 29.20)
 //   check auto|off                  auto: the output check after each set-up (upscale_probe.h: a black or NaN picture
 //                                   from FSR 4 makes FSR 3.1 run for the rest of the game); off: no check, for an A/B
 enum class Planes : uint32_t { automatic = 0, game = 1, swap = 2 };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln.ui upscaler swap: the output check on the GPU (0.2.0-dev.31.12; plain logic and thresholds in
+// kiln.ui upscaler swap: the output check on the GPU (0.2.0-dev.31.13; plain logic and thresholds in
 // upscale_probe_logic.h). A small compute pass (shaders/output_probe.comp) recorded once after a set-up into the game's
 // command buffer, right after the upscaler's work: it reads the game's colour through the game's own view
 // (SHADER_READ_ONLY_OPTIMAL) and the upscaler's output through the game's own view as a storage image (GENERAL), leaves

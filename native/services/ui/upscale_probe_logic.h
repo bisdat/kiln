@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln.ui upscaler swap: the output check's plain logic (0.2.0-dev.31.12; upscale_probe.h runs it on the GPU). Once after a
+// kiln.ui upscaler swap: the output check's plain logic (0.2.0-dev.31.13; upscale_probe.h runs it on the GPU). Once after a
 // backend's set-up, a small compute pass of Kiln's (shaders/output_probe.comp) reads a 32x32 grid of points of the game's
 // colour (the upscaler's input) and of the upscaler's output, in the frame's own command buffer right after the
 // upscaler's work, and writes their luminance and how many are not finite into a small host-visible buffer. Some frames

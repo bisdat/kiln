@@ -132,7 +132,7 @@ and render scale stay what decides the render size.
 AMD's selection needs no particular driver version for FSR 4 on Vulkan (AMD's notes); whether a card gets it is AMD's
 answer at the FSR set-up, and the status says which ran.
 
-**No black picture (0.2.0-dev.31.12).** After each set-up Kiln looks once at the upscaler's picture: about 30 frames in,
+**No black picture (0.2.0-dev.31.13).** After each set-up Kiln looks once at the upscaler's picture: about 30 frames in,
 it reads a grid of 1,024 points of the upscaler's output and of the game's own picture going into it. If the output is
 black or not a number while the game's picture is not black, FSR 4 gives way to FSR 3.1 for the rest of the game (any
 other upscaler to the game's own FSR 3), kiln.log says what it read, and the readout says "AMD FSR 4 is not running: its
@@ -206,7 +206,7 @@ pass already patched by another module, and Kiln's overlay hooks off. DLSSTweaks
   (`noSignatures`) until a Kiln update.
 - Steam Deck: AMD FSR 3.1 and XeSS; FSR 4 only where AMD's selection says it runs.
 - FSR 4 has not drawn a correct picture in this game yet (RX 9070 XT: dark scenes too dark; RX 6900 XT: black up to
-  0.2.0-dev.31.11). Kiln checks its picture once after each set-up and runs FSR 3.1 when it is black or not a number.
+  0.2.0-dev.31.12, seen on 31.11). Kiln checks its picture once after each set-up and runs FSR 3.1 when it is black or not a number.
   First reports from testers decide the defaults.
 
 ## Readout
@@ -350,22 +350,22 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
   Vulkan backend uses when the GPU offers it (subgroup size control, 16-bit floats, synchronization2, AMD's buffer
   markers and coherent memory, descriptor indexing), 16-bit storage, float16/int8 and integer dot product, each only
   where the GPU has it. Of AMD's sample's FSR 4 set (cooperative matrix, FP8, compute-shader derivatives, 8-bit storage,
-  the memory model, maintenance4), since 0.2.0-dev.31.12 what the GPU's own FSR 4 model declares
+  the memory model, maintenance4), since 0.2.0-dev.31.13 what the GPU's own FSR 4 model declares
   (`upscale_amd_map.h` `choose_fsr4_set`, from the SPIR-V inside AMD's 4.1.2 DLL):
   - **where AMD's selection takes an INT8 model** (an AMD GPU without cooperative matrix + FP8: RX 6000, RX 7000, the
     APUs): `VK_KHR_compute_shader_derivatives` (`computeDerivativeGroupLinear`), the "INT8 set". FSR 4's own auto
     exposure declares it on every model, and RDNA 3's and the lite model's INT8 prepass too; no INT8 shader declares
-    8-bit storage, the memory model or maintenance4, so they stay off. Up to 0.2.0-dev.31.11 these GPUs got none of the
+    8-bit storage, the memory model or maintenance4, so they stay off. Up to 0.2.0-dev.31.12 these GPUs got none of the
     six, and FSR 4 drew a black screen on an RX 6900 XT;
   - **where AMD's selection takes the FP8 model** (RX 9000): none of the six, as since 0.2.0-dev.29.21 (with all of them
     AMD's Vulkan FSR 4 drew dark scenes too dark on an RX 9070 XT, 29.19, while OptiScaler's pure-Vulkan FSR 4 from the
     same DLL ran correctly on a device without them);
   - not an AMD GPU: none (AMD's selection runs FSR 3.1 there).
   `kiln/control/amd` `fsr4ext auto|off|on`, read when the game makes its device (from the next game start): `off` none
-  of the six (as 29.21 to 31.11), `on` all six (as up to 29.20). kiln.log says at the game's start which set the device
+  of the six (as 29.21 to 31.12), `on` all six (as up to 29.20). kiln.log says at the game's start which set the device
   got and why ("AMD FSR on AMD Radeon RX 6900 XT: the game's device also gets FSR 4's INT8 set, ..."), and the AMD FSR
   set-up line names it ("INT8 device: compute-shader derivatives on").
-- **The output check (0.2.0-dev.31.12).** `upscale_probe.h`, `upscale_probe_logic.h`, `shaders/output_probe.comp`. Once
+- **The output check (0.2.0-dev.31.13).** `upscale_probe.h`, `upscale_probe_logic.h`, `shaders/output_probe.comp`. Once
   per context, 30 FSR frames after its first, Kiln records one 256-thread compute dispatch of its own into the frame's
   command buffer right after the upscaler's work: it reads a 32x32 grid of the game's colour (through the game's view,
   SHADER_READ_ONLY_OPTIMAL) and of the output (the game's R16G16B16A16_SFLOAT view as a storage image, GENERAL), changes
@@ -411,7 +411,7 @@ any of it DLSS. Code: `native/services/ui/upscale.cpp` (the swap), `upscale_amd.
 - **Limits:** after a fault inside an upscaler's own code Kiln never calls that upscaler again (it may hold a lock), so
   its GPU memory stays allocated until the game ends; the game's FSR 3 runs meanwhile.
 - **Not proven yet:** FSR 4 with a correct picture on any GPU (seen: dark scenes too dark on an RX 9070 XT, 29.19;
-  black on an RX 6900 XT, 31.11); whether the INT8 set of 0.2.0-dev.31.12 gives the RX 6900 XT a picture (else the
+  black on an RX 6900 XT, 31.11); whether the INT8 set of 0.2.0-dev.31.13 gives the RX 6900 XT a picture (else the
   output check runs FSR 3.1 there); the output check in a real game; FSR 4 on RX 7000, the APUs and the Steam Deck;
   AMD FSR 3.1 on an AMD card on Windows. Seen: AMD FSR 3.1 and XeSS on an NVIDIA card (Proton); the swap itself on the
   real client with a plain stretch (spike B0, RTX 3080 Ti, Proton).

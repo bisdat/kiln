@@ -718,7 +718,7 @@ static void amd_map() {
     CHECK(ffxApiGetSurfaceFormatVK(VK_FORMAT_R16G16_SNORM) == FFX_API_SURFACE_FORMAT_UNKNOWN);
 }
 
-// FSR 4's sets on the game's device (0.2.0-dev.31.12): what AMD's selection takes on a GPU decides it, as the 2.4.0 DLL's
+// FSR 4's sets on the game's device (0.2.0-dev.31.13): what AMD's selection takes on a GPU decides it, as the 2.4.0 DLL's
 // providers do (ffxProvider_FSR4::IsSupported for FP8; the INT8 models otherwise). On an RX 6900 XT (31.11, kiln-win1)
 // FSR 4 4.1.2's INT8 model drew a black screen on a device without compute-shader derivatives, which FSR 4's auto exposure
 // and the RDNA 3 / lite INT8 prepass declare; the RX 9070 XT's FP8 device stays without AMD's sample's set (29.21).
@@ -743,7 +743,7 @@ static void amd_fsr4_sets() {
     using E = amd::Fsr4Ext;
     CHECK(amd::choose_fsr4_set(rx6900, E::automatic).set == S::int8 && amd::choose_fsr4_set(rx7900, E::automatic).set == S::int8);
     CHECK(amd::choose_fsr4_set(apu, E::automatic).set == S::int8 && amd::choose_fsr4_set(no_coop_feature, E::automatic).set == S::int8);
-    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).set == S::none);  // the 9070 XT stays as 29.21 to 31.11
+    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).set == S::none);  // the 9070 XT stays as 29.21 to 31.12
     CHECK(amd::choose_fsr4_set(nv, E::automatic).set == S::none);
     CHECK(amd::choose_fsr4_set(rx6900, E::off).set == S::none && amd::choose_fsr4_set(rx9070, E::on).set == S::native &&
           amd::choose_fsr4_set(nv, E::on).set == S::native);

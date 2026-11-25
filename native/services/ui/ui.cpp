@@ -150,7 +150,7 @@ void logf(int level, const char* fmt, ...) {
     va_end(ap);
     if (n > 0 && static_cast<size_t>(n) >= sizeof(buf)) {
         // a long line (the upscaler's device report lists every extension and feature): whole, up to 16 KB, never cut
-        // at 1023 characters as up to 0.2.0-dev.31.11 (the device's "lacks" list was lost on an RX 6900 XT)
+        // at 1023 characters as up to 0.2.0-dev.31.12 (the device's "lacks" list was lost on an RX 6900 XT)
         std::string big(std::min<size_t>(static_cast<size_t>(n), 16384) + 1, '\0');
         const int m = std::vsnprintf(big.data(), big.size(), fmt, again);
         va_end(again);
