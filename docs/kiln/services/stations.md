@@ -349,7 +349,7 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | --- | --- |
 | `crafting.sources` (`Crafting.SourcesCapability`) | Server or host. Missing payment/access symbols or the permission layout, missing/old `kiln.stations`, or a missing/disabled `kiln.rules` payment hook refuses it. A joined client is the wrong side; offline and no-server-session calls refuse without taking items. |
 | `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
-| `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in or another module patched the code a lock hook reads (kiln.log names it). |
+| `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12, mod API 0.2.21) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in, a hook faulted at run time, or another module patched the code a lock hook reads (kiln.log names it). |
 
 `Kiln.TestKit` records the real managed API on its fake native table: `h.Crafting.Sources` lists live registrations and
 `h.Crafting.Stock(player)` reads registered-only, filtered, permission-checked counts. It models disposal and mod unload,
@@ -358,7 +358,7 @@ all-or-nothing preflight; Windows tests exercise the actual guarded `RecipePaid`
 The real-game scenarios below are still required.
 
 ### Locks from linked sources
-**Since 0.2.0-dev.31.12** (mod API 0.2.21), a link registered with `CraftSourceOptions.Locks = true` also supplies the
+**Since 0.2.0-dev.31.12, mod API 0.2.21**, a link registered with `CraftSourceOptions.Locks = true` also supplies the
 item a lock requires: the game's `InteractionLock` with a required item (a lockpick for the `*_Locked_Pickable_*` doors
 and loot chests, an archaic lockpick for the T7 loot chests, a furniture block's `requires.item`). Thanks to Fuzen777 for
 the request (#147).
@@ -378,9 +378,13 @@ var source = Crafting.AddSource(player, chest, new CraftSourceOptions { Locks = 
   the item only has to be held, in the bag or a link.
 - **The same access rules.** Each payment rechecks that the link is this player's and this login's, the game's
   `CanAccessInventories` right, and a readable initialized storage container, through the transaction's own view.
-- **Kiln server or host and a Kiln client.** The game's client refuses a lock its bag cannot open on its own, before the
-  server hears of the press. A Kiln client counts the server's snapshot (below). A **vanilla client keeps refusing** such a
-  lock; nothing changes for it.
+- **A Kiln server or host decides; a Kiln client shows it.** The server world runs every player's press from that
+  player's input, and its own lock check (with Kiln, the bag plus the opted-in links) decides whether the press goes on to
+  the payment; the client's predicted outcome does not stop it ([docs/re/locks.md](../../re/locks.md) section 8). So the
+  lock opens and pays from the links for a **vanilla client too**, but a vanilla client counts only its bag: its locked
+  prompt still shows the lock locked, and its own prediction may first play the lock's failed attempt before the
+  server's result arrives. A Kiln client counts the server's snapshot (below), so its prompt and its prediction agree with
+  the server.
 
 How it works ([docs/re/locks.md](../../re/locks.md)):
 - The server's lock check (the press, in `player_control_action_sequence`) counts the bag plus the server's own count of

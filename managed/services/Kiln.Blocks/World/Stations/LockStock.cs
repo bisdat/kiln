@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // GitHub #147, since 0.2.0-dev.31.12: locks (the game's InteractionLock with a required item: a lockpick, a key) count and
-// pay that item from the player's links registered with CraftSourceOptions.Locks. The game's client refuses a lock its
-// bag cannot open on its own, before the server ever hears of the press, so a Kiln client needs the server's counts:
+// pay that item from the player's links registered with CraftSourceOptions.Locks. The server world runs the press from the
+// player's input and its own lock check decides it (docs/re/locks.md section 8); the client's prompt and predicted press
+// count only its bag, so a Kiln client gets the server's counts to show and predict the same:
 //  - the server sends a player with a lock-opted link, on the channel kiln:craftstock (required: false), whether it
 //    supports locks from links and, for the lock items that player's client asked about, what the links hold (the bag
 //    not included: the client counts its own bag), again whenever a count changes;
@@ -9,7 +10,8 @@
 //    an item with no row; the client asks the server about those (at most 16, again after 5 s while unanswered);
 //  - not authority: the server's own lock check counts the links itself, and its payment rechecks every link, the bag
 //    first, inside the game's interaction transaction (native, docs/re/locks.md).
-// A vanilla client never asks and is never sent anything; it refuses such a lock as the game does.
+// A vanilla client never asks and is never sent anything: the server still opens such a lock for it and pays from the
+// links, while its prompt shows the lock locked and its own prediction may first play the failed attempt.
 // docs/kiln/services/stations.md, "Locks from linked sources".
 using System.Collections.Concurrent;
 using System.Text;

@@ -82,7 +82,7 @@ payment runs and is rolled back. `fail` (S `0xa57f8`) rolls back (`items/Invento
 `DeclinedInteraction` (EmitEvent hash `0x13f49577`, 12 bytes, S `0xa581f`). `gems/PayMaterial` pays only from the entity it is given (the guest's bag): it takes what it holds
 and answers the rest in `left`.
 
-## 6. What kiln-items does there (0.2.0-dev.31.12)
+## 6. What kiln-items does there (since 0.2.0-dev.31.12, mod API 0.2.21)
 - **Mid hook at `locks/LockCountRet`** (both sides): when error is 0 and the bag's count is below the amount, the
   context's world decides: the server world (storage kind 0; the presser from `world/CurrentEntityId(ctx)`) adds the
   server's own count of that player's links registered with Locks (read on the tick thread each 30 steps); a client or
@@ -101,8 +101,21 @@ and answers the rest in `left`.
 The issue names `Lockpick_Scrapy_T0-T4` (item 2897843384) on 73 templates and `Lockpick_Ancient_T7` (1528331711) on 11.
 Kiln does not depend on them: the hooks read the lock's own `requiredItem`. They were not re-counted for this page.
 
-## 8. Not seen yet
-No lab or client run. Open questions only a game answers: whether the dedicated server's own press check (S `0xb08a0`)
-is what decides a remote player's press, or whether the client's predicted failed attempt also stops it (then a Kiln
-client is required, as designed); the prompt's look while the snapshot row is on its way; a hosting client's three worlds
-in one process.
+## 8. Who decides a remote player's press **[desc] [dis]**
+The server's own check decides. `player_control_action_sequence` has flags `0x200` (the server world and a client's
+prediction world, docs/re/rules.md 1.2) and reads `PlayerInput` read-only (descriptor lists, both builds); no program in
+either exe writes `PlayerInput` (it is the client's raw input, `fromClient.digitalInput`, copied in by the network
+layer), so a client's predicted outcome of the press never reaches the server. The server world runs the same press
+from that input (docs/re/player-state.md: on a spawned character with no client the game's own control programs act on
+`fromClient.digitalInput`), calls its own lock check (S `0xc92ec` → `0xb08a0`, where Kiln's `locks/LockCountRet` hook
+adds the links) and sends `AcceptOfferedInteractionEvent` itself; `interaction_attempt` (flags `0x4`) takes it in the
+server world. `interaction_query_new`, the other reader of InteractionLock, writes `ClientInteractionQuery` on both
+sides and counts no item (section 2). So with a Kiln server a **vanilla client's** press on a lock its bag cannot open still opens it
+and pays from the opted-in links; its own prompt (player_ui, client only) shows the lock locked and its prediction world
+may first play the lock's failed attempt, until the server's state reaches it. A Kiln client's snapshot makes its
+prompt and prediction agree with the server; it is not what lets the press through.
+
+## 9. Not seen yet
+No lab or client run. Open questions only a game answers: what a vanilla client shows when the server opens a lock its
+prediction refused (section 8: the decision itself is read from the code, not seen); the prompt's look while the
+snapshot row is on its way; a hosting client's three worlds in one process.
