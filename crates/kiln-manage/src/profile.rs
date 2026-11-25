@@ -817,10 +817,17 @@ pub fn create(dirs: &DataDirs, name: &str, copy_from: Option<&str>) -> Result<Pr
         return Err(Error::invalid("a profile needs a name of at most 128 characters"));
     }
     let _one = one_at_a_time();
+    // Rootless game pointers fall back to the local ID when no activation record exists. Do not make a foreign
+    // pointer look local just by creating its meta.json. Rooted pointers already distinguish same-ID profiles;
+    // existing local IDs are excluded independently below, so no ownership guess is needed here.
+    let reserved: std::collections::BTreeSet<String> = crate::game::known(dirs)?.into_iter().filter_map(|install| {
+        let file = read_game_profile(&install.path).ok().flatten()?;
+        root_named(&file, &install).is_none().then_some(file.id)
+    }).collect();
     let base = id_from_name(name);
     let mut id = base.clone();
     let mut n = 2;
-    while dirs.profile(&id).exists() {
+    while dirs.profile(&id).exists() || reserved.contains(&id) {
         let suffix = format!("-{n}");
         id = format!("{}{suffix}", &base[..base.len().min(48 - suffix.len())]);
         n += 1;

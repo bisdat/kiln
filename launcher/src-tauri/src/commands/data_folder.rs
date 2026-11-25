@@ -1113,7 +1113,7 @@ pub(crate) mod tests {
     }
 
     /// The default root as a data folder with `n` backup files, and a target on the same disk.
-    fn moving(name: &str, n: usize) -> (PathBuf, DataEnv, PathBuf, PathBuf) {
+    pub(crate) fn moving(name: &str, n: usize) -> (PathBuf, DataEnv, PathBuf, PathBuf) {
         let (t, env) = scratch(name);
         let from = env.default_root().unwrap();
         data_folder(&from);
@@ -1124,6 +1124,27 @@ pub(crate) mod tests {
         }
         let to = t.join("disk/Kiln");
         (t, env, from, to)
+    }
+
+    /// A move that stopped after its copy (its partial copy marked, the journal not committed), and the next start's
+    /// folder in place (`folder::replace`) before its window: `undo_waits` says it will hold the folder for the
+    /// removal. For tests elsewhere (crate::commands::crucible's and nexus' link starts).
+    pub(crate) fn after_an_unfinished_move(name: &str) -> (PathBuf, Arc<Folder>) {
+        forget_start();
+        let (t, env, _from, to) = moving(name, 2);
+        let f = Arc::new(Folder::open(env.clone()));
+        folder::replace(f.clone());
+        let l = f.located().unwrap().clone();
+        hold_for_move(&f).unwrap();
+        let opts = dfm::MoveOptions { force_copy: true, inject: Some(dfm::Inject::StopAfter(dfm::Step::Copy)) };
+        let _ = move_with(&f, &l, &to, &opts, &mut kiln_manage::task::NoProgress);
+        assert!(matches!(dfm::pending(&env).unwrap(), Pending::Uncommitted { .. }), "an unfinished move");
+        f.release_lock();
+        forget_start();
+        let next = Arc::new(Folder::open(env));
+        folder::replace(next.clone());
+        assert!(undo_waits(&next));
+        (t, next)
     }
 
     #[cfg(unix)]

@@ -85,13 +85,13 @@ export function useProfileShare(profileId: ProfileId | null) {
 
 // ---------------------------------------------------------------- the dock under Play
 
-export function ShareDock({ game, profileId, profileName }: { game: GameInstall; profileId: ProfileId; profileName: string }) {
+export function ShareDock({ game, profileId, profileName }: { game: GameInstall; profileId: ProfileId | null; profileName: string }) {
   const t = useT();
   const open = useDock((s) => s.open);
   const setOpen = useDock((s) => s.set);
   const shared = useProfileShare(profileId);
   const changed = !!shared.data?.changed && anyChange(countsOf(shared.data.changed));
-  const run = useShareRun((s) => s.runs[profileId]);
+  const run = useShareRun((s) => profileId ? s.runs[profileId] : undefined);
   const uploading = !!run?.taskId && !run.result && !run.error;
   const dock = useRef<HTMLDivElement>(null);
   // a click outside the dock and its popover, or Esc, closes the popover (an upload goes on)
@@ -107,22 +107,23 @@ export function ShareDock({ game, profileId, profileName }: { game: GameInstall;
     window.addEventListener("keydown", key);
     return () => { window.removeEventListener("mousedown", down); window.removeEventListener("keydown", key); };
   }, [open, setOpen]);
-  useEffect(() => () => setOpen(null), [setOpen]);
+  // A different game or loaded profile must not inherit the previous profile's share popover.
+  useEffect(() => { setOpen(null); return () => setOpen(null); }, [game.id, profileId, setOpen]);
   return (
     <div className="kcr-dock" ref={dock}>
       <div className="kcr-dock-row">
-        <button type="button" className={"kcr-share-btn" + (open === "share" ? " on" : "")} aria-expanded={open === "share"} data-testid="crucible-share"
+        {profileId && <button type="button" className={"kcr-share-btn" + (open === "share" ? " on" : "")} aria-expanded={open === "share"} data-testid="crucible-share"
           onClick={() => setOpen(open === "share" ? null : "share")}>
           <img src={MARK} alt="" aria-hidden width={22} height={22} />
           <span>{uploading ? t("crucible.share.uploadingShort") : t("crucible.share.button")}</span>
           {changed && !uploading && <span className="kcr-pill" data-testid="crucible-pack-changed">{t("crucible.share.changedPill")}</span>}
-        </button>
+        </button>}
         <button type="button" className="k-link kcr-code-link" aria-expanded={open === "code"} data-testid="crucible-got-code" onClick={() => setOpen(open === "code" ? null : "code")}>
           {t("crucible.code.link")}
         </button>
         <button type="button" className="k-link kcr-what-link" data-testid="crucible-what" onClick={openCrucibleWiki}>{t("crucible.share.what")}</button>
       </div>
-      {open === "share" && <SharePanel game={game} profileId={profileId} profileName={profileName} />}
+      {open === "share" && profileId && <SharePanel game={game} profileId={profileId} profileName={profileName} />}
       {open === "code" && <CodePanel onDone={() => setOpen(null)} />}
     </div>
   );

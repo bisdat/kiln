@@ -303,6 +303,45 @@ public sealed class StageWriteTests : IDisposable
         }
     }
 
+    // 0.2.0-dev.31.5: one player's writer lines said "9152.5 ms renaming" for 3 files and nothing more. A line whose slowest
+    // single file operation took over a quarter second names it (which operation, which file, how long), so the next report
+    // says which rename waits; outside the itemised part, so its items still add up.
+    [Fact]
+    public void AWriterLineNamesItsSlowestFileOperation()
+    {
+        var backend = Backend.Current;
+        var oldHook = WorldStore.IoHook;
+        var slowOp = DiskTime.SlowOpMs;
+        var log = new Capture();
+        try
+        {
+            Backend.Current = log;
+            FiveBundles(1);
+            DiskTime.SlowOpMs = 40;
+            var renames = 0;
+            WorldStore.IoHook = op => { if (op == "rename" && ++renames == 6) Thread.Sleep(60); };  // the 6th: the pending manifest
+            Store.Stage(1, SaveReason.Autosave, late: false);
+            WorldStore.IoHook = oldHook;
+            Store.Commit(1, 1001, SaveReason.Autosave);
+            Written();
+            var staged = log.Single("Kiln.Saves: staged mod data generation 1 ");
+            Assert.Matches(@"; \d+\.\d ms else; slowest: renaming 0000000001\.pending\.json, 0\.\d\d s\)$", staged.Text);
+            var confirmed = log.Single("Kiln.Saves: confirmed mod data generation 1 ");
+            Assert.DoesNotContain("slowest", confirmed.Text);                     // nothing over the threshold there
+            var blob = WorldStore.BlobPath(_h.Root, new string('3', 64));
+            var t = new DiskTime();
+            t.Note("forcing to disk", blob, 1234.5);
+            t.Note("renaming", Pending(2), 99);
+            Assert.EndsWith("; slowest: forcing to disk blob 333333333333, 1.23 s", t.Text(2000));
+        }
+        finally
+        {
+            Backend.Current = backend;
+            WorldStore.IoHook = oldHook;
+            DiskTime.SlowOpMs = slowOp;
+        }
+    }
+
     [Fact]
     public void KillNineAfterTheWorldWriteOfAnUnchangedSaveLoadsItsStagedGeneration()
     {

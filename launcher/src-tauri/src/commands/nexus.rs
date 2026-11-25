@@ -12,7 +12,8 @@
 //!   user turned that on in Settings (`nexus_handler_set`). Mods only: the Nexus Mods build never updates the launcher
 //!   itself.
 //! - nxm links reach the running launcher through `<data>/nexus/inbox/` (a second process started by the browser queues
-//!   the link and exits; [`nxm_entry`]); links for other games go to the handler before Kiln.
+//!   the link and exits; [`nxm_entry`]); with no launcher running, the process the browser started holds the link until
+//!   its window is up. Links for other games go to the handler before Kiln.
 
 use super::TaskId;
 use super::app::{launcher_log, spawn_task, to_value};
@@ -47,7 +48,12 @@ static INSTANCE: Mutex<Option<handler::Instance>> = Mutex::new(None);
 /// In a build with Nexus on, another launcher holds `nexus/instance.lock` of this data folder (one that takes no
 /// data-folder lock: dev.24 and earlier). A move or a switch is refused then (commands/data_folder.rs).
 pub fn other_instance(dirs: &kiln_manage::paths::DataDirs) -> bool {
-    if !kiln_manage::nexus::enabled() || INSTANCE.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+    if !kiln_manage::nexus::enabled() {
+        return false;
+    }
+    // held while the lock is tried, so this window's links thread does not take it over meanwhile ([`reader`])
+    let inst = INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
+    if inst.is_some() {
         return false;
     }
     // taken now (and let go at once): nobody else has it
@@ -371,16 +377,29 @@ fn launcher_exe() -> Result<std::path::PathBuf, Error> {
 
 // ---------------------------------------------------------------- links arriving
 
-/// `main` calls this when the launcher was started with a link (`--nxm <url>` or a bare `nxm://` argument). Returns
-/// whether this process should start the UI: false when the link went to another game's handler or to the launcher
-/// that already runs.
+/// `main` calls this when the launcher was started with a link (`--nxm <url>` or a bare `nxm://` argument), before Tauri
+/// and before the data folder's gates open (`state::dirs()` refuses until the beta copy is safe; up to 0.2.0-dev.31.3
+/// the link was lost here). Returns whether this process should start the UI: false when the link went to another
+/// game's handler or to the launcher that already runs.
 pub fn nxm_entry(url: &str) -> bool {
     if !kiln_manage::nexus::enabled() { return disabled_nxm_entry(&LinkEnv::system(), url, &|line| launcher_log("nexus", line)); }
-    let Ok(r) = root() else { return true };
+    enabled_nxm_entry(url, handler::platform().as_ref())
+}
+
+/// The link this process was started with while no launcher ran: held in memory until the window can take it
+/// (`start`), then given to it once.
+static HELD: Mutex<Option<String>> = Mutex::new(None);
+
+/// [`nxm_entry`] with Nexus on. Another game's link goes to the handler before Kiln (`handler.json` is only read). An
+/// Enshrouded link goes into the inbox of the launcher that runs, written only while the folder is free for it
+/// (crate::folder::handoff_dirs), and this process ends; else this start holds it for its own window (or finds it in
+/// the inbox, when that launcher ended meanwhile). An invalid link starts the window without it, as before.
+fn enabled_nxm_entry(url: &str, platform: &dyn HandlerPlatform) -> bool {
     match nxm::game_of(url) {
         None => return true,
         Some(g) if g != catalog::GAME => {
-            match handler::forward(&r, handler::platform().as_ref(), url) {
+            let Some(d) = crate::folder::found_dirs() else { return true };
+            match handler::forward(&catalog::root_of(&d), platform, url) {
                 Ok(_) => launcher_log("nexus", "another game's link handed to the previous handler"),
                 Err(_) => launcher_log("nexus", "another game's link could not be handed to the previous handler"),
             }
@@ -388,19 +407,33 @@ pub fn nxm_entry(url: &str) -> bool {
         }
         _ => {}
     }
-    if let Err(e) = handler::queue_link(&r, url) {
-        launcher_log("nexus", &format!("could not queue a link: {}", e.message));
+    if nxm::parse(url).is_err() {
+        launcher_log("nexus", "invalid Mod Manager Download link refused");
         return true;
     }
-    match handler::acquire_instance(&r) {
-        Ok(Some(i)) => {
-            *INSTANCE.lock().unwrap() = Some(i);
-            true
+    if let Some(d) = crate::folder::handoff_dirs() {
+        let r = catalog::root_of(&d);
+        match handler::find_instance(&r) {
+            Ok(handler::Found::Running) => match handler::queue_link(&r, url) {
+                Ok(_) => match handler::find_instance(&r) {
+                    // the running launcher takes it from the inbox
+                    Ok(handler::Found::Running) => return false,
+                    // it ended meanwhile: this start reads the inbox once its window is up
+                    Ok(handler::Found::Free(i)) => {
+                        *INSTANCE.lock().unwrap() = i;
+                        return true;
+                    }
+                    Err(_) => return true,
+                },
+                Err(e) => launcher_log("nexus", &format!("could not queue a link: {}", e.message)),
+            },
+            // no launcher runs: this one holds the lock from now on (read-only; none is made before the gate)
+            Ok(handler::Found::Free(i)) => *INSTANCE.lock().unwrap() = i,
+            Err(_) => {}
         }
-        // the running launcher takes it from the inbox
-        Ok(None) => false,
-        Err(_) => true,
     }
+    *HELD.lock().unwrap() = Some(url.to_string());
+    true
 }
 
 // ---------------------------------------------------------------- Nexus off: Kiln's own leftovers
@@ -494,8 +527,9 @@ fn startup_cleanup(root: &std::path::Path, nexus_on: bool, platform: &dyn Handle
     log
 }
 
-/// At setup: holds the instance lock and watches the inbox (every 500 ms). Enshrouded links wait in memory for the UI
-/// (`kiln://nxm`, the window comes to the front); others go to the previous handler.
+/// When the gate opens (lib.rs `after_snapshot`): the link this process was started with goes to the window, then the
+/// instance lock and the inbox (every 500 ms). Enshrouded links wait in memory for the UI (`kiln://nxm`, the window
+/// comes to the front); others go to the previous handler.
 pub fn start(app: &AppHandle) {
     // Kiln's leftovers from older builds go in every build; the keyring and xdg-mime are asked off the setup thread.
     let nexus_on = kiln_manage::nexus::enabled();
@@ -520,60 +554,127 @@ pub fn start(app: &AppHandle) {
         return;
     }
     let _ = APP_VERSION.set(app.package_info().version.to_string());
-    let Ok(r) = root() else { return };
-    {
-        let mut inst = INSTANCE.lock().unwrap();
-        if inst.is_none() {
-            *inst = handler::acquire_instance(&r).ok().flatten();
-        }
-        // A normally-started second UI may remain open, but must not race the lock owner for queued links.
-        if inst.is_none() {
-            return;
-        }
+    let open = gate_open();
+    if open.added > 0 {
+        launcher_log("nexus", "the Mod Manager Download link this launcher was started with goes to the window");
+        to_window(app);
     }
+    // A normally-started second UI may remain open, but must not race the lock owner for queued links: it reads the
+    // inbox only once it took the lock over from a launcher that ended ([`reader`]).
+    let Some(r) = open.root else { return };
     let app = app.clone();
     std::thread::spawn(move || loop {
-        // the inbox is in the data folder: a writer (its files are removed once read) a move waits for, and not read
-        // while the folder is held
-        let writing = crate::state::writing();
-        if crate::folder::current().held_error().is_some() {
-            drop(writing);
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            continue;
+        if links_round(&r) > 0 {
+            to_window(&app);
         }
-        let urls = handler::take_links(&r);
-        let mut added = 0;
-        for url in urls {
-            match nxm::parse(&url) {
-                Ok(link) if link.game == catalog::GAME => {
-                    launcher_log("nexus", &format!("link {}", link.redacted()));
-                    let id = format!("nxm-{}-{}", kiln_manage::util::now_unix(), NEXT_LINK.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-                    let mut l = LINKS.lock().unwrap();
-                    l.retain(|p| p.link.file_id != link.file_id || p.link.mod_id != link.mod_id);
-                    if l.len() >= 100 { l.remove(0); }
-                    l.push(Pending { id, link, received: kiln_manage::util::now_rfc3339() });
-                    added += 1;
-                }
-                Ok(_) | Err(_) if nxm::game_of(&url).is_some_and(|g| g != catalog::GAME) => {
-                    let _ = handler::forward(&r, handler::platform().as_ref(), &url);
-                    launcher_log("nexus", "another game's link handed on");
-                }
-                Ok(_) => {}
-                Err(_) => launcher_log("nexus", "invalid Mod Manager Download link refused"),
-            }
-        }
-        if added > 0 {
-            let count = LINKS.lock().unwrap().len();
-            let _ = app.emit(NXM_EVENT, serde_json::json!({"count": count}));
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-        }
-        drop(writing);
         std::thread::sleep(std::time::Duration::from_millis(500));
     });
+}
+
+/// What the gate's opening found: the start's own link (added to the waiting links: 1, or 0), and the Nexus folder
+/// whose inbox the links thread watches (None: the data folder is not usable). The instance lock is taken here unless
+/// another launcher has it.
+struct GateOpen {
+    added: usize,
+    root: Option<std::path::PathBuf>,
+}
+
+fn gate_open() -> GateOpen {
+    let held = HELD.lock().unwrap().take();
+    let added = held.map_or(0, |url| accept(vec![url], &|_| {}));
+    let Ok(r) = root() else { return GateOpen { added, root: None } };
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_none() {
+        *inst = handler::acquire_instance(&r).ok().flatten();
+    }
+    GateOpen { added, root: Some(r) }
+}
+
+/// One round of the links thread: how many Enshrouded links the inbox added, read only by the launcher with the
+/// instance lock ([`reader`]).
+fn links_round(r: &std::path::Path) -> usize {
+    if !reader(r) { return 0; }
+    inbox_round(r)
+}
+
+/// This process holds `instance.lock`, or takes it now: the launcher that had it when this window's gate opened has
+/// ended since. Without that a second window stayed without a reader for good: a link handed to the launcher that
+/// ended, in its last moments before its next round, waited in the inbox for the next start, and the next start for a
+/// link opened another window. Read-only while the lock file is there (no permission change every round); never while
+/// the folder is held or the beta copy's gate is closed.
+fn reader(r: &std::path::Path) -> bool {
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_some() {
+        return true;
+    }
+    let taken = {
+        let _writing = crate::state::writing();
+        if crate::folder::current().held_error().is_some() || crate::snapshot::startup::refusal().is_some() {
+            return false;
+        }
+        match handler::find_instance(r) {
+            Ok(handler::Found::Free(Some(i))) => Some(i),
+            Ok(handler::Found::Free(None)) => handler::acquire_instance(r).ok().flatten(),
+            Ok(handler::Found::Running) | Err(_) => None,
+        }
+    };
+    let got = taken.is_some();
+    *inst = taken;
+    drop(inst);
+    if got {
+        launcher_log("nexus", "this window takes Mod Manager Download links from now on: the launcher that had them ended");
+    }
+    got
+}
+
+/// One look into the inbox (the reader's round): how many Enshrouded links it added. The inbox is in the data folder:
+/// a writer (its files are removed once read) a move or a restore of the beta copy waits for, and not read while the
+/// folder is held or the beta copy's gate is closed (as `state::dirs()` refuses then).
+fn inbox_round(r: &std::path::Path) -> usize {
+    let _writing = crate::state::writing();
+    if crate::folder::current().held_error().is_some() || crate::snapshot::startup::refusal().is_some() {
+        return 0;
+    }
+    accept(handler::take_links(r), &|url| {
+        let _ = handler::forward(r, handler::platform().as_ref(), url);
+    })
+}
+
+/// Enshrouded links wait for the UI (one per mod file, at most 100); another game's goes to `forward`; anything else is
+/// refused. The log lines never carry the key. Returns how many were added.
+fn accept(urls: Vec<String>, forward: &dyn Fn(&str)) -> usize {
+    let mut added = 0;
+    for url in urls {
+        match nxm::parse(&url) {
+            Ok(link) if link.game == catalog::GAME => {
+                launcher_log("nexus", &format!("link {}", link.redacted()));
+                let id = format!("nxm-{}-{}", kiln_manage::util::now_unix(), NEXT_LINK.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+                let mut l = LINKS.lock().unwrap();
+                l.retain(|p| p.link.file_id != link.file_id || p.link.mod_id != link.mod_id);
+                if l.len() >= 100 { l.remove(0); }
+                l.push(Pending { id, link, received: kiln_manage::util::now_rfc3339() });
+                added += 1;
+            }
+            Ok(_) | Err(_) if nxm::game_of(&url).is_some_and(|g| g != catalog::GAME) => {
+                forward(&url);
+                launcher_log("nexus", "another game's link handed on");
+            }
+            Ok(_) => {}
+            Err(_) => launcher_log("nexus", "invalid Mod Manager Download link refused"),
+        }
+    }
+    added
+}
+
+/// `kiln://nxm` with how many links wait; the window comes to the front.
+fn to_window(app: &AppHandle) {
+    let count = LINKS.lock().unwrap().len();
+    let _ = app.emit(NXM_EVENT, serde_json::json!({"count": count}));
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
 }
 
 #[cfg(test)]
@@ -707,6 +808,145 @@ mod capability_tests {
         // the data folder cannot be located: the message
         assert!(disabled_nxm_entry(&LinkEnv { root: None, platform: Box::new(FakeOs::default()) }, url, &log));
         assert!(NOTICE.lock().unwrap().take().is_some());
+    }
+
+    const NXM: &str = "nxm://enshrouded/mods/310/files/1001?key=SECRET-KEY&expires=9999999999";
+
+    /// A start for an nxm link as `main` runs it in every production build: the process's data folder opened (its lock
+    /// shared), the beta copy's gate still "preparing" (a test run's would be "ready": that hid the bug), no window.
+    struct NxmStart {
+        root: std::path::PathBuf,
+        nexus: std::path::PathBuf,
+        gate: crate::snapshot::startup::TestGate,
+        _serial: crate::folder::TestGuard,
+    }
+
+    impl Drop for NxmStart {
+        fn drop(&mut self) {
+            HELD.lock().unwrap().take();
+            INSTANCE.lock().unwrap().take();
+            LINKS.lock().unwrap().clear();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn nxm_start(tag: &str, before: impl FnOnce(&Path)) -> NxmStart {
+        let serial = crate::folder::test_serial();
+        let root = std::env::temp_dir().join(format!("kl-nxm-link-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        before(&root);
+        let folder = std::sync::Arc::new(crate::folder::Folder::open(kiln_manage::paths::DataEnv {
+            kiln_data_dir: Some(root.clone().into()), ..Default::default()
+        }));
+        crate::folder::replace(folder);
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        NxmStart { nexus: root.join("nexus"), root, gate, _serial: serial }
+    }
+
+    fn tree(p: &Path) -> std::collections::BTreeSet<String> { crate::commands::data_folder::tests::tree(p) }
+
+    /// 0.2.0-dev.31.3: an nxm link that started the launcher was dropped, `nxm_entry` ran before the gate opened and
+    /// `state::dirs()` refused.
+    #[test]
+    fn an_nxm_link_that_starts_the_launcher_reaches_its_window_once_the_gate_opens() {
+        if !kiln_manage::nexus::enabled() { return; }
+        let s = nxm_start("cold", |_| {});
+        assert!(crate::state::dirs().is_err(), "the production start: the gate is not open yet");
+        let before = tree(&s.root);
+        assert!(enabled_nxm_entry(NXM, &FakeOs::default()), "no launcher runs: this one starts its window");
+        assert_eq!(tree(&s.root), before, "nothing is written before the gate opens (no Nexus folder, lock or inbox)");
+        // lib.rs after_snapshot
+        s.gate.open();
+        let open = gate_open();
+        assert_eq!(open.added, 1);
+        assert_eq!(open.root.as_deref(), Some(s.nexus.as_path()));
+        assert!(INSTANCE.lock().unwrap().is_some(), "this launcher reads the inbox from now on");
+        let waiting = tauri::async_runtime::block_on(nexus_links()).unwrap();
+        assert_eq!(waiting.iter().map(|l| (l.mod_id.as_str(), l.file_id.as_str())).collect::<Vec<_>>(), [("310", "1001")]);
+        // once
+        assert_eq!(gate_open().added, 0);
+        assert_eq!(inbox_round(&s.nexus), 0);
+        assert_eq!(tauri::async_runtime::block_on(nexus_links()).unwrap().len(), 1);
+        assert!(matches!(handler::find_instance(&s.nexus).unwrap(), handler::Found::Running));
+    }
+
+    #[test]
+    fn an_nxm_link_for_the_running_launcher_goes_to_its_inbox_once_and_this_process_ends() {
+        if !kiln_manage::nexus::enabled() { return; }
+        let s = nxm_start("warm", |_| {});
+        let running = handler::acquire_instance(&s.nexus).unwrap().expect("the running launcher's lock");
+        assert!(!enabled_nxm_entry(NXM, &FakeOs::default()), "the process started for the link ends");
+        assert!(HELD.lock().unwrap().is_none() && INSTANCE.lock().unwrap().is_none());
+        assert_eq!(handler::take_links(&s.nexus), [NXM], "the running launcher's reader takes it, once");
+        assert!(handler::take_links(&s.nexus).is_empty());
+        drop(running);
+    }
+
+    #[test]
+    fn another_games_link_goes_to_the_handler_before_kiln_without_waiting_for_the_gate() {
+        if !kiln_manage::nexus::enabled() { return; }
+        let s = nxm_start("other-game", |root| dev19_record(&root.join("nexus")));
+        let before = tree(&s.root);
+        let os = FakeOs::default();
+        let url = "nxm://skyrimspecialedition/mods/1/files/2?key=K&expires=9";
+        assert!(!enabled_nxm_entry(url, &os), "the handler before Kiln took it: this process ends");
+        assert_eq!(*os.forwarded.lock().unwrap(), [("Vortex".to_string(), url.to_string())]);
+        assert_eq!(tree(&s.root), before, "handler.json is only read");
+    }
+
+    /// A second window (its gate opened while another launcher held `nexus/instance.lock`) takes the lock over once that
+    /// launcher ended: a link handed to the one that ended before its next round reaches this window instead of waiting
+    /// for the next start, and the next link start finds this window running.
+    #[test]
+    fn a_second_window_takes_the_nxm_links_over_once_the_launcher_that_had_them_ended() {
+        if !kiln_manage::nexus::enabled() { return; }
+        let s = nxm_start("take-over", |_| {});
+        s.gate.open();
+        let first = handler::acquire_instance(&s.nexus).unwrap().unwrap();
+        let open = gate_open();
+        assert!(open.root.is_some() && INSTANCE.lock().unwrap().is_none(), "the first launcher has the lock");
+        handler::queue_link(&s.nexus, NXM).unwrap();
+        assert_eq!(links_round(&s.nexus), 0, "while the first launcher runs its links stay for it");
+        assert!(INSTANCE.lock().unwrap().is_none());
+        assert!(other_instance(&kiln_manage::paths::DataDirs::at(s.root.clone())), "a move here waits for the first launcher");
+        // the first launcher ended before its next round
+        drop(first);
+        assert_eq!(links_round(&s.nexus), 1, "this window took the lock over and reads the inbox");
+        assert_eq!(links_round(&s.nexus), 0, "once");
+        assert_eq!(tauri::async_runtime::block_on(nexus_links()).unwrap().len(), 1);
+        assert!(matches!(handler::find_instance(&s.nexus).unwrap(), handler::Found::Running), "a later link start hands over to this window");
+        assert!(!other_instance(&kiln_manage::paths::DataDirs::at(s.root.clone())), "this window is the one that runs now");
+        // with the folder held (here: the beta copy's gate closed again) no lock is taken over
+        INSTANCE.lock().unwrap().take();
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        assert_eq!(links_round(&s.nexus), 0);
+        assert!(INSTANCE.lock().unwrap().is_none());
+        drop(gate);
+    }
+
+    #[test]
+    fn an_nxm_link_start_writes_nothing_while_the_folder_is_held_or_the_link_is_invalid() {
+        if !kiln_manage::nexus::enabled() { return; }
+        // another launcher holds the data-folder lock exclusively (a move, the beta copy's capture or restore)
+        let mut exclusive = None;
+        let s = nxm_start("elsewhere", |root| exclusive = kiln_manage::data_folder::DataLock::exclusive(root).unwrap());
+        assert!(exclusive.is_some());
+        let running = handler::acquire_instance(&s.nexus).unwrap().unwrap();
+        let before = tree(&s.root);
+        assert!(enabled_nxm_entry(NXM, &FakeOs::default()), "the window starts: it shows that the folder is held");
+        assert_eq!(tree(&s.root), before);
+        drop((running, exclusive, s));
+        // links that are no Enshrouded mod file: the window starts without them, as before
+        let s = nxm_start("invalid", |_| {});
+        let before = tree(&s.root);
+        for bad in ["nxm://enshrouded/mods/x/files/2", "nxm://enshrouded/mods/1", "nxm://enshrouded/collections/abc", "nxm:///mods/1/files/2"] {
+            assert!(enabled_nxm_entry(bad, &FakeOs::default()), "{bad}");
+        }
+        assert!(HELD.lock().unwrap().is_none());
+        assert_eq!(tree(&s.root), before);
+        s.gate.open();
+        assert_eq!(gate_open().added, 0);
     }
 
     #[test]

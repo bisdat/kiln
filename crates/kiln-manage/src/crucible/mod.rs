@@ -727,6 +727,11 @@ pub struct Preview {
     pub optional: BTreeMap<String, bool>,
     /// An installed instance of this pack (the preview offers its update instead).
     pub instance: Option<String>,
+    /// What that instance's profile loads from its installed version and the Library lacks ([`pack::lacking_of`]: an
+    /// optional mod switched off and a server-only mod are not missing): the preview's "Download missing mods" ([`repair`]).
+    /// None without an instance; `missing` and `download` above are of the version shown, for a new install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<pack::Lacking>,
     pub game: GameFit,
     pub kiln: KilnFit,
     pub trusted: bool,
@@ -787,7 +792,8 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
 
 /// [`preview`] for an index already opened.
 pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion, index: PackIndex, game: Option<&GameInstall>) -> Result<Preview> {
-    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().collect();
+    // by the part's stored file, not its id: an EMF mod and a ShroudLink mod may both be called "expeditions"
+    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().map(|(_, f)| (f.sha256.clone(), f)).collect();
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut size = 0u64;
@@ -797,7 +803,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
         size = size.saturating_add(part_size(m.file.as_ref()));
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-        if let Some(f) = lacking.get(&m.id) {
+        if let Some(f) = m.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr.clone());
         } else {
@@ -815,7 +821,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     if let Some(l) = &index.layer {
         size = size.saturating_add(part_size(l.file.as_ref()));
         let lr = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
-        if let Some(f) = lacking.get(&l.id) {
+        if let Some(f) = l.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr);
         } else {
@@ -837,8 +843,10 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
             None => i.pack == index.id,
         })
         .map(|(p, _)| p);
+    // an instance without its base (an older or broken install) has nothing to repair from
+    let repair = instance.as_deref().and_then(|pid| pack::lacking_of(dirs, pid).ok());
     let trusted = pack.owner.as_ref().is_some_and(|o| trusted(dirs).iter().any(|t| t.id == o.id));
-    Ok(Preview { game: game_fit(&index, game), kiln: kiln_fit(&index), pack, version, index, size, download, missing, present, code, optional, instance, trusted })
+    Ok(Preview { game: game_fit(&index, game), kiln: kiln_fit(&index), pack, version, index, size, download, missing, present, code, optional, instance, repair, trusted })
 }
 
 /// Downloads what the Library lacks of a version and puts the .kilnpack together for this game client
@@ -861,37 +869,7 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
         return Err(err(ErrorCode::Refused, "This pack is larger than Crucible allows (2 GB)."));
     }
     let mut got = 0u64;
-    let mut archives = BTreeMap::new();
-    let urls = |id: &str| -> Option<String> {
-        let mods = raw.get("mods")?.as_array()?;
-        let m = mods.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(id));
-        let f = match m {
-            Some(m) => m.get("file"),
-            None => raw.get("layer").and_then(|l| l.get("file")),
-        }?;
-        f.get("url")?.as_str().map(str::to_string)
-    };
-    for (id, f) in &lacking {
-        if progress.canceled() {
-            return Err(err(ErrorCode::Canceled, "canceled"));
-        }
-        let role = if ix.layer.as_ref().is_some_and(|l| &l.id == id) { "layer" } else { "mod" };
-        let dest = root(dirs).join("cache").join(if role == "layer" { "l" } else { "f" }).join(format!("{}.zip", f.sha256));
-        let cached = dest.is_file() && crate::hash::sha256_file(&dest).is_ok_and(|(h, n)| h == f.sha256 && n == f.size);
-        if !cached {
-            let name = ix.mods.iter().find(|m| &m.id == id).and_then(|m| m.name.clone()).unwrap_or_else(|| id.clone());
-            progress.report(Some(got as f32 / total.max(1) as f32 * 0.8), &format!("downloading {name}"));
-            let mut tick = |n: u64| {
-                got += n;
-            };
-            c.download(urls(id).as_deref(), role, f, &dest, &mut tick).map_err(|e| {
-                if e.code == ErrorCode::HashMismatch { err(ErrorCode::HashMismatch, format!("{name} didn't download correctly. Try again.")) } else { e }
-            })?;
-        } else {
-            got += f.size;
-        }
-        archives.insert(f.sha256.clone(), dest);
-    }
+    let (archives, _) = download_parts(dirs, c, &ix, &raw, &lacking, total, &mut got, progress)?;
     let mut blobs = BTreeMap::new();
     let raw_overrides: Vec<Value> = raw.get("overrides").and_then(Value::as_array).cloned().unwrap_or_default();
     for o in &ix.overrides {
@@ -910,6 +888,52 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
     let done = pack::assemble_for(dirs, &ix, &pack::client_skips, &archives, &blobs, &out)?;
     progress.report(Some(0.9), "pack checked");
     Ok((ix, done, got))
+}
+
+/// Downloads the stored archives of `parts` ((mod or layer id, its file) of the signed index `ix`; `raw`: the index as
+/// signed, which names each archive's address) into the cache, each checked against its sha256 and size (a cached one
+/// that still is is not downloaded again): (the sha256 -> the archive, the bytes downloaded). `got` counts the bytes of
+/// every part, cached or not (progress 0..0.8 of `total`).
+#[allow(clippy::too_many_arguments)]
+fn download_parts(dirs: &DataDirs, c: &Crucible, ix: &PackIndex, raw: &Value, parts: &[(String, StoredFile)], total: u64, got: &mut u64, progress: &mut dyn Progress)
+    -> Result<(BTreeMap<String, PathBuf>, u64)> {
+    let mut archives = BTreeMap::new();
+    let mut fetched = 0u64;
+    // the part with this id AND this stored file: two kinds of mod may share an id (each has its own file)
+    let urls = |id: &str, sha: &str| -> Option<String> {
+        let mods = raw.get("mods")?.as_array()?;
+        let m = mods.iter().find(|m| {
+            m.get("id").and_then(Value::as_str) == Some(id) && m.get("file").and_then(|f| f.get("sha256")).and_then(Value::as_str) == Some(sha)
+        });
+        let f = match m {
+            Some(m) => m.get("file"),
+            None => raw.get("layer").and_then(|l| l.get("file")),
+        }?;
+        f.get("url")?.as_str().map(str::to_string)
+    };
+    for (id, f) in parts {
+        if progress.canceled() {
+            return Err(err(ErrorCode::Canceled, "canceled"));
+        }
+        let role = if ix.layer.as_ref().is_some_and(|l| &l.id == id) { "layer" } else { "mod" };
+        let dest = root(dirs).join("cache").join(if role == "layer" { "l" } else { "f" }).join(format!("{}.zip", f.sha256));
+        let cached = dest.is_file() && crate::hash::sha256_file(&dest).is_ok_and(|(h, n)| h == f.sha256 && n == f.size);
+        if !cached {
+            let name = ix.mods.iter().find(|m| &m.id == id && m.file.as_ref().is_some_and(|x| x.sha256 == f.sha256)).and_then(|m| m.name.clone()).unwrap_or_else(|| id.clone());
+            progress.report(Some(*got as f32 / total.max(1) as f32 * 0.8), &format!("downloading {name}"));
+            let mut tick = |n: u64| {
+                *got += n;
+            };
+            c.download(urls(id, &f.sha256).as_deref(), role, f, &dest, &mut tick).map_err(|e| {
+                if e.code == ErrorCode::HashMismatch { err(ErrorCode::HashMismatch, format!("{name} didn't download correctly. Try again.")) } else { e }
+            })?;
+            fetched = fetched.saturating_add(f.size);
+        } else {
+            *got += f.size;
+        }
+        archives.insert(f.sha256.clone(), dest);
+    }
+    Ok((archives, fetched))
 }
 
 /// Install and play from Crucible.
@@ -998,6 +1022,47 @@ pub fn install(dirs: &DataDirs, c: &Crucible, game: Option<&GameInstall>, req: &
         let _ = c.count_install(&req.target);
     }
     Ok(InstallResult { profile: r.profile, instance: r.instance, imported: r.imported, overrides: r.overrides, previous, downloaded })
+}
+
+/// "Download missing mods": downloads from Crucible what an instance's profile loads from its installed version and the
+/// Library lacks ([`pack::lacking_of`]), the archives of that version only, each checked against its sha256 as an install
+/// does; puts them together with the layer and the installed overrides as a partial pack ([`pack::assemble_for`]: every
+/// kdh1 checked) and imports them into the Library ([`pack::repair_from`]). The instance keeps its version (an update
+/// waiting stays an update: the update screen), its profile and settings; nothing is activated or started, nothing in a
+/// game folder changes, so it may run while the game does. Nothing missing: nothing is asked of Crucible.
+pub fn repair(dirs: &DataDirs, c: &Crucible, pid: &str, progress: &mut dyn Progress) -> Result<pack::RepairResult> {
+    let inst = pack::instance(dirs, pid)?.ok_or_else(|| Error::not_found(format!("profile {pid} is no Crucible pack")))?;
+    let vid = inst.crucible.as_ref().and_then(|x| x.version.clone()).ok_or_else(|| Error::not_found("this pack was not installed from Crucible"))?;
+    let parts = pack::repair_parts(dirs, pid)?;
+    if parts.lacking.is_empty() {
+        progress.report(Some(1.0), "nothing is missing");
+        return Ok(pack::RepairResult { profile: pid.into(), version: inst.version, imported: Vec::new(), downloaded: 0, left: Vec::new() });
+    }
+    progress.report(Some(0.0), "reading the pack");
+    let (ix, raw) = c.index(&vid)?;
+    same_crucible_pack(&inst, &ix)?;
+    if ix.version != parts.index.version {
+        return Err(err(ErrorCode::Refused, "Crucible's copy of this version is not the one installed."));
+    }
+    // the archives as the signed index names them (the same sha256 as the installed index; refused below otherwise)
+    let mut lacking = Vec::new();
+    for (id, f) in &parts.lacking {
+        // the part with this id AND this stored file (two kinds of mod may share an id)
+        let signed = ix.mods.iter().filter(|m| &m.id == id).filter_map(|m| m.file.clone())
+            .chain(ix.layer.iter().filter(|l| &l.id == id).filter_map(|l| l.file.clone()))
+            .find(|s| s.sha256 == f.sha256)
+            .ok_or_else(|| err(ErrorCode::Refused, format!("{id}: Crucible's copy of this version is not the one installed")))?;
+        lacking.push((id.clone(), signed));
+    }
+    let total = lacking.iter().map(|(_, f)| f.size).fold(0u64, u64::saturating_add);
+    let mut got = 0u64;
+    let (archives, fetched) = download_parts(dirs, c, &ix, &raw, &lacking, total, &mut got, &mut Scaled { inner: progress, from: 0.0, to: 0.7 })?;
+    progress.report(Some(0.6), "checking the files");
+    let out = root(dirs).join("packs").join(format!("{vid}.repair.{}", pack::EXTENSION));
+    let done = pack::assemble_for(dirs, &ix, &parts.skip(), &archives, &parts.blobs, &out);
+    let r = done.and_then(|a| pack::repair_from(dirs, pid, &a.file, Some(&a.sha256), &mut Scaled { inner: progress, from: 0.6, to: 1.0 }));
+    let _ = std::fs::remove_file(&out);
+    Ok(pack::RepairResult { downloaded: fetched, ..r? })
 }
 
 /// An instance whose pack has a newer version on Crucible.

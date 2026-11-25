@@ -909,6 +909,43 @@ pub fn acquire_instance(root: &Path) -> Result<Option<Instance>> {
     }
 }
 
+/// What a process started for an nxm link finds ([`find_instance`]).
+pub enum Found {
+    /// No launcher holds `instance.lock`. Some: this process holds it now (keep it while the window lives); None: there
+    /// is no lock file yet, nothing was created.
+    Free(Option<Instance>),
+    /// A launcher holds it: it takes links from the inbox.
+    Running,
+}
+
+/// Whether a launcher runs with this Nexus folder, without writing anything (a process started for a link, before the
+/// data folder's gates open): `instance.lock` is opened read-only, never created, its folder never secured or made.
+pub fn find_instance(root: &Path) -> Result<Found> {
+    crate::nexus::require_enabled()?;
+    let p = root.join("instance.lock");
+    match std::fs::symlink_metadata(&p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Found::Free(None)),
+        Err(e) => return Err(crate::util::io_at(&p, "checking")(e)),
+        Ok(m) if !m.is_file() => return Err(Error::invalid("Nexus lock must be a regular file")),
+        Ok(_) => {}
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; opts.custom_flags(libc::O_NOFOLLOW); }
+    #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; opts.custom_flags(0x00200000); } // FILE_FLAG_OPEN_REPARSE_POINT
+    let f = opts.open(&p).map_err(crate::util::io_at(&p, "opening"))?;
+    if !f.metadata()?.is_file() { return Err(Error::invalid("Nexus lock must be a regular file")); }
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        if f.metadata()?.uid() != unsafe { libc::geteuid() } { return Err(Error::new(ErrorCode::Permission, "Nexus lock belongs to another account")); }
+    }
+    match f.try_lock() {
+        Ok(()) => Ok(Found::Free(Some(Instance { _file: crate::util::LockedFile(f) }))),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(Found::Running),
+        Err(std::fs::TryLockError::Error(e)) => Err(Error::from(e)),
+    }
+}
+
 fn inbox(root: &Path) -> PathBuf {
     root.join("inbox")
 }
@@ -1184,6 +1221,31 @@ mod safety_tests {
         assert!(acquire_instance(&root).is_err());
         let linked = root.join("linked"); symlink(&outside, &linked).unwrap();
         assert!(queue_link(&linked, valid).is_err());
+        std::fs::remove_dir_all(root).unwrap(); std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_process_for_a_link_finds_the_running_launcher_without_writing() {
+        use std::os::unix::fs::symlink;
+        let root = temp();
+        let nexus = root.join("nexus");
+        // no launcher took the lock in this folder yet: nothing found, nothing made (not even the private folder)
+        assert!(matches!(find_instance(&nexus).unwrap(), Found::Free(None)));
+        assert!(!nexus.exists());
+        let running = acquire_instance(&nexus).unwrap().expect("the first launcher");
+        assert!(matches!(find_instance(&nexus).unwrap(), Found::Running));
+        drop(running);
+        let Found::Free(Some(mine)) = find_instance(&nexus).unwrap() else { panic!("the lock was free") };
+        assert!(acquire_instance(&nexus).unwrap().is_none(), "this process holds it now");
+        drop(mine);
+        assert_eq!(std::fs::metadata(nexus.join("instance.lock")).unwrap().len(), 0);
+        // a link where the lock should be is never followed
+        let outside = temp();
+        std::fs::write(outside.join("lock"), b"").unwrap();
+        std::fs::remove_file(nexus.join("instance.lock")).unwrap();
+        symlink(outside.join("lock"), nexus.join("instance.lock")).unwrap();
+        assert!(find_instance(&nexus).is_err());
         std::fs::remove_dir_all(root).unwrap(); std::fs::remove_dir_all(outside).unwrap();
     }
 

@@ -179,6 +179,10 @@ internal static unsafe class AbilitiesNative
         public long TriggerTime;
     }
 
+    // KILN_ITEM_USE_COST_ITEM (KilnItemUse.flags, since 0.2.0-dev.31.5): the slot and the item as the trigger context's
+    // costItem too, as the game's hand use writes them (an older kiln.abilities answers InvalidArgument)
+    public const uint UseCostItem = 1u << 0;
+
     // KILN_ITEM_USE_* (KilnItemUse.status)
     public const uint UseStarted = 0, UseNotOwnSlot = 1, UseEmptySlot = 2, UseOtherItem = 3, UseNotAPlayer = 4, UseDead = 5,
         UseNotReady = 6, UseBusy = 7;

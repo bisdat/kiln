@@ -472,6 +472,35 @@ fn a_game_client_downloads_no_server_only_mod() {
     assert!(update_plan(&b, &cb, &ir.profile.id, &mut NoProgress).is_ok());
 }
 
+/// The same pack installed again by its code after one of its mods changed in its Library folder (0.2.0-dev.31.8: a
+/// player's "the library did not take native lootrarityleveler"): the install puts the mod's original files back.
+#[test]
+fn a_pack_installs_again_by_code_over_a_mod_changed_in_the_library() {
+    let t = tmp("changed-entry");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let req = InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() };
+    let first = install(&b, &cb, None, &req, None, false, &mut NoProgress).unwrap();
+    let alpha = first.profile.mods.kiln.iter().find(|m| m.id == "alpha").unwrap();
+    let lr = LibraryRef { kind: ModKind::Kiln, id: alpha.id.clone(), version: alpha.version.clone(), hash: alpha.hash.clone() };
+    let entry = crate::library::path_of(&b, &lr).unwrap();
+    let original = std::fs::read(entry.join("M.dll")).unwrap();
+    std::fs::write(entry.join("M.dll"), b"changed in the Library").unwrap();
+
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let again = install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), ..req }, None, false, &mut NoProgress)
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(again.profile.mods.kiln.iter().any(|m| m.id == "alpha" && m.hash == lr.hash));
+    assert_eq!(std::fs::read(entry.join("M.dll")).unwrap(), original, "the original files are back");
+    assert_eq!(crate::hash::of_mod(ModKind::Kiln, &entry).unwrap(), lr.hash);
+}
+
 #[test]
 fn signed_out_sharing_keeps_a_private_owner_key_and_updates_the_same_link() {
     let t = tmp("anonymous");
@@ -809,4 +838,326 @@ fn a_lost_share_record_keeps_the_owner_key_of_the_earlier_link() {
     assert!(kept.iter().any(|o| o.key == before.key && o.pack.as_deref() == Some(first.pack.id.as_str())),
         "the earlier link's owner key was overwritten");
     assert!(!serde_json::to_string(&shared(&a, &pid).unwrap().unwrap()).unwrap().contains(&before.key));
+}
+
+/// The creator's pack for the repair tests: alpha and beta, gamma optional and off by default, srv for servers only
+/// (Pack Studio's switches, as the signed index says them). -> (creator, the share, the friend, the friend's client)
+fn repair_fixture<'a>(t: &Tmp, fake: &'a Fake, ep: &'a Endpoints) -> (DataDirs, ShareResult, DataDirs, Crucible<'a>) {
+    let (a, pid) = creator(t);
+    add_mods(&a, &pid, &t.0, &["gamma", "srv"]);
+    let ca = Crucible::new(ep, fake, "0.2.0-dev").with_session(Some(KEY.into()));
+    let r = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    {
+        let mut s = fake.s.lock().unwrap();
+        let ix = &mut s.versions.get_mut(&r.version.id).unwrap().2;
+        for m in ix["mods"].as_array_mut().unwrap() {
+            if m["id"] == "gamma" {
+                m["dep"] = "optional".into();
+                m["default"] = false.into();
+            }
+            if m["id"] == "srv" {
+                m["env"] = serde_json::json!({ "client": "unsupported", "server": "required" });
+            }
+        }
+    }
+    (a, r, DataDirs::at(t.0.join("friend")), Crucible::new(ep, fake, "0.2.0-dev"))
+}
+
+fn lib_ref(dirs: &DataDirs, profile: &crate::profile::Profile, id: &str) -> LibraryRef {
+    let m = profile.mods.kiln.iter().find(|m| m.id == id).unwrap_or_else(|| panic!("{id} is not in the profile"));
+    let _ = dirs;
+    LibraryRef { kind: ModKind::Kiln, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() }
+}
+
+/// The player report: a pack profile, one of its mods removed from the Library, the same code opened again. The
+/// preview names what is missing for the installed version; "Download missing mods" fetches exactly that (an optional
+/// mod switched off, the server's mod and what the Library has are not asked for), checks it as an install does, and
+/// puts it back in the Library; the profile, the instance and its version stay as they were, also with an update
+/// waiting (the update stays the update screen's).
+#[test]
+fn a_pack_profile_gets_its_missing_mods_back_and_nothing_else_changes() {
+    let t = tmp("repair");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let (pv, _) = preview(&b, &cb, &r1.pack.code, None).unwrap();
+    assert_eq!(pv.repair, None, "nothing installed: nothing to repair");
+    let ir = install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    assert!(!ir.profile.mods.kiln.iter().find(|m| m.id == "gamma").unwrap().enabled, "gamma is off");
+    let (fresh, _) = preview(&b, &cb, &r1.pack.code, None).unwrap();
+    assert_eq!(fresh.repair.as_ref().map(|l| l.missing.len()), Some(0), "nothing missing after the install");
+
+    // the player removes alpha and the switched-off gamma from the Library (past the profile that lists them)
+    let alpha = lib_ref(&b, &ir.profile, "alpha");
+    let gamma = lib_ref(&b, &ir.profile, "gamma");
+    for r in [&alpha, &gamma] {
+        crate::library::remove_with(&b, r, true, &mut |_, _| Ok(None)).unwrap();
+    }
+    // and the archives Crucible's install kept are gone too (a cleared cache): the repair has to download
+    let _ = std::fs::remove_dir_all(root(&b).join("cache"));
+    // the creator shares a second version meanwhile: an update waits
+    add_mods(&a, &crate::profile::list(&a).unwrap()[0].id, &t.0.join("v2"), &["delta"]);
+    let r2 = share(&a, &Crucible::new(&ep, &fake, "0.2.0-dev").with_session(Some(KEY.into())),
+        &ShareRequest { profile: crate::profile::list(&a).unwrap()[0].id.clone(), ..Default::default() }, None, &mut NoProgress).unwrap();
+    assert_ne!(r2.version.id, r1.version.id);
+
+    let (p, _) = preview(&b, &cb, &r1.pack.code, None).unwrap();
+    assert_eq!(p.instance.as_deref(), Some(pid.as_str()));
+    assert_eq!(p.version.id, r2.version.id, "the preview shows the newest version");
+    let lack = p.repair.clone().expect("the installed version's lacks");
+    assert_eq!(lack.version, "1.0.0");
+    assert_eq!(lack.missing.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["alpha"], "gamma is off, srv is the server's");
+    let alpha_file = pv.index.mods.iter().find(|m| m.id == "alpha").unwrap().file.clone().unwrap();
+    assert_eq!(lack.download, alpha_file.size);
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap(), lack);
+
+    let profile_before = crate::profile::get(&b, &pid).unwrap();
+    let instance_before = pack::instance(&b, &pid).unwrap().unwrap();
+    let base_before = std::fs::read(b.profile(&pid).join("pack/base/kiln-modpack.json")).unwrap();
+    let profiles_before = crate::profile::list(&b).unwrap().len();
+    let sent = fake.sent().len();
+    let done = repair(&b, &cb, &pid, &mut NoProgress).unwrap();
+    let asked: Vec<String> = fake.sent()[sent..].to_vec();
+    assert_eq!(done.imported.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["alpha"], "{done:?}");
+    assert_eq!((done.version.as_str(), done.downloaded, done.left.len()), ("1.0.0", alpha_file.size, 0));
+    // only the installed version's index and alpha's archive: nothing of gamma, srv, beta, the layer, the overrides or v2
+    assert_eq!(asked, [format!("GET cdn.crucible.test/m/{}.json", r1.version.id), format!("GET cdn.crucible.test/f/{}.zip", alpha_file.sha256)], "{asked:?}");
+    assert!(crate::library::path_of(&b, &alpha).unwrap().is_dir(), "alpha is back in the Library");
+    assert!(!crate::library::path_of(&b, &gamma).unwrap().exists(), "the switched-off gamma was not downloaded");
+    assert_eq!(crate::profile::get(&b, &pid).unwrap(), profile_before, "the profile is untouched");
+    assert_eq!(pack::instance(&b, &pid).unwrap().unwrap(), instance_before, "the instance keeps its version");
+    assert_eq!(std::fs::read(b.profile(&pid).join("pack/base/kiln-modpack.json")).unwrap(), base_before);
+    assert_eq!(crate::profile::list(&b).unwrap().len(), profiles_before, "no new profile");
+    assert!(crate::profile::list(&b).unwrap().iter().all(|s| s.active.is_empty()), "nothing activated");
+    assert!(pack::lacking_of(&b, &pid).unwrap().is_empty());
+    assert_eq!(updates(&b, &cb).unwrap().len(), 1, "the update still waits");
+    // nothing missing: nothing is asked of Crucible
+    let sent = fake.sent().len();
+    let again = repair(&b, &cb, &pid, &mut NoProgress).unwrap();
+    assert!(again.imported.is_empty() && again.left.is_empty());
+    assert_eq!(fake.sent().len(), sent);
+}
+
+/// A missing mod's archive that does not match its sha256 puts nothing into the Library (the install's check).
+#[test]
+fn a_repair_with_a_tampered_download_puts_nothing_in_the_library() {
+    let t = tmp("repair-tampered");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let alpha = lib_ref(&b, &ir.profile, "alpha");
+    crate::library::remove_with(&b, &alpha, true, &mut |_, _| Ok(None)).unwrap();
+    let _ = std::fs::remove_dir_all(root(&b).join("cache"));
+    let sha = cb.index(&r1.version.id).unwrap().0.mods.iter().find(|m| m.id == "alpha").unwrap().file.clone().unwrap().sha256;
+    fake.s.lock().unwrap().tamper = Some(sha);
+    let e = repair(&b, &cb, &ir.profile.id, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::HashMismatch, "{e:?}");
+    assert!(!crate::library::path_of(&b, &alpha).unwrap().exists());
+    assert_eq!(pack::lacking_of(&b, &ir.profile.id).unwrap().missing, [alpha]);
+}
+
+/// A pack installed from a file (no Crucible): its missing mods come back from the pack file of the installed version;
+/// another version's file is refused and changes nothing.
+#[test]
+fn a_file_pack_is_repaired_from_its_own_file_only() {
+    let t = tmp("repair-file");
+    let (a, pid) = creator(&t);
+    let built = |version: &str| pack::build(&a, &pack::BuildRequest { profile: pid.clone(), version: version.into(), ..Default::default() }, &t.0.join(format!("out-{version}")), &mut NoProgress).unwrap();
+    let v1 = built("1.0.0");
+    let b = DataDirs::at(t.0.join("friend"));
+    let src = |b: &pack::BuiltPack| ModpackSource::Path { path: b.file.clone(), sha256: Some(b.sha256.clone()) };
+    let ir = pack::install(&b, None, &pack::InstallRequest { source: src(&v1), consent: true, allow_http: false, name: None, optional: BTreeMap::new(), activate: None }, &mut NoProgress).unwrap();
+    let beta = lib_ref(&b, &ir.profile, "beta");
+    crate::library::remove_with(&b, &beta, true, &mut |_, _| Ok(None)).unwrap();
+    assert_eq!(pack::lacking_of(&b, &ir.profile.id).unwrap().missing, [beta.clone()]);
+    // no file and no address it came from: the player picks the file
+    let e = pack::repair(&b, &pack::RepairRequest { profile: ir.profile.id.clone(), source: None, allow_http: false }, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    add_mods(&a, &pid, &t.0.join("v2"), &["delta"]);
+    let v2 = built("1.1.0");
+    // the file preview: what is missing, and whether this file is the installed version that can put it back
+    let i1 = pack::inspect(&b, &v1.file, Some(&v1.sha256)).unwrap();
+    assert_eq!((i1.instance.as_deref(), i1.installed_version), (Some(ir.profile.id.as_str()), true));
+    assert_eq!(i1.repair.map(|l| l.missing), Some(vec![beta.clone()]));
+    assert!(!pack::inspect(&b, &v2.file, Some(&v2.sha256)).unwrap().installed_version);
+    let e = pack::repair(&b, &pack::RepairRequest { profile: ir.profile.id.clone(), source: Some(src(&v2)), allow_http: false }, &mut NoProgress).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    assert!(!crate::library::path_of(&b, &beta).unwrap().exists());
+    let before = (crate::profile::get(&b, &ir.profile.id).unwrap(), pack::instance(&b, &ir.profile.id).unwrap());
+    let done = pack::repair(&b, &pack::RepairRequest { profile: ir.profile.id.clone(), source: Some(src(&v1)), allow_http: false }, &mut NoProgress).unwrap();
+    assert_eq!(done.imported.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["beta"]);
+    assert!(done.left.is_empty());
+    assert!(crate::library::path_of(&b, &beta).unwrap().is_dir());
+    assert_eq!((crate::profile::get(&b, &ir.profile.id).unwrap(), pack::instance(&b, &ir.profile.id).unwrap()), before);
+}
+
+/// "Load it" on a pack profile whose mod left the Library (all the preview offered before Download missing mods):
+/// in Copy mode (a game folder Windows cannot name the data folder from) the activation stops with "not in the library";
+/// with direct paths (Windows, a Proton prefix that reaches the data folder) it succeeds and writes the game's profile
+/// file naming the missing mod's Library folder: the game starts without the mod, the only sign the resolve preview's
+/// warning. Hence the preview's "missing" line before Load it.
+#[cfg(unix)]
+#[test]
+fn loading_a_pack_profile_with_a_missing_mod() {
+    let t = tmp("repair-load");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let alpha = lib_ref(&b, &ir.profile, "alpha");
+    crate::library::remove_with(&b, &alpha, true, &mut |_, _| Ok(None)).unwrap();
+    let game = t.0.join("game");
+    std::fs::create_dir_all(game.join("kiln")).unwrap();
+    std::fs::write(game.join("enshrouded.exe"), b"MZ").unwrap();
+    let pfx = t.0.join("pfx");
+    std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
+    std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
+    let at = |prefix: Option<PathBuf>, mode| crate::game::GameInstall {
+        id: "g-test".into(), kind: crate::game::GameKind::Client, path: game.clone(), exe: "enshrouded.exe".into(),
+        app_id: crate::CLIENT_APP_ID, library: None, platform: crate::game::Platform::Proton, prefix, build_id: None,
+        exe_sha256: None, steam_flavor: None, path_mode: mode, source: "manual".into(),
+    };
+    let e = crate::profile::activate(&b, &ir.profile.id, &at(None, crate::game::PathMode::Copy)).unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    assert!(e.message.contains("alpha") && e.message.contains("not in the library"), "{e:?}");
+    let a = crate::profile::activate(&b, &ir.profile.id, &at(Some(pfx), crate::game::PathMode::Z)).unwrap();
+    assert_eq!(a.profile_id, ir.profile.id);
+    let f = crate::profile::read_game_profile(&game).unwrap().unwrap();
+    assert!(f.mods.kiln.iter().any(|m| m.id == "alpha" && m.enabled), "the game's file names the missing mod: {:?}", f.mods.kiln);
+    let rp = crate::profile::resolve_preview(&b, &crate::profile::get(&b, &ir.profile.id).unwrap(), crate::manifest::RunSide::Client).unwrap();
+    assert!(rp.warnings.iter().any(|w| w.contains("alpha") && w.contains("not in the library")), "{:?}", rp.warnings);
+    // after the repair the same activation has nothing to warn about
+    repair(&b, &cb, &ir.profile.id, &mut NoProgress).unwrap();
+    let rp = crate::profile::resolve_preview(&b, &crate::profile::get(&b, &ir.profile.id).unwrap(), crate::manifest::RunSide::Client).unwrap();
+    assert!(!rp.warnings.iter().any(|w| w.contains("not in the library")), "{:?}", rp.warnings);
+}
+
+/// pack_lacking runs for every pack profile Settings lists and with every preview: it reads the Library as the Library's
+/// own list does (each entry's record, a full hash only when its manifest is newer than its record), never every file
+/// of every mod. A mod file Kiln could not even read leaves the answer as it is; a mod gone, or one whose manifest was
+/// edited, is still missing.
+#[cfg(unix)]
+#[test]
+fn lacking_of_reads_the_library_without_hashing_every_mod_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tmp("repair-cheap");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    let (alpha, beta) = (lib_ref(&b, &ir.profile, "alpha"), lib_ref(&b, &ir.profile, "beta"));
+    let dll = crate::library::path_of(&b, &beta).unwrap().join("M.dll");
+    std::fs::set_permissions(&dll, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // root reads it anyway: then there is nothing to tell
+    let unreadable = std::fs::read(&dll).is_err();
+    let lack = pack::lacking_of(&b, &pid);
+    std::fs::set_permissions(&dll, std::fs::Permissions::from_mode(0o644)).unwrap();
+    if unreadable {
+        assert_eq!(lack.unwrap().missing, [], "beta's files were not read");
+    }
+    crate::library::remove_with(&b, &alpha, true, &mut |_, _| Ok(None)).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha.clone()]);
+    // an edited manifest: the Library reads the entry as changed, so it is missing as it was imported
+    let manifest = crate::library::path_of(&b, &beta).unwrap().join("kiln.mod.json");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let text = std::fs::read_to_string(&manifest).unwrap().replace("\"side\": \"both\"", "\"side\": \"client\"");
+    std::fs::write(&manifest, text).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha, beta]);
+}
+
+/// A pack mod whose files were changed in its Library folder is missing as it was imported: the repair puts its
+/// original files back (the import's put back, 0.2.0-dev.31.8) and says it is back, never "nothing is missing".
+#[test]
+fn a_repair_of_a_mod_changed_in_the_library_says_it_is_back() {
+    let t = tmp("repair-changed");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    let beta = lib_ref(&b, &ir.profile, "beta");
+    let manifest = crate::library::path_of(&b, &beta).unwrap().join("kiln.mod.json");
+    let original = std::fs::read(&manifest).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&manifest, String::from_utf8_lossy(&original).replace("\"side\": \"both\"", "\"side\": \"client\"")).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [beta.clone()]);
+    let done = repair(&b, &cb, &pid, &mut NoProgress).unwrap();
+    assert_eq!((done.imported.as_slice(), done.left.len()), (std::slice::from_ref(&beta), 0), "{done:?}");
+    assert_eq!(std::fs::read(&manifest).unwrap(), original, "its original files are back");
+    assert!(pack::lacking_of(&b, &pid).unwrap().is_empty());
+}
+
+/// Two kinds of mod under one id (a Kiln and a SET "alpha"): the repair tells them apart by kind and stored file, so
+/// only the one that left the Library is downloaded and imported.
+#[test]
+fn a_repair_tells_two_kinds_of_mod_with_one_id_apart() {
+    let t = tmp("repair-same-id");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let set = t.0.join("src/set/alpha");
+    std::fs::create_dir_all(&set).unwrap();
+    std::fs::write(set.join("init.lua"), b"print('alpha')").unwrap();
+    let r = crate::library::import(&a, &[set], &mut NoProgress).unwrap();
+    let lr = r.imported.iter().chain(&r.existing).next().unwrap().clone();
+    let mut p = crate::profile::get(&a, &pid).unwrap();
+    p.mods.set.push(crate::profile::ProfileMod { id: lr.id.clone(), version: lr.version.clone(), hash: lr.hash.clone(), enabled: true });
+    crate::profile::save(&a, &p).unwrap();
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let ir = install(&b, &cb, None, &InstallRequest { target: shared.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let set_alpha = ir.profile.mods.set.iter().find(|m| m.id == "alpha").map(|m| LibraryRef { kind: ModKind::Set, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() }).unwrap();
+    let kiln_alpha = lib_ref(&b, &ir.profile, "alpha");
+    crate::library::remove_with(&b, &set_alpha, true, &mut |_, _| Ok(None)).unwrap();
+    let _ = std::fs::remove_dir_all(root(&b).join("cache"));
+    assert_eq!(pack::lacking_of(&b, &ir.profile.id).unwrap().missing, [set_alpha.clone()]);
+    let ix = cb.index(&shared.version.id).unwrap().0;
+    let set_file = ix.mods.iter().find(|m| m.id == "alpha" && m.kind == ModKind::Set).unwrap().file.clone().unwrap();
+    let sent = fake.sent().len();
+    let done = repair(&b, &cb, &ir.profile.id, &mut NoProgress).unwrap();
+    assert_eq!(done.imported, [set_alpha.clone()], "{done:?}");
+    assert_eq!((done.downloaded, done.left.len()), (set_file.size, 0));
+    assert_eq!(fake.sent()[sent..], [format!("GET cdn.crucible.test/m/{}.json", shared.version.id), format!("GET cdn.crucible.test/f/{}.zip", set_file.sha256)]);
+    assert!(crate::library::path_of(&b, &set_alpha).unwrap().exists() && crate::library::path_of(&b, &kiln_alpha).unwrap().is_dir());
+}
+
+/// Two kinds of mod with one id (a player's pack had an EMF and a ShroudLink "expeditions"): each part downloads its own
+/// file. Before, the download took the first part's URL with the second part's size and failed "larger than allowed".
+#[test]
+fn two_mods_of_different_kinds_with_one_id_each_get_their_own_file() {
+    let t = tmp("same-id");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    // a SET mod also called "alpha" (init.lua only), smaller than the Kiln "alpha"
+    let set = t.0.join("src/set/alpha");
+    std::fs::create_dir_all(&set).unwrap();
+    std::fs::write(set.join("init.lua"), b"print('alpha')").unwrap();
+    let r = crate::library::import(&a, &[set], &mut NoProgress).unwrap();
+    let lr = r.imported.iter().chain(&r.existing).next().unwrap().clone();
+    assert_eq!((lr.kind, lr.id.as_str()), (ModKind::Set, "alpha"));
+    let mut p = crate::profile::get(&a, &pid).unwrap();
+    p.mods.set.push(crate::profile::ProfileMod { id: lr.id.clone(), version: lr.version.clone(), hash: lr.hash.clone(), enabled: true });
+    crate::profile::save(&a, &p).unwrap();
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let alphas: Vec<_> = pv.index.mods.iter().filter(|m| m.id == "alpha").collect();
+    assert_eq!(alphas.len(), 2, "{:?}", pv.index.mods);
+    assert_ne!(alphas[0].file.as_ref().unwrap().size, alphas[1].file.as_ref().unwrap().size);
+    // the preview counts each part's own file once
+    let preview_ok = pv.missing.iter().filter(|m| m.id == "alpha").count() == 2
+        && pv.download == pv.index.mods.iter().filter_map(|m| m.file.as_ref()).map(|f| f.size).sum::<u64>();
+    install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    assert!(preview_ok, "the preview counts each part's own file once: {:?} {}", pv.missing, pv.download);
+    let have = crate::library::list(&b, None).unwrap();
+    assert!(have.iter().any(|e| e.kind == ModKind::Set && e.id == "alpha"), "{have:?}");
+    assert!(have.iter().any(|e| e.kind == ModKind::Kiln && e.id == "alpha"), "{have:?}");
 }

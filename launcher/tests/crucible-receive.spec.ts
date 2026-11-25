@@ -66,6 +66,8 @@ test("a code: the preview, trust, optional mods, Install and play, then Undo", a
     name: "Cinder Trails (Cinderhawk's pack)", play: true } });
   // "and play": the Play control starts the new instance
   await expect.poll(() => page.evaluate(() => (window as unknown as { __kilnMock: { calls: () => string[] } }).__kilnMock.calls().includes("launch_play")), { timeout: 15_000 }).toBe(true);
+  // A recorded IPC call is not a completed launch: wait until the mock game actually runs before stopping it.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __kilnMock: { gameRunning: () => boolean } }).__kilnMock.gameRunning())).toBe(true);
   await page.evaluate(() => (window as unknown as { __kilnMock: { stopGame: () => void } }).__kilnMock.stopGame());
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(page.locator(".k-toast").filter({ hasText: "Back to Ember run" })).toBeVisible();

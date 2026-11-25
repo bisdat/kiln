@@ -1,11 +1,12 @@
 // Settings > Profiles, for Crucible: a profile made from a pack (an instance) says its pack and version, an update
-// waiting (the same update screen as Play), Undo last update (pack_undo) and Uninstall (pack_uninstall: the profile
-// goes, its mods stay in the Library); the Crucible card lists the installed packs and the packs the player shared
+// waiting (the same update screen as Play), Download missing mods when its profile lacks mods of the installed version
+// (crucible_repair), Undo last update (pack_undo) and Uninstall (pack_uninstall: the profile goes, its mods stay in the
+// Library); the Crucible card lists the installed packs and the packs the player shared
 // (link, code, Copy, "Pack changed" with Update link).
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import * as api from "../api/commands";
-import type { CrucibleUpdate, PackInstance, ProfileId } from "../api/commands";
+import type { CrucibleUpdate, PackInstance, PackLacking, ProfileId } from "../api/commands";
 import { useGame, useProfiles } from "../api/hooks";
 import type { MenuItem } from "../ui";
 import { t, useT } from "../i18n";
@@ -14,6 +15,8 @@ import EMPTY from "../assets/crucible/empty.webp";
 import { anyChange, countsOf, coverFor } from "./code";
 import { LinkRows, changeWords, startShare } from "./Share";
 import { refreshCrucible, useCrucibleUi, useInstances, useShareRun, useShared, useUpdates } from "./state";
+import { repairLabel, repairPack } from "./Preview";
+export { usePackLacking } from "./state";
 
 /** The line under an instance's name: its pack and version, when it was installed or updated, an update waiting. */
 export function PackLine({ instance, update, profileId }: { instance: PackInstance; update: CrucibleUpdate | null; profileId: ProfileId }) {
@@ -35,9 +38,13 @@ async function undoUpdate(qc: QueryClient, profileId: ProfileId, instance: PackI
   } catch (e) { toast.error(e, t("crucible.update.undoFailed")); }
 }
 
-/** The instance's entries in the row's menu. */
-export function packMenu(profileId: ProfileId, instance: PackInstance, update: CrucibleUpdate | null, gameId: string | null, qc: QueryClient, loaded: boolean, uninstall: () => void): MenuItem[] {
+/** The instance's entries in the row's menu. `lacking` (usePackLacking): mods of its installed version missing from the
+ *  Library, Download missing mods for a Crucible instance (one from a file takes them from its file, in its preview). */
+export function packMenu(profileId: ProfileId, instance: PackInstance, update: CrucibleUpdate | null, gameId: string | null, qc: QueryClient, loaded: boolean, uninstall: () => void,
+  lacking?: PackLacking | null): MenuItem[] {
+  const repair = lacking && lacking.missing.length > 0 && instance.crucible?.version;
   return [
+    ...(repair ? [{ label: repairLabel(lacking), onSelect: () => void repairPack(qc, gameId, profileId, instance.name).catch(() => {}) }] : []),
     ...(update ? [{ label: t("crucible.profiles.seeUpdate"), onSelect: () => useCrucibleUi.getState().openUpdate(profileId) }] : []),
     ...(instance.previous ? [{ label: t("crucible.profiles.undoUpdate", { version: instance.previous }), onSelect: () => void undoUpdate(qc, profileId, instance, gameId) }] : []),
     { label: t("crucible.profiles.uninstall"), danger: true, disabled: loaded, onSelect: uninstall },

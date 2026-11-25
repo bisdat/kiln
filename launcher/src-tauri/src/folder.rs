@@ -201,11 +201,27 @@ fn process_env() -> DataEnv {
     }
 }
 
-/// The data folder as found, held or not, for what a start reads before Tauri: the render and sandbox markers (read
-/// only; nothing is written through it). `state::dirs()` refuses until the beta copy's gate opens
-/// (crate::snapshot::startup), which is after the window exists. None: the pointer is broken.
+/// The data folder as found, held or not, for what a start reads before Tauri: the render and sandbox markers, the
+/// handler a link for another game goes to (read only; nothing is written through it). `state::dirs()` refuses until
+/// the beta copy's gate opens (crate::snapshot::startup), which is after the window exists. None: the pointer is broken.
 pub fn found_dirs() -> Option<DataDirs> {
     current().located().ok().map(|l| l.dirs.clone())
+}
+
+/// The data folder for the one write a process started for a link makes before Tauri: the link into the inbox of the
+/// launcher that runs (crate::commands::crucible::link_entry, crate::commands::nexus::nxm_entry; such a process then
+/// ends). Some only while nothing else may change the folder: it was found (no broken pointer) and made, this process
+/// holds its lock shared, so no other launcher holds it exclusively meanwhile (a move, the beta copy's capture or
+/// restore, an unfinished move's removal), none held it so when this process opened it ([`Hold::Elsewhere`]), no
+/// restore of the beta copy stopped half way, and this start does not hold the folder to remove an unfinished move's
+/// partial copy. `state::dirs()` stays closed: this process's own beta copy comes later and never covers the inboxes.
+pub fn handoff_dirs() -> Option<DataDirs> {
+    let f = current();
+    if f.held_error().is_some() || f.made.is_err() || f.lock().is_none() || crate::commands::data_folder::undo_waits(&f) {
+        return None;
+    }
+    let dirs = f.located().ok()?.dirs.clone();
+    (!crate::snapshot::startup::restore_unfinished(&dirs.root)).then_some(dirs)
 }
 
 /// The data folder without opening it (no lock, nothing created): for `--selftest`'s report.

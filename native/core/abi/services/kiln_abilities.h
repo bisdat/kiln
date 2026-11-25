@@ -306,12 +306,22 @@ typedef struct KilnItemUse {
     uint64_t slot;          /* in: InventorySlotId as kiln.items names it: inventory entity | index << 32 */
     uint32_t item;          /* in: the item expected in the slot */
     uint32_t sequence;      /* in: the item's own sequence for the use (FNV-1a of its ActorSequenceResource GUID) */
-    uint32_t flags;         /* in: 0 */
+    uint32_t flags;         /* in: KILN_ITEM_USE_COST_ITEM or 0 */
     uint32_t status;        /* out: KILN_ITEM_USE_* */
     uint32_t count;         /* out: the stack in the slot at the call (before the use) */
     uint32_t reserved;
     int64_t trigger_time;   /* out, STARTED: the start's ECS time (sequence_state's trigger_time once it runs) */
 } KilnItemUse;
+
+/* KilnItemUse.flags (since 0.2.0-dev.31.5; an older kiln.abilities answers KILN_ERR_INVALID_ARGUMENT for any flag) */
+enum {
+    KILN_ITEM_USE_COST_ITEM = 1u << 0, /* the slot and the item also as the trigger context's costItem, as the game's hand
+                                          use writes them for an item sequence with no costOverride (0x36b60): the
+                                          sequence's PayUsageCost events then pay with the item (its own impactValues:
+                                          a scroll's ManaCost) and, with consume, take it from the slot (the repair kit).
+                                          Not for ammunition (a staff cast's PayUsageCost would take the spell) nor an
+                                          entry with a costOverride (the game pays with the override there) */
+};
 
 /* KilnItemUse.status */
 enum {
@@ -500,10 +510,15 @@ typedef struct KilnAbilitiesApi {
      * sequence whose consume event runs with no item in the trigger context takes the server down
      * (docs/re/abilities.md), so the item is checked against the slot here, at the call, and a trigger that faults
      * before it has its used item is taken back (the context cleared, KILN_ERR_INTERNAL).
-     * KILN_ERR_INVALID_ARGUMENT: NULL, size, entity, slot, item or sequence 0, flags not 0. KILN_ERR_NOT_FOUND: a
+     * With KILN_ITEM_USE_COST_ITEM (since 0.2.0-dev.31.5) the slot and the item are the trigger context's costItem too,
+     * which the game's PayUsageCost reads (actor_pay_usage_cost 0x45360 -> 0x40d00): its costs come from the item's own
+     * impactValues and a PayUsageCost with consume takes the item from that slot. Without it costItem stays empty and
+     * PayUsageCost pays only its own impactValues and takes nothing (the dev.30.3 behaviour).
+     * KILN_ERR_INVALID_ARGUMENT: NULL, size, entity, slot, item or sequence 0, a flag other than KILN_ITEM_USE_COST_ITEM. KILN_ERR_NOT_FOUND: a
      * sequence the game does not have. KILN_ERR_UNAVAILABLE: sequences off on this build (abilities.sequences), the
      * trigger context (its used item, its runtime id), Actor.sequenceRuntimeId or the state flags not in this build's
-     * reflection (kiln.types), or kiln.items not here (kiln.log says which, once). */
+     * reflection (kiln.types), KILN_ITEM_USE_COST_ITEM and no triggerContext.costItem in it, or kiln.items not here
+     * (kiln.log says which, once). */
     KilnResult(KILN_CALL* item_use)(KilnItemUse* use);
 } KilnAbilitiesApi;
 enum { KILN_NATIVE_ECS_ATTRIBUTE = 1u << 0 };

@@ -634,3 +634,50 @@ fn plugin_sharing_still_hashes_and_packs_only_the_dll() {
         assert_eq!(e.detail.as_ref().unwrap()["libraryChanged"], serde_json::to_value(&r).unwrap());
     }
 }
+
+/// A player's Crucible pack (0.2.0-dev.31.8): installed from its .kilnpack file, its native dinput8.dll proxy mod then
+/// wrote its log and settings into its Library folder (the game runs it from there in the Z and native path modes), and
+/// the same pack installed again failed with "the library did not take native lootrarityleveler". The install puts
+/// the mod's original files back (its changed copy kept in `<library>/kiln-changed/`), and both instances list them.
+#[test]
+fn a_pack_installs_again_over_its_native_mod_changed_in_the_library() {
+    let t = tmp("changed-native");
+    let creator_dirs = DataDirs::at(t.0.join("creator"));
+    let src = t.0.join("src/LootRarityLeveler");
+    put(&src, "dinput8.dll", &kiln_manage::pe::build_test_dll(&["DirectInput8Create"], b"loot rarity leveler"));
+    put(&src, "native.json", br#"{ "format": 1, "id": "lootrarityleveler", "name": "Loot Rarity Leveler", "version": "0.0.0", "dlls": ["dinput8.dll"], "phase": "early", "side": "both" }"#);
+    put(&src, "LootRarityLeveler.ini", b"[General]\nLevel=1\n");
+    put(&src, "LootRarityLeveler.log", b"[LootRarityLeveler] started\n");
+    let r = find(&import(&creator_dirs, &[src]), "lootrarityleveler");
+    let mut p = profile::create(&creator_dirs, "Loot run", None).unwrap();
+    p.mods.native.push(pm(&r, true));
+    let p = profile::save(&creator_dirs, &p).unwrap();
+    let built = pack::build(&creator_dirs, &BuildRequest { profile: p.id, version: "1.0.0".into(), ..Default::default() }, &t.0.join("out"), &mut NoProgress).unwrap();
+
+    let dirs = DataDirs::at(t.0.join("player"));
+    let req = InstallRequest { source: ModpackSource::Path { path: built.file.clone(), sha256: Some(built.sha256.clone()) }, consent: true,
+        allow_http: false, name: None, optional: BTreeMap::new(), activate: None };
+    let first = pack::install(&dirs, None, &req, &mut NoProgress).unwrap();
+    assert_eq!(first.profile.mods.native, [pm(&r, true)]);
+    let entry = library::path_of(&dirs, &r).unwrap();
+    let original = std::fs::read(entry.join("LootRarityLeveler.log")).unwrap();
+    {
+        use std::io::Write;
+        let mut log = std::fs::File::options().append(true).open(entry.join("LootRarityLeveler.log")).unwrap();
+        writeln!(log, "[LootRarityLeveler] leveled 12 items").unwrap();
+    }
+    put(&entry, "LootRarityLeveler.ini", b"[General]\nLevel=3\n");
+
+    let second = pack::install(&dirs, None, &req, &mut NoProgress).unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(second.profile.mods.native, [pm(&r, true)]);
+    assert_eq!(kiln_manage::hash::dirhash(&entry).unwrap(), r.hash, "the original files are back");
+    assert_eq!(std::fs::read(entry.join("LootRarityLeveler.log")).unwrap(), original);
+    for pid in [&first.profile.id, &second.profile.id] {
+        assert_eq!(profile::get(&dirs, pid).unwrap().mods.native, [pm(&r, true)], "{pid}");
+    }
+    let kept: Vec<_> = std::fs::read_dir(dirs.library().join("kiln-changed/native/lootrarityleveler")).unwrap().flatten().map(|e| e.path()).collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(std::fs::read(kept[0].join("LootRarityLeveler.ini")).unwrap(), b"[General]\nLevel=3\n", "the player's settings are kept");
+    let log = std::fs::read_to_string(dirs.library().join("kiln-changed/changes.log")).unwrap();
+    assert!(log.contains(&kept[0].display().to_string()), "where the changed copy went is logged: {log}");
+}

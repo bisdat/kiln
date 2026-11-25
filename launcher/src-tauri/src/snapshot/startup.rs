@@ -23,6 +23,21 @@ pub fn refusal() -> Option<Error> {
 pub fn command_refusal(cmd: &str) -> Option<Error> {
     if matches!(cmd, "snapshot_status" | "snapshot_continue" | "app_info" | "app_started" | "app_render_frame" | "data_folder_get" | "deck_quit" | "app_open_url" | "task_list" | "task_get" | "task_cancel") { None } else { refusal() }
 }
+/// A restore of the beta copy stopped half way (its journal is there): only its recovery writes the folder.
+pub fn restore_unfinished(root: &Path) -> bool { present(root, super::JOURNAL) }
+
+/// Tests: the gate as every production start has it until [`start`] opens it ("preparing"; a test run's begins
+/// "ready", which hid kiln:// and nxm:// links lost before the gate up to 0.2.0-dev.31.3), open again at
+/// [`TestGate::open`] or when the guard goes.
+#[cfg(test)]
+pub(crate) struct TestGate;
+#[cfg(test)]
+impl TestGate {
+    pub(crate) fn preparing() -> TestGate { set("preparing", vec![]); TestGate }
+    pub(crate) fn open(&self) { set("ready", vec![]); }
+}
+#[cfg(test)]
+impl Drop for TestGate { fn drop(&mut self) { set("ready", vec![]); } }
 // Identical ordinary starts do not mutate beta state and may share the folder.
 fn present(root: &Path, rel: &str) -> bool {
     !matches!(std::fs::symlink_metadata(root.join(rel)), Err(e) if e.kind() == std::io::ErrorKind::NotFound)

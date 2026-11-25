@@ -18,10 +18,13 @@ import { forgetProfileEdits, useProfileEdit } from "../pages/profiles/useProfile
 import { notifyLibraryChanged } from "../shell/libraryChanged";
 import { notifyActivation } from "../shell/notices";
 import { rich, useT } from "../i18n";
-import { PackLine, UninstallPackModal, packMenu } from "../crucible/Profiles";
+import { PackLine, UninstallPackModal, packMenu, usePackLacking } from "../crucible/Profiles";
 import { useCrucibleOn, useInstances, useUpdates } from "../crucible/state";
 import type { PackInstance } from "../api/commands";
 import { Button, Card, ConfirmDanger, EmptyState, Field, Menu, Modal, Skeleton, TextInput, errorText, fmtAgo, notifyPlacementCleanup, toast } from "../ui";
+
+// Capture intent when the dialog opens: a query/selection change must never turn a copy into an empty profile.
+type SaveProfile = { kind: "empty" } | { kind: "copy"; from: ProfileSummary; gameId: string | null };
 
 export function ProfilesCard() {
   const t = useT();
@@ -30,7 +33,7 @@ export function ProfilesCard() {
   const status = useGameStatus(game?.id);
   const profiles = useProfiles();
   const active = useActiveProfile(game?.id);
-  const [saveAs, setSaveAs] = useState(false);
+  const [saveAs, setSaveAs] = useState<SaveProfile | null>(null);
   const [rename, setRename] = useState<ProfileSummary | null>(null);
   const [folders, setFolders] = useState<string | null>(null);
   const [del, setDel] = useState<ProfileSummary | null>(null);
@@ -38,6 +41,7 @@ export function ProfilesCard() {
   const crucible = useCrucibleOn();
   const instances = useInstances(crucible);
   const updates = useUpdates(game?.id, crucible);
+  const lacking = usePackLacking([...instances.byProfile.keys()], crucible);
   const [uninstall, setUninstall] = useState<{ id: string; instance: PackInstance } | null>(null);
   const running = !!status.data?.running;
   const installed = !!status.data?.runtime.installed;
@@ -59,13 +63,18 @@ export function ProfilesCard() {
   const blocked = !game || !installed || running || load.isPending;
   const why = !game ? t("profilesSettings.findGame") : !installed ? t("profilesSettings.installKiln") : running ? t("profilesSettings.closeGame") : undefined;
   const cur = list.find((p) => p.id === loaded) ?? null;
+  const ready = profiles.isSuccess && !profiles.isFetching && (!game || (active.isSuccess && !active.isFetching)) && !load.isPending;
+  const empty = ready && !loaded;
+  const canSave = ready && (!!cur || !loaded);
 
   return (
     <Card id="profiles" aria-label={t("profilesSettings.title")} title={t("profilesSettings.title")}
       sub={status.data?.otherFolderProfile
         ? <span className="k-tone-warn" title={otherFolderTitle(status.data.otherFolderProfile)} data-testid="other-folder-profile">{otherFolderProfile()}</span>
         : cur ? rich("profilesSettings.subLoaded", { name: <b>{cur.name}</b> }) : t("profilesSettings.sub")}
-      actions={<Button size="s" disabled={!cur} title={cur ? undefined : t("profilesSettings.loadFirst")} onClick={() => setSaveAs(true)}>{t("profilesSettings.saveAs")}</Button>}>
+      actions={<Button size="s" disabled={!canSave} title={canSave ? undefined : t("profilesSettings.loadFirst")}
+        onClick={() => { if (canSave) setSaveAs(cur ? { kind: "copy", from: cur, gameId: game?.id ?? null } : { kind: "empty" }); }}>
+        {t(empty ? "profilesSettings.createEmpty" : "profilesSettings.saveAs")}</Button>}>
       {profiles.isLoading ? <Skeleton lines={3} /> : profiles.error ? <EmptyState title={t("profilesSettings.unreadable")} hint={errorText(profiles.error)} /> : (
         <ul className="k-list k-profiles" aria-label={t("profilesSettings.saved")}>
           {list.map((p) => {
@@ -88,7 +97,7 @@ export function ProfilesCard() {
                 <Menu label={t("profilesSettings.more", { name: p.name })} icon={<MoreHorizontal />} size="s" items={[
                   { label: t("profilesSettings.rename"), onSelect: () => setRename(p) },
                   { label: t("profilesSettings.folders"), onSelect: () => setFolders(p.id) },
-                  ...(inst ? packMenu(p.id, inst, upd, game?.id ?? null, qc, p.active.length > 0, () => setUninstall({ id: p.id, instance: inst })) : []),
+                  ...(inst ? packMenu(p.id, inst, upd, game?.id ?? null, qc, p.active.length > 0, () => setUninstall({ id: p.id, instance: inst }), lacking.get(p.id)) : []),
                   ...(inst ? [] : [{ label: t("common.delete"), danger: true, disabled: p.active.length > 0, onSelect: () => setDel(p) }]),
                 ]} />
               </li>
@@ -106,10 +115,15 @@ export function ProfilesCard() {
           </li>
         </ul>
       )}
-      <SaveAsModal open={saveAs} from={cur} onClose={() => setSaveAs(false)} onSaved={(p) => {
+      {saveAs && <SaveAsModal creation={saveAs} onClose={() => setSaveAs(null)} onSaved={(p) => {
         qc.invalidateQueries({ queryKey: qk.profiles });
-        toast.ok(t("profilesSettings.savedAs", { name: p.name }), cur ? t("profilesSettings.staysLoaded", { name: cur.name }) : t("profilesSettings.loadedStaysLoaded"), { actions: game ? [{ label: t("profilesSettings.loadIt"), onClick: () => load.mutate(p.id) }] : [] });
-      }} />
+        if (saveAs.kind === "empty") {
+          toast.ok(t("profilesSettings.createdLocal", { name: p.name }), t("profilesSettings.createdLocalDetail"));
+        } else {
+          toast.ok(t("profilesSettings.savedAs", { name: p.name }), cur ? t("profilesSettings.staysLoaded", { name: cur.name }) : t("profilesSettings.loadedStaysLoaded"),
+            { actions: game && game.id === saveAs.gameId && !status.data?.otherFolderProfile ? [{ label: t("profilesSettings.loadIt"), onClick: () => load.mutate(p.id) }] : [] });
+        }
+      }} />}
       <RenameModal profile={rename} onClose={() => setRename(null)} />
       {uninstall && <UninstallPackModal profileId={uninstall.id} instance={uninstall.instance} onClose={() => setUninstall(null)} />}
       {folders && <FoldersModal id={folders} onClose={() => setFolders(null)} />}
@@ -131,20 +145,21 @@ export function ProfilesCard() {
   );
 }
 
-function SaveAsModal({ open, from, onClose, onSaved }: { open: boolean; from: ProfileSummary | null; onClose: () => void; onSaved: (p: api.Profile) => void }) {
+function SaveAsModal({ creation, onClose, onSaved }: { creation: SaveProfile; onClose: () => void; onSaved: (p: api.Profile) => void }) {
   const t = useT();
+  const from = creation.kind === "copy" ? creation.from : null;
   const [name, setName] = useState("");
   const save = useMutation({
-    mutationFn: () => api.profileCreate(name.trim(), from!.id),
+    mutationFn: () => api.profileCreate(name.trim(), creation.kind === "copy" ? creation.from.id : null),
     onSuccess: (p) => { setName(""); onClose(); onSaved(p); },
     onError: (e) => toast.error(e),
   });
   return (
-    <Modal open={open && !!from} onClose={onClose} title={t("profilesSettings.saveAsTitle")} width={480}
-      footer={<><Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>{t("common.save")}</Button></>}>
-      <Field label={t("profilesSettings.name")} hint={from ? t("profilesSettings.copyOf", { name: from.name }) : undefined} htmlFor="pf-save-as">
+    <Modal open onClose={onClose} locked={save.isPending} title={t(from ? "profilesSettings.saveAsTitle" : "profilesSettings.createEmptyTitle")} width={480}
+      footer={<><Button variant="ghost" disabled={save.isPending} onClick={onClose}>{t("common.cancel")}</Button><Button variant="primary" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>{t("common.save")}</Button></>}>
+      <Field label={t("profilesSettings.name")} hint={from ? t("profilesSettings.copyOf", { name: from.name }) : t("profilesSettings.createEmptyHint")} htmlFor="pf-save-as">
         <TextInput id="pf-save-as" data-autofocus value={name} onChange={(e) => setName(e.target.value)} placeholder={from ? t("profilesSettings.copyName", { name: from.name }) : ""}
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) save.mutate(); }} />
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim() && !save.isPending) save.mutate(); }} />
       </Field>
     </Modal>
   );

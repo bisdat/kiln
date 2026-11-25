@@ -135,9 +135,16 @@ fn existing_address_must_have_matching_full_hash_and_content() {
     assert!(r.existing.is_empty() && r.imported.is_empty() && !r.skipped.is_empty());
     std::fs::write(&record, original_record).unwrap();
     put(&folder, "init.lua", b"modified behind library's back");
+    // 0.2.0-dev.31.8: an import of exactly the files the name says never takes the modified folder as that entry; it
+    // puts the verified files back and keeps the modified ones aside (<library>/kiln-changed/), never deleting them
+    let original = std::fs::read(src.join("init.lua")).unwrap();
     let r = library::import(&dirs, &[src], &mut NoProgress).unwrap();
-    assert!(r.existing.is_empty() && r.imported.is_empty() && !r.skipped.is_empty());
-    assert_eq!(std::fs::read(folder.join("init.lua")).unwrap(), b"modified behind library's back");
+    assert!(r.existing == [first.clone()] && r.imported.is_empty() && r.skipped.is_empty(), "{r:?}");
+    assert_eq!(std::fs::read(folder.join("init.lua")).unwrap(), original);
+    assert_eq!(hash::dirhash(&folder).unwrap(), first.hash);
+    let kept: Vec<_> = std::fs::read_dir(dirs.library().join("kiln-changed").join(first.kind.as_str()).join(&first.id)).unwrap().flatten().collect();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(std::fs::read(kept[0].path().join("init.lua")).unwrap(), b"modified behind library's back");
 }
 
 #[test]

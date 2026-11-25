@@ -333,10 +333,15 @@ This is opt-in: Settings > Nexus Mods > "Mod Manager Download links". It never t
 - **Another program:** if one takes the links back later, Settings says so ("turn this off and on again").
 - **One launcher:** the browser starts a second launcher process for each link. That process writes the link to
   `<data>/nexus/inbox/` (owner-only directory; Unix 0700, files 0600; protected Windows DACL) and exits when another launcher holds `<data>/nexus/instance.lock` (an OS file lock,
-  freed when the process ends, also on a crash). Otherwise it starts with the link.
+  freed when the process ends, also on a crash). Otherwise it starts with the link held in memory and gives it to its
+  window once the data folder's gates open (0.2.0-dev.31.4; up to 31.3 such a link was lost: the process asked for the
+  data folder before the beta copy's gate opened). Before that gate it writes nothing else into the data folder: it
+  looks at the lock read-only, and writes the inbox only while it holds the data-folder lock shared and the folder is not
+  held (another launcher's move or beta copy, a half-done restore, an unfinished move's removal; `folder::handoff_dirs`).
 - **The running launcher:**
   - Only the instance-lock owner reads the inbox every 500 ms and keeps Enshrouded links in memory (`nexus_links`).
-    Reads refuse symlinks, non-private files and messages over 16 KiB, and revalidate each URL.
+    A second window takes the lock over once the launcher that had it ended (and then reads what was left for that
+    one). Reads refuse symlinks, non-private files and messages over 16 KiB, and revalidate each URL.
   - It emits `kiln://nxm` and brings its window to the front.
   - The UI (desktop shell or Deck) adds each link with `nexus_link_install` once the game and Kiln are ready.
     Switching UIs preserves results/Undo; Deck queues successive reports. Invalid game selections do not consume links.
