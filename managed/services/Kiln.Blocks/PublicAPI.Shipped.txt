@@ -1255,11 +1255,17 @@ Kiln.CraftSourceHandle.Dispose() -> void
 Kiln.CraftSourceHandle.IsDisposed.get -> bool
 Kiln.CraftSourceHandle.Player.get -> Kiln.EntityId
 Kiln.CraftSourceOptions
+Kiln.CraftSourceOptions.Building.get -> bool
+Kiln.CraftSourceOptions.Building.init -> void
 Kiln.CraftSourceOptions.CraftSourceOptions() -> void
+Kiln.CraftSourceOptions.Fills.get -> bool
+Kiln.CraftSourceOptions.Fills.init -> void
 Kiln.CraftSourceOptions.Filter.get -> Kiln.CraftSourceFilter
 Kiln.CraftSourceOptions.Filter.init -> void
 Kiln.CraftSourceOptions.Items.get -> System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>?
 Kiln.CraftSourceOptions.Items.init -> void
+Kiln.CraftSourceOptions.Locks.get -> bool
+Kiln.CraftSourceOptions.Locks.init -> void
 Kiln.CraftSourceOptions.Order.get -> Kiln.CraftSourceOrder
 Kiln.CraftSourceOptions.Order.init -> void
 Kiln.CraftSourceOrder
@@ -1563,6 +1569,8 @@ Kiln.FillInput.Have.get -> int
 Kiln.FillInput.Have.init -> void
 Kiln.FillInput.Item.get -> Kiln.ItemId
 Kiln.FillInput.Item.init -> void
+Kiln.FillInput.Linked.get -> long
+Kiln.FillInput.Linked.init -> void
 Kiln.FillInput.Outputs.get -> long
 Kiln.FillInput.Outputs.init -> void
 Kiln.FillInput.PerCraft.get -> int
@@ -1600,6 +1608,8 @@ Kiln.FillOptions.Player.get -> Kiln.EntityId
 Kiln.FillOptions.Player.init -> void
 Kiln.FillOptions.Recipe.get -> uint?
 Kiln.FillOptions.Recipe.init -> void
+Kiln.FillOptions.UseLinkedSources.get -> bool
+Kiln.FillOptions.UseLinkedSources.init -> void
 Kiln.FillOptions.UseStationOutputs.get -> bool
 Kiln.FillOptions.UseStationOutputs.init -> void
 Kiln.FillOptions.Water.get -> bool
@@ -3767,6 +3777,8 @@ Kiln.StationResult.DryRun.init -> void
 Kiln.StationResult.Equals(Kiln.StationResult? other) -> bool
 Kiln.StationResult.FromChests.get -> int
 Kiln.StationResult.FromChests.init -> void
+Kiln.StationResult.FromLinked.get -> int
+Kiln.StationResult.FromLinked.init -> void
 Kiln.StationResult.FromOutputs.get -> int
 Kiln.StationResult.FromOutputs.init -> void
 Kiln.StationResult.GameError.get -> int
@@ -5400,6 +5412,8 @@ const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
 const Kiln.Bases.Capability = "stations.read" -> string!
 const Kiln.BlockUi.Bindings.Capability = "ui.blocks.bindings" -> string!
 const Kiln.BlockUi.StateCapability = "ui.blocks.state" -> string!
+const Kiln.Crafting.BuildSourcesCapability = "crafting.build_sources" -> string!
+const Kiln.Crafting.LockSourcesCapability = "items.lock_sources" -> string!
 const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!
 const Kiln.Crafting.SourcesCapability = "crafting.sources" -> string!
 const Kiln.Stations.ControlCapability = "stations.control" -> string!
