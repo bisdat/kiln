@@ -21,6 +21,11 @@ the width while height follows content between `min_h` and `max_h`. EMF windows
 use `(width, 0, width, frame.height * 0.85f)`: later rows grow the window and content
 past the cap scrolls. Older overlays retain the previous appearing-only size call.
 
+Mods' screen and window placement (0.2.0-dev.31.11, mod API 0.2.20: `UiScreenOptions.Position`, `MoveTo`, `Resize`,
+`RememberPlacement`) adds no slot: Kiln.Ui calls `set_next_window_pos` / `set_next_window_size` and reads `window_rect`, so
+the sizes it sets go through ImGui's minimum size and these constraints like any other
+([the guide](../ui.md#placing-screens-and-windows-since-020-dev3111-mod-api-0220)).
+
 ## Kiln's line in the main menu's footer (0.2.0-dev.29.11)
 
 `KilnUiApi.menu_footer(int32_t mods, uint32_t flags)` is appended after `set_next_window_size_constraints`; the service

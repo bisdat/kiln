@@ -6,6 +6,13 @@ public static partial class Coverage
     static partial void AddFakes(List<CoverageRow> rows)
     {
         void Row(string area, CoverageKind kind, string note, params string[] caps) => rows.Add(new CoverageRow(area, kind, caps, note));
+        Row("Screen and window placement (since 0.2.0-dev.31.11)", CoverageKind.Real,
+            "Kiln.Ui's own placement code: UiScreenOptions.Position, MoveTo and Resize on UiScreen and UiWindow (applied once, " +
+            "on the next frame; on a closed screen when it next opens), Placement, RememberPlacement in ui-placement.json in the " +
+            "harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). " +
+            "KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver " +
+            "and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Offline: kiln.ui " +
+            "itself (nothing is drawn), imgui.ini, size constraints a native plugin sets");
         Row("Players", CoverageKind.RecordingFake,
             "Kiln.Players' own code on the kit's kiln.players: KilnHarness.Players.Join/Leave take effect at the next step " +
             "(Players.All, Find, Joined/Left, PlayerJoinedEvent/PlayerLeftEvent); entity slot + 1, Steam id, admin bit, user-group " +
