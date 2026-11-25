@@ -2,7 +2,11 @@
 // Key and mouse presses for mods (since 0.2.0-dev.29.19): kiln.ui's key subscription (subscribe_key_ex, kiln_ui.h) as public
 // API, for a mod that reads presses itself: its own "press a key" field, a key it handles by state rather than as an action, a
 // shortcut layer of its own. KeyBindings stays the way to give an action a key the player can remap on the Keys page.
+// Since 0.2.0-dev.31.13 (mod API 0.2.22, for XHL's Blueprint and overlays): KeyListenFlags.Own makes a kept press the
+// listener's own until its release (kiln.ui.input, kiln_ui_input.h; the rules: native/services/ui/input_own.h), and
+// KeyListenFlags.Pointer adds the left and right mouse buttons to such a listener.
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -36,6 +40,54 @@ public readonly record struct KeyPress(uint VirtualKey, uint ScanCode, KeyMods M
 
     /// <summary>A game controller's button (<see cref="KeyListenFlags.Pad"/>). Since 0.2.0-dev.30.5.</summary>
     public bool IsPad => PadKeys.IsPad(VirtualKey);
+
+    /// <summary>The left (0x01) or right (0x02) mouse button, which only an owning listener gets
+    /// (<see cref="KeyListenFlags.Pointer"/>). Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public bool IsPointer => VirtualKey is 0x01 or 0x02;
+
+    /// <summary>This repeat or release (or <see cref="Ended"/>) belongs to a press the listener owns
+    /// (<see cref="KeyListenFlags.Own"/>): nobody else got it, and the game did not either (unless <see cref="Leaked"/>).
+    /// False for a press, and for every input of a listener without <see cref="KeyListenFlags.Own"/>. Since
+    /// 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public bool Owned { get; init; }
+
+    /// <summary>Not <see cref="KeyOwnEnd.None"/>: this is no real release but the end of ownership of a press the listener
+    /// owned (<see cref="Down"/> false, <see cref="Owned"/> true): the game window lost the focus, the client world
+    /// changed, or the input went down again before its release came. Reset what the press started. Since
+    /// 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public KeyOwnEnd Ended { get; init; }
+
+    /// <summary>The game saw this owned press go down after all (Alt+F4, which always reaches the game, or a mouse record
+    /// Kiln could not edit), so this repeat or release reaches the game too: it is never left holding the button. Since
+    /// 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public bool Leaked { get; init; }
+
+    /// <summary>For the left and right buttons (<see cref="IsPointer"/>): the cursor in the game window's client pixels at
+    /// the press and at the release ((0, 0) when the system could not say); null for every other input. Since
+    /// 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public Vector2? Position { get; init; }
+
+    /// <summary>For a game controller's button (<see cref="IsPad"/>) of an owning listener: the controller, 0 to 3 (XInput's
+    /// user index); 0 otherwise. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public int Controller { get; init; }
+}
+
+/// <summary>Why a press a listener owned (<see cref="KeyListenFlags.Own"/>) ended without its release
+/// (<see cref="KeyPress.Ended"/>). Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+public enum KeyOwnEnd
+{
+    /// <summary>Not an end: a real input.</summary>
+    None = 0,
+
+    /// <summary>The game window lost the keyboard focus (alt-tab): the release goes to another window.</summary>
+    Focus = 1,
+
+    /// <summary>The client world started or stopped. The press is nobody's now: its release reaches neither the game nor
+    /// anyone else.</summary>
+    World = 2,
+
+    /// <summary>The input went down again before its release reached Kiln.</summary>
+    Lost = 3,
 }
 
 /// <summary>What a key listener gets besides keyboard keys. Since 0.2.0-dev.29.19.</summary>
@@ -56,15 +108,39 @@ public enum KeyListenFlags
     /// change; true for a press keeps that button from the game until it is let go. Needs the kiln-ui.dll of the same
     /// release (<see cref="KeyListener.Pad"/> false next to an older one). Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     Pad = 2,
+
+    /// <summary>The listener owns every press it keeps (returns true for), until its release. It is asked before every
+    /// listener without this flag and every key binding (after Kiln's menu key and Escape); listeners with it are asked in
+    /// the order they were made, and the first that keeps a press owns it. Nobody else gets that press, its repeats or its
+    /// release, and the game does not either: the release never reaches the game or another mod, and while a mouse button
+    /// is held the game is not told so. The owner gets the repeats and the release (<see cref="KeyPress.Owned"/>); what it
+    /// returns for them is ignored. Ownership ends at the release, or early with a release whose
+    /// <see cref="KeyPress.Ended"/> says why (focus loss, a world change, the input going down again); it also ends, without
+    /// a call, at <see cref="KeyListener.Disown"/>, <see cref="KeyListener.Dispose"/> and the mod's unload. After a world
+    /// change, a disown or an unload the press is nobody's: its release reaches nobody, still not the game (it never saw
+    /// the press). Stuck-press guard: where the game saw the press go down after all (<see cref="KeyPress.Leaked"/>) its
+    /// release reaches it too. The wheel cannot be owned (a notch has no release): an owning listener gets no notches.
+    /// Needs kiln.ui.input (Kiln 0.2.0-dev.31.13 or later): elsewhere the listener is not <see cref="KeyListener.Ok"/>.
+    /// Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    Own = 4,
+
+    /// <summary>With <see cref="Own"/> only: the left (0x01) and right (0x02) mouse buttons too, over the game's own view,
+    /// while no Kiln screen or the Kiln menu has the input and the cursor is not over a Kiln panel (their release comes
+    /// wherever the cursor is then). <see cref="KeyPress.Position"/> is the cursor. Since 0.2.0-dev.31.13, mod API
+    /// 0.2.22.</summary>
+    Pointer = 8,
 }
 
 /// <summary>A listener made by <see cref="KeyInput.Listen"/>. Dispose it to stop; a mod's listeners also stop when the mod
 /// unloads. Since 0.2.0-dev.29.19.</summary>
 public sealed class KeyListener : IDisposable, IKilnResult
 {
-    internal KeyListener(bool ok, string? reason, bool mouse, ModContext? owner, Func<KeyPress, bool>? onKey, bool pad = false)
+    internal KeyListener(bool ok, string? reason, bool mouse, ModContext? owner, Func<KeyPress, bool>? onKey, bool pad = false,
+        bool own = false, bool pointer = false)
     {
         Pad = pad;
+        Own = own;
+        Pointer = pointer;
         Ok = ok;
         Reason = reason;
         Mouse = mouse;
@@ -85,10 +161,39 @@ public sealed class KeyListener : IDisposable, IKilnResult
     /// <summary>It gets a game controller's buttons (<see cref="KeyListenFlags.Pad"/>) as well. Since 0.2.0-dev.30.5.</summary>
     public bool Pad { get; }
 
+    /// <summary>It owns the presses it keeps (<see cref="KeyListenFlags.Own"/>). Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public bool Own { get; }
+
+    /// <summary>It gets the left and right mouse buttons (<see cref="KeyListenFlags.Pointer"/>). Since 0.2.0-dev.31.13, mod
+    /// API 0.2.22.</summary>
+    public bool Pointer { get; }
+
+    /// <summary>It owns the press of <paramref name="virtualKey"/> (on <paramref name="controller"/>, for a controller's
+    /// button) now: pressed, kept, not yet released. Any thread. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public unsafe bool Owns(uint virtualKey, int controller = 0)
+    {
+        var t = UiNative.Input;
+        ulong h;
+        lock (this) h = Handle;
+        return Own && h != 0 && t != null && controller is >= 0 and <= 3 && t->Owns(h, virtualKey, (uint)controller) != 0;
+    }
+
+    /// <summary>Gives up the press of <paramref name="virtualKey"/> (0: every press the listener owns), without a call: its
+    /// repeats and release reach nobody, and still not the game (an overlay that closes on a press gives it up as it closes).
+    /// Returns how many it gave up. Any thread, also inside the listener. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    public unsafe int Disown(uint virtualKey = 0, int controller = 0)
+    {
+        var t = UiNative.Input;
+        ulong h;
+        lock (this) h = Handle;
+        return Own && h != 0 && t != null && controller is >= 0 and <= 3 ? (int)t->Disown(h, virtualKey, (uint)controller) : 0;
+    }
+
     internal ModContext? Owner { get; }
     internal Func<KeyPress, bool>? OnKey { get; }
     internal long Id;
     internal ulong Handle;
+    internal bool Owning;  // a kiln.ui.input subscription (KeyListenFlags.Own)
 
     /// <summary>Stops the listener: once it returns, no new press reaches it. Any thread.</summary>
     public void Dispose() => KeyInput.Remove(this);
@@ -116,9 +221,13 @@ public static unsafe class KeyInput
     public static KeyListener Listen(Func<KeyPress, bool> onKey, KeyListenFlags flags = KeyListenFlags.Mouse)
     {
         ArgumentNullException.ThrowIfNull(onKey);
-        if ((flags & ~(KeyListenFlags.Mouse | KeyListenFlags.Pad)) != 0) throw new ArgumentOutOfRangeException(nameof(flags), flags, "unknown key listener flags");
+        if ((flags & ~(KeyListenFlags.Mouse | KeyListenFlags.Pad | KeyListenFlags.Own | KeyListenFlags.Pointer)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(flags), flags, "unknown key listener flags");
+        if ((flags & KeyListenFlags.Pointer) != 0 && (flags & KeyListenFlags.Own) == 0)
+            throw new ArgumentException("the left and right mouse buttons come to an owning listener only (KeyListenFlags.Own | KeyListenFlags.Pointer)", nameof(flags));
         var owner = UiModCalls.Caller;
         UiModCalls.RequireAlive(owner);
+        if ((flags & KeyListenFlags.Own) != 0) return ListenOwning(onKey, flags, owner);
         var t = UiNative.T;
         if (t == null) return new KeyListener(false, "no Kiln overlay here (kiln.ui is not loaded: a dedicated server, or kiln-ui.dll did not start)", false, owner, null);
         var ex = UiNative.SubscribeKeyExSlot;
@@ -155,6 +264,34 @@ public static unsafe class KeyInput
         return l;
     }
 
+    // KeyListenFlags.Own: kiln.ui.input's subscribe_owned (keyboard keys always; the mouse's middle and side buttons, the
+    // pointer and the pads by flag).
+    private static KeyListener ListenOwning(Func<KeyPress, bool> onKey, KeyListenFlags flags, ModContext? owner)
+    {
+        var mouse = (flags & KeyListenFlags.Mouse) != 0;
+        var pad = (flags & KeyListenFlags.Pad) != 0;
+        var pointer = (flags & KeyListenFlags.Pointer) != 0;
+        var t = UiNative.Input;
+        if (t == null)
+            return new KeyListener(false, "no kiln.ui.input here (it needs Kiln 0.2.0-dev.31.13 or later on the game client; a dedicated " +
+                "server has no game window): a listener that owns its presses cannot run, listen without KeyListenFlags.Own", false, owner, null);
+        var sources = UiNative.OwnKeys | (mouse ? UiNative.OwnMouse : 0u) | (pad ? UiNative.OwnPad : 0u) | (pointer ? UiNative.OwnPointer : 0u);
+        var id = Interlocked.Increment(ref _next);
+        var l = new KeyListener(true, null, mouse, owner, onKey, pad, own: true, pointer: pointer) { Id = id, Owning = true };
+        Listeners[id] = l;  // registered before the subscription goes in (a press may come at once)
+        ulong handle = 0;
+        var rc = t->SubscribeOwned(UiModCalls.OwnerId(owner), sources, &OnNativeOwned, (void*)(nint)id, &handle);
+        if (rc != UiNative.Ok)
+        {
+            Listeners.TryRemove(id, out _);
+            return new KeyListener(false, $"kiln.ui.input refused the owning subscription ({rc})", false, owner, null);
+        }
+        lock (l) l.Handle = handle;
+        UiModCalls.Watch(owner);
+        if (owner is { Alive: false }) Remove(l);
+        return l;
+    }
+
     /// <summary>The code a binding stores for a press of <paramref name="virtualKey"/> with <paramref name="scanCode"/>, as the
     /// Kiln menu's Keys page saves it: a punctuation key is the key at that place of a US keyboard, found by its scan code on
     /// any layout (the key left of 1 is <c>Backquote</c>, 0xC0, also on a UK, German or French layout); every other press,
@@ -171,10 +308,18 @@ public static unsafe class KeyInput
             handle = l.Handle;
             l.Handle = 0;
         }
-        var t = UiNative.T;
         // From inside a kiln.ui callback (a listener disposing itself) kiln.ui may answer KILN_ERR_WRONG_THREAD instead of
         // waiting: the subscription is already inactive there, and the listener is out of the table, so nothing more comes.
-        if (handle != 0 && t != null) t->Unsubscribe(handle);
+        // An owning listener's presses become nobody's (their releases still never reach the game).
+        if (handle == 0) return;
+        if (l.Owning)
+        {
+            var it = UiNative.Input;
+            if (it != null) it->Unsubscribe(handle);
+            return;
+        }
+        var t = UiNative.T;
+        if (t != null) t->Unsubscribe(handle);
     }
 
     internal static void RemoveOwnedBy(ModContext mod)
@@ -195,6 +340,48 @@ public static unsafe class KeyInput
         var keep = false;
         UiModCalls.Invoke(l.Owner, p => keep = fn(p), press, "a key listener (KeyInput.Listen)");
         return keep;
+    }
+
+    /// <summary>One owned-input record as an owning listener sees it (and what kiln.ui.input is told: 1 takes a press).</summary>
+    internal static uint DeliverOwned(long id, in UiNative.OwnedInput o)
+    {
+        if (!Listeners.TryGetValue(id, out var l) || l.OnKey is not { } fn) return UiNative.OwnPass;
+        if (l.Owner is { Alive: false }) return UiNative.OwnPass;
+        var press = Owned(o);
+        var keep = false;
+        UiModCalls.Invoke(l.Owner, p => keep = fn(p), press, "a key listener (KeyInput.Listen, KeyListenFlags.Own)");
+        return o.Kind == UiNative.OwnedPress && keep ? UiNative.OwnTake : UiNative.OwnPass;
+    }
+
+    /// <summary>A kiln.ui.input record as a <see cref="KeyPress"/>: a press, a repeat (Down, Repeat), a release (not Down),
+    /// an end (not Down, <see cref="KeyPress.Ended"/>).</summary>
+    internal static KeyPress Owned(in UiNative.OwnedInput o)
+    {
+        var pad = PadKeys.IsPad(o.Vk);
+        var down = o.Kind is UiNative.OwnedPress or UiNative.OwnedRepeat;
+        return new KeyPress(o.Vk, o.Scan, (KeyMods)(o.Mods & (pad ? (uint)PadKeys.Mods : 7u)), down, o.Kind == UiNative.OwnedRepeat,
+            o.TextInput != 0, o.Captured != 0)
+        {
+            Owned = o.Kind != UiNative.OwnedPress,
+            Ended = o.Kind == UiNative.OwnedEnd ? (KeyOwnEnd)o.End : KeyOwnEnd.None,
+            Leaked = (o.Flags & UiNative.OwnedLeaked) != 0,
+            Position = o.Vk is 0x01 or 0x02 ? new Vector2(o.X, o.Y) : null,
+            Controller = pad ? (int)o.Controller : 0,
+        };
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint OnNativeOwned(UiNative.OwnedInput* o, void* user)
+    {
+        try
+        {
+            return o != null ? DeliverOwned((long)(nint)user, *o) : UiNative.OwnPass;
+        }
+        catch (Exception e)
+        {
+            UiEngine.Log(LogLevel.Error, $"key listener (owned): {e}");
+            return UiNative.OwnPass;
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
