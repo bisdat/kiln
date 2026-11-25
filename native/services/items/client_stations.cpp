@@ -50,6 +50,7 @@ std::mutex g_mu;  // the copy and the detail
 std::vector<KilnStationClientView> g_rows;
 uint64_t g_step = 0, g_copy_ms = 0;
 char g_detail[160] = "not resolved yet";
+char g_skip[160] = "";  // while on and no copy yet: why the last demanded step took none ("" once one is taken)
 // the client world's thread only
 uint32_t g_copies = 0;
 std::unordered_map<uint32_t, std::vector<CvStack>> g_inventories;
@@ -60,6 +61,11 @@ KilnStr str(const char* s) { return KilnStr{s, std::strlen(s)}; }
 void set_detail(const char* why) {
     std::lock_guard lock(g_mu);
     std::snprintf(g_detail, sizeof g_detail, "%s", why);
+}
+
+void skip(const char* why) {
+    std::lock_guard lock(g_mu);
+    std::snprintf(g_skip, sizeof g_skip, "%s", why);
 }
 
 void lower(uint32_t reason, const char* why) {
@@ -117,7 +123,9 @@ void copy_now(uint64_t step) {
     const uintptr_t w = g_api->world(KILN_WORLD_CLIENT);
     const uintptr_t cfi = w ? g_api->singleton(w, str("ClientFactoryInfo")) : 0;
     const uintptr_t play = w ? g_api->singleton(w, str("G38UiPlayData")) : 0;
-    if (!cfi || !play) return;  // a client world without the cache yet (loading): no copy, the last one stays
+    if (!cfi || !play)  // a client world without the cache yet (loading): no copy, the last one stays; status says why
+        return skip(!cfi ? "no station cache (ClientFactoryInfo) in the client world yet"
+                         : "no G38UiPlayData (the HUD's clock) in the client world yet");
     void* const balancing = reinterpret_cast<void*>(g_api->singleton(w, str("BalancingRegistry")));
     void* const recipes = reinterpret_cast<void*>(g_api->singleton(w, str("g38_items::RecipeRegistry")));
     void* const items = reinterpret_cast<void*>(g_api->singleton(w, str("g38_items::ItemRegistry")));
@@ -147,7 +155,7 @@ void copy_now(uint64_t step) {
             facts = it->second;
         }
         bool have = false;
-        if (inventories && items) {
+        if (inventories && items && E.read_ok) {  // kiln.items' reader resolved (items.read)
             ReadOut ro{};
             ro.info.size = sizeof ro.info;
             ro.slots = slots.data();
@@ -171,20 +179,26 @@ void copy_now(uint64_t step) {
     g_rows = std::move(out);
     g_step = step;
     g_copy_ms = now_ms();
+    g_skip[0] = 0;
 }
 
 void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
     g_world = true;
-    if (!g_on.load() || g_fault.load() || !demanded(g_read_ms.load(std::memory_order_relaxed), now_ms())) return;
+    if (!g_on.load() || g_fault.load()) return;
+    if (!demanded(g_read_ms.load(std::memory_order_relaxed), now_ms())) {
+        g_copies = 0;  // the first copy after a pause rereads the inventories (the kept ones are from before it)
+        return;
+    }
     copy_now(tick ? tick->step : 0);
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_CLIENT) return;
-    if (ev->event == KILN_WORLD_STARTED) g_world = true;
-    if (ev->event != KILN_WORLD_STOPPING) return;
-    g_world = false;
-    g_inventories.clear();  // the destroying thread is the client world's
+    if (ev->event != KILN_WORLD_STARTED && ev->event != KILN_WORLD_STOPPING) return;
+    // STOPPING needs world.lifecycle; without it the next world's STARTED is the first word that the old one is gone
+    g_world = ev->event == KILN_WORLD_STARTED;
+    g_inventories.clear();  // both events come on the client world's thread (STOPPING: the destroying thread is it)
+    g_copies = 0;
     std::lock_guard lock(g_mu);
     g_rows.clear();  // entity ids of a closed world name nothing
     g_step = g_copy_ms = 0;
@@ -207,7 +221,8 @@ KilnResult KILN_CALL t_status(KilnStationsClientStatus* out) {
     out->rows = static_cast<uint32_t>(g_rows.size());
     out->step = g_step;
     out->age_ms = g_copy_ms ? static_cast<int64_t>(now_ms() - g_copy_ms) : -1;
-    std::snprintf(out->detail, sizeof out->detail, "%s", out->on ? "" : g_detail);
+    // off: why; on without a copy: why the last demanded step took none; on with a copy: ""
+    std::snprintf(out->detail, sizeof out->detail, "%s", !out->on ? g_detail : g_copy_ms ? "" : g_skip);
     return KILN_OK;
 }
 
