@@ -27,11 +27,13 @@ keeps every field's contract and every registry's version history; `tools/regist
 
 **What a migration does.** registrygen builds every migration into Kiln (one row per rename), and Kiln reads every edit
 through them before it checks and matches it: a data pack's `registry` section, a C# or native mod's batch, a live change,
-the plan a rollback starts on. A field path the running schema does not have, and a Kiln id (an exact selector, a `like`, a
-reference value such as a recipe input's item), that a step renames is read as the new name, through every later step too.
-Old names are never reused, so this is right whatever schema version the edit was written for, and a name the running
-schema has is never renamed. A glob selector is not renamed. kiln.log (`registry: migrated ...`) and registry.json
-`migrated` name every rename; a name no migration knows is refused as before ("items has no field ..."). C# mods name fields
+the plan a rollback starts on. A field path the running schema does not have (an edit's `field`, the fields of an add's
+`fields` and of a `where`, the leaves of a list's elements), and a Kiln id (an exact selector, a `like`, a reference value
+such as a recipe input's item, plain or as `{"set": ...}`), that a step renames is read as the new name, through every later
+step too. Old names are never reused, so this is right whatever schema version the edit was written for, and a name the
+running schema has is never renamed. A glob selector is not renamed. An edit that names one field twice, by its old name and
+its new one, is refused (which value it meant is unknown). kiln.log (`registry: migrated ...`) and registry.json
+`migrated` name every rename of a start's edits (a live change's: kiln.log, `registry (live): migrated ...`); a name no migration knows is refused as before ("items has no field ..."). C# mods name fields
 through the generated properties of the Kiln.Registry they run with, so their edits always carry the running names. No
 registry has a breaking step yet: every schema is 0.1.0, and Kiln ships no migration rows.
 

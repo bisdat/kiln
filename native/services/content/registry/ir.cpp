@@ -716,15 +716,70 @@ struct Renamer {
         const std::string to = chain(*reg, from, false, &steps);
         if (!to.empty()) note(*reg, from, to, steps, false), *v = to;
     }
-    // Reference values in a value of field f (an id, a list of ids, elements with reference leaves).
-    void values(const FieldSpec& f, json* v) {
+    // Not empty: the edit names one field twice, by an old name and by the name a step gave it (review of registry-rollback):
+    // refused, since which of the two values it meant is unknown.
+    std::string error;
+    // An object keyed by field names (an add's "fields", a "where", an element's leaves): each key renamed by rename(key) (empty:
+    // kept), and a key that a rename makes equal to another refuses the edit.
+    template <class Rename, class Each>
+    void keys(json* o, const std::string& what, Rename rename, Each each) {
+        if (!o->is_object()) return;
+        json renamed = json::object();
+        std::map<std::string, std::string> written;  // the new key -> the key as the edit wrote it
+        for (auto it = o->begin(); it != o->end(); ++it) {
+            std::string k = rename(it.key());
+            if (k.empty()) k = it.key();
+            if (const auto seen = written.find(k); seen != written.end()) {
+                if (error.empty())
+                    error = "names " + what + k + " twice (" + (seen->second == k ? it.key() : seen->second) + " is its name before a schema migration): " +
+                            "use " + k + " only";
+                return;
+            }
+            written[k] = it.key();
+            json v = it.value();
+            each(k, it.key(), &v);
+            renamed[k] = std::move(v);
+        }
+        *o = std::move(renamed);
+    }
+    // Every name a list of reg has had (its current name first): an element's leaf is renamed by a step keyed by any of them.
+    std::vector<std::string> list_names(const RegistrySpec& reg, const std::string& list, const std::string& written) const {
+        std::vector<std::string> out{list};
+        if (written != list) out.push_back(written);
+        for (const Migration& m : reg.migrations)
+            for (const auto& [from, to] : m.fields) {
+                std::string steps;
+                if (from.find('[') == std::string::npos && chain(reg, from, true, &steps) == list &&
+                    std::find(out.begin(), out.end(), from) == out.end())
+                    out.push_back(from);
+            }
+        return out;
+    }
+    // An element's leaf ("amount" of the list written as `written`, now `list`): its name now, or empty when no step renames it.
+    std::string leaf_name(const RegistrySpec& reg, const FieldSpec& list, const std::string& written, const std::string& leaf) {
+        if (list.element_field(leaf)) return "";
+        for (const std::string& name : list_names(reg, list.name, written)) {
+            std::string steps;
+            const std::string to = chain(reg, name + "[]." + leaf, true, &steps);
+            if (to.rfind(list.name + "[].", 0) == 0) {
+                note(reg, name + "[]." + leaf, to, steps, true);
+                return to.substr(list.name.size() + 3);
+            }
+        }
+        return "";
+    }
+    // Reference values in a value of field f (an id, a list of ids, elements with reference leaves), and the leaf names of its
+    // elements. written: the list's path as the edit wrote it (an old name's leaves are keyed by it).
+    void values(const RegistrySpec& reg, const FieldSpec& f, const std::string& written, json* v) {
+        if (v->is_object() && v->contains("set") && v->size() == 1) return values(reg, f, written, &(*v)["set"]);
         if (!f.ref.empty() && f.type == FieldType::Id) return id(f.ref, v);
-        if (v->is_object() && v->contains("set") && v->size() == 1) return values(f, &(*v)["set"]);
         if (f.type != FieldType::List) return;
         auto element = [&](json* x) {
             if (f.element == FieldType::Struct && x->is_object()) {
-                for (auto it = x->begin(); it != x->end(); ++it)
-                    if (const FieldSpec* leaf = f.element_field(it.key()); leaf && !leaf->ref.empty()) id(leaf->ref, &it.value());
+                keys(x, reg.name + "." + f.name + "[].", [&](const std::string& k) { return leaf_name(reg, f, written, k); },
+                     [&](const std::string& k, const std::string&, json* lv) {
+                         if (const FieldSpec* leaf = f.element_field(k); leaf && !leaf->ref.empty()) id(leaf->ref, lv);
+                     });
             } else if (!f.ref.empty()) {
                 id(f.ref, x);
             }
@@ -732,45 +787,51 @@ struct Renamer {
         if (v->is_array()) for (json& x : *v) element(&x);
         else element(v);
     }
+    // A field name of reg as an object key ("fields", "where"): renamed where this schema does not have it.
+    std::string key_name(const RegistrySpec& reg, const std::string& k) {
+        json j = k;
+        field(reg, &j);
+        return j.get<std::string>() == k ? std::string() : j.get<std::string>();
+    }
     void edit(const RegistrySpec& reg, json* e) {
+        const std::string written = e->contains("field") && (*e)["field"].is_string() ? (*e)["field"].get<std::string>() : "";
         if (e->contains("field")) field(reg, &(*e)["field"]);
         if (e->contains("select")) {
             json& s = (*e)["select"];
             if (s.is_string()) id(reg.name, &s);
             else if (s.is_object() && s.contains("id")) id(reg.name, &s["id"]);
+            // a where condition names an entry's own fields; a plain value of a reference field is an id
+            if (s.is_object() && s.contains("where"))
+                keys(&s["where"], reg.name + ".", [&](const std::string& k) { return key_name(reg, k); }, [&](const std::string& k, const std::string&, json* c) {
+                    if (const FieldSpec* f = reg.field(k); f && f->type == FieldType::Id && !f->ref.empty()) id(f->ref, c);
+                });
         }
         if (e->contains("like")) id(reg.name, &(*e)["like"]);
-        if (e->contains("fields") && (*e)["fields"].is_object()) {
-            json renamed = json::object();
-            for (auto it = (*e)["fields"].begin(); it != (*e)["fields"].end(); ++it) {
-                json k = it.key();
-                field(reg, &k);
-                json v = it.value();
-                if (const FieldSpec* f = reg.field(k.get<std::string>())) values(*f, &v);
-                renamed[k.get<std::string>()] = std::move(v);
-            }
-            (*e)["fields"] = std::move(renamed);
-        }
-        if (!e->contains("field") || !(*e)["field"].is_string()) return;
+        if (e->contains("fields"))
+            keys(&(*e)["fields"], reg.name + ".", [&](const std::string& k) { return key_name(reg, k); }, [&](const std::string& k, const std::string& old, json* v) {
+                if (const FieldSpec* f = reg.field(k)) values(reg, *f, old, v);
+            });
+        if (!error.empty() || !e->contains("field") || !(*e)["field"].is_string()) return;
         const std::string path = (*e)["field"].get<std::string>();
         const FieldSpec* f = reg.field(path);
         if (!f) return;
         // an element edit's op is that element's (or leaf's) value; a whole field's op or list op its own
         const bool element = path.find('[') != std::string::npos;
+        const std::string written_list = written.substr(0, written.find('['));
         if (e->contains("op")) {
             json& op = (*e)["op"];
-            if (!element) values(*f, &op);
+            if (!element) values(reg, *f, written_list, &op);
             else if (const FieldSpec* list = reg.field(path.substr(0, path.find('['))); list && list->type == FieldType::List) {
                 const size_t dot = path.find("].");
                 if (dot != std::string::npos) {
                     if (const FieldSpec* leaf = list->element_field(path.substr(dot + 2)); leaf && !leaf->ref.empty()) id(leaf->ref, op.is_object() && op.contains("set") ? &op["set"] : &op);
                 } else {
-                    values(*list, op.is_object() && op.contains("set") ? &op["set"] : &op);
+                    values(reg, *list, written_list, op.is_object() && op.contains("set") ? &op["set"] : &op);
                 }
             }
         }
         if (e->contains("list") && (*e)["list"].is_object())
-            for (auto it = (*e)["list"].begin(); it != (*e)["list"].end(); ++it) values(*f, &it.value());
+            for (auto it = (*e)["list"].begin(); it != (*e)["list"].end(); ++it) values(reg, *f, written_list, &it.value());
     }
 };
 }  // namespace
@@ -834,9 +895,12 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
             for (const auto& [n, r] : schema.registries) any_steps = any_steps || (!r.migrations.empty() && reg);
             if (any_steps) {
                 json m = e;
-                Renamer rn{schema, {}};
+                Renamer rn{schema, {}, {}};
                 rn.edit(*reg, &m);
-                if (!rn.notes.empty()) {
+                if (!rn.error.empty()) {
+                    ok = false;
+                    why = "the edit " + rn.error;
+                } else if (!rn.notes.empty()) {
                     for (const std::string& note : rn.notes) out->migrated.push_back("#" + std::to_string(x.n) + ": " + note);
                     ok = edit_of(m, *out, schema, &x, &why);
                 } else {

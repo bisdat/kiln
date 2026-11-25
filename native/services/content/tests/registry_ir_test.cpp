@@ -362,6 +362,48 @@ int main() {
                             "pack", "1.0.0", "content/p.json", m, &out, &rf, &err) && out.size() == 1 && out[0].edits.size() == 1 &&
                   out[0].edits[0].field == "duration" && !out[0].migrated.empty(),
               "a data pack's registry section written for 0.1.0 is migrated too");
+        // review: the rest of an edit's names go through the same steps
+        {
+            Schema mm = m;
+            FieldSpec station = spec("station", FieldType::Id);
+            station.ref = "items";
+            mm.registries["recipes"].fields["station"] = station;
+            Batch more;
+            std::vector<Refusal> rf3;
+            const bool ok3 = parse_batch(std::string(R"({"ir": 1, "mod": "a", "stage": "alter", "edits": [
+                {"registry": "recipes", "select": "game:arrow", "field": "ingredients", "list": {"append": [{"item": "game:stone_old", "amount": 4}]}},
+                {"registry": "recipes", "select": {"id": "game:*", "where": {"time": ">=1"}}, "field": "time", "op": {"mul": 2}},
+                {"registry": "recipes", "select": "game:arrow", "field": "station", "op": {"set": "game:stone_old"}},
+                {"registry": "recipes", "select": "game:arrow", "field": "inputs[0]", "op": {"set": {"item": "game:stone_old", "amount": 2}}}]})"),
+                                         mm, &more, &rf3, &err);
+            std::string why3;
+            for (const Refusal& x : rf3) why3 += " #" + std::to_string(x.n) + " " + x.reason;
+            CHECK(ok3 && rf3.empty() && more.edits.size() == 4, ("an element's leaf, a where field and a set reference are renamed too:" + why3).c_str());
+            if (ok3 && more.edits.size() == 4) {
+                const Value* count = more.edits[0].list_values.empty() ? nullptr : more.edits[0].list_values[0].leaf("count");
+                CHECK(more.edits[0].field == "inputs" && count && count->i == 4 && more.edits[0].list_values[0].leaf("item")->t == "game:stone",
+                      "an appended element written with 0.1.0's leaf name (amount) is read as inputs[].count");
+                CHECK(more.edits[1].select.where.is_object() && more.edits[1].select.where.contains("duration") && !more.edits[1].select.where.contains("time"),
+                      "a where condition's field (time) is read as duration");
+                CHECK(more.edits[2].op.set && more.edits[2].op.value.t == "game:stone", "a reference set with {\"set\": id} is renamed like a plain one");
+                const Value& el = more.edits[3].op.value;
+                CHECK(el.leaf("count") && el.leaf("count")->i == 2 && el.leaf("item") && el.leaf("item")->t == "game:stone", "a whole element set with old names");
+            }
+            // a mod that names one field twice, by its old and its new name: refused (which value it meant is unknown)
+            Batch twice;
+            std::vector<Refusal> rf4;
+            parse_batch(std::string(R"({"ir": 1, "mod": "a", "stage": "add", "edits": [
+                {"registry": "recipes", "entry": "add", "id": "a:bolt", "like": "game:old_arrow", "fields": {"time": 3, "duration": 4}}]})"), mm, &twice, &rf4, &err);
+            CHECK(twice.edits.empty() && rf4.size() == 1 && rf4[0].reason.find("names recipes.duration twice") != std::string::npos,
+                  ("an add naming duration and its old name time is refused, not silently one of them: " + (rf4.empty() ? std::string("none") : rf4[0].reason)).c_str());
+            Batch twice2;
+            std::vector<Refusal> rf5;
+            parse_batch(std::string(R"({"ir": 1, "mod": "a", "stage": "alter", "edits": [
+                {"registry": "recipes", "select": "game:arrow", "field": "inputs", "list": {"append": [{"item": "game:stone", "amount": 4, "count": 5}]}}]})"),
+                        mm, &twice2, &rf5, &err);
+            CHECK(twice2.edits.empty() && rf5.size() == 1 && rf5[0].reason.find("twice") != std::string::npos,
+                  ("an element naming count and its old name amount is refused: " + (rf5.empty() ? std::string("none") : rf5[0].reason)).c_str());
+        }
         // without migrations nothing is renamed: the unknown name is refused as before
         Batch plain;
         std::vector<Refusal> rf2;
