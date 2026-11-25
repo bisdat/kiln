@@ -5,7 +5,7 @@
   "version": "0.34.0",
   "license": "MIT",
   "source": "https://github.com/AleksanderWojtal-CC/Enshrouded-BuildingTools, tag v0.34.0 (src/main.cpp, src/objects.h)",
-  "comment": "Where Building Tools finds game code by its bytes, as far as Kiln has code near it. It loads as a dinput8.dll proxy, a Kiln Library native mod or mods/building-tools/BuildingTools.dll (ShroudForge, XHL-Core), starts a thread from its DllMain, waits 4 s and scans the live code once (exact signatures, a few that accept another mod's jump at the start), then redirects the game's calls to what it found. Kiln code on these bytes when it scans turns that feature of Building Tools off. tools/sigport/tests/test_foreign_scans.py checks each signature on the pinned executables and that every Kiln symbol on its bytes is listed under `kiln` with what Kiln does there (docs/kiln/engines/README.md, 'Mods that find game code by its bytes').",
+  "comment": "Where Building Tools finds game code by its bytes, wherever Kiln has a symbol on those bytes (and two more: MissingCall, ScreenDispatch). It loads as a dinput8.dll proxy, a Kiln Library native mod or mods/building-tools/BuildingTools.dll (ShroudForge, XHL-Core), starts a thread from its DllMain, waits 4 s and scans the live code once (exact signatures; jump-tolerant ones accept another mod's jump in their first `head` bytes and chain to it), then redirects the game's calls to what it found. Kiln code on an exact signature's bytes when it scans turns that feature of Building Tools off. Every Kiln symbol on a scan's bytes is listed under `kiln` with what Kiln does there; OPEN marks a known conflict. tools/sigport/tests/test_foreign_scans.py checks this on the pinned executables (docs/kiln/engines/README.md, 'Mods that find game code by its bytes').",
   "scans": [
     {
       "name": "CursorFlags",
@@ -58,6 +58,280 @@
       "kiln": {
         "tools/MaterialSelector": "OPEN (not changed in 0.2.0-dev.31.13): kiln-tools hooks this entry when it loads on the client (the material filter of Kiln mods' building tools, and the ammo picker); Building Tools then logs 'full material list no' and 'partial area actions: not available'",
         "build/client.MaterialRows": "OPEN: kiln-items hooks the same entry once a player has a building link (crafting.build_ui), usually after Building Tools scanned"
+      }
+    },
+    {
+      "name": "UI_DRAW_HINTS",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 8B C4 48 89 58 10 48 89 70 18 55 57 41 56 48 8D A8 A8 FA FF FF 48 81 EC 40 06 00 00",
+      "source": "src/main.cpp SIG_UI_DRAW_HINTS",
+      "feature": "its menu, tools wheel and exact placement window (required by the menu)",
+      "kiln": {
+        "ui/ChestFooter": "OPEN (rare): kiln-core's native chest entries hook this entry when a mod first adds a chest button (Ui native chest entries); before Building Tools' scan (a mod adding one while it loads) its menu, wheel and exact window stay off, after it both work"
+      }
+    },
+    {
+      "name": "UI_BEGIN_TEXT",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 50 48 8B DA 41 0F B6 F9",
+      "source": "src/main.cpp SIG_UI_BEGIN_TEXT",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/NativeTextLine": "OPEN (rare): kiln-core's item-detail capture hooks this entry when a mod first reads an item's detail lines; before Building Tools' scan its menu stays off, after it both work"
+      }
+    },
+    {
+      "name": "UI_END_TEXT",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "40 55 56 57 48 8D 6C 24 B9 48 81 EC F0 00 00 00 0F 29 BC 24 B0 00 00 00",
+      "source": "src/main.cpp SIG_UI_END_TEXT",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/NativeTextDraw": "not hooked: Kiln's main-menu footer and item tooltips call it"
+      }
+    },
+    {
+      "name": "UI_END_BOX",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 60 80 79 20 00 48 8B D9 74 6A",
+      "source": "src/main.cpp SIG_UI_END_BOX",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/UiFrameEnd": "not hooked: kiln-ui calls it"
+      }
+    },
+    {
+      "name": "UI_SELF_ALIGN",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "0F B7 02 66 89 41 6C C3 CC CC CC CC CC CC CC CC 0F 10 02 0F 11 81 98 00 00 00",
+      "source": "src/main.cpp SIG_UI_SELF_ALIGN",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/UiNodeAlign": "not hooked: kiln-ui and the item tooltips call it"
+      }
+    },
+    {
+      "name": "UI_LAYOUT",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "0F B7 02 66 89 41 6E C3 CC CC CC CC CC CC CC CC 0F B7 02 66 89 41 6C C3",
+      "source": "src/main.cpp SIG_UI_LAYOUT",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/UiNodeAlign": "not hooked: kiln-ui and the item tooltips call it"
+      }
+    },
+    {
+      "name": "UI_STRETCH",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 91 90 00 00 00 C3 CC CC CC CC CC CC CC CC 88 51 6D C3 CC CC CC CC",
+      "source": "src/main.cpp SIG_UI_STRETCH",
+      "feature": "its menu (required)",
+      "kiln": {
+        "ui/UiNodeSize": "not hooked: kiln-ui and the item tooltips call it"
+      }
+    },
+    {
+      "name": "UiScrollBegin",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 8B C4 55 57 41 54 41 55 41 57 48 8D A8 C8 FD FF FF 48 81 EC 10 03 00 00",
+      "source": "src/main.cpp SIG_UI_SCROLL_BEGIN",
+      "feature": "its menu's scrolling",
+      "kiln": {
+        "ui/ScrollLayoutBegin": "not hooked: kiln-ui's long pause menu calls it"
+      }
+    },
+    {
+      "name": "UiScrollEnd",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 8B C4 55 53 56 57 41 56 41 57 48 8D A8 D8 FC FF FF 48 81 EC F8 03 00 00",
+      "source": "src/main.cpp SIG_UI_SCROLL_END",
+      "feature": "its menu's scrolling",
+      "kiln": {
+        "ui/ScrollLayoutEnd": "not hooked: kiln-ui's long pause menu calls it"
+      }
+    },
+    {
+      "name": "UiScrollSpeed",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 10 57 48 81 EC 50 01 00 00 48 8B F9 41 B8 A8 2C 03 00 48 8B 0D ?? ?? ?? ??",
+      "source": "src/main.cpp SIG_UI_SCROLL_SPEED",
+      "feature": "its menu's scrolling",
+      "kiln": {
+        "ui/ScrollLayoutSpeed": "not hooked: kiln-ui's long pause menu calls it"
+      }
+    },
+    {
+      "name": "UiScrollParams",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 10 55 48 8D 6C 24 A9 48 81 EC E0 00 00 00 48 8B D9 E8 ?? ?? ?? ??",
+      "source": "src/main.cpp SIG_UI_SCROLL_PARAMS",
+      "feature": "its menu's scrolling",
+      "kiln": {
+        "ui/ScrollParamsInit": "not hooked: kiln-ui's long pause menu calls it"
+      }
+    },
+    {
+      "name": "PlayUi",
+      "sides": [
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "4C 8B DC 55 49 8D AB E8 FD FF FF 48 81 EC 10 03 00 00 48 8B 05 ?? ?? ?? ?? 48 8B 88 D0 00 00 00 48 8B 01 48 85 C0 0F 84 ?? ?? ?? ?? 4D 89 73 C8 4C 8B 70 38 4C 89 B5 30 02 00 00 4D 85 F6 0F 84 ?? ?? ?? ?? 4D 89 63 D8 4D 8D A6 D8 1C 00 00 41 0F B6 04 24",
+      "source": "src/main.cpp SIG_PLAY_UI",
+      "feature": "its menu (accepts another mod's jump at the start)",
+      "kiln": {
+        "ui/PlayStateUi": "not hooked: the scope of the gem forge's read-only checks (kiln-core) and of rules' UI patterns"
+      },
+      "note": "Building Tools also accepts this function with its first 0x12 bytes changed (find_play_ui); Greeneye's Hollow Halls Progression and The Worst Map Mod hook its entry"
+    },
+    {
+      "name": "PAY_PLACE",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8B 4D F8 48 8B 45 B8 48 89 85 98 01 00 00",
+      "source": "src/main.cpp SIG_PAY_PLACE",
+      "feature": "creative building's payment of a placement",
+      "kiln": {
+        "build/BlueprintApplyRet": "not hooked: the return address kiln-items compares ApplyMaterials' caller with. OPEN (other way round, from the code, not seen in a game): Building Tools redirects this call and the other building calls of ApplyMaterials (PayCost) to its own code, which then calls ApplyMaterials; Kiln's hook there sees Building Tools' code as the caller, so kiln-rules' building cost scaling (BuildCost, BuildRefund) and kiln-items' building-link payment, which recognise the building programs by that caller, would not apply while Building Tools runs"
+      }
+    },
+    {
+      "name": "StockCount",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 41 8B D8 48 8B FA 4C 8B D1",
+      "source": "src/main.cpp SIG_STOCK_COUNT",
+      "feature": "magic chests of all bases",
+      "kiln": {
+        "build/StockCount": "not hooked: the call target kiln-items checks next to build/CursorStockRet (its mid hook is in the material check, not here)"
+      }
+    },
+    {
+      "name": "BaseAt",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 08 57 48 83 EC 10 8B 7A 24 45 33 DB 48 8B DA 4C 8B D1 48 85 FF",
+      "source": "src/main.cpp SIG_BASE_AT",
+      "feature": "magic chests of all bases",
+      "kiln": {
+        "stations/BaseAtPosition": "not hooked: kiln-items calls it"
+      }
+    },
+    {
+      "name": "ChestList",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "exact",
+      "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 20 57 48 83 EC 40 49 8B F9 49 8B E8",
+      "source": "src/main.cpp SIG_CHEST_LIST",
+      "feature": "magic chests of all bases",
+      "kiln": {
+        "stations/BaseStockForPlayer": "not hooked: kiln-items calls it and checks its code before the crafting preview"
+      }
+    },
+    {
+      "name": "PayCost",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "jump-tolerant",
+      "head": 7,
+      "pattern": "40 55 56 48 83 EC 78 48 8B F2 48 8B E9 0F B6 11 85 D2 0F 84 ?? ?? ?? ??",
+      "source": "src/main.cpp SIG_PAY",
+      "feature": "creative building's payment",
+      "kiln": {
+        "rules/ApplyMaterials": "hooked at its entry (kiln-rules' building costs, kiln-items' building links); Building Tools accepts a jump there (find_hookable, 7 bytes) and chains to it. See PAY_PLACE for what its redirected calls mean for Kiln's caller checks"
+      }
+    },
+    {
+      "name": "PlaceCommit",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "jump-tolerant",
+      "head": 5,
+      "pattern": "48 8B C4 55 53 56 57 41 54 41 56 41 57 48 8D A8 88 FD FF FF 48 81 EC 40 03 00 00",
+      "source": "src/main.cpp SIG_PLACE_COMMIT",
+      "feature": "area placement (required: the mod turns off without it)",
+      "kiln": {
+        "gameplay/PlaceBlueprint": "hooked at its entry (kiln-gameplay); Building Tools accepts a jump there (find_hookable, 5 bytes) and chains to it"
+      }
+    },
+    {
+      "name": "RemoveCommit",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "jump-tolerant",
+      "head": 5,
+      "pattern": "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D AC 24 E0 E5 FF FF B8 20 1B 00 00",
+      "source": "src/main.cpp SIG_REMOVE_COMMIT",
+      "feature": "area removal",
+      "kiln": {
+        "gameplay/DismantleBlock": "hooked at its entry (kiln-gameplay); Building Tools accepts a jump there (find_hookable, 5 bytes) and chains to it"
+      }
+    },
+    {
+      "name": "SystemDeps",
+      "sides": [
+        "server",
+        "client"
+      ],
+      "lookup": "jump-tolerant",
+      "head": 5,
+      "pattern": "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 60 4C 8B 09 48 8B D9",
+      "source": "src/main.cpp SIG_SYS_DEPS",
+      "feature": "partial dismantling",
+      "kiln": {
+        "items/IterBegin": "hooked at its entry; Building Tools accepts a jump there (find_hookable, 5 bytes) and chains to it",
+        "world/IterBegin": "the same address as items/IterBegin"
       }
     }
   ]

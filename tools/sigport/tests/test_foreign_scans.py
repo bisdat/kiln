@@ -45,6 +45,8 @@ class ForeignScans(unittest.TestCase):
             for scan in doc["scans"]:
                 self.assertTrue(set(scan["sides"]) <= {"server", "client"} and scan["sides"], f"{name} {scan['name']}: sides")
                 self.assertIn(scan["lookup"], ("exact", "jump-tolerant"), f"{name} {scan['name']}: lookup")
+                if scan["lookup"] == "jump-tolerant":
+                    self.assertGreaterEqual(scan.get("head", 0), 5, f"{name} {scan['name']}: head (the bytes a jump may take)")
                 parse(scan["pattern"])
                 for symbol, what in scan.get("kiln", {}).items():
                     self.assertTrue(what.strip(), f"{name} {scan['name']}: say what Kiln does at {symbol}")
@@ -69,9 +71,8 @@ class ForeignScans(unittest.TestCase):
                 hits = Resolver(image, {}).scan(rx, lo, hi)
                 self.assertEqual(len(hits), 1, f"{what}: the signature has {len(hits)} matches (one expected): stale for this build?")
                 at = hits[0]
-                head = scan.get("head", 0) if scan["lookup"] == "jump-tolerant" else 0
-                on = sorted(n for n, rva in resolved.items()
-                            if rva < at + size and rva + PATCH > at and not (head and rva == at))
+                # a jump-tolerant scan accepts another mod's jump in its first `head` bytes; its symbols are listed all the same
+                on = sorted(n for n, rva in resolved.items() if rva < at + size and rva + PATCH > at)
                 listed = scan.get("kiln", {})
                 for n in on:
                     self.assertIn(n, listed, f"{what}: Kiln's {n} ({resolved[n]:#x}) is on the bytes it finds "
