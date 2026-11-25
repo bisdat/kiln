@@ -172,8 +172,11 @@ public sealed partial class PlayerStorageStoreTests
                 else { reached2.Set(); Assert.True(gate2.Wait(TimeSpan.FromSeconds(20))); }
             };
             persist.Frozen = new("second", PlayerStorageDocumentTests.Storages(2));
-            h.StageOnly(2);
+            // The save request's staging must be running before the snapshot staging comes: one still queued is replaced by
+            // it (the writer's back-pressure), and then there is no earlier staging of the generation to tell apart.
+            InstanceHarness.Store.Stage(2, SaveReason.Request, late: false);
             Assert.True(reached1.Wait(TimeSpan.FromSeconds(10)));
+            InstanceHarness.Store.Stage(2, SaveReason.Request, late: false, snapshot: true);
             InstanceHarness.Store.Commit(2, 1002, SaveReason.Autosave);    // late: the world write waited for the snapshot staging
             gate1.Set();                                                    // the save request's staging finishes
             Assert.True(reached2.Wait(TimeSpan.FromSeconds(10)));           // ... the snapshot staging is still being written
