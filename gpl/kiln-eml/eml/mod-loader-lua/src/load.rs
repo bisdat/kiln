@@ -242,6 +242,21 @@ pub fn create_backup_with(
         }
     }
     if retake || !bak_path.exists() || !validate_backup(path, bak_path) {
+        // kiln-eml (0.2.0-dev.31.13): a new working baseline is taken from the game files (none yet, one of another game
+        // build, or a stale one). Where Steam's manifest of the installed build is there, it says whether they are the
+        // files Steam installed; files it does not list as they are were changed by some program since, and are never
+        // the clean copy: the pair present stays as it is (after a game update it is the only clean copy there is),
+        // and Steam's file check gives files the next start takes. Kiln's ShroudForge fork decides the same way.
+        if let crate::steam_files::Installed::Differs { build, what } =
+            crate::steam_files::installed_files(root.as_std_path(), stem)
+        {
+            let kept = if bak_path.exists() { format!("; {bak_path} and {resources_bak} stay as they are") } else { String::new() };
+            anyhow::bail!(
+                "create_backup: the game's files are not the files Steam installed for {} ({what}), so Kiln takes no clean \
+                 copy of the game data from them{kept}. Verify the game files in Steam, then start through Kiln again",
+                crate::steam_files::Installed::build_words(&build)
+            );
+        }
         let live = path.with_extension("kfc_resources");
         info!(
             "Backing up the vanilla game data: {} and {} ({}) are copied, then read back for the seal",
