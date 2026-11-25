@@ -1035,3 +1035,39 @@ fn a_repair_tells_two_kinds_of_mod_with_one_id_apart() {
     assert_eq!(fake.sent()[sent..], [format!("GET cdn.crucible.test/m/{}.json", shared.version.id), format!("GET cdn.crucible.test/f/{}.zip", set_file.sha256)]);
     assert!(crate::library::path_of(&b, &set_alpha).unwrap().exists() && crate::library::path_of(&b, &kiln_alpha).unwrap().is_dir());
 }
+
+/// Two kinds of mod with one id (a player's pack had an EMF and a ShroudLink "expeditions"): each part downloads its own
+/// file. Before, the download took the first part's URL with the second part's size and failed "larger than allowed".
+#[test]
+fn two_mods_of_different_kinds_with_one_id_each_get_their_own_file() {
+    let t = tmp("same-id");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    // a SET mod also called "alpha" (init.lua only), smaller than the Kiln "alpha"
+    let set = t.0.join("src/set/alpha");
+    std::fs::create_dir_all(&set).unwrap();
+    std::fs::write(set.join("init.lua"), b"print('alpha')").unwrap();
+    let r = crate::library::import(&a, &[set], &mut NoProgress).unwrap();
+    let lr = r.imported.iter().chain(&r.existing).next().unwrap().clone();
+    assert_eq!((lr.kind, lr.id.as_str()), (ModKind::Set, "alpha"));
+    let mut p = crate::profile::get(&a, &pid).unwrap();
+    p.mods.set.push(crate::profile::ProfileMod { id: lr.id.clone(), version: lr.version.clone(), hash: lr.hash.clone(), enabled: true });
+    crate::profile::save(&a, &p).unwrap();
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let alphas: Vec<_> = pv.index.mods.iter().filter(|m| m.id == "alpha").collect();
+    assert_eq!(alphas.len(), 2, "{:?}", pv.index.mods);
+    assert_ne!(alphas[0].file.as_ref().unwrap().size, alphas[1].file.as_ref().unwrap().size);
+    // the preview counts each part's own file once
+    let preview_ok = pv.missing.iter().filter(|m| m.id == "alpha").count() == 2
+        && pv.download == pv.index.mods.iter().filter_map(|m| m.file.as_ref()).map(|f| f.size).sum::<u64>();
+    install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    assert!(preview_ok, "the preview counts each part's own file once: {:?} {}", pv.missing, pv.download);
+    let have = crate::library::list(&b, None).unwrap();
+    assert!(have.iter().any(|e| e.kind == ModKind::Set && e.id == "alpha"), "{have:?}");
+    assert!(have.iter().any(|e| e.kind == ModKind::Kiln && e.id == "alpha"), "{have:?}");
+}

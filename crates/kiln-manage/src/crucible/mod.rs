@@ -792,7 +792,8 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
 
 /// [`preview`] for an index already opened.
 pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion, index: PackIndex, game: Option<&GameInstall>) -> Result<Preview> {
-    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().collect();
+    // by the part's stored file, not its id: an EMF mod and a ShroudLink mod may both be called "expeditions"
+    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().map(|(_, f)| (f.sha256.clone(), f)).collect();
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut size = 0u64;
@@ -802,7 +803,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
         size = size.saturating_add(part_size(m.file.as_ref()));
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-        if let Some(f) = lacking.get(&m.id) {
+        if let Some(f) = m.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr.clone());
         } else {
@@ -820,7 +821,7 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     if let Some(l) = &index.layer {
         size = size.saturating_add(part_size(l.file.as_ref()));
         let lr = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
-        if let Some(f) = lacking.get(&l.id) {
+        if let Some(f) = l.file.as_ref().and_then(|f| lacking.get(&f.sha256)) {
             download = download.saturating_add(f.size);
             missing.push(lr);
         } else {
