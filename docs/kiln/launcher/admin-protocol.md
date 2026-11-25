@@ -311,13 +311,20 @@ and `kiln.log`. Dedicated servers only: on a game client `update_stage` and `upd
 ## 9. Remote servers: the SSH tunnel recipe
 The launcher never stores SSH keys or passwords: it uses the user's ssh config and agent, non-interactively.
 ```sh
+ssh -o BatchMode=yes myhost cat /srv/enshrouded/ember/kiln/state/boot.json                  # profile.dataDir (below)
 ssh -o BatchMode=yes myhost cat /srv/enshrouded/ember/kiln/data/kiln-admin/endpoint.json    # port, pid
 ssh -o BatchMode=yes myhost cat /srv/enshrouded/ember/kiln/data/kiln-admin/admin-token      # the key
-ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -L 127.0.0.1:<local>:127.0.0.1:<port> myhost
-# then connect to 127.0.0.1:<local> and speak KAP/1 as usual
+ssh -o BatchMode=yes -W 127.0.0.1:<port> myhost     # one per connection: stdin/stdout are the KAP/1 stream
 ```
-`kiln_manage::admin::tunnel::SshTunnel` runs that `ssh -N` child (a free local port, `ServerAliveInterval=15`), waits
-until the forward accepts connections, and kills the child on close or drop. `AdminHub` reconnects a dropped session
+(0.2.0-dev.31.12) `kiln_manage::admin::tunnel::SshTunnel` binds 127.0.0.1:<local> itself and holds it for the tunnel's
+life; each connection accepted there runs its own `ssh -W` child (`ServerAliveInterval=15`) and the bytes are copied
+between the two. No port is looked up, released and handed to ssh any more (another program could take it in between),
+and ssh opens no listener. Closing or dropping the tunnel stops accepting and kills every child; a connection that ssh
+could not forward reports what ssh said (`ssh tunnel to <host>: ...`). Kiln.Admin's folder follows the data folder the
+server booted with: when `kiln/state/boot.json` names a `profile.dataDir` (a profile with `dataDir: profile`), the
+launcher reads `<dataDir>/kiln-admin/` first (locally: `Z:` mapped to `/`, other drives through the Wine prefix,
+relative paths under `<server>/kiln/`; remotely: `Z:` and absolute paths), then `kiln/data/kiln-admin/`
+(`kiln_manage::admin::datadir`). `AdminHub` reconnects a dropped session
 by running the whole recipe again (endpoint, token, a new tunnel), so a restarted server with a new port is found. The
 token is held in memory only. `$KILN_SSH` overrides the ssh binary. Remote machines are Linux (POSIX shell, `cat`).
 A remote server without KAP (an old Kiln.Admin) is not reachable from the launcher (no remote file bridge).
@@ -390,6 +397,11 @@ a named consumer, and that consumer (the web admin mod, also connected with the 
   expired or other consumer's secret fails with the same message.
 - KAP only: over the file bridge both fail (a result file would keep the secret on disk). Only a SHA-256 of each secret
   is kept, in memory; secrets are never logged (kiln.log says who minted for whom, and who redeemed).
+- (0.2.0-dev.31.12) The launcher never puts the secret on a command line: it opens a one-use bootstrap address of the
+  server's web panel gateway (contracts.md, `admin_open_web_panel`) whose page holds the secret and sends the browser on
+  to `https://<the server's own loopback origin>/launcher#secret=` with `location.replace`. On Linux the page is only
+  served to a program of the launcher's own user. The panel's page removes the fragment from the address bar at once;
+  a browser's history may still list the used URL, and the secret in it is dead (one use, 60 s).
 
 ### Commands as forms
 `commands_describe` gives a panel what it needs to turn every command into a form. Per command (unchanged): `name`,
