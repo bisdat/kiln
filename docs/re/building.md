@@ -252,10 +252,16 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   1. The user's wishes come from `ClientPlayerInput.clientOnlyPlayerInput.inventoryStockSelection` (+0x5a4 +2:
      `SelectionInput {isAbsolute +0x5a6, selection +0x5a7}`) in the input handler `0x3af670` (the client frame calls it
      at `0x87a94d`): an absolute selection picks that row (wish `0x3afa75`, return `0x3afa7a`), a relative one cycles by
-     it (`0x40c320` at `0x3afabf`, wish `0x3afb02`, return `0x3afb07`). The other wish sites are the game's own:
-     `0x2bce24` (return `0x2bce29`, player_ui's `SelectInventoryStockItemEvent`) and `0x2b4846` (after `0x40cf00`);
-     `0x3a9612` and `0x3ade44` sit in `0x3a95a0` / `0x3addd0`, which no code calls directly (only `.pdata`/unwind data
-     names them).
+     it (`0x40c320` at `0x3afabf`, wish `0x3afb02`, return `0x3afb07`). The pick has seven direct calls; the other five
+     are the game's own: `0x2bce24` (return `0x2bce29`, player_ui's `SelectInventoryStockItemEvent`), `0x2b4846` (after
+     `0x40cf00`), and `0x3afcce` in the same input handler (return `0x3afcd3`), the building tool's
+     `buildingSelectMaterialFromCrosshair` (ClientOnlyPlayerInput +0x30, `ClientPlayerInput+0x5d4`), which picks the
+     aimed-at block's material only when its item's category is the held tool's group; `0x3a9612` and `0x3ade44` sit in
+     `0x3a95a0` / `0x3addd0`, which no code calls or jumps to and no pointer names (only `.pdata`/unwind data), so on
+     this build they are not a controller path; if they ever ran, their picks would not show the list (the state before
+     this fix). Which devices fill `inventoryStockSelection` was not read. The host answers every consumed action
+     alike (step 3), so in the game the automatic sites show the list for the game's rows too; for mod rows Kiln shows
+     it only for the user's two sites.
   2. The pick `0x40c150` writes `inventoryStockCycleAction` (`ClientPlayerInputData` +0x98 version, +0x9c item) and the
      pending selector; nothing on the HUD.
   3. On the host, `player_control_action_sequence` (`0x2dcca0`, its descriptor `0x141e1b2d0`) calls

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 import unittest
@@ -79,6 +80,16 @@ class AmmoQualification(unittest.TestCase):
         self.assertEqual(image[ret-5],0xe8)
         return ret+struct.unpack_from('<i',image,ret-4)[0]
 
+    def rel32_sites(self,targets):
+        """The address after every E8/E9 rel32 in .text that lands on one of targets (call return / jump end)."""
+        text,va=self.image.text,self.image.text_va;out={t:[] for t in targets}
+        for m in re.finditer(rb'[\xe8\xe9]',text):
+            p=m.start()
+            if p+5>len(text): break
+            t=va+p+5+struct.unpack_from('<i',text,p+1)[0]
+            if t in out: out[t].append(va+p+5)
+        return out
+
     def test_hud_reveal_chain(self):
         """GitHub issue 140: how the game's own pick shows the HUD list again, link by link on this build."""
         image=self.image.img
@@ -100,6 +111,17 @@ class AmmoQualification(unittest.TestCase):
         self.assertEqual(self.call_target(0x87a952),0x3af670)
         # The game's automatic wishes are elsewhere: SelectInventoryStockItemEvent in player_ui, and 0x2b4846.
         self.assertEqual(self.call_target(0x2bce29),0x40c150);self.assertEqual(self.call_target(0x2b484b),0x40c150)
+        # Every direct call of the pick on this build: the two user sites, the two automatic ones, the building tool's
+        # material-from-crosshair pick in the same input handler (behind ClientOnlyPlayerInput +0x30
+        # buildingSelectMaterialFromCrosshair, ClientPlayerInput +0x5d4; it only picks an item whose category is the
+        # held tool's group), and two in 0x3a95a0 / 0x3addd0, which nothing calls or jumps to and no pointer names.
+        sites=self.rel32_sites({0x40c150,0x3a95a0,0x3addd0})
+        self.assertEqual(sorted(sites[0x40c150]),[0x2b484b,0x2bce29,0x3a9617,0x3ade49,0x3afa7a,0x3afb07,0x3afcd3])
+        self.assertEqual((sites[0x3a95a0],sites[0x3addd0]),([],[]))
+        for f in (0x3a95a0,0x3addd0): self.assertNotIn(struct.pack('<Q',self.image.base+f),image)
+        self.assertEqual(self.pdata_chunk(0x3afcd3),self.pdata_chunk(0x3af9f9))
+        self.assertEqual(offset("keen::ecs::ClientOnlyPlayerInput","buildingSelectMaterialFromCrosshair"),0x30)
+        at(0x3afb4d,"4180bed405000000")
         # 2. The pick writes only inventoryStockCycleAction {version +0x98, item +0x9c} and the pending selector.
         self.assertEqual(offset("keen::ecs::ClientPlayerInputData","inventoryStockCycleAction"),0x98)
         # 3. The host (player_control_action_sequence 0x2dcca0 -> 0x2cb090) compares PlayerInput.fromClient's version

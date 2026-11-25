@@ -30,8 +30,10 @@ static KilnResult KILN_CALL ammo_raw(KilnOwner,uintptr_t target,const KilnHookOr
     *handle=target;return KILN_OK;
 }
 // The game's call sites of the pick, by return address (client 26430625): the user's relative cycle 0x3afb07 and
-// absolute selection 0x3afa7a; the automatic ones 0x2bce29 (SelectInventoryStockItemEvent) and 0x2b484b.
-constexpr uintptr_t kPick=0x14040c150,kCycleRet=0x1403afb07,kSelectRet=0x1403afa7a,kEventRet=0x1402bce29,kAutoRet=0x1402b484b;
+// absolute selection 0x3afa7a; the automatic ones 0x2bce29 (SelectInventoryStockItemEvent) and 0x2b484b; the building
+// tool's material-from-crosshair pick 0x3afcd3; and 0x3a9617 / 0x3ade49 in functions nothing calls.
+constexpr uintptr_t kPick=0x14040c150,kCycleRet=0x1403afb07,kSelectRet=0x1403afa7a,kEventRet=0x1402bce29,kAutoRet=0x1402b484b,
+    kCrosshairRet=0x1403afcd3,kDeadRet1=0x1403a9617,kDeadRet2=0x1403ade49;
 static uintptr_t game_caller;
 static uintptr_t KILN_CALL fake_caller(KilnHandle){return game_caller;}
 static std::map<std::string,uintptr_t> symbols;
@@ -140,7 +142,7 @@ int main() {
     active_group()=7;ammo::pick(groups,input,0,555,107);CHECK(cycle_count()==46&&drain()==1);
     active_group()=0;
     // The game's automatic selections never reopen the list.
-    for(const uintptr_t from:{kEventRet,kAutoRet,uintptr_t(0),kCycleRet+1}) {
+    for(const uintptr_t from:{kEventRet,kAutoRet,kCrosshairRet,kDeadRet1,kDeadRet2,uintptr_t(0),kCycleRet+1}) {
         game_caller=from;ammo::pick(groups,input,0,555,108);CHECK(cycle_count()==46&&drain()==1);
     }
     game_caller=kCycleRet;
