@@ -431,12 +431,12 @@ internal static unsafe class UiEngine
         _keysDrawn = false;
     }
 
-    private static void DrawWindow(UiDraw ui, UiWindow w)
+    internal static void DrawWindow(UiDraw ui, UiWindow w)
     {
         var o = w.Options;
-        var s = ui.Scale;
-        if (o.Width > 0 || o.Height > 0) ui.NextWindowSize(o.Width * s, o.Height * s, 4 /* FirstUseEver */);
-        if (o.Position is { } p) ui.NextWindowPos(p.X * ui.Width, p.Y * ui.Height, 4, 0.5f, 0.5f);
+        var vp = UiViewport.Of(ui);
+        // the options on first use (FirstUseEver), a remembered placement when it appears, MoveTo / Resize once (UiPlacement.cs)
+        w.Placer.PlanWindow(vp, o).Apply(ui);
         if (o.BackgroundAlpha is { } a) ui.NextWindowAlpha(a);
         uint flags = 0;
         if (o.AutoResize) flags |= 1u << 6;
@@ -445,7 +445,10 @@ internal static unsafe class UiEngine
         var open = true;
         var looks = ui.LookDepth;
         ui.PushLookRaw(o.Theme, o.Style);  // the player's look unless the window's mod chose its own
-        if (ui.BeginWindow(w.Key, ref open, flags))
+        var shown = ui.BeginWindow(w.Key, ref open, flags);
+        var (rx, ry, rw, rh) = ui.WindowRect;
+        w.Placer.Drawn(vp, rx, ry, rw, rh, shown);
+        if (shown)
         {
             var inner = ui.LookDepth;
             if (!UiModCalls.Invoke(w.Owner, w.Draw, ui, $"window '{w.Title}'") && Fault(w, w.Owner, $"window '{w.Title}'"))
@@ -457,13 +460,12 @@ internal static unsafe class UiEngine
         if (!open) w.SetOpenFromUi(false);
     }
 
-    private static void DrawScreens(UiDraw ui)
+    internal static void DrawScreens(UiDraw ui)
     {
         UiScreen[] ss;
         lock (Lock) ss = _screens;
         var open = ss.Where(s => s.IsOpen && !s.Disposed).OrderBy(s => s.OpenedAt).ToArray();
         if (open.Length == 0) return;
-        var s0 = ui.Scale;
         if (open.Any(s => s.Options.DimBackground))
         {
             // a full-screen, input-less window behind the screens, in the player's look (lighter when it is translucent)
@@ -488,8 +490,9 @@ internal static unsafe class UiEngine
             }
             else
             {
-                ui.NextWindowSize(o.Width * s0, o.Height * s0, 8 /* appearing */);
-                ui.NextWindowPos(ui.Width / 2, ui.Height / 2, 8, 0.5f, 0.5f);
+                // centred (or at Position) at its size whenever it appears, a remembered placement over that, MoveTo /
+                // Resize once over both (UiPlacement.cs)
+                s.Placer.PlanScreen(UiViewport.Of(ui), o).Apply(ui);
             }
             if (s.FocusNext)
             {
@@ -503,6 +506,11 @@ internal static unsafe class UiEngine
             var keep = true;
             ui.CurrentScreen = s;
             var visible = o.CloseButton && !o.FullScreen ? ui.BeginWindow($"{s.Title}{s.Id}", ref keep, flags) : ui.BeginWindowNoClose($"{s.Title}{s.Id}", flags);
+            if (!o.FullScreen)
+            {
+                var (rx, ry, rw, rh) = ui.WindowRect;
+                s.Placer.Drawn(UiViewport.Of(ui), rx, ry, rw, rh, visible);
+            }
             var inner = ui.LookDepth;
             if (visible && !UiModCalls.Invoke(s.Owner, s.Draw, ui, $"screen '{s.Title}'") && Fault(s, s.Owner, $"screen '{s.Title}'")) keep = false;
             ui.RestoreLooks(inner);

@@ -506,7 +506,7 @@ public sealed unsafe partial class UiDraw
         get
         {
             if (!UiNative.HasGameUi) return (0, 0, 0, 0);
-            float x, y, w, h;
+            float x = 0, y = 0, w = 0, h = 0;
             T->WindowRect(&x, &y, &w, &h);
             return (x, y, w, h);
         }
@@ -650,6 +650,19 @@ public sealed record UiWindowOptions
 
     /// <summary>Your own theme for the window (<see cref="Ui.Themes.Define"/>), over <see cref="Style"/>. Since 0.2.0-dev.29.16.</summary>
     public UiTheme? Theme { get; init; }
+
+    /// <summary>Kiln remembers where the player left the window (and its size, unless <see cref="AutoResize"/>), per mod and
+    /// <see cref="PlacementId"/>, across game starts (ui-placement.json in Kiln's config folder), and shows it there each
+    /// time it appears, kept inside the current viewport. It wins over <see cref="Position"/>, <see cref="Width"/> and
+    /// <see cref="Height"/> (which still apply the first time, before anything is remembered); <see cref="UiWindow.MoveTo"/>
+    /// and <see cref="UiWindow.Resize"/> win over it. Default false.</summary>
+    /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
+    public bool RememberPlacement { get; init; }
+
+    /// <summary>The id the remembered placement is kept under, unique among your mod's windows; null = the window's title
+    /// when it was created.</summary>
+    /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
+    public string? PlacementId { get; init; }
 }
 
 /// <summary>A Kiln window (Forge: a Screen). Draws every frame while open; closes with its X or <see cref="Open"/>.</summary>
@@ -666,9 +679,11 @@ public sealed class UiWindow : IDisposable
         _id = $"###kiln.w{Interlocked.Increment(ref _ids)}";
         Key = title + _id;
         _open = options.StartOpen && UiNative.DrawingOffReason == null;
+        Placer = UiPlacer.For(owner, options.RememberPlacement, options.PlacementId, () => title, window: true);
     }
 
     private readonly string _id;
+    internal UiPlacer Placer { get; }
 
     /// <summary>The window's title.</summary>
     public string Title { get; private set; }
@@ -698,6 +713,7 @@ public sealed class UiWindow : IDisposable
             if (value && UiNative.DrawingOffReason != null) return;
             if (_open == value) return;
             _open = value;
+            if (value) Placer.Opened();
             UiEngine.Recount();
         }
     }
@@ -711,6 +727,40 @@ public sealed class UiWindow : IDisposable
 
     /// <summary>Removes the window for good (also done when the owning mod unloads).</summary>
     public void Dispose() => UiEngine.Remove(this);
+
+    /// <summary>Moves the window: the point (<paramref name="pivotX"/>, <paramref name="pivotY"/>) of the window (0.5, 0.5 =
+    /// its centre; 0, 0 = its top left corner) goes to (<paramref name="x"/>, <paramref name="y"/>), fractions of the
+    /// viewport (0..1), the whole window kept inside it when its size is known. Applied once, on the next frame the window
+    /// is drawn (a hidden window: the first frame after it shows; a later call replaces one not yet applied); it wins over
+    /// the remembered placement and <see cref="UiWindowOptions.Position"/>, and the player can drag it again after. Does
+    /// nothing on a removed window. Any thread.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A position that is not a finite number, or a pivot outside 0..1.</exception>
+    /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
+    [AnyThread]
+    public void MoveTo(float x, float y, float pivotX = 0.5f, float pivotY = 0.5f)
+    {
+        UiPlacer.CheckMove(x, y, pivotX, pivotY);
+        if (!Disposed) Placer.Move(x, y, pivotX, pivotY);
+    }
+
+    /// <summary>Resizes the window to <paramref name="width"/> x <paramref name="height"/> pixels at UI scale 1, at most the
+    /// viewport; ImGui's minimum window size still applies, and an <see cref="UiWindowOptions.AutoResize"/> window keeps
+    /// following its contents. Applied once, like <see cref="MoveTo"/>; a resize alone keeps the window's top left corner,
+    /// moved back in when the new size would cross the viewport's edge. Does nothing on a removed window. Any thread.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">A size that is not a finite number above 0.</exception>
+    /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
+    [AnyThread]
+    public void Resize(float width, float height)
+    {
+        UiPlacer.CheckSize(width, height);
+        if (!Disposed) Placer.Resize(width, height);
+    }
+
+    /// <summary>Where the window was drawn last (fractions of the viewport, sizes at UI scale 1); null before its first
+    /// frame. Kept while it is hidden. Any thread.</summary>
+    /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
+    [AnyThread]
+    public UiPlacement? Placement => Placer.Placement;
 
     internal void SetOpenFromUi(bool open)
     {
