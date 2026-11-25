@@ -246,6 +246,52 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   `0x3853c0`. Which pick emptied the reporter's slot, and the server's order of the mod's swap and the game's wish, are
   runtime facts not established here.
 
+- How the list shows again after a pick (since 0.2.0-dev.31.12, GitHub issue 140; static, same client, read with
+  objdump; tests `native/services/tools/tests/ammo_sigdb_test.py` (`test_hud_reveal_chain`) and `ammo_reveal.cpp`).
+  The game's pick does not show the list itself; the host's answer does:
+  1. The user's wishes come from `ClientPlayerInput.clientOnlyPlayerInput.inventoryStockSelection` (+0x5a4 +2:
+     `SelectionInput {isAbsolute +0x5a6, selection +0x5a7}`) in the input handler `0x3af670` (the client frame calls it
+     at `0x87a94d`): an absolute selection picks that row (wish `0x3afa75`, return `0x3afa7a`), a relative one cycles by
+     it (`0x40c320` at `0x3afabf`, wish `0x3afb02`, return `0x3afb07`). The other wish sites are the game's own:
+     `0x2bce24` (return `0x2bce29`, player_ui's `SelectInventoryStockItemEvent`) and `0x2b4846` (after `0x40cf00`);
+     `0x3a9612` and `0x3ade44` sit in `0x3a95a0` / `0x3addd0`, which no code calls directly (only `.pdata`/unwind data
+     names them).
+  2. The pick `0x40c150` writes `inventoryStockCycleAction` (`ClientPlayerInputData` +0x98 version, +0x9c item) and the
+     pending selector; nothing on the HUD.
+  3. On the host, `player_control_action_sequence` (`0x2dcca0`, its descriptor `0x141e1b2d0`) calls
+     `0x2cb090` at `0x2ddf5f`: when `PlayerInput.fromClient`'s version (+0xa0 = 8 + 0x98) differs from
+     `ServerConsumedPlayerInput.consumedInventoryStockCycleAction` (+0x3c) it equips the item and sends
+     `UiInventoryStockCycleEvent` (type `0xE2267831`, 16 bytes: `playerEntityId` +8, `selectionResult` +12; `0x2cb39c`,
+     the only code that sends it), then stores the version.
+  4. The client's `player_ui` (`0x2b8430`, sys-write `G38UiPlayData`, which is `rsi` from `0x2b8588`) reads 14 event
+     streams, the last 0x70 bytes of its 0x3c8-byte table at `rbp+0x70` in the order of its descriptor (`0x141e259a0`):
+     the eighth, `UiInventoryStockCycleEvent` at `rbp+0x400` (`0x2bd0c1`), sets `G38UiPlayData+0x1a990` to
+     `selectionResult` and adds one to `G38UiPlayData+0x2fe8` (`0x2bd19a`) for each event of the local player. The
+     same `rsi` passes the groups at `+0x14fd0` (`0x2bce0f`), so the count is `groups - 0x14fd0 + 0x2fe8`. By displacement
+     the count has one writer in `.text` (that `inc`) and one reader (step 5; the other `+0x2fe8` hits are stack slots
+     or other objects); `+0x1a990` is written there and read nowhere.
+  5. The HUD's watcher `0xb34ce0` (`rdi` = `G38UiPlayData`, `rbx` = the UI data `[[0x14283f4a8]+0xd0]+0x10`) keeps one
+     record per watched value (time +0, a skip-zero flag +8, first +9, last value +0xc). At `0xb35d7d` it reads the
+     count; when it differs from the last value it stamps `rbx+0x31b48` with the UI clock (`0xa4bd40`) and plays the
+     UI sound `[[0x14283f4a8]+0xc8]+0x12d10` (`ui/UiPlaySound` `0xa4f310`).
+  6. The list draw `0xbe5150` (called at `0xbed05b` with the active group, `G38UiPlayData+0x17bc8` = groups +0x2bf8,
+     none at 7) fades the list from the latest of its own change time (aim states), `rbx+0x31b38` (the watcher
+     record at `0xb36836`, of a byte of the player's component +0x6b34) and `rbx+0x31b48` (`0xbe603f`..`0xbe6059`), with 0.5 s and 1.5 s (`0xbe6083`, `0xbe6090`)
+     through `0xb2adf0`, unless the HUD mode `+0x1db1` is 0xb. The earlier anchors `0xbe5f5a`/`0xbe5f9f` are the
+     draw's own stack slot (`rbp+0x9c8` is the home slot of its second argument), not a stored timer.
+
+  So a pick Kiln keeps from the game sends no action, the host sends no event, and the list stays hidden. For a
+  synthetic pick that reaches the provider from return `0x3afb07` or `0x3afa7a` (`pick_hook.caller()`), and only when the
+  play data's active group is the pick's kind, kiln-tools adds one to the count, as player_ui does for the host's event:
+  the HUD's own watcher, timeout and active-list checks do the rest. It writes neither +0x1a990 nor the input or pending
+  selector, and nothing for the game's automatic wishes, stale or unreadable picks, or picks the game equips (the host's
+  event shows those). sigdb: `ui/AmmoCycleReturn`, `ui/AmmoSelectReturn`, `ui/AmmoEventWishReturn`, `ui/AmmoCycle`,
+  `ui/AmmoCycleEventCount`, `ui/AmmoCycleWatch`, `ui/AmmoListRevealRead`; constants `ui/ammo.groups` (0x14fd0, three
+  captures), `ui/ammo.cycle_count` (0x2fe8, producer and watcher), `ui/ammo.reveal_time` (0x31b48, watcher and draw);
+  feature `ui.ammo.reveal`. When they do not resolve, picks work as before and `kiln.log` says once that mod rows do
+  not show the list again. Not established: whether the client and the HUD run on one thread in every session (the
+  record of this build saw the client world on the main thread), and the event's delivery to a joined client.
+
 Real menu behaviour, the server half of a swap and controller cycling remain the owner's in-game check.
 
 ### 1.3 Hardness **[dec] [data] [rt]**
