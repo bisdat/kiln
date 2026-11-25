@@ -4800,6 +4800,10 @@ void craft_pre(uint64_t step) {
             lower("stations.craft_sources", reason, why.c_str());
             lower("crafting.sources", reason, why.c_str());
             if (g_lock_feat) lower("items.lock_sources", reason, why.c_str());  // the links locks use are crafting.sources'
+            if (g_build_feat) {  // GitHub #132: a placement pays through the same hook; the cursor must not count links then
+                g_build_off.store(true);
+                lower("crafting.build_sources", reason, why.c_str());
+            }
             G.craft_ok = G.registered_ok = false;
             return;
         }
