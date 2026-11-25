@@ -1,4 +1,4 @@
-# Kiln mod API index (mod API 0.2.19)
+# Kiln mod API index (mod API 0.2.20)
 
 Every public type and member of the mod API, one line each, to grep: a name (`BlockAt`), a word of what it does (`refusal`), a mod API (`0.2.15` finds what that release added). Then open that assembly's file: its name is the `KilnServices` entry (`Items.md` needs `<KilnServices>Items</KilnServices>`; `Api.md` needs none). A file that was too large is a map (`Blocks.md`) of its parts (`Blocks-items.md`).
 
@@ -47,11 +47,11 @@ Every public type and member of the mod API, one line each, to grep: a name (`Bl
 | Kiln.Spawn | `Spawn` | Create and destroy entities from templates: creatures, item drops, props | [api-world.md](../api-world.md) | `services/spawn.md` | 14 | 104 | [Spawn.md](Spawn.md) (13 KB) |
 | Kiln.Systems | `Systems` | Wrapping the game's own ECS programs: typed system hooks | [world-programs.md](../world-programs.md), [api-world.md](../api-world.md) | `services/systems.md`, `modding/ecs-programs.md` | 26 | 154 | [Systems.md](Systems.md) (18 KB) |
 | Kiln.Terrain | `Terrain` | Terrain reads and edits | [api-world.md](../api-world.md) | `services/terrain.md` | 18 | 100 | [Terrain.md](Terrain.md) (11 KB) |
-| Kiln.TestKit | (package Kiln.TestKit) | Offline tests under dotnet test: fake server, fake world, fake services | [testing.md](../testing.md) | `modding/unit-tests.md` | 114 | 835 | [TestKit.md](TestKit.md) (map of 2 parts) |
+| Kiln.TestKit | (package Kiln.TestKit) | Offline tests under dotnet test: fake server, fake world, fake services | [testing.md](../testing.md) | `modding/unit-tests.md` | 115 | 848 | [TestKit.md](TestKit.md) (map of 2 parts) |
 | Kiln.Testing | `Testing` | In-server tests: [KilnTest], Assert, [ClientCheck] | [testing.md](../testing.md) | `modding/testing.md` | 16 | 92 | [Testing.md](Testing.md) (10 KB) |
 | Kiln.Time | `Time` | Time of day and weather | [api-world.md](../api-world.md) | `services/time.md` | 13 | 93 | [Time.md](Time.md) (11 KB) |
 | Kiln.Tools | `Tools` | Building tools: terrain tool actions, modes, tool materials | [api-world.md](../api-world.md) | `services/tools.md`, `services/tool-actions.md`, `services/tool-payment.md` | 5 | 20 | [Tools.md](Tools.md) (3 KB) |
-| Kiln.Ui | `Ui` | Menus, screens, HUD, key bindings, themes, item icons, tooltips, values in the game's UI | [api-ui.md](../api-ui.md) | `services/ui.md`, `modding/ui-blocks.md` | 147 | 1153 | [Ui.md](Ui.md) (map of 2 parts) |
+| Kiln.Ui | `Ui` | Menus, screens, HUD, key bindings, themes, item icons, tooltips, values in the game's UI | [api-ui.md](../api-ui.md) | `services/ui.md`, `modding/ui-blocks.md` | 148 | 1175 | [Ui.md](Ui.md) (map of 2 parts) |
 | Kiln.Vfx | `Vfx` | The game's particles, lights and screen effects | [vfx.md](../vfx.md) | `services/vfx.md`, `services/screen.md`, `modding/vfx.md` | 16 | 193 | [Vfx.md](Vfx.md) (15 KB) |
 | Kiln.World | `World` | Typed ECS reads, tracked writes, teleport, nearby queries, concurrent reads | [api-world.md](../api-world.md) | `services/world.md` | 53 | 402 | [World.md](World.md) (41 KB) |
 | Native ABI | C plugins | The function tables of native/core/abi: 85 tables, 1206 rows | - | `services/README.md` | 85 | 1206 | [native.md](native.md) (map of 3 parts) |

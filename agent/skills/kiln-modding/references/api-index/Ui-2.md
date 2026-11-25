@@ -1,23 +1,5 @@
 # Ui (Kiln.Ui): part 2 of 2
 
-## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
-- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
-- `Current { get; init; } -> uint?` — The current number; null keeps it.
-- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
-- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
-- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
-- `static readonly None -> UiBarEdit` — Changes nothing.
-
-## UiBarProvider `0.2.3` — A value provider.
-- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
-
-## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
-- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
-- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
-- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
-- `LabelOverride { get; init; } -> UiText?` — The label.
-- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.
-
 ## UiChildFlags — Flags of `UiDraw.BeginChild`.
 enum: None, Border, Padding, AutoHeight, FrameStyle, NavFlattened
 
@@ -268,6 +250,19 @@ enum: Left, Right, Middle
 - `Warning { get; init; } -> Color` — A status colour: a problem (`UiThemeRole.Warning`).
 - `WindowBackground { get; init; } -> Color` — Windows, title bars and pop-ups (`UiThemeRole.WindowBackground`).
 
+## UiPlacement `0.2.20` — Where a Kiln screen or window was drawn last (`UiScreen.Placement`, `UiWindow.Placement`).
+- `Bottom { get; init; } -> float` — The bottom edge, as a fraction of the viewport's height.
+- `Equals(UiPlacement other) -> bool`
+- `Height { get; init; } -> float` — The height in pixels at UI scale 1.
+- `Left { get; init; } -> float` — The left edge, as a fraction of the viewport's width.
+- `static operator !=(UiPlacement left, UiPlacement right) -> bool`
+- `static operator ==(UiPlacement left, UiPlacement right) -> bool`
+- `Right { get; init; } -> float` — The right edge, as a fraction of the viewport's width.
+- `Top { get; init; } -> float` — The top edge, as a fraction of the viewport's height.
+- `Width { get; init; } -> float` — The width in pixels at UI scale 1.
+- `X { get; init; } -> float` — The centre, as a fraction of the viewport's width.
+- `Y { get; init; } -> float` — The centre, as a fraction of the viewport's height.
+
 ## UiPlayerLook `0.2.8` — The player's look setting (`Themes.Player`; read only: the player chooses).
 - `UiPlayerLook()`
 - `UiPlayerLook(UiLook Look, string? ThemeId, float Background, float Opacity, float Scale)`
@@ -299,9 +294,12 @@ enum: Left, Right, Middle
 - `Closed -> Action?` — Runs (as the owning mod, on the thread that closed it) when the screen closes.
 - `Dispose() -> void` — Removes the screen (also done when the owning mod unloads).
 - `IsOpen { get; } -> bool` — The screen is open now.
+- `MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void` `0.2.20` — Moves the screen: the point (`pivotX`, `pivotY`) of the screen (0.5, 0.5 = its centre; 0, 0 = its top left corner)...
 - `Open() -> void` — Opens the screen (does nothing when it is open, removed, or the overlay does not draw).
 - `Opened -> Action?` — Runs when the screen opens.
 - `Options { get; } -> UiScreenOptions` — The options the screen was created with.
+- `Placement { get; } -> UiPlacement?` `0.2.20` — Where the screen was drawn last (fractions of the viewport, sizes at UI scale 1); null before its first frame, and...
+- `Resize(float width, float height) -> void` `0.2.20` — Resizes the screen to `width` x `height` pixels at UI scale 1 (the units of `UiScreenOptions.Width`), at most the...
 - `Title { get; set; } -> UiText` — The title shown in the title bar.
 - `Toggle() -> void` — Opens the screen if it is closed, closes it if it is open.
 
@@ -318,12 +316,15 @@ enum: Left, Right, Middle
 - `CloseOnEscape { get; init; } -> bool` — Escape closes the screen (the top one first).
 - `DimBackground { get; init; } -> bool` — Darken the game behind the screen.
 - `FullScreen { get; init; } -> bool` — The whole display: no title bar, not movable or resizable, no frame (Width and Height are ignored).
-- `Height { get; init; } -> float` — Size in pixels at UI scale 1, centred on the screen.
+- `Height { get; init; } -> float` — Size in pixels at UI scale 1, centred on the screen (or at `UiScreenOptions.Position`).
+- `PlacementId { get; init; } -> string?` `0.2.20` — The id the remembered placement is kept under, unique among your mod's screens; null = the title in English...
+- `Position { get; init; } -> (float X, float Y)?` `0.2.20` — Where the screen opens: its centre, as a fraction of the viewport (0..1, as `UiWindowOptions.Position`); null = the...
+- `RememberPlacement { get; init; } -> bool` `0.2.20` — Kiln remembers where the player left the screen (and its size, when `UiScreenOptions.Resizable`), per mod and...
 - `Resizable { get; init; } -> bool` — Whether the player can resize the screen.
 - `Style { get; init; } -> UiStyle` — The screen's look; `UiStyle.Player` by default (the game's look unless the player chose another; before...
 - `Theme { get; init; } -> UiTheme?` `0.2.8` — Your own theme for the screen (`Themes.Define`), over `UiScreenOptions.Style`.
 - `TitleBar { get; init; } -> bool` — Whether the screen has a title bar.
-- `Width { get; init; } -> float` — Size in pixels at UI scale 1, centred on the screen.
+- `Width { get; init; } -> float` — Size in pixels at UI scale 1, centred on the screen (or at `UiScreenOptions.Position`).
 
 ## UiSelectableFlags — Flags of the sized `UiDraw.Selectable`.
 enum: None, SpanAllColumns, AllowDoubleClick, Disabled, AllowOverlap, Highlight
@@ -528,8 +529,11 @@ enum: World, Capability, Registry
 ## UiWindow — A Kiln window (Forge: a Screen).
 - `Dispose() -> void` — Removes the window for good (also done when the owning mod unloads).
 - `Hide() -> void` — Closes the window (`UiWindow.Open` = false).
+- `MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void` `0.2.20` — Moves the window: the point (`pivotX`, `pivotY`) of the window (0.5, 0.5 = its centre; 0, 0 = its top left corner)...
 - `Open { get; set; } -> bool` — Shown right now.
 - `Options { get; } -> UiWindowOptions` — The options the window was created with.
+- `Placement { get; } -> UiPlacement?` `0.2.20` — Where the window was drawn last (fractions of the viewport, sizes at UI scale 1); null before its first frame.
+- `Resize(float width, float height) -> void` `0.2.20` — Resizes the window to `width` x `height` pixels at UI scale 1, at most the viewport; ImGui's minimum window size...
 - `Show() -> void` — Opens the window (`UiWindow.Open` = true).
 - `Title { get; } -> string` — The window's title.
 - `Toggle() -> void` — Opens the window if it is closed, closes it if it is open.
@@ -542,7 +546,9 @@ enum: None, NoScrollbar, NoScrollWithMouse, NoBackground, AlwaysVerticalScrollba
 - `BackgroundAlpha { get; init; } -> float?` — Background opacity (0..1), null = the theme's.
 - `Height { get; init; } -> float` — Initial size in pixels at scale 1 (0 = fit the contents).
 - `Interactive { get; init; } -> bool` — While open, Kiln takes mouse and keyboard from the game (a screen).
+- `PlacementId { get; init; } -> string?` `0.2.20` — The id the remembered placement is kept under, unique among your mod's windows; null = the window's title when it...
 - `Position { get; init; } -> (float X, float Y)?` — Initial position as a fraction of the screen (0..1), the window's centre placed there; null = ImGui's default.
+- `RememberPlacement { get; init; } -> bool` `0.2.20` — Kiln remembers where the player left the window (and its size, unless `UiWindowOptions.AutoResize`), per mod and...
 - `StartOpen { get; init; } -> bool` — Whether the window is open when it is created.
 - `Style { get; init; } -> UiStyle` `0.2.8` — The window's look: `UiStyle.Player` (the default: the look the player chose for Kiln's UI), `UiStyle.Game` or...
 - `Theme { get; init; } -> UiTheme?` `0.2.8` — Your own theme for the window (`Themes.Define`), over `UiWindowOptions.Style`.

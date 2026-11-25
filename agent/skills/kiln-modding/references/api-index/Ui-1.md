@@ -572,3 +572,21 @@ enum: End, AfterStats
 - `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
 - `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
 - `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
+
+## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
+- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
+- `Current { get; init; } -> uint?` — The current number; null keeps it.
+- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
+- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
+- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
+- `static readonly None -> UiBarEdit` — Changes nothing.
+
+## UiBarProvider `0.2.3` — A value provider.
+- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
+
+## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
+- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
+- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
+- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
+- `LabelOverride { get; init; } -> UiText?` — The label.
+- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.
