@@ -481,6 +481,35 @@ mod tests {
         assert_eq!(f.parent, None);
     }
 
+    /// Folders whose names Windows reaches only through the `\\?\` prefix (a trailing dot or space; `NUL`, a device name
+    /// to Win32) are listed, opened and detected like any other, and hand back a path that opens them again; the others
+    /// are shown without the prefix. (Ordinary names on Linux.)
+    #[test]
+    fn folders_only_the_verbatim_prefix_reaches_are_listed_and_opened() {
+        let verbatim = |p: &Path| if cfg!(windows) { PathBuf::from(format!(r"\\?\{}", p.display())) } else { p.to_path_buf() };
+        let t = Tmp::new("verbatim");
+        let e = env(&t);
+        let dl = e.home.join("Downloads");
+        std::fs::create_dir_all(&dl).unwrap();
+        let names = ["ends-with-dot.", "ends-with-space ", "nul", "plain"];
+        for n in names {
+            std::fs::create_dir(verbatim(&dl.join(n))).unwrap();
+        }
+        kiln_mod(&verbatim(&dl.join("dotted-mod.")), "dotted", "1.0.0");
+        let f = browse(None, &e).unwrap();
+        assert_eq!(f.folders.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), names, "{f:?}");
+        assert_eq!(f.mods.iter().map(|m| (m.file.as_str(), m.detected.id.as_deref())).collect::<Vec<_>>(), vec![("dotted-mod.", Some("dotted"))], "{f:?}");
+        for entry in &f.folders {
+            let inner = browse(Some(Path::new(&entry.path)), &e).unwrap_or_else(|err| panic!("{entry:?}: {err}"));
+            assert_eq!(inner.name, entry.name);
+            assert_eq!(inner.dir, entry.path, "the same spelling comes back");
+            assert_eq!(inner.parent.as_deref(), Some(f.dir.as_str()));
+            assert!(inner.folders.is_empty() && inner.mods.is_empty() && inner.other == 0, "{inner:?}");
+        }
+        let plain = &f.folders.iter().find(|x| x.name == "plain").unwrap().path;
+        assert!(!plain.starts_with(r"\\?\") && !f.dir.starts_with(r"\\?\"), "{f:?}");
+    }
+
     #[test]
     fn traversal_and_links_cannot_escape_places() {
         let t = Tmp::new("roots");

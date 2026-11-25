@@ -325,6 +325,29 @@ mod tests {
         assert!(!windows_same_folder("C:", r"C:\"), "drive current directory is not its root");
     }
 
+    /// What a player is shown for a canonical path, and what comes back to be opened again: the plain spelling where it
+    /// names the same file, the verbatim one where Win32 reads the plain one as something else (a trailing dot or space
+    /// is trimmed; `NUL`, and before Windows 11 `CON`, `COM1`, `aux.txt` and the like, are devices in any folder).
+    #[test]
+    fn plain_drops_the_prefix_only_where_the_plain_path_names_the_same_file() {
+        let p = |s: &str| plain(PathBuf::from(s)).to_str().unwrap().to_string();
+        assert_eq!(p(r"\\?\C:\Users\u\Downloads"), r"C:\Users\u\Downloads");
+        assert_eq!(p(r"\\?\UNC\nas\share\mods"), r"\\nas\share\mods");
+        // longer than MAX_PATH: Rust's file calls add the prefix back themselves
+        let long = format!(r"\\?\C:\{}", vec!["a".repeat(100); 4].join(r"\"));
+        assert_eq!(p(&long), &long[4..]);
+        for keep in [r"\\?\C:\d\x.", r"\\?\C:\d\x \y", r"\\?\C:\d\nul", r"\\?\C:\d\NUL\y", r"\\?\C:\d\Nul.txt", r"\\?\C:\d\con", r"\\?\C:\d\aux.tar.gz",
+                     r"\\?\C:\d\COM1", r"\\?\C:\d\lpt9.log", r"\\?\C:\d\com¹", r"\\?\C:\d\CONOUT$", r"\\?\C:\d\nul .txt", r"\\?\UNC\nas\share\prn",
+                     r"\\?\Volume{1b3}\mods"] {
+            assert_eq!(p(keep), keep, "Win32 reads the plain spelling as another file");
+        }
+        for strip in [r"\\?\C:\d\null", r"\\?\C:\d\console", r"\\?\C:\d\com10", r"\\?\C:\d\nul-mod", r"\\?\C:\d\my.nul", r"\\?\C:\d\COM"] {
+            assert_eq!(p(strip), &strip[4..]);
+        }
+        assert_eq!(p("/home/u/x"), "/home/u/x");
+        assert_eq!(p(r"C:\d\nul"), r"C:\d\nul", "a path without the prefix is left as it is");
+    }
+
     /// The launcher on Linux keeps comparing host paths exactly: `/game/Mods` and `/game/mods` are two folders there.
     #[cfg(not(windows))]
     #[test]
