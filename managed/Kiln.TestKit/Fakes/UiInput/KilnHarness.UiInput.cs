@@ -23,7 +23,7 @@ public sealed partial class KilnHarness
 /// 0x02; <c>Pad</c> a controller's 0x200..0x211) are offered it in the order they were made, and the first that keeps it owns
 /// it. <see cref="Repeat"/> (a key's auto-repeat) and <see cref="Up"/> of an owned press reach its owner only and stay kept
 /// from the game, unless <see cref="Leak"/> said the game saw the press go down; a new press of an owned code ends that
-/// ownership (Lost). <see cref="FocusLost"/> ends every ownership (Focus); <see cref="WorldChange"/> ends the ones made
+/// ownership (Lost). <see cref="FocusLost"/> ends the ownership of keys and mouse buttons (Focus), not a controller's; <see cref="WorldChange"/> ends the ones made
 /// before it (World) and their releases reach nobody, as after the listener's Disown or Dispose. <see cref="Game"/> is what
 /// reached the game, <see cref="Others"/> what Kiln's other key handlers (listeners without Own, key bindings, the pointer's
 /// subscribers) were given; they take nothing here. <see cref="SetPad"/> and <see cref="Unplug"/> are what the game's last
@@ -65,8 +65,9 @@ public sealed class HarnessInput
         return UiInputFake.Later(_harness, code, controller, false, KeyMods.None, at);
     }
 
-    /// <summary>The game window lost the focus: every owner hears the end of its presses (KeyOwnEnd.Focus); their releases,
-    /// when they come back, reach the game.</summary>
+    /// <summary>The game window lost the focus: every owner of a key or mouse button hears the end of its presses
+    /// (KeyOwnEnd.Focus); their releases, when they come back, reach the game. A controller's owned presses stay owned
+    /// (XInput does not follow the focus): their releases are their owners'.</summary>
     public void FocusLost() => UiInputFake.FocusLost(_harness);
 
     /// <summary>The client world started or stopped: the owners of presses made before hear KeyOwnEnd.World; those presses'

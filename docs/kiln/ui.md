@@ -1212,8 +1212,9 @@ usual.
   holds it, not a controller button (it reads as up, a trigger as not pulled) until the release.
 - **When it ends early.** `KeyPress.Ended` says why on a release that is no real release: `Focus` (the game window lost
   the focus: the real release goes to another window; if it comes back it reaches the game, which never saw the press, so
-  nothing is held), `World` (the client world started or stopped), `Lost` (the input went down again before its release
-  came). `listener.Disown()` (one press, or all), `Dispose()` and the mod's unload end it without a call. After a world
+  nothing is held; a controller's press does not end with the focus, as XInput does not follow it: its release still
+  comes and is the owner's), `World` (the client world started or stopped), `Lost` (the input went down again before its
+  release came). `listener.Disown()` (one press, or all), `Dispose()` and the mod's unload end it without a call. After a world
   change, a disown or an unload the press is nobody's: its release reaches nobody, and still not the game.
 - **Stuck-press guard.** Where the game saw the press go down after all, the release must reach it, or the game would hold
   the button: Alt+F4 (always the game's), or a raw mouse record with other input on a build where Kiln could not hook the

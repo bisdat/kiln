@@ -20,9 +20,10 @@
  *     a button.
  *   - ownership ends without the release (KILN_UI_OWNED_END, `end` says why): the game window lost the focus (the release
  *     will go to another window; one that comes back later reaches the game, which never saw the press, so nothing is
- *     held), the client world started or stopped, or the input went down again without its release (lost). After a world
- *     change, an unsubscribe or a disown the press is nobody's: its repeats and release reach nobody and are still kept
- *     from the game. Unsubscribe and disown make no callback.
+ *     held; a controller's press is not ended by a focus loss: XInput does not follow the focus, its release still comes
+ *     and is the owner's), the client world started or stopped, or the input went down again without its release
+ *     (lost). After a world change, an unsubscribe or a disown the press is nobody's: its repeats and release reach
+ *     nobody and are still kept from the game. Unsubscribe and disown make no callback.
  * A subscriber that passes (KILN_UI_OWN_PASS) saw the press and gets nothing more of it: the next owner, then Kiln's
  * other handlers, are asked as if it had not been. The wheel cannot be owned (a notch has no release): only key
  * subscribers get it (KILN_UI_KEYS_MOUSE).

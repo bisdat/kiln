@@ -79,7 +79,8 @@ public enum KeyOwnEnd
     /// <summary>Not an end: a real input.</summary>
     None = 0,
 
-    /// <summary>The game window lost the keyboard focus (alt-tab): the release goes to another window.</summary>
+    /// <summary>The game window lost the keyboard focus (alt-tab): the release goes to another window. Never for a
+    /// controller's button: XInput does not follow the focus, so its release still comes to the owner.</summary>
     Focus = 1,
 
     /// <summary>The client world started or stopped. The press is nobody's now: its release reaches neither the game nor
