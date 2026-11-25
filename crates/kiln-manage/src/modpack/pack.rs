@@ -1610,6 +1610,12 @@ pub struct PackPreview {
     pub optional: BTreeMap<String, bool>,
     /// The instance this pack would update (same pack id), if one is installed.
     pub instance: Option<String>,
+    /// What that instance's profile loads from its installed version and the Library lacks ([`lacking_of`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<Lacking>,
+    /// This file is the instance's installed version: [`repair`] can take the missing mods from it.
+    #[serde(default)]
+    pub installed_version: bool,
 }
 
 /// What the install preview shows (nothing is imported).
@@ -1626,7 +1632,9 @@ pub fn inspect(dirs: &DataDirs, zip_file: &Path, sha256: Option<&str>) -> Result
     let code = r.code.iter().cloned().collect::<Vec<_>>();
     let optional = r.index.mods.iter().filter(|m| m.dep == Dep::Optional).map(|m| (m.id.clone(), m.default.unwrap_or(true))).collect();
     let instance = instances(dirs)?.into_iter().find(|(_, i)| i.pack == r.index.id).map(|(p, _)| p);
-    Ok(PackPreview { index: r.index, sha256: r.sha256, size: r.size, missing, present, code, optional, instance })
+    let repair = instance.as_deref().and_then(|pid| lacking_of(dirs, pid).ok());
+    let installed_version = instance.as_deref().and_then(|pid| read_base(dirs, pid).ok()).is_some_and(|(base, _)| same_version(&base, &r.index));
+    Ok(PackPreview { index: r.index, sha256: r.sha256, size: r.size, missing, present, code, optional, instance, repair, installed_version })
 }
 
 // ================================================================================================= instances

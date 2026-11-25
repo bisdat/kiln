@@ -948,6 +948,11 @@ fn a_file_pack_is_repaired_from_its_own_file_only() {
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
     add_mods(&a, &pid, &t.0.join("v2"), &["delta"]);
     let v2 = built("1.1.0");
+    // the file preview: what is missing, and whether this file is the installed version that can put it back
+    let i1 = pack::inspect(&b, &v1.file, Some(&v1.sha256)).unwrap();
+    assert_eq!((i1.instance.as_deref(), i1.installed_version), (Some(ir.profile.id.as_str()), true));
+    assert_eq!(i1.repair.map(|l| l.missing), Some(vec![beta.clone()]));
+    assert!(!pack::inspect(&b, &v2.file, Some(&v2.sha256)).unwrap().installed_version);
     let e = pack::repair(&b, &pack::RepairRequest { profile: ir.profile.id.clone(), source: Some(src(&v2)), allow_http: false }, &mut NoProgress).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     assert!(!crate::library::path_of(&b, &beta).unwrap().exists());
