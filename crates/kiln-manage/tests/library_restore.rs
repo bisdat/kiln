@@ -291,3 +291,26 @@ fn every_kind_is_put_back() {
         assert_eq!(std::fs::read(kept[0].join(file)).unwrap(), b"edited in the Library", "{lr:?}");
     }
 }
+
+/// A plugin entry is its DLL under the file name its record gives. The same bytes dropped under another name (a case
+/// change, `Hello.dll` for `hello.dll`) are the same entry name, but a folder holding them would not be what the record
+/// that stays names: the import never puts them in place, and the changed entry is left as it is.
+#[test]
+fn a_plugin_under_another_file_name_is_never_put_in_place_of_its_entry() {
+    let t = tmp("plugin-name");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let dll = build_test_dll(&["kiln_plugin_main"], b"v1");
+    put(&t.0.join("a"), "hello.dll", &dll);
+    put(&t.0.join("b"), "Hello.dll", &dll);
+    let r = import(&dirs, &[t.0.join("a/hello.dll")]).imported[0].clone();
+    let file = library::path_of(&dirs, &r).unwrap();
+    let folder = file.parent().unwrap().to_path_buf();
+    put(&folder, "hello.dll", b"edited in the Library");
+    let changed = tree(&folder);
+
+    let again = import(&dirs, &[t.0.join("b/Hello.dll")]);
+    assert!(again.existing.is_empty() && again.imported.is_empty() && again.skipped.len() == 1, "{again:?}");
+    assert_eq!(tree(&folder), changed, "the entry is left as it is");
+    assert_eq!(library::path_of(&dirs, &r).unwrap(), file, "its record still names its own file");
+    assert!(kept_copies(&dirs, &r).is_empty(), "nothing was moved aside");
+}

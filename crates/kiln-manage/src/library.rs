@@ -1538,6 +1538,12 @@ fn restore_changed(dirs: &DataDirs, r: &LibraryRef, old: &ImportRecord, folder: 
                    find: &mut dyn FnMut(&Path, &str) -> Result<Option<crate::proc::ProcessInfo>>) -> Result<()> {
     let name = old.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| r.id.clone());
     let what = format!("{name} was changed in its Library folder ({}) and this import brings its original files", folder.display());
+    // the record stays, so the files put in place must be what it names: a plugin's DLL under the file name it gives
+    // (the same bytes dropped as `Hello.dll` for `hello.dll` are the same entry name, not that entry's files)
+    if recorded_hash(prepared, old).ok().as_deref() != Some(r.hash.as_str()) {
+        return Err(Error::new(ErrorCode::HashMismatch, format!("{}: existing library content does not match its hash, and this import's \
+            files are not the ones its record names", folder.display())));
+    }
     Guard::read(dirs, &mut *find)?.refuse_while_running(dirs, r)
         .map_err(|e| Error { message: format!("{what}: Kiln puts them back once nothing reads the mod. {}", e.message), ..e })?;
     // a cook of a Kiln mod in its Library folder writes there (and is one reason it reads as changed): held to the end
