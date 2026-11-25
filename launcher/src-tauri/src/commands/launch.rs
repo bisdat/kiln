@@ -132,6 +132,9 @@ pub(crate) async fn start_game(
     let r = blocking(move || {
         let g = crate::state::game(&id)?;
         crate::state::refuse_running(&g)?;
+        // (0.2.0-dev.31.13) no second start while one is pending (Steam asked, no game yet; or another launch_play in
+        // here now): held until this start's own steps are done
+        let _claim = claim(&id, now_ms())?;
         // the start's own steps: the profile is checked now, Steam is asked when the opener runs
         track(&id, |t| t.begin("profile", now_ms()));
         let dirs = dirs()?;
@@ -163,9 +166,7 @@ pub(crate) async fn start_game(
                 let fp = kiln_manage::launch::last_launch(&dirs, &g).ok().flatten().map(|l| l.fingerprint);
                 track(&id, |t| t.fingerprint = fp.or(t.fingerprint.take()));
             }
-            // (warnings to acknowledge: the dialog follows, and the start the launcher times with it)
-            Err(e) if kiln_manage::sfi_launch::preflight_of(e).is_some() => {}
-            Err(_) => forget(&id),
+            Err(e) => failed(&id, e),
         }
         r
     })
@@ -240,7 +241,7 @@ pub(crate) fn now_ms() -> i64 {
 /// (LauncherStart::keep_tracking) whatever the window does; `running`: the game's process runs now.
 pub(crate) fn prune(game_id: &str, running: bool) {
     let mut starts = STARTS.lock().unwrap_or_else(|e| e.into_inner());
-    if starts.get_mut(game_id).is_some_and(|t| !t.keep_tracking(running, now_ms())) {
+    if starts.get_mut(game_id).is_some_and(|t| !t.keep_tracking(running, now_ms()) || (t.vanilla() && t.seen)) {
         starts.remove(game_id);
     }
 }
@@ -264,6 +265,64 @@ pub(crate) fn forget(game_id: &str) {
     STARTS.lock().unwrap_or_else(|e| e.into_inner()).remove(game_id);
 }
 
+/// A start of this launcher ended with `e` before the game existed: its record goes (the window shows what it showed
+/// before Play, and the next start is not held by it). Warnings to acknowledge keep it (the dialog follows, and the start
+/// the launcher times with it).
+fn failed(game_id: &str, e: &Error) {
+    if kiln_manage::sfi_launch::preflight_of(e).is_none() {
+        forget(game_id);
+    }
+}
+
+// ---------------------------------------------------------------- one start at a time (0.2.0-dev.31.13)
+
+/// The `detail.kind` of the refusal of a second start ([`already_starting`]); the window tells it by this
+/// (src/shell/play.ts `isAlreadyStarting`).
+pub(crate) const ALREADY_STARTING: &str = "already_starting";
+
+/// The refusal of a start while another start of the game is pending: `busy`, said as the window shows it.
+pub(crate) fn already_starting() -> Error {
+    Error::new(kiln_manage::ErrorCode::Busy, "The game is already starting.").with_detail(serde_json::json!({ "kind": ALREADY_STARTING }))
+}
+
+/// The games a launch_play (or launch_confirm) is inside its start for now: from its checks to Steam asked (or the
+/// direct start made). A second one meanwhile is refused.
+static PLAYING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+
+/// Refuses a start of `game_id` at `now` (unix ms) while another one is pending: a start this launcher tracks holds it
+/// (Steam asked, no game process seen yet, within the window's wait: [`LauncherStart::holds_next_start`]; Kiln and
+/// Vanilla starts alike), or a launch_play is inside its start for the game ([`PLAYING`]). A start the window ended
+/// (launch_end: Stop waiting, a failed Play), one that failed, one whose game was seen, and one past the wait hold nothing.
+///
+/// [`LauncherStart::holds_next_start`]: kiln_manage::start_progress::LauncherStart::holds_next_start
+pub(crate) fn refuse_pending(game_id: &str, now: i64) -> Result<(), Error> {
+    let held = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(game_id).is_some_and(|t| t.holds_next_start(now));
+    if held || PLAYING.lock().unwrap_or_else(|e| e.into_inner()).contains(game_id) {
+        return Err(already_starting());
+    }
+    Ok(())
+}
+
+/// A launch_play's hold on its game ([`claim`]): let go when it is dropped (the start's own steps done, whatever came).
+pub(crate) struct Claim(String);
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        PLAYING.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
+/// [`refuse_pending`], then holds `game_id` for this start until the returned claim is dropped.
+pub(crate) fn claim(game_id: &str, now: i64) -> Result<Claim, Error> {
+    // (one lock for the check and the hold: two launch_plays at once cannot both pass)
+    let mut playing = PLAYING.lock().unwrap_or_else(|e| e.into_inner());
+    let held = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(game_id).is_some_and(|t| t.holds_next_start(now));
+    if held || !playing.insert(game_id.to_owned()) {
+        return Err(already_starting());
+    }
+    Ok(Claim(game_id.to_owned()))
+}
+
 /// The Kiln runtime in the game (its install receipt's version).
 fn runtime_version(g: &kiln_manage::game::GameInstall) -> Option<String> {
     kiln_manage::install::read_receipt(&g.path).ok().flatten().map(|r| r.runtime.version)
@@ -271,32 +330,41 @@ fn runtime_version(g: &kiln_manage::game::GameInstall) -> Option<String> {
 
 /// `launch_begin`: Play was pressed (before the cook): the start's own steps are timed from now. `mode` as
 /// launch_play's; a start with the active profile cooks first (its `cook` step, with the mods due as Play's plan says).
-/// A vanilla start has no Kiln and nothing to show.
+/// (0.2.0-dev.31.13) A Vanilla start is tracked too (its profile and Steam steps, the wait for its process), so it holds
+/// the next start as a Kiln start does; the window shows it without a bar, as before. Refused (`busy`,
+/// [`already_starting`]) while another start of the game is pending ([`refuse_pending`]): that start's record stays.
 #[tauri::command]
 pub async fn launch_begin(game_id: String, mode: kiln_manage::launch::LaunchMode) -> Result<(), Error> {
     blocking(move || {
-        use kiln_manage::launch::LaunchMode;
-        STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(&game_id);
-        if mode == LaunchMode::Vanilla {
-            forget(&game_id);
-            return Ok(());
-        }
+        refuse_pending(&game_id, now_ms())?;
         let g = crate::state::game(&game_id)?;
+        let t = new_start(&dirs()?, &g, mode, now_ms());
         STOPS.lock().unwrap_or_else(|e| e.into_inner()).remove(&game_id);
-        let at = now_ms();
-        let cook = (mode == LaunchMode::Profile).then(|| {
-            kiln_manage::cook::plan(&g).unwrap_or_default().into_iter().filter(|j| j.reason.is_some())
-                .map(|j| kiln_manage::start_progress::cook_key(&j.id, &j.identity)).collect()
-        });
-        let request = LaunchRequest { mode, profile_id: None, skip_backup: true };
-        let fp = if mode == LaunchMode::Once { None } else { kiln_manage::launch::launch_fingerprint(&dirs()?, &g, &request).ok() };
-        let mut t = kiln_manage::start_progress::LauncherStart::new(at, cook, runtime_version(&g), fp);
-        // a direct start's last launcher step is the launcher starting the game, not Steam (its label before it begins)
-        t.direct = kiln_manage::direct::mode_of(&dirs()?, &g) == kiln_manage::direct::StartMode::Direct;
         STARTS.lock().unwrap_or_else(|e| e.into_inner()).insert(game_id, t);
         Ok(())
     })
     .await
+}
+
+/// The record of a start Play began at `at` with `mode`: a Vanilla start has no Kiln, no cook and no mods to time.
+fn new_start(dirs: &kiln_manage::paths::DataDirs, g: &kiln_manage::game::GameInstall, mode: kiln_manage::launch::LaunchMode, at: i64)
+    -> kiln_manage::start_progress::LauncherStart {
+    use kiln_manage::launch::LaunchMode;
+    let mut t = if mode == LaunchMode::Vanilla {
+        kiln_manage::start_progress::LauncherStart::new(at, None, None, None)
+    } else {
+        let cook = (mode == LaunchMode::Profile).then(|| {
+            kiln_manage::cook::plan(g).unwrap_or_default().into_iter().filter(|j| j.reason.is_some())
+                .map(|j| kiln_manage::start_progress::cook_key(&j.id, &j.identity)).collect()
+        });
+        let request = LaunchRequest { mode, profile_id: None, skip_backup: true };
+        let fp = if mode == LaunchMode::Once { None } else { kiln_manage::launch::launch_fingerprint(dirs, g, &request).ok() };
+        kiln_manage::start_progress::LauncherStart::new(at, cook, runtime_version(g), fp)
+    };
+    // a direct start's last launcher step is the launcher starting the game, not Steam (its label before it begins)
+    t.direct = kiln_manage::direct::mode_of(dirs, g) == kiln_manage::direct::StartMode::Direct;
+    t.mode = Some(mode);
+    t
 }
 
 /// One look at a game's start: the timeline (None: nothing to show, no start of this launcher and no progress.json of
@@ -307,8 +375,9 @@ pub(crate) fn progress_round(dirs: &kiln_manage::paths::DataDirs, g: &kiln_manag
     let side = sp::game_side(g);
     let now = now_ms();
     let mut starts = STARTS.lock().unwrap_or_else(|e| e.into_inner());
-    // the deadlines first, then the process is this start's (LauncherStart::keep_tracking)
-    if starts.get_mut(&g.id).is_some_and(|t| !t.keep_tracking(side.running, now)) {
+    // the deadlines first, then the process is this start's (LauncherStart::keep_tracking); a Vanilla start is over once
+    // its game is there (nothing of Kiln to follow: the window shows the running game as before)
+    if starts.get_mut(&g.id).is_some_and(|t| !t.keep_tracking(side.running, now) || (t.vanilla() && t.seen)) {
         starts.remove(&g.id);
     }
     let launcher = starts.get(&g.id).cloned();
@@ -499,7 +568,7 @@ fn adopt_stop_process(run: &mut StopRun, pid: u32, at: i64, began: Option<i64>) 
 
 pub(crate) fn observe_stop(g: &kiln_manage::game::GameInstall, pid: Option<u32>) {
     use kiln_manage::{stopped_start as ss, start_progress as sp};
-    let began = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(&g.id).filter(|s| s.asked).map(|s| s.began + s.steps.iter().find(|step| step.id == "steam").map_or(0, |step| step.ms as i64));
+    let began = STARTS.lock().unwrap_or_else(|e| e.into_inner()).get(&g.id).filter(|s| s.asked && !s.vanilla()).map(|s| s.began + s.steps.iter().find(|step| step.id == "steam").map_or(0, |step| step.ms as i64));
     let mut all = STOPS.lock().unwrap_or_else(|e| e.into_inner());
     let run = all.entry(g.id.clone()).or_default();
     if let Some(pid) = pid {
@@ -551,5 +620,185 @@ mod stop_process_tests {
         let mut fresh = StopRun::default();
         adopt_stop_process(&mut fresh, 9000, 3000, None);
         assert_eq!(fresh.identity.unwrap().began_ms, 3000, "reopening during a Steam start adopts its identity");
+    }
+}
+
+/// (0.2.0-dev.31.13) One start at a time: a start Steam was asked for (or a direct start's) holds the next one, Kiln and
+/// Vanilla alike, until its game is seen, the window's wait is over, the window ends it (Stop waiting) or it fails.
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use kiln_manage::launch::{LaunchMode, Starter};
+    use kiln_manage::start_progress::{LauncherStart, STEAM_WAIT_MS};
+
+    /// Play pressed for `id` at `at` with `mode` (what launch_begin records, without a game folder).
+    fn begin(id: &str, mode: LaunchMode, at: i64) {
+        let cook = (mode == LaunchMode::Profile).then(Vec::new);
+        let mut t = LauncherStart::new(at, cook, None, None);
+        t.mode = Some(mode);
+        STARTS.lock().unwrap().insert(id.to_owned(), t);
+    }
+
+    /// launch_play's steps for `id`: the profile, then Steam asked through `open` (dry: nothing is opened), with the
+    /// claim held meanwhile as start_game holds it. The record is dropped on a failure, as start_game drops it.
+    fn play(id: &str, open: &dyn Fn(&str) -> Result<(), Error>) -> Result<(), Error> {
+        let _claim = claim(id, now_ms())?;
+        track(id, |t| t.begin("profile", now_ms()));
+        let spawn = |_: &kiln_manage::direct::DirectCommand, _: &Path| -> Result<(), Error> { unreachable!("no direct start here") };
+        let r = with_starter(id, None, false, open, &spawn, &|_, _| {}, |s| match s {
+            Starter::Steam(f) => f("steam://rungameid/1203620"),
+            Starter::Direct(..) => unreachable!(),
+        });
+        if let Err(e) = &r {
+            failed(id, e);
+        }
+        r
+    }
+
+    fn steam_ok(_: &str) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn refused(r: Result<(), Error>) -> bool {
+        match r {
+            Err(e) => {
+                assert_eq!(e.code, kiln_manage::ErrorCode::Busy);
+                assert_eq!(e.message, "The game is already starting.");
+                assert_eq!(e.detail.as_ref().and_then(|d| d["kind"].as_str()), Some(ALREADY_STARTING));
+                true
+            }
+            Ok(()) => false,
+        }
+    }
+
+    #[test]
+    fn a_vanilla_start_steam_was_asked_for_refuses_a_second_vanilla_and_a_kiln_start() {
+        let id = "guard-vanilla";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        play(id, &steam_ok).unwrap();
+        let t = STARTS.lock().unwrap().get(id).cloned().unwrap();
+        assert!(t.asked && t.vanilla(), "the Vanilla start is tracked and Steam was asked: {t:?}");
+        // a second Play of either kind: launch_begin and launch_play (and launch_confirm) refuse it
+        assert!(refused(refuse_pending(id, now_ms())), "a second launch_begin");
+        assert!(refused(play(id, &|_| panic!("Steam asked a second time"))), "a second Vanilla launch_play");
+        assert!(refused(claim(id, now_ms()).map(|_| ())), "a Kiln start's launch_play");
+        // the refusal leaves the pending start as it was (no launch_end, no forget)
+        assert_eq!(STARTS.lock().unwrap().get(id), Some(&t));
+        forget(id);
+    }
+
+    #[test]
+    fn a_kiln_start_steam_was_asked_for_refuses_a_vanilla_start() {
+        let id = "guard-kiln";
+        begin(id, LaunchMode::Profile, now_ms());
+        // the cook ran, then launch_play
+        track(id, |t| t.cook_done(now_ms()));
+        play(id, &steam_ok).unwrap();
+        assert!(refused(refuse_pending(id, now_ms())), "Vanilla's launch_begin");
+        assert!(refused(play(id, &|_| panic!("Steam asked a second time"))), "Vanilla's launch_play");
+        forget(id);
+    }
+
+    #[test]
+    fn a_launch_play_inside_its_start_refuses_another_until_it_is_done() {
+        let id = "guard-inflight";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        let held = claim(id, now_ms()).unwrap();
+        // the first launch_play has not asked Steam yet (it writes the play-once file): a second one waits for nothing
+        assert!(refused(claim(id, now_ms()).map(|_| ())));
+        assert!(refused(refuse_pending(id, now_ms())));
+        drop(held);
+        // done (here without Steam asked: a refusal before it): nothing holds the next start
+        assert!(refuse_pending(id, now_ms()).is_ok());
+        forget(id);
+    }
+
+    #[test]
+    fn nothing_holds_a_start_before_steam_is_asked() {
+        // Play pressed, the cook or the warning before Play under way: the next Play replaces that start, as before
+        let id = "guard-unasked";
+        begin(id, LaunchMode::Profile, now_ms());
+        assert!(refuse_pending(id, now_ms()).is_ok());
+        begin(id, LaunchMode::Vanilla, now_ms());
+        track(id, |t| t.begin("profile", now_ms()));
+        assert!(refuse_pending(id, now_ms()).is_ok());
+        forget(id);
+    }
+
+    #[test]
+    fn the_hold_ends_when_the_game_is_seen() {
+        for (id, mode) in [("guard-seen-vanilla", LaunchMode::Vanilla), ("guard-seen-kiln", LaunchMode::NoMods)] {
+            begin(id, mode, now_ms());
+            play(id, &steam_ok).unwrap();
+            assert!(refused(refuse_pending(id, now_ms())));
+            // the watcher's round sees the game's process (the game-running checks refuse a second start from now on)
+            prune(id, true);
+            assert!(refuse_pending(id, now_ms()).is_ok(), "{mode:?}");
+            // a Vanilla start is over then (nothing of Kiln to follow); a Kiln start goes on being followed
+            assert_eq!(STARTS.lock().unwrap().contains_key(id), mode != LaunchMode::Vanilla, "{mode:?}");
+            forget(id);
+        }
+    }
+
+    #[test]
+    fn the_hold_ends_with_the_windows_wait() {
+        let id = "guard-timeout";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        play(id, &steam_ok).unwrap();
+        let now = now_ms();
+        assert!(refused(refuse_pending(id, now + STEAM_WAIT_MS as i64 - 1_000)));
+        // the window offers Play again after STEAM_WAIT_MS: that Play is not refused, and replaces the start as before
+        assert!(refuse_pending(id, now + STEAM_WAIT_MS as i64 + 1_000).is_ok());
+        assert!(claim(id, now + STEAM_WAIT_MS as i64 + 1_000).is_ok());
+        assert!(STARTS.lock().unwrap().get(id).is_some_and(|t| t.holds_next_start(now) && !t.holds_next_start(now + STEAM_WAIT_MS as i64 + 1_000)));
+        forget(id);
+    }
+
+    #[test]
+    fn the_hold_ends_when_the_window_stops_waiting() {
+        let id = "guard-cancel";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        play(id, &steam_ok).unwrap();
+        assert!(refused(refuse_pending(id, now_ms())));
+        // Stop waiting (and a Play that failed in the window): launch_end
+        tauri::async_runtime::block_on(launch_end(id.to_owned())).unwrap();
+        assert!(refuse_pending(id, now_ms()).is_ok());
+        assert!(!STARTS.lock().unwrap().contains_key(id));
+    }
+
+    #[test]
+    fn the_hold_ends_when_the_start_fails() {
+        let id = "guard-failed";
+        begin(id, LaunchMode::Vanilla, now_ms());
+        // Steam's opener failed: the start is over, and the claim went with it
+        let e = play(id, &|_| Err(Error::new(kiln_manage::ErrorCode::Io, "xdg-open failed"))).unwrap_err();
+        assert_eq!(e.code, kiln_manage::ErrorCode::Io);
+        assert!(!STARTS.lock().unwrap().contains_key(id));
+        assert!(refuse_pending(id, now_ms()).is_ok());
+        // and Play again goes through
+        begin(id, LaunchMode::Vanilla, now_ms());
+        play(id, &steam_ok).unwrap();
+        forget(id);
+    }
+
+    #[test]
+    fn a_vanilla_starts_timeline_says_it_is_vanilla() {
+        let id = "guard-timeline";
+        let at = now_ms();
+        begin(id, LaunchMode::Vanilla, at);
+        play(id, &steam_ok).unwrap();
+        let t = STARTS.lock().unwrap().get(id).cloned().unwrap();
+        let tl = kiln_manage::start_progress::timeline(&kiln_manage::start_progress::Inputs { launcher: Some(&t), now: now_ms(), ..Default::default() }).unwrap();
+        assert_eq!(tl.mode, Some(LaunchMode::Vanilla));
+        assert_eq!(tl.phase, kiln_manage::start_progress::Phase::Launcher);
+        assert!(tl.steps.iter().any(|s| s.id == "steam" && s.state == kiln_manage::start_progress::StepState::Running), "{tl:?}");
+        assert!(tl.steps.iter().all(|s| s.id != "cook"), "a Vanilla start cooks nothing");
+        let json = serde_json::to_value(&tl).unwrap();
+        assert_eq!(json["mode"], "vanilla");
+        forget(id);
+        // a start without a mode says none (the field is left out)
+        let plain = LauncherStart::new(at, None, None, None);
+        let tl = kiln_manage::start_progress::timeline(&kiln_manage::start_progress::Inputs { launcher: Some(&plain), now: at, ..Default::default() }).unwrap();
+        assert!(serde_json::to_value(&tl).unwrap().get("mode").is_none());
     }
 }
