@@ -118,7 +118,19 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int FakeRegistryApply(ulong owner, NativeStr document, NativeStr source, byte* report, nuint cap, nuint* len)
     {
-        _clientRegistry = JsonNode.Parse(document.ToString())!.AsObject();
+        // As kiln.content's apply: the document's values go on top of the owner's layer, and only RevertOwner takes the layer
+        // away. So a removal shows on the client only when ContentSync reverts the previous server state first.
+        var doc = JsonNode.Parse(document.ToString())!.AsObject();
+        foreach (var section in new[] { "items", "recipes" })
+        {
+            if (doc[section] is not JsonObject entries) continue;
+            if (_clientRegistry[section] is not JsonObject into) _clientRegistry[section] = into = new JsonObject();
+            foreach (var (id, body) in entries)
+            {
+                if (into[id] is not JsonObject entry) into[id] = entry = new JsonObject();
+                foreach (var (field, value) in body!.AsObject()) entry[field] = value?.DeepClone();
+            }
+        }
         var bytes = Encoding.UTF8.GetBytes("{\"applied\":2,\"errors\":[]}");
         *len = (nuint)bytes.Length;
         bytes.CopyTo(new Span<byte>(report, (int)cap)); report[bytes.Length] = 0;
@@ -127,6 +139,9 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static uint FakeRevert(ulong owner) { _clientRegistry = new(); return 0; }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint FakeUndefine(ulong owner) => 0;  // definitions only: the owner's value layer stays (RevertOwner's)
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int FakeLabel(ulong owner, NativeStr label) => 0;
@@ -174,7 +189,7 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         content->ApplyJson = &FakeRegistryApply;
         content->Find = &FakeFind;
         content->RevertOwner = &FakeRevert;
-        content->UndefineOwner = &FakeRevert;
+        content->UndefineOwner = &FakeUndefine;
         content->LabelOwner = &FakeLabel;
         Swap(typeof(Content), "_table", Box(content));
 
