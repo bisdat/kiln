@@ -396,6 +396,39 @@ public void CtrlClickAsksToMarkTheItem()
 }
 ```
 
+- **Presses a listener owns, and the controllers** (`kiln.Input`, since 0.2.0-dev.31.13) <a id="owned-input"></a>.
+  `KeyInput.Listen` with `KeyListenFlags.Own` ([ui.md](../ui.md#owning-a-press-until-its-release-keylistenflagsown-since-020-dev3113-mod-api-0222))
+  and `PadInput` run on the kit's kiln.ui.input, whose ownership rules are the native ones (the cases in
+  `native/services/ui/tests/own_parity.json` run on both). The test plays the player: `kiln.Input.Down(code, controller,
+  mods, at)` is a new press (true when an owning listener took it), `Repeat` a key's auto-repeat, `Up` a release (true when
+  it was kept from the game), `FocusLost` and `WorldChange` end ownership early, `Leak` says the game saw an owned press go
+  down after all (its release then reaches the game). `Game` is what reached the game, `Others` what Kiln's other key
+  handlers were given; `HiddenFromGame` says whether a button is held without the game knowing. `SetPad` and `Unplug` set
+  what the game's last poll of a controller read, for `PadInput.Read`. Switch `ui.input.owned` or `ui.input.pad_state`
+  off to test a mod on a Kiln without them. Not modelled: the window, raw input, XInput, Kiln's menu key and Escape
+  ahead of the owners, the other handlers' answers.
+
+```csharp
+[Fact]
+public void BlueprintOwnsTheRightButtonGesture()
+{
+    using var kiln = new KilnHarness();
+    kiln.Step();
+    var held = false;
+    using var l = kiln.Run(() => KeyInput.Listen(p =>
+    {
+        if (p.VirtualKey != 0x02) return false;
+        held = p.Down;                     // the press starts the gesture, its release (or its end) finishes it
+        return true;
+    }, KeyListenFlags.Own | KeyListenFlags.Pointer));
+    Assert.True(kiln.Input.Down(0x02));    // owned
+    Assert.True(held);
+    Assert.True(kiln.Input.Up(0x02));      // kept from the game
+    Assert.False(held);
+    Assert.Equal(0, kiln.Input.Game.Count); // the game saw neither
+}
+```
+
 - **The HUD's ammunition and spell lists** (`kiln.AmmoList`, since 0.2.0-dev.30.6) <a id="ammo-lists"></a>.
   Ui.AmmoList's own code runs on the kit's kiln.ui.ammo, so a mod's rows and its picks are tested offline. The test
   plays the game: `kiln.AmmoList.Hold(AmmoListKind.Arrow, bow, new AmmoListRow(arrow, 20))` builds the list for a held
@@ -675,6 +708,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | Terrain | recording fake | `kiln.terrain`, `terrain.overlays`, `terrain.baked`, `terrain.biomes` | Kiln.Terrain's own code on an in-memory world (KilnHarness.Terrain): flat ground, the cells a test sets, base boxes, one ledger per mod and world id, and Kiln's witness of the kept plans with the world file's revision (SaveWorld, LoseLedger: a lost ledger is refused, a first install over matching ground is not). Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. Not modelled: streaming (tiles are loaded unless the test says not), the game's save itself (the ledger lives in the harness, not in the fake kiln.saves), kiln.build's own events (its transient journal is modelled: Restart puts transient cells back), and time: from code that is not a mod's, every batch runs in the same step. terrain.baked and terrain.biomes are off, as in the game. |
 | The HUD's ammunition and spell lists | recording fake | `kiln.ui.ammo`, `ui.ammo.list`, `ui.ammo.pick` | Ui.AmmoList's own code on the kit's kiln.ui.ammo: a test holds a bow or a staff with the game's own rows (KilnHarness.AmmoList.Hold, SetGameRows, Unhold, NewSession, KnownItems); at each step Kiln.Ui asks the providers when a list's context changed and publishes one snapshot, which the native rules check (one owner, the context's serial and session, 64 rows, no duplicate or item 0, the list's item catalog). Shown and ModeOf read the list as the HUD would compose it; the selection stays on its item (Select, Selected); Pick of a mod row the game does not list with stock (a row it kept at count 0 is none) raises Ui.AmmoList.Picked at the next step for the mod that provided it. Offline: the game's hook, its drawing and its equip request, and a stack that leaves the backpack before the game builds its rows again. |
 | Native chest buttons (since 0.2.17) | recording fake | `kiln.ui.chest`, `ui.chest.buttons` | AddChestButton registrations share the ui.values owner budget; four active captions, unique and length-checked. UiChest.Buttons/Press model a storage chest's native actions and invoke the real managed callback with the current container; disposal and five faults remove it. Not modelled: native row drawing, focus/navigation, native text budgets, game thread/session timing or hooks. |
+| Owned key, mouse and controller presses; the controllers' view | recording fake | `kiln.ui.input`, `ui.input.owned`, `ui.input.pad_state` | KeyInput.Listen with KeyListenFlags.Own (and Pointer, Mouse, Pad) and PadInput on the kit's kiln.ui.input: a test plays presses (KilnHarness.Input.Down, Repeat, Up), a focus loss, a world change and a press the game saw after all (Leak), and reads what reached the game (Game) and Kiln's other key handlers (Others); the ownership rules are the native ones (native/services/ui/tests/own_parity.json runs on both). SetPad and Unplug set what the game's last poll of a controller read. Offline: the game window, raw input and XInput themselves, Kiln's menu key and Escape ahead of the owners, the key subscribers' and bindings' own answers (Others take nothing), the cursor. |
 | The game's inventory slots | recording fake | `kiln.ui.inventory`, `ui.slots.click`, `ui.slots.inspect`, `ui.inventory.panels` | Ui.Inventory's own code on the kit's kiln.ui.inventory: OnClick handlers subscribe with their button, exact modifiers and Take; a test draws a screen's slots (KilnHarness.UiInventory.Draw), hovers one (Hovered) and clicks it (Click): only on a screen with a pointer, the matching handlers get the click with the slot's item and entity, Taken when one asked for it. Marks and MarkWhen rules are Kiln.Ui's (MarkOf: what a drawn slot would show); Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel mapping (no panel is drawn or placed), the 250 ms frame age, the game's popups (none is open: MarkOf answers as with no popup, GameScreen.PopupOpen is false). |
 | Captured item detail (Since 0.2.0-dev.30.5) | recording fake | `kiln.ui.item_detail`, `ui.item_detail` | Owned text/stat-float recordings, exact client identity or item+level+rarity lookup, strict UTF-8 byte budgets, worker reads and 64-entry capture-order eviction. UiItemDetail.Capture/Clear supply captures and model a world change. Not modelled: game text construction, native capture failures, session lifecycle, hooks or drawing. |
 | Expanded slot subscriptions | recording fake | `kiln.ui.slots` | Negotiated 120-byte slot frames from UiInventory.Draw, including rarity and level. Legacy kiln.ui.values subscribers retain 112-byte records. Not modelled: game drawing, hooks or pixel mapping. |

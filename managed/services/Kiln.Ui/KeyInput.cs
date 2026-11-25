@@ -217,7 +217,11 @@ public static unsafe class KeyInput
     /// (<see cref="KeyPress.Captured"/>, <see cref="KeyPress.TextInput"/> say so): a listener that only wants play skips
     /// those. A handler that throws is logged under its mod and keeps nothing. The listener belongs to the calling mod and
     /// stops when it unloads. Not <see cref="KeyListener.Ok"/> where there is no Kiln overlay (a dedicated server). Any
-    /// thread.</summary>
+    /// thread. With <see cref="KeyListenFlags.Own"/> (since 0.2.0-dev.31.13, mod API 0.2.22) a press the listener keeps is
+    /// its own until its release: no other listener or binding gets that press, and neither its repeats nor its release
+    /// reach anyone else or the game (see the flag).</summary>
+    /// <exception cref="ArgumentException"><see cref="KeyListenFlags.Pointer"/> without <see cref="KeyListenFlags.Own"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An unknown flag.</exception>
     public static KeyListener Listen(Func<KeyPress, bool> onKey, KeyListenFlags flags = KeyListenFlags.Mouse)
     {
         ArgumentNullException.ThrowIfNull(onKey);
