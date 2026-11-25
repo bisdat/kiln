@@ -71,7 +71,8 @@ internal sealed unsafe class UiInventoryFake : IKitFake
             "Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and " +
             "ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the " +
             "AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel " +
-            "mapping (no panel is drawn or placed), the 250 ms frame age."));
+            "mapping (no panel is drawn or placed), the 250 ms frame age, the game's popups (none is open: MarkOf answers as " +
+            "with no popup, GameScreen.PopupOpen is false)."));
 
     internal static UiInventoryFakeState? State =>
         FakeTables.Active(Service) is { } h ? KitFakes.State<UiInventoryFakeState>(h) : null;

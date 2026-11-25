@@ -46,8 +46,10 @@ public readonly record struct FakeSlotClickResult(int Delivered, bool Taken);
 /// view), delivery to every matching handler with the slot's item and entity (and, since 0.2.0-dev.30.3, the press at the slot's centre, one pixel per UI unit), <c>Hovered</c>, and the marks: Mark, Unmark,
 /// ClearMarks and MarkWhen rules are Kiln.Ui's own, <see cref="MarkOf"/> asks it. Ui.Values.Slots reads the drawn frame.</para>
 /// <para><b>Not modelled.</b> The game's drawing and hooks, pixels (marks are not drawn; the mapping answers no viewport),
-/// the 250 ms frame age, client sessions. Clicks are delivered at once on the calling thread (in a game: on the client's
-/// main thread after the next UI frame).</para>
+/// the 250 ms frame age, client sessions, the game's popups (in a game, since 0.2.0-dev.31.9, the marks under its item
+/// menu and other popups are left out; offline none is open, so <see cref="MarkOf"/> answers as with no popup and
+/// GameScreen.PopupOpen is false). Clicks are delivered at once on the calling thread (in a game: on the client's main
+/// thread after the next UI frame).</para>
 /// <para><b>Screens and panels (0.2.0-dev.30).</b> The screen a <see cref="Draw"/> draws on is the open one:
 /// Ui.Inventory.Screen and ScreenChanged (and InventoryScreenChangedEvent) follow it; <see cref="OpenChest"/> names the
 /// chest's entity (GameScreen.Target, InventoryScreen.Container), <see cref="OpenBackpack"/> and
