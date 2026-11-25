@@ -124,7 +124,7 @@ class CrosshairSignatures(unittest.TestCase):
     def test_the_trace_writes_the_fields_kiln_reads(self):
         img = self.image.img
         # status 0 and the copy of the nearest row (sorted by the squared distance at row + 0x5c) into the result:
-        # +0x08 position (nudged 1 cm toward the ray), +0x14 normal, +0x60 material, +0x61 its flag, +0x64 entity,
+        # +0x08 position (moved 1 cm), +0x14 normal, +0x60 material, +0x61 its flag, +0x64 entity,
         # +0x68 squared distance from the trace's start
         rows = self.syms["@client/CrosshairTrace.rows"]
         result = self.syms["@client/CrosshairTrace.result"]

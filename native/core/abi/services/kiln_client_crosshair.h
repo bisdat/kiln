@@ -36,7 +36,7 @@ extern "C" {
 /* KilnCrosshairHit.flags: which fields hold a value. Without HIT nothing else is set. */
 enum {
     KILN_CROSSHAIR_HIT = 1u << 0,      /* the game's trace hit something within its reach (status 0) */
-    KILN_CROSSHAIR_POSITION = 1u << 1, /* position: the hit point, world metres (the game's float, 1 cm toward the ray) */
+    KILN_CROSSHAIR_POSITION = 1u << 1, /* position: the hit point, world metres (the game's float, moved 1 cm) */
     KILN_CROSSHAIR_NORMAL = 1u << 2,   /* normal: the surface normal there, unit length (within 1e-2) */
     KILN_CROSSHAIR_DISTANCE = 1u << 3, /* distance: metres from the trace's start to the hit */
     KILN_CROSSHAIR_ENTITY = 1u << 4,   /* entity: the game's entity of the hit (0 and unset for terrain) */

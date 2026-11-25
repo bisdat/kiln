@@ -50,8 +50,9 @@ public readonly record struct CrosshairHit
     /// <summary>The game's trace hit something within its reach.</summary>
     public bool IsHit { get; init; }
 
-    /// <summary>The hit point in world metres: the game's own point, 1 cm back toward the camera along the surface
-    /// normal or the ray (where the game places things). Null without a hit.</summary>
+    /// <summary>The hit point in world metres: the game's own point, moved 1 cm either against the surface normal (into
+    /// the surface, when the hit collider and the held item ask for it) or back along the ray toward the trace's start.
+    /// Null without a hit.</summary>
     public WorldPosition? Position { get; init; }
 
     /// <summary>The surface normal at the hit, unit length. Null without a hit or when the game gave none.</summary>
@@ -61,7 +62,9 @@ public readonly record struct CrosshairHit
     public float? Distance { get; init; }
 
     /// <summary>The game's entity of the hit (a creature, a prop, a placed object), <see cref="EntityId.None"/> for
-    /// terrain and without a hit. A client-world id; on a host it is also the server world's.</summary>
+    /// terrain and without a hit. A client-world id; on a host it is also the server world's. It is the game's own
+    /// pick: where the game moves the point into the surface (see <see cref="Position"/>) and its trace found two or
+    /// more hits, the entity is the second-nearest hit's while position, normal and distance are the nearest's.</summary>
     public EntityId Entity { get; init; }
 
     /// <summary>The voxel material id the game reports for the hit surface (terrain and voxel building cells; some

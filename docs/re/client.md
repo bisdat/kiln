@@ -330,12 +330,12 @@ the binary, and where it differs it says so.
   | Result | From | Meaning |
   |---|---|---|
   | `+0x00` u8 | 0 | status: 0 hit; `0x1f` (31) no row (`0x28d084`, every field zeroed first); `0x15` (21) no camera direction |
-  | `+0x08` f32[3] | row `+0x0c` | hit position, world metres, moved 1 cm back: along the row's normal when row `+0x40` has flag `0x10` and the held item's byte `+0x1b1` is set, else along the ray (`0x28d153..0x28d1da`) |
+  | `+0x08` f32[3] | row `+0x0c` | hit position, world metres, moved 1 cm: when row `+0x40` has flag `0x10` and the held item's byte `+0x1b1` is set, p -= 0.01·n, 1 cm against the row's surface normal (into the surface; `0x28d153..0x28d18f`, the constant 0.01 at `0x1413d111c`, `subss`); else p -= 0.01·forward, 1 cm back along the ray (`0x28d1a2..0x28d1da`) |
   | `+0x14` f32[3] | row `+0x18` | surface normal |
   | `+0x20..+0x57` | row `+0x24..+0x5b` | the rest of the row (unused by Kiln) |
   | `+0x58` f32 | row `+0x5c` | squared distance (again) |
   | `+0x60` u8, `+0x61` u8 | row `+0x64`, `+0x65` | voxel material id, and its "set" flag |
-  | `+0x64` u32 | row `+0x04` | entity id; with the `0x10`/`+0x1b1` case and two or more rows, the second row's `+0x04` |
+  | `+0x64` u32 | row `+0x04` | entity id. In the `0x10`/`+0x1b1` branch with two or more rows it is the **second** row's `+0x04` (`mov eax,[rdx+0x6c]` at `0x28d19a`, 0x68 + 4) while position, normal and distances stay the first row's |
   | `+0x68` f32 | row `+0x5c` | squared distance from the ray start (`xmm6` lane 3) |
 
   XHL's "status `+0x00`, material `+0x60`/`+0x61`, entity `+0x64`, distance squared `+0x68`" matches; the position at

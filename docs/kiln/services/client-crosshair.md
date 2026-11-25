@@ -44,10 +44,10 @@ if (why == CrosshairReason.Stale) Log.Info($"last target is {last!.Value.Age.Tot
 | Member | Meaning |
 |---|---|
 | `IsHit` | the game's trace hit something within its reach |
-| `Position` | `WorldPosition?`: the hit point in world metres. The game's own point: 1 cm back toward the camera, along the surface normal or the ray, where the game places things |
+| `Position` | `WorldPosition?`: the hit point in world metres, the game's own point: moved 1 cm, either against the surface normal (into the surface, when the hit collider and the held item ask for it) or back along the ray toward the trace's start |
 | `Normal` | `Vector3?`: the surface normal, unit length |
 | `Distance` | `float?`: metres from the trace's start (see below) |
-| `Entity` / `HasEntity` | the game's entity of the hit (a creature, a prop, a placed object); `EntityId.None` for terrain and a miss. A client-world id; on a host also the server world's |
+| `Entity` / `HasEntity` | the game's entity of the hit (a creature, a prop, a placed object); `EntityId.None` for terrain and a miss. A client-world id; on a host also the server world's. The game's own pick: in the case where it moves the point into the surface and its trace found two or more hits, the entity is the second-nearest hit's while position, normal and distance are the nearest's |
 | `VoxelMaterial` | `byte?`: the voxel material id the game reports for the hit surface (terrain and voxel building cells; some colliders carry one) |
 | `GameStatus` | the game's result byte: 0 hit, 31 nothing within reach, 21 no usable camera direction |
 | `Sequence` | game traces copied since the game started; never 0. The same sequence is the same trace |

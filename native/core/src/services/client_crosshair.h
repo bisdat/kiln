@@ -9,7 +9,7 @@
 // observation is the instruction after that call: the result is complete there and nothing has read it yet. What the
 // result holds (client 26430625; the sigdb probes on the trace body pin each offset):
 //   +0x00 u8  status: 0 hit, 31 nothing within reach, 21 no usable camera direction
-//   +0x08 f32[3] the hit position, world metres (nudged 1 cm back along the normal or the ray, as the game uses it)
+//   +0x08 f32[3] the hit position, world metres (moved 1 cm against the normal or back along the ray, as the game uses it)
 //   +0x14 f32[3] the surface normal
 //   +0x60 u8  the hit's voxel material id, valid when +0x61 is not 0
 //   +0x64 u32 the hit's entity (0 for terrain)
