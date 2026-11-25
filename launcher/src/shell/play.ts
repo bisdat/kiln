@@ -24,7 +24,7 @@ import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
 import { blockedLine } from "./RuntimeFailure";
-import { askedSteamAt, quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
+import { isAlreadyStarting, isVanillaStart, quietIsKiln, quietText, seededLaunch, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 import { t } from "../i18n";
 // the warning before Play
 import { isCanceledStart, launchWithPreflight } from "./sfiWarnings";
@@ -51,17 +51,18 @@ export function rememberLaunch(gameId: string, mode: LaunchMode) {
 const seeded = new Set<string>();
 
 /** (0.2.0-dev.31.13) Once per game and page: a start the backend still follows with Steam asked and no game yet
- *  (askedSteamAt) becomes this page's own wait, as if Play had been pressed here. Only a page loaded again after its web
- *  process ended (src-tauri/src/webproc.rs) finds one: a fresh launcher follows no start. A start not tracked by the
- *  backend (Vanilla) is not found. */
-function seedLaunch(qc: ReturnType<typeof useQueryClient>, gameId: string) {
-  if (!gameId || seeded.has(gameId)) return;
+ *  (askedSteamAt) becomes this page's own wait, as if Play had been pressed here, with its mode (seededLaunch: a Vanilla
+ *  start is one too). Only a page loaded again after its web process ended (src-tauri/src/webproc.rs) finds one: a
+ *  fresh launcher follows no start. `again`: asked once more whatever this page asked before (the backend refused a
+ *  Play because such a start is pending: isAlreadyStarting). */
+function seedLaunch(qc: ReturnType<typeof useQueryClient>, gameId: string, again = false) {
+  if (!gameId || (seeded.has(gameId) && !again)) return;
   seeded.add(gameId);
   void api.launchProgress(gameId).then((tl) => {
-    const at = askedSteamAt(tl, playNow());
+    const seed = seededLaunch(tl, playNow());
     // Play pressed here meanwhile: its own memo wins
-    if (at == null || useLaunchMemo.getState().at[gameId] !== undefined || qc.isMutating({ mutationKey: ["launch_play"] }) > 0) return;
-    useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: at }, mode: { ...m.mode, [gameId]: m.mode[gameId] ?? "profile" } }));
+    if (seed == null || useLaunchMemo.getState().at[gameId] !== undefined || qc.isMutating({ mutationKey: ["launch_play"] }) > 0) return;
+    useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: seed.at }, mode: { ...m.mode, [gameId]: m.mode[gameId] ?? seed.mode } }));
   }).catch(() => {});
 }
 
@@ -162,7 +163,9 @@ export function usePlayControl(): PlayControl {
   // the states that are not a start going well win over the timeline, as before it: Steam updating, vanilla, No Kiln
   // (the proxy did not load: play-once still there, or no boot and no word from Kiln a minute in)
   const exception = !!s?.steamUpdating || (running && (state.view.phase === "vanilla" || kilnMissing));
-  const progress = !stoppedStart && !exception && showsProgress(tl) ? tl : null;
+  const shown = !stoppedStart && !exception && showsProgress(tl) ? tl : null;
+  // (0.2.0-dev.31.13) a Vanilla start the backend follows holds Play while it waits for Steam, said as before without a bar
+  const progress = shown && !isVanillaStart(shown) ? shown : null;
   const running_ = !!progress && running;
   const quiet = !exception && running && tl?.phase === "quiet" ? tl : null;
   const view: GameStateView = stoppedStart ? { phase: running ? "running" : "stopped", label: t("shell.play.stoppedStart"), word: "stoppedStart", tone: "warn", pulse: false, detail: stoppedStart.reason } : exception ? state.view
@@ -182,7 +185,8 @@ export function usePlayControl(): PlayControl {
       // the start is timed from here: its own steps (cook, profile, Steam), then what the game's Kiln says
       clearStop(gameId);
       qc.setQueryData(["launch_state", gameId], (old: api.BootState | undefined) => old ? { ...old, stoppedStart: null } : old);
-      await api.launchBegin(gameId, req.mode).catch(() => {});
+      // (0.2.0-dev.31.13) another start of the game is pending (a page loaded again while Steam was asked): refused
+      await api.launchBegin(gameId, req.mode).catch((e) => { if (isAlreadyStarting(e)) throw e; });
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
       if (await switchBackFirst(gameId, req)) invalidateGame(qc, gameId);
       await beforeStart(gameId, req);
@@ -200,6 +204,8 @@ export function usePlayControl(): PlayControl {
     // the re-apply before the start may have kept copies even when the start then failed; a mod changed in its Library
     // folder is named, with "Use the changed files" and Play again
     onError: (e, vars) => {
+      // (0.2.0-dev.31.13) refused: another start is pending. It is not this Play's to end: the window shows its wait
+      if (isAlreadyStarting(e)) { seedLaunch(qc, vars.gameId, true); toast.error(e); return; }
       // Play ended before the game existed: the start the launcher was timing is over (the window as before Play)
       void api.launchEnd(vars.gameId).catch(() => {}).then(() => qc.invalidateQueries({ queryKey: ["launch_progress", vars.gameId] }));
       // Cancel in the warning before Play ended the start; the player chose it, no toast
@@ -232,7 +238,7 @@ export function usePlayControl(): PlayControl {
   }, [id, running, process, sameRun, pending, launching, memo.at]);
   const since = runStarted(s, now, memo.since[id]);
   const starting = stoppedStart ? false : exception ? state.starting && !s?.steamUpdating
-    : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!progress && pending) || (at !== undefined && now - at < 120_000)));
+    : (state.starting && !(spoke && !progress)) || running_ || (!running && !s?.steamUpdating && (launching > 0 || (!!shown && pending) || (at !== undefined && now - at < 120_000)));
   const activeProfile = profiles.data?.find((p) => p.id === active.data?.profileId) ?? null;
   // Steam took the start (launch_play answered) and no game process exists yet
   const waitingForGame = !!game && starting && pending && launching === 0;

@@ -1129,6 +1129,9 @@ export interface StartTimeline {
   launcher: boolean;
   /** Steam was asked a minute ago or more and the game's process does not exist yet: no number. */
   steamSlow?: boolean;
+  /** (0.2.0-dev.31.13) How the launcher's start was started (launch_begin's mode); absent: not said. A Vanilla start is
+   *  followed too until its game is there, and shown without a bar. */
+  mode?: LaunchMode | null;
 }
 export interface RequiredMod {
   id: string;

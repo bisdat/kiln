@@ -331,7 +331,8 @@ still takes (0.2.0-dev.27; `kiln_manage::start_progress`, commands `launch_begin
   time left stays at what the steps after it take until it ends. The bar never moves back, and it is full only at the
   main menu.
 - **Not progress.** Safe idle (with Kiln's reason), Kiln failing to go on, the game ending, "No Kiln" (Steam did not
-  load Kiln's proxy), a vanilla start and Steam updating the game are said as before, without a bar. No word from Kiln
+  load Kiln's proxy), a vanilla start and Steam updating the game are said as before, without a bar (a vanilla start
+  waiting for Steam holds Play for the same 5 minutes as a Kiln start, 0.2.0-dev.31.13: "One start at a time"). No word from Kiln
   for 60 s (120 s inside the early plugins) is "No word from Kiln" with its sentence (a game waiting at its menu for
   its mods says so; at the last step it says the game is still loading or at a menu Kiln did not see), without a bar
   or a countdown, and the mod list is back. A game that is in a world is not "No word from Kiln" (0.2.0-dev.29): its
@@ -778,13 +779,35 @@ only SIGTERM ended it).
   end: its log follows (`logs_follow`) and server consoles (`server_console_open`), which a crashed page never closes.
   Starting a server or an install twice is refused by the backend as before (a running server's pid, the install lock).
   A start Steam was asked for and no game yet (or a direct start's) is the new page's wait too: it asks
-  `launch_progress` once per game and shows the wait and "Stop waiting" instead of Play (`askedSteamAt` in
-  `shell/startProgress.ts`); a Vanilla start is not tracked by the backend, so it is not found. The update notice's Later
+  `launch_progress` once per game and shows the wait and "Stop waiting" instead of Play (`askedSteamAt` and
+  `seededLaunch` in `shell/startProgress.ts`), with the start's mode: a Vanilla start is found too and shown as
+  Vanilla, without a bar (0.2.0-dev.31.13: see "One start at a time" below). The update notice's Later
   (and a hold for good) is kept for this run of the launcher (sessionStorage), so the new page does not count down to a
   restart the player put off.
+- **One start at a time** (0.2.0-dev.31.13, `commands/launch.rs` `refuse_pending`): the backend tracks a Vanilla
+  start ("Just once": Vanilla) as it tracks a Kiln start (`launch_begin` with mode `vanilla`: its profile and Steam
+  steps, the wait for its process; its record goes once its game is seen, and nothing of Kiln is looked for), and
+  `launch_begin`, `launch_play` and `launch_confirm` refuse a second start of either kind while one is pending: Steam
+  asked (or the direct start made) and no game process yet, within the window's 5-minute wait, or another Play inside
+  its own start. `launch_begin` checks again as it records its start, under the same locks as `launch_play`'s claim, so
+  a Play that asks Steam while the new record is built keeps its start; and a game whose process runs already is
+  refused as `game_running` first, as `launch_play` refuses it (the watcher may not have seen it yet). The refusal is
+  `busy` "The game is already starting." (`detail.kind` `already_starting`): Play shows it, does not end the pending
+  start (no `launch_end`) and shows that start's wait again (`isAlreadyStarting`). The hold ends when the game is
+  seen (then the game-running checks refuse a second start, as before), after the 5 minutes (Play is offered again and replaces the start, as before), with Stop waiting or a Play that failed
+  (`launch_end`), and when the start itself fails. Nothing holds a start before Steam is asked (the cook, the warning
+  before Play): the page that pressed Play holds it, as before. A Vanilla start waiting for Steam is said as before
+  (no bar), now for the same 5 minutes as a Kiln start (it was 2), so Play is not offered while the backend would
+  refuse it. The update's restart waits for a Vanilla start too, as the window's notice already did (the browser
+  mock's too: `mockStartTracked`).
 - **Tests**: `cargo test -p kiln-launcher --lib webproc` (the retry window, the close decisions, the line, `/proc`
   parsing); `bun test unit/close-guard.test.ts unit/startProgress.test.ts unit/update-apply.test.ts` (the answer before
-  any question, the unsaved report, the seeded wait, Later). Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_KILL_PAGE=<seconds>` ends the web process
+  any question, the unsaved report, the seeded wait and its mode, the refusal told apart, Later);
+  `cargo test -p kiln-launcher --lib guard_tests` (the hold of either kind and when it ends, launch_begin's second
+  check, `game_running` first); `bun test unit/vanilla-guard-mock.test.ts` (the mock's restart waits for a Vanilla
+  start); Playwright
+  `tests/vanilla-guard.spec.ts` (a reload during a Vanilla start's wait for Steam shows the wait, not Play; a refused
+  Play ends nothing). Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_KILL_PAGE=<seconds>` ends the web process
   (SIGKILL: WebKit says `Crashed`) that long after each page start: the first end reloads, the second shows the screen.
 
 ## WebKit's sandbox (Linux)

@@ -467,6 +467,10 @@ pub struct LauncherStart {
     /// The launcher starts the game itself (`crate::direct`), not Steam: the `steam` step is [`DIRECT_STEP_LABEL`].
     #[serde(default)]
     pub direct: bool,
+    /// (0.2.0-dev.31.13) How Play started it (`launch_begin`'s mode; None: not said). A Vanilla start is tracked too,
+    /// so its wait for Steam holds the next start like any other, and a page loaded again knows it was Vanilla.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::launch::LaunchMode>,
 }
 
 /// A cook job as the start knows it: `<id>@<identity>` and the mod's name.
@@ -478,7 +482,7 @@ impl LauncherStart {
     /// Play was pressed at `now`. `cook`: the keys of the mods due for a cook (None: a start that does not cook).
     pub fn new(now: i64, cook: Option<Vec<String>>, kiln: Option<String>, fingerprint: Option<String>) -> Self {
         let mut s = LauncherStart { began: now, plan: Vec::new(), steps: Vec::new(), kiln, fingerprint, asked: false, seen: false, kept: false, checking: false,
-            direct: false };
+            direct: false, mode: None };
         if let Some(keys) = cook {
             s.plan.push("cook".into());
             s.begin("cook", now);
@@ -528,6 +532,21 @@ impl LauncherStart {
             self.seen = true;
         }
         true
+    }
+
+    /// (0.2.0-dev.31.13) This start holds the game's next one at `now` (unix ms): Steam was asked for it (or the launcher
+    /// started the game directly), its process was not seen yet, and the window still waits for it: less than
+    /// [`STEAM_WAIT_MS`] since the ask. After that the window offers Play again and a new Play replaces this start, as
+    /// before; once the process is seen, the game-running checks refuse a second start.
+    pub fn holds_next_start(&self, now: i64) -> bool {
+        !self.seen
+            && self.asked
+            && self.steps.iter().find(|s| s.id == "steam").is_some_and(|s| now.saturating_sub(self.began).saturating_sub(s.ms as i64) < STEAM_WAIT_MS as i64)
+    }
+
+    /// A Vanilla start (`mode`): no Kiln in the game, nothing of Kiln to wait for once its process is there.
+    pub fn vanilla(&self) -> bool {
+        self.mode == Some(crate::launch::LaunchMode::Vanilla)
     }
 
     pub fn running(&self) -> Option<&LauncherStep> {
@@ -956,6 +975,10 @@ pub struct Timeline {
     /// is still preparing the game.
     #[serde(default)]
     pub steam_slow: bool,
+    /// (0.2.0-dev.31.13) How the launcher's start was started ([`LauncherStart::mode`]; None: not said, or no start of
+    /// this launcher).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::launch::LaunchMode>,
 }
 
 /// What [`timeline`] is made from (times are unix milliseconds).
@@ -1128,6 +1151,7 @@ pub fn timeline(i: &Inputs) -> Option<Timeline> {
         estimate: est,
         launcher: l.is_some(),
         steam_slow,
+        mode: l.and_then(|l| l.mode),
     })
 }
 
