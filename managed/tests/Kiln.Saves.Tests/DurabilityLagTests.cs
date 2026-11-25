@@ -110,10 +110,29 @@ public sealed class DurabilityLagTests
     }
 
     [Fact]
-    public void Late_generations_stay_bounded()
+    public void Late_generations_stay_bounded_and_keep_the_oldest()
     {
         for (uint g = 1; g <= 50; g++) _lag.Late(g);
-        Assert.False(_lag.IsLate(1));
-        Assert.True(_lag.IsLate(50));
+        Assert.True(_lag.IsLate(1));                                   // the one a stuck writer is measured by
+        Assert.All(Enumerable.Range(2, 42), g => Assert.False(_lag.IsLate((uint)g)));
+        Assert.All(Enumerable.Range(44, 7), g => Assert.True(_lag.IsLate((uint)g)));
+    }
+
+    [Fact]
+    public void A_writer_stuck_for_good_is_an_error_however_often_the_world_saves()
+    {
+        // A writer that hangs: the barrier is off, every world write goes ahead at once, and saves come every 5 s (save
+        // requests): more than the late generations kept in 2 minutes. The oldest must still be found stuck.
+        _lag.Late(1);
+        for (uint g = 2; g <= 24; g++)
+        {
+            _now += TimeSpan.FromSeconds(5);
+            _lag.Late(g);
+            Assert.Empty(_lag.Stuck());
+        }
+        _now += TimeSpan.FromSeconds(6);
+        var stuck = Assert.Single(_lag.Stuck());
+        Assert.Equal(1u, stuck.Generation);
+        Assert.Equal(121, stuck.Age.TotalSeconds, 3);
     }
 }

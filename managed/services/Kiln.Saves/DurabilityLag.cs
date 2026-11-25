@@ -40,7 +40,9 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
     {
         var t = now();
         _late[generation] = (t, false, job);
-        while (_late.Count > KeepLate) _late.Remove(_late.Keys.Min());
+        // Bounded, but never by dropping the oldest: a writer that hangs is found by it (Stuck), however often the world saves
+        // meanwhile (the barrier is off then, so every world write goes ahead at once).
+        while (_late.Count > KeepLate) _late.Remove(_late.Keys.Order().Skip(1).First());
         if (_warned)
         {
             _lateCount++;
