@@ -320,11 +320,16 @@ ssh -o BatchMode=yes -W 127.0.0.1:<port> myhost     # one per connection: stdin/
 life; each connection accepted there runs its own `ssh -W` child (`ServerAliveInterval=15`) and the bytes are copied
 between the two. No port is looked up, released and handed to ssh any more (another program could take it in between),
 and ssh opens no listener. Closing or dropping the tunnel stops accepting and kills every child; a connection that ssh
-could not forward reports what ssh said (`ssh tunnel to <host>: ...`). Kiln.Admin's folder follows the data folder the
-server booted with: when `kiln/state/boot.json` names a `profile.dataDir` (a profile with `dataDir: profile`), the
-launcher reads `<dataDir>/kiln-admin/` first (locally: `Z:` mapped to `/`, other drives through the Wine prefix,
-relative paths under `<server>/kiln/`; remotely: `Z:` and absolute paths), then `kiln/data/kiln-admin/`
-(`kiln_manage::admin::datadir`). `AdminHub` reconnects a dropped session
+could not forward reports what ssh said (`ssh tunnel to <host>: ...`). The held port serves only the launcher's own
+user's programs on Linux (`kiln_manage::admin::peer`, the socket table; a connection whose owner is not found is
+refused) and at most 8 connections at once (`tunnel::MAX_CHILDREN`; one more is closed: every connection costs an ssh
+sign-in). Since ssh connects and signs in before the first byte, the KAP hello through a tunnel may take
+`tunnel::SSH_SETUP` (20 s) longer than the handshake. Kiln.Admin's folder follows the data folder the server booted
+with: when `kiln/state/boot.json` names a `profile.dataDir` (a profile with `dataDir: profile`) that the launcher can
+map (locally: `Z:` mapped to `/`, other drives through the server's Wine prefix, relative paths under `<server>/kiln/`;
+remotely: `Z:` and absolute paths), the server's data root is that folder and Kiln.Admin's files are read from
+`<dataDir>/kiln-admin/` only; otherwise from `kiln/data/kiln-admin/` (`kiln_manage::admin::datadir`). The root is read
+once per connection, and endpoint.json and admin-token always come from the same folder. `AdminHub` reconnects a dropped session
 by running the whole recipe again (endpoint, token, a new tunnel), so a restarted server with a new port is found. The
 token is held in memory only. `$KILN_SSH` overrides the ssh binary. Remote machines are Linux (POSIX shell, `cat`).
 A remote server without KAP (an old Kiln.Admin) is not reachable from the launcher (no remote file bridge).
@@ -400,7 +405,9 @@ a named consumer, and that consumer (the web admin mod, also connected with the 
 - (0.2.0-dev.31.12) The launcher never puts the secret on a command line: it opens a one-use bootstrap address of the
   server's web panel gateway (contracts.md, `admin_open_web_panel`) whose page holds the secret and sends the browser on
   to `https://<the server's own loopback origin>/launcher#secret=` with `location.replace`. On Linux the page is only
-  served to a program of the launcher's own user. The panel's page removes the fragment from the address bar at once;
+  served to a program of the launcher's own user. The secret is minted by the Kiln.Admin of the same data root the
+  panel's `launcher-endpoint.json` was read from (one boot.json read per open), so it only ever goes to the panel
+  beside that Kiln.Admin. The panel's page removes the fragment from the address bar at once;
   a browser's history may still list the used URL, and the secret in it is dead (one use, 60 s).
 
 ### Commands as forms
