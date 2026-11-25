@@ -1,1 +1,80 @@
 #nullable enable
+const Kiln.Content.GameTextsCapability = "content.game_texts" -> string!
+static Kiln.Content.LoadTextsAsync(string? language, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.GameTextTable!>!
+static Kiln.Content.LoadVoxelMaterialsAsync(string? language = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.VoxelMaterialCatalog!>!
+static Kiln.Content.TextIn(System.Guid locaTag, string? language) -> string?
+static Kiln.Content.TextIn(uint locaId, string? language) -> string?
+static Kiln.Content.TextLanguages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Kiln.Content.TryGetTexts(string? language) -> Kiln.GameTextTable?
+static Kiln.Content.TryGetVoxelMaterials(string? language = null) -> Kiln.VoxelMaterialCatalog?
+const Kiln.Content.VoxelMaterialsCapability = "content.voxel_materials" -> string!
+Kiln.GameTextSource
+Kiln.GameTextSource.Game = 1 -> Kiln.GameTextSource
+Kiln.GameTextSource.KilnCatalog = 2 -> Kiln.GameTextSource
+Kiln.GameTextSource.None = 0 -> Kiln.GameTextSource
+Kiln.GameTextTable
+Kiln.GameTextTable.Available.get -> bool
+Kiln.GameTextTable.ContainsKey(uint key) -> bool
+Kiln.GameTextTable.Count.get -> int
+Kiln.GameTextTable.Get(System.Guid locaTag) -> string?
+Kiln.GameTextTable.Get(uint locaId) -> string?
+Kiln.GameTextTable.GetEnumerator() -> System.Collections.Generic.IEnumerator<System.Collections.Generic.KeyValuePair<uint, string!>>!
+Kiln.GameTextTable.GetPlain(uint locaId) -> string?
+Kiln.GameTextTable.Keys.get -> System.Collections.Generic.IEnumerable<uint>!
+Kiln.GameTextTable.Language.get -> string!
+Kiln.GameTextTable.Reason.get -> string!
+Kiln.GameTextTable.Source.get -> Kiln.GameTextSource
+override Kiln.GameTextTable.ToString() -> string!
+Kiln.GameTextTable.TryGetValue(uint key, out string! value) -> bool
+Kiln.GameTextTable.Values.get -> System.Collections.Generic.IEnumerable<string!>!
+Kiln.GameTextTable.this[uint key].get -> string!
+Kiln.VoxelMaterial
+Kiln.VoxelMaterial.<Clone>$() -> Kiln.VoxelMaterial!
+Kiln.VoxelMaterial.CellId.get -> int
+Kiln.VoxelMaterial.CellId.init -> void
+Kiln.VoxelMaterial.Deconstruct(out int CellId, out Kiln.VoxelMaterialKind Kind, out System.Guid Guid, out string! Name, out Kiln.ItemId LootItem, out int? ExchangeRate, out System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! PlacingItems, out string? Hardness, out int HealthPoints, out string? Label, out Kiln.VoxelMaterialLabelSource LabelSource) -> void
+Kiln.VoxelMaterial.Equals(Kiln.VoxelMaterial? other) -> bool
+override Kiln.VoxelMaterial.Equals(object? obj) -> bool
+Kiln.VoxelMaterial.ExchangeRate.get -> int?
+Kiln.VoxelMaterial.ExchangeRate.init -> void
+override Kiln.VoxelMaterial.GetHashCode() -> int
+Kiln.VoxelMaterial.Guid.get -> System.Guid
+Kiln.VoxelMaterial.Guid.init -> void
+Kiln.VoxelMaterial.Hardness.get -> string?
+Kiln.VoxelMaterial.Hardness.init -> void
+Kiln.VoxelMaterial.HealthPoints.get -> int
+Kiln.VoxelMaterial.HealthPoints.init -> void
+Kiln.VoxelMaterial.Kind.get -> Kiln.VoxelMaterialKind
+Kiln.VoxelMaterial.Kind.init -> void
+Kiln.VoxelMaterial.Label.get -> string?
+Kiln.VoxelMaterial.Label.init -> void
+Kiln.VoxelMaterial.LabelSource.get -> Kiln.VoxelMaterialLabelSource
+Kiln.VoxelMaterial.LabelSource.init -> void
+Kiln.VoxelMaterial.LootItem.get -> Kiln.ItemId
+Kiln.VoxelMaterial.LootItem.init -> void
+Kiln.VoxelMaterial.Name.get -> string!
+Kiln.VoxelMaterial.Name.init -> void
+Kiln.VoxelMaterial.PlacingItems.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemId>!
+Kiln.VoxelMaterial.PlacingItems.init -> void
+override Kiln.VoxelMaterial.ToString() -> string!
+Kiln.VoxelMaterial.VoxelMaterial(int CellId, Kiln.VoxelMaterialKind Kind, System.Guid Guid, string! Name, Kiln.ItemId LootItem, int? ExchangeRate, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! PlacingItems, string? Hardness, int HealthPoints, string? Label, Kiln.VoxelMaterialLabelSource LabelSource) -> void
+static Kiln.VoxelMaterial.operator !=(Kiln.VoxelMaterial? left, Kiln.VoxelMaterial? right) -> bool
+static Kiln.VoxelMaterial.operator ==(Kiln.VoxelMaterial? left, Kiln.VoxelMaterial? right) -> bool
+Kiln.VoxelMaterialCatalog
+Kiln.VoxelMaterialCatalog.Available.get -> bool
+Kiln.VoxelMaterialCatalog.Count.get -> int
+Kiln.VoxelMaterialCatalog.Get(int cellId) -> Kiln.VoxelMaterial?
+Kiln.VoxelMaterialCatalog.GetEnumerator() -> System.Collections.Generic.IEnumerator<Kiln.VoxelMaterial!>!
+Kiln.VoxelMaterialCatalog.Language.get -> string!
+Kiln.VoxelMaterialCatalog.PlacedBy(Kiln.ItemId item) -> Kiln.VoxelMaterial?
+Kiln.VoxelMaterialCatalog.Reason.get -> string!
+override Kiln.VoxelMaterialCatalog.ToString() -> string!
+Kiln.VoxelMaterialCatalog.WithLootItem(Kiln.ItemId item) -> System.Collections.Generic.IReadOnlyList<Kiln.VoxelMaterial!>!
+Kiln.VoxelMaterialCatalog.this[int index].get -> Kiln.VoxelMaterial!
+Kiln.VoxelMaterialKind
+Kiln.VoxelMaterialKind.Building = 1 -> Kiln.VoxelMaterialKind
+Kiln.VoxelMaterialKind.Terrain = 0 -> Kiln.VoxelMaterialKind
+Kiln.VoxelMaterialLabelSource
+Kiln.VoxelMaterialLabelSource.LootItem = 2 -> Kiln.VoxelMaterialLabelSource
+Kiln.VoxelMaterialLabelSource.None = 0 -> Kiln.VoxelMaterialLabelSource
+Kiln.VoxelMaterialLabelSource.PlacingItem = 1 -> Kiln.VoxelMaterialLabelSource

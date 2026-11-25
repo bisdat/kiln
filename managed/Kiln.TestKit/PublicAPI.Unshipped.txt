@@ -1,12 +1,22 @@
 #nullable enable
-const Kiln.TestKit.FakeCrosshair.Session = 1 -> uint
 Kiln.TestKit.FakeCrosshair
 Kiln.TestKit.HarnessCrosshair
 Kiln.TestKit.HarnessCrosshair.Age(System.TimeSpan age) -> void
-Kiln.TestKit.HarnessCrosshair.AimAtNothing() -> void
 Kiln.TestKit.HarnessCrosshair.Aim(Kiln.WorldPosition position, System.Numerics.Vector3? normal = null, float? distance = null, Kiln.EntityId entity = default(Kiln.EntityId), byte? voxelMaterial = null) -> void
+Kiln.TestKit.HarnessCrosshair.AimAtNothing() -> void
 Kiln.TestKit.HarnessCrosshair.Clear() -> void
 Kiln.TestKit.HarnessCrosshair.Fault() -> void
 Kiln.TestKit.HarnessCrosshair.HarnessCrosshair(Kiln.TestKit.KilnHarness! harness) -> void
 Kiln.TestKit.HarnessCrosshair.Reads.get -> int
+Kiln.TestKit.HarnessGameTexts
+Kiln.TestKit.HarnessGameTexts.Add(string! language, uint locaId, string! text) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.AddItem(Kiln.ItemId item, Kiln.ItemTextTags tags) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.Languages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessGameTexts.Reads.get -> int
+Kiln.TestKit.HarnessVoxelMaterials
+Kiln.TestKit.HarnessVoxelMaterials.Add(int cellId, string! name, Kiln.ItemId lootItem = default(Kiln.ItemId), int? exchangeRate = null, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? placingItems = null, string? hardness = null, int healthPoints = 0, System.Guid guid = default(System.Guid)) -> Kiln.TestKit.HarnessVoxelMaterials!
+Kiln.TestKit.HarnessVoxelMaterials.Reads.get -> int
 Kiln.TestKit.KilnHarness.Crosshair.get -> Kiln.TestKit.HarnessCrosshair!
+Kiln.TestKit.KilnHarness.GameTexts.get -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.KilnHarness.VoxelMaterials.get -> Kiln.TestKit.HarnessVoxelMaterials!
+const Kiln.TestKit.FakeCrosshair.Session = 1 -> uint

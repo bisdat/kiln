@@ -1,1 +1,23 @@
 #nullable enable
+Kiln.ItemTextTags
+Kiln.ItemTextTags.Caption.get -> uint
+Kiln.ItemTextTags.Caption.init -> void
+Kiln.ItemTextTags.Deconstruct(out uint Name, out uint Caption, out uint Description, out uint Lore) -> void
+Kiln.ItemTextTags.Description.get -> uint
+Kiln.ItemTextTags.Description.init -> void
+Kiln.ItemTextTags.Equals(Kiln.ItemTextTags other) -> bool
+~override Kiln.ItemTextTags.Equals(object obj) -> bool
+override Kiln.ItemTextTags.GetHashCode() -> int
+Kiln.ItemTextTags.ItemTextTags() -> void
+Kiln.ItemTextTags.ItemTextTags(uint Name, uint Caption, uint Description, uint Lore) -> void
+Kiln.ItemTextTags.Lore.get -> uint
+Kiln.ItemTextTags.Lore.init -> void
+Kiln.ItemTextTags.Name.get -> uint
+Kiln.ItemTextTags.Name.init -> void
+~override Kiln.ItemTextTags.ToString() -> string
+static Kiln.ItemTextTags.operator !=(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
+static Kiln.ItemTextTags.operator ==(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
+static Kiln.Items.Description(Kiln.ItemId item) -> string?
+static Kiln.Items.DescriptionIn(Kiln.ItemId item, string? language) -> string?
+static Kiln.Items.DisplayNameIn(Kiln.ItemId item, string? language) -> string?
+static Kiln.Items.TextTags(Kiln.ItemId item) -> Kiln.ItemTextTags?

@@ -864,6 +864,146 @@ Client.Post(() =>
 5. `Content.Text` from the overlay's draw callback throws the main-thread `InvalidOperationException` (and nothing
    crashes); from a `Ui.Screens` UI tick it answers.
 
+## Game texts in any language (since 0.2.0-dev.31.13)
+Mod API 0.2.22. Asked for by XHL (EmberCodex, Easy HUD, Planting Assistant, Creative Mode Fix). `Content.Text` above asks the
+game's own lookup in the player's language, on the main thread. These read the language tables the game ships, on any
+thread, in any of its languages: a codex page in the language a player picks, every text of a language for a search, an
+item's description next to its name.
+
+| Member | What |
+|---|---|
+| `IReadOnlyList<string> Content.TextLanguages` | the languages the game ships, as it keys them: 15 on client 26430625 (`en-us`, `de-de`, `fr-fr`, `it-it`, `es-es`, `ru-ru`, `pl-pl`, `ja-jp`, `ko-kr`, `pt-br`, `th-th`, `tr-tr`, `zh-cn`, `zh-tw`, `uk-ua`) |
+| `GameTextTable? Content.TryGetTexts(string? language)` | one language's texts when they are read, without waiting; null while they are read (the first call starts that) |
+| `Task<GameTextTable> Content.LoadTextsAsync(string? language, CancellationToken = default)` | reads them on a worker and completes with the table |
+| `string? Content.TextIn(uint locaId, string? language)`, `TextIn(Guid locaTag, string? language)` | one text with the game's markup, without waiting |
+| `GameTextTable` | `IReadOnlyDictionary<uint, string>` (tag id to text, with markup): `Language`, `Source` (`Game`, `KilnCatalog`, `None`), `Available`, `Reason`, `Get(uint)`, `Get(Guid)`, `GetPlain(uint)` |
+| `Items.Description(item)`, `Items.DescriptionIn(item, language)`, `Items.DisplayNameIn(item, language)`, `Items.TextTags(item)` | an item type's texts ([items.md](items.md#c)); `ItemTextTags(Name, Caption, Description, Lore)` are its tag ids |
+| `const string Content.GameTextsCapability` | `"content.game_texts"` |
+
+- **Languages.** `language` is a key the game ships (`"de-de"`); `"de"` (the first shipped `de-*`), `"De_De"` and `"DE-de"`
+  work too. Null is the player's game language (`GameLanguage.Current`; `"en-us"` on a server). A language the game does
+  not ship gives an unavailable table whose `Reason` lists the ones it has.
+- **Where from.** `keen::LocaTagCollectionResource.languages` names one content blob per language; each is a table of
+  `keen::LocaTagResource {id, text}` (types from kiln.types, bytes through kiln.assets' `blob_read_resident`, so registered
+  blob overrides apply). Layouts checked on client 26430625: the collection's `languages` at `+0x20`, 40-byte language
+  rows (`language` `+0`, `data` `+8`), 24-byte text rows (`id` `+0`, `text` `+4`). A row or string outside its blob makes
+  the whole table unavailable, never a table with wrong texts. Trailing NULs are dropped; the markup stays (`GetPlain`
+  strips it).
+- **Not cached by the game, kept by Kiln.** A table is read once (about a quarter of a second for a client language) and
+  kept; Kiln keeps the four most recently used languages. A failed read (the game has not opened its content index yet) is
+  tried again after 5 s, then twice as long each time, at most 5 minutes; `LoadTextsAsync` asks again at once.
+- **Kiln's new content.** A kiln.content item's texts are Kiln's, not in the game's tables: `Content.Text` (the game's
+  lookup) answers them, `TextIn` does not; `Items.Description` and `Items.DisplayNameIn(item, language)` take its definition's
+  texts (that language, its primary language, `"*"`, English; else its base item's).
+- **Dedicated server.** Its data has no texts (no `LocaTagCollectionResource`, none of the client's blobs; server
+  26430253, docs/re/world-status.md section 12). Every language other than English is unavailable with the reason
+  `a dedicated server's game data has no texts (the game ships them with its client only); ...`. English comes from a Kiln
+  catalog's `loca` section (`Source` `KilnCatalog`, the same table as `Texts.Get`) when the server has one
+  ([catalogs.md](../modding/catalogs.md)), and `TextLanguages` is `["en-us"]` once it is loaded. `Items.Description` is null
+  there; `Items.DisplayNameIn(item, "en-us")` is the English name Kiln ships.
+- **The row** `content.game_texts`: available on a game client with kiln.assets' resources (`assets.resources`) and kiln.types;
+  `wrong-side` on a dedicated server. The members never throw for a missing table: they say why in `Reason`.
+
+```csharp
+// EmberCodex-style: a codex page in the language the player picked in the codex's own settings ("fr-fr"; null: the game's).
+static async Task<CodexPage> Page(ItemId item, string? language)
+{
+    var texts = await Content.LoadTextsAsync(language);              // read once per language, then from memory
+    if (!texts.Available)                                            // a server, a language the game does not ship
+        return new CodexPage(Items.DisplayName(item) ?? item.ToString(), "", texts.Reason, "");
+    if (Items.TextTags(item) is not { } tags)                        // a new item (kiln.content): its definition's texts
+        return new CodexPage(Items.DisplayNameIn(item, language) ?? item.ToString(), "", Items.DescriptionIn(item, language) ?? "", "");
+    return new CodexPage(
+        texts.GetPlain(tags.Name) ?? Items.DisplayNameIn(item, language) ?? item.ToString(),
+        texts.GetPlain(tags.Caption) ?? "",
+        texts.Get(tags.Description) ?? "",                           // with the game's markup, for a rich-text widget
+        texts.GetPlain(tags.Lore) ?? "");
+}
+record CodexPage(string Name, string Caption, string Description, string Lore);
+
+// The codex's language picker: every language the game ships.
+IReadOnlyList<string> languages = Content.TextLanguages;            // ["en-us", "de-de", ...]
+
+// Search every text of one language (Creative Mode Fix-style search over names and descriptions).
+var german = await Content.LoadTextsAsync("de-de");
+var hits = german.Where(t => t.Value.Contains("Kupfer", StringComparison.OrdinalIgnoreCase)).Select(t => t.Key).ToList();
+
+// A label drawn every frame (Easy HUD-style): never waits; null until the table is read, then the text.
+string label = Content.TextIn(0xbe5b2600, null) ?? "…";
+```
+
+## Voxel materials by cell (since 0.2.0-dev.31.13)
+Mod API 0.2.22. Asked for by XHL (Vein Mining, Blueprint, Easy HUD). A voxel cell's low byte is its material: 1..127
+terrain (dirt, stone, ores), 128..255 building materials. `Content.TryGetVoxelMaterials` / `LoadVoxelMaterialsAsync` give
+every material the game configures, keyed by that byte and independent of its items: what it is, what digging it gives and
+at what rate, which items place it, and a label in a chosen language. The byte comes from `Queries.RaycastVoxels`,
+`Build.Read`, a `BuildEvent`, or a client's `ClientCursor.hoveredVoxelMaterialId`.
+
+| Member | What |
+|---|---|
+| `VoxelMaterialCatalog? Content.TryGetVoxelMaterials(string? language = null)` | the catalog when it is read, without waiting; null while it (or that language's texts) is read |
+| `Task<VoxelMaterialCatalog> Content.LoadVoxelMaterialsAsync(string? language = null, CancellationToken = default)` | reads them on a worker and completes with the catalog |
+| `VoxelMaterialCatalog` | `IReadOnlyList<VoxelMaterial>` in cell order: `Get(cellId)`, `PlacedBy(item)`, `WithLootItem(item)`, `Language`, `Available`, `Reason` |
+| `VoxelMaterial` | `CellId`, `Kind` (`Terrain`, `Building`), `Guid`, `Name`, `LootItem`, `ExchangeRate`, `PlacingItems`, `Hardness`, `HealthPoints`, `Label`, `LabelSource` (`None`, `PlacingItem`, `LootItem`) |
+| `const string Content.VoxelMaterialsCapability` | `"content.voxel_materials"` |
+
+- **Where from** (types from kiln.types, bytes through kiln.assets: what the game gets, so kiln.worldtables' merged rows are
+  in). `keen::TerraformingEfficiencyRegistryResource` (both sides): 116 `terrainConfigs` rows (`terrainMaterial` u8,
+  `terrainItem` the loot, `hardness`, `terrainPerLootItemExchangeRate`, `healthPoints`) and 85 `buildingConfigs` rows
+  (cell `128 + buildingMaterial`, `materialItem`, `blocksPerLootItemExchangeRate`) on 26430625 / 26430253; the first row of
+  an id wins. `keen::VoxelWorldResource.materialGuids[256]` gives `Guid`. Every `keen::ItemInfo`'s
+  `equipment.voxelData {isBuildingVoxel, placeVoxelMaterial, placeVoxelMaterialId}` gives `PlacingItems`: a building item
+  places 128..255, a terrain item 1..127, and a mapping that breaks that or names another GUID than the world's table is
+  left out (unknown, never guessed). Item ids are FNV-1a-32 of the item GUIDs, as the game's.
+- **Names and labels.** The game has no text of its own for a voxel material (its `SolidVoxelMaterial` resources do not
+  ship). `Name` is Kiln's stable game-material name, the one `WorldTables.GameMaterialId` and world-block files accept, made
+  from the debug name of the item that places it (`Build_TerrainMaterial_T1_Stone` → `TerrainStone`,
+  `Block_T1_Wood_Rough_CRAFTING` → `WoodRough`); a name two cells would share is nobody's; a material no item places
+  (ores, rubble) is `Cell<id>`. `Label` is an item's name in the catalog's language (`Items.DisplayNameIn(item, language)`)
+  and `LabelSource` says which: the item that places it, else the loot item. Several materials share a loot item (terrain
+  1, 15, 37 and 73 all give the grassland dirt item), so a `LootItem` label is a grouping: keep the cell id to tell them apart.
+- `ExchangeRate` is how many cells of the material one `LootItem` is (copper ore, 26: 8); null when the data gives none.
+  Unbreakable world materials (5, 16, 34) have no loot item.
+- **Read once.** The materials are read once per process (the registry, the world table, every item: a fraction of a
+  second, on a worker); a failed read is tried again after 5 s, doubling to 5 minutes. A catalog is immutable; the same one
+  comes back while nothing changed, so asking every frame is cheap.
+- **Server.** The data is on both sides. Labels need the game's texts (a client); on a dedicated server English labels are
+  the names Kiln ships, other languages have none (`LabelSource` `None`).
+- **The row** `content.voxel_materials`: available where kiln.assets reads resources (`assets.resources`) and kiln.types is
+  here. A catalog that cannot be read says why in `Reason`.
+- What the held tool's material pool holds (amounts in the backpack and magic chest) stays `ToolMaterials.TrySnapshot`
+  ([tools.md](tools.md)); this catalog describes every material, whatever is held.
+
+```csharp
+// Vein Mining-style: which material is this cell, and what does mining it give?
+VoxelMaterialCatalog? materials;                                    // keep it: read once
+
+public override void OnLoad() => _ = LoadMaterials();
+
+async Task LoadMaterials()
+{
+    var c = await Content.LoadVoxelMaterialsAsync();                 // labels in the player's language ("en-us" on a server)
+    if (!c.Available) { Log.Warn($"no voxel materials: {c.Reason}"); return; }
+    materials = c;
+}
+
+// cell: the hit voxel's material byte (Queries.RaycastVoxels, Build.Read, ClientCursor.hoveredVoxelMaterialId)
+string Describe(int cell)
+{
+    if (materials is not { } c || c.Get(cell) is not { } m) return $"cell {cell}: not a game material";
+    var name = m.LabelSource == VoxelMaterialLabelSource.LootItem ? $"{m.Label} ({m.Name})" : m.Label ?? m.Name;
+    var gives = m.LootItem.Value == 0 ? "nothing (unbreakable)"
+        : $"1 {Items.DisplayNameIn(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
+    return $"{name}: {m.Hardness}, {m.HealthPoints} HP, gives {gives}";
+}
+
+// A vein is one cell id: terrain 37 and 1 both give dirt, but only 37 is the hard ground the player struck.
+bool SameVein(int struck, int neighbour) => struck == neighbour && materials?.Get(struck) is { LootItem.Value: not 0 };
+
+// Blueprint-style: the material a held building block places, and the item and rate a removed cell gives back.
+if (materials?.PlacedBy(heldItem) is { } placed) Log.Info($"{placed.Name}: 1 {Items.DisplayNameIn(placed.LootItem, null)} per {placed.ExchangeRate} cells");
+```
+
 ## Distribution: random loot, drop tables, vendors, knowledge (v4)
 ```json
 { "guid": "...", "name": "Kiln_Kitbash_Token", "base": "Material_T1_Metal_Scraps",

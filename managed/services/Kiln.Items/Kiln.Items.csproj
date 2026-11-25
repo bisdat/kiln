@@ -11,6 +11,8 @@
   <ItemGroup>
     <!-- a block's tool wear rule is set as the block's mod (ToolWearRuntime) -->
     <InternalsVisibleTo Include="Kiln.Blocks" />
+    <!-- the voxel material labels and game texts (ContentVoxelMaterials.cs) wait for the game's item list (GameItemTexts.Ready) -->
+    <InternalsVisibleTo Include="Kiln.Content" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <!-- Equip (EquipResult from a native result, the slot mapping, the capability verdict): pure parts tested offline. -->
     <InternalsVisibleTo Include="Kiln.Items.Tests" />

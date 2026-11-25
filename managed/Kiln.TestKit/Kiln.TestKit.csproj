@@ -41,6 +41,9 @@
     <!-- The fake of kiln.ui.inventory (Fakes/UiInventory/): Ui.Inventory's records, and its marks (MarkOf). The fake of
          kiln.render (Fakes/Render/, 0.2.0-dev.30.3): Ui.World.Outline's requests. -->
     <ProjectReference Include="../services/Kiln.Ui/Kiln.Ui.csproj" />
+    <!-- The fake of the content lookups (Fakes/GameLookups/, 0.2.0-dev.31.13): the game's texts per language and voxel
+         materials the test scripts, behind Kiln.Content's own code -->
+    <ProjectReference Include="../services/Kiln.Content/Kiln.Content.csproj" />
     <!-- HarnessModValues: Kiln.ModValues' ledger on an in-memory store -->
     <ProjectReference Include="../services/Kiln.ModValues/Kiln.ModValues.csproj" />
   </ItemGroup>
