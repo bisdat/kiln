@@ -151,6 +151,34 @@ public sealed unsafe class HookRowTests : FakeTableTest
         Assert.Equal(CapabilityReason.ServiceOlder, Capabilities.Get("ui.popups").Reason);
     }
 
+    private static uint _popupsAvailable;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int FakePopups(UiNative.Popups* p)
+    {
+        p->Available = _popupsAvailable;
+        p->Size = (uint)sizeof(UiNative.Popups);
+        return _popupsAvailable != 0 ? 0 : 3;  // 3: KILN_ERR_UNAVAILABLE
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(1u)]
+    public void Popups_whose_link_was_refused_take_ui_popups_down_and_served_ones_keep_it(uint available)
+    {
+        foreach (var f in UiCaps.Features) Backend.Features.Add(f);
+        _popupsAvailable = available;
+        var t = Alloc<UiNative.TablePopups>();
+        ((UiNative.Table*)t)->Header = new ServiceHeader { Size = (uint)sizeof(UiNative.TablePopups), Version = 7 };
+        ((UiNative.Table*)t)->GetScreen = &FakeScreen;
+        t->PopupsFn = &FakePopups;
+        Serve("kiln.ui", t, typeof(UiNative), "_table");
+        StartRows(typeof(Ui).Assembly);
+        // 0.2.0-dev.31.9 (GitHub issue 117): the table has the slot, but kiln.ui says it does not read the game's popups
+        Assert.Equal(available != 0, Capabilities.Is("ui.popups"));
+        if (available == 0) Assert.Equal(CapabilityReason.Faulted, Capabilities.Get("ui.popups").Reason);
+    }
+
     [Fact]
     public void A_failed_knowledge_hook_takes_set_and_revoke_down_and_nothing_else()
     {
