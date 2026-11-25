@@ -146,7 +146,7 @@ public static unsafe partial class Abilities
         return (AbilitiesNative.TableV2*)t;
     }
 
-    private static int _oldNativeWarned;
+    internal static int _oldNativeWarned;  // the cost item's fallback said so in kiln.log (once a process)
 
     /// <summary>item_use with what <see cref="UseItem"/> read: the slot's item and the item's own sequence;
     /// <paramref name="payWithItem"/>: the item is the cost item too (KILN_ITEM_USE_COST_ITEM), <paramref name="consumes"/>:
@@ -168,16 +168,28 @@ public static unsafe partial class Abilities
         var rc = t->ItemUseFn(&u);
         if (payWithItem && rc is AbilitiesNative.InvalidArgument or AbilitiesNative.Unavailable)
         {
-            if (Interlocked.Exchange(ref _oldNativeWarned, 1) == 0)
-                ModLog.Warn($"Abilities.UseItem: this kiln.abilities cannot make the used item the cost item ({AbilitiesNative.Describe(rc)}; " +
-                            "it needs 0.2.0-dev.31.5 or newer): items used up only by their PayUsageCost (the repair kit) are NotConsumable, " +
-                            "and other uses do not pay the item's own costs");
-            if (!consumes && rc == AbilitiesNative.InvalidArgument) return ItemUseResult.NotConsumable;
+            // InvalidArgument: a kiln.abilities older than the flag. Unavailable: no costItem in this build's reflection, or
+            // item_use off altogether (the retry without the flag tells them apart; it is only made when the sequence
+            // consumes by itself)
+            var first = rc;
             if (consumes)
             {
                 u.Flags = 0;
                 u.Status = 0;
                 rc = t->ItemUseFn(&u);
+            }
+            if ((first == AbilitiesNative.InvalidArgument || (consumes && rc != AbilitiesNative.Unavailable))
+                && Interlocked.Exchange(ref _oldNativeWarned, 1) == 0)
+                ModLog.Warn($"Abilities.UseItem: this kiln.abilities cannot make the used item the cost item ({AbilitiesNative.Describe(first)}: " +
+                            "older than 0.2.0-dev.31.5, or no triggerContext.costItem in this build's reflection): items used up only by " +
+                            "their PayUsageCost (the repair kit) are not used, and other uses do not pay the item's own costs");
+            if (!consumes && first == AbilitiesNative.InvalidArgument) return ItemUseResult.NotConsumable;
+            if (!consumes && first == AbilitiesNative.Unavailable)
+            {
+                AbilitiesCaps.Ensure();
+                throw ServiceCaps.Unavailable(AbilitiesCaps.Sequences,
+                    "Abilities.UseItem cannot use this item on this build: only its PayUsageCost uses it up, which needs the trigger " +
+                    "context's cost item (or item_use is off altogether: kiln.log says which)");
             }
         }
         if (rc == AbilitiesNative.Unavailable)

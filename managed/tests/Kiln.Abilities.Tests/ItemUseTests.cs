@@ -260,6 +260,28 @@ public sealed unsafe class ItemUseTests
     }
 
     [Fact]
+    public void ItemUseOffAltogetherIsNotBlamedOnTheCostItem()
+    {
+        // item_use off on this build: Unavailable with the flag and without it. The scroll's retry answers the same, so
+        // kiln.log does not say the cost item is missing; the exception is the usual one
+        Interlocked.Exchange(ref Abilities._oldNativeWarned, 0);
+        var off = Assert.Throws<KilnUnavailableException>(() =>
+            Run(AbilitiesNative.Unavailable, 0, out _, payWithItem: true, rcWithFlags: AbilitiesNative.Unavailable));
+        Assert.Equal([AbilitiesNative.UseCostItem, 0u], _flags);
+        Assert.Equal(0, Volatile.Read(ref Abilities._oldNativeWarned));
+        Assert.Contains("unavailable on this build", off.Message);
+        // the repair kit there cannot tell which: its own message names the cost item
+        var kit = Assert.Throws<KilnUnavailableException>(() =>
+            Run(AbilitiesNative.Unavailable, 0, out _, payWithItem: true, consumes: false, rcWithFlags: AbilitiesNative.Unavailable));
+        Assert.Equal([AbilitiesNative.UseCostItem], _flags);
+        Assert.Contains("cost item", kit.Message);
+        Assert.Equal(0, Volatile.Read(ref Abilities._oldNativeWarned));
+        // an older kiln.abilities is said once
+        Run(AbilitiesNative.Ok, AbilitiesNative.UseStarted, out _, payWithItem: true, rcWithFlags: AbilitiesNative.InvalidArgument);
+        Assert.Equal(1, Volatile.Read(ref Abilities._oldNativeWarned));
+    }
+
+    [Fact]
     public void ANativeHandlerCannotUseAnItem()
     {
         // a sync native's or an attachment's handler runs inside the world's step: refused before anything is read
