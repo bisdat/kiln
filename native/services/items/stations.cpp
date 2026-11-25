@@ -3703,6 +3703,9 @@ bool g_lock_feat = false;          // items.lock_sources resolved with its pinne
 std::atomic<bool> g_lock_off{false};  // a stand-down: a foreign patch, a failed hook, a fault
 kiln::MidHook2 h_lock_eval, h_lock_paid, h_lock_ui;
 std::atomic<bool> g_lock_eval_on{false}, g_lock_paid_on{false}, g_lock_ui_on{false};
+// A hosting client puts the hooks in from two threads: its server world's Pre (the tick thread) and its client world's
+// Pre (the main thread). Both may want h_lock_eval; the installs and their failure flags go under one lock.
+std::mutex g_lock_install_mu;
 // A hook that faulted on a game worker thread: the next Pre lowers items.lock_sources (faulted), on the tick thread.
 std::atomic<bool> g_lock_fault_report{false};
 LogLimit g_log_lock_check{16}, g_log_lock_pay{24}, g_log_lock_stand{8}, g_log_lock_snap{8};
@@ -4270,6 +4273,8 @@ void lock_server_pre(uint64_t step) {
     if (!g_lock_paid_on.load() && !g_registered.any_locks()) return;
     lock_cache_refresh(step);
     if (g_lock_paid_on.load() && g_lock_eval_on.load()) return;
+    std::lock_guard install(g_lock_install_mu);
+    if (g_lock_off.load() || (g_lock_paid_on.load() && g_lock_eval_on.load())) return;
     static bool failed = false;
     if (failed) return;
     LockCodeRefusal why;
@@ -4292,6 +4297,8 @@ void lock_client_pre() {
     lock_fault_lower();
     if (!g_lock_feat || g_lock_off.load() || !g_lock_on.load(std::memory_order_acquire)) return;
     if (g_lock_eval_on.load() && g_lock_ui_on.load()) return;
+    std::lock_guard install(g_lock_install_mu);
+    if (g_lock_off.load() || (g_lock_eval_on.load() && g_lock_ui_on.load())) return;
     static bool failed = false;
     if (failed) return;
     LockCodeRefusal why;

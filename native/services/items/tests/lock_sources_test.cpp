@@ -297,5 +297,26 @@ int main() {
         CHECK(lowered.empty());  // once
         g_lock_off=false;g_registered.clear();
     }
+    // ---- a hosting client: its server world (the tick thread) and its client world (the main thread) both put the
+    // shared lock-check hook in on demand; one link goes in, whichever world gets there first ----
+    {
+        g_lock={0x140b0a97,0x140a536e,0x1402bc483,0x14093a2a0,0x1401b0d60};
+        g_lock_eval_on=g_lock_paid_on=g_lock_ui_on=false;
+        g_registered.add(10,PLAYER,EARLY,false,true,{},0,true);
+        KilnStationStack on[1]={{PICK,1}};
+        CHECK(t_set_lock_stock(1,on,1)==KILN_OK);
+        std::thread client_world;
+        mid2_during=[&](uintptr_t target) {
+            if (target!=g_lock.count_ret || client_world.joinable()) return;
+            client_world=std::thread([] { lock_client_pre(); });  // the client world's Pre, while this link goes in
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        };
+        lock_server_pre(500);
+        if (client_world.joinable()) client_world.join();
+        mid2_during=nullptr;
+        CHECK(mid2_links[g_lock.count_ret]==1 && mid2_links[g_lock.paid]==1 && mid2_links[g_lock.ui_ret]==1);
+        CHECK(g_lock_eval_on && g_lock_paid_on && g_lock_ui_on);
+        t_set_lock_stock(0,nullptr,0);g_registered.clear();
+    }
     std::printf("lock sources: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }
