@@ -181,8 +181,9 @@ public static partial class Ui
         /// for the mod that provided it. So does a pick of a provided item whose stack left the backpack after the game
         /// last built the list (the mod's server half swapped it out; since 0.2.0-dev.31.10, GitHub issue 145): the game's
         /// rows still show its old count until the game builds them again. In Append that holds since 0.2.0-dev.31.12 for
-        /// a row the game's own row of the same item hid while the backpack held the stack: list the item then too. A pick of a provided row that goes to the game
-        /// is logged at debug level (<c>ui.ammo: a pick of ... went to the game</c>).</para>
+        /// a row the game's own row of the same item hid while the backpack held the stack: list the item then too. A pick
+        /// of a provided row that goes to the game is logged at debug level (<c>ui.ammo: a pick of ... went to the
+        /// game</c>).</para>
         /// </remarks>
         /// <exception cref="KilnUnavailableException">The row <c>ui.ammo.list</c> is off (an unmeasured game build, a
         /// server, an older kiln-tools).</exception>
