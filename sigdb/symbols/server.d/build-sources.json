@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "GitHub #132, since 0.2.0-dev.31.12: block placements count and pay from a player's crafting sources linked with CraftSourceOptions.Building. (1) The build cursor's material check (S 0x99750, C 0x28ab60; rules/CursorFlags' bit 12 MissingMaterials, docs/re/rules.md 2.1), in every world: for an item with a voxel object (a blueprint shape) it counts the material in the player's inventories (InventoryItemCount, the count at [rsp+0x58] -> ebx), then the base's crafting stock at the cursor (build/StockCount: S 0x209210, C 0x4709c0; a client world reads its published stock map at bases+0x1610, a server world the base's stock list) -> eax, and sets the bit when eax + ebx < ebp (the blocks needed). build/CursorStockRet is that call's return; kiln-items' mid hook there reads eax, ebx, ebp, rsi (the cursor query: the material item at [[rsi+0x68]]) and rdi (the cursor context: its first qword is the program context), which the literal bytes pin; the cursor context's other offsets differ between the two executables and are wildcards. (2) The placement's payment: player_building_blueprints (S 0xc4410) calls rules/ApplyMaterials(ctx {u8 mode 0; tx}, list, take) at build/BlueprintApplyRet - 5, which calls rules/InventoryPay(tx, list, [tx+0xe0] the operator, 1, 0) returning to build/ApplyMaterialsPaid. kiln-items scopes a RawHook on ApplyMaterials to that one caller; the payment is kiln.stations' craft adapter with the player's building links. Props, undo, dismantle, impact natives and terraforming loot stay the game's. Server 26430253 (f0d824be) and client 26430625 (5d9ef2f1). Evidence: docs/re/stations.md section 13.",
+  "symbols": {
+    "build/CursorStockRet": {
+      "comment": "the blueprint branch of the cursor's material check: lea r9,[rsp+0x40]; mov r8,[rsi+0x68]; ... mov r8d,[r8] (the material); mov ebx,[rsp+0x58] (the bag's count); ... call build/StockCount; add eax,ebx; cmp eax,ebp; jae (enough). The return address. Server 0x99a50, client 0x28ae3c",
+      "find": [
+        {
+          "pattern": "4C 8D 4C 24 40 4C 8B 46 68 0F 57 C0 F3 48 0F 2A 87 ?? ?? 00 00 48 8B 57 50 48 8B 8F ?? ?? 00 00 45 8B 00 8B 5C 24 58 0F 57 C9 F3 48 0F 2A 8F ?? ?? 00 00 F3 0F 59 C2 F3 0F 59 CA F3 0F 11 44 24 40 0F 57 C0 F3 48 0F 2A 87 ?? ?? 00 00 F3 0F 11 4C 24 48 F3 0F 59 C2 F3 0F 11 44 24 44 E8 {build/StockCount:rel32} 03 C3 3B C5 0F 83",
+          "offset": 98
+        }
+      ]
+    },
+    "build/BlueprintApplyRet": {
+      "comment": "player_building_blueprints' payment: movzx r8d,r12b (take); lea rcx,[rsp+0x50] (the cost context: mode 0, the transaction); mov rdx,rdi (the list); call rules/ApplyMaterials; test al,al; je (refused). The return address. Server 0xc4b50, client 0x2d8bb0",
+      "find": [
+        {
+          "pattern": "45 0F B6 C4 48 8D 4C 24 50 48 8B D7 E8 {rules/ApplyMaterials:rel32} 84 C0 0F 84",
+          "offset": 17
+        }
+      ]
+    },
+    "build/ApplyMaterialsPaid": {
+      "comment": "ApplyMaterials' take in mode 0: mov r8d,[rcx+0xe0] (the transaction's operator); mov [rsp+0x20],rbx (no item override); call rules/InventoryPay; mov rbx,[rsp+0x98]; test eax,eax; sete al. The return address. Server 0x22d562, client 0x496002 (the call's target is checked against rules/InventoryPay by kiln-items, call_matches)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "rules/ApplyMaterials",
+            "size": 433
+          },
+          "pattern": "44 8B 81 E0 00 00 00 48 89 5C 24 20 E8 ?? ?? ?? ?? 48 8B 9C 24 98 00 00 00 85 C0 0F 94 C0",
+          "offset": 17
+        }
+      ]
+    }
+  },
+  "features": {
+    "crafting.build_sources": {
+      "symbols": [
+        "build/CursorStockRet",
+        "build/StockCount",
+        "build/BlueprintApplyRet",
+        "rules/ApplyMaterials",
+        "build/ApplyMaterialsPaid",
+        "rules/InventoryPay",
+        "world/CurrentEntityId",
+        "items/JobStorage"
+      ]
+    }
+  }
+}

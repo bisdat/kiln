@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 1056,
+    "symbols": 1060,
     "constants": 1102,
-    "features": 287
+    "features": 288
   },
   "features": {
     "abilities.attributes": true,
@@ -70,6 +70,7 @@
     "content.reflection": true,
     "content.stack_guard": true,
     "content.ui_texture": true,
+    "crafting.build_sources": true,
     "crafting.dye_sources": true,
     "crafting.dye_ui": true,
     "crafting.source_ui": true,
@@ -342,19 +343,23 @@
     "audio/VoiceoverRequest": "0x1232500",
     "audio/VoiceoverSetPosition": "0x1233420",
     "audio/VoiceoverUpdate": "0x1233520",
+    "build/ApplyMaterialsPaid": "0x496002",
     "build/BaseBrickDecode": "0x10cc7d0",
     "build/BaseColumnAcquire": "0x10ab270",
     "build/BaseColumnRelease": "0x10cc750",
     "build/BaseColumnSeekBrick": "0x10c6170",
     "build/BlockKernel": "0x4966e0",
+    "build/BlueprintApplyRet": "0x2d8bb0",
     "build/BuildZoneAppend": "0xeab880",
     "build/BuildingConfigFind": "0xe8c9b0",
+    "build/CursorStockRet": "0x28ae3c",
     "build/ItemFind": "0xe94470",
     "build/RetSaveRegionsBaseQuery": "0xe58696",
     "build/RetSaveRegionsBaseZones": "0xe6031d",
     "build/RetSaveRegionsWorldSave": "0xe67709",
     "build/SaveRegions": "0xe8b8f0",
     "build/SetVoxelInterface": "0x9e3540",
+    "build/StockCount": "0x4709c0",
     "build/StoreCommit": "0x10baca0",
     "build/VoxelBoxFillAir": "0xa9aac0",
     "build/VoxelDamageAdd": "0x4a7c90",
@@ -2349,6 +2354,21 @@
         "build.read": "lab",
         "build.write": "lab",
         "build.zones": "lab"
+      }
+    },
+    "build-sources": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "build/ApplyMaterialsPaid": "static",
+        "build/BlueprintApplyRet": "static",
+        "build/CursorStockRet": "static",
+        "build/StockCount": "static"
+      },
+      "constants": {},
+      "features": {
+        "crafting.build_sources": "static"
       }
     },
     "build-terrain": {
