@@ -2,6 +2,9 @@
 //! over SSH for remote servers. endpoint.json is deleted when Kiln.Admin unloads; one left behind by a crashed
 //! server has a dead listener, which [`probe`] tells (its `pid` is the Windows pid under Wine, so the launcher probes
 //! the port instead of looking the pid up).
+//!
+//! (0.2.0-dev.31.12) A server that booted with a profile whose `dataDir` is `profile` keeps Kiln.Admin's folder
+//! under that data folder instead ([`super::datadir`]): the booted folder is looked at first, `kiln/data` after.
 
 use super::protocol::{Endpoint, ENDPOINT_FILE, TOKEN_FILE};
 use crate::server::remote::RemoteSpec;
@@ -9,9 +12,20 @@ use crate::{Error, ErrorCode, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// `<server>/kiln/data/kiln-admin`.
+/// `<server>/kiln/data/kiln-admin` (the default place; [`live_admin_dir`] follows a profile's data folder).
 pub fn admin_dir(server_dir: &Path) -> PathBuf {
     server_dir.join("kiln").join("data").join("kiln-admin")
+}
+
+/// Kiln.Admin's folder for the server as it booted: the first candidate ([`super::datadir::local_mod_dirs`]) that
+/// holds endpoint.json, else the first that holds admin-token, else the default.
+pub fn live_admin_dir(server_dir: &Path) -> PathBuf {
+    let dirs = super::datadir::local_mod_dirs(server_dir, None, "kiln-admin");
+    dirs.iter()
+        .find(|d| d.join(ENDPOINT_FILE).is_file())
+        .or_else(|| dirs.iter().find(|d| d.join(TOKEN_FILE).is_file()))
+        .cloned()
+        .unwrap_or_else(|| admin_dir(server_dir))
 }
 
 /// Parses endpoint.json (refuses a larger `format`).
@@ -26,7 +40,7 @@ pub fn parse_endpoint(bytes: &[u8]) -> Result<Endpoint> {
 
 /// The server's endpoint.json, None when there is none (KAP off, server stopped, an old Kiln.Admin).
 pub fn endpoint(server_dir: &Path) -> Result<Option<Endpoint>> {
-    let p = admin_dir(server_dir).join(ENDPOINT_FILE);
+    let p = live_admin_dir(server_dir).join(ENDPOINT_FILE);
     match std::fs::read(&p) {
         Ok(b) => parse_endpoint(&b).map(Some),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -37,7 +51,7 @@ pub fn endpoint(server_dir: &Path) -> Result<Option<Endpoint>> {
 /// The HMAC key from admin-token (32 bytes). On Linux a token readable by others is tightened to 0600 when this user
 /// owns it (Kiln.Admin under Wine cannot set the mode itself).
 pub fn token(server_dir: &Path) -> Result<[u8; 32]> {
-    let p = admin_dir(server_dir).join(TOKEN_FILE);
+    let p = live_admin_dir(server_dir).join(TOKEN_FILE);
     let text = std::fs::read_to_string(&p).map_err(|e| {
         let base = Error::from(e);
         Error::new(if base.code == ErrorCode::NotFound { ErrorCode::AdminUnavailable } else { base.code }, format!("{}: {}", p.display(), base.message))
@@ -78,17 +92,39 @@ pub fn probe(host: &str, port: u16, timeout: Duration) -> bool {
     addrs.next().is_some_and(|a| std::net::TcpStream::connect_timeout(&a, timeout).is_ok())
 }
 
-/// endpoint.json of a remote server (`ssh <host> cat <dir>/kiln/data/kiln-admin/endpoint.json`).
+/// endpoint.json of a remote server (`ssh <host> cat <dir>/kiln/data/kiln-admin/endpoint.json`, or the booted
+/// profile's data folder first).
 pub fn remote_endpoint(remote: &RemoteSpec) -> Result<Option<Endpoint>> {
-    match crate::server::remote::read_file(remote, "kiln/data/kiln-admin/endpoint.json") {
-        Ok(b) => parse_endpoint(&b).map(Some),
-        Err(e) if e.code == ErrorCode::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
+    Ok(remote_live(remote)?.map(|(ep, _)| ep))
 }
 
-/// The remote admin-token, held in memory only.
+/// The remote admin-token, held in memory only (from the folder whose endpoint.json is live, else the first that has
+/// one).
 pub fn remote_token(remote: &RemoteSpec) -> Result<[u8; 32]> {
-    let b = crate::server::remote::read_file(remote, "kiln/data/kiln-admin/admin-token")?;
+    let dirs = super::datadir::remote_mod_dirs(remote, "kiln-admin");
+    let dir = match remote_live(remote)? {
+        Some((_, d)) => d,
+        None => dirs.first().cloned().unwrap_or_default(),
+    };
+    let b = crate::server::remote::read_abs_file(remote, &format!("{dir}/{TOKEN_FILE}"))?;
     super::protocol::parse_token(&String::from_utf8_lossy(&b))
+}
+
+/// A remote server's endpoint and token in one pass (from the same folder).
+pub fn remote_endpoint_and_token(remote: &RemoteSpec) -> Result<Option<(Endpoint, [u8; 32])>> {
+    let Some((ep, dir)) = remote_live(remote)? else { return Ok(None) };
+    let b = crate::server::remote::read_abs_file(remote, &format!("{dir}/{TOKEN_FILE}"))?;
+    Ok(Some((ep, super::protocol::parse_token(&String::from_utf8_lossy(&b))?)))
+}
+
+/// The first remote Kiln.Admin folder with an endpoint.json: (the endpoint, the folder).
+fn remote_live(remote: &RemoteSpec) -> Result<Option<(Endpoint, String)>> {
+    for dir in super::datadir::remote_mod_dirs(remote, "kiln-admin") {
+        match crate::server::remote::read_abs_file(remote, &format!("{dir}/{ENDPOINT_FILE}")) {
+            Ok(b) => return parse_endpoint(&b).map(|ep| Some((ep, dir))),
+            Err(e) if e.code == ErrorCode::NotFound => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(None)
 }
