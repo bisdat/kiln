@@ -556,7 +556,8 @@ Each is marked `kiln-eml:` in the source.
     written. The same reader and rule as Kiln's ShroudForge fork (`check_steam_installed_files.rs`,
     `verify_working_baseline.rs`), so both writers of the shared pair decide alike. Tests: load.rs
     `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
-    adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (5).
+    adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
+    is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

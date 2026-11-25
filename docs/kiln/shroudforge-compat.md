@@ -37,10 +37,12 @@ whole or not the source of the game files is never restored, and EML manifests m
 30.8/30.9 pin): BodyHeat's attribute calculation runs as the resource's sint32 (section 5.0).
 0.2.0-dev.31.12 pins fork branch `kiln-dev31-exports-reuse` (`1672d8af`): the host's skip list (`c115e6c3`, section 5.8)
 and, on top of it, a start reuses the last pass while runtime mods write into the export folder (`86c2f8db` and its
-review fix `1672d8af`, section 5.0). 0.2.0-dev.31.13 pins fork branch `kiln-dev31-baseline` (`81b26c61`, on top of
+review fix `1672d8af`, section 5.0). 0.2.0-dev.31.13 pins fork branch `kiln-dev31-baseline` (`e3edecc3`, on top of
 `1672d8af`): after a game update a failed pass's recovery takes the updated files as the new clean copy, Steam's
 manifest proves or refuses game files before a new working baseline is taken from them, and a start without the
-Updater converts ShroudForge 1.7's numeric toggle keys (section 5.0, "After a game update, when the pass fails").
+Updater converts ShroudForge 1.7's numeric toggle keys (`81b26c61`); its review (`b232119b`) makes a new clean copy
+whole before either backup gets its name and keeps a set-aside whole pair beside a half one (section 5.0, "After a
+game update, when the pass fails").
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -160,6 +162,14 @@ the game folder nothing changes: its Updater and recycle bin are used.
   are a clean copy of their own are the ones the failed pass did not touch, so the game starts on them, the old pair is
   set aside (`outdated-working-baseline`) and a new one is made from them (log: `the game's own files were kept as
   the new clean copy`); a refusal fails the recovery with its own text, which the record keeps as `recoveryError`.
+  The record also says what the recovery did: `recovery` is `restored` (the pair went back) or `kept` (the game's own
+  files were kept), so the launcher never says the data was put back when it was not.
+- a new clean copy (`capture_working_baseline`) is copied whole before either backup gets its name, the companion
+  first and the header backup last; a copy that cannot be finished (a full disk while the 215 MB resource file is
+  copied) leaves no backup and removes its `.partial` files. Before the review it left a header backup without its
+  companion, and the recovery right after (or the next start) set that half aside, and the set-aside's housekeeping
+  removed the generation that held the old pair. The housekeeping now lets only a whole pair replace the generations
+  kept before it: a half set aside is kept beside the newest whole pair (at most two generations).
 - before any new working baseline is taken from the game files (after an update, Steam's file check, a first start),
   Steam's own record decides where it is there (`modules/game-files/check_steam_installed_files.rs`):
   `steamapps/appmanifest_<app>.acf` names the installed depot manifests, `<Steam>/depotcache/<depot>_<manifest>.manifest`
@@ -175,10 +185,14 @@ the game folder nothing changes: its Updater and recycle bin are used.
   and ShroudForge's line says that no ShroudForge mod ran, why, and (for a refusal) how to get a clean copy back:
   "in Steam, right-click Enshrouded, Properties, Installed Files, Verify integrity of game files, then start the game
   again from the Kiln launcher" (`crates/kiln-manage/src/sf_startup.rs`).
-Tests: the fork's `verify_working_baseline` (12, 3 new), `steam_files` (5), `kiln_baseline_tests.rs` (6, 3 new: the
-failed pass after an update, files that are not Steam's, kiln-win1's whole case with legacy keys), red before; Linux
-and native Windows (kiln-win1). kiln-eml `load::kiln_tests` (2 new, red before), kiln-manage `tests/sf_startup.rs`
-(1 new, red before), native `run.py` `prepare-fails`. Not run against a real game update or a real client.
+Valve's key-value files (the appmanifest) are read 16 tables deep at most: one nested without end overflowed the stack
+of the game's start (fork and kiln-eml readers alike).
+Tests: the fork's `verify_working_baseline` (12, 3 new), `steam_files` (6), `kiln_baseline_tests.rs` (8, 5 new:
+the failed pass after an update, files that are not Steam's, kiln-win1's whole case with legacy keys, a clean copy that
+cannot be finished, the hosted toggle-key migration), `set_aside_working_baseline.rs` (a half beside a kept whole
+pair), red before; Linux and native Windows (kiln-win1). kiln-eml `load::kiln_tests` (2 new) and `steam_files` (6),
+kiln-manage `tests/sf_startup.rs` (2 new), red before; native `run.py` `prepare-fails`. Not run against a real game
+update or a real client.
 
 **A working baseline that is not the source of the game files** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). Before
 every startup pass SF copies `<stem>.kfc.bak` and `<stem>.kfc_resources.bak` over the game files. It checked only the
