@@ -52,6 +52,26 @@ fn no_catalog_hint_follows_the_context() {
     assert!(!launcher.contains("kiln catalog") && !launcher.contains("--catalog"), "no CLI wording in the launcher: {launcher}");
 }
 
+/// `text` with the path after each `marker` (`<case>`, `<repo>`) written with '/': kiln lint names files as the OS does
+/// (`<case>\icons\missing.png` on Windows), the fixtures as Linux does. Only those paths change: a backslash the mod
+/// itself wrote (`"C:\icons\x.png"` quoted in a message) stays.
+fn slashes_after(text: &str, marker: &str) -> String {
+    if !cfg!(windows) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(marker) {
+        let (before, from) = rest.split_at(at + marker.len());
+        out.push_str(before);
+        let end = from.find(|c: char| c.is_whitespace() || matches!(c, ')' | '"' | ',' | ';' | ':')).unwrap_or(from.len());
+        out.push_str(&from[..end].replace('\\', "/"));
+        rest = &from[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn rel(p: &str, base: &Path) -> String {
     Path::new(p).strip_prefix(base).map(|x| x.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| p.to_string())
 }
@@ -68,7 +88,7 @@ fn case_rows(case: &Path) -> (LintReport, Vec<Value>) {
     let rows = r
         .diagnostics
         .iter()
-        .map(|d| serde_json::json!({"file": rel(&d.file, case), "code": d.code, "severity": d.severity.as_str(), "line": d.line, "col": d.col, "message": d.message.replace(&case.display().to_string(), "<case>")}))
+        .map(|d| serde_json::json!({"file": rel(&d.file, case), "code": d.code, "severity": d.severity.as_str(), "line": d.line, "col": d.col, "message": slashes_after(&d.message.replace(&case.display().to_string(), "<case>"), "<case>")}))
         .collect();
     (r, rows)
 }
@@ -103,6 +123,26 @@ fn tmp(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
+}
+
+/// tests/lint/ajv-check.mjs on `files` against `schema`: its JSON lines, in the order of `files`. The files go in a list
+/// file (`@<list>`): hundreds of paths are longer than a command line may be on Windows (32767 characters, 8191 through
+/// cmd.exe, which a node shim such as Volta's may use).
+fn ajv_check(root: &Path, modules: &Path, schema: &str, files: &[PathBuf]) -> Vec<Value> {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let list = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lint").join(format!("ajv-files-{}-{}.txt", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+    let text: String = files.iter().map(|f| f.to_str().expect("UTF-8 test paths").to_string() + "\n").collect();
+    std::fs::write(&list, text).unwrap();
+    let mut at = std::ffi::OsString::from("@");
+    at.push(&list);
+    let out = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs")).arg(root.join("schema"))
+        .arg(modules).arg(schema).arg(at).output().unwrap();
+    let _ = std::fs::remove_file(&list);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(rows.len(), files.len(), "one line per file");
+    rows
 }
 
 fn has_tool(cmd: &str, arg: &str) -> bool {
@@ -325,10 +365,7 @@ fn ajv_agrees() {
     let mut bad = Vec::new();
     let mut n = 0;
     for (schema, list) in &by_schema {
-        let out = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs")).arg(root.join("schema")).arg(&modules).arg(schema).args(list).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        for (i, line) in String::from_utf8_lossy(&out.stdout).lines().enumerate() {
-            let v: Value = serde_json::from_str(line).unwrap();
+        for (i, v) in ajv_check(&root, &modules, schema, list).into_iter().enumerate() {
             if v["syntax"].as_bool() == Some(true) {
                 continue;
             }
@@ -528,7 +565,8 @@ fn repository_mods_pass_the_schemas() {
     let bad: Vec<String> = r
         .diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest") && !d.file.contains("content-stop-test/mods/cs-broken"))
+        // by the path with '/' (Windows names it with '\\')
+        .filter(|d| d.severity == Severity::Error && (d.code.starts_with("KL0") || d.code.starts_with("KL1")) && !d.file.contains("sample-bad-manifest") && !d.file.replace('\\', "/").contains("content-stop-test/mods/cs-broken"))
         .map(|d| format!("{}:{}: {} {}", d.file, d.line, d.code, d.message))
         .collect();
     assert!(r.checked.len() > 60, "{}", r.checked.len());
@@ -539,7 +577,7 @@ fn repository_mods_pass_the_schemas() {
 
 fn normalize_report(v: &mut Value, root: &str) {
     match v {
-        Value::String(s) => *s = s.replace(root, "<repo>"),
+        Value::String(s) => *s = slashes_after(&s.replace(root, "<repo>"), "<repo>"),
         Value::Array(a) => a.iter_mut().for_each(|x| normalize_report(x, root)),
         Value::Object(o) => o.values_mut().for_each(|x| normalize_report(x, root)),
         _ => {}
@@ -837,10 +875,7 @@ fn block_range_boundaries_agree_with_schema_and_compiler_contract() {
         }
     }
     let Some(modules) = ajv_modules(&root) else { panic!("boundary parity requires AJV") };
-    let output = std::process::Command::new("node").arg(root.join("crates/kiln-manage/tests/lint/ajv-check.mjs"))
-        .arg(root.join("schema")).arg(modules).arg("kiln-blocks.schema.json").args(&files).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let rows: Vec<Value> = String::from_utf8_lossy(&output.stdout).lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    let rows = ajv_check(&root, &modules, "kiln-blocks.schema.json", &files);
     assert_eq!(rows.len(), expected.len());
     for (i, row) in rows.iter().enumerate() {
         if row["valid"].as_bool() != Some(expected[i]) { bad.push(format!("AJV {}: expected {}, got {}", files[i].display(), expected[i], row)); }

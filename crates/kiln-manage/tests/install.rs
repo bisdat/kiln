@@ -16,6 +16,10 @@ impl Drop for Tmp {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+/// What writing the receipt gives when a folder stands where its temporary file goes (`kiln/.install.json.tmp`): an
+/// I/O error on Linux (EISDIR); Windows answers opening a folder as a file with "access denied", a permission error.
+const BLOCKED_TEMP_FILE: ErrorCode = if cfg!(windows) { ErrorCode::Permission } else { ErrorCode::Io };
+
 fn tmp(tag: &str) -> Tmp {
     let p = std::env::temp_dir().join(format!("km-install-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&p);
@@ -666,10 +670,20 @@ fn uninstall_refuses_while_a_server_in_the_same_folder_runs() {
     profile::activate(&dirs, &p.id, &client(&game)).unwrap();
     let copy = game.join("shrouded_engine_tweaks/mods/flymode");
     assert!(copy.join("init.lua").is_file());
-    let fake = t.0.join("bin/enshrouded_server.exe");
-    std::fs::create_dir_all(fake.parent().unwrap()).unwrap();
-    std::fs::copy("/bin/sleep", &fake).unwrap();
-    let mut child = std::process::Command::new(&fake).arg("30").current_dir(&game).spawn().unwrap();
+    // A process that looks like a server in this folder: on Linux one named like it with the folder as its working folder
+    // (what Wine's looks like), on Windows one whose image is the folder's enshrouded_server.exe (a copy of ping.exe, which
+    // waits ~30 s and touches nothing). The game's own exe is never started.
+    let mut child = if cfg!(windows) {
+        let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        std::fs::copy(system.join("System32/PING.EXE"), game.join("enshrouded_server.exe")).unwrap();
+        std::process::Command::new(game.join("enshrouded_server.exe")).args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null()).current_dir(&game).spawn().unwrap()
+    } else {
+        let fake = t.0.join("bin/enshrouded_server.exe");
+        std::fs::create_dir_all(fake.parent().unwrap()).unwrap();
+        std::fs::copy("/bin/sleep", &fake).unwrap();
+        std::process::Command::new(&fake).arg("30").current_dir(&game).spawn().unwrap()
+    };
     std::thread::sleep(std::time::Duration::from_millis(200));
     let r = install::uninstall_report(&dirs, &client(&game), &mut NoProgress);
     child.kill().unwrap();
@@ -1410,7 +1424,7 @@ fn review_deselection_removes_only_unchanged_files_and_receipt_failure_restores_
     let b2 = bundle::create(&stage_plus(&t.0, "b", &[("eml", true), ("fresh", false)]), &t.0.join("out"), &opts(1_793_880_000, "bbbbbbb")).unwrap();
     let options = InstallOptions { components: Some(vec!["core".into(), "sigdb-client".into(), "fresh".into()]), ..Default::default() };
     let err = install::install(&dirs, &client(&game), &b2, &options, &mut FailReceipt(game.clone())).unwrap_err();
-    assert_eq!(err.code, ErrorCode::Io);
+    assert_eq!(err.code, BLOCKED_TEMP_FILE);
     assert_eq!(std::fs::read(game.join("kiln/.install.json")).unwrap(), receipt_before);
     assert_eq!(install::read_receipt(&game).unwrap(), Some(old.clone()));
     for f in &old.files {
@@ -1785,7 +1799,7 @@ fn sf_restore_legacy_helper_recovery_rolls_back_a_later_failed_install() {
     let before = sf_inventory(&gi.path);
     let installed_before = std::fs::read(gi.path.join("dinput8.dll")).unwrap();
     let error = install::install(&dirs, &gi, &zip, &opts, &mut NoProgress).unwrap_err();
-    assert_eq!(error.code, ErrorCode::Io);
+    assert_eq!(error.code, BLOCKED_TEMP_FILE);
     assert_eq!(sf_inventory(&gi.path), before, "no partially recovered helpers");
     assert_eq!(std::fs::read(gi.path.join("dinput8.dll")).unwrap(), installed_before);
     assert_eq!(install::read_receipt(&gi.path).unwrap(), Some(receipt));

@@ -1239,9 +1239,14 @@ fn only_what_the_move_writes_after_the_switch_is_rewritten_after() {
     let ours = |p: &str| p.starts_with("installs/") || p.contains("/config/") || p.contains("/config-sync/");
     assert!(paths.iter().all(|p| ours(p)), "{paths:?}");
     assert!(paths.contains(format!("installs/{}.active.json", fx.game_z.id).as_str()), "{paths:?}");
-    // the copy-mode game's activation in the new place writes the record of its config copy again
-    let record = profile::config_sync_record(&DataDirs::at(""), &fx.active, &fx.game_copy.id);
-    assert!(paths.contains(record.to_string_lossy().as_ref()), "{paths:?}");
+    // the copy-mode game's activation in the new place writes the record of its config copy again; on Windows both games
+    // read their configs where they are (native paths, no copy mode: the fixture asserts it), so there is no such record
+    let record = profile::config_sync_record(&DataDirs::at(""), &fx.active, &fx.game_copy.id).to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        assert!(!paths.iter().any(|p| p.contains("/config-sync/")), "{paths:?}");
+    } else {
+        assert!(paths.contains(record.as_str()), "{paths:?}");
+    }
     let c = r.cleanup.unwrap();
     assert!(c.kept.iter().any(|k| k.path == fx.dirs.root.join("settings.json")), "{c:?}");
     assert!(fx.dirs.root.join("settings.json").is_file());

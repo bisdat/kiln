@@ -108,6 +108,15 @@ const MANIFESTS: &[&str] = &["kiln.mod.json", "native.json", "mod.json", "kiln-m
 type CacheKey = (PathBuf, u64, Option<SystemTime>);
 static CACHE: LazyLock<Mutex<HashMap<CacheKey, Option<Detected>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// A resolved path (`std::fs::canonicalize`) as the player reads it: on Windows without the `\\?\` prefix canonicalizing
+/// adds (`C:\Users\...`, not `\\?\C:\Users\...`), kept only where Win32 would read the plain spelling as something
+/// else (`winpath::plain`: a name ending in a dot or space, `NUL`). What this module shows and returns, and what it opens
+/// and detects a listed entry by. The folder itself is read, and paths are compared with the places' roots, in their
+/// resolved spelling: a child's path joined to a plain folder path would lose such a name.
+fn shown(resolved: PathBuf) -> PathBuf {
+    kiln_manage::winpath::plain(resolved)
+}
+
 /// One folder: `dir` null is Downloads (Home when there is no Downloads folder).
 pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     let dir = match dir {
@@ -126,15 +135,16 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     }
     let rd = std::fs::read_dir(&dir).map_err(|e| {
         let code = if e.kind() == std::io::ErrorKind::NotFound { ErrorCode::NotFound } else if e.kind() == std::io::ErrorKind::PermissionDenied { ErrorCode::Permission } else { ErrorCode::Io };
-        Error::new(code, format!("Can't open {}.", dir.display())).with_detail(e.to_string())
+        Error::new(code, format!("Can't open {}.", shown(dir.clone()).display())).with_detail(e.to_string())
     })?;
     let mut items: Vec<(PathBuf, std::fs::Metadata)> = Vec::new();
     let mut count = 0;
     for e in rd {
         let e = e.map_err(kiln_manage::util::io_at(&dir, "reading"))?;
         if e.file_name().to_str().is_none_or(|s| s.starts_with('.')) { continue; }
-        let Ok(path) = std::fs::canonicalize(e.path()) else { continue };
-        if !allowed(&path) { continue; }
+        let Ok(resolved) = std::fs::canonicalize(e.path()) else { continue };
+        if !allowed(&resolved) { continue; }
+        let path = shown(resolved);
         let Ok(meta) = std::fs::metadata(&path) else { continue };
         if !meta.is_file() && !meta.is_dir() { continue; }
         count += 1;
@@ -169,10 +179,10 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     }
     folders.sort_by_key(|f| f.name.to_lowercase());
     Ok(Folder {
-        name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| dir.display().to_string()),
-        parent: dir.parent().filter(|p| allowed(p)).map(|p| p.display().to_string()),
+        name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| shown(dir.clone()).display().to_string()),
+        parent: dir.parent().filter(|p| allowed(p)).map(|p| shown(p.to_path_buf()).display().to_string()),
         has_game: dir.join("enshrouded.exe").is_file(),
-        dir: dir.display().to_string(),
+        dir: shown(dir.clone()).display().to_string(),
         folders,
         mods,
         other,
@@ -456,7 +466,9 @@ mod tests {
         std::fs::write(g.join("enshrouded.exe"), b"MZ").unwrap();
         let f = browse(Some(&g), &e).unwrap();
         assert!(f.has_game);
-        assert_eq!(f.parent.as_deref(), Some(e.home.join("lib/steamapps/common").display().to_string().as_str()));
+        // compared as a path: the expected one is joined with '/', which Windows reads as a separator too
+        assert_eq!(f.parent.as_deref().map(Path::new), Some(e.home.join("lib/steamapps/common").as_path()));
+        assert!(!f.dir.starts_with(r"\\?\") && !f.parent.as_deref().unwrap().starts_with(r"\\?\"), "shown as the player reads it: {f:?}");
         assert!(f.mods.is_empty());
         assert!(matches!(browse(Some(&t.0.join("nope")), &e), Err(err) if err.code == ErrorCode::NotFound));
     }
@@ -470,6 +482,35 @@ mod tests {
         assert_eq!(f.dir, e.home.display().to_string());
         assert_eq!(f.folders.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), vec!["Desktop"]);
         assert_eq!(f.parent, None);
+    }
+
+    /// Folders whose names Windows reaches only through the `\\?\` prefix (a trailing dot or space; `NUL`, a device name
+    /// to Win32) are listed, opened and detected like any other, and hand back a path that opens them again; the others
+    /// are shown without the prefix. (Ordinary names on Linux.)
+    #[test]
+    fn folders_only_the_verbatim_prefix_reaches_are_listed_and_opened() {
+        let verbatim = |p: &Path| if cfg!(windows) { PathBuf::from(format!(r"\\?\{}", p.display())) } else { p.to_path_buf() };
+        let t = Tmp::new("verbatim");
+        let e = env(&t);
+        let dl = e.home.join("Downloads");
+        std::fs::create_dir_all(&dl).unwrap();
+        let names = ["ends-with-dot.", "ends-with-space ", "nul", "plain"];
+        for n in names {
+            std::fs::create_dir(verbatim(&dl.join(n))).unwrap();
+        }
+        kiln_mod(&verbatim(&dl.join("dotted-mod.")), "dotted", "1.0.0");
+        let f = browse(None, &e).unwrap();
+        assert_eq!(f.folders.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), names, "{f:?}");
+        assert_eq!(f.mods.iter().map(|m| (m.file.as_str(), m.detected.id.as_deref())).collect::<Vec<_>>(), vec![("dotted-mod.", Some("dotted"))], "{f:?}");
+        for entry in &f.folders {
+            let inner = browse(Some(Path::new(&entry.path)), &e).unwrap_or_else(|err| panic!("{entry:?}: {err}"));
+            assert_eq!(inner.name, entry.name);
+            assert_eq!(inner.dir, entry.path, "the same spelling comes back");
+            assert_eq!(inner.parent.as_deref(), Some(f.dir.as_str()));
+            assert!(inner.folders.is_empty() && inner.mods.is_empty() && inner.other == 0, "{inner:?}");
+        }
+        let plain = &f.folders.iter().find(|x| x.name == "plain").unwrap().path;
+        assert!(!plain.starts_with(r"\\?\") && !f.dir.starts_with(r"\\?\"), "{f:?}");
     }
 
     #[test]
