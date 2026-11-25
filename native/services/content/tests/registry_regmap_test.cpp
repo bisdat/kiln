@@ -323,7 +323,19 @@ int main(int argc, char** argv) {
             // (owner ruling 2026-11-23: no client proof of its own), and keeps the server's reasons.
             std::string why;
             CHECK(one.mapping("items", "maxStack", &why) == Mapping::Mapped);
-            CHECK(one.mapping("items", "block", &why) == Mapping::Unproven && why.find("not traced") != std::string::npos);
+            // registry-proof (31.x): the drop rows (lab drop tables), the loot rows (lab rolls), block and comfort (their readers
+            // found) are proven; two rows stay off with a proven reason, refused cleanly
+            for (const auto& [reg, field] : {std::pair{"items", "block"}, {"items", "comfort"}, {"loot", "rarities"}, {"loot", "fixedRarity"},
+                                             {"loot", "stack.scalable"}, {"loot", "stack.maxScaled"}, {"drops", "entries"}, {"drops", "entries[].item"},
+                                             {"drops", "entries[].count.min"}, {"drops", "entries[].count.max"}, {"drops", "entries[].chance"},
+                                             {"drops", "entries[].weight"}}) {
+                const bool ok = one.mapping(reg, field, &why) == Mapping::Mapped;
+                if (!ok) std::printf("  %s: %s.%s: %s\n", side, reg, field, why.c_str());
+                CHECK(ok);
+            }
+            CHECK(one.mapping("items", "fuel.burnTime", &why) == Mapping::Unproven && why.find("no game code reads") != std::string::npos);
+            CHECK(one.mapping("recipes", "station", &why) == Mapping::Unproven && why.find("no stations registry") != std::string::npos);
+            CHECK(mapped == static_cast<int>(std::size(gen::kFields)) - 2 && unproven == 2);
             if (std::string(side) == "client") {
                 // review3 N4: row for row only where the client's layout of the registry's root type is the server's (a
                 // later client layout may differ legitimately: those rows are unproven); never ok where the server is not

@@ -23,10 +23,10 @@ Groups of fields:
 |---|---|---|---|---|---|---|
 | `stack.min` | int 0..65535 | now | number | 0.1.0 | mapped | The smallest stack a drop has. |
 | `stack.max` | int 0..65535 | now | number | 0.1.0 | mapped | The largest stack a drop has. |
-| `stack.scalable` | bool | now | set | 0.1.0 | unproven: the roll reads it in the decompiled code; not yet seen in a lab roll | The stack grows with the world's loot amount, up to maxScaled. |
-| `stack.maxScaled` | int 0..65535 | now | number | 0.1.0 | unproven: the roll reads it in the decompiled code; not yet seen in a lab roll | The largest stack a drop has with the world's loot amount applied (when scalable). |
-| `rarities` | flags (common, uncommon, rare, epic, legendary) | now | set | 0.1.0 | unproven: whether a roll reads the rarities live is not settled (two notes disagree): a lab roll settles it | The rarities a drop may roll. |
-| `fixedRarity` | enum (none, common, uncommon, rare, epic, legendary) | now | set | 0.1.0 | unproven: not yet seen in a lab roll | A rarity every drop gets (none: rolled from rarities). |
+| `stack.scalable` | bool | now | set | 0.1.0 | mapped | The stack grows with the world's loot amount, up to maxScaled. |
+| `stack.maxScaled` | int 0..65535 | now | number | 0.1.0 | mapped | The largest stack a drop has with the world's loot amount applied (when scalable). |
+| `rarities` | flags (common, uncommon, rare, epic, legendary) | now | set | 0.1.0 | mapped | The rarities a drop may roll. |
+| `fixedRarity` | enum (none, common, uncommon, rare, epic, legendary) | now | set | 0.1.0 | mapped | A rarity every drop gets (none: rolled from rarities). |
 
 ## Entries
 

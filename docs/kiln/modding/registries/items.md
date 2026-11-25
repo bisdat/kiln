@@ -4,7 +4,7 @@
 
 Every item the game or a mod defines: stack sizes, rarity, levels, the gear numbers a tooltip shows (power, speed, damage, armour), costs, perks and sockets.
 
-Schema version 0.1.0, experimental (KILNX031: may change in any release until it is marked stable). C# entry type `Kiln.Registry.ItemEntry`. What registries are, the stages, the conflict rules and how ids are made: [README](README.md).
+Schema version 0.1.1, experimental (KILNX031: may change in any release until it is marked stable). C# entry type `Kiln.Registry.ItemEntry`. What registries are, the stages, the conflict rules and how ids are made: [README](README.md).
 
 ## Ids
 
@@ -20,7 +20,7 @@ Groups of fields:
 - `levels`: The item's level range. New copies are made inside it; a save load clamps existing copies into it.
 - `damage`: The kinds of damage a hit deals. The hit kinds (cut to poison) are shares that should add up to 1; wood, stone, metal and explosion are whole numbers.
 - `armor`: The armour of each kind the tooltip shows at levels.min. Kiln solves the game's share for it with the balance table's constants.
-- `fuel`: What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.
+- `fuel`: What the item gives as fuel. No game code reads the burn time on this game build (only whether an item is a fuel), so edits of it stay refused.
 
 | Field | Type | Applies | Ops | Since | Mapping | About |
 |---|---|---|---|---|---|---|
@@ -57,11 +57,11 @@ Groups of fields:
 | `armor.ice` | int 0..100000 | now | number | 0.1.0 | mapped | The ice armour the tooltip shows at levels.min. Formula: `gear.armor`. |
 | `armor.shroud` | int 0..100000 | now | number | 0.1.0 | mapped | The shroud armour the tooltip shows at levels.min. Formula: `gear.armor`. |
 | `armor.lightning` | int 0..100000 | now | number | 0.1.0 | mapped | The lightning armour the tooltip shows at levels.min. Formula: `gear.armor`. |
-| `block` | float 0..1 | worldLoad | number | 0.1.0 | unproven: when the game reads the block value is not traced yet | How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it. |
+| `block` | float 0..1 | now | number | 0.1.0 | mapped | How well the item blocks (0 to 1). The game reads it for each new block or attack of the item, so an edit applies at the next one. |
 | `staminaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The stamina a use costs, at the next payment. |
 | `manaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The mana a use costs, at the next cast. |
-| `fuel.burnTime` | time s 0..86400 | worldLoad | number | 0.1.0 | unproven: when the game reads the fuel burn time is not traced yet | How long one item burns. |
-| `comfort` | int 0..1000 | worldLoad | number | 0.1.0 | unproven: when the game reads the comfort value is not traced yet | The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it. |
+| `fuel.burnTime` | time s 0..86400 | worldLoad | number | 0.1.0 | unproven: no game code reads an item's burn time on this build, only whether the item is a fuel, so an edit of it would change nothing | How long one item burns. |
+| `comfort` | int 0..1000 | now | number | 0.1.0 | mapped | The comfort the item gives while a player plays it (the game's instruments). The game reads it at every pass, so an edit applies at once. |
 
 ## Traits
 

@@ -130,10 +130,10 @@
         "blockSetup.quality"
       ],
       "conv": "float",
-      "read": "unknown",
+      "read": "now",
       "backend": "live",
-      "state": "unproven",
-      "reason": "when the game reads the block value is not traced yet"
+      "clientNeeds": true,
+      "evidence": "docs/re/content.md section 11: impact_initialize's 0x191c10 reads blockSetup.quality and isSet into each new impact's block config; the client's twin and its tooltips read it too"
     },
     "staminaCost": {
       "paths": [
@@ -164,17 +164,18 @@
       "read": "unknown",
       "backend": "live",
       "state": "unproven",
-      "reason": "when the game reads the fuel burn time is not traced yet"
+      "reason": "no game code reads an item's burn time on this build, only whether the item is a fuel, so an edit of it would change nothing",
+      "evidence": "docs/re/content.md section 11: no reader of fuelSetup.burnTime in either exe; only fuelSetup.isSet is tested (server 0x7c95b, client 0x26a17b)"
     },
     "comfort": {
       "paths": [
         "comfortSetup.comfortAmount"
       ],
       "conv": "int",
-      "read": "unknown",
+      "read": "now",
       "backend": "live",
-      "state": "unproven",
-      "reason": "when the game reads the comfort value is not traced yet"
+      "clientNeeds": true,
+      "evidence": "docs/re/content.md section 11: the instruments' comfort program looks the played item up and reads comfortSetup at every pass (server 0x6679a, client 0x253b3a)"
     },
     "damage.cut": {
       "paths": [

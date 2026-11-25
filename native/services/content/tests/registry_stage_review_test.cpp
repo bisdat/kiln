@@ -124,7 +124,7 @@ stage::Env env_of(TreeView* view, Files* files, const std::string& regmap_dir, s
 std::vector<stage::Env::DataFile> sections(const Schema& schema) {
     const std::string big = R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 4}},
-        {"registry": "items", "select": {"id": "game:plank"}, "field": "block", "op": 0.5},
+        {"registry": "items", "select": {"id": "game:plank"}, "field": "fuel.burnTime", "op": 30},
         {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60},
         {"registry": "items", "entry": "remove", "select": {"id": "game:material_t1_wood_logs"}}]}})";
     const std::string late = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 2}}]}})";
@@ -478,7 +478,7 @@ void handoff_keeps_outside_refusals(const std::string& dir) {
     Batch b;
     std::vector<Refusal> rf;
     std::string err;
-    parse_batch(std::string(R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":{"id":"game:plank"},"field":"block","op":0.5}]})"), generated_schema(), &b, &rf, &err);
+    parse_batch(std::string(R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":{"id":"game:plank"},"field":"fuel.burnTime","op":30}]})"), generated_schema(), &b, &rf, &err);
     got.check(&b, &rf);
     check(b.edits.empty() && !rf.empty(), "the check refuses a reloaded unproven edit");
 }

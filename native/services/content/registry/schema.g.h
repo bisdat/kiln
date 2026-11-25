@@ -52,7 +52,7 @@ struct Registry {
 inline constexpr uint32_t kRegistrySchema = 1;
 
 inline constexpr Registry kRegistries[] = {
-    {1, "items", "0.1.0", true, true, "hidden", true, 0, 38},
+    {1, "items", "0.1.1", true, true, "hidden", true, 0, 38},
     {2, "recipes", "0.1.0", true, true, "hidden", true, 38, 10},
     {3, "loot", "0.1.0", true, false, "disabled", true, 48, 6},
     {4, "drops", "0.1.0", true, false, "", true, 54, 6},
@@ -93,11 +93,11 @@ inline constexpr Field kFields[] = {
     {0x0001001fu, "items", "armor.ice", Kind::Int, Kind::Int, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "gear.armor", false, 0u, "", 0},
     {0x00010020u, "items", "armor.shroud", Kind::Int, Kind::Int, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "gear.armor", false, 0u, "", 0},
     {0x00010021u, "items", "armor.lightning", Kind::Int, Kind::Int, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "gear.armor", false, 0u, "", 0},
-    {0x00010022u, "items", "block", Kind::Float, Kind::Float, true, true, 0.0, 1.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "", "", false, 0u, "", 0},
+    {0x00010022u, "items", "block", Kind::Float, Kind::Float, true, true, 0.0, 1.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00010023u, "items", "staminaCost", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00010024u, "items", "manaCost", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00010025u, "items", "fuel.burnTime", Kind::Time, Kind::Time, true, true, 0.0, 86400.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "s", "", false, 0u, "", 0},
-    {0x00010026u, "items", "comfort", Kind::Int, Kind::Int, true, true, 0.0, 1000.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "", "", false, 0u, "", 0},
+    {0x00010026u, "items", "comfort", Kind::Int, Kind::Int, true, true, 0.0, 1000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00020001u, "recipes", "inputs", Kind::List, Kind::Struct, false, false, 0.0, 0.0, 32u, "", "", "", false, Applies::Now, Ops::List, "", "", false, 0u, "", 0},
     {0x00020002u, "recipes", "inputs[].item", Kind::Ref, Kind::Ref, false, false, 0.0, 0.0, 0u, "", "items", "inputs", false, Applies::Now, Ops::Set, "", "", true, 0u, "", 0},
     {0x00020003u, "recipes", "inputs[].category", Kind::Ref, Kind::Ref, false, false, 0.0, 0.0, 0u, "", "inputCategories", "inputs", false, Applies::Now, Ops::Set, "", "", true, 0u, "", 0},

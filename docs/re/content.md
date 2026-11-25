@@ -82,9 +82,8 @@ Layouts used for lists (all from reflection at run time):
 - `LootableItemInfo` 36 B: itemId, rarities (Bitmask8<ItemRarity>), useUiRarity, uiRarity, labelGroups, stackSizeMin
   +0x18, stackSizeMax +0x1A, stackSizeMaxScaled +0x1C, stackSizeScalable +0x1E, shufflebagType, …
 - The roll (`0x16b5f0`) reads `+0x1E` (scalable) and then `+0x18/+0x1A` (min/max) and, when scalable, scales by
-  `+0x1C` through `0x16db30` **[dis]**: stack sizes are read at every roll. Rarity masks and label groups feed the
-  shufflebag / pools built at load, so kiln.content offers them as fields but a change may only reach rolls after the
-  pools are rebuilt (not verified).
+  `+0x1C` through `0x16db30` **[dis]**: stack sizes are read at every roll. (An earlier guess here, that rarity masks feed
+  pools built at load, does not hold: every roll reads the mask after LootFind, section 11.)
 
 ## 3. Writing
 - Item, recipe and loot structs are in a `PAGE_READONLY` `MEM_PRIVATE` allocation of ~450 MB **[rt]**. kiln.content
@@ -152,7 +151,8 @@ not definitions; there is no data-hash handshake. The client exe has the same re
 
 ## 6. Open questions
 - Client side (needs a joined player): the UI and prediction effects in the table above.
-- Rarity masks / label groups of `LootableItemInfo`: whether the loot pools pick up a change without a restart.
+- Label groups of `LootableItemInfo`: whether the shufflebag picks up a change without a restart (rarity masks: read at
+  every roll, section 11).
 - The 1273043 `ItemRegistryUpdate` pattern was not checked (the `items.loading` flag only gates readiness; the
   service also waits for a stable item count).
 - New items in random-loot pools and drop tables (section 7 covers registries, names, icons, crafting).
@@ -612,6 +612,33 @@ each kind, one hold for every pack file, most of it the lab set's largest pack. 
 kiln.assets built its index of served resources again for every resource it was given and kept every old one: 4.6-8 s of the 1,000-per-kind
 load for 3,097 clone resources, and the server grew to 6.6 GB. A put now adds to a small index of recent resources, and replaced indexes are
 freed once no reader holds them ([assets.md](../kiln/services/assets.md)): 0.2 s, and 1.3 GB.
+
+## 11. When the game reads the registry's last fields (server 26430253 `f0d824be…`, client 26430625 `5d9ef2f1…`) **[dis] [data]**
+What registry-proof (31.x registry bundle) rests on for `items.block`, `items.comfort`, `items.fuel.burnTime`, the four loot
+rows and `recipes.station`. Method: capstone over every `.pdata` function of both exes, memory operands with the
+`keen::ItemInfo` displacements of the three setups (from both exes' reflection, layout `0x07009d37` on both: `fuelSetup`
+`+0x6e8` {burnTime Time, energyOutput `+0x6f0`, isSet `+0x6f4`}, `blockSetup` `+0x6f8` {quality float, isSet `+0x6fc`},
+`comfortSetup` `+0x790` {comfortAmount u32, isSet `+0x794`}), kept where the function also calls ItemRegistryFind (server
+`0x93b5b0`, client `0xe94470`) or the hit reads a setup's two members; then the callers of LootFind (`0x92f940` / `0xe887a0`)
+and LootItems (`0x93d3b0` / `0xe96190`). Listings and the scan's JSON: `dev31/out/registry-proof/re/`.
+
+| field | reader | when | Kiln |
+|---|---|---|---|
+| `blockSetup.quality` | `impact_initialize`'s `0x191c10` (section 20 of docs/re/items.md: it writes the block and stamina configs of each used item) tests `isSet` `0x191cda` and loads `quality` `0x191cf2` into the new impact's block config (id `0xeb9596e9`, through `0x91ea30`); client twin `0x3f0990`, and four client tooltip functions (`0xb1e4b4`, `0xb8bbd0`, `0xd22f90`, `0xd9c751`) | each new impact of the item (a block, a swing) | `items.block`: read now, applies now, clientNeeds |
+| `comfortSetup.comfortAmount` | a per-step program (server chunk `0x6664e`: IterNext, 16 slots of `0xa0` per entity, ReadOther, the slot's item id `+0x38` -> ItemRegistryFind) tests `isSet` `0x6679a` and reads the amount `0x667a7` together with the time since the slot's start; client twin `0x2539ee` (`0x253b3a`) | every pass, while the item is played (only the 15 instruments set it) | `items.comfort`: read now, applies now, clientNeeds |
+| `fuelSetup.burnTime` | none in either exe: no qword read of `+0x6e8` on an `ItemInfo`; the only `fuelSetup` member read is `isSet` (server `0x7c95b`, client `0x26a17b`) in an inventory transfer handler (it decides whether an item is a fuel; the 16-byte reads of `+0x6e8` the scan also found are other structs: `0x8e4750` terrain, `0x214a18` another object) | never | `items.fuel.burnTime`: unproven with that reason (an edit would change nothing); 3 items set it |
+| loot `stackSizeScalable` `+0x1e`, `stackSizeMaxScaled` `+0x1c` | the roll `0x16b5f0` calls LootFind at `0x16b6de` on every roll, tests `+0x1e` (`0x16b704`) and, when set, scales min and max by the world's loot amount (`[sys+0x3d0]`) through `0x16db30`: `min(max(round(n x amount), 1), maxScaled)` (a fraction rounds up by chance) | each roll | read now |
+| loot `useUiRarity` `+5`, `uiRarity` `+6` | `0x16b5f0` `0x16b6ef`: with the switch on the stack's rarity is `uiRarity`, else the rarity the caller rolled, else 0 | each roll | `loot.fixedRarity`: read now |
+| loot `rarities` `+4` (Bitmask8) | the container and slot rolls `0x16ae30` (`0x16aed2`) and `0x16d05b` (`0x16d11c`) call LootFind after the weighted pick and read the mask; `0x94efe0` picks one of its bits weighted by the container's rarity rates (`+0x3ec`, five floats), passed to `0x16b5f0` as an OptU8; `0x16bda0` reads it the same way | each roll | `loot.rarities`: read now. Section 2's "pools built at load" guess does not hold: nothing per entry is pooled (section 8.4 already said so) |
+
+- **Rolls without a player.** Only two of the server's 420 drop tables hold a random-loot stack (an entry with no item):
+  `game:base_lootchest_random_cairn_sarcophagus_wood` (chance 0.333) and `game:base_trashheap` (0.1); every other random
+  roll happens on a player's interaction (the container fill, chunk `0x16ccf3` on this build) or by a pickup spawner. The
+  proof producer spawns containers of the templates those tables are named after next to a container of the lab's world
+  (registry-proof-test, phase 2), so their default inventory, random stack included, is applied without a player.
+- **`recipes.station`** (read-only, `workshopId` + `workshopGuid`): 2,485 of the server's 2,542 recipes name a workshop (46
+  distinct ids), 57 none. The row reads a stations id, and Kiln has no stations registry (and so no stations id table)
+  before dev.32, so every recipe's station decodes as none: the row stays unproven with that reason.
 
 ## Boot consumer ordering (dev.28; server 26430253 / client 26430625)
 

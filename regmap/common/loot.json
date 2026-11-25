@@ -35,9 +35,7 @@
       "conv": "bool",
       "read": "now",
       "backend": "live",
-      "state": "unproven",
-      "reason": "the roll reads it in the decompiled code; not yet seen in a lab roll",
-      "evidence": "docs/re/content.md 0x16db30"
+      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and tests it before the counts; a lab roll follows a live edit"
     },
     "stack.maxScaled": {
       "paths": [
@@ -46,8 +44,7 @@
       "conv": "int",
       "read": "now",
       "backend": "live",
-      "state": "unproven",
-      "reason": "the roll reads it in the decompiled code; not yet seen in a lab roll"
+      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and caps a scalable count at it (0x16db30); a lab roll follows a live edit"
     },
     "rarities": {
       "paths": [
@@ -63,8 +60,7 @@
         "epic": "Epic",
         "legendary": "Legendary"
       },
-      "state": "unproven",
-      "reason": "whether a roll reads the rarities live is not settled (two notes disagree): a lab roll settles it"
+      "evidence": "docs/re/content.md section 11: the container and slot rolls (0x16ae30, 0x16d05b) read the entry's mask after LootFind at each roll and pick a rarity among its bits (0x94efe0); nothing is pooled"
     },
     "fixedRarity": {
       "paths": [
@@ -82,8 +78,7 @@
         "epic": "Epic",
         "legendary": "Legendary"
       },
-      "state": "unproven",
-      "reason": "not yet seen in a lab roll"
+      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and takes uiRarity when useUiRarity is set"
     }
   }
 }

@@ -108,7 +108,9 @@
       "conv": "ref",
       "read": "restart",
       "backend": "none",
-      "evidence": "registries.cpp: per-workshop lists are built at RecipeFinishLoading"
+      "evidence": "registries.cpp: per-workshop lists are built at RecipeFinishLoading",
+      "state": "unproven",
+      "reason": "a recipe's station is a stations id, and Kiln has no stations registry yet, so no recipe's station reads as a Kiln id on any build"
     }
   }
 }

@@ -101,7 +101,7 @@ void registry_caps(const std::string& dir) {
     expect(server, "registry.items.maxStack", KILN_CAP_REASON_NONE, "applies: worldLoad");
     expect(server, "registry.balance.levelCap", KILN_CAP_REASON_NONE, "applies: restart");
     expect(server, "registry.recipes.inputs.count", KILN_CAP_REASON_NONE, "applies: now");
-    expect(server, "registry.items.block", KILN_CAP_REASON_SYMBOL_MISSING, "unverified");
+    expect(server, "registry.items.fuel.burnTime", KILN_CAP_REASON_SYMBOL_MISSING, "unverified");
     expect(server, "registry.recipes.unlock", KILN_CAP_REASON_WRONG_SIDE, "client");
 
     const auto client = run("client", kClientExe);
@@ -214,7 +214,7 @@ stage::Env env_of(TreeView* view, Files* files, const std::string& regmap_dir, s
 std::vector<stage::Env::DataFile> sections(const Schema& schema) {
     const std::string big = R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 4}},
-        {"registry": "items", "select": {"id": "game:plank"}, "field": "block", "op": 0.5},
+        {"registry": "items", "select": {"id": "game:plank"}, "field": "fuel.burnTime", "op": 30},
         {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60},
         {"registry": "items", "entry": "remove", "select": {"id": "game:material_t1_wood_logs"}}]}})";
     const std::string late = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 2}}]}})";
@@ -253,9 +253,9 @@ void one_start(const std::string& dir) {
     check(rep["order"].size() == 2 && rep["order"][0]["mod"] == "bigmod" && rep["order"][1]["mod"] == "late", "the order: the mod folders' (late after bigmod)");
     const std::string text = rep.dump();  // compact: the file itself is indented
     check(text.find("\"field\":\"maxStack\"") != std::string::npos && text.find("\"result\":160") != std::string::npos, "maxStack: x4 then x2 stack (20 -> 160)");
-    check(text.find("block") != std::string::npos && text.find("Unproven") != std::string::npos, "an unproven field's edit is refused with its reason: " + text.substr(0, 400));
+    check(text.find("fuel.burnTime") != std::string::npos && text.find("Unproven") != std::string::npos, "an unproven field's edit is refused with its reason: " + text.substr(0, 400));
     bool loud = false;
-    for (const std::string& l : files.log) loud = loud || (l.rfind("1 ", 0) == 0 && l.find("block") != std::string::npos);
+    for (const std::string& l : files.log) loud = loud || (l.rfind("1 ", 0) == 0 && l.find("fuel.burnTime") != std::string::npos);
     check(loud, "and said in the log as a warning");
     // review finding 1 (ruling 2026-11-21): entry add and remove have no back-end in this release: refused per edit, loud, and
     // nothing is removed with them (a game recipe needing the item stays)

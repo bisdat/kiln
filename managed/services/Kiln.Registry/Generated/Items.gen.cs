@@ -62,8 +62,8 @@ public sealed partial class ItemEntry : IRegistryEntry
     /// <summary>The armour of each kind the tooltip shows at levels.min. Kiln solves the game's share for it with the balance table's constants.</summary>
     public ItemArmor Armor => new(_c, _i);
 
-    /// <summary>How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
-    [RegistryField("items.block", RegistryApplies.WorldLoad)]
+    /// <summary>How well the item blocks (0 to 1). The game reads it for each new block or attack of the item, so an edit applies at the next one.</summary>
+    [RegistryField("items.block", RegistryApplies.Now)]
     public double Block { get => RegistryCells.Double(_c, ItemFields.Block, _i); set => RegistryCells.Set(_c, ItemFields.Block, _i, value); }
 
     /// <summary>The stamina a use costs, at the next payment.</summary>
@@ -74,11 +74,11 @@ public sealed partial class ItemEntry : IRegistryEntry
     [RegistryField("items.manaCost", RegistryApplies.Now)]
     public double ManaCost { get => RegistryCells.Double(_c, ItemFields.ManaCost, _i); set => RegistryCells.Set(_c, ItemFields.ManaCost, _i, value); }
 
-    /// <summary>What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
+    /// <summary>What the item gives as fuel. No game code reads the burn time on this game build (only whether an item is a fuel), so edits of it stay refused.</summary>
     public ItemFuel Fuel => new(_c, _i);
 
-    /// <summary>The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
-    [RegistryField("items.comfort", RegistryApplies.WorldLoad)]
+    /// <summary>The comfort the item gives while a player plays it (the game's instruments). The game reads it at every pass, so an edit applies at once.</summary>
+    [RegistryField("items.comfort", RegistryApplies.Now)]
     public int Comfort { get => RegistryCells.Int(_c, ItemFields.Comfort, _i); set => RegistryCells.Set(_c, ItemFields.Comfort, _i, value); }
 }
 
@@ -205,7 +205,7 @@ public sealed partial class ItemArmor
     public int Lightning { get => RegistryCells.Int(_c, ItemFields.ArmorLightning, _i); set => RegistryCells.Set(_c, ItemFields.ArmorLightning, _i, value); }
 }
 
-/// <summary>What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.</summary>
+/// <summary>What the item gives as fuel. No game code reads the burn time on this game build (only whether an item is a fuel), so edits of it stay refused.</summary>
 [global::System.Diagnostics.CodeAnalysis.Experimental("KILNX031", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/registries/items.md")]
 public sealed partial class ItemFuel
 {
