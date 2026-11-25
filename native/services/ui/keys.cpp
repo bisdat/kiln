@@ -29,6 +29,7 @@ std::vector<std::shared_ptr<KeySub>> g_subs;
 std::unordered_map<KilnHandle, std::shared_ptr<KeySub>> g_retiring;
 std::atomic<uint32_t> g_mouse_subs{0};  // subscribers with KILN_UI_KEYS_MOUSE (any thread reads it)
 std::atomic<uint32_t> g_pad_subs{0};    // subscribers with KILN_UI_KEYS_PAD (0.2.0-dev.30.5; any thread reads it)
+thread_local bool t_synthetic = false;  // a key Kiln makes itself is being dispatched on this thread (keys_synthetic)
 
 // Under g_mu, after every change of g_subs.
 void count_mouse_locked() {
@@ -89,13 +90,20 @@ KilnResult keys_unsubscribe(KilnHandle h) {
     return KILN_OK;
 }
 
+bool keys_synthetic(bool on) {
+    const bool outer = t_synthetic;
+    t_synthetic = on;
+    return outer;
+}
+
 bool keys_dispatch(const KilnUiKey& key, bool mouse) { return keys_dispatch_to(key, mouse ? KILN_UI_KEYS_MOUSE : 0u); }
 
 bool keys_dispatch_to(const KilnUiKey& key, uint32_t need, uint32_t controller) {
     // A new press goes to the owning subscribers (kiln.ui.input, 0.2.0-dev.31.13) first: one that takes it owns it, and
     // no key subscriber gets it, nor its repeats or release (input.cpp routes those to the owner). The wheel's notches
-    // cannot be owned (input_own.h source_of).
-    if (key.down && !key.repeat && own_wanted(need == KILN_UI_KEYS_PAD ? KILN_UI_OWN_PAD : need == KILN_UI_KEYS_MOUSE ? KILN_UI_OWN_MOUSE : KILN_UI_OWN_KEYS)) {
+    // cannot be owned (input_own.h source_of), nor a key Kiln makes itself (a pad's B as Escape: the owners had their
+    // chance on the B press, and its release never comes through on_key, so a claim on it would never end).
+    if (key.down && !key.repeat && !t_synthetic && own_wanted(need == KILN_UI_KEYS_PAD ? KILN_UI_OWN_PAD : need == KILN_UI_KEYS_MOUSE ? KILN_UI_OWN_MOUSE : KILN_UI_OWN_KEYS)) {
         OwnInput e;
         e.vk = key.vk;
         e.scan = key.scan;

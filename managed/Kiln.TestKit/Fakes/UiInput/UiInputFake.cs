@@ -5,8 +5,9 @@
 // handlers. The ownership rules are native/services/ui/input_own.h's, one for one: the owners are offered a new press in
 // the order they subscribed and the first that takes it owns it; its repeats and its release go to the owner alone and
 // stay kept from the game unless the game saw it go down (Leak); a new press of a claimed code ends that claim (lost);
-// focus loss ends every claim (End Focus) and drops it; a world change ends the claims of the world before (End World) and
-// keeps them as nobody's, as unsubscribe and disown do without a call. native/services/ui/tests/own_parity.json holds
+// focus loss ends every key and mouse claim (End Focus) and drops it, a controller's stay (XInput does not follow the
+// focus); a world change ends the claims of the world before (End World) and keeps them as nobody's, as unsubscribe and
+// disown do without a call. native/services/ui/tests/own_parity.json holds
 // the cases both run (Kiln.TestKit.Tests UiInputFakeTests).
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -218,9 +219,12 @@ internal sealed unsafe class UiInputFake : IKitFake
         var notes = new List<(ulong, UiNative.OwnedInput)>();
         lock (st.Lock)
         {
-            foreach (var (id, c) in st.Claims.OrderBy(p => p.Key))
+            // a controller's claims stay (XInput does not follow the window's focus): their releases are their owners'
+            foreach (var (id, c) in st.Claims.Where(p => (p.Key & 0xFFFF) < 0x200).OrderBy(p => p.Key).ToList())
+            {
                 if (!c.Orphan) notes.Add((c.Sub, Record(UiNative.OwnedEnd, id & 0xFFFF, (int)(id >> 16), 0, null, 1)));
-            st.Claims.Clear();
+                st.Claims.Remove(id);
+            }
         }
         Deliver(notes);
     }

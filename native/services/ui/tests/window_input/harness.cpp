@@ -1749,10 +1749,38 @@ KilnResult KILN_CALL fake_client_state(KilnClientState* out) {
     return KILN_OK;
 }
 KilnClientApi g_fake_client{};
+bool g_client_missing = false;  // kiln.client not registered yet
 const void* KILN_CALL fake_service(KilnStr name, uint32_t) {
-    return std::string(name.ptr, name.len) == KILN_CLIENT_SERVICE ? &g_fake_client : nullptr;
+    return !g_client_missing && std::string(name.ptr, name.len) == KILN_CLIENT_SERVICE ? &g_fake_client : nullptr;
 }
 KilnApi g_fake_api{};
+
+// kiln.client registered after kiln.ui.input first asked for it: it is asked again (at most once a second), so a world
+// change still ends ownership (review 31.13).
+void late_client() {
+    g_fake_client.header = {sizeof g_fake_client, KILN_CLIENT_VERSION};
+    g_fake_client.state = &fake_client_state;
+    g_fake_api.service = &fake_service;
+    g_client_missing = true;
+    kui::g_api = &g_fake_api;
+    OwnLog o;
+    o.take = {KILN_UI_VK_PAD_A};
+    check(kui::own_subscribe(39, KILN_UI_OWN_PAD, &own_collect, &o, &o.handle) == KILN_OK, "late kiln.client: a pad owner");
+    kui::pad_key(0, KILN_UI_VK_PAD_A, true, 0, false);  // asks for kiln.client: not there yet
+    kui::pad_key(0, KILN_UI_VK_PAD_A, false, 0, false);
+    g_client_missing = false;  // registered now
+    Sleep(1100);
+    kui::pad_key(0, KILN_UI_VK_PAD_A, true, 0, false);
+    kui::own_world_poll();
+    g_generation = 2;  // the player left the world
+    kui::own_world_poll();
+    kui::pad_key(0, KILN_UI_VK_PAD_A, false, 0, false);
+    check(o.lines == std::vector<std::string>{"press 20c", "release 20c", "press 20c", "end 20c world"} && !kui::own_claimed(),
+          "late kiln.client: found later, a world change ends ownership:%s", join(o.lines).c_str());
+    g_generation = 1;
+    kui::g_api = nullptr;
+    kui::own_unsubscribe(o.handle);
+}
 
 void owned_input() {
     fresh();
@@ -1991,6 +2019,63 @@ void owned_input() {
     kui::input_pointer_unsubscribe(ph);
 }
 
+// A pad's B turned into Escape while Kiln has the input (input_synth_escape, from the XInput hook): Kiln's own Escape and
+// the key subscribers get its press and its release; an owner of Escape is never offered it (its chance was the pad's B
+// itself), so no claim on Escape is left behind (review 31.13).
+void synthetic_escape() {
+    fresh();
+    check(!kui::own_claimed(), "synthetic Escape: nothing claimed before");
+    KeyLog keys;
+    KilnHandle kh = 0;
+    check(kui::keys_subscribe(36, &key_collect, &keys, 0, &kh) == KILN_OK, "synthetic Escape: a key subscriber");
+    OwnLog esc;
+    esc.take = {VK_ESCAPE};
+    check(kui::own_subscribe(37, KILN_UI_OWN_KEYS, &own_collect, &esc, &esc.handle) == KILN_OK, "synthetic Escape: an owner of Escape");
+    kui::input_synth_escape();
+    check(esc.lines.empty() && !kui::own_owns(esc.handle, VK_ESCAPE, 0) && !kui::own_claimed(),
+          "synthetic Escape: the owner is not offered it and no claim is left on Escape:%s", join(esc.lines).c_str());
+    check(keys.lines == std::vector<std::string>{"vk=27 down=1", "vk=27 down=0"},
+          "synthetic Escape: the key subscriber gets its press and its release:%s", join(keys.lines).c_str());
+    kui::own_unsubscribe(esc.handle);
+    kui::keys_unsubscribe(kh);
+}
+
+// With raw keyboard input seen, a key whose first raw record never came (Proton): its WM_KEYDOWN reaches the game, then the
+// raw record of its auto-repeat is a new press to Kiln, which an owner takes. The game saw the key go down, so it must get
+// the WM_KEYUP too (the stuck-press guard: the claim is leaked), and the owner hears the release marked leaked (review 31.13).
+size_t game_key_lines(const Run& r, UINT msg, uint32_t vk) {
+    char want[16];
+    std::snprintf(want, sizeof want, "%04x %x ", msg, vk);
+    size_t n = 0;
+    for (const auto& x : r.game) n += x.rfind(want, 0) == 0;
+    return n;
+}
+void owned_key_game_saw() {
+    fresh();
+    OwnLog ow;
+    ow.take = {'K'};
+    check(kui::own_subscribe(38, KILN_UI_OWN_KEYS, &own_collect, &ow, &ow.handle) == KILN_OK, "own (game saw it): an owner of K");
+    const Run r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x1e, RI_KEY_MAKE, 'A'));  // raw keyboard input is seen
+        send(WM_KEYDOWN, 'A', key_l(0x1e, false, false));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x1e, RI_KEY_BREAK, 'A'));
+        send(WM_KEYUP, 'A', key_l(0x1e, false, true));
+        send(WM_KEYDOWN, 'K', key_l(0x25, false, false));             // K's first raw record never came
+        send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));  // the auto-repeat's: a new press to Kiln
+        send(WM_KEYDOWN, 'K', repeat_l(0x25));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_BREAK, 'K'));
+        send(WM_KEYUP, 'K', key_l(0x25, false, true));
+    }, nullptr);
+    const size_t downs = game_key_lines(r, WM_KEYDOWN, 'K'), ups = game_key_lines(r, WM_KEYUP, 'K');
+    check(downs >= 1 && ups == 1, "own (game saw it): the game gets a WM_KEYUP for the WM_KEYDOWN it got (%zu down, %zu up):%s",
+          downs, ups, game_text(r).c_str());
+    check(game_key_lines(r, WM_KEYDOWN, 'A') == 1 && game_key_lines(r, WM_KEYUP, 'A') == 1, "own (game saw it): A is the game's");
+    check(ow.lines == std::vector<std::string>{"press 41", "press 4b", "release 4b leaked"} && !kui::own_claimed(),
+          "own (game saw it): the owner hears the press and the release, marked leaked; nothing claimed after:%s",
+          join(ow.lines).c_str());
+    kui::own_unsubscribe(ow.handle);
+}
+
 // Before the GetRawInputData hook: an owned press in a raw record with motion reaches the game whole, so its release must
 // too (the stuck-press guard), although the owner keeps hearing it.
 void owned_input_without_hook() {
@@ -2081,7 +2166,10 @@ int main() {
     mouse_wheel_bound();
     mouse_buttons();
     pointer_presses();
+    late_client();
     owned_input();
+    synthetic_escape();
+    owned_key_game_saw();
     mouse_captured();
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();

@@ -1,5 +1,5 @@
 {
-  "comment": "kiln.ui.input's ownership rules (native/services/ui/input_own.h, 0.2.0-dev.31.13): the cases the native host test (tests/input_own_test.cpp) and the test kit's fake kiln.ui.input (managed/Kiln.TestKit/Fakes/UiInput, managed/tests/Kiln.TestKit.Tests/UiInputFakeTests.cs) both replay. Codes are KilnUiKey.vk in hex (2 the right button, 41 the A key, 20d a pad's B, 210 its left trigger, 100 a wheel notch); '@1' is controller 1. 'owners' subscribe in order; each takes the codes in 'take' ('*' = every press it is offered). Steps: down (a new press), repeat, up, focus (the window lost the focus), world (the client world changed), unsubscribe / disown (an owner went or gave up), leak (the game saw that press's down after all), mk (the MK_ bits hidden from the game must be this), pad (controller, the owned buttons' bits). Logs: 'game' what reaches the game, 'plain' what Kiln's other key and pointer subscribers and bindings get, and each owner's callbacks: press (offered, taken or not), repeat, release, end <why>.",
+  "comment": "kiln.ui.input's ownership rules (native/services/ui/input_own.h, 0.2.0-dev.31.13): the cases the native host test (tests/input_own_test.cpp) and the test kit's fake kiln.ui.input (managed/Kiln.TestKit/Fakes/UiInput, managed/tests/Kiln.TestKit.Tests/UiInputFakeTests.cs) both replay. Codes are KilnUiKey.vk in hex (2 the right button, 41 the A key, 20d a pad's B, 210 its left trigger, 100 a wheel notch); '@1' is controller 1. 'owners' subscribe in order; each takes the codes in 'take' ('*' = every press it is offered). Steps: down (a new press), repeat, up, focus (the window lost the focus: the key and mouse claims end, a controller's stay), world (the client world changed), unsubscribe / disown (an owner went or gave up), leak (the game saw that press's down after all), mk (the MK_ bits hidden from the game must be this), pad (controller, the owned buttons' bits). Logs: 'game' what reaches the game, 'plain' what Kiln's other key and pointer subscribers and bindings get, and each owner's callbacks: press (offered, taken or not), repeat, release, end <why>.",
   "cases": [
     {
       "name": "Blueprint owns a right-button gesture: press, held, release",
@@ -28,6 +28,13 @@
       "steps": [["down", "2"], ["mk", 2], ["focus"], ["mk", 0], ["up", "2"]],
       "game": ["up 2"], "plain": ["up 2"],
       "blueprint": ["press 2", "end 2 focus"]
+    },
+    {
+      "name": "focus loss leaves a controller's press with its owner (XInput does not follow the focus): its release is the owner's alone",
+      "owners": [{"name": "overlay", "sources": ["pad", "pointer"], "take": ["20d", "2"]}],
+      "steps": [["down", "20d"], ["down", "2"], ["focus"], ["pad", 0, 8192], ["mk", 0], ["up", "20d"], ["pad", 0, 0], ["up", "2"]],
+      "game": ["up 2"], "plain": ["up 2"],
+      "overlay": ["press 20d", "press 2", "end 2 focus", "release 20d"]
     },
     {
       "name": "a world change ends ownership; the release still reaches nobody (the game never saw the press)",

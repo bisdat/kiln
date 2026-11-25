@@ -63,13 +63,18 @@ void recount_locked() {
 }
 
 // The client world's generation (kiln.client state: it changes whenever a world starts or stops); 0 without kiln.client.
+// kiln.client may register after kiln.ui first asks: until it is found it is asked again, at most once a second.
 uint32_t generation() {
     static std::atomic<const KilnClientApi*> client{nullptr};
-    static std::atomic<bool> tried{false};
+    static std::atomic<uint64_t> next_try{0};  // now_ms() of the next lookup allowed
     const KilnClientApi* c = client.load(std::memory_order_acquire);
-    if (!c && g_api && !tried.exchange(true)) {
-        c = static_cast<const KilnClientApi*>(g_api->service(KilnStr{KILN_CLIENT_SERVICE, sizeof(KILN_CLIENT_SERVICE) - 1}, 1));
-        client.store(c, std::memory_order_release);
+    if (!c && g_api) {
+        const uint64_t now = now_ms();
+        uint64_t due = next_try.load(std::memory_order_relaxed);
+        if (now >= due && next_try.compare_exchange_strong(due, now + 1000, std::memory_order_acq_rel)) {
+            c = static_cast<const KilnClientApi*>(g_api->service(KilnStr{KILN_CLIENT_SERVICE, sizeof(KILN_CLIENT_SERVICE) - 1}, 1));
+            if (c) client.store(c, std::memory_order_release);
+        }
     }
     if (!c || !c->state) return 0;
     KilnClientState s{};

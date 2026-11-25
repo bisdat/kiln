@@ -13,7 +13,8 @@
 //    path that could not keep it, such as a raw mouse record Kiln cannot edit, or Alt+F4): then the release reaches the
 //    game, so the game is never left holding a button it saw go down.
 //  - A new press of a claimed id (its release never reached Kiln) ends the claim as Lost and is a new press.
-//  - Ownership ends early: focus loss (end_all, the claims go: the release goes to another window), a world change
+//  - Ownership ends early: focus loss (end_all, the key and mouse claims go: the release goes to another window; a
+//    controller's stay, XInput does not follow the focus), a world change
 //    (the owner hears End World; the claim stays as an orphan), unsubscribe or disown (no callback; orphan). An orphan's
 //    repeats and release go to nobody and are still kept from the game (it never saw the press); its next new press ends
 //    it. So a mod that closes its overlay on a press never lets that press's release reach the game or another mod.
@@ -122,14 +123,16 @@ public:
         return it != map_.end() && !it->second.orphan ? it->second.sub : 0;
     }
 
-    // Focus loss: every owner hears End (why), and every claim goes (their releases go to another window; one that comes
-    // back later reaches the game, which never saw the press: nothing is held).
+    // Focus loss: every owner of a key or mouse button hears End (why), and those claims go (their releases go to another
+    // window; one that comes back later reaches the game, which never saw the press: nothing is held). A controller's
+    // claims stay as they are: XInput does not follow the window's focus, so the release still comes and is its owner's.
     void end_all(uint32_t why, std::vector<Note>* notes) {
         std::lock_guard lk(mu_);
-        for (const auto& [id, e] : sorted())
+        for (const auto& [id, e] : sorted()) {
+            if (vk_of(id) >= kPadFirst) continue;
             if (!e.orphan) add(notes, {e.sub, id, kEnd, why});
-        map_.clear();
-        count_.store(0, std::memory_order_release);
+            erase(map_.find(id));
+        }
     }
 
     // The client world changed: owners of claims made in another world hear End World; the claims stay as orphans.
