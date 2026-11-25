@@ -278,15 +278,15 @@ pub struct System {
 }
 
 /// What launcher.log says about an end, in one line: the reason, the last memory sample, uptimes, the system's load
-/// and memory, and the next step. `launcher_up` and `page_up`: since the window was made and since the page last
-/// loaded.
-pub fn says_end(ended: Ended, sample: Option<&Sample>, now: Instant, launcher_up: Option<Duration>, page_up: Option<Duration>,
-    sys: &System, ends: u32, step: Step) -> String {
+/// and memory, and the next step. `up`: since the window was made and since the page last loaded.
+pub fn says_end(ended: Ended, sample: Option<&Sample>, now: Instant, up: (Option<Duration>, Option<Duration>), sys: &System,
+    ends: u32, step: Step) -> String {
     let memory = match sample {
         Some(s) => format!("the web process (pid {}) used {} {} (largest this start {}; {} web process{})",
             s.pid, mb(s.rss_kb), ago(now.saturating_duration_since(s.at)), mb(s.peak_kb), s.count, if s.count == 1 { "" } else { "es" }),
         None => "its memory was never sampled".into(),
     };
+    let (launcher_up, page_up) = up;
     let up = |d: Option<Duration>| d.map_or("?".to_string(), span);
     let load = match (sys.load, sys.cpus) {
         (Some([a, b, c]), cpus) => format!("load {a:.2} {b:.2} {c:.2}{}", cpus.map(|n| format!(" on {n} CPUs")).unwrap_or_default()),
@@ -446,7 +446,7 @@ mod linux {
             s.life.page_ended();
             let step = s.recovery.ended(now);
             let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
-            let line = says_end(why, s.sample.as_ref(), now, since(s.window), since(s.loaded), &sys, s.recovery.ends, step);
+            let line = says_end(why, s.sample.as_ref(), now, (since(s.window), since(s.loaded)), &sys, s.recovery.ends, step);
             if step == Step::Reload {
                 s.loaded = Some(now);
             }
@@ -709,14 +709,14 @@ mod tests {
         let t = Instant::now();
         let s = Sample { at: t, pid: 4242, rss_kb: 812 * 1024, peak_kb: 905 * 1024, count: 1 };
         let sys = System { load: Some([54.1, 48.22, 30.0]), cpus: Some(16), available_kb: Some(2 * 1024 * 1024), total_kb: Some(32 * 1024 * 1024) };
-        let line = says_end(Ended::Crashed, Some(&s), at(t, 7), Some(Duration::from_secs(7980)), Some(Duration::from_secs(65)), &sys, 1, Step::Reload);
+        let line = says_end(Ended::Crashed, Some(&s), at(t, 7), (Some(Duration::from_secs(7980)), Some(Duration::from_secs(65))), &sys, 1, Step::Reload);
         assert!(line.starts_with("PROBLEM: the page's web process ended (Crashed); "), "the line before 31.13 still matches: {line}");
         for part in ["(pid 4242) used 812 MB 7 s ago", "largest this start 905 MB; 1 web process)", "the launcher up 2 h 13 min",
             "this page 1 min 5 s", "load 54.10 48.22 30.00 on 16 CPUs", "memory available 2.0 GB of 32.0 GB", "end 1 this start: loading the page again"] {
             assert!(line.contains(part), "{part:?} in {line}");
         }
         assert!(!line.contains('\n'));
-        let line = says_end(Ended::ExceededMemoryLimit, None, t, None, None, &System::default(), 2, Step::Fallback);
+        let line = says_end(Ended::ExceededMemoryLimit, None, t, (None, None), &System::default(), 2, Step::Fallback);
         assert!(line.starts_with("PROBLEM: the page's web process ended (ExceededMemoryLimit) (over WebKit's memory limit); its memory was never sampled"), "{line}");
         assert!(line.contains("load not known") && line.contains("memory available not known") && line.contains("fallback screen"), "{line}");
         assert_eq!(Ended::Other(9).name(), "unknown reason 9");
