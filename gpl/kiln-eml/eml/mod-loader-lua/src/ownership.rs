@@ -431,8 +431,10 @@ pub fn owns_output(root: &Path, stem: &str) -> io::Result<bool> {
 
 /// kiln-eml: the record Kiln's bundled ShroudForge (Kiln's fork, modules/game-files/record_prepared_game_files.rs)
 /// writes beside the working backup after a successful startup asset pass (`<stem>.kfc.prepared.json`), and removes
-/// before a pass changes anything: its scheme, and the part of the resource file it hashes at each end.
-const SF_PREPARED_SCHEME: &str = "kiln-sf-prepared 1";
+/// before a pass changes anything: its schemes, and the part of the resource file it hashes at each end. Scheme 2
+/// (0.2.0-dev.31.12) changed only the record's export state (`exports`), which this proof does not read; its `files`
+/// and `build` are scheme 1's.
+const SF_PREPARED_SCHEMES: [&str; 2] = ["kiln-sf-prepared 1", "kiln-sf-prepared 2"];
 const SF_PREPARED_EDGE: u64 = 1 << 20;
 
 /// kiln-eml: what Kiln's bundled ShroudForge's record of its last startup asset pass proves about the live pair
@@ -466,7 +468,9 @@ pub fn hosted_shroudforge_output(root: &Path, stem: &str) -> io::Result<HostedSh
     }
     let Ok(bytes) = bounded(root, &path) else { return Ok(NotProven) };
     let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return Ok(NotProven) };
-    if record["scheme"].as_str() != Some(SF_PREPARED_SCHEME) || record["target"].as_str() != Some(stem) {
+    if !record["scheme"].as_str().is_some_and(|scheme| SF_PREPARED_SCHEMES.contains(&scheme))
+        || record["target"].as_str() != Some(stem)
+    {
         return Ok(NotProven);
     }
     let files = &record["files"];
@@ -2431,6 +2435,12 @@ pub(crate) mod tests {
         assert_eq!(check(), NotProven, "no record");
         put(&record("26430625".into()));
         assert_eq!(check(), Output);
+        // kiln-eml: the fork's scheme 2 (0.2.0-dev.31.12) differs only in its export state: it proves the same
+        let mut current = record("26430625".into());
+        current["scheme"] = "kiln-sf-prepared 2".into();
+        current["exports"] = serde_json::json!({"touched": [["path", "auto-loot-plus-report.txt", null]]});
+        put(&current);
+        assert_eq!(check(), Output, "scheme 2");
         // the build is compared only where both sides name one
         put(&record(serde_json::Value::Null));
         assert_eq!(check(), Output);
