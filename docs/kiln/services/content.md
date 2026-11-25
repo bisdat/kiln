@@ -951,7 +951,8 @@ server changes a node from cost 3 to cost 0 while a player is joined, the player
 server acceptance and the displayed cost can disagree for that connection. Rejoin with the same updated skill pack
 on the client (restart too if its boot data was already committed). Rejoining without the matching client files is
 not a sync mechanism. Use `clients: "mod"`, with the matching pack on both sides; `clients: "kiln"` alone does not
-supply a new native tree. Shadow-node unlock-state messages are separate from rebuilding the game's native tree.
+supply a new native tree. ContentSync's separate gamedata `skills` layers are not a promise to rebuild a client's
+already constructed native tree either. Shadow-node unlock-state messages are separate from rebuilding that tree.
 See [skills](skills.md).
 
 ## Kiln clients get definitions (`"clients": "kiln"`, A5)

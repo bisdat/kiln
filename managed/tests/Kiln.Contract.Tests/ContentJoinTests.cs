@@ -29,6 +29,9 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     private readonly bool _modsLoaded = Lifecycle.ModsLoaded;
     private static byte _ready;        // kiln.content's registries on this "game"
     private static uint _capacity = 4096, _reserved = 2;
+    private static string? _registryExport;
+    private static ulong _registryGeneration;
+    private static JsonObject _clientRegistry = new();
 
     private sealed class Gate : NetAdmission.IGate
     {
@@ -94,19 +97,36 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     private static int FakeStatus(ContentNative.Status* s)
     {
         s->Ready = _ready;
-        s->Generation = 1;
+        s->Generation = _registryGeneration;
         return 0;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int FakeExport(uint kinds, byte* buf, nuint cap, nuint* len)
     {
-        *len = 0;
-        return 3;
+        if (_registryExport is null) { *len = 0; return 3; }
+        var bytes = Encoding.UTF8.GetBytes(_registryExport);
+        *len = (nuint)bytes.Length;
+        if (cap <= *len) return ContentNative.BufferTooSmall;
+        bytes.CopyTo(new Span<byte>(buf, (int)cap)); buf[bytes.Length] = 0;
+        return 0;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static uint FakeRevert(ulong owner) => 0;
+    private static int FakeFind(uint kind, NativeStr key, ContentNative.Entry* entry) => ContentNative.NotFound;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int FakeRegistryApply(ulong owner, NativeStr document, NativeStr source, byte* report, nuint cap, nuint* len)
+    {
+        _clientRegistry = JsonNode.Parse(document.ToString())!.AsObject();
+        var bytes = Encoding.UTF8.GetBytes("{\"applied\":2,\"errors\":[]}");
+        *len = (nuint)bytes.Length;
+        bytes.CopyTo(new Span<byte>(report, (int)cap)); report[bytes.Length] = 0;
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static uint FakeRevert(ulong owner) { _clientRegistry = new(); return 0; }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int FakeLabel(ulong owner, NativeStr label) => 0;
@@ -139,6 +159,7 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     public ContentJoinTests()
     {
         _ready = 0;
+        _registryExport = null; _registryGeneration = 1; _clientRegistry = new();
         _capacity = 4096;
         _reserved = 2;
         NetNative.TestTransport = _loop;
@@ -150,6 +171,8 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         content->Header = new ServiceHeader { Size = (uint)sizeof(ContentNative.Table), Version = 4 };
         content->GetStatus = &FakeStatus;
         content->ExportChanges = &FakeExport;
+        content->ApplyJson = &FakeRegistryApply;
+        content->Find = &FakeFind;
         content->RevertOwner = &FakeRevert;
         content->UndefineOwner = &FakeRevert;
         content->LabelOwner = &FakeLabel;
@@ -175,6 +198,11 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
     {
         NetEngine.OnPeer(NetNative.PeerServer, false);  // the client role leaves: ContentSync forgets the state it got
         NetEngine.OnPeer(Peer, false);
+        if (_registryExport is not null)
+        {
+            typeof(ContentSync).GetMethod("ResetServer", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["registry test ended"]);
+            _registryExport = null;
+        }
         Holds().Clear();
         NetAdmission.ResetForTests();
         NetAdmission.TestGate = null;
@@ -294,6 +322,37 @@ public sealed unsafe class ContentJoinTests : FakeTableTest
         Assert.True(ContentChannel.SendTo(p, new ContentSync.PartMsg(ContentSync.Format, id, 1, (uint)raw.Length, 0, 0, 1, ContentSync.CodecDeflate, packed)));
         _loop.Pump();
         return id;
+    }
+
+    [Fact]
+    public void Registry_layers_resync_without_rejoining()
+    {
+        _reserved = 0; _ready = 1;
+        var peer = Join();
+        void Drive(string document)
+        {
+            // The native half proves this document is the effective registry/store export, not registry IR.
+            _registryExport = document; ++_registryGeneration;
+            typeof(ContentSync).GetMethod("ServerTick", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [25UL]);
+            _loop.Pump();
+            typeof(ContentSync).GetMethod("ClientTick", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null);
+            _loop.Pump();
+            Assert.Equal(NetPeerState.Ready, peer.State);
+            Assert.Equal(ContentSyncState.Applied, ContentSync.Status.State);
+            Assert.Contains(Acks(), a => a.StateId == ContentSync.Status.StateId && a.Result == 0);
+        }
+        string State(int value) => $"{{\"format\":1,\"@fields\":2,\"items\":{{\"0x00000111\":{{\"maxStackSize\":{value}}}}}," +
+            $"\"recipes\":{{\"0x00000333\":{{\"craftingDuration\":{value / 10}}}}}}}";
+        Drive(State(90)); // server's WorldLoad pass, before this join
+        Assert.Equal(90, _clientRegistry["items"]!["0x00000111"]!["maxStackSize"]!.GetValue<int>());
+        var first = ContentSync.Status.StateId;
+        Drive(State(120)); // later HotReload pass: no new join
+        Assert.NotEqual(first, ContentSync.Status.StateId);
+        Assert.Equal(120, _clientRegistry["items"]!["0x00000111"]!["maxStackSize"]!.GetValue<int>());
+        Assert.Equal(12, _clientRegistry["recipes"]!["0x00000333"]!["craftingDuration"]!.GetValue<int>());
+        Drive("{\"format\":1,\"@fields\":0}"); // both registry layers removed
+        Assert.Null(_clientRegistry["items"]);
+        Assert.Null(_clientRegistry["recipes"]);
     }
 
     [Fact]
