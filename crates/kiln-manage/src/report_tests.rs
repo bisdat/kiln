@@ -1312,6 +1312,52 @@ fn kilns_own_copy_that_ran_although_off_is_no_players_own_folder_finding() {
     assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", r.findings.iter().filter(|x| x.id == "off-but-runs").collect::<Vec<_>>());
 }
 
+/// Review of the 31.12 bundle: compat-aside-truth's plugins (emf.json, greeneye.json, shroudtopia.json, flame.json) name
+/// their rows' state `status`, and say "runs (your own folder …; …) although it is off in the profile: …". Those are a
+/// player's own folders: `off-but-runs`. Their "runs (Kiln's copy … is still there; …)" rows are Kiln's copy, which the next
+/// Play takes out: no finding.
+#[test]
+fn an_own_loader_status_row_of_the_players_own_folder_is_off_but_runs_and_kilns_copy_is_not() {
+    let f = Fx::healthy("off-but-runs-compat");
+    f.w("kiln/state/emf.json", br#"{"format":1,"plugin":"kiln-emf","mods":[{"id":"mage_skills","status":"own-loader",
+        "reason":"runs (your own folder E:/Enshrouded/emf/mods/mage_skills; EMF's own switch is on) although it is off in the profile: EMF's own loader runs this start and reads only <game>/emf/mods, not the profile, and Kiln never changes a folder you put there. To turn it off in EMF: enabled=0 in emf/config/mage_skills.ini"}]}"#);
+    f.w("kiln/state/flame.json", br#"{"status":"running","mods":[{"name":"BiggerTorch","status":"own-loader",
+        "reason":"runs (your own folder E:/Enshrouded/mods/BiggerTorch; Flame's own loader has no switch) although it is off in the profile: Flame's own loader runs this start and reads only <game>/mods, not the profile, and Kiln never changes a folder you put there. To turn it off in Flame: move the folder"}]}"#);
+    f.w("kiln/state/greeneye.json", br#"{"status":"running","mods":[{"id":"fast-swim","status":"own-loader",
+        "reason":"runs (Kiln's copy E:/Enshrouded/greeneye/fast-swim is still there; Greeneye Loader's own switch is on) although it is off in the profile: Greeneye Loader's own loader runs this start and reads only <game>/greeneye, not the profile. Activate the profile again in the Kiln launcher to take Kiln's copy out, or enabled false in that mod.json"}]}"#);
+    let r = build(&f.input());
+    let warned: Vec<&str> = r.findings.iter().filter(|x| x.id == "off-but-runs").map(|x| x.text.as_str()).collect();
+    assert!(warned.iter().any(|t| t.contains("mage_skills")), "{warned:?}");
+    assert!(warned.iter().any(|t| t.contains("BiggerTorch")), "{warned:?}");
+    assert!(!warned.iter().any(|t| t.contains("fast-swim")), "Kiln's copy is no player's own folder: {warned:?}");
+    assert!(r.findings.iter().filter(|x| x.id == "off-but-runs").all(|x| x.level == Level::Warning));
+    // switched off in the loader too: nothing ran, nothing to warn about
+    f.w("kiln/state/emf.json", br#"{"format":1,"plugin":"kiln-emf","mods":[{"id":"mage_skills","status":"disabled",
+        "reason":"switched off in the profile; your own folder E:/Enshrouded/emf/mods/mage_skills is in <game>/emf/mods too, and EMF's own loader keeps it off as well (enabled=0 in its ini)"}]}"#);
+    f.w("kiln/state/flame.json", br#"{"status":"running","mods":[]}"#);
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", r.findings.iter().filter(|x| x.id == "off-but-runs").collect::<Vec<_>>());
+}
+
+/// Review of the 31.12 bundle: an off native mod whose DLL the player also chained (native.json `chainProxy`, kiln-core's
+/// step 3b) ran its DllMain before the profile was read: `off-but-runs` names it; without `chainProxy` nothing ran.
+#[test]
+fn an_off_native_mod_that_loads_as_a_chain_proxy_is_off_but_runs() {
+    let f = Fx::healthy("off-but-runs-native");
+    let native = |proxy: &str| format!(r#"{{"format":1,"pid":412,"written":"2026-11-25T11:00:01Z","policy":"always","mods":[
+        {{"id":"fps-unlock","state":"disabled","reason":"disabled in the profile, but its DLL fpsunlock.dll loads all the same as a chain proxy","chainProxy":{proxy}}},
+        {{"id":"clock","state":"disabled","reason":"disabled in the profile"}}]}}"#);
+    f.w("kiln/state/native.json", native(r#""E:/Enshrouded/kiln/chain/fps-unlock-dinput8.dll""#).as_bytes());
+    let r = build(&f.input());
+    let n = finding(&r, "off-but-runs");
+    assert_eq!(n.level, Level::Warning);
+    assert!(n.text.starts_with("1 native mod ran at the last start although it is off: fps-unlock.") && n.text.contains("chain proxy")
+        && !n.text.contains("clock"), "{}", n.text);
+    f.w("kiln/state/native.json", native("null").as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", ids(&r));
+}
+
 /// Review of 6a78171d: two files of one OLDER start said "hosted" and "aside for ShroudForge" while neither plugin ran
 /// in the last start; and a file without a pid stood for any start. Neither proves anything about the last start, so
 /// neither takes the place of the own-loader finding.
