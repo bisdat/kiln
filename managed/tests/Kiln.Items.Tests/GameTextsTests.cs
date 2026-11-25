@@ -197,6 +197,31 @@ public sealed class GameTextsTests : IDisposable
         Assert.False(table.ContainsKey(8));
     }
 
+    [Fact]
+    public void The_lookup_rows_are_unavailable_with_the_reason_when_a_client_has_no_source()
+    {
+        // review 31.13: LookupCaps reported a source's "no texts here" (kiln.types or kiln.assets off on a client) as
+        // ServiceCaps.Static(..., CapabilityReason.Unknown, ...), which ServiceCaps refuses ("Unknown is never reported")
+        // whenever neither needed row is off with a reason of its own (kiln.types' row on while its types are not, no row
+        // at all): the rows were left out, and Capabilities.Get answered "unknown, no row" instead of unavailable and why
+        const string why = "kiln.types has no game types here";
+        GameTextStore.UseSource(new ScriptedTexts { Why = why });
+        VoxelMaterialData.UseSource(new ScriptedMaterials(() => null, why));
+        try
+        {
+            LookupCaps.Rows.Ensure();
+            ServiceCapRows.RefreshStarted();
+            var texts = Capabilities.Get(Content.GameTextsCapability);
+            Assert.Equal((CapabilityState.Unavailable, CapabilityReason.ServiceMissing, why), (texts.State, texts.Reason, texts.ReasonText));
+            var materials = Capabilities.Get(Content.VoxelMaterialsCapability);
+            Assert.Equal((CapabilityState.Unavailable, CapabilityReason.ServiceMissing, why), (materials.State, materials.Reason, materials.ReasonText));
+        }
+        finally
+        {
+            VoxelMaterialData.ResetForTests();
+        }
+    }
+
     // ---- the store -------------------------------------------------------------------------------------------------
 
     [Fact]
