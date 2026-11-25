@@ -62,15 +62,56 @@ inline std::string how_to_remove(const Row& r) {
 inline std::string list_text(const Row& r) { return r.emf_list ? "dinput8-chain.ini" : "kiln\\chain.ini [chain]"; }
 
 // native.json's reason (and the kiln.log line) for a mod that is off (`off_reason`: "disabled in the profile" ...) whose
-// DLL `dll_file` loads as the chain proxy `r`. `dllmain`: the mod is phase dllmain, so that load is the whole mod.
-inline std::string reason(const std::string& off_reason, const std::string& dll_file, const Row& r, bool dllmain) {
+// DLL `dll_file` loads as the chain proxy `r`. `dllmain`: the mod is phase dllmain, so that load is the whole mod when
+// every one of its `total` DLLs loads that way (`matched` of them do).
+inline std::string reason(const std::string& off_reason, const std::string& dll_file, const Row& r, bool dllmain,
+                          size_t matched = 1, size_t total = 1) {
     std::string s = off_reason + ", but its DLL " + dll_file + " loads all the same as a chain proxy: " + list_text(r) +
                     " names " + r.path_text + " (the same file), which Kiln's proxy loads " +
                     (r.status == "late" ? "after the plugins ([late])" : "before kiln-core starts") +
                     ", whatever the profile says. ";
-    s += dllmain ? std::string("The mod runs (phase dllmain: loading its DLL starts it)")
-                 : std::string("Its DllMain runs; Kiln does not call its init, so what it starts there does not start");
+    if (dllmain && matched >= total)
+        s += "The mod runs (phase dllmain: loading its DLL starts it)";
+    else if (dllmain)
+        s += "Its DllMain runs, but only " + std::to_string(matched) + " of the mod's " + std::to_string(total) +
+             " DLLs " + (matched == 1 ? "loads" : "load") +
+             " that way, so the mod is not all there and stays disabled";
+    else
+        s += "Its DllMain runs; Kiln does not call its init, so what it starts there does not start";
     return s + "; " + how_to_remove(r);
+}
+
+// One of the mod's DLLs: as native.json names it, and the path to read.
+struct ModDll {
+    std::string file;
+    std::filesystem::path path;
+};
+
+// What native.json says about an off mod: `row` the first chain row that loads one of its DLLs (-1: none, the mod is
+// simply off), `loaded` true only for a phase dllmain mod all of whose DLLs load as chain proxies (a part of a mod is
+// not the mod), `reason` the new reason.
+struct Match {
+    int row = -1;
+    size_t matched = 0;
+    bool loaded = false;
+    std::string file, reason;
+};
+
+inline Match match(const std::string& off_reason, const std::vector<ModDll>& dlls, const std::vector<Row>& rows, bool dllmain) {
+    Match m;
+    for (const auto& d : dlls) {
+        const int at = find(d.path, rows);
+        if (at < 0) continue;
+        ++m.matched;
+        if (m.row < 0) {
+            m.row = at;
+            m.file = d.file;
+        }
+    }
+    if (m.row < 0) return m;
+    m.loaded = dllmain && m.matched == dlls.size();
+    m.reason = reason(off_reason, m.file, rows[static_cast<size_t>(m.row)], dllmain, m.matched, dlls.size());
+    return m;
 }
 
 }  // namespace kiln::chain_copy

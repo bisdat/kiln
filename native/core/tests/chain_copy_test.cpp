@@ -71,6 +71,31 @@ int main() {
     EXPECT(cc::find(dll, rows) == -1);
     EXPECT(cc::find(game / "missing.dll", rows) == -1);
 
+    // review (dev.31.12): a phase dllmain mod with two DLLs, only one of which is chained, is not "loaded": a part of
+    // a mod is not the mod (resolve() step 3 says the same of a [profile] mod: "the proxy loaded only some of its DLLs")
+    {
+        write(game / "library/native/two/1.0.0/a.dll", "MZ" + body + "aaa");
+        write(game / "library/native/two/1.0.0/b.dll", "MZ" + body + "bbb");
+        write(game / "kiln/chain/a-dinput8.dll", "MZ" + body + "aaa");
+        const fs::path two = game / "library/native/two/1.0.0";
+        std::vector<cc::Row> chain = {{game / "kiln/chain/a-dinput8.dll", "C:\\game\\kiln\\chain\\a-dinput8.dll", false, "loaded"}};
+        const std::vector<cc::ModDll> dlls = {{"a.dll", two / "a.dll"}, {"b.dll", two / "b.dll"}};
+        auto m = cc::match("disabled in the profile", dlls, chain, true);
+        std::printf("dllmain, 1 of 2: %s\n", m.reason.c_str());
+        EXPECT(m.row == 0 && m.matched == 1 && !m.loaded);
+        EXPECT(has(m.reason, "only 1 of the mod's 2 DLLs") && !has(m.reason, "The mod runs"));
+        // both chained: the mod runs
+        write(game / "kiln/chain/b-dinput8.dll", "MZ" + body + "bbb");
+        chain.push_back({game / "kiln/chain/b-dinput8.dll", "C:\\game\\kiln\\chain\\b-dinput8.dll", false, "loaded"});
+        m = cc::match("disabled in the profile", dlls, chain, true);
+        EXPECT(m.row == 0 && m.matched == 2 && m.loaded && has(m.reason, "The mod runs"));
+        // not dllmain: never loaded, whatever is chained
+        m = cc::match("disabled in the profile", dlls, chain, false);
+        EXPECT(m.row == 0 && !m.loaded && has(m.reason, "Kiln does not call its init"));
+        // nothing chained: no row, the reason stays
+        EXPECT(cc::match("disabled in the profile", dlls, {}, true).row == -1);
+    }
+
     fs::remove_all(game);
     std::printf("%d of %d checks failed\n", failures, checks);
     return failures ? 1 : 0;

@@ -666,22 +666,23 @@ void resolve() {
     }
     for (Mod& m : g_mods) {
         if (proxies.empty() || m.state != St::Disabled) continue;
+        std::vector<chain_copy::ModDll> dlls;
         for (const Dll& d : m.dlls) {
             std::string f = d.file;
             std::replace(f.begin(), f.end(), '/', '\\');
-            const int at = chain_copy::find(fs::path(to_wide(m.folder)) / to_wide(f), proxies);
-            if (at < 0) continue;
-            const bool dllmain = m.phase == KILN_NATIVE_PHASE_DLLMAIN;
-            m.chain_proxy = proxies[at].path_text;
-            m.reason = chain_copy::reason(m.reason, d.file, proxies[at], dllmain);
-            m.notes.push_back("loads as a chain proxy: " + proxies[at].path_text);
-            if (dllmain) {
-                m.state = St::Loaded;
-                m.load_index = g_next_index++;
-            }
-            KLOG_W("native mod %s %s: %s", m.key.c_str(), m.version.c_str(), m.reason.c_str());
-            break;
+            dlls.push_back({d.file, fs::path(to_wide(m.folder)) / to_wide(f)});
         }
+        // loaded: a phase dllmain mod all of whose DLLs load as chain proxies (a part of a mod is not the mod)
+        const auto hit = chain_copy::match(m.reason, dlls, proxies, m.phase == KILN_NATIVE_PHASE_DLLMAIN);
+        if (hit.row < 0) continue;
+        m.chain_proxy = proxies[static_cast<size_t>(hit.row)].path_text;
+        m.reason = hit.reason;
+        m.notes.push_back("loads as a chain proxy: " + m.chain_proxy);
+        if (hit.loaded) {
+            m.state = St::Loaded;
+            m.load_index = g_next_index++;
+        }
+        KLOG_W("native mod %s %s: %s", m.key.c_str(), m.version.c_str(), m.reason.c_str());
     }
     // 4. requires / incompatible to a fixpoint, then order per phase; cycles fail together, then again
     for (;;) {
