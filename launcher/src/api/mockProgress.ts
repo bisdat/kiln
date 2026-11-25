@@ -155,7 +155,9 @@ export function estimate(plan: string[], steps: StepNow[], now: number, h: KeptS
 
 // ---------------------------------------------------------------- the scripted start
 
-interface Current { began: number; script: StartScript; mode: string; kept: boolean }
+interface Current { began: number; script: StartScript; mode: string; kept: boolean;
+  /** (0.2.0-dev.31.13) When launch_play asked Steam for it (the backend's `asked`): from then the start holds the next. */
+  askedAt?: number }
 
 let script: StartScript | null = null;
 const current: Record<string, Current | undefined> = {};
@@ -182,10 +184,32 @@ export function bootJsonAt(s: StartScript): number {
   return t;
 }
 
-/** `launch_begin`: Play was pressed (only with a script; a vanilla start has none). */
+/** `launch_begin`: Play was pressed (only with a script). (0.2.0-dev.31.13) A vanilla start is followed too, as the
+ *  backend follows it: its profile and Steam steps until its game is there. */
 export function mockBegin(gameId: string, mode: string) {
-  if (!script || mode === "vanilla") { delete current[gameId]; return; }
+  if (!script) { delete current[gameId]; startsChanged(); return; }
   current[gameId] = { began: Date.now(), script, mode, kept: false };
+  startsChanged();
+}
+/** (0.2.0-dev.31.13) launch_play asked Steam for the scripted start of `gameId`. */
+export function mockAsked(gameId: string) {
+  const c = current[gameId];
+  if (c) { c.askedAt = Date.now(); startsChanged(); }
+}
+/** (0.2.0-dev.31.13) start_progress STEAM_WAIT_MS as the page has it (tests: `window.__kilnSteamWaitMs`). */
+const steamWaitMs = () => (globalThis as { __kilnSteamWaitMs?: number }).__kilnSteamWaitMs ?? 5 * 60_000;
+/** (0.2.0-dev.31.13) The backend's guard (commands/launch.rs refuse_pending): a start Steam was asked for, whose game
+ *  process is not there (`live`: the mock's status) and whose wait is not over, holds the next start of the game. */
+export function mockHoldsNextStart(gameId: string, live: boolean, nowMs = Date.now()): boolean {
+  const c = current[gameId];
+  return !!c && c.askedAt !== undefined && !live && nowMs - c.askedAt < steamWaitMs();
+}
+/** Tests (`kiln.mock.persist`): the backend's starts survive a reload of the page, as the launcher's process keeps them
+ *  (src-tauri/src/webproc.rs reloads only the page). */
+let startsChanged = () => {};
+export function persistStarts(load: string | null, save: (text: string) => void) {
+  if (load) for (const [g, c] of Object.entries(JSON.parse(load) as Record<string, Current>)) current[g] = c;
+  startsChanged = () => save(JSON.stringify(current));
 }
 /** The scripted start of `gameId` (for the fake game's process and boot.json times), if one runs. */
 export const scriptedStart = (gameId: string): { began: number; script: StartScript } | null => current[gameId] ?? null;
@@ -195,7 +219,7 @@ export function mockSpeak(gameId: string) {
   if (c) c.script = { ...c.script, dev26: false };
 }
 /** The fake game ended: the start is over. */
-export function mockStartEnded(gameId: string) { delete current[gameId]; }
+export function mockStartEnded(gameId: string) { delete current[gameId]; startsChanged(); }
 
 /** `launch_progress` for the scripted start at `nowMs`. */
 export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline | null {
@@ -232,7 +256,7 @@ export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline 
       detail: cooking && t - partMs > 1000 ? "kiln: cooking assets/cook.json (modelcook)" : null, done: i, total: n, ms: 0, tookMs: took, state: "done", launcher: true });
     if (cooking) return finish();
   }
-  if (s.bootSnapshotMs) {
+  if (s.bootSnapshotMs && c.mode !== "vanilla") {
     // the boot game-data tool builds a snapshot: its own step, right after the cook, with the tool's line
     plan.splice(plan.indexOf("profile"), 0, "boot-snapshot");
     const ms = s.bootSnapshotMs;
@@ -253,6 +277,8 @@ export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline 
     if (took === null) return finish();
     at += ms;
   }
+  // (0.2.0-dev.31.13) a vanilla start is over once its game is there: nothing of Kiln to follow (the backend forgets it)
+  if (c.mode === "vanilla") return null;
   // the runtime's
   if (s.dev26 || t < bootAt(s)) return finish();
   const runtimePlan = s.runtime.map((r) => r.id);
@@ -320,6 +346,7 @@ export function mockProgress(gameId: string, nowMs = Date.now()): StartTimeline 
     return {
       phase, why: phase === "idle" ? s.idle?.why ?? null : null, kiln: KILN, started: new Date(c!.began).toISOString(), atMs: Math.round(t),
       quietMs: t >= bootAt(s) && !s.dev26 ? (silent ? 61_000 : 0) : null, steps: out, running: running_, estimate: est, launcher: true, steamSlow,
+      mode: c!.mode as StartTimeline["mode"],
     };
   }
 }
