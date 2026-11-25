@@ -691,6 +691,45 @@ void stack_guard_against_the_last_world(const std::string& dir) {
           "two starts later, and without the guard, still a warning (that save can still hold 80-stacks; nothing can be refused for an edit that is gone): " + row);
 }
 
+// review of registry-rollback: the high-water mark (plans/index.json "stacks"). A later world on a lower max stack never
+// lowers it, and a start with no registry content at all after a raise still asks the stack guard (the base is read for
+// that alone).
+void stack_high_water_mark(const std::string& dir) {
+    Files files;
+    auto plank = [](int v) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": )" + std::to_string(v) + "}]}}";
+    };
+    g_stacks = plank(80);
+    TreeView v1 = world();
+    plan_start(dir, &files, &v1);
+    g_stacks = plank(40);
+    TreeView v2 = world();
+    plan_start(dir, &files, &v2);
+    check(json::parse(files.data["plans/index.json"])["stacks"]["items[game:plank].maxStack"] == 80,
+          "a later world on 40 does not lower the mark (80): " + json::parse(files.data["plans/index.json"]).dump());
+    g_stacks = plank(50);
+    g_guard_calls = 0;
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    std::string row;
+    for (const auto& n : s.report.value("saves", json::array()))
+        if (n["field"] == "items[game:plank].maxStack") row = n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(g_guard_calls > 0 && row.rfind("guard: a world already started with the largest stack 80, this start gives 50:", 0) == 0,
+          "50 is below the 80 a world started with (not the last world's 40): the guard is asked: " + row);
+    // no registry content at all: the base is still read for the mark, and the guard asked
+    TreeView v4 = world();
+    stage::Env env = env_of(&v4, &files, dir, &no_sections);
+    g_guard_calls = 0;
+    env.stack_guard = [](std::string*) { ++g_guard_calls; return true; };
+    stage::Runner r(std::move(env));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    bool noted = false;
+    for (const auto& n : rep.value("saves", json::array())) noted = noted || (n["field"] == "items[game:plank].maxStack" && n["decision"] == "guard");
+    check(g_guard_calls > 0 && noted, "a start without registry content after a raise asks the guard: " + rep.value("saves", json::array()).dump());
+}
+
 // ---- review of registry-rollback ----
 const char* rb_row(const json& rep) { return rep["rollback"].is_object() && rep["rollback"]["state"].is_string() ? "" : "no rollback row"; }
 std::string reason_of(const PlanStart& s) {
@@ -943,6 +982,7 @@ int main(int argc, char** argv) {
         {"rollback_refused_whole", [&] { rollback_refused_whole(dir); }},
         {"save_checks_of_restart_fields", [&] { save_checks_of_restart_fields(dir); }},
         {"stack_guard_against_the_last_world", [&] { stack_guard_against_the_last_world(dir); }},
+        {"stack_high_water_mark", [&] { stack_high_water_mark(dir); }},
         {"rollback_changed_back_names_every_value", [&] { rollback_changed_back_names_every_value(dir); }},
         {"rollback_judged_against_the_plan_rolled_away_from", [&] { rollback_judged_against_the_plan_rolled_away_from(dir); }},
         {"a_start_below_the_last_worlds_range_warns", [&] { a_start_below_the_last_worlds_range_warns(dir); }},
