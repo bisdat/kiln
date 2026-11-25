@@ -18,6 +18,9 @@ bool may_have_rules(uint32_t entity);
 uint32_t flags_seen();
 // The index of `entity`'s extra slot (a player character that is not a player: a lab's), or -1. Lock-free.
 int extra_slot(uint32_t entity);
+// The rules of the player a build cursor is about (cursor.cpp): its context's first qword is the ProgramContext; the
+// server world's per-entity rules, else the local player's (false: no rules, defaults).
+bool cursor_rules(void* cursor_ctx, KilnRulesPlayer* out);
 }  // namespace kiln_rules_bridge
 
 namespace kiln_rules_creative {
@@ -61,6 +64,19 @@ void reset();  // world lifecycle: entity ids start over
 void tick();   // once per tick of the side that simulates (the server's; a joined game's client tick): ages "active"
 KilnResult KILN_CALL state(KilnEntity entity, KilnRulesNoClip* out);
 }  // namespace kiln_rules_noclip
+
+namespace kiln_rules_cursor {
+// The build cursor's refusal flags (keen::ecs::CursorFlag) each rule waives.
+constexpr uint32_t kOutsideZone = 1u << 1, kInFog = 1u << 2, kLenientInhibitor = 1u << 4, kStrictInhibitor = 1u << 5,
+                   kEnemies = 1u << 9, kMissingMaterials = 1u << 12, kNoPermission = 1u << 14;
+uint32_t waived(const KilnRulesPlayer& rules);  // the bits these rules clear
+// The cursor waivers' mid hook (cursor.cpp; feature rules.cursor) where the game stores the flags
+// (rules/CursorFlagsStored), never at the function's entry: other mods find that function by its first bytes. True when
+// it is in (installed at load, with the other building hooks).
+bool install(const KilnApi* api, KilnOwner owner);
+uint64_t cleared();  // cursor checks a rule changed
+uint64_t faults();
+}  // namespace kiln_rules_cursor
 
 namespace kiln_rules_steer {
 // Glider steering's mid hook (steer.cpp; feature rules.glide_steer). Returns KILN_RULES_HOOK_GLIDE_STEER (steering is

@@ -9,8 +9,9 @@
 //    building zone (ServerCursor.serverFlags IsNearBuildingZone); a player with BUILD_OUTSIDE_BASES gets "yes". The game
 //    copies that flag into the actor state and the replicated NetworkCursor, so the hammer's menu ("Needs a Flame Altar
 //    nearby"), the fly-mode gate and the cursor all treat the player as inside a base. Server world only.
-//  - cursor: after the function that computes the build cursor's refusal flags (both cursor programs call it), the
-//    flags the player's rules waive are cleared.
+//  - cursor: where the function that computes the build cursor's refusal flags (both cursor programs call it) stores
+//    them, the flags the player's rules waive are cleared (cursor.cpp: a mid hook below the function's entry, which
+//    other mods find by its bytes).
 //  - costs: ApplyMaterials (take or give a materials list for a building action); called from the four building
 //    programs it is given a scaled copy of the list.
 //  - mining: TerraformImpact notes the acting player for its thread; the per-material damage function scales its result.
@@ -213,7 +214,7 @@ uint8_t shroud_branch(uint8_t fog, int32_t cur, int32_t max, float fraction, boo
 }
 
 struct Stats {
-    std::atomic<uint64_t> fly{0}, zone{0}, cursor{0}, costs{0}, refunds{0}, digs{0}, shroud{0}, glide{0}, faults{0};
+    std::atomic<uint64_t> fly{0}, zone{0}, costs{0}, refunds{0}, digs{0}, shroud{0}, glide{0}, faults{0};
 } S;
 
 // A storage payment belongs to its transaction's acting player, never merely to an inventory owner. Kept outside
@@ -231,8 +232,6 @@ bool storage_payment_free(uintptr_t ret, uintptr_t upgrade_ret, uint32_t actor, 
 using CurrentEntityIdFn = uint32_t*(__fastcall*)(void* ctx, uint32_t* out);
 using JobStorageFn = void*(__fastcall*)(void* job);
 using ActorStateTestFn = bool(__fastcall*)(void* actor, uint8_t flag);
-using CursorFlagsFn = void(__fastcall*)(uint32_t* flags, void* cctx, void* query, int64_t* xf, uint8_t a, uint8_t b,
-                                        uint32_t c);
 using ApplyMaterialsFn = bool(__fastcall*)(uint8_t* cost, int64_t* list, uint8_t take);
 using ExactHistoryFn = bool(KILN_CALL*)(const void* materials);
 std::atomic<ExactHistoryFn> g_exact_history{nullptr};
@@ -249,7 +248,6 @@ struct Fn {
     uintptr_t fly_site = 0;
     uintptr_t zone_site = 0;
     uintptr_t shroud_site = 0;
-    CursorFlagsFn cursor = nullptr;
     ApplyMaterialsFn apply = nullptr;
     DamageFn damage = nullptr;
     TerraformFn terraform = nullptr;
@@ -280,7 +278,7 @@ struct Layout {
 } L;
 
 kiln::MidHook2 h_fly, h_zone, h_shroud, h_grav, h_stam, h_ray, h_cam;
-kiln::RawHook h_cursor, h_apply, h_damage, h_terraform, h_glide;
+kiln::RawHook h_apply, h_damage, h_terraform, h_glide;
 // The storage-chest upgrade (UpgradeStorageAction) pays with the inventory payment directly, not through
 // ApplyMaterials: the payment is hooked, and only the call from that action (its return address) is waived.
 using InventoryPayFn = uint32_t(__fastcall*)(void* tx, int64_t* costs, uint32_t owner, uint32_t multiplier, void* extra);
@@ -295,9 +293,6 @@ std::string g_detail = "starting";
 constexpr uint8_t kDead = 7, kHangGliding = 37;
 constexpr uint64_t kInFogBit = 1ull << 13;  // keen::actor::StateFlag InFog, in the actor's state word
 
-// Cursor flags (keen::ecs::CursorFlag) each rule waives.
-constexpr uint32_t kOutsideZone = 1u << 1, kInFog = 1u << 2, kLenientInhibitor = 1u << 4, kStrictInhibitor = 1u << 5,
-                   kEnemies = 1u << 9, kMissingMaterials = 1u << 12, kNoPermission = 1u << 14;
 
 // ---- which world a program call belongs to ----
 // 0: the server world (also a client's hosted world); anything else: a client's own worlds (prediction, client).
@@ -653,46 +648,15 @@ void hk_shroud(safetyhook::Context& c) {
 
 // ============================================================================================= cursor ==========
 
-uint32_t waived(const KilnRulesPlayer& s) {
-    const uint32_t f = s.flags;
-    uint32_t m = 0;
-    if (f & KILN_RULES_BUILD_OUTSIDE_BASES) m |= kOutsideZone;
-    if (f & KILN_RULES_IGNORE_NO_BUILD_ZONES) m |= kLenientInhibitor | kStrictInhibitor;
-    if (f & KILN_RULES_IGNORE_ENEMIES) m |= kEnemies;
-    if (f & KILN_RULES_IGNORE_SHROUD) m |= kInFog;
-    if (f & KILN_RULES_IGNORE_BASE_PERMISSIONS) m |= kNoPermission;
-    if (s.build_cost == 0.0f) m |= kMissingMaterials;
-    return m;
-}
-
-void cursor_body(uint32_t* flags, void* cctx) {
+// The cursor waivers' hook is cursor.cpp's (a mid hook where the game stores the flags, below the function's entry); the
+// rules it applies come from here (kiln_rules_bridge::cursor_rules).
+bool cursor_rules_of(void* cctx, KilnRulesPlayer* out) {
     void* ctx = *static_cast<void**>(cctx);  // the cursor programs keep their ProgramContext first
-    if (!ctx) return;
+    if (!ctx) return false;
     const int kind = world_kind_of(ctx);
     uint32_t entity = 0;
     if (kind == 0) fn.current_entity(ctx, &entity);
-    KilnRulesPlayer s;
-    if (!rules_for(kind, entity, &s)) return;
-    const uint32_t m = waived(s);
-    if (*flags & m) {
-        *flags &= ~m;
-        S.cursor.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
-bool cursor_guarded(uint32_t* flags, void* cctx, unsigned long* code) {
-    __try {
-        cursor_body(flags, cctx);
-        return true;
-    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-void __fastcall hk_cursor(uint32_t* flags, void* cctx, void* query, int64_t* xf, uint8_t a, uint8_t b, uint32_t c) {
-    h_cursor.call<void>(flags, cctx, query, xf, a, b, c);
-    unsigned long code = 0;
-    if (flags && cctx && !cursor_guarded(flags, cctx, &code)) S.faults.fetch_add(1, std::memory_order_relaxed);
+    return rules_for(kind, entity, out);
 }
 
 // ============================================================================================= costs ===========
@@ -1337,11 +1301,11 @@ void fill_status(KilnRulesStatus* out) {
     load(g_local, &snapshot);
     out->local_flags = snapshot.flags;
     out->fly_allowed = S.fly.load();
-    out->cursor_cleared = S.cursor.load();
+    out->cursor_cleared = kiln_rules_cursor::cleared();
     out->costs_scaled = S.costs.load();
     out->refunds_scaled = S.refunds.load();
     out->digs_scaled = S.digs.load();
-    out->faults = S.faults.load() + kiln_rules_steer::faults();
+    out->faults = S.faults.load() + kiln_rules_steer::faults() + kiln_rules_cursor::faults();
     out->zone_forced = S.zone.load();
     out->shroud_held = S.shroud.load();
     out->glide_changed = S.glide.load();
@@ -1416,10 +1380,8 @@ void install() {
     } else {
         note("building zone (rules.zone)");
     }
-    // cursor
-    if (common && feat("rules.cursor") && sym("rules/CursorFlags", &fn.cursor) &&
-        inline_hook(h_cursor, reinterpret_cast<void*>(fn.cursor), reinterpret_cast<void*>(&hk_cursor), "the cursor flags", "rules/CursorFlags"))
-        g_hooks |= KILN_RULES_HOOK_CURSOR;
+    // cursor: a mid hook where the game stores the flags (cursor.cpp), never at the entry other mods find it by
+    if (common && feat("rules.cursor") && kiln_rules_cursor::install(g_api, g_owner)) g_hooks |= KILN_RULES_HOOK_CURSOR;
     else note("placement (rules.cursor)");
     // costs: server worlds only (a dedicated server, or a client hosting one)
     if (feat("rules.costs") && sym("rules/ApplyMaterials", &fn.apply) && cst("items/tx.operator", &L.tx_operator) &&
@@ -1610,4 +1572,7 @@ int extra_slot(uint32_t entity) {
         if (g_extra_hint[i].load(std::memory_order_relaxed) == entity) return i;
     return -1;
 }
+#ifndef KILN_RULES_HOST_TEST
+bool cursor_rules(void* cursor_ctx, KilnRulesPlayer* out) { return cursor_rules_of(cursor_ctx, out); }
+#endif
 }  // namespace kiln_rules_bridge
