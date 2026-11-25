@@ -310,6 +310,8 @@ internal static class UiPlacements
     private static Dictionary<(string Mod, bool Window, string Id), Entry> _entries = [];
     private static string? _path;
     private static bool _loaded, _dirty, _scheduled;
+    // the file is there but could not be read (locked, no permission): kept as it is this start, placements stay in memory
+    private static bool _unreadable;
 
     /// <summary>How long after a change the file is written (a drag changes it every frame). Tests set it.</summary>
     internal static TimeSpan Debounce = TimeSpan.FromSeconds(1);
@@ -342,7 +344,7 @@ internal static class UiPlacements
         _loaded = true;
         _path = path;
         _dirty = false;
-        _entries = Read(path);
+        _entries = Read(path, out _unreadable);
     }
 
     public static Entry? Get(string mod, bool window, string id)
@@ -388,7 +390,7 @@ internal static class UiPlacements
                 _scheduled = false;
                 if (!_dirty) return;
                 _dirty = false;
-                path = _path;
+                path = _unreadable ? null : _path;
                 copy = [.. _entries];
             }
             if (path is null) return;
@@ -403,7 +405,7 @@ internal static class UiPlacements
         {
             _entries = [];
             _path = null;
-            _loaded = _dirty = _scheduled = false;
+            _loaded = _dirty = _scheduled = _unreadable = false;
         }
     }
 
@@ -413,8 +415,9 @@ internal static class UiPlacements
         Debounce = TimeSpan.FromSeconds(1);
     }
 
-    private static Dictionary<(string, bool, string), Entry> Read(string? path)
+    private static Dictionary<(string, bool, string), Entry> Read(string? path, out bool unreadable)
     {
+        unreadable = false;
         var entries = new Dictionary<(string, bool, string), Entry>();
         if (path is null) return entries;
         string text;
@@ -425,7 +428,9 @@ internal static class UiPlacements
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            UiEngine.Log(LogLevel.Warn, $"{path}: {e.Message} (no remembered placements this start)");
+            // writing it later would put this start's few placements over every other one the file holds
+            unreadable = true;
+            UiEngine.Log(LogLevel.Warn, $"{path}: {e.Message} (no remembered placements this start; the file is left as it is)");
             return entries;
         }
         // JsonDocument, not JsonNode: a key given twice (a hand-edited file) is read as the last one, where JsonObject throws

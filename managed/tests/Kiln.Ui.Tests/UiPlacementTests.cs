@@ -512,6 +512,44 @@ public sealed unsafe class UiPlacementTests : IDisposable
     }
 
     [Fact]
+    public void A_file_that_cannot_be_read_is_not_overwritten_this_start()
+    {
+        if (OperatingSystem.IsWindows()) return;  // the unreadable file is made with Unix permissions
+        const string json = """{"mods": {"betterspells": {"screens": {"Better Spells": {"x": 0.3, "y": 0.5, "width": 600, "height": 400}}}}}""";
+        Write(json);
+        File.SetUnixFileMode(PlacementFile, UnixFileMode.None);  // as a file another program holds locked
+        try
+        {
+            if (TryRead(PlacementFile)) return;  // a user who may read anything (root): no unreadable file to test with
+            var s = Screen(new UiScreenOptions { DimBackground = false, RememberPlacement = true });
+            s.Open();
+            FrameScreens();
+            _rect = (100, 200, 720, 520);
+            FrameScreens();
+            UiPlacements.Flush();
+            Assert.Contains(_backend.Logs, l => l.StartsWith("Warn", StringComparison.Ordinal) && l.Contains("ui-placement.json", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.SetUnixFileMode(PlacementFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        Assert.Equal(json, File.ReadAllText(PlacementFile));  // Better Spells' placement is still there
+    }
+
+    private static bool TryRead(string path)
+    {
+        try
+        {
+            File.ReadAllText(path);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    [Fact]
     public void A_mod_that_unloads_writes_its_placement_at_once()
     {
         // the player drags the screen and the game quits (the host unloads every mod) before the debounce runs out
