@@ -155,20 +155,10 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
             std::memcmp(previous.rows.data(),next.rows.data(),next.value.game_count*sizeof(SelectorRow))==0&&previous.value.ok==next.value.ok;
         next.value.game_serial=equal?previous.value.game_serial:++revision;
         next.step=before.client_steps;next.built=std::chrono::steady_clock::now();
-        if(equal)next.seen=previous.seen; // the same rows: what the backpack said of them stays
-        else if(previous.value.game_serial&&same(before,previous)) {
-            // New rows of the same player and world, as each arrow shot makes them: a row whose item had stock before and
-            // still has some, no more than before, and whose stack the backpack held then, keeps that answer, as a row of
-            // unchanged rows does. A shot only lowers the count; the build counts the same backpack graph the read walks, so
-            // no stack came in that the read has not seen, and the backpack is not walked again for it (GitHub issue 145).
-            // A count that rose is read again (a new stack the reader may not see stays the game's, issue 127), as is
-            // any other answer (not found, unreadable, unread).
-            for(uint32_t r=0;r<next.value.game_count;++r)if(next.rows[r].count)
-                for(uint32_t j=0;j<previous.value.game_count;++j)if(previous.rows[j].item==next.rows[r].item) {
-                    if(next.rows[r].count<=previous.rows[j].count&&previous.seen[j]==SEEN_HELD)next.seen[r]=SEEN_HELD;
-                    break;
-                }
-        }
+        // The same rows: what the backpack said of them stays. New rows are read again at their bind, also when a count
+        // only fell (an arrow shot): the stack the read found may have left while one the reader cannot see came in or
+        // stayed, and a held answer carried over would take that row's pick from the game (issue 127; GitHub issue 145).
+        if(equal)next.seen=previous.seen;
         for(uint32_t r=0;r<next.value.game_count;++r)next.value.game_rows[r]={next.rows[r].item,uint32_t(std::min<uint64_t>(next.rows[r].count,UINT32_MAX)),0,r};
         previous=next;
         const auto& p=frame.publication[i];
