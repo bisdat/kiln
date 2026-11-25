@@ -1,1 +1,11 @@
 #nullable enable
+Kiln.TestKit.HarnessGameTexts
+Kiln.TestKit.HarnessGameTexts.Add(string! language, uint locaId, string! text) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.AddItem(Kiln.ItemId item, Kiln.ItemTextTags tags) -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.HarnessGameTexts.Languages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessGameTexts.Reads.get -> int
+Kiln.TestKit.HarnessVoxelMaterials
+Kiln.TestKit.HarnessVoxelMaterials.Add(int cellId, string! name, Kiln.ItemId lootItem = default(Kiln.ItemId), int? exchangeRate = null, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? placingItems = null, string? hardness = null, int healthPoints = 0, System.Guid guid = default(System.Guid)) -> Kiln.TestKit.HarnessVoxelMaterials!
+Kiln.TestKit.HarnessVoxelMaterials.Reads.get -> int
+Kiln.TestKit.KilnHarness.GameTexts.get -> Kiln.TestKit.HarnessGameTexts!
+Kiln.TestKit.KilnHarness.VoxelMaterials.get -> Kiln.TestKit.HarnessVoxelMaterials!

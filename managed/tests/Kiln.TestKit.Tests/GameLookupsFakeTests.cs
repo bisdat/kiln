@@ -8,6 +8,10 @@ namespace Kiln.TestKit.Tests;
 
 public sealed class GameLookupsFakeTests
 {
+    private const string ServerReason =
+        "a dedicated server's game data has no texts (the game ships them with its client only); " +
+        "English from a Kiln catalog's loca section is the server's alternative (Texts.Get)";
+
     private static readonly ItemId Pick = new(0x0c0ffee1), Ore = new(0x0c0ffee2), Logs = new(722268629);  // Logs: "Wood Logs" in items.tsv
 
     private static KilnHarness Client()
@@ -71,7 +75,7 @@ public sealed class GameLookupsFakeTests
         kiln.VoxelMaterials.Add(194, "WoodRough", lootItem: Logs, exchangeRate: 5);
         var de = await Content.LoadTextsAsync("de-de");
         Assert.False(de.Available);
-        Assert.Equal(GameTextStore.ServerReason, de.Reason);                 // the reason a real server gives
+        Assert.Equal(ServerReason, de.Reason);                               // the reason a real server gives (GameTextStore's)
         Assert.Null(Items.Description(Ore, "de-de"));
         Assert.DoesNotContain("de-de", Content.TextLanguages);               // English at most, from a Kiln catalog on this machine
         Assert.Equal(0, kiln.GameTexts.Reads);
@@ -117,11 +121,61 @@ public sealed class GameLookupsFakeTests
         kiln.VoxelMaterials.Add(26, "Cell26", lootItem: fromBytes.LootItem, exchangeRate: 8, hardness: "VeryHard", healthPoints: 8);
         var fromKit = (await Content.LoadVoxelMaterialsAsync("en-us")).Get(26)!;
         Assert.Equal(Describe(fromBytes), Describe(fromKit with { Label = null, LabelSource = VoxelMaterialLabelSource.None }));
-        Assert.Equal(new ItemId(GameTextData.Fnv16(loot.ToByteArray())), fromKit.LootItem);
+        var h = 0x811c9dc5u;
+        foreach (var x in loot.ToByteArray()) h = (h ^ x) * 0x01000193u;
+        Assert.Equal(new ItemId(h), fromKit.LootItem);                       // a loot item is the FNV-1a of its GUID, as the game's item ids
     }
 
     private static string Describe(VoxelMaterial m) =>
         $"{m.CellId} {m.Kind} {m.Guid} {m.Name} {m.LootItem.Value} {m.ExchangeRate} [{string.Join(",", m.PlacingItems.Select(i => i.Value))}] {m.Hardness} {m.HealthPoints} {m.Label} {m.LabelSource}";
+
+    // ---- the examples of docs/kiln/services/content.md, as the page writes them -------------------------------------
+
+    private static async Task<CodexPage> Page(ItemId item, string? language)
+    {
+        var texts = await Content.LoadTextsAsync(language);              // read once per language, then from memory
+        if (!texts.Available)                                            // a server, a language the game does not ship
+            return new CodexPage(Items.DisplayName(item) ?? item.ToString(), "", texts.Reason, "");
+        if (Items.TextTags(item) is not { } tags)                        // a new item (kiln.content): its definition's texts
+            return new CodexPage(Items.DisplayName(item, language) ?? item.ToString(), "", Items.Description(item, language) ?? "", "");
+        return new CodexPage(
+            texts.GetPlain(tags.Name) ?? Items.DisplayName(item, language) ?? item.ToString(),
+            texts.GetPlain(tags.Caption) ?? "",
+            texts.Get(tags.Description) ?? "",                           // with the game's markup, for a rich-text widget
+            texts.GetPlain(tags.Lore) ?? "");
+    }
+
+    private sealed record CodexPage(string Name, string Caption, string Description, string Lore);
+
+    private static VoxelMaterialCatalog? materials;
+
+    private static string Describe(int cell)
+    {
+        if (materials is not { } c || c.Get(cell) is not { } m) return $"cell {cell}: not a game material";
+        var name = m.LabelSource == VoxelMaterialLabelSource.LootItem ? $"{m.Label} ({m.Name})" : m.Label ?? m.Name;
+        var gives = m.LootItem.Value == 0 ? "nothing (unbreakable)"
+            : $"1 {Items.DisplayName(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
+        return $"{name}: {m.Hardness}, {m.HealthPoints} HP, gives {gives}";
+    }
+
+    private static bool SameVein(int struck, int neighbour) => struck == neighbour && materials?.Get(struck) is { LootItem.Value: not 0 };
+
+    [Fact]
+    public async Task The_docs_examples_answer_on_kit_data()
+    {
+        using var kiln = Client();
+        Assert.Equal(new CodexPage("Copper Pickaxe", "", "Digs <b>ore</b>.", ""), await Page(Pick, "en-us"));
+        Assert.Equal(new CodexPage("Kupferspitzhacke", "", "Gräbt <b>Erz</b>.", ""), await Page(Pick, null));
+        Assert.Equal("the game ships no texts in \"ja-jp\" (it has en-us, de-de)", (await Page(Pick, "ja-jp")).Description);
+        var german = await Content.LoadTextsAsync("de-de");
+        Assert.Equal([20u], german.Where(t => t.Value.Contains("Kupfer", StringComparison.OrdinalIgnoreCase) && !t.Value.Contains("spitz")).Select(t => t.Key));
+        materials = await Content.LoadVoxelMaterialsAsync();
+        Assert.Equal("Kupfererz (Cell26): VeryHard, 8 HP, gives 1 Kupfererz per 8 cells", Describe(26));
+        Assert.Equal("cell 5: not a game material", Describe(5));
+        Assert.True(SameVein(26, 26));
+        Assert.False(SameVein(26, 37));
+        materials = null;
+    }
 
     [Fact]
     public void The_coverage_table_names_the_lookups()
