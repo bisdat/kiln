@@ -350,3 +350,68 @@ fn line_and_column() {
     assert_eq!(line_col(t, 3), (2, 1));
     assert_eq!(line_col(t, 6), (2, 3)); // after "cé" (é is 2 bytes)
 }
+
+#[test]
+fn registry_only_clients_guidance_tracks_the_edited_fields() {
+    fn check(name: &str, clients: &str, registry: &str, field: &str, want: Option<&str>) {
+        let dir = std::env::temp_dir().join(format!("kiln-lint-registry-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("content")).unwrap();
+        std::fs::write(dir.join("kiln.mod.json"), format!(r#"{{"id":"registry-test","name":"Test","version":"1.0.0","apiVersion":"0.2","side":"both","clients":"{clients}","license":"MIT"}}"#)).unwrap();
+        let value = if field == "unlock" { "\"always\"" } else { "1" };
+        std::fs::write(dir.join("content/a.json"), format!(r#"{{"format":1,"registry":{{"alter":[{{"registry":"{registry}","select":{{"id":"*"}},"field":"{field}","op":{value}}}]}}}}"#)).unwrap();
+        let r = lint_paths(&[dir.clone()], &LintOptions { no_catalog: true, ..Default::default() });
+        let ds: Vec<_> = r.diagnostics.iter().filter(|d| d.code == "KL213").collect();
+        if let Some(value) = want {
+            assert_eq!(ds.len(), 1, "{name}: {:?}", r.diagnostics);
+            assert!(ds[0].message.contains(&format!("\"clients\": \"{value}\"")), "{name}: {:?}", ds);
+        } else { assert!(ds.is_empty(), "{name}: {ds:?}"); }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    check("loot", "kiln", "loot", "stack.max", Some("none"));
+    check("drops", "kiln", "drops", "entries[2].chance", Some("none"));
+    check("item", "none", "items", "maxStack", Some("kiln"));
+    check("recipe", "none", "recipes", "duration", Some("kiln"));
+    check("balance", "kiln", "balance", "levelCap", Some("mod"));
+    check("indexed-balance", "kiln", "balance", "xpPerLevel[2]", Some("mod"));
+    check("server-item", "kiln", "items", "staminaCost", Some("none"));
+    check("client-recipe", "kiln", "recipes", "unlock", Some("mod"));
+    check("unproven-item", "kiln", "items", "comfort", None);
+    check("good-loot", "none", "loot", "stack.max", None);
+    check("good-item", "kiln", "items", "maxStack", None);
+    check("good-balance", "mod", "balance", "levelCap", None);
+    check("unknown", "kiln", "unknown", "x", None);
+}
+
+#[test]
+fn registry_clients_does_not_guess_for_code_mixed_or_raw_packs() {
+    use serde_json::json;
+    let loot = json!({"registry":"loot","select":{"id":"*"},"field":"stack.max","op":2});
+    for (name, code, mixed, edits, expected) in [
+        ("code", true, false, vec![loot.clone()], None),
+        ("mixed", false, true, vec![loot.clone()], None),
+        ("raw", false, false, vec![json!({"registry":"balance","select":{"id":"game:balance"},"raw":{"unknown":1}})], None),
+        ("strictest", false, false, vec![loot.clone(),json!({"registry":"balance","select":{"id":"game:balance"},"field":"levelCap","op":60})], Some("mod")),
+        ("wrong-side", false, false, vec![json!({"registry":"balance","select":{"id":"game:balance"},"field":"levelCap","op":60})], Some("mod")),
+        ("loot-remove", false, false, vec![json!({"registry":"loot","select":{"id":"*"},"entry":"remove"})], Some("none")),
+        ("unknown-override", false, false, vec![json!({"registry":"items","entry":"add","id":"registry-test:token","like":"game:x","fields":{"comfort":2}})], None),
+    ] {
+        let dir = std::env::temp_dir().join(format!("kiln-lint-registry-caution-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("content")).unwrap();
+        let mut manifest = json!({"id":"registry-test","name":"Test","version":"1.0.0","apiVersion":"0.2","side":"both","clients":"kiln","license":"MIT"});
+        if name == "wrong-side" { manifest["side"] = json!("server"); manifest["clients"] = json!("mod"); }
+        if code { manifest["entryAssembly"] = json!("Test.dll"); std::fs::write(dir.join("Test.dll"), []).unwrap(); }
+        std::fs::write(dir.join("kiln.mod.json"),manifest.to_string()).unwrap();
+        let mut content = json!({"format":1,"registry":{"alter":edits}});
+        if mixed { content["items"] = json!({"*":{"maxStackSize":20}}); }
+        std::fs::write(dir.join("content/a.json"),content.to_string()).unwrap();
+        let r = lint_paths(&[dir.clone()], &LintOptions { no_catalog: true, ..Default::default() });
+        let found: Vec<_> = r.diagnostics.iter().filter(|d| d.code == "KL213").collect();
+        if let Some(value) = expected {
+            assert_eq!(found.len(),1,"{name}: {found:?}");
+            assert!(found[0].message.contains(&format!("\"clients\": \"{value}\"")),"{name}: {found:?}");
+        } else { assert!(found.is_empty(),"{name}: {found:?}"); }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
