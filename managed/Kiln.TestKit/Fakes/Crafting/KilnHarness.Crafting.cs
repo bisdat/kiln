@@ -18,7 +18,7 @@ public sealed partial class KilnHarness
 public sealed record FakeCraftSourceRegistration(ulong Owner, EntityId Player, EntityId Container, CraftSourceOrder Order,
     CraftSourceFilter Filter, IReadOnlyList<ItemId> Items)
 {
-    /// <summary>Registered with <see cref="CraftSourceOptions.Locks"/>: locks may count and pay from it. Since 0.2.0-dev.31.12.</summary>
+    /// <summary>Registered with <see cref="CraftSourceOptions.Locks"/>: locks may count and pay from it. Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public bool Locks { get; init; }
 }
 
@@ -44,7 +44,7 @@ public sealed class HarnessCrafting
 
     /// <summary>The counts a lock may use: the links registered with <see cref="CraftSourceOptions.Locks"/> only, with the
     /// same filters, player-session generation and inventory permission (not the bag: the game counts it first). No lock
-    /// check, interaction payment or client snapshot is simulated. Since 0.2.0-dev.31.12.</summary>
+    /// check, interaction payment or client snapshot is simulated. Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public IReadOnlyDictionary<ItemId, long> LockStock(EntityId player) => _harness.Run(() =>
         (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value, locks: true)
             .ToDictionary(x => new ItemId(x.Key), x => x.Value));

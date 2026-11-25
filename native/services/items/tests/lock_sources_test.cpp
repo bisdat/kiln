@@ -6,8 +6,12 @@
 // real-game check.
 #include "../stations.cpp"
 #include <cstdarg>
+#include <chrono>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 namespace fixture {
 std::map<uint32_t,std::map<uint32_t,uint32_t>> inventory;      // what kiln.items' reads and the transaction show
 std::map<uint32_t,std::map<uint32_t,uint32_t>> tx_view;        // the transaction's view when it differs
@@ -42,8 +46,10 @@ bool read_inventory(uintptr_t,void*,KilnEntity e,ReadOut* out,unsigned long*) {
 }
 uintptr_t items_server_world() { return 1; }
 std::vector<std::string> logs;
+std::mutex logs_mu;  // a hosting client's two worlds log from two threads (the install race below)
 void items_log(int,const char* fmt,...) {
-    char b[1024]; va_list a; va_start(a,fmt); std::vsnprintf(b,sizeof b,fmt,a); va_end(a); logs.emplace_back(b);
+    char b[1024]; va_list a; va_start(a,fmt); std::vsnprintf(b,sizeof b,fmt,a); va_end(a);
+    std::lock_guard lock(logs_mu); logs.emplace_back(b);
 }
 uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
@@ -85,13 +91,39 @@ KilnResult KILN_CALL session(KilnSessionInfo* info) {info->state=KILN_SESSION_DE
 uint8_t g_storage[16] = {};
 void* __fastcall job_storage(void*) { g_storage[8] = fixture::world_kind; return g_storage; }
 uint32_t* current_entity(void*, uint32_t* out) { *out = fixture::current; return out; }
+// kiln.hooks and kiln.caps stand-ins: mid2 counts its links per target (the first link at the lock check's call site
+// can let another thread in while it is going in, as a hosting client's client world may), code_state answers the
+// file's bytes, report records the capability rows lowered
+std::mutex mid2_mu;
+std::map<uintptr_t,int> mid2_links;
+std::function<void(uintptr_t)> mid2_during;
+KilnResult KILN_CALL mid2(KilnOwner,uintptr_t target,const KilnHookOrder*,KilnMidFn,void*,KilnHandle* h) {
+    { std::lock_guard lock(mid2_mu); ++mid2_links[target]; *h = 100 + mid2_links.size(); }
+    if (mid2_during) mid2_during(target);
+    return KILN_OK;
+}
+KilnResult KILN_CALL revoke(KilnHandle) { return KILN_OK; }
+KilnResult KILN_CALL code_state(uintptr_t,size_t,uint32_t* state,uint64_t* generation) { *state=KILN_CODE_ORIGINAL; *generation=0; return KILN_OK; }
+KilnHooksApi hooks = [] { KilnHooksApi t{}; t.header = {sizeof t, KILN_HOOKS_VERSION}; t.mid2 = &mid2; t.revoke = &revoke; t.code_state = &code_state; return t; }();
+std::map<std::string,uint32_t> lowered;
+KilnResult KILN_CALL report(KilnOwner,KilnStr feature,uint32_t,uint32_t reason,KilnStr) {
+    lowered[std::string(feature.ptr, feature.len)] = reason;
+    return KILN_OK;
+}
+KilnCapsApi caps = [] { KilnCapsApi t{}; t.header = {sizeof t, KILN_CAPS_VERSION}; t.report = &report; return t; }();
+const void* KILN_CALL service(KilnStr name,uint32_t) {
+    const std::string s(name.ptr, name.len);
+    return s == KILN_HOOKS_SERVICE ? static_cast<const void*>(&hooks) : s == KILN_CAPS_SERVICE ? static_cast<const void*>(&caps) : nullptr;
+}
+uint32_t KILN_CALL side() { return KILN_SIDE_CLIENT; }  // a hosting client: its server world and its client world
 }
 int main() {
     using namespace kitems;
     int checks=0,failed=0;
 #define CHECK(x) do {++checks;if(!(x)){++failed;std::printf("FAIL %d %s\n",__LINE__,#x);}}while(0)
     auto logged=[&](const char* s) { for(const auto& l:logs) if(l.find(s)!=std::string::npos) return true; return false; };
-    KilnApi api{}; api.session=&session;api.on_tick_thread=&tick_thread;api.singleton=&singleton; g_api=&api;
+    KilnApi api{}; api.size=sizeof api;api.session=&session;api.on_tick_thread=&tick_thread;api.singleton=&singleton;
+    api.service=&service;api.side=&side; g_api=&api;
     G.read=G.craft_ok=G.registered_ok=G.outputs_ok=true;G.pay=&pay;
     E.get_component=&component;E.job_storage=&job_storage;H_FACTORY=99;
     g_lock_feat=true;g_lock_current=&current_entity;
@@ -247,6 +279,44 @@ int main() {
     {
         uint64_t held=0;bool opted=false;
         CHECK(!lock_cached(PLAYER,PICK,&held,&opted));
+    }
+
+    // ---- a hook that faults at run time: the feature stands down and its capability row says faulted (the tick
+    // thread lowers it: a hook runs on a game worker thread), so the server stops telling clients it counts links ----
+    {
+        lowered.clear();g_lock_off=false;
+        KilnRegisters r{};r.rbp=reinterpret_cast<uintptr_t>(frame)+0x100;r.rsp=reinterpret_cast<uintptr_t>(stack);
+        r.r14=0x10;  // an unreadable InteractionLock
+        uint8_t* out=frame+0x100-0x68;std::memset(out,0,12);
+        hk_lock_eval(r);
+        CHECK(g_lock_off.load() && logged("the lock check's hook faulted"));
+        g_registered.add(10,PLAYER,EARLY,false,true,{},0,true);
+        lock_server_pre(400);
+        CHECK(lowered.count("items.lock_sources") && lowered["items.lock_sources"]==KILN_CAP_REASON_FAULTED);
+        lowered.clear();lock_server_pre(401);
+        CHECK(lowered.empty());  // once
+        g_lock_off=false;g_registered.clear();
+    }
+    // ---- a hosting client: its server world (the tick thread) and its client world (the main thread) both put the
+    // shared lock-check hook in on demand; one link goes in, whichever world gets there first ----
+    {
+        g_lock={0x140b0a97,0x140a536e,0x1402bc483,0x14093a2a0,0x1401b0d60};
+        g_lock_eval_on=g_lock_paid_on=g_lock_ui_on=false;
+        g_registered.add(10,PLAYER,EARLY,false,true,{},0,true);
+        KilnStationStack on[1]={{PICK,1}};
+        CHECK(t_set_lock_stock(1,on,1)==KILN_OK);
+        std::thread client_world;
+        mid2_during=[&](uintptr_t target) {
+            if (target!=g_lock.count_ret || client_world.joinable()) return;
+            client_world=std::thread([] { lock_client_pre(); });  // the client world's Pre, while this link goes in
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        };
+        lock_server_pre(500);
+        if (client_world.joinable()) client_world.join();
+        mid2_during=nullptr;
+        CHECK(mid2_links[g_lock.count_ret]==1 && mid2_links[g_lock.paid]==1 && mid2_links[g_lock.ui_ret]==1);
+        CHECK(g_lock_eval_on && g_lock_paid_on && g_lock_ui_on);
+        t_set_lock_stock(0,nullptr,0);g_registered.clear();
     }
     std::printf("lock sources: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }

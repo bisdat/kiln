@@ -139,6 +139,62 @@ public sealed class LockStockTests
     }
 
     [Fact]
+    public void A_mods_join_handler_that_links_a_chest_keeps_the_new_players_lock_session()
+    {
+        using var h = new KilnHarness();
+        LockStock.ResetForTests();
+        try
+        {
+            var sent = new List<(EntityId Player, LockStockRows Rows)>();
+            LockStock.SendHook = (p, m) => { sent.Add((p, m)); return true; };
+            var pick = h.Items.AddItem("lockpick", 20);
+            var chest = h.Entities.Create(); h.Items.AddContainer(chest).Put(pick, 2);
+            // a first lock-opted link: Kiln's own join and leave handlers are in
+            var first = h.Players.Join("First", rights: PlayerPermissions.AccessInventories);
+            h.Step();
+            using var firstLink = h.Run(() => Crafting.AddSource(first.Entity, chest, new CraftSourceOptions { Locks = true }));
+            // a mod (Streamlined Logistics style) links its chest for each player who joins, in a handler that runs
+            // before Kiln's own one
+            var links = new List<CraftSourceHandle>();
+            using var sub = h.Run(() => Events.On<PlayerJoinedEvent>(
+                e => links.Add(Crafting.AddSource(e.Player.Entity, chest, new CraftSourceOptions { Locks = true })), EventPriority.High));
+            var second = h.Players.Join("Second", rights: PlayerPermissions.AccessInventories);
+            h.Step(); h.Step();
+            Assert.Single(links);
+            Assert.Equal((true, 1), (LockStock.SessionOf(second.Entity).Open, LockStock.SessionOf(second.Entity).Links));
+            h.Step();
+            Assert.Contains(sent, s => s.Player == second.Entity && s.Rows.Supported);  // the new player's client is told
+            foreach (var l in links) l.Dispose();
+        }
+        finally { LockStock.ResetForTests(); }
+    }
+
+    [Fact]
+    public void An_earlier_logins_handle_disposed_late_does_not_end_the_new_logins_session()
+    {
+        using var h = new KilnHarness();
+        LockStock.ResetForTests();
+        try
+        {
+            var sent = new List<(EntityId Player, LockStockRows Rows)>();
+            LockStock.SendHook = (p, m) => { sent.Add((p, m)); return true; };
+            var player = h.Players.Join("Picker", rights: PlayerPermissions.AccessInventories);
+            h.Step();
+            var chest = h.Entities.Create(); h.Items.AddContainer(chest);
+            var old = h.Run(() => Crafting.AddSource(player.Entity, chest, new CraftSourceOptions { Locks = true }));
+            LockStock.Gone(player.Entity);  // the player left: that login's session ends
+            using var now = h.Run(() => Crafting.AddSource(player.Entity, chest, new CraftSourceOptions { Locks = true }));
+            Assert.Equal((true, 1), (LockStock.SessionOf(player.Entity).Open, LockStock.SessionOf(player.Entity).Links));
+            old.Dispose();  // the mod cleans up the earlier login's handle after linking the new one
+            Assert.Equal((true, 1), (LockStock.SessionOf(player.Entity).Open, LockStock.SessionOf(player.Entity).Links));
+            sent.Clear();
+            h.Run(() => LockStock.Pump(1000));
+            Assert.True(Assert.Single(sent).Rows.Supported);  // still on: not "unsupported"
+        }
+        finally { LockStock.ResetForTests(); }
+    }
+
+    [Fact]
     public void The_client_applies_the_servers_rows_and_asks_about_the_items_its_checks_met()
     {
         LockStock.ResetForTests();

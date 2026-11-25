@@ -33,9 +33,10 @@ public sealed class CraftSourceOptions
     /// also counts this container, through <see cref="Filter"/> and <see cref="Items"/>, and a lock that uses the item
     /// up takes it from here after the player's bag, in link order, in the game's own all-or-nothing interaction
     /// transaction. A lock that only needs the item to be held takes nothing. Needs capability
-    /// <see cref="Crafting.LockSourcesCapability"/> on the server or host, and a Kiln client for the player: a vanilla
-    /// client refuses such a lock on its own. Without the capability the link still serves crafting. Since
-    /// 0.2.0-dev.31.12 (mod API 0.2.21).</summary>
+    /// <see cref="Crafting.LockSourcesCapability"/> on the server or host: the server's own lock check decides every
+    /// player's press, so the lock opens for a vanilla client too, but only a Kiln client's locked prompt and predicted
+    /// press count the link (a vanilla client still shows the lock locked and may first play the failed attempt).
+    /// Without the capability the link still serves crafting. Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public bool Locks { get; init; }
 }
 
@@ -47,11 +48,12 @@ public sealed class CraftSourceHandle : IDisposable
     private readonly ulong _owner;
     private readonly ModContext? _mod;
     private readonly bool _locks;
+    private readonly object? _lockSession;  // the lock session this handle counts in (GitHub #147)
     internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod, bool locks = false)
     {
         _owner = owner; _handle = unchecked((long)handle); Player = player; Container = container; _mod = mod; _locks = locks;
         if (mod is not null) mod.Retiring += Dispose;
-        if (locks) LockStock.Track(player);
+        if (locks) _lockSession = LockStock.Track(player);
     }
     /// <summary>The only player this registration can supply.</summary>
     public EntityId Player { get; }
@@ -69,7 +71,7 @@ public sealed class CraftSourceHandle : IDisposable
         finally
         {
             if (_mod is not null) _mod.Retiring -= Dispose;
-            if (_locks) LockStock.Untrack(Player);
+            if (_locks) LockStock.Untrack(Player, _lockSession);
         }
     }
 }
@@ -84,7 +86,7 @@ public static class Crafting
     /// <summary>Locks count and pay their required item from links registered with <see cref="CraftSourceOptions.Locks"/>:
     /// on a server or host its lock check and lock payment, on a Kiln client its lock check and locked prompt (from the
     /// server's snapshot). Off, or faulted, when a symbol, a hook or the game's code it reads is missing or patched by
-    /// another module (kiln.log names it). Since 0.2.0-dev.31.12 (mod API 0.2.21).</summary>
+    /// another module (kiln.log names it). Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public const string LockSourcesCapability = "items.lock_sources";
 
     /// <summary>Registers a container for this player, in any base or none. The mod decides which containers the player
@@ -93,7 +95,8 @@ public static class Crafting
     /// are refused; production stations lend their outputs through <see cref="Stations.SetOutputSource"/>. Sources pay
     /// only a shortfall after the bag and crafting base's stock, in one all-or-nothing recipe transaction. Equal-order
     /// sources use registration order; each container is counted once per item. A vanilla client keeps its own counts.
-    /// Since 0.2.0-dev.31.12 <see cref="CraftSourceOptions.Locks"/> lets the same link supply a lock's required item.</summary>
+    /// Since 0.2.0-dev.31.12, mod API 0.2.21, <see cref="CraftSourceOptions.Locks"/> lets the same link supply a lock's
+    /// required item.</summary>
     /// <returns>A session-only handle. Dispose or unload the registering mod to remove it; re-register after restart.</returns>
     /// <exception cref="ArgumentException">Invalid player, non-container, production station, or zero item id.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Unknown option or more than 65536 filter items.</exception>

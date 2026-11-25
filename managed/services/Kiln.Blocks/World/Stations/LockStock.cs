@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // GitHub #147, since 0.2.0-dev.31.12: locks (the game's InteractionLock with a required item: a lockpick, a key) count and
-// pay that item from the player's links registered with CraftSourceOptions.Locks. The game's client refuses a lock its
-// bag cannot open on its own, before the server ever hears of the press, so a Kiln client needs the server's counts:
+// pay that item from the player's links registered with CraftSourceOptions.Locks. The server world runs the press from the
+// player's input and its own lock check decides it (docs/re/locks.md section 8); the client's prompt and predicted press
+// count only its bag, so a Kiln client gets the server's counts to show and predict the same:
 //  - the server sends a player with a lock-opted link, on the channel kiln:craftstock (required: false), whether it
 //    supports locks from links and, for the lock items that player's client asked about, what the links hold (the bag
 //    not included: the client counts its own bag), again whenever a count changes;
@@ -9,7 +10,8 @@
 //    an item with no row; the client asks the server about those (at most 16, again after 5 s while unanswered);
 //  - not authority: the server's own lock check counts the links itself, and its payment rechecks every link, the bag
 //    first, inside the game's interaction transaction (native, docs/re/locks.md).
-// A vanilla client never asks and is never sent anything; it refuses such a lock as the game does.
+// A vanilla client never asks and is never sent anything: the server still opens such a lock for it and pays from the
+// links, while its prompt shows the lock locked and its own prediction may first play the failed attempt.
 // docs/kiln/services/stations.md, "Locks from linked sources".
 using System.Collections.Concurrent;
 using System.Text;
@@ -124,27 +126,31 @@ internal static class LockStock
 
     // ================================================================ server ====
 
-    /// <summary>A lock-opted link was registered for the player (tick thread).</summary>
-    internal static void Track(EntityId player)
+    /// <summary>A lock-opted link was registered for the player (tick thread). Returns the session it counts in: the
+    /// handle gives it back to <see cref="Untrack"/>, so a handle of an earlier login never ends a later login's session.</summary>
+    internal static object? Track(EntityId player)
     {
-        if (player.IsNone) return;
+        if (player.IsNone) return null;
+        Session s;
         lock (Gate)
         {
-            if (!Sessions.TryGetValue(player.Value, out var s)) Sessions[player.Value] = s = new Session();
+            if (!Sessions.TryGetValue(player.Value, out var found)) Sessions[player.Value] = found = new Session();
+            s = found;
             s.Links++;
             s.Due = true;
             _tick ??= ServiceTick.Add("crafting lock sources", static (in TickInfo t) => Pump(t.Step));
         }
         WatchPlayers();
+        return s;
     }
 
     /// <summary>A lock-opted link was disposed (any thread). After the last one the server's next tick sends the player
-    /// "unsupported" and ends the session.</summary>
-    internal static void Untrack(EntityId player)
+    /// "unsupported" and ends the session. A handle of a session that already ended (the player left) changes nothing.</summary>
+    internal static void Untrack(EntityId player, object? session)
     {
         lock (Gate)
         {
-            if (!Sessions.TryGetValue(player.Value, out var s) || s.Links == 0) return;
+            if (!Sessions.TryGetValue(player.Value, out var s) || !ReferenceEquals(s, session) || s.Links == 0) return;
             if (--s.Links == 0) s.Due = true;
         }
     }
@@ -168,7 +174,7 @@ internal static class LockStock
         try
         {
             Events.On<PlayerLeftEvent>(static e => Gone(e.Player.Entity));
-            Events.On<PlayerJoinedEvent>(static e => Gone(e.Player.Entity));
+            Events.On<PlayerJoinedEvent>(static e => Joined(e.Player.Entity));
         }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or TypeInitializationException or FileNotFoundException)
         {
@@ -180,11 +186,25 @@ internal static class LockStock
         }
     }
 
-    /// <summary>A player left, or someone joined into the slot: that entity's links are another login's (the native
-    /// registry no longer lets them pay), and its session goes.</summary>
+    /// <summary>A player left: that entity's links are another login's (the native registry no longer lets them pay),
+    /// and its session goes; the old login's handles no longer count in any session.</summary>
     internal static void Gone(EntityId player)
     {
         lock (Gate) Sessions.Remove(player.Value);
+    }
+
+    /// <summary>Someone joined into the slot. Its session is kept: a mod's own join handler may already have linked a
+    /// chest for the new login (handlers run in priority order, Kiln's is not first). The new client has asked nothing
+    /// and been sent nothing: its asks start over and the next tick sends it the current message.</summary>
+    internal static void Joined(EntityId player)
+    {
+        lock (Gate)
+        {
+            if (!Sessions.TryGetValue(player.Value, out var s)) return;
+            s.Asked.Clear();
+            s.Sent = null;
+            s.Due = true;
+        }
     }
 
     /// <summary>Asks (tick thread): added to the player's session (oldest dropped past <see cref="MaxRows"/>).</summary>
