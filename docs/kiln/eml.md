@@ -176,8 +176,10 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   whole block rows on the PC's threads (at most 16), with the same bytes as EML's serial encode (each block depends only
   on its own pixels). Texture-heavy mods spend nearly all their time there: EMF Beastmaster's three packs 397 of 401 s
   of Lua in BC7 on one core, about 78 s for the whole run on 16 threads (section 5). The thread that runs the Lua takes
-  strips too; a helper thread the system refuses is not waited for (the threads that started encode its strips, the
-  same bytes), so a refused thread never fails a mod. `KILN_EML_ENCODE_THREADS=1` in the game's environment gives EML's
+  strips too and never waits for a helper thread to start (one the system refuses, or one that cannot start yet because
+  another thread holds the Windows loader lock, leaves its strips to the threads that run, the same bytes), so a helper
+  never fails a mod or holds up the start. The helpers work on their own copy of the texture's pixels: about twice the
+  serial encode's memory for the texture being encoded. `KILN_EML_ENCODE_THREADS=1` in the game's environment gives EML's
   serial encode; another whole number sets the count (at most 64; `0` or anything else is ignored). Kiln mode
   (kiln.launch backend `kiln`) stays serial, since its pass can run while a package DLL holds the Windows loader lock.
 - **Publication:** the writer builds privately in the game filesystem, flushes every output, publishes the vanilla

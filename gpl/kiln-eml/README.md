@@ -545,9 +545,14 @@ Each is marked `kiln-eml:` in the source.
     through the production runner and the inspector, and the read-back as the second layer).
 41. `kfc-content` `image/encode.rs` (`encode_with_threads`, `encode_threads`, `set_encode_threads`) and
     `kiln-eml/src/runner.rs` (`encode_threads`, `EncodeThreads`) (0.2.0-dev.31.13): a BC1 to BC7 texture is encoded in
-    strips of whole block rows, each into its own rows of the output by whichever thread takes it next (the calling
-    thread and up to count - 1 helpers; a helper the OS refuses is not waited for, so the threads that started encode
-    its strips, never a panic). block_compression makes a new compressor for every block, so the bytes are the serial
+    strips of whole block rows, each by whichever thread takes it next (the calling thread and up to count - 1 helpers),
+    the strips then put into the output in order. The calling thread never waits for a helper to start (one created
+    while another thread holds the Windows loader lock runs only once it is free): it takes strips from the same counter
+    and waits only for strips a helper has taken; a helper that has not started, or that the OS refuses, leaves its
+    strips to the threads that run, never a panic, and while one has not started no new helper is made. So the helpers
+    own their input (a copy of the texture's RGBA8 pixels, freed when its last strip is done) and each strip has its own
+    buffer: about twice the serial encode's memory for the texture being encoded (review of 31.13; the test
+    `a_helper_that_has_not_started_yet_is_not_waited_for` in `encode.rs`). block_compression makes a new compressor for every block, so the bytes are the serial
     encode's (`tests/parallel_encode.rs`: every BC format, uneven strips, more threads than rows, whole mip chains, very
     wide and very tall textures, sizes that are not whole blocks; the refused-thread test in `encode.rs`). `encode`
     stays EML's serial encode until the host sets a count; EML's run (`runner::run` outside kiln mode, which in the
