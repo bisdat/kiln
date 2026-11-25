@@ -717,6 +717,29 @@ internal struct DiskTime
     public int Files, Unforced, Checks, Reads, Deletes, Lists, Folders;
     public double CreateMs, WriteMs, FlushMs, CloseMs, RenameMs, CheckMs, ReadMs, DeleteMs, ListMs, FolderMs, CpuMs;
 
+    /// <summary>The slowest single file operation (since 0.2.0-dev.31.5): one player's lines said "9152.5 ms renaming" for 3
+    /// files and not which rename waited. Over <see cref="SlowOpMs"/> the line names it, after the items (in seconds, so the
+    /// items still add up).</summary>
+    public double WorstMs;
+    public string? WorstWhat;
+
+    /// <summary>A single file operation slower than this is named in the line.</summary>
+    internal static double SlowOpMs = 250;
+
+    /// <summary>One operation's time: kept when it is the slowest so far. A blob is named by the start of its hash, a
+    /// manifest or a save file by its file name (never a folder).</summary>
+    public void Note(string what, string path, double ms)
+    {
+        if (ms <= WorstMs) return;
+        WorstMs = ms;
+        var name = Path.GetFileName(path);
+        var dot = name.IndexOf(".tmp-", StringComparison.Ordinal);
+        if (dot > 0) name = name[..dot];
+        WorstWhat = string.Equals(Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(path))), "blobs", StringComparison.Ordinal)
+            ? $"{what} blob {Path.GetFileNameWithoutExtension(name)[..Math.Min(12, Path.GetFileNameWithoutExtension(name).Length)]}"
+            : $"{what} {name}";
+    }
+
     public readonly double Itemised =>
         CreateMs + WriteMs + FlushMs + CloseMs + RenameMs + CheckMs + ReadMs + DeleteMs + ListMs + FolderMs + CpuMs;
 
@@ -736,6 +759,7 @@ internal struct DiskTime
         if (Lists > 0) sb.Append($"; {Lists} folder{S(Lists)} listed in {ListMs:F1} ms");
         if (Folders > 0) sb.Append($"; {Folders} folder{S(Folders)} made in {FolderMs:F1} ms");
         sb.Append($"; {CpuMs:F1} ms hashing and JSON; {Math.Max(0, total - Itemised):F1} ms else");
+        if (WorstWhat != null && WorstMs > SlowOpMs) sb.Append($"; slowest: {WorstWhat}, {WorstMs / 1000:F2} s");
         return sb.ToString();
     }
 
@@ -747,8 +771,10 @@ internal struct DiskTime
         var t = Now();
         WorldStore.Io("check");
         var r = File.Exists(path);
-        CheckMs += Since(t);
+        var ms = Since(t);
+        CheckMs += ms;
         Checks++;
+        Note("checking", path, ms);
         return r;
     }
 
@@ -762,8 +788,10 @@ internal struct DiskTime
         }
         finally
         {
-            ReadMs += Since(t);
+            var ms = Since(t);
+            ReadMs += ms;
             Reads++;
+            Note("reading", path, ms);
         }
     }
 
@@ -771,8 +799,10 @@ internal struct DiskTime
     {
         var t = Now();
         var h = WorldStore.ReadHeader(file);
-        ReadMs += Since(t);
+        var ms = Since(t);
+        ReadMs += ms;
         Reads++;
+        Note("reading", file, ms);
         return h;
     }
 
@@ -786,8 +816,10 @@ internal struct DiskTime
         }
         finally
         {
-            DeleteMs += Since(t);
+            var ms = Since(t);
+            DeleteMs += ms;
             Deletes++;
+            Note("deleting", path, ms);
         }
     }
 
@@ -811,7 +843,9 @@ internal struct DiskTime
         var t = Now();
         WorldStore.Io("folder");
         Directory.CreateDirectory(path);
-        FolderMs += Since(t);
+        var ms = Since(t);
+        FolderMs += ms;
         Folders++;
+        Note("making the folder", path, ms);
     }
 }
