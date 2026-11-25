@@ -585,11 +585,58 @@ writer's file work (its pool task `kiln.saves/SaveWriter`), item by item: creati
 file written, then checks for existing files, reads (a pending manifest, a world file header), deletes, folder
 listings and folders made, the CPU part (hashing and JSON), and `else`, what none of them covers. A confirmation that
 prunes adds `; pruning N ms: ...` with the same items. Without the stage barrier, or when the pool cannot run the writer, the line says
-`tick thread N ms, all of it (...)` (with the reason) and `files N ms` instead of `writer`: the tick thread wrote them. kiln.saves logs, from the Save2Thread, how
+`tick thread N ms, all of it (...)` (with the reason) and `files N ms` instead of `writer`: the tick thread wrote them.
+Since 0.2.0-dev.31.5 a line whose slowest single file operation took over 250 ms names it after the items, in seconds
+(`; slowest: renaming 0000000120.pending.json, 20.00 s`; a blob by the start of its hash), so a report says which file
+waits. kiln.saves logs, from the Save2Thread, how
 long a world write waited for the writer (`saves: the world write of revision R waited N ms for Kiln.Saves' writer`,
-at Info over 250 ms), warns when it went ahead without it, and says when it saw the shutdown begin (`saves: shutdown
-begins (...)`, with how long before the line reached it the game logged it). A load or a backup that cannot read the
+at Info over 250 ms), and says when it saw the shutdown begin (`saves: shutdown
+begins (...)`, with how long before the line reached it the game logged it). A world write that went ahead without the
+writer is a delay, not an error (since 0.2.0-dev.31.5, see "A slow writer"): the first of a world session is a warning
+in full, the writer's first catch-up after it an info line (`saves: Kiln.Saves' writer caught up: staging N is on disk,
+N s after the world write that waited for it went ahead`), and later ones are summed up at most every 5 minutes
+(`saves: Kiln.Saves' writer is still slow: in the last N min ...`: how many went ahead, after waiting or without, the
+longest wait, how often and at worst how late it caught up), and once more when the world stops; one cut short by the
+shutdown is a warning each time. A load or a backup that cannot read the
 folder within 10 s says so (`the writer still has N write(s) to do`); a deferred load says when it was read after all.
+
+### A slow writer (0.2.0-dev.31.5)
+
+One player's Windows PC took 6 to 25 s to rename the files of nearly every snapshot staging, for hours (a writer line
+like `3 files written: 0.6 ms creating, 0.3 ms writing, 127.6 ms forcing to disk, 2.0 ms closing, 9152.5 ms renaming`).
+Over two hours, 239 snapshot stagings: renames 20.1 s
+median, and 138 of them between 20.0 and 22 s with none of those under 20.004 s, the shape of something that waits 20 s
+and then gives up; creating, writing and forcing to disk took milliseconds, the writer's pool task used about 30 ms of
+CPU in 40 s of wall time a minute, and the confirmations' renames (about 20 s later) took 0.5 ms. The save request's
+staging, a few hundred ms before the snapshot staging and with the same kinds of files, renamed in 1.6 ms (median). The
+writer caught up every time, one staging behind, never more; the world files were fine.
+
+What the writer does: `File.Move(tmp, path, overwrite: true)`, which on Windows is `MoveFileExW` with
+`MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED` (no `MOVEFILE_WRITE_THROUGH`), after the temp file was forced to disk
+(`FlushFileBuffers`) and closed; .NET checks that the source exists first. Measured on a Windows 11 PC with Windows
+Defender on (real-time, cloud protection, defaults; NVMe), 40 stagings of two blobs and a manifest per variant: the
+rename 0.26 ms median (0.9 ms the slowest), over an existing file 0.29 ms, with `MOVEFILE_WRITE_THROUGH` 0.36 ms,
+renamed through the still-open handle (`SetFileInformationByHandle`, `FileRenameInfo` and `FileRenameInfoEx`) 0.21 ms,
+and no rename at all saves those 0.26 ms; the same with 24 MB world-file writes and copies going on next to it. Forcing to
+disk was the largest part (1.6 ms a file). So neither the flags nor replacing nor the rename itself explains 20 s:
+something on that PC holds renames in the data folder (an antivirus or other file-system filter: backup or ransomware
+protection, a sync or indexing tool); Kiln cannot tell which. The write path is unchanged: every variant keeps the same
+crash safety, none was measurably faster where renames are healthy, and which one would avoid that PC's 20 s cannot be
+known without that PC.
+
+What changed is what it means: a world write that goes ahead of a writer that is only slow is a delay, not an error
+(above), and player storage says the same (`player-storage: world generation N was written before its storage reached
+the disk ...` once per world session, at Warn, its first catch-up at Info, a summary at most every 5 minutes and when
+the world closes). Durability
+is unchanged: a crash in such a window loads the newest usable older generation, the pairs stay in memory and the next
+save retries, and the carried copy waits for a save whose staging is on disk in time, as before; `saves.player_storage`
+and `Saves.PlayerStoragePersistenceFailure` no longer report a fault for it. A staging that cannot be written is still
+an error, and so is one still not on disk 2 minutes after its world write (however often the world saves meanwhile).
+
+What a player can try (only on that kind of PC, and only if they want to: it lowers protection): find out which security,
+backup or sync tool watches the game's folder, and as a test exclude only `<game>\kiln\data\worlds` (Kiln's mod data:
+JSON, no programs) in it, then compare the `renaming` times of `staged mod data generation` in kiln.log. Doing nothing is
+also safe: the writer catches up.
 
 ## Storage
 
@@ -650,7 +697,8 @@ its writer, the writer each one it has on disk, and the world write waits for th
   the world write (since 0.2.0-dev.29.3 the world write waits for the writer to have it on disk); a crash between the two
   leaves revision R on disk and loads generation R. A staging that takes longer than that wait (6 s; once the
   shutdown begins, 6 s after its start at the latest), one that cannot be written after its tries, or a save while the barrier is off after such a wait
-  opens a window, logged as a warning, in which a crash loads the newest usable older generation for world file R, or
+  opens a window, logged as a warning (since 0.2.0-dev.31.5 the first of a world session, then a summary at most every 5
+  minutes; see "A slow writer"), in which a crash loads the newest usable older generation for world file R, or
   none. After a power loss or a system crash, the world file of
   an unchanged save can load an older generation with the same bundles (`DataMatch.Older`) when the system had not yet
   written that save's manifests (see "How consistency works").

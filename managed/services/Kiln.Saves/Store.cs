@@ -710,19 +710,25 @@ internal sealed unsafe class WorldStore
         var t = System.Diagnostics.Stopwatch.GetTimestamp();
         Io("create");
         var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
-        disk.CreateMs += Since(t);
+        var ms = Since(t);
+        disk.CreateMs += ms;
+        disk.Note("creating", path, ms);
         try
         {
             t = System.Diagnostics.Stopwatch.GetTimestamp();
             fs.Write(data);
             fs.Flush(flushToDisk: false);  // to the system
-            disk.WriteMs += Since(t);
+            ms = Since(t);
+            disk.WriteMs += ms;
+            disk.Note("writing", path, ms);
             if (force)
             {
                 t = System.Diagnostics.Stopwatch.GetTimestamp();
                 Io("flush");
                 fs.Flush(flushToDisk: true);
-                disk.FlushMs += Since(t);
+                ms = Since(t);
+                disk.FlushMs += ms;
+                disk.Note("forcing to disk", path, ms);
                 Interlocked.Increment(ref FilesForced);
             }
             else
@@ -734,12 +740,18 @@ internal sealed unsafe class WorldStore
         {
             t = System.Diagnostics.Stopwatch.GetTimestamp();
             fs.Dispose();
-            disk.CloseMs += Since(t);
+            ms = Since(t);
+            disk.CloseMs += ms;
+            disk.Note("closing", path, ms);
         }
+        // On Windows File.Move is MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED), no write-through (0.2.0-dev.31.5
+        // measured it: about 0.3 ms with Windows Defender on, see docs/kiln/services/saves.md "A slow writer").
         t = System.Diagnostics.Stopwatch.GetTimestamp();
         Io("rename");
         File.Move(tmp, path, overwrite: true);
-        disk.RenameMs += Since(t);
+        ms = Since(t);
+        disk.RenameMs += ms;
+        disk.Note("renaming", path, ms);
         disk.Files++;
         Interlocked.Increment(ref FilesWritten);
     }

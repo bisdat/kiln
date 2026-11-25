@@ -28,7 +28,7 @@ pub struct BootState {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogErrors {
-    /// `[E ...]` lines since the start.
+    /// `[E ...]` lines since the start (`counted_error`: an older runtime's slow-writer line is not one).
     pub errors: u32,
     /// The first few, as written (trimmed to 300 characters).
     pub first: Vec<String>,
@@ -45,6 +45,17 @@ struct LogScan {
 }
 
 static SCANS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, LogScan>>> = std::sync::LazyLock::new(Default::default);
+
+/// Whether a kiln.log line counts as an error. Kiln 0.2.0-dev.31 to 31.4 logged a world write that went ahead of a slow
+/// Kiln.Saves writer as `[E] ... player-storage: persistence degraded: world generation N completed before storage became
+/// durable (write failed or bounded barrier wait expired)` at every save (one player's launcher showed "373 errors since
+/// start"); later runtimes log it as a warning (docs/kiln/services/saves.md, "A slow writer"). A staging that really failed
+/// also has its own error lines in those runtimes ("pending generation N could not be written", "writing mod data
+/// generation N failed"), which still count.
+fn counted_error(line: &[u8]) -> bool {
+    const SLOW_WRITER: &[u8] = b"completed before storage became durable (write failed or bounded barrier wait expired)";
+    line.starts_with(b"[E ") && !line.windows(SLOW_WRITER.len()).any(|w| w == SLOW_WRITER)
+}
 
 fn count_errors(path: &Path) -> Option<(String, LogErrors)> {
     use std::io::{BufRead, Read, Seek, SeekFrom};
@@ -65,7 +76,7 @@ fn count_errors(path: &Path) -> Option<(String, LogErrors)> {
     // whole lines only: a line being written is counted next time
     let end = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     for line in buf[..end].split(|&b| b == b'\n') {
-        if line.starts_with(b"[E ") {
+        if counted_error(line) {
             s.errors += 1;
             if s.first.len() < 5 {
                 s.first.push(String::from_utf8_lossy(line).trim_end().chars().take(300).collect());
@@ -430,6 +441,40 @@ mod tests {
         put(&logs.join("kiln.prev.log"), &later, t0 + Duration::from_secs(120));
         put(&logs.join("kiln.log"), &format!("{start}[E 02:10:00.000] [kiln] cannot parse the game image\n"), t0 + Duration::from_secs(130));
         assert!(log_errors(&game, &boot).is_none());
+        let _ = std::fs::remove_dir_all(&game);
+    }
+
+    /// Kiln 0.2.0-dev.31 to 31.4 logged a world write that went ahead of a slow Kiln.Saves writer as an error at every
+    /// autosave (one player's launcher said "373 errors since start"); later runtimes log it as a warning. That old line
+    /// is not counted; a staging that really failed still is, by its own error lines.
+    #[test]
+    fn a_slow_writer_line_of_an_older_runtime_is_not_an_error() {
+        let game = std::env::temp_dir().join(format!("kl-slowwriter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&game);
+        let t0 = SystemTime::now() - Duration::from_secs(600);
+        let boot: kiln_manage::state::BootJson = serde_json::from_str(
+            r#"{"format":1,"kiln":"0.2.0-dev","pid":384,"written":"2026-11-06T07:00:02Z","side":"client","hooks":true,"profile":{"mode":"active"}}"#,
+        )
+        .unwrap();
+        let logs = game.join("kiln/logs");
+        put(&game.join("kiln/state/boot.json"), "{}", t0);
+        let log = [
+            "[I 02:00:00.000] [kiln] Kiln 0.2.0-dev.31.2 starting (pid 384)",
+            "[W 02:00:30.100] [service:kiln-saves.dll] saves: the world write of revision 120 waited 6001 ms for Kiln.Saves' writer and went ahead (staging 40 of 41 on disk); a crash before the writer finishes loads an older generation of mod data",
+            "[E 02:00:30.100] [kiln] player-storage: persistence degraded: world generation 120 completed before storage became durable (write failed or bounded barrier wait expired); pairs kept in memory, next save retries",
+            "[E 02:01:00.100] [kiln] player-storage: persistence degraded: world generation 121 completed before storage became durable (write failed or bounded barrier wait expired); pairs kept in memory, next save retries",
+            "[W 02:01:30.100] [kiln] player-storage: world generation 122 was written before its storage reached the disk: Kiln.Saves' writer is slow here (a delay, not an error)",
+            "[E 02:02:00.000] [kiln] Kiln.Saves: writing mod data generation 123 failed 3 times: injected (the world write goes ahead without it)",
+            "[E 02:02:00.100] [kiln] player-storage: persistence degraded: pending generation 123 could not be written; pairs kept in memory, next save retries",
+            "[E 02:02:00.200] [kiln] player-storage: persistence degraded: world generation 123 completed before storage became durable (its staging could not be written); pairs kept in memory, next save retries",
+            "",
+        ]
+        .join("\n");
+        put(&logs.join("kiln.log"), &log, t0 + Duration::from_secs(60));
+        let e = log_errors(&game, &boot).unwrap();
+        assert_eq!(e.errors, 3, "{e:?}");
+        assert!(e.first.iter().all(|l| !l.contains("bounded barrier wait expired")), "{e:?}");
+        assert!(e.first[0].contains("writing mod data generation 123 failed"), "{e:?}");
         let _ = std::fs::remove_dir_all(&game);
     }
 }

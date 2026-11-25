@@ -293,6 +293,8 @@ public sealed partial class PlayerStorageStoreTests
             store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
             h.StageOnly(1); // earlier snapshot has no current frozen capture
             InstanceHarness.Written();
+            // The writer reports a staging done (stage_progress) just after its queue says idle: wait for that report.
+            FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromSeconds(5));
             Assert.Equal(FakeSavesTable.Issued, FakeSavesTable.Done);
             var tick = Environment.CurrentManagedThreadId;
             WorldStore.IoHook = op =>
@@ -307,7 +309,10 @@ public sealed partial class PlayerStorageStoreTests
             Assert.Throws<TimeoutException>(() => FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromMilliseconds(25)));
             // Existing bounded native wait is allowed to expire; world-written must not publish undurable storage.
             InstanceHarness.Store.Commit(1, 1001, SaveReason.PlayerLeft);
-            Assert.NotNull(store.Failure);
+            // Since 0.2.0-dev.31.5 a writer that is only slow is a delay, not a fault (PlayerStorageStoreTests.Durability.cs):
+            // the generation waits for its staging; a staging that cannot be written is still a failure.
+            Assert.Null(store.Failure);
+            Assert.True(store.Lag.IsLate(1));
             Assert.Null(store.Carried(character));
             release.Set();
             InstanceHarness.Written();
