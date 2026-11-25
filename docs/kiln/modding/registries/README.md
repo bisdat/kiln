@@ -151,7 +151,8 @@ is refused for that target without dropping unrelated valid edits.
 Direct-drop arrays keep their physical slots and indices: removal layers set affected `chance` and `weight` to zero rather
 than resizing the list. Every required drop row and recipe dependency row must be proven on the running build; otherwise
 item removal is refused **whole**, with no partial loot/recipe hiding. In particular, `drop tables not proven on this build`
-means no item removal was applied. The current shipped build records leave the drop rows unproven. Missing/invalid group
+means no item removal was applied. The current build records (server 1287369, since 31.x) prove the drop rows, so item removal
+applies there; a later game build Kiln has not proven yet refuses it whole again. Missing/invalid group
 metadata, or removing the last safely spawnable stack in a selector group, also refuses the whole item removal. A later
 registry chance/weight edit cannot reactivate a disabled slot: removal wins and the conflicting edit is reported.
 
@@ -259,8 +260,11 @@ Every field of every registry says when an edit of it takes effect, in the schem
 | `restart` | after a game restart: the game reads it once at start | the balance table |
 
 A field whose read time Kiln has not traced yet ships with the more cautious value (worldLoad or restart, never now) and an
-unproven mapping (refused per entry, with a reason, until a Kiln update proves it): items.block, items.fuel.burnTime and
-items.comfort in this release. Each page's Mapping column says which fields this Kiln maps, which are unproven and why.
+unproven mapping (refused per entry, with a reason, until a Kiln update proves it); no field is in that state in this release.
+Two fields stay off on the current build, each for a proven reason, and every edit of them is refused with it:
+`items.fuel.burnTime` (no game code reads an item's burn time on this build, so an edit would change nothing) and
+`recipes.station` (read-only; a station is a stations id, which comes with the stations registry). Each page's Mapping
+column says which fields this Kiln maps, which are unproven and why.
 
 **Lists.** A list of plain values (`items.perks`) takes clear, append, remove (by value) and replace; a list of entries
 with fields (`recipes.inputs`) takes clear, append (a new entry, then its fields) and remove (the entries a condition

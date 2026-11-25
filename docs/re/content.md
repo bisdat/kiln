@@ -632,10 +632,25 @@ and LootItems (`0x93d3b0` / `0xe96190`). Listings and the scan's JSON: `dev31/ou
 | loot `rarities` `+4` (Bitmask8) | the container and slot rolls `0x16ae30` (`0x16aed2`) and `0x16d05b` (`0x16d11c`) call LootFind after the weighted pick and read the mask; `0x94efe0` picks one of its bits weighted by the container's rarity rates (`+0x3ec`, five floats), passed to `0x16b5f0` as an OptU8; `0x16bda0` reads it the same way | each roll | `loot.rarities`: read now. Section 2's "pools built at load" guess does not hold: nothing per entry is pooled (section 8.4 already said so) |
 
 - **Rolls without a player.** Only two of the server's 420 drop tables hold a random-loot stack (an entry with no item):
-  `game:base_lootchest_random_cairn_sarcophagus_wood` (chance 0.333) and `game:base_trashheap` (0.1); every other random
-  roll happens on a player's interaction (the container fill, chunk `0x16ccf3` on this build) or by a pickup spawner. The
-  proof producer spawns containers of the templates those tables are named after next to a container of the lab's world
-  (registry-proof-test, phase 2), so their default inventory, random stack included, is applied without a player.
+  `game:base_lootchest_random_cairn_sarcophagus_wood` (chance 0.333) and `game:base_trashheap` (0.1). A default inventory
+  never rolls one: the stack applier `0x1a1d70` takes the random path (the single-slot roll `0x16d020`) only when the
+  application context has the loot generation system and the shufflebag (`ctx+0x20`, `ctx+0x28`, filled at `0x19bae7` from
+  the caller's `+0x28`/`+0x30`), and the `default_inventory` program declares no `g38_loot::LootGenerationSystem` (its sys
+  lists are empty in sigdb/programs): **[dis] [lab]** ten spawned sarcophagus containers with that stack at chance 1 stayed
+  empty. The programs that do roll are `random_loot_on_interaction` (a player opens a container, chunk `0x16ccf3`),
+  `spawn_random_loot_on_destroy` and `random_pickup_loot_spawner` (`0xebff0` / `0x1abdef` -> `0x16d020`). The last runs on
+  its own: a spawned `Base_LootPickup_RandomLoot_Spawner` (spawnProbability 1.0, no labels of its own) given a creature's
+  `RandomLoot.defaultLabels` rolls once and records the roll in its `PickupLootSlot` (`spawnItem` `+0x18`, level `+0x1c`,
+  rarity `+0x1d`, amount `+0x1e`, the pickup it spawned `+0x10`). **[lab]** In the playerless lab it does not: 80 spawned
+  spawners (ten each with the loot labels of eight creature templates) recorded no roll in 150 steps, so something in
+  `random_pickup_loot_spawner` (interval 1, every step) waits for more than a spawn (a player's presence or the loot
+  system's update; not traced). The proof producer keeps the harness (registry-proof-test, phase 2: it reports
+  INCONCLUSIVE with that reason), and the loot rows' read times rest on the disassembly above, as `stack.min`/`stack.max`
+  always did. A lab with a player (or the trace of that gate) can show it.
+- **Drop tables without a player.** A spawned container with a `DefaultInventory` has the table acquired and applied
+  (fixed stacks only) by `default_inventory` near any point of the lab's world: the producer spawns three
+  (`game:base_lootchest_random_cairn_sarcophagus_wood`, `game:base_trashheap`, `game:lootcontainer_enemy_scavenger_melee01`)
+  and all three tables load **[lab]**.
 - **`recipes.station`** (read-only, `workshopId` + `workshopGuid`): 2,485 of the server's 2,542 recipes name a workshop (46
   distinct ids), 57 none. The row reads a stations id, and Kiln has no stations registry (and so no stations id table)
   before dev.32, so every recipe's station decodes as none: the row stays unproven with that reason.

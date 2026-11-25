@@ -35,7 +35,7 @@
       "conv": "bool",
       "read": "now",
       "backend": "live",
-      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and tests it before the counts; a lab roll follows a live edit"
+      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and tests it before the counts; no playerless lab path rolls random loot"
     },
     "stack.maxScaled": {
       "paths": [
@@ -44,7 +44,7 @@
       "conv": "int",
       "read": "now",
       "backend": "live",
-      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and caps a scalable count at it (0x16db30); a lab roll follows a live edit"
+      "evidence": "docs/re/content.md section 11: the roll 0x16b5f0 looks the entry up (LootFind) at each roll and caps a scalable count at it (0x16db30); no playerless lab path rolls random loot"
     },
     "rarities": {
       "paths": [

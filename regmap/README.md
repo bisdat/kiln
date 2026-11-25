@@ -30,8 +30,8 @@ Adding a registry (schema, mapping, back-ends, proof, tests, and the pitfalls th
   "rows": {
     "maxStack": { "paths": ["maxStackSize"], "conv": "int", "read": "worldLoad", "backend": "live", "clientNeeds": true,
                   "evidence": "docs/re/content.md (StackClamp)" },
-    "comfort":  { "paths": ["comfortSetup.comfortAmount"], "conv": "int", "read": "unknown", "backend": "live",
-                  "state": "unproven", "reason": "when the game reads it is not traced" } } }
+    "fuel.burnTime": { "paths": ["fuelSetup.burnTime"], "conv": "time", "read": "unknown", "backend": "live",
+                  "state": "unproven", "reason": "no game code reads an item's burn time on this build, ..." } } }
 ```
 
 A row: `paths` (the game's member paths from the entry's root; for a field of a list's elements, from the element),
@@ -71,7 +71,7 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
   "verified": true, "proof": "regmap_check.py --exe: every row resolved and type-checked against the exe's reflection",
   "layouts": { "keen::ItemInfo": "0x07009d37" },          // the reflection's layout hash of each root type
   "rows": { "items.maxStack": "ok" },                      // ok | changed | unproven | unmapped
-  "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
+  "reasons": { "recipes.station": "a recipe's station is a stations id, ..." },   // unproven rows only, in Kiln words
   "kinds": { "items.manaCost": { "sint32": "proven (138 entries on this build)", "float": "none on this build",
                                  "notInWorld": "3 entries not in the lab's world (no edit reaches them on this build)" } },
   "regmapDigest": "<sha256>",                              // the regmap/common it was proven on (rows enabled only on it)
@@ -152,9 +152,14 @@ every entry exported through the schema from the base); `mods/tests/registry-pro
 kiln.registry.live begin/submit/commit/read/revert, raw reads by the game's member paths, the resource bytes hashed before
 the write and after the revert; a structured value's raw view is its resource's digest). A field it finds no probe for
 gets no sample and stays unproven (kiln.log says why: "registry-proof-test: no sample of <field>"); where the producer
-knows why in Kiln words it says so in the suite's `"unsampled": {"<field>": "<why>"}` (for example drop tables, which the
-game loads only as players need them: a lab world without a player has none loaded), and kilnctl takes that as the row's
-reason. A write refusal that shows the mapping disagrees with the build (the schema or regmap has no such field, a game
+knows why in Kiln words it says so in the suite's `"unsampled": {"<field>": "<why>"}`, and kilnctl takes that as the row's
+reason. Drop tables, which the game loads only when something needs them, are loaded by the producer's second phase once the
+world runs: it spawns a few of the game's loot containers next to a container of the lab's world (their default_inventory
+program acquires their tables), then samples the drop rows over them; only when that fails does `unsampled` say why. The
+same phase drives real loot rolls (the loot entries edited through kiln.registry.live, the game's random pickup spawners
+spawned with a creature's loot labels, each roll read from the spawner's record) and writes what came out into the suite's
+`"effects"` (field, setting, observed, result followed / not followed / inconclusive) and kiln.log: evidence for
+regmap/common's read times, which kilnctl does not judge. A write refusal that shows the mapping disagrees with the build (the schema or regmap has no such field, a game
 member or enum value is missing, a member is not a writable scalar) is a sample with an `error` (the row is `changed`);
 guard, range and entry-specific refusals give no sample. A boot sample's "revert" composes the base again without the
 probe, in memory: it shows that composing no rows keeps the base's bytes; the proof of a boot field is its write and read
@@ -192,7 +197,8 @@ not this tree's, so such an edit cannot pass the checks unproven.
   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
   "kinds": { "items.manaCost": { "sint32": 138, "float": 0, "unknown": 0, "notInWorld": 55 } },   // live: impact config kinds per row
   "notInWorld": { "items.manaCost": ["game:...", ...] },             // live: the entries counted notInWorld
-  "unsampled": { "drops.entries": "no drop table was loaded in the lab's world (...)" },  // live: why, in Kiln words
+  "unsampled": { "drops.entries": "the game loaded no drop table for the loot containers the lab spawned" },  // live: why
+  "effects": [ { "field": "loot.fixedRarity", "setting": "legendary for every entry", "observed": "...", "result": "followed" } ],
   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,     // element: a list element's index
                  "read": 20, "probe": 21, "readBack": 21,                            // through the schema
                  "rawBefore": [20], "rawAfter": [21],                                // each row path, through reflection
