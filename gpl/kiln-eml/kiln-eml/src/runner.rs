@@ -854,6 +854,13 @@ mod tests {
             assert_eq!(kfc::content::image::encode_threads(), 5);
         }
         assert_eq!(kfc::content::image::encode_threads(), before);
+        // a panic in the run (kiln-eml unwinds: Cargo.toml's release profile) puts it back as well
+        let unwound = std::panic::catch_unwind(|| {
+            let _threads = EncodeThreads::set(7);
+            panic!("a panic in EML's run");
+        });
+        assert!(unwound.is_err());
+        assert_eq!(kfc::content::image::encode_threads(), before);
         drop(_serial);
         // a whole run (one that fails at once: no game here) leaves it as it found it
         let dir = std::env::temp_dir().join(format!("kiln-eml-encode-{}", std::process::id()));
