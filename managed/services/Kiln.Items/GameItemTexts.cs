@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // An item type's texts in any language the game ships (since 0.2.0-dev.31.13, mod API 0.2.22): Items.TextTags,
-// Items.Description, Items.DisplayName(item, language). For XHL's EmberCodex (a codex page in a chosen language) and
+// Items.Description, Items.DescriptionIn, Items.DisplayNameIn (names of their own: Items.DisplayName is a released one-overload
+// method group, docs/kiln/modding/contract.md "Additive in source"). For XHL's EmberCodex (a codex page in a chosen language) and
 // Creative Mode Fix (search over names and descriptions).
 //
 // Where they come from: keen::ItemInfo's `name` (+0x48), `caption` (+0x58), `description` (+0x68) and `lore` (+0x78) are
@@ -102,7 +103,7 @@ public static unsafe partial class Items
     /// The loca tag ids of a game item type's texts (name, caption, description, lore), read from its <c>ItemInfo</c>: look
     /// them up in any language with <c>Content.TextIn(tags.Description, "de-de")</c> or enumerate a whole table with
     /// <c>Content.LoadTextsAsync</c>. Works on a dedicated server too (its data has the items, not the texts). Null for an
-    /// id that is no game item (a new item's texts are Kiln's: <see cref="Description(ItemId, string?)"/>), and until the
+    /// id that is no game item (a new item's texts are Kiln's: <see cref="DescriptionIn(ItemId, string?)"/>), and until the
     /// game's item list has been read (the first call starts that in the background) or without kiln.assets' resources.
     /// Since 0.2.0-dev.31.13, mod API 0.2.22.
     /// </summary>
@@ -119,10 +120,10 @@ public static unsafe partial class Items
         }
     }
 
-    /// <summary>The item's description in the player's game language: <see cref="Description(ItemId, string?)"/> with
+    /// <summary>The item's description in the player's game language: <see cref="DescriptionIn(ItemId, string?)"/> with
     /// <c>null</c>. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
     [AnyThread]
-    public static string? Description(ItemId item) => Description(item, null);
+    public static string? Description(ItemId item) => DescriptionIn(item, null);
 
     /// <summary>
     /// The item's description in <paramref name="language"/> without the game's markup: a game item's from the game's own
@@ -137,7 +138,7 @@ public static unsafe partial class Items
     /// </summary>
     /// <remarks>Any thread, also a draw callback: it never waits for a read.</remarks>
     [AnyThread]
-    public static string? Description(ItemId item, string? language)
+    public static string? DescriptionIn(ItemId item, string? language)
     {
         if (item.Value == 0) return null;
         try
@@ -163,7 +164,7 @@ public static unsafe partial class Items
     /// </summary>
     /// <remarks>Any thread, also a draw callback: it never waits for a read.</remarks>
     [AnyThread]
-    public static string? DisplayName(ItemId item, string? language)
+    public static string? DisplayNameIn(ItemId item, string? language)
     {
         if (item.Value == 0) return null;
         var lang = "en-us";

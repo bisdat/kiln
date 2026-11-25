@@ -561,9 +561,9 @@ public static partial class Content
         {
             string? label = null;
             var source = VoxelMaterialLabelSource.None;
-            if (m.PlacingItems.Count > 0 && global::Kiln.Items.DisplayName(m.PlacingItems[0], language) is { Length: > 0 } placed)
+            if (m.PlacingItems.Count > 0 && global::Kiln.Items.DisplayNameIn(m.PlacingItems[0], language) is { Length: > 0 } placed)
                 (label, source) = (placed, VoxelMaterialLabelSource.PlacingItem);
-            else if (m.LootItem.Value != 0 && global::Kiln.Items.DisplayName(m.LootItem, language) is { Length: > 0 } loot)
+            else if (m.LootItem.Value != 0 && global::Kiln.Items.DisplayNameIn(m.LootItem, language) is { Length: > 0 } loot)
                 (label, source) = (loot, VoxelMaterialLabelSource.LootItem);
             list.Add(m with { Label = label, LabelSource = source });
         }

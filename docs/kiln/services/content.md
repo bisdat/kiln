@@ -877,7 +877,7 @@ item's description next to its name.
 | `Task<GameTextTable> Content.LoadTextsAsync(string? language, CancellationToken = default)` | reads them on a worker and completes with the table |
 | `string? Content.TextIn(uint locaId, string? language)`, `TextIn(Guid locaTag, string? language)` | one text with the game's markup, without waiting |
 | `GameTextTable` | `IReadOnlyDictionary<uint, string>` (tag id to text, with markup): `Language`, `Source` (`Game`, `KilnCatalog`, `None`), `Available`, `Reason`, `Get(uint)`, `Get(Guid)`, `GetPlain(uint)` |
-| `Items.Description(item)`, `Items.Description(item, language)`, `Items.DisplayName(item, language)`, `Items.TextTags(item)` | an item type's texts ([items.md](items.md#c)); `ItemTextTags(Name, Caption, Description, Lore)` are its tag ids |
+| `Items.Description(item)`, `Items.DescriptionIn(item, language)`, `Items.DisplayNameIn(item, language)`, `Items.TextTags(item)` | an item type's texts ([items.md](items.md#c)); `ItemTextTags(Name, Caption, Description, Lore)` are its tag ids |
 | `const string Content.GameTextsCapability` | `"content.game_texts"` |
 
 - **Languages.** `language` is a key the game ships (`"de-de"`); `"de"` (the first shipped `de-*`), `"De_De"` and `"DE-de"`
@@ -893,14 +893,14 @@ item's description next to its name.
   kept; Kiln keeps the four most recently used languages. A failed read (the game has not opened its content index yet) is
   tried again after 5 s, then twice as long each time, at most 5 minutes; `LoadTextsAsync` asks again at once.
 - **Kiln's new content.** A kiln.content item's texts are Kiln's, not in the game's tables: `Content.Text` (the game's
-  lookup) answers them, `TextIn` does not; `Items.Description` and `Items.DisplayName(item, language)` take its definition's
+  lookup) answers them, `TextIn` does not; `Items.Description` and `Items.DisplayNameIn(item, language)` take its definition's
   texts (that language, its primary language, `"*"`, English; else its base item's).
 - **Dedicated server.** Its data has no texts (no `LocaTagCollectionResource`, none of the client's blobs; server
   26430253, docs/re/world-status.md section 12). Every language other than English is unavailable with the reason
   `a dedicated server's game data has no texts (the game ships them with its client only); ...`. English comes from a Kiln
   catalog's `loca` section (`Source` `KilnCatalog`, the same table as `Texts.Get`) when the server has one
   ([catalogs.md](../modding/catalogs.md)), and `TextLanguages` is `["en-us"]` once it is loaded. `Items.Description` is null
-  there; `Items.DisplayName(item, "en-us")` is the English name Kiln ships.
+  there; `Items.DisplayNameIn(item, "en-us")` is the English name Kiln ships.
 - **The row** `content.game_texts`: available on a game client with kiln.assets' resources (`assets.resources`) and kiln.types;
   `wrong-side` on a dedicated server. The members never throw for a missing table: they say why in `Reason`.
 
@@ -912,9 +912,9 @@ static async Task<CodexPage> Page(ItemId item, string? language)
     if (!texts.Available)                                            // a server, a language the game does not ship
         return new CodexPage(Items.DisplayName(item) ?? item.ToString(), "", texts.Reason, "");
     if (Items.TextTags(item) is not { } tags)                        // a new item (kiln.content): its definition's texts
-        return new CodexPage(Items.DisplayName(item, language) ?? item.ToString(), "", Items.Description(item, language) ?? "", "");
+        return new CodexPage(Items.DisplayNameIn(item, language) ?? item.ToString(), "", Items.DescriptionIn(item, language) ?? "", "");
     return new CodexPage(
-        texts.GetPlain(tags.Name) ?? Items.DisplayName(item, language) ?? item.ToString(),
+        texts.GetPlain(tags.Name) ?? Items.DisplayNameIn(item, language) ?? item.ToString(),
         texts.GetPlain(tags.Caption) ?? "",
         texts.Get(tags.Description) ?? "",                           // with the game's markup, for a rich-text widget
         texts.GetPlain(tags.Lore) ?? "");
@@ -959,7 +959,7 @@ at what rate, which items place it, and a label in a chosen language. The byte c
   ship). `Name` is Kiln's stable game-material name, the one `WorldTables.GameMaterialId` and world-block files accept, made
   from the debug name of the item that places it (`Build_TerrainMaterial_T1_Stone` → `TerrainStone`,
   `Block_T1_Wood_Rough_CRAFTING` → `WoodRough`); a name two cells would share is nobody's; a material no item places
-  (ores, rubble) is `Cell<id>`. `Label` is an item's name in the catalog's language (`Items.DisplayName(item, language)`)
+  (ores, rubble) is `Cell<id>`. `Label` is an item's name in the catalog's language (`Items.DisplayNameIn(item, language)`)
   and `LabelSource` says which: the item that places it, else the loot item. Several materials share a loot item (terrain
   1, 15, 37 and 73 all give the grassland dirt item), so a `LootItem` label is a grouping: keep the cell id to tell them apart.
 - `ExchangeRate` is how many cells of the material one `LootItem` is (copper ore, 26: 8); null when the data gives none.
@@ -993,7 +993,7 @@ string Describe(int cell)
     if (materials is not { } c || c.Get(cell) is not { } m) return $"cell {cell}: not a game material";
     var name = m.LabelSource == VoxelMaterialLabelSource.LootItem ? $"{m.Label} ({m.Name})" : m.Label ?? m.Name;
     var gives = m.LootItem.Value == 0 ? "nothing (unbreakable)"
-        : $"1 {Items.DisplayName(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
+        : $"1 {Items.DisplayNameIn(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
     return $"{name}: {m.Hardness}, {m.HealthPoints} HP, gives {gives}";
 }
 
@@ -1001,7 +1001,7 @@ string Describe(int cell)
 bool SameVein(int struck, int neighbour) => struck == neighbour && materials?.Get(struck) is { LootItem.Value: not 0 };
 
 // Blueprint-style: the material a held building block places, and the item and rate a removed cell gives back.
-if (materials?.PlacedBy(heldItem) is { } placed) Log.Info($"{placed.Name}: 1 {Items.DisplayName(placed.LootItem, null)} per {placed.ExchangeRate} cells");
+if (materials?.PlacedBy(heldItem) is { } placed) Log.Info($"{placed.Name}: 1 {Items.DisplayNameIn(placed.LootItem, null)} per {placed.ExchangeRate} cells");
 ```
 
 ## Distribution: random loot, drop tables, vendors, knowledge (v4)

@@ -40,8 +40,8 @@ public sealed class GameLookupsFakeTests
         Assert.Equal("Kupfererz", Content.TextIn(20, "de-de"));
         Assert.Equal(new ItemTextTags(10, 0, 11, 0), Items.TextTags(Pick));
         Assert.Equal("Gräbt Erz.", Items.Description(Pick));
-        Assert.Equal("Digs ore.", Items.Description(Pick, "en-us"));
-        Assert.Equal("Copper Pickaxe", Items.DisplayName(Pick, "en-us"));
+        Assert.Equal("Digs ore.", Items.DescriptionIn(Pick, "en-us"));
+        Assert.Equal("Copper Pickaxe", Items.DisplayNameIn(Pick, "en-us"));
         Assert.Equal(2, kiln.GameTexts.Reads);                               // de-de and en-us, each read once
         Assert.False((await Content.LoadTextsAsync("ja-jp")).Available);
         Assert.Equal("the game ships no texts in \"ja-jp\" (it has en-us, de-de)", (await Content.LoadTextsAsync("ja-jp")).Reason);
@@ -76,7 +76,7 @@ public sealed class GameLookupsFakeTests
         var de = await Content.LoadTextsAsync("de-de");
         Assert.False(de.Available);
         Assert.Equal(ServerReason, de.Reason);                               // the reason a real server gives (GameTextStore's)
-        Assert.Null(Items.Description(Ore, "de-de"));
+        Assert.Null(Items.DescriptionIn(Ore, "de-de"));
         Assert.DoesNotContain("de-de", Content.TextLanguages);               // English at most, from a Kiln catalog on this machine
         Assert.Equal(0, kiln.GameTexts.Reads);
         Content.TryGetTexts("de-de");
@@ -137,9 +137,9 @@ public sealed class GameLookupsFakeTests
         if (!texts.Available)                                            // a server, a language the game does not ship
             return new CodexPage(Items.DisplayName(item) ?? item.ToString(), "", texts.Reason, "");
         if (Items.TextTags(item) is not { } tags)                        // a new item (kiln.content): its definition's texts
-            return new CodexPage(Items.DisplayName(item, language) ?? item.ToString(), "", Items.Description(item, language) ?? "", "");
+            return new CodexPage(Items.DisplayNameIn(item, language) ?? item.ToString(), "", Items.DescriptionIn(item, language) ?? "", "");
         return new CodexPage(
-            texts.GetPlain(tags.Name) ?? Items.DisplayName(item, language) ?? item.ToString(),
+            texts.GetPlain(tags.Name) ?? Items.DisplayNameIn(item, language) ?? item.ToString(),
             texts.GetPlain(tags.Caption) ?? "",
             texts.Get(tags.Description) ?? "",                           // with the game's markup, for a rich-text widget
             texts.GetPlain(tags.Lore) ?? "");
@@ -154,7 +154,7 @@ public sealed class GameLookupsFakeTests
         if (materials is not { } c || c.Get(cell) is not { } m) return $"cell {cell}: not a game material";
         var name = m.LabelSource == VoxelMaterialLabelSource.LootItem ? $"{m.Label} ({m.Name})" : m.Label ?? m.Name;
         var gives = m.LootItem.Value == 0 ? "nothing (unbreakable)"
-            : $"1 {Items.DisplayName(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
+            : $"1 {Items.DisplayNameIn(m.LootItem, c.Language) ?? m.LootItem.ToString()} per {m.ExchangeRate} cells";
         return $"{name}: {m.Hardness}, {m.HealthPoints} HP, gives {gives}";
     }
 

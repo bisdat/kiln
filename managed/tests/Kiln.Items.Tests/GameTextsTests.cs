@@ -328,15 +328,15 @@ public sealed class GameTextsTests : IDisposable
         Assert.Equal(new ItemTextTags(7, 0, 8, 0), Items.TextTags(logs));
         Assert.Null(Items.TextTags(new ItemId(5)));
         Assert.Null(Items.Description(logs));                                // de-de not read yet
-        Assert.Null(Items.DisplayName(logs, "pt-br"));                       // nor pt-br: no English stand-in for another language
-        Assert.Equal("Wood Logs", Items.DisplayName(logs, "en-us"));          // English: the shipped name meanwhile
+        Assert.Null(Items.DisplayNameIn(logs, "pt-br"));                       // nor pt-br: no English stand-in for another language
+        Assert.Equal("Wood Logs", Items.DisplayNameIn(logs, "en-us"));          // English: the shipped name meanwhile
         await Content.LoadTextsAsync("de-de");
         await Content.LoadTextsAsync("pt-br");
         Assert.Equal("Gehacktes Holz.", Items.Description(logs));            // plain: markup out
-        Assert.Equal("Gehacktes Holz.", Items.Description(logs, "de"));
-        Assert.Equal("Holzscheite", Items.DisplayName(logs, null));
-        Assert.Equal("Toras", Items.DisplayName(logs, "pt-br"));
-        Assert.Null(Items.Description(logs, "pt-br"));                        // pt-br has no text for the description tag
+        Assert.Equal("Gehacktes Holz.", Items.DescriptionIn(logs, "de"));
+        Assert.Equal("Holzscheite", Items.DisplayNameIn(logs, null));
+        Assert.Equal("Toras", Items.DisplayNameIn(logs, "pt-br"));
+        Assert.Null(Items.DescriptionIn(logs, "pt-br"));                        // pt-br has no text for the description tag
         Assert.Null(Items.Description(new ItemId(0)));
     }
 
@@ -348,7 +348,7 @@ public sealed class GameTextsTests : IDisposable
         var mine = new ItemId(0xdeadbeef);
         DefinedNames.DescriptionOverride = (id, lang) => id == mine.Value ? $"Mein Ding ({lang})" : null;
         Assert.Equal("Mein Ding (de-de)", Items.Description(mine));
-        Assert.Equal("Mein Ding (fr-fr)", Items.Description(mine, "fr-fr"));
+        Assert.Equal("Mein Ding (fr-fr)", Items.DescriptionIn(mine, "fr-fr"));
         Assert.Null(Items.Description(new ItemId(1)));
         // a definition's descriptions: that language, its primary, "*", English; "" is no description
         var def = new ContentNames.Def(1, Guid.NewGuid(), null, null, "Glacier", new Dictionary<string, string>(), false)

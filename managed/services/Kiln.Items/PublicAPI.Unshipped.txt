@@ -18,6 +18,6 @@ Kiln.ItemTextTags.Name.init -> void
 static Kiln.ItemTextTags.operator !=(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
 static Kiln.ItemTextTags.operator ==(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
 static Kiln.Items.Description(Kiln.ItemId item) -> string?
-static Kiln.Items.Description(Kiln.ItemId item, string? language) -> string?
-static Kiln.Items.DisplayName(Kiln.ItemId item, string? language) -> string?
+static Kiln.Items.DescriptionIn(Kiln.ItemId item, string? language) -> string?
+static Kiln.Items.DisplayNameIn(Kiln.ItemId item, string? language) -> string?
 static Kiln.Items.TextTags(Kiln.ItemId item) -> Kiln.ItemTextTags?

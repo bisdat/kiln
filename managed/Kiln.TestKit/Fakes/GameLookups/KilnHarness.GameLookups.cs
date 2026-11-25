@@ -8,7 +8,7 @@ public sealed partial class KilnHarness
 
     /// <summary>The game's texts per language and the items' text tags this harness's game has (the kit's content lookups,
     /// since 0.2.0-dev.31.13): what <c>Content.TextIn</c>, <c>Content.TryGetTexts</c>, <c>Content.LoadTextsAsync</c>,
-    /// <c>Items.TextTags</c>, <c>Items.Description</c> and <c>Items.DisplayName(item, language)</c> answer from. A
+    /// <c>Items.TextTags</c>, <c>Items.Description</c> and <c>Items.DisplayNameIn(item, language)</c> answer from. A
     /// dedicated-server harness (the default) has none, as a dedicated server: use <see cref="HarnessSide.HostingClient"/>
     /// or <see cref="HarnessSide.JoinedClient"/>.</summary>
     public HarnessGameTexts GameTexts => _gameTexts ??= new HarnessGameTexts(this);

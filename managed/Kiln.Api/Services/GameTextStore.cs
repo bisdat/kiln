@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // The game's text tables per language, read from its own resources (since 0.2.0-dev.31.13, mod API 0.2.22): what
-// Content.TextIn, Content.TryGetTexts / LoadTextsAsync, Items.Description and Items.DisplayName(item, language) answer from.
+// Content.TextIn, Content.TryGetTexts / LoadTextsAsync, Items.Description and Items.DisplayNameIn(item, language) answer from.
 //
 // Where they come from (types from the game's reflection, kiln.types; bytes from kiln.assets; checked on client 26430625):
 //  - keen::LocaTagCollectionResource (one resource, game clients only): `languages`, a BlobArray of

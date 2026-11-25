@@ -2,7 +2,7 @@
 // The kit's content lookups (0.2.0-dev.31.13, mod API 0.2.22): the game's texts per language and its voxel materials, as the
 // test scripts them (KilnHarness.GameTexts, KilnHarness.VoxelMaterials). Not a native table: Kiln.Api's GameTextStore,
 // Kiln.Items' GameItemTexts and Kiln.Content's VoxelMaterialData read from these sources instead of the game's resources, so
-// Content.TextIn / TryGetTexts / LoadTextsAsync, Items.Description / DisplayName(item, language) / TextTags and
+// Content.TextIn / TryGetTexts / LoadTextsAsync, Items.Description / DescriptionIn / DisplayNameIn / TextTags and
 // Content.TryGetVoxelMaterials / LoadVoxelMaterialsAsync run their own code. A dedicated-server harness has no texts, as a
 // dedicated server has none (the same reason text); its voxel materials are there, as on a server.
 namespace Kiln.TestKit;
@@ -52,7 +52,7 @@ internal sealed class GameLookupsFake : IKitFake
         CoverageKind.RecordingFake, [Content.GameTextsCapability, Content.VoxelMaterialsCapability],
         "KilnHarness.GameTexts scripts the game's text tables per language and items' text tags; KilnHarness.VoxelMaterials the voxel " +
         "material rows (what the game's terraforming registry, world table and items give). Kiln's own code answers from them: " +
-        "Content.TextLanguages, TextIn, TryGetTexts, LoadTextsAsync, Items.TextTags, Description, DisplayName(item, language), " +
+        "Content.TextLanguages, TextIn, TryGetTexts, LoadTextsAsync, Items.TextTags, Description, DescriptionIn, DisplayNameIn, " +
         "Content.TryGetVoxelMaterials and LoadVoxelMaterialsAsync with their labels. A dedicated-server harness (the default) has no game " +
         "texts, as a dedicated server: the same wrong-side reason; English from a Kiln catalog is not modelled. Not modelled: the game's " +
         "loca bytes and resource reads (host tests cover the readers), Content.Text (kiln.content's main-thread lookup), new items' texts"));

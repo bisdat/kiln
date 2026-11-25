@@ -180,7 +180,7 @@ internal static class ContentNames
         _depth++;
         try
         {
-            return Items.Description(new ItemId(NewContent.IdOf(b)), language);
+            return Items.DescriptionIn(new ItemId(NewContent.IdOf(b)), language);
         }
         finally
         {
