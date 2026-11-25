@@ -18,7 +18,7 @@ import { forgetProfileEdits, useProfileEdit } from "../pages/profiles/useProfile
 import { notifyLibraryChanged } from "../shell/libraryChanged";
 import { notifyActivation } from "../shell/notices";
 import { rich, useT } from "../i18n";
-import { PackLine, UninstallPackModal, packMenu } from "../crucible/Profiles";
+import { PackLine, UninstallPackModal, packMenu, usePackLacking } from "../crucible/Profiles";
 import { useCrucibleOn, useInstances, useUpdates } from "../crucible/state";
 import type { PackInstance } from "../api/commands";
 import { Button, Card, ConfirmDanger, EmptyState, Field, Menu, Modal, Skeleton, TextInput, errorText, fmtAgo, notifyPlacementCleanup, toast } from "../ui";
@@ -41,6 +41,7 @@ export function ProfilesCard() {
   const crucible = useCrucibleOn();
   const instances = useInstances(crucible);
   const updates = useUpdates(game?.id, crucible);
+  const lacking = usePackLacking([...instances.byProfile.keys()], crucible);
   const [uninstall, setUninstall] = useState<{ id: string; instance: PackInstance } | null>(null);
   const running = !!status.data?.running;
   const installed = !!status.data?.runtime.installed;
@@ -96,7 +97,7 @@ export function ProfilesCard() {
                 <Menu label={t("profilesSettings.more", { name: p.name })} icon={<MoreHorizontal />} size="s" items={[
                   { label: t("profilesSettings.rename"), onSelect: () => setRename(p) },
                   { label: t("profilesSettings.folders"), onSelect: () => setFolders(p.id) },
-                  ...(inst ? packMenu(p.id, inst, upd, game?.id ?? null, qc, p.active.length > 0, () => setUninstall({ id: p.id, instance: inst })) : []),
+                  ...(inst ? packMenu(p.id, inst, upd, game?.id ?? null, qc, p.active.length > 0, () => setUninstall({ id: p.id, instance: inst }), lacking.get(p.id)) : []),
                   ...(inst ? [] : [{ label: t("common.delete"), danger: true, disabled: p.active.length > 0, onSelect: () => setDel(p) }]),
                 ]} />
               </li>

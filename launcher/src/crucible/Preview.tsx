@@ -4,18 +4,24 @@
 // creator, never a name a profile has), and Crucible's check line. Install and play is one task (crucible_install, or
 // pack_install for a dropped .kilnpack); the toast after it has Undo (back to the profile before). Install alone makes the
 // profile without loading it or starting the game: only the data folder changes, so it may run while the game does.
-// The Deck draws the same model with its own pieces (deck/DeckCrucible.tsx).
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+// The Deck draws the same model with its own pieces (deck/DeckCrucible.tsx). A pack installed already whose profile lacks
+// mods of its installed version in the Library (the player removed one) says so before Load it, and offers Download
+// missing mods (crucible_repair: only those mods, into the Library; the profile, its version and settings stay, nothing
+// is loaded or started, so it may run while the game does). Load it alone would start the game without them: with direct
+// paths the activation names their missing Library folders, and only Copy mode refuses ("not in the library").
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../api/commands";
-import type { CrucibleChecks, CruciblePreview, GameInstall, LibraryRef, PackIndex, PackPreview } from "../api/commands";
+import type { CrucibleChecks, CruciblePreview, GameInstall, LibraryRef, PackIndex, PackPreview, ProfileId, GameId } from "../api/commands";
 import { qk, useGame, useGameStatus, useProfiles } from "../api/hooks";
 import { KIND_NAME } from "../api/kinds";
 import { t, useT } from "../i18n";
-import { Banner, Button, Modal, Skeleton, TextInput, Toggle, fmtBytes, runTask, toast } from "../ui";
+import { Banner, Button, Modal, Skeleton, TextInput, Toggle, fmtBytes, runTask, toast, useTasks } from "../ui";
 import { checksLine, coverFor, uniqueName } from "./code";
+import { missingCount, missingLine, repairLabel } from "./repair";
+export { missingCount, missingLine, repairLabel } from "./repair";
 import { usePlayControl } from "../shell/play";
 import { crk, crucibleError, refreshCrucible, useCrucibleUi, useUpdates, type PreviewSource } from "./state";
 
@@ -36,6 +42,10 @@ export interface PreviewModel {
   target: string | null; changes: string | null;
   /** Crucible's check of this version (null: a file, still uploading, or an older Crucible). */
   checks: CrucibleChecks | null;
+  /** What the installed instance's profile lacks of its installed version (null: no instance, or nothing known). */
+  repair: api.PackLacking | null;
+  /** Where Download missing mods takes them from: Crucible, this file (it is the installed version), or nowhere here. */
+  repairFrom: "crucible" | "file" | null;
 }
 
 const has = (list: LibraryRef[], m: { kind: api.ModKind; id: string; version: string }) => list.some((r) => r.kind === m.kind && r.id === m.id && r.version === m.version);
@@ -54,6 +64,7 @@ export function fromCrucible(p: CruciblePreview, target: string): PreviewModel {
     link: p.pack.url || null, mods: modsOf(p.index, p.missing, p.code), size: p.size, download: p.download, fresh: p.missing.filter((r) => !r.id.startsWith("pack.")).length,
     present: p.present.length, optional: p.optional, fits: p.game.fits, builds: p.game.builds, current: p.game.current, kiln: p.kiln, trusted: p.trusted,
     uploading: null, instance: p.instance, target: p.version.id, changes: p.version.changes, checks: p.version.checks ?? null,
+    repair: p.instance ? p.repair ?? null : null, repairFrom: p.instance ? "crucible" : null,
   };
 }
 
@@ -65,6 +76,7 @@ export function fromUploading(u: api.CrucibleUploading, target: string): Preview
     version: "", number: null, upvotes: p.upvotes, comments: p.comments, cover: coverFor(p.id, p.icon), code: p.code || null, link: p.url || null,
     mods: [], size: 0, download: 0, fresh: 0, present: 0, optional: {}, fits: true, builds: p.builds, current: null, kiln: { needs: null, ok: true },
     trusted: false, uploading: Math.round(u.uploading.progress * 100), instance: null, target: null, changes: null, checks: null,
+    repair: null, repairFrom: null,
   };
 }
 
@@ -88,6 +100,7 @@ export function fromFile(p: PackPreview, path: string, game: GameInstall | null)
     mods: modsOf(p.index, p.missing, p.code), size: p.size, download: p.missing.reduce((s, r) => s + sizeOf(r), 0), fresh: p.missing.filter((r) => !r.id.startsWith("pack.")).length,
     present: p.present.length, optional: p.optional, fits: !builds.length || current === null || builds.includes(current), builds, current,
     kiln: { needs: null, ok: true }, trusted: false, uploading: null, instance: p.instance ?? null, target: null, changes: p.index.changes ?? null, checks: null,
+    repair: p.instance ? p.repair ?? null : null, repairFrom: p.instance && p.installedVersion ? "file" : null,
   };
 }
 
@@ -102,7 +115,8 @@ export function usePreview(source: PreviewSource | null, wait = false) {
     queryFn: async (): Promise<PreviewModel> => source!.kind === "file"
       ? fromFile(await api.packInspect({ path: source!.path }), source!.path, game)
       : await openCrucible(source!.target, game?.id),
-    enabled: !!source, retry: false, staleTime: 15_000,
+    // a code opened again reads the Library afresh (a pack mod removed meanwhile is missing now)
+    enabled: !!source, retry: false, staleTime: 15_000, refetchOnMount: "always",
     refetchInterval: (query) => (wait && query.state.data?.uploading != null ? WAIT_MS : false),
   });
   return q;
@@ -177,6 +191,34 @@ export function useInstallPack() {
   };
 }
 
+/** Runs Download missing mods (crucible_repair) and answers with the toast; `onTask`: its task id (progress). Shared by
+ *  the preview and Settings > Profiles. Never activates or starts anything. */
+export function useRepairPack() {
+  const qc = useQueryClient();
+  const { game } = useGame();
+  return (profileId: ProfileId, name: string, opts: { path?: string; onTask?: (id: string) => void } = {}) => repairPack(qc, game?.id ?? null, profileId, name, opts);
+}
+
+/** [useRepairPack] outside a component (Settings > Profiles' menu). */
+export async function repairPack(qc: QueryClient, gameId: GameId | null, profileId: ProfileId, name: string, opts: { path?: string; onTask?: (id: string) => void } = {}) {
+  try {
+    const r = await runTask<api.PackRepairResult>(async () => {
+      const id = await api.crucibleRepair(gameId, { profile: profileId, ...(opts.path ? { path: opts.path } : {}) });
+      opts.onTask?.(id);
+      return id;
+    }, { quiet: true });
+    refreshCrucible(qc, gameId);
+    void qc.invalidateQueries({ queryKey: crk.lacking(profileId) });
+    if (r.left.length) toast.info(t("crucible.repair.partly", { name, count: r.imported.length }), t("crucible.repair.left", { count: r.left.length, names: r.left.map((x) => x.id).join(", ") }));
+    else if (!r.imported.length) toast.ok(t("crucible.repair.nothing", { name }));
+    else toast.ok(t("crucible.repair.done", { name, count: r.imported.length }), r.downloaded ? t("crucible.repair.doneDetail", { size: fmtBytes(r.downloaded) }) : t("crucible.repair.doneLocal"));
+    return r;
+  } catch (e) {
+    toast.error(crucibleError(e), t("crucible.repair.failed", { name }));
+    throw e;
+  }
+}
+
 // ---------------------------------------------------------------- desktop
 
 export function PreviewModal({ source }: { source: PreviewSource }) {
@@ -195,8 +237,11 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   const [always, setAlways] = useState(false);
   const [optional, setOptional] = useState<Record<string, boolean> | null>(null);
   const [showMods, setShowMods] = useState(false);
-  const [busy, setBusy] = useState<"install" | "play" | null>(null);
+  const [busy, setBusy] = useState<"install" | "play" | "repair" | null>(null);
+  const [repairTask, setRepairTask] = useState<string | null>(null);
+  const task = useTasks((s) => (repairTask ? s.tasks[repairTask] : undefined));
   const install = useInstallPack();
+  const repairPack = useRepairPack();
   const ctl = usePlayControl();
   const profiles = useProfiles();
   const taken = useMemo(() => (profiles.data ?? []).map((p) => p.name), [profiles.data]);
@@ -234,6 +279,20 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   const update = m?.instance ? updates.data?.find((u) => u.profile === m.instance) ?? null : null;
   const optionalMods = m?.mods.filter((x) => x.optional) ?? [];
   const sizeWord = useMemo(() => (m ? sizeLine(m) : ""), [m]);
+  const missing = missingCount(m);
+  const repair = async () => {
+    if (!m?.instance || !m.repair || !m.repairFrom) return;
+    setBusy("repair");
+    try {
+      await repairPack(m.instance, m.title, { path: m.repairFrom === "file" ? (source as { path: string }).path : undefined, onTask: setRepairTask });
+      await q.refetch();
+    } catch { /* the toast said it */ } finally { setBusy(null); setRepairTask(null); }
+  };
+  const repairButton = m?.repair && missing > 0 && m.repairFrom ? (
+    <Button variant={update ? undefined : "primary"} loading={busy === "repair"} disabled={!!busy && busy !== "repair"} onClick={() => void repair()} data-testid="crucible-repair">
+      {repairLabel(m.repair, m.repairFrom)}
+    </Button>
+  ) : null;
   const loadIt = async () => {
     if (!m?.instance || !game) return;
     try {
@@ -246,9 +305,13 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   const footer = (
     <>
       <Button variant="ghost" onClick={close} disabled={!!busy}>{t("common.cancel")}</Button>
+      {/* missing mods: Download missing mods next to See changes or Load it (the update is never taken silently) */}
       {m?.instance ? (update
-        ? <Button variant="primary" onClick={() => openUpdate(m.instance!)} data-testid="crucible-preview-see-update">{t("crucible.banner.seeChanges")}</Button>
-        : <Button variant="primary" onClick={() => void loadIt()} disabled={!!status.data?.running}>{t("crucible.preview.loadIt")}</Button>)
+        ? <>{repairButton}<Button variant="primary" onClick={() => openUpdate(m.instance!)} disabled={busy === "repair"} data-testid="crucible-preview-see-update">{t("crucible.banner.seeChanges")}</Button></>
+        : <>
+            <Button variant={repairButton ? undefined : "primary"} onClick={() => void loadIt()} disabled={!!status.data?.running || busy === "repair"} data-testid="crucible-load-it">{t("crucible.preview.loadIt")}</Button>
+            {repairButton}
+          </>)
         : <>
             <Button loading={busy === "install"} disabled={!okInstall} onClick={() => void go(false)} data-testid="crucible-install-only"
               title={blockInstall ?? (!(trust || trusted) ? t("crucible.preview.tickFirst") : t("crucible.preview.installOnlyTip"))}>
@@ -301,6 +364,14 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
             {m.instance ? (
               <p className="kcr-p" data-testid="crucible-has-instance">{update ? t("crucible.preview.haveUpdate", { version: update.to.version }) : t("crucible.preview.have")}</p>
             ) : <p className="kcr-p">{t("crucible.preview.ownProfile")}</p>}
+            {m.instance && m.repair && missing > 0 && (
+              <div data-testid="crucible-missing"><Banner tone="warn" title={t("crucible.repair.title", { count: missing })}>
+                {missingLine(m.repair)}{!m.repairFrom && <> {t("crucible.repair.needFile", { version: m.repair.version })}</>}
+              </Banner></div>
+            )}
+            {busy === "repair" && task && (
+              <p className="k-hint" data-testid="crucible-repair-progress">{task.message ?? t("crucible.repair.running")}{task.progress != null ? " · " + Math.round(task.progress * 100) + "%" : ""}</p>
+            )}
             {optionalMods.length > 0 && !m.instance && (
               <div className="kcr-optional" data-testid="crucible-optional">
                 <span className="kcr-label">{t("crucible.preview.optional")}</span>

@@ -1,7 +1,7 @@
 // Crucible's shared state in the launcher: the queries (status, instances, updates, shares), what is open (the pack
 // preview, the update screen), the share task that outlives its popover, and the player wording of Crucible's errors
 // (DESIGN 1.6). Desktop and Deck both use it.
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { create } from "zustand";
 import * as api from "../api/commands";
@@ -17,6 +17,7 @@ export const crk = {
   open: (target: string) => ["crucible_open", target] as const,
   plan: (p: ProfileId) => ["crucible_update_plan", p] as const,
   trust: ["crucible_trust"] as const,
+  lacking: (p: ProfileId) => ["pack_lacking", p] as const,
 };
 
 export const useCrucibleStatus = () => useQuery({ queryKey: crk.status, queryFn: api.crucibleStatus, staleTime: 30_000, refetchInterval: 60_000, retry: false });
@@ -29,13 +30,27 @@ export const useInstances = (enabled = true) => {
 /** Instances with a newer version (the backend caches 5 min and checks on start and every 6 h). */
 export const useUpdates = (gameId: GameId | null | undefined, enabled = true) =>
   useQuery({ queryKey: crk.updates(gameId ?? ""), queryFn: () => api.crucibleUpdates(gameId!), enabled: !!gameId && enabled, refetchInterval: 5 * 60_000, retry: false });
+/** When the Library list last changed (a removal refetches it): the lack is asked again after one. */
+export function useLibraryStamp(): number {
+  const qc = useQueryClient();
+  return Math.max(0, ...qc.getQueryCache().findAll({ queryKey: ["library_list"] }).map((q) => q.state.dataUpdatedAt));
+}
+/** What pack profiles lack of their installed version (pack_lacking: read-only, but it hashes the pack's Library
+ *  entries): asked when a list shows and again after a Library change or refreshCrucible, not on focus; 5 minutes fresh. */
+export function usePackLacking(profileIds: ProfileId[], enabled = true): Map<ProfileId, api.PackLacking> {
+  const stamp = useLibraryStamp();
+  const qs = useQueries({ queries: profileIds.map((pid) => ({
+    queryKey: [...crk.lacking(pid), stamp], queryFn: () => api.packLacking(pid), enabled, retry: false, staleTime: 5 * 60_000, refetchOnWindowFocus: false,
+  })) });
+  return new Map(profileIds.flatMap((pid, i) => (qs[i]?.data ? [[pid, qs[i].data!] as const] : [])));
+}
 /** What the profile's shared pack says now (null: never shared); `stamp` (the profile's updated time) asks again after a change. */
 export const useShared = (profileId: ProfileId | null | undefined, stamp?: string, enabled = true) =>
   useQuery({ queryKey: [...crk.shared(profileId ?? ""), stamp ?? ""], queryFn: () => api.crucibleShared(profileId!), enabled: !!profileId && enabled, retry: false });
 
 /** Everything a Crucible change touches. */
 export function refreshCrucible(qc: QueryClient, gameId?: GameId | null) {
-  for (const k of [crk.instances, ["crucible_updates"], ["crucible_shared"], ["crucible_open"], ["crucible_update_plan"], qk.profiles, ["library_list"], ["profile_resolve"], ["profile_get"]])
+  for (const k of [crk.instances, ["pack_lacking"], ["crucible_updates"], ["crucible_shared"], ["crucible_open"], ["crucible_update_plan"], qk.profiles, ["library_list"], ["profile_resolve"], ["profile_get"]])
     qc.invalidateQueries({ queryKey: k });
   if (gameId) invalidateGame(qc, gameId);
 }
