@@ -250,12 +250,16 @@ consumables"):
 1. Kiln.Abilities reads the slot (`Items.Read`), finds the item's own sequence in the game's data (`ItemInfo.sequences[]`
    triggered by `Primary`, the one a hotbar use plays: `UseItem_Food_Buff`, `UseItem_Food_Liquid_Buff`,
    `UseItem_Potion_Health`, ...) and checks that it has an event that uses up the item (`ApplyBuffEvent`,
-   `SpawnImpact`, `SpawnEntityEvent` with `consume`; `PayUsageCost` does not count).
+   `SpawnImpact`, `SpawnEntityEvent` with `consume`), or, since 0.2.0-dev.31.5, a `PayUsageCost` with `consume` when
+   the item is its own cost item (below: the repair kit).
 2. kiln.abilities' `item_use` checks the slot against the player's inventory tree (kiln.items), the item in it, and
    the player's states (reflection: `Actor.currentState`, `Actor.sequenceRuntimeId`, and no trigger already waiting
    in `ActorInput.triggerContext`), then calls the game's `TriggerSequence` (0x369d0) with the
    sequence and trigger `Primary`, and writes the slot and the item into `ActorInput.triggerContext.usedItem`, as
-   `player_control_action_sequence` does for a hand use. `actor_simulation_start` takes it in the same step.
+   `player_control_action_sequence` does for a hand use. Since 0.2.0-dev.31.5 it writes them into
+   `triggerContext.costItem` as well, as the game's hand use does for an item sequence with no `costOverride`
+   (`0x36b60`): the sequence's `PayUsageCost` events read the cost item, so they pay the item's own costs (a scroll's
+   `ManaCost`) and, with `consume`, take the item from that slot. `actor_simulation_start` takes it in the same step.
 3. The sequence plays (animation, VFX, sounds; `NetworkActor` replicates it like any sequence). At its consume event
    (0.05 s for drinks, 0.4 s for food, 0.3 s for potions) the game's `actor_apply_buff` removes one item from that
    slot in an inventory transaction and applies the buff with the used item, so the buff entity gets the item's values
@@ -268,7 +272,7 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
 | `ItemUseResult` | When |
 |---|---|
 | `Started` | the sequence is triggered; the item goes at its consume event |
-| `NotConsumable` | the item has no Primary sequence, or that sequence uses up nothing (weapons, tools, materials) |
+| `NotConsumable` | the item has no Primary sequence, or that sequence uses up nothing (weapons, tools, materials), or only its `PayUsageCost` would and the item cannot be its own cost item (a staff's spell, an entry with a `costOverride`, a kiln.abilities older than 0.2.0-dev.31.5) |
 | `NotOwnSlot` | the slot is not in the player's own inventories (backpack, hotbar, equipment), or they have none |
 | `EmptySlot` | the slot holds nothing |
 | `SlotChanged` | the slot held another item at the native check than at the managed read |
@@ -277,6 +281,37 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
 | `NotReady` | not `StateFlag.IsReadyForGameplay` (joining, loading the terrain, respawning) |
 | `Busy` | a sequence plays (an attack, another use, an emote, a dodge), a trigger already waits for this step (a second `UseItem` or a `PlaySequence` on the same player in the same step, or one the game queued), or one of `Spawning`, `Sleeping`, `Sitting`, `PlayingInstrument`, `Climbing`, `ClimbingTransition`, `Attached`, `AttachedToHook`, `HangGliding`, `HeadDiving`, `IsFishing` |
 | `ServerOnly` | no server world in this process (a joined client) |
+
+### Which uses `UseItem` covers (the game's data, server build 26430253)
+
+Counted from the game's own data (every `ItemInfo` and the sequence `UseItem` picks for it: the first entry triggered
+by `Primary` with no requirements, else the first `Primary`; 4,268 items, 2,609 with a Primary sequence). GitHub #118,
+thanks Fuzen777.
+
+| What the sequence does | Items | `UseItem` |
+|---|---|---|
+| an event with `consume` uses up the item: `ApplyBuffEvent` (food, drinks, bandages, buff scrolls), `SpawnImpact` (health potions, healing food, the Meteor Shower scroll), `SpawnEntityEvent` (mana potions, fish dropped into the world, the Fire Wisp and Experience scrolls, grenades and other throwables) | the consumables (docs/re/player-state.md lists them) and throwables | `Started` (since 0.2.0-dev.30.3) |
+| only a `PayUsageCost` with `consume` uses up the item | `Consumable_RepairKit_T3` (`UseItem_Consumable_RepairKit`: `PayUsageCost` at 0.07 s, then `RepairAllItems` 8 % six times up to 4.3 s), the only one | `Started` since 0.2.0-dev.31.5 |
+| a `PayUsageCost` with `consume`, but the item is ammunition | 102 spells (`Ammo_*_Spell_*`: their Primary sequences are the staff casts, `Attack_Player_Staff_*`), and one `_Test_` spell that also has a consume event | `NotConsumable` (a cast needs the staff, which passes the spell as ammunition); the `_Test_` spell stays `Started` through its consume event, without the cost item |
+| nothing uses the item up | weapons, tools, building pieces, materials | `NotConsumable` |
+
+**The cost item.** For every use it starts (no vanilla Primary entry names a `costOverride`, and the item is no
+ammunition), `UseItem` makes the item the trigger context's cost item, as the hand use does. What changes with it:
+- the repair kit is taken by its own `PayUsageCost` (one per use) and repairs the player's gear as from the hotbar;
+- the items that have a consume event and a `ManaCost` of their own pay it when their `PayUsageCost` (consume off)
+  runs, as for a hand use: the scrolls (Prayer of the Flame 55, Prayer to the Vukah 55, Meteor Shower 80, Fire Wisp
+  80) and the mana grenades (Necromancer Grenade T2 to T6: 30, 60, 90, 120, 150; Critter Crawler Bomb 95; Shroud
+  Pheromone Grenade 56). Up to 0.2.0-dev.31.4 they cost no mana through `UseItem`. Kiln does not check the player's
+  mana before the trigger (the hand use's input gate, `0xb1410`, is not traced), and the game's payer does not refuse
+  either: with 5 of 100 mana a Prayer of the Flame through `UseItem` was `Started`, the scroll was taken and its use
+  ran, and mana went to 0 (lab, 2026-11-25). A mod that wants the hotbar's "not enough mana" should compare
+  `Abilities.Attributes.Get(player, AbilityResource.Mana)` with the item's `ManaCost` before it calls `UseItem`.
+- food, drinks and potions have no `PayUsageCost`: unchanged.
+An entry with a `costOverride` (only a mod's data can have one: the hand use then pays with that other item) gets no
+cost item from `UseItem`, so it is used as in 0.2.0-dev.30.3 when it has a consume event, and is `NotConsumable` when
+only its `PayUsageCost` would take it. With a kiln.abilities older than 0.2.0-dev.31.5 (it refuses the flag) the
+repair kit is `NotConsumable` (started without its cost item it would repair and never be taken) and a scroll is used
+without paying its mana, as before; kiln.log says so once.
 
 - **No cooldown code.** The game has no cooldown system for players (docs/re/abilities.md: "No player cooldown system
   exists"); what plays as a cooldown is the use's own sequence, so a second use while the first plays is `Busy`.
@@ -300,12 +335,17 @@ some foods add (`UseItem_Food_Heal_Buff`) happens. Nothing is taken at the call.
   (48 bytes) takes the entity, the slot, the item expected in it and the sequence id, and answers `status`
   (`KILN_ITEM_USE_*`), the stack's `count` and the start's `trigger_time`. A C caller is responsible for passing
   the item's own sequence. `KILN_ERR_WRONG_THREAD` inside a Kiln native call (a sync native, an attachment, a wrap).
+  `flags` `KILN_ITEM_USE_COST_ITEM` (since 0.2.0-dev.31.5) writes the slot and the item into `triggerContext.costItem`
+  too; an older kiln.abilities answers `KILN_ERR_INVALID_ARGUMENT` for it, a build whose reflection lacks `costItem`
+  `KILN_ERR_UNAVAILABLE`. Pass it for an item's own use unless its entry names a `costOverride`.
 - Tests: `native/services/abilities/tests/item_use_test.cpp` (the reflection paths against a fake kiln.types, every
   verdict, and `t_item_use` itself against a fake kiln.items, fake components and a fake `TriggerSequence`),
-  `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check), and
+  `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check; since
+  0.2.0-dev.31.5 the paying PayUsageCost, the `costOverride` and ammunition rules, the cost-item flag, and an older
+  kiln.abilities that never gets the repair kit started without it), and
   `mods/tests/playerstate-test` (lab: `NotReady` before the character is ready, then a mushroom eaten through
   `UseItem` with the count going down, `Busy` for a second use in the same step and during the use, the food buff, a health potion through the spawn path, `EmptySlot`, `NotConsumable` for a
-  sword, `NotOwnSlot`). Lab-tested on 2026-11-21 (playerstate-test 146 PASS: the mushroom taken at the consume event, Busy on a second use, the health potion through the spawn path); the buff numbers and the client's buff bar are still on the client checklist.
+  sword, `NotOwnSlot`). Lab-tested on 2026-11-21 (playerstate-test 146 PASS: the mushroom taken at the consume event, Busy on a second use, the health potion through the spawn path); the buff numbers and the client's buff bar are still on the client checklist. Since 0.2.0-dev.31.5 the same lab also uses a repair kit (`Started`, 3 to 2 at its PayUsageCost, still 2 after its 4.3 s of repairs), a Prayer of the Flame scroll (taken by its ApplyBuffEvent, mana 100 to 45: its `ManaCost` 55), the scroll again with 5 mana (`Started`, taken, mana 0) and a Fire Bolt spell (`NotConsumable`, nothing taken or played): 155 PASS, 0 FAIL on 2026-11-25. Whether the kit's repairs reach the gear's durability was not read in the lab (no durability read in the test).
 - Not added: `ApplyBuff(target, buff, usedItem)` (the issue's second shape). The game copies the item's values into the
   buff in `applyBuffCore` from the trigger context's used item on the `actor_apply_buff` path; whether the `applyBuff`
   native that Kiln's `ApplyBuff` program calls carries an item config into the buff entity was not traced, so a
