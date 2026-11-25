@@ -850,6 +850,31 @@ static void test_server() {
     game_creates_instance(spawned.back().entity, true, true);
     server_post();
     CHECK(got.ev.back().kind == EMF_BUFF_REMOVED);
+    // two removals of one type started in the same Pre (Beastmaster's taming removes every debuff it lists): each takes
+    // its own instance, as EMF's cleanse order does (the first not being removed yet), not the same one twice
+    {
+        const auto saved = buffs_on[7];
+        buffs_on[7] = {pb(kBleed, 620, EMF_BUFF_DEBUFF, 0, 6'000'000'000LL, 52'000'000'000LL),
+                       pb(kBleed, 621, EMF_BUFF_DEBUFF, 1, 6'000'000'000LL, 52'000'000'000LL)};
+        const size_t had = got.ev.size();
+        CHECK(t.buff_remove(server(), 7, kBleed, &done_cb, &got) && t.buff_remove(server(), 7, kBleed, &done_cb, &got));
+        server_pre();
+        game_creates_instance(spawned[spawned.size() - 2].entity, true, true);
+        game_creates_instance(spawned.back().entity, true, true);
+        server_post();
+        CHECK(got.ev.size() == had + 2 && got.ev[had].kind == EMF_BUFF_REMOVED && got.ev[had + 1].kind == EMF_BUFF_REMOVED);
+        CHECK(got.ev.size() == had + 2 && got.ev[had].buff_entity == 620 && got.ev[had + 1].buff_entity == 621);
+        // one still running holds its instance: a removal in a later step takes the next one
+        CHECK(t.buff_remove(server(), 7, kBleed, &done_cb, &got));
+        server_pre();
+        CHECK(t.buff_remove(server(), 7, kBleed, &done_cb, &got));
+        server_pre();
+        game_creates_instance(spawned[spawned.size() - 2].entity, true, true);
+        game_creates_instance(spawned.back().entity, true, true);
+        server_post();
+        CHECK(got.ev.size() == had + 4 && got.ev[had + 2].buff_entity == 620 && got.ev[had + 3].buff_entity == 621);
+        buffs_on[7] = saved;
+    }
 
     // ---- on_buff: every player's buffs against the step before ----
     CHECK(!t.on_buff(nullptr, nullptr));

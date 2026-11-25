@@ -105,7 +105,8 @@ const char* wait_why(Wait w);  // the REFUSED reason of Gone / TimedOut / Closed
 std::string apply_check(bool native_ok, const Row* rows, uint32_t n, uint32_t type, uint8_t slot,
                         uint16_t faction_exclude, int faction, uint32_t* buff_entity);
 // The instance a removal takes: the first of `type` not being removed yet (EMF's buff_cleanse order), 0 = none.
-uint32_t removal_target(const Row* rows, uint32_t n, uint32_t type);
+// `taken`: instances other removals already took and the game has not cleansed yet (the same step, or still running).
+uint32_t removal_target(const Row* rows, uint32_t n, uint32_t type, const std::vector<uint32_t>* taken = nullptr);
 
 }  // namespace kemf::buffs
 

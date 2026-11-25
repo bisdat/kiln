@@ -355,9 +355,12 @@ std::string apply_check(bool native_ok, const Row* rows, uint32_t n, uint32_t ty
     return "the game did not give it";
 }
 
-uint32_t removal_target(const Row* rows, uint32_t n, uint32_t type) {
-    for (uint32_t i = 0; i < n; ++i)
-        if (type && rows[i].type == type && !rows[i].cleansed) return rows[i].entity;
+uint32_t removal_target(const Row* rows, uint32_t n, uint32_t type, const std::vector<uint32_t>* taken) {
+    for (uint32_t i = 0; i < n; ++i) {
+        if (!type || rows[i].type != type || rows[i].cleansed) continue;
+        if (taken && std::find(taken->begin(), taken->end(), rows[i].entity) != taken->end()) continue;
+        return rows[i].entity;
+    }
     return 0;
 }
 

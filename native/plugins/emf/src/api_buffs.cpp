@@ -371,7 +371,8 @@ bool request(Mod* m, const char* fn, bool remove, EmfWorld* w, uint32_t target, 
 enum class Start { Running, Finished, Retry };
 
 // The server world's Pre: the program in this world's ImpactRegistry, the impact entity at the target with its values.
-Start start(Job& j, uint64_t step) {
+// taken: the instances removals of this target already took (started this Pre, or still running), (target, instance)
+Start start(Job& j, uint64_t step, std::vector<std::pair<uint32_t, uint32_t>>& taken) {
     const KilnAbilitiesApi* a = abilities();
     if (reinterpret_cast<uintptr_t>(j.world) != g_api->world(KILN_WORLD_SERVER))
         return finish(j, EMF_BUFF_REFUSED, "the world it was asked for has ended"), Start::Finished;
@@ -406,7 +407,10 @@ Start start(Job& j, uint64_t step) {
     if (j.remove) {
         buffs::Row rows[kMaxRows];
         const uint32_t n = read_rows(j.target, rows, kMaxRows);
-        j.before = buffs::removal_target(rows, n, j.type);
+        std::vector<uint32_t> skip;
+        for (const auto& [target, inst] : taken)
+            if (target == j.target) skip.push_back(inst);
+        j.before = buffs::removal_target(rows, n, j.type, &skip);
     }
     // the impact: Impact {program GUID, program id, impact id 0}, ImpactHierarchy {parent, root, weapon, permission}
     // = the source (else the target), and the root's Faction (Kiln.Abilities' RunProgram does the same)
@@ -450,6 +454,7 @@ Start start(Job& j, uint64_t step) {
     }
     j.impact = e;
     j.started = step;
+    if (j.remove && j.before) taken.emplace_back(j.target, j.before);
     return Start::Running;
 }
 
@@ -691,6 +696,7 @@ void buffs_server_pre() {
     Jobs& q = jobs();
     std::vector<Job> work;
     uint64_t step;
+    std::vector<std::pair<uint32_t, uint32_t>> taken;  // instances running removals hold (EMF: being removed)
     {
         std::lock_guard lock(q.m);
         step = ++q.step;
@@ -698,11 +704,14 @@ void buffs_server_pre() {
             work.push_back(std::move(q.waiting.front()));
             q.waiting.pop_front();
         }
+        if (!work.empty())
+            for (const Job& r : q.running)
+                if (r.remove && r.before) taken.emplace_back(r.target, r.before);
     }
     if (work.empty()) return;
     std::vector<Job> retry, running, finished;
     for (Job& j : work) {
-        switch (start(j, step)) {
+        switch (start(j, step, taken)) {
             case Start::Running: running.push_back(std::move(j)); break;
             case Start::Retry: retry.push_back(std::move(j)); break;
             case Start::Finished: finished.push_back(std::move(j)); break;
