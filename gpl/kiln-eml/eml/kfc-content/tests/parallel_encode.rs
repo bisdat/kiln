@@ -4,7 +4,8 @@
 //! Each BC block depends only on its own 4x4 pixels (block_compression makes a new compressor per block), so the image
 //! is cut into strips of whole block rows and each thread encodes its strip into its own rows of the output. These tests
 //! hold that to the serial encode (`encode_with_threads(.., 1)`, which is EML's `encode`) for every BC format EML encodes,
-//! for strips that do not divide evenly, more threads than block rows, the 1x1-block level and the error cases.
+//! for strips that do not divide evenly, more threads than block rows, the 1x1-block level, whole mip chains, very wide
+//! and very tall textures and the error cases.
 use kfc_content::image::{PixelFormat, encode, encode_threads, encode_with_threads, set_encode_threads, size_of_format};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -12,10 +13,15 @@ const BC: &[PixelFormat] = &[
     PixelFormat::BC1_RGB_unorm_block,
     PixelFormat::BC1_RGB_srgb_block,
     PixelFormat::BC1_RGBA_unorm_block,
+    PixelFormat::BC1_RGBA_srgb_block,
     PixelFormat::BC2_unorm_block,
+    PixelFormat::BC2_srgb_block,
+    PixelFormat::BC3_unorm_block,
     PixelFormat::BC3_srgb_block,
     PixelFormat::BC4_unorm_block,
+    PixelFormat::BC4_snorm_block,
     PixelFormat::BC5_unorm_block,
+    PixelFormat::BC5_snorm_block,
     PixelFormat::BC6H_ufloat_block,
     PixelFormat::BC7_unorm_block,
     PixelFormat::BC7_srgb_block,
@@ -79,6 +85,28 @@ fn sizes_that_are_not_whole_blocks_fail_as_the_serial_encode_does() {
             let serial = encoded(format, w, h, &src, 1);
             for threads in [2, 8] {
                 assert_eq!(encoded(format, w, h, &src, threads), serial, "{format:?} {w}x{h} x{threads}");
+            }
+        }
+    }
+}
+
+#[test]
+fn whole_mip_chains_and_extreme_shapes_match_the_serial_encode() {
+    // a mip chain down to 1x1 (its levels under one block fail on both, as above), many block rows that are not whole
+    // blocks across or down (the split must not take them), very wide and very tall textures
+    let mut sizes = vec![(64, 66), (66, 64), (10, 64), (64, 10), (1024, 8), (4, 1024), (4, 64), (12, 20)];
+    let (mut w, mut h) = (128usize, 64usize);
+    loop {
+        sizes.push((w, h));
+        if (w, h) == (1, 1) { break; }
+        (w, h) = ((w / 2).max(1), (h / 2).max(1));
+    }
+    for &format in BC {
+        for (i, &(w, h)) in sizes.iter().enumerate() {
+            let src = rgba(w, h, 100 + i as u64);
+            let serial = encoded(format, w, h, &src, 1);
+            for threads in [3, 16] {
+                assert!(encoded(format, w, h, &src, threads) == serial, "{format:?} {w}x{h} on {threads} threads");
             }
         }
     }
