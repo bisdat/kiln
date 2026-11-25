@@ -485,6 +485,15 @@ redirects the game's calls to what it found (it leaves the functions themselves 
 | `ScreenDispatch`: the HUD screen switch inside the play-state UI (client `+0xC60A1B`) | its menu (Home), tools wheel and exact placement window | nothing. Creative Mode 3.2.0 rewrites + 7 there for its own menu screen; after that Building Tools' fallback search finds nothing either. kiln.log warns when both run (compat rules `creative-mode-building-tools-hud-dispatch` and `creative-mode-building-tools-native-hud-dispatch`, `state/hooks.json` `rules`). Kiln's own `/creative` and its Creative screen do not touch that code. |
 | `Stocks`: the material picker's builder (client `+0x40E5D0`) | creative building's full material list, partial area actions | **still hooked at its entry**: kiln-tools' `tools/MaterialSelector` (when it loads; the material filter of Kiln mods' building tools and the ammo picker) and kiln-items' `build/client.MaterialRows` (once a player has a building link). Open; not changed in 31.13. |
 
+The rest of what Kiln has on Building Tools' signatures is in `sigdb/foreign/building-tools.json`: functions Kiln only
+calls; entry hooks Building Tools accepts and chains to (ApplyMaterials, PlaceBlueprint, DismantleBlock, IterBegin); and
+two hooks Kiln places only when a mod first asks for them (the chest window's footer, for mods' chest buttons, and the
+item-detail text capture), which hide Building Tools' menu functions only when that happens in its first 4 s. One works
+the other way round (from the code, not seen in a game): Building Tools redirects the building programs' calls of
+ApplyMaterials to its own code, so Kiln's hook there sees Building Tools as the caller, and Kiln's building cost rules
+(`BuildCost`, `BuildRefund`) and building-link payments, which recognise the blueprint program by its call, are expected
+not to apply to placements while Building Tools runs.
+
 **The registry.** `sigdb/foreign/<mod>.json` lists such scans for one mod: the signature, how it is looked up (`exact`,
 or `jump-tolerant` with the `head` bytes it accepts another mod's jump in), the feature, and every Kiln symbol on those
 bytes with what Kiln does there (`OPEN ...` for a known conflict). `tools/sigport/tests/test_foreign_scans.py`
