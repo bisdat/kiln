@@ -205,6 +205,14 @@ pub fn unfollow(id: &str) -> bool {
     FOLLOWS.lock().unwrap().remove(id).is_some()
 }
 
+/// The page's web process ended (crate::webproc): its follows go, a crashed page never unfollows. How many there were.
+pub fn unfollow_all() -> usize {
+    let mut map = FOLLOWS.lock().unwrap_or_else(|e| e.into_inner());
+    let n = map.len();
+    map.clear();
+    n
+}
+
 fn poll_follows(app: &AppHandle) {
     let mut map = FOLLOWS.lock().unwrap();
     for (id, f) in map.iter_mut() {

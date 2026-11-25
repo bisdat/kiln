@@ -38,6 +38,9 @@ pub mod selfupdate;
 pub mod snapshot;
 pub mod state;
 pub mod watch;
+/// The page's web process ending (Linux: reload once, then a native fallback screen) and a close that never waits for a
+/// dead page (0.2.0-dev.31.13).
+pub mod webproc;
 
 /// `--selftest [--out <file>] [--keep]`: runs the Rust side headless and returns the exit code (see selftest.rs).
 pub fn selftest() -> i32 {
@@ -84,6 +87,13 @@ pub fn run() {
                 dev_eval(app.handle().clone(), dir.into());
             }
             Ok(())
+        })
+        // the main window's close: Tauri holds it for the page's close guard; a dead or silent page must not keep the
+        // window open (webproc.rs)
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) && window.label() == "main" {
+                webproc::close_requested(tauri::Manager::app_handle(window));
+            }
         })
         .invoke_handler(gated(tauri::generate_handler![
             commands::snapshot::snapshot_status,
@@ -276,6 +286,7 @@ pub fn run() {
             commands::data_folder::data_folder_notice_ack,
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
+            commands::app::app_close_seen,
             commands::app::app_render_frame,
             commands::app::app_render_set,
             commands::app::app_render_x11_set,
@@ -386,6 +397,7 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::Exit) {
                 // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
                 render::leaving();
+                webproc::leaving();
                 watch::leaving();
                 commands::admin::close_web_panel_tunnels();
                 leave_for_sure();
@@ -478,7 +490,8 @@ fn panic_to_log() {
 
 fn gated<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
-        if let Some(e) = folder::current().command_refusal(invoke.message.command()) {
+        // the page's answer to a close request always gets through: closing never waits for the folder (webproc.rs)
+        if let Some(e) = (invoke.message.command() != "app_close_seen").then(|| folder::current().command_refusal(invoke.message.command())).flatten() {
             invoke.resolver.reject(e);
             return true;
         }

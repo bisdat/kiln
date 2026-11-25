@@ -2126,6 +2126,7 @@ pub fn window_created(app: &tauri::AppHandle) {
     frame_painted(false, w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false));
     let software = c.mode == Mode::Software;
     let x = x11().cloned();
+    let handle = app.clone();
     let _ = w.with_webview(move |pw| {
         use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
         let wv = pw.inner();
@@ -2193,7 +2194,8 @@ pub fn window_created(app: &tauri::AppHandle) {
             let note = if said && unused { " although nothing asked for it: this WebKitGTK runs it by default (sandbox.rs expects not)" } else { "" };
             crate::commands::app::launcher_log("sandbox", &format!("the web context says its sandbox is {}{note}", if said { "on" } else { "off" }));
         }
-        wv.connect_web_process_terminated(|_, reason| log(&format!("PROBLEM: the page's web process ended ({reason:?})")));
+        // the page's web process ending: one line in launcher.log, a reload once, then a fallback screen (webproc.rs)
+        crate::webproc::watch(handle, &wv);
     });
 }
 

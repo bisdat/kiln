@@ -745,6 +745,37 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   the terminal's output and, once the window works, a support report. The launcher ending at once with a `bwrap:` line
   and "Failed to start dbus proxy" in the terminal is WebKit's sandbox: see the next section.
 
+### When the page's web process ends (Linux) (0.2.0-dev.31.13)
+`src-tauri/src/webproc.rs`, `src/shell/closeGuard.ts`. WebKitGTK runs the page in its own process (`WebKitWebProcess`).
+When that process ends after the page started (WebKit's `web-process-terminated`: `Crashed`, `ExceededMemoryLimit` or
+`TerminatedByApi`), up to 31.12 the window stayed black and its close button did nothing: the page's close guard listens
+to `tauri://close-requested`, so Tauri holds every close for the page, and a dead page never answers (31.10, at load 54;
+only SIGTERM ended it).
+- **Recovery**: the first end loads the page again (a new web process). A second end within 60 s of that reload puts a
+  native GTK screen in the window instead of the webview: "The launcher's page crashed.", where `launcher.log` is, and
+  **Reload** / **Quit**. Reload gives the page one more try (another end within 60 s shows the screen again); an end
+  long after a reload reloads by itself again. Never a loop. The screen's words are English only (the page and its
+  translations are what crashed).
+- **Closing always works**: while the page is dead (ended, not yet started again) or the screen is up, closing the
+  window quits at once. Otherwise the page gets the close and its listener answers first (`app_close_seen`, open behind
+  every data folder gate): `asking` when it asks about unsaved work (the player decides), else it closes the window.
+  Without an answer within 5 s, a second close before the answer, or a page that said it closes and did not: the
+  launcher quits without the page (`close:` line in `launcher.log`). The launcher has no tray; closing the window quits
+  it, as before.
+- **What it says**: one `render:` line per end, beginning as before 31.13 (`PROBLEM: the page's web process ended
+  (Crashed)`), then the web process's pid and resident memory at the last sample (every 10 s from `/proc`, also behind
+  bwrap) with the largest this start, the launcher's and this page's uptime, `/proc/loadavg` with the CPU count,
+  MemAvailable of MemTotal, the end's number and the next step. A core dump, if any, is WebKit's
+  (`coredumpctl list WebKitWebProcess`).
+- **Running work keeps running**: only the page loads again. The backend (tasks, downloads, installs, a dedicated server
+  it started, the watchers) is the same process and never stops; the new page reads its state back through the same
+  commands as at a start (task list, server status, the game's state). What only the dead page used goes with it at the
+  end: its log follows (`logs_follow`) and server consoles (`server_console_open`), which a crashed page never closes.
+  Starting a server or an install twice is refused by the backend as before (a running server's pid, the install lock).
+- **Tests**: `cargo test -p kiln-launcher --lib webproc` (the retry window, the close decisions, the line, `/proc`
+  parsing). Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_KILL_PAGE=<seconds>` ends the web process
+  (SIGKILL: WebKit says `Crashed`) that long after each page start: the first end reloads, the second shows the screen.
+
 ## WebKit's sandbox (Linux)
 `src-tauri/src/sandbox.rs` (the choice, the probe, the messages' words), `src-tauri/src/dialog.rs` (the messages),
 0.2.0-dev.29.18. The launcher never turns the sandbox off by itself: only the player's click, flag, variable or
