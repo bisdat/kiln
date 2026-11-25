@@ -344,6 +344,20 @@ public sealed unsafe partial class RegistryProofTestMod : Mod
         }
     }
 
+    /// <summary>The probe of a field over what the entry reads and its raw members: <see cref="Probe"/>, except that an
+    /// optional enum read as "none" takes the first rarity whose game enum differs from the enum below the switch (raw
+    /// [switch, enum]), so the round trip writes both members, not the switch alone (review registry-proof: "common" over an
+    /// entry whose enum below was already Common).</summary>
+    private static JsonNode? ProbeOf(JsonNode? v, JsonArray? raw, JsonObject row, IReadOnlyList<string> otherIds)
+    {
+        if ((string?)row["conv"] == "optionalEnum" && (string?)v == "none" && row["values"] is JsonObject values &&
+            raw is { Count: 2 } && raw[1] is JsonValue below && below.TryGetValue<string>(out var enumBelow))
+            foreach (var (kiln, game) in values)
+                if (kiln != "none" && game is JsonValue g && g.TryGetValue<string>(out var name) && !string.Equals(name, enumBelow, StringComparison.OrdinalIgnoreCase))
+                    return JsonValue.Create(kiln);
+        return Probe(v, row, otherIds);
+    }
+
     private static string Digest(string common)
     {
         var sb = new StringBuilder();
@@ -586,7 +600,7 @@ public sealed unsafe partial class RegistryProofTestMod : Mod
             s["bytesBefore"] = before;
             if (backend != "live") return s; // read-only (and none): read only
             var probe = mode == "sint32" && read is JsonValue iv && iv.TryGetValue<double>(out var integer)
-                ? JsonValue.Create(integer + (integer < int.MaxValue ? 1 : -1)) : Probe(read, row, ids);
+                ? JsonValue.Create(integer + (integer < int.MaxValue ? 1 : -1)) : ProbeOf(read, s["rawBefore"] as JsonArray, row, ids);
             if (mode.Length > 0) s["configKind"] = mode == "float" ? "float" : "sint32";
             if (probe is null || JsonNode.DeepEquals(probe, read)) { Skip("no probe"); continue; } // another entry may take one
             JsonNode op = probe;

@@ -178,6 +178,30 @@ public class ProducerTests
         Assert.Equal(expected, lower?.GetValue<double>());
     }
 
+    // review registry-proof: an optional enum's probe from "none" turns the switch on with a rarity whose game enum differs
+    // from the enum below it (the raw [switch, enum]), so the round trip writes both members: "common" over an entry whose
+    // enum below is already Common wrote the switch alone (the 31.x lab sample). From a rarity it probes "none".
+    [Theory]
+    [InlineData("\"none\"", "[false,\"Common\"]", "\"uncommon\"")]
+    [InlineData("\"none\"", "[false,\"Rare\"]", "\"common\"")]
+    [InlineData("\"none\"", "[false,\"common\"]", "\"uncommon\"")]
+    [InlineData("\"none\"", null, "\"common\"")]
+    [InlineData("\"epic\"", "[true,\"Epic\"]", "\"none\"")]
+    public void An_optional_enum_probe_changes_the_enum_below_too(string read, string? raw, string expected)
+    {
+        var row = JsonNode.Parse("""{"conv":"optionalEnum","values":{"none":"","common":"Common","uncommon":"Uncommon","rare":"Rare","epic":"Epic","legendary":"Legendary"}}""")!.AsObject();
+        var probe = (JsonNode?)Call("ProbeOf", JsonNode.Parse(read), raw is null ? null : JsonNode.Parse(raw)!.AsArray(), row, Array.Empty<string>());
+        Assert.Equal(expected, probe?.ToJsonString());
+    }
+
+    // Every other conversion probes as Probe does: ProbeOf only adds what the raw value tells.
+    [Fact]
+    public void Other_probes_are_unchanged()
+    {
+        var row = new JsonObject { ["conv"] = "int" };
+        Assert.Equal("4", ((JsonNode)Call("ProbeOf", JsonNode.Parse("3"), JsonNode.Parse("[3]")!.AsArray(), row, Array.Empty<string>())!).ToJsonString());
+    }
+
     // The roll's scaled stack (0x16db30): n x the world's loot amount, at least 1, at most maxScaled.
     [Theory]
     [InlineData(3, 2.0, 1000, 6)]
