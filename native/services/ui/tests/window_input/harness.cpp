@@ -1991,6 +1991,27 @@ void owned_input() {
     kui::input_pointer_unsubscribe(ph);
 }
 
+// A pad's B turned into Escape while Kiln has the input (input_synth_escape, from the XInput hook): Kiln's own Escape and
+// the key subscribers get its press and its release; an owner of Escape is never offered it (its chance was the pad's B
+// itself), so no claim on Escape is left behind (review 31.13).
+void synthetic_escape() {
+    fresh();
+    check(!kui::own_claimed(), "synthetic Escape: nothing claimed before");
+    KeyLog keys;
+    KilnHandle kh = 0;
+    check(kui::keys_subscribe(36, &key_collect, &keys, 0, &kh) == KILN_OK, "synthetic Escape: a key subscriber");
+    OwnLog esc;
+    esc.take = {VK_ESCAPE};
+    check(kui::own_subscribe(37, KILN_UI_OWN_KEYS, &own_collect, &esc, &esc.handle) == KILN_OK, "synthetic Escape: an owner of Escape");
+    kui::input_synth_escape();
+    check(esc.lines.empty() && !kui::own_owns(esc.handle, VK_ESCAPE, 0) && !kui::own_claimed(),
+          "synthetic Escape: the owner is not offered it and no claim is left on Escape:%s", join(esc.lines).c_str());
+    check(keys.lines == std::vector<std::string>{"vk=27 down=1", "vk=27 down=0"},
+          "synthetic Escape: the key subscriber gets its press and its release:%s", join(keys.lines).c_str());
+    kui::own_unsubscribe(esc.handle);
+    kui::keys_unsubscribe(kh);
+}
+
 // Before the GetRawInputData hook: an owned press in a raw record with motion reaches the game whole, so its release must
 // too (the stuck-press guard), although the owner keeps hearing it.
 void owned_input_without_hook() {
@@ -2082,6 +2103,7 @@ int main() {
     mouse_buttons();
     pointer_presses();
     owned_input();
+    synthetic_escape();
     mouse_captured();
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();

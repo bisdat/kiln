@@ -1077,7 +1077,9 @@ std::atomic<bool> g_xinput_hooked{false};
 PadState g_pad_fed{};
 bool g_pad_fed_any = false;
 
-void synth_escape() {
+}  // namespace
+
+void input_synth_escape() {
     KilnUiKey k{};
     k.size = sizeof k;
     k.vk = VK_ESCAPE;
@@ -1089,8 +1091,6 @@ void synth_escape() {
     k.down = 0;
     dispatch_key(k);
 }
-
-}  // namespace
 
 bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured) {
     KilnUiKey k{};
@@ -1183,7 +1183,7 @@ DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
         g_pad_views[user].poll(polled, st->packet, kept | kui::pad::held(polled.buttons, polled.lt, polled.rt), now_ms());
     }
     std::memset(&st->pad, 0, sizeof st->pad);  // the game sees an idle pad while Kiln has the input
-    if (b_edge) synth_escape();
+    if (b_edge) input_synth_escape();
     return r;
 }
 

@@ -200,6 +200,9 @@ KilnResult input_pad_state(uint32_t controller, KilnUiPadState* out);
 // input.cpp: one controller button's transition from the XInput hook (pad_keys.h Tracker's callback): owned presses,
 // then the key subscribers. true = keep this press from the game until its release. Polling thread.
 bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured);
+// input.cpp: a pad's B as Escape while Kiln has the input (the XInput hook, polling thread): its press and release to Kiln's
+// own Escape and the key subscribers.
+void input_synth_escape();
 
 // ---- ui.cpp ----
 // Builds one ImGui frame (NewFrame, frame callbacks, the fallback menu, Render). Render thread. False = nothing drawn.
