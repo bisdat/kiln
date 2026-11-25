@@ -1405,6 +1405,9 @@ export const appStarted = () => call<null>("app_started");
 /** The page took the window's close request (shell/closeGuard.ts): `asking` the player, or closing. Without it the
  *  backend closes the window by itself a few seconds later (src-tauri/src/webproc.rs). */
 export const appCloseSeen = (asking: boolean) => call<null>("app_close_seen", { asking });
+/** Whether closing the window now would lose work (shell/closeGuard.ts, at its start and at every change): a slow page
+ *  with unsaved work gets longer to answer a close (src-tauri/src/webproc.rs). */
+export const appCloseUnsaved = (unsaved: boolean) => call<null>("app_close_unsaved", { unsaved });
 /** Visibility alone does not prove painting. Two visible animation frames can confirm a renderer startup. */
 export const appRenderFrame = (painted: boolean, visible: boolean) => call<string | null>("app_render_frame", { painted, visible });
 /** What the page measured about its drawing (shell/renderReport.ts), into launcher.log: at most two lines a start. */
@@ -2457,7 +2460,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_close_seen", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
+  "app_started", "app_close_seen", "app_close_unsaved", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

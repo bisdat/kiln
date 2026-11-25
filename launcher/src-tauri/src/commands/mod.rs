@@ -230,6 +230,7 @@ pub const NAMES: &[&str] = &[
     "data_folder_restart",
     "app_started",
     "app_close_seen",
+    "app_close_unsaved",
     "app_render_frame",
     "app_render_set",
     "app_render_x11_set",

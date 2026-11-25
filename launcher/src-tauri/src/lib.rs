@@ -287,6 +287,7 @@ pub fn run() {
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
             commands::app::app_close_seen,
+            commands::app::app_close_unsaved,
             commands::app::app_render_frame,
             commands::app::app_render_set,
             commands::app::app_render_x11_set,
@@ -394,6 +395,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
         .run(|_, event| {
+            // any exit (the page's own close, Deck's Quit, a restart): the close path quits nothing more (webproc.rs)
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                webproc::leaving();
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 // a clean exit after the page started is no DMA-BUF crash: its start guard goes (render.rs)
                 render::leaving();
@@ -490,8 +495,9 @@ fn panic_to_log() {
 
 fn gated<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
-        // the page's answer to a close request always gets through: closing never waits for the folder (webproc.rs)
-        if let Some(e) = (invoke.message.command() != "app_close_seen").then(|| folder::current().command_refusal(invoke.message.command())).flatten() {
+        // the close path's commands always get through: closing never waits for the folder (webproc.rs)
+        let cmd = invoke.message.command();
+        if let Some(e) = (!webproc::CLOSE_COMMANDS.contains(&cmd)).then(|| folder::current().command_refusal(cmd)).flatten() {
             invoke.resolver.reject(e);
             return true;
         }

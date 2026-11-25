@@ -26,6 +26,15 @@ pub const RETRY_WINDOW: Duration = Duration::from_secs(60);
 /// How long the page has to say it took a close request (`app_close_seen`), or to close the window after saying so.
 /// Under heavy load the page's answer can take a moment; past this the window closes without it.
 pub const CLOSE_ANSWER_WITHIN: Duration = Duration::from_secs(5);
+/// How long a page that said it has unsaved work (`app_close_unsaved`) has to answer a close: a live page on a box at
+/// load 54 may need more than [`CLOSE_ANSWER_WITHIN`], and quitting then would throw the work away. A hung page still
+/// lets the window go after this.
+pub const CLOSE_UNSAVED_WITHIN: Duration = Duration::from_secs(30);
+/// Whether a close is taken away from a dead or silent page: Linux only, where the page's web process is watched
+/// (`linux::watch`). On Windows and macOS Tauri and the page's close guard close the window exactly as before 31.13.
+pub const FORCES_CLOSE: bool = cfg!(target_os = "linux");
+/// Commands of the close path, open behind every gate of the data folder (lib.rs `gated`): closing never waits for it.
+pub const CLOSE_COMMANDS: &[&str] = &["app_close_seen", "app_close_unsaved"];
 /// How often the web process's memory is sampled (Linux).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const SAMPLE_EVERY: Duration = Duration::from_secs(10);
@@ -102,10 +111,26 @@ impl Recovery {
 /// What a close request does now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Close {
+    /// Nothing here: Tauri and the page's close guard close the window as before 31.13 (Windows and macOS, where the
+    /// page's web process is never watched, or the launcher already quits).
+    Tauri,
     /// Quit without the page (why, for launcher.log).
     Now(&'static str),
     /// The page gets the request (its close guard); this request's number, for [`Life::after_wait`].
     Page(u64),
+    /// The page has unsaved work and has not answered the last request yet: that request's wait goes on and decides.
+    Waiting,
+}
+
+/// [`Life::after_wait`]: what the wait for a close request ends with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AfterWait {
+    /// Nothing (the page answered and asks the player, a newer request decides, or the launcher quits already).
+    Done,
+    /// Quit without the page (why, for launcher.log).
+    Quit(&'static str),
+    /// Wait this much longer: the page said it has unsaved work and is not dead, so it gets [`CLOSE_UNSAVED_WITHIN`].
+    Again(Duration),
 }
 
 /// The page as the close path sees it.
@@ -113,22 +138,27 @@ pub enum Close {
 pub struct Life {
     /// The web process ended and no new page has said it started since.
     pub dead: bool,
+    /// The page's last word on its work (`app_close_unsaved`): closing now would lose some. A page that ended lost it.
+    unsaved: bool,
     /// The last close request handed to the page, and when.
     asked: u64,
     asked_at: Option<Instant>,
     /// The last request the page answered, and whether it asks the player (unsaved work) or closes the window.
     answered: u64,
     asking: bool,
+    /// The launcher quits (a forced close, the fallback's Quit, or any exit): never a second quit.
+    quitting: bool,
 }
 
 impl Life {
     pub const fn new() -> Life {
-        Life { dead: false, asked: 0, asked_at: None, answered: 0, asking: false }
+        Life { dead: false, unsaved: false, asked: 0, asked_at: None, answered: 0, asking: false, quitting: false }
     }
 
-    /// The web process ended.
+    /// The web process ended (its unsaved work went with it).
     pub fn page_ended(&mut self) {
         self.dead = true;
+        self.unsaved = false;
     }
 
     /// A page said it started (`app_started`).
@@ -136,8 +166,19 @@ impl Life {
         self.dead = false;
     }
 
-    /// The window's close button (or the desktop's close).
-    pub fn close_requested(&mut self, now: Instant, fallback: bool) -> Close {
+    /// The page says whether closing now would lose work (`app_close_unsaved`, sent whenever that changes).
+    pub fn page_unsaved(&mut self, unsaved: bool) {
+        if !self.dead {
+            self.unsaved = unsaved;
+        }
+    }
+
+    /// The window's close button (or the desktop's close). `forces`: this platform takes the close away from a dead or
+    /// silent page ([`FORCES_CLOSE`]: Linux only).
+    pub fn close_requested(&mut self, now: Instant, fallback: bool, forces: bool) -> Close {
+        if !forces || self.quitting {
+            return Close::Tauri;
+        }
         if fallback {
             return Close::Now("the fallback screen is up");
         }
@@ -145,6 +186,10 @@ impl Life {
             return Close::Now("the page's web process has ended");
         }
         let open = self.answered < self.asked;
+        if open && self.unsaved {
+            // a slow page with unsaved work: more clicks neither force the close nor make the wait longer
+            return Close::Waiting;
+        }
         if open && self.asked_at.is_some_and(|t| now.saturating_duration_since(t) < CLOSE_ANSWER_WITHIN) {
             return Close::Now("closed again before the page answered");
         }
@@ -159,16 +204,26 @@ impl Life {
         self.asking = asking;
     }
 
-    /// [`CLOSE_ANSWER_WITHIN`] after request `id`, the window still there: quit without the page? (why, for the log).
-    /// Not when a newer request is waiting (its own wait decides), nor while the page asks the player.
-    pub fn after_wait(&self, id: u64) -> Option<&'static str> {
-        if id != self.asked {
-            return None;
+    /// The wait for request `id` is over at `now`, the window still there: quit without the page, wait more, or nothing.
+    /// A newer request's own wait decides, a page asking the player keeps the window, and a page that said it has
+    /// unsaved work (and has not ended) gets [`CLOSE_UNSAVED_WITHIN`] to answer before the launcher quits without it.
+    pub fn after_wait(&self, id: u64, now: Instant) -> AfterWait {
+        if id != self.asked || self.quitting {
+            return AfterWait::Done;
         }
         if self.answered < id {
-            return Some("the page did not answer the close");
+            let waited = self.asked_at.map_or(CLOSE_UNSAVED_WITHIN, |t| now.saturating_duration_since(t));
+            if self.unsaved && !self.dead && waited < CLOSE_UNSAVED_WITHIN {
+                return AfterWait::Again(CLOSE_UNSAVED_WITHIN - waited);
+            }
+            return AfterWait::Quit("the page did not answer the close");
         }
-        (!self.asking).then_some("the page said it closes the window, and the window is still there")
+        if self.asking { AfterWait::Done } else { AfterWait::Quit("the page said it closes the window, and the window is still there") }
+    }
+
+    /// The launcher begins to quit: true the first time only.
+    pub fn begin_quit(&mut self) -> bool {
+        !std::mem::replace(&mut self.quitting, true)
     }
 }
 
@@ -179,8 +234,6 @@ struct State {
     /// When the window was made and when the page was last loaded again.
     window: Option<Instant>,
     loaded: Option<Instant>,
-    /// The launcher is quitting (`RunEvent::Exit`): no more forced closes.
-    leaving: bool,
     /// The web process's last memory sample.
     sample: Option<Sample>,
 }
@@ -190,7 +243,6 @@ static STATE: Mutex<State> = Mutex::new(State {
     life: Life::new(),
     window: None,
     loaded: None,
-    leaving: false,
     sample: None,
 });
 
@@ -210,9 +262,14 @@ pub fn page_started() {
     linux::test_kill_after_start();
 }
 
-/// `RunEvent::Exit`.
+/// `RunEvent::ExitRequested` and `RunEvent::Exit`: the launcher quits, the close path quits nothing more.
 pub fn leaving() {
-    state().leaving = true;
+    state().life.begin_quit();
+}
+
+/// The page says whether closing now would lose work (`app_close_unsaved`).
+pub fn page_unsaved(unsaved: bool) {
+    state().life.page_unsaved(unsaved);
 }
 
 /// The page answered a close request (`app_close_seen`).
@@ -221,26 +278,33 @@ pub fn page_answered(asking: bool) {
 }
 
 /// The main window's `CloseRequested` (after Tauri's own handler, which holds the close for the page's listener).
+/// Nothing on Windows and macOS ([`FORCES_CLOSE`]).
 pub fn close_requested<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let step = {
         let mut s = state();
         let fallback = s.recovery.fallback;
-        s.life.close_requested(Instant::now(), fallback)
+        s.life.close_requested(Instant::now(), fallback, FORCES_CLOSE)
     };
     match step {
+        Close::Tauri | Close::Waiting => {}
         Close::Now(why) => quit(app, why),
         Close::Page(id) => {
             let app = app.clone();
             let _ = std::thread::Builder::new().name("kiln-close".into()).spawn(move || {
-                std::thread::sleep(CLOSE_ANSWER_WITHIN);
-                let why = {
-                    let s = state();
-                    if s.leaving { None } else { s.life.after_wait(id) }
-                };
-                if let Some(why) = why {
-                    use tauri::Manager;
-                    if app.get_webview_window("main").is_some() {
-                        quit(&app, why);
+                let mut wait = CLOSE_ANSWER_WITHIN;
+                loop {
+                    std::thread::sleep(wait);
+                    let next = state().life.after_wait(id, Instant::now());
+                    match next {
+                        AfterWait::Done => return,
+                        AfterWait::Again(more) => wait = more,
+                        AfterWait::Quit(why) => {
+                            use tauri::Manager;
+                            if app.get_webview_window("main").is_some() {
+                                quit(&app, why);
+                            }
+                            return;
+                        }
                     }
                 }
             });
@@ -248,8 +312,12 @@ pub fn close_requested<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// Quits the launcher without the page: as Deck's Quit, `RunEvent::Exit` runs as at every exit.
+/// Quits the launcher without the page, once (a second forced close, or one after another exit began, does nothing):
+/// as Deck's Quit, `RunEvent::Exit` runs as at every exit.
 fn quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
+    if !state().life.begin_quit() {
+        return;
+    }
     crate::commands::app::launcher_log("close", &format!("the window closes without the page ({why}): the launcher quits"));
     app.exit(0);
 }
@@ -547,8 +615,10 @@ mod linux {
         }
         let app = app.clone();
         quit_b.connect_clicked(move |_| {
-            crate::commands::app::launcher_log("close", "the player chose \"Quit\" on the fallback screen");
-            app.exit(0);
+            if state().life.begin_quit() {
+                crate::commands::app::launcher_log("close", "the player chose \"Quit\" on the fallback screen");
+                app.exit(0);
+            }
         });
     }
 
@@ -567,8 +637,10 @@ mod linux {
         let (wv, app) = (wv.clone(), app.clone());
         d.connect_response(move |d, r| match r {
             gtk::ResponseType::Other(1) => {
-                crate::commands::app::launcher_log("close", "the player chose \"Quit\" on the fallback message");
-                app.exit(0);
+                if state().life.begin_quit() {
+                    crate::commands::app::launcher_log("close", "the player chose \"Quit\" on the fallback message");
+                    app.exit(0);
+                }
             }
             gtk::ResponseType::Other(0) => {
                 log("the player chose \"Reload\" on the fallback message");
@@ -660,38 +732,112 @@ mod tests {
         let t = Instant::now();
         let mut l = Life::new();
         l.page_ended();
-        assert!(matches!(l.close_requested(t, false), Close::Now(_)));
+        assert!(matches!(l.close_requested(t, false, true), Close::Now(_)));
         l.page_started();
-        assert!(matches!(l.close_requested(t, true), Close::Now(_)), "the fallback screen is up");
+        assert!(matches!(l.close_requested(t, true, true), Close::Now(_)), "the fallback screen is up");
         let mut l = Life::new();
-        assert_eq!(l.close_requested(t, false), Close::Page(1), "a live page gets the request");
+        assert_eq!(l.close_requested(t, false, true), Close::Page(1), "a live page gets the request");
+    }
+
+    #[test]
+    fn windows_and_macos_close_as_before() {
+        // (review) the close path is Linux only: elsewhere Tauri and the page's guard close the window, never a forced
+        // quit and never a wait that quits
+        let t = Instant::now();
+        let mut l = Life::new();
+        assert_eq!(l.close_requested(t, false, false), Close::Tauri);
+        assert_eq!(l.close_requested(at(t, 1), false, false), Close::Tauri, "a second close too");
+        l.page_ended();
+        assert_eq!(l.close_requested(at(t, 2), true, false), Close::Tauri);
+        assert!(FORCES_CLOSE == cfg!(target_os = "linux"));
     }
 
     #[test]
     fn a_page_that_does_not_answer_is_not_waited_for() {
         let t = Instant::now();
         let mut l = Life::new();
-        let Close::Page(id) = l.close_requested(t, false) else { panic!() };
-        assert_eq!(l.after_wait(id), Some("the page did not answer the close"));
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Quit("the page did not answer the close"));
         // a second close before the answer quits at once
-        assert!(matches!(l.close_requested(at(t, 1), false), Close::Now(_)));
+        assert!(matches!(l.close_requested(at(t, 1), false, true), Close::Now(_)));
         // past the wait, a new request is the page's again
-        let Close::Page(id2) = l.close_requested(at(t, 10), false) else { panic!() };
+        let Close::Page(id2) = l.close_requested(at(t, 10), false, true) else { panic!() };
         assert_eq!(id2, 2);
-        assert_eq!(l.after_wait(id), None, "the older request's wait no longer decides");
+        assert_eq!(l.after_wait(id, at(t, 10)), AfterWait::Done, "the older request's wait no longer decides");
     }
 
     #[test]
     fn a_page_asking_about_unsaved_work_keeps_the_window() {
         let t = Instant::now();
         let mut l = Life::new();
-        let Close::Page(id) = l.close_requested(t, false) else { panic!() };
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
         l.page_answered(true);
-        assert_eq!(l.after_wait(id), None, "the player decides");
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Done, "the player decides");
         // the player chose Stay, then closes again: the page gets it again (not a forced close)
-        assert_eq!(l.close_requested(at(t, 1), false), Close::Page(2));
+        assert_eq!(l.close_requested(at(t, 6), false, true), Close::Page(2));
         l.page_answered(false);
-        assert_eq!(l.after_wait(2), Some("the page said it closes the window, and the window is still there"));
+        assert_eq!(l.after_wait(2, at(t, 11)), AfterWait::Quit("the page said it closes the window, and the window is still there"));
+    }
+
+    #[test]
+    fn a_slow_page_with_unsaved_work_is_not_quit_after_5_s() {
+        // (review) a live page on a loaded box can take longer than 5 s to answer: with unsaved work it gets 30 s, and
+        // impatient clicks neither force the close nor make the wait longer
+        let t = Instant::now();
+        let mut l = Life::new();
+        l.page_unsaved(true);
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Again(CLOSE_UNSAVED_WITHIN - Duration::from_secs(5)));
+        assert_eq!(l.close_requested(at(t, 6), false, true), Close::Waiting, "a second close while it is slow");
+        assert_eq!(l.after_wait(id, at(t, 12)), AfterWait::Again(CLOSE_UNSAVED_WITHIN - Duration::from_secs(12)));
+        // its answer comes: the player decides
+        l.page_answered(true);
+        assert_eq!(l.after_wait(id, at(t, 30)), AfterWait::Done);
+        // a page that never answers still lets the window go
+        let mut l = Life::new();
+        l.page_unsaved(true);
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        assert_eq!(l.after_wait(id, at(t, 30)), AfterWait::Quit("the page did not answer the close"));
+        // the work saved again: 5 s as before
+        let mut l = Life::new();
+        l.page_unsaved(true);
+        l.page_unsaved(false);
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Quit("the page did not answer the close"));
+    }
+
+    #[test]
+    fn a_page_that_ended_has_no_unsaved_work_left() {
+        let t = Instant::now();
+        let mut l = Life::new();
+        l.page_unsaved(true);
+        l.page_ended();
+        assert!(matches!(l.close_requested(t, false, true), Close::Now(_)), "a dead page closes at once");
+        // a word of the dead page arriving late counts for nothing
+        l.page_unsaved(true);
+        l.page_started();
+        let Close::Page(id) = l.close_requested(at(t, 1), false, true) else { panic!() };
+        assert_eq!(l.after_wait(id, at(t, 6)), AfterWait::Quit("the page did not answer the close"));
+        // the page ending during the wait: no longer waited for
+        let mut l = Life::new();
+        l.page_unsaved(true);
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        l.page_ended();
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Quit("the page did not answer the close"));
+    }
+
+    #[test]
+    fn the_launcher_quits_once() {
+        // (review) a forced close, the fallback's Quit and any other exit quit once: no second app.exit, which after
+        // the event loop ended would be Tauri's process::exit in the middle of RunEvent::Exit
+        let t = Instant::now();
+        let mut l = Life::new();
+        let Close::Page(id) = l.close_requested(t, false, true) else { panic!() };
+        assert!(l.begin_quit());
+        assert!(!l.begin_quit(), "the second quit does nothing");
+        assert_eq!(l.after_wait(id, at(t, 5)), AfterWait::Done, "the wait quits nothing once the launcher quits");
+        l.page_ended();
+        assert_eq!(l.close_requested(at(t, 6), false, true), Close::Tauri, "a close while quitting");
     }
 
     #[test]
@@ -699,9 +845,9 @@ mod tests {
         let t = Instant::now();
         let mut l = Life::new();
         l.page_ended();
-        assert!(matches!(l.close_requested(t, false), Close::Now(_)));
+        assert!(matches!(l.close_requested(t, false, true), Close::Now(_)));
         l.page_started();
-        assert_eq!(l.close_requested(t, false), Close::Page(1));
+        assert_eq!(l.close_requested(t, false, true), Close::Page(1));
     }
 
     #[test]

@@ -3,7 +3,9 @@
 // the save editor's own beforeunload guard). The Deck's Quit has its own dialog, which names the same losses.
 // The listener tells the backend at once that it took the request (app_close_seen): without that answer, or when the
 // page's web process has ended, the backend closes the window by itself (src-tauri/src/webproc.rs, 0.2.0-dev.31.13).
-import { appCloseSeen, isTauri } from "../api/commands";
+// The backend also hears whenever closing would lose work (app_close_unsaved): a slow page with unsaved work then gets
+// longer to answer than the 5 s a page with nothing to lose gets.
+import { appCloseSeen, appCloseUnsaved, isTauri } from "../api/commands";
 import { usePendingEdits } from "../editor/kiln/pending";
 import { t } from "../i18n";
 import { unsavedKind, useUnsaved, type UnsavedKind } from "./unsaved";
@@ -50,6 +52,22 @@ export async function onCloseRequest(e: { preventDefault(): void }, d: CloseDeps
   if (close) await d.destroy();
 }
 
+/** Tells the backend whether closing now would lose work: once at once, then at every change (`subscribe`'s callback
+ *  runs on any store change; only a change of the answer is sent). A send that fails is sent again at the next change.
+ *  Returns the unsubscribe. */
+export function reportUnsaved(unsaved: () => boolean, subscribe: (changed: () => void) => () => void,
+  send: (unsaved: boolean) => Promise<unknown>): () => void {
+  let last: boolean | null = null;
+  const push = () => {
+    const now = unsaved();
+    if (now === last) return;
+    last = now;
+    void send(now).catch(() => { if (last === now) last = null; });
+  };
+  push();
+  return subscribe(push);
+}
+
 let installed = false;
 
 /** Asks before the window closes while closing would lose work (once per start; a no-op outside the desktop app). */
@@ -59,6 +77,10 @@ export function installCloseGuard(): void {
   void (async () => {
     const [{ getCurrentWindow }, { ask }] = await Promise.all([import("@tauri-apps/api/window"), import("@tauri-apps/plugin-dialog")]);
     const win = getCurrentWindow();
+    reportUnsaved(() => closeLoss(useUnsaved.getState().by, usePendingEdits.getState()) != null, (changed) => {
+      const a = useUnsaved.subscribe(changed), b = usePendingEdits.subscribe(changed);
+      return () => { a(); b(); };
+    }, appCloseUnsaved);
     // with a listener here the window no longer closes by itself: the listener closes it (destroy) unless it is stopped
     await win.onCloseRequested((e) => onCloseRequest(e, {
       by: useUnsaved.getState().by,

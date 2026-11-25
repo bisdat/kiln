@@ -414,6 +414,15 @@ pub async fn app_close_seen(asking: bool) -> Result<(), Error> {
     Ok(())
 }
 
+/// The page says whether closing the window now would lose work (launcher/src/shell/closeGuard.ts, at its start and at
+/// every change): a slow page with unsaved work gets longer to answer a close (crate::webproc). Open behind every gate of
+/// the data folder (lib.rs `gated`).
+#[tauri::command]
+pub async fn app_close_unsaved(unsaved: bool) -> Result<(), Error> {
+    crate::webproc::page_unsaved(unsaved);
+    Ok(())
+}
+
 /// Visibility and two visible animation frames, distinct from navigation/hidden-page readiness. A first automatic
 /// recovery attempt returns its explanation once, only when it has become visible.
 #[tauri::command]

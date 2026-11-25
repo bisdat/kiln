@@ -1272,6 +1272,7 @@ const handlers: Record<string, Handler> = {
     ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
   app_close_seen: () => null,
+  app_close_unsaved: () => null,
   app_render_frame: (a) => a.painted && a.visible && NVIDIA_Q === "recovery" ? "The previous normal NVIDIA startup never confirmed a visible frame. Kiln is trying shared-memory GPU drawing." : null,
   app_render_report: () => null,
   app_render_set: (a) => {
