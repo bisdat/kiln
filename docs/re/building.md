@@ -229,7 +229,7 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   not remove unmatched rows, and the cycle `0x40c320` does not check a row's count. Kiln therefore keeps a group's
   binding across a session or world change until that group's next build takes the mod rows out (picks of them stay
   suppressed meanwhile, with no event).
-- Rows and picks in time (0.2.0-dev.31.9, GitHub issue 145; static, same client). All seven wish sites pass the selector
+- Rows and picks in time (0.2.0-dev.31.10, GitHub issue 145; static, same client). All seven wish sites pass the selector
   state at `+0x14fd0`, the one the parent `0x40e2b0` rebuilds in full (`currentOnly` 0) on each call from `0x2bd0bc`; the
   second state at `+0x17bd0` is built for the active group only or copied from the first. In that caller the event-loop
   wish at `0x2bce24` runs before the build at `0x2bd0bc`, so it sees the previous build's rows; the order of the input
@@ -237,10 +237,11 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   stacks in the `Generic` (4) links `0xe882d0` collects from the actor's `InventorySetup` (recursing into `Virtual` (5)
   links), the same graph the backpack read walks. The equipped arrow or spell is a selected `Generic` backpack cell
   (the #139 notes in [items.md](items.md)), so its game row counts it and the backpack read finds it. A binding's rows can
-  therefore be older than the backpack at a pick: Kiln reads the backpack once per set of bound rows for each game row
-  with stock, and a provided row held then and absent at the pick goes to the mod. When the game's rows change, Kiln
-  binds nothing until the provider publishes for the new serial, so the game's own rows show for that interval; a pick
-  of a provided item's count-0 row there is decided as for a bound one. `0x40ca70` (equip reconciliation) returns the
+  therefore be older than the backpack at a pick: once per set of bound rows Kiln reads the backpack (one walk) for the
+  game rows with stock whose item the publication provides, and a provided row held then and absent at the pick goes to
+  the mod. When the game's rows change, Kiln binds nothing until the provider publishes for the new serial, so the
+  game's own rows show for that interval; a pick of a provided item there is decided by its row as the group shows it at
+  the pick: with stock the game's, at count 0 as for a bound one. `0x40ca70` (equip reconciliation) returns the
   pending item `+0x63c` while its version `+0x640` differs from the input's, else the equipped stack's item via
   `0x3853c0`. Which pick emptied the reporter's slot, and the server's order of the mod's swap and the game's wish, are
   runtime facts not established here.

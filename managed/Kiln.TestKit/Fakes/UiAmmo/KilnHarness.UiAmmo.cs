@@ -27,9 +27,10 @@ public sealed partial class KilnHarness
 /// row; the game equips a row it lists itself with stock.</para>
 /// <para><b>Not modelled.</b> The game's hook and drawing, its equip request, the server half (a pick does nothing to any
 /// inventory), the pick queue's thread. The game's rows are the backpack here, so a stack that leaves the backpack before
-/// the game builds its rows again (a pick of its row reaches <c>Picked</c> in the game since 0.2.0-dev.31.9, GitHub issue
+/// the game builds its rows again (a pick of its row reaches <c>Picked</c> in the game since 0.2.0-dev.31.10, GitHub issue
 /// 145) is not modelled; a pick after <see cref="SetGameRows"/> and before the next step is decided by the new rows, as in
-/// the game.</para>
+/// the game, while <see cref="Shown"/> still composes the earlier snapshot with them (the game shows only its own rows
+/// until Kiln publishes for them).</para>
 /// </remarks>
 public sealed class HarnessAmmoList
 {

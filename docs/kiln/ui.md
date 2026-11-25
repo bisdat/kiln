@@ -515,7 +515,7 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   backpack before the game builds the list again (your server half just swapped it into storage), a pick of its row
   raises `Picked` too, rather than going to the game, which would find no stack and empty the slot. The same holds in
   the frame or two between the game's new build and Kiln's next publication of your rows, when the game's own rows
-  show (since 0.2.0-dev.31.9, GitHub issue 145, thanks Fuzen777). With `"log_level": "debug"` in `kiln.json`, every
+  show (since 0.2.0-dev.31.10, GitHub issue 145, thanks Fuzen777). With `"log_level": "debug"` in `kiln.json`, every
   pick of a provided row that goes to the game logs one line (at most 8 a second), e.g. `ui.ammo: a pick of spell
   0x1a2b3c4d (a row a mod provided) went to the game: game row count 1 (list revision 221, built 16 ms, 0 client steps
   before the pick); backpack: holds it`. Any other mod row raises

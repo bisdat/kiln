@@ -409,8 +409,9 @@ public void CtrlClickAsksToMarkTheItem()
   Switch `ui.ammo.list` or `ui.ammo.pick` off with `kiln.Capabilities.Override` to test a mod's refusal path. Not
   modelled: the game's hook and drawing, its equip request, the server half, and a stack that leaves the backpack before
   the game builds its rows again (the game's rows are the backpack here; in the game a pick of such a row raises
-  `Picked` since 0.2.0-dev.31.9, GitHub issue 145). A `Pick` after `SetGameRows` and before the next `Step()` is decided
-  by the new rows, as in the game.
+  `Picked` since 0.2.0-dev.31.10, GitHub issue 145). A `Pick` after `SetGameRows` and before the next `Step()` is decided
+  by the new rows, as in the game; `Shown` still composes the earlier snapshot with them until that step, where the game
+  shows only its own rows.
 
 ```csharp
 [Fact]

@@ -178,7 +178,7 @@ public static partial class Ui
         /// lists itself with stock (in Replace too) or the player carries is the game's own (it equips it); a pick of any
         /// other mod row, also of an item whose used-up stack the game still lists at count 0, raises <see cref="Picked"/>
         /// for the mod that provided it. So does a pick of a provided item whose stack left the backpack after the game
-        /// last built the list (the mod's server half swapped it out; since 0.2.0-dev.31.9, GitHub issue 145): the game's
+        /// last built the list (the mod's server half swapped it out; since 0.2.0-dev.31.10, GitHub issue 145): the game's
         /// rows still show its old count until the game builds them again. A pick of a provided row that goes to the game
         /// is logged at debug level (<c>ui.ammo: a pick of ... went to the game</c>).</para>
         /// </remarks>
