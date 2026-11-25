@@ -309,19 +309,51 @@ struct GateOpen {
     held: Option<String>,
     /// The data folder is usable (else nothing more runs, as before).
     folder: bool,
-    /// This process holds the instance lock: it alone reads the inbox.
-    reader: bool,
 }
 
 /// The gate is open (lib.rs `after_snapshot`): the start's own link, and the instance lock unless another launcher has it.
 fn gate_open() -> GateOpen {
     let held = HELD.lock().unwrap().take();
-    let Ok(d) = dirs() else { return GateOpen { held, folder: false, reader: false } };
+    let Ok(d) = dirs() else { return GateOpen { held, folder: false } };
     let mut inst = INSTANCE.lock().unwrap();
     if inst.is_none() {
         *inst = links::acquire_instance(&d).ok().flatten();
     }
-    GateOpen { held, folder: true, reader: inst.is_some() }
+    GateOpen { held, folder: true }
+}
+
+/// One round of the links thread: the inbox, read only by the launcher with the instance lock ([`reader`]).
+fn links_round() -> Vec<String> {
+    if !reader() { return Vec::new(); }
+    inbox_round()
+}
+
+/// This process holds the instance lock, or takes it now: the launcher that had it when this window's gate opened has
+/// ended since. Without that a second window stayed without a reader for good: a link handed to the launcher that
+/// ended, in its last moments before its next round, waited in the inbox for the next start, and the next start for a
+/// link opened another window. Read-only while the lock file is there; never while the folder is held or the beta
+/// copy's gate is closed.
+fn reader() -> bool {
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_some() {
+        return true;
+    }
+    let taken = {
+        let _writing = crate::state::writing();
+        let Ok(d) = dirs() else { return false };
+        match links::find_instance(&d) {
+            Ok(links::Found::Free(Some(i))) => Some(i),
+            Ok(links::Found::Free(None)) => links::acquire_instance(&d).ok().flatten(),
+            Ok(links::Found::Running) | Err(_) => None,
+        }
+    };
+    let got = taken.is_some();
+    *inst = taken;
+    drop(inst);
+    if got {
+        launcher_log("crucible", "this window takes kiln:// links from now on: the launcher that had them ended");
+    }
+    got
 }
 
 /// One look into the inbox (the reader's round). Its files are removed once read: a writer of the data folder that a
@@ -354,8 +386,9 @@ fn to_window(app: &AppHandle, got: Vec<String>) {
 }
 
 /// Starts (once, when the gate opens): the link this process was started with goes to the window, the instance lock,
-/// the kiln:// registration while Crucible is on, and the inbox reader (only in the launcher that holds the lock: a
-/// second window never takes a link the other one was given).
+/// the kiln:// registration while Crucible is on, and the links thread: the inbox is read only by the launcher that
+/// holds the lock (a second window never takes a link the other one was given), and a second window takes the lock
+/// over once that launcher ended ([`reader`]).
 pub fn start(app: &AppHandle) {
     let _ = VERSION.set(app.package_info().version.to_string());
     let open = gate_open();
@@ -375,12 +408,9 @@ pub fn start(app: &AppHandle) {
             Err(e) => launcher_log("crucible", &format!("kiln:// links not registered: {}", e.message)),
         }
     }
-    if !open.reader {
-        return;
-    }
     let app = app.clone();
     let _ = std::thread::Builder::new().name("crucible links".into()).spawn(move || loop {
-        let got = inbox_round();
+        let got = links_round();
         if !got.is_empty() {
             launcher_log("crucible", &format!("{} Crucible link(s) arrived from another start", got.len()));
             to_window(&app, got);
@@ -481,7 +511,7 @@ mod tests {
         // lib.rs after_snapshot: the gate is open, `start` gives the window what waits
         s.gate.open();
         let open = gate_open();
-        assert!(open.folder && open.reader, "this launcher holds the instance lock: later links come to it");
+        assert!(open.folder && INSTANCE.lock().unwrap().is_some(), "this launcher holds the instance lock: later links come to it");
         keep(open.held.into_iter().collect());
         assert_eq!(waiting(), [LINK], "the preview opens with the start's link");
         // once: neither a second look nor the inbox has it again
@@ -566,6 +596,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(t);
     }
 
+    /// A second window (its gate opened while another launcher held the instance lock) takes the lock over once that
+    /// launcher ended: a link handed to the one that ended, in its last moments before its next round, reaches this
+    /// window (it waited in the inbox for the next start before, and Crucible drops links older than an hour), and the
+    /// next start for a link finds this window running instead of opening another.
+    #[test]
+    fn a_second_window_takes_the_links_over_once_the_launcher_that_had_them_ended() {
+        let s = link_start("take-over", |_| {});
+        s.gate.open();
+        let first = links::acquire_instance(&s.dirs).unwrap().unwrap();
+        let open = gate_open();
+        assert!(open.folder && INSTANCE.lock().unwrap().is_none(), "the first launcher has the lock");
+        links::queue(&s.dirs, LINK).unwrap();
+        assert!(links_round().is_empty(), "while the first launcher runs its links stay for it");
+        assert!(INSTANCE.lock().unwrap().is_none());
+        // the first launcher ended before its next round
+        drop(first);
+        assert_eq!(links_round(), [LINK], "this window took the lock over and reads the inbox");
+        assert!(links_round().is_empty(), "once");
+        assert!(matches!(links::find_instance(&s.dirs).unwrap(), links::Found::Running), "a later link start hands over to this window");
+        // with the folder held (here: the beta copy's gate closed again) no lock is taken over
+        INSTANCE.lock().unwrap().take();
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        assert!(links_round().is_empty());
+        assert!(INSTANCE.lock().unwrap().is_none());
+        drop(gate);
+    }
+
     #[test]
     fn only_the_launcher_with_the_instance_lock_reads_the_inbox() {
         let s = link_start("second-window", |_| {});
@@ -574,7 +631,8 @@ mod tests {
         links::queue(&s.dirs, LINK).unwrap();
         // a second window (started without a link) finds the lock taken: no reader, the link stays for the first
         let open = gate_open();
-        assert!(open.folder && !open.reader);
+        assert!(open.folder && INSTANCE.lock().unwrap().is_none());
+        assert!(links_round().is_empty());
         assert_eq!(links::take(&s.dirs), [LINK]);
         drop(running);
     }
