@@ -108,11 +108,13 @@ const MANIFESTS: &[&str] = &["kiln.mod.json", "native.json", "mod.json", "kiln-m
 type CacheKey = (PathBuf, u64, Option<SystemTime>);
 static CACHE: LazyLock<Mutex<HashMap<CacheKey, Option<Detected>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// `path` resolved (links, `..`), as the player reads it: on Windows without the `\\?\` prefix canonicalizing adds
-/// (`C:\Users\...`, not `\\?\C:\Users\...`), kept only where a name needs it (`winpath::plain`). Every path this
-/// module shows, returns or compares goes through here, so the places' roots and the folders below them agree.
-fn canonical(path: &Path) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(path).map(kiln_manage::winpath::plain)
+/// A resolved path (`std::fs::canonicalize`) as the player reads it: on Windows without the `\\?\` prefix canonicalizing
+/// adds (`C:\Users\...`, not `\\?\C:\Users\...`), kept only where Win32 would read the plain spelling as something
+/// else (`winpath::plain`: a name ending in a dot or space, `NUL`). What this module shows and returns, and what it opens
+/// and detects a listed entry by. The folder itself is read, and paths are compared with the places' roots, in their
+/// resolved spelling: a child's path joined to a plain folder path would lose such a name.
+fn shown(resolved: PathBuf) -> PathBuf {
+    kiln_manage::winpath::plain(resolved)
 }
 
 /// One folder: `dir` null is Downloads (Home when there is no Downloads folder).
@@ -125,23 +127,24 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
         }
     };
     let places = places(env);
-    let roots: Vec<PathBuf> = places.iter().filter_map(|p| canonical(Path::new(&p.path)).ok()).collect();
-    let dir = canonical(&dir).map_err(kiln_manage::util::io_at(&dir, "opening"))?;
+    let roots: Vec<PathBuf> = places.iter().filter_map(|p| std::fs::canonicalize(&p.path).ok()).collect();
+    let dir = std::fs::canonicalize(&dir).map_err(kiln_manage::util::io_at(&dir, "opening"))?;
     let allowed = |p: &Path| roots.iter().any(|r| p.starts_with(r));
     if dir.to_str().is_none() || !allowed(&dir) {
         return Err(Error::new(ErrorCode::Refused, "Browse within Home, Downloads, Steam games or a mounted card."));
     }
     let rd = std::fs::read_dir(&dir).map_err(|e| {
         let code = if e.kind() == std::io::ErrorKind::NotFound { ErrorCode::NotFound } else if e.kind() == std::io::ErrorKind::PermissionDenied { ErrorCode::Permission } else { ErrorCode::Io };
-        Error::new(code, format!("Can't open {}.", dir.display())).with_detail(e.to_string())
+        Error::new(code, format!("Can't open {}.", shown(dir.clone()).display())).with_detail(e.to_string())
     })?;
     let mut items: Vec<(PathBuf, std::fs::Metadata)> = Vec::new();
     let mut count = 0;
     for e in rd {
         let e = e.map_err(kiln_manage::util::io_at(&dir, "reading"))?;
         if e.file_name().to_str().is_none_or(|s| s.starts_with('.')) { continue; }
-        let Ok(path) = canonical(&e.path()) else { continue };
-        if !allowed(&path) { continue; }
+        let Ok(resolved) = std::fs::canonicalize(e.path()) else { continue };
+        if !allowed(&resolved) { continue; }
+        let path = shown(resolved);
         let Ok(meta) = std::fs::metadata(&path) else { continue };
         if !meta.is_file() && !meta.is_dir() { continue; }
         count += 1;
@@ -176,10 +179,10 @@ pub fn browse(dir: Option<&Path>, env: &Env) -> Result<Folder, Error> {
     }
     folders.sort_by_key(|f| f.name.to_lowercase());
     Ok(Folder {
-        name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| dir.display().to_string()),
-        parent: dir.parent().filter(|p| allowed(p)).map(|p| p.display().to_string()),
+        name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| shown(dir.clone()).display().to_string()),
+        parent: dir.parent().filter(|p| allowed(p)).map(|p| shown(p.to_path_buf()).display().to_string()),
         has_game: dir.join("enshrouded.exe").is_file(),
-        dir: dir.display().to_string(),
+        dir: shown(dir.clone()).display().to_string(),
         folders,
         mods,
         other,

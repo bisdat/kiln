@@ -73,13 +73,29 @@ pub(crate) fn plain_path(s: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// A host path without Windows' verbatim prefix where it has a plain spelling ([`plain_path`]): what a player is shown
-/// for a canonicalized path (`C:\x`, not `\\?\C:\x`). Elsewhere, and for a path that is not UTF-8, the path as it is.
+/// for a canonicalized path (`C:\x`, not `\\?\C:\x`), and what comes back to be opened again. A path through a name
+/// Win32 reads as a device ([`dos_device_name`]) keeps the prefix too, as one through a name ending in a dot or space
+/// does. Elsewhere, and for a path that is not UTF-8, the path as it is.
 pub fn plain(path: PathBuf) -> PathBuf {
     let plain = match path.to_str() {
-        Some(s) if s.starts_with(r"\\?\") => plain_path(s).into_owned(),
+        // the parts after `\\?\` (a drive, `UNC` and a server, a volume) are never such names
+        Some(s) if s.starts_with(r"\\?\") && !s.split('\\').skip(3).any(dos_device_name) => plain_path(s).into_owned(),
         _ => return path,
     };
     PathBuf::from(plain)
+}
+
+/// A file name Win32 reads as a DOS device in any folder without the verbatim prefix: `NUL` on Windows 11; also `CON`,
+/// `PRN`, `AUX`, `COM0`-`COM9`, `LPT0`-`LPT9` (and `COM¹`...) and the console names, with any extension (`aux.txt`), on
+/// Windows 10. Case and spaces before the extension do not matter.
+fn dos_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ').to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => ["COM", "LPT"].iter().any(|d| {
+            stem.strip_prefix(d).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}"))
+        }),
+    }
 }
 
 /// Where `path` is below `base`, compared as Windows compares folders: without Windows' verbatim prefix (`\\?\C:\x` is
