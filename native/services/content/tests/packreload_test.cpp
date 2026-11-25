@@ -11,6 +11,9 @@
 //  - unload reverts, an unload and a load before the next Pre apply the current files, as before
 //  - a reload of a mod without data packs, or before the world is ready, applies nothing
 //  - kiln.mod.json changing without a reload (a hot edit) is a pack change too: the scan re-applies
+//  - a pack that throws while it applies: its mod's layers of that application come off, its packs from before apply
+//    again whole (also when they had ordinary field errors), with their registry sections, else none of its packs apply
+//  - 300 reloads (good, broken, throwing): no new owners, nothing left queued
 // packreload_test.sh builds and runs it.
 #include <windows.h>
 
@@ -20,6 +23,8 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -151,7 +156,12 @@ std::unordered_map<uint32_t, std::vector<uint8_t>> g_category_guid;
 // What the packs reach in the service's other files: no new content, no kitbash, no registry stage in this test.
 void nc_packs_begin() {}
 void nc_packs_end() {}
-void nc_pack_add(KilnOwner, uint32_t, const std::string&, const std::string&, ApplyResult* out) { out->errors.push_back("no new content here"); }
+// An "add" entry {"throw": "<what>"} throws while its pack applies (a section's code meeting a value type it did not expect):
+// the rule before it in the same pack has applied already.
+void nc_pack_add(KilnOwner, uint32_t, const std::string& list, const std::string&, ApplyResult* out) {
+    if (list.find("\"throw\"") != std::string::npos) throw std::runtime_error("[json.exception.type_error.302] type must be string, but is number");
+    out->errors.push_back("no new content here");
+}
 bool nc_is_new(uint32_t, uint32_t) { return false; }
 void nc_drops_table(const Entry&) {}
 void nc_world_ready(uintptr_t, uint32_t) {}
@@ -172,8 +182,13 @@ KilnResult KILN_CALL nc_text_info_api(KilnContentTextInfo*) { return KILN_ERR_UN
 bool is_kitbash_key(const Schema&, const std::string&) { return false; }
 void kitbash(const Schema&, const std::string&, const nlohmann::ordered_json&, const ItemFind&, const std::vector<uintptr_t>&, KitbashOut*, uintptr_t) {}
 std::string ref_text(const uint8_t*) { return "none"; }
-std::shared_ptr<const registry::Schema> registry_live_schema() { return nullptr; }
-void registry_live_apply(const std::vector<RegistrySection>&, const registry::Schema*) {}
+// The registry stage: a schema (so the packs' registry sections are lowered and handed over), and what it was handed.
+std::shared_ptr<const registry::Schema> registry_live_schema() {
+    static const auto schema = std::make_shared<const registry::Schema>();
+    return schema;
+}
+std::vector<RegistrySection> g_staged;  // the sections of the last application
+void registry_live_apply(const std::vector<RegistrySection>& sections, const registry::Schema*) { g_staged = sections; }
 void registry_live_publish() {}
 void registry_live_world_begin(uint32_t) {}
 void registry_live_world_stop() {}
@@ -388,6 +403,77 @@ void run() {
     step();
     check(generation() == g4 + 1 && logged("data pack files changed: re-applying"),
           "a kiln.mod.json edit (version) is a pack change: the 2-s scan re-applies");
+
+    // ---- a pack that throws while it applies (nobody had tested this branch): none of that application's layers of the
+    // mod stay; its packs from before apply again, whole, with their registry sections
+    {
+        // the version before: a field error (an ordinary problem, reported, not a throw) and a registry section
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"Wood": {"maxStackSize": 90, "noSuchField": 1}}, "registry": {"v": "old"}})");
+        reloaded("skilltest", "was reloaded");
+        step();
+        check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw: the version before applies (Wood 90, Stone 25)");
+        auto staged_of = [](const std::string& mod) {
+            std::vector<uint64_t> h;
+            for (const RegistrySection& s : g_staged)
+                if (s.mod == mod) h.push_back(s.hash);
+            return h;
+        };
+        const std::vector<uint64_t> old_sections = staged_of("skilltest");
+        check(old_sections.size() == 1, "throw: the registry stage got the version's one registry section");
+        // the new version: Stone 33 applies, then its "add" list throws
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"Stone": {"maxStackSize": 33}, "add": [{"throw": 1}]}, "registry": {"v": "new"}})");
+        reloaded("skilltest", "was reloaded (1.0.3 -> 1.0.4)");
+        fake::lines.clear();
+        step();
+        check(fake::read32(kStone) == 25, "throw: the layer the throwing pack wrote before it threw comes off (Stone back to other's 25)");
+        check(fake::read32(kWood) == 90, "throw: the packs from before apply again, whole, though they had an ordinary field error (Wood 90)");
+        check(logged("a pack threw while it applied: the packs it had before apply again, whole"), "throw: a line says the packs from before apply again");
+        check(staged_of("skilltest") == old_sections,
+              "throw: the registry stage gets the section of the packs that apply (the one from before), not the throwing pack's");
+        check(g_report.find("applying it failed") != std::string::npos && g_report.find("type_error") != std::string::npos,
+              "throw: the report names the file and the throw");
+        // and once more: the bookkeeping still holds the version before (not the one that threw)
+        reloaded("skilltest", "was reloaded");
+        step();
+        check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw, again: the version before still applies");
+        // no version before (the mod's packs came off with an unload): the throwing pack's mod applies nothing
+        pack_mods(R"(["other"])");
+        step();
+        pack_mods(R"(["other","skilltest"])");
+        fake::lines.clear();
+        step();
+        check(fake::read32(kWood) == 10 && fake::read32(kStone) == 25, "throw without a version before: none of the mod's packs apply (Wood 10, Stone 25)");
+        check(logged("a pack threw while it applied: none of its packs apply"), "throw without a version before: a line says none apply");
+        check(staged_of("skilltest").empty(), "throw without a version before: no registry section of the mod reaches the stage");
+        // fixed: the new version applies
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
+        reloaded("skilltest", "was reloaded");
+        step();
+        check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw fixed: the new version applies (Wood 90)");
+    }
+
+    // ---- many reloads (good, broken, throwing, in turn): no new owners, nothing left queued, the last good version applies
+    {
+        const KilnOwner owners = fake::next_owner;
+        const uint64_t g = generation();
+        for (int i = 0; i < 300; ++i) {
+            const int k = i % 3;
+            if (k == 0) pack("skilltest", "more.json", R"({"format": 1, "items": {"Stone": {"maxStackSize": 4)");  // cut off
+            else if (k == 1) pack("skilltest", "more.json", R"({"format": 1, "items": {"Stone": {"maxStackSize": 5}, "add": [{"throw": 1}]}})");
+            else pack("skilltest", "more.json", R"({"format": 1, "items": {"Stone": {"maxStackSize": )" + std::to_string(100 + i) + "}}}");
+            reloaded("skilltest", "was reloaded");
+            reloaded("skilltest", "was reloaded");  // twice before one Pre: one application
+            step();
+        }
+        check(generation() == g + 300, "300 reloads: one application each (a mod named twice before a Pre applies once)");
+        check(fake::next_owner == owners, "300 reloads: no owner created after the first load (one pack owner per mod id)");
+        check(!pending() && fake::read32(kWood) == 90 && fake::read32(kStone) == 399, "300 reloads: nothing queued; the last version applies (Wood 90, Stone 399)");
+        fs::remove(mod_dir("skilltest") / "content" / "more.json");
+        reloaded("skilltest", "was reloaded");
+        step();
+    }
 
     // ---- the world goes away: nothing stays queued for the next one
     reloaded("skilltest", "was reloaded");

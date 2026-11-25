@@ -1056,19 +1056,23 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
         auto mod_index = [&](const std::string& mod) {
             return static_cast<uint64_t>(std::find(order.begin(), order.end(), mod) - order.begin());
         };
-        // Applies one pack; a pack that throws (an unexpected value type) is reported and its mod set apart below.
+        // Applies one pack; a pack that throws (an unexpected value type) is reported and its mod set apart below. False:
+        // it threw.
         auto apply_one = [&](ParsedPack& pack, uint32_t file_index, ApplyResult* out) {
             const PackFile& p = pack.file;
-            if (!pack.valid) return;
+            if (!pack.valid) return true;
             PhaseTimer ft(PH_PACK_FILE);
             t_pack_dir = p.dir;
+            bool ok = true;
             try {
                 apply_parsed_pack(owner_of(p.mod), pack_base(mod_index(p.mod), file_index), pack.doc, p.rel, &pack.registry_report, out);
             } catch (const std::exception& e) {
                 out->errors.push_back(p.rel + ": applying it failed (" + e.what() + ")");
                 threw.insert(p.mod);
+                ok = false;
             }
             t_pack_dir.clear();
+            return ok;
         };
         uint32_t file_index = 0;
         for (ParsedPack& pack : packs) {
@@ -1089,15 +1093,24 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
                 std::lock_guard kl(g_kept_mu);
                 if (auto k = g_kept.find(mod); k != g_kept.end() && !kept_mods.count(mod)) again = k->second.files;
             }
+            // The registry stage gets the sections of what applies: not this application's sections of the mod, the
+            // kept packs' (in the mod's place in the load order), or none.
+            std::erase_if(sections, [&](const RegistrySection& s) { return s.mod == mod; });
+            std::vector<RegistrySection> again_sections;
             ApplyResult r;
             uint32_t fi = 0x800;
+            bool again_ok = !again.empty();
             for (const KeptFile& kf : again) {
                 ParsedPack p = parse_pack(kf.file, kf.text, true);
-                apply_one(p, ++fi, &r);
+                stage_pack(p, live_schema.get(), &again_sections);
+                again_ok = apply_one(p, ++fi, &r) && again_ok;  // an ordinary problem in r (a field error) is no reason to drop it
             }
-            if (!again.empty() && r.errors.empty())
+            if (again_ok) {
+                const uint64_t at = mod_index(mod);
+                const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > at; });
+                sections.insert(pos, std::make_move_iterator(again_sections.begin()), std::make_move_iterator(again_sections.end()));
                 LOGW("data packs of %s: a pack threw while it applied: the packs it had before apply again, whole", mod.c_str());
-            else {
+            } else {
                 store_drop_owner(o);
                 drops_drop_owner(o);
                 LOGW("data packs of %s: a pack threw while it applied: none of its packs apply", mod.c_str());

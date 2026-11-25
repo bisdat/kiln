@@ -203,7 +203,7 @@ struct Reloaded {
     std::string mod, reason;
 };
 std::vector<Reloaded> g_reloaded;
-std::unordered_set<std::string> g_applied_mods;  // the mods whose packs the last application applied (tick thread)
+std::unordered_set<std::string> g_applied_mods;  // the mods whose packs the last application applied (g_filter_mu: world_reset may run on the destroying thread)
 
 // A timing report in lines of a length the log keeps whole.
 void log_timing(const char* what, const std::string& text) {
@@ -236,8 +236,11 @@ void apply_packs(bool reload) {
     gd_packs_end();
 #endif
     rep.skipped = skipped;
-    g_applied_mods.clear();
-    for (const PackFile& f : files) g_applied_mods.insert(f.mod);
+    {
+        std::lock_guard lock(g_filter_mu);
+        g_applied_mods.clear();
+        for (const PackFile& f : files) g_applied_mods.insert(f.mod);
+    }
     for (const std::string& m : skipped)
         LOGW("data packs of %s skipped: Kiln.Host did not load the mod (its \"mod ... not loaded\" / \"skipped\" line above and kiln/logs/mods.txt say why)", m.c_str());
     g_report = report_json(rep);
@@ -418,8 +421,8 @@ void world_reset(bool revert, const char* why) {
     {
         std::lock_guard lock(g_filter_mu);
         g_reloaded.clear();  // the next world's load applies every current file
+        g_applied_mods.clear();
     }
-    g_applied_mods.clear();
     {
         std::lock_guard lock(g_seen_mu);
         g_seen.clear();
@@ -479,13 +482,15 @@ void pre(const KilnTickInfo* tick, uint32_t kind, uintptr_t world) {
         // a mod's packs follow its load: a mod loaded again re-applies when it has packs now or had them in the last application
         std::string sig;
         std::vector<PackFile> now = discover_packs(&sig);
+        std::unordered_set<std::string> applied;
         {
             std::lock_guard lock(g_filter_mu);
             std::vector<std::string> skipped;
             if (g_have_filter) now = order_packs(now, g_filter, &skipped);
+            applied = g_applied_mods;
         }
         for (const Reloaded& r : reloaded) {
-            const bool has = g_applied_mods.count(r.mod) ||
+            const bool has = applied.count(r.mod) ||
                              std::any_of(now.begin(), now.end(), [&](const PackFile& f) { return f.mod == r.mod; });
             if (!has) continue;
             LOGI("mod %s %s: re-applying data packs (its old layer comes off, its current files apply)", r.mod.c_str(), r.reason.c_str());
