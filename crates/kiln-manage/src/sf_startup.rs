@@ -8,7 +8,9 @@
 //! failed pass ShroudForge puts the game data back and lets the game start, so every mod that needs the pass is missing
 //! and only ShroudForge's own log and window say so. When it cannot put the game data back, Kiln's ShroudForge (since
 //! 0.2.0-dev.31.13) says why in `recoveryError`; its preparation then returned false, Kiln's adapter wrote `failed`
-//! with `startupPrepared` false, and no ShroudForge mod ran in that start. [`failure`] reads the record, so Kiln's launcher and its support
+//! with `startupPrepared` false, and no ShroudForge mod ran in that start. When the failed pass changed no game file and
+//! the game's own files are a clean copy (a game update), its recovery keeps them instead and says so in `recovery`
+//! (`kept`; `restored` when the pair went back). [`failure`] reads the record, so Kiln's launcher and its support
 //! report say it too.
 //!
 //! The record names no process, so [`failure`] ties it to Kiln's last start (`kiln/state/boot.json`): it was written in
@@ -108,6 +110,11 @@ pub struct SfStartupFailure {
     /// ShroudForge mod ran in that start, not only the mods of the pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_error: Option<String>,
+    /// The recovery after the failed pass kept the game's own files: the pass had changed none of them, and they are a
+    /// clean copy of their own (a game update; the record's `recovery` is `kept`, written by Kiln's ShroudForge since
+    /// 0.2.0-dev.31.13). Then nothing was put back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept_game_files: bool,
     /// ShroudForge's words as the record has them, whole: a report redacts these, then puts them on one line and cuts
     /// them ([`SfStartupFailure::redacted`]).
     #[serde(skip)]
@@ -422,7 +429,8 @@ pub fn failure(game_dir: &Path, wine: bool) -> Option<SfStartupFailure> {
     let cure = cure.or_else(|| refused.then(|| verify_cure(server)));
     Some(SfStartupFailure { error, at: completed.and_then(|c| i64::try_from(c).ok()).map(crate::util::rfc3339), own_loader,
         version: ran.version, build: ran.build, mods, cure, skipped: skipped_mods(&assets), retry_error: raw_retry_error.as_deref().map(one_line),
-        recovery_error: raw_recovery_error.as_deref().map(one_line), raw_error, raw_retry_error, raw_recovery_error })
+        recovery_error: raw_recovery_error.as_deref().map(one_line),
+        kept_game_files: assets.get("recovery").and_then(|v| v.as_str()) == Some("kept"), raw_error, raw_retry_error, raw_recovery_error })
 }
 
 /// The mod ShroudForge's last startup pass in this game folder ran without, after the pass failed in it, or None: no such
@@ -529,6 +537,8 @@ impl SfStartupFailure {
             // the same refusal ended the pass and the recovery after it
             Some(r) if r == self.error => t.push_str(". It changed no game file, and no ShroudForge mod ran in that start"),
             Some(r) => t.push_str(&format!(". It could not put the game data back either ({r}), so no ShroudForge mod ran in that start")),
+            // the recovery kept the game's own files, which the failed pass did not change (a game update)
+            None if self.kept_game_files => t.push_str(". It changed no game file, and the game started without them"),
             None => t.push_str(". It put the game data back and the game started without them"),
         }
         match self.mods.len() {
