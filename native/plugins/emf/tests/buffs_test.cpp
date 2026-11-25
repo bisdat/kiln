@@ -659,7 +659,11 @@ static void test_server() {
     for (size_t i = first; i < n; ++i)
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void*) &&
             i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void*) && i != offsetof(EmfApi, on_hit) / sizeof(void*) &&
-            i != offsetof(EmfApi, spawn_facing) / sizeof(void*))
+            i != offsetof(EmfApi, spawn_facing) / sizeof(void*) &&
+            // fill_markers (tests/markers_test.cpp) and fill_orders (tests/orders_test.cpp) fill these, not linked here
+            !(i >= offsetof(EmfApi, marker_set) / sizeof(void*) && i <= offsetof(EmfApi, marker_types) / sizeof(void*)) &&
+            i != offsetof(EmfApi, marker_send) / sizeof(void*) && i != offsetof(EmfApi, marker_unsend) / sizeof(void*) &&
+            !(i >= offsetof(EmfApi, enemy_order) / sizeof(void*) && i <= offsetof(EmfApi, enemy_moving) / sizeof(void*)))
             ++empty;
     CHECK(empty == 0);
     t_thread = 0;
