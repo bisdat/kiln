@@ -2012,6 +2012,42 @@ void synthetic_escape() {
     kui::keys_unsubscribe(kh);
 }
 
+// With raw keyboard input seen, a key whose first raw record never came (Proton): its WM_KEYDOWN reaches the game, then the
+// raw record of its auto-repeat is a new press to Kiln, which an owner takes. The game saw the key go down, so it must get
+// the WM_KEYUP too (the stuck-press guard: the claim is leaked), and the owner hears the release marked leaked (review 31.13).
+size_t game_key_lines(const Run& r, UINT msg, uint32_t vk) {
+    char want[16];
+    std::snprintf(want, sizeof want, "%04x %x ", msg, vk);
+    size_t n = 0;
+    for (const auto& x : r.game) n += x.rfind(want, 0) == 0;
+    return n;
+}
+void owned_key_game_saw() {
+    fresh();
+    OwnLog ow;
+    ow.take = {'K'};
+    check(kui::own_subscribe(38, KILN_UI_OWN_KEYS, &own_collect, &ow, &ow.handle) == KILN_OK, "own (game saw it): an owner of K");
+    const Run r = run([] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x1e, RI_KEY_MAKE, 'A'));  // raw keyboard input is seen
+        send(WM_KEYDOWN, 'A', key_l(0x1e, false, false));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x1e, RI_KEY_BREAK, 'A'));
+        send(WM_KEYUP, 'A', key_l(0x1e, false, true));
+        send(WM_KEYDOWN, 'K', key_l(0x25, false, false));             // K's first raw record never came
+        send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_MAKE, 'K'));  // the auto-repeat's: a new press to Kiln
+        send(WM_KEYDOWN, 'K', repeat_l(0x25));
+        send(WM_INPUT, RIM_INPUT, raw_key(0x25, RI_KEY_BREAK, 'K'));
+        send(WM_KEYUP, 'K', key_l(0x25, false, true));
+    }, nullptr);
+    const size_t downs = game_key_lines(r, WM_KEYDOWN, 'K'), ups = game_key_lines(r, WM_KEYUP, 'K');
+    check(downs >= 1 && ups == 1, "own (game saw it): the game gets a WM_KEYUP for the WM_KEYDOWN it got (%zu down, %zu up):%s",
+          downs, ups, game_text(r).c_str());
+    check(game_key_lines(r, WM_KEYDOWN, 'A') == 1 && game_key_lines(r, WM_KEYUP, 'A') == 1, "own (game saw it): A is the game's");
+    check(ow.lines == std::vector<std::string>{"press 4b", "release 4b leaked"} && !kui::own_claimed(),
+          "own (game saw it): the owner hears the press and the release, marked leaked; nothing claimed after:%s",
+          join(ow.lines).c_str());
+    kui::own_unsubscribe(ow.handle);
+}
+
 // Before the GetRawInputData hook: an owned press in a raw record with motion reaches the game whole, so its release must
 // too (the stuck-press guard), although the owner keeps hearing it.
 void owned_input_without_hook() {
@@ -2104,6 +2140,7 @@ int main() {
     pointer_presses();
     owned_input();
     synthetic_escape();
+    owned_key_game_saw();
     mouse_captured();
     kui::keys_unsubscribe(kiln_ui_h);
     mouse_subscribers();
