@@ -38,6 +38,24 @@ public sealed class CraftSourceOptions
     /// press count the link (a vanilla client still shows the lock locked and may first play the failed attempt).
     /// Without the capability the link still serves crafting. Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public bool Locks { get; init; }
+    /// <summary>Production-station fills too (default false): the station screen's "+1" and "+10" (the game's "fill from
+    /// chests", which Kiln.Blocks then runs as Kiln's fill) and a <see cref="Stations.Fill"/> with
+    /// <see cref="FillOptions.UseLinkedSources"/> take from this container, through <see cref="Filter"/> and
+    /// <see cref="Items"/>, what the player's bag, the station base's Magic chests and named chests cannot cover: before or
+    /// after opted-in station outputs by <see cref="Order"/>, in the fill's one all-or-nothing transaction, in any base.
+    /// Off by default because a fill moves whole crafts' worth of inputs out of chests in other bases at once, which a
+    /// link made for crafting did not ask for. Needs <see cref="Stations.FillCapability"/> on the server or host; a Kiln
+    /// client's "+1" / "+10" light up from the server's answer (a vanilla client's stay greyed when the bag and the Magic
+    /// chests cannot cover the fill). A row transfer of one ingredient stays the game's. Since 0.2.0-dev.31.12.</summary>
+    public bool Fills { get; init; }
+    /// <summary>Building too (default false): the build cursor's material check and the Construction Hammer's blueprint
+    /// placements (blocks and terrain shapes) count and pay from this container, through <see cref="Filter"/> and
+    /// <see cref="Items"/>: after the player's bag and the current base's Magic chests (in the game's own order), only what
+    /// they cannot cover, in the placement's all-or-nothing payment, in any base. Props, undo, dismantling and terraforming
+    /// stay the game's. Needs capability <see cref="Crafting.BuildSourcesCapability"/> on the server or host, and a Kiln
+    /// client for the player's own cursor (a vanilla client shows the placement as missing materials and does not send it).
+    /// Since 0.2.0-dev.31.12.</summary>
+    public bool Building { get; init; }
 }
 
 /// <summary>A session-only player crafting source. Dispose or unload its registering mod to remove it. In-flight
@@ -49,11 +67,19 @@ public sealed class CraftSourceHandle : IDisposable
     private readonly ModContext? _mod;
     private readonly bool _locks;
     private readonly object? _lockSession;  // the lock session this handle counts in (GitHub #147)
-    internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod, bool locks = false)
+    private readonly object? _fillSession, _buildSession;  // GitHub #132
+    internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod, bool locks = false,
+        bool fills = false, bool building = false)
     {
         _owner = owner; _handle = unchecked((long)handle); Player = player; Container = container; _mod = mod; _locks = locks;
         if (mod is not null) mod.Retiring += Dispose;
         if (locks) _lockSession = LockStock.Track(player);
+        if (fills)
+        {
+            _fillSession = LinkPurposes.Fills.Track(player);
+            StationsCore.StartPump();  // the station screen's fill button is followed from the stations pump
+        }
+        if (building) _buildSession = BuildStock.Track(player);
     }
     /// <summary>The only player this registration can supply.</summary>
     public EntityId Player { get; }
@@ -72,6 +98,8 @@ public sealed class CraftSourceHandle : IDisposable
         {
             if (_mod is not null) _mod.Retiring -= Dispose;
             if (_locks) LockStock.Untrack(Player, _lockSession);
+            if (_fillSession is not null) LinkPurposes.Fills.Untrack(Player, _fillSession);
+            if (_buildSession is not null) BuildStock.Untrack(Player, _buildSession);
         }
     }
 }
@@ -88,6 +116,11 @@ public static class Crafting
     /// server's snapshot). Off, or faulted, when a symbol, a hook or the game's code it reads is missing or patched by
     /// another module (kiln.log names it). Since 0.2.0-dev.31.12, mod API 0.2.21.</summary>
     public const string LockSourcesCapability = "items.lock_sources";
+    /// <summary>Block placements count and pay from links registered with <see cref="CraftSourceOptions.Building"/>: on a
+    /// server or host the build cursor's material check and the blueprint placement's payment, on a Kiln client its own
+    /// build cursor (from the server's snapshot). Off, or faulted, when a symbol, a hook or the game's code it relies on is
+    /// missing or patched by another module (kiln.log names it). Since 0.2.0-dev.31.12.</summary>
+    public const string BuildSourcesCapability = "crafting.build_sources";
 
     /// <summary>Registers a container for this player, in any base or none. The mod decides which containers the player
     /// may use; the server rechecks the player's own global CanAccessInventories permission and a readable initialized
@@ -118,8 +151,12 @@ public static class Crafting
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var owner = Services.CallerOwner;
         if (o.Locks) CraftingCore.NoteLocks();
-        var handle = CraftingCore.Add(owner, player, container, o.Order, o.Filter, items, o.Locks);
-        return new CraftSourceHandle(owner, handle, player, container, mod, o.Locks);
+        var purposes = (o.Fills || o.Building) && CraftingCore.NotePurposes();
+        var fills = o.Fills && purposes;
+        var building = o.Building && purposes;
+        if (building) CraftingCore.NoteBuilding();
+        var handle = CraftingCore.Add(owner, player, container, o.Order, o.Filter, items, o.Locks, fills, building);
+        return new CraftSourceHandle(owner, handle, player, container, mod, o.Locks, fills, building);
     }
 }
 
@@ -163,8 +200,29 @@ internal static unsafe class CraftingCore
         ModLog.Warn($"crafting: a source asked for Locks, but locks do not use linked sources here (the link still serves crafting): " +
                     Capabilities.Why(Crafting.LockSourcesCapability));
     }
+    // GitHub #132: kiln.stations' fill and building flags and set_build_stock came in one release (after #147's members).
+    internal static bool HasPurposeMembers(uint size) => size >= (uint)StationsNative.TableBuild;
+    internal static bool HasPurposes => Table is var t && t != null && HasPurposeMembers(t->Header.Size) && t->SetBuildStock != null;
+    private static int _purposesNoted, _buildingNoted;
+    /// <summary>A link asked for Fills or Building: false (and one kiln.log line) when this kiln-items.dll cannot keep them;
+    /// the link then serves crafting only.</summary>
+    internal static bool NotePurposes()
+    {
+        if (HasPurposes) return true;
+        if (Interlocked.Exchange(ref _purposesNoted, 1) == 0)
+            ModLog.Warn("crafting: a source asked for Fills or Building, but kiln.stations has no such members (older kiln-items.dll): " +
+                        "the link serves crafting only");
+        return false;
+    }
+    /// <summary>A link asked for Building: say once why placements will not use it when the capability is off.</summary>
+    internal static void NoteBuilding()
+    {
+        if (Capabilities.Is(Crafting.BuildSourcesCapability) || Interlocked.Exchange(ref _buildingNoted, 1) != 0) return;
+        ModLog.Warn("crafting: a source asked for Building, but block placements do not use linked sources here (the link still " +
+                    "serves crafting): " + Capabilities.Why(Crafting.BuildSourcesCapability));
+    }
     internal static ulong Add(ulong owner, EntityId player, EntityId container, CraftSourceOrder order, CraftSourceFilter filter, uint[] items,
-        bool locks = false)
+        bool locks = false, bool fills = false, bool building = false)
     {
         var t = Need(); ulong id = 0; int rc;
         fixed (uint* p = items)
@@ -178,7 +236,8 @@ internal static unsafe class CraftingCore
                 Filter = (uint)filter,
                 ItemCount = (uint)items.Length,
                 Items = p,
-                Flags = locks && HasLocks ? StationsNative.SourceLocks : 0u,
+                Flags = (locks && HasLocks ? StationsNative.SourceLocks : 0u) |
+                        (fills && HasPurposes ? StationsNative.SourceFills : 0u) | (building && HasPurposes ? StationsNative.SourceBuilding : 0u),
             };
             rc = t->AddSource(owner, &r, &id);
         }
@@ -200,6 +259,16 @@ internal static unsafe class CraftingCore
     {
         if (!HasLocks) return StationsNative.Unavailable;
         fixed (StationsNative.Stack* p = rows) return Table->SetLockStock(on ? 1u : 0u, p, (uint)rows.Length);
+    }
+    /// <summary>GitHub #132: one purpose's links alone (no bag, no base): Fills or Building.</summary>
+    internal static (int Rc, StationsNative.Stack[] Rows) FillStock(EntityId player) =>
+        HasPurposes ? Stock(player, StationsNative.StockFills) : (StationsNative.Unavailable, []);
+    internal static (int Rc, StationsNative.Stack[] Rows) BuildStockRows(EntityId player) =>
+        HasPurposes ? Stock(player, StationsNative.StockBuilding) : (StationsNative.Unavailable, []);
+    internal static int SetBuildStock(bool on, StationsNative.Stack[] rows)
+    {
+        if (!HasPurposes) return StationsNative.Unavailable;
+        fixed (StationsNative.Stack* p = rows) return Table->SetBuildStock(on ? 1u : 0u, p, (uint)rows.Length);
     }
     internal static (int Rc, uint[] Items) LockAsks()
     {

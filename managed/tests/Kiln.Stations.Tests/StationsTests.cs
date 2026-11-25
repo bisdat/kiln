@@ -126,6 +126,7 @@ public sealed unsafe class StationsTests : IDisposable
 
         public uint[] LastChests = [];
         public bool HasChests { get; set; } = true;
+        public bool HasLinkedFills { get; set; } = true;  // GitHub #132
         // base_stock_with_stations (0.2.0-dev.29.17): off unless a test sets it
         public bool HasStockWithStations { get; set; }
         public StationsNative.Stack[] StockWithStations = [];
@@ -271,6 +272,7 @@ public sealed unsafe class StationsTests : IDisposable
     {
         StationsCore.UseBackend(null);
         StationOutputKeeper.Reset();
+        BuildStock.ResetForTests();
         StationsCore.CanAccessInventories = static p => p.PermissionsKnown ? p.Can(PlayerPermissions.AccessInventories) : null;
     }
 
@@ -306,14 +308,17 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(88, (int)Marshal.OffsetOf<StationsNative.Request>("ChestCount"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Request>("Chests"));
         Assert.Equal(32, sizeof(StationsNative.MoveChange));
-        Assert.Equal(1240, sizeof(StationsNative.Result));
+        Assert.Equal(1248, sizeof(StationsNative.Result));  // GitHub #132: FromLinked, ReservedLinked appended
+        Assert.Equal(1240, (int)Marshal.OffsetOf<StationsNative.Result>("FromLinked"));
         Assert.Equal(1232, (int)Marshal.OffsetOf<StationsNative.Result>("FromChests"));
         Assert.Equal(52, (int)Marshal.OffsetOf<StationsNative.Result>("LimitedBy"));
         Assert.Equal(56, (int)Marshal.OffsetOf<StationsNative.Result>("ShortItem"));
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Result>("Ticket"));
         Assert.Equal(80, (int)Marshal.OffsetOf<StationsNative.Result>("Changes"));
         Assert.Equal(1104, (int)Marshal.OffsetOf<StationsNative.Result>("Message"));
-        Assert.Equal(952, sizeof(StationsNative.Plan));
+        Assert.Equal(1080, sizeof(StationsNative.Plan));  // GitHub #132: Linked appended
+        Assert.Equal(952, (int)Marshal.OffsetOf<StationsNative.Plan>("Linked"));
+        Assert.Equal(952, StationsNative.PlanLinked);
         Assert.Equal(696, (int)Marshal.OffsetOf<StationsNative.Plan>("Outputs"));
         Assert.Equal(824, (int)Marshal.OffsetOf<StationsNative.Plan>("Chests"));
         Assert.Equal(696, StationsNative.PlanV1);
@@ -327,7 +332,9 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(304, sizeof(StationsNative.Table));  // GitHub #147: SetLockStock, LockAsks appended
+        Assert.Equal(312, sizeof(StationsNative.Table));  // GitHub #147: SetLockStock, LockAsks; #132: SetBuildStock appended
+        Assert.Equal(304, (int)Marshal.OffsetOf<StationsNative.Table>("SetBuildStock"));
+        Assert.Equal(312, StationsNative.TableBuild);
         Assert.Equal(40, sizeof(StationsNative.SourceRequest));  // GitHub #147: Flags, Reserved after the 32-byte V1
         Assert.Equal(32, (int)Marshal.OffsetOf<StationsNative.SourceRequest>("Flags"));
         Assert.Equal(288, (int)Marshal.OffsetOf<StationsNative.Table>("SetLockStock"));
@@ -1049,6 +1056,123 @@ public sealed unsafe class StationsTests : IDisposable
         _fake.Planned.Clear();
         Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
         Assert.Empty(_fake.Planned);
+    }
+
+    [Fact]
+    public void TheFillButtonTakesFromAPlayersFillOptedLinks()
+    {
+        // GitHub #132 (0.2.0-dev.31.12): no station opted in, the player has a link registered with Fills
+        using var kiln = Kiln();
+        AddStation(5, 0, x: 3);    // the player, in the forge's base
+        var player = new EntityId(5);
+        var forge = new EntityId(3300);
+        string? why = null;
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillLinked) != 0 ? StationActionStatus.Done : StationActionStatus.NotEnough, 0);
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));  // no link: vanilla, never planned
+        Assert.Empty(_fake.Planned);
+        var session = LinkPurposes.Fills.Track(player);
+        Assert.True(LinkPurposes.Fills.Has(player) && LinkPurposes.Fills.Any && StationsCore.FillLinksOf(player));
+        var o = kiln.Run(() => StationsCore.SourceFill(player, FillPress(amount: 2), true, out _, out why));
+        Assert.NotNull(o);
+        Assert.True(o!.UseLinkedSources && o.Player == player && o.Exact && o.Crafts == 2);
+        Assert.True((_fake.Planned[0].Flags & (StationsNative.FillLinked | StationsNative.FillNoOutputs)) == StationsNative.FillNoOutputs);  // plain first
+        Assert.True((_fake.Planned[^1].Flags & StationsNative.FillLinked) != 0 && _fake.Planned[^1].Player == 5);
+        // the links cannot cover it either: the game's own fill, said so
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.NotEnough);
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Contains("linked sources", why);
+        // a Kiln client's "+1" / "+10": the answer counts the links too
+        _fake.PlanFor = r =>
+        {
+            var p = PlanWith((r.Flags & StationsNative.FillLinked) != 0 ? StationActionStatus.Partial : StationActionStatus.NotEnough);
+            p.CraftsPlanned = (r.Flags & StationsNative.FillLinked) != 0 ? 7u : 0u;
+            return p;
+        };
+        Assert.Equal(7u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, [], true)));
+        Assert.Equal(0u, kiln.Run(() => StationsCore.FillCrafts(player, forge, 0x1234, [], false)));  // the inventory right still
+        // an older kiln-items.dll (no FILL_LINKED): the button stays the game's, a mod's fill that asks is refused
+        _fake.HasLinkedFills = false;
+        _fake.Planned.Clear();
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+        Assert.Throws<InvalidOperationException>(() => StationsCore.FillRequest(forge, new FillOptions { Player = player, UseLinkedSources = true }));
+        _fake.HasLinkedFills = true;
+        Assert.Throws<ArgumentException>(() => StationsCore.FillRequest(forge, new FillOptions { UseLinkedSources = true }));  // no Player
+        var (req, _, _) = StationsCore.FillRequest(forge, new FillOptions { Player = player, UseLinkedSources = true });
+        Assert.True((req.Flags & StationsNative.FillLinked) != 0);
+        var (plain, _, _) = StationsCore.FillRequest(forge, new FillOptions { Player = player });
+        Assert.True((plain.Flags & StationsNative.FillLinked) == 0);  // a mod's fill never takes from links unless it asks
+        // the link went (disposed, or the player left): vanilla again
+        LinkPurposes.Fills.Untrack(player, session);
+        Assert.False(LinkPurposes.Fills.Has(player));
+        LinkPurposes.Fills.Track(player);
+        BuildStock.Gone(player);
+        Assert.False(LinkPurposes.Fills.Has(player));
+        _fake.Planned.Clear();
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+    }
+
+    [Fact]
+    public void LinkedCountsComeBackInThePlanAndTheResult()
+    {
+        using var kiln = Kiln();
+        var p = PlanWith(StationActionStatus.Done, 3);
+        p.Linked[0] = 9;
+        _fake.NextPlan = p;
+        var plan = kiln.Run(() => Stations.Plan(new EntityId(3300), new FillOptions { Player = new EntityId(5), UseLinkedSources = true }));
+        Assert.Equal((9L, 3L), (plan.Inputs[0].Linked, plan.Inputs[0].Outputs));
+        var r = new StationsNative.Result { Size = (uint)sizeof(StationsNative.Result), Status = 0, FromLinked = 12, FromOutputs = 1 };
+        Assert.Equal((12, 1), (StationsCore.ResultOf(r, StationAction.Fill).FromLinked, StationsCore.ResultOf(r, StationAction.Fill).FromOutputs));
+    }
+
+    [Fact]
+    public void TheBuildingSnapshotGoesToThePlayersKilnClientWhileALinkIsOptedIn()
+    {
+        // GitHub #132: the server sends a player with a Building link what those links hold; off after the last one goes
+        var sent = new List<(EntityId Player, BuildStockRows Message)>();
+        BuildStock.SendHook = (p, m) => { sent.Add((p, m)); return true; };
+        BuildStock.SupportedHook = () => true;
+        var rows = new[] { new StationsNative.Stack { Item = 0x88, Count = 4 }, new StationsNative.Stack { Item = 0x77, Count = 35 },
+                           new StationsNative.Stack { Item = 0x99, Count = 0 } };
+        BuildStock.RowsHook = _ => (StationsNative.Ok, rows);
+        var player = new EntityId(5);
+        var s = BuildStock.Track(player);
+        Assert.Equal((true, 1), BuildStock.SessionOf(player));
+        BuildStock.Pump(100);
+        Assert.Single(sent);
+        Assert.True(sent[0].Message.Supported);
+        Assert.Equal([new CraftStockRow(0x77, 35), new CraftStockRow(0x88, 4)], sent[0].Message.Rows);  // sorted, empty rows left out
+        BuildStock.Pump(110);
+        Assert.Single(sent);                                     // unchanged, not due: nothing again
+        rows[0].Count = 3;
+        BuildStock.Pump(131);
+        Assert.Equal(2, sent.Count);                             // the refresh saw a change
+        BuildStock.SupportedHook = () => false;
+        BuildStock.Pump(162);
+        Assert.False(sent[^1].Message.Supported);                // the capability went off: the client's own checks again
+        BuildStock.SupportedHook = () => true;
+        BuildStock.Untrack(player, s);
+        BuildStock.Pump(163);
+        Assert.False(sent[^1].Message.Supported);
+        Assert.Equal((false, 0), BuildStock.SessionOf(player));  // the last link went: the session ended
+        // the wire message round-trips and refuses malformed rows
+        var w = new NetWriter();
+        BuildStockRows.Encode(new BuildStockRows(true, [new(0x77, 35)]), w);
+        var reader = new NetReader(w.WrittenSpan);
+        var back = BuildStockRows.Decode(ref reader);
+        Assert.True(back.Supported && back.Rows.Single() == new CraftStockRow(0x77, 35));
+        var bad = new NetWriter();
+        bad.Bool(true).UInt16(2).UInt32(0x77).UInt32(1).UInt32(0x77).UInt32(2);
+        Assert.Throws<InvalidDataException>(() => { var rr = new NetReader(bad.WrittenSpan); BuildStockRows.Decode(ref rr); });
+        // the client hands it to kiln-items only with a Kiln server
+        var applied = new List<(bool On, int Rows)>();
+        BuildStock.ApplyHook = (on, r) => { applied.Add((on, r.Length)); return StationsNative.Ok; };
+        BuildStock.ServerSideHook = () => true;
+        Assert.True(BuildStock.ClientApply(back));
+        BuildStock.ServerSideHook = () => false;
+        Assert.True(BuildStock.ClientApply(back));
+        Assert.Equal([(true, 1), (false, 0)], applied);
     }
 
     [Fact]

@@ -235,6 +235,7 @@ internal static class CraftStock
                     NetDirection.ToClient);
             DyeStock.Attach(_channel);
             LockStock.Attach(_channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
+            BuildStock.Attach(_channel);  // GitHub #132, 0.2.0-dev.31.12: block placements from linked sources
         }
         catch (Exception e)
         {
@@ -444,7 +445,9 @@ internal static class CraftStock
     internal static FillAnswer[] BuildFill(EntityId player, IReadOnlyList<FillKey> keys)
     {
         if (FillBuildHook is { } hook) return hook(player, keys);
-        if (!Capabilities.Is(Stations.OutputSourcesCapability) || !Capabilities.Is(Stations.FillCapability)) return [.. keys.Select(k => new FillAnswer(k, 0))];
+        // GitHub #132: a player's fill-opted links count as well as opted-in station outputs
+        if (!Capabilities.Is(Stations.FillCapability) ||
+            (!Capabilities.Is(Stations.OutputSourcesCapability) && !StationsCore.FillLinksOf(player))) return [.. keys.Select(k => new FillAnswer(k, 0))];
         if (!Stations.Available || !Players.Available) return [.. keys.Select(k => new FillAnswer(k, 0))];
         bool? mayAccess = Players.Find(player) is { InGame: true } who ? StationsCore.CanAccessInventories(who) : null;
         var answers = new FillAnswer[keys.Count];

@@ -1,4 +1,15 @@
 #nullable enable
+const Kiln.Crafting.BuildSourcesCapability = "crafting.build_sources" -> string!
 const Kiln.Crafting.LockSourcesCapability = "items.lock_sources" -> string!
+Kiln.CraftSourceOptions.Building.get -> bool
+Kiln.CraftSourceOptions.Building.init -> void
+Kiln.CraftSourceOptions.Fills.get -> bool
+Kiln.CraftSourceOptions.Fills.init -> void
 Kiln.CraftSourceOptions.Locks.get -> bool
 Kiln.CraftSourceOptions.Locks.init -> void
+Kiln.FillInput.Linked.get -> long
+Kiln.FillInput.Linked.init -> void
+Kiln.FillOptions.UseLinkedSources.get -> bool
+Kiln.FillOptions.UseLinkedSources.init -> void
+Kiln.StationResult.FromLinked.get -> int
+Kiln.StationResult.FromLinked.init -> void

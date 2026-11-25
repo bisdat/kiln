@@ -229,6 +229,15 @@ public sealed record FillOptions
     /// outputs (named chests are still used). Since
     /// 0.2.0-dev.29.17 (<c>stations.output_sources</c>; without it the fill uses the game's sources only).</summary>
     public bool UseStationOutputs { get; init; } = true;
+
+    /// <summary>Also take from <see cref="Player"/>'s linked crafting sources registered with
+    /// <see cref="CraftSourceOptions.Fills"/>, in any base: after the bag, the Magic chests and <see cref="Chests"/>, only
+    /// what they cannot cover; a link registered <see cref="CraftSourceOrder.BeforeStationOutputs"/> pays before opted-in
+    /// station outputs, <see cref="CraftSourceOrder.AfterStationOutputs"/> after. Each link is checked again in the fill's
+    /// transaction (the player's own CanAccessInventories and login, an initialized container, its item filter). Default
+    /// false: a mod's fill never takes from a player's links unless it asks. Needs <see cref="Player"/>. The station
+    /// screen's own "+1" / "+10" set it for the pressing player. Since 0.2.0-dev.31.12.</summary>
+    public bool UseLinkedSources { get; init; }
 }
 
 /// <summary>What kept a fill below what was asked.</summary>
@@ -261,6 +270,11 @@ public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, lon
     /// <summary>What opted-in stations of the base lend of it (their finished items), taken after <see cref="Stock"/>
     /// and <see cref="Chests"/>; 0 with none opted in. Since 0.2.0-dev.29.17.</summary>
     public long Outputs { get; init; }
+
+    /// <summary>What the named player's linked sources registered with <see cref="CraftSourceOptions.Fills"/> hold of it
+    /// (with <see cref="FillOptions.UseLinkedSources"/>), taken after <see cref="Chests"/> and around <see cref="Outputs"/> by
+    /// each link's order; 0 otherwise. Since 0.2.0-dev.31.12.</summary>
+    public long Linked { get; init; }
 }
 
 /// <summary>What a fill would do now (<see cref="Stations.Plan"/>). Since 0.2.0-dev.29.14.</summary>
@@ -412,6 +426,10 @@ public sealed record StationResult(StationActionStatus Status, StationAction Act
     /// <summary>Fill: items taken from opted-in stations' finished items (<see cref="Stations.SetOutputSource"/>), all
     /// inputs together; 0 when the earlier sources covered it. Since 0.2.0-dev.29.17.</summary>
     public int FromOutputs { get; init; }
+
+    /// <summary>Fill: items taken from the player's linked sources (<see cref="FillOptions.UseLinkedSources"/>), all inputs
+    /// together; 0 when the earlier sources covered it. Since 0.2.0-dev.31.12.</summary>
+    public int FromLinked { get; init; }
 
     /// <summary>The same call may succeed later as it is: <see cref="StationActionStatus.QueueFull"/>,
     /// <see cref="StationActionStatus.Dropped"/>, and the stock or room shortages of a fill (they change as players and
