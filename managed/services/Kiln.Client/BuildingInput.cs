@@ -391,7 +391,11 @@ public static unsafe class BuildingInput
 /// <summary>Started at the first service tick (ServiceTick.AutoStart): Kiln.Client's own capability rows.</summary>
 internal static class ClientStartup
 {
-    static ClientStartup() => BuildingInput.Rows.Ensure();
+    static ClientStartup()
+    {
+        BuildingInput.Rows.Ensure();
+        Crosshair.Rows.Ensure();  // since 0.2.0-dev.31.13
+    }
 }
 
 /// <summary>kiln.client v1 with its building input members (native/core/abi/services/kiln_client.h, KilnClientApi: 80
