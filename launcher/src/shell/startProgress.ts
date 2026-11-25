@@ -35,6 +35,18 @@ export function quietIsKiln(tl: StartTimeline): boolean {
 /** The timeline is shown in place of the boot stages (a dev.26 runtime's `legacy` and the end states are not). */
 export const showsProgress = (tl: StartTimeline | null | undefined): tl is StartTimeline => !!tl && ACTIVE.has(tl.phase);
 
+/** (0.2.0-dev.31.13) When this launcher asked Steam (or started the game directly) for the start the backend still
+ *  follows, on the clock `now` is read from: the timeline is the launcher's, its `steam` step runs (no game process
+ *  yet) and the game does not run. Null otherwise. A page loaded again after its web process ended
+ *  (src-tauri/src/webproc.rs) remembers no start: shell/play.ts seeds its wait from this, so Play is not offered again
+ *  while Steam prepares the game (a second press could ask Steam again or start a second Proton). */
+export function askedSteamAt(tl: StartTimeline | null | undefined, now: number): number | null {
+  if (!tl || !tl.launcher || (tl.phase !== "launcher" && tl.phase !== "waiting")) return null;
+  const steam = tl.steps.find((s) => s.id === "steam");
+  if (!steam || steam.state !== "running" || steam.ms == null) return null;
+  return now - Math.max(0, tl.atMs - steam.ms);
+}
+
 /** "about 40 s", "about 1 min 25 s", "a few seconds": rounded to 5 s above 20 s, whole seconds from 5 to 20 s. */
 export function aboutText(ms: number): string {
   const s = ms / 1000;

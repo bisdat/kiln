@@ -24,7 +24,7 @@ import { useApplying, type Applying } from "./applying";
 import { gameState, playState, runStarted, type GameStateView } from "./gameState";
 import { notifyActivation, notifyActivationOf, notifyInstall } from "./notices";
 import { blockedLine } from "./RuntimeFailure";
-import { quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
+import { askedSteamAt, quietIsKiln, quietText, showsProgress, STEAM_WAIT_MS } from "./startProgress";
 import { t } from "../i18n";
 // the warning before Play
 import { isCanceledStart, launchWithPreflight } from "./sfiWarnings";
@@ -45,6 +45,24 @@ export const useLaunchMemo = create<LaunchMemo>(() => ({ at: {}, mode: {}, since
 /** A start this launcher asked Steam for (Play, a modpack offer's Launch): the window follows it until the game runs. */
 export function rememberLaunch(gameId: string, mode: LaunchMode) {
   useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: playNow() }, mode: { ...m.mode, [gameId]: mode } }));
+}
+
+/** Games whose start the backend was asked about since this page loaded (seedLaunch). */
+const seeded = new Set<string>();
+
+/** (0.2.0-dev.31.13) Once per game and page: a start the backend still follows with Steam asked and no game yet
+ *  (askedSteamAt) becomes this page's own wait, as if Play had been pressed here. Only a page loaded again after its web
+ *  process ended (src-tauri/src/webproc.rs) finds one: a fresh launcher follows no start. A start not tracked by the
+ *  backend (Vanilla) is not found. */
+function seedLaunch(qc: ReturnType<typeof useQueryClient>, gameId: string) {
+  if (!gameId || seeded.has(gameId)) return;
+  seeded.add(gameId);
+  void api.launchProgress(gameId).then((tl) => {
+    const at = askedSteamAt(tl, playNow());
+    // Play pressed here meanwhile: its own memo wins
+    if (at == null || useLaunchMemo.getState().at[gameId] !== undefined || qc.isMutating({ mutationKey: ["launch_play"] }) > 0) return;
+    useLaunchMemo.setState((m) => ({ at: { ...m.at, [gameId]: at }, mode: { ...m.mode, [gameId]: m.mode[gameId] ?? "profile" } }));
+  }).catch(() => {});
 }
 
 /** The window stops following the start it asked Steam for (its time and mode go): Play again. */
@@ -106,6 +124,8 @@ export function usePlayControl(): PlayControl {
   const applying = useApplying(game?.id);
   const memo = useLaunchMemo();
   const id = game?.id ?? "";
+  // a page loaded again after its web process ended: the wait for Steam goes on (no second Play meanwhile)
+  useEffect(() => { seedLaunch(qc, id); }, [qc, id]);
   const stops = useStops();
   const evidence = launchState.data?.stoppedStart;
   useEffect(() => {
