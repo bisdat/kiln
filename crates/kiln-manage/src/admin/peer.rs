@@ -2,8 +2,36 @@
 //! loopback port and read other users' command lines (`/proc/<pid>/cmdline`); the kernel's socket table
 //! (`/proc/net/tcp`, `/proc/net/tcp6`) names the owner of each connection's client end. Elsewhere this is not
 //! checked (Windows hides other users' command lines from standard users; macOS is not a launcher platform).
+//!
+//! Used by the web panel gateway, its bootstrap page and the SSH tunnel's held port ([`admits`]). On Linux a
+//! connection is served only when its client end is found and is this user's: a connection the table does not show
+//! (a read that raced the table's changes, after one retry) is refused, never waved through. (Before the review of
+//! 0.2.0-dev.31.12 the gateway let such a connection through, and a remote panel takes everything that arrives through
+//! the gateway's ssh as loopback.)
 
 use std::net::SocketAddr;
+
+/// Whether a connection from `peer` to `listener` may be served: on Linux only a found client end of this user, after
+/// a second look when the first read of the table did not find it; elsewhere every connection.
+pub fn admits(listener: SocketAddr, peer: SocketAddr) -> bool {
+    decide(|| same_user(listener, peer))
+}
+
+/// [`admits`]'s rule over a lookup (two tries, 5 ms apart, while it answers None).
+pub fn decide(mut lookup: impl FnMut() -> Option<bool>) -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    for i in 0..2 {
+        if let Some(v) = lookup() {
+            return v;
+        }
+        if i == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    false
+}
 
 /// Some(true): the client end of `peer` -> `listener` belongs to this user; Some(false): to another; None: unknown
 /// (not Linux, or not in this network namespace's table).

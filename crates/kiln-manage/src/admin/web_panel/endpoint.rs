@@ -26,7 +26,10 @@ impl Endpoint {
             return Err(invalid());
         }
         let mut endpoint: Self = serde_json::from_slice(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)).map_err(|_| invalid())?;
-        if endpoint.format != 1 || endpoint.port == 0 || endpoint.host.is_unspecified() || endpoint.host.is_multicast() {
+        // `::ffff:a.b.c.d` is a.b.c.d: checked (and connected to) as that
+        endpoint.host = endpoint.host.to_canonical();
+        let broadcast = matches!(endpoint.host, IpAddr::V4(v4) if v4.is_broadcast());
+        if endpoint.format != 1 || endpoint.port == 0 || endpoint.host.is_unspecified() || endpoint.host.is_multicast() || broadcast {
             return Err(invalid());
         }
         if let Some(pin) = &mut endpoint.sha256 {
@@ -43,30 +46,40 @@ fn not_listening() -> Error {
     Error::new(ErrorCode::AdminUnavailable, "Kiln Web Admin is not listening. Check that the current mod is loaded.")
 }
 
-/// The server's endpoint: the booted profile's data folder first, `kiln/data/kiln-webadmin` after; locally, or over
-/// ssh for a remote server.
-pub fn read(server: &ServerInstance) -> Result<Endpoint> {
+/// The server's data root as it booted ([`datadir`]): read once by [`super::WebPanels::open`], which takes both this
+/// file and Kiln.Admin's from it.
+pub fn root(server: &ServerInstance) -> Result<datadir::DataRoot> {
     match &server.remote {
-        Some(spec) => {
-            for dir in datadir::remote_mod_dirs(spec, MOD_ID) {
-                match crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}")) {
-                    Ok(b) => return Endpoint::parse(&b),
-                    Err(e) if e.code == ErrorCode::NotFound => continue,
-                    Err(_) => return Err(not_listening()),
-                }
-            }
-            Err(not_listening())
-        }
+        Some(spec) => Ok(datadir::DataRoot::Remote(datadir::remote_data_root(spec))),
         None => {
             let dir = server.dir.as_deref().ok_or_else(|| Error::invalid("server has no folder"))?;
-            for d in datadir::local_mod_dirs(dir, server.prefix.as_deref(), MOD_ID) {
-                match std::fs::read(d.join(FILE)) {
-                    Ok(b) => return Endpoint::parse(&b),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(_) => return Err(not_listening()),
-                }
-            }
-            Err(not_listening())
+            Ok(datadir::DataRoot::Local(datadir::local_data_root(dir, server.prefix.as_deref())))
         }
+    }
+}
+
+/// The server's endpoint (`<data root>/kiln-webadmin/launcher-endpoint.json`), locally or over ssh.
+pub fn read(server: &ServerInstance) -> Result<Endpoint> {
+    read_in(server, &root(server)?)
+}
+
+/// The endpoint in the data root `root`.
+pub fn read_in(server: &ServerInstance, root: &datadir::DataRoot) -> Result<Endpoint> {
+    match (&server.remote, root) {
+        (Some(spec), datadir::DataRoot::Remote(_)) => {
+            let dir = root.remote_mod(MOD_ID).unwrap_or_default();
+            match crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}")) {
+                Ok(b) => Endpoint::parse(&b),
+                Err(_) => Err(not_listening()),
+            }
+        }
+        (None, datadir::DataRoot::Local(_)) => {
+            let dir = root.local_mod(MOD_ID).unwrap_or_default();
+            match std::fs::read(dir.join(FILE)) {
+                Ok(b) => Endpoint::parse(&b),
+                Err(_) => Err(not_listening()),
+            }
+        }
+        _ => Err(Error::invalid("a local server's data folder is on this machine, a remote server's on that one")),
     }
 }

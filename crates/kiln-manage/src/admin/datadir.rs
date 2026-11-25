@@ -3,8 +3,13 @@
 //! folder in the game), and Kiln.Admin and Kiln Web Admin then write endpoint.json, admin-token and
 //! launcher-endpoint.json there. kiln-core says which folder the running server booted with in
 //! `kiln/state/boot.json` `profile.dataDir` (the profile's game-side path: absolute Windows, `Z:` under Wine, or
-//! relative to `<server>/kiln/`). The candidates come in order: the booted profile's folder first, the default after,
-//! so a stale file left in `kiln/data` by an earlier start never shadows the live one.
+//! relative to `<server>/kiln/`).
+//!
+//! The server's data root is that folder when boot.json names one this launcher can map, else `<server>/kiln/data`:
+//! one folder, never a mix. Every mod of a running server writes under the same root, so a reader that needs files of
+//! two mods (Open web panel: Kiln Web Admin's listener and Kiln.Admin's token) resolves the root once and reads both
+//! from it. (Before the review of 0.2.0-dev.31.12 each file fell back to `kiln/data` on its own when the booted folder
+//! lacked it, so a server could pair its own listener with another folder's Kiln.Admin.)
 
 use crate::server::remote::RemoteSpec;
 use std::path::{Path, PathBuf};
@@ -16,9 +21,11 @@ pub fn booted_data_dir(boot_json: &[u8]) -> Option<String> {
     (!d.is_empty() && d.len() <= 32767 && !d.contains('\0')).then(|| d.to_string())
 }
 
+/// The components of a relative game-side path; None for `..` or a component with a drive or stream colon (`C:` pushed
+/// onto a Windows path replaces it: `a\\C:\\x` would leave the server folder).
 fn relative_parts(p: &str) -> Option<Vec<&str>> {
     let parts: Vec<&str> = p.split(['\\', '/']).filter(|c| !c.is_empty() && *c != ".").collect();
-    (!parts.is_empty() && !parts.contains(&"..")).then_some(parts)
+    (!parts.is_empty() && !parts.iter().any(|c| *c == ".." || c.contains(':'))).then_some(parts)
 }
 
 fn is_drive_path(p: &str) -> bool {
@@ -76,36 +83,51 @@ pub fn remote_host_path(remote: &RemoteSpec, game_path: &str) -> Option<String> 
     Some(format!("{}/kiln/{}", remote.dir.trim_end_matches('/'), relative_parts(p)?.join("/")))
 }
 
-/// The folders where mod `id` of the server in `server_dir` may keep its data, most likely first.
-pub fn local_mod_dirs(server_dir: &Path, prefix: Option<&Path>, id: &str) -> Vec<PathBuf> {
-    let default = server_dir.join("kiln").join("data").join(id);
-    let mut out = Vec::new();
-    if let Ok(b) = std::fs::read(server_dir.join(crate::paths::game::BOOT_JSON))
-        && let Some(d) = booted_data_dir(&b)
-        && let Some(p) = local_host_path(server_dir, prefix, &d)
-    {
-        out.push(p.join(id));
-    }
-    if !out.contains(&default) {
-        out.push(default);
-    }
-    out
+/// The folder holding the per-mod data folders of the server in `server_dir`, as it booted (`prefix`: its Wine
+/// prefix, for drive letters other than Z:).
+pub fn local_data_root(server_dir: &Path, prefix: Option<&Path>) -> PathBuf {
+    std::fs::read(server_dir.join(crate::paths::game::BOOT_JSON))
+        .ok()
+        .and_then(|b| booted_data_dir(&b))
+        .and_then(|d| local_host_path(server_dir, prefix, &d))
+        .unwrap_or_else(|| server_dir.join("kiln").join("data"))
 }
 
-/// The same for a remote server, as absolute paths on it (boot.json is read over ssh).
-pub fn remote_mod_dirs(remote: &RemoteSpec, id: &str) -> Vec<String> {
-    let default = format!("{}/kiln/data/{id}", remote.dir.trim_end_matches('/'));
-    let mut out = Vec::new();
-    if let Ok(b) = crate::server::remote::read_file(remote, crate::paths::game::BOOT_JSON)
-        && let Some(d) = booted_data_dir(&b)
-        && let Some(p) = remote_host_path(remote, &d)
-    {
-        out.push(format!("{}/{id}", p.trim_end_matches('/')));
+/// The same for a remote server, as an absolute path on it (boot.json is read over ssh).
+pub fn remote_data_root(remote: &RemoteSpec) -> String {
+    crate::server::remote::read_file(remote, crate::paths::game::BOOT_JSON)
+        .ok()
+        .and_then(|b| booted_data_dir(&b))
+        .and_then(|d| remote_host_path(remote, &d))
+        .map(|p| p.trim_end_matches('/').to_string())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| format!("{}/kiln/data", remote.dir.trim_end_matches('/')))
+}
+
+/// A server's data root, resolved once: every file one operation reads comes from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataRoot {
+    Local(PathBuf),
+    /// An absolute path on the remote machine.
+    Remote(String),
+}
+
+impl DataRoot {
+    /// Mod `id`'s folder on this machine (None for a remote root).
+    pub fn local_mod(&self, id: &str) -> Option<PathBuf> {
+        match self {
+            DataRoot::Local(p) => Some(p.join(id)),
+            DataRoot::Remote(_) => None,
+        }
     }
-    if !out.contains(&default) {
-        out.push(default);
+
+    /// Mod `id`'s folder on the remote machine (None for a local root).
+    pub fn remote_mod(&self, id: &str) -> Option<String> {
+        match self {
+            DataRoot::Remote(p) => Some(format!("{}/{id}", p.trim_end_matches('/'))),
+            DataRoot::Local(_) => None,
+        }
     }
-    out
 }
 
 #[cfg(test)]
@@ -141,13 +163,28 @@ mod tests {
     }
 
     #[test]
-    fn the_booted_folder_comes_before_the_default() {
+    fn a_drive_inside_a_relative_path_is_refused() {
+        // review of 0.2.0-dev.31.12: on Windows, PathBuf::push("C:") replaces the server folder
+        let server = Path::new("/srv/lab");
+        assert_eq!(local_host_path(server, None, "a\\C:\\Windows"), None);
+        assert_eq!(local_host_path(server, None, "copy/p1:stream/data"), None);
+        let r = RemoteSpec { host: "box".into(), port: None, dir: "/srv/e".into(), instance: None };
+        assert_eq!(remote_host_path(&r, "a\\C:\\x"), None);
+    }
+
+    #[test]
+    fn the_booted_folder_is_the_only_root() {
         let dir = std::env::temp_dir().join(format!("kiln-datadir-{}-{}", std::process::id(), line!()));
         let state = dir.join("kiln/state");
         std::fs::create_dir_all(&state).unwrap();
-        assert_eq!(local_mod_dirs(&dir, None, "kiln-webadmin"), vec![dir.join("kiln/data/kiln-webadmin")]);
+        assert_eq!(local_data_root(&dir, None), dir.join("kiln/data"));
         std::fs::write(state.join("boot.json"), br#"{"profile":{"dataDir":"copy/p1/data"}}"#).unwrap();
-        assert_eq!(local_mod_dirs(&dir, None, "kiln-webadmin"), vec![dir.join("kiln/copy/p1/data/kiln-webadmin"), dir.join("kiln/data/kiln-webadmin")]);
+        assert_eq!(local_data_root(&dir, None), dir.join("kiln/copy/p1/data"), "no kiln/data fallback beside it");
+        // a folder this launcher can't map (C: without the prefix): the default
+        std::fs::write(state.join("boot.json"), br#"{"profile":{"dataDir":"C:\\data"}}"#).unwrap();
+        if !cfg!(windows) {
+            assert_eq!(local_data_root(&dir, None), dir.join("kiln/data"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

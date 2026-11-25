@@ -9,15 +9,19 @@
 //! - the one-time login never appears on a command line: the browser gets a one-use bootstrap address instead;
 //! - the gateway (and its ssh connections) closes when the panel's tab is closed or idle, when "Close" is pressed, or
 //!   when the launcher exits;
-//! - `launcher-endpoint.json` is read from the profile's data folder when the server booted with `dataDir: profile`.
+//! - `launcher-endpoint.json` is read from the profile's data folder when the server booted with `dataDir: profile`,
+//!   and the one-time login is minted by the Kiln.Admin of that same folder (the data root is read once per open);
+//! - a server's origin belongs to its panel's certificate too: a panel with another certificate (another panel the
+//!   server's files point at) gets another address, so cookies one panel set never reach another.
 
 pub mod endpoint;
 pub mod gateway;
 pub mod origins;
-pub mod peer;
 pub mod pin;
+/// The same-user check ([`crate::admin::peer`]; the SSH tunnel uses it too).
+pub use crate::admin::peer;
 
-use crate::admin::client::{AdminClient, Transport};
+use crate::admin::client::AdminClient;
 use crate::server::instance::ServerInstance;
 use crate::{Error, ErrorCode, Result};
 use gateway::{Gateway, Limits, Upstream};
@@ -98,7 +102,9 @@ impl WebPanels {
     /// and returns the bootstrap address for the browser.
     pub fn open(&mut self, server: &ServerInstance) -> Result<Opened> {
         self.sweep();
-        let ep = endpoint::read(server)?;
+        // one data root for everything below: the panel's listener and the Kiln.Admin that mints its login
+        let root = endpoint::root(server)?;
+        let ep = endpoint::read_in(server, &root)?;
         let target = SocketAddr::new(ep.host, ep.port);
         let upstream = match &server.remote {
             Some(spec) => Upstream::Ssh(spec.clone(), target),
@@ -110,10 +116,11 @@ impl WebPanels {
             if let Some(old) = self.open.remove(&server.id) {
                 old.gateway.close();
             }
-            let slot = origins::slot(&self.registry, &server.id)?;
+            let key = origins::key(&server.id, ep.sha256.as_deref());
+            let slot = origins::slot(&self.registry, &key)?;
             let gw = Gateway::start(slot.ip, slot.port, upstream, self.limits)?;
             if gw.isolated && gw.addr().port() != slot.port {
-                let _ = origins::remember_port(&self.registry, &server.id, gw.addr().port());
+                let _ = origins::remember_port(&self.registry, &key, gw.addr().port());
             }
             self.open.insert(server.id.clone(), Open { gateway: gw, fingerprint: ep.sha256.clone() });
         }
@@ -128,8 +135,7 @@ impl WebPanels {
             self.close(&server.id);
             return Err(e);
         }
-        let transport = if server.remote.is_some() { Transport::Ssh } else { Transport::Tcp };
-        let admin = AdminClient::connect(server, transport)?;
+        let admin = AdminClient::connect_at(server, &root)?;
         let args = serde_json::json!({ "consumer": endpoint::MOD_ID, "label": "Kiln Launcher" });
         let ticket = admin
             .call("login_mint", args.as_object().cloned().unwrap_or_default())
@@ -140,7 +146,7 @@ impl WebPanels {
             .ok_or_else(|| Error::new(ErrorCode::Parse, "Kiln.Admin returned an invalid one-time login."))?;
         drop(admin);
         let o = self.open.get(&server.id).expect("open");
-        let url = o.gateway.offer(format!("https://{addr}/launcher#secret={secret}"), self.limits.handle_ttl);
+        let url = o.gateway.offer(format!("https://{addr}/launcher#secret={secret}"), self.limits.handle_ttl)?;
         Ok(Opened { url, info: self.info(&server.id, o) })
     }
 
@@ -180,5 +186,7 @@ impl WebPanels {
     }
 }
 
+#[cfg(test)]
+mod review_tests;
 #[cfg(test)]
 mod tests;

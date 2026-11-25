@@ -7,7 +7,8 @@
 //!   server. The browser's TLS session ends at the panel, as before; nothing is decrypted here. A panel that listens on
 //!   another machine's address (a network share's server folder) is refused: the browser's connection would cross
 //!   the network without the launcher's pin.
-//! - **This user only** (Linux): connections from another user's programs are refused ([`super::peer`]).
+//! - **This user only** (Linux): connections from another user's programs, or whose owner can't be found, are refused
+//!   ([`super::peer`]).
 //! - **The one-time login stays off command lines.** The browser is sent to a one-use bootstrap address on a second
 //!   listener (`http://<origin ip>:<port>/k/<handle>`); only that page, fetched once by this user, holds the secret,
 //!   and it moves the browser on with `location.replace`.
@@ -49,9 +50,15 @@ impl Default for Limits {
     }
 }
 
-/// Whether `ip` is this machine's: loopback, or an address one of its interfaces holds (a socket can be bound to it).
-/// Traffic to such an address never leaves the machine.
+/// Whether `ip` is this machine's: loopback, or a unicast address one of its interfaces holds (a socket can be bound
+/// to it). Traffic to such an address never leaves the machine. An IPv4-mapped IPv6 address counts as its IPv4
+/// address; the unspecified, broadcast and multicast addresses are nobody's (Linux binds a UDP socket to a broadcast
+/// or multicast address too).
 pub fn is_local_address(ip: IpAddr) -> bool {
+    let ip = ip.to_canonical();
+    if ip.is_unspecified() || ip.is_multicast() || matches!(ip, IpAddr::V4(v4) if v4.is_broadcast()) {
+        return false;
+    }
     ip.is_loopback() || std::net::UdpSocket::bind(SocketAddr::new(ip, 0)).is_ok()
 }
 
@@ -139,16 +146,17 @@ impl Gateway {
         self.shared.active.load(Ordering::Relaxed)
     }
 
-    /// A one-use address that sends the browser on to `target` (which holds the one-time secret).
-    pub fn offer(&self, target: String, ttl: Duration) -> String {
-        let handle = crate::hash::hex(&crate::util::random_bytes::<32>().unwrap_or([0u8; 32]));
+    /// A one-use address that sends the browser on to `target` (which holds the one-time secret). Fails when the
+    /// system gives no random bytes (never a guessable handle).
+    pub fn offer(&self, target: String, ttl: Duration) -> Result<String> {
+        let handle = crate::hash::hex(&crate::util::random_bytes::<32>()?);
         let mut h = self.shared.handles.lock().unwrap_or_else(|p| p.into_inner());
         h.retain(|_, (_, until)| *until > Instant::now());
         h.insert(handle.clone(), (target, Instant::now() + ttl));
         // a new open counts as activity: the browser is about to connect
         self.shared.idle_since.store(self.shared.now_ms(), Ordering::Relaxed);
         self.shared.touch();
-        format!("http://{}/k/{handle}", self.boot)
+        Ok(format!("http://{}/k/{handle}", self.boot))
     }
 
     /// Stops accepting, ends every browser connection and ssh child, and waits for the gateway's threads.
@@ -217,8 +225,9 @@ fn accept_loop(listener: TcpListener, sh: Arc<Shared>, up: Upstream, limits: Lim
         };
         let _ = tcp.set_nonblocking(false);
         let _ = tcp.set_nodelay(true);
-        // another user's program: refused (unknown counts as allowed here; the bootstrap page requires a yes)
-        if local.is_some_and(|l| peer::same_user(l, peer_addr) == Some(false)) || sh.active.load(Ordering::Relaxed) >= limits.max_connections {
+        // Linux: only this user's programs (a connection whose owner can't be found is refused too: a remote panel
+        // takes whatever comes through the gateway's ssh as a loopback client)
+        if !local.is_some_and(|l| peer::admits(l, peer_addr)) || sh.active.load(Ordering::Relaxed) >= limits.max_connections {
             let _ = tcp.shutdown(Shutdown::Both);
             continue;
         }
@@ -403,7 +412,7 @@ fn boot_loop(listener: TcpListener, sh: Arc<Shared>) {
             let handle = path.strip_prefix("/k/").filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()));
             // Linux: only a program of this user may take a page (another user could read the address from a
             // command line); elsewhere the address is as private as the browser's own command line
-            let mine = local.and_then(|l| peer::same_user(l, peer_addr)).unwrap_or(!cfg!(target_os = "linux"));
+            let mine = local.is_some_and(|l| peer::admits(l, peer_addr));
             let target = match (method, handle) {
                 ("GET", Some(h)) if mine => {
                     let mut hs = sh.handles.lock().unwrap_or_else(|p| p.into_inner());

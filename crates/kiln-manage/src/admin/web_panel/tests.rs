@@ -174,7 +174,7 @@ fn the_bootstrap_page_is_one_use_and_holds_the_secret() {
     let echo = echo_server();
     let gw = Gateway::start(Ipv4Addr::new(127, 77, 1, 5), 0, Upstream::Direct(echo), Limits::default()).unwrap();
     let target = format!("https://{}/launcher#secret={}", gw.addr(), "ab".repeat(32));
-    let url = gw.offer(target.clone(), Duration::from_secs(5));
+    let url = gw.offer(target.clone(), Duration::from_secs(5)).unwrap();
     assert!(!url.contains("secret"), "the browser's command line gets no secret: {url}");
     let (host, path) = url.strip_prefix("http://").unwrap().split_once('/').unwrap();
     let boot: SocketAddr = host.parse().unwrap();
@@ -188,7 +188,7 @@ fn the_bootstrap_page_is_one_use_and_holds_the_secret() {
     assert!(head.contains("Cache-Control: no-store") && head.contains("Referrer-Policy: no-referrer"));
     assert_eq!(http_get(boot, &format!("/{path}")).0, 404, "one use");
     assert_eq!(http_get(boot, &format!("/k/{}", "0".repeat(64))).0, 404, "an unknown handle");
-    let short = gw.offer(target, Duration::from_millis(50));
+    let short = gw.offer(target, Duration::from_millis(50)).unwrap();
     std::thread::sleep(Duration::from_millis(120));
     let p = short.split_once("/k/").unwrap().1;
     assert_eq!(http_get(boot, &format!("/k/{p}")).0, 404, "expired");
@@ -363,8 +363,9 @@ fn ssh_forwards_hold_their_port_and_use_ssh_w_per_connection() {
         eprintln!("skipped: no python3 for the ssh stand-in");
         return;
     };
-    // the only test that sets KILN_SSH; ssh_stdio reads it when it spawns
-    // SAFETY: no other test of this crate reads or writes KILN_SSH.
+    // ssh_stdio reads KILN_SSH when it spawns; every test that sets it holds SSH_ENV
+    let _held = super::review_tests::SSH_ENV.lock().unwrap_or_else(|p| p.into_inner());
+    // SAFETY: the tests that read or write KILN_SSH hold SSH_ENV.
     unsafe { std::env::set_var("KILN_SSH", &ssh) };
     let echo = echo_server();
     let remote = crate::server::remote::RemoteSpec { host: "lab-box".into(), port: None, dir: "/srv/lab".into(), instance: None };

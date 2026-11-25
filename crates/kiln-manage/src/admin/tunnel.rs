@@ -6,6 +6,11 @@
 //! (and be talked to as if it were the server); now no port is ever free between lookup and use, and ssh opens no
 //! listener at all. A connection's ssh child ends with its connection; closing (or dropping) the tunnel stops
 //! accepting and ends every child.
+//!
+//! (Review of 0.2.0-dev.31.12) Every accepted connection costs an ssh process and a sign-in on the remote machine, so
+//! the held port serves only this user's programs on Linux ([`super::peer::admits`]) and at most [`MAX_CHILDREN`]
+//! connections at once (KAP uses one; `ssh -L` multiplexed them in one process). A KAP hello through the tunnel waits
+//! [`SSH_SETUP`] longer than the handshake, since ssh connects and signs in before the first byte arrives.
 
 use crate::server::remote::RemoteSpec;
 use crate::{Error, ErrorCode, Result};
@@ -15,6 +20,13 @@ use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// How long a tunneled connection may wait for ssh to connect and sign in, on top of the KAP handshake's own time
+/// (ssh's ConnectTimeout is 10 s; the tunnel waited 15 s for `ssh -L` before 0.2.0-dev.31.12).
+pub const SSH_SETUP: Duration = Duration::from_secs(20);
+
+/// At most this many connections (and ssh children) of one tunnel at once; one more is closed at once.
+pub const MAX_CHILDREN: usize = 8;
 
 pub struct SshTunnel {
     pub local_port: u16,
@@ -111,19 +123,26 @@ impl SshTunnel {
         let shared = Arc::new(Shared { stop: AtomicBool::new(false), children: Mutex::new(Vec::new()), last_error: Mutex::new(None) });
         let (sh, spec) = (shared.clone(), remote.clone());
         let accept = std::thread::Builder::new().name(format!("ssh-tunnel-{local_port}")).spawn(move || {
+            let local = listener.local_addr().ok();
             while !sh.stop.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((tcp, _)) => {
+                    Ok((tcp, peer_addr)) => {
                         let _ = tcp.set_nonblocking(false);
                         let _ = tcp.set_nodelay(true);
+                        let running = {
+                            let mut list = sh.children.lock().unwrap_or_else(|p| p.into_inner());
+                            list.retain(|c| c.lock().map(|mut c| matches!(c.try_wait(), Ok(None))).unwrap_or(false));
+                            list.len()
+                        };
+                        // another user's program, or one connection too many: no ssh for it
+                        if running >= MAX_CHILDREN || !local.is_some_and(|l| super::peer::admits(l, peer_addr)) {
+                            let _ = tcp.shutdown(Shutdown::Both);
+                            continue;
+                        }
                         match ssh_stdio(&spec, target) {
                             Ok(child) => {
                                 let child = Arc::new(Mutex::new(child));
-                                {
-                                    let mut list = sh.children.lock().unwrap_or_else(|p| p.into_inner());
-                                    list.retain(|c| c.lock().map(|mut c| matches!(c.try_wait(), Ok(None))).unwrap_or(false));
-                                    list.push(child.clone());
-                                }
+                                sh.children.lock().unwrap_or_else(|p| p.into_inner()).push(child.clone());
                                 let sh2 = sh.clone();
                                 std::thread::spawn(move || {
                                     splice_child(tcp, child, move |e| *sh2.last_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(e));
