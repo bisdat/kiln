@@ -40,6 +40,7 @@ been seen in a game.
 | dev.31.7 | 0.2.18 | dev.31.2 | launcher only (an installed Crucible pack that lacks Library mods says so and offers Download missing mods: the installed version's missing archives only, verified like an install; Tauri `crucible_repair`, `pack_lacking`) |
 | dev.31.8 | 0.2.18 | dev.31.2 | launcher and kilnctl (an import of exactly an entry's files puts back a Library entry changed on disk; the changed copy goes to `<library>/kiln-changed/<kind>/<id>/<ver>+<h8>.<stamp>/`, newest 3 kept, `changes.log`; refused while a game or server using it runs) |
 | dev.31.9 | 0.2.19 | dev.31.9 | `GameScreen.PopupOpen` (Kiln.Ui: true while one of the game's popups covers its UI in that frame); `Ui.Inventory` marks leave out the slots under the game's item menu, drop-downs and context menus while they are open (#117); TestKit models no popups; native: kiln.ui popups tail member in `kiln_ui.h`, capability `ui.popups` |
+| dev.31.10 | 0.2.19 | dev.31.9 | runtime only (a pick of a mod's ammo or spell row whose stack just left the backpack raises `Picked` instead of emptying the slot, also while the game's new rows show before the mod republishes; debug log line `ui.ammo: a pick of ... went to the game` (#145); no ABI change) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 
