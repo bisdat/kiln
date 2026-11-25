@@ -155,7 +155,10 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
             std::memcmp(previous.rows.data(),next.rows.data(),next.value.game_count*sizeof(SelectorRow))==0&&previous.value.ok==next.value.ok;
         next.value.game_serial=equal?previous.value.game_serial:++revision;
         next.step=before.client_steps;next.built=std::chrono::steady_clock::now();
-        if(equal)next.seen=previous.seen; // the same rows: what the backpack said of them stays
+        // The same rows: what the backpack said of them stays. New rows are read again at their bind, also when a count
+        // only fell (an arrow shot): the stack the read found may have left while one the reader cannot see came in or
+        // stayed, and a held answer carried over would take that row's pick from the game (issue 127; GitHub issue 145).
+        if(equal)next.seen=previous.seen;
         for(uint32_t r=0;r<next.value.game_count;++r)next.value.game_rows[r]={next.rows[r].item,uint32_t(std::min<uint64_t>(next.rows[r].count,UINT32_MAX)),0,r};
         previous=next;
         const auto& p=frame.publication[i];

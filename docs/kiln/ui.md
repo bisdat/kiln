@@ -591,7 +591,9 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   in `Append` the mods' rows fit in what the game's rows leave (none when the game shows 64 itself); in `Replace` the
   mods have all 64. `ctx.Truncated` says Kiln cut rows at 64 (the game's own list was longer, so `GameRows` are its first
   64, or the list shown last was longer).
-  `Append` (the default) leaves out an item the game already lists (its row keeps the real count); `Replace` shows only
+  `Append` (the default) shows the game's own row for an item the game already lists (with its real count) and none
+  of yours in its place; since 0.2.0-dev.31.12 your row of that item is still published behind it, taking no room, so
+  a pick of it reaches you once its stack has left the backpack (GitHub issue 145, below). `Replace` shows only
   the mods' rows, and one provider asking for it replaces the whole list. A provider that throws adds no rows that time;
   rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
   Both go to the mod's log.
@@ -603,8 +605,14 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   backpack before the game builds the list again (your server half just swapped it into storage), a pick of its row
   raises `Picked` too, rather than going to the game, which would find no stack and empty the slot. The same holds in
   the frame or two between the game's new build and Kiln's next publication of your rows, when the game's own rows
-  show (since 0.2.0-dev.31.10, GitHub issue 145, thanks Fuzen777). With `"log_level": "debug"` in `kiln.json`, every
-  pick of a provided row that goes to the game logs one line (at most 8 a second), e.g. `ui.ammo: a pick of spell
+  show (since 0.2.0-dev.31.10, GitHub issue 145, thanks Fuzen777). In `Append` (also
+  `PlayerStorage.Client.ProvideAmmo`'s default) this holds since 0.2.0-dev.31.12 for a row of yours that the game's
+  own row of the same item hid while the backpack held its stack: list the item while it is in the backpack too
+  (a spellbook's equipped spell), and its pick after your swap reaches you. A row you list only once your own data
+  shows the item again (your server's swap reached the game) is yours once the game has built its rows without the
+  stack; a pick before that goes to the game, as before. With `"log_level": "debug"` in `kiln.json`, every
+  pick of a provided row that goes to the game logs one line (at most 8 a second; in `Append` since 0.2.0-dev.31.12
+  also a pick of your row behind the game's own), e.g. `ui.ammo: a pick of spell
   0x1a2b3c4d (a row a mod provided) went to the game: game row count 1 (list revision 221, built 16 ms, 0 client steps
   before the pick); backpack: holds it`. Any other mod row raises
   `Picked` for the mod that provided it (on the UI thread at the next UI frame; an earlier session's picks are dropped),

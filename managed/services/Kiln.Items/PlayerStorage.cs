@@ -502,8 +502,10 @@ public sealed class PlayerStorage
         /// <remarks>
         /// <para>On a game client the rows come from the client copy: one row per item (the counts of its slots added up),
         /// in slot order, only items the game equips into that list's slot. They follow the copy as it changes. The HUD's
-        /// rules apply (<c>Ui.AmmoList.Provide</c>): in Append a row for an item the game lists itself is left out, and
-        /// a pick of an item the player carries is the game's own. Every other pick goes to the server as a wish.</para>
+        /// rules apply (<c>Ui.AmmoList.Provide</c>): in Append the game's own row shows for an item the game lists itself
+        /// (the storage's row is kept behind it), and a pick of an item the player carries is the game's own. Every other
+        /// pick goes to the server as a wish, since 0.2.0-dev.31.12 also one of such an item once the backpack's stack has
+        /// left (GitHub issue 145).</para>
         /// <para>On the server (a dedicated server, or a game hosting the world) the pick is checked like any request from
         /// a game: the storage is the sender's own, the item is in it, it is ammunition of the list's kind; at most 4 picks
         /// a second per player. Then the first slot holding the item is equipped as the storage's mod. A pick that does not
