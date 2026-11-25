@@ -160,6 +160,7 @@ void copy_now(uint64_t step) {
             ro.info.size = sizeof ro.info;
             ro.slots = slots.data();
             ro.capacity = static_cast<uint32_t>(slots.size());
+            ro.no_stamp = true;  // the client world's item entities: never into the server world's stamp table
             unsigned long code = 0;
             if (read_inventory(w, items, row.entity, &ro, &code) && ro.found) {
                 std::vector<CvStack> st;

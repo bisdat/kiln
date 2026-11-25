@@ -39,6 +39,7 @@ bool stations_recipe_facts(void*, uint32_t id, int64_t, int64_t* duration_ns, st
 }
 bool read_inventory(uintptr_t, void*, KilnEntity, ReadOut* out, unsigned long*) {
     ++fixture::reads;
+    fixture::last_no_stamp = out->no_stamp;
     out->found = true;
     out->slots[0] = KilnItemsSlot{};
     out->slots[0].item = 500;
@@ -216,6 +217,8 @@ int main() {
         check(fixture::reads == 1 && v.size() == 1 && (v[0].flags & KILN_STATION_CLIENT_OUTPUTS) && v[0].output_count == 1 &&
                   v[0].outputs[0].item == 500 && v[0].outputs[0].count == 3,
               "read_ok true: the station's finished stack is read");
+        // 4: the client view's reads never stamp (the stamp table is the server world's)
+        check(fixture::last_no_stamp, "the client view reads inventories without stamping");
     }
 
     // 5: the demand lapses; the first copy after the pause refreshes the inventories
