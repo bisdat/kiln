@@ -803,11 +803,11 @@ internal static unsafe class UiNative
     /// <summary>Tests: a table of the pointer tail in place of kiln.ui's.</summary>
     internal static TableDrag* DragOverride;
 
-    /// <summary>KILN_UI_POPUP_* and KILN_UI_POPUPS_MAX (kiln_ui.h, 0.2.0-dev.31.5, GitHub issue 117).</summary>
+    /// <summary>KILN_UI_POPUP_* and KILN_UI_POPUPS_MAX (kiln_ui.h, 0.2.0-dev.31.9, GitHub issue 117).</summary>
     public const uint PopupPanel = 1, PopupUnknown = 2, PopupError = 4;
     public const int PopupsMax = 4;
 
-    /// <summary>KilnUiPopups (kiln_ui.h, 0.2.0-dev.31.5): the game's popup panels over its UI in the last completed UI
+    /// <summary>KilnUiPopups (kiln_ui.h, 0.2.0-dev.31.9): the game's popup panels over its UI in the last completed UI
     /// frame, their rectangles in UI units (the space of a slot's <c>outer_ui</c>).</summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct Popups
@@ -825,7 +825,7 @@ internal static unsafe class UiNative
         public float X, Y, Width, Height;
     }
 
-    /// <summary>The tail after drop_target (0.2.0-dev.31.5, GitHub issue 117): popups at 1080 (the table is 1088 bytes).</summary>
+    /// <summary>The tail after drop_target (0.2.0-dev.31.9, GitHub issue 117): popups at 1080 (the table is 1088 bytes).</summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct TablePopups
     {
@@ -833,7 +833,7 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<Popups*, int> PopupsFn;
     }
 
-    /// <summary>kiln.ui's popups slot, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.31.5). Tests:
+    /// <summary>kiln.ui's popups slot, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.31.9). Tests:
     /// <see cref="PopupsOverride"/>.</summary>
     internal static delegate* unmanaged[Cdecl]<Popups*, int> PopupsSlot
     {

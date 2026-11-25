@@ -289,7 +289,7 @@ Managed: `UiDraw.Pointer`, `ButtonHeld`, `DragSource`, `DropTarget` ([ui.md](../
 - Coordinates are the overlay's pixels, the space of every drawing slot. Kiln feeds Dear ImGui the game window's client
   pixels, the same pixels as long as the window's client area and the swapchain match (they always have, so far).
 
-## The game's popup panels (0.2.0-dev.31.5, GitHub issue 117)
+## The game's popup panels (0.2.0-dev.31.9, GitHub issue 117)
 
 One slot after `drop_target`, a size-guarded tail: `popups` at byte 1080; the table is 1088 bytes (1080 before). Check
 `header.size >= offsetof(KilnUiApi, popups) + sizeof(void*)` and the pointer.

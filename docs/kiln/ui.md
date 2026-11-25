@@ -141,7 +141,7 @@ Events.On<ScreenChangedEvent>(e => …);                                        
 `ScreenKind`: None, Title, MainMenu, Loading, Cinematic, Credits, InGame, PauseMenu, Settings, Inventory, Map, Journal,
 Character, Crafting, SkillTree, Storage, Dialog, Chat, Other. `GameScreen.StationWorkshop` is the workshop id of the
 crafting station the player uses (0 when none). The event observes only: the game's change has already happened (no cancel).
-`GameScreen.PopupOpen` (since 0.2.0-dev.31.5, mod API addition, GitHub issue 117) is true while one of the game's own
+`GameScreen.PopupOpen` (since 0.2.0-dev.31.9, mod API 0.2.19, GitHub issue 117) is true while one of the game's own
 popups is open over its UI in the frame the screen is of: the item menu a right-click on an inventory slot opens, a
 drop-down, a context menu, or the game's error popup. Kiln's overlay draws above the game's UI; step aside while it is
 true if you draw over the game's screens (`Ui.Inventory` marks already do). Opening or closing a popup is not a screen
@@ -406,8 +406,8 @@ the game gets the click as without Kiln. A click still waiting for its UI frame 
 **Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
 player's game only. Two mods marking one item: one of the marks shows (no layering in this version).
 
-**The game's popups** (since 0.2.0-dev.31.5, GitHub issue 117, thanks Fuzen777). The overlay draws above the game's UI, so
-through 0.2.0-dev.31.3 a mark under the game's item menu (right-click an item: Equip, Salvage, Delete) sat on top of the
+**The game's popups** (since 0.2.0-dev.31.9, GitHub issue 117, thanks Fuzen777). The overlay draws above the game's UI, so
+through 0.2.0-dev.31.8 a mark under the game's item menu (right-click an item: Equip, Salvage, Delete) sat on top of the
 menu. Kiln now reads the game's popup panels (that menu, drop-downs, context menus: feature `ui.popups`) and leaves out the
 mark of every slot a panel covers, for as long as it is open; the other slots keep theirs. While a panel's rectangle is not
 known (its first frame) or the game's error popup shows, no mark is drawn at all. On a game build where Kiln cannot read

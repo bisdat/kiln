@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GameScreen.PopupOpen (0.2.0-dev.31.5, GitHub issue 117): one of the game's popups is open in the UI frame the screen is
+// GameScreen.PopupOpen (0.2.0-dev.31.9, GitHub issue 117): one of the game's popups is open in the UI frame the screen is
 // of, from kiln.ui's popups; false for an older screen, without the slot and when Kiln does not read popups.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

@@ -307,7 +307,7 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
     /// read the popups (capability <c>ui.popups</c> off). Opening or closing a popup is not a screen change
     /// (<see cref="Ui.Screens.Changed"/> does not fire): read it from <see cref="Ui.Screens.Current"/>, on
     /// <see cref="Ui.Screens.UiTick"/> or in a draw callback. Read from the game's code, not yet seen in a running game.
-    /// Since 0.2.0-dev.31.5 (GitHub issue 117).</summary>
+    /// Since 0.2.0-dev.31.9 (GitHub issue 117).</summary>
     public bool PopupOpen { get; init; }
 
     /// <summary>Is a popup open in the UI frame <paramref name="frame"/> (kiln.ui's popups, read now)? The popups of that

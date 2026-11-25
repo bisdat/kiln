@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // GitHub issue 117: Ui.Inventory's marks are drawn on Kiln's overlay, above the game's UI, so a mark under the game's item
-// menu (RMB on a slot: Equip, Salvage, Delete) sat on top of the menu. kiln.ui's popups (kiln_ui.h, 0.2.0-dev.31.5) gives
+// menu (RMB on a slot: Equip, Salvage, Delete) sat on top of the menu. kiln.ui's popups (kiln_ui.h, 0.2.0-dev.31.9) gives
 // the game's popup panels of the last UI frame; DrawMarks leaves out the marks of the slots they cover, all of them while a
 // panel's rectangle is unknown or the error popup shows, and draws as before when Kiln does not read popups.
 using System.Runtime.CompilerServices;

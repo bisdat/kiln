@@ -763,7 +763,7 @@ Host tests verify scoping, continuation counts, no game writes, copied current c
 callbacks, duplicate/budget refusal, disposal and retirement. Native appearance/row sizing, mouse activation
 and controller focus/navigation remain real-game unverified; the generic native entry's semantics are static evidence.
 
-### Popup panels over the inventory (0.2.0-dev.31.5, GitHub issue 117; client 26430625, static, nothing of it run)
+### Popup panels over the inventory (0.2.0-dev.31.9, GitHub issue 117; client 26430625, static, nothing of it run)
 Client 26430625 / `5d9ef2f1`, capstone disassembly and Ghidra 12 headless decompiles (no auto-analysis) of the copied exe.
 Kiln's use: `native/services/ui/popups.cpp`, feature `ui.popups` (`sigdb/symbols/client.d/ui-popups.json`); anchors:
 `native/services/ui/tests/popups_sigdb_test.py`.

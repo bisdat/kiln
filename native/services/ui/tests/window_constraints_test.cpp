@@ -46,7 +46,7 @@ static_assert(offsetof(KilnUiApi, chat_search) == 1048);
 static_assert(offsetof(KilnUiApi, pointer) == offsetof(KilnUiApi, chat_search) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, pointer) == 1056);
 static_assert(offsetof(KilnUiApi, drop_target) == 1072);
-// popups (0.2.0-dev.31.5, issue 117) after it
+// popups (0.2.0-dev.31.9, issue 117) after it
 static_assert(offsetof(KilnUiApi, popups) == offsetof(KilnUiApi, drop_target) + sizeof(void*));
 static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, popups) + sizeof(void*));
 int main() {
