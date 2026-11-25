@@ -390,7 +390,7 @@ const UPGRADE_LOOK: Duration = Duration::from_secs(2);
 const UPGRADE_RETRY: Duration = Duration::from_secs(30);
 
 fn endpoint_mtime(server_dir: &Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(super::discover::admin_dir(server_dir).join(protocol::ENDPOINT_FILE)).and_then(|m| m.modified()).ok()
+    std::fs::metadata(super::discover::live_admin_dir(server_dir).join(protocol::ENDPOINT_FILE)).and_then(|m| m.modified()).ok()
 }
 
 impl Upgrade {
@@ -536,12 +536,17 @@ impl AdminClient {
 
     /// A remote server: endpoint and token over `ssh cat`, then a tunnel to its listener.
     pub fn connect_ssh(remote: &crate::server::remote::RemoteSpec, server_id: &str) -> Result<AdminClient> {
-        let ep = super::discover::remote_endpoint(remote)?
+        let (ep, token) = super::discover::remote_endpoint_and_token(remote)?
             .ok_or_else(|| Error::new(ErrorCode::AdminUnavailable, format!("{}: no endpoint.json (server stopped, or KAP off)", remote.host)))?;
-        let token = super::discover::remote_token(remote)?;
         let tunnel = super::tunnel::SshTunnel::open(remote, ep.port)?;
         let port = tunnel.local_port;
+        let errors = tunnel.errors();
         AdminClient::connect_tcp(TcpTarget { host: "127.0.0.1".into(), port, token, server_id: server_id.into(), tunnel: Some(tunnel), transport: Transport::Ssh })
+            .map_err(|e| match errors() {
+                // the forwarded connection failed in ssh: say what ssh said
+                Some(ssh) => Error::new(ErrorCode::Network, format!("ssh tunnel to {}: {ssh}", remote.host)),
+                None => e,
+            })
     }
 
     pub fn connect_tcp(target: TcpTarget) -> Result<AdminClient> {
