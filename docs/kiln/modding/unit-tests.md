@@ -403,8 +403,7 @@ public void CtrlClickAsksToMarkTheItem()
   `NewSession` starts another session (snapshots and queued picks cleared), `KnownItems` names the items of a kind (a
   row of any other item is refused, as the game refuses it), `Player` sets the context's player. Each `Step()` is a UI
   frame: the providers of a list whose context changed are asked and their composed rows published. `Shown(kind)` is the
-  list as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows (in
-  Append since 0.2.0-dev.31.12 also a mod's row of an item the game lists itself, kept behind the game's row),
+  list as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows,
   `ModeOf(kind)` Append, Replace or null (the game's list as is), `Publishes` counts the snapshots. `Select` and
   `Selected` model the selection, which stays on its item when the rows change. `Pick(kind, item)` is the player's pick:
   true when it is a mod row the game does not list with stock (a game row at count 0, a used-up stack, is none), which
@@ -415,6 +414,11 @@ public void CtrlClickAsksToMarkTheItem()
   `Picked` since 0.2.0-dev.31.10, GitHub issue 145). A `Pick` after `SetGameRows` and before the next `Step()` is decided
   by the new rows, as in the game; `Shown` still composes the earlier snapshot with them until that step, where the game
   shows only its own rows.
+  **Changed in 0.2.0-dev.31.12 (GitHub issue 145), in Append:** a mod's row of an item the game lists itself, also with
+  stock, is now published behind the game's row, so `Provided(kind)` lists it too (`Shown` does not change: the game's
+  row shows in its place). A test that asserts `Provided` in Append must add those rows, in the provider's order. And a
+  `Pick` of such a row after `SetGameRows` set the game's count of it to 0, before the next `Step()`, now returns true
+  and raises `Picked` for that mod (the stack left the backpack), where it returned false before.
 
 ```csharp
 [Fact]
