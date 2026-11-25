@@ -37,15 +37,25 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
 ```
 
 - **Arrow, Spell and FishingBait** are selected in place on a verified Generic backpack page, never in a spare
-  Equipment page cell. The item must have the matching physical slot type, Ammunition category and no gear flag.
+  Equipment page cell. The item must have the matching physical slot type and the Ammunition category, and must not
+  carry its own inventory.
   With a zero selection, a real empty Generic cell not on the action bars or reserved by another equipment selection
   is required, even for `Replaced.Take`. A valid already-selected Generic cell is reused, empty or occupied.
-  Occupied contents must still resolve to plain Ammunition of the selected logical slot's type; stale, unknown,
-  non-ammo or gear contents return `SlotChanged` before mutation, including Take and DryRun. A different valid spell,
+  Occupied contents must still resolve to Ammunition of the selected logical slot's type; stale, unknown or
+  non-ammo contents return `SlotChanged` before mutation, including Take and DryRun. A different valid spell,
   arrow or bait of the matching type can still replace the old one; item identity need not match.
   Missing/short Inventory components and unverified Virtual backpack setups are not free space. A selected non-Generic,
   foreign, action-bar or shared cell returns `SlotChanged` before mutation; this call does not repair or migrate it.
-  Instance-backed spells (including eternal spells) are not currently supported by `GiveEquip`.
+- **Instance-backed ammo (eternal spells and arrows), since 0.2.0-dev.31.12.** An eternal spell is an item entity, not
+  a plain stack. `GiveEquip` gives one (count 1) the way the game equips one from the backpack: it is created once,
+  with its own item entity, directly in the Generic cell above, and selected there with the entity marked equipped.
+  Its identity is that entity: the result's `ItemEntity` and `Ref` name it, and nothing moves it afterwards. A
+  replaced eternal keeps its entity: `Replaced.Backpack` unequips it and moves it to a free Generic cell
+  (`ReplacedEntity` names the same entity), `Replaced.Take` destroys it. Plain and eternal ammo can replace each other.
+  A selected eternal whose item entity is missing is stale and returns `SlotChanged` before mutation. This needs the
+  sigdb feature `items.give_equip.instance_ammo` (both approved builds have it); without it, or if the game's own
+  equip decision does not place this item in the backpack, an eternal is refused before any change with a reason
+  naming it. Plain ammo is unchanged and never needs that feature.
 - `Replaced.Backpack` (default) preserves the old stack and its instance in an empty Generic backpack slot.
   An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty gear/vanity target still works;
   selected empty ammo reuses its verified Generic cell without needing a second cell.
@@ -56,7 +66,7 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
 - `DryRun = true` runs and rolls back the whole transaction. No inventory/selection changes, new item entity or
   `EquipChangedEvent` survives. The result reports the old stack and the predicted destination, but no new instance.
 - Always all-or-nothing: no partial give, no duplicated or missing item on an ordinary refusal. Count is 1..65535,
-  must fit one item stack, and must be **1 for gear**. `From` is None. Ordinary `Equip`/`Unequip` keep
+  must fit one item stack, and must be **1 for gear and eternal ammo**. `From` is None. Ordinary `Equip`/`Unequip` keep
   `ReplacedCount = 0`. A successful committed GiveEquip posts one `EquipChangedEvent` on the tick thread.
   A fault inside the game's commit is different from an ordinary refusal: the result is `Unavailable`, equipment
   calls are disabled until restart, and the reason warns that items may have changed. Kiln never attempts an unsafe
@@ -71,7 +81,8 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
   checks are shared with `Equip`; the shared queue holds at most 1024 requests.
 - TestKit models this operation's logical equipment, replacement, dry-run and event behaviour. Set an item's type
   with `kiln.Items.SetEquipmentSlotType(item, EquipmentSlot.Ring0)` (both ring slots fit the same type). It does not
-  reproduce the game's physical equipment-page layout, derived stats, visual updates or persistence.
+  reproduce the game's physical equipment-page layout, derived stats, visual updates or persistence. Arrows, spells and
+  bait (eternal ones included) follow the backpack-cell rules above in the kit's fake backpack.
 
 Changelog: added atomic give-and-equip into empty or occupied equipment slots, with replacement policies and dry-run;
 thanks to **Fuzen777** for [#126](https://github.com/frostdev-ops/kiln/issues/126).
