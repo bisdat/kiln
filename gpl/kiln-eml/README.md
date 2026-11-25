@@ -481,7 +481,7 @@ Each is marked `kiln-eml:` in the source.
     (`restore_backup_as`), `startup_host.rs` (`restore_base`, `VERIFY_GAME_FILES`) and `kiln-eml/src/startup.rs` (the
     witness) (kiln-eml's own code): a kiln-mode start over Kiln's bundled ShroudForge's output. That ShroudForge's fork
     records its last startup asset pass beside the backup (`<stem>.kfc.prepared.json`, scheme `kiln-sf-prepared 1`,
-    record_prepared_game_files.rs): the header's size and whole SHA-256, the resource file's size, last-write time and
+    or 2 since 0.2.0-dev.31.12, which changed only its export state; record_prepared_game_files.rs): the header's size and whole SHA-256, the resource file's size, last-write time and
     the SHA-256 of its first and last MiB, both backups' size and last-write time, Steam's build id. No receipt lists that
     output, so the verified BASE used to refuse it (`neither the BASE nor output Kiln can prove it published`) and Kiln's
     interpreter did not start for a player who switched from Kiln's bundled ShroudForge. Now, in kiln mode only
