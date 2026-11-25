@@ -35,6 +35,9 @@ bool OutputProbe::init(const VkContext& vk, std::string* detail) {
 const char* OutputProbe::unsupported(const Frame& f) {
     if (!f.color.view || !f.output.view) return "no view of the colour or the output";
     if (f.output.format != VK_FORMAT_R16G16B16A16_SFLOAT) return "the output is not R16G16B16A16_SFLOAT";
+    // usage 0: Kiln did not see the image made (the upscalers write the output as a storage image and sample the colour)
+    if (f.output.usage && !(f.output.usage & VK_IMAGE_USAGE_STORAGE_BIT)) return "the output is not a storage image";
+    if (f.color.usage && !(f.color.usage & VK_IMAGE_USAGE_SAMPLED_BIT)) return "the colour is not a sampled image";
     if (!f.render_width || !f.render_height || !f.output_width || !f.output_height) return "a size is 0";
     if (f.render_width > f.color.width || f.render_height > f.color.height || f.output_width > f.output.width ||
         f.output_height > f.output.height)
