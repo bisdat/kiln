@@ -159,7 +159,12 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   bundled SF, from fork commit `2eb8f0b` on (the pin `112d939` includes it; the earlier pin `724a884` kept the old
   pair and failed every preparation after an update, as it needs its Updater for this step), moves the old pair and
   the seal to `shroudforge/backups/outdated-working-baseline/`; an installed SF (its Updater present) replaces both
-  through its Updater and recycle bin and leaves kiln-eml's seal behind. Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
+  through its Updater and recycle bin and leaves kiln-eml's seal behind. Since 0.2.0-dev.31.13 the bundled SF does
+  this in the recovery after a failed pass too (before, a pass that failed before it reached the baseline, such as one
+  refused by SF's own settings, left the old pair and no ShroudForge mod ran), and neither SF nor kiln-eml takes a new
+  pair from game files that Steam's manifest of the installed build does not list as they are (size and SHA-1, read
+  from `<Steam>/depotcache`; refused with "Verify the game files in Steam", the old pair stays; no manifest: the rules
+  below decide as before). Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
   resource prefix) and seals it; a sealed pair counts as replaced, not damaged, only when the files' lengths differ
   from what the seal recorded, and a same-length mismatch stays refused. The old receipt then lists other backups, so
   nothing is taken for EML's output and the old build's bytes never go back. ShroudForge writes its backup copies to

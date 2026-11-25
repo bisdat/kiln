@@ -6,7 +6,9 @@
 //! `failed`), `phase`, `target` (`enshrouded`, `enshrouded_server`), `completedAt` (unix seconds) and, when it failed,
 //! `error` (ShroudForge's `asset_preparation/apply_asset_mods.rs` and `recover_failed_startup_assets.rs`). After a
 //! failed pass ShroudForge puts the game data back and lets the game start, so every mod that needs the pass is missing
-//! and only ShroudForge's own log and window say so. [`failure`] reads the record, so Kiln's launcher and its support
+//! and only ShroudForge's own log and window say so. When it cannot put the game data back, Kiln's ShroudForge (since
+//! 0.2.0-dev.31.13) says why in `recoveryError`; its preparation then returned false, Kiln's adapter wrote `failed`
+//! with `startupPrepared` false, and no ShroudForge mod ran in that start. [`failure`] reads the record, so Kiln's launcher and its support
 //! report say it too.
 //!
 //! The record names no process, so [`failure`] ties it to Kiln's last start (`kiln/state/boot.json`): it was written in

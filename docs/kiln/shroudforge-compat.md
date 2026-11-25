@@ -37,7 +37,10 @@ whole or not the source of the game files is never restored, and EML manifests m
 30.8/30.9 pin): BodyHeat's attribute calculation runs as the resource's sint32 (section 5.0).
 0.2.0-dev.31.12 pins fork branch `kiln-dev31-exports-reuse` (`1672d8af`): the host's skip list (`c115e6c3`, section 5.8)
 and, on top of it, a start reuses the last pass while runtime mods write into the export folder (`86c2f8db` and its
-review fix `1672d8af`, section 5.0).
+review fix `1672d8af`, section 5.0). 0.2.0-dev.31.13 pins fork branch `kiln-dev31-baseline` (`81b26c61`, on top of
+`1672d8af`): after a game update a failed pass's recovery takes the updated files as the new clean copy, Steam's
+manifest proves or refuses game files before a new working baseline is taken from them, and a start without the
+Updater converts ShroudForge 1.7's numeric toggle keys (section 5.0, "After a game update, when the pass fails").
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -140,6 +143,42 @@ its copy is complete: until then it is `<stem>.kfc.bak.partial` / `<stem>.kfc_re
 folder, flushed and then renamed, so a start that ends during the copy (the resource file is about 200 MiB) leaves a
 `.partial` file that nothing restores from, and one can stay behind after a killed start. With an SF installation in
 the game folder nothing changes: its Updater and recycle bin are used.
+
+**After a game update, when the pass fails** (fork branch `kiln-dev31-baseline`, 0.2.0-dev.31.13). On kiln-win1
+(Kiln 0.2.0-dev.31.11, 2026-11-25) no ShroudForge mod ran at any start since the game's update of 2026-11-03/04:
+- the pass failed at its first read of SF's settings: `debugConsole.toggleKey: Hotkey must be an SDL binding string`.
+  `shroudforge/config/modloader-config.json` came from ShroudForge 1.7 and keeps the windows' toggle keys as Windows
+  virtual-key numbers (121, 113, 120). Upstream converts them in its Updater's first post-install job
+  (`MigrateLegacyToggleKeys`); the bundled component has no Updater (`run_post_install_migrations` returned at once),
+  so nothing did. Now a start without an Updater runs upstream's own `migrate_legacy_toggle_key_settings` first
+  (`embedded.rs` `run_hosted_migrations`; F10, F2 and F9 become `SDL:` bindings, a mouse button `Mouse:<n>`).
+- the recovery after the failed pass only knew how to restore the working baseline. The backups were of the previous
+  build (`1273043 ... 2026-10-20` beside the game's `1287369 ... 2026-11-04`), so the check refused them (right) and
+  the recovery failed with "could not restore both baseline asset files": the adapter then starts the game without any
+  ShroudForge mod, not only without the pass's. Now the recovery asks `check_working_baseline` (with the last-output
+  proof) as the pass does (`recover_failed_startup_assets.rs`): a pair that may go back is restored; game files that
+  are a clean copy of their own are the ones the failed pass did not touch, so the game starts on them, the old pair is
+  set aside (`outdated-working-baseline`) and a new one is made from them (log: `the game's own files were kept as
+  the new clean copy`); a refusal fails the recovery with its own text, which the record keeps as `recoveryError`.
+- before any new working baseline is taken from the game files (after an update, Steam's file check, a first start),
+  Steam's own record decides where it is there (`modules/game-files/check_steam_installed_files.rs`):
+  `steamapps/appmanifest_<app>.acf` names the installed depot manifests, `<Steam>/depotcache/<depot>_<manifest>.manifest`
+  lists every file with its size and SHA-1 (on Windows also the depotcache of the Steam installation the registry
+  names, for a library on another drive). Both asset files as listed: taken, and the log's reason ends `(Steam's
+  manifest of build <id> lists the game's files as they are: they are the ones Steam installed)`. Either one not as
+  listed: refused, "... are not the files Steam installed for build <id> (...) ... Verify the game files in Steam (or
+  update the server files with SteamCMD's validate), then start again", and the backups stay where they are. No
+  manifest (a SteamCMD server, a folder outside a Steam library): the archive's own structure decides, as before. On
+  kiln-win1 the manifest of build 26430625 lists both live files byte for byte (read from a copy of its depotcache).
+- kiln-eml takes the same evidence where it takes a new pair itself (kiln mode, `load.rs` `create_backup_with`), and
+  the launcher's engine list now reads a failed recovery: kiln-shroudforge adds `startupPrepared: false` to `failed`,
+  and ShroudForge's line says that no ShroudForge mod ran, why, and (for a refusal) how to get a clean copy back:
+  "in Steam, right-click Enshrouded, Properties, Installed Files, Verify integrity of game files, then start the game
+  again from the Kiln launcher" (`crates/kiln-manage/src/sf_startup.rs`).
+Tests: the fork's `verify_working_baseline` (12, 3 new), `steam_files` (5), `kiln_baseline_tests.rs` (6, 3 new: the
+failed pass after an update, files that are not Steam's, kiln-win1's whole case with legacy keys), red before; Linux
+and native Windows (kiln-win1). kiln-eml `load::kiln_tests` (2 new, red before), kiln-manage `tests/sf_startup.rs`
+(1 new, red before), native `run.py` `prepare-fails`. Not run against a real game update or a real client.
 
 **A working baseline that is not the source of the game files** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). Before
 every startup pass SF copies `<stem>.kfc.bak` and `<stem>.kfc_resources.bak` over the game files. It checked only the
