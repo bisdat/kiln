@@ -352,12 +352,16 @@ The plan is **refused whole**, and the start runs the mods' current edits (regis
 reason, and a kiln.log warning), when the request cannot be read, the plan file is missing, was written by an older Kiln
 (format 1), or does not match its name, it is the other side's, one of its mods is not loaded (`<mod> is gone`) or not at
 its version (`<mod> changed (1.0.0, now 1.1.0)`), or one of its edits is refused on this start (a field this build does not
-map, an entry this build does not have, a save check below). It is never half-applied. Refusals that only a world's load can
-make (an entry that world lacks) stay per entry, as on any start. A plan made on another game build may start when every edit
-of it maps there (`rollback.madeOnExe` says so); schema migrations apply to it like to any edit.
+map, an entry this build does not have, a save check below). The save checks judge every value of the plan twice: against
+the value without the registry (as for any edit) and against the plan it rolls away from (the request's `from`; without one,
+the plan the last world ran on), since a world ran on those values and its saves can hold them. A narrower level range or a
+shorter build-zone list than that plan's refuses the rollback whole; a lower max stack needs the stack guard at the stage. It
+is never half-applied. Refusals that only a world's load can make (an entry that world lacks) stay per entry, as on any start.
+A plan made on another game build may start when every edit of it maps there (`rollback.madeOnExe` says so); schema
+migrations apply to it like to any edit.
 
 A rollback **never touches saves**: it writes one file beside the plans. When it gives an item a lower max stack than a world
-already started with, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
+already started with, or than the value under it, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
 rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback.
 
 ## Edits that change existing saves

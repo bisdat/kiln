@@ -50,6 +50,25 @@ Value before_registry(const FieldOutcome& fo) {
     return v;
 }
 
+Value of_json(const json& j) {
+    if (j.is_number_integer()) return Value::integer(j.get<int64_t>());
+    if (j.is_number()) return Value::number(j.get<double>());
+    if (j.is_boolean()) return Value::boolean(j.get<bool>());
+    if (j.is_string()) return Value::text(j.get<std::string>());
+    if (j.is_array()) {
+        std::vector<Value> list;
+        for (const json& x : j) list.push_back(of_json(x));
+        return Value::of_list(std::move(list));
+    }
+    if (j.is_object()) {
+        Value v;
+        v.kind = Value::Struct;
+        for (auto it = j.begin(); it != j.end(); ++it) v.keys.push_back(it.key()), v.list.push_back(of_json(it.value()));  // sorted keys
+        return v;
+    }
+    return Value{};
+}
+
 std::optional<Verdict> judge(const std::string& registry, const std::string& field, const Value& before, const Value& after) {
     if (after == before) return std::nullopt;
     if (registry == "items") {

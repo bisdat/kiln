@@ -104,7 +104,8 @@ pub fn rollback(a: RollbackArgs) -> Result<i32> {
         Err(e) => println!("what changes back: unknown here ({}); the start lists it under rollback.changedBack", e.message),
     }
     println!("saves are not touched. A start refuses the plan whole, and runs the mods' current edits, when one of its mods is not");
-    println!("loaded at the version above or one of its edits is refused on that game build.");
+    println!("loaded at the version above, one of its edits is refused on that game build, or it would change what saves hold against");
+    println!("the plan of the last start (a narrower item level range, a shorter build-zone list; a lower max stack without Kiln's stack guard).");
     if a.dry_run {
         println!("dry run: nothing written");
         return Ok(0);

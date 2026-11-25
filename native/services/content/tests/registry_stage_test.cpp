@@ -438,7 +438,7 @@ PlanStart plan_start(const std::string& dir, Files* files, TreeView* view, const
     const auto boot = r.run({});
     std::vector<stage::BootOutcome> outcomes;
     for (const auto& b : boot)
-        for (const auto& f : b.fields) outcomes.push_back({f.field, true, Value::integer(60), ""});
+        for (const auto& f : b.fields) outcomes.push_back({f.field, true, f.rows.empty() ? Value::integer(60) : f.rows.back().after, ""});  // as composed
     r.finish(outcomes);
     out.report = json::parse(files->report);
     if (out.world && live_result) {
@@ -690,6 +690,155 @@ void stack_guard_against_the_last_world(const std::string& dir) {
     check(row.rfind("warn: ", 0) == 0 && row.find("not available here") != std::string::npos && logged(s.log, "1 registry: saves: items[game:plank].maxStack"),
           "two starts later, and without the guard, still a warning (that save can still hold 80-stacks; nothing can be refused for an edit that is gone): " + row);
 }
+
+// ---- review of registry-rollback ----
+const char* rb_row(const json& rep) { return rep["rollback"].is_object() && rep["rollback"]["state"].is_string() ? "" : "no rollback row"; }
+std::string reason_of(const PlanStart& s) {
+    return s.report["rollback"].is_object() && s.report["rollback"]["reason"].is_string() ? s.report["rollback"]["reason"].get<std::string>() : std::string();
+}
+
+// changedBack lists a value that only the plan rolled back to edits (the plan rolled away from left it at the game's value)
+void rollback_changed_back_names_every_value(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;  // plank x4 = 80, levelCap 60
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 8}}]}})";
+    TreeView v2 = world();
+    const std::string hb = plan_hash(plan_start(dir, &files, &v2));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"from", hb}}.dump();
+    TreeView v3 = world();
+    PlanStart r = plan_start(dir, &files, &v3);
+    check(r.report["rollback"].is_object() && r.report["rollback"]["state"] == "applied", std::string(rb_row(r.report)) + r.report["rollback"].dump());
+    bool plank = false, cap = false;
+    for (const auto& row : r.report["rollback"]["changedBack"]) {
+        plank = plank || (row["field"] == "items[game:plank].maxStack" && row["from"] == 160 && row["to"] == 80);
+        cap = cap || (row["field"] == "balance[game:balance].levelCap" && row["from"] == 50 && row["to"] == 60);
+    }
+    check(plank && cap && r.report["rollback"]["changedBackTotal"] == 2,
+          "changedBack: plank 160 -> 80 and levelCap 50 (the game's, plan B has no edit of it) -> 60: " + r.report["rollback"].dump());
+    check(logged(r.log, "registry: rollback: balance[game:balance].levelCap 50 -> 60"), "and kiln.log names it");
+}
+
+// A rollback is judged against the values of the plan it rolls away from (a world ran on them, so its saves can hold them):
+// a narrower level range or a shorter build-zone list than that plan's refuses the plan whole; a wider one is applied.
+void rollback_judged_against_the_plan_rolled_away_from(const std::string& dir) {
+    Files files;
+    auto levels = [](int max) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "levels.max", "op": )" + std::to_string(max) + "}]}}";
+    };
+    g_stacks = levels(10);
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = levels(20);
+    TreeView v2 = world();
+    const std::string hb = plan_hash(plan_start(dir, &files, &v2));
+    check(!ha.empty() && !hb.empty() && ha != hb, "two plans");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"from", hb}}.dump();
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    check(s.report["rollback"].is_object() && s.report["rollback"]["state"] == "refused" &&
+              reason_of(s).find("items[game:plank].levels.max narrows the level range (levels.max 20 -> 10)") != std::string::npos &&
+              reason_of(s).find(hb.substr(0, 12)) != std::string::npos,
+          "rolling levels.max back from 20 to 10 would clamp copies a world on plan B saved: refused whole, naming that plan: " + s.report["rollback"].dump());
+    check(field_row(s.report, "game:plank", "levels.max")["result"] == 20 && s.rollback.empty(), "the mods' current edits run (20), not the plan's 10");
+    // the other way round widens the range: applied
+    g_stacks = levels(10);
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hb}, {"from", ha}}.dump();
+    TreeView v4 = world();
+    PlanStart w = plan_start(dir, &files, &v4);
+    check(w.report["rollback"]["state"] == "applied" && field_row(w.report, "game:plank", "levels.max")["result"] == 20,
+          "rolling back to a wider range (10 -> 20) is applied: " + w.report["rollback"].dump());
+    // without "from": judged against the plan the last world ran on (plans/index.json "world")
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    TreeView v5 = world();
+    PlanStart nf = plan_start(dir, &files, &v5);
+    check(nf.report["rollback"]["state"] == "refused" && reason_of(nf).find("levels.max 20 -> 10") != std::string::npos,
+          "no from: the last world's plan (B, 20) is the reference: " + nf.report["rollback"].dump());
+    // the build-zone list: plan D gives a fourth altar level, plan C none (the game's three)
+    files.data.erase("rollback.json");
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+    TreeView v6 = world();
+    const std::string hc = plan_hash(plan_start(dir, &files, &v6));
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60},
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "buildzoneSizesPerAltarLevel", "list": {"append": [{"x": 99, "y": 99, "z": 99}]}}]}})";
+    TreeView v7 = world();
+    PlanStart d = plan_start(dir, &files, &v7);
+    const std::string hd = plan_hash(d);
+    check(d.report["refused"].empty() && hd != hc, "plan D (four build-zone sizes) starts cleanly: " + d.report["refused"].dump().substr(0, 400));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hc}, {"from", hd}}.dump();
+    TreeView v8 = world();
+    PlanStart z = plan_start(dir, &files, &v8);
+    check(z.report["rollback"]["state"] == "refused" && reason_of(z).find("shortens the build-zone sizes to 3 altar level(s) from 4") != std::string::npos,
+          "rolling back to three build-zone sizes would leave a saved level-4 altar without one: refused whole: " + z.report["rollback"].dump());
+    // a warning class against that plan is reported (levelCap 70 -> 60; the game's 50 alone would say nothing)
+    files.data.erase("rollback.json");
+    auto cap = [](int c) {
+        return R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": )" + std::to_string(c) + "}]}}";
+    };
+    g_stacks = cap(60);
+    TreeView v9 = world();
+    const std::string hf = plan_hash(plan_start(dir, &files, &v9));
+    g_stacks = cap(70);
+    TreeView v10 = world();
+    const std::string he = plan_hash(plan_start(dir, &files, &v10));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hf}, {"from", he}}.dump();
+    TreeView v11 = world();
+    PlanStart c = plan_start(dir, &files, &v11);
+    std::string note;
+    for (const auto& n : c.report.value("saves", json::array()))
+        if (n["field"] == "balance[game:balance].levelCap") note = n["class"].get<std::string>() + "/" + n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(c.report["rollback"]["state"] == "applied" && note.rfind("progressionCap/warn: lowers the level cap 70 -> 60", 0) == 0 && note.find("against plan " + he.substr(0, 12)) != std::string::npos,
+          "registry.json saves: the rollback lowers the level cap against the plan it rolls away from: " + note);
+}
+
+// A start (not a rollback) whose level range is narrower than the last world's: applied with a warning (refusing it would
+// leave the game's range, narrower still)
+void a_start_below_the_last_worlds_range_warns(const std::string& dir) {
+    Files files;
+    auto levels = [](int max) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "levels.max", "op": )" + std::to_string(max) + "}]}}";
+    };
+    g_stacks = levels(20);
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = levels(15);
+    TreeView v2 = world();
+    PlanStart s = plan_start(dir, &files, &v2);
+    std::string note;
+    for (const auto& n : s.report.value("saves", json::array()))
+        if (n["field"] == "items[game:plank].levels.max") note = n["class"].get<std::string>() + "/" + n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(field_row(s.report, "game:plank", "levels.max")["result"] == 15 && s.report["refused"].empty(), "15 is applied (the game's 1 would be narrower still)");
+    check(note.rfind("levelRange/warn: narrows the level range (levels.max 20 -> 15)", 0) == 0 && note.find("against plan " + ha.substr(0, 12)) != std::string::npos &&
+              note.find("not applied") == std::string::npos,
+          "registry.json saves warns against the plan the last world ran on: " + note);
+    check(logged(s.log, "1 registry: saves: items[game:plank].levels.max narrows the level range"), "a kiln.log warning");
+}
+
+// A plan whose max stack is lower than the value under it needs the stack guard at the stage, not per entry at the world's load
+// (here the index was deleted, so no highest stack is known, and the request names no plan rolled away from).
+void rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(const std::string& dir) {
+    Files files;
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": 10}]}})";  // 20 -> 10
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kGood;
+    TreeView v2 = world();
+    plan_start(dir, &files, &v2);
+    files.data.erase("plans/index.json");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    g_guard_available = false;
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    g_guard_available = true;
+    check(s.report["rollback"].is_object() && s.report["rollback"]["state"] == "refused" && reason_of(s).find("stack guard is not available") != std::string::npos,
+          "the plan lowers plank's max stack 20 -> 10 and the guard is not available: refused whole at the stage: " + s.report["rollback"].dump());
+    check(field_row(s.report, "game:plank", "maxStack")["result"] == 80 && s.rollback.empty(), "the mods' current edits run (80)");
+    TreeView v4 = world();
+    g_guard_calls = 0;
+    PlanStart ok = plan_start(dir, &files, &v4);
+    check(ok.report["rollback"]["state"] == "applied" && g_guard_calls > 0, "with the guard: applied, the guard asked at the stage: " + ok.report["rollback"].dump());
+}
 }  // namespace
 
 // review3 S4: registry.json does not call a record verified when it was proven on another regmap/common (every row is off)
@@ -719,7 +868,11 @@ int main(int argc, char** argv) {
         {"rollback_starts_on_the_previous_plan", [&] { rollback_starts_on_the_previous_plan(dir); }},
         {"rollback_refused_whole", [&] { rollback_refused_whole(dir); }},
         {"save_checks_of_restart_fields", [&] { save_checks_of_restart_fields(dir); }},
-        {"stack_guard_against_the_last_world", [&] { stack_guard_against_the_last_world(dir); }}};
+        {"stack_guard_against_the_last_world", [&] { stack_guard_against_the_last_world(dir); }},
+        {"rollback_changed_back_names_every_value", [&] { rollback_changed_back_names_every_value(dir); }},
+        {"rollback_judged_against_the_plan_rolled_away_from", [&] { rollback_judged_against_the_plan_rolled_away_from(dir); }},
+        {"a_start_below_the_last_worlds_range_warns", [&] { a_start_below_the_last_worlds_range_warns(dir); }},
+        {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

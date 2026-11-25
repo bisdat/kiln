@@ -55,6 +55,10 @@ std::optional<Verdict> judge(const std::string& registry, const std::string& fie
 // The value a field's registry rows start from: after the chain's last row that is not the registry's, else its base.
 Value before_registry(const FieldOutcome& fo);
 
+// A value as a plan's "values" (or registry.json) writes it, read back for judge(): numbers, true/false, names, lists and
+// elements as they are (no schema check; null is none).
+Value of_json(const json& j);
+
 // The notes of a composed (or live) result: every field with registry rows whose judge() verdict is not Refuse (a refused edit
 // is no longer in the result's value), in the result's order.
 std::vector<SaveNote> notes(const Result& r);

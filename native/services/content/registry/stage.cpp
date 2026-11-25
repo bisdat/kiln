@@ -5,7 +5,9 @@
 #include "unmapped.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
+#include <functional>
 #include <iterator>
 
 #include "services/kiln_caps.h"
@@ -1011,8 +1013,10 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // it): an edit the saves refuse is taken out before the boot back-end writes anything. A plan a rollback starts on is
     // checked on every field, so it is refused whole rather than per entry at the world's load.
     std::vector<Refusal> save_refused;
+    std::vector<std::string> plan_guards;  // a plan's live fields whose save check needs the stack guard (a lower max stack)
     auto compose_checked = [&](const std::vector<ModInput>& in, bool plan) {
         save_refused.clear();
+        plan_guards.clear();
         Result x = compose(d.schema, base, old, in);
         std::vector<FieldRef> drop;
         for (const auto& [ref, fo] : x.fields) {
@@ -1021,6 +1025,9 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
             const FieldSpec* f = rs ? rs->field(ref.field) : nullptr;
             if (!plan && !(f && f->applies == Applies::Restart)) continue;
             const auto v = saves::judge(ref.registry, ref.field, saves::before_registry(fo), fo.result);
+            // review: the live back-end asks the guard per entry at the world's load; a plan asks it here, so a missing guard
+            // refuses the plan whole rather than some of its entries
+            if (v && v->decision == saves::Decision::Guard && plan) plan_guards.push_back(ref.text() + " " + v->text.substr(0, v->text.find(':')));
             if (!v || v->decision != saves::Decision::Refuse) continue;
             for (const ChainRow& c : fo.chain)
                 if (c.kind == WriterKind::Registry)
@@ -1045,25 +1052,86 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         }
         return out;
     };
+    // A field's value on this start without the registry's rows (after the older paths' writes; the base's when nothing writes
+    // it). None: the entry or field is not in this start's base.
+    auto bare = [&](const Result& x, const FieldRef& ref) -> Value {
+        if (const auto it = x.fields.find(ref); it != x.fields.end()) return saves::before_registry(it->second);
+        if (const auto reg = base.registries.find(ref.registry); reg != base.registries.end())
+            for (const BaseModel::Entry& e : reg->second)
+                if (e.id == ref.id) {
+                    const auto f = e.fields.find(ref.field);
+                    return f == e.fields.end() ? Value{} : f->second;
+                }
+        return Value{};
+    };
     Result r;
-    if (src) r = compose_checked(inputs, rolled);
-    std::string guard_why;
-    bool guard_failed = false;
-    if (rolled && src && r.refused.empty() && save_refused.empty()) {
-        const auto lowered = stacks_lowered(r);
-        if (!lowered.empty() && !(d.env.stack_guard && d.env.stack_guard(&guard_why))) {
-            guard_failed = true;
-            save_refused.push_back({"", "", Stage::Alter, 0, "saves: it lowers the largest stack of " + std::to_string(lowered.size()) + " item(s) (" +
-                lowered.front().first.text() + " " + lowered.front().second.first.text_of() + " -> " + lowered.front().second.second.text_of() +
-                ") below what a world already started with, and Kiln's stack guard is not available here" + (guard_why.empty() ? "" : " (" + guard_why + ")") +
-                ": the game would delete the part of a saved stack above it", ""});
+    // review: every value this start's registry edits give (and every value of another plan's) against that plan's values: one
+    // saves::judge verdict per field that changes what saves hold (the plan's value -> this start's)
+    auto judge_against = [&](const json& against, const std::function<void(const FieldRef&, const std::string&, const saves::Verdict&)>& each) {
+        std::set<std::string> keys;
+        for (auto it = against.begin(); it != against.end(); ++it) keys.insert(it.key());
+        for (const auto& [ref, fo] : r.fields)
+            if (has_registry_row(fo)) keys.insert(ref.text());
+        for (const std::string& k : keys) {
+            FieldRef ref;
+            if (!field_ref_of(k, &ref) || is_raw_field(ref.field)) continue;
+            const auto it = r.fields.find(ref);
+            const Value was = against.contains(k) ? saves::of_json(against[k]) : bare(r, ref);
+            const Value now = it != r.fields.end() && has_registry_row(it->second) ? it->second.result : bare(r, ref);
+            if (was.kind == Value::None || now.kind == Value::None) continue;  // not on one of the two (an entry this build lacks)
+            if (const auto v = saves::judge(ref.registry, ref.field, was, now)) each(ref, k, *v);
         }
+    };
+    // the values of a kept plan (plans/<hash>.json "values"); empty: not there
+    auto plan_values = [&](const std::string& hash) -> json {
+        if (hash.empty() || !d.env.read_data) return json::object();
+        const auto t = d.env.read_data("plans/" + hash + ".json");
+        const json f = t ? json::parse(*t, nullptr, false) : json();
+        return f.is_object() && f.contains("values") && f["values"].is_object() ? f["values"] : json::object();
+    };
+    const std::string world_plan = d.index.contains("world") && d.index["world"].is_object() && d.index["world"].contains("plan") &&
+                                           d.index["world"]["plan"].is_string() ? d.index["world"]["plan"].get<std::string>() : "";
+    if (src) r = compose_checked(inputs, rolled);
+    std::string guard_why, plan_why;  // plan_why: the whole plan is refused by a check of all of it (not one edit)
+    std::vector<saves::SaveNote> rollback_notes;  // registry.json "saves": what the rollback does to saves against that plan
+    if (rolled && src && r.refused.empty() && save_refused.empty()) {
+        // review: the plan against the values of the plan it rolls away from (else the last world's): a world ran on those, so
+        // its saves can hold them. A Refuse verdict refuses the plan whole; a Guard verdict needs the stack guard here.
+        json against = from_values;
+        std::string against_plan = rb["from"].is_string() ? rb["from"].get<std::string>() : "";
+        if (against.empty()) {
+            against_plan = world_plan == rb.value("plan", std::string()) ? std::string() : world_plan;
+            against = plan_values(against_plan);
+        }
+        std::vector<std::string> needs_guard = plan_guards;
+        std::vector<saves::SaveNote> guard_notes;  // a lower max stack against that plan: the guard keeps such stacks whole
+        const std::string vs = against_plan.empty() ? std::string() : " against plan " + short_hash(against_plan) + ", which it rolls away from";
+        judge_against(against, [&](const FieldRef& ref, const std::string& k, const saves::Verdict& v) {
+            if (v.decision == saves::Decision::Guard) {
+                needs_guard.push_back(k + " " + v.text.substr(0, v.text.find(':')) + vs);
+                guard_notes.push_back({ref, v.cls, "guard", v.text + vs});
+            }
+            if (v.decision == saves::Decision::Refuse && plan_why.empty()) plan_why = "saves: " + k + " " + v.text + vs;
+            if (v.decision == saves::Decision::Warn || v.decision == saves::Decision::Report)
+                rollback_notes.push_back({ref, v.cls, saves::decision_name(v.decision), v.text + vs});
+        });
+        const auto lowered = stacks_lowered(r);
+        if (plan_why.empty() && (!lowered.empty() || !needs_guard.empty()) && !(d.env.stack_guard && d.env.stack_guard(&guard_why))) {
+            const std::string what = !lowered.empty() ? "it lowers the largest stack of " + std::to_string(lowered.size()) + " item(s) (" + lowered.front().first.text() + " " +
+                                                            lowered.front().second.first.text_of() + " -> " + lowered.front().second.second.text_of() + ") below what a world already started with"
+                                                      : needs_guard.front();
+            plan_why = "saves: " + what + ", and Kiln's stack guard is not available here" + (guard_why.empty() ? "" : " (" + guard_why + ")") +
+                       ": the game would delete the part of a saved stack above it";
+        }
+        if (!plan_why.empty()) save_refused.push_back({"", "", Stage::Alter, 0, plan_why, ""});
+        for (const saves::SaveNote& n : guard_notes)  // the stack note below names the ones against a world's highest stack
+            if (std::none_of(lowered.begin(), lowered.end(), [&](const auto& l) { return l.first == n.field; })) rollback_notes.push_back(n);
     }
     if (rolled && (!src || !r.refused.empty() || !save_refused.empty())) {
         // never half-applied: one refused edit of the plan on this start refuses the whole plan
         std::string why = "the stage has no base to read";
-        if (src && guard_failed) {
-            why = save_refused.front().reason;
+        if (src && !plan_why.empty()) {
+            why = plan_why;
         } else if (src) {
             std::vector<Refusal> all = r.refused;
             all.insert(all.end(), save_refused.begin(), save_refused.end());
@@ -1094,22 +1162,27 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
                     (w.empty() ? "" : " (" + w + ")") + ": the game deletes the part of a saved stack above " + b + " at its next move"});
         }
     }
+    if (rolled) d.stage_notes.insert(d.stage_notes.end(), rollback_notes.begin(), rollback_notes.end());
+    // review: a start (not a rollback) against the plan the last world ran on. A narrower level range or a shorter build-zone
+    // list than that world's changes what its saves hold, and nothing can be refused for it (without the edit the value is
+    // the game's, narrower still): a warning. The other classes are judged against the value without the registry, as above.
+    if (src && !rolled && !world_plan.empty())
+        judge_against(plan_values(world_plan), [&](const FieldRef& ref, const std::string&, const saves::Verdict& v) {
+            if (v.decision != saves::Decision::Refuse) return;
+            std::string text = v.text;
+            if (const size_t cut = text.rfind("; this edit was not applied"); cut != std::string::npos) text.resize(cut);
+            d.stage_notes.push_back({ref, v.cls, "warn", text + " against plan " + short_hash(world_plan) + ", which the last world ran on (a world on it can " +
+                                                         "have saved that; without this start's value the game's applies, narrower still)"});
+        });
     if (rolled) {
         // exactly what changed back: every value of the plan rolled away from, and of this start, that differs
         std::map<std::string, json> now;
         for (const auto& [ref, fo] : r.fields)
             if (has_registry_row(fo)) now[ref.text()] = fo.result.to_json();
+        // review: a field only the plan edits had its value without the registry in the plan rolled away from (not the plan's)
         auto without_registry = [&](const std::string& key) -> json {
             FieldRef ref;
-            if (!field_ref_of(key, &ref)) return nullptr;
-            if (const auto it = r.fields.find(ref); it != r.fields.end()) return it->second.result.to_json();
-            if (const auto reg = base.registries.find(ref.registry); reg != base.registries.end())
-                for (const BaseModel::Entry& e : reg->second)
-                    if (e.id == ref.id) {
-                        const auto f = e.fields.find(ref.field);
-                        return f == e.fields.end() ? json(nullptr) : f->second.to_json();
-                    }
-            return nullptr;
+            return field_ref_of(key, &ref) ? bare(r, ref).to_json() : json(nullptr);
         };
         std::set<std::string> keys;
         for (auto it = from_values.begin(); it != from_values.end(); ++it) keys.insert(it.key());
