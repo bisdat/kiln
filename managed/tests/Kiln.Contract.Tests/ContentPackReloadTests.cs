@@ -181,5 +181,38 @@ public sealed unsafe class ContentPackReloadTests : FakeTableTest
         Assert.Equal(["reload all"], Calls);
     }
 
+    [Fact]
+    public void An_older_kiln_content_re_applies_once_for_a_reload_with_dependents()
+    {
+        Table(withReloaded: false);
+        Load("lib", "1.0.0");
+        Load("pack", "1.0.0");
+        Publish("lib", "pack");
+        Content.SyncMods();
+        Calls.Clear();
+        Load("lib", "1.0.0");
+        Load("pack", "1.0.0");
+        Publish("lib", "pack");
+        Content.OnModReloaded(Reloaded("lib", "1.0.0", "pack"));
+        Content.SyncMods();
+        Assert.Equal(["reload all"], Calls);  // one re-application of every pack covers both mods, not one per mod
+    }
+
+    [Fact]
+    public void An_older_kiln_content_whose_list_changed_re_applies_from_the_list_alone()
+    {
+        Table(withReloaded: false);
+        Load("a", "1.0.0");
+        Load("b", "1.0.0");
+        Publish("a", "b");
+        Content.SyncMods();
+        Calls.Clear();
+        Load("a", "1.0.0");
+        Publish("b", "a");
+        Content.OnModReloaded(Reloaded("a", "1.0.0"));
+        Content.SyncMods();
+        Assert.Equal(["mods [\"b\",\"a\"]"], Calls);  // pack_mods re-applies at the next Pre: a ReloadPacks now would be a second one
+    }
+
     private static ModReloadedEvent Reloaded(string id, string version, params string[] cascade) => new(id, version, true, cascade);
 }

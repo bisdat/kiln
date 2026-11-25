@@ -369,27 +369,29 @@ public static unsafe partial class Content
         var again = Loads.Next(loads);
         var ids = loaded.Select(m => m.Id).ToArray();
         var json = JsonSerializer.Serialize(ids);
-        if (json != _lastModList)
+        var listChanged = json != _lastModList;
+        if (listChanged)
         {
             _lastModList = json;
             using var s = new ContentNative.Utf8(json);
             _table->PackMods(s.Str);
         }
-        foreach (var (id, reason) in again) PackModReloaded(id, reason);
-    }
-
-    private static void PackModReloaded(string id, string reason)
-    {
+        if (again.Count == 0) return;
         if (ContentNative.HasPackModReloaded(_table))
         {
-            using var m = new ContentNative.Utf8(id);
-            using var r = new ContentNative.Utf8(reason);
-            _table->PackModReloaded(m.Str, r.Str);
+            foreach (var (id, reason) in again)
+            {
+                using var m = new ContentNative.Utf8(id);
+                using var r = new ContentNative.Utf8(reason);
+                _table->PackModReloaded(m.Str, r.Str);
+            }
             return;
         }
-        // an older kiln.content: re-apply every pack now (the tick thread of its world, else it refuses and nothing changes)
-        try { Backend.Current.Log(0, LogLevel.Info, $"Kiln.Content: mod {id} {reason}: re-applying data packs"); } catch { }
-        if (_table->ReloadPacks != null) _table->ReloadPacks();
+        // An older kiln.content: one re-application of every pack covers every mod loaded again (the tick thread of its
+        // world, else it refuses and nothing changes). A changed list re-applies them at its next Pre already.
+        foreach (var (id, reason) in again)
+            try { Backend.Current.Log(0, LogLevel.Info, $"Kiln.Content: mod {id} {reason}: re-applying data packs"); } catch { }
+        if (!listChanged && _table->ReloadPacks != null) _table->ReloadPacks();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
