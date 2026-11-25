@@ -7,7 +7,8 @@
 // rows, no item 0, no duplicate, flags 0, items of the list's kind when the test named a catalog. Shown composes the
 // game's rows with the snapshot as the HUD would; the selection stays on its item; a pick of a mod row the game does
 // not list with stock (a row it kept at count 0 is none) is queued for Ui.AmmoList.Picked (64 at most, the oldest
-// dropped). The game's hook, its drawing and the equip request are not modelled.
+// dropped). The game's hook, its drawing and the equip request are not modelled, nor a stack that leaves the backpack
+// before the game builds its rows again (GitHub issue 145: the game's rows here are the backpack).
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -87,7 +88,7 @@ internal sealed unsafe class UiAmmoFake : IKitFake
             "the HUD would compose it; the selection stays on its item (Select, Selected); Pick of a mod row the game does not " +
             "list with stock (a row it kept at count 0 is none) raises Ui.AmmoList.Picked at the next step for the mod that " +
             "provided it. Offline: the game's hook, its " +
-            "drawing and its equip request."));
+            "drawing and its equip request, and a stack that leaves the backpack before the game builds its rows again."));
 
     internal static UiAmmoFakeState? State =>
         FakeTables.Active(Service) is { } h ? KitFakes.State<UiAmmoFakeState>(h) : null;

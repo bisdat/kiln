@@ -511,7 +511,14 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
 - **Picks.** A row whose item the game lists itself with stock (in `Replace` too) or the player carries is the game's
   own: it equips it as always. The row the game keeps at count 0 for a stack the player used up is not stock: since
   0.2.0-dev.30.7 a mod row of that item raises `Picked` unless the player carries it, in either mode (GitHub issue 131,
-  thanks Fuzen777). Any other mod row raises
+  thanks Fuzen777). The game's rows are the ones it built last: when the stack of an item your rows provide leaves the
+  backpack before the game builds the list again (your server half just swapped it into storage), a pick of its row
+  raises `Picked` too, rather than going to the game, which would find no stack and empty the slot. The same holds in
+  the frame or two between the game's new build and Kiln's next publication of your rows, when the game's own rows
+  show (since 0.2.0-dev.31.9, GitHub issue 145, thanks Fuzen777). With `"log_level": "debug"` in `kiln.json`, every
+  pick of a provided row that goes to the game logs one line (at most 8 a second), e.g. `ui.ammo: a pick of spell
+  0x1a2b3c4d (a row a mod provided) went to the game: game row count 1 (list revision 221, built 16 ms, 0 client steps
+  before the pick); backpack: holds it`. Any other mod row raises
   `Picked` for the mod that provided it (on the UI thread at the next UI frame; an earlier session's picks are dropped),
   and the game does nothing. `Picked` is a selection wish, not proof of a click: the game's own automatic selection (the
   weapon's current ammunition is not in a replaced list, so it selects the first or the kept row) raises it too. Kiln

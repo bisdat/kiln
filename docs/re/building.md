@@ -229,6 +229,21 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   not remove unmatched rows, and the cycle `0x40c320` does not check a row's count. Kiln therefore keeps a group's
   binding across a session or world change until that group's next build takes the mod rows out (picks of them stay
   suppressed meanwhile, with no event).
+- Rows and picks in time (0.2.0-dev.31.9, GitHub issue 145; static, same client). All seven wish sites pass the selector
+  state at `+0x14fd0`, the one the parent `0x40e2b0` rebuilds in full (`currentOnly` 0) on each call from `0x2bd0bc`; the
+  second state at `+0x17bd0` is built for the active group only or copied from the first. In that caller the event-loop
+  wish at `0x2bce24` runs before the build at `0x2bd0bc`, so it sees the previous build's rows; the order of the input
+  wish sites (`0x3a9612`, `0x3ade44`, `0x3afa75`, `0x3afb02`) against the build is not established. The builder counts
+  stacks in the `Generic` (4) links `0xe882d0` collects from the actor's `InventorySetup` (recursing into `Virtual` (5)
+  links), the same graph the backpack read walks. The equipped arrow or spell is a selected `Generic` backpack cell
+  (the #139 notes in [items.md](items.md)), so its game row counts it and the backpack read finds it. A binding's rows can
+  therefore be older than the backpack at a pick: Kiln reads the backpack once per set of bound rows for each game row
+  with stock, and a provided row held then and absent at the pick goes to the mod. When the game's rows change, Kiln
+  binds nothing until the provider publishes for the new serial, so the game's own rows show for that interval; a pick
+  of a provided item's count-0 row there is decided as for a bound one. `0x40ca70` (equip reconciliation) returns the
+  pending item `+0x63c` while its version `+0x640` differs from the input's, else the equipped stack's item via
+  `0x3853c0`. Which pick emptied the reporter's slot, and the server's order of the mod's swap and the game's wish, are
+  runtime facts not established here.
 
 Real menu behaviour, the server half of a swap and controller cycling remain the owner's in-game check.
 

@@ -67,6 +67,30 @@ public sealed unsafe class UiAmmoFakeTests
     }
 
     [Fact]
+    public void APickBetweenTheGamesNewRowsAndTheNextStepIsDecidedByTheNewRows()
+    {
+        // GitHub issue 145: the mod swapped its stored 0x40 in and the equipped 0x41 out; the game built its rows again
+        // (0x41 kept at count 0) and Kiln.Ui has not published for them yet. As native, the pick of 0x41 reaches the mod.
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var picks = new List<AmmoListPick>();
+        kiln.AmmoList.Hold(AmmoListKind.Spell, Staff, R(0x41, 1));
+        using var p = kiln.Run(() => Ui.AmmoList.Provide(AmmoListKind.Spell, c => [R(0x40, 1), .. c.GameRows],
+            new AmmoListOptions { Mode = AmmoListMode.Replace }));
+        kiln.Run(() => Ui.AmmoList.Picked += picks.Add);
+        kiln.Step();
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x41)));  // equipped and carried: the game's own
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));
+        kiln.Step();
+        kiln.AmmoList.SetGameRows(AmmoListKind.Spell, R(0x41, 0), R(0x40, 1));  // the swap, before Kiln.Ui's next frame
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x41)));
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));  // now in the backpack: the game's
+        kiln.Step();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Spell, new ItemId(0x40), 1), new AmmoListPick(AmmoListKind.Spell, new ItemId(0x41), 1)],
+            picks);
+    }
+
+    [Fact]
     public void InAppendAGameRowAtCountZeroShowsAndAPickOfItReachesTheModWithARowOfItsItem()
     {
         using var kiln = new KilnHarness();
