@@ -1969,10 +1969,23 @@ pub fn watch() {
 #[cfg(not(target_os = "linux"))]
 pub fn watch() {}
 
-/// The watchdog: the page's ready call in time, or the fallback.
+/// The watchdog: the page's ready call in time, or the fallback. On a busy box the page gets
+/// [`crate::fonthang::LOADED_LATE`] instead of [`TIMEOUT`]; a page whose web process is stuck in the font library gets
+/// the font cache hint instead of a restart (0.2.0-dev.31.14, crate::fonthang).
 #[cfg(target_os = "linux")]
 fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
-    let window = match WATCH.wait(begun, TIMEOUT, NO_WINDOW_TIMEOUT) {
+    let mut late = TIMEOUT;
+    let mut seen = WATCH.wait(begun, late, NO_WINDOW_TIMEOUT);
+    if seen == (Seen::Late { window: true }) {
+        let load = crate::fonthang::load_now();
+        if load.loaded() {
+            late = crate::fonthang::LOADED_LATE;
+            log(&format!("the page has not started {} s after the window, {}: a slow start, waiting until {} s",
+                TIMEOUT.as_secs(), load.says(), late.as_secs()));
+            seen = WATCH.wait(begun, late, NO_WINDOW_TIMEOUT);
+        }
+    }
+    let window = match seen {
         Seen::Started(after) => {
             log(&format!("the page started {} ms after the window was made ({:?}, dmabuf {})", after.as_millis(), c.mode,
                 if d.on { "on" } else { "off" }).to_lowercase());
@@ -1985,7 +1998,14 @@ fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
         }
         Seen::Late { window } => window,
     };
-    let what = if window { format!("the page did not start within {} s of the window", TIMEOUT.as_secs()) } else { format!("no window within {} s", NO_WINDOW_TIMEOUT.as_secs()) };
+    let what = if window { format!("the page did not start within {} s of the window", late.as_secs()) } else { format!("no window within {} s", NO_WINDOW_TIMEOUT.as_secs()) };
+    // a web process stuck in fontconfig: no renderer would help, so the font cache hint instead of a restart (and of a
+    // sticky marker); not conclusive: on as before
+    if window && crate::fonthang::check(&what, &|| WATCH.has_started()) == crate::fonthang::Checked::Started {
+        let after = WATCH.wait_late(begun);
+        log(&format!("the page started late, {} ms after the window was made", after.as_millis()));
+        return;
+    }
     match when_late_forced(&c, &d, &x, &f) {
         Late::NoForce => {
             let why = format!("The launcher turned this off by itself: {what} with GPU drawing forced on NVIDIA");
