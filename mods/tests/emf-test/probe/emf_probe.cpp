@@ -296,9 +296,9 @@ void v40_checks(EmfWorld* w) {
     EmfMapMarkerType mt{};
     check(!A->marker_set(&mk) && !A->marker_remove("probe") && A->marker_clear() == 0,
           "markers: marker_set, marker_remove, marker_clear answer false / 0 on a dedicated server (it draws nothing)");
-    const uint32_t types = A->marker_types(&mt, 1);
-    check(types == 0 || (mt.size == sizeof mt && mt.id != 0), "markers: marker_types answers the catalog's map types or 0",
-          std::to_string(types));
+    const uint32_t map_types = A->marker_types(&mt, 1);
+    check(map_types == 0 || (mt.size == sizeof mt && mt.id != 0), "markers: marker_types answers the catalog's map types or 0",
+          std::to_string(map_types));
     const uint32_t reached = A->marker_send(0, &mk, 1);
     check(reached <= 32, "markers: marker_send to every player answers how many Kiln players it reached", std::to_string(reached));
     EmfMarker badid = mk;
