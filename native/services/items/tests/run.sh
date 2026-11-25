@@ -39,4 +39,10 @@ if [[ -n ${KILN_CLIENT_EXE:-} && -n ${KILN_SERVER_EXE:-} ]]; then
 else
   echo "SKIP craft preview signatures: supply KILN_CLIENT_EXE and KILN_SERVER_EXE static copies"
 fi
+echo "== give_equip_instance_ammo_sigdb_test.py"
+if [[ -n ${KILN_CLIENT_EXE:-} && -n ${KILN_SERVER_EXE:-} ]]; then
+  python3 -I "$here/give_equip_instance_ammo_sigdb_test.py" --client "$KILN_CLIENT_EXE" --server "$KILN_SERVER_EXE" || fail=1
+else
+  echo "SKIP GiveEquip instance-backed ammo signatures: supply KILN_CLIENT_EXE and KILN_SERVER_EXE static copies"
+fi
 exit $fail

@@ -1,0 +1,57 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "#139: instance-backed arrows, spells and bait (eternal spells) given and equipped in place (docs/re/items.md section 22). The game's EquipItem first asks EquipLocationKind (ItemInfo+0x104 through a jump table: types 1-12 and 36 -> 4 Generic, in place; 13-18, 34, 35, 37, 38 -> 2 Equipment; else 0). Kind 4 on a cell of the current entity's own inventory calls SelectEquipment(remove 0, cell, ItemInfo, the stack's own pide); UnequipItem's kind 4 calls it with remove 1 and that pide; the commit's op7 then ORs ItemState+0x0e bit 0x08 (IsEquipped), or clears it for remove. No HasPIDE test on any of these paths. Same bytes on server 26430253 (f0d824be) and client 26430625 (5d9ef2f1); kiln.items calls EquipLocationKind (entry bytes qualified) and otherwise only matches these sites.",
+  "symbols": {
+    "@items/EquipItem.inPlace": {
+      "comment": "EquipItem's kind-4 branch: kind = EquipLocationKind(ItemInfo); kind 4 and EquipInPlaceOwned(cell, player, tx) -> SelectEquipment(out, tx, remove 0, player, SlotSelection, slot, cell, ItemInfo, r15d). Server 26430253 0x1b4fba, client 26430625 0x41541a",
+      "find": [
+        {
+          "scope": { "symbol": "items/EquipItem", "size": 1536 },
+          "pattern": "48 8B CF E8 {items/EquipLocationKind:rel32} 0F B6 D8 84 C0 0F 84 ?? ?? ?? ?? 3C 04 75 ?? 8B 54 24 50 4C 8B C6 49 8B CE E8 {items/EquipInPlaceOwned:rel32} 84 C0 74 ?? 0F B6 8D ?? ?? 00 00 45 33 C0 44 8B 4C 24 50 48 8B D6 44 89 7C 24 40 48 89 7C 24 38 4C 89 74 24 30 88 4C 24 28 49 8B CC 4C 89 6C 24 20 E8 {items/SelectEquipment:rel32}"
+        }
+      ]
+    },
+    "@items/EquipItem.stackPide": {
+      "comment": "the r15d EquipItem's in-place branch passes as the pide: the stack's own pide field (getItemStack result +8, before ItemRegistryFind). Server 26430253 0x1b4f15, client 26430625 0x415375",
+      "find": [
+        { "scope": { "symbol": "items/EquipItem", "size": 256 }, "pattern": "48 8B 56 08 8B 0B 44 8B 7B 08 E8" }
+      ]
+    },
+    "@items/EquipLocationKind.body": {
+      "comment": "the whole leaf: range check, byte index table, dword target table, three returns (4, 2, 0). The tables are read by native/services/items/tests/give_equip_instance_ammo_sigdb_test.py",
+      "find": [
+        {
+          "scope": { "symbol": "items/EquipLocationKind", "size": 48 },
+          "pattern": "0F B6 81 04 01 00 00 83 F8 26 77 21 48 8D 15 ?? ?? ?? ?? 0F B6 84 02 ?? ?? ?? ?? 8B 8C 82 ?? ?? ?? ?? 48 03 CA FF E1 B0 04 C3 B0 02 C3 32 C0 C3"
+        }
+      ]
+    },
+    "@items/UnequipItem.inPlace": {
+      "comment": "UnequipItem's kind-4 branch: SelectEquipment(out, tx, remove 1, player, SlotSelection, slot, the 'none' cell, ItemInfo, the stack's pide): the stack stays where it is. A second vote for EquipLocationKind. Server 26430253 0x1b9ccf, client 26430625 0x41988f",
+      "find": [
+        {
+          "scope": { "symbol": "items/UnequipItem", "size": 1536 },
+          "pattern": "48 8B C8 E8 {items/EquipLocationKind:rel32} 49 8B D7 3C 04 75 ?? 48 8B 05 ?? ?? ?? ?? 41 B0 01 44 8B 8C 24 ?? ?? 00 00 48 8B CE 89 5C 24 40 4C 89 64 24 38 48 89 44 24 30 40 88 6C 24 28 4C 89 6C 24 20 E8 {items/SelectEquipment:rel32}"
+        }
+      ]
+    },
+    "@items/InventoryCommit.equippedBit": {
+      "comment": "the commit's op7 branch after it sets the selection: a nonzero op.pide gets its ItemState (tx[5]); op.slot 0 clears bit 0x08 of +0x0e (and di = 0xfff7), else sets it. Server 26430253 0x1b0337, client 26430625 0x410907",
+      "find": [
+        {
+          "scope": { "symbol": "items/InventoryCommit", "size": 3072 },
+          "pattern": "4D 8B 04 24 48 8B D0 41 0F B6 4C 24 27 E8 ?? ?? ?? ?? 41 83 7C 24 20 00 0F 84 ?? ?? ?? ?? 45 8B 44 24 20 49 8B 55 28 49 8B 4D 00 E8 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 41 83 3C 24 00 75 11 41 80 7C 24 04 00 75 09 66 21 78 0E E9 ?? ?? ?? ?? 66 83 48 0E 08"
+        }
+      ]
+    }
+  },
+  "features": {
+    "items.give_equip.instance_ammo": {
+      "requires": ["items.give_equip"],
+      "symbols": ["items/EquipLocationKind", "items/EquipInPlaceOwned", "@items/EquipItem.inPlace", "@items/EquipItem.stackPide",
+                  "@items/EquipLocationKind.body", "@items/UnequipItem.inPlace", "@items/InventoryCommit.equippedBit",
+                  "items/SelectEquipment", "items/EquipItem", "items/UnequipItem", "items/InventoryCommit"]
+    }
+  }
+}

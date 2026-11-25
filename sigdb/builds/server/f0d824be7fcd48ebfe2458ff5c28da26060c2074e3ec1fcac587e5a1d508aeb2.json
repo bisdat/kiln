@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 741,
+    "symbols": 748,
     "constants": 795,
-    "features": 210
+    "features": 211
   },
   "features": {
     "abilities.attributes": true,
@@ -99,6 +99,7 @@
     "items.gear.power": true,
     "items.gear.rolls": true,
     "items.give_equip": true,
+    "items.give_equip.instance_ammo": true,
     "items.instances": true,
     "items.move": true,
     "items.names": true,
@@ -408,7 +409,9 @@
     "items/CreateEntity": "0x620ce0",
     "items/CreatePide": "0x1b1920",
     "items/EnableDurability": "0x94a050",
+    "items/EquipInPlaceOwned": "0x1b6ef0",
     "items/EquipItem": "0x1b4e70",
+    "items/EquipLocationKind": "0x1b6760",
     "items/GetItemVolume": "0x1bb380",
     "items/GuidToItemId": "0x40720",
     "items/HashMapFindEntity": "0x650c50",
@@ -2659,6 +2662,24 @@
       },
       "features": {
         "gems.sockets": "static"
+      }
+    },
+    "give-equip-instance-ammo": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@items/EquipItem.inPlace": "static",
+        "@items/EquipItem.stackPide": "static",
+        "@items/EquipLocationKind.body": "static",
+        "@items/InventoryCommit.equippedBit": "static",
+        "@items/UnequipItem.inPlace": "static",
+        "items/EquipInPlaceOwned": "static",
+        "items/EquipLocationKind": "static"
+      },
+      "constants": {},
+      "features": {
+        "items.give_equip.instance_ammo": "static"
       }
     },
     "impact-pool": {

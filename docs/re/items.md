@@ -886,3 +886,70 @@ scoped hook's initial equipped bit, isolation to the requested item, ordinary la
 Derived stats, impact recalculation, visual replication, persistence, real backpack topology and live-player effects
 remain **unverified**; fixture equality is not evidence of execution in the game or a save/reload fix. The reported
 reload-loss mechanism has not been established. No game, live server or real save was used for the #139 fix.
+
+## 22. Instance-backed ammo in GiveEquip: eternal spells and arrows (since 0.2.0-dev.31.12, GitHub issue 139) **[dis] [fixture]**
+
+Target: server 26430253 (`f0d824be…`), client 26430625 (`5d9ef2f1…`), static copies only (objdump and the sigdb
+resolver; no game, server or save was run). An eternal spell (`Ammo_T7_Spell_Fire_Pillar_lvl45_Eternal` and the rest
+of the `*_Eternal` rows of `Kiln.Items/Data/items.tsv`) is Ammunition (category 8) with HasPIDE (`ItemInfo+0x5D8 & 2`):
+dev.31.2's guard refused exactly that flag (Fuzen777's log, "ammo equipment requires a plain Ammunition stack").
+
+**How the game equips one from the backpack.** EquipItem (`0x1b4e70` / client `0x4152d0`) has no HasPIDE test before
+its first decision:
+- `EquipLocationKind(ItemInfo)` (`0x1b6760` / `0x416bb0`, sigdb `items/EquipLocationKind`): `movzx eax, [rcx+0x104];
+  cmp eax, 0x26; ja none`, then a byte index table and a three-target jump table. Same map on both builds:
+  EquipmentSlotType 1-12 and 36 -> **4** (Generic: selected where it lies), 13-18, 34, 35, 37, 38 -> 2 (moved to an
+  Equipment page), others 0. Arrow 6, Spell 7 and FishingBait 8 are 4.
+- Kind 4 and `EquipInPlaceOwned(cell, player, tx)` (`0x1b6ef0` / `0x416f60`: cell index < 8 and its page among the
+  player's inventories) -> `SelectEquipment(out, tx, remove 0, player, SlotSelection, slot, cell, ItemInfo, r15d)`
+  (`0x1b4fba..0x1b5016` / `0x41541a..0x415476`). `r15d` is the stack's own pide field (`mov r15d, [rbx+8]` at
+  `0x1b4f1b` / `0x41537b`, the getItemStack result); nothing writes r15 between that load and the call (capstone).
+  No move: an eternal spell stays in its backpack cell exactly like a plain spell.
+- SelectEquipment (`0x1b28f0` / `0x412d50`) tests only ItemInfo flag 4 (an item with its own inventory: needs the setup
+  write accessor and runs the move-all); it never tests HasPIDE. It queues op7 with the pide at `+0x20`.
+- UnequipItem's kind-4 branch (`0x1b9ccf..0x1b9d10` / `0x41988f..0x4198d0`) is the same helper with remove 1, the
+  "none" cell and the stack's pide: the stack is deselected in place, not moved.
+- The commit's op7 (`0x1b0337..0x1b038d` / `0x410907..0x41095d`) sets the selection, then for a nonzero op.pide reads
+  that entity's ItemState through `tx+0x28` (tx[5]) and ORs `+0x0e` with 0x08 (IsEquipped), or ANDs it with
+  `di = 0xfff7` when op.slot is none (remove). That bit and the selection are the whole equipped state: this branch
+  writes no Equipment component (section 16).
+
+So the game's in-place equip of an eternal spell differs from a plain spell's only in op7's nonzero pide, i.e. the
+IsEquipped bit of its ItemState.
+
+**What GiveEquip does (engine.cpp `give_equip_run`).** The plain-ammo transaction of section 21 with three additions:
+- The new instance is created by the game's own path (addItems at the final Generic cell, `createPide` at commit, as
+  `Items.Give` and crafting create one), never moved after. It gets IsEquipped through the existing scoped creation
+  hook (section 21), keyed on that exact cell: the same 0x48 initial flags the vanilla op7 would leave on an instance
+  given into the backpack and then equipped. The fixture compares those bytes (state, owner, selection) with its
+  vanilla Give + in-place Equip.
+- It is selected with `SelectEquipment(..., cell, ItemInfo, pide 0)` directly, also when the cell was already
+  selected, instead of EquipItem. putStack (`0x1b2540`) writes the stack's id and count but not its pide field, so
+  EquipItem would pass op7 whatever pide the cell held (after a Backpack evacuation possibly the moved instance's id,
+  whose IsEquipped the commit would set again). The same direct call is used when plain ammo replaces an instance.
+  Plain over plain still runs EquipItem, unchanged.
+- A replaced instance keeps its behaviour as the game's unequip leaves it: Backpack queues op7 remove with its pide
+  (IsEquipped cleared at commit) and moves it with the game's transfer to a free Generic cell, keeping its pide (checked
+  before commit); Take removes it (removeItems' destroy at commit). A selected instance-backed stack with no pide
+  (0 or 0xFFFFFFFF) is stale: SlotChanged before the transaction.
+
+Gates: `items.give_equip.instance_ammo` (`server.d/give-equip-instance-ammo.json`, composed unchanged for the client)
+requires `items.give_equip` and matches the four sites above as probes (`@items/EquipItem.inPlace`,
+`@items/EquipItem.stackPide`, `@items/UnequipItem.inPlace`, `@items/InventoryCommit.equippedBit`) plus the whole kind leaf
+(`@items/EquipLocationKind.body`). kiln.items also requires EquipLocationKind's first 12 bytes to be original and
+unpatched (`kEquipLocationKindCode`, `qualified_code.h`) and, per request, calls it: an instance-backed ammo item whose
+kind is not 4 is refused. Without the feature an eternal is refused before any change ("... needs feature
+items.give_equip.instance_ammo ..."), and an eternal already in the selected cell returns SlotChanged (never moved or
+destroyed). Plain ammo needs none of this. Item flag 4 is refused for any ammo.
+
+Tests: `native/services/items/tests/give_equip_instance_ammo_sigdb_test.py` (both exes: RVAs, the kind table, the
+in-place argument bytes, no HasPIDE test, the op7 bit and mask, six single-byte mutations that switch the feature off);
+`move_test.cpp give-equip` (`eternal_ammo_tests`: zero and selected cells for Arrow/Spell/Bait under Backpack, Take and
+DryRun, vanilla-byte equality, eternal over eternal, plain over eternal and back, a stale pide field left by the
+transfer, feature off, kind not 4, missing entity, count 2, every pre-commit failure rolled back once and a post-commit
+invariant failure never rolled back).
+
+**Not shown statically:** that the save keeps the selection and the bit (the state equals what the game's own Give +
+Equip leaves, which players save every day, but no save/load was run); the HUD/ability side reading an equipped spell
+instance; replication to a joined client. The createPide output for an eternal spell (its components) was not compared
+with a crafted one: it is the same call, not a copy of it.

@@ -1566,10 +1566,20 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
     if (!info) return fail(KILN_ITEMS_UNKNOWN_ITEM, "the item is not in the registry");
     if (info[0x104] != slot_type_of(r.equipment_slot))
         return fail(KILN_ITEMS_REFUSED, "the item does not fit that equipment slot: the game refused it");
-    const bool gear = (rd<uint32_t>(info,E.item_flags)&2) != 0;
+    const uint32_t item_flags = rd<uint32_t>(info,E.item_flags);
+    const bool gear = (item_flags&2) != 0;  // HasPIDE: the stack has its own item entity (gear, eternal spells)
     const bool ammo = r.equipment_slot>=14 && r.equipment_slot<=16;
-    if (ammo && (gear || info[0xCC]!=8))
-        return fail(KILN_ITEMS_REFUSED, "ammo equipment requires a plain Ammunition stack");
+    if (ammo && (info[0xCC]!=8 || (item_flags&4)))
+        return fail(KILN_ITEMS_REFUSED, "ammo equipment requires an Ammunition item without its own inventory");
+    // #139 (docs/re/items.md section 22): an instance-backed arrow, spell or bait (an eternal spell) is equipped by the
+    // game in place, like plain ammo, with its own pide in op7. Only on a build whose in-place equip, unequip and commit
+    // were matched, and only when the game's own EquipLocationKind says this item type is selected in place (Generic).
+    const bool instance_ammo = ammo && gear;
+    if (instance_ammo && !E.give_equip_instance_ammo_ok)
+        return fail(KILN_ITEMS_REFUSED, "instance-backed ammo (eternal spells) needs feature items.give_equip.instance_ammo, "
+                                        "which this game build did not resolve");
+    if (instance_ammo && (!E.equip_location_kind || E.equip_location_kind(info)!=kLinkGeneric))
+        return fail(KILN_ITEMS_REFUSED, "the game does not equip this instance-backed ammo in place");
     if ((gear && r.count!=1) || r.count>rd<uint16_t>(info,E.item_max_stack))
         return fail(KILN_ITEMS_REFUSED, "count must fit one equipment stack (one item for gear)");
     const int index = selection_index(r.equipment_slot);
@@ -1633,9 +1643,13 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
     // evacuate unrelated contents: validate the old stack's provenance before even constructing the transaction.
     if (ammo && old.item) {
         const auto* previous_info=static_cast<const uint8_t*>(E.item_find(old.item,a.items));
+        const uint32_t previous_flags=previous_info ? rd<uint32_t>(previous_info,E.item_flags) : 0;
         if (!previous_info || previous_info[0x104]!=slot_type_of(r.equipment_slot) || previous_info[0xCC]!=8 ||
-            (rd<uint32_t>(previous_info,E.item_flags)&2)!=0)
-            return fail(KILN_ITEMS_SLOT_CHANGED,"the selected ammo cell no longer holds matching plain Ammunition");
+            (previous_flags&4) || ((previous_flags&2) && !E.give_equip_instance_ammo_ok))
+            return fail(KILN_ITEMS_SLOT_CHANGED,"the selected ammo cell no longer holds matching Ammunition");
+        // An instance-backed stack is only itself with its item entity: without one the reference is stale.
+        if ((previous_flags&2) && !pide_of(old))
+            return fail(KILN_ITEMS_SLOT_CHANGED,"the selected instance-backed ammo has no item entity");
     }
     uint64_t backpack=0;
     const bool take=(r.flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0, dry=(r.flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;
@@ -1694,7 +1708,10 @@ static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, 
         why="the new stack could not be created entirely in its equipment slot";
     }
     if(ok) {
-        if (selected[index]) E.equip_item(&out,tx,target,r.equipment_slot);
+        // EquipItem's in-place branch passes the cell's pide field to op7, whose commit then marks that entity
+        // IsEquipped. For a pending instance, or a cell an instance just left, that field is not the new stack's: select
+        // the cell directly with pide 0 (the creation hook gives the new instance its bit). Plain over plain: unchanged.
+        if (selected[index] && !(ammo && (gear || old_pide))) E.equip_item(&out,tx,target,r.equipment_slot);
         else E.select_equipment(&out,tx,0,r.player,selection,r.equipment_slot,target,info,0);
         ok=out.error==0;
         const auto* st=stack_at(a,target);
