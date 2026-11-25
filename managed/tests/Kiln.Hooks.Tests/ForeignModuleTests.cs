@@ -73,7 +73,9 @@ public sealed unsafe class ForeignModuleTests : IDisposable
             var link = Assert.Single(FakeRegistry.Live);
             Assert.Equal(at, link.Address);
             Assert.Equal(HookCookies.Mid, link.Kind);
-            Assert.Equal("creative.dll+0x15F5F7 (0x7FFB83A7F5F7)", HooksApi.Where(at));
+            // the name as the module was first opened in this process (TryModuleIsFalseForAModuleThatIsNotLoaded opens
+            // "CREATIVE.DLL"; Windows module names have no case), so the test does not depend on the order tests run in
+            Assert.Equal("creative.dll+0x15F5F7 (0x7FFB83A7F5F7)", HooksApi.Where(at), ignoreCase: true);
         });
     }
 

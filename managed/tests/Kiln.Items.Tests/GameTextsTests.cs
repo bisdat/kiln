@@ -336,7 +336,11 @@ public sealed class GameTextsTests : IDisposable
         GameTextStore.UseSource(new ScriptedTexts { Why = GameTextStore.ServerReason });
         var dir = Path.Combine(Path.GetTempPath(), "kiln-gametexts-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
-        var saved = Environment.GetEnvironmentVariable("KILN_CATALOG");
+        // Every other place Texts looks for a catalog points into the empty folder too (the PC's own ~/.local/share/kiln/catalog
+        // is not this test's); the assembly runs its tests one at a time, so the process environment is this test's meanwhile.
+        string[] places = ["KILN_CATALOG", "KILN_DATA_DIR", "XDG_DATA_HOME", "HOME", "WINE_HOST_XDG_DATA_HOME", "WINE_HOST_HOME", "WINEHOMEDIR", "LOCALAPPDATA"];
+        var saved = places.ToDictionary(p => p, Environment.GetEnvironmentVariable);
+        foreach (var p in places) Environment.SetEnvironmentVariable(p, p == "WINEHOMEDIR" ? null : dir);
         try
         {
             var file = Path.Combine(dir, "client.json");
@@ -361,7 +365,7 @@ public sealed class GameTextsTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("KILN_CATALOG", saved);
+            foreach (var (p, v) in saved) Environment.SetEnvironmentVariable(p, v);
             Texts.Reset();
             Directory.Delete(dir, true);
         }

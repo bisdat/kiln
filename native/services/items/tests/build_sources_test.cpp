@@ -142,6 +142,31 @@ KilnResult KILN_CALL world_position(KilnEntity e, KilnVec3* out) {
     return KILN_OK;
 }
 BaseHit* __fastcall base_at(BaseHit* out, void*, const float*) { *out = {}; out->error = in_base ? 0 : 0x1f; out->index = 0; return out; }
+// review of 31.13: build_resolve against code whose live calls another module redirected. `live` is the code as it runs,
+// `file` the same range as the exe file has it (kiln.hooks' read_original); symbols and features by name.
+alignas(16) uint8_t live[0x40] = {}, file[0x40] = {};
+std::map<std::string, uintptr_t> symbols;
+KilnResult KILN_CALL symbol(KilnStr name, uintptr_t* out) {
+    auto it = symbols.find(std::string(name.ptr, name.len));
+    if (it == symbols.end()) return KILN_ERR_NOT_FOUND;
+    *out = it->second;
+    return KILN_OK;
+}
+bool KILN_CALL feature(KilnStr name) { return std::string_view(name.ptr, name.len) == "crafting.build_sources"; }
+KilnResult KILN_CALL read_original(uintptr_t at, void* out, size_t n) {
+    const auto base = reinterpret_cast<uintptr_t>(live);
+    if (at < base || at + n > base + sizeof live) return KILN_ERR_INVALID_ARGUMENT;
+    std::memcpy(out, file + (at - base), n);
+    return KILN_OK;
+}
+// an E8 at `at` (offset into both copies) calling `to` live and `original` in the file
+void put_call(size_t at, uintptr_t to, uintptr_t original) {
+    const auto ret = reinterpret_cast<intptr_t>(live + at + 5);
+    const int32_t rel_live = static_cast<int32_t>(static_cast<intptr_t>(to) - ret), rel_file = static_cast<int32_t>(static_cast<intptr_t>(original) - ret);
+    live[at] = file[at] = 0xe8;
+    std::memcpy(live + at + 1, &rel_live, 4);
+    std::memcpy(file + at + 1, &rel_file, 4);
+}
 }
 int main() {
     using namespace kitems;
@@ -341,6 +366,40 @@ int main() {
     CHECK(g_build_off.load() && !g_build_cursor_on.load() && mid2_links.empty());
     CHECK(logged("build: the build cursor's count of linked sources stands down: the base stock count (build check) code state FOREIGN"));
     CHECK(lowered["crafting.build_sources"]==KILN_CAP_REASON_FAULTED);
+    // ---- review of 31.13: Building Tools 0.34.0 redirects the blueprint program's payment call and the build cursor's
+    // stock count 4 s after it loads, which can be before kiln-items resolves (a slow start, Building Tools loaded first).
+    // Resolve checks those two calls as the exe file has them (read_original), so the building links follow the redirect
+    // (build_code_ok) instead of standing down as "a symbol did not check out" ----
+    {
+        const uintptr_t L = reinterpret_cast<uintptr_t>(live), bt = L + 0x3c;  // bt: the other module's code
+        const uintptr_t stock = L + 0x30, apply = L + 0x34, pay = L + 0x38;
+        put_call(0x00, bt, stock);   // the cursor's stock count: redirected
+        put_call(0x10, bt, apply);   // the blueprint program's payment: redirected
+        put_call(0x20, pay, pay);    // ApplyMaterials' inventory payment: the game's
+        symbols = {{"build/CursorStockRet", L + 5}, {"build/StockCount", stock}, {"rules/ApplyMaterials", apply},
+                   {"build/BlueprintApplyRet", L + 0x15}, {"build/ApplyMaterialsPaid", L + 0x25}, {"rules/InventoryPay", pay}};
+        api.symbol = &symbol; api.feature = &feature; hooks.read_original = &read_original;
+        const BuildSites before = g_build;
+        g_build = {}; g_build_feat = false; lowered.clear(); logs.clear();
+        build_resolve();
+        CHECK(g_build_feat && g_build.cursor_ret == L + 5 && g_build.blueprint_ret == L + 0x15 && g_build.paid == L + 0x25);
+        CHECK(!lowered.count("crafting.build_sources") && !logged("block placements from linked sources are unavailable"));
+        // the file's call does not reach the function either: not the symbol it claims to be, off as before
+        put_call(0x10, bt, bt);
+        g_build = {}; g_build_feat = false; lowered.clear();
+        build_resolve();
+        CHECK(!g_build_feat && lowered["crafting.build_sources"] == KILN_CAP_REASON_SYMBOL_MISSING);
+        // a core without read_original: the live call decides, as before
+        put_call(0x10, bt, apply); hooks.read_original = nullptr;
+        g_build = {}; g_build_feat = false; lowered.clear();
+        build_resolve();
+        CHECK(!g_build_feat && lowered["crafting.build_sources"] == KILN_CAP_REASON_SYMBOL_MISSING);
+        put_call(0x00, stock, stock); put_call(0x10, apply, apply);  // nothing redirected: the live calls check out
+        g_build = {}; g_build_feat = false; lowered.clear();
+        build_resolve();
+        CHECK(g_build_feat && !lowered.count("crafting.build_sources"));
+        g_build = before; g_build_feat = true; api.symbol = nullptr; api.feature = nullptr;
+    }
     std::printf("build sources: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

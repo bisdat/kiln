@@ -529,10 +529,16 @@ fn encode_bc7(
 }
 
 /// kiln-eml: `compress_rgba8` over the whole image, cut into at most `threads` strips of whole block rows, each encoded
-/// into its own rows of `dst` by whichever thread takes it next: this one and up to `threads - 1` helpers. A helper the
-/// OS refuses (`spawn_helper`) is not waited for: the threads that started, at least this one, take its strips, with
-/// the same bytes. A size that is not whole blocks, a single block row or one thread takes the serial call unchanged
-/// (block_compression's own checks apply there). Nothing is copied: each strip borrows its rows of `src` and `dst`.
+/// by whichever thread takes it next: this one and up to `threads - 1` helpers, the strips then put into `dst` in order
+/// (the same bytes). A size that is not whole blocks, a single block row or one thread takes the serial call unchanged
+/// (block_compression's own checks apply there).
+///
+/// The Windows loader lock: a thread created while another thread holds it (a DLL's initializer) does not run until the
+/// lock is free. So this thread never waits for a helper to start: it takes strips itself from the same counter as the
+/// helpers and waits only for strips a helper has already taken. A helper that has not started, or that the OS refuses
+/// (`spawn_helper`), only leaves its strips to the threads that run, at least this one. The helpers own what they read
+/// (a copy of the image's pixels, freed when the last strip is done), as one may start after this call returned; while
+/// a helper of an earlier texture has still not started, no new one is made.
 fn compress_rgba8_split(
     variant: CompressionVariant,
     src: &[u8],
@@ -550,40 +556,156 @@ fn compress_rgba8_split(
     let dst_row = variant.blocks_byte_size(width as u32, 4); // the bytes of one block row
     let src_row = width * 4 * 4; // its pixels: four image rows of RGBA8
     let rows_per = block_rows.div_ceil(threads);
-    let (dst, _) = dst.split_at_mut(dst_row * block_rows);
-    let strips = std::sync::Mutex::new(dst.chunks_mut(dst_row * rows_per).zip(src.chunks(src_row * rows_per)));
-    let work = || loop {
-        let Some((out, pixels)) = strips.lock().unwrap_or_else(std::sync::PoisonError::into_inner).next() else { break };
-        let rows = out.len() / dst_row;
-        debug_assert_eq!(pixels.len(), rows * src_row);
-        compress_rgba8(variant, pixels, out, width as u32, (rows * 4) as u32, width as u32 * 4);
-    };
-    std::thread::scope(|scope| {
-        for _ in 1..threads {
-            if spawn_helper(scope, &work).is_err() {
+    let strips = block_rows.div_ceil(rows_per);
+    let job = std::sync::Arc::new(SplitJob {
+        variant,
+        width,
+        dst_row,
+        src_row,
+        rows_per,
+        block_rows,
+        strips,
+        pixels: std::sync::RwLock::new(src[..src_row * block_rows].to_vec()),
+        next: AtomicUsize::new(0),
+        done: std::sync::Mutex::new(((0..strips).map(|_| None).collect(), 0)),
+        all_done: std::sync::Condvar::new(),
+    });
+    if HELPERS_NOT_STARTED.load(Ordering::Acquire) == 0 {
+        for _ in 1..strips {
+            let helper = std::sync::Arc::clone(&job);
+            if spawn_helper(Box::new(move || helper.work())).is_err() {
                 break; // the OS refused a thread: the ones running (this one at least) take the rest
             }
         }
-        work();
-    });
+    }
+    job.work();
+    // every strip is taken: wait only for those a running helper still encodes
+    let results = {
+        let mut done = job.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while done.1 < strips {
+            done = job.all_done.wait(done).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        std::mem::take(&mut done.0)
+    };
+    drop(std::mem::take(&mut *job.pixels.write().unwrap_or_else(std::sync::PoisonError::into_inner)));
+    for (strip, result) in results.into_iter().enumerate() {
+        match result.expect("every strip is done") {
+            Ok(bytes) => {
+                let at = strip * rows_per * dst_row;
+                dst[at..at + bytes.len()].copy_from_slice(&bytes);
+            }
+            Err(panic) => std::panic::resume_unwind(panic), // as the serial encode would have panicked
+        }
+    }
+}
+
+/// Helper threads of `compress_rgba8_split` made that have not started yet (a thread the loader lock holds back).
+static HELPERS_NOT_STARTED: AtomicUsize = AtomicUsize::new(0);
+
+/// One split texture: its pixels, which strip comes next, and the strips' bytes as they are done.
+struct SplitJob {
+    variant: CompressionVariant,
+    width: usize,
+    dst_row: usize,
+    src_row: usize,
+    rows_per: usize,
+    block_rows: usize,
+    strips: usize,
+    pixels: std::sync::RwLock<Vec<u8>>,
+    next: AtomicUsize,
+    done: std::sync::Mutex<(Vec<Option<std::thread::Result<Vec<u8>>>>, usize)>,
+    all_done: std::sync::Condvar,
+}
+
+impl SplitJob {
+    /// Takes strips until none is left (the calling thread and every helper).
+    fn work(&self) {
+        loop {
+            let strip = self.next.fetch_add(1, Ordering::AcqRel);
+            if strip >= self.strips {
+                return;
+            }
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.encode_strip(strip)));
+            let mut done = self.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            done.0[strip] = Some(result);
+            done.1 += 1;
+            if done.1 == self.strips {
+                self.all_done.notify_all();
+            }
+        }
+    }
+
+    fn encode_strip(&self, strip: usize) -> Vec<u8> {
+        let first = strip * self.rows_per;
+        let rows = self.rows_per.min(self.block_rows - first);
+        let pixels = self.pixels.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut out = vec![0u8; rows * self.dst_row];
+        compress_rgba8(
+            self.variant,
+            &pixels[first * self.src_row..(first + rows) * self.src_row],
+            &mut out,
+            self.width as u32,
+            (rows * 4) as u32,
+            self.width as u32 * 4,
+        );
+        out
+    }
 }
 
 #[cfg(test)]
 thread_local! {
     /// Tests: how many more helper threads this thread may start; past it a start fails as the OS refusing one would.
     static SPAWNS_LEFT: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+    /// Tests: helpers this thread starts wait for this gate to open before they run, as a thread created while another
+    /// thread holds the Windows loader lock waits in its DLL_THREAD_ATTACH.
+    static HELPER_GATE: std::cell::RefCell<Option<std::sync::Arc<TestGate>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestGate {
+    open: std::sync::Mutex<bool>,
+    opened: std::sync::Condvar,
+}
+
+#[cfg(test)]
+impl TestGate {
+    fn pass(&self) {
+        let mut open = self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while !*open {
+            open = self.opened.wait(open).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+    fn release(&self) {
+        *self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        self.opened.notify_all();
+    }
 }
 
 /// One helper thread of `compress_rgba8_split`; an error when the OS refuses it (no memory for its stack, a thread limit).
-fn spawn_helper<'scope, 'env, F: FnOnce() + Send + 'scope>(
-    scope: &'scope std::thread::Scope<'scope, 'env>,
-    work: F,
-) -> std::io::Result<()> {
+fn spawn_helper(work: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
     #[cfg(test)]
     if SPAWNS_LEFT.with(|left| left.replace(left.get().saturating_sub(1))) == 0 {
         return Err(std::io::Error::other("test: thread creation refused"));
     }
-    std::thread::Builder::new().spawn_scoped(scope, work).map(drop)
+    #[cfg(test)]
+    let gate = HELPER_GATE.with(|g| g.borrow().clone());
+    HELPERS_NOT_STARTED.fetch_add(1, Ordering::AcqRel);
+    let made = std::thread::Builder::new()
+        .name("eml-texture-encode".into())
+        .spawn(move || {
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                gate.pass();
+            }
+            HELPERS_NOT_STARTED.fetch_sub(1, Ordering::AcqRel);
+            work()
+        })
+        .map(drop);
+    if made.is_err() {
+        HELPERS_NOT_STARTED.fetch_sub(1, Ordering::AcqRel);
+    }
+    made
 }
 
 #[cfg(test)]
@@ -618,5 +740,27 @@ mod tests {
                 assert_eq!(split.as_ref().map(|b| b == &serial), Ok(true), "{format:?}: {allowed} of 7 helper threads started");
             }
         }
+    }
+
+    #[test]
+    fn a_helper_that_has_not_started_yet_is_not_waited_for() {
+        // A thread created while another thread holds the Windows loader lock does not run until the lock is free (its
+        // DLL_THREAD_ATTACH waits for it): the encode is the calling thread's alone then, the serial bytes, and it does not
+        // wait for such a helper to start (kiln-core's early step must not hang on another thread's DllMain)
+        let src = image(64, 64);
+        let serial = bc(PixelFormat::BC7_srgb_block, 64, 64, &src, 1).unwrap();
+        let gate = std::sync::Arc::new(TestGate::default());
+        let (sent, got) = std::sync::mpsc::channel();
+        let worker = {
+            let gate = gate.clone();
+            std::thread::spawn(move || {
+                HELPER_GATE.with(|g| *g.borrow_mut() = Some(gate));
+                let _ = sent.send(bc(PixelFormat::BC7_srgb_block, 64, 64, &src, 8));
+            })
+        };
+        let result = got.recv_timeout(std::time::Duration::from_secs(20));
+        gate.release(); // the helpers start now and find nothing left to do
+        worker.join().unwrap();
+        assert_eq!(result.expect("the encode waited for helpers that had not started"), Ok(serial));
     }
 }

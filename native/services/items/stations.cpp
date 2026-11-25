@@ -4948,15 +4948,19 @@ void lock_resolve() {
     }
 }
 
-// GitHub #132: the building hooks' symbols (sigdb server.d/build-sources.json), each call they rely on checked.
+// GitHub #132: the building hooks' symbols (sigdb server.d/build-sources.json), each call they rely on checked. The build
+// cursor's stock-count call and the blueprint program's payment call as the exe file has them (call_matches_original):
+// Building Tools (0.34.0) redirects their live rel32 4 s after it loads, which can be before this runs; build_code_ok then
+// follows that redirect when the hooks go in, as it does for one made later.
 void build_resolve() {
     if (!feat("crafting.build_sources")) return;
     if (!g_lock_current) sym("world/CurrentEntityId", &g_lock_current);
     g_build_feat = sym("build/CursorStockRet", &g_build.cursor_ret) && sym("build/StockCount", &g_build.stock_fn) &&
                    sym("rules/ApplyMaterials", &g_build.apply) && sym("build/BlueprintApplyRet", &g_build.blueprint_ret) &&
                    sym("build/ApplyMaterialsPaid", &g_build.paid) && sym("rules/InventoryPay", &g_build.pay_fn) &&
-                   call_matches(g_build.cursor_ret, g_build.stock_fn) && call_matches(g_build.blueprint_ret, g_build.apply) &&
-                   call_matches(g_build.paid, g_build.pay_fn) && g_lock_current && E.job_storage;
+                   call_matches_original(g_build.cursor_ret, g_build.stock_fn) &&
+                   call_matches_original(g_build.blueprint_ret, g_build.apply) && call_matches(g_build.paid, g_build.pay_fn) &&
+                   g_lock_current && E.job_storage;
     if (g_build_feat && g_api->side() == KILN_SIDE_CLIENT && feat("crafting.build_ui")) {  // the build menu's counts
         g_build_ui_feat = sym("build/client.MaterialRows", &g_build_rows_fn) && sym("build/client.MaterialRowsBody", &g_build_rows_body) &&
                           sym("build/client.MaterialRowsDone", &g_build_rows_done) && g_build_rows_body > g_build_rows_fn &&
