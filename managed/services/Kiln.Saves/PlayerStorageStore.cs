@@ -72,6 +72,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     {
         if (!_pending.ContainsKey(job.Gen)) return;
         _stages[job.Gen] = job;
+        _unwritten.Remove(job.Gen);  // an earlier staging of it that failed is not the one its world write waits for now
         job.Finished = success => _outcomes.Enqueue((job.Gen, success, job));
         foreach (var older in _stages.Keys.OrderByDescending(x => x).Skip(2).ToArray()) _stages.Remove(older);
     }

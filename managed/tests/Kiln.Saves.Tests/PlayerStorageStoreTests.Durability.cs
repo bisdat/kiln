@@ -291,4 +291,59 @@ public sealed partial class PlayerStorageStoreTests
             store.Native = null;
         }
     }
+
+    [Fact]
+    public void A_failed_save_request_staging_is_not_the_snapshot_stagings_failure()
+    {
+        // The save request's staging fails fast and the pump sees it before the snapshot staging comes; the snapshot staging
+        // is only slow. Its world write going ahead is a delay, not "its staging could not be written".
+        using var h = new InstanceHarness();
+        using var native = new FakeSavesTable();
+        using var reached = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        var oldHook = WorldStore.IoHook;
+        var backend = Backend.Current;
+        var tap = new Tap();
+        try
+        {
+            Backend.Current = tap;
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            SaveInTime(h, 1);
+            var carried = store.Carried(character);
+            Assert.NotNull(carried);
+            var tick = Environment.CurrentManagedThreadId;
+            WorldStore.IoHook = op => { if (op == "create" && Environment.CurrentManagedThreadId != tick) throw new IOException("injected storage disk failure"); };
+            persist.Frozen = new("second", PlayerStorageDocumentTests.Storages(2));
+            InstanceHarness.Store.Stage(2, SaveReason.Request, late: false);
+            FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromSeconds(20));  // the save request's staging gave up after its tries
+            store.PollWrites();                                             // a pump before the snapshot staging
+            Assert.Contains(tap.Errors(), e => e.StartsWith("player-storage: persistence degraded: pending generation 2 could not be written", StringComparison.Ordinal));
+            var errors = tap.Errors().Count;
+            HoldTheWriter(reached, release);
+            InstanceHarness.Store.Stage(2, SaveReason.Request, late: false, snapshot: true);
+            Assert.True(reached.Wait(TimeSpan.FromSeconds(10)));
+            InstanceHarness.Store.Commit(2, 1002, SaveReason.Autosave);    // the world write went ahead of the snapshot staging
+            Assert.Equal(errors, tap.Errors().Count);
+            Assert.True(store.Lag.IsLate(2));
+            Assert.Single(tap.With("player-storage: world generation 2 was written before its storage reached the disk"));
+            Assert.Equal(carried, store.Carried(character));                // nothing undurable is carried
+            release.Set();
+            InstanceHarness.Written();
+            store.PollWrites();
+            Assert.Single(tap.With("player-storage: generation 2's storage reached the disk"));
+            Assert.Equal(errors, tap.Errors().Count);
+        }
+        finally
+        {
+            release.Set();
+            WorldStore.IoHook = oldHook;
+            InstanceHarness.Written();
+            Backend.Current = backend;
+            store.Native = null;
+        }
+    }
 }
