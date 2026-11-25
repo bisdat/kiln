@@ -340,7 +340,8 @@ This is opt-in: Settings > Nexus Mods > "Mod Manager Download links". It never t
   held (another launcher's move or beta copy, a half-done restore, an unfinished move's removal; `folder::handoff_dirs`).
 - **The running launcher:**
   - Only the instance-lock owner reads the inbox every 500 ms and keeps Enshrouded links in memory (`nexus_links`).
-    Reads refuse symlinks, non-private files and messages over 16 KiB, and revalidate each URL.
+    A second window takes the lock over once the launcher that had it ended (and then reads what was left for that
+    one). Reads refuse symlinks, non-private files and messages over 16 KiB, and revalidate each URL.
   - It emits `kiln://nxm` and brings its window to the front.
   - The UI (desktop shell or Deck) adds each link with `nexus_link_install` once the game and Kiln are ready.
     Switching UIs preserves results/Undo; Deck queues successive reports. Invalid game selections do not consume links.

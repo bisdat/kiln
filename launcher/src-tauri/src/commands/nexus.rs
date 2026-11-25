@@ -48,7 +48,12 @@ static INSTANCE: Mutex<Option<handler::Instance>> = Mutex::new(None);
 /// In a build with Nexus on, another launcher holds `nexus/instance.lock` of this data folder (one that takes no
 /// data-folder lock: dev.24 and earlier). A move or a switch is refused then (commands/data_folder.rs).
 pub fn other_instance(dirs: &kiln_manage::paths::DataDirs) -> bool {
-    if !kiln_manage::nexus::enabled() || INSTANCE.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+    if !kiln_manage::nexus::enabled() {
+        return false;
+    }
+    // held while the lock is tried, so this window's links thread does not take it over meanwhile ([`reader`])
+    let inst = INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
+    if inst.is_some() {
         return false;
     }
     // taken now (and let go at once): nobody else has it
@@ -554,11 +559,12 @@ pub fn start(app: &AppHandle) {
         launcher_log("nexus", "the Mod Manager Download link this launcher was started with goes to the window");
         to_window(app);
     }
-    // A normally-started second UI may remain open, but must not race the lock owner for queued links.
-    let Some(r) = open.reader else { return };
+    // A normally-started second UI may remain open, but must not race the lock owner for queued links: it reads the
+    // inbox only once it took the lock over from a launcher that ended ([`reader`]).
+    let Some(r) = open.root else { return };
     let app = app.clone();
     std::thread::spawn(move || loop {
-        if inbox_round(&r) > 0 {
+        if links_round(&r) > 0 {
             to_window(&app);
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -566,21 +572,59 @@ pub fn start(app: &AppHandle) {
 }
 
 /// What the gate's opening found: the start's own link (added to the waiting links: 1, or 0), and the Nexus folder
-/// whose inbox this process reads (it holds the instance lock).
+/// whose inbox the links thread watches (None: the data folder is not usable). The instance lock is taken here unless
+/// another launcher has it.
 struct GateOpen {
     added: usize,
-    reader: Option<std::path::PathBuf>,
+    root: Option<std::path::PathBuf>,
 }
 
 fn gate_open() -> GateOpen {
     let held = HELD.lock().unwrap().take();
     let added = held.map_or(0, |url| accept(vec![url], &|_| {}));
-    let Ok(r) = root() else { return GateOpen { added, reader: None } };
+    let Ok(r) = root() else { return GateOpen { added, root: None } };
     let mut inst = INSTANCE.lock().unwrap();
     if inst.is_none() {
         *inst = handler::acquire_instance(&r).ok().flatten();
     }
-    GateOpen { added, reader: inst.is_some().then_some(r) }
+    GateOpen { added, root: Some(r) }
+}
+
+/// One round of the links thread: how many Enshrouded links the inbox added, read only by the launcher with the
+/// instance lock ([`reader`]).
+fn links_round(r: &std::path::Path) -> usize {
+    if !reader(r) { return 0; }
+    inbox_round(r)
+}
+
+/// This process holds `instance.lock`, or takes it now: the launcher that had it when this window's gate opened has
+/// ended since. Without that a second window stayed without a reader for good: a link handed to the launcher that
+/// ended, in its last moments before its next round, waited in the inbox for the next start, and the next start for a
+/// link opened another window. Read-only while the lock file is there (no permission change every round); never while
+/// the folder is held or the beta copy's gate is closed.
+fn reader(r: &std::path::Path) -> bool {
+    let mut inst = INSTANCE.lock().unwrap();
+    if inst.is_some() {
+        return true;
+    }
+    let taken = {
+        let _writing = crate::state::writing();
+        if crate::folder::current().held_error().is_some() || crate::snapshot::startup::refusal().is_some() {
+            return false;
+        }
+        match handler::find_instance(r) {
+            Ok(handler::Found::Free(Some(i))) => Some(i),
+            Ok(handler::Found::Free(None)) => handler::acquire_instance(r).ok().flatten(),
+            Ok(handler::Found::Running) | Err(_) => None,
+        }
+    };
+    let got = taken.is_some();
+    *inst = taken;
+    drop(inst);
+    if got {
+        launcher_log("nexus", "this window takes Mod Manager Download links from now on: the launcher that had them ended");
+    }
+    got
 }
 
 /// One look into the inbox (the reader's round): how many Enshrouded links it added. The inbox is in the data folder:
@@ -816,7 +860,8 @@ mod capability_tests {
         s.gate.open();
         let open = gate_open();
         assert_eq!(open.added, 1);
-        assert_eq!(open.reader.as_deref(), Some(s.nexus.as_path()), "this launcher reads the inbox from now on");
+        assert_eq!(open.root.as_deref(), Some(s.nexus.as_path()));
+        assert!(INSTANCE.lock().unwrap().is_some(), "this launcher reads the inbox from now on");
         let waiting = tauri::async_runtime::block_on(nexus_links()).unwrap();
         assert_eq!(waiting.iter().map(|l| (l.mod_id.as_str(), l.file_id.as_str())).collect::<Vec<_>>(), [("310", "1001")]);
         // once
@@ -848,6 +893,36 @@ mod capability_tests {
         assert!(!enabled_nxm_entry(url, &os), "the handler before Kiln took it: this process ends");
         assert_eq!(*os.forwarded.lock().unwrap(), [("Vortex".to_string(), url.to_string())]);
         assert_eq!(tree(&s.root), before, "handler.json is only read");
+    }
+
+    /// A second window (its gate opened while another launcher held `nexus/instance.lock`) takes the lock over once that
+    /// launcher ended: a link handed to the one that ended before its next round reaches this window instead of waiting
+    /// for the next start, and the next link start finds this window running.
+    #[test]
+    fn a_second_window_takes_the_nxm_links_over_once_the_launcher_that_had_them_ended() {
+        if !kiln_manage::nexus::enabled() { return; }
+        let s = nxm_start("take-over", |_| {});
+        s.gate.open();
+        let first = handler::acquire_instance(&s.nexus).unwrap().unwrap();
+        let open = gate_open();
+        assert!(open.root.is_some() && INSTANCE.lock().unwrap().is_none(), "the first launcher has the lock");
+        handler::queue_link(&s.nexus, NXM).unwrap();
+        assert_eq!(links_round(&s.nexus), 0, "while the first launcher runs its links stay for it");
+        assert!(INSTANCE.lock().unwrap().is_none());
+        assert!(other_instance(&kiln_manage::paths::DataDirs::at(s.root.clone())), "a move here waits for the first launcher");
+        // the first launcher ended before its next round
+        drop(first);
+        assert_eq!(links_round(&s.nexus), 1, "this window took the lock over and reads the inbox");
+        assert_eq!(links_round(&s.nexus), 0, "once");
+        assert_eq!(tauri::async_runtime::block_on(nexus_links()).unwrap().len(), 1);
+        assert!(matches!(handler::find_instance(&s.nexus).unwrap(), handler::Found::Running), "a later link start hands over to this window");
+        assert!(!other_instance(&kiln_manage::paths::DataDirs::at(s.root.clone())), "this window is the one that runs now");
+        // with the folder held (here: the beta copy's gate closed again) no lock is taken over
+        INSTANCE.lock().unwrap().take();
+        let gate = crate::snapshot::startup::TestGate::preparing();
+        assert_eq!(links_round(&s.nexus), 0);
+        assert!(INSTANCE.lock().unwrap().is_none());
+        drop(gate);
     }
 
     #[test]
