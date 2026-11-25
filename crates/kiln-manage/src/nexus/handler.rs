@@ -812,6 +812,12 @@ fn private_dir_inner(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Secures a Nexus state folder or file: owned by this user, with a protected DACL for its owner and SYSTEM only.
+///
+/// The owner check accepts what this user's own launcher makes. A launcher started "as administrator" makes its folders
+/// owned by BUILTIN\Administrators (an elevated token's default owner), not by the user; such a folder (also one an
+/// older build left by an elevated start) is taken over: its owner becomes the user, so a later start without elevation
+/// can still use it. Anything owned by another account is refused.
 #[cfg(windows)]
 fn secure_windows_dir(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -819,11 +825,13 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
     #[link(name = "advapi32")]
     unsafe extern "system" {
         fn ConvertStringSecurityDescriptorToSecurityDescriptorW(s: *const u16, revision: u32, descriptor: *mut *mut core::ffi::c_void, size: *mut u32) -> i32;
+        fn ConvertSidToStringSidW(sid: *const core::ffi::c_void, text: *mut *mut u16) -> i32;
         fn SetFileSecurityW(path: *const u16, information: u32, descriptor: *const core::ffi::c_void) -> i32;
         fn GetNamedSecurityInfoW(path: *mut u16, object_type: u32, information: u32, owner: *mut *mut core::ffi::c_void, group: *mut *mut core::ffi::c_void, dacl: *mut *mut core::ffi::c_void, sacl: *mut *mut core::ffi::c_void, descriptor: *mut *mut core::ffi::c_void) -> u32;
         fn OpenProcessToken(process: *mut core::ffi::c_void, access: u32, token: *mut *mut core::ffi::c_void) -> i32;
         fn GetTokenInformation(token: *mut core::ffi::c_void, class: u32, info: *mut core::ffi::c_void, len: u32, needed: *mut u32) -> i32;
         fn EqualSid(first: *const core::ffi::c_void, second: *const core::ffi::c_void) -> i32;
+        fn IsWellKnownSid(sid: *const core::ffi::c_void, kind: i32) -> i32;
     }
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -831,33 +839,76 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
         fn GetCurrentProcess() -> *mut core::ffi::c_void;
         fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
     }
+    const TOKEN_USER: u32 = 1;
+    const TOKEN_GROUPS: u32 = 2;
+    const TOKEN_OWNER: u32 = 4;
+    const WIN_BUILTIN_ADMINISTRATORS_SID: i32 = 26;
+    /// A token information class read into pointer-aligned words (TOKEN_USER and TOKEN_OWNER start with the SID pointer).
+    unsafe fn token_info(token: *mut core::ffi::c_void, class: u32) -> Option<Vec<usize>> {
+        let mut needed = 0;
+        // SAFETY: a size query (null buffer), then a buffer of at least `needed` bytes.
+        unsafe {
+            GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed);
+            if needed == 0 { return None; }
+            let mut words = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            (GetTokenInformation(token, class, words.as_mut_ptr().cast(), (words.len() * std::mem::size_of::<usize>()) as u32, &mut needed) != 0).then_some(words)
+        }
+    }
     let mut name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     // Check ownership before applying an OWNER RIGHTS DACL: a precreated foreign directory must not retain access.
     let mut owner = std::ptr::null_mut();
     let mut original = std::ptr::null_mut();
     let mut token = std::ptr::null_mut();
-    // SAFETY: valid NUL-terminated name and system-owned handles/descriptors freed before returning.
+    // The user's SID as SDDL text when the owner must become the user, None when the user owns it already.
+    let new_owner: Option<String>;
+    // SAFETY: valid NUL-terminated name and system-owned handles/descriptors freed before returning; the SID pointers
+    // read from the token buffers live as long as those buffers.
     unsafe {
         let rc = GetNamedSecurityInfoW(name.as_mut_ptr(), 1, 1, &mut owner, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), &mut original);
         if rc != 0 { return Err(Error::new(ErrorCode::Permission, format!("checking Nexus folder owner: error {rc}"))); }
         if OpenProcessToken(GetCurrentProcess(), 8, &mut token) == 0 { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
-        let mut needed = 0;
-        GetTokenInformation(token, 1, std::ptr::null_mut(), 0, &mut needed);
-        let mut words = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
-        let ok = GetTokenInformation(token, 1, words.as_mut_ptr().cast(), (words.len() * std::mem::size_of::<usize>()) as u32, &mut needed);
-        let same = ok != 0 && EqualSid(owner, words[0] as *const core::ffi::c_void) != 0;
-        CloseHandle(token); LocalFree(original);
-        if !same { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
+        let user = token_info(token, TOKEN_USER);
+        let default_owner = token_info(token, TOKEN_OWNER);
+        let groups = token_info(token, TOKEN_GROUPS);
+        CloseHandle(token);
+        let Some(user) = user.filter(|w| w[0] != 0) else { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")) };
+        let user_sid = user[0] as *const core::ffi::c_void;
+        let owned_by_user = EqualSid(owner, user_sid) != 0;
+        // what this process makes: an elevated token's default owner is BUILTIN\Administrators
+        let owned_by_default = default_owner.as_ref().is_some_and(|w| w[0] != 0 && EqualSid(owner, w[0] as *const core::ffi::c_void) != 0);
+        // what an elevated start of this user made, seen without elevation (the Administrators group is deny-only then)
+        let owned_by_our_admins = IsWellKnownSid(owner, WIN_BUILTIN_ADMINISTRATORS_SID) != 0 && groups.as_ref().is_some_and(|w| {
+            // TOKEN_GROUPS: a DWORD count, then SID_AND_ATTRIBUTES { PSID, DWORD } entries from the next pointer-aligned word
+            let count = w[0] as u32 as usize;
+            (0..count).filter_map(|i| w.get(1 + 2 * i)).any(|&sid| sid != 0 && IsWellKnownSid(sid as *const core::ffi::c_void, WIN_BUILTIN_ADMINISTRATORS_SID) != 0)
+        });
+        new_owner = if owned_by_user {
+            None
+        } else if owned_by_default || owned_by_our_admins {
+            let mut text = std::ptr::null_mut();
+            if ConvertSidToStringSidW(user_sid, &mut text) == 0 { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
+            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            LocalFree(text.cast());
+            Some(sid)
+        } else {
+            None
+        };
+        LocalFree(original);
+        if !owned_by_user && new_owner.is_none() { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
     }
-    // Protected DACL, inherited by files/subdirectories: only object owner and SYSTEM have access.
-    let sddl: Vec<u16> = "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)".encode_utf16().chain(Some(0)).collect();
+    // Protected DACL, inherited by files/subdirectories: only object owner and SYSTEM have access. The owner becomes the
+    // user in the same call when it was Administrators.
+    let owner_part = new_owner.as_deref().map(|sid| format!("O:{sid}")).unwrap_or_default();
+    let sddl: Vec<u16> = format!("{owner_part}D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)").encode_utf16().chain(Some(0)).collect();
+    let information = if new_owner.is_some() { 0x80000005 } else { 0x80000004 }; // PROTECTED_DACL | DACL (| OWNER)
     let mut descriptor = std::ptr::null_mut();
     // SAFETY: NUL-terminated buffers and descriptor allocated by the system, released with LocalFree.
     unsafe {
         if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) == 0 {
             return Err(crate::util::io_at(path, "securing")(std::io::Error::last_os_error()));
         }
-        let ok = SetFileSecurityW(name.as_ptr(), 0x80000004, descriptor);
+        let ok = SetFileSecurityW(name.as_ptr(), information, descriptor);
         LocalFree(descriptor);
         if ok == 0 { return Err(crate::util::io_at(path, "securing")(std::io::Error::last_os_error())); }
     }
