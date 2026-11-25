@@ -266,6 +266,12 @@ It fails soft:
   this start's game data ...`, and `reason` plus `sfDisplaced` in `kiln/state/eml.json`, shown on the Engines row). The
   next start in which SF runs prepares them again, from the vanilla backup, with the EML mods in its folder. That
   happens once per change of who writes, not every start.
+- **ShroudForge's record of its pass (0.2.0-dev.31.12).** In a hosted start ShroudForge skips its pass while its own
+  record (`<exe>.kfc.prepared.json`) holds; kiln-eml's stamps and change cache are not part of it, and kiln-eml,
+  standing aside, writes none of the files it records. With a pregame exporter on, that record held the whole
+  `shroudforge/exports` folder, so a runtime mod writing there sent every start through the whole pass again (11
+  minutes with the Beastmaster packs); it now holds only what the pass used there (shroudforge-compat.md section 5.0,
+  "A start reuses the last pass while runtime mods write into the export folder").
 - **A backup of an earlier game build.** After a game update the backup (`<exe>.kfc.bak`) is of the old build while
   the game data is of the new one. A start without EML mods then compares nothing, restores nothing and claims nothing
   about the data: one info line in kiln.log (`... the vanilla backup is of another game build ...`), `staleBackup:
