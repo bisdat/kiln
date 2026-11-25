@@ -230,7 +230,9 @@ internal static partial class KilnApis
         "M:Kiln.ContentRegistry.get_Item(System.Int32)", // ContentRegistry.this[int].get: via Content.Require(string)
         "M:Kiln.ContentSync.CheckRoundTrip", // ContentSync.CheckRoundTrip(): via Content.Require(string)
         "M:Kiln.Crafting.AddSource(Kiln.EntityId,Kiln.EntityId,Kiln.CraftSourceOptions)", // Crafting.AddSource(EntityId, EntityId, CraftSourceOptions?): Services.RequireTickThread
+        "M:Kiln.Creative.Effects(Kiln.EntityId)", // Creative.Effects(EntityId): Game.AssertTickThread
         "M:Kiln.Creative.Set(Kiln.EntityId,System.Boolean)", // Creative.Set(EntityId, bool): Game.AssertTickThread
+        "M:Kiln.Creative.SetEffect(Kiln.EntityId,System.String,System.Boolean)", // Creative.SetEffect(EntityId, string, bool): Game.AssertTickThread
         "M:Kiln.Creative.SetFlight(Kiln.EntityId,Kiln.CharacterFlightMode)", // Creative.SetFlight(EntityId, CharacterFlightMode): Game.AssertTickThread
         "M:Kiln.CreativeTools.Found(Kiln.EntityId)", // CreativeTools.Found(EntityId): Game.AssertTickThread
         "M:Kiln.CreativeTools.Give(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{System.Int32},System.Nullable{Kiln.ItemRarity})", // CreativeTools.Give(EntityId, ItemId, int, int?, ItemRarity?): via CreativeTools.Give(EntityId, ItemId, int, int?, ItemRarity?, int, bool)
