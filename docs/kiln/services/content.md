@@ -93,7 +93,7 @@ stayed until the next restart or file edit.
 - An edit of a mod's `kiln.mod.json` (its `id`, `version` or `side`) counts as a pack file change: the ~2 s scan
   re-applies, without a reload.
 
-### When a reload fails partway
+### When a reload fails partway (0.2.0-dev.31.13)
 A mod's packs apply whole from one version, never half:
 
 - **The mod does not load again** (its `OnLoad` throws, its manifest is invalid, a dependency is missing): it is not
@@ -106,12 +106,19 @@ A mod's packs apply whole from one version, never half:
   generation N), until every file of it reads as a pack`, and `Content.PackReport()` lists the kept files as
   `<file> (kept from generation N)` and the new ones as `<file> (not applied)`. The next reload or file edit tries the
   files again.
-- With no earlier application in this world (the world's first load, or the mod's first load since the world loaded),
-  there is no old layer: as before, the files that read apply and the broken one is reported.
-- **A pack throws while it applies** (an unexpected value type in a section's code): that mod's layers of this
-  application come off and its kept packs apply again, else none of its packs apply.
-- Inside one application the layers change under one store lock with one flush: no reader on another thread (a drop
-  table being acquired, the content sync's export) sees a mix of the old and the new layer.
+- With no old layer to keep, the files that read apply and the broken one is reported, as before. There is none when
+  this world has not yet applied the mod's packs with every file reading: the world's first load, the mod's first
+  application after its packs came off (an `unload` seen as a change of the list, its files gone), or every application
+  since then had a broken file. A world reset forgets every old layer.
+- **A pack throws while it applies** (an unexpected value type in a section's code): that mod's field and drop layers
+  of this application come off, and its packs from the last application in which every file read apply again, whole,
+  with their `registry` sections (ordinary problems in them, such as an unknown field, are reported as before and do not
+  stop them). Without such packs, or when one of them throws too, none of the mod's packs apply and no `registry` section
+  of it reaches the registry stage. The report lists the mod as `<mod> (set apart)`. Not rolled back: what the throwing
+  pack did before the throw outside the field and drop layers (new items or recipes of an `add` list, gamedata `add`
+  clones, a section another service registered); the next application without the throw puts them right.
+- Inside one application the layers change under one store lock: no reader that takes it (a drop table being acquired,
+  the content sync's export) sees a mix of the old and the new layer.
 
 ## Gear values
 A typed face over the item fields of gear, in the numbers the game's own tooltip shows: a server owner writes "power 30" or
