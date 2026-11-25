@@ -694,6 +694,40 @@ Regression evidence: `native/services/items/tests/craft_preview_test.cpp` (actua
 functions) and `craft_preview_sigdb_test.py` (the two static executable copies, exact branches and changed-call
 negative cases). The no-CBS Windows player's real game after this fix, and actual CBS 1.1.0 coexistence, remain unverified.
 
+**Correction (GitHub #132, 0.2.0-dev.31.12; static, client 26430625 `5d9ef2f1`, objdump).** The bridge above never ran in a
+real game: the crafting menu's type-1 query does not pay through `InventoryPay`. `player_ui`'s common setup starts the
+descriptor word at `[rbp+0x780] = 0x0040` (C `0x2bd88b`); the recipe query sets its second byte, the stock mode, to 0 or 2
+(C `0x2bdcec` / `0x2bdd01`) and one workshop (`0xfd28ca06`) ORs `0x08` into the first (C `0x2bdda4`); `InventoryInit`
+copies both bytes to `tx+0xb0` / `tx+0xb1`. `RecipeApply` (C `0x3f8f30`) tests `tx+0xb0 & 0x40` at C `0x3f8fe3` and calls
+**`RecipePayAlt`** (C `0x3f9700`, S `0x19a9b0`; .pdata `0x3f9700`..`0x3f98f4`, one fragment), returning to C `0x3f8ff3`
+(`rules/RecipePaid` + 7); only the other branch calls `InventoryPay`. So every preview of every crafting menu was left
+native at Kiln's descriptor check (`transaction-mode-or-flags`, recipe 0: the check runs before the recipe is read), which
+is Fuzen777's clean 31.2 trace exactly. `RecipePayAlt(tx, costs, owner, multiplier, extra)`: mode 0 asks
+`PayMaterial(out, tx, owner, item, multiplier x count)` per line (return C `0x3f9777`); any other mode first reads the
+client's published stock map (`0x4709a0`: `lea rax,[rcx+0x1610]` on `tx+0x68`, the same map the ingredient rows count, `u16`
+per item), skips a line it covers with no take, and asks `PayMaterial` for the rest (return C `0x3f98a3`). A remainder then
+answers 4 (`0xeb3ab0` is `xor al,al; ret`, so a short line always refuses); it never calls `BaseStockForPlayer` or
+`InventoryPay`. After it, `RecipeApply`'s water (the client's water map `0x4709b0`, or the owner) and output checks run as
+before. Cross-Base Storage worked because it rewrites the published stock map with every base's Magic chests, so the
+alternate payer's table covered the line natively.
+
+Kiln (0.2.0-dev.31.12, building on work-23's unfinished start): the exact preview reads the descriptor first; `0x40` (with
+or without `0x08`) names the RecipePayAlt route, `0` the InventoryPay route, anything else (0x10 skips payment) stays native.
+kiln-items joins `RecipePayAlt` with a RawHook (kiln.rules' free crafting may already have a link there) and, after the
+original returns 4 for that exact transaction, complements it as above, requiring the payer's return address
+(`0x3f8ff3`) and every take to return to the one site its mode uses (`stations/client.CraftAltTakeRet` /
+`CraftAltStockTakeRet`; `unrecognized-take-caller` otherwise). **The code-state check is per route:** RecipeApply,
+PayMaterial, InventoryRemoveItems, InventoryPageFetch, InventoryRollback and the menu's call for every preview;
+`RecipePayAlt` (0x1f4 bytes) and the stock-table getter (8 bytes) for the RecipePayAlt route; `InventoryPay` and
+`BaseStockForPlayer` only for the InventoryPay route, which the pinned client never takes. So Building Tools 0.34.0's
+redirected call inside InventoryPay (`0x3f8aee`) and Unified Tweaks Live's hook inside BaseStockForPlayer (`0x46fb65`),
+which stood the whole preview down in 31.1 and 31.2, are off the route. A stand-down is checked again in the next client
+world. The refusal line now names the payer, the descriptor byte and the mode. sigdb: `client.d/stations-craft-ui.json`;
+`craft_preview_sigdb_test.py` checks the descriptor writes, the branch, the payer's two take sites, the table getter, the
+.pdata extent and that a changed call disables the route; `craft_preview_test.cpp` runs the bridge on a fake RecipePayAlt
+with the real control flow (both modes, a table that covers a line, wrong caller/take site, route mismatch, foreign code
+on each route).
+
 ### 10.3 C7, the station screen's fill button
 
 The dry run is inside client `FUN_1402b8430` (Ghidra 12.1.2, `rea` 6.7.0, evidence
@@ -937,17 +971,21 @@ Verification here is offline: host registry/payment arithmetic, Windows tests of
 fake transactions, managed snapshot/lifetime tests and symbol resolution on the two pinned binaries. No new game
 client, server or lab was run for this change; the guided checks are in the public station service docs.
 
-### 10.8 Fills from registered sources (not built)
+### 10.8 Fills from registered sources (built in 0.2.0-dev.31.12)
 
-A production station's fill could take from a player's registered sources the way it takes from named chests (§9): one
-more source list, per input with a shortfall after the bag, the Magic chests and named chests, through
-`AutoTransferRecipe(tx, {the player's registered containers that allow the item and pass source_access}, [stack_i with
-count 1], station, crafts = share_i, water 0, player 0)` inside the fill's one transaction, any code rolling it back. Not
-built: it needs a per-registration opt-in (public API), the server's handling of the button press with those sources (the
-press runs as the game's `AutoTransferAction` with the player's base list; Kiln.Blocks already runs a press as Kiln's fill
-when opted-in outputs are needed), the fill query's answers (§10.3) counting them, and the row transfer (UI command `0x39`,
-`AutoTransferItem`, C `0x3f7950` / S `0x198bf0`, not hooked by Kiln) handled the same way or kept the game's. The station
-screen's counts would then name that opted-in part apart from the rest of the linked share.
+Built as sketched: a FILL with `KILN_STATION_FILL_LINKED` and a player takes, per input with a shortfall after the bag, the
+Magic chests and named chests, from that player's links registered with `KILN_CRAFT_SOURCE_FILLS`, through
+`AutoTransferRecipe(tx, {that item's links, in order}, [stack_i with count 1], station, crafts = share_i, water 0,
+player 0)` inside the fill's one transaction. Layers per input (`stations_logic.h` `pay_shares`): named chests, links
+ordered `BeforeStationOutputs`, opted-in outputs, links ordered `AfterStationOutputs`; the rest is the game's own call. The
+links are revalidated in the program through the transaction's accessors (`source_access`: the player's id, login and
+`CanAccessInventories`; an initialized inventory that is no person's), every container once per item, never the station,
+the base's Magic chests, a named chest or a lending station. The press: Kiln.Blocks follows the held
+`PlayerCraftingAction` fill when the pressing player has a fill-opted link and runs it as Kiln's fill when the plain fill
+cannot and the linked one can; the fill query's answers (§10.3) use the same plan. The row transfer (UI command `0x39`,
+`AutoTransferItem`) stays the game's. CharosDX's Cross-Base Storage takes the other road (it rewrites the stock list the
+game's own queue fill reads, `player_crafting`'s AutomaticTransfer); Kiln keeps the game's list and adds a source list of
+its own, so a link's filter and opt-in hold. Not run in a lab or a game.
 
 ## 12. Registered sources for dyes (GitHub #125)
 
@@ -1012,3 +1050,65 @@ installed only after the payment link, and an entry installation failure revokes
 Windows fake-transaction tests cover entry/debit revocation, player generations, wrong storage/missing accessors,
 commit guards, nested routing, code qualification, partial installation and an injected SEH fault after a source debit;
 native palette tests cover the raw grid callback and both mids. These are not real-client execution evidence.
+
+## 13. Block placements from registered sources (GitHub #132, since 0.2.0-dev.31.12)
+
+Static, server 26430253 (`f0d824be…`) and client 26430625 (`5d9ef2f1…`), objdump; sigdb `server.d/build-sources.json`,
+checked by `native/services/items/tests/build_sources_sigdb_test.py` on both copies. RVAs: server / client.
+
+| Seam | Server | Client |
+| --- | --- | --- |
+| the cursor's material check (under `rules/CursorFlags`' bit 12) | `0x99750` | `0x28ab60` |
+| its blueprint branch's stock-count call, return (`build/CursorStockRet`) | `0x99a50` | `0x28ae3c` |
+| the stock count (`build/StockCount`) | `0x209210` | `0x4709c0` |
+| `rules/ApplyMaterials` | `0x22d480` | `0x495f20` |
+| its take's `InventoryPay` call, return (`build/ApplyMaterialsPaid`) | `0x22d562` | `0x496002` |
+| `player_building_blueprints`' `ApplyMaterials` call, return (`build/BlueprintApplyRet`) | `0xc4b50` | `0x2d8bb0` |
+
+**The check.** For an item with a voxel object (a blueprint shape) the material check counts the query's material
+(`[[rsi+0x68]]`) in the player's inventories (`InventoryItemCount`, the count at `[rsp+0x58]` -> `ebx`), then calls the
+stock count with the cursor's position -> `eax`, and answers "missing" when `eax + ebx < ebp` (`ebp`: the blocks the
+placement fills, from `0x9333b0`). The stock count reads a client world's published stock map (`bases + 0x1610`, the
+crafting menus' map, docs 10.3) or, on a server world, the base's stock list at the position (`0x208c60`). The function's
+register use differs between the executables (the server keeps the program context in r14, the client in rbx, which the
+bag count then overwrites), but in both `rdi` is the cursor context, whose first qword is the program context (its job's
+storage kind tells the world). A terraformer's material (the other branch, `add eax,ebx; je`) is not hooked.
+
+**The payment.** `player_building_blueprints` (S `0xc4410`) opens the placement's transaction from a setup whose stock-mode
+byte (`[rbp+0x291]`) is `sete`: 1 (the base's stock list first, then the owner) or 0 (the owner alone); `InventoryInit`
+copies it to `tx+0xb1`. It calls `ApplyMaterials({mode 0, tx}, list, take = r12b)`, which in mode 0 calls
+`InventoryPay(tx, list, [tx+0xe0] the operator, 1, 0)`. kiln.rules' InventoryPay hook (free crafting, the storage upgrade,
+kiln.stations' adapter) sees it with the return address `build/ApplyMaterialsPaid`.
+
+**What Kiln does.** A mid hook at `build/CursorStockRet` (on demand: a server once a link has `KILN_CRAFT_SOURCE_BUILDING`, a
+client once its server's building snapshot is on) adds the player's building links to `eax` when `eax + ebx < ebp`: a server
+world from the server's count of those links (cached on the tick thread every 30 steps and on a registration change, so the
+check never calls kiln.world), a client world from the snapshot (`set_build_stock`). A RawHook on `ApplyMaterials` sets a
+thread-local scope only for a take whose caller is `build/BlueprintApplyRet`; inside it, the craft adapter (§10.1, §10.7)
+accepts `build/ApplyMaterialsPaid` and pays with the building links only (no station outputs): the owner and the base list
+in the game's order first, then the links, all or nothing; any fault or remainder returns 4, `ApplyMaterials` answers false
+and the placement is not made. Foreign code on the cursor's call (98 bytes before and 6 after the return), the stock
+count's entry, ApplyMaterials' entry, its take's call or the blueprint program's call stands the building half down with
+one line. A fault inside the cursor hook does the same.
+
+Cross-Base Storage (CharosDX, MIT; read as source, commit `2bb3978`, written against build 1273043) covers building by
+redirecting the stock-list calls of the building tool and the material consumption, the build menu's count rebuild and
+the two base-count calls of the build check (the same `F3 0F 11 44 24 44 E8 .. 03 C3` sites as `build/CursorStockRet`), and
+optionally takes from the inventory first by removing `InventoryPay`'s mode-2 test. Kiln changes none of the game's lists:
+it counts and pays links on top. Its own client prediction of the base counts is therefore not needed.
+
+**The build menu's material counts** (client only, `client.d/build-ui.json`, feature `crafting.build_ui`). The material
+selector's gatherer `0x40e5d0` (`void(selectorState, access, bool currentOnly)`, docs/re/building.md 1.2.2) walks seven
+groups of `0x648` bytes (`imul rcx,rax,0x648` at `0x40ee37`; the current-group byte after them at `+0x2bf8`). A group it
+rebuilds is zeroed first (`mov [r15-0x630],rbp` at `0x40e694`: its row count), then gets a zero row per known pool material
+(`0x40e750` loop, `0x40c010` with the default key), the bag's stacks, and per pool material the client's published base
+stock map's `u16` (`0x40ee46`, return `0x40ee4b`). `0x40c010` finds a row by item and adds the count at `+0x10` of a
+24-byte row (`0x40c0f4`). With `currentOnly` only the current group is rebuilt; the others keep their rows. CBS swaps the
+base's stock list for its merged one around the count rebuild (`0x46f460` on this build, "menu counts" in its log). Kiln
+wraps the gatherer instead: before it, each row that still shows exactly what Kiln wrote gets the game's value back; after
+it, the first row of each item in the building snapshot gets the links' count added, and both values are noted per
+(selector, group, item). So a rebuilt row gets the links once, a kept row is not raised twice, a row the game changed in
+between keeps the game's value plus the links. A row that cannot be read stands the menu's half down (a fault guard). A
+material only the links hold still has its row: the game adds a zero row for every known pool material first.
+
+Not done: props (`place_prop`'s two `ApplyMaterials` calls), undo, dismantle and terraforming. Not run in a lab or a game.

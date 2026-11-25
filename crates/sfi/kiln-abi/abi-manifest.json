@@ -6639,13 +6639,15 @@
           "fields": {
             "container": 8,
             "filter": 16,
+            "flags": 32,
             "item_count": 20,
             "items": 24,
             "order": 12,
             "player": 4,
+            "reserved": 36,
             "size": 0
           },
-          "size": 32
+          "size": 40
         },
         "KilnStation": {
           "align": 8,
@@ -6783,6 +6785,7 @@
             "input_count": 32,
             "inputs": 56,
             "limited_by": 40,
+            "linked": 952,
             "message": 568,
             "outputs": 696,
             "recipe": 12,
@@ -6797,7 +6800,7 @@
             "water_per_craft": 44,
             "water_stock": 52
           },
-          "size": 952
+          "size": 1080
         },
         "KilnStationRecipe": {
           "align": 8,
@@ -6853,12 +6856,14 @@
             "crafts_requested": 24,
             "flags": 12,
             "from_chests": 1232,
+            "from_linked": 1240,
             "from_outputs": 60,
             "game_error": 40,
             "limited_by": 52,
             "message": 1104,
             "recipe": 20,
             "reserved8": 53,
+            "reserved_linked": 1244,
             "reserved_tail": 1236,
             "short_item": 56,
             "size": 0,
@@ -6871,7 +6876,7 @@
             "stopped_before": 50,
             "ticket": 64
           },
-          "size": 1240
+          "size": 1248
         },
         "KilnStationStack": {
           "align": 4,
@@ -6903,15 +6908,18 @@
             "fill_asks": 240,
             "header": 0,
             "last_seq": 168,
+            "lock_asks": 296,
             "max_chests": 192,
             "output_sources": 184,
             "plan": 128,
             "recipe": 88,
             "recipe_inputs": 96,
             "remove_source": 256,
+            "set_build_stock": 304,
             "set_craft_stock": 216,
             "set_dye_stock": 280,
             "set_fill_answers": 232,
+            "set_lock_stock": 288,
             "set_output_source": 176,
             "source_stock": 272,
             "station_read": 80,
@@ -6921,7 +6929,7 @@
             "watch": 152,
             "workshop_recipes": 120
           },
-          "size": 288
+          "size": 312
         },
         "KilnStationsStatus": {
           "align": 4,
@@ -6944,7 +6952,7 @@
           "size": 188
         }
       },
-      "sha256": "a259bde01d7ff59df605d3fd430a35a1a6a10c85a53dcb2c1b2eb4e209e9b43d"
+      "sha256": "edc51fafe20ca385c28bc871569913bc13162c3872d2e3606304beb186ad0970"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -10067,7 +10075,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
+    "src/layout.rs": "7d3e58d8b12098fdf454d8fd939b93206f3138c984f59ac5600b1304ac9408af",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10124,7 +10132,7 @@
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
     "src/services/kiln_station_menus.rs": "f9755639d612efc6c34785105f36e6798337387dfe8a642b78ca413a1e70cac8",
-    "src/services/kiln_stations.rs": "a9d80849d6104e4b1858c99e2aaa2a680a23164ea3182d6737d4ad56af3e5827",
+    "src/services/kiln_stations.rs": "fd739f6ddec50acd622a5474e32a3e1ea3de0c48f106dcba5f2afc51e511c154",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_survivors.rs": "ed6f377e897d0236e33196f19d1be825b230e5d6575129a676ff32da08df2722",

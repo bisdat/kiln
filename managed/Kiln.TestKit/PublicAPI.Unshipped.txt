@@ -1,1 +1,10 @@
 #nullable enable
+Kiln.TestKit.FakeCraftSourceRegistration.Building.get -> bool
+Kiln.TestKit.FakeCraftSourceRegistration.Building.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Fills.get -> bool
+Kiln.TestKit.FakeCraftSourceRegistration.Fills.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Locks.get -> bool
+Kiln.TestKit.FakeCraftSourceRegistration.Locks.init -> void
+Kiln.TestKit.HarnessCrafting.BuildStock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
+Kiln.TestKit.HarnessCrafting.FillStock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
+Kiln.TestKit.HarnessCrafting.LockStock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!

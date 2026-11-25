@@ -1375,6 +1375,47 @@ uint32_t read_slots(const Access& a, KilnEntity e, KilnItemsSlot* out, uint32_t 
     }
 }
 
+namespace {
+bool access_from_tx_reads_impl(void* tx, Access* a) {
+    if (!tx || !E.job_storage || !E.component_map_find) return false;
+    auto* w = static_cast<void**>(tx);
+    a->ctx = w[0];
+    if (!a->ctx) return false;
+    a->job = *static_cast<void**>(a->ctx);
+    if (!a->job) return false;
+    a->storage = E.job_storage(a->job);
+    if (!a->storage || rd<uint8_t>(a->storage, 8) != 0) return false;  // the server world only
+    a->items = w[1];
+    a->balancing = w[2];
+    a->attributes = w[0xF];
+    a->acc[A_FUEL] = reinterpret_cast<uint64_t>(w[7]);
+    a->acc[A_INVENTORY] = reinterpret_cast<uint64_t>(w[4]);
+    a->acc[A_EMPTY] = reinterpret_cast<uint64_t>(w[0x14]);
+    a->acc[A_SETUP] = reinterpret_cast<uint64_t>(w[3]);
+    a->acc[A_ITEMSTATE] = reinterpret_cast<uint64_t>(w[5]);
+    a->acc[A_OWNER] = reinterpret_cast<uint64_t>(w[0x12]);
+    a->acc[A_SLOTSEL] = reinterpret_cast<uint64_t>(w[0x1D]);
+    if (!a->items) return false;
+    void* registry = *static_cast<void**>(a->storage);
+    if (!registry) return false;
+    for (const int i : {static_cast<int>(A_SETUP), static_cast<int>(A_INVENTORY)}) {
+        if (!a->acc[i]) return false;
+        const uint32_t h = kAccHashes[i];
+        const uint16_t* p = E.component_map_find(static_cast<uint8_t*>(registry) + E.registry_components, &h);
+        if (!p || *reinterpret_cast<const uint16_t*>(a->acc[i]) != *p) return false;
+    }
+    return true;
+}
+}  // namespace
+
+bool access_from_tx_reads(void* tx, Access* a) {
+    __try {
+        return access_from_tx_reads_impl(tx, a);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool access_from_tx(void* tx, Access* a) {
     __try {
         return access_from_tx_impl(tx, a);

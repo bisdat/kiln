@@ -2,6 +2,7 @@
 #include "../craft_sources.h"
 #include <cstdio>
 #include <map>
+#include <string>
 #include <tuple>
 using namespace kitems;
 using namespace kitems::stations;
@@ -59,6 +60,118 @@ int main() {
     CHECK(!source_identity_ok(1,2,true,true));
     CHECK(!source_identity_ok(1,2000,false,false));
     CHECK(!source_identity_ok(1024,2000,false,true));
+    // ---- GitHub #147: a lock's required item from the player's opted-in links ----
+    {
+        CraftSourceRegistry locks;
+        // registration order: 2100 (crafting only), 2200 (locks, after outputs), 2300 (locks), 2400 (locks, allow 9 only),
+        // 2300 again (locks, a second link of one container), 2500 (another player's, locks)
+        CHECK(locks.add(10, 1, 2100, false, true, {}, 0, false) && locks.add(10, 1, 2200, true, true, {}, 0, true) &&
+              locks.add(10, 1, 2300, false, true, {}, 0, true) && locks.add(10, 1, 2400, false, false, {9}, 0, true) &&
+              locks.add(10, 1, 2300, false, true, {}, 0, true) && locks.add(10, 2, 2500, false, true, {}, 0, true));
+        CHECK(locks.any_locks() && locks.players() == std::vector<uint32_t>({1, 2}));
+        std::map<std::pair<uint32_t,uint32_t>, uint64_t> held = {{{1,7},5}, {{2100,7},9}, {{2200,7},2}, {{2300,7},1}, {{2400,7},4},
+                                                                {{2400,9},6}, {{2500,7},8}};
+        auto count = [&](uint32_t e, uint32_t item) { return held[{e,item}]; };
+        auto all = [](uint32_t, uint32_t) { return true; };
+        const auto src = locks.copy(1);
+        // opt-in respected (2100 is crafting only), the filter respected (2400 allows 9 only), BeforeStationOutputs links
+        // first in registration order, then AfterStationOutputs, one container once, the bag never a source
+        auto seven = lock_sources_for(src, 1, 7, 1, all, count);
+        CHECK(seven.size() == 2 && seven[0].container == 2300 && seven[0].count == 1 && seven[1].container == 2200 && seven[1].count == 2);
+        auto nine = lock_sources_for(src, 1, 9, 1, all, count);
+        CHECK(nine.size() == 1 && nine[0].container == 2400 && nine[0].count == 6);
+        // the payment's permission and container test refuses a link: it is not counted
+        CHECK(lock_sources_for(src, 1, 7, 1, [](uint32_t, uint32_t c) { return c != 2300; }, count).size() == 1);
+        // another player's links never count; item 0 names nothing
+        CHECK(lock_sources_for(src, 2, 7, 2, all, count).empty() && lock_sources_for(locks.copy(2), 2, 7, 2, all, count).size() == 1);
+        CHECK(lock_sources_for(src, 1, 0, 1, all, count).empty());
+        // all or nothing: 3 from {2300: 1, 2200: 2} in that order; 4 is more than they hold, so no take at all
+        std::vector<LockHeld> takes;
+        CHECK(plan_lock_take(seven, 3, &takes) && takes.size() == 2 && takes[0].container == 2300 && takes[0].count == 1 &&
+              takes[1].container == 2200 && takes[1].count == 2);
+        CHECK(plan_lock_take(seven, 1, &takes) && takes.size() == 1 && takes[0].container == 2300);
+        CHECK(!plan_lock_take(seven, 4, &takes) && takes.empty());
+        // the count a lock check sees: the bag's when it covers the lock (no link asked), else bag + links
+        CHECK(lock_counted(5, 3, 1) == 5 && lock_counted(0, 3, 1) == 3 && lock_counted(1, 2, 2) == 3 && lock_counted(0, 0, 1) == 0);
+        CHECK(lock_counted(2, 0xffffffffull, 3) == 0xffffffffu);
+        // why the links cannot pay, for the log line
+        CHECK(lock_why(src, 1, 7, 3, 3) == kLockNone && lock_why(src, 1, 7, 3, 4) == kLockShort);
+        CHECK(lock_why(src, 3, 7, 0, 1) == kLockNoLinks);
+        CraftSourceRegistry crafting_only;
+        crafting_only.add(10, 1, 2100, false, true, {}, 0, false);
+        CHECK(lock_why(crafting_only.copy(1), 1, 7, 0, 1) == kLockNotOptedIn);
+        CraftSourceRegistry allow9;
+        allow9.add(10, 1, 2400, false, false, {9}, 0, true);
+        CHECK(lock_why(allow9.copy(1), 1, 7, 0, 1) == kLockFiltered && lock_why(allow9.copy(1), 1, 9, 6, 1) == kLockNone);
+        CHECK(std::string(lock_why_text(kLockNotOptedIn)).find("not opted in") != std::string::npos);
+        // an older caller's registration (no Locks) never pays a lock
+        CraftSourceRegistry old;
+        old.add(10, 1, 2300, false, true, {});
+        CHECK(!old.any_locks() && lock_sources_for(old.copy(1), 1, 7, 1, all, count).empty());
+    }
+    // ---- GitHub #132 (0.2.0-dev.31.12): fills and block placements from the player's opted-in links ----
+    {
+        CraftSourceRegistry reg;
+        // 3100 crafting only; 3200 fills (after outputs); 3300 fills; 3400 fills, allow 9 only; 3300 again (fills);
+        // 3500 building; 3600 another player's fills; 3700 fills, but access refused; 3800 fills + building + locks
+        CHECK(reg.add(10, 1, 3100, false, true, {}, 0, 0) && reg.add(10, 1, 3200, true, true, {}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3300, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3400, false, false, {9}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3300, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3500, false, true, {}, 0, KILN_CRAFT_SOURCE_BUILDING) &&
+              reg.add(10, 2, 3600, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3700, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS) &&
+              reg.add(10, 1, 3800, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS | KILN_CRAFT_SOURCE_BUILDING | KILN_CRAFT_SOURCE_LOCKS));
+        const auto src = reg.copy(1);
+        CHECK(src.size() == 8 && !src[0].fills && !src[0].building && src[1].fills && !src[1].building && src[5].building && !src[5].fills);
+        CHECK(src[7].fills && src[7].building && src[7].locks && reg.any_building() && reg.any_locks());
+        CraftSourceRegistry plain;
+        plain.add(10, 1, 3100, false, true, {});  // an older caller: crafting only
+        CHECK(!plain.copy(1)[0].fills && !plain.copy(1)[0].building && !plain.any_building());
+        std::map<std::pair<uint32_t,uint32_t>, uint64_t> held = {{{1,7},5}, {{3100,7},9}, {{3200,7},2}, {{3300,7},1}, {{3400,7},4},
+                                                                {{3400,9},6}, {{3500,7},8}, {{3600,7},8}, {{3700,7},3}, {{3800,7},6},
+                                                                {{4000,7},5}};
+        std::map<uint32_t, int> asked;
+        auto count = [&](uint32_t e, uint32_t item) { return held[{e,item}]; };
+        auto access = [&](uint32_t, uint32_t c) { ++asked[c]; return c != 3700; };
+        auto use = links_for(src, &CraftSource::fills, 1, {7, 9, 0}, {4000}, access, count);
+        // before outputs: 3300 (once, its second link deduped), 3800; 3400 holds 7 but allows only 9; after outputs: 3200
+        CHECK(use.before[7] == std::vector<uint32_t>({3300, 3800}) && use.count_before[7] == 7);
+        CHECK(use.after[7] == std::vector<uint32_t>({3200}) && use.count_after[7] == 2);
+        CHECK(use.before[9] == std::vector<uint32_t>({3400}) && use.count_before[9] == 6 && use.after_of(9) == 0);
+        CHECK(use.before_of(8) == 0 && !use.empty());
+        CHECK(asked[3700] == 1 && asked[3300] == 1 && !asked.count(3100) && !asked.count(3500) && !asked.count(3600));  // access once
+        // skip: the base's Magic chests, named chests, the station, lending stations are never a linked source again
+        auto skipped = links_for(src, &CraftSource::fills, 1, {7}, {3300, 3800}, access, count);
+        CHECK(skipped.before[7].empty() && skipped.count_before.count(7) == 0 && skipped.after[7] == std::vector<uint32_t>({3200}));
+        // building's links are its own opt-in; another player's never count; the player's own bag never does
+        auto build = links_for(src, &CraftSource::building, 1, {7}, {}, access, count);
+        CHECK(build.before[7] == std::vector<uint32_t>({3500, 3800}) && build.count_before[7] == 14 && build.after_of(7) == 0);
+        CHECK(links_for(src, &CraftSource::fills, 2, {7}, {}, access, count).empty());
+        CraftSourceRegistry own_bag;
+        own_bag.add(10, 1, 1, false, true, {}, 0, KILN_CRAFT_SOURCE_FILLS);
+        CHECK(links_for(own_bag.copy(1), &CraftSource::fills, 1, {7}, {}, access, count).empty());
+        CHECK(links_for(plain.copy(1), &CraftSource::fills, 1, {7}, {}, access, count).empty());  // crafting-only links
+    }
+    // ---- the fill's shares with linked sources: chests, linked (before outputs), outputs, linked (after outputs) ----
+    {
+        InputNow i{};
+        i.item = 7, i.count = 2, i.have = 0;
+        i.chests = 1, i.linked = 3, i.outputs = 2, i.linked_after = 4;
+        i.stock = 5 + i.chests + i.linked + i.outputs + i.linked_after;  // the bag and the Magic chests hold 5
+        FillShares s;
+        CHECK(pay_shares({i}, 2, 0, &s) && s.chests[0] == 0 && s.linked[0] == 0 && s.outputs[0] == 0 && s.linked_after[0] == 0);
+        CHECK(pay_shares({i}, 4, 0, &s) && s.chests[0] == 1 && s.linked[0] == 2 && s.outputs[0] == 0 && s.linked_after[0] == 0);
+        CHECK(pay_shares({i}, 6, 0, &s) && s.chests[0] == 1 && s.linked[0] == 3 && s.outputs[0] == 2 && s.linked_after[0] == 1);
+        CHECK(s.linked_all()[0] == 4 && s.all()[0] == 7);
+        CHECK(pay_shares({i}, 7, 0, &s) && s.linked_after[0] == 3);
+        CHECK(!pay_shares({i}, 8, 0, &s));  // 16 needed, 15 held: the fill asks the game for fewer crafts
+        InputNow none = i;
+        none.linked = none.linked_after = 0, none.stock = 5 + 1 + 2;
+        std::vector<uint32_t> chest_sh, out_sh;
+        CHECK(pay_layers({none}, 4, 0, &chest_sh, &out_sh) && chest_sh[0] == 1 && out_sh[0] == 2);  // before #132: unchanged
+        CHECK(!pay_layers({none}, 5, 0, &chest_sh, &out_sh) && chest_sh[0] == 0 && out_sh[0] == 0);
+    }
     std::printf("craft sources: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

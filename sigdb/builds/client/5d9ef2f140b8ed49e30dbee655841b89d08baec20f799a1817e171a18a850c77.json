@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 1048,
-    "constants": 1099,
-    "features": 286
+    "symbols": 1064,
+    "constants": 1102,
+    "features": 289
   },
   "features": {
     "abilities.attributes": true,
@@ -70,6 +70,8 @@
     "content.reflection": true,
     "content.stack_guard": true,
     "content.ui_texture": true,
+    "crafting.build_sources": true,
+    "crafting.build_ui": true,
     "crafting.dye_sources": true,
     "crafting.dye_ui": true,
     "crafting.source_ui": true,
@@ -122,6 +124,7 @@
     "items.gear.rolls": true,
     "items.give_equip": true,
     "items.instances": true,
+    "items.lock_sources": true,
     "items.move": true,
     "items.names": true,
     "items.pide_options": true,
@@ -341,19 +344,23 @@
     "audio/VoiceoverRequest": "0x1232500",
     "audio/VoiceoverSetPosition": "0x1233420",
     "audio/VoiceoverUpdate": "0x1233520",
+    "build/ApplyMaterialsPaid": "0x496002",
     "build/BaseBrickDecode": "0x10cc7d0",
     "build/BaseColumnAcquire": "0x10ab270",
     "build/BaseColumnRelease": "0x10cc750",
     "build/BaseColumnSeekBrick": "0x10c6170",
     "build/BlockKernel": "0x4966e0",
+    "build/BlueprintApplyRet": "0x2d8bb0",
     "build/BuildZoneAppend": "0xeab880",
     "build/BuildingConfigFind": "0xe8c9b0",
+    "build/CursorStockRet": "0x28ae3c",
     "build/ItemFind": "0xe94470",
     "build/RetSaveRegionsBaseQuery": "0xe58696",
     "build/RetSaveRegionsBaseZones": "0xe6031d",
     "build/RetSaveRegionsWorldSave": "0xe67709",
     "build/SaveRegions": "0xe8b8f0",
     "build/SetVoxelInterface": "0x9e3540",
+    "build/StockCount": "0x4709c0",
     "build/StoreCommit": "0x10baca0",
     "build/VoxelBoxFillAir": "0xa9aac0",
     "build/VoxelDamageAdd": "0x4a7c90",
@@ -367,6 +374,10 @@
     "build/VoxelReadBatch": "0x10b20e0",
     "build/VoxelTileReady": "0x10bc130",
     "build/VoxelWrite": "0x10bb030",
+    "build/client.MaterialRowAdd": "0x40c010",
+    "build/client.MaterialRowStock": "0x40c0f4",
+    "build/client.MaterialRows": "0x40e5d0",
+    "build/client.StockRowsRet": "0x40ee4b",
     "build/voxel.base_size": "0x13d47a0",
     "camera/RenderFovSelected": "0x87b9fd",
     "camera/RenderPoseGetter": "0x3aaaf0",
@@ -594,6 +605,10 @@
     "items/WearItem": "0x3b5ca0",
     "items/WriteComponentTick": "0x9b2f20",
     "items/WriteOther": "0x9b2900",
+    "locks/InventoryItemCount": "0xe93160",
+    "locks/LockCountRet": "0x2c5547",
+    "locks/LockPaid": "0x2a7efe",
+    "locks/client.UiLockCountRet": "0x2bc483",
     "markers/Clear": "0x304470",
     "models/Chain2CpuAdd": "0x11e2480",
     "models/Chain2DeferredAdd": "0x11e1ca0",
@@ -826,7 +841,11 @@
     "stations/client.AvailableOptionRet": "0xbf352c",
     "stations/client.AvailableRowRet1": "0xbb19b8",
     "stations/client.AvailableRowRet2": "0xbb280a",
+    "stations/client.CraftAltStockRead": "0x3f97d4",
+    "stations/client.CraftAltStockTakeRet": "0x3f98a3",
+    "stations/client.CraftAltTakeRet": "0x3f9777",
     "stations/client.CraftPreviewReturn": "0x2be03f",
+    "stations/client.CraftStockTable": "0x4709a0",
     "stations/client.UiActionStatus": "0xb2dbe0",
     "stations/client.UiAvailableCount": "0xd397d0",
     "stations/client.UiFixedSlotsCount": "0xd39430",
@@ -1426,6 +1445,9 @@
     "items/tx.touched_inline": "0x7168",
     "items/world.program_count": "0xe16f50",
     "items/world.program_stride": "0x1f28",
+    "locks/lock.amount": "0x16",
+    "locks/lock.item": "0x10",
+    "locks/lock.mask": "0x18",
     "markers/custom.capacity_offset": "0x396a38",
     "markers/entry.label": "0x50",
     "markers/entry.label_hash": "0x60",
@@ -2339,6 +2361,21 @@
         "build.zones": "lab"
       }
     },
+    "build-sources": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "build/ApplyMaterialsPaid": "static",
+        "build/BlueprintApplyRet": "static",
+        "build/CursorStockRet": "static",
+        "build/StockCount": "static"
+      },
+      "constants": {},
+      "features": {
+        "crafting.build_sources": "static"
+      }
+    },
     "build-terrain": {
       "level": "static",
       "date": "2026-11-22",
@@ -2381,6 +2418,21 @@
         "build.block_metadata": "static",
         "build.block_provenance": "static",
         "build.box_fill_air": "static"
+      }
+    },
+    "build-ui": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "build/client.MaterialRowAdd": "static",
+        "build/client.MaterialRowStock": "static",
+        "build/client.MaterialRows": "static",
+        "build/client.StockRowsRet": "static"
+      },
+      "constants": {},
+      "features": {
+        "crafting.build_ui": "static"
       }
     },
     "characters": {
@@ -3944,6 +3996,25 @@
         "items.transfer": "static"
       }
     },
+    "lock-sources": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "locks/InventoryItemCount": "static",
+        "locks/LockCountRet": "static",
+        "locks/LockPaid": "static",
+        "locks/client.UiLockCountRet": "static"
+      },
+      "constants": {
+        "locks/lock.amount": "static",
+        "locks/lock.item": "static",
+        "locks/lock.mask": "static"
+      },
+      "features": {
+        "items.lock_sources": "static"
+      }
+    },
     "net": {
       "level": "lab",
       "date": "2026-11-05",
@@ -4786,7 +4857,11 @@
       "date": "2026-11-17",
       "evidence": "resolved offline (tools/sigport/build_record.py)",
       "symbols": {
-        "stations/client.CraftPreviewReturn": "static"
+        "stations/client.CraftAltStockRead": "static",
+        "stations/client.CraftAltStockTakeRet": "static",
+        "stations/client.CraftAltTakeRet": "static",
+        "stations/client.CraftPreviewReturn": "static",
+        "stations/client.CraftStockTable": "static"
       },
       "constants": {},
       "features": {

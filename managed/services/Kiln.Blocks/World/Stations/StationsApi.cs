@@ -460,6 +460,9 @@ internal interface IStationsBackend
     bool HasOutputSources { get; }
     /// <summary>The table has max_chests (ordinary chests on a fill).</summary>
     bool HasChests { get; }
+    /// <summary>kiln.stations takes FILL_LINKED (a fill from the player's fill-opted links; the table through
+    /// set_build_stock, 0.2.0-dev.31.12).</summary>
+    bool HasLinkedFills => false;
     /// <summary>The table has base_stock_with_stations (Magic-chest stock plus finished station outputs).</summary>
     bool HasStockWithStations { get; }
     (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index);
@@ -684,6 +687,7 @@ internal static unsafe partial class StationsCore
         public bool HasOutputSources => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableOutputs;
 
         public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests;
+        public bool HasLinkedFills => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableBuild;
 
         public bool HasStockWithStations => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableStock &&
                                              t->BaseStockWithStations != null;
@@ -1069,9 +1073,13 @@ internal static unsafe partial class StationsCore
     {
         if (o.Crafts is < 1 or > 1000) throw new ArgumentException($"Crafts is 1..1000 (got {o.Crafts})", nameof(o));
         if (o.Choices is { Count: > 0 } && o.Recipe is null) throw new ArgumentException("category choices name a recipe's categories: give the Recipe too", nameof(o));
+        if (o.UseLinkedSources && o.Player.IsNone) throw new ArgumentException("UseLinkedSources takes a Player's linked sources: give the Player", nameof(o));
+        if (o.UseLinkedSources && !Backend.HasLinkedFills)
+            throw new InvalidOperationException("Stations.Fill: this Kiln does not take from linked sources (an older kiln-items.dll)");
         var flags = (o.Mode == FillMode.Add ? StationsNative.FillAdd : 0) | (o.Exact ? StationsNative.FillExact : 0) |
                     (o.DryRun ? StationsNative.DryRun : 0) | (o.Water ? 0 : StationsNative.NoWater) |
-                    (o.UseStationOutputs || !Backend.HasOutputSources ? 0 : StationsNative.FillNoOutputs);
+                    (o.UseStationOutputs || !Backend.HasOutputSources ? 0 : StationsNative.FillNoOutputs) |
+                    (o.UseLinkedSources ? StationsNative.FillLinked : 0);
         var r = Request(station, StationsNative.Fill, flags);
         r.Crafts = (uint)o.Crafts;
         r.RecipeId = o.Recipe ?? 0;
@@ -1103,7 +1111,7 @@ internal static unsafe partial class StationsCore
         for (var i = 0; i < Math.Min(p.InputCount, (uint)StationsNative.MaxInputs); i++)
             inputs.Add(new FillInput(new ItemId(p.Inputs[i * 2]), (int)p.Inputs[i * 2 + 1], (int)p.Have[i], p.Stock[i])
             {
-                Chests = p.Chests[i], Outputs = p.Outputs[i],
+                Chests = p.Chests[i], Outputs = p.Outputs[i], Linked = p.Linked[i],
             });
         return new FillPlan(StatusOf(p.Status), new EntityId(p.Station), p.RecipeId, (int)p.CraftsLoaded, (int)p.CraftsAffordable,
             (int)p.CraftsPlanned, inputs, StationsNative.Text(p.Message, 128))
@@ -1166,6 +1174,7 @@ internal static unsafe partial class StationsCore
         {
             LimitedBy = LimitOf(r.LimitedBy), ShortItem = r.ShortItem != 0 ? new ItemId(r.ShortItem) : null,
             FromChests = (int)Math.Min(r.FromChests, int.MaxValue), FromOutputs = (int)Math.Min(r.FromOutputs, int.MaxValue),
+            FromLinked = (int)Math.Min(r.FromLinked, int.MaxValue),
         };
     }
 
@@ -1188,7 +1197,11 @@ internal static unsafe partial class StationsCore
     {
         try
         {
-            Complete((long)user, *r);
+            // an older kiln.stations' result is shorter (1240 bytes before 0.2.0-dev.31.12): copy what it says it has
+            var copy = default(StationsNative.Result);
+            var n = Math.Min(r->Size, (uint)sizeof(StationsNative.Result));
+            Buffer.MemoryCopy(r, &copy, sizeof(StationsNative.Result), n);
+            Complete((long)user, copy);
         }
         catch
         {

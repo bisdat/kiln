@@ -49,6 +49,7 @@ uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
 bool access_from_tx(void*,Access* out) { *out = {}; return fixture::server_storage; }
+bool access_from_tx_reads(void*,Access* out) { *out = {}; return fixture::server_storage; }
 bool setup_flags(const Access&,KilnEntity e,uint8_t* flags) { *flags = e <= 1023 ? 1 : 0; return fixture::inventory.count(e) != 0; }
 bool read_pages(const Access&,KilnEntity e,PageSet* out,bool* initialized) {
     *out = {}; *initialized = fixture::inventory.count(e) != 0;
@@ -115,7 +116,29 @@ int main() {
     CHECK(t_source_stock(1,0,stocks,2,&n)==KILN_OK && n==1 && stocks[0].item==7 && stocks[0].count==2);
     CHECK(t_source_stock(1,0,nullptr,0,&n)==KILN_ERR_BUFFER_TOO_SMALL && n==1);
     CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_ALL,stocks,2,&n)==KILN_OK && n==1 && stocks[0].count==2);
-    CHECK(t_source_stock(1,2,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_source_stock(1,16,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT); // 2 LOCKS (#147), 4 FILLS and 8 BUILDING (#132) since 0.2.0-dev.31.12
+    // GitHub #132: one purpose's rows count only the links opted into it; two purposes at once are refused
+    CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_OK && n==0);    // the link above: crafting only
+    CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS|KILN_CRAFT_SOURCE_STOCK_BUILDING,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_source_stock(1,uint32_t{KILN_CRAFT_SOURCE_STOCK_LOCKS}|KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
+    {
+        fixture::inventory[2001]={{7,4},{8,1}};fixture::inventory[2002]={{7,5}};
+        uint64_t fill_link=0,build_link=0,both=0;
+        KilnCraftSourceRequest f{sizeof f,1,2001,0,1,1,nullptr,KILN_CRAFT_SOURCE_FILLS,0};const KilnItemId seven=7;f.items=&seven; // allow 7
+        KilnCraftSourceRequest b{sizeof b,1,2002,1,0,0,nullptr,KILN_CRAFT_SOURCE_BUILDING,0};
+        KilnCraftSourceRequest fb{sizeof fb,1,2002,0,0,0,nullptr,KILN_CRAFT_SOURCE_FILLS|KILN_CRAFT_SOURCE_BUILDING,0};
+        CHECK(t_add_source(10,&f,&fill_link)==KILN_OK && t_add_source(10,&b,&build_link)==KILN_OK);
+        CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_OK && n==1 && stocks[0].item==7 && stocks[0].count==4);
+        CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_BUILDING,stocks,2,&n)==KILN_OK && n==1 && stocks[0].item==7 && stocks[0].count==5);
+        CHECK(t_add_source(10,&fb,&both)==KILN_OK);
+        CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_OK && n==1 && stocks[0].count==9); // 2002 counted once
+        infos[0x9d]=0; // no CanAccessInventories: nothing counts
+        CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_OK && n==0);
+        infos[0x9d]=2;
+        t_remove_source(10,fill_link);t_remove_source(10,build_link);t_remove_source(10,both);
+        CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_BUILDING,stocks,2,&n)==KILN_OK && n==0);
+        fixture::inventory.erase(2001);fixture::inventory.erase(2002);
+    }
     KilnWorldApi world{};world.position=&position;g_w=&world;
     fixture::in_base=true;uint32_t base_chest=2000;
     G.stock_items=0x20;G.stock_items_count=0x28;G.stock_water=0x30;G.stock_water_count=0x38;G.aabb_y=0x80;G.zone_mask_rel=0x20;
@@ -168,6 +191,34 @@ int main() {
     reset();fixture::fail_take=true;
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==4); // caller must rollback this transaction
     fixture::fail_take=false;
+    // ---- GitHub #132 (0.2.0-dev.31.12): a block placement (ApplyMaterials' take in the blueprint program, t_build_pay set
+    // by hk_build_apply) pays from the player's building links only, bag and base first, all or nothing ----
+    {
+        auto said=[&](const char* s) { for (const auto& l : logs) if (l.find(s) != std::string::npos) return true; return false; };
+        g_build.paid=0x5678;reset();logs.clear();
+        t_build_pay=true;  // only the crafting link (container 2000) exists: a placement never takes from it
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        uint64_t bl=0;KilnCraftSourceRequest b{sizeof b,1,2000,0,0,0,nullptr,KILN_CRAFT_SOURCE_BUILDING,0};
+        CHECK(t_add_source(10,&b,&bl)==KILN_OK && bl);
+        t_build_pay=false;reset();  // ApplyMaterials' take outside the blueprint program (props, impact natives): the game's
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        t_build_pay=true;reset();
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==1 && code==0 && fixture::paid==std::vector<uint32_t>({1,2000}));
+        CHECK(said("a block placement paid 2 from additional crafting sources"));
+        reset();fixture::inventory[2000][7]=1;  // bag 1 + link 1 < 3: left to the game (it refuses), nothing taken
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        CHECK(said("a block placement left to the game"));
+        reset();fixture::fail_take=true;  // a take faulted after another: 4, ApplyMaterials fails and the transaction rolls back
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==1 && code==4);
+        fixture::fail_take=false;
+        reset();infos[0x9d]=0;  // no CanAccessInventories: the link is not a source
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        infos[0x9d]=2;
+        reset();CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);  // a craft still uses it (every link crafts)
+        t_build_pay=false;g_build.paid=0;reset();
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());  // no building symbols: never
+        t_remove_source(10,bl);reset();
+    }
     // #132: a craft at a crafting station (the decoration table's menu sends the same CraftRecipe; kiln.gameplay's craft
     // hook names the station for the call) pays from the player's linked source the same way, all or nothing
     reset();t_craft_station=3000;

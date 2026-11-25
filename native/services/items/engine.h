@@ -346,6 +346,10 @@ uint32_t read_slots(const Access& a, KilnEntity e, KilnItemsSlot* out, uint32_t 
 // game's own): the accessors are words of the transaction (docs/re/items.md section 3). Checks them once against the
 // world's component map; false when they do not hold (the hooks then do nothing but pass through).
 bool access_from_tx(void* tx, Access* a);
+// GitHub #147: the reads of a server-world transaction whose program declares no Fuel (interaction_attempt's lock
+// payment): ctx, items and the InventorySetup / Inventory accessors, checked against the registry, the server world only.
+// The other accessors are copied as the transaction holds them (0 when it has none). For read_pages / setup_flags only.
+bool access_from_tx_reads(void* tx, Access* a);
 
 // Runs a move request inside the program update: validates, builds a transaction, moves, commits (or rolls back for
 // a dry run), and fills the result including the ledger. Guarded: false on a fault.
