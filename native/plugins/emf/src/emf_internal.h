@@ -21,6 +21,9 @@
 //   api_v40.cpp   v28-v49: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
+//   api_buffs.cpp v32 buffs: kiln.playerstate reads, the BuffRegistry's types, kiln.abilities programs that run the
+//                 game's applyBuff / removeBuff, kiln.content texts (buffs_model.* without the game)
+//   api_view.cpp  v35 player_view through kiln.client and kiln.render; fog_at, map_markers, canvases answer "not yet"
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
 //   seh.cpp       structured-exception guards around every call into a mod
 // Docs: docs/kiln/emf.md (users), docs/re/emf-compat.md (how each function maps onto Kiln).
@@ -326,6 +329,13 @@ bool events_relay_registered(const char* name);
 void hits_on_ready(bool any_mod_loaded);
 void hits_after_ready();
 void fill_hits(EmfApi* t);  // after fill_v40: on_hit (on_hit_before and the hit rules stay in api_v40.cpp)
+// v32 buffs (api_buffs.cpp, since 0.2.0-dev.31.13): kiln.playerstate reads, kiln.abilities programs for giving and
+// removing, the players' buff events; v35 player_view (api_view.cpp). Both after fill_v40.
+void fill_buffs(EmfApi* t);
+void fill_view(EmfApi* t);  // player_view; fog_at, map_markers and the canvases answer "not yet" there
+void buffs_server_pre();                           // starts queued gives and removals (the server world's Pre)
+void buffs_after_step(EmfWorld* w, uint8_t kind);  // server: answers, on_buff; client: texts, the view's copy
+void buffs_world_stopping();                       // the server world's: waiting requests are refused at the next Post
 // a posted task that runs `f` on the server world's tick thread (Pre of the next step); false when it was not queued
 bool post_tick(std::function<void()> f);
 // kiln.ui v2 slots (a core with an older kiln.ui ends its table above them)

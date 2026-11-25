@@ -209,6 +209,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     net_world_stopping(static_cast<uint8_t>(e->kind));
     if (e->kind == KILN_WORLD_SERVER) {
         terrain_world_stopping();
+        buffs_world_stopping();
         events_world_stopping();
         components_world_stopping();
     }
@@ -328,6 +329,8 @@ void dispatch_server_pre() {
     g_pre_parts.begin(qpc_ns());
     terrain_server_pre();
     g_pre_parts.part("blocks", qpc_ns());
+    buffs_server_pre();
+    g_pre_parts.part("buffs", qpc_ns());
     net_server_pre();
     g_pre_parts.part("net", qpc_ns());
     game_server_pre(&g_pre_parts);

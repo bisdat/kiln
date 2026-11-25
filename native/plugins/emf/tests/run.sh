@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers and v31 on_hit (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers, v31 on_hit, v32 buffs and v35 player_view (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -44,6 +44,14 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     "$here/hits_test.cpp" "$here/../src/api_hits.cpp" "$here/../src/hits_model.cpp" "$here/../src/api_events.cpp" \
     -o "$out/hits_test"
 for mode in "" no-mods no-relay mod-event bad-layout bad-size; do "$out/hits_test" $mode; done
+# v32 buffs and v35 player_view (0.2.0-dev.31.13): the production adapters with fake services; the two Impact programs
+# through kiln.abilities' own verifier
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -D__fastcall= \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    -I"$here/../../../services/abilities" \
+    "$here/buffs_test.cpp" "$here/../src/buffs_model.cpp" "$here/../src/api_buffs.cpp" "$here/../src/api_view.cpp" \
+    "$here/../src/api_v40.cpp" "$here/../src/api_terrain.cpp" "$here/../../../services/abilities/verify.cpp" -o "$out/buffs_test"
+for mode in "" client server; do "$out/buffs_test" $mode; done
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -DKEMF_NET_CLIENT_TEST \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/net_test.cpp" "$here/../src/api_net.cpp" "$here/../src/api_net_client.cpp" \

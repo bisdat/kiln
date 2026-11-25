@@ -163,19 +163,26 @@ Kiln does not carry every function EMF added since. Carried: chat lines without 
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
 since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the server applies to a creature, player
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
-Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
-language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
-and villager moves. A mod that calls one of those gets
+Kiln yet, and the mod's log says so once) and, since 0.2.0-dev.31.13, buffs (`buff_types`, `buff_type`, `buff_text`,
+`buffs_of`, `buff_apply`, `buff_remove`, `on_buff`; Lua `emf.buffs`, `emf.apply_buff`, `emf.remove_buff` and the rest:
+giving and removing run the game's own buff natives, so the effect, the HUD icon and saving are the game's; a give with
+an `item` is refused) and `player_view` (the local player's position, heading and camera direction). Not yet: player
+join/leave/death events, item names and the game's language, character names, changing hits (`on_hit_before`, hit
+rules), markers, map clicks and map actions, canvases and the rest of the minimap's parts (`fog_at`, `map_markers`),
+`remove_building`, paths, doors, enemy orders and move orders, a player's game permissions and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
 
 What that means for EMF's own mods of 0.6.8, read from their source (not seen with a player):
-- **minimap** draws nothing (`emf.canvas`, `emf.player_view` and `emf.map_markers` are not carried).
-- **Beastmaster**: its markers sent to players (`emf.send_marker`), its buff reads and removals (`emf.buffs`,
-  `emf.remove_buff`) and its reads of `emf.player_view` and `emf.enemy_moving` give nothing; the rest runs as
-  before.
+- **minimap** draws nothing (`emf.canvas`, `emf.fog_at` and `emf.map_markers` are not carried; `emf.player_view` is
+  since 0.2.0-dev.31.13).
+- **Beastmaster** (1.22.0): since 0.2.0-dev.31.13 a tamed beast loses its debuffs (`emf.buffs` lists them,
+  `emf.remove_buff` takes each one off through the game's own removeBuff, so a player's bleed no longer kills the wolf
+  once its guard ends), and `beastmaster.spawn` puts the beast 5 m in the camera's direction (`emf.player_view`; on
+  the host's console thread from the server world's copy of the host's player). Its markers sent to players
+  (`emf.send_marker`) and its reads of `emf.enemy_moving` still give nothing; the rest runs as before. Not seen in a
+  live game yet.
 - **teleports**: the map action (Shift and hold on the map) is not offered and it cannot look the ground up for a
   spot (`map_action`, `ground_at`); its commands work as before.
 
