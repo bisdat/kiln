@@ -35,6 +35,7 @@ been seen in a game.
 | dev.31.2 | 0.2.18 | dev.31.2 | Creative effects (Kiln.Rules: `Creative.SetEffect`, `Creative.Effects`, `CreativeEffectState`; each creative effect is its own toggle in F7, `/creative effect` and Kiln.Admin); runtime: `Items.GiveEquip` puts Arrow/Spell/FishingBait in a verified Generic backpack cell (#139); kiln-emf admits EmfApi v49 next to v48, `path_find` / `enemy_move` still refuse (#141); launcher: account-free unlisted Crucible shares, Deck local `.kilnpack` export, native preview against the installed runtime, Kiln Web Admin panel |
 | dev.31.3 | 0.2.18 | dev.31.2 | runtime and tools (the default `emf` component ships EMF 0.6.22's unmodified Lua host 1.43.0, used only when an enabled EMF Lua script needs it; `kiln new` installs missing templates on .NET SDKs with the newer "no templates were found" message; Korean translation review (#143)) |
 | dev.31.4 | 0.2.18 | dev.31.2 | launcher only (Crucible "Got a code" without a loaded profile; Settings creates an empty local profile; `profile::create` skips IDs of known games' rootless game pointers) |
+| dev.31.5 | 0.2.18 | dev.31.2 | runtime and launcher (`Abilities.UseItem` covers the repair kit and pays the item's own costs: scrolls and mana grenades take their ManaCost, C flag `KILN_ITEM_USE_COST_ITEM` in `KilnItemUse.flags` (#118); kiln:// and nxm:// links that start the launcher reach its window, warm starts hand over once) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 
