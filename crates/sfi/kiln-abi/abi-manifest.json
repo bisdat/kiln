@@ -1353,6 +1353,39 @@
       },
       "sha256": "bb42fe79f184b04de9069b1cd85eef4c7a7cdb4318fb67e4a9041290f9999b10"
     },
+    "native/core/abi/services/kiln_client_crosshair.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnClientCrosshairApi": {
+          "align": 8,
+          "fields": {
+            "get": 8,
+            "header": 0
+          },
+          "size": 16
+        },
+        "KilnCrosshairHit": {
+          "align": 8,
+          "fields": {
+            "age_ns": 40,
+            "client_session": 20,
+            "client_step": 32,
+            "distance": 84,
+            "entity": 12,
+            "flags": 4,
+            "material": 16,
+            "normal": 72,
+            "position": 48,
+            "sequence": 24,
+            "size": 0,
+            "status": 8
+          },
+          "size": 88
+        }
+      },
+      "sha256": "4d66a80efe76fd7f696c925765e5c44ff4acc7f709ecf202198f71d05e679201"
+    },
     "native/core/abi/services/kiln_combat.h": {
       "function_macros": [
         "KILN_COMBAT_MASK"
@@ -10067,7 +10100,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
+    "src/layout.rs": "ce18f3b6987337f0ff61488131fc5117c1fd9f6e1a2f5571f4c0273d3116438a",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10080,6 +10113,7 @@
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
     "src/services/kiln_chat.rs": "79e3b08c8c6678ece24cdbfd1cc62011acf5501a5185f4b323db61e459c0b4e7",
     "src/services/kiln_client.rs": "76d3a26b8c1dce6a03621ce0d2f10392113fda59a2ac83a5d837939641e73b13",
+    "src/services/kiln_client_crosshair.rs": "09a1563a385122b9a6c5952bc016876c03c4c72a31fe41ef76ccff8702a27dda",
     "src/services/kiln_combat.rs": "9169650eb5d67472f057e80219789229e51a5d7e17435b5d39af0434c8880006",
     "src/services/kiln_component_changes.rs": "91d043f6b4257e141af61bc4659fcb8a5d3be65dbcdfac9d338dc9910f108288",
     "src/services/kiln_content.rs": "eb97a1555b61b1f3cb2c23f0b6b9736404b7bc551eb03b2a15a29b19428ba0fb",
@@ -10148,7 +10182,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "faf70c692377d7bd36ae08a7ab1eb90d0089077ec0352ed5a9867442fe453e6b"
+    "src/services/mod.rs": "befbff5feffe424cbeab50b59db3bdd96a377155a3c68ed6df113566fe88bfac"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
