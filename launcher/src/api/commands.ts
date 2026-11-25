@@ -2464,7 +2464,7 @@ export const COMMANDS = [
   "community_settings_get", "community_settings_set", "community_status", "community_feed", "community_check_member", "community_signout", "community_signin_start", "community_signin_poll", "community_signin_cancel",
   "community_posts", "community_post_seen", "community_post_solved", "community_post_delete", "community_presence_facts", "community_report_prepare", "community_report_send",
   "tester_status", "tester_join", "tester_leave", "tester_result_set", "tester_results_send", "community_steam_keyboard",
-  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
+  "pack_inspect", "pack_install", "pack_instance", "pack_instances", "pack_lacking", "pack_update_plan", "pack_update", "pack_undo", "pack_uninstall", "pack_build", "pack_verify", "pack_diff", "pack_secret_scan", "pack_peek_format", "pack_local_files", "pack_local_write", "pack_local_save", "pack_check", "crucible_status", "crucible_open", "crucible_install", "crucible_updates", "crucible_update_plan", "crucible_update", "crucible_repair", "crucible_share", "crucible_shared", "crucible_trust", "crucible_trust_set", "crucible_links", "crucible_resume", "crucible_clipboard",
   "studio_list", "studio_create", "studio_get", "studio_save", "studio_delete", "studio_credits_set", "studio_capture", "studio_capture_set", "studio_order", "studio_layer_files", "studio_layer_read", "studio_layer_write", "studio_layer_delete", "studio_layer_set", "studio_layer_lint", "studio_pick", "studio_fields", "studio_categories", "studio_catalog_status", "studio_catalog_ensure", "studio_analyze", "studio_test", "studio_test_report", "studio_test_end", "studio_build", "studio_publish_check", "studio_publish", "studio_set_visibility", "studio_server_pack",
   // the check before Play and the restore's BASE
   "launch_prepare", "launch_confirm", "launch_cancel", "eml_data_base",
@@ -2771,6 +2771,30 @@ export interface PackLocalFile { path: string; text: string }
 export interface PackPreview {
   index: PackIndex; sha256: string; size: number; missing: LibraryRef[]; present: LibraryRef[]; code: string[];
   optional: Record<string, boolean>; instance?: string | null;
+  /** What that instance's profile loads from its installed version and the Library lacks (absent without an instance). */
+  repair?: PackLacking | null;
+  /** This file is the instance's installed version: crucibleRepair can take the missing mods from it. */
+  installedVersion?: boolean;
+}
+/** What a pack profile loads from its installed version and the Library lacks ("Download missing mods"): an optional mod
+ *  switched off, a mod the player took out or swapped and a server-only mod are not missing. */
+export interface PackLacking {
+  /** The installed version. */
+  version: string;
+  /** The mods (and the layer, "pack.<id>") to get back. */
+  missing: LibraryRef[];
+  /** Their names, in the order of `missing`. */
+  names: string[];
+  /** Bytes to download (from Crucible). */
+  download: number;
+}
+/** What "Download missing mods" did (crucible_repair's task result). The profile, the instance and its version stay. */
+export interface PackRepairResult {
+  profile: ProfileId; version: string; imported: LibraryRef[];
+  /** Bytes downloaded (0 from a file or the cache). */
+  downloaded: number;
+  /** Still missing (a Library entry edited in place). */
+  left: LibraryRef[];
 }
 /** Local paths only. */
 export type PackSource = { path: string; sha256?: string };
@@ -2832,6 +2856,9 @@ export interface CruciblePreview {
   optional: Record<string, boolean>;
   /** Profile id of an installed instance of this pack (the preview offers Update instead). */
   instance: string | null;
+  /** What that instance's profile loads from its installed version and the Library lacks (absent without an instance;
+   *  `missing` and `download` above are of the version shown, for a new install). */
+  repair?: PackLacking | null;
   /** A yellow note when !fits. */
   game: { builds: number[]; current: number | null; fits: boolean };
   /** Red, blocks the install, when !ok. */
@@ -2906,6 +2933,10 @@ export const crucibleUpdates = (gameId: GameId, force = false) => call<CrucibleU
 export const crucibleUpdatePlan = (profileId: ProfileId) => call<CrucibleUpdatePlan>("crucible_update_plan", { profileId });
 /** Error `conflict` with the PackUpdatePlan in `detail` while a conflict has no choice. */
 export const crucibleUpdate = (gameId: GameId, request: CrucibleUpdateRequest) => call<TaskId>("crucible_update", { gameId, request });
+/** "Download missing mods" of a pack profile (a task; result PackRepairResult): from Crucible, or for a pack installed
+ *  from a file from `path`, the file of its installed version. Writes only the Library: nothing is loaded or started,
+ *  allowed while the game runs. */
+export const crucibleRepair = (gameId: GameId | null, request: { profile: ProfileId; path?: string }) => call<TaskId>("crucible_repair", { gameId, request });
 /** Error `auth_failed` when not signed in. */
 export const crucibleShare = (request: CrucibleShareRequest, gameId?: GameId | null) => call<TaskId>("crucible_share", { request, gameId: gameId ?? null });
 export const crucibleShared = (profileId: ProfileId) => call<CrucibleShared | null>("crucible_shared", { profileId });
@@ -2927,6 +2958,9 @@ export const packLocalSave = (profileId: ProfileId) => call<Profile>("pack_local
 export const packCheck = (path: string) => call<PackCheckReport>("pack_check", { path });
 export const packInstance = (profileId: ProfileId) => call<PackInstance | null>("pack_instance", { profileId });
 export const packInstances = () => call<[ProfileId, PackInstance][]>("pack_instances");
+/** What a pack profile loads from its installed version and the Library lacks (nothing downloaded; reads the
+ *  Library's records and its cheap changed check, no full hash of the pack's mods). */
+export const packLacking = (profileId: ProfileId) => call<PackLacking>("pack_lacking", { profileId });
 export const packUndo = (profileId: ProfileId) => call<Profile>("pack_undo", { profileId });
 export const packUninstall = (profileId: ProfileId) => call<{ profile: Profile; unused: LibraryRef[] }>("pack_uninstall", { profileId });
 /** "Save as file": a .kilnpack of a profile into a folder. */
