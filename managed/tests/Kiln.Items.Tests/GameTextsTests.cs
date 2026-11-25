@@ -162,6 +162,41 @@ public sealed class GameTextsTests : IDisposable
         Assert.Null(GameTextData.Table(new byte[4], L));
     }
 
+    [Fact]
+    public void A_layout_whose_id_or_language_leaves_its_row_reads_nothing_and_never_throws()
+    {
+        // review 31.13: Valid checked the string and data fields against the stride, not the tag id or the language value
+        Assert.False((L with { TagId = 22 }).Valid);
+        Assert.False((L with { LanguageValue = 38 }).Valid);
+        // the readers on their own: the last row's id read past the blob is no table, never an exception (Content.TextIn,
+        // Content.TextLanguages and GameTextStore.Resolve read the collection on the caller's thread)
+        var table = new byte[8 + 24];
+        BinaryPrimitives.WriteInt32LittleEndian(table, 8);
+        BinaryPrimitives.WriteUInt32LittleEndian(table.AsSpan(4), 1);
+        Assert.Null(GameTextData.Table(table, L with { TagId = 22 }));
+        var collection = new byte[0x20 + 8 + 40];
+        BinaryPrimitives.WriteInt32LittleEndian(collection.AsSpan(0x20), 8);
+        BinaryPrimitives.WriteUInt32LittleEndian(collection.AsSpan(0x24), 1);
+        Assert.Null(GameTextData.Languages(collection, L with { LanguageValue = 38 }));
+    }
+
+    [Fact]
+    public void A_text_longer_than_the_limit_is_left_out_and_the_others_stay()
+    {
+        // GameTextData.MaxTextBytes says "longer ones are left out, never cut": one long text in the blob must not take the
+        // whole language away (review 31.13)
+        var t = new TestBlob(8);
+        var rows = t.Array(0, 2, L.TagStride);
+        t.U32(rows, 7);
+        t.String(rows + L.TagText, "Holzscheite");
+        t.U32(rows + L.TagStride, 8);
+        t.Raw(rows + L.TagStride + L.TagText, Enumerable.Repeat((byte)'a', GameTextData.MaxTextBytes + 1).ToArray());
+        var table = GameTextData.Table(t.Done, L)!;
+        Assert.NotNull(table);
+        Assert.Equal("Holzscheite", table[7]);
+        Assert.False(table.ContainsKey(8));
+    }
+
     // ---- the store -------------------------------------------------------------------------------------------------
 
     [Fact]

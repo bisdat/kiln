@@ -111,6 +111,13 @@ public sealed class VoxelMaterialsTests : IDisposable
         Assert.Equal(new VoxelMaterialLayout(0, 184, 0, 4, 0x14, 0x18, 0x1c, 8, 180, 0, 4, 0x14, 0x18, 0x1c, 0, 0x820, 0x104 + 0x33c, 0, 4, 0x14, 0x1c), L);
         Assert.True(L.Valid);
         Assert.False((L with { TerrainRate = 184 }).Valid);
+        // review 31.13: the material id bytes and the item's isBuildingVoxel byte must fit too (they were read unchecked)
+        Assert.False((L with { TerrainId = 184 }).Valid);
+        Assert.False((L with { BuildingId = 180 }).Valid);
+        Assert.False((L with { VoxelIsBuilding = 0x40 }).Valid);
+        var item = new byte[L.ItemVoxel + 0x20];
+        item[L.ItemVoxel + L.VoxelGuid] = 1;                                   // a material GUID, so the flag byte is read
+        Assert.Null(VoxelMaterialData.ParsePlacer(item, L with { VoxelIsBuilding = 0x40 }, true));
     }
 
     [Fact]
