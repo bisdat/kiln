@@ -1230,6 +1230,148 @@ mod safety_tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(windows)]
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(sd: *const core::ffi::c_void, revision: u32, information: u32, text: *mut *mut u16, len: *mut u32) -> i32;
+        fn ConvertSidToStringSidW(sid: *const core::ffi::c_void, text: *mut *mut u16) -> i32;
+    }
+
+    /// Text Windows allocated (LocalFree), as a String.
+    #[cfg(windows)]
+    unsafe fn local_text(text: *mut u16) -> String {
+        // SAFETY: a NUL-terminated string the system allocated, freed here.
+        unsafe {
+            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            windows_sys::Win32::Foundation::LocalFree(text.cast());
+            s
+        }
+    }
+
+    /// This process's user SID as text (`S-1-5-21-...`).
+    #[cfg(windows)]
+    fn user_sid() -> String {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        // SAFETY: a buffer sized by the size query, the token handle closed before returning.
+        unsafe {
+            let mut token: HANDLE = std::ptr::null_mut();
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token), 0);
+            let mut needed = 0;
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            let mut user = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetTokenInformation(token, TokenUser, user.as_mut_ptr().cast(), needed, &mut needed), 0);
+            CloseHandle(token);
+            let mut text = std::ptr::null_mut();
+            assert_ne!(ConvertSidToStringSidW((*(user.as_ptr() as *const TOKEN_USER)).User.Sid, &mut text), 0);
+            local_text(text)
+        }
+    }
+
+    /// `path`'s owner, group and access list, in a buffer for the security calls.
+    #[cfg(windows)]
+    fn security_of(path: &Path) -> Vec<usize> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GetFileSecurityW, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let information = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        // SAFETY: NUL-terminated name, a buffer sized by the size query.
+        unsafe {
+            let mut needed = 0;
+            GetFileSecurityW(name.as_ptr(), information, std::ptr::null_mut(), 0, &mut needed);
+            let mut sd = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetFileSecurityW(name.as_ptr(), information, sd.as_mut_ptr().cast(), needed, &mut needed), 0, "{}", path.display());
+            sd
+        }
+    }
+
+    /// `path`'s access list in SDDL (`D:P(A;OICI;FA;;;SY)...`).
+    #[cfg(windows)]
+    fn dacl_sddl(path: &Path) -> String {
+        let sd = security_of(path);
+        let mut text = std::ptr::null_mut();
+        // SAFETY: a security descriptor GetFileSecurityW filled; the text is freed by local_text.
+        unsafe {
+            assert_ne!(ConvertSecurityDescriptorToStringSecurityDescriptorW(sd.as_ptr().cast(), 1, windows_sys::Win32::Security::DACL_SECURITY_INFORMATION, &mut text, std::ptr::null_mut()), 0);
+            local_text(text)
+        }
+    }
+
+    /// Whether a start of this user WITHOUT elevation may read and write `path`: Windows' own access check with this
+    /// process's token restricted the way a start without elevation has it (BUILTIN\Administrators for deny only). Run
+    /// elevated (as the win1 runner is), this tells what a later normal start can do with what an elevated one made.
+    #[cfg(windows)]
+    fn usable_without_elevation(path: &Path) -> bool {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{AccessCheck, CreateRestrictedToken, CreateWellKnownSid, DuplicateToken, GENERIC_MAPPING, MapGenericMask,
+            SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
+        use windows_sys::Win32::Storage::FileSystem::{FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut sd = security_of(path);
+        // SAFETY: buffers of the documented sizes; every handle is closed before returning.
+        unsafe {
+            let mut admins = vec![0usize; (SECURITY_MAX_SID_SIZE as usize).div_ceil(std::mem::size_of::<usize>())];
+            let mut size = SECURITY_MAX_SID_SIZE;
+            assert_ne!(CreateWellKnownSid(WinBuiltinAdministratorsSid, std::ptr::null_mut(), admins.as_mut_ptr().cast(), &mut size), 0);
+            let (mut token, mut restricted, mut client): (HANDLE, HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &mut token), 0);
+            let deny_only = SID_AND_ATTRIBUTES { Sid: admins.as_mut_ptr().cast(), Attributes: 0 };
+            assert_ne!(CreateRestrictedToken(token, 0, 1, &deny_only, 0, std::ptr::null(), 0, std::ptr::null(), &mut restricted), 0);
+            assert_ne!(DuplicateToken(restricted, SecurityImpersonation, &mut client), 0);
+            let mapping = GENERIC_MAPPING { GenericRead: FILE_GENERIC_READ, GenericWrite: FILE_GENERIC_WRITE, GenericExecute: FILE_GENERIC_EXECUTE, GenericAll: FILE_ALL_ACCESS };
+            let mut want = FILE_GENERIC_READ | FILE_GENERIC_WRITE;
+            MapGenericMask(&mut want, &mapping);
+            let mut privileges = [0usize; 64];
+            let mut privileges_len = std::mem::size_of_val(&privileges) as u32;
+            let (mut granted, mut status) = (0u32, 0);
+            let ok = AccessCheck(sd.as_mut_ptr().cast(), client, want, &mapping, privileges.as_mut_ptr().cast(), &mut privileges_len, &mut granted, &mut status);
+            let error = std::io::Error::last_os_error();
+            CloseHandle(client); CloseHandle(restricted); CloseHandle(token);
+            assert_ne!(ok, 0, "access check on {}: {error}", path.display());
+            status != 0 && granted & want == want
+        }
+    }
+
+    /// A launcher started as administrator writes its Nexus records as BUILTIN\Administrators (the elevated token's
+    /// default owner). A later start of the same player without elevation must still read and replace them, as it does
+    /// the folder and its locks; and nobody else is let in: the folder's protected access list names only the user and
+    /// SYSTEM.
+    #[cfg(windows)]
+    #[test]
+    fn what_an_elevated_start_writes_stays_usable_without_elevation_and_private() {
+        let root = temp();
+        let state = root.join("state");
+        private_dir_inner(&state).unwrap();
+        drop(open_lock(&state, "test.lock").unwrap());
+        let inbox = state.join("inbox");
+        private_dir_inner(&inbox).unwrap();
+        let record = state.join("record.json");
+        let link = inbox.join("0000000000001-00000000.json");
+        for p in [&record, &link] {
+            if crate::nexus::enabled() {
+                crate::nexus::keystore::write_private(p, &serde_json::json!({ "url": "nxm://enshrouded/mods/1/files/2" })).unwrap();
+            } else {
+                std::fs::write(p, b"{}").unwrap(); // as write_private makes it: a new file in the folder
+            }
+        }
+        for p in [&state, &state.join("test.lock"), &inbox, &record, &link] {
+            assert!(usable_without_elevation(p), "a start without elevation cannot use {}: {}", p.display(), dacl_sddl(p));
+        }
+        let user = user_sid();
+        for dir in [&state, &inbox] {
+            let sddl = dacl_sddl(dir);
+            assert!(sddl.starts_with("D:P"), "protected, nothing inherited: {sddl}");
+            for ace in sddl.split('(').skip(1) {
+                let ace = ace.trim_end_matches(')');
+                let sid = ace.rsplit(';').next().unwrap();
+                assert!(ace.starts_with("A;") && (sid == user || sid == "SY" || sid == "OW"), "only the user and SYSTEM: {sddl}");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn registration_is_serialized_and_does_not_override_a_later_choice() {
         let root = temp();
