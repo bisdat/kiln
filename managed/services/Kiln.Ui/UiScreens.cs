@@ -116,10 +116,10 @@ public sealed class UiScreen : IDisposable
     public void Open()
     {
         if (Disposed || _open || UiNative.DrawingOffReason != null) return;
+        Placer.Opened();  // before _open: the render thread's first frame of this open is always its appearing one
         _open = true;
         OpenedAt = Interlocked.Increment(ref UiEngine.ScreenOrder);
         FocusNext = true;
-        Placer.Opened();
         UiEngine.Recount();
         if (Opened is { } o) UiModCalls.Invoke(Owner, static a => a(), o, "screen Opened");
     }
@@ -173,7 +173,7 @@ public sealed class UiScreen : IDisposable
     }
 
     /// <summary>Where the screen was drawn last (fractions of the viewport, sizes at UI scale 1); null before its first
-    /// frame. Kept while it is closed. Hand it to another mod (<c>Mods.Send</c>) to open a screen beside this one. Any
+    /// frame, and always for a <see cref="UiScreenOptions.FullScreen"/> screen (it is not placed). Kept while it is closed. Hand it to another mod (<c>Mods.Send</c>) to open a screen beside this one. Any
     /// thread.</summary>
     /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
     [AnyThread]

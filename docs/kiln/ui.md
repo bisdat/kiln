@@ -202,7 +202,7 @@ player put it (GitHub issue 146). The same units as `UiWindowOptions.Position` a
 | `UiScreenOptions.Position` | where the screen's centre opens; null (the default) = the middle, as before. Applied each time it opens |
 | `UiScreen.MoveTo(x, y, pivotX = 0.5f, pivotY = 0.5f)`, `UiWindow.MoveTo(...)` | puts the pivot point at (x, y), once |
 | `UiScreen.Resize(width, height)`, `UiWindow.Resize(...)` | sets the size, once; a resize alone keeps the top left corner |
-| `UiScreen.Placement`, `UiWindow.Placement` | a `UiPlacement` (`X`, `Y` = the centre, `Width`, `Height`, `Left`, `Top`, `Right`, `Bottom`): where it was drawn last; null before its first frame, kept while it is closed |
+| `UiScreen.Placement`, `UiWindow.Placement` | a `UiPlacement` (`X`, `Y` = the centre, `Width`, `Height`, `Left`, `Top`, `Right`, `Bottom`): where it was drawn last; null before its first frame (always for a `FullScreen` screen), kept while it is closed |
 | `UiScreenOptions.RememberPlacement`, `UiWindowOptions.RememberPlacement` | Kiln keeps where the player left it, across opens and game starts |
 | `UiScreenOptions.PlacementId`, `UiWindowOptions.PlacementId` | the id it is remembered under, unique among your mod's screens (or windows); null = the title (a screen's in English) |
 
@@ -217,21 +217,23 @@ player put it (GitHub issue 146). The same units as `UiWindowOptions.Position` a
   (`Position`, `Width`, `Height`). A remembered placement is applied whenever the screen or window appears; a window's
   options still apply with `FirstUseEver`, as before, while nothing is remembered.
 - **Kept on the screen.** Kiln keeps the whole rect inside the current viewport when it places by a position (the option,
-  a remembered placement, `MoveTo`; a window whose size is not known yet: its pivot point), and caps every size it sets at
-  the viewport, so a screen saved on a bigger monitor or at another resolution cannot open off-screen. ImGui's own
+  a remembered placement, `MoveTo`; a window whose size is not known yet: its pivot point), and caps a size from
+  `Resize` or a remembered placement at the viewport, so a screen saved on a bigger monitor or at another resolution
+  cannot open off-screen (`Width` and `Height` themselves are used as given, as before). ImGui's own
   minimum window size and any size constraints still apply on top (they are applied inside `Begin`). Without
   `Position` or a remembered placement a screen opens centred at its size, exactly as before 0.2.0-dev.31.11.
 - **Remembered sizes** apply only where the player can resize: a `Resizable` screen, a window that is not `AutoResize`.
   The position applies to every remembering screen and window.
 - **Where it is kept.** `ui-placement.json` in Kiln's config folder, beside `keybinds.json` (the active profile's config
   folder when the launcher runs one, else `kiln/config`), per mod id, then `screens` or `windows`, then the id: `x`, `y`
-  (the centre, fractions) and `width`, `height` (pixels at UI scale 1). Kiln writes it about a second after the player
-  stops moving a window, and at once when the mod unloads (also when the game quits and unloads every mod), as a whole
-  new file put in place. A file that is not JSON is kept aside as
+  (the centre, fractions) and `width`, `height` (pixels at UI scale 1). Kiln writes it about a second after a change (at
+  most once a second while the player drags a window), and at once when the mod unloads (also when the game quits and
+  unloads every mod), as a whole new file put in place; a write that fails is tried again at the next of these. A file that is not JSON is kept aside as
   `ui-placement.json.bad` with a warning in the log, and every screen and window starts from its options; an entry that
   is not a placement (a missing or non-number field, a size of 0 or less) is skipped; a key given twice counts once (the
   last one). A file Kiln cannot read (locked by another program, no permission) is left as it is for that game start,
-  with a warning. Delete an entry, or the file, to forget it.
+  with a warning; so is a file a newer Kiln wrote (a higher `version`, after going back from a beta), whose placements
+  Kiln still uses as far as it reads them. Delete an entry, or the file, to forget it.
 
 Grimoire (F3) opening beside Better Spells (Shift+F3) when both are loaded:
 ```csharp

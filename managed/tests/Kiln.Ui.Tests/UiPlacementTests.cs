@@ -550,6 +550,47 @@ public sealed unsafe class UiPlacementTests : IDisposable
     }
 
     [Fact]
+    public void A_write_that_fails_is_tried_again_at_the_next_flush()
+    {
+        // the write fails once (here a folder where the temp file goes; in a game a virus scanner or a sync tool holding the
+        // file for a moment): the placement stays to be written, so the next flush (the next change, a mod's unload, the
+        // game's quit) still saves it
+        Directory.CreateDirectory(PlacementFile + ".tmp");
+        UiPlacements.Put("grimoire", window: false, "Grimoire", new UiPlacements.Entry(0.3f, 0.4f, 500, 400));
+        UiPlacements.Flush();
+        Assert.False(File.Exists(PlacementFile));
+        Assert.Contains(_backend.Logs, l => l.StartsWith("Warn", StringComparison.Ordinal) && l.Contains("ui-placement.json", StringComparison.Ordinal));
+        Directory.Delete(PlacementFile + ".tmp");
+        UiPlacements.Flush();
+        Assert.True(File.Exists(PlacementFile));
+        UiPlacements.ResetForTests();
+        Assert.Equal(new UiPlacements.Entry(0.3f, 0.4f, 500, 400), UiPlacements.Get("grimoire", window: false, "Grimoire"));
+    }
+
+    [Fact]
+    public void A_file_a_newer_Kiln_wrote_is_read_and_left_as_it_is()
+    {
+        // the player went back from a newer Kiln (the beta channel) whose file has a version this one does not know: what
+        // this one can read is used, and the file, with what only the newer Kiln reads, is not written over this start
+        const string json = """{"version": 2, "mods": {"grimoire": {"screens": {"Grimoire": {"x": 0.25, "y": 0.5, "width": 600, "height": 400, "monitor": 1}}}}, "layouts": {}}""";
+        Write(json);
+        var s = Screen(new UiScreenOptions { DimBackground = false, Resizable = true, RememberPlacement = true });
+        s.Open();
+        Assert.Equal((480f, 540f, Appearing, 0.5f, 0.5f), FrameScreens().Pos);
+        _rect = (100, 200, 800, 600);
+        FrameScreens();
+        UiPlacements.Flush();
+        Assert.Equal(json, File.ReadAllText(PlacementFile));
+        Assert.Contains(_backend.Logs, l => l.StartsWith("Warn", StringComparison.Ordinal) && l.Contains("newer Kiln", StringComparison.Ordinal));
+        // a file of this version (or one without a version, written by hand) is written as before
+        UiPlacements.ResetForTests();
+        Write("""{"version": 1, "mods": {}}""");
+        UiPlacements.Put("grimoire", window: false, "Grimoire", new UiPlacements.Entry(0.3f, 0.4f, 500, 400));
+        UiPlacements.Flush();
+        Assert.Contains("\"grimoire\"", File.ReadAllText(PlacementFile), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_mod_that_unloads_writes_its_placement_at_once()
     {
         // the player drags the screen and the game quits (the host unloads every mod) before the debounce runs out
