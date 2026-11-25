@@ -1803,8 +1803,9 @@ const handlers: Record<string, Handler> = {
     gameOf(S(a.gameId));
     refusePending(S(a.gameId));
     mockBegin(S(a.gameId), S(a.mode));
-    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked)
-    if (S(a.mode) === "vanilla") startsBegun.delete(S(a.gameId)); else startsBegun.add(S(a.gameId));
+    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked; a Vanilla start
+    // too since 0.2.0-dev.31.13)
+    startsBegun.add(S(a.gameId));
     return null;
   },
   launch_progress: (a) => {
@@ -2047,11 +2048,14 @@ const handlers: Record<string, Handler> = {
 Object.assign(handlers, adminMockHandlers(mockEmit));
 // the update's restart waits while a game starts (launch_begin and no process yet, a scripted start before its process
 // exists), not while one runs (selfupdate.rs restart_refusal)
-Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () => {
+/** commands/launch.rs start_tracked as the mock has it: a start launch_begin began (any mode: the backend tracks a
+ *  Vanilla start too since 0.2.0-dev.31.13) whose game process has not come yet, or a scripted start before its process. */
+export function mockStartTracked(): boolean {
   for (const g of [...startsBegun]) if (live(g)) startsBegun.delete(g);
-  const starting = startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
-  return starting ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null;
-}));
+  return startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
+}
+Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () =>
+  mockStartTracked() ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null));
 Object.assign(handlers, deckMockHandlers(handlers));
 // the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
 Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));
