@@ -3544,8 +3544,22 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.32",
+      "version": "0.2.0-dev.31.10",
       "status": "next",
+      "title": "Fast spell switches keep the Spell slot",
+      "summary": "A fast spell or arrow switch right after a mod's swap no longer empties the slot.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Fast spell switches keep the Spell slot",
+          "text": "A pick of the spell a mod just swapped out of the backpack goes to the mod instead of emptying the slot (#145).",
+          "area": "core"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.32",
+      "status": "planned",
       "title": "Camera, pets and taming",
       "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
       "features": [
