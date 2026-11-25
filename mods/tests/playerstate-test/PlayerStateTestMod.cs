@@ -673,6 +673,9 @@ public sealed class PlayerStateTestMod : Mod
 
         // the repair kit: no consume event, its PayUsageCost (consume, 0.07 s) takes it, then six RepairAllItems
         await WaitIdle(e);
+        if (Content.ItemData.Get(RepairKit) is { } kd)
+            Info($"UseItem: the kit in kiln.gamedata: category {kd.GetJson("category")?["value"]?.ToJsonString()}, ammunitionType " +
+                 $"{kd.GetJson("ammunitionType")?["value"]?.ToJsonString()}, costOverride {kd.GetJson("sequences")?["value"]?[0]?["costOverride"]?.ToJsonString()}");
         var kit = await Give(e, RepairKit, 3);
         if (kit is null) Check(false, "UseItem: the character takes repair kits");
         else
@@ -694,9 +697,9 @@ public sealed class PlayerStateTestMod : Mod
         if (scroll is null) Check(false, "UseItem: the character takes Prayer of the Flame scrolls");
         else
         {
-            int? Mana() => Attributes.Get(e, AbilityResource.Mana);
-            var max = Attributes.Max(e, AbilityResource.Mana) ?? 0;
-            Attributes.Add(e, AbilityResource.Mana, max - (Mana() ?? 0));
+            int? Mana() => Abilities.Attributes.Get(e, AbilityResource.Mana);
+            var max = Abilities.Attributes.Max(e, AbilityResource.Mana) ?? 0;
+            Abilities.Attributes.Add(e, AbilityResource.Mana, max - (Mana() ?? 0));
             await Steps(2);
             var m0 = Mana();
             var n0 = CountIn(scroll.Slot);
@@ -710,7 +713,7 @@ public sealed class PlayerStateTestMod : Mod
             await WaitIdle(e);
 
             // too little mana: what the game's payer does (Kiln checks nothing before the trigger)
-            Attributes.Add(e, AbilityResource.Mana, 5 - (Mana() ?? 0));
+            Abilities.Attributes.Add(e, AbilityResource.Mana, 5 - (Mana() ?? 0));
             await Steps(2);
             var low = Mana();
             var n1 = CountIn(scroll.Slot);
