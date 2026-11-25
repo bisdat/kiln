@@ -247,12 +247,23 @@ int main() {
         CHECK(hk_build_apply(nullptr,list,0) && !seen_scope);                 // a give (refund) is never paid from links
         apply_caller=0x1400c6be9;CHECK(hk_build_apply(nullptr,list,1) && !seen_scope);  // place_prop's take: the game's
         apply_caller=g_build.blueprint_ret;g_build_off.store(true);CHECK(hk_build_apply(nullptr,list,1) && !seen_scope);
+        g_build_off.store(false);
+        // another module's code made the call (Building Tools 0.34.0 routes the blueprint program's payment through its own
+        // code): with no game call of ApplyMaterials behind it on this stack, the take is the game's, and kiln.log says so
+        apply_caller=0x7ff800001234;
+        CHECK(hk_build_apply(nullptr,list,1) && !seen_scope && logged("could not be traced to the game's call behind it"));
+        apply_caller=g_build.blueprint_ret;
         g_build_off.store(false);h_build_apply={};raw_links.clear();
     }
     // ---- the build menu's material counts: bag + base + links, once, whatever the gatherer rebuilt ----
     {
         g_build_ui_feat=true;g_build_rows_fn=0x14040e5d0;g_build_row_add=0x14040c010;g_build_stock_rows_ret=0x14040ee4b;
-        h_build_rows.install(g_api,g_owner,g_build_rows_fn,reinterpret_cast<void*>(&hk_build_rows),"build/client.MaterialRows");
+        g_build_rows_body=g_build_rows_fn+0x23;g_build_rows_done=g_build_rows_fn+0xa8a;
+        // the gatherer as the game runs it with Kiln's two halves in: its body between them, this call's frame as its rsp
+        auto gather=[&](uint8_t* s,uint8_t only) {
+            volatile uint8_t mark=0;const auto frame=reinterpret_cast<uintptr_t>(&mark);
+            build_rows_enter(s,frame);const uint64_t r=fake_rows(s,nullptr,only);build_rows_leave(frame,s);return r;
+        };
         std::vector<uint8_t> state(kRowGroups*kRowGroupStride+0x10,0);
         uint8_t g1[3*kRowStride]={}, g3[1*kRowStride]={};
         wr(g1,0,STONE);wr(g1,kRowStride,WOOD);wr(g1,2*kRowStride,uint32_t{0x99});wr(g3,0,STONE);
@@ -262,45 +273,66 @@ int main() {
         KilnStationStack snap[2]={{STONE,35},{WOOD,4}};
         CHECK(t_set_build_stock(1,snap,2)==KILN_OK);
         game={{1,{{STONE,10},{WOOD,0},{0x99,3}}},{3,{{STONE,2}}}};rebuild={1,3};
-        CHECK(hk_build_rows(state.data(),nullptr,0)==7);
+        CHECK(gather(state.data(),0)==7);
         CHECK(stock(g1,0)==45 && stock(g1,1)==4 && stock(g1,2)==3 && stock(g3,0)==37);  // every group holding a linked item
         rebuild={};                                                                      // currentOnly: nothing rebuilt
-        hk_build_rows(state.data(),nullptr,1);
+        gather(state.data(),1);
         CHECK(stock(g1,0)==45 && stock(g1,1)==4 && stock(g3,0)==37);                    // raised once, not twice
         game[1][STONE]=12;rebuild={1};                                                   // the bag gained 2 stone
-        hk_build_rows(state.data(),nullptr,1);
+        gather(state.data(),1);
         CHECK(stock(g1,0)==47 && stock(g3,0)==37);
         wr<uint64_t>(g3,kRowStock,50);rebuild={};                                       // the game changed a kept row itself
-        hk_build_rows(state.data(),nullptr,1);
+        gather(state.data(),1);
         CHECK(stock(g3,0)==85);                                                          // its value is the game's, plus the links
         snap[0].count=5;t_set_build_stock(1,snap,2);rebuild={1,3};game[3][STONE]=2;
-        hk_build_rows(state.data(),nullptr,0);
+        gather(state.data(),0);
         CHECK(stock(g1,0)==17 && stock(g3,0)==7);                                       // a new snapshot
         t_set_build_stock(0,nullptr,0);rebuild={};
-        hk_build_rows(state.data(),nullptr,1);
+        gather(state.data(),1);
         CHECK(stock(g1,0)==12 && stock(g1,1)==0 && stock(g3,0)==2 && g_build_marks.empty());  // off: the game's counts again
         CHECK(rows_calls==6);
         // a state that cannot be read: the original still runs, the menu keeps the game's counts from then on
         t_set_build_stock(1,snap,2);logs.clear();
         std::vector<uint8_t> broken(kRowGroups*kRowGroupStride,0);wr(broken.data(),0,reinterpret_cast<uint8_t*>(0x10));wr(broken.data(),8,uint64_t{1});
-        rebuild={};CHECK(hk_build_rows(broken.data(),nullptr,1)==7 && g_build_rows_off.load() && logged("material rows could not be read"));
-        hk_build_rows(state.data(),nullptr,1);CHECK(stock(g1,0)==12);
-        g_build_rows_off.store(false);t_set_build_stock(0,nullptr,0);h_build_rows={};raw_links.clear();g_build_marks.clear();
+        rebuild={};CHECK(gather(broken.data(),1)==7 && g_build_rows_off.load() && logged("material rows could not be read"));
+        gather(state.data(),1);CHECK(stock(g1,0)==12);
+        g_build_rows_off.store(false);
+        // a second half whose first did not run (the hooks went in while a call was inside): the game's counts, nothing raised
+        {volatile uint8_t mark=0;const auto frame=reinterpret_cast<uintptr_t>(&mark);t_set_build_stock(1,snap,2);rebuild={1};game[1][STONE]=12;
+         fake_rows(state.data(),nullptr,1);build_rows_leave(frame,state.data());CHECK(stock(g1,0)==12 && t_build_rows.depth()==0 && g_build_marks.empty());}
+        t_set_build_stock(0,nullptr,0);raw_links.clear();g_build_marks.clear();
     }
     // ---- install on demand: the server once a Building link exists, a client once its snapshot is on ----
     g_build_apply_on.store(false);g_build_cursor_on.store(false);mid2_links.clear();raw_links.clear();
     build_client_pre();CHECK(mid2_links.empty());                       // no snapshot: nothing goes in
     CHECK(t_set_build_stock(1,rows,2)==KILN_OK);logs.clear();
-    build_client_pre();CHECK(mid2_links[g_build.cursor_ret]==1 && raw_links[g_build_rows_fn]==1 && logged("this client's build cursor counts"));
+    build_client_pre();CHECK(mid2_links[g_build.cursor_ret]==1 && mid2_links[g_build_rows_body]==1 && mid2_links[g_build_rows_done]==1 &&
+                             logged("this client's build cursor counts"));
+    // XHL, 2026-11-25: kiln-items hooked the gatherer's entry, which Building Tools 0.34.0 finds by its first 35 bytes (and
+    // then the bytes and calls up to + 0xa7a), so its full material list and partial area actions stayed off. Now inside it.
+    CHECK(!raw_links.count(g_build_rows_fn) && !mid2_links.count(g_build_rows_fn));
+    for (const auto& [at, n] : mid2_links) CHECK(n && (at < g_build_rows_fn || at >= g_build_rows_fn + 35));
+    for (uintptr_t bt : {0x194, 0x705, 0x721, 0x78f, 0x867, 0x876, 0x89d, 0xa76})
+        for (const auto& [at, n] : mid2_links) CHECK(at + 5 <= g_build_rows_fn + bt || at >= g_build_rows_fn + bt + 7);
     CHECK(g_build_rows_on.load() && logged("the build menu's material counts include the building links"));
-    build_server_pre(5);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1 && raw_links[g_build_rows_fn]==1);  // shared
+    build_server_pre(5);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1 && mid2_links[g_build_rows_body]==1);  // shared
     build_server_pre(6);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1);  // once
     t_set_build_stock(0,nullptr,0);
+    // ---- Building Tools 0.34.0 redirects the blueprint program's payment call and the cursor's stock count (their rel32
+    // only): the hooks follow the game's call, they do not stand down ----
+    g_build_apply_on.store(false);g_build_cursor_on.store(false);h_build_cursor={};h_build_apply={};mid2_links.clear();raw_links.clear();
+    lowered.clear();foreign={g_build.blueprint_ret-3,g_build.cursor_ret-2};logs.clear();
+    build_server_pre(9);
+    CHECK(!g_build_off.load() && g_build_apply_on.load() && g_build_cursor_on.load() && raw_links[g_build.apply]==1 &&
+          mid2_links[g_build.cursor_ret]==1 && !lowered.count("crafting.build_sources"));
+    CHECK(logged("build: the blueprint program's payment call (rva") && logged("build: the build cursor's stock-count call (rva") &&
+          logged("'s code: the building hooks follow the game's call through it"));
+    foreign.clear();
     // ---- the stand-down on foreign code (Cross-Base Storage's build check, say) ----
     // the menu's gatherer changed by another module: only the menu's counts stand down, the cursor stays
-    g_build_rows_on.store(false);h_build_rows={};raw_links.clear();foreign={g_build_rows_fn+8};logs.clear();
+    g_build_rows_on.store(false);h_build_rows_body={};h_build_rows_done={};raw_links.clear();mid2_links.clear();foreign={g_build_rows_fn+8};logs.clear();
     build_rows_install();
-    CHECK(g_build_rows_off.load() && !g_build_off.load() && raw_links.empty() && lowered["crafting.build_ui"]==KILN_CAP_REASON_FAULTED);
+    CHECK(g_build_rows_off.load() && !g_build_off.load() && raw_links.empty() && mid2_links.empty() && lowered["crafting.build_ui"]==KILN_CAP_REASON_FAULTED);
     CHECK(logged("build menu's counts of linked sources stand down: the build menu's material gatherer code state FOREIGN"));
     foreign.clear();g_build_rows_off.store(false);
     g_build_apply_on.store(false);g_build_cursor_on.store(false);h_build_cursor={};h_build_apply={};mid2_links.clear();raw_links.clear();

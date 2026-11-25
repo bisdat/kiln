@@ -483,23 +483,37 @@ redirects the game's calls to what it found (it leaves the functions themselves 
 |---|---|---|
 | `CursorFlags`: the build cursor's flags function (`rules/CursorFlags`, client `+0x29BFB0`, server `+0x9FB20`), its first 42 bytes | overlap objects | since 0.2.0-dev.31.13 nothing: kiln-rules' cursor waivers hook entry + `0xfa` (`rules/CursorFlagsStored`, right after the game stores the flags), below this signature and below Building Tools' `MissingCall` one (which ends at + `0xfa`). Before, kiln-rules hooked the entry when it loaded, so the signature missed and overlap objects stayed off. Building Tools' redirected calls run the whole function, Kiln's waivers inside it included, in either load order. |
 | `ScreenDispatch`: the HUD screen switch inside the play-state UI (client `+0xC60A1B`) | its menu (Home), tools wheel and exact placement window | nothing. Creative Mode 3.2.0 rewrites + 7 there for its own menu screen; after that Building Tools' fallback search finds nothing either. kiln.log warns when both run (compat rules `creative-mode-building-tools-hud-dispatch` and `creative-mode-building-tools-native-hud-dispatch`, `state/hooks.json` `rules`). Kiln's own `/creative` and its Creative screen do not touch that code. |
-| `Stocks`: the material picker's builder (client `+0x40E5D0`) | creative building's full material list, partial area actions | **still hooked at its entry**: kiln-tools' `tools/MaterialSelector` (when it loads; the material filter of Kiln mods' building tools and the ammo picker) and kiln-items' `build/client.MaterialRows` (once a player has a building link). Open; not changed in 31.13. |
+| `Stocks`: the material picker's builder (client `+0x40E5D0`), its first 35 bytes, then bytes at + `0x194`, + `0x78f`, + `0x867` and the calls at + `0x705` .. + `0xa76` (it redirects the last, the finalizer) | creative building's full material list, partial area actions | since 0.2.0-dev.31.13 nothing there: kiln-tools (the material filter of Kiln mods' building tools, the ammo picker) and kiln-items (the build menu's counts of building links) wrap the function from inside, with two mid hooks each: after the prologue (+ `0x23`, `tools/MaterialSelectorBody` = `build/client.MaterialRowsBody`) and at the epilogue (+ `0xa8a`, after the finalizer, on every path: `tools/MaterialSelectorDone` = `build/client.MaterialRowsDone`), paired by the function's rsp (`kiln_mid_frames.hpp`). Before, both hooked the entry (kiln-tools when it loaded on the client), and Building Tools logged `full material list no` and `partial area actions: not available`. |
+| `UiBeginText`: the UI text line (`ui/NativeTextLine`, client `+0xB1DA10`), its first 28 bytes | its menu (required) | since 0.2.0-dev.31.13 nothing there: kiln-core's item-detail capture is a mid hook at + `0x1c` (`ui/NativeTextLineBody`, the text in rbx). Before, a detour on the entry went in when a mod first read an item's detail lines, which hid the function when that happened in Building Tools' first 4 s. |
+| `UiDrawHints`: the chest window's footer (`ui/ChestFooter`, client `+0xC3A440`), its first 29 bytes | its menu, tools wheel and exact placement window | **hooked at its entry when a mod first adds a chest button** (Ui native chest entries). Only a hook that goes in before Building Tools' scan, in its first 4 s, turns those off; after it both work. Not moved: the hook counts the footer's nesting around the whole call and the function's code is split into chunks, so two mid hooks inside it are not a small change. |
 
 The rest of what Kiln has on Building Tools' signatures is in `sigdb/foreign/building-tools.json`: functions Kiln only
-calls; entry hooks Building Tools accepts and chains to (ApplyMaterials, PlaceBlueprint, DismantleBlock, IterBegin); and
-two hooks Kiln places only when a mod first asks for them (the chest window's footer, for mods' chest buttons, and the
-item-detail text capture), which hide Building Tools' menu functions only when that happens in its first 4 s. One works
-the other way round (from the code, not seen in a game): Building Tools redirects the building programs' calls of
-ApplyMaterials to its own code, so Kiln's hook there sees Building Tools as the caller, and Kiln's building cost rules
-(`BuildCost`, `BuildRefund`) and building-link payments, which recognise the blueprint program by its call, are expected
-not to apply to placements while Building Tools runs.
+calls, and entry hooks Building Tools accepts and chains to (ApplyMaterials, PlaceBlueprint, DismantleBlock, IterBegin).
+
+**Payments Building Tools makes for the game.** It redirects the building programs' calls of ApplyMaterials (the E8s at
+the blueprint, place-prop, undo and dismantle payments, `PayPlace` .. `PayUndo` in its source) to its own code, which then
+calls ApplyMaterials itself: to merge an area action's cost entries, cut an area down to what the inventory can pay, refund
+what a Replace removed, skip the charge in its creative building. Kiln's hook on ApplyMaterials then sees Building Tools'
+DLL as the caller, so until 0.2.0-dev.31.13 Kiln's building cost rules (`BuildCost`, `BuildRefund`) and the blueprint
+program's payment from building links did not apply to placements while it ran. Since then, when the caller is another
+module's code, Kiln walks the stack behind it by the unwind data of each frame (`native/core/abi/kiln_call_site.hpp`):
+the first frame in the game's code must be a call of ApplyMaterials as the exe file has it (the call that module
+redirected), and that call decides, as the game's own would (a building program for the cost rules, the blueprint program
+for the links). Every payment Building Tools makes there is the game's charge it asked for, paid once: a placement pays
+from the links only through the blueprint program's call, all or nothing, else through the game's payment. A payment that
+cannot be traced is treated as before and kiln.log says so once per module (`costs: a materials payment from ... could not
+be traced`, `build: a materials take from ... could not be traced`); a traced one is named once too (`... makes the
+building programs' payments`). Its redirects of the blueprint program's payment call and of the build cursor's stock
+count (its magic chests of all bases) change only those calls' rel32, which kiln-items follows instead of standing its
+building links down (`build: ... is redirected to BuildingTools.dll's code`).
 
 **The registry.** `sigdb/foreign/<mod>.json` lists such scans for one mod: the signature, how it is looked up (`exact`,
 or `jump-tolerant` with the `head` bytes it accepts another mod's jump in), the feature, and every Kiln symbol on those
 bytes with what Kiln does there (`OPEN ...` for a known conflict). `tools/sigport/tests/test_foreign_scans.py`
 (`SIGPORT_SERVER`, `SIGPORT_CLIENT`: the pinned executables, read as files) checks that each signature still finds its one
-match and that no Kiln symbol lies on its bytes without an entry, so a new Kiln hook there fails the test instead of a
-player's game. The next mod with this problem is one file (or one scan) there; a clash between two other mods that Kiln
+match, that the bytes the mod checks after it (`checks`) and the calls it follows (`calls`) hold, that no Kiln symbol lies
+on any of them without an entry, and that each site where Kiln hooks such a function instead (`kiln_sites`) resolves inside
+it and clear of them, so a new Kiln hook there fails the test instead of a player's game. The next mod with this problem is one file (or one scan) there; a clash between two other mods that Kiln
 can only report is one `warn` rule in `compat-rules.json`.
 
 **For mod authors.** Kiln does not move or undo its hooks for a mod that scans later. If yours finds functions by their

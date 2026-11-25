@@ -58,7 +58,7 @@ int main() {
     ammo::client=&client_table;ammo::ready.store(true);ammo::backpack_probe=&backpack_fixture;
     ammo_client_state.size=sizeof ammo_client_state;ammo_client_state.side=KILN_SIDE_CLIENT;ammo_client_state.session=KILN_SESSION_HOST;
     ammo_client_state.generation=7;ammo_client_state.client_session=9;ammo_client_state.local_player=123;ammo_client_state.client_steps=10;
-    CHECK(selector_hook.install(&fake,child,20,reinterpret_cast<void*>(&selector),"ammo selector fixture"));
+    selector_game=&ammo_selector_fixture;
     CHECK(ammo::pick_hook.install(&fake,child,21,reinterpret_cast<void*>(&ammo::pick),"ammo pick fixture"));
     CHECK(ammo::finalizer_hook.install(&fake,child,22,reinterpret_cast<void*>(&ammo::finalizer),"ammo finalizer fixture"));
     ammo::catalog[0]={999,1257792166u,555};ammo::catalog[1]={999,1257792166u,555};ammo::catalog_session=9;

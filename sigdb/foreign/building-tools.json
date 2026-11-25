@@ -19,6 +19,9 @@
       "feature": "overlap objects (objects placed into others)",
       "kiln": {
         "rules/CursorFlags": "not hooked since 0.2.0-dev.31.13: the scope of rules/CursorFlagsStored (kiln-rules' cursor waivers hook at entry + 0xfa). Until then kiln-rules hooked this entry when it loaded, which hid the signature (XHL, 2026-11-25)"
+      },
+      "kiln_sites": {
+        "rules/CursorFlagsStored": "kiln-rules' cursor waivers (a mid hook, 10 bytes moved; since 0.2.0-dev.31.13)"
       }
     },
     {
@@ -53,11 +56,38 @@
       ],
       "lookup": "exact",
       "pattern": "48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED",
-      "source": "src/main.cpp SIG_STOCKS",
+      "source": "src/main.cpp SIG_STOCKS and the checks after find_unique(\"Stocks\") (it redirects the function's callers and the call at + 0xa76, the finalizer)",
       "feature": "creative building's full material list and partial area actions",
       "kiln": {
-        "tools/MaterialSelector": "OPEN (not changed in 0.2.0-dev.31.13): kiln-tools hooks this entry when it loads on the client (the material filter of Kiln mods' building tools, and the ammo picker); Building Tools then logs 'full material list no' and 'partial area actions: not available'",
-        "build/client.MaterialRows": "OPEN: kiln-items hooks the same entry once a player has a building link (crafting.build_ui), usually after Building Tools scanned"
+        "tools/MaterialSelector": "not hooked since 0.2.0-dev.31.13: the scope of tools/MaterialSelectorBody and tools/MaterialSelectorDone. Until then kiln-tools hooked this entry when it loaded on the client, and Building Tools logged 'full material list no' and 'partial area actions: not available' (XHL, 2026-11-25)",
+        "build/client.MaterialRows": "not hooked since 0.2.0-dev.31.13: the scope of build/client.MaterialRowsBody and build/client.MaterialRowsDone. Until then kiln-items hooked this entry once a player had a building link (crafting.build_ui)"
+      },
+      "checks": [
+        {
+          "at": "0x194",
+          "bytes": "44 8B 05"
+        },
+        {
+          "at": "0x78F",
+          "bytes": "48 8D BE F8 2B 00 00"
+        },
+        {
+          "at": "0x867",
+          "bytes": "48 69 C8 48 06 00 00"
+        }
+      ],
+      "calls": [
+        "0x705",
+        "0x721",
+        "0x876",
+        "0x89D",
+        "0xA76"
+      ],
+      "kiln_sites": {
+        "tools/MaterialSelectorBody": "kiln-tools' first half of the picker (+ 0x23: the material filter of Kiln mods' building tools, the ammo picker)",
+        "tools/MaterialSelectorDone": "kiln-tools' second half (+ 0xa8a, the epilogue, after the finalizer call Building Tools redirects)",
+        "build/client.MaterialRowsBody": "kiln-items' first half of the build menu's linked counts (the same site as tools/MaterialSelectorBody)",
+        "build/client.MaterialRowsDone": "kiln-items' second half (the same site as tools/MaterialSelectorDone)"
       }
     },
     {
@@ -70,7 +100,7 @@
       "source": "src/main.cpp SIG_UI_DRAW_HINTS",
       "feature": "its menu, tools wheel and exact placement window (required by the menu)",
       "kiln": {
-        "ui/ChestFooter": "OPEN (rare): kiln-core's native chest entries hook this entry when a mod first adds a chest button (Ui native chest entries); before Building Tools' scan (a mod adding one while it loads) its menu, wheel and exact window stay off, after it both work"
+        "ui/ChestFooter": "OPEN (rare, not moved in 0.2.0-dev.31.13): kiln-core's native chest entries hook this entry when a mod first adds a chest button (Ui native chest entries). Only a hook that goes in before Building Tools' scan (a mod adding a chest button within Building Tools' first 4 s) turns its menu, wheel and exact window off; after the scan both work. Not moved because the hook counts the footer's nesting around the whole call (it needs the function's end as well as its start) and the function is split into several code chunks, so a pair of mid hooks inside it is not a small change"
       }
     },
     {
@@ -83,7 +113,10 @@
       "source": "src/main.cpp SIG_UI_BEGIN_TEXT",
       "feature": "its menu (required)",
       "kiln": {
-        "ui/NativeTextLine": "OPEN (rare): kiln-core's item-detail capture hooks this entry when a mod first reads an item's detail lines; before Building Tools' scan its menu stays off, after it both work"
+        "ui/NativeTextLine": "not hooked since 0.2.0-dev.31.13: the scope of ui/NativeTextLineBody. Until then kiln-core's item-detail capture hooked this entry when a mod first read an item's detail lines, which hid it from Building Tools' scan when that happened within its first 4 s (its menu then stayed off)"
+      },
+      "kiln_sites": {
+        "ui/NativeTextLineBody": "kiln-core's item-detail capture (+ 0x1c, a mid hook: the line's text in rbx)"
       }
     },
     {
@@ -228,7 +261,7 @@
       "source": "src/main.cpp SIG_PAY_PLACE",
       "feature": "creative building's payment of a placement",
       "kiln": {
-        "build/BlueprintApplyRet": "not hooked: the return address kiln-items compares ApplyMaterials' caller with. OPEN (other way round, from the code, not seen in a game): Building Tools redirects this call and the other building calls of ApplyMaterials (PayCost) to its own code, which then calls ApplyMaterials; Kiln's hook there sees Building Tools' code as the caller, so kiln-rules' building cost scaling (BuildCost, BuildRefund) and kiln-items' building-link payment, which recognise the building programs by that caller, would not apply while Building Tools runs"
+        "build/BlueprintApplyRet": "not hooked: the return address kiln-items compares ApplyMaterials' caller with. Building Tools redirects this call and the other building programs' calls of ApplyMaterials (PayCost) to its own code, which then calls ApplyMaterials, so Kiln's hook there sees its DLL as the caller. Since 0.2.0-dev.31.13 kiln-rules (BuildCost, BuildRefund) and kiln-items (building-link payments) find the game's call behind it on the stack (native/core/abi/kiln_call_site.hpp) and decide by that call; a payment they cannot trace stays the game's, logged once per module. Until then those rules did not apply while Building Tools ran (from its code, not seen in a game)"
       }
     },
     {
@@ -285,7 +318,7 @@
       "source": "src/main.cpp SIG_PAY",
       "feature": "creative building's payment",
       "kiln": {
-        "rules/ApplyMaterials": "hooked at its entry (kiln-rules' building costs, kiln-items' building links); Building Tools accepts a jump there (find_hookable, 7 bytes) and chains to it. See PAY_PLACE for what its redirected calls mean for Kiln's caller checks"
+        "rules/ApplyMaterials": "hooked at its entry (kiln-rules' building costs, kiln-items' building links); Building Tools accepts a jump there (find_hookable, 7 bytes) and chains to it. Its redirected calls of it reach Kiln's hook from its DLL; see PAY_PLACE for how Kiln finds the game's call behind them"
       }
     },
     {

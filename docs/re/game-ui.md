@@ -574,6 +574,9 @@ ScopeEnd, after selected body. A branch jumps directly there; `0xc12165` is not 
 mode 4 exits before this scope and has no such callback.
 
 `void* NativeTextLine(void* out,const GameText*,const void* style,u8 mode)` C **`0xb1da10`** returns out;
+its prologue (28 bytes, which Building Tools 0.34.0 finds it by as UiBeginText for its menu) ends with `mov rbx,rdx` and
+`movzx edi,r9b`; the item-detail capture is a mid hook on the next instruction, + `0x1c` (`ui/NativeTextLineBody`,
+`xor edx,edx; mov rsi,r8`; rbx is the text there) since 0.2.0-dev.31.13, not a detour on the entry;
 allocate 0x150 B/align 16 (constructor writes through `+0x140`). Body uses style bundle `+0x10bbc`, mode 1;
 vanilla numeric bars use mode 0. GameText 24 B `{utf8 pointer,u64 byteLength,u64 hash}` is borrowed, not owned.
 Existing Kiln non-ASCII signed-byte FNV convention is [source]; VERIFY independently checked only ASCII.

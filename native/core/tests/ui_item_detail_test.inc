@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 // #120: completed, bounded snapshots only; exact instance/variant identity and session isolation.
-using CaptureTextFn = void* (*)(void*, const text::GameText*, const void*, uint8_t);
-void* capture_text_next(void* out, const text::GameText*, const void*, uint8_t) { return out; }
+// the game's NativeTextLine(object, text, style, mode) reaching ui/NativeTextLineBody: rbx (and rdx) the text
 void capture_emit(const char* str) {
     text::GameText t{str, std::strlen(str), 0};
-    for (const auto& raw : fake::raws)
-        if (raw.label == "ui.item_detail/NativeTextLine") reinterpret_cast<CaptureTextFn>(raw.fn)(nullptr, &t, nullptr, 1);
+    KilnRegisters r{};
+    r.rbx = r.rdx = reinterpret_cast<uintptr_t>(&t);
+    for (const auto& mid : fake::mids)
+        if (mid.label == "ui.item_detail/NativeTextLine") mid.fn(&r, nullptr);
 }
 void capture_stat_next(const void*, float) { capture_emit("Damage"); capture_emit("42.5"); }
 void capture_nested_detail(void*, uint8_t) { capture_emit("Nested name"); }
@@ -36,6 +37,14 @@ void item_detail_tests() {
     std::vector<KilnUiItemDetailLine> lines(KILN_UI_ITEM_DETAIL_MAX_LINES);
     CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok,
           "item detail: first read installs capture and reports no cached panel");
+    // XHL, 2026-11-25: a detour on NativeTextLine's entry hid the function from Building Tools 0.34.0 (UiBeginText: its
+    // first 28 bytes, which its menu needs) when a mod first read item details within its first 4 s. A mid hook below.
+    {
+        bool entry = false, body = false;
+        for (const auto& raw : fake::raws) entry |= raw.target == 0x140b1da10ull;
+        for (const auto& mid : fake::mids) body |= mid.target == 0x140b1da2cull && mid.label == "ui.item_detail/NativeTextLine";
+        CHECK(!entry && body, "item detail: the text capture hooks NativeTextLine + 0x1c, below the 28 bytes Building Tools finds it by");
+    }
     CHECK(arm_tooltip(), "item detail: shares the existing ItemDetail hook");
     DetailCopy c; c.ok = true;
     fill_view_bytes(c.raw, 0x5000, 2, 0xAA, 1, 900, 0, 0);
@@ -69,7 +78,6 @@ void item_detail_tests() {
     CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok,
           "item detail: budget overflow refuses whole panel, never truncates");
     for (auto& raw : fake::raws) {
-        if (raw.label == "ui.item_detail/NativeTextLine") *raw.original = reinterpret_cast<void*>(&capture_text_next);
         if (raw.label == "ui.tooltip/StatValueDraw") *raw.original = reinterpret_cast<void*>(&capture_stat_next);
         if (raw.label == "ui.values/ItemDetail") *raw.original = reinterpret_cast<void*>(&capture_game_detail);
     }
@@ -183,7 +191,7 @@ void item_detail_tests() {
     CHECK(!c.capture, "item detail: disabling capture stops new panel allocations");
     fake::rows.insert("ui.item_detail");
     item_detail_reset_for_tests();
-    fake::symbols.erase("ui/NativeTextLine");
+    fake::symbols.erase("ui/NativeTextLineBody");
     CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_ERR_UNAVAILABLE &&
               std::find(fake::rows_off.begin(), fake::rows_off.end(), "ui.item_detail") != fake::rows_off.end(),
           "item detail: missing capture symbol refuses and reports the capability off");
