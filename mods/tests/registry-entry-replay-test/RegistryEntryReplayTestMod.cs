@@ -16,7 +16,7 @@ public sealed class RegistryEntryReplayTestMod : Mod
     }
     public override void OnLoad()
     {
-        Context.Tick.Pre += (in TickInfo _) =>
+        Context.Tick.Pre += (in TickInfo tick) =>
         {
             if (_ran || !Content.Ready || !Saves.WorldDataReady || Saves.Status?.State != "running") return;
             // The saved bundles arrive with WorldLoaded, then MissingContent polls every 100 ticks.
@@ -37,7 +37,29 @@ public sealed class RegistryEntryReplayTestMod : Mod
                 foreach (var item in items) Log.Info($"registry-entry-replay-test: ID {item.Body["registryId"]} guid={item.Definition.Guid:D}");
             }
             catch (Exception e) { Check(false, e.ToString()); }
-            finally { Log.Info($"registry-entry-replay-test: DONE pass={_pass} fail={_fail}"); }
+            _ = Restored();
         };
+    }
+
+    /// <summary>Without the removing mod the removal is gone at this start: the drop table that names the removed item gives
+    /// it again (the registry-entries-test start before this one saw that slot disabled).</summary>
+    private async Task Restored()
+    {
+        try
+        {
+            for (var i = 0; i < 25 * 120 && !(Spawn.WorldRunning && Items.Status() is { Read: true }); i++) await Context.Scheduler.NextTick();
+            var wood = new ItemId(Content.Items.Get("Material_T1_Wood_Logs")!.Id);
+            var near = Items.FindInventories(InventoryKinds.Containers | InventoryKinds.NonEmpty).Select(c => Spawn.Inspect(c)).FirstOrDefault(i => i != null);
+            var template = Spawn.Templates.FirstOrDefault(t => t.Name.Equals("lootchest_cheat_new13_loot_grassland", StringComparison.OrdinalIgnoreCase));
+            if (near is null || template is null) { Check(false, "no place or template for the drop table check"); return; }
+            var e = await Spawn.Entity(template.Name, near.Position with { Y = near.Position.Y + 2 }, options: new SpawnOptions { Tag = "registry-entry-replay-test", Flags = SpawnFlags.Transient });
+            for (var i = 0; i < 200 && Items.Read(e) is not { UsedSlots: > 0 }; i++) await Context.Scheduler.NextTick();
+            for (var i = 0; i < 5; i++) await Context.Scheduler.NextTick();
+            var got = Items.Read(e);
+            Check(got is not null && got.Count(wood) > 0, $"without the removing mod the drop table gives the item again: {got?.Count(wood) ?? -1} in {template.Name}");
+            Spawn.Destroy(e);
+        }
+        catch (Exception x) { Check(false, x.ToString()); }
+        finally { Log.Info($"registry-entry-replay-test: DONE pass={_pass} fail={_fail}"); }
     }
 }
