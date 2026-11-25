@@ -346,4 +346,35 @@ public sealed partial class PlayerStorageStoreTests
             store.Native = null;
         }
     }
+
+    [Fact]
+    public void The_world_stops_with_its_delays_summed_up()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var backend = Backend.Current;
+        var tap = new Tap();
+        var oldLag = store.Lag;
+        var now = TimeSpan.FromHours(1);
+        var lag = new DurabilityLag(() => now);
+        store.Lag = lag;
+        try
+        {
+            Backend.Current = tap;
+            lag.Late(10);
+            now += TimeSpan.FromSeconds(30);
+            lag.Late(11);
+            store.PollWrites();
+            Assert.Empty(tap.With("player-storage: in the last"));
+            store.Clear();                                                  // the world closes
+            var summary = Assert.Single(tap.With("player-storage: in the last 1 min, 1 more world save was written before its storage reached the disk"));
+            Assert.Equal(LogLevel.Warn, summary.Level);
+            Assert.False(lag.IsLate(11));
+        }
+        finally
+        {
+            Backend.Current = backend;
+            store.Lag = oldLag;
+        }
+    }
 }

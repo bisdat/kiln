@@ -123,6 +123,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         _instanceOwners.Clear(); _ordinaryHolders.Clear();
         while (_outcomes.TryDequeue(out _)) { }
         _unwritten.Clear();
+        Say(Lag.Summary(force: true));  // the world closes: what was counted of its delays, as kiln.saves does at its stop
         Lag.Clear();
         Failure = null;
     }

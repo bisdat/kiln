@@ -135,4 +135,17 @@ public sealed class DurabilityLagTests
         Assert.Equal(1u, stuck.Generation);
         Assert.Equal(121, stuck.Age.TotalSeconds, 3);
     }
+
+    [Fact]
+    public void The_world_stops_says_what_was_counted_at_once()
+    {
+        _lag.Late(10);
+        _now += TimeSpan.FromSeconds(20);
+        _lag.Late(11);
+        Assert.Null(_lag.Summary());
+        var stop = _lag.Summary(force: true);
+        Assert.Equal(LogLevel.Warn, stop!.Value.Level);
+        Assert.StartsWith("player-storage: in the last 1 min, 1 more world save was written before its storage reached the disk; 2 not yet", stop.Value.Text);
+        Assert.Null(_lag.Summary(force: true));                        // nothing new: nothing to say
+    }
 }

@@ -96,14 +96,14 @@ internal sealed class DurabilityLag(Func<TimeSpan> now)
         return stuck;
     }
 
-    /// <summary>What was counted since the last line, once <see cref="SummaryEvery"/> has passed since it; counting starts
-    /// from zero again.</summary>
-    internal (LogLevel Level, string Text)? Summary()
+    /// <summary>What was counted since the last line, once <see cref="SummaryEvery"/> has passed since it (<paramref
+    /// name="force"/>: now, the world closes); counting starts from zero again.</summary>
+    internal (LogLevel Level, string Text)? Summary(bool force = false)
     {
         var t = now();
-        if (_lateCount + _caughtCount == 0 || t - _lastLine < SummaryEvery) return null;
+        if (_lateCount + _caughtCount == 0 || (!force && t - _lastLine < SummaryEvery)) return null;
         var waiting = _late.Count(l => !l.Value.Stuck);
-        var text = $"player-storage: in the last {(t - _lastLine).TotalMinutes:F0} min, " +
+        var text = $"player-storage: in the last {Math.Max(1, (t - _lastLine).TotalMinutes):F0} min, " +
                    (_lateCount == 1 ? "1 more world save was written before its storage reached the disk"
                                     : $"{_lateCount} more world saves were written before their storage reached the disk") +
                    (_caughtCount > 0 ? $"; {_caughtCount} reached it later, at worst {_slowest.TotalSeconds:F1} s after its world write" : "") +
