@@ -169,14 +169,18 @@ profile change the launcher has not applied yet). Up to 0.2.0-dev.31.10 `kcompat
 (`native/plugins/compat/own_off.h`, through `kcompat::aside_off`): the state file lists the entry `own-loader`, with
 the reason `runs (your own folder <path>; <loader>'s own switch is on) although it is off in the profile: ...` and how
 to turn it off in that loader, and `kiln.log` has the same line as a warning. When that loader's own switch keeps the
-copy off, the entry stays `disabled` and the reason says both. `disabled` alone means nothing of it runs. None of these
-loaders offers a host call that skips one mod for a start, so Kiln states the truth and does not skip.
+copy off, the entry stays `disabled` and the reason says both. `disabled` alone means nothing of it runs. A false
+"runs" is worse than a false "disabled", so Kiln says `own-loader` only when it is sure: when it cannot read that
+loader's switch (an ini value it does not know, a file over its read cap, a `shroudtopia.json` that is not JSON), or
+only the file name matches, the entry stays `disabled` and the reason says what is there and what Kiln cannot tell.
+Values from the player's files are cleaned to valid UTF-8 before they go in a reason. None of these loaders offers a
+host call that skips one mod for a start, so Kiln states the truth and does not skip.
 
 | Own loader | Which copy is the entry's mod | Its own switch (what the reason names) | How to turn it off there |
 |---|---|---|---|
-| EMF (kiln-emf, `emf.json` `status`) | `emf/mods/<folder>/` whose mod.json `id` is the entry's, or `emf/mods/<id>.dll` | `emf/config/<id>.ini` `enabled=0/1`; without a value mod.json `"enabled"` (default on); a `side: client` mod does nothing on a server | `enabled=0` in that ini |
+| EMF (kiln-emf, `emf.json` `status`) | `emf/mods/<folder>/` whose mod.json `id` is the entry's, or `emf/mods/<id>.dll` | `emf/config/<id>.ini` `enabled=` (`0`/`false`/`no`/`off` and `1`/`true`/`yes`/`on`, any case; an off line anywhere wins; another value, or a file over 256 KiB: no claim); without a value mod.json `"enabled"` (default on); a `side: client` mod does nothing on a server | `enabled=0` in that ini |
 | Greeneye Loader (kiln-greeneye, `greeneye.json` `status`) | `greeneye/<folder>/` whose mod.json `id` (else the folder name) is the entry's, read with Greeneye Loader's lenient reader | mod.json `"enabled"` (default on), `"side"` (default client), `"api"` up to 2, its DLL present | `"enabled": false` in that mod.json |
-| Shroudtopia (kiln-shroudtopia, `shroudtopia.json` `status`) | a DLL in `mods/` or `mods/<name>/` with the same bytes or the same file name as the entry's DLL | `<game>/shroudtopia.json` `"active"` (its loader loads no mod while it is false; without the file it starts with its defaults). The per-mod `"active"` only deactivates a mod after its DLL loaded, and its key is the name the DLL reports, which Kiln cannot read without loading it | none keeps the DLL from loading: move it out of `mods/` |
+| Shroudtopia (kiln-shroudtopia, `shroudtopia.json` `status`) | a DLL in `mods/` or `mods/<name>/` with the same bytes as the entry's DLL (the same file name with other bytes is only named in the `disabled` reason as maybe another build) | `<game>/shroudtopia.json` `"active"` (its loader loads mods only while it is `true`: false, missing or not a boolean is off, as in kiln-shroudtopia's port; without the file it starts with its defaults, on; a file that is not JSON: no claim). The per-mod `"active"` only deactivates a mod after its DLL loaded, and its key is the name the DLL reports, which Kiln cannot read without loading it | none keeps the DLL from loading: move it out of `mods/` |
 | Flame (kiln-flame, `flame.json` `status`) | `mods/<folder>/` with `flame.json` whose mod.json `id` (else the folder name) is the entry's | none: every such folder starts | move the folder out of `mods/`, or switch Flame's loader off in `kiln/chain.ini` |
 
 Not changed: Enshrouded ModLoader (kiln-dllmod) switches each package per world in the world's Edit > MODS page,

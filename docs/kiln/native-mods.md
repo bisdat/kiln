@@ -137,8 +137,9 @@ mod that is off (in the profile, in `<configDir>/native.json`, or by default) wh
 a proxy (the same bytes) runs all the same. Its row keeps the reason it is off and adds that its DLL loads as a chain
 proxy, which line names it and how to take it out (`;` in front of the line in `kiln\chain.ini`, or the line out of
 `dinput8-chain.ini`, or the file out of the game folder); `chainProxy` is that path, and `kiln.log` has a warning with
-the same text. A phase dllmain mod then reads `loaded` (loading its DLL is the mod); any other stays `disabled`, since
-Kiln does not call its `init` (its `DllMain` still ran). Host test: `native/core/tests/test-chain-copy.sh`
+the same text. A phase dllmain mod then reads `loaded` when every one of its DLLs loads that way (loading its DLLs is
+the mod); with only some of them chained it stays `disabled` and the reason says how many load. Any other phase stays
+`disabled`, since Kiln does not call its `init` (its `DllMain` still ran). Host test: `native/core/tests/test-chain-copy.sh`
 (`src/chain_copy.h`).
 
 ## Testing
