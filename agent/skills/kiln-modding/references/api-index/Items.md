@@ -498,7 +498,10 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `const ContainerNameMaxChars = 48 -> int` `0.2.13` — The most characters (Unicode code points) `Items.SetContainerName` takes: the game's Rename field's limit (48).
 - `static ContainerNamesAvailable { get; } -> bool` — True when `Items.ContainerName` can read names on this game build (capability `items.names`).
 - `static ContainerRenameAvailable { get; } -> bool` `0.2.13` — True when `Items.SetContainerName` can rename here now: capability `items.rename` (the game build's rename is...
+- `static Description(ItemId item) -> string?` `0.2.22` — The item's description in the player's game language: `Items.DescriptionIn` with `null`.
+- `static DescriptionIn(ItemId item, string? language) -> string?` `0.2.22` — The item's description in `language` without the game's markup: a game item's from the game's own text table of that...
 - `static DisplayName(ItemId item) -> string?` `0.2.7` — The item's name for players (since 0.2.0-dev.29.15).
+- `static DisplayNameIn(ItemId item, string? language) -> string?` `0.2.22` — The item's name in `language` (a key the game ships, `"de-de"`; null: the player's game language), as...
 - `static Equip(EntityId player, SlotId from, EquipmentSlot? slot = null, EquipOptions options = EquipOptions.None, EntityId itemEntity = default(EntityId)) -> Task<EquipResult>` `0.2.2` — Puts an item a player has on: the stack in `from` (a slot of the player's own inventories) goes into the equipment...
 - `static Equipped(EntityId player, EquipmentSlot slot) -> ItemInstanceRef` — The item `player` wears or holds in an equipment slot.
 - `static EquipSet(EntityId player, EquipmentSet set, EquipOptions options = EquipOptions.None) -> Task<EquipmentSetResult>` `0.2.4` — Changes `player`'s equipment to `set` in one inventory transaction: every slot the set names changes, or none does...
@@ -543,6 +546,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static Status3() -> ItemsV3Status?` — The v3 parts' state (moves, names, transfer hooks, counters), or null on an older runtime.
 - `static Take(EntityId target, ItemId item, int count = 1, SlotId? from = null, bool exactSlot = false, EntityId? itemEntity = null, bool dryRun = false) -> Task<ItemsResult>` — Takes `count` x `item` out of `target`'s inventory, all or nothing.
 - `static TakeSlot(EntityId target, InventorySlot slot, bool dryRun = false) -> Task<ItemsResult>` — Takes everything in one slot as read (exact slot, the same item entity for gear).
+- `static TextTags(ItemId item) -> ItemTextTags?` `0.2.22` — The loca tag ids of a game item type's texts (name, caption, description, lore), read from its `ItemInfo`: look them...
 - `static ToolWearStatus(ItemId tool) -> ToolWearState` `0.2.3` — What one debit of `tool` costs now, whose rule that is, and whether a rule can be set here.
 - `static TryGetResult(Task<ItemsResult> transaction, out ItemsResult? result) -> bool` — Observes the result of a Give/Take task, including an inventory commit whose normal callback has not yet run.
 - `static Unequip(EntityId player, EquipmentSlot slot, EquipOptions options = EquipOptions.None) -> Task<EquipResult>` `0.2.2` — Takes off what `player` wears or holds in `slot`: the game's own unequip moves it into a free slot of the backpack.
@@ -632,6 +636,14 @@ enum: Done, Partial, NoRoom, NotEnough, NoInventory, UnknownItem, SlotChanged, R
 - `TransferHooks { get; init; } -> bool` — True when the quick stack and move all hooks can be installed.
 - `TransfersCanceled { get; init; } -> ulong` — How many of those a rule or handler canceled.
 - `TransfersSeen { get; init; } -> ulong` — Calls of the game's quick stack and move all since the hooks went in.
+
+## ItemTextTags `0.2.22` — The loca tag ids of an item type's texts: FNV-1a-32 of the `keen::ItemInfo` LocaTag GUIDs (the ids `Texts.TagOf` and the game's tables use), 0 where the item has none.
+- `ItemTextTags()`
+- `ItemTextTags(uint Name, uint Caption, uint Description, uint Lore)`
+- `Caption { get; init; } -> uint` — The line under the name (`ItemInfo.caption`).
+- `Description { get; init; } -> uint` — The description (`ItemInfo.description`).
+- `Lore { get; init; } -> uint` — The lore text (`ItemInfo.lore`).
+- `Name { get; init; } -> uint` — The name (`ItemInfo.name`).
 
 ## MoveChange — One piece of a move's ledger: `MoveChange.Amount` of `MoveChange.Item` left `MoveChange.From` and arrived in `MoveChange.To`.
 - `MoveChange()`
