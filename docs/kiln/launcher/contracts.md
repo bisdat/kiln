@@ -1279,7 +1279,11 @@ Before `launch_play` the launcher runs, by mode (`shell/play.ts` `beforeStart`):
 the boot game-data step); `once`, `boot_snapshot_run` for that profile (the boot game-data step only: a single start
 cooks nothing); `vanilla` and `no-mods`, nothing. Neither step refuses the start.
 
-1. Refuse while the game runs (`game_running`).
+1. Refuse while the game runs (`game_running`). (0.2.0-dev.31.13) Refuse while another start of the game is pending
+   (`busy`, `detail: {kind: "already_starting"}`, "The game is already starting."; `commands/launch.rs`
+   `refuse_pending`): a start the launcher tracks (Kiln or Vanilla) for which Steam was asked (or the direct start
+   made), its game process not seen, less than 5 minutes (`STEAM_WAIT_MS`) since the ask; or another `launch_play` /
+   `launch_confirm` inside its own start for the game. The pending start's record is left as it is.
 2. Mode `profile`: nothing to write (Steam's Play button does the same). Modes `vanilla`/`no-mods`: write
    play-once.ini. Mode `once`: render the profile into `kiln/profile.once.json` (+ `kiln/chain/once.ini`: its dllmain
    natives and its chain plan, so the single start follows this profile's compat rules and late list), then
@@ -1443,8 +1447,8 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | launch | `launch_play` | gameId, request: LaunchRequest {mode: 'profile'\|'vanilla'\|'no-mods'\|'once', profileId?, skipBackup?} | `LaunchResult` (+ `via: 'steam'\|'direct'`, dev.29.17) |
 | launch | `launch_state` | gameId | `BootState` {boot, mods, native, stale} (launcher type) |
 | launch | `launch_prestart` | gameId | `PreStart` or null: what kiln-eml is doing before the game's window exists (`kiln/state/eml.json`, phase running), while the game runs (`kiln_manage::prestart`) |
-| launch | `launch_begin` | gameId, mode: LaunchMode | null: Play was pressed (before the cook); the launcher times the start's own steps from now (`kiln_manage::start_progress`) |
-| launch | `launch_progress` | gameId | `StartTimeline` or null: the start as one timeline (the launcher's steps, then `kiln/state/progress.json`'s), the running step and the time left from `<data>/state/start-times.json`; app.md "What a start is doing" |
+| launch | `launch_begin` | gameId, mode: LaunchMode | null: Play was pressed (before the cook); the launcher times the start's own steps from now (`kiln_manage::start_progress`). (0.2.0-dev.31.13) Every mode, `vanilla` too (its record goes once its game is seen); `busy` with `detail.kind` `already_starting` while another start is pending (`launch_play` step 1), and the pending start is kept: the window does not call `launch_end` for that refusal |
+| launch | `launch_progress` | gameId | `StartTimeline` or null: the start as one timeline (the launcher's steps, then `kiln/state/progress.json`'s), the running step and the time left from `<data>/state/start-times.json`; app.md "What a start is doing". (0.2.0-dev.31.13) `mode?: LaunchMode`: how the launcher's start was started (absent: not said); a Vanilla start's timeline exists until its game is there |
 | launch | `launch_end` | gameId | null: Play ended before the game existed (refused before Steam was asked, or Stop waiting while Steam had not started the game: app.md "What a start is doing"); the start the launcher was timing is over |
 | logs | `logs_list` | target: LogTarget | `LogFile[]` |
 | logs | `logs_read` | target, file: string, offset: number \| null, maxBytes: number \| null | `LogChunk` |
