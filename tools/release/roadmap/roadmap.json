@@ -1,6 +1,35 @@
 {
   "released": [
     {
+      "version": "0.2.0-dev.31.13",
+      "date": "2026-11-25",
+      "title": "FSR 4 on RX 6000, Beastmaster on Kiln, XHL's APIs",
+      "summary": "FSR 4 on more AMD cards, Building Tools next to Kiln, Beastmaster without EMF, and four new APIs from XHL's requests.",
+      "patch": true,
+      "features": [
+        {
+          "title": "FSR 4 on RX 6000 and RX 7000",
+          "text": "FSR 4 no longer draws a black screen on RX 6000/7000 cards, and Kiln falls back to FSR 3.1 if its picture comes out wrong.",
+          "area": "core"
+        },
+        {
+          "title": "Building Tools next to Kiln",
+          "text": "Kiln's cursor hook no longer hides the game code Building Tools looks for.",
+          "area": "core"
+        },
+        {
+          "title": "Beastmaster on Kiln alone",
+          "text": "Beastmaster runs without EMF: orders, markers, buffs and its creature packs on Kiln's own EML runner.",
+          "area": "core"
+        },
+        {
+          "title": "XHL's APIs",
+          "text": "Crosshair hits, game texts in every language, owned key presses and joined-client views (mod API 0.2.22).",
+          "area": "api"
+        }
+      ]
+    },
+    {
       "version": "0.2.0-dev.31.12",
       "date": "2026-11-25",
       "title": "Crafting from linked chests, everywhere",
@@ -3606,37 +3635,8 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.31.13",
-      "status": "next",
-      "title": "FSR 4 on RX 6000, Beastmaster on Kiln, XHL's APIs",
-      "summary": "FSR 4 on more AMD cards, Building Tools next to Kiln, Beastmaster without EMF, and four new APIs from XHL's requests.",
-      "patch": true,
-      "features": [
-        {
-          "title": "FSR 4 on RX 6000 and RX 7000",
-          "text": "FSR 4 no longer draws a black screen on RX 6000/7000 cards, and Kiln falls back to FSR 3.1 if its picture comes out wrong.",
-          "area": "core"
-        },
-        {
-          "title": "Building Tools next to Kiln",
-          "text": "Kiln's cursor hook no longer hides the game code Building Tools looks for.",
-          "area": "core"
-        },
-        {
-          "title": "Beastmaster on Kiln alone",
-          "text": "Beastmaster runs without EMF: orders, markers, buffs and its creature packs on Kiln's own EML runner.",
-          "area": "core"
-        },
-        {
-          "title": "XHL's APIs",
-          "text": "Crosshair hits, game texts in every language, owned key presses and joined-client views (mod API 0.2.22).",
-          "area": "api"
-        }
-      ]
-    },
-    {
       "version": "0.2.0-dev.32",
-      "status": "planned",
+      "status": "next",
       "title": "Pets, taming and more registries",
       "summary": "Pets that follow and fight for their owner, taming, and Kiln registries for creatures, spells, buffs, perks, stations, world rules and skills.",
       "features": [
