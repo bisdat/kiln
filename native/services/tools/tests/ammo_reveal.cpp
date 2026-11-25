@@ -17,10 +17,11 @@ static int backpack_fixture(uint32_t,uint32_t){return backpack_answer;}
 static unsigned equip_calls;
 static void KILN_CALL equip_fixture(SelectorGroup*,void*,uint8_t,uint32_t,uint32_t){++equip_calls;}
 static void KILN_CALL finalizer_fixture(SelectorGroup*,void*,void*,void*,void*,void*){}
+static uint64_t count_999=9; // the game's count of its row 999 (0: the stack left, its row kept)
 static void vanilla_selector(SelectorGroup* groups,void*,uint8_t) {
     for(unsigned i=0;i<7;++i) {
         auto& g=groups[i];g.data=g.inline_rows;g.capacity=64;g.count=2;
-        g.data[0].item=999;g.data[0].count=9;g.data[1].item=1257792166u;g.data[1].count=3;
+        g.data[0].item=999;g.data[0].count=count_999;g.data[1].item=1257792166u;g.data[1].count=3;
         if(!g.has_selected){g.has_selected=1;g.selected=0;}
     }
 }
@@ -165,6 +166,41 @@ int main() {
     // The count wraps as the game's own increment does.
     cycle_count()=0xffffffffu;ammo::pick(groups,input,0,555,115);CHECK(cycle_count()==0&&drain()==1);
     CHECK(std::equal(input_before.begin(),input_before.end(),input)&&pending_untouched());
+    // Append as Ui.AmmoList publishes it since 0.2.0-dev.31.12 (GitHub issue 145): the quiver's row of 999, which the game
+    // lists with stock, sits behind the game's row; 556 is the quiver's own. 999's stack was in the backpack at the bind.
+    {
+        KilnUiAmmoRow quiver[]={{999,20,0,0},{556,4,0,1}};
+        KilnUiAmmoContext context{};context.size=sizeof context;
+        KilnUiAmmoPublish append{sizeof append,KUA_KIND_ARROW,KUA_MODE_APPEND,2,9,0,0,quiver};
+        auto bind=[&] {
+            selector(groups,acc,0);CHECK(ammo::context(7,KUA_KIND_ARROW,&context)==KILN_OK&&context.ok);
+            append.serial=context.game_serial;CHECK(ammo::publish(7,&append)==KILN_OK);selector(groups,acc,0);
+        };
+        count_999=8;backpack_answer=1;bind(); // new rows, so the bind reads the backpack for 999
+        CHECK(groups[0].count==3&&groups[0].data[0].item==999&&groups[0].data[0].count==8&&groups[0].data[2].item==556);
+        active_group()=0;equip_calls=0;cycle_count()=50;drain();
+        // The stack is there: the user's cycle and selection and the game's automatic selections are the game's, once
+        // each; Kiln shows nothing (the host's answer does) and raises nothing.
+        for(const uintptr_t from:{kCycleRet,kSelectRet,kEventRet,kAutoRet}){game_caller=from;ammo::pick(groups,input,0,999,130);}
+        CHECK(equip_calls==4&&cycle_count()==50&&drain()==0);
+        // The quiver's server half swapped 999 out before the game built its rows again: the user's picks raise Picked
+        // and show the list, once each ...
+        backpack_answer=0;game_caller=kCycleRet;ammo::pick(groups,input,0,999,131);
+        CHECK(equip_calls==4&&cycle_count()==51&&drain()==1&&picks[0].item==999&&picks[0].row==0);
+        game_caller=kSelectRet;ammo::pick(groups,input,0,999,132);CHECK(cycle_count()==52&&drain()==1);
+        // ... the game's automatic selections raise it as in 0.2.0-dev.31.10 (the backpack lacks the stack) and show nothing.
+        for(const uintptr_t from:{kEventRet,kAutoRet,kCrosshairRet}) {
+            game_caller=from;ammo::pick(groups,input,0,999,133);CHECK(equip_calls==4&&cycle_count()==52&&drain()==1);
+        }
+        // After the game's rebuild (999 kept at count 0) and before Kiln.Ui's next publication: the same.
+        count_999=0;selector(groups,acc,0);CHECK(groups[0].count==2&&groups[0].data[0].count==0);
+        game_caller=kCycleRet;ammo::pick(groups,input,0,999,134);CHECK(equip_calls==4&&cycle_count()==53&&drain()==1);
+        game_caller=kEventRet;ammo::pick(groups,input,0,999,135);CHECK(equip_calls==4&&cycle_count()==53&&drain()==1);
+        // And bound again: the count-0 row as issue 131 decides it.
+        bind();game_caller=kSelectRet;ammo::pick(groups,input,0,999,136);CHECK(equip_calls==4&&cycle_count()==54&&drain()==1);
+        game_caller=kAutoRet;ammo::pick(groups,input,0,999,137);CHECK(equip_calls==4&&cycle_count()==54&&drain()==1);
+        count_999=9;backpack_answer=0;game_caller=kCycleRet;
+    }
     // stop() turns the reveal off with the rest.
     ammo::stop();cycle_count()=5;ammo::ready.store(true);ammo::catalog[0]={999,1257792166u,555,556};ammo::catalog_session=9;
     selector(groups,acc,0);publish(KUA_KIND_ARROW,arrows);selector(groups,acc,0);

@@ -419,6 +419,11 @@ public void CtrlClickAsksToMarkTheItem()
   `Picked` since 0.2.0-dev.31.10, GitHub issue 145). A `Pick` after `SetGameRows` and before the next `Step()` is decided
   by the new rows, as in the game; `Shown` still composes the earlier snapshot with them until that step, where the game
   shows only its own rows.
+  **Changed in 0.2.0-dev.31.12 (GitHub issue 145), in Append:** a mod's row of an item the game lists itself, also with
+  stock, is now published behind the game's row, so `Provided(kind)` lists it too (`Shown` does not change: the game's
+  row shows in its place). A test that asserts `Provided` in Append must add those rows, in the provider's order. And a
+  `Pick` of such a row after `SetGameRows` set the game's count of it to 0, before the next `Step()`, now returns true
+  and raises `Picked` for that mod (the stack left the backpack), where it returned false before.
 
 ```csharp
 [Fact]

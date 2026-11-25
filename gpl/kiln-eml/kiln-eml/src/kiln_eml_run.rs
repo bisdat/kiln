@@ -77,7 +77,13 @@ fn main() {
         candidates.extend(discover::folder_candidates(&game.join("kiln/eml/mods"), "kiln-dropin"));
         candidates.extend(discover::folder_candidates(&game.join("mods"), "game-mods"));
     }
-    let (run, entries) = discover::resolve(&candidates);
+    let (mut run, mut entries) = discover::resolve(&candidates);
+    // as the plugin: a drop-in of an EML mod the profile has off is skipped
+    if let Some(text) = profile.as_ref().and_then(|p| std::fs::read_to_string(p).ok()) {
+        for line in discover::honor_profile_off(&text, &game.join("kiln"), &mut run, &mut entries) {
+            eprintln!("[I] {line}");
+        }
+    }
     cfg.cache_dir = cache.unwrap_or_else(|| game.join("kiln/eml/cache"));
     cfg.game_dir = game;
     let out = runner::run(&cfg, run, entries);

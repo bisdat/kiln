@@ -515,6 +515,38 @@ fn the_launcher_says_when_shroudforge_has_an_eml_mod_off_and_never_writes_a_play
     assert!(eml.text.contains("switched off in ShroudForge's settings"), "{}", eml.text);
 }
 
+/// A player's report (0.2.0-dev.31.9): the profile had an EML mod off, his own folder of it was in ShroudForge's mods folder
+/// with ShroudForge's own switch on, and ShroudForge ran it. Kiln never writes into that folder; activation says what
+/// happens to it (Kiln's bundled runtime skips it at each start) and how to stop it where Kiln cannot. One whose switch is
+/// off does not run, and gets no note.
+#[test]
+fn a_players_own_eml_folder_of_a_mod_that_is_off_says_what_hosted_shroudforge_does() {
+    let s = setup("own-off");
+    let quiver = import(&s.dirs, &legacy(&s.t.0, "quiver-slots", "0.8.2"), ModKind::Eml, "quiver-slots");
+    let quiet = import(&s.dirs, &legacy(&s.t.0, "quiet-own", "1.0.0"), ModKind::Eml, "quiet-own");
+    let hand = s.game.join("mods/Quiver Slots");
+    put(&hand, "mod.json", br#"{"id":"quiver-slots","name":"Quiver","version":"0.8.2","capabilities":["patch"]}"#);
+    put(&hand, "src/mod.lua", b"return {}");
+    put(&hand, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client","server"]}"#);
+    let shut = s.game.join("mods/quiet-own");
+    put(&shut, "mod.json", br#"{"id":"quiet-own","name":"Quiet","version":"1.0.0","capabilities":["patch"]}"#);
+    put(&shut, "src/mod.lua", b"return {}");
+    put(&shut, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"EML","enabled":false}"#);
+    let before = ext_of(&hand);
+    let p = s.profile(vec![pm(&quiver, false), pm(&quiet, false)]);
+    let rep = engine_mods::place(&s.dirs, &p, &s.game).unwrap();
+    let note = rep.safety_notes.iter().find(|n| n.starts_with("eml:quiver-slots")).unwrap_or_else(|| panic!("a safety note: {rep:?}"));
+    assert!(note.starts_with(&format!("eml:quiver-slots: it is off in the profile, and your own folder {} ", hand.display())), "{note}");
+    assert!(note.contains("when that runtime takes Kiln's skip list") && note.contains("kiln.log says at each start whether it was skipped")
+        && !note.contains("Kiln's bundled runtime skips this folder at each start") && note.contains("Mods > ShroudForge")
+        && note.contains("move the folder out"), "{note}");
+    assert!(!note.contains("Let Kiln manage this folder"), "Kiln takes over ShroudForge folders only: {note}");
+    assert!(rep.own_notes.contains(note), "{rep:?}");
+    assert!(!rep.safety_notes.iter().any(|n| n.starts_with("eml:quiet-own")), "its switch is off: it does not run {rep:?}");
+    assert_eq!(ext_of(&hand), before, "a player's folder is never written to");
+    assert!(engine_mods::marker(&hand).is_none());
+}
+
 /// sol-playtest-manage S9: the receipt lists `extended.mod.json` without its switch and its whole `settings` object, and
 /// the check for the player's ShroudForge settings compared only their values. An edit of a setting's metadata alone
 /// (the player widened a slider's range by hand) must survive an update and every way of stopping the mod: kept in the

@@ -536,6 +536,33 @@ public sealed class PlayerStorageMirrorTests
     }
 
     [Fact]
+    public void ByDefaultAStoragesRowOfAnItemTheBackpackHoldsTooIsKeptSoItsPickAfterTheStackLeftGoesToTheServer()
+    {
+        // GitHub issue 145, ProvideAmmo's default (Append): the quiver and the backpack both hold arrows of r.Arrow. The HUD
+        // shows the game's row of them; the quiver's row is published behind it. When the backpack's stack leaves (the game
+        // builds its rows again with that row kept at count 0), a pick of the row is the quiver's: it goes to the server,
+        // which equips the quiver's stack, instead of to the game, which would find no stack and empty the slot.
+        using var r = new Run();
+        var bow = r.Kiln.Items.AddItem("Weapon_Bow_T1", 1, ItemCategory.Weapons, gear: true);
+        PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 1,
+            [E("quivers:quiver", 18, Arrows(0, r.Arrow.Value, 30), Arrows(1, r.FireArrow.Value, 5))]));
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow)));
+        Assert.False(ammo.Options.Replace);
+        r.Kiln.AmmoList.Hold(AmmoListKind.Arrow, bow, new AmmoListRow(r.Arrow, 10));
+        r.Kiln.Step(2);
+        Assert.Equal(AmmoListMode.Append, r.Kiln.AmmoList.ModeOf(AmmoListKind.Arrow));
+        Assert.Equal([new AmmoListRow(r.Arrow, 30), new AmmoListRow(r.FireArrow, 5)], r.Kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        Assert.Equal([new AmmoListRow(r.Arrow, 10), new AmmoListRow(r.FireArrow, 5)], r.Kiln.AmmoList.Shown(AmmoListKind.Arrow));
+        Assert.False(r.Kiln.AmmoList.Pick(AmmoListKind.Arrow, r.Arrow));  // the backpack holds it: the game's own
+        r.Kiln.Step(2);
+        Assert.Empty(r.Link.Picks);
+        r.Kiln.AmmoList.SetGameRows(AmmoListKind.Arrow, new AmmoListRow(r.Arrow, 0));  // the backpack's stack left
+        Assert.True(r.Kiln.AmmoList.Pick(AmmoListKind.Arrow, r.Arrow));
+        r.Kiln.Step(2);
+        Assert.Equal([new StorageAmmoPick("quivers:quiver", 1, r.Arrow.Value)], r.Link.Picks);
+    }
+
+    [Fact]
     public void TheServerMarksArrowsAndSpellsAndAGameWithoutAnItemCatalogListsThemByTheMarks()
     {
         using var r = new Run();

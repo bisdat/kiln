@@ -191,6 +191,22 @@ itself; it places no second copy, since ShroudForge drops a package whose id it 
 are editable in the launcher all the same (engines.md "Settings"); the settings dialog says "This is your own folder,
 not a copy Kiln placed: Kiln changes only the setting you change here."
 
+A player's own folder of a mod the profile has **off** (0.2.0-dev.31.12; a player's own EML folder in ShroudForge's mods
+folder had run while he had the mod off). Its note is a safety note, raised even with the notes about mod folders off,
+and says what happens to the folder and how to stop it where Kiln cannot (`engine_mods::own_off_in_shroudforge`, for a
+ShroudForge entry and for an EML entry whose folder ShroudForge would run): "shroudforge:<id>: it is off in the profile,
+and your own folder <path> stays as it is (Kiln never writes into a folder it did not place). While Kiln hosts
+ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list (Kiln's
+bundled runtime does from 0.2.0-dev.31.12 on); kiln.log says at each start whether it was skipped. Another runtime (your
+installed ShroudForge, "Use my installed ShroudForge") or ShroudForge's own loader still runs it while its own
+ShroudForge switch is on: to stop that,
+switch it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, choose "Let Kiln manage this
+folder" in Notes, or move the folder out of the mods folder." An EML entry's note leaves out "Let Kiln manage this
+folder" (Kiln takes over ShroudForge folders only). The mod's row says what ran at the last start: the engine status
+lists kiln-eml's row as `disabled` ("… is skipped this start; Kiln leaves its files as they are") or, where nothing
+skipped it, `own-loader` ("runs … although it is off in the profile: …", with the same ways to turn it off).
+Before, the note was "your own folder <path> stays as it is; Kiln never switches a folder it did not place".
+
 **"Let Kiln manage this folder"** (dev.27, `components/OwnFolders.tsx`, `engine_own_folders` / `engine_adopt_folder`)
 hands such a ShroudForge folder to Kiln, on the player's click only. It is offered where the own-folder note is: in the
 Notes dialog under "Your own mod folders" (the folder's path, the mod and version, and the button), and in the mod's
