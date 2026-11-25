@@ -129,6 +129,42 @@ public sealed class LoaderTests : ModsFixture
         Assert.Empty(mods.Mods);
     }
 
+    /// <summary>What Kiln.Content, Kiln.Quests and Kiln.Blocks tell a new load of a mod by (0.2.0-dev.31.13; live server,
+    /// 0.2.0-dev.31.10): the control command <c>reload</c> (and <c>unload</c> then <c>load</c>) of a data-only mod that is the
+    /// last loaded keeps its id and its place in the load order, so the list of loaded ids does not change. Its entry's
+    /// Info and the live context's owner do, and the entry carries the version now on disk.</summary>
+    [Fact]
+    public void A_reload_of_the_last_loaded_data_only_mod_is_a_new_load_under_the_same_id()
+    {
+        InstallHello();
+        var dir = WriteManifest("skilltest", """{"id":"skilltest","version":"1.0.0","apiVersion":"0.2"}""");
+        Directory.CreateDirectory(Path.Combine(dir, "content"));
+        File.WriteAllText(Path.Combine(dir, "content", "skills.json"), """{"format":1}""");
+        var host = new FakeHost();
+        using var mods = NewManager(host);
+        mods.LoadAll();
+        string[] Order() => Kiln.Mods.All.Where(m => m.IsLoaded).OrderBy(m => m.LoadIndex).Select(m => m.Id).ToArray();
+        var before = Kiln.Mods.Get("skilltest")!;
+        var firstOwner = ModContext.FindLive(before.Info!)!.Owner;
+        Assert.Equal(["hello", "skilltest"], Order());
+
+        File.WriteAllText(Path.Combine(dir, Manifest.FileName), """{"id":"skilltest","version":"1.0.1","apiVersion":"0.2"}""");
+        var r = mods.Execute(ModOperation.Reload, "skilltest");  // what kiln/control's "reload skilltest" runs
+        Assert.True(r.Ok, r.Message);
+        var after = Kiln.Mods.Get("skilltest")!;
+        Assert.Equal(["hello", "skilltest"], Order());  // the same list: pack_mods alone would see no change
+        Assert.Equal("1.0.1", after.Version);
+        Assert.NotSame(before.Info, after.Info);
+        var secondOwner = ModContext.FindLive(after.Info!)!.Owner;
+        Assert.NotEqual(firstOwner, secondOwner);
+        Assert.Null(ModContext.FindLive(before.Info!));  // the old load is gone
+
+        Assert.True(mods.Execute(ModOperation.Unload, "skilltest").Ok);  // "unload skilltest", then "load skilltest"
+        Assert.True(mods.Execute(ModOperation.Load, "skilltest").Ok);
+        Assert.Equal(["hello", "skilltest"], Order());
+        Assert.NotEqual(secondOwner, ModContext.FindLive(Kiln.Mods.Get("skilltest")!.Info!)!.Owner);
+    }
+
     [Fact]
     public void Reload_of_an_unknown_id_loads_its_folder()
     {
