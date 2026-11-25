@@ -70,7 +70,15 @@ bool mem_read(void*, void* dst, uintptr_t src, size_t n) {
 }
 const ch::Memory kMem{&mem_read, nullptr};
 
-constexpr ch::Env kClient{true, true};
+// The live process's facts at a get: the game client, hooks on, and the client session tick::session says is live (the
+// tests keep it with the client Pre they give, live() below).
+std::atomic<uint32_t> g_env_live{0};
+ch::Env client() { return {true, true, g_env_live.load(std::memory_order_relaxed)}; }
+// The client world's Pre: kiln.tick's session and the service's Pre together.
+void live(uint32_t session, uint64_t step) {
+    g_env_live = session;
+    ch::session_live(session, step);
+}
 
 KilnCrosshairHit fresh_out() {
     KilnCrosshairHit h;
@@ -109,16 +117,17 @@ void reset() {
     g_fault = false;
     g_installs = 0;
     g_in_install = false;
+    g_env_live = 0;
 }
 
 // A ready build with a live session 3 at step 100, installed by a first get.
 void ready() {
     reset();
     ch::set_installer(&install_bound);
-    ch::session_live(3, 100);
+    live(3, 100);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 99;
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
 }
 
 void decoder() {
@@ -178,15 +187,15 @@ void decoder() {
 void refusals() {
     reset();
     ch::set_installer(&install_bound);
-    ch::session_live(3, 100);
+    live(3, 100);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 0;
-    check(ch::get({false, true}, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: a dedicated server is unavailable");
-    check(ch::get({true, false}, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: safe idle is unavailable");
+    check(ch::get({false, true, 3}, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: a dedicated server is unavailable");
+    check(ch::get({true, false, 3}, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: safe idle is unavailable");
     check(g_installs == 0, "get: a refused get installs nothing");
-    check(ch::get(kClient, nullptr, &reason) == KILN_ERR_INVALID_ARGUMENT, "get: no out is invalid");
+    check(ch::get(client(), nullptr, &reason) == KILN_ERR_INVALID_ARGUMENT, "get: no out is invalid");
     h.size = sizeof h - 1;
-    check(ch::get(kClient, &h, &reason) == KILN_ERR_INVALID_ARGUMENT, "get: a short out is invalid");
+    check(ch::get(client(), &h, &reason) == KILN_ERR_INVALID_ARGUMENT, "get: a short out is invalid");
     check(g_installs == 0, "get: an invalid get installs nothing");
 
     reset();
@@ -195,7 +204,7 @@ void refusals() {
     check(!ch::usable(&why, &installed) && why && std::string(why).find("client.crosshair_trace") != std::string::npos,
           "usable: unbound by default, the reason names the sigdb feature", why ? why : "");
     h = fresh_out();
-    check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: no installer and no binding is unavailable");
+    check(ch::get(client(), &h, &reason) == KILN_ERR_UNAVAILABLE, "get: no installer and no binding is unavailable");
     ch::unbound_reason("held for a test");
     check(!ch::usable(&why, &installed) && std::string(why) == "held for a test", "usable: unbound_reason is the answer");
 }
@@ -211,12 +220,12 @@ void lazy_install() {
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 99;
     // the menu: no live session yet. The get still installs (a mod may read early); nothing to give.
-    check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0 &&
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0 &&
               h.flags == 0 && h.size == sizeof h,
           "get: the first get answers NO_SAMPLE with a zeroed sample");
     check(g_installs == 1 && ch::usable(&why, &installed) && installed, "get: the first get installed the hook, once");
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(g_installs == 1 && ch::stats().installs == 1, "get: a later get installs nothing more");
 
     reset();
@@ -226,7 +235,7 @@ void lazy_install() {
     for (uint32_t i = 0; i + 1 < ch::kInstallAttempts; ++i) {
         h = fresh_out();
         reason = 99;
-        const KilnResult rc = ch::get(kClient, &h, &reason);
+        const KilnResult rc = ch::get(client(), &h, &reason);
         check(rc == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0 && h.flags == 0 &&
                   h.size == sizeof h,
               "get: an install refused for unchecked threads answers NO_SAMPLE with a zeroed sample", std::to_string(i));
@@ -237,19 +246,19 @@ void lazy_install() {
         g_now += ch::kInstallRetryNs - 1;
         h = fresh_out();
         reason = 99;
-        check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE &&
+        check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE &&
                   g_installs == before,
               "get: no new attempt sooner than kInstallRetryNs after a refusal", std::to_string(g_installs.load()));
         g_now += 1;
     }
     h = fresh_out();
-    check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: the last refused attempt is final, unavailable");
+    check(ch::get(client(), &h, &reason) == KILN_ERR_UNAVAILABLE, "get: the last refused attempt is final, unavailable");
     check(g_installs == static_cast<int>(ch::kInstallAttempts) && ch::install_failed(),
           "get: Again is tried kInstallAttempts times, then final");
     check(!ch::usable(&why, &installed) && std::string(why) == "threads could not be checked",
           "usable: the last refusal's reason stays");
     h = fresh_out();
-    check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE && g_installs == static_cast<int>(ch::kInstallAttempts),
+    check(ch::get(client(), &h, &reason) == KILN_ERR_UNAVAILABLE && g_installs == static_cast<int>(ch::kInstallAttempts),
           "get: no install after the final failure");
 
     // a get that waited on the install of another thread, which was refused for unchecked threads: NO_SAMPLE too
@@ -260,12 +269,12 @@ void lazy_install() {
     uint32_t first_reason = 99, waiter_reason = 99;
     std::thread first([&] {
         KilnCrosshairHit x = fresh_out();
-        first_rc = ch::get(kClient, &x, &first_reason);
+        first_rc = ch::get(client(), &x, &first_reason);
     });
     while (!g_in_install.load()) std::this_thread::yield();
     std::thread waiter([&] {
         KilnCrosshairHit x = fresh_out();
-        waiter_rc = ch::get(kClient, &x, &waiter_reason);
+        waiter_rc = ch::get(client(), &x, &waiter_reason);
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     g_hold_install = false;
@@ -280,10 +289,10 @@ void lazy_install() {
     ch::set_installer(&install_failed);
     const uint64_t g1 = ch::generation();
     h = fresh_out();
-    check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE && ch::install_failed() && ch::generation() != g1,
+    check(ch::get(client(), &h, &reason) == KILN_ERR_UNAVAILABLE && ch::install_failed() && ch::generation() != g1,
           "get: a failed install is final at once and moves the generation");
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(g_installs == 1, "get: a failed install is never tried again");
     ch::set_installer(&install_bound);
     check(!ch::install_failed(), "set_installer clears install_failed");
@@ -295,13 +304,13 @@ void samples() {
     f.put(terrain_hit());
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 99;
-    check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE,
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE,
           "get: nothing observed yet is NO_SAMPLE");
     ch::observe(f.rbp(), kMem);
     check(g_last_src == f.rbp() + kHit, "observe: copies from client_cursor's frame at client/crosshair.hit");
     g_now += 5'000'000;
     h = fresh_out();
-    check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NONE, "get: a fresh sample");
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NONE, "get: a fresh sample");
     check(h.size == sizeof h && h.sequence == 1 && h.client_session == 3 && h.client_step == 100 && h.age_ns == 5'000'000,
           "get: sequence 1, the live session and step, its age",
           std::to_string(h.sequence) + " " + std::to_string(h.client_session) + " " + std::to_string(h.client_step) + " " +
@@ -309,32 +318,32 @@ void samples() {
     check((h.flags & KILN_CROSSHAIR_HIT) && h.material == 37 && h.distance == 6.0f && h.position[1] == 37.25,
           "get: the decoded hit");
 
-    ch::session_live(3, 101);
+    live(3, 101);
     f.put(Result{}.status(KILN_CROSSHAIR_STATUS_NOTHING));
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE && h.sequence == 2 && h.client_step == 101 && h.flags == 0 &&
               h.status == 31 && h.age_ns == 0,
           "get: the next trace (a miss) is sequence 2 at the next step");
 
     g_now += static_cast<int64_t>(KILN_CROSSHAIR_FRESH_NS);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE, "get: exactly KILN_CROSSHAIR_FRESH_NS old is still fresh");
     g_now += 1;
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_STALE && h.sequence == 2 && h.status == 31 &&
               h.age_ns == KILN_CROSSHAIR_FRESH_NS + 1,
           "get: an older sample is STALE and still given");
     h = fresh_out();
-    check(ch::get(kClient, &h, nullptr) == KILN_OK && h.sequence == 2, "get: out_reason may be NULL");
+    check(ch::get(client(), &h, nullptr) == KILN_OK && h.sequence == 2, "get: out_reason may be NULL");
 
     // a clock that went back (another thread's QPC read) is age 0, never a huge unsigned age
     g_now = 0;
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(h.age_ns == 0 && reason == KILN_CROSSHAIR_REASON_NONE, "get: a sample from the future is age 0");
 }
 
@@ -345,35 +354,59 @@ void sessions() {
     ch::observe(f.rbp(), kMem);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 0;
-    ch::session_live(4, 500);
-    ch::get(kClient, &h, &reason);
+    live(4, 500);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0 && h.flags == 0,
           "session: a sample of an older session is never given");
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE && h.client_session == 4 && h.sequence == 2,
           "session: the new session's sample (the sequence keeps growing)");
     ch::session_ended(4);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0, "session: after STOPPING nothing is given");
     const uint64_t skipped = ch::stats().skipped;
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && ch::stats().skipped == skipped + 1,
           "session: a visit with no live session is skipped");
-    ch::session_live(4, 501);  // a late Pre of the stopped session does not bring it back
+    live(4, 501);  // a late Pre of the stopped session does not bring it back
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NO_SAMPLE, "session: an ended session stays ended");
-    ch::session_live(5, 10);
+    live(5, 10);
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE && h.client_session == 5, "session: the next session works");
+}
+
+// The client world's STOPPING never came (world.lifecycle's destroy hook missing): the session the live process names at
+// the get decides, so a sample of an ended session is not given as STALE forever.
+void ended_without_stopping() {
+    ready();
+    Frame f;
+    f.put(terrain_hit());
+    ch::observe(f.rbp(), kMem);
+    KilnCrosshairHit h = fresh_out();
+    uint32_t reason = 99;
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NONE && h.client_session == 3,
+          "session: a sample of the live session");
+    g_now += 10 * static_cast<int64_t>(KILN_CROSSHAIR_FRESH_NS);
+    h = fresh_out();
+    reason = 99;
+    check(ch::get({true, true, 0}, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE &&
+              h.sequence == 0 && h.flags == 0,
+          "session: no live session at the get (no STOPPING seen) gives no sample, not STALE", std::to_string(reason));
+    h = fresh_out();
+    reason = 99;
+    check(ch::get({true, true, 4}, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE &&
+              h.sequence == 0,
+          "session: another session live at the get (its Pre not seen yet) gives no sample of the old one");
 }
 
 void faults() {
@@ -385,24 +418,24 @@ void faults() {
     ch::observe(f.rbp(), kMem);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 0;
-    check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_FAULT && h.sequence == 0 &&
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_FAULT && h.sequence == 0 &&
               ch::stats().faults == 1,
           "fault: a faulted copy is FAULT, no sample");
     g_fault = false;
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_FAULT && ch::stats().faults == 1,
           "fault: no copy is tried again in the faulted session");
-    ch::session_live(4, 1);
+    live(4, 1);
     ch::observe(f.rbp(), kMem);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE && h.client_session == 4, "fault: the next session copies again");
 
     // unbound: nothing is read
     reset();
-    ch::session_live(1, 1);
+    live(1, 1);
     g_last_src = 0;
     ch::observe(f.rbp(), kMem);
     check(g_last_src == 0, "observe: unbound reads nothing");
@@ -416,7 +449,7 @@ void busy() {
     ch::hold_publish_for_tests(true);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 0;
-    check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_BUSY && h.sequence == 0 &&
+    check(ch::get(client(), &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_BUSY && h.sequence == 0 &&
               h.flags == 0,
           "busy: a publish in progress is BUSY with a zeroed sample");
     const uint64_t skipped = ch::stats().skipped;
@@ -424,7 +457,7 @@ void busy() {
     check(ch::stats().skipped == skipped + 1, "busy: another visit skips instead of writing over it");
     ch::hold_publish_for_tests(false);
     h = fresh_out();
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     check(reason == KILN_CROSSHAIR_REASON_NONE && h.sequence == 1, "busy: the held sample is readable again");
 }
 
@@ -438,7 +471,7 @@ void producer_allocates_nothing() {
     for (int i = 0; i < 100; ++i) ch::observe(f.rbp(), kMem);
     KilnCrosshairHit h = fresh_out();
     uint32_t reason = 0;
-    ch::get(kClient, &h, &reason);
+    ch::get(client(), &h, &reason);
     t_counting = false;
     check(t_allocs == 0, "threads: observe and get allocate nothing", std::to_string(t_allocs));
 }
@@ -463,7 +496,7 @@ void no_torn_samples() {
             for (int i = 0; i < 20000; ++i) {
                 KilnCrosshairHit h = fresh_out();
                 uint32_t reason = 0;
-                if (ch::get(kClient, &h, &reason) != KILN_OK) {
+                if (ch::get(client(), &h, &reason) != KILN_OK) {
                     torn.fetch_add(1);
                     continue;
                 }
@@ -495,6 +528,7 @@ int main() {
     lazy_install();
     samples();
     sessions();
+    ended_without_stopping();
     faults();
     busy();
     producer_allocates_nothing();

@@ -58,6 +58,7 @@ void session_ended(uint32_t session);
 struct Env {
     bool client_side;  // the game client (a dedicated server has no cursor)
     bool hooks;        // not safe idle
+    uint32_t live_session;  // the client session live now (0: none), asked at this get: a sample of another is never given
 };
 // kiln.client.crosshair's get (kiln_client_crosshair.h). The first call on a ready build installs the hook (the lazy
 // installer below) and answers NO_SAMPLE.
