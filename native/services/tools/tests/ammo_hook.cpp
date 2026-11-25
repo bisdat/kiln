@@ -3,6 +3,7 @@
 #include "presentation_api.cpp"
 #undef main
 #include "../ammo_runtime.h"
+#include <vector>
 static KilnClientState ammo_client_state;
 static KilnResult KILN_CALL ammo_state(KilnClientState* out){*out=ammo_client_state;return KILN_OK;}
 static bool KILN_CALL ammo_thread(){return true;}
@@ -11,6 +12,8 @@ static int backpack_fixture(uint32_t,uint32_t){return backpack_answer;}
 static unsigned equip_calls,finalizer_calls;
 static void KILN_CALL equip_fixture(SelectorGroup*,void*,uint8_t,uint32_t,uint32_t){++equip_calls;}
 static void KILN_CALL finalizer_fixture(SelectorGroup* g,void*,void*,void*,void*,void*){++finalizer_calls;g[0].selected=0;g[0].has_selected=1;}
+static std::vector<std::pair<int32_t,std::string>> log_lines;
+static void KILN_CALL capture_log(KilnOwner,int32_t level,KilnStr text){log_lines.emplace_back(level,std::string(text.ptr,text.len));}
 static bool game_lists_555; // the arrow group also lists 555, with this count (0: a stack used up, its row kept)
 static uint64_t game_555_count;
 static void vanilla_selector(SelectorGroup* groups,void*,uint8_t) {
@@ -49,7 +52,7 @@ int main() {
     presentation_fixture();
     fake_hooks.raw_detour=&ammo_raw;
     KilnClientApi client_table{};client_table.state=&ammo_state;client_table.on_client_thread=&ammo_thread;
-    KilnApi fake{};fake.size=sizeof fake;fake.abi_version=KILN_ABI_VERSION;fake.subscribe_tick=&tick;fake.unsubscribe=&unsubscribe;fake.service=&service;
+    KilnApi fake{};fake.size=sizeof fake;fake.abi_version=KILN_ABI_VERSION;fake.subscribe_tick=&tick;fake.unsubscribe=&unsubscribe;fake.service=&service;fake.log=&capture_log;
     api=&fake;hooks=&fake_hooks;child=88;retiring=99;
     ammo::client=&client_table;ammo::ready.store(true);ammo::backpack_probe=&backpack_fixture;
     ammo_client_state.size=sizeof ammo_client_state;ammo_client_state.side=KILN_SIDE_CLIENT;ammo_client_state.session=KILN_SESSION_HOST;
@@ -157,6 +160,65 @@ int main() {
     backpack_answer=0;ammo::pick(groups,nullptr,0,555,404);CHECK(equip_calls==2);
     backpack_answer=-1;ammo::pick(groups,nullptr,0,555,405);CHECK(equip_calls==3);
     CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    // GitHub issue 145: the list was built while the backpack held the stack, then a swap moved the stack out before the
+    // game built the list again. The row still shows count 1; vanilla would equip nothing and empty the slot.
+    for(const uint32_t mode:{KUA_MODE_REPLACE,KUA_MODE_APPEND}) {
+        game_555_count=1;backpack_answer=1;republish(mode); // the build finds the stack in the backpack
+        CHECK(context.game_rows[2].item==555&&context.game_rows[2].count==1);
+        const uint32_t shown=mode==KUA_MODE_REPLACE?0:2;
+        CHECK(groups[0].data[shown].item==555&&groups[0].data[shown].count==(mode==KUA_MODE_REPLACE?12:1));
+        groups[0].selected=1;equip_calls=0;
+        backpack_answer=0;ammo::pick(groups,nullptr,0,555,500);CHECK(equip_calls==0); // the stack left: the mod's pick
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].count==12&&picks[0].row==3);
+        CHECK(groups[0].has_selected&&groups[0].data[groups[0].selected].item==555);
+        backpack_answer=-1;ammo::pick(groups,nullptr,0,555,501);CHECK(equip_calls==1); // unreadable: as before, the game's
+        // The currently equipped spell or arrow: its stack is the selected backpack cell, so the game's row counts it
+        // and the backpack holds it. The game's own pick, exactly once, no event.
+        backpack_answer=1;ammo::pick(groups,nullptr,0,555,502);CHECK(equip_calls==2);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // A build that did not find the stack (a reader that cannot see that stock) keeps issue 127's rule: the game's.
+        game_555_count=2;backpack_answer=0;republish(mode);equip_calls=0;
+        ammo::pick(groups,nullptr,0,555,503);CHECK(equip_calls==1);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // Between the game's new build (the stack's row kept at count 0) and the mod's next publication there is no
+        // binding: the game's own rows show, and its count-0 row of a provided item is decided as in issue 131.
+        backpack_answer=1;republish(mode);game_555_count=0;selector(groups,acc,0);
+        CHECK(groups[0].count==3&&groups[0].data[2].item==555&&groups[0].data[2].count==0);
+        equip_calls=0;backpack_answer=0;ammo::pick(groups,nullptr,0,555,504);CHECK(equip_calls==0);
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].row==3);
+        CHECK(groups[0].has_selected&&groups[0].data[groups[0].selected].item==555);
+        backpack_answer=-1;ammo::pick(groups,nullptr,0,555,505);CHECK(equip_calls==0); // unreadable: no equip, no event
+        backpack_answer=1;ammo::pick(groups,nullptr,0,555,506);CHECK(equip_calls==1); // carried again: the game's
+        backpack_answer=0;ammo::pick(groups,nullptr,0,999,507);CHECK(equip_calls==2); // the game's row with stock
+        ammo::pick(groups,nullptr,0,1257792166u,508);CHECK(equip_calls==3);           // a row no mod provided
+        CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+        // A stale session is no permission for a synthetic pick in that window either; the game's row goes the game's way.
+        ++ammo_client_state.generation;backpack_answer=0;ammo::pick(groups,nullptr,0,555,509);CHECK(equip_calls==4);
+        --ammo_client_state.generation;CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
+    }
+    // A debug line for every pick of a provided row that went to the game, at most 8 a second, from the client Post tick.
+    log_lines.clear();ammo::handoff_window={};ammo::report_post(nullptr,nullptr); // the lines of the cases above
+    CHECK(!log_lines.empty()&&log_lines.size()<=8&&log_lines[0].first==KILN_LOG_DEBUG);log_lines.clear();ammo::handoff_window={};
+    game_555_count=1;backpack_answer=1;republish(KUA_MODE_REPLACE);
+    ammo::pick(groups,nullptr,0,555,600);ammo::report_post(nullptr,nullptr);
+    CHECK(log_lines.size()==1&&log_lines[0].first==KILN_LOG_DEBUG);
+    CHECK(log_lines[0].second.rfind("ui.ammo: a pick of arrow 0x0000022b (a row a mod provided) went to the game: game row count 1 "
+        "(list revision ",0)==0);
+    CHECK(log_lines[0].second.find("; backpack: holds it")!=std::string::npos);
+    CHECK(log_lines[0].second.find(" ms, 0 client steps before the pick)")!=std::string::npos);
+    log_lines.clear();game_555_count=2;backpack_answer=0;republish(KUA_MODE_REPLACE);
+    ammo::pick(groups,nullptr,0,555,601);ammo::pick(groups,nullptr,0,1257792166u,602);ammo::report_post(nullptr,nullptr);
+    CHECK(log_lines.size()==1); // an unprovided row's pick is no mod's: no line
+    CHECK(log_lines[0].second.find("; backpack: not read (the list's build did not find it there)")!=std::string::npos);
+    log_lines.clear();ammo::handoff_window={};for(unsigned i=0;i<20;++i)ammo::pick(groups,nullptr,0,555,610+i);
+    ammo::report_post(nullptr,nullptr);ammo::report_post(nullptr,nullptr);
+    CHECK(log_lines.size()==8&&log_lines[7].second.find("; 12 more such picks not logged")!=std::string::npos);
+    CHECK(log_lines[6].second.find("more such picks")==std::string::npos);
+    log_lines.clear();for(unsigned i=0;i<10;++i)ammo::pick(groups,nullptr,0,555,640+i);
+    ammo::report_post(nullptr,nullptr);CHECK(log_lines.empty()); // 8 lines this second already
+    ammo::handoff_window={};ammo::report_post(nullptr,nullptr); // the next second
+    CHECK(log_lines.size()==8&&log_lines[7].second.find("; 2 more such picks not logged")!=std::string::npos);
+    backpack_answer=0;
     game_lists_555=false;
     ammo::retire(7);CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==0);
     CHECK(kiln_tools_remove_family(7,tool_handle)==KILN_OK);kiln_tools_presentation_set_held_provider(nullptr);

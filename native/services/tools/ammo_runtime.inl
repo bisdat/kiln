@@ -12,9 +12,15 @@ struct Publication {
     KilnOwner owner{};uint32_t kind{},mode{},session{},count{};uint64_t serial{};
     std::array<KilnUiAmmoRow,KUA_CAPACITY> rows{};
 };
+// What the backpack said of a game row with stock when a binding was made from these rows (GitHub issue 145).
+enum Seen:int8_t {SEEN_UNREAD=-2,SEEN_UNREADABLE=-1,SEEN_ABSENT=0,SEEN_HELD=1};
 struct Observation {
     KilnUiAmmoContext value{};uint32_t generation{};
     std::array<SelectorRow,KUA_CAPACITY> rows{};
+    uint64_t step{};std::chrono::steady_clock::time_point built{}; // the build these rows came from
+    std::array<int8_t,KUA_CAPACITY> seen; // per row, kept while the rows stay the same
+    bool checked{};
+    Observation(){seen.fill(SEEN_UNREAD);}
 };
 struct Binding {
     Observation original;
@@ -31,6 +37,14 @@ uint32_t catalog_session{};
 uint64_t revision{};
 std::deque<std::pair<KilnOwner,KilnUiAmmoPick>> pending;
 int (*backpack_probe)(uint32_t,uint32_t){}; // private fixture seam; production uses stable ECS snapshots
+int backpack(uint32_t actor,uint32_t item);
+// A pick of a provided row that went to the game (GitHub issue 145): logged at debug level from the client Post tick,
+// never from the pick hook itself. At most 8 lines a second; the rest are counted into the next line.
+enum class Backpack:uint8_t {Held,Unreadable,NotFoundAtBuild,UnreadableAtBuild,Stale,GameStock};
+struct Handoff {uint32_t kind{},item{},count{};uint64_t serial{};int64_t age_ms{};uint64_t age_steps{};Backpack backpack{};};
+std::array<Handoff,8> handoffs{};uint32_t handoff_count{};uint64_t handoff_dropped{};
+std::atomic<bool> handoff_pending{};
+struct {std::chrono::steady_clock::time_point start{};unsigned lines{};} handoff_window;
 unsigned index(uint32_t kind){return kind==KUA_KIND_ARROW?0:kind==KUA_KIND_SPELL?1:2;}
 bool state(KilnClientState& out) {
     out={};out.size=sizeof out;
@@ -75,7 +89,8 @@ void KILN_CALL lifecycle(const KilnWorldEvent* e,void*) {
 }
 KilnHandle lifecycle_handle{},report_tick{};
 std::atomic<bool> fault_reported{};
-void KILN_CALL report_post(const KilnTickInfo*,void*) {if(failed()&&!fault_reported.exchange(true))report_caps();}
+void publish_handoffs();
+void KILN_CALL report_post(const KilnTickInfo*,void*) {if(failed()&&!fault_reported.exchange(true))report_caps();publish_handoffs();}
 // The exact ItemRegistry lookup at Ce94470 uses map+0x38; Ce86770 gives these map field offsets. Copy only
 // validated ammunition identities/categories, never a borrowed ItemInfo pointer. Refresh on each new client session.
 bool copy_catalog(void* access,uint32_t session) {
@@ -139,6 +154,8 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         const bool equal=previous.value.game_serial&&same(before,previous)&&previous.value.held_item==held&&previous.value.game_count==next.value.game_count&&
             std::memcmp(previous.rows.data(),next.rows.data(),next.value.game_count*sizeof(SelectorRow))==0&&previous.value.ok==next.value.ok;
         next.value.game_serial=equal?previous.value.game_serial:++revision;
+        next.step=before.client_steps;next.built=std::chrono::steady_clock::now();
+        if(equal){next.seen=previous.seen;next.checked=previous.checked;} // the same rows: what the backpack said stays
         for(uint32_t r=0;r<next.value.game_count;++r)next.value.game_rows[r]={next.rows[r].item,uint32_t(std::min<uint64_t>(next.rows[r].count,UINT32_MAX)),0,r};
         previous=next;
         const auto& p=frame.publication[i];
@@ -151,9 +168,19 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
             if(stale==bindings.end()){previous.value.reason=KUA_REASON_LIMIT;continue;}
             bindings.erase(stale);
         }
+        // Once per set of rows: does the backpack hold the stack of each game row with stock? A pick of a provided row
+        // that the backpack held here and no longer holds is no longer the game's (GitHub issue 145). A row it did not
+        // find here (a reader that cannot see that stock) stays the game's, as issue 127 decided.
+        if(!previous.checked) {
+            for(uint32_t r=0;r<previous.value.game_count;++r)if(previous.rows[r].count) {
+                const int held=backpack(before.local_player,previous.rows[r].item);
+                previous.seen[r]=held>0?SEEN_HELD:held==0?SEEN_ABSENT:SEEN_UNREADABLE;
+            }
+            previous.checked=true;
+        }
         // Reserve suppression bookkeeping before the first game write. Allocation failure must leave vanilla
         // rows, never a synthetic row whose later equip request has no binding to intercept.
-        const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{next,p,std::move(composed)});
+        const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{previous,p,std::move(composed)});
         if(!inserted){fault(nullptr);continue;}
         const auto& output=bound->second.composed;
         if(!write_rows(groups+i,output.rows.data(),output.count,frame.selected[i]?frame.selected[i]:selection(groups+i))){fault(groups+i);continue;}
@@ -206,27 +233,95 @@ bool select_identity(SelectorGroup* group,uint32_t selected) {
     }
     return false;
 }
+// Caller holds the mutex. The line is formatted and logged later, on the client Post tick.
+void note_handoff(const Publication& p,uint32_t item,uint32_t count,const Observation& rows,uint64_t step,Backpack backpack) {
+    Handoff h{p.kind,item,count,rows.value.game_serial,
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-rows.built).count(),
+        step>=rows.step?step-rows.step:0,backpack};
+    if(handoff_count==handoffs.size()){std::move(handoffs.begin()+1,handoffs.end(),handoffs.begin());--handoff_count;++handoff_dropped;}
+    handoffs[handoff_count++]=h;handoff_pending.store(true,std::memory_order_release);
+}
+void publish_handoffs() {
+    if(!handoff_pending.load(std::memory_order_acquire)||!api||!api->log)return;
+    std::array<Handoff,8> lines{};uint32_t n=0;uint64_t dropped=0;
+    {
+        std::lock_guard lock(mutex);
+        const auto now=std::chrono::steady_clock::now();
+        if(now-handoff_window.start>=std::chrono::seconds(1))handoff_window={now,0};
+        n=std::min<uint32_t>(handoff_count,uint32_t(handoffs.size()-handoff_window.lines));
+        std::copy_n(handoffs.begin(),n,lines.begin());
+        std::move(handoffs.begin()+n,handoffs.begin()+handoff_count,handoffs.begin());handoff_count-=n;
+        handoff_window.lines+=n;
+        if(n){dropped=handoff_dropped;handoff_dropped=0;}
+        handoff_pending.store(handoff_count||handoff_dropped,std::memory_order_release);
+    }
+    for(uint32_t i=0;i<n;++i)try {
+        const auto& h=lines[i];
+        const char* backpack=h.backpack==Backpack::Held?"holds it":h.backpack==Backpack::Unreadable?"unreadable":
+            h.backpack==Backpack::NotFoundAtBuild?"not read (the list's build did not find it there)":
+            h.backpack==Backpack::UnreadableAtBuild?"not read (unreadable when the list was built)":
+            h.backpack==Backpack::Stale?"not read (the client session, world or player changed since the list was built)":
+            "not read (the game's own rows showed, with stock of it: the mods' rows for them were not up yet)";
+        char text[400];
+        int len=std::snprintf(text,sizeof text,"ui.ammo: a pick of %s 0x%08x (a row a mod provided) went to the game: game row count %u "
+            "(list revision %llu, built %lld ms, %llu client steps before the pick); backpack: %s",h.kind==KUA_KIND_SPELL?"spell":"arrow",
+            h.item,h.count,static_cast<unsigned long long>(h.serial),static_cast<long long>(h.age_ms),static_cast<unsigned long long>(h.age_steps),backpack);
+        if(len>0&&i+1==n&&dropped)len+=std::snprintf(text+std::min<size_t>(size_t(len),sizeof text-1),sizeof text-std::min<size_t>(size_t(len),sizeof text-1),
+            "; %llu more such picks not logged",static_cast<unsigned long long>(dropped));
+        if(len>0)api->log(parent_owner,KILN_LOG_DEBUG,{text,std::min<size_t>(size_t(len),sizeof text-1)});
+    } catch(...) {}
+}
 void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t item,uint32_t version) try {
     kt::ToolPolicyScope no_impact_policy(nullptr);
-    std::shared_ptr<const Publication> p;Observation original{};KilnUiAmmoRow picked{};bool injected=false;
+    std::shared_ptr<const Publication> p;Observation original{};KilnUiAmmoRow picked{};
+    bool provided=false,bound=false;int stocked=-1; // stocked: the index of the game's row of the item with stock
     if(groups&&category<2) {
         std::lock_guard lock(mutex);const auto b=bindings.find(reinterpret_cast<uintptr_t>(groups+category));
-        if(b!=bindings.end())for(uint32_t i=0;i<b->second.composed.count;++i)if(b->second.composed.rows[i].item==item) {
-            p=b->second.publication;original=b->second.original;
-            for(uint32_t j=0;j<p->count;++j)if(p->rows[j].item==item){picked=p->rows[j];injected=true;break;}
-            // A row the game listed itself is the game's own in either mode (vanilla equips it), whatever a probe says.
-            // Not one it kept at count 0: a rebuild zeroes every row it keeps, adds stock only to matching rows and does
-            // not remove the rest, so a used-up stack's row stays listed at 0 (issue 131). The backpack below decides it.
-            for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item&&original.rows[j].count)injected=false;
-            break;
+        if(b!=bindings.end()) {
+            for(uint32_t i=0;i<b->second.composed.count;++i)if(b->second.composed.rows[i].item==item){p=b->second.publication;original=b->second.original;bound=true;break;}
+        } else if(publications[category]&&observations[category].value.game_serial&&publications[category]->session==observations[category].value.session) {
+            // No binding: the game built new rows and the mod has not published for them yet, so the game's own rows show
+            // (GitHub issue 145). They are the observation's; a row the mod provides is decided by them below.
+            p=publications[category];original=observations[category];
+        }
+        if(p)for(uint32_t j=0;j<p->count;++j)if(p->rows[j].item==item){picked=p->rows[j];provided=true;break;}
+        // A row the game listed itself is the game's own in either mode (vanilla equips it). Not one it kept at count 0: a
+        // rebuild zeroes every row it keeps, adds stock only to matching rows and does not remove the rest, so a used-up
+        // stack's row stays listed at 0 (issue 131). The backpack below decides it.
+        if(provided)for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item&&original.rows[j].count){stocked=int(j);break;}
+        if(provided&&!bound&&stocked<0) {
+            bool shown=false; // without a binding, only a row of the game's that shows: its count-0 row of the item
+            for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item)shown=true;
+            if(!shown)provided=false;
         }
     }
-    if(!injected){pick_hook.call<void>(groups,input,category,item,version);return;}
-    KilnClientState before{};
-    if(!state(before)||!same(before,original))return; // A stale synthetic row is never native equip permission.
+    if(!provided){pick_hook.call<void>(groups,input,category,item,version);return;}
+    const auto vanilla=[&](uint32_t count,uint64_t step,Backpack why) {
+        {std::lock_guard lock(mutex);note_handoff(*p,item,count,original,step,why);}
+        pick_hook.call<void>(groups,input,category,item,version);
+    };
+    const uint32_t count=stocked>=0?uint32_t(std::min<uint64_t>(original.rows[stocked].count,UINT32_MAX)):0;
+    KilnClientState before{};const bool live=state(before)&&same(before,original);
+    if(stocked>=0) {
+        // The game's row with stock is the game's unless the backpack held the stack when these rows were bound and no
+        // longer does: a swap moved it out before the game built the list again (GitHub issue 145). Vanilla would equip
+        // nothing and empty the slot, so the pick is the mod's. Unread or unreadable then, or unreadable now: the game's.
+        const int8_t seen=bound?original.seen[stocked]:int8_t(SEEN_UNREAD);
+        if(!live||seen!=SEEN_HELD) {
+            vanilla(count,live?before.client_steps:original.step,!live?Backpack::Stale:seen==SEEN_ABSENT?Backpack::NotFoundAtBuild:
+                seen==SEEN_UNREADABLE?Backpack::UnreadableAtBuild:Backpack::GameStock);
+            return;
+        }
+    }
+    else if(!live) {
+        if(!bound){vanilla(count,original.step,Backpack::Stale);return;} // the game's own row, as before this window existed
+        return; // A stale synthetic row is never native equip permission.
+    }
     const int actual=backpack(before.local_player,item);
-    KilnClientState after{};if(!state(after)||after.generation!=before.generation||after.client_session!=before.client_session||after.local_player!=before.local_player)return;
-    if(actual==1){pick_hook.call<void>(groups,input,category,item,version);return;}
+    KilnClientState after{};const bool steady=state(after)&&after.generation==before.generation&&after.client_session==before.client_session&&after.local_player==before.local_player;
+    if(stocked>=0&&(!steady||actual!=0)){vanilla(count,before.client_steps,actual>0?Backpack::Held:Backpack::Unreadable);return;}
+    if(!steady)return;
+    if(actual==1){vanilla(count,before.client_steps,Backpack::Held);return;}
     if(actual<0)return;
     std::lock_guard lock(mutex);
     if(publications[category]!=p||!available()||!select_identity(groups+category,item))return;
