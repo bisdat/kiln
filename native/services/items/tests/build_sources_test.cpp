@@ -326,7 +326,7 @@ int main() {
     CHECK(!g_build_off.load() && g_build_apply_on.load() && g_build_cursor_on.load() && raw_links[g_build.apply]==1 &&
           mid2_links[g_build.cursor_ret]==1 && !lowered.count("crafting.build_sources"));
     CHECK(logged("build: the blueprint program's payment call (rva") && logged("build: the build cursor's stock-count call (rva") &&
-          logged("is redirected to another module's code: the building hooks follow the game's call through it"));
+          logged("'s code: the building hooks follow the game's call through it"));
     foreign.clear();
     // ---- the stand-down on foreign code (Cross-Base Storage's build check, say) ----
     // the menu's gatherer changed by another module: only the menu's counts stand down, the cursor stays
