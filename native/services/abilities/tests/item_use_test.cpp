@@ -75,7 +75,7 @@ static KilnResult KILN_CALL f_type_enum(const KilnType* type, uint32_t i, KilnSt
 }
 
 static KilnTypesApi g_types_api;
-static FakeType *g_item_id_field_owner, *g_state_flag, *g_trigger_enum, *g_slot_id, *g_runtime_id;
+static FakeType *g_item_id_field_owner, *g_state_flag, *g_trigger_enum, *g_slot_id, *g_runtime_id, *g_context;
 
 // This build's shapes, as the server's reflection has them (docs/re/player-state.md, docs/re/abilities.md section 4).
 static void build_types() {
@@ -100,6 +100,7 @@ static void build_types() {
     auto* ctx = add_type("keen::actor::ActionSequenceTriggerContext", KILN_TYPE_STRUCT, 0x170);
     ctx->fields = {{"sequenceRuntimeId", g_runtime_id, 0}, {"triggerType", u32, 0x18}, {"costItem", iii, 0x1C},
                    {"usedItem", iii, 0x30}, {"usedAmmunition", iii, 0x44}};
+    g_context = ctx;
     auto* ctx_td = add_type("keen::actor::TriggerContextAlias", KILN_TYPE_TYPEDEF, 0x170, ctx);
     auto* ai = add_type("keen::ecs::ActorInput", KILN_TYPE_STRUCT, 0x1C8);
     ai->fields = {{"triggerContext", ctx_td, 8}, {"triggerCallCounter", u8, 0x178}};
@@ -129,6 +130,7 @@ static void test_resolve() {
     CHECK(L.state == 0xBF8);              // in the base class
     CHECK(L.running == 0xC08);            // Actor.sequenceRuntimeId.sequenceId, in the base class, a typedef'd u32
     CHECK(L.pending == 8);                // ActorInput.triggerContext.sequenceRuntimeId.sequenceId
+    CHECK(L.cost_slot == 8 + 0x1C && L.cost_item == 8 + 0x1C + 8);  // ActorInput.triggerContext.costItem (#118)
     CHECK(L.context == 8 && L.context_size == 0x170);  // through the typedef
     CHECK(L.dead == 7 && L.ready == 50 && L.primary == 1);
     CHECK(L.busy == ((1ull << 9) | (1ull << 11) | (1ull << 12) | (1ull << 34) | (1ull << 37)));  // names not here: skipped
@@ -165,6 +167,12 @@ static void test_resolve() {
     CHECK(!kab::use::resolve(&g_types_api, &L, why, sizeof why) && std::strstr(why, "Primary"));
     g_trigger_enum->values = trig;
     CHECK(kab::use::resolve(&g_types_api, &L, why, sizeof why));
+    // no costItem in the reflection: item_use stays on, only the cost item is off
+    auto ctx_fields = g_context->fields;
+    g_context->fields.erase(g_context->fields.begin() + 2);
+    CHECK(kab::use::resolve(&g_types_api, &L, why, sizeof why) && L.ok() && L.cost_slot == -1 && L.cost_item == -1);
+    g_context->fields = ctx_fields;
+    CHECK(kab::use::resolve(&g_types_api, &L, why, sizeof why) && L.cost_slot == 8 + 0x1C);
     CHECK(kab::use::field_path(&g_types_api, "keen::ecs::ActorInput", "triggerContext.nothing", nullptr) == -1);
     CHECK(kab::use::field_path(&g_types_api, "keen::NoSuchType", "a", nullptr) == -1);
     CHECK(kab::use::enum_value(&g_types_api, "keen::actor::StateFlag", "NoSuchFlag") == -1);
@@ -223,9 +231,14 @@ static void test_request() {
         if (i == 1) b.slot = 0;
         if (i == 2) b.item = 0;
         if (i == 3) b.sequence = 0;
-        if (i == 4) b.flags = 1;
+        if (i == 4) b.flags = 2;  // a flag this kiln.abilities does not know
         CHECK(kab::use::check_request(&b) == KILN_ERR_INVALID_ARGUMENT);
     }
+    // KILN_ITEM_USE_COST_ITEM (since 0.2.0-dev.31.5) is a known flag
+    u = KilnItemUse{sizeof(KilnItemUse), 7, KILN_SLOT_ID(100, 2), 0x1234, 0xabc, KILN_ITEM_USE_COST_ITEM, 0, 0, 0, 0};
+    CHECK(kab::use::check_request(&u) == KILN_OK);
+    u.flags = KILN_ITEM_USE_COST_ITEM | 4;
+    CHECK(kab::use::check_request(&u) == KILN_ERR_INVALID_ARGUMENT);
     // the used item lands where the reflection says, the rest of the context stays
     Layout L;
     char why[200];
@@ -239,6 +252,16 @@ static void test_request() {
     std::memcpy(&item, ai + 0x40, 4);
     CHECK(slot == KILN_SLOT_ID(100, 2) && item == 0x1234);
     CHECK(ai[0x37] == 0xEE && ai[0x44] == 0xEE);
+    CHECK(ai[0x24] == 0xEE && ai[0x2c] == 0xEE);  // no cost item asked: costItem untouched
+    // with the cost item: the same slot and item at triggerContext.costItem, the hand use's 0x36b60
+    kab::use::write_used(ai, L, KILN_SLOT_ID(100, 3), 0x5678, true);
+    std::memcpy(&slot, ai + 0x24, 8);
+    std::memcpy(&item, ai + 0x2c, 4);
+    CHECK(slot == KILN_SLOT_ID(100, 3) && item == 0x5678);
+    std::memcpy(&slot, ai + 0x38, 8);
+    std::memcpy(&item, ai + 0x40, 4);
+    CHECK(slot == KILN_SLOT_ID(100, 3) && item == 0x5678);
+    CHECK(ai[0x23] == 0xEE && ai[0x30] == 0xEE);  // costItem.pide and what is before it untouched
     // abort_trigger clears the whole context, as actor_clear_input does, and nothing around it
     kab::use::abort_trigger(ai, L);
     bool cleared = true;
@@ -414,6 +437,56 @@ static void test_service() {
     }
     CHECK(g_seq_holds.size() == 1 && g_seq_holds[0].entity == 8);  // the player's held sequence is replaced
     CHECK(g_use_state == 1);
+    {
+        // no KILN_ITEM_USE_COST_ITEM: costItem stays as the trigger cleared it (a food's use, unchanged since dev.30.3)
+        const uint8_t* ai = g_comps[{kActorInput, kPlayer}].data();
+        uint64_t slot;
+        uint32_t item;
+        std::memcpy(&slot, ai + 0x24, 8);
+        std::memcpy(&item, ai + 0x2c, 4);
+        CHECK(slot == 0 && item == 0);
+    }
+
+    // #118: a repair kit's use, KILN_ITEM_USE_COST_ITEM: the slot and the item as costItem too, which PayUsageCost reads
+    reset_world();
+    u = req();
+    u.flags = KILN_ITEM_USE_COST_ITEM;
+    CHECK(t_item_use(&u) == KILN_OK && u.status == KILN_ITEM_USE_STARTED && g_triggers.size() == 1);
+    {
+        const uint8_t* ai = g_comps[{kActorInput, kPlayer}].data();
+        uint64_t used_slot, cost_slot;
+        uint32_t used_item, cost_item, cost_pide;
+        std::memcpy(&used_slot, ai + 0x38, 8);
+        std::memcpy(&used_item, ai + 0x40, 4);
+        std::memcpy(&cost_slot, ai + 0x24, 8);
+        std::memcpy(&cost_item, ai + 0x2c, 4);
+        std::memcpy(&cost_pide, ai + 0x30, 4);
+        CHECK(used_slot == kSlot && used_item == kMushroom);
+        CHECK(cost_slot == kSlot && cost_item == kMushroom && cost_pide == 0);
+    }
+    // a refusal with the flag writes nothing either
+    reset_world();
+    set_running(0xbbb);
+    u = req();
+    u.flags = KILN_ITEM_USE_COST_ITEM;
+    CHECK(t_item_use(&u) == KILN_OK && u.status == KILN_ITEM_USE_BUSY && g_triggers.empty());
+    {
+        uint32_t cost_item;
+        std::memcpy(&cost_item, g_comps[{kActorInput, kPlayer}].data() + 0x2c, 4);
+        CHECK(cost_item == 0);
+    }
+    // a build whose reflection has no costItem: the flag is unavailable (nothing triggered), a use without it still works
+    reset_world();
+    {
+        auto ctx_fields = g_context->fields;
+        g_context->fields.erase(g_context->fields.begin() + 2);
+        u = req();
+        u.flags = KILN_ITEM_USE_COST_ITEM;
+        CHECK(t_item_use(&u) == KILN_ERR_UNAVAILABLE && g_triggers.empty());
+        u = req();
+        CHECK(t_item_use(&u) == KILN_OK && u.status == KILN_ITEM_USE_STARTED && g_triggers.size() == 1);
+        g_context->fields = ctx_fields;
+    }
 
     // refusals: KILN_OK with a status, and no trigger
     struct Case { const char* name; void (*setup)(); KilnItemUse r; uint32_t status; };

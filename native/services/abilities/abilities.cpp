@@ -3004,11 +3004,12 @@ bool use_ready() {
     g_use_state = ok ? 1 : -1;
     if (ok)
         logi("kiln.abilities: item_use on (used item at ActorInput+0x%llx/+0x%llx, pending trigger +0x%llx, context +0x%llx "
-             "(%u bytes), Actor.currentState +0x%llx, sequenceRuntimeId +0x%llx, trigger Primary %lld)",
+             "(%u bytes), Actor.currentState +0x%llx, sequenceRuntimeId +0x%llx, trigger Primary %lld, cost item %s0x%llx)",
              static_cast<unsigned long long>(g_use.used_slot), static_cast<unsigned long long>(g_use.used_item),
              static_cast<unsigned long long>(g_use.pending), static_cast<unsigned long long>(g_use.context), g_use.context_size,
              static_cast<unsigned long long>(g_use.state), static_cast<unsigned long long>(g_use.running),
-             static_cast<long long>(g_use.primary));
+             static_cast<long long>(g_use.primary), g_use.cost_slot < 0 ? "not in the reflection " : "+",
+             static_cast<unsigned long long>(g_use.cost_slot < 0 ? 0 : g_use.cost_slot));
     else
         logw("kiln.abilities: item_use is off: %s", why);
     return ok;
@@ -3018,9 +3019,9 @@ bool use_ready() {
 // server's spawn path reads one without a check): the component was just written by the game through the same pointer
 // and its size checked against the offsets, so the write is not expected to fault; it is guarded all the same, and a
 // trigger that did not get its item (or a TriggerSequence that faulted half way) is taken back (guarded_abort).
-bool guarded_used(void* ai, uint64_t slot, uint32_t item) {
+bool guarded_used(void* ai, uint64_t slot, uint32_t item, bool cost) {
     __try {
-        kab::use::write_used(static_cast<uint8_t*>(ai), g_use, slot, item);
+        kab::use::write_used(static_cast<uint8_t*>(ai), g_use, slot, item, cost);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -3055,6 +3056,9 @@ KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     const uintptr_t world = g_api->server_world();
     if (!world) return KILN_ERR_WRONG_THREAD;  // no server world in this process: a joined client, or none started yet
     if (!g_have_sequences || !use_ready()) return KILN_ERR_UNAVAILABLE;
+    // the cost item (since 0.2.0-dev.31.5): only where this build's reflection has triggerContext.costItem
+    const bool cost = (u->flags & KILN_ITEM_USE_COST_ITEM) != 0;
+    if (cost && g_use.cost_slot < 0) return KILN_ERR_UNAVAILABLE;
     if (!sequence_key(u->sequence) && !g_sequence_keys.empty()) return KILN_ERR_NOT_FOUND;
     const KilnEntity e = u->entity;
     uint64_t ai_size = 0, a_size = 0;
@@ -3062,7 +3066,8 @@ KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     auto* a = static_cast<const uint8_t*>(component(world, kActor, e, &a_size));
     const uint64_t ai_need = static_cast<uint64_t>(std::max({g_use.used_slot + 8, g_use.used_item + 4, g_use.pending + 4,
                                                              g_use.context + static_cast<int64_t>(g_use.context_size),
-                                                             E.trigger_counter + 1}));
+                                                             E.trigger_counter + 1, cost ? g_use.cost_slot + 8 : 0,
+                                                             cost ? g_use.cost_item + 4 : 0}));
     const uint64_t a_need = static_cast<uint64_t>(std::max<int64_t>(g_use.state + 8, g_use.running + 4));
     if (!ai || !a || ai_size < ai_need || a_size < a_need) {
         u->status = KILN_ITEM_USE_NOT_A_PLAYER;  // not a character the game can trigger a sequence on
@@ -3098,13 +3103,15 @@ KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
     const int64_t now = ecs_now(world);
     if (!trigger_sequence(ai, e, u->sequence, now, static_cast<uint16_t>(g_use.primary)))
         return use_failed(ai, e, u->sequence, "TriggerSequence faulted");
-    if (!guarded_used(ai, u->slot, u->item)) return use_failed(ai, e, u->sequence, "writing the used item faulted after the trigger");
+    if (!guarded_used(ai, u->slot, u->item, cost))
+        return use_failed(ai, e, u->sequence, "writing the used item faulted after the trigger");
     // a new sequence replaces a held one (sequence_play's rule); the game's consumables have no keep-alive gates
     g_seq_holds.erase(std::remove_if(g_seq_holds.begin(), g_seq_holds.end(), [&](const SeqHold& h) { return h.entity == e; }),
                       g_seq_holds.end());
     u->trigger_time = now;
-    logi("kiln.abilities: item 0x%08x used from slot %u:%u by %u (sequence 0x%08x, %u in the stack, time %lld)", u->item,
-         KILN_SLOT_INVENTORY(u->slot), KILN_SLOT_INDEX(u->slot), e, u->sequence, f.count, static_cast<long long>(now));
+    logi("kiln.abilities: item 0x%08x used from slot %u:%u by %u (sequence 0x%08x, %u in the stack, time %lld%s)", u->item,
+         KILN_SLOT_INVENTORY(u->slot), KILN_SLOT_INDEX(u->slot), e, u->sequence, f.count, static_cast<long long>(now),
+         cost ? ", also the cost item" : "");
     return KILN_OK;
 }
 

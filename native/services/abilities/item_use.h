@@ -10,6 +10,11 @@
 // actor_apply_buff removes one item from that slot in a transaction and applies the buff with the item (its impactValues and
 // time), the spawn path (potions) does the same for SpawnImpact / SpawnEntityEvent. kiln.playerstate's lab_use_item has
 // done exactly this on spawned player characters since 0.2.0-dev.27 (5 mushrooms to 4, the buff in the food slot).
+// The cost item (since 0.2.0-dev.31.5, GitHub #118): the game's hand use of an item sequence with no costOverride writes
+// the slot and the item as costItem as well as usedItem (0x36b60; with a costOverride 0x36ce0 writes the override as the
+// cost), and PayUsageCost reads costItem (actor_pay_usage_cost 0x45360 -> 0x40d00): the costs from the item's own
+// impactValues (a scroll's ManaCost) and, with consume, the item taken from costItem's slot (the repair kit's only
+// consume). KILN_ITEM_USE_COST_ITEM asks for that write (docs/re/abilities.md "The cost item of an item use").
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +37,8 @@ inline constexpr const char* kBusyStates[] = {"Spawning",           "Sleeping", 
 struct Layout {
     int64_t used_slot = -1;  // ActorInput.triggerContext.usedItem.slotId (InventorySlotId, 8 bytes)
     int64_t used_item = -1;  // ActorInput.triggerContext.usedItem.itemId (4 bytes)
+    int64_t cost_slot = -1;  // ActorInput.triggerContext.costItem.slotId (8 bytes); -1: not in this build's reflection, so
+    int64_t cost_item = -1;  // ...costItem.itemId (4 bytes); KILN_ITEM_USE_COST_ITEM is unavailable (the rest works)
     int64_t pending = -1;    // ActorInput.triggerContext.sequenceRuntimeId.sequenceId (4 bytes): a trigger waiting for the step
     int64_t context = -1;    // ActorInput.triggerContext, and its size: what actor_clear_input clears (abort())
     uint32_t context_size = 0;
@@ -124,6 +131,11 @@ inline bool resolve(const KilnTypesApi* t, Layout* L, char* why, size_t cap) {
     if (L->used_slot < 0 || n != 8) return std::snprintf(why, cap, "ActorInput.triggerContext.usedItem.slotId is not in this build's reflection"), false;
     L->used_item = field_path(t, "keen::ecs::ActorInput", "triggerContext.usedItem.itemId", &n);
     if (L->used_item < 0 || n != 4) return std::snprintf(why, cap, "ActorInput.triggerContext.usedItem.itemId is not in this build's reflection"), false;
+    // the cost item is optional: without it only KILN_ITEM_USE_COST_ITEM is unavailable
+    uint32_t cs = 0, ci = 0;
+    L->cost_slot = field_path(t, "keen::ecs::ActorInput", "triggerContext.costItem.slotId", &cs);
+    L->cost_item = field_path(t, "keen::ecs::ActorInput", "triggerContext.costItem.itemId", &ci);
+    if (L->cost_slot < 0 || cs != 8 || L->cost_item < 0 || ci != 4) L->cost_slot = L->cost_item = -1;
     L->pending = field_path(t, "keen::ecs::ActorInput", "triggerContext.sequenceRuntimeId.sequenceId", &n);
     if (L->pending < 0 || n != 4)
         return std::snprintf(why, cap, "ActorInput.triggerContext.sequenceRuntimeId.sequenceId is not in this build's reflection"), false;
@@ -134,6 +146,7 @@ inline bool resolve(const KilnTypesApi* t, Layout* L, char* why, size_t cap) {
     };
     if (L->context < 0 || L->context_size == 0 || !inside(L->used_slot, 8) || !inside(L->used_item, 4) || !inside(L->pending, 4))
         return std::snprintf(why, cap, "ActorInput.triggerContext is not in this build's reflection"), false;
+    if (L->cost_slot >= 0 && (!inside(L->cost_slot, 8) || !inside(L->cost_item, 4))) L->cost_slot = L->cost_item = -1;
     L->state = field_path(t, "keen::ecs::Actor", "currentState", &n);
     if (L->state < 0 || n != 8) return std::snprintf(why, cap, "Actor.currentState is not in this build's reflection"), false;
     L->running = field_path(t, "keen::ecs::Actor", "sequenceRuntimeId.sequenceId", &n);
@@ -187,15 +200,21 @@ inline KilnResult check_request(KilnItemUse* u) {
     u->status = KILN_ITEM_USE_STARTED;
     u->count = 0;
     u->trigger_time = 0;
-    if (!u->entity || !u->slot || !u->item || !u->sequence || u->flags) return KILN_ERR_INVALID_ARGUMENT;
+    if (!u->entity || !u->slot || !u->item || !u->sequence || (u->flags & ~uint32_t{KILN_ITEM_USE_COST_ITEM}))
+        return KILN_ERR_INVALID_ARGUMENT;
     return KILN_OK;
 }
 
 // The used item into a trigger context TriggerSequence has just written (it clears the context first, so the rest of
-// usedItem, the pide, stays 0 as for a stack item). The caller guards the writes.
-inline void write_used(uint8_t* actor_input, const Layout& L, uint64_t slot, uint32_t item) {
+// usedItem, the pide, stays 0 as for a stack item), and with cost the same slot and item as costItem (the hand use's
+// 0x36b60). The caller checked L.cost_slot for cost and guards the writes.
+inline void write_used(uint8_t* actor_input, const Layout& L, uint64_t slot, uint32_t item, bool cost = false) {
     std::memcpy(actor_input + L.used_slot, &slot, sizeof slot);
     std::memcpy(actor_input + L.used_item, &item, sizeof item);
+    if (cost && L.cost_slot >= 0) {
+        std::memcpy(actor_input + L.cost_slot, &slot, sizeof slot);
+        std::memcpy(actor_input + L.cost_item, &item, sizeof item);
+    }
 }
 
 // Takes back a trigger that did not get its used item: the context cleared as actor_clear_input clears it, so
