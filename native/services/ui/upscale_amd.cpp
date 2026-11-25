@@ -225,7 +225,8 @@ class AmdBackend final : public Backend {
         destroy();  // the core calls it first; once more is harmless
         tuning_ = amd::parse_tuning(read_control());  // a knob changed in a test applies at the next set-up
         const int fsr3 = amd::pick_fsr3(version_names_);
-        bool pin = amd_pins_fsr3(ci.amd) && fsr3 >= 0;
+        // FSR 3.1 when the player pins it, or for the rest of the game once FSR 4's picture came out black (step_down)
+        bool pin = (amd_pins_fsr3(ci.amd) || fsr4_off_) && fsr3 >= 0;
         // the create flags depend on what runs (FSR 4: no DYNAMIC_RESOLUTION, as OptiScaler's working FSR 4): what AMD's
         // selection will run, checked below against what it ran
         Running expect = amd::expected_running(version_names_, pin);
@@ -284,7 +285,9 @@ class AmdBackend final : public Backend {
         // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
         *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_, expect)) +
                   (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture; " + device_path_ + ")" +
-                  (note.empty() ? "" : "; " + note) + kv_note;
+                  (note.empty() ? "" : "; " + note) +
+                  (fsr4_off_ && !amd_pins_fsr3(ci.amd) ? "; FSR 4's picture came out black on this GPU earlier in this game: FSR 3.1 until it restarts" : "") +
+                  kv_note;
         for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
         return true;
     }
@@ -318,6 +321,19 @@ class AmdBackend final : public Backend {
     }
 
     void reset() override { reset_ = true; }
+
+    bool step_down(std::string* detail) override {
+        // FSR 4's picture came out black or NaN (the core's output check): FSR 3.1 for the rest of the game, made now for
+        // the same sizes (create() retires the FSR 4 context first: the GPU may still run its last frames)
+        if (running_ != Running::amd_fsr4 || amd::pick_fsr3(version_names_) < 0) return false;
+        fsr4_off_ = true;
+        const CreateInfo ci = ci_;
+        std::string d;
+        const bool ok = create(ci, &d);
+        if (detail) *detail = d;
+        return ok && running_ == Running::amd_fsr3;
+    }
+    bool output_check() const override { return !tuning_.check_off; }
 
     void tick(uint64_t frame) override {
         if (frame > frame_) frame_ = frame;
@@ -465,6 +481,7 @@ class AmdBackend final : public Backend {
     amd::Tuning tuning_;
     std::string device_path_ = "device not seen";
     amd::Fsr4Set set_ = amd::Fsr4Set::none;  // FSR 4's set the game's device was asked for (device_needs)
+    bool fsr4_off_ = false;                  // FSR 4's picture came out black: FSR 3.1 for the rest of the game
     bool reset_ = true;
     uint64_t frame_ = 0;
     Running running_ = Running::off;

@@ -17,6 +17,7 @@
 #include "../graphics_settings.h"
 #include "../upscale_amd_map.h"
 #include "../upscale_logic.h"
+#include "../upscale_probe_logic.h"
 
 using namespace kui;
 using namespace kui::upscale;
@@ -772,14 +773,98 @@ static void amd_fsr4_sets() {
     CHECK(!need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
           !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES) &&
           !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES));
-    // the knob: fsr4ext auto|off|on (anything else is not understood, and says so)
+    // the knobs: fsr4ext auto|off|on, check auto|off (anything else is not understood, and says so)
     CHECK(amd::parse_tuning("fsr4ext auto").fsr4ext == E::automatic && !amd::parse_tuning("fsr4ext auto").changed());
     CHECK(amd::parse_tuning("fsr4ext off").fsr4ext == E::off && amd::parse_tuning("fsr4ext off").changed());
     CHECK(amd::parse_tuning("FSR4EXT=On").fsr4ext == E::on && amd::parse_tuning("fsr4ext int8").notes.size() == 1);
+    CHECK(amd::parse_tuning("check off").check_off && amd::parse_tuning("check off").changed() && !amd::parse_tuning("check auto").check_off &&
+          !amd::parse_tuning("").check_off && amd::parse_tuning("check maybe").notes.size() == 1);
+    CHECK(amd::tuning_text(Running::amd_fsr4, amd::parse_tuning("check off")) == "pre-exposure 1, no masks, planes swapped, no output check");
     // the set-up line's device words
     CHECK(amd::fsr4_device_text(S::int8, true) == "INT8 device: compute-shader derivatives on");
     CHECK(amd::fsr4_device_text(S::int8, false).find("not on") != std::string::npos);
     CHECK(amd::fsr4_device_text(S::none, false) == "device without FSR 4's sets" && amd::fsr4_device_text(S::native, true).find("fsr4ext on") != std::string::npos);
+}
+
+// The output check (upscale_probe_logic.h): the slots the probe shader writes, the verdict, when it runs and is read.
+static probe::Slot slot(uint32_t tag, float c_max, float c_sum, float o_max, float o_sum, uint32_t c_bad = 0, uint32_t o_bad = 0) {
+    probe::Slot s{};
+    s.tag = tag;
+    s.points = 4;
+    s.colour_bad = c_bad, s.output_bad = o_bad;
+    s.colour_max = c_max, s.colour_sum = c_sum, s.output_max = o_max, s.output_sum = o_sum;
+    return s;
+}
+static probe::Result fill(const probe::Slot& one, uint32_t tag = 7) {
+    std::vector<probe::Slot> s(probe::kThreads, one);
+    probe::Result r;
+    CHECK(probe::reduce(s.data(), probe::kThreads, tag, &r));
+    return r;
+}
+static void output_check() {
+    CHECK(probe::kBufferBytes == 8192 && probe::kPoints == 1024);
+    // a whole result needs every slot's tag (the GPU wrote all of them)
+    std::vector<probe::Slot> s(probe::kThreads, slot(7, 0.4f, 1.0f, 0.5f, 1.2f));
+    probe::Result r;
+    CHECK(probe::reduce(s.data(), probe::kThreads, 7, &r));
+    CHECK(r.colour.points == 1024 && r.output.points == 1024 && r.colour.nonfinite == 0);
+    CHECK(std::fabs(r.colour.mean_lum - 0.25) < 1e-6 && std::fabs(r.output.mean_lum - 0.3) < 1e-6 && std::fabs(r.output.max_lum - 0.5) < 1e-6);
+    s[200].tag = 6;  // one slot still from before
+    CHECK(!probe::reduce(s.data(), probe::kThreads, 7, &r));
+    CHECK(!probe::reduce(s.data(), probe::kThreads, 0, &r) && !probe::reduce(nullptr, 0, 7, &r));
+    // a picture, about as bright as the game's colour: fine
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.5f, 1.2f))) == probe::Verdict::ok);
+    // FSR 4 too dark (the RX 9070 XT's dark scenes) is still a picture: not this check's business
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.04f, 0.1f))) == probe::Verdict::ok);
+    // black: the RX 6900 XT's FSR 4 (31.11)
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f))) == probe::Verdict::black);
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.004f, 0.01f))) == probe::Verdict::black);
+    // NaN: a quarter of the points or more
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f, 0, 4))) == probe::Verdict::nan);
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.5f, 0.9f, 0, 1))) == probe::Verdict::nan);  // 1 of 4: 25%
+    {
+        std::vector<probe::Slot> few(probe::kThreads, slot(7, 0.4f, 1.0f, 0.5f, 1.2f));
+        for (int i = 0; i < 10; ++i) few[i].output_bad = 1, few[i].output_sum = 0.9f;  // 10 of 1024: a few stray NaN pixels
+        CHECK(probe::reduce(few.data(), probe::kThreads, 7, &r) && probe::judge(r) == probe::Verdict::ok);
+    }
+    // the game's own picture black (a load, a fade) or not finite: no verdict, the check looks again
+    CHECK(probe::judge(fill(slot(7, 0.0f, 0.0f, 0.0f, 0.0f))) == probe::Verdict::scene_black);
+    CHECK(probe::judge(fill(slot(7, 5e-6f, 1e-5f, 0.0f, 0.0f))) == probe::Verdict::scene_black);
+    CHECK(probe::judge(fill(slot(7, 0.0f, 0.0f, 0.0f, 0.0f, 4, 4))) == probe::Verdict::input_bad);
+    CHECK(probe::bad(probe::Verdict::black) && probe::bad(probe::Verdict::nan) && !probe::bad(probe::Verdict::scene_black) &&
+          !probe::bad(probe::Verdict::ok));
+    const std::string t = probe::readout_text(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f)));
+    CHECK(t.find("output: mean luminance 0") != std::string::npos && t.find("0 of 1024 points not finite") != std::string::npos &&
+          t.find("the game's colour: mean 0.25") != std::string::npos);
+    CHECK(std::string(probe::verdict_text(probe::Verdict::nan)).find("NaN") != std::string::npos);
+    CHECK(fsr4_black_text("the picture is black") == "its picture came out wrong on this graphics card (the picture is black): FSR 3.1 runs until the game restarts");
+
+    // when: kWarmFrames after a set-up, read kReadFrames later, once
+    probe::Schedule c;
+    CHECK(!c.due_record(100) && !c.active());
+    c.arm(100);
+    CHECK(c.active() && !c.due_record(129) && c.due_record(130));
+    c.recorded(130, 9);
+    CHECK(!c.due_record(131) && !c.due_read(137) && c.due_read(138) && c.tag == 9 && !c.overdue(369) && c.overdue(370));
+    c.stop();
+    CHECK(!c.due_read(500) && !c.due_record(500) && !c.active());  // done: nothing per frame after the check
+    // the game's picture black: again a second later, up to kMaxTries
+    c.arm(0);
+    for (uint32_t i = 0; i < probe::kMaxTries; ++i) {
+        const uint64_t at = c.next;
+        CHECK(c.due_record(at));
+        c.recorded(at, i + 1);
+        if (i + 1 < probe::kMaxTries) {
+            CHECK(c.retry(at + probe::kReadFrames) && c.next == at + probe::kReadFrames + probe::kRetryFrames);
+        } else {
+            CHECK(!c.retry(at + probe::kReadFrames) && !c.active());
+        }
+    }
+    // a new set-up starts it again
+    c.arm(1000);
+    CHECK(c.due_record(1030) && c.tries == 0);
+    // the readback waits past the frames the GPU may still run (upscale_logic.h kRetireFrames)
+    CHECK(probe::kReadFrames > kRetireFrames);
 }
 
 int main(int argc, char** argv) {
@@ -799,6 +884,7 @@ int main(int argc, char** argv) {
     amd_optiscaler_knobs();
     amd_fsr4_inputs();
     amd_fsr4_sets();
+    output_check();
     exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);
     return 0;

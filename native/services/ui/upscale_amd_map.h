@@ -78,7 +78,7 @@ inline const std::vector<const char*>& fsr4_native_extensions() {
 
 // ---- FSR 4's sets on the game's device (0.2.0-dev.31.12) -----------------------------------------------------------
 // AMD's selection in amd_fidelityfx_upscaler_vk.dll 4.1.2 (SDK 2.4.0) has four FSR 4 providers (their RTTI names), each
-// with its own model and shaders (out/fsr4-black/ROOT-CAUSE.md: the SPIR-V the DLL carries, deflated and read):
+// with its own model and shaders (the SPIR-V the DLL carries, deflated and read: the dev.31 wave's out/fsr4-black/REPORT.md):
 //  - ffxProvider_FSR4, the FP8 model: an AMD GPU that is not integrated, offers VK_KHR_cooperative_matrix and
 //    VK_EXT_shader_float8, and has cooperativeMatrix (its IsSupported; RX 9000). Its shaders declare cooperative matrix,
 //    FP8, the memory model, 64-bit atomics and more;
@@ -271,6 +271,8 @@ enum class Colour : uint32_t { linear = 0, srgb = 1, pq = 2 };
 //                                   GPU's FSR 4 model needs (choose_fsr4_set: compute-shader derivatives where AMD's
 //                                   selection takes an INT8 model, nothing on the FP8 one); off, none (as 29.21 to
 //                                   31.11); on, AMD's sample's whole set (fsr4_native_extensions, as up to 29.20)
+//   check auto|off                  auto: the output check after each set-up (upscale_probe.h: a black or NaN picture
+//                                   from FSR 4 makes FSR 3.1 run for the rest of the game); off: no check, for an A/B
 enum class Planes : uint32_t { automatic = 0, game = 1, swap = 2 };
 struct Tuning {
     Exposure exposure = Exposure::automatic;
@@ -282,11 +284,12 @@ struct Tuning {
     Planes planes = Planes::automatic;
     bool usage_rw = false, maxrender_output = false, keyvalues = false, debug = false;
     Fsr4Ext fsr4ext = Fsr4Ext::automatic;  // read when the game makes its device (from the next game start)
+    bool check_off = false;                // no output check after a set-up
     std::vector<std::string> notes;  // lines Kiln did not understand
     bool changed() const {
         return exposure != Exposure::automatic || pre_exposure != PreExposure::automatic || reactive != Mask::automatic ||
                transparency != Mask::automatic || hdr_off || colour != Colour::linear || dynres != Mask::automatic ||
-               planes != Planes::automatic || usage_rw || maxrender_output || keyvalues || debug || fsr4ext != Fsr4Ext::automatic;
+               planes != Planes::automatic || usage_rw || maxrender_output || keyvalues || debug || fsr4ext != Fsr4Ext::automatic || check_off;
     }
 };
 inline Tuning parse_tuning(std::string_view text) {
@@ -331,6 +334,7 @@ inline Tuning parse_tuning(std::string_view text) {
         else if (w[0] == "debug" && (v == "off" || v == "on")) t.debug = v == "on";
         else if (w[0] == "fsr4ext" && (v == "auto" || v == "off" || v == "on"))
             t.fsr4ext = v == "on" ? Fsr4Ext::on : v == "off" ? Fsr4Ext::off : Fsr4Ext::automatic;
+        else if (w[0] == "check" && (v == "auto" || v == "off")) t.check_off = v == "off";
         else if (w[0] == "planes" && (v == "auto" || v == "game" || v == "swap"))
             t.planes = v == "game" ? Planes::game : v == "swap" ? Planes::swap : Planes::automatic;
         else t.notes.push_back(line);
@@ -363,6 +367,7 @@ inline std::string tuning_text(Running running, const Tuning& t) {
     if (t.maxrender_output) s += ", maxRenderSize the output's";
     if (t.keyvalues) s += ", OptiScaler's key-values";
     if (t.debug) s += ", debug view";
+    if (t.check_off) s += ", no output check";
     return s;
 }
 
