@@ -868,6 +868,8 @@ mod tests {
         let cfg = RunConfig { game_dir: Utf8PathBuf::from_path_buf(dir.clone()).unwrap(), ..Default::default() };
         let out = run(&cfg, vec![Utf8PathBuf::from("/nonexistent/mod")], Vec::new());
         assert_eq!(out.phase, Phase::Failed);
+        // read under RUN_LOCK: another test's run on another thread holds the PC's count while it runs
+        let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(kfc::content::image::encode_threads(), before);
         let _ = std::fs::remove_dir_all(dir);
     }
