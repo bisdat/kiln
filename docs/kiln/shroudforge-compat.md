@@ -686,7 +686,8 @@ upstream's behaviour.
 Kiln's callers, each for its own entries, before the startup pass: kiln-shroudforge for the profile's ShroudForge
 entries (`skip_profile_off`, `src/own_skip.h`; just before it asks kiln-eml to stand aside) and kiln-eml for its EML
 entries (`host_skip` in `plugin.rs`, from `eml_stand_aside`; it finds the loaded `shroudforge-runtime.dll` with
-`GetModuleHandleW`, as `sf_in_process` does). Each says per package, in kiln.log, whether it was skipped or why it runs
+`GetModuleHandleW`, as `sf_in_process` does). Both name one package per call, so one name the runtime refuses keeps
+only its own package running; neither names a package that an entry the profile has on stands for. Each says per package, in kiln.log, whether it was skipped or why it runs
 (engines.md, "A player's own ShroudForge folder"; eml.md). A runtime without the export (an installed ShroudForge, or a
 bundled build before this) runs them, and the lines and `eml.json` say so. Tests: the fork's `cargo test -p
 shroudforge-package kiln_host_skip` and `cargo test -p shroudforge-modloader --lib kiln_host_skip`; Kiln's

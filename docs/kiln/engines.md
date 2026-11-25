@@ -399,14 +399,17 @@ engines' mods") and 5.8.
     ShroudForge's mods folder, which kiln-eml also reported as `disabled`). When Kiln hosts ShroudForge, it now has the
     runtime skip it for that start, without touching its files: kiln-shroudforge names the profile's ShroudForge
     entries that are off (`own_skip.h`: the entry's folder `<mods>/<id>` or the player's folder of the same package id,
-    one ShroudForge would run: its switch on for this side, or a folder without mod.json, which the DLL Manager loads),
-    kiln-eml the EML entries (eml.md, "A profile mod that is off"), each through the runtime's optional export
-    `shroudforge_host_skip_packages` (the fork's `kiln/abi/host_skip.h`) before `shroudforge_prepare_startup`. The
+    one ShroudForge would run: its switch on for this side, or a folder without mod.json, which the DLL Manager loads
+    and which is named as the folder spells it on disk, since the DLL Manager matches that name exactly; never a
+    package that an entry the profile has on stands for), kiln-eml the EML entries (eml.md, "A profile mod that is
+    off"), each package in a call of its own (the runtime refuses a whole call for one name it does not take) through
+    the runtime's optional export `shroudforge_host_skip_packages` (the fork's `kiln/abi/host_skip.h`) before
+    `shroudforge_prepare_startup`. The
     runtime then reads them switched off (asset pass, DLL Manager, live runtime). One kiln.log line each: `<id> is off
     in the profile: your own folder <path> is skipped this start; Kiln leaves its files as they are`, and
     `shroudforge.json` `profileOff` lists them (`id`, `package`, `path`, `own`, `skipped`). Where nothing can skip it
-    (an installed ShroudForge runtime without the export, ShroudForge's own loader), the line is a warning that says it
-    runs, why, and how to turn it off: ShroudForge's switch in Kiln's in-game menu (Mods > ShroudForge) or ShroudForge's
+    (an installed ShroudForge runtime without the export, ShroudForge's own loader, or a name the runtime refused), the
+    line is a warning that says it runs, why, and how to turn it off: ShroudForge's switch in Kiln's in-game menu (Mods > ShroudForge) or ShroudForge's
     Modloader, "Let Kiln manage this folder", or moving the folder out of the mods folder. The activation's safety
     note for such a folder says the same (`engine_mods::own_off_in_shroudforge`; for EML entries without "Let Kiln
     manage this folder", which takes ShroudForge folders only).

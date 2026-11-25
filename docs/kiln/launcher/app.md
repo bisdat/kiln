@@ -196,8 +196,10 @@ folder had run while he had the mod off). Its note is a safety note, raised even
 and says what happens to the folder and how to stop it where Kiln cannot (`engine_mods::own_off_in_shroudforge`, for a
 ShroudForge entry and for an EML entry whose folder ShroudForge would run): "shroudforge:<id>: it is off in the profile,
 and your own folder <path> stays as it is (Kiln never writes into a folder it did not place). While Kiln hosts
-ShroudForge, Kiln's bundled runtime skips this folder at each start. ShroudForge's own loader, or your installed
-ShroudForge ("Use my installed ShroudForge"), still runs it while its own ShroudForge switch is on: to stop that,
+ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list (Kiln's
+bundled runtime does from 0.2.0-dev.31.12 on); kiln.log says at each start whether it was skipped. Another runtime (your
+installed ShroudForge, "Use my installed ShroudForge") or ShroudForge's own loader still runs it while its own
+ShroudForge switch is on: to stop that,
 switch it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, choose "Let Kiln manage this
 folder" in Notes, or move the folder out of the mods folder." An EML entry's note leaves out "Let Kiln manage this
 folder" (Kiln takes over ShroudForge folders only). The mod's row says what ran at the last start: the engine status

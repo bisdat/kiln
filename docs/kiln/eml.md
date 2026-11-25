@@ -509,8 +509,10 @@ and `eml.json` said `disabled`). Kiln never writes into, switches, replaces or r
 so ShroudForge's own switch there (`enabled` in its `extended.mod.json`) can be on while the profile has the mod off.
 Standing aside, kiln-eml looks for such a folder for every profile entry that is off (the entry's folder, or the
 player's folder of the same package under another name, as for the entries that are on); one the loader would not run
-anyway (ShroudForge's switch off, the other side only, a file it refuses) and an entry with no folder there stay
-`disabled` ("switched off in the profile"). For the rest:
+anyway (ShroudForge's switch off, the other side only, a file it refuses), a package that an entry the profile has on
+also stands for (another Library entry of the same package, a ShroudForge entry, `emlRuntime`: it runs for that entry,
+and the runtime skips by package id), and an entry with no folder there stay `disabled` ("switched off in the
+profile"). For the rest:
 
 - **Kiln hosts ShroudForge** (`kiln.eml` `stand_aside`): kiln-eml names the package (its mod.json id) to the runtime
   through its optional export `shroudforge_host_skip_packages` (the fork's `kiln/abi/host_skip.h`), before ShroudForge's

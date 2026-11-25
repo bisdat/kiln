@@ -1217,7 +1217,8 @@ A client only: a dedicated server is `unsupported`.
    value a new version refuses, a profile entry the player's own folder serves), `safetyNotes` (dev.26: the sentences of
    `warnings` about a player's own folder that may still run although the profile has its mod off; 0.2.0-dev.31.12: for a
    ShroudForge entry, or an EML entry in ShroudForge's mods folder with ShroudForge's switch on, the sentence says that
-   Kiln's bundled ShroudForge runtime skips the folder at each start while Kiln hosts it, and how to stop it where Kiln
+   Kiln has the ShroudForge runtime it hosts skip the folder at each start when that runtime takes Kiln's skip list
+   (the bundled one from 0.2.0-dev.31.12 on; kiln.log says whether it was skipped), and how to stop it where Kiln
    cannot: [app.md](app.md)), `ownLoaders`. Each `retained` reason
    ends with what still runs from that folder. The launcher shows the first three until dismissed, each sentence once
    per game (`notices_unseen`; [app.md](app.md) "Notices about mod folders"), wherever a command
