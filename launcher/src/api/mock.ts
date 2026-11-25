@@ -15,7 +15,7 @@ import type { SfBackend, SfBackendCard, SfBackendPreview, SfResolution, SfSettin
 import type { Preflight, StartWarning } from "./commands";
 import type { DataRestoreBase, EngineStatus } from "./commands";
 import { adminMockHandlers } from "../admin/mock";
-import { serverMockHandlers } from "../pages/servers/mockServers";
+import { serverMockHandlers, webPanelMockHooks } from "../pages/servers/mockServers";
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
@@ -2401,6 +2401,8 @@ export function mockEmit(name: string, payload: unknown): void {
 // Playwright and the dev console reach the fake game through this (mock mode only).
 if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown }).__kilnMock = { community: communityMockHooks(mockEmit), crash: mockCrash, scriptStoppedStart, externalStart: mockExternalStart, stopGame: mockStopGame, emit: mockEmit, setLastServer: mockSetLastServer,
   calls: () => [...commandCalls],
+  /** "Open web panel": Kiln Web Admin on the mock server, the gateways (src/pages/servers/mockServers.ts). */
+  webPanel: webPanelMockHooks,
   // Settings' ShroudForge card
   /** Why Kiln's interpreter is held (null: this mock build does not hold it). */
   setSfHeld: (why: string | null) => { sfHeld = why; },

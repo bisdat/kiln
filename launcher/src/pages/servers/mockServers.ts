@@ -68,12 +68,43 @@ const consoleLines = [
   ["[game_server] Switching state from LoadEcsScene to Run after 509.38 ms", "info"],
 ].map(([text, level]) => ({ text, level }));
 
+// "Open web panel" (0.2.0-dev.31.12): the mock's gateways, one per server on its own loopback origin, like
+// kiln_manage::admin::web_panel (tests: `__kilnMock.webPanel`). Kiln Web Admin is in the server's mods only after
+// `webPanel.install()`, so the other specs' Overview stays as it was.
+type MockWebPanel = { serverId: string; origin: string; fingerprint: string | null; via: "local" | "ssh"; isolated: boolean; idleCloseS: number; connections: number };
+const webPanels = new Map<string, MockWebPanel>();
+let webAdmin = false;
+let webVia: "local" | "ssh" = "local";
+const webadminMod = { id: "kiln-webadmin", version: "0.1.0", folder: "kiln-webadmin", enabled: true, source: null, clients: "none", state: "loaded", kind: "kiln" };
+const originOf = (id: string) => {
+  let h = 2166136261;
+  for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return `https://127.${64 + (h % 191)}.${(h >>> 8) & 255}.${1 + ((h >>> 16) % 254)}:${40000 + (h % 20000)}`;
+};
+export const webPanelMockHooks = {
+  /** Kiln Web Admin loaded on the mock server (the Overview shows "Open web panel"). */
+  install: (on = true) => { webAdmin = on; },
+  /** How the next gateway reaches its panel. */
+  setVia: (via: "local" | "ssh") => { webVia = via; },
+  /** The gateway closed by itself (the panel's last tab closed). */
+  expire: (serverId: string) => { webPanels.delete(serverId); },
+  list: () => [...webPanels.values()],
+};
+
 export const serverMockHandlers: Record<string, (args: Args) => unknown> = {
+  admin_open_web_panel: (a) => {
+    const id = String(a.serverId);
+    const p = webPanels.get(id) ?? { serverId: id, origin: originOf(id), fingerprint: "ab".repeat(32), via: webVia, isolated: true, idleCloseS: 120, connections: 1 };
+    webPanels.set(id, p);
+    return p;
+  },
+  admin_close_web_panel: (a) => webPanels.delete(String(a.serverId)),
+  admin_web_panels: () => [...webPanels.values()],
   server_console_open: (a) => ({ subscription: "console-mock", serverId: a.serverId, source: "capture", path: "/home/player/.local/state/kiln/lab.run.log", truncated: false, lines: consoleLines }),
   server_console_close: () => null,
   server_settings_get: () => ({ path: "/home/player/srv/enshrouded/lab/enshrouded_server.json", values: settings, schema, running: false }),
   server_settings_set: (a) => ({ path: "/home/player/srv/enshrouded/lab/enshrouded_server.json", values: { ...settings, ...(a.values as object) }, schema, running: false }),
-  server_mods: () => mods,
+  server_mods: () => (webAdmin ? [...mods, webadminMod] : mods),
   server_mod_enable: () => null,
   server_backups: () => backups,
   server_query: () => ({ name: "Lab server", players: 0, maxPlayers: 4, version: "0.0.15.0", pingMs: 2 }),
