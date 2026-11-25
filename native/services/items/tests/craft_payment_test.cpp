@@ -49,6 +49,7 @@ uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
 bool access_from_tx(void*,Access* out) { *out = {}; return fixture::server_storage; }
+bool access_from_tx_reads(void*,Access* out) { *out = {}; return fixture::server_storage; }
 bool setup_flags(const Access&,KilnEntity e,uint8_t* flags) { *flags = e <= 1023 ? 1 : 0; return fixture::inventory.count(e) != 0; }
 bool read_pages(const Access&,KilnEntity e,PageSet* out,bool* initialized) {
     *out = {}; *initialized = fixture::inventory.count(e) != 0;
@@ -115,7 +116,7 @@ int main() {
     CHECK(t_source_stock(1,0,stocks,2,&n)==KILN_OK && n==1 && stocks[0].item==7 && stocks[0].count==2);
     CHECK(t_source_stock(1,0,nullptr,0,&n)==KILN_ERR_BUFFER_TOO_SMALL && n==1);
     CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_ALL,stocks,2,&n)==KILN_OK && n==1 && stocks[0].count==2);
-    CHECK(t_source_stock(1,2,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_source_stock(1,4,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT); // 2 is KILN_CRAFT_SOURCE_STOCK_LOCKS since 0.2.0-dev.31.12
     KilnWorldApi world{};world.position=&position;g_w=&world;
     fixture::in_base=true;uint32_t base_chest=2000;
     G.stock_items=0x20;G.stock_items_count=0x28;G.stock_water=0x30;G.stock_water_count=0x38;G.aabb_y=0x80;G.zone_mask_rel=0x20;

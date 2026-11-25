@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/lock-sources.json",
+  "comment": "GitHub #147, Kiln clients: player_ui's locked prompt (C 0x2b8430) counts the lock's item with the same InventoryItemCount and marks the prompt locked when it is short (G38UiPlayData +0x2c98 item, +0x2c9c amount, +0x2ca4 locked). locks/client.UiLockCountRet is that call's return address. Client-only UI code: the dedicated server has no player_ui update. Client 26430625 (5d9ef2f1) only. docs/re/locks.md.",
+  "symbols": {
+    "locks/client.UiLockCountRet": {
+      "comment": "mov ebx,[rdi+requiredItem]; test; cmp byte [rax],0 (DynamicInteractionLock.destroy); [rsp+0x28] = item; call InventoryItemCount; mov [rsi+0x2c98],ebx; movzx eax,word [rdi+requiredItemAmount]. The return address; kiln-items' mid hook there reads rbp+0x620 (count +0x628) and rdi, which the literal bytes pin. Client 26430625 0x2bc483",
+      "find": [
+        {
+          "pattern": "8B 5F 10 85 DB 74 ?? 80 38 00 75 ?? 48 8B 85 ?? ?? ?? ?? 48 8D 8D 20 06 00 00 4C 8B 8D ?? ?? ?? ?? 4C 8B 85 ?? ?? ?? ?? 48 8B 95 ?? ?? ?? ?? 48 89 44 24 30 48 8B 85 ?? ?? ?? ?? 89 5C 24 28 48 89 44 24 20 E8 {locks/InventoryItemCount:rel32} 89 9E ?? ?? ?? ?? 0F B7 47 16 66 89 86 ?? ?? ?? ?? 80 BD 20 06 00 00 00 75 ?? 0F B7 47 16 39 85 28 06 00 00",
+          "offset": 73
+        }
+      ]
+    }
+  },
+  "features": {
+    "items.lock_sources": {
+      "symbols": [
+        "locks/LockCountRet",
+        "locks/InventoryItemCount",
+        "locks/client.UiLockCountRet",
+        "locks/LockPaid",
+        "gems/PayMaterial",
+        "world/CurrentEntityId"
+      ],
+      "constants": [
+        "locks/lock.item",
+        "locks/lock.amount",
+        "locks/lock.mask",
+        "crafting/bases.players",
+        "crafting/player.stride",
+        "crafting/player.permissions",
+        "players/info.handle"
+      ]
+    }
+  }
+}

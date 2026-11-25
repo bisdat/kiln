@@ -3677,11 +3677,358 @@ uint64_t KILN_CALL t_last_seq() {
     return g_ring.last();
 }
 
+// ---- GitHub #147: an InteractionLock's required item from the player's linked sources (docs/re/locks.md) ----
+// Two places in the game decide a lock with a required item (sigdb server.d/lock-sources.json):
+//  - the press: player_control_action_sequence's lock check counts the item in the presser's bag (InventoryItemCount)
+//    and, when it is short of requiredItemAmount, plays the lock's failed attempt instead of sending the press. It runs
+//    in the server world and, on a client, in the client and prediction worlds; a hosting client's exe runs one copy
+//    of the code for all three. A mid hook at the count's return (locks/LockCountRet) adds, when the bag alone is short:
+//    in the server world the server's own count of the player's lock-opted links (g_lock_cache, read on the tick thread
+//    each 30 steps); in a client world the server's snapshot (set_lock_stock). The locked prompt (player_ui, client
+//    only, locks/client.UiLockCountRet) adds the snapshot the same way.
+//  - the payment: interaction_attempt pays the item with PayMaterial(tx, guest, item, amount) inside its own
+//    transaction, then commits (Consume) or rolls back (a presence test). A mid hook after that call (locks/LockPaid)
+//    pays what the bag left from the opted-in links, in their order, inside the same transaction, after a recount of
+//    each through the transaction's own accessors; anything short leaves the game's answer (left > 0), and the game
+//    declines and rolls the whole transaction back: all or nothing, as crafting's payment.
+// Hooks go in on demand: the server's when a link with Locks exists, the client's when a Kiln server's snapshot is on.
+constexpr uint64_t kLockRefreshSteps = 30;
+struct LockSites {
+    uintptr_t count_ret = 0, paid = 0, ui_ret = 0, count_fn = 0, pay_fn = 0;
+};
+LockSites g_lock;
+using CurrentEntityFn = uint32_t* (*)(void* ctx, uint32_t* out);
+CurrentEntityFn g_lock_current = nullptr;
+bool g_lock_feat = false;          // items.lock_sources resolved with its pinned layout (stations_resolve)
+std::atomic<bool> g_lock_off{false};  // a stand-down: a foreign patch, a failed hook, a fault
+kiln::MidHook2 h_lock_eval, h_lock_paid, h_lock_ui;
+std::atomic<bool> g_lock_eval_on{false}, g_lock_paid_on{false}, g_lock_ui_on{false};
+LogLimit g_log_lock_check{16}, g_log_lock_pay{24}, g_log_lock_stand{8}, g_log_lock_snap{8};
+
+// The server's own counts of each player's lock-opted links (tick thread writes, any thread reads). `linked`: the player
+// has links of this login; `opted`: one of them has Locks.
+struct LockCached {
+    uint32_t session = 0;
+    bool linked = false, opted = false;
+    std::unordered_map<uint32_t, uint64_t> counts;
+};
+std::mutex g_lock_mu;
+std::unordered_map<uint32_t, LockCached> g_lock_cache;  // g_lock_mu
+std::atomic<bool> g_lock_dirty{true};
+uint64_t g_lock_step = 0;
+
+// A Kiln client's snapshot from the server (g_lock_snap_mu): on, the rows, the items asked about.
+std::mutex g_lock_snap_mu;
+std::atomic<bool> g_lock_on{false};
+std::unordered_map<uint32_t, uint32_t> g_lock_have;  // g_lock_snap_mu
+std::vector<uint32_t> g_lock_asks;                   // g_lock_snap_mu, oldest first
+
+// What this player's lock-opted links hold, through kiln.items' reads (tick thread). The payment recounts at use.
+void lock_counts(void* bases, uint32_t player, const std::vector<CraftSource>& sources, std::unordered_map<uint32_t, uint64_t>* out) {
+    std::unordered_set<uint32_t> seen{player};
+    for (bool after : {false, true})
+        for (const auto& s : sources) {
+            if (!s.locks || s.after_outputs != after || seen.count(s.container) || !source_access(bases, player, s.container)) continue;
+            seen.insert(s.container);
+            std::unordered_map<uint32_t, uint64_t> held;
+            count_items(s.container, &held);
+            // A container is counted once per item even when several of the player's links name it with other filters.
+            for (const auto& [item, n] : held) {
+                bool allowed = false;
+                for (const auto& t : sources) allowed = allowed || (t.locks && t.container == s.container && t.allows(item));
+                if (allowed && n) (*out)[item] += n;
+            }
+        }
+}
+
+// Tick thread, the server world's Pre: the cache, every 30 steps and when a registration changed.
+void lock_cache_refresh(uint64_t step) {
+    if (!g_lock_dirty.exchange(false) && step < g_lock_step + kLockRefreshSteps && step >= g_lock_step) return;
+    g_lock_step = step;
+    void* const bases = g_srv_bases.load(std::memory_order_acquire);
+    std::unordered_map<uint32_t, LockCached> next;
+    for (uint32_t player : g_registered.players()) {
+        LockCached c;
+        if (!source_player(bases, player, &c.session)) continue;
+        const auto sources = craft_sources_copy(player);
+        c.linked = !sources.empty();
+        c.opted = std::any_of(sources.begin(), sources.end(), [](const CraftSource& s) { return s.locks; });
+        if (c.opted) lock_counts(bases, player, sources, &c.counts);
+        if (c.linked) next.emplace(player, std::move(c));
+    }
+    std::lock_guard lock(g_lock_mu);
+    g_lock_cache = std::move(next);
+}
+
+// The server world's count for a player's lock check (any thread): false when the player has no link of this login.
+bool lock_cached(uint32_t player, uint32_t item, uint64_t* held, bool* opted) {
+    std::lock_guard lock(g_lock_mu);
+    const auto it = g_lock_cache.find(player);
+    if (it == g_lock_cache.end()) return false;
+    *opted = it->second.opted;
+    const auto n = it->second.counts.find(item);
+    *held = n == it->second.counts.end() ? 0 : n->second;
+    return true;
+}
+
+// The client's snapshot for a lock check (any thread). False: no snapshot. *row: the server named the item. An item
+// with no row is noted for the client to ask about (at most KILN_STATIONS_MAX_LOCK_ASKS, oldest kept).
+bool lock_snapshot(uint32_t item, uint64_t* held, bool* row) {
+    std::lock_guard lock(g_lock_snap_mu);
+    if (!g_lock_on.load(std::memory_order_relaxed)) return false;
+    const auto it = g_lock_have.find(item);
+    *row = it != g_lock_have.end();
+    *held = *row ? it->second : 0;
+    if (!*row && item && g_lock_asks.size() < KILN_STATIONS_MAX_LOCK_ASKS &&
+        std::find(g_lock_asks.begin(), g_lock_asks.end(), item) == g_lock_asks.end())
+        g_lock_asks.push_back(item);
+    return true;
+}
+
+// The world a game program's context belongs to (ctx qword 0 = the job; the job's storage kind byte +8): 0 the server
+// world, 1 prediction, 2 client; 0xff unreadable.
+uint8_t ctx_world(void* ctx) {
+    __try {
+        if (!ctx || !E.job_storage) return 0xff;
+        void* const job = *static_cast<void**>(ctx);
+        if (!job) return 0xff;
+        const void* const storage = E.job_storage(job);
+        return storage ? rd<uint8_t>(storage, 8) : 0xff;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0xff;
+    }
+}
+uint32_t ctx_entity(void* ctx) {
+    __try {
+        uint32_t out = 0;
+        const uint32_t* p = g_lock_current && ctx ? g_lock_current(ctx, &out) : nullptr;
+        return p ? *p : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+// One lock check (the press, or the locked prompt): the game counted `bag` of `item`, the lock needs `need`. Returns the
+// count the game should see. `world`: the context's world (the prompt: client). Logs a press's decision when links or a
+// snapshot were asked.
+uint32_t lock_check(uint8_t world, uint32_t player, uint32_t item, uint32_t bag, uint32_t need, bool press) {
+    if (!item || !need || bag >= need || g_lock_off.load(std::memory_order_relaxed)) return bag;
+    uint64_t linked = 0;
+    const char* why = nullptr;
+    if (world == 0) {
+        bool opted = false;
+        if (!lock_cached(player, item, &linked, &opted)) return bag;  // nothing linked: the game's lock, no line
+        if (!opted) why = lock_why_text(kLockNotOptedIn);
+        else if (bag + linked < need) why = "short count";
+    } else {
+        bool row = false;
+        if (!lock_snapshot(item, &linked, &row))
+            why = "no snapshot from the server (a vanilla or older server, or no link opted in with Locks)";
+        else if (!row)
+            why = "no snapshot row for the item yet (the client asks the server for it)";
+        else if (bag + linked < need)
+            why = "short count";
+    }
+    const uint32_t counted = why ? bag : lock_counted(bag, linked, need);
+    if (press)
+        if (const uint32_t n = g_log_lock_check.take()) {
+            const char* where = world == 0 ? "server" : world == 2 ? "client" : world == 1 ? "prediction" : "unknown";
+            if (why)
+                LOGI("locks: the %s world's lock check of item 0x%08x (player %u) refused: %s (bag %u, linked %llu, needs %u)%s",
+                     where, item, player, why, bag, static_cast<unsigned long long>(linked), need, n > 1 ? " (more held back)" : "");
+            else
+                LOGI("locks: the %s world's lock check of item 0x%08x (player %u) counts the linked sources: bag %u + linked %llu, "
+                     "needs %u%s", where, item, player, bag, static_cast<unsigned long long>(linked), need, n > 1 ? " (more held back)" : "");
+        }
+    return counted;
+}
+
+// locks/LockCountRet: rbp-0x68 the count's {u8 error; u32; u32 count}, r14 the InteractionLock (item +0x10, amount u16
+// +0x16), [rsp+0x58] the program context (all pinned by the pattern).
+void lock_eval_impl(KilnRegisters& r) {
+    auto* out = reinterpret_cast<uint8_t*>(r.rbp - 0x68);
+    if (out[0] != 0) return;  // the game's own refusal (no initialized inventory): left to it
+    const auto* lock = reinterpret_cast<const uint8_t*>(r.r14);
+    const uint32_t item = rd<uint32_t>(lock, 0x10), need = rd<uint16_t>(lock, 0x16), bag = rd<uint32_t>(out, 8);
+    if (bag >= need) return;
+    void* const ctx = rd<void*>(reinterpret_cast<const void*>(r.rsp), 0x58);
+    const uint8_t world = ctx_world(ctx);
+    if (world == 0xff) return;
+    const uint32_t player = world == 0 ? ctx_entity(ctx) : 0;
+    if (world == 0 && (!player || player > kMaxPlayerEntity)) return;
+    const uint32_t counted = lock_check(world, player, item, bag, need, true);
+    if (counted != bag) wr<uint32_t>(out, 8, counted);
+}
+void hk_lock_eval(KilnRegisters& r) {
+    __try {
+        lock_eval_impl(r);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_lock_off.exchange(true)) LOGE("locks: the lock check's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+    }
+}
+// locks/client.UiLockCountRet: rbp+0x620 the count's result, rdi the InteractionLock (pinned by the pattern).
+void hk_lock_ui(KilnRegisters& r) {
+    __try {
+        auto* out = reinterpret_cast<uint8_t*>(r.rbp + 0x620);
+        if (out[0] != 0) return;
+        const auto* lock = reinterpret_cast<const uint8_t*>(r.rdi);
+        const uint32_t item = rd<uint32_t>(lock, 0x10), need = rd<uint16_t>(lock, 0x16), bag = rd<uint32_t>(out, 8);
+        if (bag >= need) return;
+        const uint32_t counted = lock_check(2, 0, item, bag, need, false);
+        if (counted != bag) wr<uint32_t>(out, 8, counted);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_lock_off.exchange(true)) LOGE("locks: the locked prompt's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+    }
+}
+
+// The rest of a lock's payment from the guest's opted-in links, inside the game's transaction (any thread: the game's
+// interaction_attempt). `left`: what the bag's PayMaterial left. True: every unit was taken (the caller sets left 0).
+bool lock_pay_impl(void* tx, uint32_t guest, uint32_t item, uint32_t need, uint32_t left, bool consume) {
+    auto stand = [&](const char* why) {
+        if (const uint32_t n = g_log_lock_pay.take())
+            LOGI("locks: player %u's lock of item 0x%08x x%u left to the game: %s (the bag paid %u)%s", guest, item, need, why,
+                 need - left, n > 1 ? " (more held back)" : "");
+        return false;
+    };
+    if (!guest || guest > kMaxPlayerEntity || !item || !left || left > need) return false;
+    if (g_lock_off.load(std::memory_order_relaxed) || !G.registered_ok || !G.pay) return stand("locks from linked sources are off here");
+    void* const bases = g_srv_bases.load(std::memory_order_acquire);
+    Access a{};
+    if (!bases || !access_from_tx_reads(tx, &a)) return stand("not the server world's transaction (its accessors did not check out)");
+    const auto sources = craft_sources_copy(guest);
+    if (sources.empty()) {
+        if (!g_registered.copy(guest).empty()) return stand("the player's links belong to an earlier login");
+        return false;  // nothing linked: the game's lock, no line
+    }
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> views;
+    auto have = [&](uint32_t e, uint32_t it) -> uint64_t {
+        auto v = views.find(e);
+        if (v == views.end()) {
+            std::unordered_map<uint32_t, uint64_t> m;
+            count_pages(a, e, &m);
+            v = views.emplace(e, std::move(m)).first;
+        }
+        const auto n = v->second.find(it);
+        return n == v->second.end() ? 0 : n->second;
+    };
+    auto access = [&](uint32_t player, uint32_t container) {
+        if (storage_contains(container) || !source_access(bases, player, container)) return false;
+        uint8_t flags = 0;
+        PageSet pages{};
+        bool initialized = false;
+        return setup_flags(a, container, &flags) && !(flags & 3) && read_pages(a, container, &pages, &initialized) && initialized;
+    };
+    const auto held = lock_sources_for(sources, guest, item, guest, access, have);
+    uint64_t total = 0;
+    for (const auto& h : held) total += h.count;
+    if (const uint32_t why = lock_why(sources, guest, item, total, left); why != kLockNone) {
+        if (why == kLockNoLinks) return false;
+        uint64_t cached = 0;
+        bool opted = false;
+        if (why == kLockShort && lock_cached(guest, item, &cached, &opted) && cached >= left) {
+            char text[160];
+            std::snprintf(text, sizeof text, "a stack the server no longer sees (the links were counted to hold %llu, hold %llu now; "
+                          "needs %u more)", static_cast<unsigned long long>(cached), static_cast<unsigned long long>(total), left);
+            return stand(text);
+        }
+        char text[160];
+        std::snprintf(text, sizeof text, "%s (the links hold %llu, needs %u more)", lock_why_text(why),
+                      static_cast<unsigned long long>(total), left);
+        return stand(text);
+    }
+    std::vector<LockHeld> takes;
+    if (!plan_lock_take(held, left, &takes)) return stand("short count");
+    uint64_t paid = 0;
+    for (const auto& t : takes) {
+        uint32_t rem = static_cast<uint32_t>(t.count);
+        uint8_t refused = 0;
+        const bool ran = pay_one(tx, t.container, item, &rem, &refused);
+        if (!ran || refused || rem) {
+            LOGW("locks: player %u's lock of item 0x%08x x%u rolled back: container %u's take %s (refused 0x%02x, %u short): nothing moved",
+                 guest, item, need, t.container, !ran ? "faulted" : refused ? "was refused" : "came short", refused, rem);
+            return false;  // left > 0: the game declines and rolls the transaction back, the bag's take included
+        }
+        paid += t.count;
+    }
+    g_lock_dirty.store(true, std::memory_order_relaxed);
+    if (const uint32_t n = g_log_lock_pay.take())
+        LOGI("locks: player %u's lock of item 0x%08x x%u: the bag paid %u, %llu from %zu linked source(s)%s%s", guest, item, need,
+             need - left, static_cast<unsigned long long>(paid), takes.size(),
+             consume ? "" : " (no Consume: a presence test, the game rolls it back)", n > 1 ? " (more held back)" : "");
+    return true;
+}
+// locks/LockPaid: [rsp+0x58] PayMaterial's {u8 error; u32; u32 left}, rbp+0x230 the transaction, r14 the event's guest,
+// rsi the InteractionLock (item +0x10, amount +0x16, mask +0x18 bit 0 Consume): pinned by the pattern.
+void lock_paid_impl(KilnRegisters& r) {
+    auto* out = reinterpret_cast<uint8_t*>(r.rsp + 0x58);
+    const uint32_t left = rd<uint32_t>(out, 8);
+    if (!left) return;  // the bag paid it: the game's own lock
+    const auto* lock = reinterpret_cast<const uint8_t*>(r.rsi);
+    const uint32_t item = rd<uint32_t>(lock, 0x10), need = rd<uint16_t>(lock, 0x16);
+    const bool consume = (lock[0x18] & 1) != 0;
+    const uint32_t guest = rd<uint32_t>(reinterpret_cast<const void*>(r.r14), 0);
+    if (out[0] != 0) {
+        if (!craft_sources_copy(guest).empty())
+            if (const uint32_t n = g_log_lock_pay.take())
+                LOGI("locks: player %u's lock of item 0x%08x x%u left to the game: the bag's payment answered error 0x%02x%s", guest,
+                     item, need, out[0], n > 1 ? " (more held back)" : "");
+        return;
+    }
+    if (lock_pay_impl(reinterpret_cast<void*>(r.rbp + 0x230), guest, item, need, left, consume)) wr<uint32_t>(out, 8, 0);
+}
+void hk_lock_paid(KilnRegisters& r) {
+    __try {
+        lock_paid_impl(r);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_lock_off.exchange(true)) LOGE("locks: the lock payment's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+    }
+}
+
+// The client's snapshot (a Kiln client, any thread).
+KilnResult KILN_CALL t_set_lock_stock(uint32_t on, const KilnStationStack* rows, uint32_t count) {
+    if (on > 1 || (on && (count > KILN_STATIONS_MAX_LOCK_STOCK || (count && !rows)))) return KILN_ERR_INVALID_ARGUMENT;
+    for (uint32_t i = 0; on && i < count; ++i)
+        if (!rows[i].item) return KILN_ERR_INVALID_ARGUMENT;
+    bool was = false;
+    size_t kept = 0;
+    {
+        std::lock_guard lock(g_lock_snap_mu);
+        was = g_lock_on.load(std::memory_order_relaxed);
+        g_lock_have.clear();
+        if (on)
+            for (uint32_t i = 0; i < count; ++i) g_lock_have[rows[i].item] = rows[i].count;
+        else
+            g_lock_asks.clear();
+        g_lock_asks.erase(std::remove_if(g_lock_asks.begin(), g_lock_asks.end(), [](uint32_t i) { return g_lock_have.count(i) != 0; }),
+                          g_lock_asks.end());
+        kept = g_lock_have.size();
+        g_lock_on.store(on != 0, std::memory_order_release);
+    }
+    if (on != static_cast<uint32_t>(was))
+        if (const uint32_t n = g_log_lock_snap.take())
+            LOGI(on ? "locks: the server counts lock items from linked sources: %u item row(s)%s"
+                    : "locks: lock snapshot cleared: the game's own lock checks again%s",
+                 static_cast<unsigned>(kept), n > 1 ? " (more held back)" : "");
+    return KILN_OK;
+}
+KilnResult KILN_CALL t_lock_asks(KilnItemId* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out)) return KILN_ERR_INVALID_ARGUMENT;
+    std::lock_guard lock(g_lock_snap_mu);
+    const uint32_t n = static_cast<uint32_t>(g_lock_asks.size());
+    *out_count = n;
+    for (uint32_t i = 0; i < n && i < capacity; ++i) out[i] = g_lock_asks[i];
+    return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
+
 KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest* r, uint64_t* out) {
     if (!out) return KILN_ERR_INVALID_ARGUMENT;
     *out = 0;
-    if (!r || r->size < sizeof *r || r->order > 1 || r->filter > 1 || r->item_count > 65536 ||
+    if (!r || r->size < KILN_CRAFT_SOURCE_REQUEST_V1 || r->order > 1 || r->filter > 1 || r->item_count > 65536 ||
         (r->item_count && !r->items)) return KILN_ERR_INVALID_ARGUMENT;
+    // Since 0.2.0-dev.31.12 (GitHub #147): flags, read only when the request's size covers them.
+    const bool has_flags = r->size >= sizeof *r;
+    const uint32_t flags = has_flags ? r->flags : 0u;
+    if ((flags & ~static_cast<uint32_t>(KILN_CRAFT_SOURCE_LOCKS)) || (has_flags && r->reserved)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
     if (!source_identity_ok(r->player,r->container,false,source_container(r->container))) return KILN_ERR_INVALID_ARGUMENT;
@@ -3691,19 +4038,36 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     uint32_t session=0;
     // Registration already holds the tick-thread gate: do not depend on our first Pre having cached this world yet.
     if(!source_player(singleton("PlayerBasesSystemServer"),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
-    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session);
+    const bool locks = (flags & KILN_CRAFT_SOURCE_LOCKS) != 0;
+    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session,locks);
+    g_lock_dirty.store(true, std::memory_order_relaxed);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
+    g_lock_dirty.store(true, std::memory_order_relaxed);
     return g_registered.remove(owner,handle) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
-void KILN_CALL t_cancel_sources(KilnOwner owner) { g_registered.cancel_owner(owner); }
+void KILN_CALL t_cancel_sources(KilnOwner owner) { g_registered.cancel_owner(owner); g_lock_dirty.store(true, std::memory_order_relaxed); }
 
 KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
-    if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity || (flags & ~KILN_CRAFT_SOURCE_STOCK_ALL)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity ||
+        (flags & ~(static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_ALL) | static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_LOCKS)))) return KILN_ERR_INVALID_ARGUMENT;
     *out_count = 0;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
+    if (flags & KILN_CRAFT_SOURCE_STOCK_LOCKS) {  // GitHub #147: the lock-opted links alone (no base, no bag)
+        void* const bases = singleton("PlayerBasesSystemServer");
+        if (!bases) return KILN_ERR_UNAVAILABLE;
+        std::unordered_map<uint32_t, uint64_t> sum;
+        lock_counts(bases, player, craft_sources_copy(player), &sum);
+        std::vector<KilnStationStack> rows;
+        for (const auto& [item, count] : sum) if (count) rows.push_back({item, static_cast<uint32_t>(std::min<uint64_t>(count, UINT32_MAX))});
+        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.item < b.item; });
+        *out_count = static_cast<uint32_t>(rows.size());
+        if (capacity < rows.size()) return KILN_ERR_BUFFER_TOO_SMALL;
+        if (!rows.empty()) std::memcpy(out, rows.data(), rows.size() * sizeof rows[0]);
+        return KILN_OK;
+    }
     RawBases rb{};
     if(flags & KILN_CRAFT_SOURCE_STOCK_ALL) {rb.sys=singleton("PlayerBasesSystemServer");if(!rb.sys)return KILN_ERR_UNAVAILABLE;}
     else if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
@@ -3750,6 +4114,7 @@ const KilnStationsApi kTable = {
     &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
     &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources, &t_max_chests,
     &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock, &dyes_set_stock,
+    &t_set_lock_stock, &t_lock_asks,
 };
 
 bool sym(const char* name, uintptr_t* out) {
@@ -3811,11 +4176,130 @@ bool rules_hook(uint32_t bit, std::string* why, uint32_t* reason) {
     return false;
 }
 
+// ---- GitHub #147: the lock hooks' symbols, their code check and their installation on demand ----
+// stations_resolve: items.lock_sources with its pinned layout (the patterns pin rbp-0x68, [rsp+0x58], rbp+0x620,
+// rbp+0x230; the captured InteractionLock offsets must be the ones the handlers read).
+void lock_resolve() {
+    if (!feat("items.lock_sources")) return;
+    int64_t item = -1, amount = -1, mask = -1;
+    const bool layout = cst("locks/lock.item", &item) && cst("locks/lock.amount", &amount) && cst("locks/lock.mask", &mask) &&
+                        item == 0x10 && amount == 0x16 && mask == 0x18;
+    g_lock_feat = layout && sym("locks/LockCountRet", &g_lock.count_ret) && sym("locks/InventoryItemCount", &g_lock.count_fn) &&
+                  sym("locks/LockPaid", &g_lock.paid) && sym("gems/PayMaterial", &g_lock.pay_fn) &&
+                  sym("world/CurrentEntityId", &g_lock_current) && call_matches(g_lock.count_ret, g_lock.count_fn) &&
+                  call_matches(g_lock.paid, g_lock.pay_fn) && E.job_storage && E.component_map_find;
+    if (g_lock_feat && g_api->side() == KILN_SIDE_CLIENT)
+        g_lock_feat = sym("locks/client.UiLockCountRet", &g_lock.ui_ret) && call_matches(g_lock.ui_ret, g_lock.count_fn);
+    if (!G.pay) sym("gems/PayMaterial", &G.pay);
+    if (!g_lock_feat) {
+        LOGW("locks: locks from linked sources are unavailable: a symbol or the InteractionLock layout of items.lock_sources did not check out");
+        lower("items.lock_sources", KILN_CAP_REASON_SYMBOL_MISSING,
+              "locks/LockCountRet, locks/LockPaid, locks/InventoryItemCount (and on a client locks/client.UiLockCountRet) or the "
+              "InteractionLock offsets did not check out on this build");
+    }
+}
+
+// Foreign code (another module's hook or patch) on what a lock hook reads or patches: the call sites and the two
+// functions' entries. Named in kiln.log; the hooks then stay out.
+struct LockCodeRefusal {
+    const char* name = nullptr;
+    uintptr_t at = 0;
+    size_t size = 0;
+    uint32_t state = KILN_CODE_UNKNOWN;
+    KilnResult rc = KILN_ERR_UNAVAILABLE;
+};
+bool lock_code_ok(bool client_sites, bool server_sites, LockCodeRefusal* why) {
+    const auto* h = kiln::hooks_v2(g_api);
+    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
+        why->name = "kiln.hooks' code-state check";
+        return false;
+    }
+    struct Dep { uintptr_t at; size_t size; const char* name; bool want; };
+    for (const Dep& d : {Dep{g_lock.count_ret ? g_lock.count_ret - 0x32 : 0, 0x48, "the lock check's item count call", true},
+                         Dep{g_lock.count_fn, 0x40, "InventoryItemCount", true},
+                         Dep{g_lock.ui_ret ? g_lock.ui_ret - 0x49 : 0, 0x6a, "the locked prompt's item count call", client_sites},
+                         Dep{g_lock.paid ? g_lock.paid - 0x20 : 0, 0x3c, "interaction_attempt's lock payment call", server_sites},
+                         Dep{g_lock.pay_fn, 0x2b, "PayMaterial", server_sites}}) {
+        if (!d.want) continue;
+        uint32_t state = KILN_CODE_UNKNOWN;
+        uint64_t generation = 0;
+        const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+        if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+            *why = {d.name, d.at, d.size, state, rc};
+            return false;
+        }
+    }
+    return true;
+}
+void lock_stand_down(const char* what, const LockCodeRefusal& why) {
+    PreviewCodeRefusal p{why.name, why.at, why.size, why.state, why.rc};
+    char note[512]{};
+    preview_code_note(p, note, sizeof note);
+    LOGW("locks: %s stands down%s (the game's own lock checks and payments are used)", what, note);
+    lower("items.lock_sources", KILN_CAP_REASON_FAULTED, "another module patched the code a lock hook reads (see kiln.log)");
+}
+bool lock_install(kiln::MidHook2& hook, std::atomic<bool>& on, uintptr_t at, void (*fn)(KilnRegisters&), const char* label) {
+    if (on.load()) return true;
+    if (!hook.install(g_api, g_owner, at, fn, label)) {
+        if (!g_lock_off.exchange(true))
+            LOGW("locks: %s could not be hooked (%s): locks from linked sources stand down", label, hook.error() ? hook.error() : "refused");
+        lower("items.lock_sources", KILN_CAP_REASON_FAULTED, "a lock hook could not be installed (see kiln.log)");
+        return false;
+    }
+    on.store(true);
+    return true;
+}
+
+// The server world's Pre (tick thread): the cache, and the server's hooks once a link with Locks exists.
+void lock_server_pre(uint64_t step) {
+    if (!g_lock_feat || !G.registered_ok || g_lock_off.load()) return;
+    if (!g_lock_paid_on.load() && !g_registered.any_locks()) return;
+    lock_cache_refresh(step);
+    if (g_lock_paid_on.load() && g_lock_eval_on.load()) return;
+    static bool failed = false;
+    if (failed) return;
+    LockCodeRefusal why;
+    if (!lock_code_ok(false, true, &why)) {
+        failed = true;
+        g_lock_off.store(true);
+        lock_stand_down("the server's lock check and payment from linked sources", why);
+        return;
+    }
+    if (!lock_install(h_lock_eval, g_lock_eval_on, g_lock.count_ret, &hk_lock_eval, "locks/LockCountRet") ||
+        !lock_install(h_lock_paid, g_lock_paid_on, g_lock.paid, &hk_lock_paid, "locks/LockPaid")) {
+        failed = true;
+        return;
+    }
+    LOGI("locks: a link opted in with Locks: the server's lock check and lock payment count linked sources (bag first)");
+}
+
+// The client world's Pre (a client process): the client's hooks once a Kiln server's lock snapshot is on.
+void lock_client_pre() {
+    if (!g_lock_feat || g_lock_off.load() || !g_lock_on.load(std::memory_order_acquire)) return;
+    if (g_lock_eval_on.load() && g_lock_ui_on.load()) return;
+    static bool failed = false;
+    if (failed) return;
+    LockCodeRefusal why;
+    if (!lock_code_ok(true, false, &why)) {
+        failed = true;
+        g_lock_off.store(true);
+        lock_stand_down("the client's lock check and locked prompt from linked sources", why);
+        return;
+    }
+    if (!lock_install(h_lock_eval, g_lock_eval_on, g_lock.count_ret, &hk_lock_eval, "locks/LockCountRet") ||
+        !lock_install(h_lock_ui, g_lock_ui_on, g_lock.ui_ret, &hk_lock_ui, "locks/client.UiLockCountRet")) {
+        failed = true;
+        return;
+    }
+    LOGI("locks: the server's lock snapshot is on: this client's lock checks count the bag plus linked sources");
+}
+
 // Tick thread, every Pre: what the payment reads off the tick thread, the rows' check, the craft hook's demand.
-void craft_pre() {
+void craft_pre(uint64_t step) {
     if (!G.craft_ok) return;
     g_srv_bases.store(singleton("PlayerBasesSystemServer"), std::memory_order_release);
     g_srv_recipes.store(recipes_registry(), std::memory_order_release);
+    lock_server_pre(step);
     static bool checked = false;
     if (!checked) {
         checked = true;
@@ -3825,6 +4309,7 @@ void craft_pre() {
             LOGW("stations: station outputs in a craft are off: %s", why.c_str());
             lower("stations.craft_sources", reason, why.c_str());
             lower("crafting.sources", reason, why.c_str());
+            if (g_lock_feat) lower("items.lock_sources", reason, why.c_str());  // the links locks use are crafting.sources'
             G.craft_ok = G.registered_ok = false;
             return;
         }
@@ -3870,6 +4355,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
     preview_hook_on_demand();
     fill_hook_on_demand();
     avail_hook_on_demand();
+    lock_client_pre();
     static bool checked = false;
     if (!checked && w && feat("stations.craft_ui")) {
         checked = true;
@@ -3891,6 +4377,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
 }
 void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
+    t_set_lock_stock(0, nullptr, 0);  // the lock snapshot named this session's lock items
     g_client_recipes.store(nullptr, std::memory_order_release);
     {
         std::lock_guard lock(g_craft_mu);
@@ -3965,6 +4452,7 @@ void stations_resolve() {
     }
     // The ingredient rows' "available" count (the same snapshot). Hooked on demand.
     if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) avail_resolve();
+    lock_resolve();  // GitHub #147, after G.pay may have resolved
     G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
@@ -3988,6 +4476,8 @@ void stations_resolve() {
         cst("crafting/player.stride",&stride) && stride == 0xa0 && cst("crafting/player.permissions",&perms) && perms == 0x9d && cst("players/info.handle",&handle) && handle == 4;
     if (!G.registered_ok && feat("crafting.sources"))
         lower("crafting.sources",KILN_CAP_REASON_SYMBOL_MISSING,"the server recipe payment, inventory access or player permission layout is unavailable");
+    if (!G.registered_ok && g_lock_feat && g_api->side() == KILN_SIDE_SERVER)
+        lower("items.lock_sources",KILN_CAP_REASON_SYMBOL_MISSING,"crafting.sources (the links a lock uses) is unavailable on this build");
     // the recipe map, for the items a Kiln client is sent (craft_items); absolute offsets in the RecipeRegistry
     if (!(cst("content/recipes.cap", &g_rmap_cap) && cst("content/recipes.bits", &g_rmap_bits) &&
           cst("content/recipes.values", &g_rmap_values) && cst("content/recipes.count", &g_rmap_count)))
@@ -4071,7 +4561,7 @@ void stations_register(const KilnWorldApi* w) {
 
 void stations_pre(uint64_t step) {
     if (!G.read) return;
-    craft_pre();
+    craft_pre(step);
     poll_program();
     // SELECT's unlock check (tick thread), then the program may take them
     std::vector<Req> incoming;
@@ -4144,6 +4634,11 @@ void stations_world_closed() {
         g_sources.clear();  // entity ids of a closed world name nothing
     }
     g_registered.clear();
+    {
+        std::lock_guard lock(g_lock_mu);  // GitHub #147: the lock checks' counts named this world's entities
+        g_lock_cache.clear();
+    }
+    g_lock_dirty.store(true);
     g_srv_bases.store(nullptr, std::memory_order_release);
     g_srv_recipes.store(nullptr, std::memory_order_release);
     g_rindex = RecipeIndex{};

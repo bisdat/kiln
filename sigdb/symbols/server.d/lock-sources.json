@@ -1,0 +1,56 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "GitHub #147, since 0.2.0-dev.31.12: InteractionLock's required item (requiredItem u32 +0x10, requiredItemAmount u16 +0x16, lockMask +0x18 bit 0 Consume) counted and paid from a player's crafting sources linked with CraftSourceOptions.Locks. Two places decide a lock in the game. (1) The lock check of an interaction press, a helper of player_control_action_sequence (S 0xb08a0, C 0x2c5350; it runs in every world: the server world, and on a client the client and prediction worlds): it counts the item in the presser's InventorySetup inventories with InventoryItemCount(out {u8 error; u32 0; u32 count @8}, ctx, InventorySetup*, Inventory accessor, ?, u32 item, ItemRegistry*) and, when count < requiredItemAmount, plays the lock's failedAttempt sequence instead of the press (no AcceptOfferedInteractionEvent is sent). locks/LockCountRet is the return address of that call. (2) interaction_attempt (S 0xa4e80, C 0x2a7a10, events-in AcceptOfferedInteractionEvent) opens an inventory transaction and calls gems/PayMaterial(out, tx, guest, requiredItem, requiredItemAmount); error 0 and left 0 then commit when lockMask has Consume, else roll back (a presence test); anything else rolls back and declines (DeclinedInteraction). locks/LockPaid is that call's return address. Identical bytes on server 26430253 (f0d824be) and client 26430625 (5d9ef2f1). Evidence: docs/re/locks.md.",
+  "symbols": {
+    "locks/LockCountRet": {
+      "comment": "the lock check's InventoryItemCount call: lea rcx,[rbp-0x68] (the result); mov rdx,[rsp+0x58] (the program context); mov eax,[r14+requiredItem]; [rsp+0x28] = item; call; then cmp [rbp-0x68],bl (error), cmovz edi,[rbp-0x60] (count), movzx ebx,word [r14+requiredItemAmount]. The return address; kiln-items' mid hook there reads rbp-0x68, r14 and [rsp+0x58], which the literal bytes pin. Server 26430253 0xb0a97, client 26430625 0x2c5547",
+      "find": [
+        {
+          "pattern": "48 8D 4D 98 4C 8B 8E ?? ?? ?? ?? 4C 8B 46 ?? 48 8B 54 24 58 48 89 44 24 30 41 8B 46 {locks/lock.item:d8} 89 44 24 28 48 8B 86 ?? ?? ?? ?? 48 89 44 24 20 E8 {locks/InventoryItemCount:rel32} 38 5D 98 8B FB 41 8B 46 10 0F 44 7D A0 33 C9 41 0F B7 5E {locks/lock.amount:d8}",
+          "offset": 50
+        }
+      ]
+    },
+    "locks/LockPaid": {
+      "comment": "interaction_attempt's lock payment: movzx eax,word [rsi+requiredItemAmount]; r9d = [rsi+requiredItem]; r8d = guest; call gems/PayMaterial; cmp byte [rsp+0x58],0 (error); cmp dword [rsp+0x60],0 (left); test byte [rsi+lockMask],1 (Consume: commit, else roll back). The return address; kiln-items' mid hook there reads [rsp+0x58], rbp+0x230 (the transaction), r14 and rsi, which the literal bytes pin. Server 26430253 0xa536e, client 26430625 0x2a7efe",
+      "find": [
+        {
+          "pattern": "0F B7 46 {locks/lock.amount:d8} 48 8D 95 30 02 00 00 44 8B 4E {locks/lock.item:d8} 48 8D 4C 24 58 45 8B 06 89 44 24 20 E8 {gems/PayMaterial:rel32} 80 7C 24 58 00 0F 85 ?? ?? ?? ?? 83 7C 24 60 00 0F 85 ?? ?? ?? ?? F6 46 {locks/lock.mask:d8} 01",
+          "offset": 32
+        }
+      ]
+    }
+  },
+  "constants": {
+    "locks/lock.item": {
+      "min_votes": 2
+    },
+    "locks/lock.amount": {
+      "min_votes": 2
+    },
+    "locks/lock.mask": {
+      "min_votes": 1
+    }
+  },
+  "features": {
+    "items.lock_sources": {
+      "symbols": [
+        "locks/LockCountRet",
+        "locks/InventoryItemCount",
+        "locks/LockPaid",
+        "gems/PayMaterial",
+        "world/CurrentEntityId"
+      ],
+      "constants": [
+        "locks/lock.item",
+        "locks/lock.amount",
+        "locks/lock.mask",
+        "crafting/bases.players",
+        "crafting/player.stride",
+        "crafting/player.permissions",
+        "players/info.handle"
+      ]
+    }
+  }
+}

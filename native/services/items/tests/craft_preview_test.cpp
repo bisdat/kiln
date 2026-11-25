@@ -45,6 +45,7 @@ uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
 bool access_from_tx(void*,Access*) { std::abort(); }
+bool access_from_tx_reads(void*,Access*) { std::abort(); }
 bool setup_flags(const Access&,KilnEntity,uint8_t*) { std::abort(); }
 bool read_pages(const Access&,KilnEntity,PageSet* p,bool* init) { *p={};p->n=1;p->p[0].entity=99;*init=fixture::initialized;return fixture::pages_ok; }
 void player_guard(const Access&,KilnEntity,PlayerGuard*) { std::abort(); }
