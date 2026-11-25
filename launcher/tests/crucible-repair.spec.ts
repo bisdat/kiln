@@ -78,9 +78,15 @@ test("no update, the game running: Load it waits, Download missing mods runs; a 
   // Hardcore Hunger is optional and off by default: gone from the Library, it is not missing
   await crucible(page, (h) => { h.dropFromLibrary("kiln", "weather-plus"); h.dropFromLibrary("kiln", "hardcore-hunger"); });
   await mock(page, (m) => m.externalStart("client-steam"));
+  // the same code again moments later: Crucible is not asked again (the preview is fresh), the Library is (pack_lacking)
+  const opens = async () => (await crucible(page, (h) => h.requests())).filter((r) => r.cmd === "crucible_open").length;
+  const lacks = async () => (await crucible(page, (h) => h.requests())).filter((r) => r.cmd === "pack_lacking").length;
+  const [opened, lacked] = [await opens(), await lacks()];
   await code(page, "K4TW-9XRB");
   await expect(page.getByTestId("crucible-has-instance")).toHaveText("You have this pack already.");
   await expect(page.getByTestId("crucible-missing")).toContainText("Weather Plus (pack version 1.2.0) is no longer in your Library. Load it would start the game without it.");
+  expect(await opens()).toBe(opened);
+  expect(await lacks()).toBeGreaterThan(lacked);
   await expect(page.getByTestId("crucible-missing")).not.toContainText("Hardcore Hunger");
   await expect(page.getByTestId("crucible-load-it")).toBeDisabled();
   await expect(page.getByTestId("crucible-repair")).toHaveText("Download the missing mod (9.6 MB)");

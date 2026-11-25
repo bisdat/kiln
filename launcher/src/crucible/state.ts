@@ -50,7 +50,7 @@ export const useShared = (profileId: ProfileId | null | undefined, stamp?: strin
 
 /** Everything a Crucible change touches. */
 export function refreshCrucible(qc: QueryClient, gameId?: GameId | null) {
-  for (const k of [crk.instances, ["pack_lacking"], ["crucible_updates"], ["crucible_shared"], ["crucible_open"], ["crucible_update_plan"], qk.profiles, ["library_list"], ["profile_resolve"], ["profile_get"]])
+  for (const k of [crk.instances, ["pack_lacking"], ["crucible_updates"], ["crucible_shared"], ["crucible_open"], ["pack_inspect"], ["crucible_update_plan"], qk.profiles, ["library_list"], ["profile_resolve"], ["profile_get"]])
     qc.invalidateQueries({ queryKey: k });
   if (gameId) invalidateGame(qc, gameId);
 }

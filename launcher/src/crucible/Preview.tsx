@@ -115,11 +115,20 @@ export function usePreview(source: PreviewSource | null, wait = false) {
     queryFn: async (): Promise<PreviewModel> => source!.kind === "file"
       ? fromFile(await api.packInspect({ path: source!.path }), source!.path, game)
       : await openCrucible(source!.target, game?.id),
-    // a code opened again reads the Library afresh (a pack mod removed meanwhile is missing now)
-    enabled: !!source, retry: false, staleTime: 15_000, refetchOnMount: "always",
+    enabled: !!source, retry: false, staleTime: 15_000,
     refetchInterval: (query) => (wait && query.state.data?.uploading != null ? WAIT_MS : false),
   });
   return q;
+}
+
+/** The preview with its instance's missing mods read afresh at each open (pack_lacking: local, reads the Library's
+ *  records only): a pack mod removed meanwhile is missing now, and Crucible (or the pack file) is not asked again. */
+export function useFreshRepair(m: PreviewModel | undefined) {
+  const pid = m?.instance ?? null;
+  const lack = useQuery({ queryKey: crk.lacking(pid ?? ""), queryFn: () => api.packLacking(pid!), enabled: !!pid,
+    retry: false, staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: false });
+  const model = useMemo(() => (m && pid && lack.data ? { ...m, repair: lack.data } : m), [m, pid, lack.data]);
+  return { model, refetch: lack.refetch };
 }
 
 /** The Kiln version a pack needs, as a player reads it: "0.2.0-dev.31" for ">=0.2.0-dev.31" (the line says "or newer"). */
@@ -231,7 +240,8 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
   const status = useGameStatus(game?.id);
   const [wait, setWait] = useState(false);
   const q = usePreview(source, wait);
-  const m = q.data;
+  const fresh = useFreshRepair(q.data);
+  const m = fresh.model;
   const updates = useUpdates(game?.id, !!m?.instance);
   const [trust, setTrust] = useState(false);
   const [always, setAlways] = useState(false);
@@ -285,7 +295,7 @@ export function PreviewModal({ source }: { source: PreviewSource }) {
     setBusy("repair");
     try {
       await repairPack(m.instance, m.title, { path: m.repairFrom === "file" ? (source as { path: string }).path : undefined, onTask: setRepairTask });
-      await q.refetch();
+      await fresh.refetch();
     } catch { /* the toast said it */ } finally { setBusy(null); setRepairTask(null); }
   };
   const repairButton = m?.repair && missing > 0 && m.repairFrom ? (
