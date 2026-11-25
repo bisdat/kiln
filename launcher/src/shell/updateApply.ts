@@ -47,7 +47,9 @@ export function applyWait(status: GameStatus | undefined): ApplyWait {
 }
 
 /** The keys the automatic install already tried (applyKey), in this session: shell/UpdateNotice.tsx's install by itself
- *  tries each once, and Play's Update game marks its own try, so a failed click is not followed by a try by itself. */
+ *  tries each once, and Play's Update game marks its own try, so a failed click is not followed by a try by itself (a
+ *  click before the update status answered has no key yet: the install by itself also skips a Kiln whose install
+ *  already failed in this session). */
 export const autoTried = new Set<string>();
 
 /** (0.2.0-dev.31.12) Play's "Update game" banner (pages/PlayPage.tsx): the game's Kiln is older than the one this
