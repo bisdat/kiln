@@ -56,6 +56,12 @@ struct Copy {
     bool any = false;
 } g_copy;
 char g_detail[160] = "not resolved yet";
+char g_skip[160] = "";  // while on and no copy yet: why the last demanded step took none
+
+void skip(const char* why) {
+    std::lock_guard lock(g_mu);
+    std::snprintf(g_skip, sizeof g_skip, "%s", why);
+}
 
 KilnStr str(const char* s) { return KilnStr{s, std::strlen(s)}; }
 uint64_t now_ms() { return GetTickCount64(); }
@@ -180,18 +186,20 @@ bool take(uintptr_t w, KilnEntity player, uint64_t step, Copy* c, const char** w
 void KILN_CALL on_post(const KilnTickInfo* tick, void*) {
     if (!g_on.load() || g_fault.load() || !demanded(g_read_ms.load(std::memory_order_relaxed), now_ms())) return;
     KilnClientState st{sizeof st};
-    if (!g_client || g_client->state(&st) != KILN_OK || !st.local_player) return;
+    if (!g_client || g_client->state(&st) != KILN_OK || !st.local_player) return skip("no local player in the client world yet");
     const uintptr_t w = g_api->world(KILN_WORLD_CLIENT);
-    if (!w) return;
+    if (!w) return skip("no client world");
     Copy c;
     const char* why = nullptr;
-    if (!take(w, st.local_player, tick ? tick->step : 0, &c, &why)) return;  // the last copy stays
+    if (!take(w, st.local_player, tick ? tick->step : 0, &c, &why)) return skip(why ? why : "no copy");  // the last copy stays
     std::lock_guard lock(g_mu);
     g_copy = std::move(c);
+    g_skip[0] = 0;
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
-    if (!ev || ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
+    // STOPPING needs world.lifecycle; without it the next world's STARTED is the first word that the old one is gone
+    if (!ev || ev->kind != KILN_WORLD_CLIENT || (ev->event != KILN_WORLD_STOPPING && ev->event != KILN_WORLD_STARTED)) return;
     std::lock_guard lock(g_mu);
     g_copy = Copy{};  // another session's player must not show
 }
@@ -211,7 +219,8 @@ KilnResult KILN_CALL t_state(KilnSkillsClientState* out) {
     const KilnResult g = gate();
     out->copying = g == KILN_OK;
     std::lock_guard lock(g_mu);
-    std::snprintf(out->detail, sizeof out->detail, "%s", out->on ? "" : g_detail);
+    // off: why; on without a copy: why the last demanded step took none; on with a copy: ""
+    std::snprintf(out->detail, sizeof out->detail, "%s", !out->on ? g_detail : g_copy.any ? "" : g_skip);
     if (g != KILN_OK) return g;
     if (!g_copy.any) return KILN_ERR_NOT_FOUND;
     out->player = g_copy.player;
