@@ -462,6 +462,27 @@ public sealed unsafe class AmmoListTests : IDisposable
     }
 
     [Fact]
+    public void A_pick_of_a_replaced_row_the_game_still_lists_with_stock_reaches_the_mod_that_provided_it()
+    {
+        // GitHub issue 145: the mod's server half swapped the equipped spell 0x41 into storage after the game built its rows,
+        // which still list 0x41 with stock. Native finds no stack in the backpack and queues the pick; Kiln.Ui hands it to
+        // the row's mod by its key, whatever the context's count said.
+        FakeAmmo.Context(Spell, 1, game: (0x41, 1));
+        var book = Mod("book", 74);
+        var toBook = new List<AmmoListPick>();
+        using var p = As(book, () => Ui.AmmoList.Provide(AmmoListKind.Spell, c => [R(0x40, 1), .. c.GameRows],
+            new AmmoListOptions { Mode = AmmoListMode.Replace }));
+        As(book, () => { Ui.AmmoList.Picked += toBook.Add; return 0; });
+        UiAmmoListBridge.Tick();
+        Assert.Equal(UiAmmoNative.ModeReplace, FakeAmmo.Last(Spell).Mode);
+        Assert.Equal([(0x40u, 1u), (0x41u, 1u)], FakeAmmo.Last(Spell).Rows);
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Spell, Item = 0x41, Count = 1, Key = 1, Session = 1 });
+        UiAmmoListBridge.Tick();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Spell, new ItemId(0x41), 1)], toBook);
+        book.Retire();
+    }
+
+    [Fact]
     public void A_queued_pick_of_a_retired_providers_row_never_reaches_the_provider_that_shows_the_item_next()
     {
         FakeAmmo.Context(Arrow, 1);
