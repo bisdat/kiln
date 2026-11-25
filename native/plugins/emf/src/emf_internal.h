@@ -20,6 +20,8 @@
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
 //   api_v40.cpp   v28-v49: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
+//   api_orders.cpp v39 enemy orders and v40 move orders on kiln.creature_control leases, kiln.creatures and
+//                 kiln.spawn (the logic without the game: orders_model.*)
 //   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
 //   seh.cpp       structured-exception guards around every call into a mod
@@ -257,6 +259,12 @@ void terrain_world_stopping(); // cancellations delivered at the next server Pos
 void terrain_world_started();
 std::string terrain_status_json();
 void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v48, without the two chat functions of api_game.cpp)
+// v39 enemy orders and v40 move orders (api_orders.cpp, orders_model.*; since 0.2.0-dev.31.13): after fill_v40
+void fill_orders(EmfApi* t);
+void orders_after_step(EmfWorld* w, uint8_t kind);  // the server world's: orders and moves walked on, callbacks
+void orders_world_stopping();                       // every move ends cancelled (world NULL), every order ends
+void orders_world_started();
+void orders_shutdown();                             // on_unload: kiln.creatures' holds of kiln-emf go
 void net_on_ready();
 void net_server_pre();
 void net_after_step(EmfWorld* w, uint8_t kind);

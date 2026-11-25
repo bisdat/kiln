@@ -23,11 +23,18 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -o "$out/glue_test"
 "$out/glue_test" "$out"
 "$out/glue_test" "$out" no-render
-# v49 (EMF 0.6.22): v47/v48/v49 path and old/new move no-action refusals against the production api_v40.cpp (also built natively: emf-path-test).
+# v49 (EMF 0.6.22): v47/v48/v49 path no-action refusals against the production api_v40.cpp (also built natively: emf-path-test).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/path_test.cpp" "$here/../src/api_v40.cpp" -o "$out/path_test"
 "$out/path_test"
+# v39 enemy orders and v40 move orders on kiln.creature_control leases, kiln.creatures and kiln.spawn (0.2.0-dev.31.13;
+# also built natively: emf-orders-test).
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/orders_test.cpp" "$here/../src/api_v40.cpp" "$here/../src/api_orders.cpp" "$here/../src/orders_model.cpp" \
+    -o "$out/orders_test"
+"$out/orders_test"
 # v44/v45/v47 terrain translation, async queue and callback timing.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \

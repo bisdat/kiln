@@ -8,19 +8,21 @@
 // own lua 1.43 keeps it).
 // v41 (0.6.10) and v42 (0.6.11) added no function, only fields at the end of two structs: EmfMoveOrder.stuck_seconds
 // (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf's version (42 since 0.2.0-dev.28) lets a mod
-// whose mod.json says "emf": 41 or 42 load; enemy_move and path_find, the functions those fields belong to, are not carried yet
-// (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
+// whose mod.json says "emf": 41 or 42 load. enemy_move is carried since 0.2.0-dev.31.13 (api_orders.cpp: stuck_seconds
+// read when the order's size covers it; EMF_MOVE_PEACEFUL_ALL refused with its `why`); path_find is not carried yet
+// (below): no path result is ever handed to a mod.
 // v43-v46 permissions and villager moves remain unavailable. The v44/v45/v47 block family is filled by
 // api_terrain.cpp through kiln.build; spawn_facing by api_spawn.cpp through kiln.spawn. Marker bars stay unavailable.
 // v48 (0.6.20) added no function: EmfPathQuery.as_entity (plan as a given creature) and EmfPathResult's used values
 // belong to path_find, which is not carried: a query of either size is answered 0 unread, and no result is written.
 // v49 (0.6.22) adds no slots: path as_state (calm/guard) and enemy_move CLEAR remain unavailable, not
-// approximated. Unknown states/flags are also no-action refusals; no query, points or entity state are consumed.
+// approximated (CLEAR is refused with its `why` by api_orders.cpp). Unknown states/flags are also no-action refusals; no query, points or entity state are consumed.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
-// speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
+// speaker), world_to_screen (kiln.render's camera, below), on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3) and
+// the six v39/v40 order functions (api_orders.cpp, fill_orders; since 0.2.0-dev.31.13).
 //
-// Not carried yet (45 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
+// Not carried yet (39 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
 // mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
 // the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
@@ -283,49 +285,7 @@ bool api_door_lock(EmfWorld*, uint32_t, uint32_t) {
     return false;
 }
 
-// ---------------------------------------------------------------------------------------------- v39 -------------
-uint32_t api_enemy_order(EmfWorld*, EmfEnemyOrder* order) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (!order || order->size < v26::kEnemyOrderV39Size) {
-        refuse(m, "enemy_order", "no order, or its size field is not sizeof(EmfEnemyOrder)", true);
-        return 0;
-    }
-    unsupported(m, "enemy_order", kNotYet);
-    say_why(order->why);
-    return 0;
-}
-
-bool api_enemy_order_cancel(uint32_t) {
-    KEMF_NOT_YET("enemy_order_cancel");
-    return false;
-}
-
-uint32_t api_enemy_target(EmfWorld*, uint32_t) {
-    KEMF_NOT_YET("enemy_target");
-    return 0;
-}
-
-// ---------------------------------------------------------------------------------------------- v40 -------------
-uint32_t api_enemy_move(EmfWorld*, EmfMoveOrder* order, EmfMoveCallback, void*) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (!order || order->size < v26::kMoveOrderV40Size) {
-        refuse(m, "enemy_move", "no order, or its size field is not sizeof(EmfMoveOrder)", true);
-        return 0;
-    }
-    unsupported(m, "enemy_move", kNotYet);
-    say_why(order->why);
-    return 0;  // refused: `cb` is not called
-}
-
-bool api_enemy_move_cancel(uint32_t) {
-    KEMF_NOT_YET("enemy_move_cancel");
-    return false;
-}
-
-uint32_t api_enemy_moving(EmfWorld*, uint32_t) {
-    KEMF_NOT_YET("enemy_moving");
-    return 0;
-}
+// v39 enemy orders and v40 move orders: api_orders.cpp (fill_orders, since 0.2.0-dev.31.13).
 
 // ---------------------------------------------------------------------------------------------- v43 -------------
 bool api_player_permissions(EmfWorld*, uint32_t, uint32_t* perms) {
@@ -399,12 +359,7 @@ void fill_v40(EmfApi* t) {
     t->door_state = &api_door_state;
     t->door_set = &api_door_set;
     t->door_lock = &api_door_lock;
-    t->enemy_order = &api_enemy_order;
-    t->enemy_order_cancel = &api_enemy_order_cancel;
-    t->enemy_target = &api_enemy_target;
-    t->enemy_move = &api_enemy_move;
-    t->enemy_move_cancel = &api_enemy_move_cancel;
-    t->enemy_moving = &api_enemy_moving;
+    // enemy_order .. enemy_moving (v39, v40): fill_orders (api_orders.cpp), called after this
     t->player_permissions = &api_player_permissions;  // v43
     t->villager_move = &api_villager_move;  // v46
     t->villager_move_cancel = &api_villager_move_cancel;

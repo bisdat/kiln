@@ -326,7 +326,8 @@ void v40_checks(EmfWorld* w) {
     check(A->enemy_order(w, &eo) == 0 && eo.why[0] != 0 && !A->enemy_order_cancel(1) && A->enemy_target(w, F.villager) == 0 &&
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
-          "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
+          "enemy orders and moves (carried since 0.2.0-dev.31.13): an order without a creature is refused with its reason, "
+          "no order 1 to cancel, a villager has no pick and no move", std::string(eo.why));
     // v43 (EMF 0.6.13) to v47 (0.6.19); v48 (0.6.20) added no function (path_find's as_entity: above)
     uint32_t perms = 0x3F;
     check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
