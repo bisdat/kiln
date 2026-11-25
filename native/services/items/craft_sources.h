@@ -12,6 +12,8 @@ struct CraftSource {
     std::vector<uint32_t> items;
     uint32_t player_session = 0;
     bool locks = false;  // GitHub #147: also counts and pays an InteractionLock's required item (KILN_CRAFT_SOURCE_LOCKS)
+    bool fills = false;     // GitHub #132: production-station fills named KILN_STATION_FILL_LINKED (KILN_CRAFT_SOURCE_FILLS)
+    bool building = false;  // GitHub #132: the player's block placements (KILN_CRAFT_SOURCE_BUILDING)
     bool allows(uint32_t item) const {
         const bool found = std::binary_search(items.begin(), items.end(), item);
         return item && (deny ? !found : found);
@@ -26,8 +28,9 @@ class CraftSourceRegistry {
     uint64_t next_ = 0;
     std::vector<CraftSource> sources_;
 public:
+    // flags: KILN_CRAFT_SOURCE_* (a bool true is KILN_CRAFT_SOURCE_LOCKS, as the #147 callers pass it)
     uint64_t add(uint64_t owner, uint32_t player, uint32_t container, bool after, bool deny, std::vector<uint32_t> items, uint32_t session = 0,
-                 bool locks = false) {
+                 uint32_t flags = 0) {
         std::lock_guard lock(mutex_);
         // This player's registrations from an earlier login are dead (every snapshot drops them): free their slots, so
         // a mod that re-registers on each join without disposing cannot exhaust the shared 4096 limit for everyone.
@@ -36,7 +39,8 @@ public:
         std::sort(items.begin(), items.end());
         items.erase(std::unique(items.begin(), items.end()), items.end());
         const auto id = ++next_;
-        sources_.push_back({owner,id,player,container,after,deny,std::move(items),session,locks});
+        sources_.push_back({owner,id,player,container,after,deny,std::move(items),session,(flags & 1u) != 0,(flags & 2u) != 0,
+                            (flags & 4u) != 0});
         return id;
     }
     bool remove(uint64_t owner, uint64_t handle) {
@@ -63,6 +67,10 @@ public:
     bool any_locks() const {
         std::lock_guard lock(mutex_);
         return std::any_of(sources_.begin(), sources_.end(), [](const CraftSource& s) { return s.locks; });
+    }
+    bool any_building() const {
+        std::lock_guard lock(mutex_);
+        return std::any_of(sources_.begin(), sources_.end(), [](const CraftSource& s) { return s.building; });
     }
     std::vector<CraftSource> copy(uint32_t player) const {
         std::lock_guard lock(mutex_);
@@ -95,6 +103,47 @@ void merge_craft_sources(const std::vector<CraftSource>& sources, uint32_t playe
         lent->by[item] = std::move(out);
         lent->count[item] = total;
     }
+}
+
+// ---- GitHub #132 (0.2.0-dev.31.12): production-station fills and block placements from the player's linked sources ----
+// Which links a fill (opt = &CraftSource::fills) or a placement (&CraftSource::building) may take each item from: this
+// player's, opted in, the filter allowing the item, every container once per item across both groups, never one in
+// `skip` (the station, the player, the base's Magic chests, named chests, lending stations: counted already or never a
+// source). BeforeStationOutputs links come in `before`, AfterStationOutputs in `after`, each in registration order.
+// `access` (the payment's permission and container test) runs once per container; containers holding none are left out.
+struct LinkUse {
+    std::unordered_map<uint32_t, std::vector<uint32_t>> before, after;
+    std::unordered_map<uint32_t, uint64_t> count_before, count_after;
+    uint64_t before_of(uint32_t item) const { const auto it = count_before.find(item); return it == count_before.end() ? 0 : it->second; }
+    uint64_t after_of(uint32_t item) const { const auto it = count_after.find(item); return it == count_after.end() ? 0 : it->second; }
+    bool empty() const { return count_before.empty() && count_after.empty(); }
+};
+template<class Access, class Count>
+LinkUse links_for(const std::vector<CraftSource>& sources, bool CraftSource::*opt, uint32_t player, const std::vector<uint32_t>& items,
+                  const std::unordered_set<uint32_t>& skip, Access access, Count count) {
+    LinkUse u;
+    std::unordered_map<uint32_t, bool> ok;  // access, once per container
+    auto allowed = [&](uint32_t c) {
+        const auto it = ok.find(c);
+        if (it != ok.end()) return it->second;
+        return ok[c] = access(player, c);
+    };
+    for (uint32_t item : items) {
+        if (!item) continue;
+        std::unordered_set<uint32_t> seen(skip.begin(), skip.end());
+        seen.insert(player);
+        for (bool after : {false, true})
+            for (const auto& s : sources) {
+                if (s.player != player || !(s.*opt) || s.after_outputs != after || !s.allows(item) || seen.count(s.container)) continue;
+                seen.insert(s.container);
+                if (!allowed(s.container)) continue;
+                if (const uint64_t n = count(s.container, item)) {
+                    (after ? u.after : u.before)[item].push_back(s.container);
+                    (after ? u.count_after : u.count_before)[item] += n;
+                }
+            }
+    }
+    return u;
 }
 
 // ---- GitHub #147: an InteractionLock's required item from the player's linked sources ----

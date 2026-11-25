@@ -1845,7 +1845,7 @@ void finish_plan(const KilnStationRequest& r, PlanOut* p) {
 void plan_inputs(const KilnStationRequest& r, const KilnStationStack* keep, const ResolveCall& rc,
                  std::unordered_map<uint32_t, uint64_t>& have, std::unordered_map<uint32_t, uint64_t>& stock,
                  std::unordered_map<uint32_t, uint64_t>& bag, const std::unordered_map<uint32_t, uint64_t>* chests,
-                 const Lent* lent, PlanOut* p) {
+                 const Lent* lent, PlanOut* p, const LinkUse* links = nullptr) {
     for (uint32_t i = 0; i < rc.n; ++i) {
         InputNow x{};
         x.item = rc.out[i].item;
@@ -1863,6 +1863,11 @@ void plan_inputs(const KilnStationRequest& r, const KilnStationStack* keep, cons
             const auto it = lent->count.find(x.item);
             x.outputs = it == lent->count.end() ? 0 : it->second;
             x.stock += x.outputs;
+        }
+        if (links) {  // the player's fill-opted linked sources, around the outputs (no reserve)
+            x.linked = links->before_of(x.item);
+            x.linked_after = links->after_of(x.item);
+            x.stock += x.linked + x.linked_after;
         }
         p->in.push_back(x);
     }
@@ -1910,6 +1915,10 @@ bool outputs_allowed(const KilnStationRequest& r, const ResolveCall& rc) {
     if (inputs_repeat(items, rc.n)) return false;
     std::lock_guard lock(g_mu);
     return !g_sources.empty();
+}
+// Whether a FILL takes from its player's fill-opted linked sources (GitHub #132): the request, a player, the registry.
+bool fill_links_wanted(const KilnStationRequest& r) {
+    return (r.flags & KILN_STATION_FILL_LINKED) && r.player && r.player <= kMaxPlayerEntity && G.registered_ok && !g_off.load();
 }
 std::vector<uint32_t> input_items(const ResolveCall& rc) {
     std::vector<uint32_t> v;
@@ -1971,7 +1980,28 @@ void plan_tick(const KilnStationRequest& r, const KilnEntity* chest_ids, uint32_
         std::snprintf(p->why, sizeof p->why, "%s", chests.why);
         return;
     }
-    plan_inputs(r, r.keep, rc, have, stock, bag, chest_n ? &chests.count : nullptr, outs ? &lent : nullptr, p);
+    // GitHub #132: the player's fill-opted linked sources, in any base (each checked as the payment checks a link)
+    LinkUse links;
+    const bool linked = fill_links_wanted(r);
+    if (linked) {
+        std::unordered_set<uint32_t> skip{r.station};
+        skip.insert(list.begin(), list.end());
+        skip.insert(chests.ids.begin(), chests.ids.end());
+        for (const auto& [item, by] : lent.by) skip.insert(by.begin(), by.end());
+        std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> held;
+        links = links_for(craft_sources_copy(r.player), &CraftSource::fills, r.player, items, skip,
+                          [&](uint32_t pl, uint32_t c) { return source_access(rb.sys, pl, c); },
+                          [&](uint32_t c, uint32_t item) -> uint64_t {
+                              auto it = held.find(c);
+                              if (it == held.end()) {
+                                  it = held.emplace(c, std::unordered_map<uint32_t, uint64_t>{}).first;
+                                  count_items(c, &it->second);
+                              }
+                              const auto n = it->second.find(item);
+                              return n == it->second.end() ? 0 : n->second;
+                          });
+    }
+    plan_inputs(r, r.keep, rc, have, stock, bag, chest_n ? &chests.count : nullptr, outs ? &lent : nullptr, p, linked ? &links : nullptr);
     void* attributes = singleton("impact::AttributeRegistry");
     int32_t cur = 0, max = 0;
     water_of(r.station, attributes, &cur, &max);
@@ -2255,7 +2285,35 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
         },
         [&](KilnEntity e, std::unordered_map<uint32_t, uint64_t>* m) { count_pages(run.a, e, m); });
     if (named.refused) return finish_text(res, KILN_STATION_REFUSED, named.why);
-    plan_inputs(r, q.keep, rc, have, stocked, bag, q.chest_n ? &named.count : nullptr, outs ? &lent : nullptr, &p);
+    // GitHub #132: the player's fill-opted linked sources, revalidated at the transaction through its own accessors: the
+    // player's CanAccessInventories and login (source_access), an initialized inventory that is no person's
+    LinkUse links;
+    const bool linked = fill_links_wanted(r);
+    if (linked) {
+        std::unordered_set<uint32_t> skip{r.station};
+        skip.insert(magic.begin(), magic.end());
+        skip.insert(named.ids.begin(), named.ids.end());
+        for (const auto& [item, by] : lent.by) skip.insert(by.begin(), by.end());
+        std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> held;
+        links = links_for(craft_sources_copy(r.player), &CraftSource::fills, r.player, items, skip,
+                          [&](uint32_t pl, uint32_t c) {
+                              if (!source_access(run.bases, pl, c)) return false;
+                              PageSet pages{};
+                              bool init = false;
+                              uint8_t flags = 0;
+                              return read_pages(run.a, c, &pages, &init) && init && setup_flags(run.a, c, &flags) && !setup_is_person(flags);
+                          },
+                          [&](uint32_t c, uint32_t item) -> uint64_t {
+                              auto it = held.find(c);
+                              if (it == held.end()) {
+                                  it = held.emplace(c, std::unordered_map<uint32_t, uint64_t>{}).first;
+                                  count_pages(run.a, c, &it->second);
+                              }
+                              const auto n = it->second.find(item);
+                              return n == it->second.end() ? 0 : n->second;
+                          });
+    }
+    plan_inputs(r, q.keep, rc, have, stocked, bag, q.chest_n ? &named.count : nullptr, outs ? &lent : nullptr, &p, linked ? &links : nullptr);
     const uint32_t charges = rd<uint32_t>(recipe, G.recipe_water);
     {
         int32_t cur = 0, max = 0;
@@ -2288,16 +2346,20 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     alignas(16) uint8_t setup[kSetupBlock];
     setup_for_fill(run, r.player, pos, setup);
     char fault[128] = "";
-    uint64_t from_outputs = 0, from_chests = 0;
+    uint64_t from_outputs = 0, from_chests = 0, from_linked = 0;
     std::vector<uint32_t> lenders_used;  // the stations a committed fill took from (their screens refresh too)
-    const bool layers = outs || q.chest_n != 0;
+    const bool layers = outs || q.chest_n != 0 || (linked && !links.empty());
     const Attempts at = run_attempts(r.flags, p.planned, [&](uint32_t n) -> int32_t {
-        // ordinary chests, then station outputs, pay only what the player and the Magic chests cannot (none: the plain
-        // fill, exactly as before)
-        std::vector<uint32_t> chest_sh, out_sh;
-        if (layers && !pay_layers(p.in, n, p.loaded, &chest_sh, &out_sh)) return 4;
+        // ordinary chests, linked sources and station outputs pay only what the player and the Magic chests cannot (none:
+        // the plain fill, exactly as before)
+        FillShares sh;
+        for (auto* v : {&sh.chests, &sh.linked, &sh.outputs, &sh.linked_after}) v->assign(p.in.size(), 0);
+        if (layers && !pay_shares(p.in, n, p.loaded, &sh)) return 4;
+        const std::vector<uint32_t>& chest_sh = sh.chests;
+        const std::vector<uint32_t>& out_sh = sh.outputs;
         const bool take_chests = q.chest_n && any_share(chest_sh);
         const bool lend = outs && any_share(out_sh);
+        const bool take_linked = linked && (any_share(sh.linked) || any_share(sh.linked_after));
         E.tx_ctor(g_tx);
         E.tx_init(g_tx, setup);
         unsigned long code = 0;
@@ -2325,13 +2387,27 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
         };
         int32_t rc0 = 0;
         uint32_t n_game = n;
-        const bool extra = take_chests || lend;
+        const bool extra = take_chests || lend || take_linked;
+        // one input's linked share from that item's links, in their order
+        auto take_linked_share = [&](const std::vector<uint32_t>& shares, const std::unordered_map<uint32_t, std::vector<uint32_t>>& by) {
+            for (size_t k = 0; k < p.in.size() && rc0 == 0; ++k) {
+                if (k >= shares.size() || !shares[k]) continue;
+                const auto it = by.find(p.in[k].item);
+                if (it == by.end() || it->second.empty()) {
+                    rc0 = 4;
+                    break;
+                }
+                const uint64_t from[4] = {reinterpret_cast<uint64_t>(it->second.data()), it->second.size(), 0, 0};
+                rc0 = take_exact(k, shares[k], from);
+            }
+        };
         if (extra) {
             if (take_chests) {
                 const uint64_t from[4] = {reinterpret_cast<uint64_t>(named.ids.data()), named.ids.size(), 0, 0};
                 for (size_t k = 0; k < p.in.size() && rc0 == 0; ++k)
                     if (chest_sh[k]) rc0 = take_exact(k, chest_sh[k], from);
             }
+            if (rc0 == 0 && take_linked) take_linked_share(sh.linked, links.before);
             if (rc0 == 0 && lend) {
                 for (size_t k = 0; k < p.in.size() && rc0 == 0; ++k) {
                     if (!out_sh[k]) continue;
@@ -2344,7 +2420,8 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
                     rc0 = take_exact(k, out_sh[k], from);
                 }
             }
-            n_game = crafts_after_shares(p.in, share_sum(chest_sh, out_sh), n, p.loaded);
+            if (rc0 == 0 && take_linked) take_linked_share(sh.linked_after, links.after);
+            n_game = crafts_after_shares(p.in, sh.all(), n, p.loaded);
         }
         if (rc0 == 0 && (!extra || n_game > 0)) rc0 = call(stock, inputs, n_game, water, r.player);
         if (rc0 == kAttemptFault) return kAttemptFault;
@@ -2353,6 +2430,7 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
             ledger(g_tx, res);
             from_chests = take_chests ? shares_total(chest_sh) : 0;
             from_outputs = lend ? shares_total(out_sh) : 0;
+            from_linked = take_linked ? shares_total(sh.linked_all()) : 0;
             lenders_used.clear();
             for (size_t k = 0; lend && k < p.in.size(); ++k)
                 if (out_sh[k])
@@ -2369,6 +2447,7 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     });
     res->from_outputs = static_cast<uint32_t>(std::min<uint64_t>(from_outputs, UINT32_MAX));
     res->from_chests = static_cast<uint32_t>(std::min<uint64_t>(from_chests, UINT32_MAX));
+    res->from_linked = static_cast<uint32_t>(std::min<uint64_t>(from_linked, UINT32_MAX));
     if (fault[0]) {
         switch_off(fault);
         return finish_text(res, KILN_STATION_UNAVAILABLE, fault);
@@ -3428,13 +3507,16 @@ KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
     // a caller built before 0.2.0-dev.29.17 passes the plan without `outputs`: it gets everything up to message
     constexpr uint32_t kPlanV1 = static_cast<uint32_t>(offsetof(KilnStationPlan, outputs));
     constexpr uint32_t kPlanChests = static_cast<uint32_t>(offsetof(KilnStationPlan, chests));
+    constexpr uint32_t kPlanLinked = static_cast<uint32_t>(offsetof(KilnStationPlan, linked));  // a caller before 31.12
     if (!r || !out || out->size < kPlanV1) return KILN_ERR_INVALID_ARGUMENT;
     if (r->action != KILN_STATION_FILL || !request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     const uint32_t size = out->size;
     const bool with_outputs = size >= kPlanChests;
-    const bool with_chests = size >= sizeof(KilnStationPlan);
-    const uint32_t clear = with_chests ? static_cast<uint32_t>(sizeof(KilnStationPlan)) : with_outputs ? kPlanChests : kPlanV1;
+    const bool with_chests = size >= kPlanLinked;
+    const bool with_linked = size >= sizeof(KilnStationPlan);
+    const uint32_t clear = with_linked ? static_cast<uint32_t>(sizeof(KilnStationPlan)) : with_chests ? kPlanLinked
+                           : with_outputs ? kPlanChests : kPlanV1;
     std::memset(out, 0, clear);
     out->size = size;
     out->station = r->station;
@@ -3461,11 +3543,14 @@ KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
         uint64_t rest = x.stock;
         const uint64_t out_n = std::min(rest, x.outputs);
         rest -= out_n;
+        const uint64_t linked_n = std::min(rest, x.linked + x.linked_after);
+        rest -= linked_n;
         const uint64_t chest_n = std::min(rest, x.chests);
         rest -= chest_n;
         out->stock[i] = static_cast<uint32_t>(std::min<uint64_t>(rest, UINT32_MAX));
         if (with_outputs) out->outputs[i] = static_cast<uint32_t>(std::min<uint64_t>(out_n, UINT32_MAX));
         if (with_chests) out->chests[i] = static_cast<uint32_t>(std::min<uint64_t>(chest_n, UINT32_MAX));
+        if (with_linked) out->linked[i] = static_cast<uint32_t>(std::min<uint64_t>(linked_n, UINT32_MAX));
     }
     std::snprintf(out->message, sizeof out->message, "%s", p.why);
     return KILN_OK;
@@ -3807,6 +3892,28 @@ void lock_counts(void* bases, uint32_t player, const std::vector<CraftSource>& s
         }
 }
 
+// GitHub #132: what one purpose's links (fills, building) hold, every container once per item, the filters applied, no
+// bag and no base; sorted by item. Tick thread (kiln.world reads), as the payment's own checks.
+std::vector<KilnStationStack> link_rows(void* bases, uint32_t player, const std::vector<CraftSource>& sources, bool CraftSource::*opt) {
+    std::unordered_map<uint32_t, uint64_t> sum;
+    std::unordered_set<uint32_t> seen{player};
+    for (const auto& s : sources) {
+        if (!(s.*opt) || seen.count(s.container) || !source_access(bases, player, s.container)) continue;
+        seen.insert(s.container);
+        std::unordered_map<uint32_t, uint64_t> held;
+        count_items(s.container, &held);
+        for (const auto& [item, n] : held) {
+            bool allowed = false;
+            for (const auto& t : sources) allowed = allowed || ((t.*opt) && t.container == s.container && t.allows(item));
+            if (allowed && n) sum[item] += n;
+        }
+    }
+    std::vector<KilnStationStack> rows;
+    for (const auto& [item, count] : sum) rows.push_back({item, static_cast<uint32_t>(std::min<uint64_t>(count, UINT32_MAX))});
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.item < b.item; });
+    return rows;
+}
+
 // Tick thread, the server world's Pre: the cache, every 30 steps and when a registration changed.
 void lock_cache_refresh(uint64_t step) {
     if (!g_lock_dirty.exchange(false) && step < g_lock_step + kLockRefreshSteps && step >= g_lock_step) return;
@@ -4094,7 +4201,8 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     // Since 0.2.0-dev.31.12 (GitHub #147): flags, read only when the request's size covers them.
     const bool has_flags = r->size >= sizeof *r;
     const uint32_t flags = has_flags ? r->flags : 0u;
-    if ((flags & ~static_cast<uint32_t>(KILN_CRAFT_SOURCE_LOCKS)) || (has_flags && r->reserved)) return KILN_ERR_INVALID_ARGUMENT;
+    constexpr uint32_t kKnownFlags = KILN_CRAFT_SOURCE_LOCKS | KILN_CRAFT_SOURCE_FILLS | KILN_CRAFT_SOURCE_BUILDING;  // 31.12
+    if ((flags & ~kKnownFlags) || (has_flags && r->reserved)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
     if (!source_identity_ok(r->player,r->container,false,source_container(r->container))) return KILN_ERR_INVALID_ARGUMENT;
@@ -4104,8 +4212,7 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     uint32_t session=0;
     // Registration already holds the tick-thread gate: do not depend on our first Pre having cached this world yet.
     if(!source_player(singleton("PlayerBasesSystemServer"),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
-    const bool locks = (flags & KILN_CRAFT_SOURCE_LOCKS) != 0;
-    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session,locks);
+    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session,flags);
     g_lock_dirty.store(true, std::memory_order_relaxed);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
@@ -4116,11 +4223,23 @@ KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
 void KILN_CALL t_cancel_sources(KilnOwner owner) { g_registered.cancel_owner(owner); g_lock_dirty.store(true, std::memory_order_relaxed); }
 
 KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
+    constexpr uint32_t kPurpose = KILN_CRAFT_SOURCE_STOCK_LOCKS | KILN_CRAFT_SOURCE_STOCK_FILLS | KILN_CRAFT_SOURCE_STOCK_BUILDING;
     if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity ||
-        (flags & ~(static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_ALL) | static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_LOCKS)))) return KILN_ERR_INVALID_ARGUMENT;
+        (flags & ~(static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_ALL) | kPurpose)) ||
+        __builtin_popcount(flags & kPurpose) > 1) return KILN_ERR_INVALID_ARGUMENT;
     *out_count = 0;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
+    if (flags & (KILN_CRAFT_SOURCE_STOCK_FILLS | KILN_CRAFT_SOURCE_STOCK_BUILDING)) {  // GitHub #132: one purpose's links alone
+        void* const bases = singleton("PlayerBasesSystemServer");
+        if (!bases) return KILN_ERR_UNAVAILABLE;
+        const auto rows = link_rows(bases, player, craft_sources_copy(player),
+                                    (flags & KILN_CRAFT_SOURCE_STOCK_FILLS) ? &CraftSource::fills : &CraftSource::building);
+        *out_count = static_cast<uint32_t>(rows.size());
+        if (capacity < rows.size()) return KILN_ERR_BUFFER_TOO_SMALL;
+        if (!rows.empty()) std::memcpy(out, rows.data(), rows.size() * sizeof rows[0]);
+        return KILN_OK;
+    }
     if (flags & KILN_CRAFT_SOURCE_STOCK_LOCKS) {  // GitHub #147: the lock-opted links alone (no base, no bag)
         void* const bases = singleton("PlayerBasesSystemServer");
         if (!bases) return KILN_ERR_UNAVAILABLE;
