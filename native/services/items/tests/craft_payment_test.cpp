@@ -120,7 +120,7 @@ int main() {
     // GitHub #132: one purpose's rows count only the links opted into it; two purposes at once are refused
     CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_OK && n==0);    // the link above: crafting only
     CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_FILLS|KILN_CRAFT_SOURCE_STOCK_BUILDING,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
-    CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_LOCKS|KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
+    CHECK(t_source_stock(1,uint32_t{KILN_CRAFT_SOURCE_STOCK_LOCKS}|KILN_CRAFT_SOURCE_STOCK_FILLS,stocks,2,&n)==KILN_ERR_INVALID_ARGUMENT);
     {
         fixture::inventory[2001]={{7,4},{8,1}};fixture::inventory[2002]={{7,5}};
         uint64_t fill_link=0,build_link=0,both=0;
@@ -191,6 +191,34 @@ int main() {
     reset();fixture::fail_take=true;
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==4); // caller must rollback this transaction
     fixture::fail_take=false;
+    // ---- GitHub #132 (0.2.0-dev.31.12): a block placement (ApplyMaterials' take in the blueprint program, t_build_pay set
+    // by hk_build_apply) pays from the player's building links only, bag and base first, all or nothing ----
+    {
+        auto said=[&](const char* s) { for (const auto& l : logs) if (l.find(s) != std::string::npos) return true; return false; };
+        g_build.paid=0x5678;reset();logs.clear();
+        t_build_pay=true;  // only the crafting link (container 2000) exists: a placement never takes from it
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        uint64_t bl=0;KilnCraftSourceRequest b{sizeof b,1,2000,0,0,0,nullptr,KILN_CRAFT_SOURCE_BUILDING,0};
+        CHECK(t_add_source(10,&b,&bl)==KILN_OK && bl);
+        t_build_pay=false;reset();  // ApplyMaterials' take outside the blueprint program (props, impact natives): the game's
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        t_build_pay=true;reset();
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==1 && code==0 && fixture::paid==std::vector<uint32_t>({1,2000}));
+        CHECK(said("a block placement paid 2 from additional crafting sources"));
+        reset();fixture::inventory[2000][7]=1;  // bag 1 + link 1 < 3: left to the game (it refuses), nothing taken
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        CHECK(said("a block placement left to the game"));
+        reset();fixture::fail_take=true;  // a take faulted after another: 4, ApplyMaterials fails and the transaction rolls back
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==1 && code==4);
+        fixture::fail_take=false;
+        reset();infos[0x9d]=0;  // no CanAccessInventories: the link is not a source
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        infos[0x9d]=2;
+        reset();CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);  // a craft still uses it (every link crafts)
+        t_build_pay=false;g_build.paid=0;reset();
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());  // no building symbols: never
+        t_remove_source(10,bl);reset();
+    }
     // #132: a craft at a crafting station (the decoration table's menu sends the same CraftRecipe; kiln.gameplay's craft
     // hook names the station for the call) pays from the player's linked source the same way, all or nothing
     reset();t_craft_station=3000;

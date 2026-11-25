@@ -573,6 +573,16 @@ typedef struct KilnStationsApi {
      * that no row names, oldest first, at most KILN_STATIONS_MAX_LOCK_ASKS. They stay until a row names them or the
      * snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* lock_asks)(KilnItemId* out, uint32_t capacity, uint32_t* out_count);
+    /* ---- block placements from linked sources, since 0.2.0-dev.31.12 (GitHub #132; capability crafting.build_sources;
+     * header.size tells whether this is here) ---- */
+    /* A Kiln client: the server's building snapshot for the local player. on 1: the server counts and pays block
+     * placements from the player's links registered with KILN_CRAFT_SOURCE_BUILDING; rows are per item the count those
+     * links hold (the bag and the base not included), at most KILN_STATIONS_MAX_CRAFT_STOCK. on 0 clears it (rows
+     * ignored). While on, the client's build cursor counts the bag, the base's stock and the item's row when the first two
+     * fall short of a blueprint's blocks. Not authority: the server checks the placement again and pays bag and base first,
+     * all or nothing. Any thread. KILN_ERR_INVALID_ARGUMENT: on over 1, count over the limit, rows null with count set, an
+     * item 0. */
+    KilnResult(KILN_CALL* set_build_stock)(uint32_t on, const KilnStationStack* rows, uint32_t count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

@@ -963,6 +963,16 @@ LogLimit g_log_left{6}, g_log_paid{20}, g_log_refused{12}, g_log_raised{12}, g_l
 // the game. g_log_tx: the server world's transaction refused; g_log_craft: one line per player craft (craft_done_impl).
 LogLimit g_log_dry{4}, g_log_tx{8}, g_log_craft{24};
 
+// GitHub #132 (0.2.0-dev.31.12): a block placement's payment from the player's building links (build section below).
+// t_build_pay: set by the RawHook on ApplyMaterials for the blueprint program's own call, read by craft_pay_impl.
+struct BuildSites {
+    uintptr_t cursor_ret = 0, stock_fn = 0, apply = 0, blueprint_ret = 0, paid = 0, pay_fn = 0;
+};
+BuildSites g_build;
+thread_local bool t_build_pay = false;
+LogLimit g_log_build_pay{16};
+std::atomic<bool> g_build_dirty{true};  // a registration changed: the server's count of building links is read again
+
 void left_to_game(const char* why, unsigned mode, unsigned err, uint32_t owner) {
     trace(kTraceLeft, 0, why);
     if (const uint32_t n = g_log_left.take())
@@ -976,15 +986,22 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     // ret is rules/RecipePaid, the return address: call_matches(ret, pay) checked at resolve that the instruction there
     // calls InventoryPay; comparing ret with RecipePaid is the runtime test. The storage upgrade and the alternate payer
     // (RecipePayAlt) return elsewhere and stay the game's.
-    if (ret != G.recipe_paid) {
+    // GitHub #132: a block placement (ApplyMaterials' take, scoped to the blueprint program by hk_build_apply) pays from the
+    // player's building links only, never from station outputs; otherwise the same adapter as a craft's.
+    const bool build = g_build.paid && ret == g_build.paid && t_build_pay;
+    if (ret != G.recipe_paid && !build) {
         trace(kTraceOtherPayer);
         return 0;
     }
+    const char* const what = build ? "a block placement" : "a craft";
     CS.calls.fetch_add(1, std::memory_order_relaxed);
-    const auto registered = G.registered_ok ? craft_sources_copy(owner) : std::vector<CraftSource>{};
+    auto registered = G.registered_ok ? craft_sources_copy(owner) : std::vector<CraftSource>{};
+    if (build)
+        registered.erase(std::remove_if(registered.begin(), registered.end(), [](const CraftSource& s) { return !s.building; }),
+                         registered.end());
     {
         std::lock_guard lock(g_mu);
-        if (g_sources.empty() && registered.empty()) {
+        if ((build || g_sources.empty()) && registered.empty()) {
             CS.idle.fetch_add(1, std::memory_order_relaxed);
             // links of this payer that craft_sources_copy left out: another login's, or an unreadable player record
             trace(t_trace.active && G.registered_ok && !g_registered.copy(owner).empty() ? kTraceDropped : kTraceIdle);
@@ -1107,7 +1124,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     const uintptr_t world = items_server_world();
     void* const reg = g_srv_recipes.load(std::memory_order_acquire);
     std::vector<CraftLender> cands;
-    for (KilnEntity e : (head.mode != 0 && !stock.err.error && base >= 0 ? sources_copy() : std::vector<KilnEntity>{})) {
+    for (KilnEntity e : (head.mode != 0 && !stock.err.error && base >= 0 && !build ? sources_copy() : std::vector<KilnEntity>{})) {
         CraftLender l;
         l.entity = e;
         FsBytes fs{};
@@ -1166,9 +1183,9 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
             for (const CraftCost& c : lines)
                 if (c.need > c.game + c.outputs) short_by += c.need - c.game - c.outputs;
             trace(kTraceShort, short_by);
-            if (const uint32_t n = g_log_refused.take())
-                LOGI("stations: a craft left to the game: linked sources and base %d's opted-in outputs cannot cover it (short by "
-                     "%llu; payer %u)%s", base, static_cast<unsigned long long>(short_by), owner, n > 1 ? " (more held back)" : "");
+            if (const uint32_t n = (build ? g_log_build_pay : g_log_refused).take())
+                LOGI("stations: %s left to the game: linked sources and base %d's opted-in outputs cannot cover it (short by "
+                     "%llu; payer %u)%s", what, base, static_cast<unsigned long long>(short_by), owner, n > 1 ? " (more held back)" : "");
         } else {
             trace(kTraceCovered);
         }
@@ -1178,10 +1195,10 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         CS.paid.fetch_add(1, std::memory_order_relaxed);
         CS.from_outputs.fetch_add(static_cast<uint32_t>(std::min<uint64_t>(from, 0xffffffffu)), std::memory_order_relaxed);
         trace(kTracePaid, from);
-        if (const uint32_t n = g_log_paid.take())
-            LOGI("stations: a craft paid %llu from additional crafting sources (base %d, payer %u; the bag and Magic chests "
+        if (const uint32_t n = (build ? g_log_build_pay : g_log_paid).take())
+            LOGI("stations: %s paid %llu from additional crafting sources (base %d, payer %u; the bag and Magic chests "
                  "counted %llu, paid %llu; the payer's bag held %llu, paid %llu; %u take(s) refused, last error 0x%02x)%s",
-                 static_cast<unsigned long long>(from), base, owner, static_cast<unsigned long long>(game_counted),
+                 what, static_cast<unsigned long long>(from), base, owner, static_cast<unsigned long long>(game_counted),
                  static_cast<unsigned long long>(game_paid), static_cast<unsigned long long>(payer_held),
                  static_cast<unsigned long long>(payer_paid), refusals, static_cast<unsigned>(last_refusal),
                  n > 1 ? " (more held back)" : "");
@@ -1193,8 +1210,8 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
                                : why == kCraftWhyGamePaidLess ? "the bag and the Magic chests paid less than they were counted to hold"
                                                               : "a line stayed short";
     trace(kTraceRollback, from, rolled);
-    LOGW("stations: a craft paid from additional sources rolled back (%s; base %d, payer %u; counted %llu, paid %llu; "
-         "%u take(s) refused, last error 0x%02x): nothing moved", rolled, base, owner,
+    LOGW("stations: %s paid from additional sources rolled back (%s; base %d, payer %u; counted %llu, paid %llu; "
+         "%u take(s) refused, last error 0x%02x): nothing moved", what, rolled, base, owner,
          static_cast<unsigned long long>(game_counted), static_cast<unsigned long long>(game_paid), refusals,
          static_cast<unsigned>(last_refusal));
     *code = 4;  // a take may already be queued: CraftRecipe rolls the transaction back
@@ -4140,6 +4157,7 @@ bool lock_pay_impl(void* tx, uint32_t guest, uint32_t item, uint32_t need, uint3
         paid += t.count;
     }
     g_lock_dirty.store(true, std::memory_order_relaxed);
+    g_build_dirty.store(true, std::memory_order_relaxed);
     if (const uint32_t n = g_log_lock_pay.take())
         LOGI("locks: player %u's lock of item 0x%08x x%u: the bag paid %u, %llu from %zu linked source(s)%s%s", guest, item, need,
              need - left, static_cast<unsigned long long>(paid), takes.size(),
@@ -4217,7 +4235,7 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     // Since 0.2.0-dev.31.12 (GitHub #147): flags, read only when the request's size covers them.
     const bool has_flags = r->size >= sizeof *r;
     const uint32_t flags = has_flags ? r->flags : 0u;
-    constexpr uint32_t kKnownFlags = KILN_CRAFT_SOURCE_LOCKS | KILN_CRAFT_SOURCE_FILLS | KILN_CRAFT_SOURCE_BUILDING;  // 31.12
+    constexpr uint32_t kKnownFlags = uint32_t{KILN_CRAFT_SOURCE_LOCKS} | uint32_t{KILN_CRAFT_SOURCE_FILLS} | uint32_t{KILN_CRAFT_SOURCE_BUILDING};  // 31.12
     if ((flags & ~kKnownFlags) || (has_flags && r->reserved)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
@@ -4230,16 +4248,23 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     if(!source_player(singleton("PlayerBasesSystemServer"),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
     *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session,flags);
     g_lock_dirty.store(true, std::memory_order_relaxed);
+    g_build_dirty.store(true, std::memory_order_relaxed);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
     g_lock_dirty.store(true, std::memory_order_relaxed);
+    g_build_dirty.store(true, std::memory_order_relaxed);
     return g_registered.remove(owner,handle) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
-void KILN_CALL t_cancel_sources(KilnOwner owner) { g_registered.cancel_owner(owner); g_lock_dirty.store(true, std::memory_order_relaxed); }
+void KILN_CALL t_cancel_sources(KilnOwner owner) {
+    g_registered.cancel_owner(owner);
+    g_lock_dirty.store(true, std::memory_order_relaxed);
+    g_build_dirty.store(true, std::memory_order_relaxed);
+}
 
 KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
-    constexpr uint32_t kPurpose = KILN_CRAFT_SOURCE_STOCK_LOCKS | KILN_CRAFT_SOURCE_STOCK_FILLS | KILN_CRAFT_SOURCE_STOCK_BUILDING;
+    constexpr uint32_t kPurpose = uint32_t{KILN_CRAFT_SOURCE_STOCK_LOCKS} | uint32_t{KILN_CRAFT_SOURCE_STOCK_FILLS} |
+                                  uint32_t{KILN_CRAFT_SOURCE_STOCK_BUILDING};
     if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity ||
         (flags & ~(static_cast<uint32_t>(KILN_CRAFT_SOURCE_STOCK_ALL) | kPurpose)) ||
         __builtin_popcount(flags & kPurpose) > 1) return KILN_ERR_INVALID_ARGUMENT;
@@ -4309,6 +4334,244 @@ KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStati
     return KILN_OK;
 }
 
+// ---- GitHub #132 (0.2.0-dev.31.12): block placements from the player's building links (docs/re/stations.md §13) ----
+// The build cursor's material check (S 0x99750 / C 0x28ab60, rules/CursorFlags' bit 12) counts the bag (ebx) plus the
+// base's stock at the cursor (build/StockCount -> eax) and compares them with the blocks needed (ebp). A mid hook at that
+// call's return (build/CursorStockRet) adds the player's building links when the two fall short: in the server world from
+// the server's own count of the links (g_build_cache, the tick thread's), in a Kiln client's own world from the server's
+// snapshot (set_build_stock). The placement itself pays through craft_pay_impl (ApplyMaterials -> InventoryPay, scoped by
+// hk_build_apply to the blueprint program's call), bag and base first, all or nothing. Never props, undo, dismantling,
+// terraforming or impact natives (their checks and payments stay the game's).
+bool g_build_feat = false;  // crafting.build_sources resolved (stations_resolve)
+std::atomic<bool> g_build_off{false}, g_build_cursor_on{false}, g_build_apply_on{false};
+std::mutex g_build_install_mu;
+kiln::MidHook2 h_build_cursor;
+kiln::RawHook h_build_apply;
+std::mutex g_build_mu;  // the server's count of each player's building links (tick thread writes)
+std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> g_build_cache;
+uint64_t g_build_step = 0;
+std::mutex g_build_snap_mu;  // a Kiln client's snapshot from its server
+std::unordered_map<uint32_t, uint64_t> g_build_have;
+std::atomic<bool> g_build_on{false};
+LogLimit g_log_build{16}, g_log_build_snap{4};
+std::atomic<uint64_t> g_build_last_line{0};  // the cursor runs every frame: one line per change of (world, item, need, verdict)
+
+void build_cache_refresh(uint64_t step) {
+    if (!g_build_dirty.exchange(false) && step < g_build_step + 30 && step >= g_build_step) return;
+    g_build_step = step;
+    void* const bases = g_srv_bases.load(std::memory_order_acquire);
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> next;
+    for (uint32_t player : g_registered.players()) {
+        const auto sources = craft_sources_copy(player);  // this login's links
+        if (std::none_of(sources.begin(), sources.end(), [](const CraftSource& s) { return s.building; })) continue;
+        auto& counts = next[player];
+        for (const KilnStationStack& row : link_rows(bases, player, sources, &CraftSource::building)) counts[row.item] = row.count;
+    }
+    std::lock_guard lock(g_build_mu);
+    g_build_cache = std::move(next);
+}
+// The server world's count for a placement (any thread): false when the player has no building link of this login.
+bool build_cached(uint32_t player, uint32_t item, uint64_t* held) {
+    std::lock_guard lock(g_build_mu);
+    const auto it = g_build_cache.find(player);
+    if (it == g_build_cache.end()) return false;
+    const auto n = it->second.find(item);
+    *held = n == it->second.end() ? 0 : n->second;
+    return true;
+}
+// A Kiln client's snapshot (any thread): false when its server sent none (a vanilla or older server, no building link).
+bool build_snapshot(uint32_t item, uint64_t* held) {
+    std::lock_guard lock(g_build_snap_mu);
+    if (!g_build_on.load(std::memory_order_relaxed)) return false;
+    const auto it = g_build_have.find(item);
+    *held = it == g_build_have.end() ? 0 : it->second;
+    return true;
+}
+
+// The count the cursor's check should see: the game's (`base` + `bag`) when it covers `need` or nothing is linked, else
+// the base's count raised by what the links hold (capped so base + bag stays a u32). Logged per change.
+uint32_t build_check(uint8_t world, uint32_t player, uint32_t item, uint32_t base, uint32_t bag, uint32_t need, bool linked_known,
+                     uint64_t linked) {
+    const uint64_t have = static_cast<uint64_t>(base) + bag;
+    if (!need || have >= need || !linked_known) return base;
+    const bool covered = have + linked >= need;
+    const uint64_t key = (static_cast<uint64_t>(world) << 56) ^ (static_cast<uint64_t>(item) << 24) ^ (static_cast<uint64_t>(need) << 1) ^
+                         (covered ? 1u : 0u);
+    if (g_build_last_line.exchange(key) != key)
+        if (const uint32_t n = g_log_build.take()) {
+            const char* where = world == 0 ? "server" : world == 2 ? "client" : "other";
+            LOGI("build: the %s world's material check of item 0x%08x (player %u) %s: bag %u + base %u + linked %llu, needs %u%s",
+                 where, item, player, covered ? "counts the building links" : "refused: short count", bag, base,
+                 static_cast<unsigned long long>(linked), need, n > 1 ? " (more held back)" : "");
+        }
+    if (!covered) return base;  // the game's own verdict (missing materials) and its count
+    return static_cast<uint32_t>(std::min<uint64_t>(static_cast<uint64_t>(base) + linked, 0xffffffffull - bag));
+}
+
+// build/CursorStockRet: eax the base's stock count, ebx the bag's, ebp the blocks needed, rsi the cursor query (the
+// material item at [[rsi+0x68]]), rdi the cursor context (its first qword the program context); pinned by the pattern.
+void build_cursor_impl(KilnRegisters& r) {
+    const uint32_t base = static_cast<uint32_t>(r.rax), bag = static_cast<uint32_t>(r.rbx), need = static_cast<uint32_t>(r.rbp);
+    if (!need || static_cast<uint64_t>(base) + bag >= need || !r.rsi || !r.rdi) return;
+    const auto* material = rd<const uint32_t*>(reinterpret_cast<const void*>(r.rsi), 0x68);
+    const uint32_t item = material ? *material : 0;
+    if (!item) return;
+    void* const ctx = rd<void*>(reinterpret_cast<const void*>(r.rdi), 0);
+    const uint8_t world = ctx_world(ctx);
+    uint32_t player = 0;
+    uint64_t linked = 0;
+    bool known = false;
+    if (world == 0) {
+        player = ctx_entity(ctx);
+        if (!player || player > kMaxPlayerEntity) return;
+        known = build_cached(player, item, &linked);
+    } else if (world == 2) {
+        known = build_snapshot(item, &linked);
+    } else {
+        return;  // a prediction world's check stays the game's
+    }
+    const uint32_t counted = build_check(world, player, item, base, bag, need, known, linked);
+    if (counted != base) r.rax = counted;
+}
+void hk_build_cursor(KilnRegisters& r) {
+    __try {
+        if (!g_build_off.load(std::memory_order_relaxed)) build_cursor_impl(r);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_build_off.exchange(true))
+            LOGE("build: the build cursor's material hook faulted (0x%08lx): block placements from linked sources stand down", GetExceptionCode());
+    }
+}
+
+// rules/ApplyMaterials(cost context, list, take): only the blueprint program's own take (build/BlueprintApplyRet) may pay
+// from building links; any other caller (props, undo, dismantling, terraforming, impact natives) and a give stay the game's.
+using BuildApplyFn = bool(__fastcall*)(void* ctx, void* list, uint8_t take);
+bool __fastcall hk_build_apply(void* ctx, void* list, uint8_t take) {
+    const uintptr_t ret = h_build_apply.caller();  // before the original
+    struct Scope {
+        bool saved = t_build_pay;
+        ~Scope() { t_build_pay = saved; }
+    } scope;
+    t_build_pay = take != 0 && ret == g_build.blueprint_ret && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
+    return h_build_apply.original<BuildApplyFn>()(ctx, list, take);
+}
+
+// Foreign code on what the building hooks read or rely on: the cursor's stock-count call and the count function (e.g.
+// Cross-Base Storage's build check), ApplyMaterials' entry and take, the blueprint program's call. Named once in kiln.log.
+bool build_code_ok(bool cursor, bool payment, PreviewCodeRefusal* why) {
+    const auto* h = kiln::hooks_v2(g_api);
+    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
+        why->name = "kiln.hooks' code-state check";
+        return false;
+    }
+    struct Dep { uintptr_t at; size_t size; const char* name; bool want; };
+    for (const Dep& d : {Dep{g_build.cursor_ret ? g_build.cursor_ret - 98 : 0, 98 + 6, "the build cursor's stock-count call", cursor},
+                         Dep{g_build.stock_fn, 0x40, "the base stock count (build check)", cursor},
+                         Dep{g_build.apply, 0x40, "ApplyMaterials", payment},
+                         Dep{g_build.paid ? g_build.paid - 17 : 0, 17 + 13, "ApplyMaterials' inventory payment call", payment},
+                         Dep{g_build.blueprint_ret ? g_build.blueprint_ret - 17 : 0, 17 + 4, "the blueprint program's payment call", payment}}) {
+        if (!d.want) continue;
+        uint32_t state = KILN_CODE_UNKNOWN;
+        uint64_t generation = 0;
+        const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+        if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+            *why = {d.name, d.at, d.size, state, rc};
+            return false;
+        }
+    }
+    return true;
+}
+void build_stand_down(const char* what, const PreviewCodeRefusal& why) {
+    char note[512]{};
+    preview_code_note(why, note, sizeof note);
+    LOGW("build: %s stands down%s (the game's own material check and payment are used)", what, note);
+    lower("crafting.build_sources", KILN_CAP_REASON_FAULTED, "another module patched the code a building hook reads (see kiln.log)");
+}
+bool build_install_cursor() {
+    if (g_build_cursor_on.load()) return true;
+    PreviewCodeRefusal why;
+    if (!build_code_ok(true, false, &why)) {
+        g_build_off.store(true);
+        build_stand_down("the build cursor's count of linked sources", why);
+        return false;
+    }
+    if (!h_build_cursor.install(g_api, g_owner, g_build.cursor_ret, &hk_build_cursor, "build/CursorStockRet")) {
+        g_build_off.store(true);
+        LOGW("build: build/CursorStockRet could not be hooked (%s): block placements from linked sources stand down",
+             h_build_cursor.error() ? h_build_cursor.error() : "refused");
+        lower("crafting.build_sources", KILN_CAP_REASON_FAULTED, "a building hook could not be installed (see kiln.log)");
+        return false;
+    }
+    g_build_cursor_on.store(true);
+    return true;
+}
+// The server world's Pre (tick thread): the cache, then both hooks once a link with Building exists.
+void build_server_pre(uint64_t step) {
+    if (!g_build_feat || !G.registered_ok || !G.craft_ok || g_build_off.load()) return;
+    if (!g_build_apply_on.load() && !g_registered.any_building()) return;
+    build_cache_refresh(step);
+    if (g_build_apply_on.load() && g_build_cursor_on.load()) return;
+    std::lock_guard install(g_build_install_mu);
+    static bool failed = false;
+    if (failed || g_build_off.load()) return;
+    PreviewCodeRefusal why;
+    if (!build_code_ok(false, true, &why)) {
+        failed = true;
+        g_build_off.store(true);
+        build_stand_down("the server's block placement payment from linked sources", why);
+        return;
+    }
+    if (!g_build_apply_on.load()) {
+        if (!h_build_apply.install(g_api, g_owner, g_build.apply, reinterpret_cast<void*>(&hk_build_apply), "build/ApplyMaterials")) {
+            failed = true;
+            g_build_off.store(true);
+            LOGW("build: rules/ApplyMaterials could not be hooked (%s): block placements from linked sources stand down",
+                 h_build_apply.error() ? h_build_apply.error() : "refused");
+            lower("crafting.build_sources", KILN_CAP_REASON_FAULTED, "a building hook could not be installed (see kiln.log)");
+            return;
+        }
+        g_build_apply_on.store(true);
+    }
+    if (!build_install_cursor()) {
+        failed = true;
+        return;
+    }
+    LOGI("build: a link opted in with Building: the server's material check and blueprint payment count linked sources (bag "
+         "and base first)");
+}
+// The client world's Pre (a client process): the cursor hook once a Kiln server's building snapshot is on.
+void build_client_pre() {
+    if (!g_build_feat || g_build_off.load() || g_build_cursor_on.load() || !g_build_on.load(std::memory_order_acquire)) return;
+    std::lock_guard install(g_build_install_mu);
+    static bool failed = false;
+    if (failed || g_build_off.load()) return;
+    if (!build_install_cursor()) {
+        failed = true;
+        return;
+    }
+    LOGI("build: the server's building snapshot is on: this client's build cursor counts the bag, the base and linked sources");
+}
+KilnResult KILN_CALL t_set_build_stock(uint32_t on, const KilnStationStack* rows, uint32_t count) {
+    if (on > 1 || (on && (count > KILN_STATIONS_MAX_CRAFT_STOCK || (count && !rows)))) return KILN_ERR_INVALID_ARGUMENT;
+    for (uint32_t i = 0; on && i < count; ++i)
+        if (!rows[i].item) return KILN_ERR_INVALID_ARGUMENT;
+    bool was = false;
+    size_t kept = 0;
+    {
+        std::lock_guard lock(g_build_snap_mu);
+        was = g_build_on.load(std::memory_order_relaxed);
+        g_build_have.clear();
+        for (uint32_t i = 0; on && i < count; ++i) g_build_have[rows[i].item] = rows[i].count;
+        kept = g_build_have.size();
+        g_build_on.store(on != 0, std::memory_order_release);
+    }
+    if (on != static_cast<uint32_t>(was))
+        if (const uint32_t n = g_log_build_snap.take())
+            LOGI(on ? "build: the server counts building materials from linked sources: %u item row(s)%s"
+                    : "build: building snapshot cleared: the game's own material checks again%s",
+                 static_cast<unsigned>(kept), n > 1 ? " (more held back)" : "");
+    return KILN_OK;
+}
+
 const KilnStationsApi kTable = {
     {sizeof(KilnStationsApi), KILN_STATIONS_VERSION},
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
@@ -4316,6 +4579,7 @@ const KilnStationsApi kTable = {
     &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources, &t_max_chests,
     &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock, &dyes_set_stock,
     &t_set_lock_stock, &t_lock_asks,
+    &t_set_build_stock,  // GitHub #132 (0.2.0-dev.31.12), after #147's members
 };
 
 bool sym(const char* name, uintptr_t* out) {
@@ -4397,6 +4661,24 @@ void lock_resolve() {
         lower("items.lock_sources", KILN_CAP_REASON_SYMBOL_MISSING,
               "locks/LockCountRet, locks/LockPaid, locks/InventoryItemCount (and on a client locks/client.UiLockCountRet) or the "
               "InteractionLock offsets did not check out on this build");
+    }
+}
+
+// GitHub #132: the building hooks' symbols (sigdb server.d/build-sources.json), each call they rely on checked.
+void build_resolve() {
+    if (!feat("crafting.build_sources")) return;
+    if (!g_lock_current) sym("world/CurrentEntityId", &g_lock_current);
+    g_build_feat = sym("build/CursorStockRet", &g_build.cursor_ret) && sym("build/StockCount", &g_build.stock_fn) &&
+                   sym("rules/ApplyMaterials", &g_build.apply) && sym("build/BlueprintApplyRet", &g_build.blueprint_ret) &&
+                   sym("build/ApplyMaterialsPaid", &g_build.paid) && sym("rules/InventoryPay", &g_build.pay_fn) &&
+                   call_matches(g_build.cursor_ret, g_build.stock_fn) && call_matches(g_build.blueprint_ret, g_build.apply) &&
+                   call_matches(g_build.paid, g_build.pay_fn) && g_lock_current && E.job_storage;
+    if (!g_build_feat) {
+        g_build = {};
+        LOGW("build: block placements from linked sources are unavailable: a symbol of crafting.build_sources did not check out");
+        lower("crafting.build_sources", KILN_CAP_REASON_SYMBOL_MISSING,
+              "build/CursorStockRet, build/StockCount, build/BlueprintApplyRet, build/ApplyMaterialsPaid or rules/ApplyMaterials "
+              "did not check out on this build");
     }
 }
 
@@ -4507,6 +4789,7 @@ void craft_pre(uint64_t step) {
     g_srv_bases.store(singleton("PlayerBasesSystemServer"), std::memory_order_release);
     g_srv_recipes.store(recipes_registry(), std::memory_order_release);
     lock_server_pre(step);
+    build_server_pre(step);  // GitHub #132
     static bool checked = false;
     if (!checked) {
         checked = true;
@@ -4563,6 +4846,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
     fill_hook_on_demand();
     avail_hook_on_demand();
     lock_client_pre();
+    build_client_pre();  // GitHub #132
     static bool checked = false;
     if (!checked && w && feat("stations.craft_ui")) {
         checked = true;
@@ -4585,6 +4869,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
 void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
     t_set_lock_stock(0, nullptr, 0);  // the lock snapshot named this session's lock items
+    t_set_build_stock(0, nullptr, 0);  // and the building snapshot this session's materials (GitHub #132)
     g_client_recipes.store(nullptr, std::memory_order_release);
     // A stand-down is checked again in the next world (GitHub #132: it was decided once per session); hooks already in stay.
     if (!g_preview_hooked.load()) g_preview_failed.store(false);
@@ -4670,6 +4955,7 @@ void stations_resolve() {
     // The ingredient rows' "available" count (the same snapshot). Hooked on demand.
     if (g_api->side() == KILN_SIDE_CLIENT && feat("stations.stock_ui")) avail_resolve();
     lock_resolve();  // GitHub #147, after G.pay may have resolved
+    build_resolve();  // GitHub #132
     G.fill_ok = G.read && feat("stations.fill") && E.tx_ok && sym("stations/AutoTransferRecipe", &G.fill) &&
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
@@ -4855,7 +5141,12 @@ void stations_world_closed() {
         std::lock_guard lock(g_lock_mu);  // GitHub #147: the lock checks' counts named this world's entities
         g_lock_cache.clear();
     }
+    {
+        std::lock_guard lock(g_build_mu);  // GitHub #132: entity ids of a closed world name nothing
+        g_build_cache.clear();
+    }
     g_lock_dirty.store(true);
+    g_build_dirty.store(true);
     g_srv_bases.store(nullptr, std::memory_order_release);
     g_srv_recipes.store(nullptr, std::memory_order_release);
     g_rindex = RecipeIndex{};
