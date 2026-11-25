@@ -3497,8 +3497,22 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.32",
+      "version": "0.2.0-dev.31.7",
       "status": "next",
+      "title": "Download missing mods for a pack",
+      "summary": "An installed Crucible pack that is missing mods says so and downloads only what is missing.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Download missing mods for a pack",
+          "text": "An installed pack missing a mod from your Library says so before you load it and downloads only what is missing.",
+          "area": "launcher"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.32",
+      "status": "planned",
       "title": "Camera, pets and taming",
       "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
       "features": [
