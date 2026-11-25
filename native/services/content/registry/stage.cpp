@@ -303,6 +303,9 @@ struct Runner::Impl {
     std::vector<std::string> rm_errs;
     bool rm_loaded = false;
     std::vector<std::pair<std::string, std::string>> order;  // Kiln.Host's (set_order)
+    // mod -> kiln.mod.json side ("server", "client"; absent or "both": both), from set_order or the mod's data files. The join
+    // fingerprint (bootSync) leaves out fields a one-side mod writes: the other side never runs it (kiln.boot skips such mods too).
+    std::map<std::string, std::string> sides;
     bool registry_users = false;  // set_order named a mod whose code uses the registry API (review4 NS1)
     bool order_set = false;
     struct Sub {
@@ -454,6 +457,7 @@ KilnResult Runner::set_order(const std::string& order_json) {
     const json j = json::parse(order_json, nullptr, false);
     if (!j.is_array()) return KILN_ERR_INVALID_ARGUMENT;
     std::vector<std::pair<std::string, std::string>> order;
+    std::map<std::string, std::string> sides;
     std::set<std::string> seen;
     bool users = false;
     for (const auto& row : j) {
@@ -461,11 +465,13 @@ KilnResult Runner::set_order(const std::string& order_json) {
         const std::string mod = row["mod"].get<std::string>();
         if (!seen.insert(mod).second) return KILN_ERR_INVALID_ARGUMENT;
         order.emplace_back(mod, row.contains("version") && row["version"].is_string() ? row["version"].get<std::string>() : std::string());
+        if (row.contains("side") && row["side"].is_string()) sides[mod] = row["side"].get<std::string>();
         users |= row.contains("registry") && row["registry"].is_boolean() && row["registry"].get<bool>();
     }
     std::lock_guard lk(d_->mu);
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     d_->order = std::move(order);
+    d_->sides = std::move(sides);
     d_->order_set = true;
     d_->registry_users = users;
     return KILN_OK;
@@ -668,6 +674,11 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     std::set<std::string> loaded;
     for (const auto& [m, v] : order) versions[m] = v, loaded.insert(m);
     std::vector<Refusal> skipped;
+    {
+        std::lock_guard lk(d.mu);
+        for (const Env::DataFile& f : files)
+            if (!f.side.empty()) d.sides.emplace(f.mod, f.side);  // Kiln.Host's set_order side wins
+    }
     for (Env::DataFile& f : files) {
         // review finding 3 (ruling 2026-11-21): only mods Kiln.Host loaded on this side, in its order; the others are skipped
         // and named. With Kiln.Host's order, membership decides alone: on a client it holds side "server" mods when hosted
@@ -1015,12 +1026,18 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         for (const auto& o : outcomes) if (o.ok) written.insert(o.field);
         json values = json::array(), order = json::array();
         std::map<std::string, json> contributions;
+        auto one_side = [&](const std::string& mod) {
+            auto it = d.sides.find(mod);
+            return it != d.sides.end() && !it->second.empty() && it->second != "both";
+        };
         for (const auto& [ref, fo] : d.boot_fields) {
             if (!written.count(ref)) continue;
             auto reg = d.rm.registries.find(ref.registry);
             if (reg == d.rm.registries.end()) continue;
             auto row = reg->second.rows.find(ref.field);
             if (row == reg->second.rows.end() || row->second.backend != map::Backend::Boot || !row->second.client_needs) continue;
+            // a field a side server/client mod writes (any writer kind) differs by design: the other side never runs that mod
+            if (std::any_of(fo.chain.begin(), fo.chain.end(), [&](const ChainRow& c) { return !c.mod.empty() && one_side(c.mod); })) continue;
             bool edited = false;
             for (const auto& c : fo.chain) {
                 if (c.kind != WriterKind::Registry) continue;

@@ -141,16 +141,17 @@ The native stage fingerprints successfully resolved, boot-routed registry fields
 its own copy. It uses Kiln registry/entry/field names and the values actually written, not archive bytes, resource
 addresses, game executable hashes, runtime live layers or report truncation. Server-only fields do not contribute.
 The order hash covers participating mods and their resolved field contributions in registry load order; mods with no
-participating boot edits do not contribute. The immutable start snapshot remains available as `bootSync` in
+participating boot edits do not contribute. A field that a mod with side `server` or `client` writes (by any path) is
+left out, because the other side never runs that mod; `kiln.boot` leaves such mods out too. The immutable start snapshot remains available as `bootSync` in
 `kiln/state/registry.json` after world load and hot reload too.
 
-A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
 The server compares the part only when both peers run the same side-`both` mods in the same versions. When the mod
 lists differ, the mod-list rules above decide alone, as before: a missing required mod, a version difference, an
 `optionalMods` entry the player lacks, another version that `versionMatch` accepts, or an extra client mod. One hash
 over all mods cannot honour those rules per mod, so it does not try. Client- and server-side mods in the lists do not stop
 the comparison.
 
+A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
 restart. Only when values match is the order compared; an order/contribution mismatch says **registry boot edits or load order differ** and
 asks for the server's modpack/load order and a restart. Both use the ordinary handshake missing-details/report line,
 REJECT under `modSync: refuse`, WELCOME warning under `warn` (including the default), and no player warning under

@@ -234,7 +234,8 @@ std::vector<boothook::OldDoc> old_patch() {
 }
 
 void boot_sync(const std::string& dir) {
-    auto run = [&](int cap, int points, bool reverse, bool needs, bool accepted) {
+    // b_side: "" = both; "order:<side>" = Kiln.Host's set_order names it; "file:<side>" = only its kiln.mod.json (the data file) does
+    auto run = [&](int cap, int points, bool reverse, bool needs, bool accepted, const std::string& b_side = "") {
         TreeView view = world();
         Files files;
         auto e = env_of(&view, &files, dir, nullptr);
@@ -245,6 +246,8 @@ void boot_sync(const std::string& dir) {
             auto b = stage::read_sections("b", "1", {{"content/b.json", json{{"registry", {{"alter", json::array({
                 {{"registry", "balance"}, {"select", "game:balance"}, {"field", "skillPointsPerLevel"}, {"op", points}}
             })}}}}.dump()}}, schema);
+            if (b_side.rfind("file:", 0) == 0)
+                for (auto& f : b) f.side = b_side.substr(5);
             a.insert(a.end(), b.begin(), b.end());
             return a;
         };
@@ -255,7 +258,8 @@ void boot_sync(const std::string& dir) {
             return ok;
         };
         stage::Runner r(std::move(e));
-        r.set_order(reverse ? R"([{"mod":"b"},{"mod":"a"}])" : R"([{"mod":"a"},{"mod":"b"}])");
+        const std::string bj = b_side.rfind("order:", 0) == 0 ? R"({"mod":"b","side":")" + b_side.substr(6) + R"("})" : R"({"mod":"b"})";
+        r.set_order(reverse ? "[" + bj + R"(,{"mod":"a"}])" : R"([{"mod":"a"},)" + bj + "]");
         auto boot = r.run({});
         std::vector<stage::BootOutcome> outcomes;
         for (const auto& resource : boot)
@@ -274,6 +278,12 @@ void boot_sync(const std::string& dir) {
     check(base["values"] == reverse["values"] && base["order"] != reverse["order"], "same values, other registry order detected");
     check(run(60, 3, false, false, true) == run(60, 9, false, false, true), "server-only values and writers excluded");
     check(run(60, 3, false, true, false) == run(90, 9, true, true, false), "refused writes excluded");
+    // a side server/client mod runs on one side only (kiln.boot leaves such mods out too): the fields it writes take no part
+    check(base["values"] != run(60, 9, false, true, true)["values"], "a side-both mod's client-needed value takes part");
+    check(run(60, 3, false, true, true, "order:server") == run(60, 9, false, true, true, "order:server"), "a side server mod (Kiln.Host's order) takes no part");
+    check(run(60, 3, false, true, true, "order:client") == run(60, 9, false, true, true, "order:client"), "a side client mod takes no part");
+    check(run(60, 3, false, true, true, "file:server") == run(60, 9, false, true, true, "file:server"), "a side server mod (its kiln.mod.json) takes no part");
+    check(run(60, 3, false, true, true, "order:both") == base, "side both in the order is the default");
 }
 
 void one_start(const std::string& dir) {
