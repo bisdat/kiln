@@ -84,12 +84,12 @@ enum: Apply, Update, End
 
 ## TestKit.FakeCraftSourceRegistration `0.2.15` — A mod's live source registration in the kit.
 - `FakeCraftSourceRegistration(ulong Owner, EntityId Player, EntityId Container, CraftSourceOrder Order, CraftSourceFilter Filter, IReadOnlyList<ItemId> Items)`
-- `Building { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Building`: block placements may count and pay from it.
+- `Building { get; init; } -> bool` `0.2.20` — Registered with `CraftSourceOptions.Building`: block placements may count and pay from it.
 - `Container { get; init; } -> EntityId` — The storage container.
-- `Fills { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Fills`: production-station fills may take from it.
+- `Fills { get; init; } -> bool` `0.2.20` — Registered with `CraftSourceOptions.Fills`: production-station fills may take from it.
 - `Filter { get; init; } -> CraftSourceFilter` — The item-set interpretation.
 - `Items { get; init; } -> IReadOnlyList<ItemId>` — A copy of the filter items.
-- `Locks { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Locks`: locks may count and pay from it.
+- `Locks { get; init; } -> bool` `0.2.20` — Registered with `CraftSourceOptions.Locks`: locks may count and pay from it.
 - `Order { get; init; } -> CraftSourceOrder` — Its position relative to station outputs.
 - `Owner { get; init; } -> ulong` — The registering native owner.
 - `Player { get; init; } -> EntityId` — The only player it supplies.
@@ -590,10 +590,10 @@ enum: Entity, Item, Destroy, Cleanup
 - `Watches { get; } -> int` — How many watches exist.
 
 ## TestKit.HarnessCrafting `0.2.15` — Player-source registrations and their filtered counts in the kit.
-- `BuildStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a block placement may use: the links registered with `CraftSourceOptions.Building` only, likewise.
+- `BuildStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.20` — The counts a block placement may use: the links registered with `CraftSourceOptions.Building` only, likewise.
 - `Dyes(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session generation...
-- `FillStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a production-station fill may take: the links registered with `CraftSourceOptions.Fills` only, with the...
-- `LockStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a lock may use: the links registered with `CraftSourceOptions.Locks` only, with the same filters...
+- `FillStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.20` — The counts a production-station fill may take: the links registered with `CraftSourceOptions.Fills` only, with the...
+- `LockStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.20` — The counts a lock may use: the links registered with `CraftSourceOptions.Locks` only, with the same filters...
 - `Sources { get; } -> IReadOnlyList<TestKit.FakeCraftSourceRegistration>` — Live registrations, in registration order.
 - `Stock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — Registered source counts only (not the bag), with the same per-player allow/deny union and current inventory...
 
@@ -606,3 +606,12 @@ enum: Entity, Item, Destroy, Cleanup
 - `Active { get; } -> int` — How many decisions are open (held, not ended).
 - `Outcomes { get; } -> IReadOnlyList<DecisionResult>` — How every decision ended so far, in order: what the service recorded, whether or not a mod listened for...
 - `RestartWorld() -> void` — The server world stops and the next one starts, as when a hosted world is switched: every open decision ends...
+
+## TestKit.HarnessImpactNatives `0.2.4` — The fake kiln.abilities natives of a harness (`KilnHarness.ImpactNatives`): Kiln.Abilities' own code (`Abilities.Natives.RegisterSync`, `Attach`, `DeclareTyped`, an...
+- `AddProgram(uint program, params TestKit.FakeEcall[] calls) -> void` — Declares a game program in the world's ImpactRegistry with the natives it calls and where (the ECALL's call-site...
+- `Call(TestKit.FakeImpactCall call) -> TestKit.FakeImpactResult` — Makes one ECALL of `FakeImpactCall.Native`, as a program's step would, and waits for it.
+- `Calls { get; } -> IReadOnlyList<TestKit.FakeImpactCallRecord>` — Every call the test made, in order.
+- `OtherRead { get; } -> ISet<string>` — The types of impact_simulation's other_read list: what NativeContext.TryRead may read of any entity (with...
+- `OtherWrite { get; } -> ISet<string>` — The types of impact_simulation's other_write list: what NativeContext.TryWrite may write (and TryRead read).
+- `Serial { get; set; } -> bool` — The simulated pin-and-world-thread condition for ECS access (default true).
+- `SetGameNative(string native, TestKit.FakeGameNativeHandler? handler = null) -> void` — Makes `native` one of the game's natives (its node name, `"applyDamage"`, or "0x" and its hash) and says what it...
