@@ -32,8 +32,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -4486,6 +4488,140 @@ void build_stand_down(const char* what, const PreviewCodeRefusal& why) {
     LOGW("build: %s stands down%s (the game's own material check and payment are used)", what, note);
     lower("crafting.build_sources", KILN_CAP_REASON_FAULTED, "another module patched the code a building hook reads (see kiln.log)");
 }
+// ---- the build menu's material counts (crafting.build_ui, a Kiln client; docs/re/stations.md §13) ----
+// The material selector's gatherer (build/client.MaterialRows, C 0x40e5d0) rebuilds up to kRowGroups groups of
+// kRowGroupStride bytes at its selector state: each group's rows {ptr +0, count +8}, 24-byte rows with the item at +0 and
+// the aggregate stock (u64) at +0x10. A group it rebuilds is zeroed and refilled (bag, then the base's stock map); one
+// it skips (currentOnly) keeps its rows. kiln-items wraps the gatherer: before the original it takes its own earlier
+// addition back from each row that still shows exactly what Kiln wrote, after it adds the server's building snapshot to
+// the first row of each linked item, and notes what it wrote. So a rebuilt row gets the links once, a kept row is not
+// raised twice, and the menu shows bag + base + links, as the cursor counts them and the placement pays.
+constexpr uint32_t kRowGroups = 7;
+constexpr size_t kRowGroupStride = 0x648, kRowStride = 24, kRowStock = 0x10;
+constexpr uint64_t kRowMax = 4096;
+struct RowMark {
+    uint64_t game = 0, shown = 0;
+};
+using RowKey = std::tuple<uintptr_t, uint32_t, uint32_t>;  // (selector state, group, item)
+std::mutex g_build_rows_mu;
+std::map<RowKey, RowMark> g_build_marks;
+bool g_build_ui_feat = false;  // crafting.build_ui resolved (stations_resolve, a client)
+std::atomic<bool> g_build_rows_on{false}, g_build_rows_off{false};
+kiln::RawHook h_build_rows;
+uintptr_t g_build_rows_fn = 0, g_build_row_add = 0, g_build_stock_rows_ret = 0, g_build_row_stock = 0;
+
+// Before the gatherer: every row of `state` that still shows what Kiln wrote gets the game's count back. Raw reads and
+// writes of the game's rows: the caller guards them.
+void build_rows_restore(uint8_t* state, std::map<RowKey, RowMark>& marks) {
+    const uintptr_t key = reinterpret_cast<uintptr_t>(state);
+    for (auto it = marks.lower_bound(RowKey{key, 0, 0}); it != marks.end() && std::get<0>(it->first) == key;) {
+        const uint32_t g = std::get<1>(it->first), item = std::get<2>(it->first);
+        uint8_t* const group = state + static_cast<size_t>(g) * kRowGroupStride;
+        auto* const rows = rd<uint8_t*>(group, 0);
+        const uint64_t n = rd<uint64_t>(group, 8);
+        for (uint64_t i = 0; rows && n <= kRowMax && i < n; ++i) {
+            uint8_t* const row = rows + i * kRowStride;
+            if (rd<uint32_t>(row, 0) != item) continue;
+            if (rd<uint64_t>(row, kRowStock) == it->second.shown) wr<uint64_t>(row, kRowStock, it->second.game);
+            break;
+        }
+        it = marks.erase(it);
+    }
+}
+// After it: the first row of each item the links hold gets their count on top; noted for the next call.
+void build_rows_raise(uint8_t* state, const std::unordered_map<uint32_t, uint64_t>& linked, std::map<RowKey, RowMark>& marks) {
+    const uintptr_t key = reinterpret_cast<uintptr_t>(state);
+    for (uint32_t g = 0; g < kRowGroups; ++g) {
+        uint8_t* const group = state + static_cast<size_t>(g) * kRowGroupStride;
+        auto* const rows = rd<uint8_t*>(group, 0);
+        const uint64_t n = rd<uint64_t>(group, 8);
+        if (!rows || n > kRowMax) continue;
+        for (uint64_t i = 0; i < n; ++i) {
+            uint8_t* const row = rows + i * kRowStride;
+            const uint32_t item = rd<uint32_t>(row, 0);
+            const auto it = linked.find(item);
+            if (!item || it == linked.end() || !it->second || marks.count(RowKey{key, g, item})) continue;
+            const uint64_t game = rd<uint64_t>(row, kRowStock);
+            const uint64_t shown = game + std::min<uint64_t>(it->second, UINT32_MAX);
+            wr<uint64_t>(row, kRowStock, shown);
+            marks[RowKey{key, g, item}] = RowMark{game, shown};
+        }
+    }
+}
+struct RowsJob {
+    uint8_t* state;
+    const std::unordered_map<uint32_t, uint64_t>* linked;  // null: restore only
+};
+void build_rows_impl(void* p) {
+    auto& j = *static_cast<RowsJob*>(p);
+    if (j.linked) build_rows_raise(j.state, *j.linked, g_build_marks);
+    else build_rows_restore(j.state, g_build_marks);
+}
+void build_rows_guarded(uint8_t* state, const std::unordered_map<uint32_t, uint64_t>* linked) {
+    RowsJob j{state, linked};
+    unsigned long code = 0;
+    if (!guard(&build_rows_impl, &j, &code) && !g_build_rows_off.exchange(true)) {
+        g_build_marks.clear();
+        LOGE("build: the build menu's material rows could not be read (0x%08lx): its counts are the game's again", code);
+    }
+}
+using BuildRowsFn = uint64_t(__fastcall*)(void* state, void* access, uint8_t current_only);
+uint64_t __fastcall hk_build_rows(void* state, void* access, uint8_t current_only) {
+    auto* const s = static_cast<uint8_t*>(state);
+    std::unordered_map<uint32_t, uint64_t> linked;
+    bool raise = false;
+    {
+        std::lock_guard lock(g_build_snap_mu);
+        raise = g_build_on.load(std::memory_order_relaxed) && !g_build_have.empty();
+        if (raise) linked = g_build_have;
+    }
+    std::lock_guard rows(g_build_rows_mu);
+    if (s && !g_build_rows_off.load()) build_rows_guarded(s, nullptr);
+    const uint64_t r = h_build_rows.original<BuildRowsFn>()(state, access, current_only);
+    if (s && raise && !g_build_rows_off.load() && !g_build_off.load()) build_rows_guarded(s, &linked);
+    return r;
+}
+// Once the cursor hook is in: the menu's counts too, unless another module changed the gatherer or the row add.
+void build_rows_install() {
+    if (!g_build_ui_feat || g_build_rows_on.load() || g_build_rows_off.load()) return;
+    const auto* h = kiln::hooks_v2(g_api);
+    PreviewCodeRefusal why;
+    if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
+        why.name = "kiln.hooks' code-state check";
+    } else {
+        struct Dep { uintptr_t at; size_t size; const char* name; };
+        for (const Dep& d : {Dep{g_build_rows_fn, 0x40, "the build menu's material gatherer"},
+                             Dep{g_build_stock_rows_ret ? g_build_stock_rows_ret - 58 : 0, 58 + 4, "its base-stock record"},
+                             Dep{g_build_row_add, 0x134, "the material row add"}}) {
+            uint32_t state = KILN_CODE_UNKNOWN;
+            uint64_t generation = 0;
+            const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+            if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+                why = {d.name, d.at, d.size, state, rc};
+                break;
+            }
+        }
+    }
+    if (why.name) {
+        g_build_rows_off.store(true);
+        char note[512]{};
+        preview_code_note(why, note, sizeof note);
+        LOGW("build: the build menu's counts of linked sources stand down%s (its counts are the game's; the cursor and the "
+             "placement still count the links)", note);
+        lower("crafting.build_ui", KILN_CAP_REASON_FAULTED, "another module patched the build menu's gatherer (see kiln.log)");
+        return;
+    }
+    if (!h_build_rows.install(g_api, g_owner, g_build_rows_fn, reinterpret_cast<void*>(&hk_build_rows), "build/client.MaterialRows")) {
+        g_build_rows_off.store(true);
+        LOGW("build: build/client.MaterialRows could not be hooked (%s): the build menu keeps the game's counts",
+             h_build_rows.error() ? h_build_rows.error() : "refused");
+        lower("crafting.build_ui", KILN_CAP_REASON_FAULTED, "the build menu's hook could not be installed (see kiln.log)");
+        return;
+    }
+    g_build_rows_on.store(true);
+    LOGI("build: the build menu's material counts include the building links (the server's snapshot)");
+}
+
 bool build_install_cursor() {
     if (g_build_cursor_on.load()) return true;
     PreviewCodeRefusal why;
@@ -4540,7 +4676,14 @@ void build_server_pre(uint64_t step) {
 }
 // The client world's Pre (a client process): the cursor hook once a Kiln server's building snapshot is on.
 void build_client_pre() {
-    if (!g_build_feat || g_build_off.load() || g_build_cursor_on.load() || !g_build_on.load(std::memory_order_acquire)) return;
+    if (!g_build_feat || g_build_off.load() || !g_build_on.load(std::memory_order_acquire)) return;
+    if (g_build_cursor_on.load()) {  // a hosting client's server Pre may have put the cursor's hook in first
+        if (!g_build_rows_on.load() && !g_build_rows_off.load()) {
+            std::lock_guard install(g_build_install_mu);
+            build_rows_install();
+        }
+        return;
+    }
     std::lock_guard install(g_build_install_mu);
     static bool failed = false;
     if (failed || g_build_off.load()) return;
@@ -4549,6 +4692,7 @@ void build_client_pre() {
         return;
     }
     LOGI("build: the server's building snapshot is on: this client's build cursor counts the bag, the base and linked sources");
+    build_rows_install();  // the build menu's counts (crafting.build_ui), once
 }
 KilnResult KILN_CALL t_set_build_stock(uint32_t on, const KilnStationStack* rows, uint32_t count) {
     if (on > 1 || (on && (count > KILN_STATIONS_MAX_CRAFT_STOCK || (count && !rows)))) return KILN_ERR_INVALID_ARGUMENT;
@@ -4673,6 +4817,14 @@ void build_resolve() {
                    sym("build/ApplyMaterialsPaid", &g_build.paid) && sym("rules/InventoryPay", &g_build.pay_fn) &&
                    call_matches(g_build.cursor_ret, g_build.stock_fn) && call_matches(g_build.blueprint_ret, g_build.apply) &&
                    call_matches(g_build.paid, g_build.pay_fn) && g_lock_current && E.job_storage;
+    if (g_build_feat && g_api->side() == KILN_SIDE_CLIENT && feat("crafting.build_ui")) {  // the build menu's counts
+        g_build_ui_feat = sym("build/client.MaterialRows", &g_build_rows_fn) && sym("build/client.StockRowsRet", &g_build_stock_rows_ret) &&
+                          sym("build/client.MaterialRowAdd", &g_build_row_add) && sym("build/client.MaterialRowStock", &g_build_row_stock) &&
+                          call_matches(g_build_stock_rows_ret, g_build_row_add) && g_build_row_stock > g_build_row_add &&
+                          g_build_row_stock < g_build_row_add + 0x134;
+        if (!g_build_ui_feat)
+            lower("crafting.build_ui", KILN_CAP_REASON_SYMBOL_MISSING, "the build menu's gatherer or row layout did not check out");
+    }
     if (!g_build_feat) {
         g_build = {};
         LOGW("build: block placements from linked sources are unavailable: a symbol of crafting.build_sources did not check out");
@@ -4874,6 +5026,10 @@ void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
     t_set_lock_stock(0, nullptr, 0);  // the lock snapshot named this session's lock items
     t_set_build_stock(0, nullptr, 0);  // and the building snapshot this session's materials (GitHub #132)
+    {
+        std::lock_guard lock(g_build_rows_mu);  // a selector of the next world may reuse an address: nothing to take back
+        g_build_marks.clear();
+    }
     g_client_recipes.store(nullptr, std::memory_order_release);
     // A stand-down is checked again in the next world (GitHub #132: it was decided once per session); hooks already in stay.
     if (!g_preview_hooked.load()) g_preview_failed.store(false);

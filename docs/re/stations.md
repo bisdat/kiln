@@ -1095,6 +1095,20 @@ Cross-Base Storage (CharosDX, MIT; read as source, commit `2bb3978`, written aga
 redirecting the stock-list calls of the building tool and the material consumption, the build menu's count rebuild and
 the two base-count calls of the build check (the same `F3 0F 11 44 24 44 E8 .. 03 C3` sites as `build/CursorStockRet`), and
 optionally takes from the inventory first by removing `InventoryPay`'s mode-2 test. Kiln changes none of the game's lists:
-it counts and pays links on top. Its own client prediction of the base counts is therefore not needed. Not done: the build
-menu's material counts (`0x40e5d0`'s building-stock records), props (`place_prop`'s two `ApplyMaterials` calls), undo,
-dismantle and terraforming. Not run in a lab or a game.
+it counts and pays links on top. Its own client prediction of the base counts is therefore not needed.
+
+**The build menu's material counts** (client only, `client.d/build-ui.json`, feature `crafting.build_ui`). The material
+selector's gatherer `0x40e5d0` (`void(selectorState, access, bool currentOnly)`, docs/re/building.md 1.2.2) walks seven
+groups of `0x648` bytes (`imul rcx,rax,0x648` at `0x40ee37`; the current-group byte after them at `+0x2bf8`). A group it
+rebuilds is zeroed first (`mov [r15-0x630],rbp` at `0x40e694`: its row count), then gets a zero row per known pool material
+(`0x40e750` loop, `0x40c010` with the default key), the bag's stacks, and per pool material the client's published base
+stock map's `u16` (`0x40ee46`, return `0x40ee4b`). `0x40c010` finds a row by item and adds the count at `+0x10` of a
+24-byte row (`0x40c0f4`). With `currentOnly` only the current group is rebuilt; the others keep their rows. CBS swaps the
+base's stock list for its merged one around the count rebuild (`0x46f460` on this build, "menu counts" in its log). Kiln
+wraps the gatherer instead: before it, each row that still shows exactly what Kiln wrote gets the game's value back; after
+it, the first row of each item in the building snapshot gets the links' count added, and both values are noted per
+(selector, group, item). So a rebuilt row gets the links once, a kept row is not raised twice, a row the game changed in
+between keeps the game's value plus the links. A row that cannot be read stands the menu's half down (a fault guard). A
+material only the links hold still has its row: the game adds a zero row for every known pool material first.
+
+Not done: props (`place_prop`'s two `ApplyMaterials` calls), undo, dismantle and terraforming. Not run in a lab or a game.

@@ -44,6 +44,7 @@ internal sealed unsafe class CraftingFake : IKitFake
         FakeTables.Features([Crafting.SourcesCapability, Crafting.LockSourcesCapability]);
         FakeTables.Offline(Crafting.SourceUiCapability,"the test kit has no game client crafting screens");
         FakeTables.Offline(Crafting.BuildSourcesCapability,"the test kit has no build cursor or blueprint placement (the Building opt-in and its counts are recorded)");
+        FakeTables.Offline("crafting.build_ui","the test kit has no game client build menu");
         FakeTables.Offline("crafting.dye_sources", "the test kit records dye source counts but does not run the game's Tint transaction");
         FakeTables.Offline("crafting.dye_ui", "the test kit has no game client tinting screen");
         FakeTables.Offline("crafting.dye_sources_session", "the test kit has no native Tint transaction session");

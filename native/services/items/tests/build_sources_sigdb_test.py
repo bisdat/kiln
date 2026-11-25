@@ -73,6 +73,32 @@ def main():
             b[at] = 0x90
             altered.img = bytes(b)
             check(not Resolver(altered, doc).run()[2]['build'], f'{side} changed call at {at:#x} disables crafting.build_sources')
+    # the build menu's material counts (crafting.build_ui, client only)
+    client = Path(args.client)
+    symbols = {}
+    for _, part, _ in compose('client'):
+        symbols.update(part.get('symbols', {}))
+    ui_names = ['build/client.MaterialRows', 'build/client.StockRowsRet', 'build/client.MaterialRowAdd', 'build/client.MaterialRowStock']
+    doc = {'symbols': symbols, 'features': {'ui': {'symbols': ui_names}}}
+    image = Image(client)
+    found, _, features = Resolver(image, doc).run()
+    check(features['ui'], 'client crafting.build_ui resolves')
+    for name, rva in zip(ui_names, [0x40e5d0, 0x40ee4b, 0x40c010, 0x40c0f4]):
+        check(found[name]['rva'] == rva, f'client {name} = {rva:#x}')
+    raw = image.img
+    check(bytes.fromhex('4869C848060000') in raw[0x40ee11:0x40ee4b], 'a group is 0x648 bytes (imul rcx,rax,0x648)')
+    check(raw[0x40e694:0x40e69b] == bytes.fromhex('4989AFD0F9FFFF'), 'a rebuilt group is zeroed first (mov [r15-0x630],rbp: its count)')
+    check(raw[0x40c0f9:0x40c105] == bytes.fromhex('488D0C40488B0748016CC810'), 'a row is 24 bytes, its stock a u64 at +0x10')
+    check(raw[0x40e615:0x40e61c] == bytes.fromhex('4438B6F82B0000'), 'seven groups (the current group byte after them at +0x2bf8 = 7 x 0x648)')
+    server_names = set()
+    for _, part, _ in compose('server'):
+        server_names.update(part.get('symbols', {}))
+    check(not any(n in server_names for n in ui_names), 'the build menu sites are declared for clients only')
+    altered = copy.copy(image)
+    b = bytearray(raw)
+    b[0x40ee46] = 0x90
+    altered.img = bytes(b)
+    check(not Resolver(altered, doc).run()[2]['ui'], 'a changed row-add call disables crafting.build_ui')
     print(f'build sources sigdb: {checks} passed, 0 failed')
 
 

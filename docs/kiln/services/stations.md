@@ -349,6 +349,7 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | --- | --- |
 | `crafting.sources` (`Crafting.SourcesCapability`) | Server or host. Missing payment/access symbols or the permission layout, missing/old `kiln.stations`, or a missing/disabled `kiln.rules` payment hook refuses it. A joined client is the wrong side; offline and no-server-session calls refuse without taking items. |
 | `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
+| `crafting.build_ui` (since 0.2.0-dev.31.12) | Kiln client: the build menu's material counts include the building links. Off when a symbol of `sigdb/symbols/client.d/build-ui.json` does not resolve; faulted when another module patched the menu's gatherer or its row add, or a row could not be read (the menu keeps the game's counts; the cursor and the placement still count the links). |
 | `crafting.build_sources` (`Crafting.BuildSourcesCapability`, since 0.2.0-dev.31.12) | Server or host: the build cursor's material check and the blueprint placement's payment ([Building from linked sources](#building-from-linked-sources)); a Kiln client: its own build cursor. Off when a symbol of `sigdb/symbols/server.d/build-sources.json` does not resolve; faulted when a hook could not go in, faulted at run time, or another module patched the code it relies on (kiln.log names it). |
 | `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12, mod API 0.2.21) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in, a hook faulted at run time, or another module patched the code a lock hook reads (kiln.log names it). |
 
@@ -456,9 +457,11 @@ debug level why the press stayed the game's.
   still missing, in the placement's own all-or-nothing payment. Short, refused or faulting: nothing is placed and nothing
   moves. Station outputs never pay a placement.
 
-Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, the build
-menu's material counts (they show the bag and the base; the cursor and the placement count the links), and a vanilla
-client's cursor (it shows missing materials and its game does not send the placement). Cross-Base Storage's
+- **The build menu's material counts** (a Kiln client, capability `crafting.build_ui`): each material row shows the bag,
+  the base's Magic chests and the building links (the same snapshot), so the menu, the cursor and the placement agree.
+
+Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, and a
+vanilla client's menu and cursor (they show the bag and the base; its game does not send a placement only links cover). Cross-Base Storage's
 `inventory_first` option (bag before chests) has no Kiln equivalent: Kiln keeps the game's order.
 
 Needs `crafting.build_sources` on the server or host. Where another module patched the code it relies on (the cursor's
@@ -977,7 +980,7 @@ native slot for them.
   Cross-Base Storage; Building Tools' and Unified Tweaks Live's patches no longer stand it down, and a stand-down is
   checked again in the next world. `CraftSourceOptions.Fills` (production-station fills, `FillOptions.UseLinkedSources`,
   `FillInput.Linked`, `StationResult.FromLinked`) and `CraftSourceOptions.Building` (the build cursor and the blueprint
-  placement, capability `crafting.build_sources`). Thanks Fuzen777, and CharosDX's Cross-Base Storage (MIT) for the map
+  placement, capability `crafting.build_sources`; the build menu's counts, `crafting.build_ui`). Thanks Fuzen777, and CharosDX's Cross-Base Storage (MIT) for the map
   of the game's stock paths.
 - **0.2.0-dev.31.12:** `CraftSourceOptions.Locks`: a lock's required item counts and pays from the player's opted-in
   links (the bag first, link order, all or nothing), with a Kiln client's lock snapshot; capability `items.lock_sources`.

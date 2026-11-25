@@ -53,8 +53,8 @@ public sealed class CraftSourceOptions
     /// <see cref="Items"/>: after the player's bag and the current base's Magic chests (in the game's own order), only what
     /// they cannot cover, in the placement's all-or-nothing payment, in any base. Props, undo, dismantling and terraforming
     /// stay the game's. Needs capability <see cref="Crafting.BuildSourcesCapability"/> on the server or host, and a Kiln
-    /// client for the player's own cursor (a vanilla client shows the placement as missing materials and does not send it).
-    /// Since 0.2.0-dev.31.12.</summary>
+    /// client for the player's own cursor and build menu counts (a vanilla client shows the placement as missing materials
+    /// and does not send it). Since 0.2.0-dev.31.12.</summary>
     public bool Building { get; init; }
 }
 
