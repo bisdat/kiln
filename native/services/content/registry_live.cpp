@@ -320,6 +320,9 @@ void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field
 // write) only evaluates.
 bool save_check(const std::shared_ptr<Binding>& b, const Value& under, const Value& v, std::string* why) {
     if (!b->row) return true;  // a raw member (Advanced tier): composed with its field or refused at composition
+    // review: a new entry's first values (its add's "fields", over the bytes of the entry it is like) are not an edit of
+    // anything a save holds; a refusal here would refuse the whole entry. Its later edits are checked like any other.
+    if (g.initializing_entry) return true;
     const auto verdict = registry::saves::judge(b->ref.registry, b->ref.field, under, v);
     if (!verdict) return true;
     if (verdict->decision == registry::saves::Decision::Refuse) return *why = "saves: " + b->ref.text() + " " + verdict->text, false;

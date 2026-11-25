@@ -178,7 +178,8 @@ Decide for each field whether an edit of it changes what a save holds (a cap the
 clamps saved copies into, a list a saved index points into) and add its case to `registry/saves.cpp` `judge`: refuse, guard,
 warn or report (README "Edits that change existing saves"), with a `registry_saves` test. Restart fields are judged at the
 stage (`stage.cpp` `compose_checked`), live scalar fields at each write over the value under them (`registry_live.cpp`
-`save_check`); a field read only at use or for new copies needs nothing.
+`save_check`; a new entry's first values are not judged), and every field of a rollback's plan also against the plan it rolls
+away from (`stage.cpp`, whole plan); a field read only at use or for new copies needs nothing.
 
 ### 2.9 Managed typed API and analyzers
 

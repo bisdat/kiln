@@ -30,6 +30,10 @@ int main() {
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, sword_clone, "a:sword", {{"manaCost", 1.5}}, &why), "inexact whole-number config refuses the clone");
     entry_check(why.starts_with("not_exact: "), "whole-number refusal keeps the stable reason token");
     g_integer_impacts.clear();
+    // review of registry-rollback: a new entry's own values are no edit of a saved copy (the save checks are for later edits)
+    why.clear();
+    entry_check(registry_live_initialize_entry(KILN_CONTENT_ITEMS, sword_clone, "a:sword", {{"levels.max", 12}}, &why) && at<uint32_t>(0x42000 + 0x14) == 12,
+                ("a new sword like Sword_T2 (levels 10..15) with levels.max 12 is initialized, not refused as a narrower range: " + why).c_str());
     RegistryLive in = *g.in;
     in.added_guid = [](const auto&, const auto&) { return "12345678-1234-5678-9123-123456789abc"; };
     registry::EntryDefinition d;
