@@ -49,10 +49,10 @@ public sealed class RegistryEntryReplayTestMod : Mod
         {
             for (var i = 0; i < 25 * 120 && !(Spawn.WorldRunning && Items.Status() is { Read: true }); i++) await Context.Scheduler.NextTick();
             var wood = new ItemId(Content.Items.Get("Material_T1_Wood_Logs")!.Id);
-            var near = Items.FindInventories(InventoryKinds.Containers | InventoryKinds.NonEmpty).Select(c => Spawn.Inspect(c)).FirstOrDefault(i => i != null);
+            var at = Items.FindInventories(InventoryKinds.Containers).Select(c => Spawn.Inspect(c)).FirstOrDefault(i => i != null)?.Position ?? new WorldPosition(3855.8, 834.5, 1399.8);
             var template = Spawn.Templates.FirstOrDefault(t => t.Name.Equals("lootchest_cheat_new13_loot_grassland", StringComparison.OrdinalIgnoreCase));
-            if (near is null || template is null) { Check(false, "no place or template for the drop table check"); return; }
-            var e = await Spawn.Entity(template.Name, near.Position with { Y = near.Position.Y + 2 }, options: new SpawnOptions { Tag = "registry-entry-replay-test", Flags = SpawnFlags.Transient });
+            if (template is null) { Check(false, "no template for the drop table check"); return; }
+            var e = await Spawn.Entity(template.Name, at with { Y = at.Y + 2 }, options: new SpawnOptions { Tag = "registry-entry-replay-test", Flags = SpawnFlags.Transient });
             for (var i = 0; i < 200 && Items.Read(e) is not { UsedSlots: > 0 }; i++) await Context.Scheduler.NextTick();
             for (var i = 0; i < 5; i++) await Context.Scheduler.NextTick();
             var got = Items.Read(e);
