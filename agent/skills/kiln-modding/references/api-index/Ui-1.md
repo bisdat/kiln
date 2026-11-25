@@ -105,6 +105,7 @@ enum: Right, Left, Bottom
 - `Language { get; } -> string` — The game's text language key ("de-de", ...).
 - `LanguageId { get; init; } -> uint` — The game's `keen::LanguageId` of its text language; 0 when unknown.
 - `static readonly None -> GameScreen` — No screen known: no UI state, no HUD screen, no crafting menu.
+- `PopupOpen { get; init; } -> bool` `0.2.19` — One of the game's own popups is open over its UI: the item menu a right-click on an inventory slot opens (Equip...
 - `State { get; init; } -> GameUiState` — The game's top-level UI state.
 - `StationWorkshop { get; init; } -> uint` — The game's `keen::WorkshopId` of the crafting station the player uses; 0 when none.
 - `Target { get; init; } -> EntityId` `0.2.12` — The entity the open screen is about, on the screens the game draws as a chest-style transfer screen: a storage...

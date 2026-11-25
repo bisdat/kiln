@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.18): part 2 of 3
+# Native ABI rows (mod API 0.2.19): part 2 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 

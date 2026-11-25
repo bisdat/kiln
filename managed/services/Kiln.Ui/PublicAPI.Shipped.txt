@@ -125,6 +125,8 @@ Kiln.GameScreen.Kind.init -> void
 Kiln.GameScreen.Language.get -> string!
 Kiln.GameScreen.LanguageId.get -> uint
 Kiln.GameScreen.LanguageId.init -> void
+Kiln.GameScreen.PopupOpen.get -> bool
+Kiln.GameScreen.PopupOpen.init -> void
 Kiln.GameScreen.State.get -> Kiln.GameUiState
 Kiln.GameScreen.State.init -> void
 Kiln.GameScreen.StationWorkshop.get -> uint

@@ -1,6 +1,4 @@
 #nullable enable
-Kiln.GameScreen.PopupOpen.get -> bool
-Kiln.GameScreen.PopupOpen.init -> void
 Kiln.UiPlacement
 Kiln.UiPlacement.Bottom.get -> float
 Kiln.UiPlacement.Bottom.init -> void

@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.18): part 3 of 3
+# Native ABI rows (mod API 0.2.19): part 3 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -137,7 +137,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_types.h `KilnTypesApi.ecs_registry` @208 `0.2.10` — Appended to v1 (check header.size): the engine's component registration catalog for 'world_kind'...
 
 ## services/kiln_ui.h — service `kiln.ui`, `kiln.ui.tick`, `kiln.craftmenu`
-### KilnUiApi — 1080 bytes
+### KilnUiApi — 1088 bytes
 - kiln_ui.h `KilnUiApi.status` @8
 - kiln_ui.h `KilnUiApi.subscribe_frame` @16
 - kiln_ui.h `KilnUiApi.subscribe_key` @24
@@ -272,6 +272,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_ui.h `KilnUiApi.pointer` @1056 `0.2.13` — Additive size-guarded tail (0.2.0-dev.30.3; check header.size >= offsetof(KilnUiApi, x) + sizeof(void*)...
 - kiln_ui.h `KilnUiApi.drag_source` @1064 `0.2.13`
 - kiln_ui.h `KilnUiApi.drop_target` @1072 `0.2.13`
+- kiln_ui.h `KilnUiApi.popups` @1080 `0.2.19` — Additive size-guarded tail (0.2.0-dev.31.9; check header.size >= offsetof(KilnUiApi, popups) +...
 ### KilnUiTickApi — 32 bytes
 - kiln_ui.h `KilnUiTickApi.subscribe` @8
 - kiln_ui.h `KilnUiTickApi.unsubscribe` @16
