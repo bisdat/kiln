@@ -930,7 +930,18 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         if (const auto req = d.env.read_data("rollback.json")) {
             std::vector<ModInput> plan_inputs;
             std::string why;
-            if (d.rollback_inputs(*req, loaded, versions, &plan_inputs, &rb, &from_values, &why)) {
+            bool usable = false;
+            try {
+                usable = d.rollback_inputs(*req, loaded, versions, &plan_inputs, &rb, &from_values, &why);
+            } catch (const std::exception& e) {
+                // review: a member of the request or the plan of another type than Kiln writes (a hand edit) threw from json::value;
+                // refused like any unreadable request, never thrown into the boot
+                if (!rb.is_object()) rb = {{"plan", nullptr}};
+                plan_inputs.clear();
+                from_values = json::object();
+                why = std::string("the rollback request or its plan cannot be read (") + e.what() + ")";
+            }
+            if (usable) {
                 for (const ModInput& in : plan_inputs)
                     for (const Batch& b : in.batches)
                         if (versions[in.id].empty()) versions[in.id] = b.mod_version;

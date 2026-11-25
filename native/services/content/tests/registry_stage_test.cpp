@@ -594,6 +594,18 @@ void rollback_refused_whole(const std::string& dir) {
     files.data["rollback.json"] = "{not json";
     TreeView v7 = world();
     refused(plan_start(dir, &files, &v7), "cannot be read");
+    // review: members of another type than Kiln writes (a hand edit) refuse the rollback, never throw into the boot
+    files.data["rollback.json"] = json{{"format", "1"}, {"plan", ha}}.dump();
+    TreeView v7b = world();
+    refused(plan_start(dir, &files, &v7b), "cannot be read");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"requested", 5}}.dump();
+    TreeView v7c = world();
+    refused(plan_start(dir, &files, &v7c), "cannot be read");
+    files.data["plans/" + ha + ".json"] = json{{"format", "2"}, {"inputs", json::array()}}.dump();
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    TreeView v7d = world();
+    refused(plan_start(dir, &files, &v7d), "cannot be read");
+    files.data["plans/" + ha + ".json"] = keep;
     // a plan edit that no longer applies on this base (the entry is gone): refused whole, never half-applied
     g_stacks = R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": 70},
