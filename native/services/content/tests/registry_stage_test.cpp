@@ -234,56 +234,97 @@ std::vector<boothook::OldDoc> old_patch() {
 }
 
 void boot_sync(const std::string& dir) {
-    // b_side: "" = both; "order:<side>" = Kiln.Host's set_order names it; "file:<side>" = only its kiln.mod.json (the data file) does
-    auto run = [&](int cap, int points, bool reverse, bool needs, bool accepted, const std::string& b_side = "") {
+    // One start of mods a (levelCap) and b (b_field, "" = no mod b) with the join's registry part it publishes; null: none.
+    // b_side: "" = both; "order:<side>" = Kiln.Host's set_order names it; "file:<side>" = only its kiln.mod.json (the data file) does.
+    struct Opt {
+        int cap = 60, points = 3;
+        bool reverse = false, needs = true;
+        std::string b_side, b_field = "skillPointsPerLevel";
+        std::string refused;          // the boot write this game refuses: "levelCap", "skillPointsPerLevel", "*" (both)
+        bool cap_unmapped = false;    // this game build's record does not map balance.levelCap
+        bool code_fault = false;      // a side-both mod's native stage callback faults
+        bool no_base = false;         // the stage cannot read the game's base
+    };
+    auto run = [&](const Opt& o) -> json {
         TreeView view = world();
         Files files;
         auto e = env_of(&view, &files, dir, nullptr);
         e.data = [=](const Schema& schema) {
             auto a = stage::read_sections("a", "1", {{"content/a.json", json{{"registry", {{"alter", json::array({
-                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "levelCap"}, {"op", cap}}
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "levelCap"}, {"op", o.cap}}
             })}}}}.dump()}}, schema);
+            if (o.b_field.empty()) return a;
             auto b = stage::read_sections("b", "1", {{"content/b.json", json{{"registry", {{"alter", json::array({
-                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "skillPointsPerLevel"}, {"op", points}}
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", o.b_field}, {"op", o.points}}
             })}}}}.dump()}}, schema);
-            if (b_side.rfind("file:", 0) == 0)
-                for (auto& f : b) f.side = b_side.substr(5);
+            if (o.b_side.rfind("file:", 0) == 0)
+                for (auto& f : b) f.side = o.b_side.substr(5);
             a.insert(a.end(), b.begin(), b.end());
             return a;
         };
         auto mapping = e.regmap;
         e.regmap = [=](map::RegMap* rm, std::vector<std::string>* errors) {
             bool ok = mapping(rm, errors);
-            rm->registries.at("balance").rows.at("skillPointsPerLevel").client_needs = needs;
+            rm->registries.at("balance").rows.at("skillPointsPerLevel").client_needs = o.needs;
+            if (o.cap_unmapped) rm->build.rows["balance.levelCap"] = map::BuildRow::Changed;
             return ok;
         };
+        if (o.no_base) e.source = [](std::string* why) -> std::unique_ptr<model::Source> { *why = "test: no base"; return nullptr; };
         stage::Runner r(std::move(e));
-        const std::string bj = b_side.rfind("order:", 0) == 0 ? R"({"mod":"b","side":")" + b_side.substr(6) + R"("})" : R"({"mod":"b"})";
-        r.set_order(reverse ? "[" + bj + R"(,{"mod":"a"}])" : R"([{"mod":"a"},)" + bj + "]");
+        const std::string bj = o.b_side.rfind("order:", 0) == 0 ? R"({"mod":"b","side":")" + o.b_side.substr(6) + R"("})" : R"({"mod":"b"})";
+        if (o.b_field.empty()) r.set_order(R"([{"mod":"a"}])");
+        else r.set_order(o.reverse ? "[" + bj + R"(,{"mod":"a"}])" : R"([{"mod":"a"},)" + bj + "]");
+        uint64_t h = 0;
+        if (o.code_fault) r.subscribe_stage(9, "c", [](Stage s, const View&) { return s != Stage::Alter; }, &h);
         auto boot = r.run({});
         std::vector<stage::BootOutcome> outcomes;
+        const bool b_last = !o.reverse;  // the later writer of levelCap when both write it
         for (const auto& resource : boot)
-            for (const auto& f : resource.fields)
-                outcomes.push_back({f.field, accepted, Value::integer(f.field.field == "levelCap" ? cap : points), "test refusal"});
+            for (const auto& f : resource.fields) {
+                const bool cap = f.field.field == "levelCap";
+                const int value = cap && o.b_field == "levelCap" ? (b_last ? o.points : o.cap) : cap ? o.cap : o.points;
+                const bool refused = o.refused == "*" || o.refused == f.field.field;
+                outcomes.push_back({f.field, !refused, Value::integer(value), "test refusal"});
+            }
         r.finish(outcomes);
         auto report = json::parse(files.report);
-        check(report.contains("bootSync"), "resolved boot registry fingerprint is in registry.json");
-        return report["bootSync"];
+        return report.contains("bootSync") ? report["bootSync"] : json();
     };
-    const auto base = run(60, 3, false, true, true);
-    check(base["values"].is_string() && base["values"].get<std::string>().size() == 64, "full resolved values hash");
-    check(base == run(60, 3, false, true, true), "deterministic across starts");
-    check(base["values"] != run(61, 3, false, true, true)["values"], "resolved boot value changes hash");
-    auto reverse = run(60, 3, true, true, true);
+    auto with = [](std::function<void(Opt&)> f) { Opt o; f(o); return o; };
+    const auto base = run({});
+    check(base.is_object() && base["values"].is_string() && base["values"].get<std::string>().size() == 64, "full resolved values hash in registry.json");
+    check(base == run({}), "deterministic across starts");
+    check(base["values"] != run(with([](Opt& o) { o.cap = 61; }))["values"], "resolved boot value changes hash");
+    auto reverse = run(with([](Opt& o) { o.reverse = true; }));
     check(base["values"] == reverse["values"] && base["order"] != reverse["order"], "same values, other registry order detected");
-    check(run(60, 3, false, false, true) == run(60, 9, false, false, true), "server-only values and writers excluded");
-    check(run(60, 3, false, true, false) == run(90, 9, true, true, false), "refused writes excluded");
+    check(run(with([](Opt& o) { o.needs = false; })) == run(with([](Opt& o) { o.needs = false; o.points = 9; })), "server-only values and writers excluded");
     // a side server/client mod runs on one side only (kiln.boot leaves such mods out too): the fields it writes take no part
-    check(base["values"] != run(60, 9, false, true, true)["values"], "a side-both mod's client-needed value takes part");
-    check(run(60, 3, false, true, true, "order:server") == run(60, 9, false, true, true, "order:server"), "a side server mod (Kiln.Host's order) takes no part");
-    check(run(60, 3, false, true, true, "order:client") == run(60, 9, false, true, true, "order:client"), "a side client mod takes no part");
-    check(run(60, 3, false, true, true, "file:server") == run(60, 9, false, true, true, "file:server"), "a side server mod (its kiln.mod.json) takes no part");
-    check(run(60, 3, false, true, true, "order:both") == base, "side both in the order is the default");
+    check(base["values"] != run(with([](Opt& o) { o.points = 9; }))["values"], "a side-both mod's client-needed value takes part");
+    for (const char* side : {"order:server", "order:client", "file:server"})
+        check(run(with([&](Opt& o) { o.b_side = side; })) == run(with([&](Opt& o) { o.b_side = side; o.points = 9; })),
+              std::string("a one-side mod's own field takes no part (") + side + ")");
+    check(run(with([](Opt& o) { o.b_side = "order:both"; })) == base, "side both in the order is the default");
+    // The part is one hash over both sides' fields, so a field only one side leaves out makes every join differ. A server whose side
+    // server mod b writes nothing a shared mod edits equals a client that never runs b...
+    const auto shared_only = run(with([](Opt& o) { o.b_field = ""; }));
+    check(shared_only.is_object() && run(with([](Opt& o) { o.b_side = "order:server"; })) == shared_only,
+          "a server with a one-side mod on its own field sends what a client without that mod sends");
+    // ...but one whose one-side mod also writes a field a shared mod edits has no fair counterpart: no part, never a difference
+    for (const char* side : {"order:server", "order:client", "file:server"})
+        check(run(with([&](Opt& o) { o.b_side = side; o.b_field = "levelCap"; o.points = 70; })).is_null(),
+              std::string("a one-side mod on a shared mod's client-held field: no registry part (") + side + ")");
+    check(run(with([](Opt& o) { o.b_side = "order:server"; o.b_field = "levelCap"; o.points = 70; o.reverse = true; })).is_null(),
+          "the same with the one-side mod first");
+    // a shared mod's client-held edit this side could not apply (the other side may have): no part either
+    check(run(with([](Opt& o) { o.refused = "levelCap"; })).is_null(), "a client-held boot write this game refused: no registry part");
+    check(run(with([](Opt& o) { o.refused = "*"; })).is_null(), "every boot write refused: no registry part");
+    check(run(with([](Opt& o) { o.cap_unmapped = true; })).is_null(), "a client-held edit this build's mapping refused: no registry part");
+    check(run(with([](Opt& o) { o.code_fault = true; })).is_null(), "a shared mod's stage callback faulted (its edits unknown): no registry part");
+    check(run(with([](Opt& o) { o.no_base = true; })).is_null(), "a stage that could not read the base: no registry part");
+    check(run(with([](Opt& o) { o.needs = false; o.refused = "skillPointsPerLevel"; })) == run(with([](Opt& o) { o.needs = false; })),
+          "a refused server-only write does not stop the part");
+    check(run(with([](Opt& o) { o.b_side = "order:server"; o.refused = "skillPointsPerLevel"; })) == shared_only,
+          "a one-side mod's refused write does not stop the part");
 }
 
 void one_start(const std::string& dir) {

@@ -1006,7 +1006,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             for (const ChainRow& c : fo->second.chain)
                 if (c.kind == WriterKind::Registry)
                 {
-                    const Refusal x{c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", ""};
+                    const Refusal x{c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", "",
+                                    o.field.registry, o.field.id, o.field.field};
                     d.result.refused.push_back(x);
                     d.outside.push_back(x);
                 }
@@ -1030,14 +1031,46 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             auto it = d.sides.find(mod);
             return it != d.sides.end() && !it->second.empty() && it->second != "both";
         };
+        auto client_held = [&](const std::string& registry, const std::string& field) {
+            auto reg = d.rm.registries.find(registry);
+            if (reg == d.rm.registries.end()) return false;
+            std::string g = generic_path(field);
+            auto row = reg->second.rows.find(g);
+            if (row == reg->second.rows.end() && g.size() > 2 && g.ends_with("[]")) row = reg->second.rows.find(g.substr(0, g.size() - 2));
+            return row != reg->second.rows.end() && row->second.backend == map::Backend::Boot && row->second.client_needs;
+        };
+        // Both sides hash their own fields, so a field one side leaves out and the other keeps would make every join differ, with
+        // nothing the player can change. The part is published only when this start applied each client-held boot edit of the mods
+        // both sides run (side both) as asked: none refused (by this build's mapping, by composition or by the write, or a refusal
+        // Kiln cannot place: a faulted callback, an unreadable file), the base read, and no side server/client mod writing the same
+        // field. Otherwise nothing is sent and nothing is compared with this process (kiln.log says why).
+        std::set<std::string> ran;
+        for (const auto& o : d.meta.order) ran.insert(o.mod);
+        std::string not_compared;
+        if (d.counts.failed) not_compared = "the stage could not read the game's base";
+        for (const Refusal& x : d.result.refused) {
+            if (!not_compared.empty()) break;
+            if (x.mod.empty() || one_side(x.mod) || !ran.count(x.mod)) continue;
+            if (x.registry.empty()) not_compared = "mod " + x.mod + " has a registry refusal that names no field (" + x.source + ")";
+            else if (!x.raw && !x.field.empty() && client_held(x.registry, x.field))
+                not_compared = "mod " + x.mod + "'s edit of " + x.registry + " " + x.field + " was refused on this game";
+        }
         for (const auto& [ref, fo] : d.boot_fields) {
             if (!written.count(ref)) continue;
             auto reg = d.rm.registries.find(ref.registry);
             if (reg == d.rm.registries.end()) continue;
             auto row = reg->second.rows.find(ref.field);
             if (row == reg->second.rows.end() || row->second.backend != map::Backend::Boot || !row->second.client_needs) continue;
-            // a field a side server/client mod writes (any writer kind) differs by design: the other side never runs that mod
-            if (std::any_of(fo.chain.begin(), fo.chain.end(), [&](const ChainRow& c) { return !c.mod.empty() && one_side(c.mod); })) continue;
+            // a field a side server/client mod writes (any writer kind) differs by design: the other side never runs that mod. It
+            // stays out on both sides only while no side-both mod edits it too (the other side keeps such a field).
+            const auto foreign = std::find_if(fo.chain.begin(), fo.chain.end(), [&](const ChainRow& c) { return !c.mod.empty() && one_side(c.mod); });
+            if (foreign != fo.chain.end()) {
+                const bool shared = std::any_of(fo.chain.begin(), fo.chain.end(),
+                                                [&](const ChainRow& c) { return c.kind == WriterKind::Registry && !c.mod.empty() && !one_side(c.mod); });
+                if (shared && not_compared.empty())
+                    not_compared = ref.text() + " is written by mod " + foreign->mod + " (side " + d.sides[foreign->mod] + ") and edited by a side-both mod";
+                continue;
+            }
             bool edited = false;
             for (const auto& c : fo.chain) {
                 if (c.kind != WriterKind::Registry) continue;
@@ -1055,8 +1088,13 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             contributions.erase(it);
         }
         for (const auto& [mod, edits] : contributions) order.push_back({mod, sha_hex(edits.dump())});
-        d.meta.boot_sync = {{"values", sha_hex("kiln-registry-boot-values 1\n" + values.dump())},
-                            {"order", sha_hex("kiln-registry-boot-order 1\n" + order.dump())}};
+        d.meta.boot_sync = nullptr;
+        if (not_compared.empty())
+            d.meta.boot_sync = {{"values", sha_hex("kiln-registry-boot-values 1\n" + values.dump())},
+                                {"order", sha_hex("kiln-registry-boot-order 1\n" + order.dump())}};
+        else
+            d.log(1, "registry: this start's registry boot values are not compared at joins (" + not_compared +
+                         "): players are checked by their mod lists and boot content only (docs/kiln/network.md)");
         d.generation = 1;
         d.meta.generation = 1;
         d.meta.world_load = false;

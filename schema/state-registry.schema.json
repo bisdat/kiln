@@ -349,7 +349,7 @@
     },
     "bootSync": {
       "type": "object",
-      "description": "Immutable successful client-needed boot registry values and participating mod-order hashes. Optional for old writers; full hashes are computed before report caps. Neither server-only fields nor live layers contribute.",
+      "description": "Immutable successful client-needed boot registry values and participating mod-order hashes. Optional for old writers, and absent when this start could not apply its side-both mods' client-held boot edits as asked (then nothing is compared at joins: docs/kiln/network.md); full hashes are computed before report caps. Neither server-only fields nor live layers contribute.",
       "required": [
         "values",
         "order"
