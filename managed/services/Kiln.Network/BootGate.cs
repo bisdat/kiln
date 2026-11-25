@@ -37,8 +37,13 @@ internal static class BootGate
         value[66] == ':' && value.AsSpan(2, 64).IndexOfAnyExcept("0123456789abcdef") < 0 &&
         value.AsSpan(67, 64).IndexOfAnyExcept("0123456789abcdef") < 0 ? value : null;
 
-    internal static string? RegistryDifference(IReadOnlyDictionary<string, string> properties)
+    /// <summary>The registry part's message, or null when it is not compared or agrees. It is one hash over every participating mod, so it
+    /// cannot honour the mod-list rules per mod: it is compared only when both sides run the same side-both mods in the same versions
+    /// (<see cref="SameSharedMods"/>). Otherwise the missing/versionMatch/optionalMods/extra rules decide alone, as before.</summary>
+    internal static string? RegistryDifference(IReadOnlyDictionary<string, string> properties, IEnumerable<Wire.ModEntry> serverMods,
+        IEnumerable<Wire.ModEntry> clientMods)
     {
+        if (!SameSharedMods(serverMods, clientMods)) return null;
         var own = RegistryOwn();
         var peer = RegistryValue(properties.GetValueOrDefault(RegistryKey));
         if (own is null || peer is null) return null; // additive: old peers compare nothing
@@ -47,6 +52,17 @@ internal static class BootGate
         if (!own.AsSpan(67, 64).SequenceEqual(peer.AsSpan(67, 64)))
             return "The registry boot edits or load order differ from this server's. Use the server's modpack and load order, then restart the game.";
         return null;
+    }
+
+    /// <summary>Both lists hold the same side-both mods (ids and exact versions). Side client and server mods are not compared: each runs
+    /// on one side only, and the native stage leaves the fields they write out of the registry part.</summary>
+    internal static bool SameSharedMods(IEnumerable<Wire.ModEntry> serverMods, IEnumerable<Wire.ModEntry> clientMods)
+    {
+        static Dictionary<string, string> Shared(IEnumerable<Wire.ModEntry> mods) => mods.Where(m => m.Side == ModSide.Both)
+            .GroupBy(m => m.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Version, StringComparer.Ordinal);
+        var s = Shared(serverMods);
+        var c = Shared(clientMods);
+        return s.Count == c.Count && s.All(kv => c.TryGetValue(kv.Key, out var v) && string.Equals(v, kv.Value, StringComparison.Ordinal));
     }
 
     /// <summary>A boot mod in this process's generation that was left out of it (or whose content faulted since).</summary>

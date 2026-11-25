@@ -477,7 +477,7 @@ internal static class NetEngine
                 bootDiffers[detail] = (m.Id, m.Version, ModName(m.Id));
             }
         }
-        var registryDifference = BootGate.RegistryDifference(hello.Properties);
+        var registryDifference = BootGate.RegistryDifference(hello.Properties, LocalMods(client: false), hello.Mods);
         if (registryDifference is not null) missing.Add(registryDifference);
         var bootNotes = BootGate.LeftOut(serverBoot, clientBoot);
         var bootNote = bootNotes.Count > 0 ? " (boot: " + string.Join("; ", bootNotes.Take(4)) + ")" : "";

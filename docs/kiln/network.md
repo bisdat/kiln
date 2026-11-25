@@ -145,6 +145,12 @@ participating boot edits do not contribute. The immutable start snapshot remains
 `kiln/state/registry.json` after world load and hot reload too.
 
 A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
+The server compares the part only when both peers run the same side-`both` mods in the same versions. When the mod
+lists differ, the mod-list rules above decide alone, as before: a missing required mod, a version difference, an
+`optionalMods` entry the player lacks, another version that `versionMatch` accepts, or an extra client mod. One hash
+over all mods cannot honour those rules per mod, so it does not try. Client- and server-side mods in the lists do not stop
+the comparison.
+
 restart. Only when values match is the order compared; an order/contribution mismatch says **registry boot edits or load order differ** and
 asks for the server's modpack/load order and a restart. Both use the ordinary handshake missing-details/report line,
 REJECT under `modSync: refuse`, WELCOME warning under `warn` (including the default), and no player warning under
