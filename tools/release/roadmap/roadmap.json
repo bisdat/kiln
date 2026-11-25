@@ -3608,8 +3608,8 @@
     {
       "version": "0.2.0-dev.32",
       "status": "next",
-      "title": "Camera, pets and taming",
-      "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
+      "title": "Pets, taming and more registries",
+      "summary": "Pets that follow and fight for their owner, taming, and Kiln registries for creatures, spells, buffs, perks, stations, world rules and skills.",
       "features": [
         {
           "title": "Pets that follow you",
@@ -3620,6 +3620,26 @@
           "title": "Taming creatures",
           "text": "Players can tame creatures step by step, by feeding, weakening or using a tool, to make them their pet.",
           "area": "content"
+        },
+        {
+          "title": "Creature, spell, buff and perk registries",
+          "text": "Mods and data packs edit creatures, spells, buffs and perks by Kiln's stable names, as they edit items and recipes today, so they keep working after game updates.",
+          "area": "api"
+        },
+        {
+          "title": "Station, world-rule, skill and limit registries",
+          "text": "Crafting stations, world rules such as build zones and difficulty, skills and Kiln's limits become registries too.",
+          "area": "api"
+        },
+        {
+          "title": "One view over every registry",
+          "text": "One typed view over all registries, equipment rules on the registries, and editor hints that point mods from old paths to registry fields.",
+          "area": "api"
+        },
+        {
+          "title": "ShroudForge mods on the registries",
+          "text": "ShroudForge mods' data edits get named owners in the Conflicts view, and their effects can replay on Kiln's registries (opt-in).",
+          "area": "compat"
         },
         {
           "title": "Cooked terrain tiles",
