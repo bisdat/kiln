@@ -42,7 +42,9 @@ review fix `1672d8af`, section 5.0). 0.2.0-dev.31.13 pins fork branch `kiln-dev3
 manifest proves or refuses game files before a new working baseline is taken from them, and a start without the
 Updater converts ShroudForge 1.7's numeric toggle keys (`81b26c61`); its review (`b232119b`) makes a new clean copy
 whole before either backup gets its name and keeps a set-aside whole pair beside a half one (section 5.0, "After a
-game update, when the pass fails").
+game update, when the pass fails"), and on top of it fork branch `kiln-dev31-fast-encode` (`6cb84f34`): a pregame
+pass encodes block-compressed textures on the PC's threads with the serial encode's bytes, and `game.assets.get_content`
+answers a blob created earlier in the same pass (section 5.0, "Textures on every core, and blobs made earlier in the pass").
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -193,6 +195,40 @@ cannot be finished, the hosted toggle-key migration), `set_aside_working_baselin
 pair), red before; Linux and native Windows (kiln-win1). kiln-eml `load::kiln_tests` (2 new) and `steam_files` (6),
 kiln-manage `tests/sf_startup.rs` (2 new), red before; native `run.py` `prepare-fails`. Not run against a real game
 update or a real client.
+
+**Textures on every core, and blobs made earlier in the pass** (fork branch `kiln-dev31-fast-encode`, `6cb84f34`,
+0.2.0-dev.31.13). Players with EMF Beastmaster's creature packs, and any mod that needs ShroudForge's runtime beside
+them (ammo-slots' native DLL), waited about 10 minutes on their first ShroudForge pass.
+- **Where the time went:** BC7 sRGB encode on one thread, 397 of the 401 s of Lua of the three packs (kiln-eml's
+  profile of the same packs). In a pregame pass `image.encode_texture` now cuts a BC1-BC7 texture into strips of whole
+  block rows (at least 64 blocks each) and encodes each strip with upstream's own `kfc::content::image::encode`: every
+  block depends only on its own 4x4 pixels, so the output is byte for byte the serial encode. It is kiln-eml's
+  `encode_with_threads` (0.2.0-dev.31.13) moved to the call site, since the fork's kfc-parser is upstream's submodule.
+- **When:** `run_with_api` sets the count for a pregame pass only and puts it back when the pass ends: the PC's
+  threads, at most 16, or `KILN_SF_ENCODE_THREADS` (1 = the serial encode; a count at most 64). The in-game runtime
+  keeps the serial encode. In a Kiln-hosted start the pass runs inside `shroudforge_prepare_startup`, which
+  kiln-shroudforge calls from its `kiln_plugin_early` (`on_ready` with `g_early`) in kiln-core's early step: on the
+  game's main thread at Kiln's entry gate, after the early native mods, before sigdb and hooks, outside DllMain and the
+  loader lock. ShroudForge's own bootstrap calls it on its preparation thread while its gate holds the entry, also
+  outside the loader lock. Another thread can still hold the lock then (a deferred native mod, an injected overlay), and
+  a thread created meanwhile only starts once the lock is free. So the calling thread takes strips from the same counter
+  as its helpers and waits only for strips a helper has begun; with no helper running it encodes the whole texture
+  itself, in the serial time. While a helper of an earlier texture has not started, no new helpers are made.
+- **The blob:** ShroudForge's `get_content` (`access_file_content.rs`) answered only blobs listed in the game's own
+  header; EML and kiln-eml also answer blobs created earlier in the same pass. The beasts pack writes the English text
+  table back as a new blob and the wilds pack's harness script reads it: under ShroudForge it got nil, and the Llama
+  Harness, Camel Saddle and Mule Harness were not added. It now asks the pass's new contents first
+  (`AppState::has_content`, EML's rule); `get_all_contents` still lists the header only, as in EML.
+- **Offline proof** (2026-11-25; reflink copies of the vanilla client data of build 26430625, the three packs, no game
+  started; ShroudForge's startup pass `run_with_local_schema` as its loader calls it, through the dev31 slot at nice 19
+  on a PC at load average about 16-19): the fork at `e3edecc3` took 414 s (398 s CPU) and left out the harness
+  items; at `6cb84f34`, 16 threads, 95 s (461 s CPU). Its game data equals kiln-eml's (`45575990`, 97 s) byte for
+  byte: all 92 229 resources (320 new, 5 game resources changed) and all 209 new blobs (87.6 MB), the harness's text
+  blob included. Against `e3edecc3` the 208 shared blobs (every texture) are identical: the threads change no byte.
+Tests (red before): the fork's `kiln_encode_in_strips_tests.rs` (9: every BC format against the serial bytes for
+uneven strips and more threads than rows, sizes that are not whole blocks, helpers that never start, the thread count,
+its env value and its scope) and `kiln_same_pass_content_tests.rs` (2 whole passes: package A creates a blob and B reads
+it; a texture the pass encodes on several threads is the serial encode). Not run in a real client.
 
 **A working baseline that is not the source of the game files** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). Before
 every startup pass SF copies `<stem>.kfc.bak` and `<stem>.kfc_resources.bak` over the game files. It checked only the
