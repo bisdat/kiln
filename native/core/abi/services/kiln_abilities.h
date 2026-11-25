@@ -318,7 +318,9 @@ enum {
     KILN_ITEM_USE_COST_ITEM = 1u << 0, /* the slot and the item also as the trigger context's costItem, as the game's hand
                                           use writes them for an item sequence with no costOverride (0x36b60): the
                                           sequence's PayUsageCost events then pay with the item (its own impactValues:
-                                          a scroll's ManaCost) and, with consume, take it from the slot (the repair kit) */
+                                          a scroll's ManaCost) and, with consume, take it from the slot (the repair kit).
+                                          Not for ammunition (a staff cast's PayUsageCost would take the spell) nor an
+                                          entry with a costOverride (the game pays with the override there) */
 };
 
 /* KilnItemUse.status */

@@ -292,7 +292,8 @@ thanks Fuzen777.
 |---|---|---|
 | an event with `consume` uses up the item: `ApplyBuffEvent` (food, drinks, bandages, buff scrolls), `SpawnImpact` (health potions, healing food, the Meteor Shower scroll), `SpawnEntityEvent` (mana potions, fish dropped into the world, the Fire Wisp and Experience scrolls, grenades and other throwables) | the consumables (docs/re/player-state.md lists them) and throwables | `Started` (since 0.2.0-dev.30.3) |
 | only a `PayUsageCost` with `consume` uses up the item | `Consumable_RepairKit_T3` (`UseItem_Consumable_RepairKit`: `PayUsageCost` at 0.07 s, then `RepairAllItems` 8 % six times up to 4.3 s), the only one | `Started` since 0.2.0-dev.31.5 |
-| a `PayUsageCost` with `consume`, but the item is ammunition | 102 spells (`Ammo_*_Spell_*`: their Primary sequences are the staff casts, `Attack_Player_Staff_*`), and one `_Test_` spell that also has a consume event | `NotConsumable` (a cast needs the staff, which passes the spell as ammunition); the `_Test_` spell stays `Started` through its consume event, without the cost item |
+| a `PayUsageCost` with `consume`, but the item is ammunition | 102 spells (`Ammo_*_Spell_*`: their Primary sequences are the staff casts, `Attack_Player_Staff_*`), one of them a `_Test_` spell that also has a consume event | `NotConsumable` (a cast needs the staff, which passes the spell as ammunition); the `_Test_` spell stays `Started` through its consume event, without the cost item |
+| an event with `consume`, on items that are no consumables | 46 arrows (`Attack_Player_Ranged_Bow_Shoot`), the two Fog Meteor spells (`Attack_Player_Staff_FixedAnim_Meteor_AOE`), two baits (`UseItem_Drop_FoodBait`), 27 voxel brushes (`Building_VoxelBrushInstance_Place`: `PlaceVoxelObjectEvent`) | `Started` through that event, as since 0.2.0-dev.30.3; ammunition and baits without the cost item. What a bow shot or a staff cast does with no weapon in hand was not tested |
 | nothing uses the item up | weapons, tools, building pieces, materials | `NotConsumable` |
 
 **The cost item.** For every use it starts (no vanilla Primary entry names a `costOverride`, and the item is no
@@ -337,7 +338,9 @@ without paying its mana, as before; kiln.log says so once.
   the item's own sequence. `KILN_ERR_WRONG_THREAD` inside a Kiln native call (a sync native, an attachment, a wrap).
   `flags` `KILN_ITEM_USE_COST_ITEM` (since 0.2.0-dev.31.5) writes the slot and the item into `triggerContext.costItem`
   too; an older kiln.abilities answers `KILN_ERR_INVALID_ARGUMENT` for it, a build whose reflection lacks `costItem`
-  `KILN_ERR_UNAVAILABLE`. Pass it for an item's own use unless its entry names a `costOverride`.
+  `KILN_ERR_UNAVAILABLE`. Pass it for an item's own use unless its entry names a `costOverride` or the item is
+  ammunition (`category` Ammunition, or an `ammunitionType` other than Invalid): a staff cast's `PayUsageCost` would take
+  the spell, and the game's payer re-equips a spent ammunition stack (`0x93a5b0`), a path Kiln never starts.
 - Tests: `native/services/abilities/tests/item_use_test.cpp` (the reflection paths against a fake kiln.types, every
   verdict, and `t_item_use` itself against a fake kiln.items, fake components and a fake `TriggerSequence`),
   `managed/tests/Kiln.Abilities.Tests/ItemUseTests.cs` (layout, answers, the sequence pick, the consume check; since

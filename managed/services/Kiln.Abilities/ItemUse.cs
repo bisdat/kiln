@@ -26,7 +26,8 @@ public enum ItemUseResult
     Started = 0,
 
     /// <summary>The item has no sequence its use starts (<c>triggeredBy</c> Primary), or that sequence uses up nothing:
-    /// a weapon, a tool, a material, a staff's spell (ammunition: cast with the staff, not used). Nothing happened.</summary>
+    /// a weapon, a tool, a material, a staff's spell (ammunition: cast with the staff, not used; the few spells and arrows
+    /// with a consume event of their own start). Nothing happened.</summary>
     NotConsumable = 1,
 
     /// <summary>The slot is not in the player's own inventories (backpack, hotbar, equipment), or the player has none.
@@ -81,7 +82,7 @@ public static unsafe partial class Abilities
     /// world's step, where the game's own programs run beside it on other threads): post it to the next tick.</exception>
     /// <exception cref="KilnUnavailableException">kiln.abilities, kiln.items or kiln.gamedata is not here, or this build
     /// cannot start item uses (sequences, or the trigger context's used item in the game's reflection: kiln.log says
-    /// which).</exception>
+    /// which), or, for an item only its PayUsageCost uses up (the repair kit), not its cost item.</exception>
     [ServerOnly]
     [TickThreadOnly]
     [RequiresCapability(AbilitiesCaps.Service)]
