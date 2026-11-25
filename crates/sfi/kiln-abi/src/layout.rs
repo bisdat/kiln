@@ -1259,7 +1259,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentTextInfo, language) == 12);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentTextInfo, language_key) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentTextInfo, detail) == 32);
-    assert!(core::mem::size_of::<crate::services::kiln_content::KilnContentApi>() == 280);
+    assert!(core::mem::size_of::<crate::services::kiln_content::KilnContentApi>() == 288);
     assert!(core::mem::align_of::<crate::services::kiln_content::KilnContentApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, status) == 8);
@@ -1296,6 +1296,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, txn_end) == 256);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, text) == 264);
     assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, text_info) == 272);
+    assert!(core::mem::offset_of!(crate::services::kiln_content::KilnContentApi, pack_mod_reloaded) == 280);
     assert!(core::mem::size_of::<crate::services::kiln_creature_control::KilnControlBodyKey>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_creature_control::KilnControlBodyKey>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_creature_control::KilnControlBodyKey, world_epoch) == 0);

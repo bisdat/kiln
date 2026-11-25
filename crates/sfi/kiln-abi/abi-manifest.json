@@ -1703,6 +1703,7 @@
             "icon_alias": 240,
             "info": 232,
             "label_owner": 176,
+            "pack_mod_reloaded": 280,
             "pack_mods": 184,
             "reload_packs": 136,
             "report": 144,
@@ -1722,7 +1723,7 @@
             "undefine_owner": 224,
             "unsubscribe_ready": 160
           },
-          "size": 280
+          "size": 288
         },
         "KilnContentEntry": {
           "align": 8,
@@ -1814,7 +1815,7 @@
           "size": 40
         }
       },
-      "sha256": "de328014b44f6be147f8d6f2b6db551d0609c871d82a5f2d6702aac7cf3e8cde"
+      "sha256": "ad6fc227de830c2d7152c62c9c87aabc31444bdcda4da26953fc5c9c733cd3b8"
     },
     "native/core/abi/services/kiln_creature_control.h": {
       "function_macros": [],
@@ -10067,7 +10068,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
+    "src/layout.rs": "3a5d6f1b7b30e8d52dfb34f5d4f257c111fb2552703ff6f41cbd39b50f297e58",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10082,7 +10083,7 @@
     "src/services/kiln_client.rs": "76d3a26b8c1dce6a03621ce0d2f10392113fda59a2ac83a5d837939641e73b13",
     "src/services/kiln_combat.rs": "9169650eb5d67472f057e80219789229e51a5d7e17435b5d39af0434c8880006",
     "src/services/kiln_component_changes.rs": "91d043f6b4257e141af61bc4659fcb8a5d3be65dbcdfac9d338dc9910f108288",
-    "src/services/kiln_content.rs": "eb97a1555b61b1f3cb2c23f0b6b9736404b7bc551eb03b2a15a29b19428ba0fb",
+    "src/services/kiln_content.rs": "288d63c1d976da8ee9ee96e0a07ef115f70dc33e87ab91a1bce630cc37eb28b4",
     "src/services/kiln_creature_control.rs": "57bd170993d6d3b4462e01d79eb1b117a91f39fc2ec86dc733d6cf9aea6a080e",
     "src/services/kiln_creatures.rs": "78c648da71e905df9e7b816a6a962393ccde88b559b44858da73beb13a387f45",
     "src/services/kiln_decisions.rs": "45c2c15581e800dcfb3ca6764fdee2760cadc07af59b2ddc5e9691953176d740",
