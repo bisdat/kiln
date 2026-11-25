@@ -86,6 +86,13 @@ double Reader::f64() {
     std::memcpy(&v, &b, 8);
     return v;
 }
+bool Reader::only_padding() const {
+    if (!ok_ || n_ % 4 != 0 || n_ - at_ > 3) return false;
+    for (size_t i = at_; i < n_; ++i)
+        if (p_[i] != 0) return false;
+    return true;
+}
+
 void Reader::raw(void* out, size_t n) {
     const uint8_t* p = need(n);
     if (p) std::memcpy(out, p, n);
@@ -129,9 +136,9 @@ void get_header(Reader& r, Header* h) {
     h->sequence = r.u64();
 }
 
-// The end of a decode: every byte read, the body within 16384.
+// The end of a decode: every byte read but the transport's zero padding (Reader::only_padding), the body within 16384.
 bool finish(Reader& r, size_t n, const char** why) {
-    if (r.ok() && !r.done()) r.fail("the message has bytes after its end");
+    if (r.ok() && !r.done() && !r.only_padding()) r.fail("the message has bytes after its end");
     if (r.ok() && n > kMaxBody) r.fail("the message is longer than 16384 bytes");
     if (!r.ok() && why) *why = r.why();
     return r.ok();

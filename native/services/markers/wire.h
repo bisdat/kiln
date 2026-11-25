@@ -179,6 +179,10 @@ public:
     size_t left() const { return ok_ ? n_ - at_ : 0; }
     size_t at() const { return at_; }
     bool done() const { return ok_ && at_ == n_; }
+    // kiln.net's game transport pads every payload with zeros to a multiple of 4 bytes (net/game.cpp send: the game's
+    // bit writers flush whole 32-bit words), so a message can arrive with up to 3 zero bytes after its end. Those are
+    // the transport's: true when only such padding is left.
+    bool only_padding() const;
     uint8_t u8();
     uint16_t u16();
     uint32_t u32();
