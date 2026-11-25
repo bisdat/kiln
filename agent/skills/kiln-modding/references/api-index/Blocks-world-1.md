@@ -125,6 +125,7 @@ enum: Hearth, Bed, Chair, Table, Bench, Throne, Bathtub, Sink, Toilet, Shower, C
 
 ## Crafting `0.2.15` — Player crafting sources for station, NPC and inventory crafting.
 - `static AddSource(EntityId player, EntityId container, CraftSourceOptions? options = null) -> CraftSourceHandle` — Registers a container for this player, in any base or none.
+- `const LockSourcesCapability = "items.lock_sources" -> string` `0.2.19` — Locks count and pay their required item from links registered with `CraftSourceOptions.Locks`: on a server or host...
 - `const SourcesCapability = "crafting.sources" -> string` — Server payment through the recipe transaction, with player-bound linked storage.
 - `const SourceUiCapability = "crafting.source_ui" -> string` — A Kiln client's crafting screens count the server's linked-storage snapshot.
 
@@ -140,6 +141,7 @@ enum: Deny, Allow
 ## CraftSourceOptions `0.2.15` — Options copied when a linked crafting source is registered.
 - `Filter { get; init; } -> CraftSourceFilter` — Allow-list or deny-list interpretation of `CraftSourceOptions.Items`; default deny.
 - `Items { get; init; } -> IReadOnlyCollection<ItemId>?` — The item set, copied eagerly on registration; null means an empty set.
+- `Locks { get; init; } -> bool` `0.2.19` — Locks too (default false): a lock that requires an item (the game's InteractionLock: a lockpick, a key) also counts...
 - `Order { get; init; } -> CraftSourceOrder` — After the bag/base stock, before or after opted-in station outputs.
 
 ## CraftSourceOrder `0.2.15` — Where linked storage pays, after the bag and the crafting base's stock.
@@ -367,10 +369,3 @@ enum: Fill, Stop, Resume, Select, Collect
 
 ## StationActionStatus `0.2.6` — What a station action did.
 enum: Done, Partial, NotEnough, NoRoom, NotAStation, NoBase, NoRecipe, WrongWorkshop, Unchanged, Locked, Refused, Unavailable, Dropped, TimedOut, QueueFull, Canceled
-
-## StationBlock — A station a player builds: a prop that makes things.
-- `Kind { get; init; } -> StationKind?` — The game's station it starts from: its model, collision and sound, and the menu it opens.
-- `Menu { get; init; } -> PartRef<MenuBlock>?` — The menu it opens.
-- `OwnWorkshop { get; init; } -> bool?` — A workshop of its own, which is what decides which recipes it runs.
-- `Processing { get; init; } -> PartRef<ProcessingBlock>?` — How it works on its own.
-- `Recipes { get; init; } -> IReadOnlyList<RecipeBlock>?` — What it makes, each with `RecipeBlock.Output`.

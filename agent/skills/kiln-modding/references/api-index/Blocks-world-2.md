@@ -1,5 +1,12 @@
 # Blocks (Kiln.Blocks): world, part 2 of 2
 
+## StationBlock — A station a player builds: a prop that makes things.
+- `Kind { get; init; } -> StationKind?` — The game's station it starts from: its model, collision and sound, and the menu it opens.
+- `Menu { get; init; } -> PartRef<MenuBlock>?` — The menu it opens.
+- `OwnWorkshop { get; init; } -> bool?` — A workshop of its own, which is what decides which recipes it runs.
+- `Processing { get; init; } -> PartRef<ProcessingBlock>?` — How it works on its own.
+- `Recipes { get; init; } -> IReadOnlyList<RecipeBlock>?` — What it makes, each with `RecipeBlock.Output`.
+
 ## StationChangedEvent `0.2.6` — A Kiln.Stations call changed a station (the contract's change event of every write): a fill that moved something, a stop, a resume, a selection, a collect.
 - `Action { get; } -> StationAction` — Which call changed it: fill, stop, resume, select or collect.
 - `ByMod { get; } -> string?` — The mod that called; null for Kiln itself.

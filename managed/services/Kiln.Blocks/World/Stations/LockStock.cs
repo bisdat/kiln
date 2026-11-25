@@ -138,21 +138,14 @@ internal static class LockStock
         WatchPlayers();
     }
 
-    /// <summary>A lock-opted link was disposed (any thread). The last one sends the player "unsupported".</summary>
+    /// <summary>A lock-opted link was disposed (any thread). After the last one the server's next tick sends the player
+    /// "unsupported" and ends the session.</summary>
     internal static void Untrack(EntityId player)
     {
         lock (Gate)
         {
-            if (!Sessions.TryGetValue(player.Value, out var s)) return;
-            if (--s.Links > 0) return;
-            Sessions.Remove(player.Value);
-        }
-        try
-        {
-            Deliver(player, Off);
-        }
-        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
-        {
+            if (!Sessions.TryGetValue(player.Value, out var s) || s.Links == 0) return;
+            if (--s.Links == 0) s.Due = true;
         }
     }
 
@@ -230,6 +223,17 @@ internal static class LockStock
         foreach (var (player, s, asked) in due)
         {
             LockStockRows m;
+            bool closing;
+            lock (Gate) closing = s.Links == 0;
+            if (closing)
+            {
+                // the last lock-opted link went: the client's lock checks are the game's own again
+                try { Deliver(player, Off); }
+                catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException) { }
+                lock (Gate)
+                    if (Sessions.TryGetValue(player.Value, out var live) && ReferenceEquals(live, s) && s.Links == 0) Sessions.Remove(player.Value);
+                continue;
+            }
             try
             {
                 m = Build(player, asked);

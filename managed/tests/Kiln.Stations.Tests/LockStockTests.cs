@@ -90,6 +90,8 @@ public sealed class LockStockTests
             sent.Clear();
             // the last lock-opted link goes: "unsupported" (the game's own lock checks again)
             source.Dispose();
+            Assert.Empty(sent);  // any thread: the server's next tick sends it
+            h.Run(() => LockStock.Pump(200));
             Assert.False(Assert.Single(sent).Rows.Supported);
             Assert.False(LockStock.SessionOf(player.Entity).Open);
         }
