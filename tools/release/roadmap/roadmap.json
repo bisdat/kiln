@@ -3483,8 +3483,22 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.32",
+      "version": "0.2.0-dev.31.6",
       "status": "next",
+      "title": "Quieter saves on slow PCs",
+      "summary": "A slow Kiln save writer is logged as a delay, not an error at every autosave.",
+      "patch": true,
+      "features": [
+        {
+          "title": "No more save errors from a slow writer",
+          "text": "When Kiln writes mod data more slowly than the game saves, kiln.log shows one warning and a summary instead of an error at every autosave.",
+          "area": "core"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.32",
+      "status": "planned",
       "title": "Camera, pets and taming",
       "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
       "features": [

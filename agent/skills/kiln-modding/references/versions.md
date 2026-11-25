@@ -36,6 +36,7 @@ been seen in a game.
 | dev.31.3 | 0.2.18 | dev.31.2 | runtime and tools (the default `emf` component ships EMF 0.6.22's unmodified Lua host 1.43.0, used only when an enabled EMF Lua script needs it; `kiln new` installs missing templates on .NET SDKs with the newer "no templates were found" message; Korean translation review (#143)) |
 | dev.31.4 | 0.2.18 | dev.31.2 | launcher only (Crucible "Got a code" without a loaded profile; Settings creates an empty local profile; `profile::create` skips IDs of known games' rootless game pointers) |
 | dev.31.5 | 0.2.18 | dev.31.2 | runtime and launcher (`Abilities.UseItem` covers the repair kit and pays the item's own costs: scrolls and mana grenades take their ManaCost, C flag `KILN_ITEM_USE_COST_ITEM` in `KilnItemUse.flags` (#118); kiln:// and nxm:// links that start the launcher reach its window, warm starts hand over once) |
+| dev.31.6 | 0.2.18 | dev.31.2 | runtime and launcher (a slow Kiln.Saves writer is a delay: one Warn per world, a catch-up Info and a 5-minute summary instead of an [E] per autosave; `Saves.PlayerStoragePersistenceFailure` / `saves.player_storage` report only failed or 2-minute-stuck stagings; the launcher no longer counts the old line) |
 
 Every API bump since dev.27 was additive: no public member was removed or changed.
 
