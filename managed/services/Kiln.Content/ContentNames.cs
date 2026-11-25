@@ -13,7 +13,12 @@ internal static class ContentNames
     /// its own (its base item's, or its "icon" item's; null until it is in a world), the item it was cloned from, its
     /// display name, and its names per language as the definition gives them.</summary>
     internal sealed record Def(uint Id, Guid Guid, Guid? IconGuid, Guid? BaseGuid, string? DisplayName,
-        IReadOnlyDictionary<string, string> Names, bool HasIconFile);
+        IReadOnlyDictionary<string, string> Names, bool HasIconFile)
+    {
+        /// <summary>Its descriptions per language as the definition gives them (since 0.2.0-dev.31.13): the texts' and, as
+        /// <c>"*"</c>, the definition's own <c>description</c>. An empty one is "no description" (not the base item's).</summary>
+        public IReadOnlyDictionary<string, string> Descriptions { get; init; } = new Dictionary<string, string>();
+    }
 
     private static readonly object Gate = new();
     private static Dictionary<uint, Def> _defs = new();
@@ -116,17 +121,22 @@ internal static class ContentNames
             if (Str(e, "kind") != "item" || !Guid.TryParse(Str(e, "guid"), out var guid)) continue;
             var id = NewContent.IdOf(guid);
             var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var descriptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string? display = Str(e, "displayName");
             if (e.TryGetProperty("definition", out var body) && body.ValueKind == JsonValueKind.Object)
             {
                 display ??= Str(body, "displayName");
+                if (Str(body, "description") is { } all) descriptions["*"] = all;
                 if (body.TryGetProperty("texts", out var texts) && texts.ValueKind == JsonValueKind.Object)
                     foreach (var t in texts.EnumerateObject())
-                        if (t.Value.ValueKind == JsonValueKind.Object && Str(t.Value, "name") is { Length: > 0 } n)
-                            names[t.Name.Trim()] = n;
+                    {
+                        if (t.Value.ValueKind != JsonValueKind.Object) continue;
+                        if (Str(t.Value, "name") is { Length: > 0 } n) names[t.Name.Trim()] = n;
+                        if (Str(t.Value, "description") is { } d) descriptions[t.Name.Trim()] = d;
+                    }
             }
             map[id] = new Def(id, guid, Ref(Str(e, "iconGuid")), Ref(Str(e, "baseGuid")), display is { Length: > 0 } ? display : null, names,
-                Str(e, "iconFile") is { Length: > 0 });
+                Str(e, "iconFile") is { Length: > 0 }) { Descriptions = descriptions };
         }
         return map;
     }
@@ -146,6 +156,36 @@ internal static class ContentNames
         foreach (var key in new[] { lang, dash > 0 ? lang[..dash] : "", "*", "en", "en-us" })
             if (key.Length > 0 && d.Names.TryGetValue(key, out var n)) return n;
         return d.DisplayName;
+    }
+
+    /// <summary>A definition's description for a game language, in <see cref="NameFor"/>'s order (that language, its primary
+    /// language, <c>"*"</c>, English): the text, <c>""</c> for "no description", or null when the definition gives none (the
+    /// item keeps its base item's then). Since 0.2.0-dev.31.13.</summary>
+    internal static string? DescriptionFor(Def d, string language)
+    {
+        var lang = (language ?? "").Trim().Replace('_', '-').ToLowerInvariant();
+        var dash = lang.IndexOf('-');
+        foreach (var key in new[] { lang, dash > 0 ? lang[..dash] : "", "*", "en", "en-us" })
+            if (key.Length > 0 && d.Descriptions.TryGetValue(key, out var text)) return text;
+        return null;
+    }
+
+    /// <summary>Kiln.Items' <c>Items.Description</c> asks this (by reflection) for a new item's description: its definition's,
+    /// else its base item's in the same language. Null: none, or no new item (yet) by this id. Since 0.2.0-dev.31.13.</summary>
+    internal static string? DescriptionOf(uint id, string language)
+    {
+        if (Find(id) is not { } d) return null;
+        if (DescriptionFor(d, language) is { } text) return text.Trim() is { Length: > 0 } t ? t : null;
+        if (d.BaseGuid is not { } b || _depth > 4) return null;
+        _depth++;
+        try
+        {
+            return Items.Description(new ItemId(NewContent.IdOf(b)), language);
+        }
+        finally
+        {
+            _depth--;
+        }
     }
 
     [ThreadStatic] private static int _depth;

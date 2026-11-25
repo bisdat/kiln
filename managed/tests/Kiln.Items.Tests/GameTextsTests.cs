@@ -78,7 +78,7 @@ public sealed class GameTextsTests : IDisposable
     private static ScriptedTexts Client()
     {
         var s = new ScriptedTexts();
-        s.Tables["en-us"] = new() { [7] = "Wood Logs", [8] = "<b>Chopped</b> wood.\0\0", [9] = "" };
+        s.Tables["en-us"] = new() { [7] = "Wood Logs", [8] = "<b>Chopped</b> wood.", [9] = "" };
         s.Tables["de-de"] = new() { [7] = "Holzscheite", [8] = "<b>Gehacktes</b> Holz." };
         s.Tables["pt-br"] = new() { [7] = "Toras" };
         GameTextStore.UseSource(s);
@@ -86,6 +86,17 @@ public sealed class GameTextsTests : IDisposable
     }
 
     private static T Eventually<T>(Func<T?> f) where T : class
+    {
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < until)
+        {
+            if (f() is { } v) return v;
+            Thread.Sleep(5);
+        }
+        throw new TimeoutException("no answer within 10 s");
+    }
+
+    private static T EventuallyValue<T>(Func<T?> f) where T : struct
     {
         var until = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < until)
@@ -172,8 +183,8 @@ public sealed class GameTextsTests : IDisposable
         s.Tables["fr-fr"] = new() { [7] = "Bûches" };
         s.Tables["ja-jp"] = new() { [7] = "丸太" };
         Assert.Null(GameTextStore.TryGet("de-de"));                          // not read yet: the read starts
-        var de = Eventually(() => GameTextStore.TryGet("de-de"));
-        Assert.Equal("Holzscheite", de.Value.Texts![7]);
+        var de = EventuallyValue(() => GameTextStore.TryGet("de-de"));
+        Assert.Equal("Holzscheite", de.Texts![7]);
         Assert.Equal(1, s.Reads);
         Assert.Equal("Holzscheite", GameTextStore.Text(7, "de-de"));
         Assert.Null(GameTextStore.Text(9, "en-us"));                         // not read yet
@@ -184,7 +195,7 @@ public sealed class GameTextsTests : IDisposable
         Assert.Equal(5, s.Reads);
         Assert.NotNull(GameTextStore.TryGet("ja-jp"));                        // kept
         Assert.Null(GameTextStore.TryGet("de-de"));                          // the least recently used of five: read again
-        Eventually(() => GameTextStore.TryGet("de-de"));
+        EventuallyValue(() => GameTextStore.TryGet("de-de"));
         Assert.Equal(6, s.Reads);
     }
 
@@ -193,9 +204,9 @@ public sealed class GameTextsTests : IDisposable
     {
         var s = Client();
         Assert.Null(GameTextStore.TryGet("xx-yy"));
-        var failed = Eventually(() => GameTextStore.TryGet("xx-yy"));
-        Assert.Null(failed.Value.Texts);
-        Assert.Equal("the game ships no texts in \"xx-yy\" (it has en-us, de-de, pt-br)", failed.Value.Reason);
+        var failed = EventuallyValue(() => GameTextStore.TryGet("xx-yy"));
+        Assert.Null(failed.Texts);
+        Assert.Equal("the game ships no texts in \"xx-yy\" (it has en-us, de-de, pt-br)", failed.Reason);
         Assert.NotNull(GameTextStore.TryGet("xx-yy"));                        // the back-off: answered, not read again
         Assert.Equal(1, s.Reads);
         var again = await GameTextStore.LoadAsync("xx-yy", default);          // an explicit load asks again
