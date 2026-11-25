@@ -336,7 +336,8 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 }
 
 // What S11 does at resources-ready: lower the sections, compose, install.
-void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}) {
+void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}, const std::string& rollback = "",
+           const std::vector<std::string>& left_out = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -369,6 +370,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
         g_last_report = r;
         ++g_reports;
     };
+    in.rollback = rollback, in.left_out = left_out;  // a rolled-back start (stage.h LiveHandoff::rollback, left_out)
     registry_live_install(std::move(in));
 }
 
@@ -815,6 +817,33 @@ void save_checks_at_world_load() {
     g_registry_stack_guard = &fake_guard, g_guard_ok = true;
 }
 
+// review of registry-rollback: a start on a rolled-back plan. A pack reload's changed registry section is RestartRequired, not
+// composed over the plan's edits; a mod the plan leaves out has its live changes RestartRequired too; a plan mod's are applied.
+void rolled_back_start_live() {
+    world();
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 20}]}})"}};
+    auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files, {}, std::string(64, 'a'), {"later"});
+    registry_live_world_begin();
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20, "the plan's edit is written at the world's load");
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 40}]}})";
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20 && reported("RestartRequired: this start runs on the rolled-back registry plan aaaaaaaaaaaa"),
+          "a pack reload's changed section is not composed over the plan: RestartRequired");
+    uint64_t h = 0;
+    RegistryLiveReply reply;
+    check(registry_live_begin(88, "later", 4, &h) == KILN_OK, "begin (a mod the plan leaves out)");
+    registry_live_submit(88, h, R"({"ir":1,"mod":"later","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    check(registry_live_commit(88, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::RestartRequired && at<uint32_t>(WOOD_AT) == 20,
+          "a left-out mod's live change is RestartRequired, nothing written (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    uint64_t h2 = 0;
+    check(registry_live_begin(77, "m", 4, &h2) == KILN_OK, "begin (a mod of the plan)");
+    registry_live_submit(77, h2, R"({"ir":1,"mod":"m","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":30}]})", &reply, nullptr);
+    check(registry_live_commit(77, h2, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 30,
+          "a plan mod's live change is applied over the plan (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+}
+
 int main() {
     std::vector<std::string> errs;
     g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
@@ -838,6 +867,7 @@ int main() {
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
         {"save_checks_at_world_load", save_checks_at_world_load},
+        {"rolled_back_start_live", rolled_back_start_live},
     };
     int failed = 0;
     for (auto& [name, fn] : tests) {

@@ -385,6 +385,7 @@ struct Runner::Impl {
     // and the plan this start runs on when a rollback applied (its hash and its own "previous")
     json index = json::object();
     std::string rollback, rollback_previous;
+    std::vector<std::string> left_out;  // a rolled-back start's mods the plan does not hold (registry.json rollback.leftOut)
     // registry.json "saves" (saves.h): this start's notes from the stage itself (the max stack against the plan the last world
     // ran on), and the lines already in kiln.log (each once per start)
     std::vector<saves::SaveNote> stage_notes;
@@ -1297,6 +1298,8 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     d.meta.rollback = rb;
     if (rolled) {
         d.rollback = rb.value("plan", std::string());
+        for (const json& m : rb.value("leftOut", json::array()))
+            if (m.is_string()) d.left_out.push_back(m.get<std::string>());
         d.rollback_previous = rb.contains("previous") && rb["previous"].is_string() ? rb["previous"].get<std::string>() : std::string();
         rb.erase("previous");
         d.meta.rollback = rb;
@@ -1483,6 +1486,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         for (const auto& [h, s] : d.ready_subs) ready.push_back(h);
         live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
         live.rollback = d.rollback;
+        live.left_out = d.left_out;
         live.check = [this](Batch* b, std::vector<Refusal>* refused) {
             std::lock_guard l2(d_->mu);
             refuse_unmapped(d_->rm, d_->schema, b, refused, d_->env.entry_support);

@@ -598,6 +598,7 @@ void bind_service() {
         in.changed = h.changed;
         in.prepare = h.prepare;
         in.rollback = h.rollback;
+        in.left_out = h.left_out;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         if (!in.result.definitions.empty()) registry_entries_prepare(&in);
         const Result reconciled = in.result;

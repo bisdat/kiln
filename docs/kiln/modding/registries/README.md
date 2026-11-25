@@ -348,8 +348,9 @@ the highest stacks are unknown Kiln's stack guard goes on. An index entry that n
   callbacks (those are not called; the plan holds their edits). Old paths (packs, boot patches, `OnBoot`, hooks) run as always;
 - registry.json `rollback` says `applied`, lists every value that changed back (`changedBack`: field, from, to; also in
   kiln.log) and the mods with registry edits the plan does not hold (`leftOut`: not applied while the rollback holds);
-- `ModLoad`, `WorldLoad`, `HotReload` passes and `Registry.Change` still run as the mods make them (they are not part of a
-  plan), and a pack reload's changed `registry` section is `RestartRequired`.
+- `ModLoad`, `WorldLoad`, `HotReload` passes and `Registry.Change` of the plan's mods still run as the mods make them (they
+  are not part of a plan); a left-out mod's live changes are `RestartRequired`, and so is a pack reload's changed `registry`
+  section.
 
 The plan is **refused whole**, and the start runs the mods' current edits (registry.json `rollback.state` `refused`, with the
 reason, and a kiln.log warning), when the request cannot be read, the plan file is missing, was written by an older Kiln

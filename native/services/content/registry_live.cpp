@@ -1793,7 +1793,13 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
         std::string reason;
         const auto* reg = g.in->schema->registry(edit.registry);
         const auto* field = reg ? reg->field(edit.element.on ? edit.element.list : edit.field) : nullptr;
-        if (edit.entry != registry::EntryOp::None || !edit.raw.empty()) reason = "live changes use mapped Kiln fields, not entry add/remove or raw game paths";
+        const bool left_out = !g.in->rollback.empty() && std::find(g.in->left_out.begin(), g.in->left_out.end(), change->mod) != g.in->left_out.end();
+        if (left_out) {
+            // review: a mod the rolled-back plan leaves out has none of its registry edits applied, live ones neither
+            change->restart = true;
+            reason = "RestartRequired: this start runs on the rolled-back registry plan " + g.in->rollback.substr(0, 12) + ", which leaves mod " + change->mod +
+                     " out (registry.json rollback.leftOut); its registry edits apply after kilnctl registry rollback --clear and a restart";
+        } else if (edit.entry != registry::EntryOp::None || !edit.raw.empty()) reason = "live changes use mapped Kiln fields, not entry add/remove or raw game paths";
         else if (field && field->applies == registry::Applies::Restart) { change->restart = true; reason = "RestartRequired: " + edit.registry + "." + field->name + " is read at game start"; }
         else if (field && !g.in->decoded.count(edit.registry + "." + field->name)) { change->restart = true; reason = "RestartRequired: the base did not read " + edit.registry + "." + field->name + " at start"; }
         if (reason.empty()) return false;

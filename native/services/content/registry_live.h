@@ -74,6 +74,9 @@ struct RegistryLive {
     // Not empty: the start runs on this rolled-back plan (stage.h LiveHandoff::rollback). mods hold the plan's edits; a pack
     // reload's changed registry sections do not replace them and are reported RestartRequired until the rollback is cleared.
     std::string rollback;
+    // The mods that plan leaves out (registry.json rollback.leftOut): their live changes are RestartRequired until the rollback
+    // is cleared, like their GameStart edits.
+    std::vector<std::string> left_out;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).

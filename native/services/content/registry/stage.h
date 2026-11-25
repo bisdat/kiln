@@ -129,6 +129,8 @@ struct LiveHandoff {
     // Not empty: this start runs on a rolled-back plan (its hash; kiln/data/content/registry/rollback.json). The inputs are the
     // plan's edits: a pack reload does not replace them (it is reported RestartRequired until the rollback is cleared).
     std::string rollback;
+    // review: the mods a rolled-back start leaves out (registry.json rollback.leftOut): their live changes are RestartRequired too.
+    std::vector<std::string> left_out;
 };
 
 class Runner {
