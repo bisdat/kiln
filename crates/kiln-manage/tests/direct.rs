@@ -43,6 +43,12 @@ fn client(path: &Path, source: &str, library: Option<PathBuf>) -> GameInstall {
     }
 }
 
+/// `/games/Enshrouded-old/enshrouded.exe` as this host joins it (a Linux runner's command line names the host path;
+/// the tests build Linux commands on a Windows host too, where the join is `\`).
+fn old_exe() -> String {
+    Path::new("/games/Enshrouded-old").join("enshrouded.exe").display().to_string()
+}
+
 fn env<'a>(c: &'a DirectCommand, k: &str) -> Option<&'a str> {
     c.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
 }
@@ -66,7 +72,7 @@ fn proton_runs_the_exe_with_compatdata_a_client_folder_and_the_proxy_override() 
     let proton = RunnerInfo { kind: RunnerKind::Proton, path: "/tools/GE-Proton10-25".into(), label: "GE-Proton10-25".into(), source: "compat".into(), proton: None };
     let c = direct::command_for(false, &g, Some(&proton), Some(Path::new("/pfx/g-direct")), Some(Path::new("/steam")), false).unwrap();
     assert_eq!(c.program, Path::new("/tools/GE-Proton10-25/proton"));
-    assert_eq!(c.args, vec!["run".to_string(), "/games/Enshrouded-old/enshrouded.exe".to_string()]);
+    assert_eq!(c.args, vec!["run".to_string(), old_exe()]);
     assert_eq!(c.cwd, Path::new("/games/Enshrouded-old"));
     assert_eq!(env(&c, "STEAM_COMPAT_DATA_PATH"), Some("/pfx/g-direct"));
     assert_eq!(env(&c, "STEAM_COMPAT_CLIENT_INSTALL_PATH"), Some("/steam"));
@@ -96,7 +102,7 @@ fn wine_runs_the_exe_with_its_prefix_and_keeps_mscoree() {
     let wine = RunnerInfo { kind: RunnerKind::Wine, path: "/usr/bin/wine".into(), label: "Wine".into(), source: "system".into(), proton: None };
     let c = direct::command_for(false, &g, Some(&wine), Some(Path::new("/pfx/mine")), None, false).unwrap();
     assert_eq!(c.program, Path::new("/usr/bin/wine"));
-    assert_eq!(c.args, vec!["/games/Enshrouded-old/enshrouded.exe".to_string()]);
+    assert_eq!(c.args, vec![old_exe()]);
     assert_eq!(c.cwd, Path::new("/games/Enshrouded-old"));
     assert_eq!(env(&c, "WINEPREFIX"), Some("/pfx/mine"));
     let o = env(&c, "WINEDLLOVERRIDES").unwrap();
@@ -143,8 +149,12 @@ fn own_prefixes_live_outside_the_data_folder() {
     use kiln_manage::paths::DataEnv;
     let e = DataEnv { home: Some("/h".into()), ..Default::default() };
     assert_eq!(direct::own_prefix(&e, "abc"), Some(PathBuf::from("/h/.local/share/kiln-prefixes/abc")));
-    let e = DataEnv { home: Some("/h".into()), xdg_data_home: Some("/x".into()), ..Default::default() };
-    assert_eq!(direct::own_prefix(&e, "abc"), Some(PathBuf::from("/x/kiln-prefixes/abc")));
+    // XDG_DATA_HOME counts when it is absolute (on a Windows host, where these Linux rules are tested too, that needs a drive)
+    let x = if cfg!(windows) { r"C:\x" } else { "/x" };
+    let e = DataEnv { home: Some("/h".into()), xdg_data_home: Some(x.into()), ..Default::default() };
+    assert_eq!(direct::own_prefix(&e, "abc"), Some(Path::new(x).join("kiln-prefixes/abc")));
+    let e = DataEnv { home: Some("/h".into()), xdg_data_home: Some("relative/x".into()), ..Default::default() };
+    assert_eq!(direct::own_prefix(&e, "abc"), Some(PathBuf::from("/h/.local/share/kiln-prefixes/abc")), "a relative XDG_DATA_HOME is ignored");
     assert_ne!(direct::prefixes_root(&e), e.default_root().ok(), "never the data folder itself");
     assert_eq!(direct::own_prefix(&DataEnv { windows: true, ..Default::default() }, "abc"), None);
 }
@@ -156,7 +166,7 @@ fn umu_runs_the_exe_in_the_prefix_with_umus_default_game_id() {
         proton: Some("/tools/GE-Proton10-25".into()) };
     let c = direct::command_for(false, &g, Some(&umu), Some(Path::new("/pfx/g-direct/pfx")), None, false).unwrap();
     assert_eq!(c.program, Path::new("/usr/bin/umu-run"));
-    assert_eq!(c.args, vec!["/games/Enshrouded-old/enshrouded.exe".to_string()]);
+    assert_eq!(c.args, vec![old_exe()]);
     assert_eq!(c.cwd, Path::new("/games/Enshrouded-old"));
     assert_eq!(env(&c, "WINEPREFIX"), Some("/pfx/g-direct/pfx"), "umu is given the prefix itself");
     assert_eq!(env(&c, "PROTONPATH"), Some("/tools/GE-Proton10-25"), "a Proton found here: umu downloads nothing");

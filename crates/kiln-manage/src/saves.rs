@@ -153,10 +153,20 @@ pub fn slot_kind(file: &str) -> SlotKind {
     }
 }
 
+#[cfg(all(test, windows))]
+thread_local! {
+    /// Tests on Windows: a temp folder standing in for the user's real Saved Games folder ([`windows_saved_games`]).
+    pub(crate) static TEST_SAVED_GAMES: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The Windows user's Saved Games folder (its known-folder location, which may have been moved off `%USERPROFILE%`).
 fn windows_saved_games() -> Option<PathBuf> {
     #[cfg(windows)]
     {
+        #[cfg(test)]
+        if let Some(p) = TEST_SAVED_GAMES.with(|p| p.borrow().clone()) {
+            return Some(p);
+        }
         crate::steam::win::saved_games()
     }
     #[cfg(not(windows))]

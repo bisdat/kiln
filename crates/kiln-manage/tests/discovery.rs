@@ -345,6 +345,17 @@ fn chained_loader_launch_advice() {
     let f = fake_steam("chained-advice");
     let roots = [root_of(&f)];
     let install = game::inspect_with(&f.client, &roots, &f.home.join("data")).unwrap();
+    if cfg!(windows) {
+        // Windows runs the game itself: no Wine, so no WINEDLLOVERRIDES to advise, with a chained loader or without
+        // (Windows loads dinput8.dll and xinput9_1_0.dll beside the exe first).
+        assert_eq!(install.platform, Platform::Windows);
+        assert!(game::launch_options_info(&install, &roots).is_none());
+        write(&f.client.join("xinput9_1_0.dll"), kiln_manage::pe::build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b""));
+        write(&f.client.join("kiln/chain.ini"), "[chain]\n..\\XINPUT9_1_0.DLL\n");
+        assert!(game::launch_options_info(&install, &roots).is_none());
+        fs::remove_dir_all(f.home).unwrap();
+        return;
+    }
     let info = game::launch_options_info(&install, &roots).unwrap();
     assert!(info.has_dll_override && info.advice.is_none());
     write(&f.client.join("xinput9_1_0.dll"), b"fixture");

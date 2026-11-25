@@ -127,7 +127,8 @@ fn settings_stay_by_default_and_go_with_the_last_version_when_asked() {
     assert_eq!(record["kind"], "kiln");
     assert_eq!(record["id"], "night-sky");
     assert_eq!(record["items"].as_array().unwrap().len(), r.removed.len());
-    assert!(record["items"].as_array().unwrap().iter().any(|i| i["from"].as_str().unwrap().ends_with("profiles/play/config/night-sky-server.json")));
+    // "from" is where the file was, as this OS writes it (so it can be put back by hand): compared as a path
+    assert!(record["items"].as_array().unwrap().iter().any(|i| Path::new(i["from"].as_str().unwrap()).ends_with("profiles/play/config/night-sky-server.json")));
 }
 
 #[test]

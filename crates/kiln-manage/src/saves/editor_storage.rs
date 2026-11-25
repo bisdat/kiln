@@ -349,10 +349,19 @@ mod tests {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let root = std::env::temp_dir().join(format!("kiln-storage-return-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            // A LOCAL character: in the prefix's Saved Games through Proton on Linux; on Windows in the user's Saved Games
+            // folder, a temp folder standing in for it (saves::TEST_SAVED_GAMES, this thread only).
+            let (platform, prefix, saved_games) = if cfg!(windows) {
+                (Platform::Windows, None, root.join("Saved Games"))
+            } else {
+                (Platform::Proton, Some(root.join("prefix")), root.join("prefix/drive_c/users/steamuser/Saved Games"))
+            };
+            #[cfg(windows)]
+            crate::saves::TEST_SAVED_GAMES.with(|p| *p.borrow_mut() = Some(saved_games.clone()));
             let install = GameInstall { id: "storage-test".into(), kind: GameKind::Client, path: root.join("game"), exe: "enshrouded.exe".into(),
-                app_id: crate::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: Some(root.join("prefix")),
+                app_id: crate::CLIENT_APP_ID, library: None, platform, prefix,
                 build_id: None, exe_sha256: None, steam_flavor: None, path_mode: PathMode::Copy, source: "manual".into() };
-            let target = install.prefix.as_ref().unwrap().join("drive_c/users/steamuser/Saved Games/keen games/Enshrouded/0/character0.ksd");
+            let target = saved_games.join("keen games/Enshrouded/0/character0.ksd");
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             let mut old = vec![0; 49]; old[..4].copy_from_slice(b"SV2C"); old[12..28].fill(1); old[48] = 1;
             let mut new = old.clone(); new[48] = 2;
