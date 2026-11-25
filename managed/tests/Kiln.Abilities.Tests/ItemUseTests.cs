@@ -141,7 +141,7 @@ public sealed unsafe class ItemUseTests
     {
         Assert.Equal(new Abilities.ItemUseEntry(RepairKit, false), Abilities.PrimaryUse(JsonNode.Parse($$"""
             {"path": "sequences", "value": [{"triggeredBy": "Primary", "requirements": [], "sequence": "{{RepairKit}}",
-              "costOverride": "00000000-0000-0000-0000-000000000000"}]}
+              "costOverride": "none"}]}
             """)));
         Assert.Equal(new Abilities.ItemUseEntry(Eat, true), Abilities.PrimaryUse(JsonNode.Parse($$"""
             [{"triggeredBy": "Primary", "requirements": [], "sequence": "{{Eat}}", "costOverride": "{{Drink}}"}]
@@ -149,6 +149,7 @@ public sealed unsafe class ItemUseTests
         Assert.False(Abilities.HasCostOverride(null));
         Assert.False(Abilities.HasCostOverride(JsonValue.Create("")));
         Assert.False(Abilities.HasCostOverride(JsonValue.Create("0")));
+        Assert.False(Abilities.HasCostOverride(JsonValue.Create("none")));  // kiln.gamedata's zero reference (lab, the repair kit)
         Assert.False(Abilities.HasCostOverride(JsonValue.Create(Guid.Empty.ToString())));
         Assert.True(Abilities.HasCostOverride(JsonValue.Create(Drink.ToString())));
         Assert.True(Abilities.HasCostOverride(JsonValue.Create("Ability_Blink_Cost")));

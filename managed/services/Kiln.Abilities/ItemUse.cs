@@ -245,13 +245,13 @@ public static unsafe partial class Abilities
         return any;
     }
 
-    /// <summary>A <c>costOverride</c> that names an item: a GUID other than zero, or a name; none, empty or zero is
-    /// none.</summary>
+    /// <summary>A <c>costOverride</c> that names an item: a GUID other than zero, or a name; kiln.gamedata's <c>"none"</c>
+    /// (how it writes a zero reference), empty or zero is none.</summary>
     internal static bool HasCostOverride(JsonNode? value)
     {
         if (value is null) return false;
         if (value is not JsonValue v || !v.TryGetValue<string>(out var text)) return true;  // not a plain reference: assume one
-        if (string.IsNullOrWhiteSpace(text) || text == "0") return false;
+        if (string.IsNullOrWhiteSpace(text) || text is "0" or "none") return false;
         return !Guid.TryParse(text, out var g) || g != Guid.Empty;
     }
 }
