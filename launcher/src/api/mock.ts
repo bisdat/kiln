@@ -139,6 +139,8 @@ let preStart: PreStart | null = null;
 const otherFolder: Record<string, { id: string; root?: string | null } | null> = {};
 /** GameStatus.newerMods per game (tests: `__kilnMock.setNewerMods`). */
 const newerMods: Record<string, NewerKilnMod[]> = {};
+/** Steam is updating the game (GameStatus.steamUpdating; tests: `__kilnMock.setSteamUpdating(true)`). */
+const steamUpdating: Record<string, boolean> = {};
 /** GameStatus.graphicsTools per game (tests: `__kilnMock.setGraphicsTools`). */
 const graphicsTools: Record<string, GraphicsToolNote[]> = {};
 /** GameStatus.graphicsStepAside per game (tests: `__kilnMock.setGraphicsStepAside`). The preview's Steam client has
@@ -695,7 +697,7 @@ function status(gameId: string): GameStatus {
   const g = gameOf(gameId);
   const r = live(gameId);
   return {
-    id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: false, runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
+    id: g.id, running: !!r, pid: r?.pid ?? null, started: r ? new Date(r.at - (noProxy ? 31_000 : 0)).toISOString() : null, steamUpdating: !!steamUpdating[gameId], runtime: withMissing(runtime[gameId] ?? { installed: false, receipt: null, proxy: null, modified: [], upgradeAvailable: null }, g.kind),
     activeProfile: otherFolder[gameId] ? null : activations[gameId]?.profileId ?? null,
     ...(otherFolder[gameId] ? { otherFolderProfile: otherFolder[gameId]! } : {}), playOncePending: !!r && r.mode !== "profile" && (noProxy || Date.now() - r.at < 2500),
     boot: bootFor(gameId), launchOptions: MODE === "native-runner"
@@ -2494,6 +2496,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
     const values = setPath(f.values, path, value);
     Object.assign(f, { values, text: JSON.stringify(values, null, 2) + "\n", modified: now() });
   },
+  setSteamUpdating: (on: boolean, gameId = "client-steam") => { steamUpdating[gameId] = on; emitGame(gameId, "status"); },
   setUpgradeAvailable: (version: string | null, gameId = "client-steam") => { if (runtime[gameId]) runtime[gameId] = { ...runtime[gameId], upgradeAvailable: version }; emitGame(gameId, "status"); },
   /** (dev.29) The game's Kiln came with a test build and the launcher ships the older `to` (InstallState.switchBack);
    *  null clears it. An install (runtime_install) clears it too, as the backend's next status does. */

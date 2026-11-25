@@ -2,7 +2,7 @@
 // by itself after the restart.
 import { describe, expect, test } from "bun:test";
 import type { GameStatus, InstallState } from "../src/api/commands";
-import { applyKey, applyWait, restartHold, runtimeToApply } from "../src/shell/updateApply";
+import { applyKey, applyWait, gameBehind, restartHold, runtimeToApply } from "../src/shell/updateApply";
 import { unsavedKind } from "../src/shell/unsaved";
 
 const rt = (p: Partial<InstallState>): InstallState => ({ installed: true, receipt: null, proxy: null, modified: [], upgradeAvailable: null, ...p } as InstallState);
@@ -50,5 +50,35 @@ describe("the Kiln the update brought", () => {
     expect(applyWait(status({ running: true }))).toBe("running");
     expect(applyWait(status({ steamUpdating: true }))).toBe("steam");
     expect(applyWait(status({}))).toBeNull();
+  });
+});
+
+describe("Play's Update game banner (0.2.0-dev.31.12)", () => {
+  const has = "0.2.0-dev+1", next = "0.2.0-dev+2";
+  const receipt = { runtime: { version: has } } as InstallState["receipt"];
+  const behind = (p: Partial<GameStatus>, r: Partial<InstallState>, o: Parameters<typeof gameBehind>[1] = { channel: false }) =>
+    gameBehind(status(p, { receipt, ...r }), o);
+  test("the game's Kiln older than the launcher's: both versions, nothing holds it", () => {
+    expect(behind({}, { upgradeAvailable: next })).toEqual({ has, next, hold: null, failed: false });
+  });
+  test("none when equal or newer (no offer), without Kiln, after a switch back, under the channel notice, before the status", () => {
+    expect(behind({}, { upgradeAvailable: null })).toBeNull();
+    expect(behind({}, { upgradeAvailable: has })).toBeNull();
+    expect(behind({}, { installed: false, upgradeAvailable: next })).toBeNull();
+    expect(behind({}, { upgradeAvailable: next, switchBack: { from: "0.2.1-dev+1", to: next } })).toBeNull();
+    expect(behind({}, { upgradeAvailable: next }, { channel: true })).toBeNull();
+    expect(gameBehind(undefined, { channel: false })).toBeNull();
+  });
+  test("held while a change runs, then the game runs, then it starts, then Steam updates it", () => {
+    const running = { state: "running", version: next };
+    expect(behind({ running: true, steamUpdating: true }, { upgradeAvailable: next }, { channel: false, starting: true, change: running })?.hold).toBe("applying");
+    expect(behind({ running: true, steamUpdating: true }, { upgradeAvailable: next }, { channel: false, starting: true })?.hold).toBe("running");
+    expect(behind({ steamUpdating: true }, { upgradeAvailable: next }, { channel: false, starting: true })?.hold).toBe("starting");
+    expect(behind({ steamUpdating: true }, { upgradeAvailable: next })?.hold).toBe("steam");
+  });
+  test("a failed install of this very version is said on it; another change's failure is not", () => {
+    expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "failed", version: next } })?.failed).toBe(true);
+    expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "failed", version: "0.1.9+1" } })?.failed).toBe(false);
+    expect(behind({}, { upgradeAvailable: next }, { channel: false, change: { state: "done", version: next } })?.failed).toBe(false);
   });
 });
