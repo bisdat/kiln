@@ -298,8 +298,9 @@ files ([data-pack caveat](../../services/content.md#multiplayer-registry-and-ski
 | Item/recipe entry add/remove | At least `kiln`; `mod` for custom assets or other client-local content | Definitions and visibility are not just scalar server rules. Existing content/look-alike rules still apply. Loot removal alone remains server-only (`none`). |
 | Unproven/unknown or raw fields | Inspect the field/refusal first | No automatic safety claim; lint does not guess. |
 
-For `items`, `rolled`, `socket`, `staminaCost`, and the read-only `hasDamage` / `hasArmor` are `serverOnly` under the
-current mapping; `block`, `comfort` and `fuel.burnTime` are `unknown` until their read timing is proven. Other item
+For `items`, `rolled`, `socket` and the read-only `hasDamage` / `hasArmor` are `serverOnly` under the current
+mapping (`staminaCost` follows ContentSync like `manaCost`: the server charges it, but a client's tooltip and prediction
+read their own copy); `block`, `comfort` and `fuel.burnTime` are `unknown` until their read timing is proven. Other item
 fields follow ContentSync. `recipes.station` is read-only/server-only; the remaining recipe fields sync except
 `unlock`. `loot`/`drops` never require a client copy. The generated pages are the per-field reference.
 

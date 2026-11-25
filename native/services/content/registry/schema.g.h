@@ -95,7 +95,7 @@ inline constexpr Field kFields[] = {
     {0x00010020u, "items", "armor.shroud", Kind::Int, Kind::Int, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "gear.armor", false, 0u, "", 0, Side::Both, "now"},
     {0x00010021u, "items", "armor.lightning", Kind::Int, Kind::Int, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "gear.armor", false, 0u, "", 0, Side::Both, "now"},
     {0x00010022u, "items", "block", Kind::Float, Kind::Float, true, true, 0.0, 1.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "", "", false, 0u, "", 0, Side::Both, "unknown"},
-    {0x00010023u, "items", "staminaCost", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0, Side::Both, "serverOnly"},
+    {0x00010023u, "items", "staminaCost", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0, Side::Both, "now"},
     {0x00010024u, "items", "manaCost", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0, Side::Both, "now"},
     {0x00010025u, "items", "fuel.burnTime", Kind::Time, Kind::Time, true, true, 0.0, 86400.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "s", "", false, 0u, "", 0, Side::Both, "unknown"},
     {0x00010026u, "items", "comfort", Kind::Int, Kind::Int, true, true, 0.0, 1000.0, 0u, "", "", "", false, Applies::WorldLoad, Ops::Number, "", "", false, 0u, "", 0, Side::Both, "unknown"},

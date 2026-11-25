@@ -58,7 +58,7 @@ Groups of fields:
 | `armor.shroud` | int 0..100000 | now | number | 0.1.0 | mapped | now | The shroud armour the tooltip shows at levels.min. Formula: `gear.armor`. |
 | `armor.lightning` | int 0..100000 | now | number | 0.1.0 | mapped | now | The lightning armour the tooltip shows at levels.min. Formula: `gear.armor`. |
 | `block` | float 0..1 | worldLoad | number | 0.1.0 | unproven: when the game reads the block value is not traced yet | unknown | How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it. |
-| `staminaCost` | float 0..100000 | now | number | 0.1.0 | mapped | serverOnly | The stamina a use costs, at the next payment. |
+| `staminaCost` | float 0..100000 | now | number | 0.1.0 | mapped | now | The stamina a use costs, at the next payment. |
 | `manaCost` | float 0..100000 | now | number | 0.1.0 | mapped | now | The mana a use costs, at the next cast. |
 | `fuel.burnTime` | time s 0..86400 | worldLoad | number | 0.1.0 | unproven: when the game reads the fuel burn time is not traced yet | unknown | How long one item burns. |
 | `comfort` | int 0..1000 | worldLoad | number | 0.1.0 | unproven: when the game reads the comfort value is not traced yet | unknown | The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it. |

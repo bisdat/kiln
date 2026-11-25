@@ -374,7 +374,10 @@ fn registry_only_clients_guidance_tracks_the_edited_fields() {
     check("recipe", "none", "recipes", "duration", Some("kiln"));
     check("balance", "kiln", "balance", "levelCap", Some("mod"));
     check("indexed-balance", "kiln", "balance", "xpPerLevel[2]", Some("mod"));
-    check("server-item", "kiln", "items", "staminaCost", Some("none"));
+    check("server-item", "kiln", "items", "socket", Some("none"));
+    // stamina costs: the server pays them, a client's tooltip and prediction read its own copy (as for mana costs)
+    check("stamina-item", "none", "items", "staminaCost", Some("kiln"));
+    check("good-stamina-item", "kiln", "items", "staminaCost", None);
     check("client-recipe", "kiln", "recipes", "unlock", Some("mod"));
     check("unproven-item", "kiln", "items", "comfort", None);
     check("good-loot", "none", "loot", "stack.max", None);

@@ -67,7 +67,7 @@ public sealed partial class ItemEntry : IRegistryEntry
     public double Block { get => RegistryCells.Double(_c, ItemFields.Block, _i); set => RegistryCells.Set(_c, ItemFields.Block, _i, value); }
 
     /// <summary>The stamina a use costs, at the next payment.</summary>
-    [RegistryField("items.staminaCost", RegistryApplies.Now, JoinedClient = "serverOnly")]
+    [RegistryField("items.staminaCost", RegistryApplies.Now, JoinedClient = "now")]
     public double StaminaCost { get => RegistryCells.Double(_c, ItemFields.StaminaCost, _i); set => RegistryCells.Set(_c, ItemFields.StaminaCost, _i, value); }
 
     /// <summary>The mana a use costs, at the next cast.</summary>

@@ -334,7 +334,7 @@
       "applies": "now",
       "ops": "number",
       "doc": "The stamina a use costs, at the next payment.",
-      "joinedClient": "serverOnly"
+      "joinedClient": "now"
     },
     "manaCost": {
       "type": "float",
