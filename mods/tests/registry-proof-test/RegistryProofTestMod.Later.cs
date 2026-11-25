@@ -29,7 +29,8 @@ public sealed partial class RegistryProofTestMod
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (!(Spawn.Available && Spawn.WorldRunning) && sw.Elapsed.TotalSeconds < 300) await Context.Scheduler.NextTick();
+            while (!(Spawn.Available && Spawn.WorldRunning && Items.Available && Items.Status() is { Read: true }) && sw.Elapsed.TotalSeconds < 300)
+                await Context.Scheduler.NextTick();
             var loaded = 0;
             if (!Spawn.Available || !Spawn.WorldRunning) _noTables = "the lab's world did not run, so the lab loaded no drop table";
             else
