@@ -145,3 +145,34 @@ fn a_failed_recovery_says_no_shroudforge_mod_ran_and_how_to_get_a_clean_copy() {
         "reason":"EML writer is already active or incompatible; refusing a second KFC writer"}}"#, T0 + 5).as_bytes());
     assert!(row(&rows(g), "shroudforge").get("startupFailed").is_none_or(|v| v.is_null()));
 }
+
+/// Review (0.2.0-dev.31.13): after a game update the pass failed and its recovery kept the game's own files (they are a
+/// clean copy the pass did not change; ShroudForge's record says `recovery: kept`). The line said "It put the game data
+/// back", which it did not: it changed no game file. A pair that went back (`recovery: restored`, or a record without
+/// the word, from before 31.13) is still said to be put back.
+#[test]
+fn a_recovery_that_kept_the_game_files_does_not_say_the_game_data_was_put_back() {
+    let t = game("recovery-kept");
+    let g = &t.0;
+    hosted_failure(g);
+    let record = |recovery: Option<&str>| {
+        let mut assets = serde_json::json!({"status": "failed", "phase": "startup", "target": "enshrouded", "completedAt": T0 + 3,
+            "error": "pregame phase failed: debugConsole.toggleKey: Hotkey must be an SDL binding string"});
+        if let Some(recovery) = recovery {
+            assets["recovery"] = recovery.into();
+        }
+        serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "assets": assets})).unwrap()
+    };
+    put(g, "shroudforge/state.json", &record(Some("kept")));
+    let sf = row(&rows(g), "shroudforge").clone();
+    let text = sf["startupFailed"]["text"].as_str().unwrap_or_else(|| panic!("no startupFailed.text on ShroudForge's line: {sf}"));
+    assert!(!text.contains("put the game data back"), "{text}");
+    assert!(text.contains("It changed no game file, and the game started without them"), "{text}");
+    assert!(text.contains("(bone-caller)"), "the mods of the pass are still named: {text}");
+    for recovery in [Some("restored"), None] {
+        put(g, "shroudforge/state.json", &record(recovery));
+        let sf = row(&rows(g), "shroudforge").clone();
+        let text = sf["startupFailed"]["text"].as_str().unwrap();
+        assert!(text.contains("It put the game data back and the game started without them"), "{recovery:?}: {text}");
+    }
+}
