@@ -101,6 +101,7 @@ public readonly record struct PadState(int Controller, bool Connected, PadButton
 /// if (pad.Connected &amp;&amp; pad.RightTrigger &gt; 0.5f) Climb(pad.LeftStick);
 /// </code></example>
 [ClientOnly]
+[AnyThread]
 public static unsafe class PadInput
 {
     /// <summary>How many controllers XInput has: 0 to 3.</summary>
