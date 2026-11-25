@@ -13,7 +13,14 @@ internal static class SequenceGuard
     private static Dictionary<Guid, List<GameDataEntry>>? _subs;
 
     /// <summary>The first event of a sequence, in any of its sub-sequences, that consumes the used item, as "sub-sequence: type"; or null.</summary>
-    public static string? ConsumingEvent(Guid sequence)
+    public static string? ConsumingEvent(Guid sequence) => FirstIn(sequence, ConsumingEventIn);
+
+    /// <summary>The first PayUsageCost event of a sequence, in any of its sub-sequences, with <c>consume</c> on, as
+    /// "sub-sequence: type"; or null. It takes the trigger context's cost item, which a use of the item itself puts there
+    /// (GitHub #118: the repair kit is used up this way and no other way).</summary>
+    public static string? PayingEvent(Guid sequence) => FirstIn(sequence, PayingEventIn);
+
+    private static string? FirstIn(Guid sequence, Func<JsonNode?, string?> find)
     {
         if (!Content.GameDataAvailable) return null;
         var status = Content.Status();
@@ -34,21 +41,33 @@ internal static class SequenceGuard
             }
             if (!_subs.TryGetValue(sequence, out var subs)) return null;
             foreach (var sub in subs)
-                if (ConsumingEventIn(sub.GetJson("events")?["value"]) is { } type)
+                if (find(sub.GetJson("events")?["value"]) is { } type)
                     return $"{sub.Name}: {type}";
             return null;
         }
     }
 
     /// <summary>The type of the first event of one sub-sequence's events (kiln.gamedata's JSON array) that consumes the used
-    /// item, or null. PayUsageCost does not count: the cost payer checks for no item (0x40d00), and staff attacks have it
-    /// on.</summary>
+    /// item, or null. PayUsageCost does not count: it takes the cost item, not the used item, and the cost payer checks for
+    /// no item (0x40d00), so PlaySequence plays it safely (staff attacks have it on); <see cref="PayingEventIn"/> finds
+    /// it.</summary>
     internal static string? ConsumingEventIn(JsonNode? events)
     {
         if (events is not JsonArray list) return null;
         foreach (var ev in list)
             if (ev?["consume"] is JsonValue v && v.TryGetValue<bool>(out var consume) && consume && (string?)ev["$type"] is { } type
                 && !type.EndsWith("PayUsageCost", StringComparison.Ordinal))
+                return type;
+        return null;
+    }
+
+    /// <summary>The type of the first PayUsageCost event of one sub-sequence's events with <c>consume</c> on, or null.</summary>
+    internal static string? PayingEventIn(JsonNode? events)
+    {
+        if (events is not JsonArray list) return null;
+        foreach (var ev in list)
+            if (ev?["consume"] is JsonValue v && v.TryGetValue<bool>(out var consume) && consume && (string?)ev["$type"] is { } type
+                && type.EndsWith("PayUsageCost", StringComparison.Ordinal))
                 return type;
         return null;
     }
