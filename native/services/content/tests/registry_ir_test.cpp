@@ -249,6 +249,62 @@ int main() {
         CHECK(lower_section(json::object(), "pack", "", "c", s, &o2, &rf, &err) && o2.empty(), "an empty section is no batch");
     }
 
+    // ---- batch_json: the plan keeps a start's edits as IR that parse_batch reads back the same (registry-rollback) ----
+    {
+        const std::string alters = R"([
+            {"n": 40, "registry": "recipes", "select": {"id": "game:arr*", "where": {"duration": ">=1"}, "has": ["t1"], "hasNot": ["old"]},
+             "field": "duration", "op": {"mul": 0.5, "add": 1, "min": 0, "max": 60, "raiseOnly": true}, "exclusive": true},
+            {"n": 70, "registry": "recipes", "select": {"id": "game:arrow"}, "field": "duration", "op": 2.5, "yield": true},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"append": [{"item": "game:stone", "count": 4}]}},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"remove": [{"item": "game:wood"}]}},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": {"replace": []}},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs", "list": "clear"},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs[1].count", "op": {"mul": 2}},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs[*].item", "op": "game:iron"},
+            {"registry": "recipes", "select": {"id": "game:arrow"}, "field": "inputs[0]", "op": {"set": {"item": "game:iron", "count": 1}}},
+            {"registry": "items", "select": {"id": "game:chest"}, "field": "tags", "op": ["quest", "fuel"]},
+            {"registry": "items", "select": {"id": "game:chest"}, "field": "tags", "list": {"append": ["storage"]}},
+            {"registry": "items", "select": {"id": "game:chest"}, "field": "perks[1]", "op": "game:perk_a"},
+            {"registry": "items", "entry": "remove", "select": {"id": "game:chest"}},
+            {"registry": "balance", "select": {"id": "game:balance"}, "field": "altarsPerFlameLevel[2]", "op": {"add": 10}}])";
+        const std::string adds = R"([{"n": 3, "registry": "recipes", "entry": "add", "id": "a:bolt", "like": "game:arrow",
+                                      "fields": {"duration": 3, "inputs": [{"item": "game:stone", "count": 2}]}}])";
+        Batch alter_b = batch(s, "a", "alter", alters), add_b = batch(s, "a", "add", adds);
+        alter_b.mod_version = "1.2.3";
+        CHECK(alter_b.edits.size() == 14 && add_b.edits.size() == 1, "the fixture parses whole");
+        for (const Batch* b0 : {&alter_b, &add_b}) {
+            const json doc = batch_json(*b0);
+            Batch back;
+            std::vector<Refusal> rf;
+            std::string err;
+            const bool ok = parse_batch(doc.dump(), s, &back, &rf, &err);
+            CHECK(ok && rf.empty() && back.edits.size() == b0->edits.size(), ("batch_json reads back whole: " + err + " " + doc.dump().substr(0, 300)).c_str());
+            CHECK(ok && back.mod == b0->mod && back.mod_version == b0->mod_version && back.stage == b0->stage && back.source == b0->source,
+                  "mod, version, stage and source kept");
+            CHECK(ok && batch_json(back) == doc, "a second trip writes the same document");
+            for (size_t i = 0; ok && i < back.edits.size() && i < b0->edits.size(); ++i) {
+                const Edit &x = b0->edits[i], &y = back.edits[i];
+                CHECK(x.n == y.n && x.registry == y.registry && x.field == y.field && x.select.id == y.select.id && x.select.where == y.select.where &&
+                          x.select.has == y.select.has && x.select.has_not == y.select.has_not && x.op.set == y.op.set && x.op.value == y.op.value &&
+                          x.op.mul == y.op.mul && x.op.add == y.op.add && x.op.min == y.op.min && x.op.max == y.op.max && x.op.raise_only == y.op.raise_only &&
+                          x.list == y.list && x.list_values == y.list_values && x.entry == y.entry && x.add_id == y.add_id && x.like == y.like &&
+                          x.add_fields == y.add_fields && x.exclusive == y.exclusive && x.yield == y.yield && x.element.on == y.element.on,
+                      ("edit " + std::to_string(i) + " is the same after the trip").c_str());
+            }
+        }
+        const Result r1 = compose(s, b, {}, {mod("a", {alter_b})});
+        Batch again;
+        std::vector<Refusal> rf;
+        std::string err;
+        parse_batch(batch_json(alter_b).dump(), s, &again, &rf, &err);
+        const Result r2 = compose(s, b, {}, {mod("a", {again})});
+        CHECK(r1.fields.size() == r2.fields.size() && r1.refused.size() == r2.refused.size(), "the read-back batch composes the same");
+        for (const auto& [ref, fo] : r1.fields) {
+            const auto it = r2.fields.find(ref);
+            CHECK(it != r2.fields.end() && it->second.result == fo.result, ("the same result for " + ref.text()).c_str());
+        }
+    }
+
     std::printf("registry-ir-test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

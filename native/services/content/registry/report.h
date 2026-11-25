@@ -42,8 +42,11 @@ struct ReportMeta {
     std::vector<Order> order;                // the mods, in the order the stage ran them
     std::string order_source = "kiln.host";  // "kiln.host" (Kiln.Host's runtime load order) | "folders" (no .NET: kiln.content's mod folders)
     struct Plan {
-        std::string hash, file, previous;  // the lowered plan (P1-PLAN.md section 6); empty: none written
+        std::string hash, file, previous;  // the plan this start runs on; previous: the last good plan before it (a rollback's target)
     } plan;
+    // registry.json "rollback" (stage.cpp fills it when kiln/data/content/registry/rollback.json asks for one): {plan, from,
+    // requested, state applied | refused, reason, changedBack [{field, from, to}], changedBackTotal, leftOut}; null: none asked.
+    json rollback;
     // A game entry's base origin per field (S5 / S10); unset: "archive" (the game's data as the archive writer published it).
     // An entry a mod added always reports "added".
     std::function<std::string(const FieldRef&)> origin;

@@ -727,6 +727,68 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
     return true;
 }
 
+namespace {
+json selector_json(const Selector& s) {
+    json o = {{"id", s.id}};
+    if (s.where.is_object() && !s.where.empty()) o["where"] = s.where;
+    if (!s.has.empty()) o["has"] = s.has;
+    if (!s.has_not.empty()) o["hasNot"] = s.has_not;
+    return o;
+}
+// An op as edit_of reads it: a whole element with fields only as {"set": {...}} (a plain object reads as relative numbers).
+json op_json(const Op& op) {
+    if (op.set && op.value.kind == Value::Struct) return {{"set", op.value.to_json()}};
+    return op.to_json();
+}
+json values_json(const std::vector<Value>& vs) {
+    json a = json::array();
+    for (const Value& v : vs) a.push_back(v.to_json());
+    return a;
+}
+}  // namespace
+
+json batch_json(const Batch& b) {
+    json edits = json::array();
+    for (const Edit& e : b.edits) {
+        json o = {{"n", e.n}, {"registry", e.registry}};
+        if (e.exclusive) o["exclusive"] = true;
+        if (e.yield) o["yield"] = true;
+        if (!e.raw.empty()) {
+            o["select"] = selector_json(e.select);
+            json raw = json::object();
+            for (const RawWrite& w : e.raw) raw[w.path] = w.op;
+            o["raw"] = std::move(raw);
+        } else if (e.entry == EntryOp::Add) {
+            o["entry"] = "add";
+            o["id"] = e.add_id;
+            if (!e.like.empty()) o["like"] = e.like;
+            if (!e.add_fields.empty()) {
+                json f = json::object();
+                for (const auto& [k, v] : e.add_fields) f[k] = v.to_json();
+                o["fields"] = std::move(f);
+            }
+        } else if (e.entry == EntryOp::Remove) {
+            o["entry"] = "remove";
+            o["select"] = selector_json(e.select);
+        } else {
+            o["select"] = selector_json(e.select);
+            o["field"] = e.field;
+            switch (e.list) {
+                case ListOp::None: o["op"] = op_json(e.op); break;
+                case ListOp::Clear: o["list"] = {{"clear", true}}; break;
+                case ListOp::Append: o["list"] = {{"append", values_json(e.list_values)}}; break;
+                case ListOp::Remove: o["list"] = {{"remove", values_json(e.list_values)}}; break;
+                case ListOp::Replace: o["list"] = {{"replace", values_json(e.list_values)}}; break;
+            }
+        }
+        edits.push_back(std::move(o));
+    }
+    json doc = {{"ir", 1}, {"mod", b.mod}, {"stage", stage_name(b.stage)}, {"edits", std::move(edits)}};
+    if (!b.mod_version.empty()) doc["modVersion"] = b.mod_version;
+    if (!b.source.empty()) doc["source"] = b.source;
+    return doc;
+}
+
 bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
                    std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err) {
     out->clear();

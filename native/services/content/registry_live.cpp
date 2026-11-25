@@ -1587,7 +1587,20 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
     std::map<std::string, uint64_t> hashes;
     for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
     g.refused.clear(), g.refused_keys.clear();
-    if (late || (g.applied && hashes != g.hashes)) {
+    if (!g.in->rollback.empty() && (late || (g.applied && hashes != g.hashes))) {
+        // registry-rollback: this start runs on a rolled-back plan's edits; a section's change is not composed over them
+        // (the first application of a late base: the stage already named the mods the plan leaves out, registry.json rollback.leftOut)
+        for (const RegistrySection& s : sections) {
+            const auto h = g.hashes.find(s.rel);
+            if (!g.applied || (h != g.hashes.end() && h->second == s.hash)) continue;
+            registry::Refusal r;
+            r.mod = s.mod, r.source = s.source;
+            r.reason = "RestartRequired: this start runs on the rolled-back registry plan " + g.in->rollback.substr(0, 12) +
+                       "; a data pack's registry section change applies after the rollback is cleared (kilnctl registry rollback --clear) and a restart";
+            g.refused.push_back(std::move(r));
+        }
+        LOGW("registry: a data pack's registry section changed, but this start runs on a rolled-back plan: not composed again");
+    } else if (late || (g.applied && hashes != g.hashes)) {
         LOGI("registry: a data pack's registry section changed: composing the registry again");
         recompose(sections);
     }

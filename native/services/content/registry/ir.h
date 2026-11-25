@@ -222,6 +222,11 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
 bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
                    std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err);
 
+// The IR document of a batch, as parse_batch reads it back: the same edits, ordinals, selectors, values and flags (the
+// Kiln-internal Selector::except and Edit::per_entry are not IR and are left out). The stage keeps a start's lowered edits in
+// its plan with it (the plan a rollback starts on, stage.h).
+json batch_json(const Batch& b);
+
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
 // false + *why: the result is not finite, or past what a whole-number field holds (checked before any rounding).
 bool op_result(const Op& op, const Value& base, const FieldSpec& f, Value* out, std::string* why);

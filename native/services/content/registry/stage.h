@@ -122,6 +122,9 @@ struct LiveHandoff {
     std::function<void(const Result&, bool world)> changed;
     // Empty when the full copied base was prepared during the stage. Serialized and cached otherwise.
     std::function<bool(LiveData*, std::string*)> prepare;
+    // Not empty: this start runs on a rolled-back plan (its hash; kiln/data/content/registry/rollback.json). The inputs are the
+    // plan's edits: a pack reload does not replace them (it is reported RestartRequired until the rollback is cleared).
+    std::string rollback;
 };
 
 class Runner {

@@ -71,6 +71,9 @@ struct RegistryLive {
     // Checked under store_mutex against the token/kind that gates all live accesses; false/missing fails closed.
     std::function<bool(uint32_t kind)> on_world_thread;
     std::function<bool(registry::stage::LiveData*, std::string*)> prepare; // optional copied-base preparation on first use
+    // Not empty: the start runs on this rolled-back plan (stage.h LiveHandoff::rollback). mods hold the plan's edits; a pack
+    // reload's changed registry sections do not replace them and are reported RestartRequired until the rollback is cleared.
+    std::string rollback;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).
