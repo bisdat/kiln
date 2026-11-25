@@ -506,7 +506,7 @@ impl AdminClient {
     }
 
     /// KAP to the Kiln.Admin of the data root `root` (resolved once by the caller, [`super::datadir::DataRoot`]): TCP
-    /// for a local server, ssh for a remote one. Open web panel reads Kiln Web Admin's listener from the same root, so
+    /// for a local server, ssh for a remote one. Open web panel reads Kilnwarden's listener from the same root, so
     /// the one-time login it mints is always for the panel next to it.
     pub fn connect_at(instance: &crate::server::instance::ServerInstance, root: &super::datadir::DataRoot) -> Result<AdminClient> {
         match (instance.remote.as_ref(), root) {

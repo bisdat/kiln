@@ -1,4 +1,4 @@
-// The admin pages in a plain web page, the way Kiln Web Admin hosts them: @kiln/admin-ui's entry (../web.ts, from
+// The admin pages in a plain web page, the way Kilnwarden hosts them: @kiln/admin-ui's entry (../web.ts, from
 // source) over the WebSocket transport, no launcher around them. The launcher's dev server serves it
 // (http://localhost:1420/src/admin/harness/index.html?kap=<ws url>#/servers/<id>/admin/players); a launcher build does
 // not contain it. tests/admin-ui-web.spec.ts puts a fake KAP/1-over-WebSocket server behind it.
@@ -19,7 +19,7 @@ createRoot(document.getElementById("root")!).render(
         <div className="k-app" style={{ height: "100%", overflow: "auto" }}>
           <Routes>
             <Route path="servers/:id/admin/*" element={<AdminRoutes />} />
-            {/* as Kiln Web Admin mounts it: Configs is the server's own page in the launcher */}
+            {/* as Kilnwarden mounts it: Configs is the server's own page in the launcher */}
             <Route path="servers/:id/configs" element={<AdminConfigsPage />} />
             <Route path="*" element={<Navigate to="/servers/lab/admin/players" replace />} />
           </Routes>

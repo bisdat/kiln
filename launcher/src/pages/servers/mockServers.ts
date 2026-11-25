@@ -54,6 +54,27 @@ const backups = [
   { name: "lab-savegame-20261103-201500Z.tar.gz", created: "2026-11-03T20:15:00Z", bytes: 398_112, source: "kilnctl" },
 ];
 
+// "Open web panel" (0.2.0-dev.31.14): the web panel mod on the mock server, Kilnwarden (`kilnwarden`) or its old name
+// Kiln Web Admin (`kiln-webadmin`, the 0.1.0 test builds), or both (tests: `__kilnMock.webPanelMods`). None until a test
+// sets it, so the other specs' Overview stays as it was. admin_open_web_panel answers as kiln_manage::admin::web_panel
+// does: the panel that listens is Kilnwarden's, unless the old copy is enabled too (Kilnwarden then stays off and the
+// old one listens), and the one-time login is minted for that mod's id.
+type PanelMod = { id: string; enabled: boolean };
+let panelMods: PanelMod[] = [];
+const panelOpens: { serverId: string; mod: string; consumer: string }[] = [];
+const panelModRow = (m: PanelMod) => ({ id: m.id, version: "0.1.0", folder: m.id, enabled: m.enabled, source: null, clients: "none", state: m.enabled ? "loaded" : null, kind: "kiln" });
+function listeningPanel(): string | null {
+  const on = (id: string) => panelMods.some((m) => m.id === id && m.enabled) || (id === "kiln-webadmin" && webAdmin);
+  if (on("kilnwarden") && !on("kiln-webadmin")) return "kilnwarden";
+  return on("kiln-webadmin") ? "kiln-webadmin" : null;
+}
+export const webPanelModMockHooks = {
+  /** The web panel mods in the lab server's mods folder (`[]`: none). */
+  set: (list: PanelMod[]) => { panelMods = list.map((m) => ({ ...m })); },
+  /** Each admin_open_web_panel that opened a panel: the mod that listened and the login's consumer. */
+  opens: () => panelOpens.map((o) => ({ ...o })),
+};
+
 // a launcher start's capture (kiln_manage::server::console), shortened from the server-console lab
 const consoleLines = [
   ["---- kiln-launcher start lab at 2026-11-04T23:10:02Z", "meta"],
@@ -94,6 +115,9 @@ export const webPanelMockHooks = {
 export const serverMockHandlers: Record<string, (args: Args) => unknown> = {
   admin_open_web_panel: (a) => {
     const id = String(a.serverId);
+    const mod = listeningPanel();
+    if (!mod) throw { code: "admin_unavailable", message: "Kilnwarden is not listening. Check that the current mod is loaded." };
+    panelOpens.push({ serverId: id, mod, consumer: mod });
     const p = webPanels.get(id) ?? { serverId: id, origin: originOf(id), fingerprint: "ab".repeat(32), via: webVia, isolated: true, idleCloseS: 120, connections: 1 };
     webPanels.set(id, p);
     return p;
@@ -104,7 +128,7 @@ export const serverMockHandlers: Record<string, (args: Args) => unknown> = {
   server_console_close: () => null,
   server_settings_get: () => ({ path: "/home/player/srv/enshrouded/lab/enshrouded_server.json", values: settings, schema, running: false }),
   server_settings_set: (a) => ({ path: "/home/player/srv/enshrouded/lab/enshrouded_server.json", values: { ...settings, ...(a.values as object) }, schema, running: false }),
-  server_mods: () => (webAdmin ? [...mods, webadminMod] : mods),
+  server_mods: () => [...mods, ...(webAdmin ? [webadminMod] : []), ...panelMods.map(panelModRow)],
   server_mod_enable: () => null,
   server_backups: () => backups,
   server_query: () => ({ name: "Lab server", players: 0, maxPlayers: 4, version: "0.0.15.0", pingMs: 2 }),

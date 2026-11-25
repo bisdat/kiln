@@ -397,3 +397,57 @@ fn ssh_forwards_hold_their_port_and_use_ssh_w_per_connection() {
     unsafe { std::env::remove_var("KILN_SSH") };
     let _ = std::fs::remove_dir_all(ssh.parent().unwrap());
 }
+
+/// (0.2.0-dev.31.14) A plain-HTTP endpoint of mod `id` in the data folder `data` (`<data root>/<id>/`).
+fn panel_endpoint(data: &Path, id: &str, port: u16) {
+    let dir = data.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(endpoint::FILE), format!(r#"{{"format":1,"host":"127.0.0.1","port":{port},"sha256":null}}"#)).unwrap();
+}
+
+#[test]
+fn kilnwarden_kiln_web_admin_or_both_kilnwarden_first() {
+    let dir = temp("ids");
+    let s = server("ids", &dir);
+    let data = dir.join("kiln/data");
+    let found = |s: &ServerInstance| endpoint::find_in(s, &endpoint::root(s).unwrap()).map(|(m, ep)| (m.id, ep.port));
+    let e = found(&s).unwrap_err();
+    assert_eq!(e.code, ErrorCode::AdminUnavailable);
+    assert!(e.message.starts_with("Kilnwarden is not listening"), "{}", e.message);
+    panel_endpoint(&data, "kiln-webadmin", 1111);
+    assert_eq!(found(&s).unwrap(), ("kiln-webadmin", 1111), "a Kiln Web Admin test build");
+    panel_endpoint(&data, "kilnwarden", 2222);
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 2222), "both: Kilnwarden");
+    std::fs::remove_dir_all(data.join("kiln-webadmin")).unwrap();
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 2222), "Kilnwarden alone");
+    assert_eq!(endpoint::read(&s).unwrap().port, 2222);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn kilnwarden_follows_a_profile_data_folder_too() {
+    let dir = temp("ids-datadir");
+    let s = server("ids-datadir", &dir);
+    // a stale old copy's file in kiln/data does not count once the server booted with a profile data folder
+    panel_endpoint(&dir.join("kiln/data"), "kiln-webadmin", 1111);
+    std::fs::create_dir_all(dir.join("kiln/state")).unwrap();
+    std::fs::write(dir.join("kiln/state/boot.json"), br#"{"profile":{"mode":"active","dataDir":"profiles-copy/p1/data"}}"#).unwrap();
+    panel_endpoint(&dir.join("kiln/profiles-copy/p1/data"), "kilnwarden", 3333);
+    let (m, ep) = endpoint::find_in(&s, &endpoint::root(&s).unwrap()).unwrap();
+    assert_eq!((m, ep.port), (ids::KILNWARDEN, 3333));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_plain_http_kilnwarden_opens_through_its_gateway() {
+    let dir = temp("ids-open");
+    let s = server("ids-open", &dir);
+    let upstream = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    panel_endpoint(&dir.join("kiln/data"), "kilnwarden", upstream.local_addr().unwrap().port());
+    let mut panels = WebPanels::new(dir.join("web-panel-origins.json"));
+    let opened = panels.open(&s).unwrap();
+    assert!(opened.url.starts_with("http://") && opened.url.ends_with("/signin"), "{}", opened.url);
+    assert_eq!(opened.info.fingerprint, None);
+    panels.close_all();
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -143,7 +143,7 @@ const iconPx = (z: number) => Math.max(12, Math.min(40, 6 + z * 5));
 
 /** A player's dot and name label. The health bar's width (--hp) is set through the CSSOM once Leaflet has built the
  *  icon: a style="..." in the icon's HTML is an inline style attribute, which a strict Content-Security-Policy refuses
- *  (Kiln Web Admin's style-src 'self'); element.style is not subject to it. */
+ *  (Kilnwarden's style-src 'self'); element.style is not subject to it. */
 class PlayerIcon extends L.DivIcon {
   private readonly hp: string | null;
   constructor(options: L.DivIconOptions, hp: string | null) {
