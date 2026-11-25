@@ -552,6 +552,27 @@ test("a folder that is not exactly the mod's is not taken over, and the reason n
   expect((await api<{ refusal?: string }[]>(page, "engineOwnFolders", "ember-run", "client-steam"))[0].refusal).toBe(WHY);
 });
 
+// 0.2.0-dev.31.12 (a player's report: his own folder of a mod he had switched off ran under Kiln-hosted ShroudForge): the
+// note for that folder says what happens to it now and how to stop it where Kiln cannot (engine_mods::own_off_in_shroudforge).
+test("the player's own folder of a ShroudForge mod that is off says Kiln-hosted ShroudForge skips it", async ({ page }) => {
+  type Mock = { __kilnMock: { setOwnFolder: (id: string, own: unknown) => void } };
+  const OWN = "/games/Enshrouded/mods/BetterChests";
+  await desktop(page);
+  const sw = () => row(page, "Better Chests").getByRole("switch", { name: "Better Chests" });
+  await expect(sw()).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
+  await page.evaluate((own) => (window as unknown as Mock).__kilnMock.setOwnFolder("better-chests", { path: own }), OWN);
+  await sw().click();
+  await expect(sw()).toHaveAttribute("aria-checked", "false");
+  await page.locator(".k-hero").getByRole("button", { name: /^Notes \(\d+\)$/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Notes about your mod folders" });
+  await expect(dialog).toContainText(`shroudforge:better-chests: it is off in the profile, and your own folder ${OWN} stays as it is`);
+  await expect(dialog).toContainText("While Kiln hosts ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list");
+  await expect(dialog).toContainText("kiln.log says at each start whether it was skipped.");
+  await expect(dialog).not.toContainText("Kiln's bundled runtime skips this folder at each start");
+  await expect(dialog).toContainText("switch it off in Kiln's in-game menu (Mods > ShroudForge)");
+  await expect(dialog).not.toContainText("Kiln never switches a folder it did not place");
+});
+
 test("the mod's settings offer the same button for the player's own folder, and not while the game runs", async ({ page }) => {
   type Mock = { __kilnMock: { setOwnFolder: (id: string, own: unknown) => void; startOutside: (ago: number) => void; stopGame: () => void } };
   await desktop(page);

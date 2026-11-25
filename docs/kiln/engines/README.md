@@ -126,6 +126,15 @@ launcher puts them there:
   the folder's own row in Mods > ShroudForge: "Switch it on below"). On a dedicated server, which has no in-game menu,
   the second way out is the only one named. Text: `kiln_manage::shroudforge::hand_eml_off`; kiln-eml and `Kiln.Ui`
   keep their own copy of the words.
+- **A mod the profile has off, in a folder the player put there himself** (0.2.0-dev.31.12). Kiln never writes into,
+  switches, replaces or removes such a folder, so its loader may still run it. When Kiln hosts ShroudForge it has the
+  runtime skip such a package for that start (kiln-shroudforge for the profile's ShroudForge entries, kiln-eml for its
+  EML entries, through the fork's optional export `shroudforge_host_skip_packages`), and kiln.log says one line each:
+  `<id> is off in the profile: your own folder <path> is skipped this start; Kiln leaves its files as they are`. Kiln's
+  own runner skips such a drop-in itself (kiln-eml). Where nothing can skip it (an installed ShroudForge runtime,
+  ShroudForge's or EML's own loader), the state file lists it as running (`own-loader`), never `disabled`, with why and
+  how to turn it off ([engines.md](../engines.md), "A player's own ShroudForge folder"; [eml.md](../eml.md)). The
+  other engines: see "Off in the profile, the player's own folder" below.
 - **No double load.** When the loader does not start after all (Wine/Proton without the override), the plugin runs
   the profile's mods from the Library as usual (EML's: unless Kiln hosts ShroudForge for the profile, which then runs
   Kiln's copies in its folder). A folder in the engine's drop-in folder whose marker names this
@@ -459,6 +468,35 @@ from loading them (it ran before the core): the rule is reported as not applied 
 kiln-core started`) and the mod shows as loaded. Activate the profile again so the launcher's chain.ini keeps them out.
 A DLL that `[late]` defers is held back by the rule. A file with more than 512 rules keeps the first 512 and logs one line
 for the rest. Schema: `schema/compat-rules.schema.json`.
+
+## Off in the profile, the player's own folder
+
+(0.2.0-dev.31.12.) A mod the profile has off can still have a folder of the player's where its loader reads, and Kiln
+never writes into, switches, replaces or removes such a folder. What each engine does with it, and what its state file
+says:
+
+| Engine, who runs it | The player's own folder of a mod that is off | State |
+|---|---|---|
+| ShroudForge entries, Kiln hosts ShroudForge | kiln-shroudforge has the runtime skip it this start (`shroudforge_host_skip_packages`) | kiln.log line; `shroudforge.json` `profileOff` |
+| EML entries, Kiln hosts ShroudForge | kiln-eml has the runtime skip it the same way | `eml.json` `disabled`, "… is skipped this start" |
+| either, a runtime without the export, or ShroudForge's own loader | runs while ShroudForge's own switch is on | kiln.log warning; `eml.json` `own-loader`, "runs … although it is off in the profile" |
+| EML, EML's own loader | runs (EML has no switch) | `eml.json` `own-loader`, the same words |
+| EML, Kiln's own runner (drop-ins on) | skipped by kiln-eml (before 0.2.0-dev.31.12 it ran as a drop-in) | `eml.json` `disabled`, "… is skipped this start" |
+| EMF, Kiln's own runner | not loaded: the profile's entry comes first and keeps the id, the folder is "a second copy … ignored" | `emf.json` `disabled` |
+| Native mods (Kiln's loader, drop-ins on) | not loaded: "the profile lists … too (the profile wins over the drop-in folder)" | `native.json` |
+
+Not changed yet, and listed here so that nobody takes the state for the truth there:
+
+- **EMF's, Greeneye Loader's and Shroudtopia's own loaders** (the adapter stands aside): `kcompat::aside_report`
+  (`native/plugins/compat/compat.h`) answers `disabled` ("switched off in the profile") for every entry that is off
+  without looking into the loader's folder, so a folder of the player's there that the loader runs is reported
+  `disabled`. kiln-emf's `hand_copy` finds such a folder for entries that are on only. Each of these loaders has its
+  own switch (EMF: `emf/config/<id>.ini`; Shroudtopia: its `shroudtopia.json`), which would have to be read to say
+  truthfully whether it runs.
+- **A native mod whose DLL the player also put in as a proxy** (`dinput8.dll` that the installer moved to `kiln/chain/`,
+  the `[chain]` section of `chain.ini`): the `[chain]` lines load whatever the profile says, while `native.json` says
+  the Library entry is `disabled in the profile`. Both rows are in the support report (`chain loaded`), but nothing
+  ties them together.
 
 ## Status files and logs
 

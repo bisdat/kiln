@@ -712,6 +712,37 @@ the fork calls itself 1.7.9 too) other than the two pins Kiln shipped before `03
 and ShroudForge's per-mod errors while the game runs ([ui.md](ui.md)); what was missing is the launcher and the report,
 which the player sees once the game is closed.
 
+### 5.8 Packages the profile has off: the host's skip list (0.2.0-dev.31.12)
+
+A player's report (0.2.0-dev.31.9): he had put an EML package (a DLL, mod.json, native-plugin.ini, ShroudForge's switch
+on) into ShroudForge's mods folder himself, switched the mod off in his Kiln profile, and Kiln-hosted ShroudForge ran
+it (its DLL loaded by the DLL Manager, its runtime mod "initialized and active") while kiln-eml reported
+it `disabled`. Kiln never writes into, switches, replaces or removes a folder the player installed, and ShroudForge
+reads only its own switch, so nothing stopped it.
+
+The fork now takes a list from its host: one optional export of `shroudforge-runtime.dll`, declared in the fork's
+`kiln/abi/host_skip.h` (MIT): `bool shroudforge_host_skip_packages(const uint16_t* ids)`, mod.json ids (or the folder
+name of a package without mod.json) one per line, before `shroudforge_prepare_startup`. Every manifest read in the
+process then has those packages switched off (`modules/modloader/kiln_host_skip.rs`, checked in `read_manifest`; the
+DLL Manager also plans no DLL of such a folder without mod.json), so the startup asset pass, the DLL Manager and the
+live runtime leave them out; nothing on disk changes. Additive; refuses an invalid id as a whole; false once the
+startup pass began, which fixes the list and logs one `[host-skip]` line per package. A host that never calls it gets
+upstream's behaviour.
+
+Kiln's callers, each for its own entries, before the startup pass: kiln-shroudforge for the profile's ShroudForge
+entries (`skip_profile_off`, `src/own_skip.h`; just before it asks kiln-eml to stand aside) and kiln-eml for its EML
+entries (`host_skip` in `plugin.rs`, from `eml_stand_aside`; it finds the loaded `shroudforge-runtime.dll` with
+`GetModuleHandleW`, as `sf_in_process` does). Both name one package per call, so one name the runtime refuses keeps
+only its own package running; neither names a package that an entry the profile has on stands for. Each says per package, in kiln.log, whether it was skipped or why it runs
+(engines.md, "A player's own ShroudForge folder"; eml.md). A runtime without the export (an installed ShroudForge, or a
+bundled build before this) runs them, and the lines and `eml.json` say so. Tests: the fork's `cargo test -p
+shroudforge-package kiln_host_skip` and `cargo test -p shroudforge-modloader --lib kiln_host_skip`; Kiln's
+`native/plugins/shroudforge/tests/test-own-skip.sh` (host, `own_skip.h`) and kiln-eml's `own_folder_off_tests`.
+
+**Pin.** The fork change is the patch `sf-skip-own-folders-fork.patch` of the dev.31 task `sf-own-folder-off`, on fork
+branch `kiln-dev31/sf-skip-own-folders` from `465aad9f` (the 0.2.0-dev.31 pin). It is not pushed yet: until the
+submodule moves to it, the bundled runtime has no export, and Kiln reports such folders as running, as above.
+
 ## 6. What other agents need to do (detect, launcher)
 
 - **Installer** (agent `detect`, `install.rs`): when ShroudForge is installed, install "next to ShroudForge" by default.

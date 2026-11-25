@@ -137,6 +137,7 @@ Each candidate is classified. Only EML mods run; everything else is logged and l
 | `extended.mod.json` whose `launcher` is not `"EML"` | skipped | a ShroudForge package (ShroudForge's runtime runs it) |
 | an unknown capability, a bad semver | skipped | not an EML manifest |
 | `enabled: false` in the profile | disabled | |
+| a drop-in whose package is an EML mod the profile has off (the player's own folder of it) | disabled | `<id> is off in the profile: your own folder <path> is skipped this start; Kiln leaves its files as they are` (0.2.0-dev.31.12; before, it ran beside the profile's `disabled` row) |
 
 ### The run
 This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
@@ -509,6 +510,41 @@ kiln-eml: 2 of the profile's 2 EML mod(s) run under EML's own loader
 ```
 Kiln never places a second copy of a mod the player already has in `mods/` (the same manifest id under another
 folder name): EML stops the game on a duplicate id. The player's copy runs.
+
+**A profile mod that is off, whose folder the other loader runs anyway** (0.2.0-dev.31.12, a player's report: an EML
+package he had put into ShroudForge's mods folder himself ran under Kiln-hosted ShroudForge while the profile had it off,
+and `eml.json` said `disabled`). Kiln never writes into, switches, replaces or removes a folder the player installed,
+so ShroudForge's own switch there (`enabled` in its `extended.mod.json`) can be on while the profile has the mod off.
+Standing aside, kiln-eml looks for such a folder for every profile entry that is off (the entry's folder, or the
+player's folder of the same package under another name, as for the entries that are on); one the loader would not run
+anyway (ShroudForge's switch off, the other side only, a file it refuses), a package that an entry the profile has on
+also stands for (another Library entry of the same package, a ShroudForge entry, `emlRuntime`: it runs for that entry,
+and the runtime skips by package id), and an entry with no folder there stay `disabled` ("switched off in the
+profile"). For the rest:
+
+- **Kiln hosts ShroudForge** (`kiln.eml` `stand_aside`): kiln-eml names the package (its mod.json id) to the runtime
+  through its optional export `shroudforge_host_skip_packages` (the fork's `kiln/abi/host_skip.h`), before ShroudForge's
+  startup pass. A runtime that takes it skips the package this start: no asset pass, no DLL, no Lua, its files as they
+  are. The row is `disabled`, and kiln.log says one line per package (info):
+  `kiln-eml: <id> is off in the profile: your own folder <path> is skipped this start; Kiln leaves its files as they are`.
+  Kiln's own copy switched on since the last activation (in the game's menu) is skipped the same way; its row says
+  that the next Play switches it off. The line of the EML packages ShroudForge runs from its folder leaves the skipped
+  ones out and names them: `kiln-eml: 4 of 5 EML packages in <mods> run under ShroudForge: ...; 1 is off in the profile
+  and skipped this start: <id>`.
+- **Nothing skips it**: a runtime without the export (an installed ShroudForge through "Use my installed ShroudForge",
+  or a bundled runtime before 0.2.0-dev.31.12), ShroudForge's own loader (no Kiln host), or EML's own loader (it has no
+  switch and runs every mod of its folder). The row is `own-loader`, because it runs, and its reason says so, why, and
+  how to turn it off: `runs under <who> although it is off in the profile: it is your own folder <path>, which Kiln
+  never writes into, and ShroudForge's own switch for it is on; <why>. To turn it off, switch it off in Kiln's in-game
+  menu (Mods > ShroudForge) or in ShroudForge's Modloader, or move the folder out of <mods>` (a dedicated server: put
+  `"enabled": false` into its `extended.mod.json` or move the folder, then restart the server; EML's own loader: move
+  the folder). kiln.log has one warning per such mod, and the count line adds `; <n> run although the profile has
+  them off`. Never `disabled` for something that runs.
+
+Kiln's own runner (no other loader): with drop-ins on, a folder in `<game>/mods` or `kiln/eml/mods` whose package is an
+EML mod the profile has off ran as a drop-in beside the profile's `disabled` row. It is skipped now (`disabled`, the
+same line, logged at info); Kiln reads it in place and never writes into it. A package the launcher handed to
+ShroudForge's runtime (`emlRuntime`) is on, whatever its entry's `enabled` says, and is not affected.
 
 When EML's `dbghelp.dll` only sits in the folder but is **not loaded** (Wine without the override), kiln-eml runs the
 mods, which is the Linux case EML can't handle by itself. The profile's entries then run from the Library and the

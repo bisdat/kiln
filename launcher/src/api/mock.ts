@@ -373,7 +373,12 @@ const ownFolders = new Map<string, { path: string; renameTo?: string; refusal?: 
 /** engine_mods::own_folder's sentence for a ShroudForge entry the player's own folder serves. */
 const ownFolderNote = (id: string, path: string, on: boolean) => on
   ? `shroudforge:${id}: the game uses your own folder ${path} for this mod; Kiln leaves it as it is and places no copy of its own.`
-  : `shroudforge:${id}: your own folder ${path} stays as it is; Kiln never switches a folder it did not place.`;
+  : `shroudforge:${id}: it is off in the profile, and your own folder ${path} stays as it is (Kiln never writes into a folder it did not place). `
+    + `While Kiln hosts ShroudForge, Kiln has its runtime skip this folder at each start when that runtime takes Kiln's skip list `
+    + `(Kiln's bundled runtime does from 0.2.0-dev.31.12 on); kiln.log says at each start whether it was skipped. Another runtime (your `
+    + `installed ShroudForge, "Use my installed ShroudForge") or ShroudForge's own loader still runs it while its own ShroudForge switch `
+    + `is on: to stop that, switch it off in Kiln's in-game menu (Mods > ShroudForge) or in ShroudForge's Modloader, choose "Let Kiln manage `
+    + `this folder" in Notes, or move the folder out of the mods folder.`;
 /** kiln_manage::cook in the fake game: the mods with something to cook (by id), why each is due, and what its tools
  *  say when its cook fails. Tests: `__kilnMock.setCook`. */
 const cookMods = new Map<string, { reason: CookReason | null; fails?: string; last?: CookedMod }>();
