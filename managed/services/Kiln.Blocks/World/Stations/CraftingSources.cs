@@ -47,11 +47,12 @@ public sealed class CraftSourceHandle : IDisposable
     private readonly ulong _owner;
     private readonly ModContext? _mod;
     private readonly bool _locks;
+    private readonly object? _lockSession;  // the lock session this handle counts in (GitHub #147)
     internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod, bool locks = false)
     {
         _owner = owner; _handle = unchecked((long)handle); Player = player; Container = container; _mod = mod; _locks = locks;
         if (mod is not null) mod.Retiring += Dispose;
-        if (locks) LockStock.Track(player);
+        if (locks) _lockSession = LockStock.Track(player);
     }
     /// <summary>The only player this registration can supply.</summary>
     public EntityId Player { get; }
@@ -69,7 +70,7 @@ public sealed class CraftSourceHandle : IDisposable
         finally
         {
             if (_mod is not null) _mod.Retiring -= Dispose;
-            if (_locks) LockStock.Untrack(Player);
+            if (_locks) LockStock.Untrack(Player, _lockSession);
         }
     }
 }
