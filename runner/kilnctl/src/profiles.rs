@@ -27,6 +27,9 @@ pub fn import(paths: Vec<PathBuf>) -> Result<i32> {
     for s in &r.skipped {
         println!("skipped  {}: {}", s.path, s.reason);
     }
+    for n in &r.notes {
+        println!("{}", n.text);
+    }
     Ok(if r.skipped.is_empty() { 0 } else { 1 })
 }
 
