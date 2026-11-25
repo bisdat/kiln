@@ -426,7 +426,7 @@
           "size": 88
         }
       },
-      "sha256": "025befc80610ab5360a853042c90f8366dd224f5293966bdd0a50c761ea3ebc4"
+      "sha256": "fdc44a4710c16f012652343d46eec86e8029aa35ae918c68fa8de12f735396e1"
     },
     "native/core/abi/services/kiln_assets.h": {
       "function_macros": [],
@@ -10045,7 +10045,7 @@
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
     "src/layout.rs": "5ba216bee7e3e22795239b22ecc1648836b44e38e3ee8a4af6cef6052bd3a10e",
-    "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
+    "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",

@@ -178,6 +178,34 @@ the current sequence window's `PayUsageCost` events (type hash `0x4e5c0937`). `0
 `Ability_Blink_Cost` 20, `Ability_SpecialAbility` special 100, `Ability_Skill_Warrior_WhirlAttack` stamina 75.
 **[dis] [data]**
 
+### The cost item of an item use (GitHub #118) **[dis] [data]**
+- **The payer reads costItem.** `actor_pay_usage_cost` (`0x45360`) runs, for each PayUsageCost of the step's window,
+  `0x40d00(&ctx.costItem, event, …)` with a copy of `triggerContext.costItem` (`+0x1C`, 20 bytes) when
+  `costItem.itemId != 0` or the event's own impactValues are not empty (`event+0x64`). `0x40d00` finds the item
+  (`ItemRegistryFind(costItem.itemId)`), reads each cost from the item's impactValues (`ItemInfo+0x5F8`) and the
+  event's (`0x1ba980`), skips the bits of `ignoreCostMask` (`+0x70`) and adds `-cost` to the attribute (`0x3cfc0`).
+  With `consume` (`+0x71`) and an item it runs `InventoryRemoveItems(tx, actor, costItem.itemId, costItem.slotId, 1)`
+  (`0x1b0d90`) and commits only on success; a spent ammunition stack is re-equipped (`ItemInfo+0xcc == 8`,
+  `0x93a5b0`). `usedItem` is never read here.
+- **Who writes it.** `TriggerSequence`'s writer has six inlined variants after `0x369d0` (each clears the context and
+  writes the runtime id, trigger and input type): `0x36a80` usedItem = costItem = item, usedAmmunition = a second
+  item (1 caller, `0xd9430`); `0x36b60` usedItem = costItem = item (21 callers in the player's item actions);
+  `0x36c20` costItem only (1 caller); `0x36ce0` usedItem = item, costItem = another (6 callers); `0x36db0` usedItem
+  and the song id (instruments). At `0xb6243` the choice is the item sequence entry's `costOverride`: none →
+  `0x36b60` with the slot's item, else `0x36ce0` with `{no slot, the override's id}` as cost.
+- **So a hand use of an item pays with the item.** Of the game's 4,268 items, 2,609 have a Primary sequence (Kiln's
+  pick: the first Primary entry with no requirements, else the first Primary) and none of those entries names a
+  `costOverride`. 103 of the sequences have a PayUsageCost with `consume`: 102 spells (`Ammo_*_Spell_*`, category
+  Ammunition, the staff casts `Attack_Player_Staff_*`) and `Consumable_RepairKit_T3` (`UseItem_Consumable_RepairKit`
+  `e46613ca-…`: PayUsageCost consume at 0.067 s, no impactValues, then `RepairAllItems` 0.08 at 0.53, 1.2, 2.1, 2.73,
+  3.4 and 4.3 s), whose only consume it is. The scrolls (Prayer of the Flame `0x7ab33fcf`, Prayer to the Vukah, Meteor
+  Shower, Fire Wisp, Experience) consume through an ApplyBuffEvent / SpawnImpact / SpawnEntityEvent and have a
+  PayUsageCost with consume off and no impactValues of its own: their `ManaCost` (`0xaf236ece`: 55, 55, 80, 80) is on
+  the item, so it is paid only when the item is the cost item. The same holds for the mana grenades (Necromancer
+  Grenade T2-T6 30-150, Critter Crawler Bomb 95, Shroud Pheromone Grenade 56). Read offline with `tools/kfc` from the
+  server's KFC (build 26430253); Kiln's `item_use` sets the cost item with `KILN_ITEM_USE_COST_ITEM` (since
+  0.2.0-dev.31.5).
+
 The tooltips name two of them: `0x579b2657` is **Charge Time**; `0x63d242a0` is a tooltip-only slot with no reader, whatever its loca tag says (Radius on Fireball I, Debuff Duration and Slow on Ice Bolt I, twice on one item) **[data]**. `0x41a7d373` (1.0, 1.25; no tag) is open. Who reads Charge Time is
 probably `server_player_ranged_weapon` [hyp].
 
