@@ -1,0 +1,107 @@
+{
+  "comment": "kiln.ui.input's ownership rules (native/services/ui/input_own.h, 0.2.0-dev.31.13): the cases the native host test (tests/input_own_test.cpp) and the test kit's fake kiln.ui.input (managed/Kiln.TestKit/Fakes/UiInput, managed/tests/Kiln.TestKit.Tests/UiInputFakeTests.cs) both replay. Codes are KilnUiKey.vk in hex (2 the right button, 41 the A key, 20d a pad's B, 210 its left trigger, 100 a wheel notch); '@1' is controller 1. 'owners' subscribe in order; each takes the codes in 'take' ('*' = every press it is offered). Steps: down (a new press), repeat, up, focus (the window lost the focus), world (the client world changed), unsubscribe / disown (an owner went or gave up), leak (the game saw that press's down after all), mk (the MK_ bits hidden from the game must be this), pad (controller, the owned buttons' bits). Logs: 'game' what reaches the game, 'plain' what Kiln's other key and pointer subscribers and bindings get, and each owner's callbacks: press (offered, taken or not), repeat, release, end <why>.",
+  "cases": [
+    {
+      "name": "Blueprint owns a right-button gesture: press, held, release",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": ["2"]}],
+      "steps": [["down", "2"], ["mk", 2], ["up", "2"], ["mk", 0]],
+      "game": [], "plain": [],
+      "blueprint": ["press 2", "release 2"]
+    },
+    {
+      "name": "a press the owner passes reaches the game and the others, its release too",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": []}],
+      "steps": [["down", "2"], ["mk", 0], ["up", "2"]],
+      "game": ["down 2", "up 2"], "plain": ["down 2", "up 2"],
+      "blueprint": ["press 2"]
+    },
+    {
+      "name": "an owned key's repeats and release go to the owner only",
+      "owners": [{"name": "overlay", "sources": ["keys"], "take": ["41"]}],
+      "steps": [["down", "41"], ["repeat", "41"], ["repeat", "41"], ["up", "41"], ["down", "42"], ["up", "42"]],
+      "game": ["down 42", "up 42"], "plain": ["down 42", "up 42"],
+      "overlay": ["press 41", "repeat 41", "repeat 41", "release 41", "press 42"]
+    },
+    {
+      "name": "focus loss ends ownership: the owner hears it, a release that comes back later is the game's",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": ["2"]}],
+      "steps": [["down", "2"], ["mk", 2], ["focus"], ["mk", 0], ["up", "2"]],
+      "game": ["up 2"], "plain": ["up 2"],
+      "blueprint": ["press 2", "end 2 focus"]
+    },
+    {
+      "name": "a world change ends ownership; the release still reaches nobody (the game never saw the press)",
+      "owners": [{"name": "overlay", "sources": ["pad"], "take": ["20d"]}],
+      "steps": [["down", "20d"], ["pad", 0, 8192], ["world"], ["pad", 0, 0], ["up", "20d"]],
+      "game": [], "plain": [],
+      "overlay": ["press 20d", "end 20d world"]
+    },
+    {
+      "name": "unload (unsubscribe) mid-press: no callback, the release reaches nobody; the next press is everyone's",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": ["2"]}],
+      "steps": [["down", "2"], ["unsubscribe", "blueprint"], ["mk", 2], ["up", "2"], ["mk", 0], ["down", "2"], ["up", "2"]],
+      "game": ["down 2", "up 2"], "plain": ["down 2", "up 2"],
+      "blueprint": ["press 2"]
+    },
+    {
+      "name": "stuck-press guard: the game saw the down after all, so the release reaches it (the owner still hears it)",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": ["2"]}],
+      "steps": [["down", "2"], ["leak", "2"], ["mk", 0], ["up", "2"]],
+      "game": ["down 2", "up 2"], "plain": [],
+      "blueprint": ["press 2", "release 2"]
+    },
+    {
+      "name": "a new press without the release reaching Kiln ends the old claim as lost",
+      "owners": [{"name": "overlay", "sources": ["keys"], "take": ["*"]}],
+      "steps": [["down", "41"], ["down", "41"], ["up", "41"]],
+      "game": [], "plain": [],
+      "overlay": ["press 41", "end 41 lost", "press 41", "release 41"]
+    },
+    {
+      "name": "the first owner to take a press owns it; a later owner never sees it",
+      "owners": [{"name": "first", "sources": ["pointer"], "take": ["2"]}, {"name": "second", "sources": ["pointer"], "take": ["*"]}],
+      "steps": [["down", "2"], ["up", "2"], ["down", "1"], ["up", "1"]],
+      "game": [], "plain": [],
+      "first": ["press 2", "release 2", "press 1"],
+      "second": ["press 1", "release 1"]
+    },
+    {
+      "name": "an owner only gets its own sources; the wheel is never ownable (a notch has no release)",
+      "owners": [{"name": "blueprint", "sources": ["pointer", "mouse"], "take": ["*"]}],
+      "steps": [["down", "41"], ["up", "41"], ["down", "100"], ["down", "4"], ["mk", 16], ["up", "4"]],
+      "game": ["down 41", "up 41", "down 100"], "plain": ["down 41", "up 41", "down 100"],
+      "blueprint": ["press 4", "release 4"]
+    },
+    {
+      "name": "a controller's buttons are owned per controller",
+      "owners": [{"name": "overlay", "sources": ["pad"], "take": ["20d", "210"]}],
+      "steps": [["down", "20d@0"], ["down", "20d@1"], ["down", "210@1"], ["pad", 0, 8192], ["pad", 1, 73728], ["up", "20d@1"],
+                ["pad", 1, 65536], ["up", "210@1"], ["up", "20d@0"], ["down", "20c@0"], ["up", "20c@0"]],
+      "game": ["down 20c", "up 20c"], "plain": ["down 20c", "up 20c"],
+      "overlay": ["press 20d", "press 20d@1", "press 210@1", "release 20d@1", "release 210@1", "release 20d", "press 20c"]
+    },
+    {
+      "name": "an overlay that disowns its press as it closes: the release reaches nobody",
+      "owners": [{"name": "overlay", "sources": ["pad", "keys"], "take": ["20d", "1b"]}],
+      "steps": [["down", "20d"], ["disown", "overlay"], ["up", "20d"], ["down", "1b"], ["repeat", "1b"], ["disown", "overlay"],
+                ["repeat", "1b"], ["up", "1b"]],
+      "game": [], "plain": [],
+      "overlay": ["press 20d", "press 1b", "repeat 1b"]
+    },
+    {
+      "name": "the next press of an orphan (its world ended) is offered again",
+      "owners": [{"name": "blueprint", "sources": ["pointer"], "take": ["2"]}],
+      "steps": [["down", "2"], ["world"], ["down", "2"], ["up", "2"]],
+      "game": [], "plain": [],
+      "blueprint": ["press 2", "end 2 world", "press 2", "release 2"]
+    },
+    {
+      "name": "an owner that passes saw the press; the next owner takes it and keeps its release",
+      "owners": [{"name": "first", "sources": ["keys"], "take": []}, {"name": "second", "sources": ["keys"], "take": ["*"]}],
+      "steps": [["down", "12"], ["up", "12"]],
+      "game": [], "plain": [],
+      "first": ["press 12"],
+      "second": ["press 12", "release 12"]
+    }
+  ]
+}

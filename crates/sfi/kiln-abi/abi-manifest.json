@@ -8398,6 +8398,78 @@
       },
       "sha256": "ac1c1759d67bbf77ea9d5ff6ba259dbf96b5810c3d2e70176af7e9557f562cbe"
     },
+    "native/core/abi/services/kiln_ui_input.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiInputApi": {
+          "align": 8,
+          "fields": {
+            "disown": 24,
+            "header": 0,
+            "owns": 32,
+            "pad_state": 40,
+            "subscribe_owned": 8,
+            "unsubscribe": 16
+          },
+          "size": 48
+        },
+        "KilnUiOwnedInput": {
+          "align": 4,
+          "fields": {
+            "captured": 57,
+            "client_height": 52,
+            "client_width": 48,
+            "controller": 24,
+            "end": 28,
+            "flags": 36,
+            "kind": 4,
+            "mods": 20,
+            "reserved": 58,
+            "scan": 16,
+            "size": 0,
+            "source": 8,
+            "text_input": 56,
+            "time": 32,
+            "vk": 12,
+            "x": 40,
+            "y": 44
+          },
+          "size": 64
+        },
+        "KilnUiPadState": {
+          "align": 8,
+          "fields": {
+            "buttons": 12,
+            "connected": 8,
+            "controller": 4,
+            "hidden": 20,
+            "left_trigger": 40,
+            "left_x": 24,
+            "left_y": 28,
+            "owned": 16,
+            "packet": 60,
+            "poll_ms": 64,
+            "polls": 72,
+            "raw_left_trigger": 56,
+            "raw_left_x": 48,
+            "raw_left_y": 50,
+            "raw_right_trigger": 57,
+            "raw_right_x": 52,
+            "raw_right_y": 54,
+            "reserved0": 9,
+            "reserved1": 58,
+            "reserved2": 80,
+            "right_trigger": 44,
+            "right_x": 32,
+            "right_y": 36,
+            "size": 0
+          },
+          "size": 88
+        }
+      },
+      "sha256": "7f5a5874bc259579f82645e137a1db9df2593bf28a7912131176f44918ee170d"
+    },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -10067,7 +10139,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "b978a02b6bef6dcd7a07af52f6f8efbbe2a35c5cab42da876ebd22096113ea1b",
+    "src/layout.rs": "e5ea4fd277373cac8be0d0ea577ce68c6637b0fd8eb3db023e7c17d64e7284b9",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10137,6 +10209,7 @@
     "src/services/kiln_ui_ammo.rs": "6533ca816d68b06c9cd461564a7a15fa56df804e22e0f26dc6d590e93171ffa7",
     "src/services/kiln_ui_blocks.rs": "cf0d0e1760465229c8b1c2f2e0c6a0a9764476feffa231677c78f87c5921d011",
     "src/services/kiln_ui_chest.rs": "9f1aaa1a9f8e9f0fb65f3f6e3339f325cec6f92a743bfba5211110b802567315",
+    "src/services/kiln_ui_input.rs": "ca41ea703688fae4155a7c8e051b5eaf3ba1ea69954f6c2dd4415025497529bf",
     "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
     "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
@@ -10148,7 +10221,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "faf70c692377d7bd36ae08a7ab1eb90d0089077ec0352ed5a9867442fe453e6b"
+    "src/services/mod.rs": "7c94e07bbbbcb90ac66b0a5fb562ea19cfd250f6bb112fa4dbc1925fd7eeba17"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
