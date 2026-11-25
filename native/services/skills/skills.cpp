@@ -36,6 +36,7 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_world.h"
 #include "shadow.h"
+#include "client_view.h"
 #include "tree.h"
 
 namespace fs = std::filesystem;
@@ -1446,6 +1447,7 @@ void KILN_CALL on_ready(void*) {
         set_reason("kiln.assets is unavailable: the game's tree cannot be expanded");
     }
     shadow::ready();
+    client_view::ready();
     if (g_api->side() == KILN_SIDE_CLIENT && shadow::level()) {
         KilnHandle h = 0;
         g_api->subscribe_world_tick(g_owner, KILN_WORLD_CLIENT, KILN_TICK_PRE, &on_client_pre, nullptr, &h);
@@ -1511,6 +1513,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         set_reason("feature skills.login_guard is off on this build: unknown saved nodes reset the tree (the game's way)");
     }
     shadow::init(api, owner);
+    client_view::init(api, owner);  // kiln.skills.client (0.2.0-dev.31.13): the local player's tree as the client holds it
     KilnHandle h = 0;
     api->subscribe_tick(owner, KILN_TICK_PRE, &on_pre, nullptr, &h);
     api->subscribe_world(owner, &on_world, nullptr, &h);

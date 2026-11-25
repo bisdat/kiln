@@ -2251,6 +2251,7 @@ void resolve() {
     xfer_init();  // after every symbol above: a lab switch may install the hooks right now
     gems_resolve();  // gem wave G3: the forge actions (kiln.gemcraft), after the transaction symbols
     stations_resolve();  // kiln.stations: bases, stations, the game's fill (after the transaction symbols)
+    client_stations_resolve();  // kiln.stations.client (0.2.0-dev.31.13): the client world's station cache
     dyes_resolve();      // registered sources in the tinting screen and Tint's own transaction
     gear_resolve();      // v8: gear writes (after the tracked writes and the item instances)
     scale_resolve(g_api, g_owner);  // v8 (P7): power and armour scales (hooks only at the first scale)
@@ -2267,6 +2268,7 @@ void KILN_CALL on_ready(void*) {
     equip_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);
     gems_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // gem wave G3: kiln_items_gems
     stations_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);  // kiln.stations: kiln_items_stations
+    client_stations_register();  // kiln.stations.client: its copy after each client-world step
     dyes_register();
     gear_register(w && w->header.size >= sizeof(KilnWorldApi) ? w : nullptr);      // v8: kiln_items_gear
 }
@@ -2345,6 +2347,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     toolwear::publish(api, owner);  // kiln.toolwear: published also where its hooks are off (status says why)
     gems_publish(api, owner);       // kiln.gemcraft: published also where gems.craft is off (status says why)
     stations_publish(api, owner);   // kiln.stations: published also where its features are off (status says why)
+    client_stations_publish(api, owner);  // kiln.stations.client: also where it is off (status says why)
     // kiln.items.inventory_kinds (0.2.0-dev.31): its find answers as find_inventories does where reads are off
     api->register_service(owner, KilnStr{KILN_ITEMS_INVENTORY_KINDS_SERVICE, std::strlen(KILN_ITEMS_INVENTORY_KINDS_SERVICE)}, &kKindsTable);
     return api->register_service(owner, KilnStr{KILN_ITEMS_SERVICE, std::strlen(KILN_ITEMS_SERVICE)}, &kTable);

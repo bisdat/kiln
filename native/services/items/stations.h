@@ -4,6 +4,7 @@
 // in stations_logic.h (host test tests/stations_test.cpp).
 #pragma once
 #include <cstdint>
+#include <vector>
 #include "craft_sources.h"
 
 #include "kiln_api.h"
@@ -33,5 +34,15 @@ KilnResult stations_publish(const KilnApi* api, KilnOwner owner);
 bool stations_base_stock(std::vector<KilnEntity>* out);
 // The entity carries keen::ecs::FactoryStation (a production station as kiln.stations reads it).
 bool stations_is_factory(KilnEntity e);
+
+// kiln.stations.client (client_stations.cpp, since 0.2.0-dev.31.13): one recipe of a world's g38_items::RecipeRegistry
+// (the client world's): its craftingDuration (the i64 at duration_at, unscaled), its output items and every input item
+// (the options of a category input included). False: no such recipe, or a read faulted. On that world's thread.
+bool stations_recipe_facts(void* registry, uint32_t id, int64_t duration_at, int64_t* duration_ns,
+                           std::vector<uint32_t>* outputs, std::vector<uint32_t>* inputs);
+// kiln.stations.client: resolve (after stations_resolve), the client world's tick (on_ready), the table (plugin main).
+void client_stations_resolve();
+void client_stations_register();
+KilnResult client_stations_publish(const KilnApi* api, KilnOwner owner);
 
 }  // namespace kitems

@@ -3905,6 +3905,41 @@ void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
 bool stations_base_stock(std::vector<KilnEntity>* out) { return base_stock_all(out); }
 bool stations_is_factory(KilnEntity e) { return is_factory(e); }
 
+// kiln.stations.client (client_stations.cpp, 0.2.0-dev.31.13): a recipe of `registry` (the client world's
+// g38_items::RecipeRegistry), read through the game's RecipeFind with the layout kiln.stations reads every recipe with.
+// Read-only; on that world's thread.
+bool stations_recipe_facts(void* registry, uint32_t id, int64_t duration_at, int64_t* duration_ns,
+                           std::vector<uint32_t>* outputs, std::vector<uint32_t>* inputs) {
+    outputs->clear();
+    inputs->clear();
+    const auto* recipe = static_cast<const uint8_t*>(find_recipe(id, registry));
+    if (!recipe || duration_at <= 0) return false;
+    KilnStationRecipe r{};
+    r.size = sizeof r;
+    RecipeCall c{id, registry, &r, false};
+    unsigned long code = 0;
+    struct DurationRead {
+        const uint8_t* at;
+        int64_t* out;
+        static void run(void* p) {
+            auto* d = static_cast<DurationRead*>(p);
+            std::memcpy(d->out, d->at, sizeof *d->out);
+        }
+    } dur{recipe + duration_at, duration_ns};
+    if (!guard(&recipe_impl, &c, &code) || !c.found || !guard(&DurationRead::run, &dur, &code)) return false;
+    for (uint32_t i = 0; i < r.output_count; ++i) outputs->push_back(r.outputs[i].item);
+    for (uint32_t i = 0; i < r.input_count; ++i) {
+        if (r.inputs[i].item) inputs->push_back(r.inputs[i].item);
+        if (!r.inputs[i].category || G.cat_bits <= 0) continue;
+        KilnItemId items[64] = {};
+        float scaling[64] = {};
+        CatCall k{registry, r.inputs[i].category, 0, false, 0, items, scaling, 64, 0, false};
+        if (guard(&cat_impl, &k, &code) && k.found)
+            for (uint32_t j = 0; j < std::min<uint32_t>(k.n, 64); ++j) inputs->push_back(items[j]);
+    }
+    return true;
+}
+
 void stations_resolve() {
     g_api = items_api();
     g_owner = items_owner();
