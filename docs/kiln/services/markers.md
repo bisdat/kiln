@@ -99,6 +99,12 @@ a refusal is not a rollback, and the marker reaches a player as soon as they can
 nothing** (no packet is sent to them) and are counted as refused. Received markers are the player's to see, not the
 server's to read back: no visibility comes back to the server.
 
+On a dedicated server or a world another player hosts, through 0.2.0-dev.31.11 no joined player's link came up:
+the game's transport pads every payload with zeros to a multiple of 4 bytes, and both ends refused the padded messages
+("a bad marker message from peer 0x…: the message has bytes after its end", every 5 s, while the client kept saying
+HELLO). Since 0.2.0-dev.31.12 both ends take up to 3 zero bytes after a message when its length is a multiple of 4,
+and nothing else. Both ends need 0.2.0-dev.31.12: an older client still refuses a newer server's padded messages.
+
 ## Limits
 Kiln's own policy, not the game's: 128 markers per mod and source, 512 local and 512 received on a client (1024 in all),
 64 changes per mod (256 in all) between two client steps (the 65th is `Full`: spread big loads over steps), 4 MiB of
