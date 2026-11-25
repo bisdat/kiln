@@ -251,6 +251,16 @@ class Backend {
     // free what destroy() kept for the GPU once it is surely done (a context last used kRetireFrames frames ago).
     virtual void tick(uint64_t frame) { (void)frame; }
 
+    // The output check (upscale_probe_logic.h) found this context's picture black or NaN: a lesser mode of the same
+    // backend for the rest of the session (AMD FSR: FSR 3.1 in place of FSR 4), made now for the same sizes. False: it
+    // has none (the core puts the game's own FSR 3 back). `detail`: what runs now, in words.
+    virtual bool step_down(std::string* detail) {
+        (void)detail;
+        return false;
+    }
+    // Whether the core checks the output after a set-up (a test knob may turn it off; upscale_amd_map.h "check").
+    virtual bool output_check() const { return true; }
+
     // What it runs now (amd_fsr4 / amd_fsr3 / xess) and its version: (major << 22) | (minor << 12) | patch.
     virtual Running running() const = 0;
     virtual uint32_t version() const = 0;

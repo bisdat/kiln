@@ -144,9 +144,21 @@ void logf(int level, const char* fmt, ...) {
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
+    va_list again;
+    va_copy(again, ap);
     const int n = std::vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    if (n > 0) g_api->log(g_owner, level, KilnStr{buf, static_cast<size_t>(std::min(n, static_cast<int>(sizeof(buf) - 1)))});
+    if (n > 0 && static_cast<size_t>(n) >= sizeof(buf)) {
+        // a long line (the upscaler's device report lists every extension and feature): whole, up to 16 KB, never cut
+        // at 1023 characters as up to 0.2.0-dev.31.12 (the device's "lacks" list was lost on an RX 6900 XT)
+        std::string big(std::min<size_t>(static_cast<size_t>(n), 16384) + 1, '\0');
+        const int m = std::vsnprintf(big.data(), big.size(), fmt, again);
+        va_end(again);
+        if (m > 0) g_api->log(g_owner, level, KilnStr{big.data(), std::min(static_cast<size_t>(m), big.size() - 1)});
+        return;
+    }
+    va_end(again);
+    if (n > 0) g_api->log(g_owner, level, KilnStr{buf, static_cast<size_t>(n)});
 }
 
 void set_error(const char* fmt, ...) {

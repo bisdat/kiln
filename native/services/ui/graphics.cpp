@@ -695,6 +695,10 @@ static void upscale_readout(const KilnUiGraphicsStatus& st) {
         std::string name = upscale::running_name(running);
         if (st.upscale_version) name += " (" + upscale::version_text(st.upscale_version) + ")";
         ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale"), {{"upscaler", name}, {"render", render}, {"output", output}}).c_str());
+        // FSR 3.1 in place of FSR 4, whose picture came out black on this card (the output check): the reason under it
+        std::string black;
+        if (running == upscale::Running::amd_fsr3 && upscale_fsr4_black(&black))
+            ImGui::TextUnformatted(text::fill(text::get("native.graphics.upscale_why"), {{"upscaler", "AMD FSR 4"}, {"why", black}}).c_str());
         return;
     }
     if (running == upscale::Running::game_fsr3)

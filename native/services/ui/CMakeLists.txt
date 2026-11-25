@@ -9,7 +9,7 @@ target_compile_options(kiln-imgui PRIVATE -w)
 
 # The upscaler swap (phase B, upscale.cpp) and its backends: AMD FSR (upscale_amd.cpp) and Intel XeSS (upscale_xess.cpp;
 # upscale_xess_none.cpp stands in while it is not in the tree).
-set(KILN_UI_UPSCALE upscale.cpp upscale_mv.cpp upscale_amd.cpp)
+set(KILN_UI_UPSCALE upscale.cpp upscale_mv.cpp upscale_probe.cpp upscale_amd.cpp)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upscale_xess.cpp")
     list(APPEND KILN_UI_UPSCALE upscale_xess.cpp)
 else()
