@@ -95,7 +95,7 @@ module header that cannot be read counts as no mismatch.
 A `[chain]` or `dinput8-chain.ini` line loads whatever the profile says. When it holds the DLL of a native mod that is
 off (the player also put that mod's `dinput8.dll` in as a proxy, and the installer chained it), `state/native.json`
 no longer says only "disabled in the profile": the row says its DLL loads as a chain proxy, names the line (`chainProxy`)
-and how to take it out, and `kiln.log` has the same warning (0.2.0-dev.31.12, [native-mods.md](native-mods.md#status-game-kilnstatenativejson)).
+and how to take it out, and `kiln.log` has the same warning (0.2.0-dev.31.12, [native-mods.md](native-mods.md#status-gamekilnstatenativejson)).
 The engines' own loaders and a mod the profile has off: [engines/README.md](engines/README.md#a-mod-the-profile-has-off-while-the-engines-own-loader-runs-020-dev3112).
 
 ### Loading a chained DLL late (`[late]`)
