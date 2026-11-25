@@ -78,6 +78,9 @@ hold::Keys g_keys;  // keys held, across a focus loss (key_hold.h; the wheel ask
 int g_repress_said = 0;
 bool g_consumed[256] = {};  // vk consumed by a binding: swallow its legacy messages too
 bool g_up_kept[256] = {};   // an owned key's raw release was kept (kiln.ui.input): keep its WM_KEYUP too
+// The game got this key's WM_KEYDOWN / WM_SYSKEYDOWN and not yet its up (window thread): an owner that takes a press of
+// it later (its first raw record missing, the raw auto-repeat counted as the press) never keeps its up from the game.
+bool g_game_down[256] = {};
 // The game's chat field (ui.h ChatInputSink, chat_input_probe.cpp): set while chat history runs, null otherwise.
 std::atomic<const ChatInputSink*> g_chat_sink{nullptr};
 std::atomic<uint32_t> g_pressed_vk{0}, g_pressed_mods{0};
@@ -227,6 +230,9 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold
     // them for the game's UI thread. Kiln's own keys and the key subscribers get every other transition.
     const ChatInputSink* chat = from_mouse ? nullptr : g_chat_sink.load(std::memory_order_acquire);
     const bool consumed = (chat && chat->key(vk, k.mods, down, k.captured != 0)) || dispatch_key(k, from_mouse);
+    // an owner took a press of a key the game holds down (its WM_KEYDOWN reached the game before Kiln saw the press): the
+    // stuck-press guard (kiln.ui.input), its release reaches the game
+    if (down && consumed && !from_mouse && g_game_down[vk] && own_claimed() && own_hidden(vk, 0)) own_leak(vk, 0);
     if (!down) {
         g_consumed[vk] = false;
         return false;  // releases always reach the game
@@ -360,7 +366,7 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
 // and notches are forgotten, without inventing key messages for either subscribers or the game (the v5 focus record
 // lets subscribers reset their own state).
 void forget_keys() {
-    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = g_up_kept[vk] = false;
+    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = g_up_kept[vk] = g_game_down[vk] = false;
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
@@ -886,11 +892,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (cap || consumed) {
                 if (m == WM_SYSKEYDOWN && vk == VK_F4) {  // Alt+F4 still closes the game
                     own_leak(vk, 0);  // stuck-press guard (kiln.ui.input): the game saw it, its release reaches it
+                    g_game_down[vk] = true;
                     break;
                 }
                 return 0;
             }
             if (own_claimed() && own_hidden(vk, 0)) own_leak(vk, 0);  // an owned key's down the game gets after all
+            g_game_down[vk] = true;
             break;
         }
         case WM_KEYUP:
@@ -914,7 +922,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_up_kept[vk] = false;
             }
             enqueue(h, m, w, l);
-            if (owned) return 0;
+            if (owned && !g_game_down[vk]) return 0;  // never an up whose down the game saw (stuck-press guard)
+            g_game_down[vk] = false;
             break;  // releases reach the game
         }
         case WM_CHAR:

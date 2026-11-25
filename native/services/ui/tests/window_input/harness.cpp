@@ -2070,7 +2070,7 @@ void owned_key_game_saw() {
     check(downs >= 1 && ups == 1, "own (game saw it): the game gets a WM_KEYUP for the WM_KEYDOWN it got (%zu down, %zu up):%s",
           downs, ups, game_text(r).c_str());
     check(game_key_lines(r, WM_KEYDOWN, 'A') == 1 && game_key_lines(r, WM_KEYUP, 'A') == 1, "own (game saw it): A is the game's");
-    check(ow.lines == std::vector<std::string>{"press 4b", "release 4b leaked"} && !kui::own_claimed(),
+    check(ow.lines == std::vector<std::string>{"press 41", "press 4b", "release 4b leaked"} && !kui::own_claimed(),
           "own (game saw it): the owner hears the press and the release, marked leaked; nothing claimed after:%s",
           join(ow.lines).c_str());
     kui::own_unsubscribe(ow.handle);
