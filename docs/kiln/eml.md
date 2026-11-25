@@ -167,6 +167,14 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   `<exe>.kfc.bak.partial` and `<exe>.kfc_resources.bak.partial` first (fork 112d939), and one can stay after a killed
   start: kiln-eml looks up backups only by their exact names, so it never reads, seals, compares or restores from a
   `.partial` file, and its tidy-up never removes one (it is SF's).
+- **Block-compressed textures on every core (0.2.0-dev.31.13).** `image.encode_texture` to BC1 ... BC7 encodes strips of
+  whole block rows on the PC's threads (at most 16), with the same bytes as EML's serial encode (each block depends only
+  on its own pixels). Texture-heavy mods spend nearly all their time there: EMF Beastmaster's three packs 397 of 401 s
+  of Lua in BC7 on one core, about 78 s for the whole run on 16 threads (section 5). The thread that runs the Lua takes
+  strips too; a helper thread the system refuses is not waited for (the threads that started encode its strips, the
+  same bytes), so a refused thread never fails a mod. `KILN_EML_ENCODE_THREADS=1` in the game's environment gives EML's
+  serial encode; another whole number sets the count (at most 64; `0` or anything else is ignored). Kiln mode
+  (kiln.launch backend `kiln`) stays serial, since its pass can run while a package DLL holds the Windows loader lock.
 - **Publication:** the writer builds privately in the game filesystem, flushes every output, publishes the vanilla
   header from its validated private snapshot before replacing mod-owned containers/resources, and publishes the
   patched header last. Vanilla containers
@@ -796,6 +804,49 @@ Test mods (kept outside the repository):
 | second run | `No changes detected, skipping patching` (`cached: true`) |
 | verify on the patched files | `playerBaseStamina = 777`; on the vanilla files `= 100` |
 | probe | `kiln_eml_probe: 58/58 passed` (58 checks cover the 89 functions) |
+
+### EMF Beastmaster's packs offline (2026-11-25, 0.2.0-dev.31.13, client build 26430625)
+`emf_beastmaster_bear` 3.0.0, `emf_beastmaster_beasts` 2.3.0 and `emf_beastmaster_wilds` 1.1.0 (EMF's
+`tools/models/make_mod.py`; 167 Lua files, 386 MB, PNG mip chains in escaped string literals) are plain EML mods (`patch`,
+no `extended.mod.json`): with no package needing ShroudForge's runtime, no ShroudForge writer reserves the start and
+kiln-eml runs them through EML's own runner (`runner::run`, `mod_loader::lua::run_with`), in kiln mode through the
+same Lua runtime (`startup_host`). They use `game.assets.create_resource` (with a GUID and part 0),
+`get_resource`, `get_resources_by_type`, `create_content`, `get_content`, `Content:read_data`, `game.guid.from_content_hash`
+and `hash`, `game.types.get_by_qualified_name`, `buffer.*` (`wrap`, `create`, `write_string`, `to_string`,
+`read_resource`, `write_resource`), `image.decode` (PNG), `create`, `get_pixel`/`set_pixel`, `decode_texture` and
+`encode_texture` (BC7 sRGB, BC5, BC1, BC4, BC6H), `loader.is_server` and `loader.features.patch`: all EML's own code.
+`kiln-eml-run` on a reflinked copy of a client's vanilla data (`.kfc.bak` pair, 55 containers), against ShroudForge's
+own pass (`shroudforge_api::run_with_local_schema`, as its loader's startup phase calls it, fork `1672d8af`) on another
+copy, compared resource by resource and blob by blob:
+
+| Run | Result |
+|---|---|
+| kiln-eml, three packs | done, 325 resources written (320 new, 5 game resources changed), 209 new blobs (87.6 MB in `_055.dat`); 1 bear, 5 beasts and 3 props, 76 wild creatures (all of creatures.lua), 3 harness items; 379 s on one core, 1.25 GiB peak |
+| ShroudForge, three packs | 366 s; the same 320 new resources and 208 blobs byte for byte; the harness items of wilds are missing (below), so the 5 changed game resources and 1 blob differ |
+| bear and beasts, both | identical: every resource and all 31 new blobs |
+| wilds alone, both | identical: every resource and all 190 new blobs |
+| kiln-eml, 16 threads | byte for byte the one-core run; 77.5 s (load average 25 on the PC) |
+| next start, nothing changed | `cached: true`, 0.2 s; after that it reads nothing (3 ms) |
+
+The one difference is ShroudForge's: its `game.assets.get_content` answers only blobs of the game's own header
+(`access_file_content.rs`), EML's (and kiln-eml's) also the ones created earlier in the same pass. The beasts pack's
+stable script writes the English text table back as a new blob; the wilds pack's harness script then reads it, gets
+nil under ShroudForge ("content_beastmaster_harness: not added: ... attempt to index a nil value (local 'content')")
+and adds its three items under kiln-eml. Whole files differ between two runs that agree on every resource and blob:
+the header's order of new entries is not fixed.
+
+Where the time goes (one core, the same run instrumented, 420 s): BC7 encode 396.7 s (850 levels, 60 M pixels), the
+other BC formats 0.3 s, PNG decode 0.7 s, reading the modules 0.6 s, compiling them (the escaped literals) 1.5 s,
+per-pixel Lua (flat maps, 4x4 padding) and resource reads/writes under 1 s, staging the 325 resources 0.35 s,
+publication 4 s, preparing the vanilla data (backup and seal) about 12 s.
+
+Cache: a start after one that changed nothing reads nothing. Files that a running game and its mods write outside the
+inputs (`enshrouded.log`, `kiln/state`, `kiln/logs`, `shroudforge/exports`, `emf/`, `BuildingTools.ini`,
+`<exe>.kfc.prepared.json`, `crash_dumps/`, `mods/<other>/`) left the next start a hit. The inputs are the mods' folders
+(every file and folder, by size, last-write time and CRC-64) and, in the game folder itself, every `.dat`, `.kfc`,
+`.kfc_resources`, `.exe`, `.bak` and `.integrity` file and `eml.json`. A pack file whose last-write time changes
+re-runs the pass even with the same bytes (EML's fingerprint includes the time); the launcher's Library keeps a
+version's files as installed. Packs on another volume than the game are read at every start (0.5 s for these three).
 
 ### Lab server `wv-eml-1` (UDP 27100)
 The deploy is minimal and native only (proxy, kiln-core with the early step, sigdb, kiln-eml; `clr: false`). These

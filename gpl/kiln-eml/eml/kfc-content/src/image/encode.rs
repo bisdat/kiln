@@ -1,4 +1,5 @@
 use block_compression::{encode::compress_rgba8, BC6HSettings, BC7Settings, CompressionVariant};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use half::f16;
 
 use crate::image::{size_of_format, PixelFormat};
@@ -203,12 +204,41 @@ macro_rules! encode {
     }};
 }
 
+// kiln-eml: the block-compressed formats can be encoded on several threads (`encode_with_threads`), with the same bytes.
+// `encode` uses the process-wide count (`set_encode_threads`), 1 unless the host sets it: EML's own behaviour.
+static ENCODE_THREADS: AtomicUsize = AtomicUsize::new(1);
+
+/// kiln-eml: how many threads `encode` gives a block-compressed texture (1: EML's serial encode).
+pub fn encode_threads() -> usize {
+    ENCODE_THREADS.load(Ordering::Relaxed).max(1)
+}
+
+/// kiln-eml: sets the thread count `encode` uses for block-compressed textures (0 is taken as 1); returns the previous
+/// one. Only a host that knows it may start threads (not under the Windows loader lock) should set more than 1.
+pub fn set_encode_threads(threads: usize) -> usize {
+    ENCODE_THREADS.swap(threads.max(1), Ordering::Relaxed).max(1)
+}
+
 pub fn encode(
     format: PixelFormat,
     width: usize,
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+) -> anyhow::Result<()> {
+    encode_with_threads(format, width, height, src, dst, encode_threads())
+}
+
+/// kiln-eml: `encode`, with block-compressed formats cut into strips of whole block rows that `threads` threads encode
+/// at once. Each BC block depends only on its own 4x4 pixels (block_compression makes a new compressor per block), so
+/// the output is byte for byte the serial one (tests/parallel_encode.rs). Other formats ignore `threads`.
+pub fn encode_with_threads(
+    format: PixelFormat,
+    width: usize,
+    height: usize,
+    src: &[u8],
+    dst: &mut [u8],
+    threads: usize,
 ) -> anyhow::Result<()> {
     let src = &src[..width * height * 4];
     let dst = &mut dst[..size_of_format(format, width, height)];
@@ -342,22 +372,22 @@ pub fn encode(
             anyhow::bail!("E5B9G9R9_ufloat_pack32 encoding not implemented"),
 
         // TODO: handle srgb, currently treated as unorm
-        PixelFormat::BC1_RGB_unorm_block => encode_bc1(width, height, src, dst),
-        PixelFormat::BC1_RGB_srgb_block => encode_bc1(width, height, src, dst),
-        PixelFormat::BC1_RGBA_unorm_block => encode_bc1(width, height, src, dst),
-        PixelFormat::BC1_RGBA_srgb_block => encode_bc1(width, height, src, dst),
-        PixelFormat::BC2_unorm_block => encode_bc2(width, height, src, dst),
-        PixelFormat::BC2_srgb_block => encode_bc2(width, height, src, dst),
-        PixelFormat::BC3_unorm_block => encode_bc3(width, height, src, dst),
-        PixelFormat::BC3_srgb_block => encode_bc3(width, height, src, dst),
-        PixelFormat::BC4_unorm_block => encode_bc4(width, height, src, dst),
-        PixelFormat::BC4_snorm_block => encode_bc4(width, height, src, dst),
-        PixelFormat::BC5_unorm_block => encode_bc5(width, height, src, dst),
-        PixelFormat::BC5_snorm_block => encode_bc5(width, height, src, dst),
-        PixelFormat::BC6H_ufloat_block => encode_bc6h(width, height, src, dst),
+        PixelFormat::BC1_RGB_unorm_block => encode_bc1(width, height, src, dst, threads),
+        PixelFormat::BC1_RGB_srgb_block => encode_bc1(width, height, src, dst, threads),
+        PixelFormat::BC1_RGBA_unorm_block => encode_bc1(width, height, src, dst, threads),
+        PixelFormat::BC1_RGBA_srgb_block => encode_bc1(width, height, src, dst, threads),
+        PixelFormat::BC2_unorm_block => encode_bc2(width, height, src, dst, threads),
+        PixelFormat::BC2_srgb_block => encode_bc2(width, height, src, dst, threads),
+        PixelFormat::BC3_unorm_block => encode_bc3(width, height, src, dst, threads),
+        PixelFormat::BC3_srgb_block => encode_bc3(width, height, src, dst, threads),
+        PixelFormat::BC4_unorm_block => encode_bc4(width, height, src, dst, threads),
+        PixelFormat::BC4_snorm_block => encode_bc4(width, height, src, dst, threads),
+        PixelFormat::BC5_unorm_block => encode_bc5(width, height, src, dst, threads),
+        PixelFormat::BC5_snorm_block => encode_bc5(width, height, src, dst, threads),
+        PixelFormat::BC6H_ufloat_block => encode_bc6h(width, height, src, dst, threads),
         PixelFormat::BC6H_sfloat_block => return Err(anyhow::anyhow!("BC6H_sfloat_block encoding not implemented")),
-        PixelFormat::BC7_unorm_block => encode_bc7(width, height, src, dst),
-        PixelFormat::BC7_srgb_block => encode_bc7(width, height, src, dst),
+        PixelFormat::BC7_unorm_block => encode_bc7(width, height, src, dst, threads),
+        PixelFormat::BC7_srgb_block => encode_bc7(width, height, src, dst, threads),
 
         // opaque
         PixelFormat::D16_unorm |
@@ -378,14 +408,15 @@ fn encode_bc1(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC1,
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -395,14 +426,15 @@ fn encode_bc2(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC2,
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -412,14 +444,15 @@ fn encode_bc3(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC3,
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -429,14 +462,15 @@ fn encode_bc4(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC4,
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -446,14 +480,15 @@ fn encode_bc5(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC5,
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -463,14 +498,15 @@ fn encode_bc6h(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC6H(BC6HSettings::basic()),
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
 }
 
@@ -480,13 +516,107 @@ fn encode_bc7(
     height: usize,
     src: &[u8],
     dst: &mut [u8],
+    threads: usize,
 ) {
-    compress_rgba8(
+    compress_rgba8_split(
         CompressionVariant::BC7(BC7Settings::alpha_basic()),
         src,
         dst,
-        width as u32,
-        height as u32,
-        width as u32 * 4,
+        width,
+        height,
+        threads,
     );
+}
+
+/// kiln-eml: `compress_rgba8` over the whole image, cut into at most `threads` strips of whole block rows, each encoded
+/// into its own rows of `dst` by whichever thread takes it next: this one and up to `threads - 1` helpers. A helper the
+/// OS refuses (`spawn_helper`) is not waited for: the threads that started, at least this one, take its strips, with
+/// the same bytes. A size that is not whole blocks, a single block row or one thread takes the serial call unchanged
+/// (block_compression's own checks apply there). Nothing is copied: each strip borrows its rows of `src` and `dst`.
+fn compress_rgba8_split(
+    variant: CompressionVariant,
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    height: usize,
+    threads: usize,
+) {
+    let block_rows = height / 4;
+    let threads = threads.min(block_rows);
+    if threads <= 1 || width % 4 != 0 || height % 4 != 0 || width == 0 {
+        compress_rgba8(variant, src, dst, width as u32, height as u32, width as u32 * 4);
+        return;
+    }
+    let dst_row = variant.blocks_byte_size(width as u32, 4); // the bytes of one block row
+    let src_row = width * 4 * 4; // its pixels: four image rows of RGBA8
+    let rows_per = block_rows.div_ceil(threads);
+    let (dst, _) = dst.split_at_mut(dst_row * block_rows);
+    let strips = std::sync::Mutex::new(dst.chunks_mut(dst_row * rows_per).zip(src.chunks(src_row * rows_per)));
+    let work = || loop {
+        let Some((out, pixels)) = strips.lock().unwrap_or_else(std::sync::PoisonError::into_inner).next() else { break };
+        let rows = out.len() / dst_row;
+        debug_assert_eq!(pixels.len(), rows * src_row);
+        compress_rgba8(variant, pixels, out, width as u32, (rows * 4) as u32, width as u32 * 4);
+    };
+    std::thread::scope(|scope| {
+        for _ in 1..threads {
+            if spawn_helper(scope, &work).is_err() {
+                break; // the OS refused a thread: the ones running (this one at least) take the rest
+            }
+        }
+        work();
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: how many more helper threads this thread may start; past it a start fails as the OS refusing one would.
+    static SPAWNS_LEFT: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+}
+
+/// One helper thread of `compress_rgba8_split`; an error when the OS refuses it (no memory for its stack, a thread limit).
+fn spawn_helper<'scope, 'env, F: FnOnce() + Send + 'scope>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    work: F,
+) -> std::io::Result<()> {
+    #[cfg(test)]
+    if SPAWNS_LEFT.with(|left| left.replace(left.get().saturating_sub(1))) == 0 {
+        return Err(std::io::Error::other("test: thread creation refused"));
+    }
+    std::thread::Builder::new().spawn_scoped(scope, work).map(drop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    fn image(width: usize, height: usize) -> Vec<u8> {
+        (0..width * height * 4).map(|i| (i * 7 + i / 13) as u8).collect()
+    }
+
+    fn bc(format: PixelFormat, width: usize, height: usize, src: &[u8], threads: usize) -> Result<Vec<u8>, String> {
+        let mut dst = vec![0xa5u8; size_of_format(format, width, height)];
+        match catch_unwind(AssertUnwindSafe(|| encode_with_threads(format, width, height, src, &mut dst, threads))) {
+            Ok(Ok(())) => Ok(dst),
+            Ok(Err(e)) => Err(format!("error: {e}")),
+            Err(_) => Err("panic".into()),
+        }
+    }
+
+    #[test]
+    fn a_thread_the_os_refuses_leaves_its_strips_to_the_threads_it_has() {
+        // the OS may refuse a thread (no memory for its stack, a thread limit): the texture is still encoded, the
+        // serial bytes, on the threads that did start (none: the calling thread alone), never a panic
+        for format in [PixelFormat::BC7_srgb_block, PixelFormat::BC1_RGBA_unorm_block, PixelFormat::BC6H_ufloat_block] {
+            let src = image(64, 64);
+            let serial = bc(format, 64, 64, &src, 1).unwrap();
+            for allowed in [0, 1, 2, 6] {
+                SPAWNS_LEFT.set(allowed);
+                let split = bc(format, 64, 64, &src, 8);
+                SPAWNS_LEFT.set(usize::MAX);
+                assert_eq!(split.as_ref().map(|b| b == &serial), Ok(true), "{format:?}: {allowed} of 7 helper threads started");
+            }
+        }
+    }
 }

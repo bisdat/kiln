@@ -543,6 +543,18 @@ Each is marked `kiln-eml:` in the source.
     `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
     `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder
     through the production runner and the inspector, and the read-back as the second layer).
+41. `kfc-content` `image/encode.rs` (`encode_with_threads`, `encode_threads`, `set_encode_threads`) and
+    `kiln-eml/src/runner.rs` (`encode_threads`, `EncodeThreads`) (0.2.0-dev.31.13): a BC1 to BC7 texture is encoded in
+    strips of whole block rows, each into its own rows of the output by whichever thread takes it next (the calling
+    thread and up to count - 1 helpers; a helper the OS refuses is not waited for, so the threads that started encode
+    its strips, never a panic). block_compression makes a new compressor for every block, so the bytes are the serial
+    encode's (`tests/parallel_encode.rs`: every BC format, uneven strips, more threads than rows, whole mip chains, very
+    wide and very tall textures, sizes that are not whole blocks; the refused-thread test in `encode.rs`). `encode`
+    stays EML's serial encode until the host sets a count; EML's run (`runner::run` outside kiln mode, which in the
+    plugin runs in kiln-core's early step outside the loader lock) sets the PC's threads, at most 16,
+    `KILN_EML_ENCODE_THREADS` overriding (1 = serial, at most 64, `0` or a non-number ignored), and puts the old count
+    back when it ends, also on an error or a panic. Kiln mode stays serial: its pass can run while a package DLL holds the loader lock,
+    where a new thread cannot start. EMF Beastmaster's three packs spent 397 of their 401 s of Lua in BC7.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

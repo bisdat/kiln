@@ -1024,11 +1024,12 @@ fn the_sf_lock_guard_closes_its_file_before_releasing_its_hold() {
 fn every_file_lock_and_process_of_this_crate_goes_through_the_gate() {
     use std::path::Path;
     // (path under eml/, receiver): mutexes, not files.
-    const MUTEXES: [(&str, &str); 4] = [
+    const MUTEXES: [(&str, &str); 5] = [
         ("mod-loader-lua/src/progress.rs", "m"),
         ("mod-loader-lua/src/test_gate.rs", "GATE"),
         ("mod-loader-base/src/registry/mod.rs", "self.inner.fs"),
         ("kfc-base/src/container/reader.rs", "entry.mutex"),
+        ("kfc-content/src/image/encode.rs", "strips"),
     ];
     let eml = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut files = Vec::new();
