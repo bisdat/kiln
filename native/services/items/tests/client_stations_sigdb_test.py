@@ -7,7 +7,7 @@ HUD's remaining-time helper and its two call sites resolve once each on client 2
 captured; the decoder's stream order is the server encoder's on both executables (the client's own copy of the server
 code and the dedicated server's); the helper's arithmetic and constants are the ones client_stations_logic.h
 re-implements; the decoder drops a row outside a known base; a changed byte turns the feature off; the dedicated
-server has no such feature. docs/re/stations.md section 13.
+server has no such feature. docs/re/stations.md section 14.
 """
 import argparse
 import copy

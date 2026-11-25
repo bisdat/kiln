@@ -2,7 +2,7 @@
 // ClientStations (since 0.2.0-dev.31.13, mod API 0.2.22): the production stations a game client knows from its own world,
 // read-only, for a player who joined someone else's world. Native: kiln.stations.client (native/core/abi/services/
 // kiln_stations_client.h, in kiln-items.dll); guide: docs/kiln/services/stations.md ("On a joined client: the client's own
-// station view"); evidence: docs/re/stations.md section 13.
+// station view"); evidence: docs/re/stations.md section 14.
 using System.Runtime.InteropServices;
 
 namespace Kiln;

@@ -377,7 +377,7 @@ call of a factory cycle and clear for its start (`@gameplay/CraftRecipe.factory_
 
 | | dedicated server | hosting client | joined client |
 |---|---|---|---|
-| reads | yes | yes (the hosted server world; same functions, [cmp]) | **no** for kiln.stations: `FactoryStation` is server-only. Since 0.2.0-dev.31.13 a read-only view of the client's own station cache (`ClientFactoryInfo`): §13 |
+| reads | yes | yes (the hosted server world; same functions, [cmp]) | **no** for kiln.stations: `FactoryStation` is server-only. Since 0.2.0-dev.31.13 a read-only view of the client's own station cache (`ClientFactoryInfo`): §14 |
 | fill / stop / resume / select / collect | yes | yes | no: the mod sends a request to its own server side (Kiln.Network); the only vanilla route would be writing the local player's `ClientPlayerInput.playerCraftingAction` (acts as the player, needs the player in the base): not proposed |
 | events | yes | yes | no (`StationPlayerActionEvent` only where `PlayerClientActionEvent` can hold) |
 
@@ -1015,7 +1015,7 @@ native palette tests cover the raw grid callback and both mids. These are not re
 
 ---------------------------------------------------------------------------------------------------------------------
 
-## 13. A game client's own station cache (ClientFactoryInfo, since 0.2.0-dev.31.13)
+## 14. A game client's own station cache (ClientFactoryInfo, since 0.2.0-dev.31.13)
 
 What `ClientStations` / `kiln.stations.client` read on a game client, joined or hosting: the client world's
 `ClientFactoryInfo`, the station cache the game's own station HUD and production-station screen read. Read on client
@@ -1025,7 +1025,7 @@ again here. Symbols: `sigdb/symbols/client.d/stations-client-view.json` (feature
 `native/services/items/tests/client_stations_sigdb_test.py` (72 checks); logic `client_stations_logic.h` (host test
 `client_stations_test.cpp`).
 
-### 13.1 The resource [dis][sig]
+### 14.1 The resource [dis][sig]
 - `player_ui` (C `0x2b8430`) lists `ClientFactoryInfo` in its sys-reads (program catalog), so it is a registered system
   resource of the client world: Kiln gets it with the core's `singleton(world, "ClientFactoryInfo")`. Nothing in the
   catalog writes it: the network decoder below does.
@@ -1043,7 +1043,7 @@ again here. Symbols: `sigdb/symbols/client.d/stations-client-view.json` (feature
   (`ui/play.target`, the screen's entity) and stores the row pointer at `G38UiPlayData+0x2cc0` (what the station
   screen and its recipe picker read: content.md "a station's screens").
 
-### 13.2 How rows arrive [dis][cmp]
+### 14.2 How rows arrive [dis][cmp]
 - Network handler C `0x8760a3` calls the decoder C `0x3bf7f0`: a count byte, a u16 (stored at row `+0xc0`), then per
   entry the u32 entity, a u8 operation (1 removes the row), three u16 positions (x 0.25: constant C `0x13d290c`), a
   lookup of the base at that position in the client's own base list (C `0x46fd00`; **no base found: the entry is
@@ -1056,7 +1056,7 @@ again here. Symbols: `sigdb/symbols/client.d/stations-client-view.json` (feature
   and before any player station action. **Which stations go to which player (a radius, the player's base) was not
   traced**, nor whether a change of only the loaded crafts or the water re-sends a row at once.
 
-### 13.3 A row (0xc8 bytes) [dis][sig][cmp]
+### 14.3 A row (0xc8 bytes) [dis][sig][cmp]
 
 | Row | Width | What | Server row (encoder) |
 |---|---|---|---|
@@ -1083,7 +1083,7 @@ Not in a row: `runningRecipe`, `recipePauseDuration`, `isStoppedByPlayer` (only 
 current craft". XHL's offsets (+0 entity, +8 recipe, +160 crafts, +166 state 0..5) are confirmed; their "batch count" is
 the loaded crafts after the cycle in progress.
 
-### 13.4 The time [dis][sig]
+### 14.4 The time [dis][sig]
 - `stations/client.FactoryRemaining` (C `0xb2d6e0`) is `i64 (const RecipeInfo*, const Row*, i64 now, float speed)`:
   no recipe answers 0; one craft = `(i64)((double)(float(double(recipe+0x38) * 1e-9) * speed) * 1e9)` (constants C
   `0x13d2670`, `0x13d6b90`); total = craft x row `+0xa0` (kept at an extreme when craft is `INT64_MAX`/`MIN`), + craft;
@@ -1099,19 +1099,19 @@ the loaded crafts after the cycle in progress.
 - The client's speed factor is its own copy of the setting; that a server's live change of `factoryProductionSpeedFactor`
   reaches it was not checked.
 
-### 13.5 Outputs
+### 14.5 Outputs
 The finished stacks: Kiln reads the station's inventory in the client world with kiln.items' reader (the same code as on
 the server, `read_inventory` on the client world) every 15th copy, and keeps the stacks of an item that is an output of
 the selected recipe and no input of it (a category input's options count as inputs), as XHL's reference sums
 `ItemStack` counts of the product. That the client world holds a station's inventory outside its open screen was not seen
 in a running game: without one, `Outputs` is null.
 
-### 13.6 Sides and threads
+### 14.6 Sides and threads
 The decoder runs on the client; a hosting client has the cache too (it is a client of its own server). Kiln copies the
 rows after the client world's step (Post, no job running), at most 1000 rows, only while some caller read in the last 5 s;
 readers on any thread get that copy. No hook, no write, no message.
 
-### 13.7 Not verified without a running game
+### 14.7 Not verified without a running game
 - that the cache holds the stations a joined player sees (and how far around them), and how soon a change arrives;
 - that `ClientFactoryInfo` is the singleton's registered name in a live client world (the catalog's name; the core's
   lookup is by that name);

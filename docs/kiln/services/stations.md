@@ -204,7 +204,7 @@ Acting on a station stays your server half's (`Stations`, through `Kiln.Network`
 anything. Capability `stations.client_view` (sigdb, `client.d/stations-client-view.json`); off, every member but
 `Available` and `Status` throws `KilnUnavailableException` naming it. TestKit: `KilnHarness.ClientStations` (`Add`,
 `SetRecipe`, `Clock`, `SpeedFactor`; the times as kiln-items.dll computes them). C: `kiln.stations.client` v1 (`status`,
-`stations`, `station`; any thread). Evidence: [docs/re/stations.md section 13](../../re/stations.md#13-a-game-clients-own-station-cache-clientfactoryinfo-since-020-dev3113).
+`stations`, `station`; any thread). Evidence: [docs/re/stations.md section 14](../../re/stations.md#14-a-game-clients-own-station-cache-clientfactoryinfo-since-020-dev3113).
 Not yet seen in a running game: see the note's "not verified" list.
 
 ## Fill from chests

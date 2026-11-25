@@ -4,7 +4,7 @@
  * and answers nothing) and for a hosting player's own client. Served by kiln-items.dll on the game client. A table of its
  * own: kiln.stations does not grow for it. Capability: stations.client_view (sigdb client.d/stations-client-view.json).
  * Managed face: Kiln.Blocks' ClientStations and ClientStationInfo. Guide: docs/kiln/services/stations.md ("On a joined
- * client: the client's own station view"); evidence: docs/re/stations.md section 13.
+ * client: the client's own station view"); evidence: docs/re/stations.md section 14.
  *
  * Where it comes from. The server's factory_station_info program keeps one row per station in ServerFactoryInfo and sends
  * changed rows to the players; the client keeps them in its world's ClientFactoryInfo resource (the cache the game's own

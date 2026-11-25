@@ -4,7 +4,7 @@
 // remaining-time arithmetic (client 26430625 0xb2d6e0, saturating at the i64 extremes), the scaled craft duration
 // (FactorySpeed's float factor, as factory_station), the view a row gives, and the bounded caller buffer.
 // client_stations.cpp reads the game's memory on the client world's thread and hands the bytes here.
-// Evidence: docs/re/stations.md section 13.
+// Evidence: docs/re/stations.md section 14.
 #pragma once
 #include <algorithm>
 #include <cstdint>

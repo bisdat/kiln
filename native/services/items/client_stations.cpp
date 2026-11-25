@@ -2,7 +2,7 @@
 // kiln.stations.client (since 0.2.0-dev.31.13, mod API 0.2.22): a read-only copy of the game client's own station cache
 // (ClientFactoryInfo), for a player who joined someone else's world. ABI: native/core/abi/services/kiln_stations_client.h;
 // pure part: client_stations_logic.h (host test tests/client_stations_test.cpp); symbols: sigdb client.d/
-// stations-client-view.json (tests/client_stations_sigdb_test.py); evidence: docs/re/stations.md section 13.
+// stations-client-view.json (tests/client_stations_sigdb_test.py); evidence: docs/re/stations.md section 14.
 //
 // The copy is taken on the client world's thread after its step (Post: its jobs are done), only while a caller read in
 // the last KILN_STATIONS_CLIENT_DEMAND_MS; readers on any thread get that copy. Nothing here writes game memory: the game's

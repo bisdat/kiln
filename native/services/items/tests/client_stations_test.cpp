@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.stations.client (kiln_stations_client.h, since 0.2.0-dev.31.13), the pure part (client_stations_logic.h) on the
 // host, no game: the ABI layout the managed side mirrors, a ClientFactoryInfo row of client 26430625 decoded with the
-// layout sigdb captures (docs/re/stations.md section 13), the game HUD's remaining-time arithmetic (0xb2d6e0, every
+// layout sigdb captures (docs/re/stations.md section 14), the game HUD's remaining-time arithmetic (0xb2d6e0, every
 // branch of its saturation), the scaled craft, the view a row gives (time only while Running, outputs only with the
 // station's inventory), the bounded caller buffer and the demand window.
 //   g++ -std=c++20 -I native/core/abi native/services/items/tests/client_stations_test.cpp && ./a.out
