@@ -21,12 +21,14 @@
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
 // speaker), world_to_screen (kiln.render's camera, below), on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3),
-// the six v39/v40 order functions (api_orders.cpp, fill_orders) and the six v33 marker functions (api_markers.cpp,
-// fill_markers), both since 0.2.0-dev.31.13.
+// and since 0.2.0-dev.31.13: the seven v32 buff functions (api_buffs.cpp, fill_buffs), v35 player_view (api_view.cpp,
+// fill_view), the six v33 marker functions (api_markers.cpp, fill_markers) and the six v39/v40 order functions
+// (api_orders.cpp, fill_orders). fog_at, map_markers and the canvases answer "not yet" from api_view.cpp.
 //
-// Not carried yet (33 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
-// mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
-// the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
+// Not carried yet (25 functions; v35's fog_at, map_markers and canvases among them, in api_view.cpp): each answers as
+// EMF's own core answers where a feature is off on a game build, so a mod meets a state it already has to handle: the
+// documented failure value, out buffers cleared, `why` filled where the request has one, a request whose `size` is too
+// small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
 // A function leaves this file when Kiln carries it: docs/kiln/emf-parity.md has the list.
 #include <intrin.h>
@@ -99,42 +101,7 @@ bool api_hit_rule_remove(uint32_t) {
     return false;  // no rule has that id
 }
 
-// ---------------------------------------------------------------------------------------------- v32 -------------
-uint32_t api_buff_types(EmfWorld*, EmfBuffType*, uint32_t) {
-    KEMF_NOT_YET("buff_types");
-    return 0;  // "0 when the world's buff registry cannot be read"
-}
-
-bool api_buff_type(EmfWorld*, uint32_t, EmfBuffType*) {
-    KEMF_NOT_YET("buff_type");
-    return false;
-}
-
-bool api_buff_text(uint32_t, uint32_t, char* buf, uint32_t cap) {
-    KEMF_NOT_YET("buff_text");
-    clear(buf, cap);
-    return false;
-}
-
-uint32_t api_buffs_of(EmfWorld*, uint32_t, EmfBuff*, uint32_t) {
-    KEMF_NOT_YET("buffs_of");
-    return 0;
-}
-
-bool api_buff_apply(EmfWorld*, uint32_t, uint32_t, int64_t, uint32_t, uint32_t, EmfBuffCallback, void*) {
-    KEMF_NOT_YET("buff_apply");
-    return false;  // refused at once: `done` is not called
-}
-
-bool api_buff_remove(EmfWorld*, uint32_t, uint32_t, EmfBuffCallback, void*) {
-    KEMF_NOT_YET("buff_remove");
-    return false;
-}
-
-bool api_on_buff(EmfBuffCallback, void*) {
-    KEMF_NOT_YET("on_buff");
-    return false;
-}
+// v32 buffs: api_buffs.cpp (fill_buffs, since 0.2.0-dev.31.13)
 
 // ---------------------------------------------------------------------------------------------- v33 -------------
 // marker_set ... marker_unsend: api_markers.cpp (fill_markers, after fill_v40).
@@ -189,31 +156,7 @@ bool api_ground_at(EmfWorld*, double, double, EmfGroundCallback, void*) {
     return false;  // refused at once: `cb` is not called
 }
 
-// ---------------------------------------------------------------------------------------------- v35 -------------
-bool api_player_view(EmfPlayerView*) {
-    KEMF_NOT_YET("player_view");
-    return false;
-}
-
-bool api_fog_at(double, double, float*) {
-    KEMF_NOT_YET("fog_at");
-    return false;
-}
-
-uint32_t api_map_markers(EmfGameMarker*, uint32_t) {
-    KEMF_NOT_YET("map_markers");
-    return 0;
-}
-
-bool api_canvas_set(const char*, const EmfCanvas*) {
-    KEMF_NOT_YET("canvas_set");
-    return false;
-}
-
-bool api_canvas_draw(const char*, const EmfCanvasCmd*, uint32_t) {
-    KEMF_NOT_YET("canvas_draw");
-    return false;  // an unknown canvas
-}
+// v35 player_view, fog_at, map_markers, canvas_set, canvas_draw: api_view.cpp (fill_view, since 0.2.0-dev.31.13)
 
 // ---------------------------------------------------------------------------------------------- v36 -------------
 bool api_remove_building(EmfWorld*, EmfRemoveBuilding* req) {
@@ -304,24 +247,14 @@ void fill_v40(EmfApi* t) {
     t->on_hit_before = &api_on_hit_before;
     t->hit_rule_add = &api_hit_rule_add;
     t->hit_rule_remove = &api_hit_rule_remove;
-    t->buff_types = &api_buff_types;
-    t->buff_type = &api_buff_type;
-    t->buff_text = &api_buff_text;
-    t->buffs_of = &api_buffs_of;
-    t->buff_apply = &api_buff_apply;
-    t->buff_remove = &api_buff_remove;
-    t->on_buff = &api_on_buff;
+    // v32 buffs: fill_buffs (api_buffs.cpp), called after this
     // marker_set, marker_remove, marker_clear, marker_types, marker_send, marker_unsend: fill_markers (api_markers.cpp)
     t->world_to_screen = &api_world_to_screen;
     t->map_cursor = &api_map_cursor;
     t->on_map_click = &api_on_map_click;
     t->map_action = &api_map_action;
     t->ground_at = &api_ground_at;
-    t->player_view = &api_player_view;
-    t->fog_at = &api_fog_at;
-    t->map_markers = &api_map_markers;
-    t->canvas_set = &api_canvas_set;
-    t->canvas_draw = &api_canvas_draw;
+    // v35: fill_view (api_view.cpp), called after this
     t->remove_building = &api_remove_building;
     t->path_find = &api_path_find;
     t->path_cancel = &api_path_cancel;

@@ -165,22 +165,33 @@ Kiln does not carry every function EMF added since. Carried: chat lines without 
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
 since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the server applies to a creature, player
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
-Kiln yet, and the mod's log says so once) and, since 0.2.0-dev.31.13, markers (`marker_set` ... `marker_unsend`, Lua
-`emf.marker` ... `emf.unsend_marker`, and v47's bar) on Kiln's own marker service: a world label, Kiln's compass strip
-for the edge arrow, and the game's map with one of its icons; the mapping and what differs are in
-[emf-parity.md](emf-parity.md#markers-on-kiln-v33-and-v47s-bar). Not yet: player join/leave/death events, item names and the game's
-language, character names, changing hits (`on_hit_before`, hit rules), buffs, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, a player's game permissions
-and villager moves. A mod that calls one of those gets
+Kiln yet, and the mod's log says so once). Since 0.2.0-dev.31.13 also:
+- buffs (`buff_types`, `buff_type`, `buff_text`, `buffs_of`, `buff_apply`, `buff_remove`, `on_buff`; Lua `emf.buffs`,
+  `emf.apply_buff`, `emf.remove_buff` and the rest): giving and removing run the game's own buff natives, so the
+  effect, the HUD icon and saving are the game's; a give with an `item` is refused;
+- `player_view` (the local player's position, heading and camera direction);
+- markers (`marker_set` ... `marker_unsend`, Lua `emf.marker` ... `emf.unsend_marker`, and v47's bar) on Kiln's own
+  marker service: a world label, Kiln's compass strip for the edge arrow, and the game's map with one of its icons;
+  the mapping and what differs are in [emf-parity.md](emf-parity.md#markers-on-kiln-v33-and-v47s-bar);
+- enemy orders and move orders (`enemy_order` ... `enemy_moving`) on `kiln.creature_control` leases: the game's own AI
+  attacks or walks, and an order with `damage` or a move with the peaceful or clear options is refused with its reason.
+
+Not yet: player join/leave/death events, item names and the game's language, character names, changing hits
+(`on_hit_before`, hit rules), map clicks and map actions, canvases and the rest of the minimap's parts (`fog_at`,
+`map_markers`), `remove_building`, paths, doors, a player's game permissions and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
 
 What that means for EMF's own mods of 0.6.8, read from their source (not seen with a player):
-- **minimap** draws nothing (`emf.canvas`, `emf.player_view` and `emf.map_markers` are not carried).
-- **Beastmaster**: its buff reads and removals (`emf.buffs`, `emf.remove_buff`) and its reads of `emf.player_view`
-  give nothing; the rest runs as before. Since 0.2.0-dev.31.13 its markers, enemy orders and move checks work on Kiln
-  alone (read from Beastmaster 1.22.0's source; not yet seen with a player):
+- **minimap** draws nothing (`emf.canvas`, `emf.fog_at` and `emf.map_markers` are not carried; `emf.player_view` is
+  since 0.2.0-dev.31.13).
+- **Beastmaster** (1.22.0): since 0.2.0-dev.31.13 it runs fully on Kiln alone, without EMF (read from its source; not
+  yet seen with a player):
+  - Taming: a tamed beast loses its debuffs (`emf.buffs` lists them, `emf.remove_buff` takes each one off through
+    the game's own removeBuff, so a player's bleed no longer kills the wolf once its guard ends).
+  - `beastmaster.spawn` puts the beast 5 m in the camera's direction (`emf.player_view`; on the host's console thread
+    from the server world's copy of the host's player).
   - Markers (`/beastmaster markers on`, `/beastmaster stable_markers on`): each beast you have out gets its name and
     its health as ten cells (`Rex [########..]`) over its head, following it, on Kiln's compass strip (direction and
     distance) and on the map as one of the game's pin icons; the stables show on the map, and within 200 m in the

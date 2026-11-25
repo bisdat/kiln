@@ -11,11 +11,12 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **86 full, 25 partial, 33 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
-  v40 append 45: seven full (`world_to_screen`; since 0.2.0-dev.31.13 `enemy_order_cancel`, `enemy_move_cancel`,
-  `enemy_moving`, `marker_remove`, `marker_clear` and `marker_unsend`), nine partial (`chat_tell_ex`,
-  `chat_broadcast_ex`, `on_hit` since 0.2.0-dev.30.3; `enemy_order`, `enemy_target`, `enemy_move`, `marker_set`,
-  `marker_types` and `marker_send` since 0.2.0-dev.31.13) and 29 not yet
+- Counts: **91 full, 28 partial, 25 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+  v40 append 45: twelve full (`world_to_screen`; since 0.2.0-dev.31.13 `buff_types`, `buff_type`, `buffs_of`,
+  `buff_remove`, `on_buff`, `marker_remove`, `marker_clear`, `marker_unsend`, `enemy_order_cancel`,
+  `enemy_move_cancel` and `enemy_moving`), twelve partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since
+  0.2.0-dev.30.3; since 0.2.0-dev.31.13 `buff_text`, `buff_apply`, `player_view`, `marker_set`, `marker_types`,
+  `marker_send`, `enemy_order`, `enemy_target` and `enemy_move`) and 21 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7: two full, one partial and four not yet
   ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2, both full (`spawn_facing`,
   `find_wall_ex`; [v47](#v47-emf-0619)); v48 and v49 append none ([v48](#v48-emf-0620), [v49](#v49-emf-0622)). Counts are C table slots, not
@@ -126,8 +127,8 @@ queries and `EMF_BREAK_WORLD` are translated onto `kiln.build` since 0.2.0-dev.3
 ## v28 to v40 (EMF 0.6.3 to 0.6.8)
 
 What a mod gets from each function EMF added after 0.6.0. "Answer" is the value a mod sees from a function Kiln does
-not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`; the six order functions:
-`tests/orders_test.cpp`); the probe checks them on a dedicated server.
+not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`; the v32 buffs and v35:
+`tests/buffs_test.cpp`; the v33 markers: `tests/markers_test.cpp`; the six order functions: `tests/orders_test.cpp`); the probe checks them on a dedicated server.
 
 | EMF function (since) | On Kiln | Status | Tested |
 |---|---|---|---|
@@ -138,14 +139,20 @@ not carry yet. Host tests check every answer (`tests/glue_test.cpp`, `test_v40`;
 | `player_character_name` (30) | Answer: `false` and an empty buffer. | not yet | host, probe |
 | `on_hit` (31) | Since 0.2.0-dev.30.3. The game's HitEvents of the server world, as EMF's core takes them: kiln-emf's own relay program for HitEvent (the one `on_event` uses: a `kiln.world` SYSTEM program, host only) copies them in the step, and after the step, on the tick thread, each becomes EMF's `EmfHit`: attacker = root source, part, target = root target (else the part), amount and stamina (positive = damage), the game's flags (`EMF_HIT_KILLED` on the killing blow), damage types, attack kinds, weapon category, program, impact, reaction, target faction, position; `health_before` -1; `health_after` = `kiln.combat` `health()` of the part, else of the target; `weapon_item` = the weapon entity's ItemState item; `from_mod` = a `damage()` hit (kiln.combat's impact ids, so a Kiln mod's damage counts too). Terrain and building hits are never passed. At most 16 callbacks, null refused; a faulting callback is switched off. A call before the worlds are set up is kept (EMF: any time). | partial: entity hits only: fall, shroud, cold and drowning damage (`EMF_HIT_KIND_FALL` to `_DROWNING`, which EMF reads from its own hooks on four game programs) never arrive; `health_after` of a placed object whose Health is gone is -1 (EMF: the object's maximum). The mod's log says so once, at its first `on_hit`. | host (`tests/hits_test.cpp`); probe (lab: passed 2026-11-21, the Vukah killing blow reached `on_hit` with `EMF_HIT_KILLED`) |
 | `on_hit_before`, `hit_rule_add`, `hit_rule_remove` (31) | Answer: `false` / 0. Hits are not changed. | not yet | host, probe |
-| `buff_types`, `buff_type`, `buff_text`, `buffs_of`, `buff_apply`, `buff_remove`, `on_buff` (32) | Answer: 0 / `false`; `done` is not called. | not yet | host, probe |
+| `buff_types`, `buff_type` (32) | Since 0.2.0-dev.31.13. The world's BuffRegistry collection (the game's buffs and kiln.gamedata's buff clones), any world kind, any thread: each 184-byte record read at EMF's offsets ([below](#buffs-on-kiln-v32)). 0 / `false` when the collection cannot be read, or when sigdb `gamedata/buffreg.collection` says it moved. | full | host (also native Windows); probe (not run yet) |
+| `buffs_of` (32) | Since 0.2.0-dev.31.13. `kiln.playerstate` `buffs()` (BuffContainer and each buff entity's BuffNetworkData; players, creatures, NPCs) on the world's own thread, in slot order with each buff's place in its slot group; time left against the world's ECS time, -1 while BuffNetworkData has no end. A client world answers 0: BuffContainer is a server component (EMF reads the same component there). Another thread: 0. | full | host (also native Windows); probe (not run yet) |
+| `buff_remove` (32) | Since 0.2.0-dev.31.13. The game's `removeBuff` native (what the game's own programs call: the buff entity, its effect and HUD icon go) in kiln-emf's Impact program through `kiln.abilities`, on the game's generic impact entity spawned at the target (`kiln.spawn`). Queued from any thread, started in the server's next Pre (16 a step, 64 waiting); `done` once, after the step on the server thread: REMOVED (`cleansed` 1, the instance taken) or REFUSED (`the target does not have it`, a target not in the world, a world that closed, 120 steps without an answer). False at once (logged): not the server world, entity or type 0, an unknown type, 64 waiting, `kiln.abilities` without its instance hooks on this build. Before a world has loaded its ImpactRegistry a request waits up to 60 steps. | full | host (also native Windows); probe (refusals, not run yet); in-game check pending |
+| `buff_apply` (32) | Since 0.2.0-dev.31.13. The game's `applyBuff` native in kiln-emf's second program, as `buff_remove`, with the duration (0 = the type's default) and the source (0 = the target) as the impact's root and faction; then the target's buffs are read back (EMF's check: the game answers "ok" without giving to an excluded faction). APPLIED with the new buff entity, or REFUSED with EMF's reasons. | partial: an `item` (a food type's stats and time from the eaten item) is refused at once, because the game's `applyBuff` takes no item; the source's stats reach the buff only as the impact's root, not copied as EMF's own ApplyBuffCtx does | host (also native Windows); probe (refusals, not run yet); in-game check pending |
+| `buff_text` (32) | Since 0.2.0-dev.31.13. The type's name or description tag through `kiln.content` `text()`, the game's own lookup (Kiln's texts of clones first) in the player's language, cut to whole UTF-8 characters. On the game's main thread at once; on another thread the copy of what the main thread looked up, a new tag looked up at the next client step. False on the dedicated server. | partial: off the main thread the first call for a tag answers false, and after a language change the old text until the next client step | host (also native Windows); client check pending |
+| `on_buff` (32) | Since 0.2.0-dev.31.13. After each server step on its thread: every in-game player's (`kiln.players`) buffs through `kiln.playerstate`, compared with the step before (EMF's diff: APPLIED, REFRESHED when an end moves on by more than 1 s, REMOVED with `cleansed` / `replaced`; the first sight says nothing). At most 16 callbacks; a faulting one is switched off. On a joined client nothing is called (no server step there), as on EMF. | full | host (also native Windows); probe (registration, not run yet) |
 | `marker_set` (33) | Since 0.2.0-dev.31.13. `kiln.markers`' local store (`set_local`) of the client world, under the mod's own namespace `emf:<id>`: [markers on Kiln](#markers-on-kiln-v33-and-v47s-bar) has the mapping. False on the dedicated server (it draws nothing, as EMF), for EMF's bad ids and numbers, without a client world, or over Kiln's limits. | partial: Kiln's diamond for every shape, no `icon` pictures, the distance on the compass strip only, no minimap; 128 markers per mod and 512 in all (EMF 256 and 1024); a mod's markers end with the client world (EMF keeps them across worlds) | host (`tests/markers_test.cpp`); probe (dedicated-server answers; not run yet) |
 | `marker_remove`, `marker_clear` (33) | Since 0.2.0-dev.31.13. The mod's own markers on this game (`remove_local`, `clear_local`): false / how many it had. | full | host; probe (not run yet) |
 | `marker_types` (33) | Since 0.2.0-dev.31.13. Kiln's icon catalog: the game's marker types usable on Kiln's map (id, `EMF_MAP_TYPE_CUSTOM` for the game's pin types, the alias as `name`). 0 while the catalog warms up. | partial: every map type of this game build, not only those this world's map used so far; fast-travel types are not listed (Kiln refuses them on the map); a dedicated server answers once the first verified Kiln player sent the catalog (EMF: 0 there) | host; probe (not run yet) |
 | `marker_send` (33) | Since 0.2.0-dev.31.13. `kiln.markers`' server layers (`send`): player 0 = the broadcast layer (also players who join later), else that player's own value; a followed entity is a server anchor, so the player sees it move where their game does not know it. Answers how many players with Kiln it reached; players without Kiln get nothing, as EMF's answer for players without EMF. At most 256 a call; bad markers are left out. Off the server's tick thread: carried out at the next server step, in order, answering 0. | partial: the receiving game needs Kiln 0.2.0-dev.31.12 or later, not EMF (EMF's `emf/markers` channel is not spoken: a player with EMF but no Kiln sees none); 128 sent markers per mod across all players; the drawing differences of `marker_set` | host; probe (not run yet); client (a joined player sees them) |
 | `marker_unsend` (33) | Since 0.2.0-dev.31.13. One player: their own value goes (`unsend`); a marker sent to every player is hidden from that game (`suppress_sent`) until it is sent to every player again. Player 0: from every game (the broadcast and every player's own value or hiding). How many players it reached. | full | host; probe (not run yet) |
 | `map_cursor`, `on_map_click`, `map_action`, `ground_at` (34) | Answer: `false`; no callback. | not yet | host, probe |
-| `player_view`, `fog_at`, `map_markers`, `canvas_set`, `canvas_draw` (35) | Answer: `false` / 0. No canvas is drawn. | not yet | host, probe |
+| `player_view` (35) | Since 0.2.0-dev.31.13. `kiln.client`'s local player and its CurrentTransform (position, heading from its orientation: 0 north, 90 east), read in the client world on the game's main thread or in the server world on a host's tick thread; `camera_yaw_deg` with `EMF_VIEW_CAMERA` from `kiln.render`'s camera while it is valid; `world_size` 10240 m. Another thread: the copy of the latest client step, kept while a mod asked in the last 10 s. False on the dedicated server, at the menu and before the player is known. | partial: off those two threads the first call (and the first in a new world) answers false; `world_size` is always 10240 (EMF reads it from its fog grid once it has one) | host (also native Windows); probe (dedicated server: false, not run yet); client check pending |
+| `fog_at`, `map_markers`, `canvas_set`, `canvas_draw` (35) | Answer: `false` / 0. No canvas is drawn. Why: no Kiln service reads the fog of war (EMF copies the client world's FogOfWar grid) or the game's own map list (EMF captures it with its hooks), and a canvas over `kiln.render` with the FOG, MARKERS and MAP commands needs both and the v33 markers. | not yet | host, probe |
 | `remove_building` (36) | Answer: `false`, `refunded` 0, `why` "not available on Kiln yet". Nothing is removed. | not yet | host, probe |
 | `path_find`, `path_cancel` (37) | Answer: 0 / `false`; no callback. | not yet | host, probe |
 | `door_state`, `door_set`, `door_lock` (38) | Answer: `EMF_DOOR_NONE` / `false`. | not yet | host, probe |
@@ -218,30 +225,32 @@ Ownership: a world's stop ends that world's markers of every mod (the client wor
 sent ones and the calls still waiting); kiln-emf's unload releases every mod's owner (`release_owner`), which clears
 what was left. kiln-emf never unloads one EMF mod alone.
 
-### Buffs (v32): plan
+### Buffs on Kiln (v32)
 
-Not carried yet (the answers above). Best estimate for all seven: 4 to 6 days, in this order:
+Since 0.2.0-dev.31.13 (`native/plugins/emf/src/api_buffs.cpp`, `buffs_model.cpp`; host test `tests/buffs_test.cpp`).
+No engine call or write is in kiln-emf itself, and no hook or signature was added:
 
-1. `buffs_of` and `on_buff` (about 1 day): `kiln.playerstate` `buffs()` already reads any entity's BuffContainer
-   and each buff entity's BuffNetworkData on the server world (type, entity, slot, cleansed, lifetime, end, level).
-   `on_buff` = a per-step comparison of each player's buffs (APPLIED, REFRESHED when the same buff entity's end moves
-   on, REMOVED with `cleansed`/`replaced`), the first sight saying nothing, as EMF. Open points for the lab:
-   `EmfBuff.index` (kiln.playerstate skips empty slots, so the place in the slot group needs one more field), the
-   time base of `remaining_ns` (BuffNetworkData's end against the world's ECS time), and client worlds (BuffContainer
-   is server only: EMF answers there from replicated data, Kiln would answer 0 at first).
-2. `buff_types` and `buff_type` (about 1 day): the BuffRegistry's collection, which `kiln.content`'s buff clones
-   already find (`gamedata/GetBuffType`, `gamedata/buffreg.collection`), read for id, slot, apply type, faction
-   mask, flags, default time and follow-up; server sigdb entries to add where only the client has them.
-3. `buff_remove` (about half a day): the cleansed byte of the target's slot through a kiln.world program's tracked
-   write (the game's own cleanse ends it the next step), with `done` after that step.
-4. `buff_apply` (2 to 3 days, the risky part): the game's applyBuffCore with a 0xE8-byte ApplyBuffCtx built inside a
-   kiln.world program that has the buff programs' access (BuffContainer and LifeTime writes, the buff and balancing
-   registries, AppliedBuffEvent out), new signatures on both executables, and a lab check of the effect, HUD icon,
-   saving and faction refusals.
-5. `buff_text` (half a day to a day): the game's text lookup, shared with v29's `item_name` (not carried either).
+- **Types** come from the world's BuffRegistry singleton: the collection at +0x20 (kiln.gamedata's sigdb capture
+  `gamedata/buffreg.collection`; on a build where it differs, `buff_types` answers 0 and kiln.log says so once), its
+  `buffs` BlobArray at +0x18, 184-byte `keen::BuffType` records read at EMF's offsets. Kiln's catalog of the game's
+  reflection lists the record's fields in that order, and Kiln's RE has the id at +0, `isSaved` at +0x4a and
+  `onTimeout` at +0x88 where EMF reads them ([emf-compat.md](../re/emf-compat.md#v32-buffs-and-v35-player_view)).
+  kiln.gamedata's buff clones are in the list (their copy of the collection, whose old headers are never freed, so any
+  thread may read it).
+- **An entity's buffs** are `kiln.playerstate` `buffs()`, whose records carry each buff's place in its slot group since
+  0.2.0-dev.31.13 (`KilnPlayerBuff.index`). Time left uses the world's ECS time, as EMF.
+- **Giving and removing** run the game's `applyBuff` (argc 5) and `removeBuff` (argc 3) natives in two Impact programs
+  kiln-emf registers with `kiln.abilities` (the shape of Kiln.Abilities' ApplyBuff and RemoveBuff, under kiln-emf's own
+  GUIDs `6b656d66-...`, checked by kiln.abilities' verifier). Each runs on the game's generic impact entity spawned
+  through `kiln.spawn` at the target, with the buff (16 bytes whose FNV-1a is the type id: the natives hash the
+  reference), the target and the duration as config overrides. The program keeps the native's answer and a done flag
+  for 30 steps; kiln-emf reads them after the step, destroys the impact and calls `done`. A world that closes refuses
+  what waits; those answers come at the next server Post.
+- **Events** compare each in-game player's buffs with the step before, as EMF's own diff does.
 
-Not built in 0.2.0-dev.30.3: step 1 alone is moderate, but its numbers need a lab run first, and steps 2 to 5 call
-into the engine.
+What only a live game can show (no in-game check has run): the HUD icon and the effect of a given buff, a removed
+debuff's effect ending on a tamed creature, saving of a given buff, and the faction refusal. `buff_apply` with an `item`
+stays refused until the game's food path (`actor_apply_buff` with the used item) can be reached for any target.
 
 ## v43 to v46 (EMF 0.6.13 to 0.6.14)
 
@@ -396,10 +405,11 @@ Kiln the functions still marked not yet below return what EMF's Lua guide docume
 | `emf.item_name`, `emf.language` (1.21) | `item_name`, `game_language` | not yet (`emf.item_name` gives the debug name and `false`, `emf.language` `nil`, as on a dedicated server) |
 | `emf.on_hit` (1.23) | v31 `on_hit` | partial (since 0.2.0-dev.30.3): entity hits, the default, arrive after the server step with every field of EMF's hit table; `{kinds = ...}` with fall, shroud, cold or drowning gets none of those |
 | `emf.hit_rule`, `emf.hit_rule_remove` | v31 `hit_rule_add`, `hit_rule_remove` | not yet (`nil` / `false`) |
-| `emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff` | v32 | not yet |
+| `emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff` | v32 | since 0.2.0-dev.31.13: full, except `emf.apply_buff` with `{item = ...}` (false, logged) and a type's `name` / `description`, which are nil on the dedicated server (as EMF) and, off the game's main thread, until it looked them up |
 | `emf.marker`, `emf.remove_marker`, `emf.clear_markers`, `emf.marker_types`, `emf.send_marker`, `emf.unsend_marker` | v33 | since 0.2.0-dev.31.13: partial / full / full / partial / partial / full (as C) |
 | `emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at` | v34 | not yet |
-| `emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw` | v35 | not yet |
+| `emf.player_view` | v35 `player_view` | since 0.2.0-dev.31.13: partial (as C; `world_size` 10240) |
+| `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw` | v35 | not yet |
 | `emf.remove_building` | v36 | not yet |
 | `emf.path_find`, `emf.path_cancel` | v37 | not yet |
 | `emf.door`, `emf.door_open`, `emf.door_close`, `emf.door_lock` | v38 | not yet |
@@ -438,6 +448,17 @@ portraits and their appearance in Beastmaster remain unchecked. See [eml.md](eml
 - EMF's own console UI, debug bridge, save backups and profile manager are EMF's tooling, not API.
 
 ## Changelog
+
+- **0.2.0-dev.31.13:** three parts of EMF's API that Beastmaster uses, on Kiln alone:
+  - v32 buffs (all seven functions) and v35 `player_view` on Kiln's services: `kiln.playerstate` reads (with the new
+    `KilnPlayerBuff.index`), the BuffRegistry collection, the game's `applyBuff` / `removeBuff` in kiln-emf's
+    `kiln.abilities` programs, `kiln.content` texts, `kiln.client` and `kiln.render` for the view. Beastmaster's
+    taming takes the debuffs off a tamed beast, and its spawn command uses the camera's direction.
+  - v33 markers and v47's bar on `kiln.markers` ([above](#markers-on-kiln-v33-and-v47s-bar)): Beastmaster's beast
+    and stable markers.
+  - v39 enemy orders and v40 move orders on `kiln.creature_control` leases: Beastmaster's Training Grounds attack,
+    its cancel on petting, and its check for another mod's move.
+  - Counts, recounted from the rows: 91 full, 28 partial, 25 not yet (was 80 / 19 / 45).
 
 - **Issue #141 (unreleased):** pinned EMF 0.6.22/v49 and Lua 1.42/1.43 source audit; v49 ABI/version admission,
   unchanged 1160-byte table, v48 compatibility preserved. Path/Guard/CLEAR/move functionality remains unavailable.

@@ -522,6 +522,7 @@ void dispatch_after_step(EmfWorld* w, uint8_t kind) {
     level_after_step(w, kind);       // v22: the XP curve cache
     net_after_step(w, kind);         // v27: messages on their destination world's thread
     markers_after_step(w, kind);     // v33: queued marker_send / marker_unsend, follow and map retries
+    buffs_after_step(w, kind);       // v32: give/remove answers, on_buff (server); texts and the v35 view's copy (client)
     commands_after_step(w, kind);
     core_after_step(w, kind);
     settings_after_step(w, kind);
@@ -546,6 +547,8 @@ const EmfApi* api_table() {
         fill_hits(&g_table);        // v31 on_hit (api_hits.cpp)
         fill_orders(&g_table);      // v39 enemy orders, v40 move orders (api_orders.cpp)
         fill_markers(&g_table);     // v33 markers, v47 bars (api_markers.cpp, kiln.markers)
+        fill_buffs(&g_table);       // v32 buffs (api_buffs.cpp)
+        fill_view(&g_table);        // v35 player_view (api_view.cpp)
         // every slot must be filled: a NULL would crash a mod that checks only api->size
         const auto* slots = reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(&g_table) + 8);
         const size_t n = (sizeof(EmfApi) - 8) / sizeof(void*);

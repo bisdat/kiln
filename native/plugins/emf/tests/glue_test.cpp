@@ -918,22 +918,31 @@ static void test_v40(KilnApi &api) {
         CHECK(good == 8 && render_lookups == 1);
     }
     // the two chat functions come from fill_game (api_game.cpp, not built into this test), on_hit from fill_hits
-    // (api_hits.cpp: tests/hits_test.cpp), the six v39/v40 order slots from fill_orders (api_orders.cpp:
-    // tests/orders_test.cpp) and the six marker functions from fill_markers (api_markers.cpp: tests/markers_test.cpp),
-    // both since 0.2.0-dev.31.13
+    // (api_hits.cpp: tests/hits_test.cpp); since 0.2.0-dev.31.13 the v32 buffs from fill_buffs (api_buffs.cpp) and the
+    // five v35 slots from fill_view (api_view.cpp; both tests/buffs_test.cpp), the six marker functions from
+    // fill_markers (api_markers.cpp: tests/markers_test.cpp) and the six v39/v40 order slots from fill_orders
+    // (api_orders.cpp: tests/orders_test.cpp)
     const size_t first = offsetof(EmfApi, on_player) / sizeof(void *), n = sizeof(EmfApi) / sizeof(void *);
     const auto *slots = reinterpret_cast<void *const *>(&t);
-    int empty = 0;
+    const size_t v32 = offsetof(EmfApi, buff_types) / sizeof(void *), v32_end = offsetof(EmfApi, on_buff) / sizeof(void *);
+    const size_t v35 = offsetof(EmfApi, player_view) / sizeof(void *), v35_end = offsetof(EmfApi, canvas_draw) / sizeof(void *);
+    int empty = 0, elsewhere = 0;
     const size_t markers[] = {offsetof(EmfApi, marker_set), offsetof(EmfApi, marker_remove), offsetof(EmfApi, marker_clear),
                               offsetof(EmfApi, marker_types), offsetof(EmfApi, marker_send), offsetof(EmfApi, marker_unsend)};
     for (size_t o : markers) CHECK(!slots[o / sizeof(void *)]);
-    for (size_t i = first; i < n; ++i)
+    for (size_t i = first; i < n; ++i) {
+        if ((i >= v32 && i <= v32_end) || (i >= v35 && i <= v35_end)) {
+            elsewhere += !slots[i];
+            continue;
+        }
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
             i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *) &&
             !(i >= offsetof(EmfApi, enemy_order) / sizeof(void *) && i <= offsetof(EmfApi, enemy_moving) / sizeof(void *)) &&
             std::find(std::begin(markers), std::end(markers), i * sizeof(void *)) == std::end(markers))
             ++empty;
+    }
     CHECK(n - first == 54 && empty == 1 && !t.spawn_facing);  // spawn_facing is filled by fill_spawn, not fill_v40
+    CHECK(elsewhere == 12);
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
     CHECK(!t.enemy_order && !t.enemy_order_cancel && !t.enemy_target && !t.enemy_move && !t.enemy_move_cancel && !t.enemy_moving);
 
@@ -954,28 +963,11 @@ static void test_v40(KilnApi &api) {
     EmfHitRule rule{};
     rule.size = sizeof rule;
     CHECK(t.hit_rule_add(&rule) == 0 && !t.hit_rule_remove(1));
-    EmfBuffType bt{};
-    EmfBuff b{};
-    CHECK(t.buff_types(w, &bt, 1) == 0 && !t.buff_type(w, 1, &bt) && t.buffs_of(w, 1, &b, 1) == 0);
-    dirty();
-    CHECK(!t.buff_text(1, 0, buf, sizeof buf) && buf[0] == 0);
-    auto buff_cb = [](EmfWorld *, const EmfBuffEvent *, void *) { ++v40_callbacks; };
-    CHECK(!t.buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) && !t.buff_remove(w, 1, 2, buff_cb, nullptr) &&
-          !t.on_buff(buff_cb, nullptr));
     double x = 7, z = 9;
     CHECK(!t.map_cursor(&x, &z) && x == 7 && z == 9);
     CHECK(!t.on_map_click([](const EmfMapClick *, void *) { ++v40_callbacks; }, nullptr));
     CHECK(!t.map_action("a", "A", 0, [](EmfWorld *, const EmfMapDone *, void *) { ++v40_callbacks; }, nullptr));
     CHECK(!t.ground_at(w, 1, 2, [](EmfWorld *, const EmfGround *, void *) { ++v40_callbacks; }, nullptr));
-    EmfPlayerView view{};
-    view.size = sizeof view;
-    float explored = 4;
-    EmfGameMarker gm{};
-    EmfCanvas canvas{};
-    canvas.size = sizeof canvas;
-    EmfCanvasCmd cmd{};
-    CHECK(!t.player_view(&view) && !t.fog_at(1, 2, &explored) && explored == 4 && t.map_markers(&gm, 1) == 0);
-    CHECK(!t.canvas_set("c", &canvas) && !t.canvas_draw("c", &cmd, 1));
     EmfPathQuery q{};
     q.size = sizeof q;
     CHECK(t.path_find(w, &q, [](EmfWorld *, uint32_t, const EmfPathResult *, const EmfPathPoint *, void *) { ++v40_callbacks; },
@@ -992,7 +984,7 @@ static void test_v40(KilnApi &api) {
     rb.refunded = 77;
     CHECK(!t.remove_building(w, &rb) && rb.refunded == 0 && std::string(rb.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
-    CHECK(counted >= 30);  // every function that is not carried reported itself at least once (orders, markers: 31.13)
+    CHECK(counted >= 18);  // every function of this file that is not carried reported itself at least once
     rb = {};
     rb.size = sizeof rb - 1;
     rb.refunded = 77;

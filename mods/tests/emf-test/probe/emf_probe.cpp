@@ -265,14 +265,25 @@ void v40_checks(EmfWorld* w) {
     check(!A->on_hit_before([](EmfWorld*, EmfHit*, void*) { ++g_v40_callbacks; }, nullptr) && A->hit_rule_add(&rule) == 0 &&
               !A->hit_rule_remove(1),
           "hits: on_hit_before, hit_rule_add, hit_rule_remove answer false / 0");
+    // buffs are carried since 0.2.0-dev.31.13: the server world's types, an entity's buffs; gives and removals of a type
+    // the game does not have (and gives with an item) are refused at once, without a callback; a dedicated server has
+    // no texts
     EmfBuffType bt{};
-    EmfBuff bf{};
+    EmfBuff bf[40]{};
     auto buff_cb = [](EmfWorld*, const EmfBuffEvent*, void*) { ++g_v40_callbacks; };
+    const uint32_t types = A->buff_types(w, nullptr, 0);
+    EmfBuffType first{};
+    const bool listed = types > 0 && A->buff_types(w, &first, 1) == types && A->buff_type(w, first.id, &bt) && bt.id == first.id &&
+                        bt.size == sizeof bt && bt.slot <= EMF_BUFF_TERRAIN;
+    check(listed && !A->buff_type(w, 0x6b656d00u, &bt), "buffs: buff_types lists the game's types, buff_type finds one");
     dirty();
-    check(A->buff_types(w, &bt, 1) == 0 && !A->buff_type(w, 1, &bt) && !A->buff_text(1, 0, buf, sizeof buf) && buf[0] == 0 &&
-              A->buffs_of(w, 1, &bf, 1) == 0 && !A->buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) &&
-              !A->buff_remove(w, 1, 2, buff_cb, nullptr) && !A->on_buff(buff_cb, nullptr),
-          "buffs: the seven functions answer false / 0");
+    check(!A->buff_text(first.id, 0, buf, sizeof buf) && buf[0] == 0, "buffs: buff_text is false on a dedicated server");
+    check(A->buffs_of(w, 1, bf, 40) <= 40, "buffs: buffs_of answers on the server world");
+    check(!A->buff_apply(w, 1, 0x6b656d00u, 0, 0, 0, buff_cb, nullptr) && !A->buff_remove(w, 1, 0x6b656d00u, buff_cb, nullptr) &&
+              !A->buff_apply(w, 1, first.id, 0, 0, 7, buff_cb, nullptr) && !A->buff_apply(w, 1, first.id, -1, 0, 0, buff_cb, nullptr),
+          "buffs: an unknown type, an item and a negative duration are refused at once");
+    check(A->on_buff([](EmfWorld*, const EmfBuffEvent*, void*) {}, nullptr) && !A->on_buff(nullptr, nullptr),
+          "buffs: on_buff takes a callback and refuses none");
     // markers since 0.2.0-dev.31.13 (kiln.markers): a dedicated server draws nothing of its own, it sends
     EmfMarker mk{};
     mk.size = sizeof mk;
@@ -308,7 +319,7 @@ void v40_checks(EmfWorld* w) {
     EmfCanvasCmd cmd{};
     check(!A->player_view(&view) && !A->fog_at(0, 0, &explored) && explored == 4 && A->map_markers(&gm, 1) == 0 &&
               !A->canvas_set("probe", &canvas) && !A->canvas_draw("probe", &cmd, 1),
-          "minimap parts: player_view, fog_at, map_markers, canvas_set, canvas_draw answer false / 0");
+          "minimap parts: player_view (no player on a dedicated server), fog_at, map_markers, canvas_set, canvas_draw answer false / 0");
     EmfRemoveBuilding rb{};
     rb.size = sizeof rb;
     rb.entity = F.villager;
