@@ -365,8 +365,10 @@ Code: `crates/kiln-manage/src/crucible/` (`mod.rs` client and flows, `sign.rs` t
 - **Trust**: "Always trust packs from <creator>" is kept in `<data>/crucible/trust.json` by Discord id; the warning shows
   every time.
 - **kiln:// links**: `kiln://crucible/<CODE>`, `kiln://crucible/pack/<slug>`. `--link <url>` (or a bare kiln:// argument,
-  nothing else) queues it in `<data>/crucible/inbox/`; the launcher holding `<data>/crucible/instance.lock` reads the
-  inbox every 0.5 s and emits `kiln://crucible-link`. Registered at start while Crucible is on (Kiln is kiln://'s only
+  nothing else) queues it in `<data>/crucible/inbox/` when a launcher runs (it holds `<data>/crucible/instance.lock`;
+  the new process exits), else that process starts with the link held in memory and gives it to its window once the data
+  folder's gates open (0.2.0-dev.31.4; up to 31.3 the link was lost before the gate). Only the lock's holder reads the
+  inbox, every 0.5 s, and emits `kiln://crucible-link`. Registered at start while Crucible is on (Kiln is kiln://'s only
   handler): Linux `kiln-launcher-links.desktop` + xdg-mime, Windows `HKCU\Software\Classes\kiln`.
 - **A local service** (debug builds, or the `crucible-dev` feature): `KILN_CRUCIBLE_DEV="api=http://127.0.0.1:<port>/kiln/crucible/api/v1
   cdn=http://127.0.0.1:<port>/<bucket> key=<base64>"` maps the local origins to made-up https hosts (`api.crucible.test`,
