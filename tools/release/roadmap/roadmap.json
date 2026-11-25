@@ -3607,7 +3607,7 @@
     },
     {
       "version": "0.2.0-dev.32",
-      "status": "next",
+      "status": "planned",
       "title": "Camera, pets and taming",
       "summary": "Camera control for mods, pets that follow and fight for their owner, and taming.",
       "features": [
