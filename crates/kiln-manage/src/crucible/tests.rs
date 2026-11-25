@@ -472,6 +472,35 @@ fn a_game_client_downloads_no_server_only_mod() {
     assert!(update_plan(&b, &cb, &ir.profile.id, &mut NoProgress).is_ok());
 }
 
+/// The same pack installed again by its code after one of its mods changed in its Library folder (0.2.0-dev.31.8: a
+/// player's "the library did not take native lootrarityleveler"): the install puts the mod's original files back.
+#[test]
+fn a_pack_installs_again_by_code_over_a_mod_changed_in_the_library() {
+    let t = tmp("changed-entry");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (a, pid) = creator(&t);
+    let ca = Crucible::new(&ep, &fake, "0").with_session(Some(KEY.into()));
+    let shared = share(&a, &ca, &ShareRequest { profile: pid, ..Default::default() }, None, &mut NoProgress).unwrap();
+    let b = DataDirs::at(t.0.join("friend"));
+    let cb = Crucible::new(&ep, &fake, "0");
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let req = InstallRequest { target: pv.version.id.clone(), consent: true, ..Default::default() };
+    let first = install(&b, &cb, None, &req, None, false, &mut NoProgress).unwrap();
+    let alpha = first.profile.mods.kiln.iter().find(|m| m.id == "alpha").unwrap();
+    let lr = LibraryRef { kind: ModKind::Kiln, id: alpha.id.clone(), version: alpha.version.clone(), hash: alpha.hash.clone() };
+    let entry = crate::library::path_of(&b, &lr).unwrap();
+    let original = std::fs::read(entry.join("M.dll")).unwrap();
+    std::fs::write(entry.join("M.dll"), b"changed in the Library").unwrap();
+
+    let (pv, _) = preview(&b, &cb, &shared.pack.code, None).unwrap();
+    let again = install(&b, &cb, None, &InstallRequest { target: pv.version.id.clone(), ..req }, None, false, &mut NoProgress)
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(again.profile.mods.kiln.iter().any(|m| m.id == "alpha" && m.hash == lr.hash));
+    assert_eq!(std::fs::read(entry.join("M.dll")).unwrap(), original, "the original files are back");
+    assert_eq!(crate::hash::of_mod(ModKind::Kiln, &entry).unwrap(), lr.hash);
+}
+
 #[test]
 fn signed_out_sharing_keeps_a_private_owner_key_and_updates_the_same_link() {
     let t = tmp("anonymous");
@@ -1037,6 +1066,28 @@ fn lacking_of_reads_the_library_without_hashing_every_mod_file() {
     let text = std::fs::read_to_string(&manifest).unwrap().replace("\"side\": \"both\"", "\"side\": \"client\"");
     std::fs::write(&manifest, text).unwrap();
     assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [alpha, beta]);
+}
+
+/// A pack mod whose files were changed in its Library folder is missing as it was imported: the repair puts its
+/// original files back (the import's put back, 0.2.0-dev.31.8) and says it is back, never "nothing is missing".
+#[test]
+fn a_repair_of_a_mod_changed_in_the_library_says_it_is_back() {
+    let t = tmp("repair-changed");
+    let fake = Fake::new();
+    let ep = endpoints(&fake.signer.key);
+    let (_a, r1, b, cb) = repair_fixture(&t, &fake, &ep);
+    let ir = install(&b, &cb, None, &InstallRequest { target: r1.version.id.clone(), consent: true, play: Some(false), ..Default::default() }, None, false, &mut NoProgress).unwrap();
+    let pid = ir.profile.id.clone();
+    let beta = lib_ref(&b, &ir.profile, "beta");
+    let manifest = crate::library::path_of(&b, &beta).unwrap().join("kiln.mod.json");
+    let original = std::fs::read(&manifest).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&manifest, String::from_utf8_lossy(&original).replace("\"side\": \"both\"", "\"side\": \"client\"")).unwrap();
+    assert_eq!(pack::lacking_of(&b, &pid).unwrap().missing, [beta.clone()]);
+    let done = repair(&b, &cb, &pid, &mut NoProgress).unwrap();
+    assert_eq!((done.imported.as_slice(), done.left.len()), (std::slice::from_ref(&beta), 0), "{done:?}");
+    assert_eq!(std::fs::read(&manifest).unwrap(), original, "its original files are back");
+    assert!(pack::lacking_of(&b, &pid).unwrap().is_empty());
 }
 
 /// Two kinds of mod under one id (a Kiln and a SET "alpha"): the repair tells them apart by kind and stored file, so
