@@ -1297,6 +1297,21 @@ fn a_mod_that_is_off_but_ran_from_the_players_own_folder_is_a_warning() {
     assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", ids(&r));
 }
 
+/// Review (0.2.0-dev.31.12): `off-but-runs` is about a folder of the player's own. Kiln's copy that runs although the
+/// profile has its mod off (switched on in the game's menu since the last activation) is Kiln's, and the next Play
+/// switches it off: the finding must not call it "a folder of the player's own, which Kiln never writes into".
+#[test]
+fn kilns_own_copy_that_ran_although_off_is_no_players_own_folder_finding() {
+    const WHY: &str = "ShroudForge owns startup asset patching and runs EML packages in its mods folder";
+    let f = Fx::healthy("off-but-runs-copy");
+    f.w("kiln/state/shroudforge.json", br#"{"pid":412,"mode":"hosted","source":"installed","runtime":"running",
+        "profileOff":[{"id":"stack-copy","package":"stack-copy","path":"S:\\mods\\stack-copy","own":false,"skipped":false}]}"#);
+    f.w("kiln/state/eml.json", format!(r#"{{"pid":412,"phase":"aside","aside":"{WHY}","mods":[{{"id":"stack-tweaks","state":"own-loader",
+        "reason":"runs under ShroudForge (hosted by Kiln) although it is off in the profile: ShroudForge's switch is on in Kiln's copy S:/mods/stack-tweaks, and this ShroudForge runtime takes no skip list from Kiln. Press Play in the Kiln launcher (or activate the profile again): Kiln then takes its copy out (or switches it off)"}}]}}"#).as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"off-but-runs"), "{:?}", r.findings.iter().filter(|x| x.id == "off-but-runs").collect::<Vec<_>>());
+}
+
 /// Review of 6a78171d: two files of one OLDER start said "hosted" and "aside for ShroudForge" while neither plugin ran
 /// in the last start; and a file without a pid stood for any start. Neither proves anything about the last start, so
 /// neither takes the place of the own-loader finding.

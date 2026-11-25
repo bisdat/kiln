@@ -2008,13 +2008,16 @@ pub fn build(input: &ReportInput) -> Report {
             }
         }
         // 0.2.0-dev.31.12: a mod the profile has off that ran all the same, from a folder of the player's that nothing could
-        // skip (kiln-eml's `own-loader` row "… although it is off in the profile: …"; kiln-shroudforge's `profileOff`)
+        // skip (kiln-eml's `own-loader` row "… although it is off in the profile: it is your own folder …";
+        // kiln-shroudforge's `profileOff` rows with `own`). Kiln's copy that ran so is Kiln's, and the next Play switches
+        // it off: no finding about a player's folder.
         let ran_off: Vec<String> = match e.kind {
             ModKind::ShroudForge => st.get("profileOff").and_then(|v| v.as_array()).into_iter().flatten()
-                .filter(|r| r.get("skipped").and_then(|b| b.as_bool()) == Some(false)).filter_map(|r| jstr(r.get("id"))).collect(),
+                .filter(|r| r.get("skipped").and_then(|b| b.as_bool()) == Some(false) && r.get("own").and_then(|b| b.as_bool()) == Some(true))
+                .filter_map(|r| jstr(r.get("id"))).collect(),
             _ => st.get("mods").and_then(|v| v.as_array()).into_iter().flatten()
                 .filter(|m| jstr(m.get("state")).as_deref() == Some("own-loader")
-                    && jstr(m.get("reason")).is_some_and(|r| r.contains(" although it is off in the profile: ")))
+                    && jstr(m.get("reason")).is_some_and(|r| r.contains(" although it is off in the profile: it is your own folder ")))
                 .filter_map(|m| jstr(m.get("id"))).collect(),
         };
         if !ran_off.is_empty() {
