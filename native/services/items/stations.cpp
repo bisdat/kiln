@@ -3703,6 +3703,8 @@ bool g_lock_feat = false;          // items.lock_sources resolved with its pinne
 std::atomic<bool> g_lock_off{false};  // a stand-down: a foreign patch, a failed hook, a fault
 kiln::MidHook2 h_lock_eval, h_lock_paid, h_lock_ui;
 std::atomic<bool> g_lock_eval_on{false}, g_lock_paid_on{false}, g_lock_ui_on{false};
+// A hook that faulted on a game worker thread: the next Pre lowers items.lock_sources (faulted), on the tick thread.
+std::atomic<bool> g_lock_fault_report{false};
 LogLimit g_log_lock_check{16}, g_log_lock_pay{24}, g_log_lock_stand{8}, g_log_lock_snap{8};
 
 // The server's own counts of each player's lock-opted links (tick thread writes, any thread reads). `linked`: the player
@@ -3859,11 +3861,22 @@ void lock_eval_impl(KilnRegisters& r) {
     const uint32_t counted = lock_check(world, player, item, bag, need, true);
     if (counted != bag) wr<uint32_t>(out, 8, counted);
 }
+// A fault in a lock hook (a game worker thread): the feature stands down at once, its capability row on the next Pre.
+void lock_fault(const char* what, unsigned long code) {
+    if (g_lock_off.exchange(true)) return;
+    LOGE("locks: %s faulted (0x%08lx): locks from linked sources stand down", what, code);
+    g_lock_fault_report.store(true);
+}
+// Tick thread (either world's Pre): the capability row of a hook fault, once.
+void lock_fault_lower() {
+    if (g_lock_fault_report.exchange(false))
+        lower("items.lock_sources", KILN_CAP_REASON_FAULTED, "a lock hook faulted (see kiln.log): the game's own lock checks and payments are used");
+}
 void hk_lock_eval(KilnRegisters& r) {
     __try {
         lock_eval_impl(r);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (!g_lock_off.exchange(true)) LOGE("locks: the lock check's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+        lock_fault("the lock check's hook", GetExceptionCode());
     }
 }
 // locks/client.UiLockCountRet: rbp+0x620 the count's result, rdi the InteractionLock (pinned by the pattern).
@@ -3877,7 +3890,7 @@ void hk_lock_ui(KilnRegisters& r) {
         const uint32_t counted = lock_check(2, 0, item, bag, need, false);
         if (counted != bag) wr<uint32_t>(out, 8, counted);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (!g_lock_off.exchange(true)) LOGE("locks: the locked prompt's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+        lock_fault("the locked prompt's hook", GetExceptionCode());
     }
 }
 
@@ -3980,7 +3993,7 @@ void hk_lock_paid(KilnRegisters& r) {
     __try {
         lock_paid_impl(r);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (!g_lock_off.exchange(true)) LOGE("locks: the lock payment's hook faulted (0x%08lx): locks from linked sources stand down", GetExceptionCode());
+        lock_fault("the lock payment's hook", GetExceptionCode());
     }
 }
 
@@ -4252,6 +4265,7 @@ bool lock_install(kiln::MidHook2& hook, std::atomic<bool>& on, uintptr_t at, voi
 
 // The server world's Pre (tick thread): the cache, and the server's hooks once a link with Locks exists.
 void lock_server_pre(uint64_t step) {
+    lock_fault_lower();
     if (!g_lock_feat || !G.registered_ok || g_lock_off.load()) return;
     if (!g_lock_paid_on.load() && !g_registered.any_locks()) return;
     lock_cache_refresh(step);
@@ -4275,6 +4289,7 @@ void lock_server_pre(uint64_t step) {
 
 // The client world's Pre (a client process): the client's hooks once a Kiln server's lock snapshot is on.
 void lock_client_pre() {
+    lock_fault_lower();
     if (!g_lock_feat || g_lock_off.load() || !g_lock_on.load(std::memory_order_acquire)) return;
     if (g_lock_eval_on.load() && g_lock_ui_on.load()) return;
     static bool failed = false;
