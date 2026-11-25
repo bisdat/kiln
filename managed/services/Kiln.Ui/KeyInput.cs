@@ -180,7 +180,8 @@ public sealed class KeyListener : IDisposable, IKilnResult
 
     /// <summary>Gives up the press of <paramref name="virtualKey"/> (0: every press the listener owns), without a call: its
     /// repeats and release reach nobody, and still not the game (an overlay that closes on a press gives it up as it closes).
-    /// Returns how many it gave up. Any thread, also inside the listener. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
+    /// Called inside the listener for the press it is being offered, it gives that press up as soon as it keeps it. Returns
+    /// how many it gave up. Any thread, also inside the listener. Since 0.2.0-dev.31.13, mod API 0.2.22.</summary>
     public unsafe int Disown(uint virtualKey = 0, int controller = 0)
     {
         var t = UiNative.Input;

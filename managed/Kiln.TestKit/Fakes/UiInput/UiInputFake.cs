@@ -43,6 +43,8 @@ internal sealed unsafe class UiInputFake : IKitFake
     private static readonly object Shared = new();
     private static readonly List<(ulong Handle, uint Sources, nint Fn, nint User)> Subs = [];
     private static ulong _nextHandle = 0x5100;
+    // the press being offered on this thread, so that a disown inside its own call gives it up once taken (input_own.cpp)
+    [ThreadStatic] private static (ulong Sub, uint Id, bool Disowned) _offering;
 
     string IKitFake.Service => Service;
 
@@ -166,12 +168,23 @@ internal sealed unsafe class UiInputFake : IKitFake
         if (source != 0 && !FakeTables.Off(OwnedRow))
         {
             var rec = Record(UiNative.OwnedPress, vk, controller, mods, at);
-            foreach (var s in Snapshot())
+            var id = UiInputFakeState.Id(vk, controller);
+            var outer = _offering;
+            try
             {
-                if ((s.Sources & source) == 0) continue;
-                if (Call(s.Fn, s.User, rec) != UiNative.OwnTake) continue;
-                lock (st.Lock) st.Claims[UiInputFakeState.Id(vk, controller)] = new UiInputFakeState.Claim { Sub = s.Handle, Gen = gen };
-                return true;
+                foreach (var s in Snapshot())
+                {
+                    if ((s.Sources & source) == 0) continue;
+                    _offering = (s.Handle, id, false);
+                    if (Call(s.Fn, s.User, rec) != UiNative.OwnTake) continue;
+                    lock (st.Lock)
+                        st.Claims[id] = new UiInputFakeState.Claim { Sub = s.Handle, Gen = gen, Orphan = _offering.Disowned };
+                    return true;
+                }
+            }
+            finally
+            {
+                _offering = outer;
             }
         }
         lock (st.Lock)
@@ -285,6 +298,12 @@ internal sealed unsafe class UiInputFake : IKitFake
             var id = vk == 0 ? 0u : UiInputFakeState.Id(vk, (int)controller);
             var n = st.Claims.Count(p => !p.Value.Orphan && p.Value.Sub == h && (id == 0 || p.Key == id));
             DisownLocked(st, h, id);
+            // inside the call that offers a press to h: that press too, once it is taken
+            if (_offering.Sub == h && !_offering.Disowned && (id == 0 || id == _offering.Id))
+            {
+                _offering.Disowned = true;
+                n++;
+            }
             return (uint)n;
         }
     }

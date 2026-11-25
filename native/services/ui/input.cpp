@@ -306,8 +306,8 @@ constexpr USHORT kRawButtonFlags = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUT
                                    RI_MOUSE_BUTTON_5_UP | RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL;
 
 // The presses a raw mouse record carries (middle and side buttons, presses before releases, and the wheel), dispatched.
-// Returns the record's flags whose presses Kiln keeps from the game, and the releases an owner keeps (kiln.ui.input). Over a Kiln panel the middle button's press and the
-// wheel are the panel's: no press.
+// Returns the record's flags whose presses Kiln keeps from the game, and the releases an owner keeps (kiln.ui.input).
+// Over a Kiln panel the middle button's press and the wheel are the panel's: no press.
 USHORT raw_mouse_presses(const RAWMOUSE& ms, bool over_panel) {
     static constexpr struct {
         uint32_t vk;
@@ -332,7 +332,8 @@ USHORT raw_mouse_presses(const RAWMOUSE& ms, bool over_panel) {
 }
 
 // The presses a mouse message carries (middle and side buttons, the wheel), dispatched. true = a press Kiln keeps from
-// the game, or an owned press's release (kiln.ui.input). Over a Kiln panel the middle button and the wheel are the panel's: no press.
+// the game, or an owned press's release (kiln.ui.input). Over a Kiln panel the middle button and the wheel are the
+// panel's: no press.
 bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
     using mouse::Source;
     switch (m) {

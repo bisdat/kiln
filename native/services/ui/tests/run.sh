@@ -89,6 +89,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$he
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=thread -I"$here/../../../third_party" -I"$here/../../../core/abi" \
     "$here/input_own_test.cpp" -o "$out/input_own_tsan_test"
 "$out/input_own_tsan_test" "$here/own_parity.json" >/dev/null
+# the game input paths kiln.ui.input relies on, on the client exe when it is installed (read only; docs/re/input-ownership.md)
+PYTHONDONTWRITEBYTECODE=1 python3 "$here/input_own_re_test.py"
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"

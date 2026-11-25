@@ -138,8 +138,9 @@ typedef struct KilnUiInputApi {
      * a callback. NOT_FOUND: not a subscribe_owned handle. */
     KilnResult(KILN_CALL* unsubscribe)(KilnHandle subscription);
     /* Gives up the subscription's press of `vk` on `controller` (vk 0: every press it owns) without a callback: its
-     * repeats and release reach nobody and stay kept from the game. Returns how many it gave up. Any thread, also
-     * inside the callback. */
+     * repeats and release reach nobody and stay kept from the game. Inside the KILN_UI_OWNED_PRESS call of a press it
+     * gives that press up too, as soon as the answer takes it (an overlay that closes on the press). Returns how many it
+     * gave up. Any thread, also inside the callback. */
     uint32_t(KILN_CALL* disown)(KilnHandle subscription, uint32_t vk, uint32_t controller);
     /* The subscription owns the press of `vk` on `controller` now. Any thread. */
     bool(KILN_CALL* owns)(KilnHandle subscription, uint32_t vk, uint32_t controller);

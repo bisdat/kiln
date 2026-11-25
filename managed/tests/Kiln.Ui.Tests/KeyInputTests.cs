@@ -152,7 +152,7 @@ public sealed unsafe class KeyInputTests : IDisposable
         Assert.True(l.Ok);
         Assert.False(l.Mouse);
         lock (Calls) Assert.Equal(["subscribe_key_ex owner 0 flags 0"], Calls);
-        Assert.Throws<ArgumentOutOfRangeException>(() => KeyInput.Listen(_ => false, (KeyListenFlags)4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => KeyInput.Listen(_ => false, (KeyListenFlags)16));  // 4 and 8 are Own and Pointer (31.13)
         Assert.Throws<ArgumentNullException>(() => KeyInput.Listen(null!));
     }
 

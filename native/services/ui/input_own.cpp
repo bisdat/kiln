@@ -42,6 +42,14 @@ std::atomic<uint32_t> g_count[4] = {};                               // subscrib
 own::Table g_table;
 std::atomic<uint32_t> g_world{0};  // the generation the last world poll saw
 bool g_fault_said = false;
+// The press being offered on this thread (own_offer), so that a disown from inside its own call gives it up as soon as
+// it is taken (an overlay that closes on the press).
+struct Offering {
+    KilnHandle sub = 0;
+    uint32_t id = 0;
+    bool disowned = false;
+};
+thread_local Offering t_offering;
 
 int bit_index(uint32_t source) { return source == own::kKeys ? 0 : source == own::kMouse ? 1 : source == own::kPointer ? 2 : 3; }
 
@@ -189,10 +197,17 @@ bool own_offer(const OwnInput& e) {
     std::vector<Entry> subs;
     for (auto& s : snapshot()) subs.push_back({s->handle, s->sources, s});
     const KilnUiOwnedInput in = record(e, KILN_UI_OWNED_PRESS);
-    return own::offer(g_table, own::id_of(e.vk, e.controller), generation(), subs, [&](Entry& s) {
-               uint32_t answer = KILN_UI_OWN_PASS;
-               return call(s.sub, in, &answer) && answer == KILN_UI_OWN_TAKE;
-           }) != 0;
+    const uint32_t id = own::id_of(e.vk, e.controller);
+    const Offering outer = t_offering;
+    const KilnHandle owner = own::offer(g_table, id, generation(), subs, [&](Entry& s) {
+        t_offering = {s.handle, id, false};
+        uint32_t answer = KILN_UI_OWN_PASS;
+        return call(s.sub, in, &answer) && answer == KILN_UI_OWN_TAKE;
+    });
+    const bool disowned = owner && t_offering.sub == owner && t_offering.disowned;
+    t_offering = outer;
+    if (disowned) g_table.disown(owner, id);  // it gave the press up in its own call: taken, and nobody's
+    return owner != 0;
 }
 
 void own_leak(uint32_t vk, uint32_t controller) {
@@ -264,7 +279,14 @@ KilnResult own_unsubscribe(KilnHandle h) {
 
 uint32_t own_disown(KilnHandle h, uint32_t vk, uint32_t controller) {
     if (!h) return 0;
-    return static_cast<uint32_t>(g_table.disown(h, vk ? own::id_of(vk, controller) : 0));
+    const uint32_t id = vk ? own::id_of(vk, controller) : 0;
+    uint32_t n = static_cast<uint32_t>(g_table.disown(h, id));
+    // inside the call that offers a press to `h`: that press too, once it is taken
+    if (t_offering.sub == h && !t_offering.disowned && (id == 0 || id == t_offering.id)) {
+        t_offering.disowned = true;
+        ++n;
+    }
+    return n;
 }
 
 bool own_owns(KilnHandle h, uint32_t vk, uint32_t controller) { return g_table.owns(h, own::id_of(vk, controller)); }

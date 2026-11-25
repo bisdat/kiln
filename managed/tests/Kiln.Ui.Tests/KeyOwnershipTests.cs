@@ -141,7 +141,7 @@ public sealed unsafe class KeyOwnershipTests : IDisposable
         Assert.Equal(1u, Send(UiNative.OwnedPress, 0x02, mods: 2, x: 640, y: 360));  // taken: Blueprint owns it
         Assert.Equal(0u, Send(UiNative.OwnedPress, 0x01, x: 10, y: 20));           // the left button: passed
         Assert.Equal(0u, Send(UiNative.OwnedRelease, 0x02, x: 700, y: 380));       // a release's answer counts for nothing
-        Assert.Equal(4, got.Count);
+        Assert.Equal(3, got.Count);
         Assert.Equal(new KeyPress(0x02, 0, KeyMods.Shift, true, false, false, false) { Position = new Vector2(640, 360) }, got[0]);
         Assert.False(got[0].Owned);
         Assert.True(got[2].Owned && !got[2].Down && got[2].Ended == KeyOwnEnd.None && got[2].Position == new Vector2(700, 380));

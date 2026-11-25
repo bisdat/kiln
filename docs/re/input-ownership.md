@@ -7,7 +7,8 @@ owned press's release and held state from the game, and checks the addresses XHL
 (`XHL-Kiln-Game-Interfaces.md`, 24 November 2026: "Own a complete right-button gesture during construction", "Route an
 overlay's controller release", "Observe normalized controller input") gives for the same jobs.
 
-kiln.ui.input adds **no new game hook**. It uses three hooks kiln.ui already has, found by name, not by pattern: the
+`native/services/ui/tests/input_own_re_test.py` (in `tests/run.sh`) checks every address and claim below on the installed
+exe (read only; it skips without the exe or on another build). kiln.ui.input adds **no new game hook**. It uses three hooks kiln.ui already has, found by name, not by pattern: the
 game window's procedure (a subclass), the game's `user32!GetRawInputData` import slot, and `XInputGetState` in whichever
 XInput DLL the game loads. So there is no new sigdb entry; this note is the evidence that those three cover the release
 and the held state.

@@ -1706,6 +1706,7 @@ struct OwnLog {
     std::vector<uint32_t> take;  // codes it takes
     bool all = false;
     KilnHandle handle = 0;
+    uint32_t disown_vk = 0;  // gives this press up inside its own call (an overlay that closes on it)
 };
 uint32_t KILN_CALL own_collect(const KilnUiOwnedInput* in, void* user) {
     auto* log = static_cast<OwnLog*>(user);
@@ -1719,6 +1720,7 @@ uint32_t KILN_CALL own_collect(const KilnUiOwnedInput* in, void* user) {
     if (in->kind != KILN_UI_OWNED_PRESS) return KILN_UI_OWN_PASS;
     bool take = log->all;
     for (const uint32_t t : log->take) take = take || t == in->vk;
+    if (take && in->vk == log->disown_vk && kui::own_disown(log->handle, in->vk, in->controller) != 1) log->lines.push_back("disown said 0");
     return take ? KILN_UI_OWN_TAKE : KILN_UI_OWN_PASS;
 }
 uint32_t KILN_CALL own_fault(const KilnUiOwnedInput*, void*) {
@@ -1959,6 +1961,21 @@ void owned_input() {
     }, nullptr);
     check(ov.lines == std::vector<std::string>{"press 1b"} && r.game.empty(),
           "own: a disowned press's release reaches nobody, not the game:%s", game_text(r).c_str());
+    // the same, given up inside the press's own call: taken, and nobody's at once
+    ov.take = {'Q'};
+    ov.disown_vk = 'Q';
+    ov.lines.clear();
+    fresh();
+    r = run([&] {
+        send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_MAKE, 'Q'));
+        send(WM_KEYDOWN, 'Q', key_l(0x10, false, false));
+        check(!kui::own_owns(ov.handle, 'Q', 0), "own: a press disowned in its own call is not owned");
+        send(WM_INPUT, RIM_INPUT, raw_key(0x10, RI_KEY_BREAK, 'Q'));
+        send(WM_KEYUP, 'Q', key_l(0x10, false, true));
+    }, nullptr);
+    check(ov.lines == std::vector<std::string>{"press 51"} && r.game.empty(),
+          "own: disowned in its own call: kept from the game, its release reaches nobody:%s%s", join(ov.lines).c_str(),
+          game_text(r).c_str());
     kui::g_api = nullptr;
     kui::own_unsubscribe(ov.handle);
     kui::own_unsubscribe(pad_owner.handle);
