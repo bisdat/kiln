@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 namespace Kiln.TestKit;
 
-internal sealed record CraftSourceEntry(ulong Owner, ulong Handle, uint Player, uint Container, uint Order, bool Deny, uint[] Items, uint PlayerSession)
+internal sealed record CraftSourceEntry(ulong Owner, ulong Handle, uint Player, uint Container, uint Order, bool Deny, uint[] Items, uint PlayerSession, bool Locks = false)
 {
     internal bool Allows(uint item) => Deny ? !Items.Contains(item) : Items.Contains(item);
 }
@@ -32,9 +32,13 @@ internal sealed unsafe class CraftingFake : IKitFake
             for(var i=0;i<30;i++) slots[i]=(nint)(delegate* unmanaged[Cdecl]<int>)&Unavailable;
             _table->CraftItems=&CraftItems;
             _table->AddSource=&Add;_table->RemoveSource=&Remove;_table->CancelSources=&Cancel;_table->SourceStock=&Stock;
+            // GitHub #147: the lock snapshot is a game client's (no lock check runs in the kit): its members answer
+            // unavailable, as on a server; the registrations' Locks flag and lock counts are modelled.
+            _table->SetLockStock=(delegate* unmanaged[Cdecl]<uint,StationsNative.Stack*,uint,int>)(delegate* unmanaged[Cdecl]<int>)&Unavailable;
+            _table->LockAsks=(delegate* unmanaged[Cdecl]<uint*,uint,uint*,int>)(delegate* unmanaged[Cdecl]<int>)&Unavailable;
         }
         KitBackend.Instance.RegisterTable(Service,(nint)_table);
-        FakeTables.Features([Crafting.SourcesCapability]);
+        FakeTables.Features([Crafting.SourcesCapability, Crafting.LockSourcesCapability]);
         FakeTables.Offline(Crafting.SourceUiCapability,"the test kit has no game client crafting screens");
         FakeTables.Offline("crafting.dye_sources", "the test kit records dye source counts but does not run the game's Tint transaction");
         FakeTables.Offline("crafting.dye_ui", "the test kit has no game client tinting screen");
@@ -45,7 +49,7 @@ internal sealed unsafe class CraftingFake : IKitFake
     public void BeforeStep(KilnHarness harness,ulong step) { }
     public void End(KilnHarness harness) {var s=KitFakes.State<CraftingState>(harness);lock(s.Gate)s.Sources.Clear();}
     public void AddCoverage(List<CoverageRow> rows)=>rows.Add(new CoverageRow("Player crafting sources",CoverageKind.RecordingFake,
-        [StationsNative.Name,Crafting.SourcesCapability],"Player/container registrations, copied allow/deny filters, order metadata, per-player counts, inventory permission, disposal and mod unload. No game RecipePaid hook, base stock, station outputs or client screens are simulated."));
+        [StationsNative.Name,Crafting.SourcesCapability,Crafting.LockSourcesCapability],"Player/container registrations, copied allow/deny filters, order metadata, the Locks opt-in, per-player counts (all, and lock-opted only), inventory permission, disposal and mod unload. No game RecipePaid hook, lock check or interaction payment, base stock, station outputs or client screens are simulated."));
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]
     private static int Unavailable()=>FakeTables.Unavailable;
     [UnmanagedCallersOnly(CallConvs=[typeof(CallConvCdecl)])]
@@ -63,17 +67,20 @@ internal sealed unsafe class CraftingFake : IKitFake
         try
         {
             if(handle==null)return FakeTables.InvalidArgument;*handle=0;
-            if(r==null || r->Size<sizeof(StationsNative.SourceRequest) || r->Player is 0 or >1023 || r->Container<=1023 || r->Order>1 || r->Filter>1 || r->ItemCount>65536 || (r->ItemCount!=0 && r->Items==null))return FakeTables.InvalidArgument;
+            if(r==null || r->Size<32 || r->Player is 0 or >1023 || r->Container<=1023 || r->Order>1 || r->Filter>1 || r->ItemCount>65536 || (r->ItemCount!=0 && r->Items==null))return FakeTables.InvalidArgument;
             if(!FakeTables.OnTickThread)return FakeTables.WrongThread;
             if(FakeTables.Off(Crafting.SourcesCapability) || State is not {} s)return FakeTables.Unavailable;
             if(IsProductionStation(r->Container) || Items.Read(new EntityId(r->Container)) is not {Initialized:true,IsPlayer:false,IsNpc:false})return FakeTables.InvalidArgument;
             if(Players.Find(new EntityId(r->Player)) is not {InGame:true} player)return FakeTables.InvalidArgument;
+            // since 0.2.0-dev.31.12 (GitHub #147): flags when the request's size covers them, as kiln.stations
+            var hasFlags=r->Size>=sizeof(StationsNative.SourceRequest);var flags=hasFlags?r->Flags:0u;
+            if((flags & ~StationsNative.SourceLocks)!=0 || (hasFlags && r->Reserved!=0))return FakeTables.InvalidArgument;
             var items=new ReadOnlySpan<uint>(r->Items,(int)r->ItemCount).ToArray().Distinct().Order().ToArray();
             if(items.Contains(0u))return FakeTables.InvalidArgument;
             lock(s.Gate)
             {
                 if(s.Sources.Count>=4096)return FakeTables.BufferTooSmall;
-                *handle=++s.Next;s.Sources.Add(new(owner,*handle,r->Player,r->Container,r->Order,r->Filter==0,items,player.Handle));
+                *handle=++s.Next;s.Sources.Add(new(owner,*handle,r->Player,r->Container,r->Order,r->Filter==0,items,player.Handle,(flags & StationsNative.SourceLocks)!=0));
             }
             return FakeTables.Ok;
         }
@@ -95,21 +102,22 @@ internal sealed unsafe class CraftingFake : IKitFake
     {
         try
         {
-            if(count==null || (capacity!=0 && rows==null) || player is 0 or >1023 || (flags & ~1u)!=0)return FakeTables.InvalidArgument;*count=0;
+            if(count==null || (capacity!=0 && rows==null) || player is 0 or >1023 || (flags & ~(StationsNative.StockAll|StationsNative.StockLocks))!=0)return FakeTables.InvalidArgument;*count=0;
             if(!FakeTables.OnTickThread)return FakeTables.WrongThread;
             if(FakeTables.Off(Crafting.SourcesCapability) || State is not {} s)return FakeTables.Unavailable;
-            var stock=Counts(s,player);*count=(uint)stock.Count;
+            var stock=Counts(s,player,(flags & StationsNative.StockLocks)!=0);*count=(uint)stock.Count;
             if(capacity<*count)return FakeTables.BufferTooSmall;
             var i=0;foreach(var (item,n) in stock.OrderBy(x=>x.Key))rows[i++]=new(){Item=item,Count=(uint)Math.Min(n,uint.MaxValue)};
             return FakeTables.Ok;
         }
         catch{return FakeTables.Internal;}
     }
-    internal static Dictionary<uint,long> Counts(CraftingState state,uint player)
+    // locks: the lock-opted registrations alone (KILN_CRAFT_SOURCE_STOCK_LOCKS), as kiln.stations counts them.
+    internal static Dictionary<uint,long> Counts(CraftingState state,uint player,bool locks=false)
     {
         var result=new Dictionary<uint,long>();
         if(Players.Find(new EntityId(player)) is not {InGame:true,PermissionsKnown:true} who || !who.Can(PlayerPermissions.AccessInventories))return result;
-        CraftSourceEntry[] sources;lock(state.Gate)sources=[..state.Sources.Where(s=>s.Player==player && s.PlayerSession==who.Handle)];
+        CraftSourceEntry[] sources;lock(state.Gate)sources=[..state.Sources.Where(s=>s.Player==player && s.PlayerSession==who.Handle && (!locks || s.Locks))];
         var seen=new HashSet<(uint,uint)>();
         foreach(var source in sources)
             if(!IsProductionStation(source.Container) && Items.Read(new EntityId(source.Container)) is {Initialized:true,IsPlayer:false,IsNpc:false} inv)

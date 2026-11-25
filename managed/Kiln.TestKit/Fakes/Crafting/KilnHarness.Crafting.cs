@@ -16,7 +16,11 @@ public sealed partial class KilnHarness
 /// <param name="Filter">The item-set interpretation.</param>
 /// <param name="Items">A copy of the filter items.</param>
 public sealed record FakeCraftSourceRegistration(ulong Owner, EntityId Player, EntityId Container, CraftSourceOrder Order,
-    CraftSourceFilter Filter, IReadOnlyList<ItemId> Items);
+    CraftSourceFilter Filter, IReadOnlyList<ItemId> Items)
+{
+    /// <summary>Registered with <see cref="CraftSourceOptions.Locks"/>: locks may count and pay from it. Since 0.2.0-dev.31.12.</summary>
+    public bool Locks { get; init; }
+}
 
 /// <summary>Player-source registrations and their filtered counts in the kit. No base, game payment hook, station
 /// outputs or client screens are simulated. Since 0.2.0-dev.30.6.</summary>
@@ -30,12 +34,19 @@ public sealed class HarnessCrafting
         var s = KitFakes.State<CraftingState>(_harness);
         lock (s.Gate) return (IReadOnlyList<FakeCraftSourceRegistration>)[..s.Sources.Select(x=>new FakeCraftSourceRegistration(x.Owner,
             new EntityId(x.Player),new EntityId(x.Container),(CraftSourceOrder)x.Order,x.Deny?CraftSourceFilter.Deny:CraftSourceFilter.Allow,
-            Array.AsReadOnly(x.Items.Select(i=>new ItemId(i)).ToArray())))];
+            Array.AsReadOnly(x.Items.Select(i=>new ItemId(i)).ToArray())){Locks=x.Locks})];
     });
     /// <summary>Registered source counts only (not the bag), with the same per-player allow/deny union and current
     /// inventory permission check as source_stock. No base restriction is applied.</summary>
     public IReadOnlyDictionary<ItemId, long> Stock(EntityId player) => _harness.Run(() =>
         (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value)
+            .ToDictionary(x => new ItemId(x.Key), x => x.Value));
+
+    /// <summary>The counts a lock may use: the links registered with <see cref="CraftSourceOptions.Locks"/> only, with the
+    /// same filters, player-session generation and inventory permission (not the bag: the game counts it first). No lock
+    /// check, interaction payment or client snapshot is simulated. Since 0.2.0-dev.31.12.</summary>
+    public IReadOnlyDictionary<ItemId, long> LockStock(EntityId player) => _harness.Run(() =>
+        (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value, locks: true)
             .ToDictionary(x => new ItemId(x.Key), x => x.Value));
 
     /// <summary>The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session

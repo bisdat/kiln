@@ -29,6 +29,14 @@ public sealed class CraftSourceOptions
     /// <summary>The item set, copied eagerly on registration; null means an empty set. No managed predicate runs in
     /// the native payment hook, which may run on a game worker thread. Register again to change the filter.</summary>
     public IReadOnlyCollection<ItemId>? Items { get; init; }
+    /// <summary>Locks too (default false): a lock that requires an item (the game's InteractionLock: a lockpick, a key)
+    /// also counts this container, through <see cref="Filter"/> and <see cref="Items"/>, and a lock that uses the item
+    /// up takes it from here after the player's bag, in link order, in the game's own all-or-nothing interaction
+    /// transaction. A lock that only needs the item to be held takes nothing. Needs capability
+    /// <see cref="Crafting.LockSourcesCapability"/> on the server or host, and a Kiln client for the player: a vanilla
+    /// client refuses such a lock on its own. Without the capability the link still serves crafting. Since
+    /// 0.2.0-dev.31.12 (mod API 0.2.21).</summary>
+    public bool Locks { get; init; }
 }
 
 /// <summary>A session-only player crafting source. Dispose or unload its registering mod to remove it. In-flight
@@ -38,10 +46,12 @@ public sealed class CraftSourceHandle : IDisposable
     private long _handle;
     private readonly ulong _owner;
     private readonly ModContext? _mod;
-    internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod)
+    private readonly bool _locks;
+    internal CraftSourceHandle(ulong owner, ulong handle, EntityId player, EntityId container, ModContext? mod, bool locks = false)
     {
-        _owner = owner; _handle = unchecked((long)handle); Player = player; Container = container; _mod = mod;
+        _owner = owner; _handle = unchecked((long)handle); Player = player; Container = container; _mod = mod; _locks = locks;
         if (mod is not null) mod.Retiring += Dispose;
+        if (locks) LockStock.Track(player);
     }
     /// <summary>The only player this registration can supply.</summary>
     public EntityId Player { get; }
@@ -56,7 +66,11 @@ public sealed class CraftSourceHandle : IDisposable
         var id = Interlocked.Exchange(ref _handle, 0);
         if (id == 0) return;
         try { CraftingCore.Remove(_owner, unchecked((ulong)id)); }
-        finally { if (_mod is not null) _mod.Retiring -= Dispose; }
+        finally
+        {
+            if (_mod is not null) _mod.Retiring -= Dispose;
+            if (_locks) LockStock.Untrack(Player);
+        }
     }
 }
 
@@ -67,13 +81,19 @@ public static class Crafting
     public const string SourcesCapability = "crafting.sources";
     /// <summary>A Kiln client's crafting screens count the server's linked-storage snapshot.</summary>
     public const string SourceUiCapability = "crafting.source_ui";
+    /// <summary>Locks count and pay their required item from links registered with <see cref="CraftSourceOptions.Locks"/>:
+    /// on a server or host its lock check and lock payment, on a Kiln client its lock check and locked prompt (from the
+    /// server's snapshot). Off, or faulted, when a symbol, a hook or the game's code it reads is missing or patched by
+    /// another module (kiln.log names it). Since 0.2.0-dev.31.12 (mod API 0.2.21).</summary>
+    public const string LockSourcesCapability = "items.lock_sources";
 
     /// <summary>Registers a container for this player, in any base or none. The mod decides which containers the player
     /// may use; the server rechecks the player's own global CanAccessInventories permission and a readable initialized
     /// container at payment time. It does not enforce base ownership. Player/NPC inventories and production stations
     /// are refused; production stations lend their outputs through <see cref="Stations.SetOutputSource"/>. Sources pay
     /// only a shortfall after the bag and crafting base's stock, in one all-or-nothing recipe transaction. Equal-order
-    /// sources use registration order; each container is counted once per item. A vanilla client keeps its own counts.</summary>
+    /// sources use registration order; each container is counted once per item. A vanilla client keeps its own counts.
+    /// Since 0.2.0-dev.31.12 <see cref="CraftSourceOptions.Locks"/> lets the same link supply a lock's required item.</summary>
     /// <returns>A session-only handle. Dispose or unload the registering mod to remove it; re-register after restart.</returns>
     /// <exception cref="ArgumentException">Invalid player, non-container, production station, or zero item id.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Unknown option or more than 65536 filter items.</exception>
@@ -94,8 +114,9 @@ public static class Crafting
         var mod = ModContext.CurrentMod;
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
         var owner = Services.CallerOwner;
-        var handle = CraftingCore.Add(owner, player, container, o.Order, o.Filter, items);
-        return new CraftSourceHandle(owner, handle, player, container, mod);
+        if (o.Locks) CraftingCore.NoteLocks();
+        var handle = CraftingCore.Add(owner, player, container, o.Order, o.Filter, items, o.Locks);
+        return new CraftSourceHandle(owner, handle, player, container, mod, o.Locks);
     }
 }
 
@@ -125,7 +146,22 @@ internal static unsafe class CraftingCore
         if (t == null || !HasSources) throw new KilnUnavailableException(Crafting.SourcesCapability, "kiln.stations has no player crafting-source members");
         return t;
     }
-    internal static ulong Add(ulong owner, EntityId player, EntityId container, CraftSourceOrder order, CraftSourceFilter filter, uint[] items)
+    // GitHub #147: kiln.stations' lock members (set_lock_stock, lock_asks) and the request's flags came in one release.
+    internal static bool HasLockMembers(uint size) => size >= (uint)StationsNative.TableLocks;
+    internal static bool HasLocks => Table is var t && t != null && HasLockMembers(t->Header.Size) && t->SetLockStock != null && t->LockAsks != null;
+    private static int _locksNoted;
+    // A link asked for Locks: say once why locks will not use it when they cannot (the link still serves crafting).
+    internal static void NoteLocks()
+    {
+        if (!HasLocks)
+            ServiceCaps.Static(Crafting.LockSourcesCapability, false, CapabilityReason.ServiceOlder,
+                "kiln.stations has no lock-source members (older kiln-items.dll)", StationsNative.Name);
+        if (Capabilities.Is(Crafting.LockSourcesCapability) || Interlocked.Exchange(ref _locksNoted, 1) != 0) return;
+        ModLog.Warn($"crafting: a source asked for Locks, but locks do not use linked sources here (the link still serves crafting): " +
+                    Capabilities.Why(Crafting.LockSourcesCapability));
+    }
+    internal static ulong Add(ulong owner, EntityId player, EntityId container, CraftSourceOrder order, CraftSourceFilter filter, uint[] items,
+        bool locks = false)
     {
         var t = Need(); ulong id = 0; int rc;
         fixed (uint* p = items)
@@ -138,7 +174,8 @@ internal static unsafe class CraftingCore
                 Order = (uint)order,
                 Filter = (uint)filter,
                 ItemCount = (uint)items.Length,
-                Items = p
+                Items = p,
+                Flags = locks && HasLocks ? StationsNative.SourceLocks : 0u,
             };
             rc = t->AddSource(owner, &r, &id);
         }
@@ -153,6 +190,22 @@ internal static unsafe class CraftingCore
     }
     internal static (int Rc, StationsNative.Stack[] Rows) ExtraStock(EntityId player) => Stock(player, 0);
     internal static (int Rc, StationsNative.Stack[] Rows) AllStock(EntityId player) => Stock(player, 1);
+    /// <summary>The lock-opted links' counts alone (no bag, no base; GitHub #147).</summary>
+    internal static (int Rc, StationsNative.Stack[] Rows) LockStock(EntityId player) =>
+        HasLocks ? Stock(player, StationsNative.StockLocks) : (StationsNative.Unavailable, []);
+    internal static int SetLockStock(bool on, StationsNative.Stack[] rows)
+    {
+        if (!HasLocks) return StationsNative.Unavailable;
+        fixed (StationsNative.Stack* p = rows) return Table->SetLockStock(on ? 1u : 0u, p, (uint)rows.Length);
+    }
+    internal static (int Rc, uint[] Items) LockAsks()
+    {
+        if (!HasLocks) return (StationsNative.Unavailable, []);
+        var items = new uint[StationsNative.MaxLockAsks]; uint n = 0;
+        int rc;
+        fixed (uint* p = items) rc = Table->LockAsks(p, (uint)items.Length, &n);
+        return rc == StationsNative.Ok && n <= items.Length ? (rc, items[..(int)n]) : (rc, []);
+    }
     private static (int Rc, StationsNative.Stack[] Rows) Stock(EntityId player, uint flags)
     {
         if (!HasSources || !Capabilities.Is(Crafting.SourcesCapability)) return (StationsNative.Unavailable, []);

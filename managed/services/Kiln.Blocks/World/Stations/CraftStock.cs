@@ -234,6 +234,7 @@ internal static class CraftStock
                     static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
                     NetDirection.ToClient);
             DyeStock.Attach(_channel);
+            LockStock.Attach(_channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
         }
         catch (Exception e)
         {

@@ -219,6 +219,9 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<ulong, void> CancelSources;
         public delegate* unmanaged[Cdecl]<uint, uint, Stack*, uint, uint*, int> SourceStock;
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetDyeStock;
+        // ---- locks from linked sources (GitHub #147, 0.2.0-dev.31.12). Header.Size tells whether they are here. ----
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetLockStock;
+        public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> LockAsks;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -226,7 +229,16 @@ internal static unsafe class StationsNative
     {
         public uint Size, Player, Container, Order, Filter, ItemCount;
         public uint* Items;
+        // since 0.2.0-dev.31.12 (GitHub #147): an older kiln.stations reads the first 32 bytes only
+        public uint Flags, Reserved;
     }
+
+    /// <summary>KilnCraftSourceRequest.flags: KILN_CRAFT_SOURCE_LOCKS (GitHub #147).</summary>
+    public const uint SourceLocks = 1;
+    /// <summary>source_stock's flags: KILN_CRAFT_SOURCE_STOCK_ALL, KILN_CRAFT_SOURCE_STOCK_LOCKS.</summary>
+    public const uint StockAll = 1, StockLocks = 2;
+    /// <summary>KILN_STATIONS_MAX_LOCK_STOCK / KILN_STATIONS_MAX_LOCK_ASKS.</summary>
+    public const int MaxLockStock = 256, MaxLockAsks = 16;
 
     /// <summary>KilnStationFillKey: a fill the station screen asks the game about (40 bytes).</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -270,6 +282,10 @@ internal static unsafe class StationsNative
     public static readonly int TableCraftStock = TableStock + 2 * sizeof(nint);
     /// <summary>The table size through <see cref="Table.FillAsks"/>: the station screen's fill buttons (0.2.0-dev.29.19).</summary>
     public static readonly int TableFillUi = TableCraftStock + 2 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.SetDyeStock"/> (crafting sources and dyes, 0.2.0-dev.30.6).</summary>
+    public static readonly int TableDyes = TableFillUi + 5 * sizeof(nint);
+    /// <summary>The table size through <see cref="Table.LockAsks"/>: locks from linked sources (0.2.0-dev.31.12).</summary>
+    public static readonly int TableLocks = TableDyes + 2 * sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 2 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>

@@ -1,1 +1,4 @@
 #nullable enable
+const Kiln.Crafting.LockSourcesCapability = "items.lock_sources" -> string!
+Kiln.CraftSourceOptions.Locks.get -> bool
+Kiln.CraftSourceOptions.Locks.init -> void

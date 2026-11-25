@@ -327,8 +327,13 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(288, sizeof(StationsNative.Table));
-        Assert.Equal(32, sizeof(StationsNative.SourceRequest));
+        Assert.Equal(304, sizeof(StationsNative.Table));  // GitHub #147: SetLockStock, LockAsks appended
+        Assert.Equal(40, sizeof(StationsNative.SourceRequest));  // GitHub #147: Flags, Reserved after the 32-byte V1
+        Assert.Equal(32, (int)Marshal.OffsetOf<StationsNative.SourceRequest>("Flags"));
+        Assert.Equal(288, (int)Marshal.OffsetOf<StationsNative.Table>("SetLockStock"));
+        Assert.Equal(296, (int)Marshal.OffsetOf<StationsNative.Table>("LockAsks"));
+        Assert.Equal(288, StationsNative.TableDyes);
+        Assert.Equal(304, StationsNative.TableLocks);
         Assert.Equal(248, (int)Marshal.OffsetOf<StationsNative.Table>("AddSource"));
         Assert.Equal(256, (int)Marshal.OffsetOf<StationsNative.Table>("RemoveSource"));
         Assert.Equal(264, (int)Marshal.OffsetOf<StationsNative.Table>("CancelSources"));

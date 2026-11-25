@@ -349,12 +349,65 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | --- | --- |
 | `crafting.sources` (`Crafting.SourcesCapability`) | Server or host. Missing payment/access symbols or the permission layout, missing/old `kiln.stations`, or a missing/disabled `kiln.rules` payment hook refuses it. A joined client is the wrong side; offline and no-server-session calls refuse without taking items. |
 | `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
+| `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in or another module patched the code a lock hook reads (kiln.log names it). |
 
 `Kiln.TestKit` records the real managed API on its fake native table: `h.Crafting.Sources` lists live registrations and
 `h.Crafting.Stock(player)` reads registered-only, filtered, permission-checked counts. It models disposal and mod unload,
 not the game payment hook, bases, station outputs or screen drawing. Native host tests cover order, filtering and
 all-or-nothing preflight; Windows tests exercise the actual guarded `RecipePaid` adapter on fake engine transactions.
 The real-game scenarios below are still required.
+
+### Locks from linked sources
+**Since 0.2.0-dev.31.12** (mod API 0.2.21), a link registered with `CraftSourceOptions.Locks = true` also supplies the
+item a lock requires: the game's `InteractionLock` with a required item (a lockpick for the `*_Locked_Pickable_*` doors
+and loot chests, an archaic lockpick for the T7 loot chests, a furniture block's `requires.item`). Thanks to Fuzen777 for
+the request (#147).
+
+```csharp
+// Streamlined Logistics' linked chest, now for locks too:
+var source = Crafting.AddSource(player, chest, new CraftSourceOptions { Locks = true });
+```
+
+- **Opt-in.** `Locks` is off by default: a link without it never serves a lock, and a mod that only wants crafting is not
+  changed. It is the same link and the same filter: `Filter` and `Items` apply to locks as to crafting. There is no second
+  registry and no other lifetime.
+- **The bag first.** A lock counts the player's bag, and only when the bag alone is short, the opted-in links. A lock
+  with `uses` (the game's `lockMask` Consume) pays from the bag first, then from the links in link order
+  (`BeforeStationOutputs` links first, then `AfterStationOutputs`, each in registration order; a container once), inside
+  the game's own interaction transaction: all or nothing. A shortfall takes nothing. A lock without `uses` takes nothing:
+  the item only has to be held, in the bag or a link.
+- **The same access rules.** Each payment rechecks that the link is this player's and this login's, the game's
+  `CanAccessInventories` right, and a readable initialized storage container, through the transaction's own view.
+- **Kiln server or host and a Kiln client.** The game's client refuses a lock its bag cannot open on its own, before the
+  server hears of the press. A Kiln client counts the server's snapshot (below). A **vanilla client keeps refusing** such a
+  lock; nothing changes for it.
+
+How it works ([docs/re/locks.md](../../re/locks.md)):
+- The server's lock check (the press, in `player_control_action_sequence`) counts the bag plus the server's own count of
+  the player's opted-in links (read on the tick thread every 30 steps, and when a link is added or removed). Its lock
+  payment (`interaction_attempt`) pays what the bag left from the links, after a recount of each through the
+  transaction's accessors.
+- A Kiln client's lock check and its locked prompt count the bag plus the server's **lock snapshot**, on the channel
+  `kiln:craftstock`: a player with an opted-in link is told the server supports it; the client's checks note each lock
+  item they meet without a row, the client asks about those (up to 16, again after 5 s while unanswered), and the server
+  sends per asked item what the links hold, again whenever it changes. The first look at a new kind of lock may still show
+  it locked for a moment, until the row arrives (about a second). It is only UI help: the server checks the press again.
+- The hooks go in on demand: the server's when a link with `Locks` exists, the client's when a Kiln server's snapshot is
+  on. With no opted-in link the game's code runs untouched.
+
+kiln.log, one line per decision, rate-limited (`locks:`): `the server world's lock check of item 0x... (player N) counts
+the linked sources: bag a + linked b, needs n`; `... refused: <check> (bag a, linked b, needs n)` with the check `no
+snapshot from the server`, `no snapshot row for the item yet`, `source not opted in`, `short count`; on payment `player N's
+lock of item 0x... xn: the bag paid a, b from k linked source(s)`, or `left to the game: <check>` (`short count`, `source
+not opted in`, `every opted-in link's item filter refuses the item`, `a stack the server no longer sees`, `the player's
+links belong to an earlier login`, `not the server world's transaction`), `rolled back: container C's take ...`; a
+stand-down names the function and any foreign module found on it (`locks: ... stands down: ... code state FOREIGN ...`).
+
+`Kiln.TestKit` records `Locks` (`h.Crafting.Sources[i].Locks`) and counts what a lock may use
+(`h.Crafting.LockStock(player)`: opted-in links only, filters, login and permission). It does not run the game's lock
+check, the interaction payment or a client's snapshot. Native host tests (`items-lock-sources-test`) run the real hooks'
+handlers on fake registers and a fake transaction; `lock_sources_sigdb_test.py` qualifies the sites on the pinned builds.
+Not seen in a real game yet (0.2.0-dev.31.12).
 
 ### Dyes from the same links
 
@@ -818,7 +871,9 @@ kiln.stations passes a shorter result). Since 0.2.0-dev.29.17 `submit` and `plan
 `KILN_STATION_REQUEST_V1` or `sizeof(KilnStationRequest)` bytes; 29.16 also took a larger size. `base_stock_with_stations` (check `header.size`) is
 `Bases.StockWithStations`: the Magic-chest stock plus finished outputs still in the base's stations, on the tick thread.
 `set_output_source(station, on)` and `output_sources(...)` are the opt-in (any thread). For station outputs in a craft
-(check `header.size`): `set_craft_stock(rows, n)` is a Kiln client's crafting-menu snapshot (up to
+(check `header.size`): since 0.2.0-dev.31.12 `KilnCraftSourceRequest.flags` (`KILN_CRAFT_SOURCE_LOCKS`; a request of
+`KILN_CRAFT_SOURCE_REQUEST_V1` bytes has none), `source_stock`'s `KILN_CRAFT_SOURCE_STOCK_LOCKS` and a Kiln client's lock
+snapshot `set_lock_stock(on, rows, n)` / `lock_asks(...)`; `set_craft_stock(rows, n)` is a Kiln client's crafting-menu snapshot (up to
 `KILN_STATIONS_MAX_CRAFT_STOCK` rows; any thread; the server's payment never reads it) and `craft_items(items, n, ...)`
 the items a client must have counted for those lent items (the inputs of every recipe that takes one; server, tick
 thread). kiln-items.dll also exports, for Kiln's own DLLs and labs (not an ABI): `kiln_stations_craft_pay` (kiln.rules'
@@ -838,6 +893,9 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.31.12:** `CraftSourceOptions.Locks`: a lock's required item counts and pays from the player's opted-in
+  links (the bag first, link order, all or nothing), with a Kiln client's lock snapshot; capability `items.lock_sources`.
+  Thanks Fuzen777 (kiln#147).
 - **0.2.0-dev.31:** a Kiln client's crafting menu treats the game's cached craft value as the status it is: only the dry
   run's material shortfall can be covered by the server's snapshot, every other refusal stays the game's, and the
   preview stands down when another module patched the code it reads. Thanks Fuzen777 (kiln#132).
