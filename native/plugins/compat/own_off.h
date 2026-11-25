@@ -41,6 +41,36 @@ inline std::string utf8(const fs::path& p) {
 }
 inline fs::path u8path(std::string_view s) { return fs::path(std::u8string(s.begin(), s.end())); }
 
+// `s` with every byte that is not part of valid UTF-8, and every control character, as '?': a reason holds
+// values from the player's files (Greeneye's lenient reader takes any bytes), and the state files' JSON writer
+// (nlohmann dump) throws on invalid UTF-8.
+inline std::string clean(std::string_view s) {
+    std::string o;
+    o.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        size_t n = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+        bool ok = n != 0 && i + n <= s.size() && !(n == 2 && c < 0xC2) && !(n == 4 && c > 0xF4);
+        for (size_t k = 1; ok && k < n; ++k) ok = (static_cast<unsigned char>(s[i + k]) & 0xC0) == 0x80;
+        if (ok && n == 3) {
+            const auto c1 = static_cast<unsigned char>(s[i + 1]);
+            ok = !(c == 0xE0 && c1 < 0xA0) && !(c == 0xED && c1 >= 0xA0);  // overlong, surrogates
+        }
+        if (ok && n == 4) {
+            const auto c1 = static_cast<unsigned char>(s[i + 1]);
+            ok = !(c == 0xF0 && c1 < 0x90) && !(c == 0xF4 && c1 >= 0x90);
+        }
+        if (!ok || (n == 1 && c < 0x20)) {
+            o += '?';
+            ++i;
+            continue;
+        }
+        o.append(s.substr(i, n));
+        i += n;
+    }
+    return o;
+}
+
 inline bool read_text(const fs::path& file, std::string* out, size_t cap = 1024 * 1024) {
     std::error_code ec;
     if (!fs::is_regular_file(file, ec)) return false;
@@ -66,9 +96,13 @@ inline std::optional<nlohmann::json> json_file(const fs::path& file) {
 
 // What the own loader sees in one entry of its folder (a folder, or a file where the loader takes single files).
 struct Seen {
-    std::vector<std::string> keys;  // what identifies the mod, lower case (its manifest id; Shroudtopia: its DLLs)
+    std::vector<std::string> keys;  // what identifies the mod, lower case (its manifest id; Shroudtopia: its DLLs' bytes)
+    // what only hints at the mod (Shroudtopia: its DLLs' file names, which an unrelated DLL or another build can share):
+    // a match on these alone never reads as "runs" (a false "runs" is worse than a false "disabled")
+    std::vector<std::string> weak_keys;
     bool runs = true;               // the loader's own switch (and side, API ...) lets it run this start
     std::string why_not;            // !runs: why that loader keeps it off ("its mod.json says \"enabled\": false")
+    bool unsure = false;            // !runs because Kiln cannot read that loader's switch (why_not says why), not "off"
     std::string on_text;            // runs: what says so; default "<loader>'s own switch is on"
     std::string turn_off;           // how to turn it off in that loader (a clause: "set ... in ...")
     bool move_too = true;           // the reason adds "or move <folder> out of <game>\\<folder>" (turn_off says no move)
@@ -94,6 +128,7 @@ struct Verdict {
     bool found = false;  // a copy of it is in the loader's folder
     bool runs = false;   // and the loader runs it this start
     bool kilns = false;  // that copy is Kiln's (its marker names this entry), not the player's own
+    bool maybe = false;  // only a weak key matched (Shroudtopia: a DLL of the same file name, other bytes): not "runs"
     fs::path where;      // the copy
     std::string reason;  // one sentence for the state file and kiln.log ("switched off in the profile" when !found)
 };
@@ -134,10 +169,21 @@ inline std::string reason_runs(const Loader& l, const Seen& s, const Verdict& v)
            s.turn_off + (s.move_too ? "; or move " + where + " out of <game>\\" + l.folder_text : std::string());
 }
 
+inline std::string reason_maybe(const Loader& l, const Seen& s, const Verdict& v) {
+    std::error_code ec;
+    const bool dir = fs::is_directory(v.where, ec);
+    return "switched off in the profile; " + yours(v) + utf8(v.where) + " in <game>\\" + l.folder_text +
+           (dir ? " holds a DLL of the same file name as this mod's DLL" : " has the same file name as this mod's DLL") +
+           ", but other bytes: if that is another build of this mod, " + own(l) +
+           " loads it this start (it reads only <game>\\" + l.folder_text + ", not the profile), and to stop that: " +
+           s.turn_off;
+}
+
 inline std::string reason_kept_off(const Loader& l, const Seen& s, const Verdict& v) {
     return std::string("switched off in the profile; ") + (v.kilns ? std::string("Kiln's copy ") : yours(v)) + utf8(v.where) +
-           " is in <game>\\" + l.folder_text + " too, and " + own(l) + " keeps it off as well (" + s.why_not +
-           ")";
+           " is in <game>\\" + l.folder_text + " too, and " +
+           (s.unsure ? "Kiln cannot tell whether " + own(l) + " runs it (" + s.why_not + "); to be sure it does not: " + s.turn_off
+                     : own(l) + " keeps it off as well (" + s.why_not + ")");
 }
 
 }  // namespace detail
@@ -161,7 +207,7 @@ inline Verdict off_entry(const Loader& l, std::string_view profile_id, const std
     const auto contained = l.contained ? l.contained : default_contained;
     const auto marker = l.marker ? l.marker : default_marker;
     const std::string pid = low(profile_id);
-    std::optional<Verdict> kept;
+    std::optional<Verdict> kept, maybe;
     for (const auto& e : entries) {
         const bool dir = fs::is_directory(e, ec);
         if (!dir && !(l.files && fs::is_regular_file(e, ec))) continue;
@@ -176,23 +222,74 @@ inline Verdict off_entry(const Loader& l, std::string_view profile_id, const std
         }
         const auto seen = l.read(e, dir);
         if (!seen) continue;
-        bool same = kilns;
-        for (const auto& k : seen->keys)
-            if (!k.empty() && std::find(want.begin(), want.end(), k) != want.end()) same = true;
-        if (!same) continue;
+        auto any = [&](const std::vector<std::string>& keys) {
+            for (const auto& k : keys)
+                if (!k.empty() && std::find(want.begin(), want.end(), k) != want.end()) return true;
+            return false;
+        };
+        const bool same = kilns || any(seen->keys);
+        if (!same) {
+            // only the weak keys match: maybe another build of this mod, maybe an unrelated DLL of the same name
+            if (!maybe && seen->runs && any(seen->weak_keys)) {
+                Verdict v;
+                v.found = v.maybe = true;
+                v.where = e;
+                v.reason = clean(detail::reason_maybe(l, *seen, v));
+                maybe = v;
+            }
+            continue;
+        }
         Verdict v;
         v.found = true;
         v.kilns = kilns;
         v.where = e;
         v.runs = seen->runs;
         if (v.runs) {
-            v.reason = detail::reason_runs(l, *seen, v);
+            v.reason = clean(detail::reason_runs(l, *seen, v));
             return v;
         }
-        v.reason = detail::reason_kept_off(l, *seen, v);
+        v.reason = clean(detail::reason_kept_off(l, *seen, v));
         if (!kept) kept = v;
     }
-    return kept ? *kept : none;
+    return kept ? *kept : maybe ? *maybe : none;
+}
+
+// EMF's own switch in <game>/emf/config/<id>.ini: every `enabled=` line (key in any case, around it spaces, before
+// any section or in one; ';' and '#' start a comment line). 0: any of them is off (0, false, no, off: the spellings
+// kiln-emf's settings take); 1: all of them on (1, true, yes, on); 2: a value that is neither; -1: none. `value` gets
+// the value that decided. An off value anywhere wins, so a file EMF might read either way never reads as "runs".
+inline int ini_switch(std::string_view text, std::string* value) {
+    auto trim = [](std::string_view v) {
+        while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\r' || v.front() == '\0')) v.remove_prefix(1);
+        while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r' || v.back() == '\0')) v.remove_suffix(1);
+        return v;
+    };
+    if (text.size() >= 3 && text.substr(0, 3) == "\xEF\xBB\xBF") text.remove_prefix(3);
+    int out = -1;
+    for (size_t i = 0; i < text.size();) {
+        size_t j = text.find('\n', i);
+        if (j == std::string_view::npos) j = text.size();
+        const std::string_view line = trim(text.substr(i, j - i));
+        i = j + 1;
+        if (line.empty() || line[0] == ';' || line[0] == '#' || line[0] == '[') continue;
+        const size_t eq = line.find('=');
+        if (eq == std::string_view::npos || low(trim(line.substr(0, eq))) != "enabled") continue;
+        const std::string v = low(trim(line.substr(eq + 1)));
+        if (v == "0" || v == "false" || v == "no" || v == "off") {
+            *value = v;
+            return 0;
+        }
+        if (v == "1" || v == "true" || v == "yes" || v == "on") {
+            if (out < 0) {
+                out = 1;
+                *value = v;
+            }
+        } else if (out != 2) {
+            out = 2;
+            *value = v.substr(0, 32);
+        }
+    }
+    return out;
 }
 
 // ---- the loaders -------------------------------------------------------------------------------------------------
@@ -228,18 +325,21 @@ inline Loader emf(const fs::path& game, bool server) {
         s.keys = {low(id)};
         const std::string ini_text = "emf\\config\\" + id + ".ini";
         s.turn_off = "set enabled=0 in <game>\\" + ini_text + " (EMF's own switch)";
-        std::string ini, flat;
+        std::string ini, value;
         int switch_value = -1;
-        if (read_text(config / u8path(id + ".ini"), &ini, 256 * 1024)) {
-            for (char c : ini)
-                if (c != ' ' && c != '\t' && c != '\r') flat += c;
-            flat = "\n" + flat;
-            if (flat.find("\nenabled=0") != std::string::npos) switch_value = 0;
-            else if (flat.find("\nenabled=1") != std::string::npos) switch_value = 1;
-        }
+        std::error_code ec;
+        const fs::path ini_file = config / u8path(id + ".ini");
+        if (read_text(ini_file, &ini, 256 * 1024)) switch_value = ini_switch(ini, &value);
+        else if (fs::exists(ini_file, ec)) switch_value = 3;  // there, but over 256 KiB, not a file or unreadable
         if (switch_value == 0) {
             s.runs = false;
-            s.why_not = ini_text + " says enabled=0";
+            s.why_not = ini_text + " says enabled=" + value;
+        } else if (switch_value == 2 || switch_value == 3) {
+            // Kiln cannot read EMF's switch: it does not claim the mod runs (a false "runs" is worse)
+            s.runs = false;
+            s.unsure = true;
+            s.why_not = switch_value == 2 ? ini_text + " says enabled=" + value + ", which Kiln cannot read as on or off"
+                                          : ini_text + " is there, but Kiln cannot read it (over 256 KiB or unreadable)";
         } else if (switch_value < 0 && !manifest_on) {
             s.runs = false;
             s.why_not = "its mod.json says \"enabled\": false and " + ini_text + " sets no enabled=";
@@ -247,7 +347,7 @@ inline Loader emf(const fs::path& game, bool server) {
             s.runs = false;
             s.why_not = "a client mod (side \"client\"), which does nothing on a dedicated server";
         } else {
-            s.on_text = switch_value == 1 ? "EMF's own switch is on: " + ini_text + " says enabled=1"
+            s.on_text = switch_value == 1 ? "EMF's own switch is on: " + ini_text + " says enabled=" + value
                                           : "EMF's own switch is on: no enabled=0 in " + ini_text;
         }
         return s;
@@ -257,15 +357,28 @@ inline Loader emf(const fs::path& game, bool server) {
 
 // What identifies a Shroudtopia mod: its DLL files (Shroudtopia has no manifest id). Each DLL gives two keys, its
 // bytes (size and FNV-1a hash: the very same build) and its file name (another build of the same mod).
+// The file is hashed in 64 KiB blocks: it is never held in memory whole (a game process; a DLL up to 512 MiB counts).
 inline std::vector<std::string> dll_keys_of_file(const fs::path& f) {
     std::vector<std::string> keys;
-    std::string bytes;
-    if (low(utf8(f.extension())) != ".dll" || !read_text(f, &bytes, 512u * 1024 * 1024)) return keys;
-    uint64_t h = 1469598103934665603ull;
-    for (unsigned char c : bytes) h = (h ^ c) * 1099511628211ull;
+    std::error_code ec;
+    if (low(utf8(f.extension())) != ".dll" || !fs::is_regular_file(f, ec)) return keys;
+    const auto n = fs::file_size(f, ec);
+    if (ec || n > 512ull * 1024 * 1024) return keys;
+    std::ifstream in(f, std::ios::binary);
+    if (!in) return keys;
+    uint64_t h = 1469598103934665603ull, total = 0;
+    std::vector<char> block(64 * 1024);
+    while (in) {
+        in.read(block.data(), static_cast<std::streamsize>(block.size()));
+        const auto got = static_cast<size_t>(in.gcount());
+        for (size_t i = 0; i < got; ++i) h = (h ^ static_cast<unsigned char>(block[i])) * 1099511628211ull;
+        total += got;
+        if (total > n) return {};  // it grew while read
+    }
+    if (total != n) return {};
     char hex[17];
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
-    keys.push_back("bytes:" + std::to_string(bytes.size()) + ":" + hex);
+    keys.push_back("bytes:" + std::to_string(n) + ":" + hex);
     keys.push_back("name:" + low(utf8(f.filename())));
     return keys;
 }
@@ -297,7 +410,7 @@ inline Loader shroudtopia(const fs::path& game) {
     const fs::path settings = game / "shroudtopia.json";
     l.read = [settings](const fs::path& e, bool) -> std::optional<Seen> {
         Seen s;
-        s.keys = dll_keys(e);
+        for (auto& k : dll_keys(e)) (k.rfind("name:", 0) == 0 ? s.weak_keys : s.keys).push_back(std::move(k));
         if (s.keys.empty()) return std::nullopt;
         s.move_too = false;
         s.turn_off = "it has no switch that keeps a DLL in <game>\\mods from loading (\"active\" under the mod's name in "
@@ -310,12 +423,24 @@ inline Loader shroudtopia(const fs::path& game) {
             return s;
         }
         const auto j = json_file(settings);
-        if (j && j->is_object() && j->contains("active") && (*j)["active"].is_boolean() && !(*j)["active"].get<bool>()) {
+        if (!j || !j->is_object()) {
+            // Shroudtopia keeps its last good settings (at start: its defaults, "active" on) on a file it cannot parse,
+            // but Kiln reads the file with another parser and cannot be sure: no "runs" (a false "runs" is worse)
             s.runs = false;
-            s.why_not = "<game>\\shroudtopia.json says \"active\": false, so its loader loads no mod";
+            s.unsure = true;
+            s.why_not = "<game>\\shroudtopia.json cannot be read as a JSON object: over 1 MiB, unreadable or not JSON";
             return s;
         }
-        s.on_text = "Shroudtopia's own switch is on: <game>\\shroudtopia.json has \"active\" on";
+        // Its loader loads mods only while "active" is true: a missing or non-boolean "active" reads as off (the same
+        // rule as kiln-shroudtopia's port of that loop, json_bool("active", false)).
+        if (!j->contains("active") || !(*j)["active"].is_boolean() || !(*j)["active"].get<bool>()) {
+            s.runs = false;
+            s.why_not = !j->contains("active") || !(*j)["active"].is_boolean()
+                            ? "<game>\\shroudtopia.json has no \"active\": true, which its loader reads as off, so it loads no mod"
+                            : "<game>\\shroudtopia.json says \"active\": false, so its loader loads no mod";
+            return s;
+        }
+        s.on_text = "Shroudtopia's own switch is on: <game>\\shroudtopia.json says \"active\": true";
         return s;
     };
     return l;
