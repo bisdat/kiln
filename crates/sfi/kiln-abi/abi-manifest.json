@@ -6560,7 +6560,7 @@
           "size": 216
         }
       },
-      "sha256": "d14db7fd301b9dccd0ea1894fa02c75c4332551a70bb1cd2cef4a6b470e6a560"
+      "sha256": "14781ed61e1f0cd799f421ab8c3369d96386d83ebca28b50a9736ee54bf83f51"
     },
     "native/core/abi/services/kiln_spawn.h": {
       "function_macros": [],
@@ -7119,7 +7119,7 @@
           "size": 192
         }
       },
-      "sha256": "15c3a2f286907cd78eea325e7687ae3135e447a900a62051774ff833f895d2d4"
+      "sha256": "7448c9cc1fcd4166b8cc72f92afcb3b7d8ff7471ec7172a1d5abbc8bb4edd0bd"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],

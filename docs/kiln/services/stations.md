@@ -141,7 +141,7 @@ sends nothing. Thanks XHL (Easy HUD), whose reference named the cache.
 
 | Member | What |
 |---|---|
-| `ClientStations.Available`, `Status` | the view works here; `Status`: `On`, `World`, `Copying`, `Rows`, `Step`, `Age`, `Detail` (why it is off) |
+| `ClientStations.Available`, `Status` | the view works here; `Status`: `On`, `World`, `Copying`, `Rows`, `Step`, `Age`, `Detail` (why it is off, or while on with no copy yet why none was taken) |
 | `All()` | every station of the cache (grouped by base) |
 | `Near(center, radius = 16)` | those within `radius` metres of `center`, nearest first (pass your player's or the camera's position) |
 | `Read(station)` | one station, null when the cache does not have it |
