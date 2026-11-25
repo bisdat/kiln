@@ -17,7 +17,7 @@ namespace Kiln;
 /// changes made in <see cref="OnReady"/> / <see cref="ContentReadyEvent"/> run again.</para>
 /// <para>Data packs: a mod ships <c>content/*.json</c> in its folder; kiln.content applies them when the world's
 /// registries have loaded (before the save is read and players can join), in mod load order, reports conflicts, and
-/// re-applies them when a file changes or the mod is loaded / unloaded.</para>
+/// re-applies them when a file changes or the mod is loaded, unloaded or reloaded.</para>
 /// <para>Call everything on the tick thread (mod code runs there). Before <see cref="Ready"/> the registries are
 /// empty.</para>
 /// </remarks>
@@ -29,6 +29,9 @@ public static unsafe partial class Content
     private static readonly HashSet<ModContext> Watched = new(ReferenceEqualityComparer.Instance);
     private static bool _initialized;
     private static string? _lastModList;
+    internal static PackModLoads Loads = new();  // replaced by tests
+    private static EventSubscription? _reloads;
+    private static bool _syncSoon;
 
     internal static ContentNative.Table* T
     {
@@ -331,7 +334,9 @@ public static unsafe partial class Content
         _table->SubscribeReady(0, &OnNativeReady, null, &h);
         ServiceTick.Add("kiln content packs", static (in TickInfo tick) =>
         {
-            if (tick.Step % 25 == 0 || _lastModList == null) SyncMods();
+            // from the service's own tick, so the subscription is the service's (a mod's would end with the mod)
+            _reloads ??= Events.On<ModReloadedEvent>(OnModReloaded);
+            if (tick.Step % 25 == 0 || _lastModList == null || _syncSoon) SyncMods();
             MissingContent.Tick(tick.Step);
             if (tick.Step % 25 == 0) DefinitionsExport.Tick();  // kiln/state/content-definitions.json (launcher)
         });
@@ -339,19 +344,52 @@ public static unsafe partial class Content
         StationMenuSync.Start();  // station menus with tabs of their own: channel kiln:station-menu (StationMenuSync.cs)
     }
 
-    /// <summary>Tells the native service which mods are loaded, in load order: their data packs apply, others not.</summary>
-    private static void SyncMods()
+    internal static void OnModReloaded(ModReloadedEvent e)
     {
+        Loads.Reloaded(e.Id, null);
+        foreach (var dependent in e.Cascade) Loads.Reloaded(dependent, e.Id);
+        _syncSoon = true;  // at the next tick, not within 25 steps
+    }
+
+    /// <summary>Tells the native service which mods are loaded, in load order: their data packs apply, others not; and
+    /// which of them were loaded again under the same id (a reload, or an unload and a load since the last sync): their
+    /// packs come off and apply again from their current files, as after an unload and a load.</summary>
+    internal static void SyncMods()
+    {
+        _syncSoon = false;
         if (ModsBackend.Current is null || _table == null) return;
         var loaded = Kiln.Mods.All.Where(m => m.State == ModState.Loaded).OrderBy(m => m.LoadIndex).ToArray();
+        var loads = new List<(string, ulong, string)>(loaded.Length);
         foreach (var entry in loaded)
-            if (entry.Info is { } info && ModContext.FindLive(info) is { } context) Track(context);
+        {
+            var context = entry.Info is { } info ? ModContext.FindLive(info) : null;
+            if (context is not null) Track(context);
+            loads.Add((entry.Id, context?.Owner ?? 0, entry.Version));
+        }
+        var again = Loads.Next(loads);
         var ids = loaded.Select(m => m.Id).ToArray();
         var json = JsonSerializer.Serialize(ids);
-        if (json == _lastModList) return;
-        _lastModList = json;
-        using var s = new ContentNative.Utf8(json);
-        _table->PackMods(s.Str);
+        if (json != _lastModList)
+        {
+            _lastModList = json;
+            using var s = new ContentNative.Utf8(json);
+            _table->PackMods(s.Str);
+        }
+        foreach (var (id, reason) in again) PackModReloaded(id, reason);
+    }
+
+    private static void PackModReloaded(string id, string reason)
+    {
+        if (ContentNative.HasPackModReloaded(_table))
+        {
+            using var m = new ContentNative.Utf8(id);
+            using var r = new ContentNative.Utf8(reason);
+            _table->PackModReloaded(m.Str, r.Str);
+            return;
+        }
+        // an older kiln.content: re-apply every pack now (the tick thread of its world, else it refuses and nothing changes)
+        try { Backend.Current.Log(0, LogLevel.Info, $"Kiln.Content: mod {id} {reason}: re-applying data packs"); } catch { }
+        if (_table->ReloadPacks != null) _table->ReloadPacks();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
