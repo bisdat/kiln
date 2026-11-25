@@ -3,7 +3,7 @@
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
 ## services/kiln_stations.h — service `kiln.stations`
-### KilnStationsApi — 304 bytes
+### KilnStationsApi — 312 bytes
 - kiln_stations.h `KilnStationsApi.status` @8 `0.2.6`
 - kiln_stations.h `KilnStationsApi.base_count` @16 `0.2.6` — The game's bases. base_at: index 0..count-1. base_of: the base the entity stands in (KILN_ERR_NOT_FOUND...
 - kiln_stations.h `KilnStationsApi.base_at` @24 `0.2.6`
@@ -41,6 +41,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_stations.h `KilnStationsApi.set_dye_stock` @280 `0.2.15` — Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player.
 - kiln_stations.h `KilnStationsApi.set_lock_stock` @288 `0.2.19` — locks from linked sources, since 0.2.0-dev.31.12 (GitHub #147; capability items.lock_sources; header.size...
 - kiln_stations.h `KilnStationsApi.lock_asks` @296 `0.2.19` — A Kiln client: the lock items its lock checks (the press and the locked prompt) met while the snapshot was...
+- kiln_stations.h `KilnStationsApi.set_build_stock` @304 `0.2.19` — block placements from linked sources, since 0.2.0-dev.31.12 (GitHub #132; capability...
 
 ## services/kiln_steamguard.h — service `kiln.steamguard`
 ### KilnSteamGuardApi — 40 bytes

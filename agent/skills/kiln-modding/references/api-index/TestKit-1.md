@@ -84,7 +84,9 @@ enum: Apply, Update, End
 
 ## TestKit.FakeCraftSourceRegistration `0.2.15` — A mod's live source registration in the kit.
 - `FakeCraftSourceRegistration(ulong Owner, EntityId Player, EntityId Container, CraftSourceOrder Order, CraftSourceFilter Filter, IReadOnlyList<ItemId> Items)`
+- `Building { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Building`: block placements may count and pay from it.
 - `Container { get; init; } -> EntityId` — The storage container.
+- `Fills { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Fills`: production-station fills may take from it.
 - `Filter { get; init; } -> CraftSourceFilter` — The item-set interpretation.
 - `Items { get; init; } -> IReadOnlyList<ItemId>` — A copy of the filter items.
 - `Locks { get; init; } -> bool` `0.2.19` — Registered with `CraftSourceOptions.Locks`: locks may count and pay from it.
@@ -588,7 +590,9 @@ enum: Entity, Item, Destroy, Cleanup
 - `Watches { get; } -> int` — How many watches exist.
 
 ## TestKit.HarnessCrafting `0.2.15` — Player-source registrations and their filtered counts in the kit.
+- `BuildStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a block placement may use: the links registered with `CraftSourceOptions.Building` only, likewise.
 - `Dyes(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session generation...
+- `FillStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a production-station fill may take: the links registered with `CraftSourceOptions.Fills` only, with the...
 - `LockStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.19` — The counts a lock may use: the links registered with `CraftSourceOptions.Locks` only, with the same filters...
 - `Sources { get; } -> IReadOnlyList<TestKit.FakeCraftSourceRegistration>` — Live registrations, in registration order.
 - `Stock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — Registered source counts only (not the bag), with the same per-player allow/deny union and current inventory...
