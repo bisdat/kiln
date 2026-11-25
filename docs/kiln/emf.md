@@ -14,7 +14,7 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 
 1. Install Kiln as usual. `tools/deploy-server.sh` copies `kiln-emf.dll` to `kiln/plugins/`.
 2. Put the mod where EMF would put it: a folder `<game>/emf/mods/<id>/` with its `mod.json` and DLL, or a single
-   `<game>/emf/mods/<name>.dll`. EMF's Lua mods also need the `lua` mod (`emf/mods/lua/`).
+   `<game>/emf/mods/<name>.dll`. For versions without the bundled host, EMF Lua mods also need the `lua` mod.
    With the Kiln Launcher, a profile's `emf` entries are loaded too (`kiln.profile`). The `emf/mods` folder still
    counts while the profile has EMF drop-ins on, which is the default.
    EMF's Lua mods can be added in the launcher too, one folder or EMF's whole zip (its Lua mods are in
@@ -22,6 +22,11 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
    mod finds a Lua mod only by its folder in `emf/mods`, so activation copies each enabled one to
    `<game>/emf/mods/<id>/` with Kiln's marker, with or without EMF's own loader, and the profile names that copy (a
    folder of the same mod you put there yourself is used as it is). EMF's DLL mods still run from the Library.
+   Kiln bundles EMF's unmodified Lua 1.43.0 host. `kiln-emf` uses it when an enabled Lua script needs a host and
+   no `lua` mod was selected by the profile or allowed drop-ins. An explicit Lua install or disable wins, and
+   `Play without mods` does not run the host. Kiln leaves EMF's own loader alone: that loader still uses its own
+   `emf/mods/lua/`. For a different host version, add the built `game/emf/mods/lua` folder with both `lua.dll` and
+   `mod.json`, not the DLL alone (which Kiln sees as `0.0.0`).
 3. Switch it on. Most shipped EMF mods start switched off. Edit `<configDir>/emf/<id>.ini`:
    ```ini
    [big_stacks]

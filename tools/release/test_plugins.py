@@ -68,6 +68,8 @@ class ExpectedTests(unittest.TestCase):
         for p in ("greeneye", "flame", "shroudtopia", "set", "enshwick", "shroudlink", "ember", "shroudforge"):
             self.assertEqual(exp.get(f"kiln/plugins/kiln-{p}.dll"), "core", p)
         self.assertEqual(exp["kiln/plugins/kiln-emf.dll"], "emf")
+        for name in ("lua.dll", "mod.json", "EMF-LICENSE.txt", "Lua-LICENSE.txt", "SOURCE.txt"):
+            self.assertEqual(exp[f"kiln/plugins/emf-lua/{name}"], "emf")
         self.assertEqual(exp["kiln/plugins/kiln-eml.dll"], "eml")
         self.assertEqual(exp["kiln/plugins/shroudforge/shroudforge-runtime.dll"], "shroudforge")
         self.assertEqual(exp["kiln/plugins/shroudforge/kfc-runtime.dll"], "shroudforge")
@@ -106,6 +108,12 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(self.check(rt), 1)
         rt = runtime(self.dir / "rt2.zip", self.exp, drop={"kiln/plugins/enshwick/enshwick.dll"})
         self.assertEqual(self.check(rt), 1)
+
+    def test_missing_bundled_lua_manifest_fails_by_name(self):
+        path = "kiln/plugins/emf-lua/mod.json"
+        rt = runtime(self.dir / "rt.zip", self.exp, drop={path})
+        comps, files = pl.from_zip(rt)
+        self.assertEqual(pl.problems(self.exp, comps, files), [f"{path}: missing (expected in component emf)"])
 
     def test_non_default_or_one_sided_component_fails(self):
         comps = json.loads(json.dumps(COMPONENTS))

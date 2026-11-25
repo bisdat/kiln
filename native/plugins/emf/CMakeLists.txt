@@ -72,3 +72,8 @@ add_executable(emf-terrain-test tests/terrain_test.cpp src/api_terrain.cpp)
 target_include_directories(emf-terrain-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
 set_target_properties(emf-terrain-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
+
+# Headless actual plugin/Lua boot fixture: a fake core and no game engine.
+add_executable(emf-bundled-lua-test tests/bundled_lua_wine.cpp)
+target_include_directories(emf-bundled-lua-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(emf-bundled-lua-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")

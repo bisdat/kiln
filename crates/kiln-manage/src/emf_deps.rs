@@ -360,18 +360,22 @@ pub fn read_folder(folder: &Path, entry: Option<&str>, enabled: bool) -> Option<
 /// with a mod.json that are not Kiln's copy of an EMF mod (activation's marker: the profile entry is that mod), and
 /// loose DLLs (id: the file name in lower case, version 0.0.0).
 pub fn dropins(dir: &Path) -> Vec<EmfMod> {
+    dropin_candidates(dir).into_iter().map(|(m, _)| m).collect()
+}
+
+fn dropin_candidates(dir: &Path) -> Vec<(EmfMod, PathBuf)> {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().take(4096).map(|e| e.path()).collect();
     entries.sort();
     let mut out = Vec::new();
     for p in entries {
         if p.is_dir() {
             if crate::engine_mods::marker(&p).is_some_and(|k| k.kind == ModKind::Emf) { continue; }
-            if let Some(m) = read_folder(&p, None, true) { out.push(m); }
+            if let Some(m) = read_folder(&p, None, true) { out.push((m, p)); }
         } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")) {
             let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             let id = stem.to_lowercase();
             let broken = (!valid_id(&id)).then(|| "the file name is not a valid mod id (1-48 of a-z 0-9 _ . -)".to_string());
-            out.push(EmfMod { entry: None, id, name: stem, version: "0.0.0".into(), enabled: true, side: String::new(), deps: Vec::new(), broken });
+            out.push((EmfMod { entry: None, id, name: stem, version: "0.0.0".into(), enabled: true, side: String::new(), deps: Vec::new(), broken }, p));
         }
     }
     out
@@ -508,13 +512,34 @@ pub fn own_loader(game: &Path) -> bool {
     crate::own_loaders::find(game, None).iter().any(|l| l.kind == ModKind::Emf)
 }
 
-/// [`check`] over a profile's EMF entries, read from the Library, and, with `game` and EMF drop-ins on in the profile,
-/// the mods in `<game>/emf/mods`: the enabled entries a dependency keeps from loading. Nothing while EMF's own loader is
-/// installed in `game` ([`own_loader`]): EMF decides then, by its own switches, so any word here could be wrong.
-pub fn profile_problems(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Vec<EmfDepProblem> {
-    if profile.mods.emf.iter().all(|m| !m.enabled) || game.is_some_and(own_loader) {
-        return Vec::new();
+/// The runtime's private Lua host, not a Library/profile mod. Read the installed manifest rather than assuming a
+/// launcher version installed it. Only the fixed DLL at this path can be the bundled host (kiln-emf's fallback rule).
+fn bundled_lua(game: &Path) -> Option<EmfMod> {
+    let folder = game.join("kiln/plugins/emf-lua");
+    if !folder.join("lua.dll").is_file() { return None; }
+    let m = read_folder(&folder, None, true)?;
+    if m.id != "lua" || m.broken.is_some() { return None; }
+    let text = crate::manifest::read_text(&folder.join("mod.json")).ok()?;
+    let j = crate::jsonc::parse(&text).ok()?;
+    let s = |k: &str| j.get(k).and_then(|v| v.as_str()).unwrap_or_default();
+    if !s("main").is_empty() || !matches!(s("dll"), "" | "lua.dll")
+        || j.get("settings").is_some_and(|v| !v.is_null() && !v.is_array())
+    {
+        return None;
     }
+    Some(m)
+}
+
+/// kiln-emf's demand rule is the main file's suffix, even if that file is missing (the host then reports that error).
+fn lua_script(folder: &Path) -> bool {
+    let Ok(text) = crate::manifest::read_text(&folder.join("mod.json")) else { return false };
+    let Ok(j) = crate::jsonc::parse(&text) else { return false };
+    j.get("main").and_then(|v| v.as_str()).is_some_and(|s| s.len() > 4 && s.to_ascii_lowercase().ends_with(".lua"))
+}
+
+/// The dependency candidates in runtime order, including its on-demand private Lua host. This is a read-only preview:
+/// it never adds a profile/Library entry or asks activation to place the host in emf/mods.
+pub(crate) fn preview_mods(dirs: &DataDirs, profile: &Profile, game: Option<&Path>) -> Vec<EmfMod> {
     let mut mods = Vec::new();
     for m in &profile.mods.emf {
         let r = crate::library::LibraryRef { kind: ModKind::Emf, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
@@ -524,12 +549,30 @@ pub fn profile_problems(dirs: &DataDirs, profile: &Profile, side: RunSide, game:
             entry: Some(m.id.clone()), id: m.id.to_lowercase(), name: m.id.clone(), version: m.version.clone(), enabled: m.enabled,
             side: String::new(), deps: Vec::new(), broken: None,
         });
-        mods.push(entry);
+        mods.push((entry, folder));
     }
     if let Some(game) = game.filter(|_| profile.dropin_kinds().contains(&ModKind::Emf)) {
-        mods.extend(dropins(&game.join(crate::paths::game::DROPIN_EMF)));
+        mods.extend(dropin_candidates(&game.join(crate::paths::game::DROPIN_EMF)));
     }
-    let mut out = check(&mods, side);
+    // A disabled or rejected explicit lua still wins, as does a profile row named lua with a mismatched manifest.
+    let explicit = profile.mods.emf.iter().any(|m| m.id.eq_ignore_ascii_case("lua")) || mods.iter().any(|(m, _)| m.id == "lua");
+    let wants_lua = !explicit && mods.iter().enumerate().any(|(i, (m, folder))| m.enabled && m.broken.is_none()
+        && !mods[..i].iter().any(|(prior, _)| prior.id == m.id) && lua_script(folder));
+    let mut out: Vec<EmfMod> = mods.into_iter().map(|(m, _)| m).collect();
+    if let Some(host) = game.filter(|g| wants_lua && !own_loader(g)).and_then(bundled_lua) {
+        out.push(host);
+    }
+    out
+}
+
+/// [`check`] over a profile's EMF entries, enabled drop-ins and the installed bundle when an enabled Lua script needs
+/// it: the enabled entries a dependency keeps from loading. Nothing while EMF's own loader is installed in `game`
+/// ([`own_loader`]): EMF decides then, by its own switches, so any word here could be wrong.
+pub fn profile_problems(dirs: &DataDirs, profile: &Profile, side: RunSide, game: Option<&Path>) -> Vec<EmfDepProblem> {
+    if profile.mods.emf.iter().all(|m| !m.enabled) || game.is_some_and(own_loader) {
+        return Vec::new();
+    }
+    let mut out = check(&preview_mods(dirs, profile, game), side);
     out.retain(|p| profile.mods.emf.iter().any(|m| m.id == p.id && m.enabled));
     out
 }

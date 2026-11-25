@@ -37,7 +37,7 @@ another path): every reader of a manifest refuses them (`bundle::validate`).
 | `sigdb-server` | server | yes | `kiln/sigdb/server.json`, `server.d/*.json`, `builds/server/*.json` |
 | `sigdb-client` | client | yes | `kiln/sigdb/client.json`, `client.d/*.json` (`tools/sigport/sides.py compose client`), `builds/client/*.json` |
 | `admin` | server | yes | `kiln/mods/kiln-admin/{Kiln.Admin.dll,.pdb,kiln.mod.json}` |
-| `emf` | server, client | yes | `kiln/plugins/kiln-emf.{dll,pdb}` |
+| `emf` | server, client | yes | `kiln/plugins/kiln-emf.{dll,pdb}` and `kiln/plugins/emf-lua/` (upstream Lua host, manifest, licenses and source pointer) |
 | `eml` | server, client | yes | `kiln/plugins/kiln-eml.dll` (GPL-3.0, `gpl/kiln-eml`) + `kiln-eml.LICENSE.txt`, `kiln-eml.NOTICE.txt` |
 | `shroudforge` | server, client | yes | `kiln/plugins/shroudforge/**`: ShroudForge's runtime (GPL-3.0, `third_party/shroudforge`), its notice, source pointer and licences |
 | `enshwick` | server, client | yes | `kiln/plugins/enshwick/{enshwick.dll,enshwick-version.txt,LICENSE.txt}`: Enshwick's own loader (MIT), built from the pinned tag and commit by `native/plugins/enshwick/tools/build-runtime.sh`; kiln-enshwick runs it when the game has no `mods/enshwick/enshwick.dll` |
@@ -62,6 +62,12 @@ declares 2 or more), `dotnet` from the runtime folder, `builds` from the verifie
 `builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json`. A cached `runtime.zip` with that hash is used
 as it is; otherwise it downloads from `builds.dotnet.microsoft.com` and checks the hash. `root/` is the unpacked zip
 (what deploy-server.sh, client.sh and stage.sh copy).
+
+### EMF's Lua host
+`tools/package/stage-emf-lua.py` checks the SHA-256 of upstream's EMF 0.6.22 release ZIP and stages only the Lua
+1.43.0 DLL, its manifest and licenses. The ZIP is cached under `.cache/emf-lua/`; set `KILN_EMF_LUA_ARCHIVE` to use
+a local copy with the same hash. The pin is verified before release signing. The host is not a game drop-in and does
+not install EMF's own loader or any script mod.
 
 ## Installing (kiln_manage::install)
 `install(dirs, game, bundle, options, progress)`, `bundle` a zip or an unpacked folder; the CLI: `kilnctl bundle install`,

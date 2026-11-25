@@ -453,3 +453,137 @@ fn the_preview_names_an_emf_mods_missing_dependency_before_play() {
     assert!(!kiln_manage::emf_deps::own_loader(&g.path));
     assert_eq!(problems(&p)[0].state, DepState::Missing);
 }
+
+fn bundled_lua(game: &Path, version: &str) {
+    let dir = game.join("kiln/plugins/emf-lua");
+    put(&dir, "mod.json", format!(r#"{{"id":"lua","name":"Lua Scripts","version":"{version}","emf":20}}"#).as_bytes());
+    put(&dir, "lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+}
+
+#[test]
+fn bundled_lua_preview_reads_the_installed_manifest_and_requires_both_files() {
+    use kiln_manage::emf_deps::DepState;
+    use kiln_manage::manifest::RunSide;
+    let t = tmp("bundle-preview");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0);
+    let src = t.0.join("src/spells");
+    lua_mod(&src, "spells", "Spells", "1.0.0");
+    put(&src, "mod.json", br#"{"id":"spells","version":"1.0.0","emf":20,"main":"main.lua","depends":{"lua":">=1.43"}}"#);
+    let script = import_one(&dirs, &src, "spells");
+    let mut p = profile::create(&dirs, "bundle", None).unwrap();
+    p.mods.emf = vec![pm(&script, true)];
+    let problems = |p: &profile::Profile| profile::resolve_preview_in(&dirs, p, RunSide::Client, Some(&g.path)).unwrap().emf;
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+    bundled_lua(&g.path, "1.43.0");
+    assert!(problems(&p).is_empty(), "the installed bundle supplies lua");
+    assert_eq!(profile::resolve_preview(&dirs, &p, RunSide::Client).unwrap().emf[0].state, DepState::Missing,
+        "without a game no bundle is assumed");
+    bundled_lua(&g.path, "1.42.0");
+    let out = problems(&p);
+    assert_eq!((out[0].state, out[0].found.as_deref()), (DepState::TooOld, Some("1.42.0")), "read the actual installed version");
+    bundled_lua(&g.path, "1.43.0");
+    std::fs::remove_file(g.path.join("kiln/plugins/emf-lua/lua.dll")).unwrap();
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+    bundled_lua(&g.path, "1.43.0");
+    for manifest in [
+        "not json",
+        r#"{"id":"not-lua","version":"1.43.0"}"#,
+        r#"{"id":"lua","version":"latest"}"#,
+        r#"{"id":"lua","version":"1.43.0","main":"main.lua"}"#,
+        r#"{"id":"lua","version":"1.43.0","dll":"other.dll"}"#,
+        r#"{"id":"lua","version":"1.43.0","settings":{}}"#,
+        r#"{"id":"lua","version":"1.43.0","depends":{"x":"latest"}}"#,
+    ] {
+        put(&g.path, "kiln/plugins/emf-lua/mod.json", manifest.as_bytes());
+        assert_eq!(problems(&p)[0].state, DepState::Missing, "{manifest}");
+    }
+    bundled_lua(&g.path, "1.43.0");
+    std::fs::remove_file(g.path.join("kiln/plugins/emf-lua/mod.json")).unwrap();
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+}
+
+#[test]
+fn bundled_lua_never_replaces_explicit_profile_or_enabled_dropin_candidates() {
+    use kiln_manage::emf_deps::DepState;
+    use kiln_manage::manifest::RunSide;
+    let t = tmp("bundle-precedence");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0);
+    bundled_lua(&g.path, "1.43.0");
+    let src = t.0.join("src/spells");
+    lua_mod(&src, "spells", "Spells", "1.0.0");
+    put(&src, "mod.json", br#"{"id":"spells","version":"1.0.0","emf":20,"main":"main.lua","depends":{"lua":">=1.36"}}"#);
+    let script = import_one(&dirs, &src, "spells");
+    let host_src = t.0.join("src/lua");
+    lua_host(&host_src);
+    let host = import_one(&dirs, &host_src, "lua");
+    let mut p = profile::create(&dirs, "precedence", None).unwrap();
+    p.mods.emf = vec![pm(&script, true), pm(&host, true)];
+    let problems = |p: &profile::Profile| profile::resolve_preview_in(&dirs, p, RunSide::Client, Some(&g.path)).unwrap().emf;
+    assert_eq!(problems(&p)[0].state, DepState::TooOld, "imported 1.33 wins over bundled 1.43");
+    p.mods.emf[1].enabled = false;
+    assert_eq!(problems(&p)[0].state, DepState::Off);
+    p.mods.emf.truncate(1);
+    lua_host(&g.path.join("emf/mods/a-user-host"));
+    bundled_lua(&g.path, "1.43.0");
+    p.dropins_engines = true;
+    p.dropins = vec![ModKind::Emf];
+    assert_eq!(problems(&p)[0].state, DepState::TooOld, "a user drop-in selected by manifest ID wins");
+    put(&g.path, "emf/mods/a-user-host/mod.json", br#"{"id":"lua","version":"bad","emf":20}"#);
+    assert_eq!(problems(&p)[0].state, DepState::NotLoading, "an invalid explicit candidate still blocks fallback");
+    std::fs::remove_dir_all(g.path.join("emf/mods/a-user-host")).unwrap();
+    put(&g.path, "emf/mods/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    assert_eq!(problems(&p)[0].found.as_deref(), Some("0.0.0"), "loose DLL is the explicit host");
+    p.dropins.clear();
+    assert!(problems(&p).is_empty(), "disabled drop-ins do not override the bundle");
+    // Even a mismatched manifest cannot turn the explicitly named profile lua into automatic fallback.
+    put(&library::path_of(&dirs, &host).unwrap(), "mod.json", br#"{"id":"other","version":"1.33.0","emf":20}"#);
+    p.mods.emf.push(pm(&host, false));
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+    p.mods.emf.truncate(1);
+    put(&g.path, "dinput8.dll", &build_test_dll(&["DirectInput8Create", "emf_loader_identity"], b""));
+    assert!(problems(&p).is_empty(), "the real EMF owns its dependency checks");
+}
+
+#[test]
+fn bundled_lua_is_only_a_preview_candidate_for_enabled_selected_lua_scripts() {
+    use kiln_manage::emf_deps::DepState;
+    use kiln_manage::manifest::RunSide;
+    let t = tmp("bundle-demand");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0);
+    bundled_lua(&g.path, "1.43.0");
+    let src = t.0.join("src/native");
+    put(&src, "mod.json", br#"{"id":"native","version":"1.0.0","emf":20,"depends":{"lua":">=1.36"}}"#);
+    put(&src, "native.dll", &build_test_dll(&["emf_mod_load"], b""));
+    let native = import_one(&dirs, &src, "native");
+    let mut p = profile::create(&dirs, "demand", None).unwrap();
+    p.mods.emf = vec![pm(&native, true)];
+    let problems = |p: &profile::Profile| profile::resolve_preview_in(&dirs, p, RunSide::Client, Some(&g.path)).unwrap().emf;
+    assert_eq!(problems(&p)[0].state, DepState::Missing, "a DLL dependency alone does not activate the bundle");
+    let script_src = t.0.join("src/script");
+    lua_mod(&script_src, "script", "Script", "1.0.0");
+    let script = import_one(&dirs, &script_src, "script");
+    p.mods.emf.push(pm(&script, false));
+    assert_eq!(problems(&p)[0].state, DepState::Missing, "a disabled script is not demand");
+    p.mods.emf[1].enabled = true;
+    assert!(problems(&p).is_empty());
+    p.mods.emf.truncate(1);
+    lua_mod(&g.path.join("emf/mods/drop-script"), "script", "Script", "1.0.0");
+    p.dropins_engines = true;
+    p.dropins.clear();
+    assert_eq!(problems(&p)[0].state, DepState::Missing);
+    p.dropins.push(ModKind::Emf);
+    p.mods.emf.push(pm(&script, false));
+    assert_eq!(problems(&p)[0].state, DepState::Missing, "the first, disabled copy of script wins over the drop-in");
+    p.mods.emf.truncate(1);
+    assert!(problems(&p).is_empty(), "an enabled drop-in Lua script is demand too");
+    profile::save(&dirs, &p).unwrap();
+    profile::activate(&dirs, &p.id, &g).unwrap();
+    let activated = profile::read_game_profile(&g.path).unwrap().unwrap();
+    assert!(activated.mods.emf.iter().all(|m| m.id != "lua"), "the bundle is not a profile mod");
+    assert!(!g.path.join("emf/mods/lua").exists(), "the bundle produces no placement");
+    assert_eq!(p.mods.emf.len(), 1);
+    assert_eq!(std::fs::read_dir(dirs.root.join("library/emf")).unwrap().count(), 2, "only explicitly imported mods exist in Library");
+}

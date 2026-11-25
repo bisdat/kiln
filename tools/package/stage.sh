@@ -3,7 +3,7 @@
 # their game-relative paths, plus kiln-runtime.json without files[] (kilnctl bundle create hashes and zips them).
 #   tools/package/stage.sh <stage dir> [--no-build] [--allow-missing]
 # Components: core (proxy, kiln-core, services, host, .NET, kiln.json, compat-rules.json, Kiln's other plugins), sigdb-server,
-# sigdb-client, admin (Kiln.Admin), emf (kiln-emf plugin), eml (kiln-eml, GPL-3, gpl/kiln-eml), samples (hello mod +
+# sigdb-client, admin (Kiln.Admin), emf (kiln-emf plugin and upstream Lua host), eml (kiln-eml, GPL-3), samples (hello mod +
 # native hello plugin), shroudforge (ShroudForge's runtime, GPL-3, kiln/plugins/shroudforge/, from
 # third_party/shroudforge), enshwick (Enshwick's own loader, MIT, kiln/plugins/enshwick/, built from the pinned
 # upstream tag by native/plugins/enshwick/tools/build-runtime.sh). The layout rules are tools/deploy-server.sh's (same
@@ -286,6 +286,15 @@ if [[ -d $bin/plugins ]]; then
     install -m 644 "$f" "$stage/$comp/kiln/plugins/"
   done
 fi
+# EMF's unmodified Lua host (MIT): staged only with kiln-emf, in a private subfolder rather than a game drop-in.
+if [[ -f $stage/emf/kiln/plugins/kiln-emf.dll ]]; then
+  if built emf-lua python3 -I "$repo/tools/package/stage-emf-lua.py" "$out/emf-lua-runtime"; then
+    install -d "$stage/emf/kiln/plugins/emf-lua"
+    install -m 644 "$out/emf-lua-runtime/"{lua.dll,mod.json,EMF-LICENSE.txt,Lua-LICENSE.txt,SOURCE.txt} "$stage/emf/kiln/plugins/emf-lua/"
+  else
+    miss "EMF Lua host: could not stage the pinned release (log: $logs/emf-lua.log)"
+  fi
+fi
 # kiln-eml (component eml): the GPL-3 licence and where its source is go next to the DLL
 if [[ -f $stage/eml/kiln/plugins/kiln-eml.dll ]]; then
   install -m 644 "$repo/gpl/kiln-eml/LICENSE" "$stage/eml/kiln/plugins/kiln-eml.LICENSE.txt"
@@ -411,7 +420,7 @@ known = {
     "admin": {"sides": ["server"], "default": True, "requires": ["core"],
               "description": "Kiln.Admin: the file bridge and KAP/1 admin transport"},
     "emf": {"sides": ["server", "client"], "default": True, "requires": ["core"],
-            "description": "kiln-emf: runs EMF mods on Kiln's services"},
+            "description": "kiln-emf and the Lua host: run EMF DLL and Lua mods on Kiln's services"},
     "samples": {"sides": ["server"], "default": False, "requires": ["core"],
                 "description": "the hello sample mod and the native hello plugin"},
     "eml": {"sides": ["server", "client"], "default": True, "requires": ["core"],

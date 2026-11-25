@@ -285,6 +285,7 @@ fn emf_lua_mods_load_under_emfs_lua_mod() {
     assert!(b.reason.contains("this profile has it switched off"), "{}", b.reason);
     std::fs::remove_dir_all(g.path.join("emf/mods/lua")).unwrap();
     p.mods.emf[0].enabled = true;
+    p.mods.emf[0].version = "1.33.0".into(); // the host now has to meet the Lua script's declared version floor
     assert_eq!(scan(&dirs, &g, &p).mods[0].state, FoundState::Loads);
     // no lua mod anywhere: not "can't run", but what is missing
     let r = scan(&dirs, &g, &emf);
@@ -559,4 +560,65 @@ fn a_hand_copied_eml_mod_shroudforge_keeps_off_says_so_in_the_promised_words() {
     assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
     assert_eq!(m.reason, "You put this mod into ShroudForge's folder yourself, and ShroudForge has it switched off. A server has no \
         in-game menu: remove the folder and add the mod with Add mods, and Kiln places its own copy, switched on.");
+}
+
+#[test]
+fn emf_lua_bundle_is_not_found_but_runs_loose_scripts_with_its_installed_version() {
+    let t = tmp("emf-bundle");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0, true);
+    let p = profile(&[ModKind::Emf], true);
+    put(&g.path, "emf/mods/script/mod.json", br#"{"id":"script","version":"1.0.0","emf":20,"main":"main.lua","depends":{"lua":">=1.43"}}"#);
+    put(&g.path, "emf/mods/script/main.lua", b"-- synthetic\n");
+    put(&g.path, "kiln/plugins/emf-lua/mod.json", br#"{"id":"lua","version":"1.43.0","emf":20}"#);
+    put(&g.path, "kiln/plugins/emf-lua/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    let r = scan(&dirs, &g, &p);
+    assert_eq!(r.mods.len(), 1, "the runtime bundle is not a Found mod: {r:#?}");
+    assert_eq!((r.mods[0].state, r.mods[0].via), (FoundState::Loads, Some(FoundVia::Kiln)), "{r:#?}");
+    put(&g.path, "kiln/plugins/emf-lua/mod.json", br#"{"id":"lua","version":"1.42.0","emf":20}"#);
+    let r = scan(&dirs, &g, &p);
+    let m = one(&r, "emf/mods/script");
+    assert_eq!(m.state, FoundState::Off, "{m:#?}");
+    assert!(m.reason.contains("too old") && m.reason.contains("1.42.0"), "{}", m.reason);
+    for manifest in ["broken", r#"{"id":"wrong","version":"1.43.0"}"#, r#"{"id":"lua","version":"1.43.0","dll":"wrong.dll"}"#] {
+        put(&g.path, "kiln/plugins/emf-lua/mod.json", manifest.as_bytes());
+        assert_eq!(one(&scan(&dirs, &g, &p), "emf/mods/script").state, FoundState::Off);
+    }
+    put(&g.path, "kiln/plugins/emf-lua/mod.json", br#"{"id":"lua","version":"1.43.0","dll":"lua.dll","emf":20}"#);
+    assert_eq!(one(&scan(&dirs, &g, &profile(&[], true)), "emf/mods/script").fix, Some(FoundFix::Dropins));
+    std::fs::remove_file(g.path.join("kiln/plugins/emf-lua/lua.dll")).unwrap();
+    assert_eq!(one(&scan(&dirs, &g, &p), "emf/mods/script").state, FoundState::Off);
+}
+
+#[test]
+fn emf_lua_bundle_does_not_override_found_hosts_or_the_real_loader() {
+    let t = tmp("emf-bundle-precedence");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let g = game(&t.0, true);
+    let mut p = profile(&[ModKind::Emf], true);
+    put(&g.path, "emf/mods/script/mod.json", br#"{"id":"script","version":"1.0.0","emf":20,"main":"main.lua","depends":{"lua":">=1.43"}}"#);
+    put(&g.path, "emf/mods/script/main.lua", b"-- synthetic\n");
+    put(&g.path, "kiln/plugins/emf-lua/mod.json", br#"{"id":"lua","version":"1.43.0","emf":20}"#);
+    put(&g.path, "kiln/plugins/emf-lua/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    p.mods.emf.push(ProfileMod { enabled: false, ..pm("lua") });
+    let r = scan(&dirs, &g, &p);
+    let m = one(&r, "emf/mods/script");
+    assert_eq!(m.state, FoundState::Off);
+    assert!(m.reason.contains("switched off"), "{}", m.reason);
+    p.mods.emf.clear();
+    put(&g.path, "emf/mods/a-host/mod.json", br#"{"id":"lua","version":"1.33.0","emf":20}"#);
+    put(&g.path, "emf/mods/a-host/lua.dll", &build_test_dll(&["emf_mod_load"], b""));
+    let r = scan(&dirs, &g, &p);
+    let m = one(&r, "emf/mods/script");
+    assert_eq!(m.state, FoundState::Off);
+    assert!(m.reason.contains("1.33.0"), "{}", m.reason);
+    std::fs::remove_dir_all(g.path.join("emf/mods/a-host")).unwrap();
+    // The bundle is not installed in the real EMF's mods folder, so its loader cannot use it.
+    put(&g.path, "kiln/chain/emf.dll", &build_test_dll(&["DirectInput8Create", "emf_loader_identity"], b""));
+    put(&g.path, "kiln/chain.ini", b"[chain]\r\nchain/emf.dll\r\n");
+    assert_eq!(one(&scan(&dirs, &g, &p), "emf/mods/script").state, FoundState::Off);
+    std::fs::remove_file(g.path.join("kiln/chain.ini")).unwrap();
+    // A possible real loader under Wine (without a known DLL override) also blocks bundle promises.
+    put(&g.path, "dbghelp.dll", &build_test_dll(&["emf_loader_identity"], b""));
+    assert_eq!(one(&scan(&dirs, &g, &p), "emf/mods/script").state, FoundState::Off);
 }

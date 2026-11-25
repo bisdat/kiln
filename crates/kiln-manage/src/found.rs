@@ -26,6 +26,7 @@ use crate::quick::{AddReport, AddedMod};
 use crate::task::Progress;
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
+use std::cell::OnceCell;
 use std::path::{Component, Path, PathBuf};
 
 /// Entries read per folder; more are left out and `truncated` says so.
@@ -376,6 +377,8 @@ struct Ctx<'a> {
     sf_eml: Option<bool>,
     /// A dedicated server's folder.
     server: bool,
+    /// Read EMF dependency candidates once, if this scan actually has an EMF Lua row to explain.
+    emf_mods: OnceCell<Vec<crate::emf_deps::EmfMod>>,
 }
 
 fn found(name: String, path: String, state: FoundState, reason: String) -> FoundMod {
@@ -449,25 +452,52 @@ fn entry(cx: &Ctx, root: &Root, abs: &Path, file_name: &str, is_zip: bool) -> Fo
         m.profile_mod = Some(pm.id.clone());
         return m;
     }
-    // An EMF Lua mod runs under EMF's lua mod, whoever loads the EMF mods: without it nothing runs the mod
+    // An EMF Lua mod needs both a reader for its folder and a Lua host. Only kiln-emf can use the private bundle;
+    // the real EMF still reads its own folder and switches, as before.
     let lua = kind == ModKind::Emf && abs.is_dir() && crate::library::is_emf_lua(abs);
-    match lua.then(|| emf_lua_host(cx)) {
-        Some(Some(false)) => {
-            m.reason = "An EMF Lua mod. EMF's lua mod runs Lua mods, and this profile has it switched off.".into();
-            return m;
-        }
-        Some(None) => {
-            m.reason = format!("An EMF Lua mod. EMF's lua mod runs Lua mods, and it is not in {} or in this profile. Add EMF's lua mod \
-                (game/emf/mods/lua in EMF's download) to run it.", folders_of(kind));
-            return m;
-        }
-        _ => {}
-    }
     let mut m = found_loads(cx, kind, m);
     if lua && m.state == FoundState::Loads {
+        let problem = if m.via == Some(FoundVia::OwnLoader) {
+            match emf_lua_host(cx) {
+                Some(true) => None,
+                Some(false) => Some((crate::emf_deps::DepState::Off, String::new())),
+                None => Some((crate::emf_deps::DepState::Missing, String::new())),
+            }
+        } else {
+            emf_lua_problem(cx, abs, &m.path)
+        };
+        if let Some((state, reason)) = problem {
+            m.state = FoundState::Off;
+            m.via = None;
+            m.reason = match state {
+                crate::emf_deps::DepState::Off => "An EMF Lua mod. EMF's lua mod runs Lua mods, and this profile has it switched off.".into(),
+                crate::emf_deps::DepState::Missing => format!("An EMF Lua mod. EMF's lua mod runs Lua mods, and it is not in {} or in this profile. Add EMF's lua mod \
+                    (game/emf/mods/lua in EMF's download) to run it.", folders_of(kind)),
+                _ => format!("An EMF Lua mod. {}", sentence(&reason)),
+            };
+            return m;
+        }
         m.reason.push_str(" EMF's lua mod runs its Lua.");
     }
     m
+}
+
+/// A loose Lua script's host dependency, using the same candidates, first-ID and version rules as the profile preview.
+/// Other dependencies remain outside Found's existing Lua-host check. A script without a declared lua dependency still
+/// needs a host to run it, but imposes no version floor.
+fn emf_lua_problem(cx: &Ctx, folder: &Path, row: &str) -> Option<(crate::emf_deps::DepState, String)> {
+    use crate::emf_deps::{Dep, check, read_folder};
+    let mut script = read_folder(folder, Some(row), true)?;
+    script.deps.retain(|d| d.id == EMF_LUA_HOST);
+    for d in &mut script.deps { d.optional = false; } // a script always needs its host, even if its manifest calls it optional
+    if script.deps.is_empty() {
+        script.deps.push(Dep { id: EMF_LUA_HOST.into(), range: String::new(), optional: false, url: None });
+    }
+    let mut mods = vec![script];
+    let candidates = cx.emf_mods.get_or_init(|| crate::emf_deps::preview_mods(cx.dirs, cx.profile, Some(cx.game)));
+    mods.extend(candidates.iter().cloned());
+    let side = if cx.server { crate::manifest::RunSide::Server } else { crate::manifest::RunSide::Client };
+    check(&mods, side).into_iter().find(|p| p.id == row).map(|p| (p.state, p.reason))
 }
 
 /// [`entry`] from the own loader on: who loads the mod of `kind` with this profile, and why.
@@ -593,7 +623,8 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 && !matches!(l.via, crate::own_loaders::Via::HostedShroudForge | crate::own_loaders::Via::Interpreter)))
     }).flatten();
     let cx = Ctx { dirs, game, profile, loaders: &loaders, kiln: kiln_installed, wine: install.platform != crate::game::Platform::Windows,
-        sf_eml, server: install.kind == crate::game::GameKind::Server };
+        sf_eml, server: install.kind == crate::game::GameKind::Server,
+        emf_mods: OnceCell::new() };
     let mut rep = FoundReport {
         game_id: install.id.clone(),
         profile_id: profile.id.clone(),

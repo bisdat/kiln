@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 
+#include "bundled_lua.h"
 #include "compat_ticks.h"
 #include "emf_internal.h"
 #include "../../compat/compat.h"
@@ -756,18 +757,61 @@ void load_thunk(void* p) {
 
 }  // namespace
 
+namespace {
+
+void prepare_mod(Mod* m) {
+    m->owner = g_api->owner_create(kstr("emf:" + m->id));
+    if (m->status == EMF_MOD_PENDING || m->status == EMF_MOD_DISABLED) {
+        settings_load_mod(m);  // reads the switch: enabled=0 in the ini disables it
+        if (m->status == EMF_MOD_PENDING) m->enabled = settings_enabled(m, m->enabled_default);
+    }
+}
+
+Mod* add_bundled_lua() {
+    bundled_lua::Demand demand;
+    for (const auto& m : g_mods)
+        demand.consider(m->id, m->profile_id, m->main, m->enabled && m->status == EMF_MOD_PENDING,
+                        m->emf_min, kEmfApiVersion, g_side == KILN_SIDE_SERVER, m->side);
+    if (!demand.needed() || !P.kiln.is_absolute()) return nullptr;
+
+    // Not in emf/mods, not a profile entry, and never scanned as a Kiln plugin. Real EMF's loader remains in charge
+    // when on_ready steps aside. In No Mods or invalid profile mode discovery supplied no requests.
+    const auto folder = P.kiln / L"plugins" / bundled_lua::folder;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(folder, ec)) return nullptr;  // older/minimal install has no payload
+    auto m = std::make_unique<Mod>();
+    m->folder = folder;
+    m->source = "lua\\";
+    m->origin = "bundled";
+    if (!read_manifest(folder, m.get()) || m->id != bundled_lua::id || !m->main.empty() ||
+        m->dll != folder / L"lua.dll" || !std::filesystem::is_regular_file(m->dll, ec)) {
+        logf(KILN_LOG_WARN, "bundled EMF lua: missing or invalid mod.json or lua.dll; leaving it off");
+        return nullptr;
+    }
+    prepare_mod(m.get());
+    auto* added = m.get();
+    g_mods.push_back(std::move(m));  // demand already excluded an explicit lua entry
+    return added;
+}
+
+}  // namespace
+
 void load_mods(const EmfApi* table) {
     std::vector<Mod*> order;
     {
         std::lock_guard lock(g_mods_mutex);
-        for (const auto& up : g_mods) {
-            up->owner = g_api->owner_create(kstr("emf:" + up->id));
-            if (up->status == EMF_MOD_PENDING || up->status == EMF_MOD_DISABLED) {
-                settings_load_mod(up.get());  // reads the switch: enabled=0 in the ini disables it
-                if (up->status == EMF_MOD_PENDING) up->enabled = settings_enabled(up.get(), up->enabled_default);
-            }
-        }
+        for (const auto& up : g_mods) prepare_mod(up.get());
+        Mod* bundled = add_bundled_lua();
         order = resolve_order();
+        if (bundled && bundled->status == EMF_MOD_PENDING &&
+            std::ranges::none_of(g_mods, [](const auto& m) {
+                return m->status == EMF_MOD_SCRIPT && bundled_lua::is_lua_main(m->main);
+            })) {
+            // The request was only provisional: no Lua script survived the dependency checks.
+            bundled->status = EMF_MOD_DISABLED;
+            bundled->reason = "no admitted EMF Lua script needs the bundled host";
+            std::erase(order, bundled);
+        }
     }
     portraits_on_ready();  // selected manifests only; the early startup asset writer has already finished
     for (Mod* m : order) {

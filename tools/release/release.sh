@@ -622,6 +622,15 @@ if [[ -d $stage/shroudforge/kiln/plugins/shroudforge ]]; then
     done
     printf 'Corresponding source: source/shroudforge-kiln-%s-src.tar.gz in this release, and\nhttps://github.com/frostdev-ops/shroudforge at commit %s.\n' "${sfpin:0:12}" "$sfpin"; } >>"$notices"
 fi
+if [[ -d $stage/emf/kiln/plugins/emf-lua ]]; then
+  el=$stage/emf/kiln/plugins/emf-lua
+  { printf '\nEMF Lua host (component "emf", kiln/plugins/emf-lua/)\n'
+    cat "$el/SOURCE.txt"
+    for license in EMF-LICENSE.txt Lua-LICENSE.txt; do
+      printf '\n--- %s\n' "$license"
+      cat "$el/$license"
+    done; } >>"$notices"
+fi
 install -m 644 "$notices" "$stage/core/kiln/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$src/LICENSE" "$stage/core/kiln/LICENSE.txt"
 if ((signing)); then

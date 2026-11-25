@@ -102,6 +102,11 @@ install -m 644 "$bin/kiln-core.dll" "$bin/kiln-core.pdb" "$k/"
 rsync -a --delete --include='*.dll' --include='*.pdb' --exclude='*' "$bin/services/" "$k/services/" 2>/dev/null || true
 # Kiln's own plugins (native/plugins/*, e.g. kiln-emf.dll); other plugins already in kiln/plugins stay.
 [[ -d $bin/plugins ]] && rsync -a --include='*.dll' --include='*.pdb' --exclude='*' "$bin/plugins/" "$k/plugins/"
+# With a staged build, deploy the same upstream Lua host and notices as the runtime bundle's emf component.
+if [[ -s $bin/plugins/kiln-emf.dll && -s $out/emf-lua-runtime/lua.dll ]]; then
+  install -d "$k/plugins/emf-lua"
+  install -m 644 "$out/emf-lua-runtime/"{lua.dll,mod.json,EMF-LICENSE.txt,Lua-LICENSE.txt,SOURCE.txt} "$k/plugins/emf-lua/"
+fi
 # kiln-eml ships with its GPL-3 licence and notice (as the runtime bundle's eml component does)
 if [[ -f $k/plugins/kiln-eml.dll ]]; then
   install -m 644 "$repo/gpl/kiln-eml/LICENSE" "$k/plugins/kiln-eml.LICENSE.txt"

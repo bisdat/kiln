@@ -7,6 +7,7 @@ The expected list comes from the source tree, so a new plugin is expected as soo
 
   - kiln/plugins/kiln-<p>.dll for each native/plugins/<p>/CMakeLists.txt (component core; kiln-emf: emf), unless
     that CMakeLists.txt says "Builds no plugin" (native/plugins/compat: the plugins' shared code and host tests);
+  - EMF's Lua host, manifest, source pointer and licenses (component emf, kiln/plugins/emf-lua/);
   - kiln/plugins/<name>.dll for each GPL plugin gpl/<name>/Cargo.toml (component eml for kiln-eml);
   - ShroudForge's runtime kiln/plugins/shroudforge/{shroudforge-runtime,kfc-runtime}.dll (component shroudforge),
     whenever its adapter is in the tree (an uninitialized submodule is an error, never an opt-out);
@@ -40,6 +41,9 @@ def expected(src):
         if NO_PLUGIN in open(cm, encoding="utf-8").read():
             continue  # shared code and host tests (native/plugins/compat)
         out.append((f"kiln/plugins/kiln-{p}.dll", "emf" if p == "emf" else "core"))
+    if ("kiln/plugins/kiln-emf.dll", "emf") in out:
+        out += [(f"kiln/plugins/emf-lua/{name}", "emf") for name in
+                ("lua.dll", "mod.json", "EMF-LICENSE.txt", "Lua-LICENSE.txt", "SOURCE.txt")]
     for ws in sorted(glob.glob(os.path.join(src, "gpl", "*", "Cargo.toml"))):
         name = os.path.basename(os.path.dirname(ws))
         out.append((f"kiln/plugins/{name}.dll", "eml" if name == "kiln-eml" else name))
