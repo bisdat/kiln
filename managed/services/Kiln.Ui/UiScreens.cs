@@ -173,7 +173,7 @@ public sealed class UiScreen : IDisposable
     }
 
     /// <summary>Where the screen was drawn last (fractions of the viewport, sizes at UI scale 1); null before its first
-    /// frame. Kept while it is closed. Hand it to another mod (<c>Mods.Send</c>) to open a screen beside this one. Any
+    /// frame, and always for a <see cref="UiScreenOptions.FullScreen"/> screen (it is not placed). Kept while it is closed. Hand it to another mod (<c>Mods.Send</c>) to open a screen beside this one. Any
     /// thread.</summary>
     /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
     [AnyThread]
