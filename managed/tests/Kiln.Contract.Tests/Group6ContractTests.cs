@@ -172,7 +172,7 @@ public sealed unsafe class HookRowTests : FakeTableTest
         ((UiNative.Table*)t)->Header = new ServiceHeader { Size = (uint)sizeof(UiNative.TablePopups), Version = 7 };
         ((UiNative.Table*)t)->GetScreen = &FakeScreen;
         t->PopupsFn = &FakePopups;
-        Serve("kiln.ui", t, typeof(UiNative), "_table");
+        Serve("kiln.ui", (UiNative.Table*)t, typeof(UiNative), "_table");
         StartRows(typeof(Ui).Assembly);
         // 0.2.0-dev.31.9 (GitHub issue 117): the table has the slot, but kiln.ui says it does not read the game's popups
         Assert.Equal(available != 0, Capabilities.Is("ui.popups"));
