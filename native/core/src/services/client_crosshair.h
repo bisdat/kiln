@@ -71,6 +71,7 @@ KilnResult get(const Env& env, KilnCrosshairHit* out, uint32_t* out_reason);
 // becomes usable()'s answer, and get() answers KILN_ERR_UNAVAILABLE.
 enum class Install { Bound, Again, Failed };
 constexpr uint32_t kInstallAttempts = 3;
+constexpr int64_t kInstallRetryNs = 1'000'000'000;  // the least time between two attempts, on the service's clock
 using Installer = Install (*)(uint32_t* hit_offset, const char** why);
 void set_installer(Installer install);  // nullptr: none (the default); clears install_failed()
 // The reason usable() gives while there is neither an installer nor a binding (a static string; nullptr: the default,

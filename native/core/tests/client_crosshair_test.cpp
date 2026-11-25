@@ -9,6 +9,7 @@
 #include <sanitizer/allocator_interface.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -89,6 +90,12 @@ ch::Install install_again(uint32_t*, const char** why) {
     *why = "threads could not be checked";
     return ch::Install::Again;
 }
+std::atomic<bool> g_hold_install{false}, g_in_install{false};
+ch::Install install_again_held(uint32_t* offset, const char** why) {
+    g_in_install = true;
+    while (g_hold_install.load()) std::this_thread::yield();
+    return install_again(offset, why);
+}
 ch::Install install_failed(uint32_t*, const char** why) {
     g_installs.fetch_add(1);
     *why = "the detour could not be written";
@@ -101,6 +108,7 @@ void reset() {
     g_now = 1'000'000'000;
     g_fault = false;
     g_installs = 0;
+    g_in_install = false;
 }
 
 // A ready build with a live session 3 at step 100, installed by a first get.
@@ -213,12 +221,29 @@ void lazy_install() {
 
     reset();
     ch::set_installer(&install_again);
-    for (uint32_t i = 0; i < ch::kInstallAttempts; ++i) {
+    // a refusal for unchecked threads is not final: the row stays on, so get answers NO_SAMPLE (as the docs promise
+    // for the first read), never UNAVAILABLE while usable() says yes
+    for (uint32_t i = 0; i + 1 < ch::kInstallAttempts; ++i) {
         h = fresh_out();
+        reason = 99;
         const KilnResult rc = ch::get(kClient, &h, &reason);
-        check(rc == KILN_ERR_UNAVAILABLE, "get: an install refused for unchecked threads answers unavailable",
-              std::to_string(i));
+        check(rc == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && h.sequence == 0 && h.flags == 0 &&
+                  h.size == sizeof h,
+              "get: an install refused for unchecked threads answers NO_SAMPLE with a zeroed sample", std::to_string(i));
+        check(ch::usable(&why, &installed) && !installed && !ch::install_failed(),
+              "usable: still on after a retryable refusal", std::to_string(i));
+        // a mod polling every frame does not burn the attempts: none before kInstallRetryNs on the service's clock
+        const int before = g_installs.load();
+        g_now += ch::kInstallRetryNs - 1;
+        h = fresh_out();
+        reason = 99;
+        check(ch::get(kClient, &h, &reason) == KILN_OK && reason == KILN_CROSSHAIR_REASON_NO_SAMPLE &&
+                  g_installs == before,
+              "get: no new attempt sooner than kInstallRetryNs after a refusal", std::to_string(g_installs.load()));
+        g_now += 1;
     }
+    h = fresh_out();
+    check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE, "get: the last refused attempt is final, unavailable");
     check(g_installs == static_cast<int>(ch::kInstallAttempts) && ch::install_failed(),
           "get: Again is tried kInstallAttempts times, then final");
     check(!ch::usable(&why, &installed) && std::string(why) == "threads could not be checked",
@@ -226,6 +251,30 @@ void lazy_install() {
     h = fresh_out();
     check(ch::get(kClient, &h, &reason) == KILN_ERR_UNAVAILABLE && g_installs == static_cast<int>(ch::kInstallAttempts),
           "get: no install after the final failure");
+
+    // a get that waited on the install of another thread, which was refused for unchecked threads: NO_SAMPLE too
+    reset();
+    g_hold_install = true;
+    ch::set_installer(&install_again_held);
+    KilnResult first_rc = KILN_ERR_INTERNAL, waiter_rc = KILN_ERR_INTERNAL;
+    uint32_t first_reason = 99, waiter_reason = 99;
+    std::thread first([&] {
+        KilnCrosshairHit x = fresh_out();
+        first_rc = ch::get(kClient, &x, &first_reason);
+    });
+    while (!g_in_install.load()) std::this_thread::yield();
+    std::thread waiter([&] {
+        KilnCrosshairHit x = fresh_out();
+        waiter_rc = ch::get(kClient, &x, &waiter_reason);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    g_hold_install = false;
+    first.join();
+    waiter.join();
+    check(first_rc == KILN_OK && first_reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && waiter_rc == KILN_OK &&
+              waiter_reason == KILN_CROSSHAIR_REASON_NO_SAMPLE && g_installs == 1,
+          "get: the refused install's thread and a thread that waited on it both answer NO_SAMPLE, one attempt",
+          std::to_string(first_rc) + " " + std::to_string(waiter_rc) + " " + std::to_string(g_installs.load()));
 
     reset();
     ch::set_installer(&install_failed);
