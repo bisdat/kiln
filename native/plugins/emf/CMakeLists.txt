@@ -21,6 +21,8 @@ kiln_plugin(emf
     src/api_portraits.cpp
     src/api_terrain.cpp
     src/api_v40.cpp
+    src/api_orders.cpp
+    src/orders_model.cpp
     src/api_hits.cpp
     src/hits_model.cpp
     src/net/net_service.cpp
@@ -55,11 +57,18 @@ set_target_properties(emf-net-probe PROPERTIES OUTPUT_NAME emf_net_probe RUNTIME
 add_executable(emf-portrait-bridge-test tests/portrait_wine.cpp)
 set_target_properties(emf-portrait-bridge-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
 
-# EmfApi v49 path/move refusals (including v47 and v48 callers) through the production api_v40.cpp; headless native Windows test.
+# EmfApi v49 path refusals (including v47 and v48 callers) through the production api_v40.cpp; headless native Windows test.
 add_executable(emf-path-test tests/path_test.cpp src/api_v40.cpp)
 target_include_directories(emf-path-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
 set_target_properties(emf-path-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
+
+# EmfApi v39 enemy orders and v40 move orders: the production adapter (api_orders.cpp, orders_model.cpp) against fake
+# kiln.creatures / kiln.creature_control / kiln.spawn / kiln.world (since 0.2.0-dev.31.13); headless native Windows test.
+add_executable(emf-orders-test tests/orders_test.cpp src/api_v40.cpp src/api_orders.cpp src/orders_model.cpp)
+target_include_directories(emf-orders-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
+set_target_properties(emf-orders-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
 
 # Production spawn adapter with fake services; headless native Windows regression test.
 add_executable(emf-spawn-test tests/spawn_test.cpp src/api_spawn.cpp)

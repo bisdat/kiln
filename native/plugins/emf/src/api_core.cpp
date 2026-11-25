@@ -515,6 +515,7 @@ void core_after_step(EmfWorld* w, uint8_t kind) {
 void dispatch_after_step(EmfWorld* w, uint8_t kind) {
     if (!w) return;
     terrain_after_step(w, kind); // break results queued by this step, before mod on_tick callbacks
+    orders_after_step(w, kind);  // v39/v40: orders and moves walked on, move callbacks, before on_tick
     events_after_step(w, kind);
     components_after_step(w, kind);  // v23/v25: answers of change_component, offer upkeep
     windows_after_step(w, kind);     // v24: window events
@@ -542,6 +543,7 @@ const EmfApi* api_table() {
         fill_net(&g_table);         // v27
         fill_v40(&g_table);         // v28-v48 (spawn_facing is filled by fill_game)
         fill_hits(&g_table);        // v31 on_hit (api_hits.cpp)
+        fill_orders(&g_table);      // v39 enemy orders, v40 move orders (api_orders.cpp)
         // every slot must be filled: a NULL would crash a mod that checks only api->size
         const auto* slots = reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(&g_table) + 8);
         const size_t n = (sizeof(EmfApi) - 8) / sizeof(void*);

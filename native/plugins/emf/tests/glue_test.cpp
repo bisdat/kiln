@@ -918,16 +918,19 @@ static void test_v40(KilnApi &api) {
         CHECK(good == 8 && render_lookups == 1);
     }
     // the two chat functions come from fill_game (api_game.cpp, not built into this test), on_hit from fill_hits
-    // (api_hits.cpp: tests/hits_test.cpp)
+    // (api_hits.cpp: tests/hits_test.cpp), the six v39/v40 order slots from fill_orders (api_orders.cpp:
+    // tests/orders_test.cpp, since 0.2.0-dev.31.13)
     const size_t first = offsetof(EmfApi, on_player) / sizeof(void *), n = sizeof(EmfApi) / sizeof(void *);
     const auto *slots = reinterpret_cast<void *const *>(&t);
     int empty = 0;
     for (size_t i = first; i < n; ++i)
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
-            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *))
+            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *) &&
+            !(i >= offsetof(EmfApi, enemy_order) / sizeof(void *) && i <= offsetof(EmfApi, enemy_moving) / sizeof(void *)))
             ++empty;
     CHECK(n - first == 54 && empty == 1 && !t.spawn_facing);  // spawn_facing is filled by fill_spawn, not fill_v40
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
+    CHECK(!t.enemy_order && !t.enemy_order_cancel && !t.enemy_target && !t.enemy_move && !t.enemy_move_cancel && !t.enemy_moving);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
     const int before = unsupported_calls, refused_before = refusals;
@@ -980,49 +983,23 @@ static void test_v40(KilnApi &api) {
                       nullptr) == 0 &&
           !t.path_cancel(1));
     CHECK(t.door_state(w, 1) == EMF_DOOR_NONE && !t.door_set(w, 1, 1, 0) && !t.door_lock(w, 1, 1));
-    CHECK(!t.enemy_order_cancel(1) && t.enemy_target(w, 1) == 0 && !t.enemy_move_cancel(1) && t.enemy_moving(w, 1) == 0);
     CHECK(v40_callbacks == 0);
     CHECK(refusals == refused_before);
 
-    // the three requests with a `why`: refused with the reason, and a request that is too small is refused untouched
+    // the request with a `why` (enemy orders and moves: tests/orders_test.cpp): refused with the reason, and a request that is too small is refused untouched
     EmfRemoveBuilding rb{};
     rb.size = sizeof rb;
     rb.entity = 5;
     rb.refunded = 77;
     CHECK(!t.remove_building(w, &rb) && rb.refunded == 0 && std::string(rb.why) == "not available on Kiln yet");
-    EmfEnemyOrder eo{};
-    eo.size = sizeof eo;
-    CHECK(t.enemy_order(w, &eo) == 0 && std::string(eo.why) == "not available on Kiln yet");
-    EmfMoveOrder mo{};
-    mo.size = sizeof mo;
-    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
-          std::string(mo.why) == "not available on Kiln yet");
-    // v41 (EMF 0.6.10): a mod built with 0.6.11's header sends 136 bytes with stuck_seconds and EMF_MOVE_PEACEFUL_ALL;
-    // one built with 0.6.8's sends 128. Both get the same refusal with its reason, and no callback.
-    CHECK(sizeof mo == 136);
-    mo = {};
-    mo.size = sizeof mo;
-    mo.flags = EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL;
-    mo.stuck_seconds = 30;
-    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
-          std::string(mo.why) == "not available on Kiln yet");
-    mo = {};
-    mo.size = 128;
-    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && std::string(mo.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
-    CHECK(counted >= 42);  // every function that is not carried reported itself at least once
+    CHECK(counted >= 36);  // every function that is not carried reported itself at least once
     rb = {};
     rb.size = sizeof rb - 1;
     rb.refunded = 77;
     CHECK(!t.remove_building(w, &rb) && rb.refunded == 77 && rb.why[0] == 0);
     CHECK(!t.remove_building(w, nullptr));
-    eo = {};
-    eo.size = 8;
-    CHECK(t.enemy_order(w, &eo) == 0 && eo.why[0] == 0 && t.enemy_order(w, nullptr) == 0);
-    mo = {};
-    mo.size = 8;
-    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && mo.why[0] == 0 && t.enemy_move(w, nullptr, nullptr, nullptr) == 0);
-    CHECK(refusals == refused_before + 6 && unsupported_calls - before == counted && v40_callbacks == 0);
+    CHECK(refusals == refused_before + 2 && unsupported_calls - before == counted && v40_callbacks == 0);
 
     // world_to_screen: kiln.render's answer; a point behind the camera (false) leaves px, py alone
     float px = -1, py = -1;
@@ -1099,11 +1076,7 @@ static void test_v46() {
     mo.size = 128;  // a mod built with EMF 0.6.8's header
     CHECK(t.villager_move(w, &mo, nullptr, nullptr) == 0 && mo.why == not_yet);
     CHECK(!t.villager_move_cancel(1) && t.villager_moving(w, 9) == 0);
-    // enemy_move with EMF_MOVE_HOLD (EMF: "EMF_MOVE_HOLD is for villager_move"): refused as every order on Kiln
-    mo = {};
-    mo.size = sizeof mo;
-    mo.flags = EMF_MOVE_HOLD;
-    CHECK(t.enemy_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    // enemy_move with EMF_MOVE_HOLD ("EMF_MOVE_HOLD is for villager_move"): tests/orders_test.cpp
     CHECK(v46_callbacks == 0 && refusals == refused_before);
     // each of the seven reported itself (one kiln.log line per mod and function, state/emf.json "unsupported")
     for (const char *fn : {"player_permissions", "break_blocks", "block_at", "find_wall", "villager_move",

@@ -201,7 +201,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     if (!e || e->kind >= KILN_WORLD_KINDS) return;
     if (e->event == KILN_WORLD_STARTED) {
         net_world_started(static_cast<uint8_t>(e->kind));
-        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); }
+        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); orders_world_started(); }
         windows_world_started(static_cast<uint8_t>(e->kind));
         return;
     }
@@ -209,6 +209,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     net_world_stopping(static_cast<uint8_t>(e->kind));
     if (e->kind == KILN_WORLD_SERVER) {
         terrain_world_stopping();
+        orders_world_stopping();
         events_world_stopping();
         components_world_stopping();
     }
@@ -294,6 +295,7 @@ void KILN_CALL on_ready(void*) {
 
 void KILN_CALL on_unload(void*) {
     terrain_world_stopping();
+    orders_shutdown();
     net_shutdown();
     events_shutdown();
     program_hooks_shutdown();
