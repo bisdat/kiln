@@ -231,7 +231,7 @@ static std::map<KilnEntity, std::vector<KilnConfigOverride>> overrides;
 // impact instances: impact id -> its variables (index -> bytes)
 static std::map<uint32_t, std::map<uint32_t, std::vector<uint8_t>>> instances;
 static KilnResult KILN_CALL ab_status(KilnAbilitiesStatus* s) {
-    s->natives = s->programs = abilities_ready;
+    s->natives = s->programs = s->instances = abilities_ready;
     return KILN_OK;
 }
 static KilnResult KILN_CALL ab_program_info(uint32_t id, KilnImpactProgramInfo* out) {
@@ -834,7 +834,7 @@ static void test_server() {
     registry_loaded = true;
     CHECK(got.ev.size() == 9 + buffs::kMaxPending && got.ev.back().kind == EMF_BUFF_REFUSED &&
           got.why.back().find("ImpactRegistry") != std::string::npos);
-    // kiln.abilities without natives or programs on this build: refused at once
+    // kiln.abilities without its instance hooks on this build: refused at once
     abilities_ready = false;
     CHECK(!t.buff_remove(server(), 7, kBleed, &done_cb, &got) && !t.buff_apply(server(), 7, kBleed, 0, 0, 0, &done_cb, &got));
     abilities_ready = true;

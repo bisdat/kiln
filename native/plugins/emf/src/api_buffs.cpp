@@ -81,15 +81,16 @@ const KilnAbilitiesApi* abilities() {
     return a;
 }
 
-// Giving and removing need kiln.abilities' natives and programs on this build (the capability abilities.buffs) and
-// kiln.spawn's spawn-time components. Empty = usable.
+// Giving and removing need kiln.abilities' instance hooks on this build (the config overrides and the answer's read;
+// Kiln.Abilities' capability abilities.buffs asks the same) and kiln.spawn's spawn-time components. Empty = usable.
+// The natives and the ImpactRegistry come with each server world: a program that cannot be registered yet waits.
 std::string giving_unavailable() {
     const KilnAbilitiesApi* a = abilities();
     if (!a) return "kiln.abilities is not available";
     KilnAbilitiesStatus st{};
     st.size = sizeof st;
-    if (a->status(&st) != KILN_OK || !st.natives || !st.programs)
-        return "kiln.abilities has no natives or programs on this game build (capability abilities.buffs)";
+    if (a->status(&st) != KILN_OK || !st.instances)
+        return "kiln.abilities has no instance hooks on this game build (capability abilities.instances)";
     if (!S.spawn || S.spawn->header.size < offsetof(KilnSpawnApi, capabilities) + sizeof(void*) || !S.spawn->capabilities ||
         !(S.spawn->capabilities() & KILN_SPAWN_CAP_COMPONENTS) || !S.spawn->entity_info || !S.spawn->destroy)
         return "kiln.spawn spawn-time components are unavailable";
