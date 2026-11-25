@@ -27,6 +27,9 @@ public sealed class PlayerStateTestMod : Mod
     private const uint Potion = 0xdcb1dded;    // Consumable_Potion_Health_T4
     private const uint Glider = 0x3d4a78dd;    // Tool_Glider_T1
     private const uint Sword = 0x4c0d3e02;     // Weapon_T1_1H_Sword_Craft
+    private const uint RepairKit = 0xc948f6ae; // Consumable_RepairKit_T3: UseItem_Consumable_RepairKit, used up by PayUsageCost only
+    private const uint Prayer = 0x7ab33fcf;    // Consumable_Scroll_Prayer_Of_The_Flame_Buff: ApplyBuffEvent consumes, ManaCost on the item
+    private const uint FireBolt = 0x343449dc;  // Ammo_T1_Spell_Fire_Bolt_lvl5: a staff's spell, its PayUsageCost consumes
     private const uint RingLight = 0x79442800; // Ring_T3_Ring_of_Light
     private const uint RingShock = 0x4623bcb0; // Ring_T6_Ring_of_Shock
     private const byte EquipRing1 = 11;        // keen::EquipmentSlot.Ring1
@@ -653,12 +656,82 @@ public sealed class PlayerStateTestMod : Mod
             await WaitIdle(e);
         }
 
+        await TestUseItemCost(e);
+
         var empty = Items.Read(e)?.Slots.FirstOrDefault(s => s.IsEmpty);
         if (empty is not null) Check(Abilities.UseItem(e, empty.Slot) == ItemUseResult.EmptySlot, "UseItem on an empty slot: EmptySlot");
         var sword = await Give(e, Sword, 1);
         if (sword is not null) Check(Abilities.UseItem(e, sword.Slot) == ItemUseResult.NotConsumable, "UseItem on a sword: NotConsumable");
         Check(Abilities.UseItem(e, SlotId.Of(new EntityId(0xFFFFF0), 0)) == ItemUseResult.NotOwnSlot, "UseItem on a slot of no inventory of the character: NotOwnSlot");
         Check(Count() == before - 1, "UseItem: the refusals took nothing");
+    }
+
+    // ---- GitHub #118 (0.2.0-dev.31.5): the used item is the use's cost item too, as in the game's hand use ----
+    private async Task TestUseItemCost(EntityId e)
+    {
+        int CountIn(SlotId s) => Items.Read(e)?.Slots.FirstOrDefault(x => x.Slot == s)?.Count ?? 0;
+
+        // the repair kit: no consume event, its PayUsageCost (consume, 0.07 s) takes it, then six RepairAllItems
+        await WaitIdle(e);
+        var kit = await Give(e, RepairKit, 3);
+        if (kit is null) Check(false, "UseItem: the character takes repair kits");
+        else
+        {
+            var kits = CountIn(kit.Slot);
+            var r = Abilities.UseItem(e, kit.Slot);
+            Check(r == ItemUseResult.Started, $"UseItem: a repair kit (used up by its PayUsageCost alone): {r}");
+            Check(CountIn(kit.Slot) == kits, $"UseItem: the kit is not taken at the call ({CountIn(kit.Slot)} of {kits})");
+            await Steps(1);
+            Info($"UseItem: the kit's use plays {PlayerStates.Read(e)?.Action?.SequenceName ?? "nothing"}");
+            for (var i = 0; i < 90 && CountIn(kit.Slot) == kits; i++) await Steps(1);
+            Check(CountIn(kit.Slot) == kits - 1, $"UseItem: the kit's PayUsageCost took one from its slot: {kits} -> {CountIn(kit.Slot)}");
+            await WaitIdle(e, 600);
+            Check(CountIn(kit.Slot) == kits - 1, $"UseItem: one kit for the whole use, its repairs took no more: {CountIn(kit.Slot)}");
+        }
+
+        // a scroll: consumed by its own ApplyBuffEvent as before, and now it pays the item's ManaCost like a hand use
+        var scroll = await Give(e, Prayer, 3);
+        if (scroll is null) Check(false, "UseItem: the character takes Prayer of the Flame scrolls");
+        else
+        {
+            int? Mana() => Attributes.Get(e, AbilityResource.Mana);
+            var max = Attributes.Max(e, AbilityResource.Mana) ?? 0;
+            Attributes.Add(e, AbilityResource.Mana, max - (Mana() ?? 0));
+            await Steps(2);
+            var m0 = Mana();
+            var n0 = CountIn(scroll.Slot);
+            var r = Abilities.UseItem(e, scroll.Slot);
+            Check(r == ItemUseResult.Started, $"UseItem: a Prayer of the Flame scroll: {r}");
+            for (var i = 0; i < 90 && CountIn(scroll.Slot) == n0; i++) await Steps(1);
+            await Steps(4);
+            var m1 = Mana();
+            Check(CountIn(scroll.Slot) == n0 - 1, $"UseItem: the scroll's ApplyBuffEvent took one: {n0} -> {CountIn(scroll.Slot)}");
+            Check(m1 < m0, $"UseItem: the scroll paid its mana as a hand use does: {m0} -> {m1} of {max}");
+            await WaitIdle(e);
+
+            // too little mana: what the game's payer does (Kiln checks nothing before the trigger)
+            Attributes.Add(e, AbilityResource.Mana, 5 - (Mana() ?? 0));
+            await Steps(2);
+            var low = Mana();
+            var n1 = CountIn(scroll.Slot);
+            var lr = Abilities.UseItem(e, scroll.Slot);
+            for (var i = 0; i < 90 && CountIn(scroll.Slot) == n1; i++) await Steps(1);
+            await Steps(4);
+            Info($"UseItem with too little mana ({low} of {max}): {lr}; scrolls {n1} -> {CountIn(scroll.Slot)}, mana after {Mana()}, " +
+                 $"buffs {string.Join(",", PlayerStates.BuffsOf(e).Select(b => $"0x{b.Id:x8} {b.Slot}"))}");
+            await WaitIdle(e);
+        }
+
+        // a staff's spell: its sequence's PayUsageCost consumes, but it is ammunition (cast with a staff): refused
+        var spell = await Give(e, FireBolt, 5);
+        if (spell is not null)
+        {
+            var n = CountIn(spell.Slot);
+            var r = Abilities.UseItem(e, spell.Slot);
+            Check(r == ItemUseResult.NotConsumable, $"UseItem on a staff's spell (Fire Bolt ammunition): NotConsumable: {r}");
+            await Steps(10);
+            Check(CountIn(spell.Slot) == n && Abilities.SequenceOf(e)?.Sequence is 0 or null, $"UseItem: the spell took nothing and played nothing ({CountIn(spell.Slot)} of {n})");
+        }
     }
 
     // ---- fake input: what the game itself does with PlayerInput on a character with no client ----
