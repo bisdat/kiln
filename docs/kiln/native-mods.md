@@ -117,6 +117,11 @@ closed its worlds and returned from main, before Windows ends the other threads 
 - **Not called:** a killed process, a crash (also one the game catches and ends with a non-zero code), any non-zero
   exit, safe idle, early plugins (`kiln_plugin_early`) and native mods.
 
+## A mod that finds game functions by their bytes
+A plain DLL mod that looks game code up by its first bytes once at startup (Building Tools, 4 s after it loads) misses a
+function Kiln has hooked at that spot. What Kiln keeps clear for which mod, the registry that lists it
+(`sigdb/foreign/`) and what such a mod can do: [engines/README.md](engines/README.md#mods-that-find-game-code-by-its-bytes).
+
 ## Status: `<game>/kiln/state/native.json`
 Rewritten after the discovery and after each phase:
 ```json

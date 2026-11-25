@@ -469,6 +469,36 @@ kiln-core started`) and the mod shows as loaded. Activate the profile again so t
 A DLL that `[late]` defers is held back by the rule. A file with more than 512 rules keeps the first 512 and logs one line
 for the rest. Schema: `schema/compat-rules.schema.json`.
 
+## Mods that find game code by its bytes
+
+Some native mods look game functions up by their first bytes, once, at startup, and turn a feature off when the bytes
+are not there. A jump Kiln has already placed at that spot hides them, whatever Kiln does after it. Kiln therefore keeps
+its hooks off those bytes where it can, and says so where it cannot.
+
+**Building Tools (0.34.0).** It loads as a `dinput8.dll` proxy, a Library native mod or ShroudForge's
+`mods/building-tools/BuildingTools.dll`, waits 4 s on a thread of its own, scans the live code once, and then
+redirects the game's calls to what it found (it leaves the functions themselves alone). What Kiln has on those bytes:
+
+| Building Tools looks for | Its feature | Kiln there |
+|---|---|---|
+| `CursorFlags`: the build cursor's flags function (`rules/CursorFlags`, client `+0x29BFB0`, server `+0x9FB20`), its first 42 bytes | overlap objects | since 0.2.0-dev.31.13 nothing: kiln-rules' cursor waivers hook entry + `0xfa` (`rules/CursorFlagsStored`, right after the game stores the flags), below this signature and below Building Tools' `MissingCall` one (which ends at + `0xfa`). Before, kiln-rules hooked the entry when it loaded, so the signature missed and overlap objects stayed off. Building Tools' redirected calls run the whole function, Kiln's waivers inside it included, in either load order. |
+| `ScreenDispatch`: the HUD screen switch inside the play-state UI (client `+0xC60A1B`) | its menu (Home), tools wheel and exact placement window | nothing. Creative Mode 3.2.0 rewrites + 7 there for its own menu screen; after that Building Tools' fallback search finds nothing either. kiln.log warns when both run (compat rules `creative-mode-building-tools-hud-dispatch` and `creative-mode-building-tools-native-hud-dispatch`, `state/hooks.json` `rules`). Kiln's own `/creative` and its Creative screen do not touch that code. |
+| `Stocks`: the material picker's builder (client `+0x40E5D0`) | creative building's full material list, partial area actions | **still hooked at its entry**: kiln-tools' `tools/MaterialSelector` (when it loads; the material filter of Kiln mods' building tools and the ammo picker) and kiln-items' `build/client.MaterialRows` (once a player has a building link). Open; not changed in 31.13. |
+
+**The registry.** `sigdb/foreign/<mod>.json` lists such scans for one mod: the signature, how it is looked up (`exact`,
+or `jump-tolerant` with the `head` bytes it accepts another mod's jump in), the feature, and every Kiln symbol on those
+bytes with what Kiln does there (`OPEN ...` for a known conflict). `tools/sigport/tests/test_foreign_scans.py`
+(`SIGPORT_SERVER`, `SIGPORT_CLIENT`: the pinned executables, read as files) checks that each signature still finds its one
+match and that no Kiln symbol lies on its bytes without an entry, so a new Kiln hook there fails the test instead of a
+player's game. The next mod with this problem is one file (or one scan) there; a clash between two other mods that Kiln
+can only report is one `warn` rule in `compat-rules.json`.
+
+**For mod authors.** Kiln does not move or undo its hooks for a mod that scans later. If yours finds functions by their
+bytes: accept a jump at the start and follow it (`E9 rel32`, `FF 25`, `mov rax/r11, imm64; jmp`), as Building Tools
+does for most of its hooks; or scan the exe file's bytes rather than the live code; or, as a Kiln mod, use
+`Symbols.Find` / `OriginalCode` (they read the file, so another engine's jump does not hide a match, [../hooks.md](../hooks.md)).
+`state/hooks.json` `codePatches` lists every patched range in the game's code at runtime, with who made it.
+
 ## Off in the profile, the player's own folder
 
 (0.2.0-dev.31.12.) A mod the profile has off can still have a folder of the player's where its loader reads, and Kiln
