@@ -36,8 +36,10 @@ internal sealed record GameTextLayout(int Languages, int LanguageStride, int Lan
         return l.Valid ? l : null;
     }
 
+    // every field read must fit inside its row: the language value (4 bytes), its blob hash (16), the tag id (4), the text (8)
     public bool Valid => Languages >= 0 && LanguageValue >= 0 && LanguageData >= 0 && TagId >= 0 && TagText >= 0 &&
-                         LanguageStride >= LanguageData + 16 && TagStride >= TagText + 8;
+                         LanguageStride >= LanguageValue + 4 && LanguageStride >= LanguageData + 16 &&
+                         TagStride >= TagId + 4 && TagStride >= TagText + 8;
 }
 
 /// <summary>Pure readers of the game's loca bytes, as kiln.assets gives them. Host-tested.</summary>
@@ -79,6 +81,15 @@ internal static class GameTextData
         return Encoding.UTF8.GetString(bytes);
     }
 
+    // A BlobString header (inside the data) whose text is inside the data too but longer than MaxTextBytes.
+    private static bool TooLong(ReadOnlySpan<byte> d, int at)
+    {
+        if (at < 0 || at > d.Length - 8) return false;
+        var n = BinaryPrimitives.ReadUInt32LittleEndian(d[(at + 4)..]);
+        var s = (long)at + BinaryPrimitives.ReadInt32LittleEndian(d[at..]);
+        return n > MaxTextBytes && s >= 0 && s + n <= d.Length;
+    }
+
     /// <summary>FNV-1a-32 over 16 bytes: a LocaTag GUID's tag id, an item GUID's item id. 0 for an all-zero reference.</summary>
     public static uint Fnv16(ReadOnlySpan<byte> g)
     {
@@ -97,7 +108,7 @@ internal static class GameTextData
     /// hash, in the resource's order. Null when the array does not read.</summary>
     public static List<(long Value, byte[] Hash)>? Languages(ReadOnlySpan<byte> collection, GameTextLayout l)
     {
-        if (!BlobArray(collection, l.Languages, l.LanguageStride, out var start, out var n) || n > 4096) return null;
+        if (!l.Valid || !BlobArray(collection, l.Languages, l.LanguageStride, out var start, out var n) || n > 4096) return null;
         var list = new List<(long, byte[])>(n);
         for (var i = 0; i < n; i++)
         {
@@ -108,16 +119,17 @@ internal static class GameTextData
     }
 
     /// <summary>One language's texts as the blob holds them: tag id -> text with the game's markup, trailing NULs off.
-    /// A row with tag 0 is left out. Null when the blob does not read as a table (a row or a string outside it): never a
-    /// table with wrong texts.</summary>
+    /// A row with tag 0, and a text longer than <see cref="MaxTextBytes"/>, are left out. Null when the blob does not read
+    /// as a table (a row or a string outside it): never a table with wrong texts.</summary>
     public static Dictionary<uint, string>? Table(ReadOnlySpan<byte> blob, GameTextLayout l)
     {
-        if (!BlobArray(blob, 0, l.TagStride, out var start, out var n) || n > MaxTexts) return null;
+        if (!l.Valid || !BlobArray(blob, 0, l.TagStride, out var start, out var n) || n > MaxTexts) return null;
         var t = new Dictionary<uint, string>(n);
         for (var i = 0; i < n; i++)
         {
             var r = start + i * l.TagStride;
             var id = BinaryPrimitives.ReadUInt32LittleEndian(blob[(r + l.TagId)..]);
+            if (TooLong(blob, r + l.TagText)) continue;   // inside the blob, but longer than a text Kiln keeps: left out
             var s = BlobString(blob, r + l.TagText);
             if (s is null) return null;
             if (id != 0) t[id] = s;

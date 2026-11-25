@@ -171,8 +171,8 @@ internal sealed record VoxelMaterialLayout(
 
     // Each row's fields must fit inside its stride; the optional ones (hardness, health) may be -1 (a build without them).
     public bool Valid =>
-        TerrainConfigs >= 0 && TerrainStride > 0 && TerrainId >= 0 && TerrainItem >= 0 && TerrainItem + 16 <= TerrainStride &&
-        BuildingConfigs >= 0 && BuildingStride > 0 && BuildingId >= 0 && BuildingItem >= 0 && BuildingItem + 16 <= BuildingStride &&
+        TerrainConfigs >= 0 && TerrainStride > 0 && TerrainId >= 0 && TerrainId < TerrainStride && TerrainItem >= 0 && TerrainItem + 16 <= TerrainStride &&
+        BuildingConfigs >= 0 && BuildingStride > 0 && BuildingId >= 0 && BuildingId < BuildingStride && BuildingItem >= 0 && BuildingItem + 16 <= BuildingStride &&
         Math.Max(TerrainRate, Math.Max(TerrainHardness, TerrainHealth)) + 4 <= TerrainStride &&
         Math.Max(BuildingRate, Math.Max(BuildingHardness, BuildingHealth)) + 4 <= BuildingStride &&
         ItemId >= 0 && ItemDebugName >= 0 && ItemVoxel >= 0 && VoxelIsBuilding >= 0 && VoxelGuid >= 0 && VoxelId >= 0 && WorldGuids >= 0;
@@ -203,7 +203,7 @@ internal static class VoxelMaterialData
     public static VoxelPlacer? ParsePlacer(ReadOnlySpan<byte> item, VoxelMaterialLayout l, bool isGame)
     {
         var v = l.ItemVoxel;
-        if (v + Math.Max(l.VoxelGuid + 16, l.VoxelId + 1) > item.Length || l.ItemId + 4 > item.Length) return null;
+        if (v + Math.Max(Math.Max(l.VoxelGuid + 16, l.VoxelId + 1), l.VoxelIsBuilding + 1) > item.Length || l.ItemId + 4 > item.Length) return null;
         var guid = item.Slice(v + l.VoxelGuid, 16);
         if (!guid.ContainsAnyExcept((byte)0)) return null;
         var debug = GameTextData.BlobString(item, l.ItemDebugName) ?? "";
