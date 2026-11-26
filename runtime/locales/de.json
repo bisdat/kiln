@@ -289,7 +289,7 @@
       "effect": "ShroudForge-Lua ist aktiv; gemeldete Wirkung: {effect}. {detail}",
       "effect_failed_help": "Die Mod meldet, dass ihre Änderung nicht angewendet wurde. ShroudForges Protokoll enthält die Details.",
       "effect_last_failed": "ShroudForge führt das Lua aus; die Mod meldet, dass ihre letzte Änderung nicht angewendet wurde: {detail}",
-      "effect_last_failed_help": "Die Mod ist weiter geladen und reagiert auf ihre Tasten. kiln.log (die [sf]-Zeilen) sagt, warum die Änderung nicht angewendet wurde.",
+      "effect_last_failed_help": "Die Mod ist weiter geladen und läuft. kiln.log sagt, warum die Änderung nicht angewendet wurde: eine Zeile \"ShroudForge voxel write\" bei einer Änderung der Blöcke der Welt, die [sf]-Zeilen bei allem anderen.",
       "active": "ShroudForge führt ihr Lua aus; die Mod meldet kein Ergebnis zur Wirkung."
     },
     "enshwick": {

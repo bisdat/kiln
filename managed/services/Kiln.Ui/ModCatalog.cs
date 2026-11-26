@@ -1374,8 +1374,8 @@ internal static class ModCatalog
             return m with { State = ModRunState.NotLoaded, Word = "inactive", Reason = KilnText.T("catalog.sf.inactive"), Help = null };
         if (runtime.Effects.TryGetValue(p.Id, out var effect))
         {
-            // the mod's own report that its last change did not apply: it still runs (ShroudForge lists it active) and
-            // answers its keys, so it is loaded, with that report as a warning; a fault or unload takes it off the list
+            // the mod's own report that its last change did not apply: it still runs (ShroudForge lists it active; the mod
+            // itself made the report), so it is loaded, with that report as a warning; a fault or unload takes it off the list
             if (effect.State == "write-failed")
                 return m with
                 {
