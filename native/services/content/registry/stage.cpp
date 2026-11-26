@@ -189,6 +189,10 @@ bool field_ref_of(const std::string& text, FieldRef* out) {
     return !out->registry.empty() && !out->id.empty() && !out->field.empty();
 }
 std::string short_hash(const std::string& h) { return h.substr(0, 12); }
+// registry.json's text (the start's report, a live one, report_json's): a byte that is not UTF-8 (a label a plugin gave a code
+// writer) is written as U+FFFD; nlohmann's default throws, which would leave the file stale on the report writer's thread and
+// throw across the kiln.registry C ABI from report_json (review of Q1).
+std::string report_dump(const json& doc, int indent = -1) { return doc.dump(indent, ' ', false, json::error_handler_t::replace); }
 
 }  // namespace
 
@@ -414,11 +418,11 @@ struct Runner::Impl {
         // The text outside mu (review of Q1): the tick takes mu each step (status, reads, the next publish), and a large
         // report's dump takes tens of milliseconds (51 ms at 10,000 fields on the host bench).
         if (!built) {
-            std::string text = doc.dump();
+            std::string text = report_dump(doc);
             std::lock_guard l(mu);
             if (job->seq > report_built) report = std::move(text), report_built = job->seq;
         }
-        if (env.write_report && !env.write_report(doc.dump(1))) log(1, "registry: state/registry.json could not be written");
+        if (env.write_report && !env.write_report(report_dump(doc, 1))) log(1, "registry: state/registry.json could not be written");
         report_written = job->seq;
     }
     std::vector<BootResource> boot;
@@ -1731,8 +1735,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         }
         d.meta.saves = d.saves_json(d.result);
         const json doc = ::kc::registry::report_json(d.schema, d.result, d.meta);
-        d.report = doc.dump();
-        report_text = doc.dump(1);
+        d.report = report_dump(doc);
+        report_text = report_dump(doc, 1);
         d.report_job.reset();
         start_seq = d.report_built = ++d.report_seq;
         // refusals first (warnings, never crowded out by conflict lines), then the conflict lines, then one total
@@ -2068,7 +2072,7 @@ KilnResult Runner::report_json(std::string* out) {
         if (!d_->report_job || d_->report_job->seq <= d_->report_built) return *out = d_->report, KILN_OK;
         job = d_->report_job;  // a live report the writer has not made yet: made here, outside the lock
     }
-    std::string text = d_->report_doc(*job).dump();
+    std::string text = report_dump(d_->report_doc(*job));
     std::lock_guard lk(d_->mu);
     if (job->seq > d_->report_built) d_->report = std::move(text), d_->report_built = job->seq;
     *out = d_->report;  // this job's text, or a newer one made meanwhile
