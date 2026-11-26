@@ -239,8 +239,9 @@ function OpenWebPanel({ id }: { id: string }) {
   const shown = hosted ?? (open && { ...open, fallback: last && last.via !== "hosted" ? last.fallback : null });
   return <div className="k-sov-webpanel">
     <div className="k-sov-webpanel-actions">
-      <Button size="s" disabled={busy} onClick={() => void run(() => api.adminOpenWebPanel(id))}>{t("servers.overview.openWebPanel")}</Button>
-      {offerHere(hosted, always) && <Button size="s" variant="ghost" disabled={busy} onClick={() => void run(() => api.adminOpenWebPanel(id, "local"))}>{t("servers.overview.openWebPanelHere")}</Button>}
+      {/* while the switch is being saved an open waits: the backend reads the setting at every open */}
+      <Button size="s" disabled={busy || saving} onClick={() => void run(() => api.adminOpenWebPanel(id))}>{t("servers.overview.openWebPanel")}</Button>
+      {offerHere(hosted, always) && <Button size="s" variant="ghost" disabled={busy || saving} onClick={() => void run(() => api.adminOpenWebPanel(id, "local"))}>{t("servers.overview.openWebPanelHere")}</Button>}
       {open && <Button size="s" variant="ghost" disabled={busy} onClick={() => void run(() => api.adminCloseWebPanel(id))}>{t("servers.overview.closeWebPanel")}</Button>}
     </div>
     <Toggle checked={always} disabled={busy || saving || !settings.data} onChange={(on) => void setAlways(on)}
