@@ -997,8 +997,10 @@ mod tests {
         d
     }
 
+    /// `dir` is `/`-separated; the folder is joined part by part, so its text is the one the product reads back from the
+    /// folder (`…\mods\bare` on Windows, never `…\mods/bare`), and a test can compare the paths in reasons as text.
     pub(super) fn eml_mod(root: &Utf8Path, dir: &str, id: &str) -> Utf8PathBuf {
-        let p = root.join(dir);
+        let p = dir.split('/').fold(root.to_owned(), |p, part| p.join(part));
         std::fs::create_dir_all(p.join("src")).unwrap();
         std::fs::write(p.join("mod.json"), format!(r#"{{"id":"{id}","name":"N","version":"1.0.0","capabilities":["patch"]}}"#)).unwrap();
         std::fs::write(p.join("src/mod.lua"), "-- x").unwrap();
