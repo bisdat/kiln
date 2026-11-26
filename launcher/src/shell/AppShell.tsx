@@ -36,6 +36,8 @@ import { CrucibleHost } from "../crucible/Host";
 import { useCrucibleOn } from "../crucible/state";
 // the warning before Play
 import { SfiWarningHost } from "../components/SfiWarningDialog";
+// unsaved work on a page asks before the page is left
+import { LeaveGuardHost } from "./leaveGuard";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -312,6 +314,7 @@ export function AppShell() {
       <CrucibleHost />
       <OwnFilesNotice />
       <SfiWarningHost />
+      <LeaveGuardHost />
       <Toaster />
       <Splash done={ready} />
     </div>
