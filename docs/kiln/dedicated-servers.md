@@ -235,7 +235,7 @@ Restart the server after adding or removing mods.
 
 **Changing a mod while the server runs.** `kiln reload <id>` (or a `reload <id>` line in `kiln/control/<name>.cmd`) loads
 a Kiln mod's new version without a restart: its code, data packs, `blocks/` and `quests/` files apply again. Some parts
-only change at the next start, and the reload says so (next release):
+only change at the next start, and the reload says so (since 0.2.0-dev.31.17):
 - refused, with the reason first: `RestartRequiredBoot: ...` for a mod with boot content (`"boot"` in its
   `kiln.mod.json`, or in its new version's: the running version stays loaded), and `RestartRequired: <id> is a native
   mod ...` for a mod in `kiln/native/`;

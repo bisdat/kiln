@@ -106,7 +106,7 @@ consumers run under a structured-exception guard: a faulting subscriber is remov
 
 ### What `reload <id>` covers
 A reload unloads the mod and its dependents (dependents first), reads its `kiln.mod.json` and files again and loads them
-in a new load context, after the mods that stay loaded (the next release documents this table and enforces its refusals).
+in a new load context, after the mods that stay loaded (documented, and its refusals enforced, since 0.2.0-dev.31.17).
 
 | Part of the mod | `reload <id>` |
 |---|---|
@@ -115,7 +115,7 @@ in a new load context, after the mods that stay loaded (the next release documen
 | `apiVersion`, `dependencies`, `incompatible`, `features` | checked again. A refusal leaves the mod (and its dependents) unloaded, and the reply says why; a later `load` or `reload` retries |
 | `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place until the next start; a changed order takes effect then |
 | `side` | the mod loads again only on a side it names (else the reply fails, the mod stays unloaded); kiln.content reads it again for the mod's data packs |
-| `clients` | what joining players need follows at the next second (next release; before, up to a minute); players already in the world are not checked again |
+| `clients` | what joining players need follows at the next second (since 0.2.0-dev.31.17; before, up to a minute); players already in the world are not checked again |
 | `steamMessages`, `tests` | apply (the new load's owner gets the grant; `autoRun` runs after the load) |
 | `writes` | a new entry needs a restart: kiln.world reads the lists when the server starts, and the reloaded mod's tracked writes of a type it adds are refused (`NotDeclared`) until then |
 | `boot` | refused, `RestartRequiredBoot: ...`: a mod with boot content in this process, and a mod (or one of its dependents) whose new version adds `boot`; both before anything unloads, so the running versions stay as they were. Boot content (`OnBoot`, `resourcePatches`, `baseRules`, `gearRules`) never changes without a restart |
@@ -125,7 +125,7 @@ in a new load context, after the mods that stay loaded (the next release documen
 | registry entry points (`[RegistryEntryPoints]`) | `HotReload` runs; `ModLoad` runs again when there is no `HotReload`; `WorldLoad` runs for the world that exists; `GameStart` does not run again: its edits stay as the start composed them, and when the reloaded code differs the reply says `RestartRequired: <id>'s OnRegistry runs at GameStart only ...` |
 | native mods (`native.json`, `kiln/native/<id>/`) | refused, `RestartRequired: <id> is a native mod ...`: kiln-core loads their DLLs at start and never unloads them |
 
-**The reply says what waits for a restart** (next release). `reload <id>`'s result waits for the reload's
+**The reply says what waits for a restart** (since 0.2.0-dev.31.17). `reload <id>`'s result waits for the reload's
 registry work (the mod's runtime pass, its data packs' application at kiln.content's next Pre; a few steps, at most 5 s),
 then adds `; registry: <n> edit(s) need(s) a restart: <mod> <place>, ...` to the message, and its `data` gets
 `registry`: `{known, settled, restartRequired, edits: [{mod, registry, id, field, reason, source}]}` for the reloaded
