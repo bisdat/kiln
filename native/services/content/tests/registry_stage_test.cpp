@@ -619,9 +619,8 @@ void plans_link_the_last_good_plan(const std::string& dir) {
     json idx2 = json::parse(files.data["plans/index.json"]);
     check(c.report["plan"]["previous"] == hb && idx2["good"]["plan"] == hb && idx2["world"]["plan"] == plan_hash(c),
           "a world with a refusal is not a good plan (the last good one stays): " + idx2.dump());
-    // a refused edit at the stage also keeps the plan from being good (fuel.burnTime: unproven on this build, so refused;
-    // items.block was refused here until registry-proof proved it, and an edit of it is now a good plan)
-    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "fuel.burnTime", "op": 30}]}})";
+    // a refused edit at the stage also keeps the plan from being good
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "block", "op": 0.5}]}})";
     TreeView v6 = world();
     plan_start(dir, &files, &v6);
     check(json::parse(files.data["plans/index.json"]).value("good", json::object()).value("plan", "") == hb, "a start with a refused edit is not a good plan");
