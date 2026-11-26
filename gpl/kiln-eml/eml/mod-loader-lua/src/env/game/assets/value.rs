@@ -69,10 +69,11 @@ pub fn is_dirty_lua_value(
 }
 
 /// kiln-eml: the writes logged in `lua_value`'s tree, as (writer, member path from `path`) (env/writes.rs). A plain value
-/// logs nothing of its own: its writes are its container's.
+/// logs nothing of its own: its writes are its container's. `path` is the walk's one buffer (writes::push_field): it is
+/// as it was when the walk returns.
 pub(crate) fn walk_writes(
     lua_value: &LuaValue,
-    path: &str,
+    path: &mut String,
     out: &mut Vec<(u32, String)>,
 ) -> mlua::Result<()> {
     let LuaValue::UserData(ud) = lua_value else { return Ok(()) };

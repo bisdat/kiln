@@ -5,7 +5,7 @@ use kfc::{resource::value::{Value, Variant}, reflection::{PrimitiveType, TypeMet
 use mlua::{AnyUserData, Function, MetaMethod, UserData};
 use ouroboros::self_referencing;
 
-use crate::{alias::TypeHandle, env::{game::value::{note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, field_path}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
+use crate::{alias::TypeHandle, env::{game::value::{note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
 
 pub struct StructValue {
     r#type: TypeHandle,
@@ -135,10 +135,15 @@ impl StructValue {
     }
 
     /// kiln-eml: this value's logged writes and its fields' (env/writes.rs), `path` being its own path.
-    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+    pub(crate) fn walk_writes(&self, path: &mut String, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
         self.writes.emit(path, out);
         for (key, value) in self.fields.borrow().iter() {
-            walk_writes(value, &field_path(path, key), out)?;
+            if let LuaValue::UserData(_) = value {
+                let len = push_field(path, key);
+                let walked = walk_writes(value, path, out);
+                path.truncate(len);
+                walked?;
+            }
         }
         Ok(())
     }
@@ -449,10 +454,15 @@ impl ArrayValue {
     }
 
     /// kiln-eml: this value's logged writes and its elements' (env/writes.rs), at their current indices.
-    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+    pub(crate) fn walk_writes(&self, path: &mut String, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
         self.writes.emit(path, out);
         for (i, value) in self.values.borrow().iter().enumerate() {
-            walk_writes(value, &format!("{path}[{i}]"), out)?;
+            if let LuaValue::UserData(_) = value {
+                let len = push_index(path, i);
+                let walked = walk_writes(value, path, out);
+                path.truncate(len);
+                walked?;
+            }
         }
         Ok(())
     }
@@ -675,7 +685,7 @@ impl VariantValue {
     }
 
     /// kiln-eml: this value's logged writes and its value's (env/writes.rs): a variant's fields are at its own path.
-    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+    pub(crate) fn walk_writes(&self, path: &mut String, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
         self.writes.emit(path, out);
         walk_writes(&self.value, path, out)
     }

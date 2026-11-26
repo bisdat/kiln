@@ -97,6 +97,24 @@ pub(crate) fn field_path(path: &str, key: &str) -> String {
     if path.is_empty() { key.to_owned() } else { format!("{path}.{key}") }
 }
 
+/// The walk's one path buffer (`walk_writes`): a member's segment is pushed before its value is walked and taken off
+/// after, so a path is only allocated for a logged write ([`Writes::emit`]), never per value walked.
+pub(crate) fn push_field(path: &mut String, key: &str) -> usize {
+    let len = path.len();
+    if len > 0 {
+        path.push('.');
+    }
+    path.push_str(key);
+    len
+}
+/// `path[index]` in the walk's buffer (0-based, the published place); returns the length to truncate back to.
+pub(crate) fn push_index(path: &mut String, index: usize) -> usize {
+    use std::fmt::Write as _;
+    let len = path.len();
+    let _ = write!(path, "[{index}]");
+    len
+}
+
 /// Whether a run is recording on this thread (the resource-level notes below check it).
 pub(crate) fn recording() -> bool {
     RECORDING.with(Cell::get)

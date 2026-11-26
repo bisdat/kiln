@@ -294,7 +294,7 @@ fn writes_are_named_by_their_published_member_paths() {
     let walk = |lua: &mlua::Lua, global: &str| {
         let data: LuaValue = lua.globals().get(global).unwrap();
         let mut out = Vec::new();
-        walk_writes(&data, "", &mut out).unwrap();
+        walk_writes(&data, &mut String::new(), &mut out).unwrap();
         out.sort();
         out
     };
@@ -341,5 +341,100 @@ fn writes_are_named_by_their_published_member_paths() {
             (3, "recipes[]".to_string()),
         ],
         "an owned value: b's element and the field b set in it, at index 0 since c removed the first element"
+    );
+}
+
+// kiln-eml (review of the change journal's cost): a large EML mod set over one big shared registry, timed with the
+// write log off (outside a run: EML as before, one thread-local read per write) and on (a run recording per entrypoint),
+// and the walk that turns the logs into member paths against EML's own pass over the same tree before it serializes
+// (convert_lua_to_value). Not a pass/fail test: `cargo test --release -p mod-loader-lua journal_cost -- --ignored
+// --nocapture` prints the numbers.
+fn big_registry(n: u32) -> Rc<[u8]> {
+    let mut bytes = vec![0u8; 8 + 8 * n as usize];
+    bytes[0..4].copy_from_slice(&8u32.to_le_bytes());
+    bytes[4..8].copy_from_slice(&n.to_le_bytes());
+    for i in 0..n as usize {
+        bytes[8 + 8 * i..12 + 8 * i].copy_from_slice(&(100 + i as u32).to_le_bytes());
+    }
+    bytes.into()
+}
+
+#[test]
+#[ignore]
+fn journal_cost() {
+    use crate::env::writes::{Record, Recording, collect};
+    use std::{cell::RefCell, time::Instant};
+    const N: u32 = 5000;
+    const ROUNDS: u32 = 20;
+    let registry = recipe_fixture();
+    let bytes = big_registry(N);
+    let mods = r#"
+        -- a reader that walks everything (materializes every recipe), an unlocker that writes two fields of every recipe,
+        -- a mod that edits every 10th recipe, one that appends 100 recipes and one that replaces 50 recipes whole
+        local function reader(data) local s = 0 for _, r in ipairs(data.recipes) do s = s + r.knowledgeRequirement.compareValue end return s end
+        local function every_tenth(data) for i = 1, #data.recipes, 10 do data.recipes[i].knowledgeRequirement.compareValue = 2 end end
+        local function append(data) for i = 1, 100 do push(data.recipes, new_recipe(900000 + i)) end end
+        local function replace(data) for i = 1, 50 do data.recipes[i * 7] = new_recipe(800000 + i) end end
+        mods = { reader, function(d) unlock_all(d, 1715248921) end, every_tenth, append, replace }
+    "#;
+    let mut times = [0f64; 6];
+    for round in 0..ROUNDS {
+        for on in [false, true] {
+            let lua = mlua::Lua::new();
+            let mapped = MappedValue::from_bytes(&registry, registry.get(TypeIndex::new(REGISTRY)).unwrap(), &bytes).unwrap();
+            lua.globals().set("game", convert_value_to_lua(&mapped, &lua).unwrap()).unwrap();
+            let push_fn = lua
+                .create_function(|lua, (list, value): (AnyUserData, LuaValue)| Ok(push(&list, &value, lua)?))
+                .unwrap();
+            lua.globals().set("push", push_fn).unwrap();
+            lua.load("function new_recipe(id) return { knowledgeRequirement = { knowledgeOrQueryId = { value = id }, compareValue = 0 } } end
+                function unlock_all(data, id) for _, recipe in ipairs(data.recipes) do local q = recipe.knowledgeRequirement
+                if q.knowledgeOrQueryId.value ~= id then q.knowledgeOrQueryId.value = id end q.compareValue = 1 end end").exec().unwrap();
+            lua.load(mods).exec().unwrap();
+            let fns: Vec<mlua::Function> = lua.globals().get::<mlua::Table>("mods").unwrap().sequence_values().map(|f| f.unwrap()).collect();
+            let data: LuaValue = lua.globals().get("game").unwrap();
+            let record = RefCell::new(Record::default());
+            let t = Instant::now();
+            {
+                let _run = on.then(Recording::start);
+                for (i, f) in fns.iter().enumerate() {
+                    let _w = Record::begin(&record, &format!("mod{i}"));
+                    f.call::<()>(data.clone()).unwrap();
+                }
+            }
+            let mods_time = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let mut out = Vec::new();
+            walk_writes(&data, &mut String::new(), &mut out).unwrap();
+            let paths = out.len();
+            let r = collect(&record.borrow(), vec![(kfc::guid::ResourceId::new(kfc::guid::Guid::from([1; 16]), 1, 0), out)]);
+            let walk_time = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let value = convert_lua_to_value(&data, &handle(&registry, REGISTRY)).unwrap();
+            let convert_time = t.elapsed().as_secs_f64();
+            assert!(value.as_struct().is_some());
+            if round > 0 {
+                let k = if on { 3 } else { 0 };
+                times[k] += mods_time;
+                times[k + 1] += walk_time;
+                times[k + 2] += convert_time;
+            }
+            if on && round == ROUNDS - 1 {
+                let written: usize = r.packages.iter().map(|p| p.changed.iter().map(|c| c.paths.len()).sum::<usize>()).sum();
+                println!("journal_cost: {N} recipes, {paths} logged writes walked, {written} member paths in the record");
+            }
+        }
+    }
+    let ms = |x: f64| x * 1000.0 / (ROUNDS - 1) as f64;
+    println!(
+        "journal_cost (ms per pass, mean of {}): mods off {:.2} on {:.2} (+{:.1}%); walk off {:.2} on {:.2}; EML's convert {:.2} / {:.2}",
+        ROUNDS - 1,
+        ms(times[0]),
+        ms(times[3]),
+        (times[3] / times[0] - 1.0) * 100.0,
+        ms(times[1]),
+        ms(times[4]),
+        ms(times[2]),
+        ms(times[5])
     );
 }

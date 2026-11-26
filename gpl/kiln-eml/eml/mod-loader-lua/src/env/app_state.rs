@@ -207,10 +207,11 @@ impl AppState {
     /// written: call it once the mods ran, before their resources are serialized.
     pub(crate) fn write_record(&self) -> mlua::Result<writes::WriteRecord> {
         let mut trees = Vec::new();
+        let mut path = String::new();
         for info in self.resources.borrow().values() {
             if let Some(value) = info.value.borrow().as_ref() {
                 let mut out = Vec::new();
-                walk_writes(value, "", &mut out)?;
+                walk_writes(value, &mut path, &mut out)?;
                 if !out.is_empty() {
                     trees.push((info.resource_id, out));
                 }
