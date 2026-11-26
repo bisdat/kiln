@@ -20,6 +20,9 @@ public sealed class RegistryEntriesTestMod : Mod
     internal const string WoodChest = "lootchest_cheat_new13_loot_grassland";
     // the spot of the lab world the other spawn tests use (blocks-loot-test, registry-proof-test)
     internal static readonly WorldPosition LabSpot = new(3855.8, 834.5, 1399.8);
+    // the game's storage chest, spawned as an entity the game saves (not Transient), the container the server runs for the owned
+    // copies when the lab's world has none of its own
+    internal const string StorageChest = "Prop_Decoration_T1_Storage_24";
     private void Check(bool ok, string message)
     {
         if (ok) ++_pass; else ++_fail;
@@ -128,24 +131,49 @@ public sealed class RegistryEntriesTestMod : Mod
         {
             for (var i = 0; i < 25 * 120 && !(Spawn.WorldRunning && Items.Status() is { Transactions: true, Read: true }); i++) await Context.Scheduler.NextTick();
             var wood = new ItemId(FlintEntry()!.Id);  // the removed item
-            int Owned() => Items.FindInventories(InventoryKinds.Containers).Sum(c => Items.Read(c)?.Count(wood) ?? 0);
-            // owned copies: a container of the lab's world, when it has one the server runs (a player's chest is built, not spawned)
-            var chest = Items.FindInventories(InventoryKinds.Containers).FirstOrDefault(c => Items.Read(c) is { } inv && inv.FreeSlots() >= 1);
+            // owned copies: a container the server runs and saves. A playerless lab world has none of its own (a player's chest is
+            // built), so the first start spawns the game's storage chest; the reload looks for it (the world's containers and the
+            // chests at its spot)
+            IEnumerable<EntityId> Holders() => Items.FindInventories(InventoryKinds.Containers).Concat(ChestsNearChestSpot()).Distinct();
+            int Owned() => Holders().Sum(c => Items.Read(c)?.Count(wood) ?? 0);
+            var chest = Items.FindInventories(InventoryKinds.Containers).FirstOrDefault(c => Items.Read(c) is { Initialized: true } inv && inv.FreeSlots() >= 1);
             var file = Path.Combine(Context.DataDirectory, "owned-wood.txt");
-            if (chest.IsNone)
-                Log.Info("registry-entries-test: SKIP owned copies: the lab's world has no container the server runs");
-            else if (Mode == "reload")
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            if (Mode == "reload")
             {
-                var saved = File.Exists(file) ? int.Parse(File.ReadAllText(file).Trim(), System.Globalization.CultureInfo.InvariantCulture) : -1;
-                Check(saved > 0 && Owned() == saved, $"owned copies of the removed item survived the save and the reload: {Owned()} in the world's containers (saved {saved})");
+                var record = File.Exists(file) ? File.ReadAllText(file).Trim().Split(' ') : [];
+                var saved = record.Length == 4 ? int.Parse(record[0], inv) : -1;
+                if (record.Length == 4) ChestSpot = new WorldPosition(double.Parse(record[1], inv), double.Parse(record[2], inv), double.Parse(record[3], inv));
+                for (var i = 0; i < 25 * 60 && saved > 0 && Owned() < saved; i++) await Context.Scheduler.NextTick();
+                // A fresh playerless lab world brings back nothing spawned in an earlier session (31.x lab: kiln.spawn's own spawn-test
+                // barrel "not saved (gone after restart)", the chest's tracked records not live, the world's 1301 entities each start),
+                // so the reload can check the copies only where their chest came back; one that did not come back is a SKIP, said why.
+                var chestBack = ChestsNearChestSpot().Count > 0 || Spawn.Tracked.Any(t => t.TemplateName == StorageChest && t.IsLive);
+                if (saved > 0 && !chestBack)
+                    Log.Info($"registry-entries-test: SKIP owned copies across the reload: the chest the first start spawned at {ChestSpot} and the world saved is not in " +
+                             $"this world (tracked records {string.Join(", ", Spawn.Tracked.Where(t => t.TemplateName == StorageChest).Select(t => t.IsLive ? "live" : "not live"))}): " +
+                             "a playerless lab world restores no entity spawned in an earlier session");
+                else
+                    Check(saved > 0 && Owned() == saved, $"owned copies of the removed item survived the save and the reload: {Owned()} in the world's containers (saved {saved})");
             }
             else
             {
+                if (chest.IsNone)
+                {
+                    if (ResidentAnchor() is { } anchor) ChestSpot = anchor with { X = anchor.X + 3, Y = anchor.Y + 0.5, Z = anchor.Z + 3 };
+                    chest = await PlaceChest();
+                }
+                if (chest.IsNone)
+                {
+                    Check(false, "owned copies: the lab's world has no container the server runs, and no storage chest could be spawned");
+                    return;
+                }
                 var before = Owned();
                 var give = await Items.Give(chest, wood, 7, options: GiveOptions.AllOrNothing);
                 await Steps(5);
-                Check(give is { Status: ItemsStatus.Done } && Owned() == before + 7, $"the removed item can still be owned: 7 given into {chest}, {before} -> {Owned()} in the world's containers");
-                File.WriteAllText(file, Owned().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Check(give is { Status: ItemsStatus.Done } && Owned() == before + 7,
+                    $"the removed item can still be owned: 7 given into {chest} ({give?.Status}), {before} -> {Owned()} in the world's containers");
+                File.WriteAllText(file, string.Format(inv, "{0} {1} {2} {3}", Owned(), ChestSpot.X, ChestSpot.Y, ChestSpot.Z));
             }
             var at = Items.FindInventories(InventoryKinds.Containers).Select(c => Spawn.Inspect(c)).FirstOrDefault(i => i != null)?.Position ?? LabSpot;
             var template = Spawn.Templates.FirstOrDefault(t => t.Name.Equals(WoodChest, StringComparison.OrdinalIgnoreCase));
@@ -160,5 +188,43 @@ public sealed class RegistryEntriesTestMod : Mod
         }
         catch (Exception x) { Check(false, x.ToString()); }
         finally { Done(); }
+    }
+
+    // where the owned copies' chest stands: next to an entity the world keeps resident without a player (an altar or a villager,
+    // as spawn-test anchors its barrel), else next to the lab world's spot; written with the count for the reload
+    private WorldPosition ChestSpot = LabSpot with { X = LabSpot.X + 6, Z = LabSpot.Z + 6 };
+
+    private static WorldPosition? ResidentAnchor()
+    {
+        foreach (var filter in new[] { "FlameAltar", "Altar", "Townsfolk" })
+            foreach (var id in Spawn.FindByName(filter, max: 4))
+                if (Spawn.Inspect(id) is { } info) return info.Position;
+        return null;
+    }
+
+    /// <summary>The storage chests within 3 m of the chest's spot.</summary>
+    private IReadOnlyList<EntityId> ChestsNearChestSpot() =>
+        Spawn.Templates.FirstOrDefault(t => t.Name == StorageChest) is { } t ? Spawn.Find(t.Id, ChestSpot, 3) : [];
+
+    /// <summary>The game's storage chest spawned at <see cref="ChestSpot"/> as an entity the game saves (not Transient); none
+    /// when it cannot be spawned (the log says why).</summary>
+    private async Task<EntityId> PlaceChest(WorldPosition? spot = null)
+    {
+        var at = spot ?? ChestSpot;
+        try
+        {
+            var e = await Spawn.Entity(StorageChest, at, options: new SpawnOptions { Tag = "registry-entries-test" });
+            // its inventory is set up by the game's own programs a few steps after the spawn
+            for (var i = 0; i < 25 * 30 && !e.IsNone && Items.Read(e) is not { Initialized: true, Slots.Count: > 0 }; i++) await Context.Scheduler.NextTick();
+            var inv = e.IsNone ? null : Items.Read(e);
+            Log.Info($"registry-entries-test: spawned {StorageChest} as {e} at {at} (saved with the world) for the owned copies: " +
+                     (inv is null ? "no inventory" : $"initialized {inv.Initialized}, {inv.Slots.Count} slots"));
+            return inv is { Initialized: true, Slots.Count: > 0 } ? e : EntityId.None;
+        }
+        catch (Exception x) when (x is SpawnException or KilnUnavailableException or InvalidOperationException or ArgumentException)
+        {
+            Log.Info($"registry-entries-test: no chest spawned: {x.Message}");
+            return EntityId.None;
+        }
     }
 }
