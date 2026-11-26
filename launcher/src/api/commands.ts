@@ -1150,7 +1150,8 @@ export interface LastServer {
   required: RequiredMod[];
   truncated: boolean;
   missing: string[];
-  /** The server was this game's own hosted world (nothing it advertises is missing; modpack_pending never offers it). */
+  /** The server was this game's own hosted world (nothing it advertises is missing; modpack_pending never offers it).
+   *  Absent in a file an older Kiln wrote: then the backend compares the server id with the game's own. */
   hosted?: boolean;
   history?: LastServer[];
 }
