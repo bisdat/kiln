@@ -293,7 +293,11 @@ export function AppShell() {
       data-render={info.data?.render?.mode === "software" ? "software" : flat ? "flat" : undefined}>
       <div className="k-stage" aria-hidden><Stage root={root} key={fire ? "fire" : "plain"} enabled={fire} onLit={setLit} /><div className="k-fall" /></div>
       <Header isPlay={isPlay} ctl={ctl} />
-      <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>{hero}</div>
+      <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>
+        {/* Thanksgiving (mock/turkey): a greeting on the wall over the mouth, lit by the fire (--fire, FIRE_READERS) */}
+        <div className="k-thanks" aria-hidden>{t("shell.appShell.thanksgiving")}</div>
+        {hero}
+      </div>
       <main className={"k-sheet" + (isPlay ? " down" : " up")} id="main" aria-hidden={isPlay}>
         {/* leaves: the lit top edge (the flicker's --fire) and the torch (--mx, --my); nothing goes inside them */}
         <div className="k-sheet-rim" aria-hidden />

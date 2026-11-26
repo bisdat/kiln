@@ -95,7 +95,7 @@ test("the flicker and the torch write only onto leaves, never onto an element wi
   // and only onto their leaves
   const onParents = all.filter((w) => w.name !== "--k" && w.kids !== 0);
   expect(onParents).toEqual([]);
-  expect([...new Set(by("--fire").map((w) => w.cls.split(" ")[0]))].sort()).toEqual(["k-sheet-rim", "k-title"]);
+  expect([...new Set(by("--fire").map((w) => w.cls.split(" ")[0]))].sort()).toEqual(["k-sheet-rim", "k-thanks", "k-title"]);
   expect([...new Set([...by("--mx"), ...by("--my")].map((w) => w.cls))]).toEqual(["k-torch"]);
   // the mouth's spring fades the label, not the whole window
   expect([...new Set(by("--k").map((w) => w.cls))]).toEqual(["k-door-lab"]);
