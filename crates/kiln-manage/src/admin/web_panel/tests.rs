@@ -478,8 +478,13 @@ fn a_stale_kilnwarden_file_next_to_a_loaded_old_copy_is_not_the_panel() {
     assert_eq!(found(&s), ("kiln-webadmin", 1111), "the old copy is loaded: Kilnwarden is off");
     mods_json(&dir, &[("kiln-webadmin", "pending"), ("kilnwarden", "loaded")]);
     assert_eq!(found(&s), ("kiln-webadmin", 1111), "the old copy still loading counts too (as in M4)");
-    // the old copy gone (or switched off): its file is the stale one, Kilnwarden's the live one
+    // disabled by Kiln's fault policy (loaded, then switched off; `reload` retries it): Kilnwarden stays off next to
+    // it as well (its M4: Pending, Loaded or Disabled), so its file is the stale one
     mods_json(&dir, &[("kilnwarden", "loaded"), ("kiln-webadmin", "disabled")]);
+    assert_eq!(found(&s), ("kiln-webadmin", 1111), "the old copy disabled by the fault policy");
+    // the old copy gone (or switched off by the player: a .disabled file, Kiln's `skipped`): its file is the stale one,
+    // Kilnwarden's the live one
+    mods_json(&dir, &[("kilnwarden", "loaded"), ("kiln-webadmin", "skipped")]);
     assert_eq!(found(&s), ("kilnwarden", 2222));
     mods_json(&dir, &[("kilnwarden", "loaded")]);
     assert_eq!(found(&s), ("kilnwarden", 2222));
