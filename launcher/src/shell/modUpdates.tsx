@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import * as api from "../api/commands";
 import type { ModKind } from "../api/commands";
 import { useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
+import * as nx from "../api/nexus";
 import * as up from "../api/updates";
 import type { CheckReport, ModUpdateStatus, UpdatesRequest, UpdatesSpec } from "../api/updates";
 import { Badge, Banner, Button, Field, KeyValue, Modal, Select, TextInput, errorText, fmtAgo, toast, useTasks } from "../ui";
@@ -54,18 +55,43 @@ export async function checkNow(qc: QueryClient) {
 }
 
 /** Whether a status is worth a line in a mod's row: an update, a new upload, or (for a mod with a source) a check
- *  that could not tell. Up to date, no source and not checked yet stay quiet; the mod's Updates dialog says them. */
-export const noticeable = (s: ModUpdateStatus | undefined): s is ModUpdateStatus =>
-  !!s && !!s.source && (up.hasUpdate(s) || (s.state === "unknown" && s.reason !== "not_checked"));
+ *  that could not tell. Up to date, no source and not checked yet stay quiet; the mod's Updates dialog says them.
+ *  `installed`: the version the row shows. An update the row's copy already has (a result from before the player
+ *  updated) is no notice: "Update 0.2.10" never stands beside 0.2.10. */
+export const noticeable = (s: ModUpdateStatus | undefined, installed?: string): s is ModUpdateStatus =>
+  !!s && !!s.source && ((up.hasUpdate(s) && (installed === undefined || up.offeredFor(s, installed))) || (s.state === "unknown" && s.reason !== "not_checked"));
+
+/** Keeps the shared result in step with the Library: when a Library list query reads other entries than before (a
+ *  drop, Add mod, the Library's import, a catalog install, a roll back, a removal, a take-over), `run` works the
+ *  update result out again; by default an offline check (no request to any provider: what is remembered, compared
+ *  with what is installed now), and the Catalog's list of what it installed is read again. Returns the unsubscribe. */
+export function watchLibrary(qc: QueryClient, run: () => void = () => {
+  void checkModUpdates(qc, { offline: true }).catch(() => {});
+  void qc.invalidateQueries({ queryKey: nx.nk.installed });
+}, delay = 300): () => void {
+  const seen = new Map<string, string>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const off = qc.getQueryCache().subscribe((e) => {
+    if (e.type !== "updated" || e.action.type !== "success" || e.query.queryKey[0] !== "library_list") return;
+    const entries = (e.query.state.data ?? []) as api.LibraryEntry[];
+    const print = JSON.stringify(entries.map((l) => [l.kind, l.id, l.versions.map((v) => [v.version, v.hash])]));
+    const before = seen.get(e.query.queryHash);
+    seen.set(e.query.queryHash, print);
+    if (before === undefined || before === print) return;
+    clearTimeout(timer);
+    timer = setTimeout(run, delay);
+  });
+  return () => { clearTimeout(timer); off(); };
+}
 
 /** A mod row's update notice, in the row's note line. An update is a link to its page (the browser opens it; nothing
  *  is downloaded); a check that could not tell is words only, and never says "up to date". */
-export function UpdateBadge({ status }: { status: ModUpdateStatus | undefined }) {
+export function UpdateBadge({ status, installed }: { status: ModUpdateStatus | undefined; installed?: string }) {
   const t = useT();
-  if (!noticeable(status)) return null;
+  if (!noticeable(status, installed)) return null;
   const w = up.updateWords(status);
   const url = up.pageOf(status);
-  if (!up.hasUpdate(status) || !url) return <span className="k-tone-idle k-mod-update" title={w.detail}>{status.state === "unknown" ? (status.stale ? t("shell.modUpdates.stale") : t("shell.modUpdates.unknown")) : w.word}</span>;
+  if (!up.hasUpdate(status) || (installed !== undefined && !up.offeredFor(status, installed)) || !url) return <span className="k-tone-idle k-mod-update" title={w.detail}>{status.state === "unknown" ? (status.stale ? t("shell.modUpdates.stale") : t("shell.modUpdates.unknown")) : w.word}</span>;
   return (
     <button type="button" className="k-link k-mod-update" title={t("shell.modUpdates.badgeTip", { detail: w.detail })} aria-label={t("shell.modUpdates.badgeAria", { word: w.word, name: status.name })}
       onClick={() => openUpdatePage(status)}>{w.word}</button>
@@ -199,6 +225,8 @@ export function ModUpdatesWatcher() {
     api.onKilnEvent("kiln://mod-updates", (r) => qc.setQueryData(up.uk.report, r)).then((f) => (live ? (off = f) : f())).catch(() => {});
     return () => { live = false; off?.(); };
   }, [qc]);
+  // a Library change (any way it happens): the notices are worked out again, offline
+  useEffect(() => watchLibrary(qc), [qc]);
   useEffect(() => {
     if (!daily) return;
     const test = (window as unknown as { __kilnDailyMs?: number }).__kilnDailyMs;
