@@ -88,6 +88,72 @@ public sealed class ShroudForgeNewsTests : IDisposable
     }
 
     [Fact]
+    public void A_notice_whose_words_are_not_UTF8_is_left_out_and_the_read_never_throws()
+    {
+        // a damaged state file (ShroudForge's serde_json never writes one): the read runs on the thread that holds F9 and
+        // toggle_modloader(), which an exception from here would end for the rest of the game
+        var bytes = new List<byte>();
+        bytes.AddRange(System.Text.Encoding.UTF8.GetBytes("{\"events\":{\"a-b.json\":{\"id\":\"a.b\",\"modId\":\"a\",\"title\":\""));
+        bytes.AddRange([0xC3, 0x28]);
+        bytes.AddRange(System.Text.Encoding.UTF8.GetBytes("\",\"message\":\"m\",\"level\":\"info\",\"updatedAt\":5}," + Event("glider", "hello", "Glider", "Ready", 7) + "}}"));
+        File.WriteAllBytes(StatePath, bytes.ToArray());
+        Assert.Equal(["glider.hello"], ShroudForgeNews.Read(StatePath).Select(n => n.Id));
+        Assert.Equal(["glider.hello"], ShroudForgeNews.Reload().Select(n => n.Id));
+    }
+
+    [Fact]
+    public void ShroudForges_own_mod_events_without_words_are_left_out()
+    {
+        // what ShroudForge's Modloader window writes when a mod is installed, updated or removed (sync_mod_events ->
+        // write_event_notice, fork pin): no title, no message, a kind its window words; Kiln has no words for it, and an
+        // empty entry would take one of the three places in the mod's details (or make an empty toast)
+        State(
+            "\"event-mod-install-altar-cleanup-1.0.0.json\": {\"id\":\"mod-install-altar-cleanup-1.0.0\",\"modId\":\"altar-cleanup\",\"ecosystem\":null,\"title\":\"\",\"message\":\"\",\"level\":\"info\",\"kind\":\"mod.install.success\",\"values\":{\"name\":\"Altar Cleanup\",\"version\":\"1.0.0\",\"previousVersion\":null},\"changelog\":[],\"actions\":[{\"id\":\"open-mod\",\"kind\":\"open-mod\",\"target\":\"altar-cleanup\"}],\"updatedAt\":200}",
+            Event("altar-cleanup", "result", "", "487 blocks found", 100),
+            Event("altar-cleanup", "title-only", "Done", "", 90));
+        Assert.Equal(["altar-cleanup.result", "altar-cleanup.title-only"], ShroudForgeNews.Read(StatePath).Select(n => n.Id));
+    }
+
+    [Fact]
+    public void The_state_file_is_read_again_only_when_it_changed()
+    {
+        // read once a second for the whole game: an unchanged file (ShroudForge replaces it by rename at each write) is
+        // not opened and parsed again
+        State(Event("altar-cleanup", "result", "Found", "Press again", 100));
+        var written = File.GetLastWriteTimeUtc(StatePath);
+        Assert.Equal(["Found"], ShroudForgeNews.Reload().Select(n => n.Title));
+        State(Event("altar-cleanup", "result", "Gone!", "Press again", 100));  // the same length
+        File.SetLastWriteTimeUtc(StatePath, written);
+        Assert.Equal(["Found"], ShroudForgeNews.Reload().Select(n => n.Title));
+        File.SetLastWriteTimeUtc(StatePath, written.AddSeconds(1));
+        Assert.Equal(["Gone!"], ShroudForgeNews.Reload().Select(n => n.Title));
+        File.Delete(StatePath);
+        Assert.Empty(ShroudForgeNews.Reload());
+    }
+
+    [Fact]
+    public void A_read_that_fails_now_is_tried_again_at_the_next_look()
+    {
+        // a scanner or backup tool holding the file for a moment: that is no reason to keep "no news" until ShroudForge
+        // writes the file again
+        if (OperatingSystem.IsWindows()) return;
+        State(Event("altar-cleanup", "result", "Found", "Press again", 100));
+        File.SetUnixFileMode(StatePath, UnixFileMode.None);
+        try
+        {
+            try
+            {
+                using (File.OpenRead(StatePath)) { }
+                return;  // root reads it all the same: nothing to show here
+            }
+            catch (UnauthorizedAccessException) { }
+            Assert.Empty(ShroudForgeNews.Reload());
+        }
+        finally { File.SetUnixFileMode(StatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+        Assert.Equal(["altar-cleanup.result"], ShroudForgeNews.Reload().Select(n => n.Id));  // the same size and time
+    }
+
+    [Fact]
     public void The_fresh_mod_is_the_one_whose_notice_came_in_the_last_seconds()
     {
         State(Event("glider", "hello", "Glider", "Ready", 95), Event("altar-cleanup", "result", "Found", "Press again", 100));

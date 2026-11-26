@@ -17,6 +17,11 @@
 //
 // Threads: Read does the file IO (a worker, or the menu thread for a mod's toggle). The render thread asks Cached, which
 // starts a read on a worker at most once a second and returns what the last one found.
+//
+// ShroudForge writes the file as a flushed temp file renamed over state.json (loader-config write_json_atomically.rs),
+// retrying a refused rename for about 150 ms only; its runtime status, assets record and every notice go through it. So
+// Kiln opens it as it opens every file another process replaces (read, write and delete sharing, as ModCatalog.ReadJson),
+// holds it only while it copies the bytes, and opens it only when its size or time changed since the last read.
 using System.Text.Json;
 
 namespace Kiln;
@@ -26,9 +31,10 @@ internal sealed record SfNews(string Id, string ModId, string Title, string Mess
 
 internal static class ShroudForgeNews
 {
-    /// <summary>The most notices kept from one read (newest first) and the largest state file read.</summary>
+    /// <summary>The most notices kept from one read (newest first) and the largest state file read (ModCatalog reads the
+    /// same file with the same limit).</summary>
     internal const int MaxNotices = 512;
-    internal const long MaxStateBytes = 32L * 1024 * 1024;
+    internal const long MaxStateBytes = 8L * 1024 * 1024;
 
     /// <summary>ShroudForge's state file (tests point it elsewhere). Asked only for a hosted or installed start's rows.</summary>
     internal static Func<string> StatePath = () => Path.Combine(ShroudForgePackages.Folder(ShroudForgeUi.GameDir(), "state"), "state.json");
@@ -37,32 +43,65 @@ internal static class ShroudForgeNews
     private static long _readAtMs = long.MinValue / 2;
     private static int _reading;
 
+    // what the last Reload found, with the file's size and time then: the same size and time are not read again
+    private sealed record Seen(string Path, long Length, long WrittenTicks, IReadOnlyList<SfNews> News);
+    private static volatile Seen? _seen;
+
     /// <summary>The notices in the state file at <paramref name="path"/>, newest first; none when it is missing, too big or
     /// not ShroudForge's. An entry that is not what notifications.publish writes is left out, never changed.</summary>
-    public static IReadOnlyList<SfNews> Read(string path)
+    public static IReadOnlyList<SfNews> Read(string path) => TryRead(path, out var news) ? news : [];
+
+    /// <summary><see cref="Read"/>; false when the file could not be read just now (an IO error, or it grew past the limit
+    /// while read), which the next look tries again. Missing, too big or not JSON reads as no news.</summary>
+    private static bool TryRead(string path, out IReadOnlyList<SfNews> news)
     {
+        news = [];
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists || info.Length > MaxStateBytes || info.LinkTarget is not null) return [];
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path), new JsonDocumentOptions { MaxDepth = 64 });
+            // a FIFO or a socket has no length: opening one could block this thread
+            if (!info.Exists || info.Length <= 0 || info.Length > MaxStateBytes || info.LinkTarget is not null) return true;
+            if (Bytes(path) is not { } bytes) return false;
+            using var doc = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 64 });
             if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("events", out var events) ||
-                events.ValueKind != JsonValueKind.Object) return [];
+                events.ValueKind != JsonValueKind.Object) return true;
             var list = new List<SfNews>();
             foreach (var e in events.EnumerateObject())
                 if (Entry(e.Value) is { } n) list.Add(n);
-            return list.OrderByDescending(n => n.UpdatedAt).ThenBy(n => n.Id, StringComparer.Ordinal).Take(MaxNotices).ToList();
+            news = list.OrderByDescending(n => n.UpdatedAt).ThenBy(n => n.Id, StringComparer.Ordinal).Take(MaxNotices).ToList();
+            return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return []; }
+        catch (JsonException) { return true; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
+    }
+
+    /// <summary>The file's bytes, opened with read, write and delete sharing so that ShroudForge's rename over it never
+    /// fails because Kiln has it open; at most <see cref="MaxStateBytes"/> however much it grows meanwhile (null then).</summary>
+    private static ReadOnlyMemory<byte>? Bytes(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
+        var buf = new byte[(int)Math.Min(fs.Length, MaxStateBytes) + 1];
+        var n = 0;
+        for (int r; n < buf.Length && (r = fs.Read(buf, n, buf.Length - n)) > 0;) n += r;
+        return n > MaxStateBytes ? null : buf.AsMemory(0, n);
     }
 
     private static SfNews? Entry(JsonElement v)
     {
         if (v.ValueKind != JsonValueKind.Object) return null;
+        try { return EntryOf(v); }
+        catch (InvalidOperationException) { return null; }  // a string that is not UTF-8 (a damaged file): this entry only
+    }
+
+    private static SfNews? EntryOf(JsonElement v)
+    {
         static string? S(JsonElement o, string k, int max) =>
             o.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.String && x.GetString() is { } s && s.Length <= max ? s : null;
         if (S(v, "id", 200) is not { Length: > 0 } id || S(v, "modId", 80) is not { Length: > 0 } mod || S(v, "title", 120) is not { } title ||
             S(v, "message", 2000) is not { } message) return null;
+        // ShroudForge's own record of a mod installed, updated or removed (its Modloader window's sync_mod_events ->
+        // write_event_notice): no words, a kind that window words; Kiln has none to show
+        if (title.Length == 0 && message.Length == 0) return null;
         if (!v.TryGetProperty("updatedAt", out var at) || at.ValueKind != JsonValueKind.Number || !at.TryGetInt64(out var seconds) || seconds < 0)
             return null;
         return new SfNews(id, mod, title, message, S(v, "level", 16) ?? "info", seconds);
@@ -90,12 +129,34 @@ internal static class ShroudForgeNews
         return _cached;
     }
 
-    /// <summary>Reads the state file now and keeps what it holds for <see cref="Cached"/> (a worker, a test).</summary>
+    /// <summary>Reads the state file now, unless its size and time are those of the last read, and keeps what it holds for
+    /// <see cref="Cached"/> (a worker, the menu thread, a test). A missing, damaged or unreadable file is no news, never an
+    /// exception: the menu thread that calls it holds F9 and toggle_modloader().</summary>
     public static IReadOnlyList<SfNews> Reload()
     {
         IReadOnlyList<SfNews> news;
-        try { news = Read(StatePath()); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { news = []; }
+        try
+        {
+            var path = StatePath();
+            var info = new FileInfo(path);
+            long length = info.Exists ? info.Length : -1, written = info.Exists ? info.LastWriteTimeUtc.Ticks : 0;
+            var last = _seen;
+            if (last is not null && last.Path == path && last.Length == length && last.WrittenTicks == written) news = last.News;
+            else if (length < 0)
+            {
+                news = [];
+                _seen = new Seen(path, length, written, news);
+            }
+            // the size and time come first: a write after them makes the next look differ, so none is missed; a read that
+            // failed just now is not remembered (the next look reads again), and what the last one found stays meanwhile
+            else if (TryRead(path, out news)) _seen = new Seen(path, length, written, news);
+            else news = last is not null && last.Path == path ? last.News : [];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or JsonException or
+                                       InvalidOperationException or SfEditException)
+        {
+            news = [];
+        }
         _cached = news;
         Interlocked.Exchange(ref _readAtMs, Environment.TickCount64);
         return news;
@@ -104,6 +165,7 @@ internal static class ShroudForgeNews
     internal static void ResetForTests()
     {
         _cached = [];
+        _seen = null;
         Interlocked.Exchange(ref _readAtMs, long.MinValue / 2);
         StatePath = () => Path.Combine(ShroudForgePackages.Folder(ShroudForgeUi.GameDir(), "state"), "state.json");
     }
