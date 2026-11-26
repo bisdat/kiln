@@ -194,10 +194,23 @@ internal static partial class NetAdvertise
     public static void Tick()
     {
         var snapshot = Snapshot();
-        var sig = string.Join("\n", snapshot.Select(m => $"{m.Id}\0{m.Version}\0{m.State}\0{m.Directory}"));
+        var sig = Signature(snapshot.Select(m => (m.Id, m.Version, m.State, m.Directory)));
         var now = Environment.TickCount64;
         if (sig == _lastSignature && now - _lastFull < 60_000) return;
         Refresh(snapshot, sig);
+    }
+
+    /// <summary>What a recompute follows: each mod's id, version, state and folder, and when its kiln.mod.json was written.
+    /// The last one since 0.2.0-dev.31.14: a `reload` that changes only "clients" (the version kept) changed what joining
+    /// players need, and the gate went on with the old answer for up to a minute, so a vanilla client could still join a
+    /// server whose reloaded mod now needs Kiln.</summary>
+    internal static string Signature(IEnumerable<(string Id, string Version, ModState State, string Directory)> mods) =>
+        string.Join("\n", mods.Select(m => $"{m.Id}\0{m.Version}\0{m.State}\0{m.Directory}\0{ManifestStamp(m.Directory)}"));
+
+    private static long ManifestStamp(string directory)
+    {
+        try { return directory.Length == 0 ? 0 : File.GetLastWriteTimeUtc(Path.Combine(directory, "kiln.mod.json")).Ticks; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return 0; }
     }
 
     /// <summary>Recompute now (network_reload, a manual refresh).</summary>
