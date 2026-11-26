@@ -33,7 +33,13 @@ export const VERT = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
 // uR canvas size; uT time; uH heat; uF flicker; uD mouth (centre x, bottom y, half width, height) in canvas px;
 // uM pointer (-1..1); uS canvas px per CSS px; uL floor height (CSS px); uK 0 on Play, 1 as the pilot light; uO the
 // canvas rows below this canvas (the header band behind a sheet: stageCanvas), so it draws the whole picture's top rows.
-export const FRAG = [
+// Thanksgiving weekend (thanksgiving.ts) adds the roast turkey: the T(...) lines below. FRAG is the shader without them,
+// line for line the fire of every other day (the same program, the same cost); FRAG_TURKEY is the one with the bird.
+type Line = string | { turkey: string; plain?: string };
+/** A line only the turkey's shader has (`plain`: what the fire of every other day has there instead). */
+const T = (turkey: string, plain?: string): Line => ({ turkey, plain });
+const turkeyOnly = (lines: string[]): Line[] => lines.map((l) => T(l));
+const SRC: Line[] = [
   "#ifdef GL_FRAGMENT_PRECISION_HIGH",
   "precision highp float;",
   "#else",
@@ -49,7 +55,10 @@ export const FRAG = [
   "vec4 brick(vec2 uv,vec2 s){vec2 c=uv/s;float r=floor(c.y);c.x+=.5*mod(r,2.);vec2 id=floor(c);vec2 f=fract(c);vec2 e=min(f,1.-f)*s;float m=smoothstep(.02*s.y,.07*s.y,min(e.x,e.y));return vec4(m,hash(id+vec2(r*.37,3.1)),f);}",
   "vec3 ramp(float f){vec3 c=vec3(.05,.012,.006);c=mix(c,vec3(.55,.08,.015),smoothstep(.05,.45,f));c=mix(c,vec3(1.,.38,.05),smoothstep(.35,.8,f));c=mix(c,vec3(1.,.73,.25),smoothstep(.75,1.15,f));c=mix(c,vec3(1.,.96,.8),smoothstep(1.1,1.55,f));return c;}",
   "float flame(vec2 p,float s){float tt=uT*(1.+.12*s);vec2 q=vec2(p.x*1.5+s*3.7,p.y*1.05-tt*1.3);float a=fbm(q);float b=fbm(q*1.85+vec2(a*1.3,-tt*.55));float top=(.75+1.05*uH)*exp(-p.x*p.x*.45);float f=(top-p.y)/max(top,.25);f=f*1.45+(b-.5)*1.9;return clamp(f,0.,1.7)*step(-.05,p.y);}",
-  // Thanksgiving (mock/turkey): a roast turkey on an iron spit over the fire, raymarched in the chamber's own space (the
+  // Thanksgiving: the turkey's own uniform (uV: 1 moving, 0 a still frame for reduced motion: no rock, no drips)
+  ...turkeyOnly([
+  "uniform float uV;",
+  // Thanksgiving: a roast turkey on an iron spit over the fire, raymarched in the chamber's own space (the
   // same camera, firelight and flames as the chamber). The spit runs into the chamber at an angle (front right to back
   // left), so the bird shows its front three-quarter: the domed breast, both drumsticks up with their frills, a wing.
   // It rocks gently on the spit; the spit rests on two forked iron posts.
@@ -70,7 +79,7 @@ export const FRAG = [
   "d=smin(d,sdE(q-vec3(-.2,-.01,.37),vec3(.27,.14,.09)),.05);",
   "fr=min(frill(p,KN(-1.)+vec3(.03,.025,-.003),normalize(KN(-1.)-HP(-1.))),frill(p,KN(1.)+vec3(.03,.025,.003),normalize(KN(1.)-HP(1.))));",
   "return d;}",
-  "float spitA(){return -.22+sin(uT*.9)*.12;}",
+  "float spitA(){return -.22+sin(uT*.9)*.12*uV;}",
   // spit frame (s, relative to TC) to the bird's own frame
   "vec3 tLoc(vec3 r){float a=spitA();float c=cos(a),s=sin(a);return vec3(r.x/TS+.14,(c*r.y+s*r.z)/TS,(-s*r.y+c*r.z)/TS);}",
   // the whole rig in the spit frame; m: 0 skin, 1 paper frill, 2 iron
@@ -138,6 +147,7 @@ export const FRAG = [
   "float smoke(vec2 q){float h=q.y-1.3;if(h<0.||h>2.)return 0.;float sw=sin(h*2.3-uT*.7)*.07*h+h*h*.1*sin(uT*.11+1.);float x=q.x-sw;float wd=.09+h*.3;float g=exp(-x*x/(wd*wd));if(g<.01)return 0.;",
   "float n=fbm(vec2(x*3.,h*2.2-uT*.38));float n2=vn(vec2(x*8.,h*5.5-uT*.95));",
   "return g*smoothstep(0.,.2,h)*(1.-smoothstep(.9,2.,h))*smoothstep(.3,.75,n*.85+n2*.32);}",
+  ]),
   // inside the mouth: a barrel-vaulted brick chamber seen from a camera that follows the pointer a little
   "vec3 chamber(vec2 q,float H){vec2 qq=q;qq.x+=sin(q.y*8.+uT*3.1)*.008*uH;",
   "vec3 ro=vec3(uM.x*.34,.72+uM.y*.12,-2.4);vec3 rd=normalize(vec3(qq,0.)-ro);",
@@ -145,21 +155,25 @@ export const FRAG = [
   "float tc=(-b+sqrt(disc))/(2.*a+.0001);float tf=rd.y<0.?-ro.y/rd.y:1000.;float tb=(Zb-ro.z)/rd.z;float t=min(tc,min(tf,tb));vec3 p=ro+rd*t;vec3 n;vec2 uv;",
   "if(t==tf){n=vec3(0.,1.,0.);uv=p.xz;}else if(t==tb){n=vec3(0.,0.,-1.);uv=p.xy;}else{n=normalize(vec3(-p.x,-(p.y-Yc),0.));uv=vec2(atan(p.x,p.y-Yc)*Rc,p.z);}",
   "vec4 br=brick(uv,vec2(.62,.27));vec3 alb=mix(vec3(.30,.13,.08),vec3(.46,.22,.13),br.y)*(.35+.65*br.x);",
-  "vec3 L=vec3(0.,.75,2.6);vec3 l=L-p;float dl=length(l);l/=dl;float diff=(max(dot(n,l),0.)*.85+.15)*rigShadow(p,L);float F=uH*(.72+.28*uF);",
+  T("vec3 L=vec3(0.,.75,2.6);vec3 l=L-p;float dl=length(l);l/=dl;float diff=(max(dot(n,l),0.)*.85+.15)*rigShadow(p,L);float F=uH*(.72+.28*uF);",
+    "vec3 L=vec3(0.,.75,2.6);vec3 l=L-p;float dl=length(l);l/=dl;float diff=max(dot(n,l),0.)*.85+.15;float F=uH*(.72+.28*uF);"),
   "vec3 col=alb*diff*vec3(1.,.5,.2)*F*3.2/(1.+.28*dl*dl);col+=vec3(.9,.28,.05)*exp(-dl*.9)*F*.35;",
   "if(t==tf){float dz=(p.z-2.6)*.9;float cz=exp(-dz*dz)*exp(-p.x*p.x*.45);float cn=vn(p.xz*7.+vec2(0.,uT*.12));col+=vec3(1.,.3,.04)*cn*cn*cn*cz*2.4*F;}",
   // the flames behind the roast, the roast, its drips, then the flames in front of it
-  "float tT=1e3;vec4 rk=vec4(0.);if(uK<.5)rk=roast(ro,rd,t,tT);",
-  "float fb=0.,ff=0.;for(int i=0;i<3;i++){float z=2.+float(i)*.6;float tp=(z-ro.z)/rd.z;if(tp<t){vec3 fp=ro+rd*tp;float v=flame(fp.xy,float(i))*.36;if(i==0)v+=sizzle(fp.xy)*.75;if(tp<tT)ff+=v;else fb+=v;}}",
+  T("float tT=1e3;vec4 rk=vec4(0.);if(uK<.5)rk=roast(ro,rd,t,tT);" + "\n" +
+    "float fb=0.,ff=0.;for(int i=0;i<3;i++){float z=2.+float(i)*.6;float tp=(z-ro.z)/rd.z;if(tp<t){vec3 fp=ro+rd*tp;float v=flame(fp.xy,float(i))*.36;if(i==0&&uV>.5)v+=sizzle(fp.xy)*.75;if(tp<tT)ff+=v;else fb+=v;}}",
+    "float fl=0.;for(int i=0;i<3;i++){float z=2.+float(i)*.6;float tp=(z-ro.z)/rd.z;if(tp<t){vec3 fp=ro+rd*tp;fl+=flame(fp.xy,float(i))*.36;}}"),
   // a cold kiln (no game, Kiln not installed) shows no flames, only the last glow
-  "float hot=smoothstep(.12,.34,uH);col=mix(col,ramp(fb),smoothstep(.06,.42,fb)*hot);col=mix(col,rk.rgb,rk.a);",
-  "float fl=ff+fb*rk.a*.5;col=mix(col,ramp(fl),smoothstep(.06,.42,ff)*hot*(rk.a>0.?.82:1.));if(uK<.5&&hot>.01)col=drips(ro,rd,t,tT,F,col);",
+  T("float hot=smoothstep(.12,.34,uH);col=mix(col,ramp(fb),smoothstep(.06,.42,fb)*hot);col=mix(col,rk.rgb,rk.a);" + "\n" +
+    "float fl=ff+fb*rk.a*.5;col=mix(col,ramp(fl),smoothstep(.06,.42,ff)*hot*(rk.a>0.?.82:1.));if(uK<.5&&hot>.01&&uV>.5)col=drips(ro,rd,t,tT,F,col);",
+    "col=mix(col,ramp(fl),smoothstep(.06,.42,fl)*smoothstep(.12,.34,uH));"),
   "vec2 s=vec2(q.x*9.,q.y*9.-uT*2.6);vec2 sid=floor(s);float sp=step(.972,hash(sid))*(1.-smoothstep(0.,.34,length(fract(s)-.5)))*(1.-smoothstep(.4,H,q.y));col+=vec3(1.,.46,.13)*sp*min(uH*1.2,1.2)*smoothstep(.12,.34,uH);",
   "return col;}",
   "float embers(vec2 w,float sc,float sp,float seed){vec2 p=w/sc;p.y-=uT*sp;p.x+=sin(p.y*.7+seed)*.35;vec2 id=floor(p);float h=hash(id+seed);if(h<.965)return 0.;vec2 f=fract(p)-.5;f+=vec2(hash(id+1.3),hash(id+2.7))*.6-.3;float tw=.6+.4*sin(uT*3.+h*60.);return tw*(1.-smoothstep(0.,.05,length(f)));}",
   "void main(){vec2 px=gl_FragCoord.xy+vec2(0.,uO);vec2 w=px/uS;float hw=uD.z;float Hd=uD.w/hw;vec2 q=(px-uD.xy)/hw;float d=sdArch(q,Hd);float F=uH*(.72+.28*uF);",
   "vec2 lc=uD.xy+vec2(0.,uD.w*.35);float dist=length((px-lc)/hw);vec3 col;",
-  "if(d<0.){col=chamber(q,Hd);if(uK>.5){float da;vec3 dc=drum(q,F,da);col=mix(col,dc,da*smoothstep(.5,.9,uK));}col*=1.-.6*smoothstep(-.2,0.,d);}",
+  T("if(d<0.){col=chamber(q,Hd);if(uK>.5){float da;vec3 dc=drum(q,F,da);col=mix(col,dc,da*smoothstep(.5,.9,uK));}col*=1.-.6*smoothstep(-.2,0.,d);}",
+    "if(d<0.){col=chamber(q,Hd);col*=1.-.6*smoothstep(-.2,0.,d);}"),
   // the floor in front of the mouth (the strip under the facts), lit in a pool; gone as the mouth becomes the pilot light
   "else if(w.y<uL){float dep=1.-w.y/uL;vec2 g=vec2((px.x-uD.x)/uS/(1.+dep*1.6),w.y*3.);vec4 fb=brick(g,vec2(170.,54.));vec3 st=mix(vec3(.10,.065,.05),vec3(.19,.12,.085),fb.y)*(.45+.55*fb.x);float pool=exp(-abs(q.x)*.62)*exp(-dep*1.3);col=st*pool*vec3(1.,.5,.22)*F*3.*(1.-uK);col+=vec3(1.,.40,.10)*exp(-abs(q.x)*1.1)*exp(-dep*3.4)*.2*F*(1.-uK);col+=vec3(.006,.004,.003);}",
   // the wall, lit by the mouth and fading out before it reaches the text on the left
@@ -171,11 +185,17 @@ export const FRAG = [
   "float dm=abs(q.x)*1.25+abs(q.y-(Hd+.105));if(dm<.062)col=mix(vec3(.98,.78,.31),vec3(.55,.3,.08),smoothstep(.03,.062,dm))*(.7+.5*F);",
   "}",
   // the roast's smoke: lit by the fire inside the mouth, faint and dark once it is out on the wall
-  "float sm=uK<.5?smoke(q):0.;if(sm>.001){float ins=1.-smoothstep(-.06,.12,d);vec3 sc=mix(vec3(.34,.28,.24)*F*exp(-dist*.22)+vec3(.05,.045,.042),vec3(.86,.66,.5)*F*1.25+vec3(.06,.055,.05),ins);col=mix(col,sc,sm*mix(.5,.58,ins));}",
+  T("float sm=uK<.5?smoke(q):0.;if(sm>.001){float ins=1.-smoothstep(-.06,.12,d);vec3 sc=mix(vec3(.34,.28,.24)*F*exp(-dist*.22)+vec3(.05,.045,.042),vec3(.86,.66,.5)*F*1.25+vec3(.06,.055,.05),ins);col=mix(col,sc,sm*mix(.5,.58,ins));}"),
   "float band=1.-smoothstep(uL*.4,uL+210.,w.y);if(band>.001&&dist<9.){float hz=fbm(vec2(w.x*.0045+uT*.035,w.y*.013-uT*.018));col+=vec3(1.,.38,.12)*hz*hz*hz*band*exp(-dist*.5)*1.05*F*(1.-uK);}",
   "float ee=exp(-dist*.62);if(ee>.012&&w.y>uL*.8&&d>0.){float e1=embers(w,34.,1.25,1.);float e2=embers(w+17.,52.,.8,4.);col+=vec3(1.,.55,.18)*(e1+e2*.8)*ee*2.2*min(uH+.3,1.4)*smoothstep(.12,.34,uH);}",
   "col+=(hash(px+fract(uT))-.5)*.012;gl_FragColor=vec4(col,1.);}",
-].join("\n");
+];
+const frag = (turkey: boolean) => SRC.flatMap((l) => (typeof l === "string" ? [l] : turkey ? [l.turkey] : l.plain === undefined ? [] : [l.plain])).join("\n");
+/** The fire of every day but Thanksgiving weekend (and of Deck mode, deck/Fire.tsx, which never shows the turkey). */
+export const FRAG = frag(false);
+/** The fire with the Thanksgiving turkey on its spit, the drumstick pilot light and the roast's smoke; one more uniform,
+ *  uV (1 moving, 0 the still frame of reduced motion: the bird at rest, no drips). */
+export const FRAG_TURKEY = frag(true);
 
 export const UNIFORMS = ["uR", "uT", "uH", "uF", "uD", "uM", "uS", "uL", "uK", "uO"] as const;
 
@@ -227,8 +247,9 @@ export function wakeStage() {
  *  and the flicker on FIRE_READERS. `enabled` false takes the no-WebGL path without asking for a context (give the
  *  canvas a new key to turn it back on). `onLit` hears whether the fire burns (the torch follows it).
  *  prefers-reduced-motion is followed while the fire runs (KDE's animation speed "Instant" turns it on): the fire stands
- *  still, writes no flicker and draws only when what it shows changed (wakeStage, a resize), with no timer meanwhile. */
-export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDivElement>; enabled?: boolean; onLit?: (lit: boolean) => void }) {
+ *  still, writes no flicker and draws only when what it shows changed (wakeStage, a resize), with no timer meanwhile.
+ *  `turkey`: Thanksgiving weekend's shader (FRAG_TURKEY; give the canvas a new key to switch); otherwise FRAG, as always. */
+export function Stage({ root, enabled = true, turkey = false, onLit }: { root: RefObject<HTMLDivElement>; enabled?: boolean; turkey?: boolean; onLit?: (lit: boolean) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   // the latest callback, without restarting the fire when the parent renders a new one
   const litCb = useRef(onLit);
@@ -272,7 +293,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       if (!gl!.getShaderParameter(o, gl!.COMPILE_STATUS)) { console.warn(gl!.getShaderInfoLog(o)); return null; }
       return o;
     };
-    const vs = mk(gl.VERTEX_SHADER, VERT), fs = mk(gl.FRAGMENT_SHADER, FRAG);
+    const vs = mk(gl.VERTEX_SHADER, VERT), fs = mk(gl.FRAGMENT_SHADER, turkey ? FRAG_TURKEY : FRAG);
     if (!vs || !fs) { off("shader"); return; }
     const prog = gl.createProgram()!;
     gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
@@ -284,6 +305,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     for (const n of UNIFORMS) U[n] = gl.getUniformLocation(prog, n);
+    const uV = turkey ? gl.getUniformLocation(prog, "uV") : null;
     const lost = (e: Event) => { e.preventDefault(); off("context lost"); };
     canvas.addEventListener("webglcontextlost", lost);
     app.dataset.gl = "1";
@@ -378,6 +400,7 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       gl.uniform1f(U.uS!, S);
       gl.uniform1f(U.uL!, 84);
       gl.uniform1f(U.uK!, k);
+      if (uV) gl.uniform1f(uV, still ? 0 : 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
     const resume = () => {
@@ -409,6 +432,6 @@ export function Stage({ root, enabled = true, onLit }: { root: RefObject<HTMLDiv
       unflicker();
       litCb.current?.(false);
     };
-  }, [root, enabled]);
+  }, [root, enabled, turkey]);
   return <canvas ref={ref} className="k-stage-gl" aria-hidden />;
 }

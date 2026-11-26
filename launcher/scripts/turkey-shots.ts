@@ -1,5 +1,6 @@
-// Thanksgiving mockup captures (mock/turkey, not for release): the Play page with the turkey on the spit, a 2x close-up
-// of the mouth, a frame-stepped loop (page.clock drives the fire's time, so the video is smooth whatever the GPU) and the
+// Dev script: stills and a loop of the Thanksgiving turkey (shell/thanksgiving.ts, shell/Stage.tsx FRAG_TURKEY), forced
+// on with ?turkey=1 whatever the date: the Play page with the turkey on the spit, a 2x close-up of the mouth, a
+// frame-stepped loop (page.clock drives the fire's time, so the video is smooth whatever the GPU; needs ffmpeg) and the
 // pilot light on another page. Needs the dev server running:
 //   bun run dev --port 1477 &   bun scripts/turkey-shots.ts <out dir> [port] [only: play|close|loop|pilot]
 import { chromium, type Page } from "@playwright/test";
@@ -26,7 +27,7 @@ async function open(scale: number, hash = "/", clock = true): Promise<Page> {
   const page = await ctx.newPage();
   page.on("console", (m) => { if (m.type() === "warning" || m.type() === "error") console.log("[page]", m.text()); });
   if (clock) await page.clock.install({ time: 0 });
-  await page.goto(`http://127.0.0.1:${PORT}/?mock=1#${hash}`);
+  await page.goto(`http://127.0.0.1:${PORT}/?mock=1&turkey=1#${hash}`);
   if (clock) await page.clock.runFor(2500);
   else await page.waitForTimeout(2600);
   await page.evaluate(() => document.fonts.ready);
