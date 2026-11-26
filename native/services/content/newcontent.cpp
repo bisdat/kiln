@@ -4458,7 +4458,7 @@ void nc_pack_unmark() {
 }
 
 uint32_t nc_pack_rollback(KilnOwner owner) {
-    std::vector<DefPtr> rebuilt;  // their definition text changed back: texts again, clones and the recipe rebuilt
+    std::vector<DefPtr> rebuilt;  // their definition changed back: its texts and icon again
     uint32_t n = 0;
     {
         std::lock_guard lock(store_mutex());
@@ -4477,18 +4477,19 @@ uint32_t nc_pack_rollback(KilnOwner owner) {
                      d->kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d->name.c_str(), d->guid_s.c_str());
                 continue;
             }
-            if (d->text != was->text || d->placeholder != was->placeholder) {
-                // its definition as at the mark, as a new version (as a redefinition): its clones and recipe are built again
-                // from it at the next sync, the maps re-pointed (the memory of the version that threw stays valid)
+            if (d->version != was->version || d->text != was->text || d->placeholder != was->placeholder) {
+                // its definition as at the mark, as a new version (as a redefinition), with the clones, the recipe and the
+                // random-loot entry the game had then (their memory stays valid, as the memory of the version that threw
+                // does): the next sync points the game's maps at them again. A layer is an address in them, so the layers
+                // other packs put on the definition's fields (an earlier mod's rule that matches the item, its own pack's
+                // rules for one taken over) reach the game again; clones built anew would have none of them until the next
+                // application.
                 const std::string now_name = d->name;
                 Def back = *was;
                 back.version = d->version + 1;
                 back.at = d->at;
-                back.clones.clear();
-                back.info = 0;
-                back.info_version = ~0ull;
-                back.loot_entry = 0;
-                back.loot_version = ~0ull;
+                back.info_version = was->info && was->info_version == was->version ? back.version : ~0ull;
+                back.loot_version = was->loot_entry && was->loot_version == was->version ? back.version : ~0ull;
                 back.listed.clear();
                 back.listed_as = 0;
                 *d = std::move(back);

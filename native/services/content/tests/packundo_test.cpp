@@ -5,8 +5,10 @@
 // their index by GUID and name, nc_packs_begin / nc_packs_end, the listing), with no world (nothing is synced), a fake
 // kiln API and owner labels:
 //  - an item the marked owner's pack adds: orphaned at the rollback, as a removed pack's item (its id stays registered)
-//  - an item it redefines: its definition from before (text, name in the index, display name), as a new version
-//  - an item it takes over from another mod's pack: that pack's again (owner, label, source)
+//  - an item it redefines: its definition from before (text, name in the index, display name), as a new version, with the
+//    clone the game had (so the layers other packs put on its fields reach the game again); a recipe its RecipeInfo, an
+//    item its random-loot entry
+//  - an item it takes over from another mod's pack: that pack's again (owner, label, source, its clone)
 //  - an orphan it adopts: an orphan again
 //  - a rollback, then more, then a rollback: the mark's state; the journal is empty after each (a third does nothing)
 //  - another owner's rollback, and definitions after nc_pack_unmark: nothing is journaled or touched
@@ -176,6 +178,17 @@ kc::DefPtr def(const char* guid) {
     kc::guid_parse(guid, g);
     return kc::find_def(KILN_CONTENT_ITEMS, g);
 }
+bool define_recipe(KilnOwner owner, const char* guid, const char* name, const char* input) {
+    std::string report;
+    const std::string text = std::string(R"({"guid": ")") + guid + R"(", "name": ")" + name + R"(", "base": "Recipe_Rope", "inputs": [")" +
+                             input + R"("], "outputs": ["Rope"]})";
+    return kc::nc_define(owner, KILN_CONTENT_RECIPES, text, true, "content/x.json", &report) == KILN_OK;
+}
+kc::DefPtr recipe(const char* guid) {
+    uint8_t g[16];
+    kc::guid_parse(guid, g);
+    return kc::find_def(KILN_CONTENT_RECIPES, g);
+}
 bool named(const std::string& name, const kc::DefPtr& d) {
     const auto* v = kc::g_index.named(KILN_CONTENT_ITEMS, name);
     return v && std::find(v->begin(), v->end(), d) != v->end();
@@ -187,6 +200,7 @@ constexpr const char* kZ = "11111111-0000-4000-8000-000000000003";  // b's, take
 constexpr const char* kQ = "11111111-0000-4000-8000-000000000004";  // an orphan the pack that throws adopts
 constexpr const char* kW = "11111111-0000-4000-8000-000000000005";  // added after a first rollback
 constexpr const char* kK = "11111111-0000-4000-8000-000000000006";  // c's code definition (no pack)
+constexpr const char* kR = "11111111-0000-4000-8000-000000000007";  // a's recipe, redefined by the pack that throws
 
 void run() {
     kc::N.on = true;
@@ -208,8 +222,26 @@ void run() {
     kc::nc_packs_end();
     check(def(kQ)->orphan, "Q is in no pack: an orphan");
 
+    // ---- the world had built Y's and Z's clones and R's recipe before the reload (sync_world does it; no world here). The
+    // game's maps point at them, and so do the layers other packs put on their fields: b's rules on its own Z, an earlier
+    // mod's rule that matches Y (an "items *" stack size rule), since a layer is an address in the clone.
+    def(kY)->clones[0x7000] = kc::CloneRec{0x7100};
+    def(kZ)->clones[0x7000] = kc::CloneRec{0x7200};
+    {
+        kc::nc_packs_begin();
+        define(kA, item(kY, "Yew", "Yew Bow"));
+        define(kB, item(kZ, "Zinc", "Zinc Bar"));
+        check(define_recipe(kA, kR, "Rope", "Wood"), "before: a's pack defines the recipe R");
+        kc::nc_packs_end();
+        const kc::DefPtr r = recipe(kR);
+        r->info = 0x7300, r->info_version = r->version;
+        r->loot_entry = 0, r->loot_version = ~0ull;
+        def(kY)->loot_entry = 0x7400, def(kY)->loot_version = def(kY)->version;
+    }
+    const uint64_t r_version = recipe(kR)->version;
+
     // ---- the application with the pack that throws: b applies first, then a (marked) adds X, redefines Y with another
-    // name and display name, takes Z over, adopts Q, and throws
+    // name and display name, takes Z over, adopts Q, redefines R, and throws
     kc::nc_packs_begin();
     define(kB, item(kZ, "Zinc", "Zinc Bar"));
     kc::nc_pack_mark(kA);
@@ -217,14 +249,26 @@ void run() {
     check(define(kA, item(kY, "YewLong", "Long Yew Bow")), "throw: a's pack redefines Y (another name)");
     check(define(kA, item(kZ, "Zinc", "Zinc Bar (a)")), "throw: a's pack takes Z over from b's pack");
     check(define(kA, item(kQ, "Quill", "Quill")) && !def(kQ)->orphan, "throw: a's pack adopts the orphan Q");
+    check(define_recipe(kA, kR, "Rope", "Stone"), "throw: a's pack redefines R (another input)");
     check(def(kY)->name == "YewLong" && named("YewLong", def(kY)), "throw: Y carries the new name in the index");
+    check(def(kY)->clones.empty() && def(kZ)->clones.empty() && recipe(kR)->info == 0 && def(kY)->loot_entry == 0,
+          "throw: the redefinitions dropped the clones, the recipe and the loot entry built for the version before");
     check(kc::nc_pack_rollback(kB) == 0 && def(kZ)->owner == kA, "another owner's rollback does nothing");
-    check(kc::nc_pack_rollback(kA) == 4, "rollback: four definitions come back");
-    const kc::DefPtr x = def(kX), y = def(kY), z = def(kZ), q = def(kQ);
+    check(kc::nc_pack_rollback(kA) == 5, "rollback: five definitions come back");
+    const kc::DefPtr x = def(kX), y = def(kY), z = def(kZ), q = def(kQ), r = recipe(kR);
     check(x && x->orphan && !x->seen, "rollback: X, which the pack added, is orphaned (its id stays registered)");
     check(y->text == y_text && y->name == "Yew" && y->display == "Yew Bow" && y->owner == kA, "rollback: Y is its definition from before");
     check(named("Yew", y) && !named("YewLong", y), "rollback: the index names Y as before");
-    check(y->version == y_version + 2 && y->clones.empty() && y->info == 0, "rollback: Y is a new version, its clones built again from it");
+    check(y->version == y_version + 2, "rollback: Y is a new version (the maps are re-pointed at the next sync)");
+    // the game gets back the clone it had (its memory stays valid): the layers other packs put on it reach the game again,
+    // where a clone built anew from the definition would have none of them until the next application
+    check(y->clones.size() == 1 && y->clones.count(0x7000) && y->clones.at(0x7000).at == 0x7100,
+          "rollback: Y gets the clone it had before the reload back, with the layers on it (an earlier mod's rule), not a new one");
+    check(z->clones.size() == 1 && z->clones.count(0x7000) && z->clones.at(0x7000).at == 0x7200,
+          "rollback: Z, taken over, gets b's pack's clone back, with b's rules on it");
+    check(r->version == r_version + 2 && r->info == 0x7300 && r->info_version == r->version,
+          "rollback: R gets the recipe it had back (built for this version: not built again)");
+    check(y->loot_entry == 0x7400 && y->loot_version == y->version, "rollback: Y gets its random-loot entry back");
     check(!y->seen && !y->orphan, "rollback: Y not seen in this application yet (the packs from before define it again, or it is orphaned)");
     check(z->owner == kB && z->owner_label == "pack b" && z->text == z_text && z->seen, "rollback: Z is b's pack's again, seen in this application");
     check(q->orphan, "rollback: Q is an orphan again");
