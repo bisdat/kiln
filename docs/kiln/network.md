@@ -144,7 +144,7 @@ The order hash covers participating mods and their resolved field contributions 
 participating boot edits do not contribute. A field that a mod with side `server` or `client` writes (by any path) is
 left out, because the other side never runs that mod; `kiln.boot` leaves such mods out too. The immutable start snapshot remains available as `bootSync` in
 `kiln/state/registry.json` after world load and hot reload too. A `reload <id>` (or an `unload` and a `load`) whose new
-`kiln.mod.json` changes the mod's `side` is refused (`RestartRequired: ...`, the running version stays; next release), so
+`kiln.mod.json` changes the mod's `side` is refused (`RestartRequired: ...`, the running version stays; 0.2.0-dev.31.18), so
 the side-`both` lists the join compares keep the sides this snapshot was made with.
 
 Each side hashes its own fields, so a field that one side leaves out and the other keeps would make every join differ,

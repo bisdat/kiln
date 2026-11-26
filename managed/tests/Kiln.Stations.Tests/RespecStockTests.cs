@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GitHub #150 (0.2.0-dev.31.next): CraftSourceOptions.Respec on the real managed API against the kit's kiln.stations fake:
+// GitHub #150 (0.2.0-dev.31.18): CraftSourceOptions.Respec on the real managed API against the kit's kiln.stations fake:
 // the flag, its counts, the respec snapshot a Kiln client gets (RespecStock: message 11 on kiln:craftstock) and the
 // client's hand-off to kiln-items. The payment and the client's checks themselves are native
 // (native/services/items/tests/respec_sources_test.cpp).

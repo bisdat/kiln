@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GitHub #150, since 0.2.0-dev.31.next: the skill tree's respec (a node's unlearn, the Flame Altar's skill reset) counts
+// GitHub #150, since 0.2.0-dev.31.18: the skill tree's respec (a node's unlearn, the Flame Altar's skill reset) counts
 // and pays its respec item (the game's Runes) from the player's links registered with CraftSourceOptions.Respec, the
 // managed half. The server pays natively (kiln-items, the respec payer's InventoryPay call: the bag and the Magic chests
 // of the player's base first, then the links, all or nothing); the player's own game decides whether to send the respec at

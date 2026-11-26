@@ -70,7 +70,7 @@ C `0x2b98df`) every frame **[dis]**; the constants are `respec/client.ui.item` /
 with Runes only in a linked chest, a vanilla client's unlearn is never offered and the altar's reset stays greyed: nothing
 is sent. The server has no screen check of its own: a respec that reaches it is paid or refused by the payer alone.
 
-## 4. What kiln-items does (since 0.2.0-dev.31.next, capability `crafting.respec_sources`)
+## 4. What kiln-items does (since 0.2.0-dev.31.18, capability `crafting.respec_sources`)
 - **The payment (server world):** no hook of its own. kiln.rules' `InventoryPay` hook (installed for crafting sources)
   hands every call to kiln-items' payment adapter; a call returning to `respec/RespecPaid` is the respec branch. With a
   link of that player registered with `Respec` (`KILN_CRAFT_SOURCE_RESPEC`), the transaction the server world's (its

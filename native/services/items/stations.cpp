@@ -1000,7 +1000,7 @@ thread_local bool t_build_pay = false;
 LogLimit g_log_build_pay{16};
 std::atomic<bool> g_build_dirty{true};  // a registration changed: the server's count of building links is read again
 
-// GitHub #150 (0.2.0-dev.31.next): the skill tree's paid reset and a node's unlearn from the player's respec links (respec
+// GitHub #150 (0.2.0-dev.31.18): the skill tree's paid reset and a node's unlearn from the player's respec links (respec
 // section below). Both pay through the respec payer's one InventoryPay call (respec/RespecPaid, its return address), a
 // stock-mode-2 transaction (the bag, then the Magic chests of the player's base) with one cost line of the respec item.
 struct RespecSites {
@@ -4642,7 +4642,7 @@ KilnResult KILN_CALL t_lock_asks(KilnItemId* out, uint32_t capacity, uint32_t* o
     return n > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
 }
 
-// ---- GitHub #150 (0.2.0-dev.31.next): the skill tree's respec from the player's respec links (docs/re/respec.md) ----
+// ---- GitHub #150 (0.2.0-dev.31.18): the skill tree's respec from the player's respec links (docs/re/respec.md) ----
 // The game charges its respec item (Runes, respec/item) in two places, both through one payer (respec/Payer, S 0xb9230):
 // a node's unlearn (its cost; a refusal puts the node back) and the skill tree's reset with its pay flag set (the points
 // spent). The payer opens a stock-mode-2 transaction (the bag, then the Magic chests of the base the player stands in) and
@@ -4802,7 +4802,7 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     const bool has_flags = r->size >= sizeof *r;
     const uint32_t flags = has_flags ? r->flags : 0u;
     constexpr uint32_t kKnownFlags = uint32_t{KILN_CRAFT_SOURCE_LOCKS} | uint32_t{KILN_CRAFT_SOURCE_FILLS} | uint32_t{KILN_CRAFT_SOURCE_BUILDING} |
-                                     uint32_t{KILN_CRAFT_SOURCE_RESPEC};  // 31.12; RESPEC since 31.next (GitHub #150)
+                                     uint32_t{KILN_CRAFT_SOURCE_RESPEC};  // 31.12; RESPEC since 31.18 (GitHub #150)
     if ((flags & ~kKnownFlags) || (has_flags && r->reserved)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
@@ -5465,7 +5465,7 @@ const KilnStationsApi kTable = {
     &t_set_lock_stock, &t_lock_asks,
     &t_set_build_stock,  // GitHub #132 (0.2.0-dev.31.12), after #147's members
     &t_fill_flags,       // GitHub #132 (0.2.0-dev.31.16)
-    &t_set_respec_stock, // GitHub #150 (0.2.0-dev.31.next)
+    &t_set_respec_stock, // GitHub #150 (0.2.0-dev.31.18)
 };
 
 bool sym(const char* name, uintptr_t* out) {

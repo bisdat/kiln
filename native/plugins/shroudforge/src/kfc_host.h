@@ -37,7 +37,7 @@ struct KfcHost {
                                       uintptr_t* address);
     uint64_t(__cdecl* install_hook)(const char* name, uintptr_t target, uint32_t kind, void* callback, uintptr_t extra);
     void(__cdecl* remove_hook)(uint64_t handle);
-    // Since dev.31, optional (a runtime that does not know them reads only as far as its own table): ShroudForge's
+    // Since dev.31.18, optional (a runtime that does not know them reads only as far as its own table): ShroudForge's
     // runtime.world.voxel.write goes to Kiln (host_voxels.cpp). ready: non-zero when a write may be tried now (a world
     // this game hosts runs). write: KfcRuntimeWorldVoxelWrite's contract and outcome codes (0 written, 1 refused before
     // any change, 2 put back, 3 uncertain); called on ShroudForge's mods thread.

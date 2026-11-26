@@ -69,7 +69,7 @@ enum {
                                              elsewhere they regrow at the next restart (as ShroudForge's
                                              runtime.world.voxel.write and the game's own tools). Needs no
                                              save-region hook; cells of the transient journal it sets are taken out of it as
-                                             a kept write's are. Since 0.2.0-dev.31 (an older kiln.build ignores the bit and
+                                             a kept write's are. Since 0.2.0-dev.31.18 (an older kiln.build ignores the bit and
                                              keeps the chunks). Not with KILN_BUILD_F_TRANSIENT (INVALID_ARGUMENT) */
 };
 

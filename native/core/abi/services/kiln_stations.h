@@ -440,7 +440,7 @@ enum { KILN_CRAFT_SOURCE_FILLS = 2u, KILN_CRAFT_SOURCE_BUILDING = 4u };
  * Both leave out the Magic chests of the base the player stands in (FILLS since 0.2.0-dev.31.16): the bag and those chests
  * pay first and are counted apart, so a link to one of them never counts twice. */
 enum { KILN_CRAFT_SOURCE_STOCK_FILLS = 4u, KILN_CRAFT_SOURCE_STOCK_BUILDING = 8u };
-/* Since 0.2.0-dev.31.next (GitHub #150): RESPEC, the skill tree's paid reset and a node's unlearn count and pay their
+/* Since 0.2.0-dev.31.18 (GitHub #150): RESPEC, the skill tree's paid reset and a node's unlearn count and pay their
  * respec item (the game's Runes) from the link (capability crafting.respec_sources). Default off: a link serves crafting
  * only. source_stock with KILN_CRAFT_SOURCE_STOCK_RESPEC: one row, the respec item and what the RESPEC links hold of it
  * (0 when none), without the Magic chests of the base the player stands in (the bag and those chests pay first and are
@@ -611,7 +611,7 @@ typedef struct KilnStationsApi {
     /* The KILN_STATION_FILL_* request flags plan and submit take for a FILL on this build: KILN_STATION_FILL_ITEM only
      * where the game's item transfer resolved (feature stations.fill_items) and stations.fill is on. Any thread. */
     uint32_t(KILN_CALL* fill_flags)(void);
-    /* ---- the skill tree's respec from linked sources, since 0.2.0-dev.31.next (GitHub #150; capability
+    /* ---- the skill tree's respec from linked sources, since 0.2.0-dev.31.18 (GitHub #150; capability
      * crafting.respec_sources; header.size tells whether this is here) ---- */
     /* A Kiln client: the server's respec snapshot for the local player. on 1: the server counts and pays the skill tree's
      * paid reset and a node's unlearn from the player's links registered with KILN_CRAFT_SOURCE_RESPEC; rows are per item

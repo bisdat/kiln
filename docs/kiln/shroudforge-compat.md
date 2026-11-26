@@ -49,7 +49,7 @@ The stale-game-data patch (0.2.0-dev.31.16) pins fork branch `kiln-dev31-stale-d
 `6cb84f34`, with its review's commits on top, fast-forward): a clean copy of the game data goes back without
 a word only when Steam's manifest of the installed build lists it byte for byte, and is refused only when it is proven
 to carry a mod's changes (section 5.0, "A clean copy that carries an uninstalled mod's changes").
-The voxel-write patch (0.2.0-dev.31.next) pins fork branch `kiln-dev31-voxel-write` at `6cf01443` (on top of `a9dc2ad2`):
+The voxel-write patch (0.2.0-dev.31.18) pins fork branch `kiln-dev31-voxel-write` at `6cf01443` (on top of `a9dc2ad2`):
 `runtime.world.voxel.write` through the host's voxel writer (section 8, "Voxel writes through kiln.build").
 
 ## 1. How ShroudForge loads (source facts)
@@ -1123,7 +1123,7 @@ Tests: `native/plugins/shroudforge/tests/run.py` (fake runtime and fake `kiln.ho
 switch), `native/plugins/shroudforge/tests/test-host-chain.sh` (the adapter against the real registry with a foreign
 `jmp` on one place) and, in the fork, `kfc-runtime-test-engine-hooks` (the installer with and without a host).
 
-### Voxel writes through `kiln.build` (dev.31)
+### Voxel writes through `kiln.build` (dev.31.18)
 
 ShroudForge's own `runtime.world.voxel.write` (`voxels/write_registered_voxel_grid.cpp`) finds the game's block writer
 (`build/VoxelWrite`) by reading the game's code from the registered terraforming impact (`gameplay/TerraformImpact`) down
@@ -1137,7 +1137,7 @@ impact binding hook `TerraformImpact`, `kiln.tools.carve` the carve dispatcher t
 Altar Cleanup, 0.2.0-dev.31.17: "cleaning up 41640 cells in 28 chunks", then "write failed: voxel write was rejected
 before changing the world (0 cells changed so far, undo still works)").
 
-Since dev.31 the host table has two optional members, `voxel_write_ready` and `voxel_write` (fork `kiln-dev31-voxel-write`;
+Since dev.31.18 the host table has two optional members, `voxel_write_ready` and `voxel_write` (fork `kiln-dev31-voxel-write`;
 `kiln/UPSTREAM-PATCHES.md`). With both, `kfc-runtime` passes the write and `runtime.has("runtime.world.voxel.write")` to
 the host and never resolves its own writer. The adapter (`src/host_voxels.cpp`, `src/voxel_write_core.h`) posts the write
 from ShroudForge's mods thread to the server world's thread and waits for it (a write the world has not begun within 2 s
