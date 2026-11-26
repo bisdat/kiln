@@ -36,7 +36,10 @@ Everything about the text is **client-side**. The server never sends a line's te
    @+0x8c; u8 nVo @+0x28c}`: init lines with a marker/requirement ("priority") at `+0x90/+0x98` (ptr/count), plain
    greetings at `+0x5338/+0x5340`, transitions `+0xa5e0/+0xa5e8`, farewell ids `+0xf888/+0xf890`, options
    `+0xf8d0/+0xf8d8`. The record is rebuilt only when it is new or the knowledge counter (`DynamicNpcDialog
-   .syncedKnowledgeQueryCounter`) changes.
+   .syncedKnowledgeQueryCounter`) changes. Records are never removed while the map lives, and they are **inline**: when
+   the map grows (find-or-insert `0x459230` → `0x45c1f0`, x4), `0x459590` copies every record to the new storage (its
+   lists' entries as they are, the knowledge counter too, so no rebuild follows) and the NPC layer passes the new
+   address from then on. A line entry's `+0` is its line id (PickLines reads it into the slot); review 2026-11-26.
 2. The HUD's **NPC layer** (`doNpcUIWindow`, "[GameUi] NPC Layer", `0xc48d70`) calls the **per-NPC bubble** function
    `0xcc7760(entry, layer, slots, pos)` for each nearby NPC (`entry+0` entity id, `entry+8` the record). It runs a small
    state machine per NPC: idle → (the NPC is the player's interaction target, within **5 m**, `0x13d45e4`) pick lines

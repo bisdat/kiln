@@ -22,9 +22,11 @@ struct Layout {
     int64_t bubble_reset = 5;   //                      +5 hide at once
     int64_t prio_list = 0, prio_count = 0, plain_list = 0, plain_count = 0;  // the record's two greeting lists (ptr, u64 count)
     int64_t entry_size = 0, entry_vo = 0, vo_slots = 0;                     // a line entry: its inline voice-over GUIDs
+    int64_t entry_line = 0;                                                  // a line entry: its line id (u32 at +0, PickLines)
     bool voice_sane() const {
         return prio_list > 0 && prio_count > 0 && plain_list > 0 && plain_count > 0 && entry_size >= 0x100 && entry_size <= 0x1000 &&
-               entry_vo > 0 && vo_slots > 0 && vo_slots <= 64 && entry_vo + vo_slots * 16 <= entry_size && prio_list < 0x20000 &&
+               entry_vo > 0 && vo_slots > 0 && vo_slots <= 64 && entry_vo + vo_slots * 16 <= entry_size && entry_line >= 0 &&
+               entry_line + 4 <= entry_vo && prio_list < 0x20000 &&
                plain_list < 0x20000 && prio_count < 0x20000 && plain_count < 0x20000;
     }
 };
@@ -96,7 +98,13 @@ public:
             s.say_until = 0;
             prune_later_ = true;
         }
-        if (!s.say_tag && s.mode == KILN_SPEECH_GAME) return;
+        if (!s.say_tag && s.mode == KILN_SPEECH_GAME) {
+            if (s.muted.empty()) {  // nothing left for this NPC (no voice-overs to put back: voice() may never run)
+                npcs_.erase(it);
+                publish();
+            }
+            return;
+        }
         bubbles_++;
         uint32_t text;
         std::memcpy(&text, params + l.bubble_text, 4);
@@ -126,6 +134,9 @@ public:
     }
 
     // NpcBubble with the NPC's record: mutes the greeting voice-overs while Kiln speaks for it, puts them back after.
+    // The record is the one the game passes now: its record map keeps records inline and copies all of them to new
+    // storage when it grows (0x459590 on 26430625), Kiln's zeros with them, so the saved voice-overs follow the NPC, not
+    // an address. Each is put back only where the slot is still empty and the entry still holds the same line.
     // Faults are the caller's (SEH): this only reads and writes inside the record's own lists.
     void voice(uint32_t npc, uint8_t* record, const Layout& l) {
         if (!l.entry_size || !record) return;
@@ -135,12 +146,10 @@ public:
         auto& s = it->second;
         const bool speaking = s.mode != KILN_SPEECH_GAME || s.say_tag;
         if (speaking) {
-            if (s.muted_record && s.muted_record != record) s.muted.clear();  // another record: the old one is gone
-            s.muted_record = record;
             mute_list(s, record, l, l.prio_list, l.prio_count, 0);
             mute_list(s, record, l, l.plain_list, l.plain_count, 1);
         } else {  // nothing left for this NPC: put its voice-overs back and forget it
-            if (!s.muted.empty() && s.muted_record == record) restore(s, record, l);
+            if (!s.muted.empty()) restore(s, record, l);
             npcs_.erase(it);
             publish();
         }
@@ -172,6 +181,7 @@ private:
         uint8_t list;     // 0 priority, 1 plain
         uint32_t index;   // entry in that list
         uint32_t slot;    // voice-over slot in the entry
+        uint32_t line;    // the entry's line id when it was muted
         uint8_t guid[16];
     };
     struct Npc {
@@ -180,7 +190,6 @@ private:
         uint32_t say_tag = 0;
         uint64_t say_until = 0;
         uint32_t seen_game = 0, pick = 0;
-        uint8_t* muted_record = nullptr;
         std::vector<Muted> muted;
     };
 
@@ -216,17 +225,22 @@ private:
         std::memcpy(&n, record + count_off, sizeof n);
         if (!base || n > kMaxEntries) return;
         for (uint64_t i = 0; i < n; ++i) {
-            uint8_t* vo = base + i * static_cast<uint64_t>(l.entry_size) + l.entry_vo;
+            uint8_t* entry = base + i * static_cast<uint64_t>(l.entry_size);
+            uint8_t* vo = entry + l.entry_vo;
             for (int64_t k = 0; k < l.vo_slots; ++k) {
                 uint8_t* g = vo + k * 16;
                 static const uint8_t zero[16] = {};
                 if (std::memcmp(g, zero, 16) == 0) continue;  // already muted, or a line without voice
-                Muted m{which, static_cast<uint32_t>(i), static_cast<uint32_t>(k), {}};
+                Muted m{which, static_cast<uint32_t>(i), static_cast<uint32_t>(k), 0, {}};
+                std::memcpy(&m.line, entry + l.entry_line, 4);
                 std::memcpy(m.guid, g, 16);
-                // a rebuilt record refills a slot Kiln already holds: keep the first copy, zero again
+                // a slot Kiln already holds that is filled again: the game rebuilt the record, its value is the current one
                 bool held = false;
                 for (auto& x : s.muted)
-                    if (x.list == which && x.index == i && x.slot == k) held = true;
+                    if (x.list == which && x.index == i && x.slot == k) {
+                        x = m;
+                        held = true;
+                    }
                 if (!held) s.muted.push_back(m);
                 std::memset(g, 0, 16);
                 muted_++;
@@ -242,7 +256,11 @@ private:
             std::memcpy(&base, record + list_off, sizeof base);
             std::memcpy(&n, record + count_off, sizeof n);
             if (!base || m.index >= n || n > kMaxEntries) continue;  // the record changed shape: the game refilled it itself
-            uint8_t* g = base + m.index * static_cast<uint64_t>(l.entry_size) + l.entry_vo + m.slot * 16;
+            uint8_t* entry = base + m.index * static_cast<uint64_t>(l.entry_size);
+            uint32_t line;
+            std::memcpy(&line, entry + l.entry_line, 4);
+            if (line != m.line) continue;  // another line sits there now (a rebuilt list): not this voice-over's place
+            uint8_t* g = entry + l.entry_vo + m.slot * 16;
             static const uint8_t zero[16] = {};
             if (std::memcmp(g, zero, 16) == 0) std::memcpy(g, m.guid, 16);
         }

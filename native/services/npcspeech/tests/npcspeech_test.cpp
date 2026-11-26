@@ -184,7 +184,47 @@ int main() {
         c.voice(7, a.mem.data(), l);
         c.set(7, KILN_SPEECH_GAME, nullptr, 0);
         c.voice(7, b.mem.data(), l);
-        CHECK(a.vo_byte(false, 0) == 0 && b.vo_byte(false, 0) == 0x10, "restore only into the record that was muted");
+        CHECK(a.vo_byte(false, 0) == 0 && b.vo_byte(false, 0) == 0x10, "an old record is not written to; a new one keeps its own");
+    }
+    {  // the game moves the record (its map grows: every record is copied to new storage, Kiln's zeros with it)
+        npcspeech::Core c;
+        Record a(2, 2);
+        c.set(7, KILN_SPEECH_REPLACE, tags, 1);
+        c.voice(7, a.mem.data(), l);
+        Record b(2, 2);
+        b.prio = a.prio;  // the copy carries the muted entries
+        b.plain = a.plain;
+        CHECK(b.vo_byte(false, 0) == 0 && b.vo_byte(true, 1) == 0, "the moved copy is muted too");
+        c.voice(7, b.mem.data(), l);  // still speaking, at the new address
+        c.set(7, KILN_SPEECH_GAME, nullptr, 0);
+        c.voice(7, b.mem.data(), l);
+        CHECK(b.vo_byte(false, 0) == 0x10 && b.vo_byte(false, 1) == 0x11, "moved record: priority voice-overs back");
+        CHECK(b.vo_byte(true, 0) == 0x40 && b.vo_byte(true, 1) == 0x41, "moved record: plain voice-overs back");
+        CHECK(!c.active() && c.tracked() == 0, "moved record: forgotten after restore");
+    }
+    {  // a rebuilt list: a refill with another voice-over is the one put back; a slot whose line changed is left alone
+        npcspeech::Core c;
+        Record r(1, 2);
+        const uint32_t line_a = 111, line_b = 222;
+        std::memcpy(&r.plain[0], &line_a, 4);
+        std::memcpy(&r.plain[0x294], &line_a, 4);
+        c.set(7, KILN_SPEECH_SUPPRESS, nullptr, 0);
+        c.voice(7, r.mem.data(), l);
+        std::memset(&r.plain[0 * 0x294 + 0x8c], 0x77, 16);  // the game refills entry 0 with another voice-over
+        c.voice(7, r.mem.data(), l);
+        std::memcpy(&r.plain[0x294], &line_b, 4);  // entry 1 is now another line, without a voice-over
+        c.set(7, KILN_SPEECH_GAME, nullptr, 0);
+        c.voice(7, r.mem.data(), l);
+        CHECK(r.vo_byte(true, 0) == 0x77, "the game's latest voice-over is the one put back");
+        CHECK(r.vo_byte(true, 1) == 0, "a slot that now holds another line gets no voice-over of the old one");
+    }
+    {  // without the record layout an ended Say is dropped at its next draw (nothing left to do for that NPC)
+        npcspeech::Core c;
+        c.say(9, 0xbeef, 1000, 0);
+        Params p;
+        p.set(5, 1);
+        c.draw(9, p.b, l, 2000);
+        CHECK(p.text() == 5 && c.tracked() == 0 && !c.active(), "an ended Say is forgotten at its draw");
     }
     {  // concurrent writers and a drawing thread
         npcspeech::Core c;

@@ -50,6 +50,7 @@
     "npcspeech/rec.entry_size": { "min_votes": 2, "comment": "one line entry: {u32 lineId; u32 bodyTexts[32] +8; u8 n +0x88; Guid vo[32] +0x8c; u8 nVo +0x28c}; 0x294" },
     "npcspeech/rec.entry_vo": { "min_votes": 1, "comment": "the entry's inline voice-over GUIDs; 0x8c" },
     "npcspeech/rec.vo_slots": { "value": 32, "comment": "voice-over GUIDs per entry (the game stops at more than 32, creatures.md 7.8)" },
+    "npcspeech/rec.entry_line": { "value": 0, "comment": "the entry's line id (u32; PickLines reads it at +0): a voice-over Kiln muted goes back only into an entry that still holds its line (the record map copies records to new storage when it grows, 0x459590 on 26430625)" },
     "npcspeech/entry.record": { "value": 8, "comment": "NpcBubble's entry: +0 entity id (u32), +8 the dialogue record (pointer)" },
     "npcspeech/bubble.text": { "value": 0, "comment": "BubbleDraw's params: the loca tag" },
     "npcspeech/bubble.show": { "value": 4, "comment": "BubbleDraw's params: show (u8; fades in / out)" },
@@ -64,7 +65,7 @@
     "npcspeech.voice": {
       "symbols": ["npcspeech/PickLines", "@npcspeech/PickLines.fields"],
       "constants": ["npcspeech/rec.prio_list", "npcspeech/rec.prio_count", "npcspeech/rec.plain_list", "npcspeech/rec.plain_count",
-                    "npcspeech/rec.entry_size", "npcspeech/rec.entry_vo", "npcspeech/rec.vo_slots"],
+                    "npcspeech/rec.entry_size", "npcspeech/rec.entry_vo", "npcspeech/rec.vo_slots", "npcspeech/rec.entry_line"],
       "comment": "While Kiln speaks for an NPC, the greeting lines' voice-overs of its dialogue record are muted (put back after). Off: texts change, voices stay the game's."
     }
   }

@@ -73,7 +73,8 @@ void resolve() {
                  constant("npcspeech/rec.prio_count", &v) && (g_lay.prio_count = v, true) && constant("npcspeech/rec.plain_list", &v) &&
                  (g_lay.plain_list = v, true) && constant("npcspeech/rec.plain_count", &v) && (g_lay.plain_count = v, true) &&
                  constant("npcspeech/rec.entry_size", &v) && (g_lay.entry_size = v, true) && constant("npcspeech/rec.entry_vo", &v) &&
-                 (g_lay.entry_vo = v, true) && constant("npcspeech/rec.vo_slots", &v) && (g_lay.vo_slots = v, true) && g_lay.voice_sane();
+                 (g_lay.entry_vo = v, true) && constant("npcspeech/rec.vo_slots", &v) && (g_lay.vo_slots = v, true) &&
+                 constant("npcspeech/rec.entry_line", &v) && (g_lay.entry_line = v, true) && g_lay.voice_sane();
     if (!g_voice_ok) g_lay.entry_size = 0;  // the core never touches a record without the whole layout
 }
 
