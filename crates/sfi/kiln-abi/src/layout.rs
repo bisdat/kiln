@@ -5673,6 +5673,14 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, count) == 12);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, frame) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPopups, rect) == 24);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiWindowState>() == 24);
+    assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiWindowState>() == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, size) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, flags) == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, x) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, y) == 12);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, width) == 16);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiWindowState, height) == 20);
     assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiPreOverlay>() == 112);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiPreOverlay>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPreOverlay, size) == 0);
@@ -5918,7 +5926,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, y) == 12);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, held) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiPointer, reserved) == 20);
-    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1088);
+    assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiApi>() == 1096);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, status) == 8);
@@ -6056,6 +6064,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drag_source) == 1064);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, drop_target) == 1072);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, popups) == 1080);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiApi, window_state) == 1088);
     assert!(core::mem::size_of::<crate::services::kiln_ui::KilnUiTickApi>() == 32);
     assert!(core::mem::align_of::<crate::services::kiln_ui::KilnUiTickApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui::KilnUiTickApi, header) == 0);

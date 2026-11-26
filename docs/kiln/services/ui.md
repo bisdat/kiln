@@ -314,6 +314,25 @@ One slot after `drop_target`, a size-guarded tail: `popups` at byte 1080; the ta
   game function is called and nothing is written. Kiln.Ui leaves out the `Ui.Inventory` marks of the slots under a panel
   ([ui.md](../ui.md#the-games-inventory-slots-020-dev30)).
 
+## A window's state for docking (0.2.0-dev.31.16, mod API 0.2.23, GitHub issue 149)
+
+One slot after `popups`, a size-guarded tail: `window_state` at byte 1088; the table is 1096 bytes (1088 before). Check
+`header.size >= offsetof(KilnUiApi, window_state) + sizeof(void*)` and the pointer. `KILN_UI_VERSION` stays 7.
+
+- `bool window_state(KilnStr name, KilnUiWindowState* out)`: set `out->size` (24 bytes: `size, flags, x, y, width,
+  height`) first. A window as Dear ImGui has it now, read only, in the overlay's pixels; frame callbacks only. `name` is
+  the window's name as given to `begin` (ImGui's `"Title###id"` rules); empty: the window being drawn (its top-level
+  window, also from inside a child region). `flags`: `KILN_UI_WINDOW_STATE_EXISTS` (ImGui knows the window: it was begun
+  in this or an earlier frame; x..height are where it is now), `_MOVING` (the player holds it to drag it: ImGui's moving
+  window, whichever part was clicked), `_RESIZING` (the player holds one of its resize grips or borders). Called before
+  that window's `begin`, `x` and `y` are already this frame's when the player drags it (ImGui moves a dragged window in
+  `NewFrame`); after it, where it was drawn. False: outside a frame callback, `out` NULL or too small (nothing written),
+  or no window of that name (`flags` 0). It never makes a window.
+- Kiln.Ui's window docking ([ui.md](../ui.md#docking-windows-since-020-dev3116-mod-api-0223)) asks it for every window of a dock
+  group before drawing them, to know which one leads the frame, and `UiDraw.WindowMovedByUser` / `WindowResizedByUser`
+  ask it for the current window. Tests: `native/services/ui/tests/window_state_test.cpp` plays ImGui frames headless with
+  real drags and resizes.
+
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 
 No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing-off).

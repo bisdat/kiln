@@ -503,6 +503,34 @@ public void GrimoireOpensBesideBetterSpells()
 }
 ```
 
+  **Docked windows** (since 0.2.0-dev.31.16, mod API 0.2.23; [the guide](../ui.md#docking-windows-since-020-dev3116-mod-api-0223)):
+  `kiln.UiPlacement.FrameWindows()` plays one overlay frame of every open window of the harness's mods with Kiln.Ui's own
+  dock code (the group's leader first, the others beside it in the same frame, the group kept inside the viewport, a
+  docked window waiting for its closed target, Shift, a drop beside the old side) and returns where each one is, keyed by
+  window (one that waits is not in it). `PlayerDrags(window, x, y, shift: false)` is the player holding the window and
+  dragging its centre to (x, y) in the next frame; the frame after without another drag is the drop. A `PlayerPlaces`
+  that changes a window's size is a resize. The kit's clock moves 16 ms a frame (a docked window waits for its target 250
+  ms at most: 16 frames). Not modelled: which window's edge has the pointer where two touch, imgui.ini.
+
+```csharp
+[Fact]
+public void GrimoireMovesWithBetterSpells()
+{
+    using var kiln = new KilnHarness();
+    var spells = kiln.Load<BetterSpells>();   // Ui.Window("Better Spells", ..., new() { PlacementId = "spells", AcceptDock = true })
+    var grimoire = kiln.Load<Grimoire>();     // docks its window: DockTo(Ui.FindWindow("betterspells", "spells")!, DockSide.Right)
+    kiln.Step();
+    var bs = ((BetterSpells)spells.Instance).Window;
+    var g = ((Grimoire)grimoire.Instance).Window;
+    kiln.UiPlacement.PlayerDrags(bs, 0.5f, 0.5f);
+    var f = kiln.UiPlacement.FrameWindows();
+    Assert.Equal(f[bs].Right, f[g].Left, 3);  // in the same frame
+    kiln.UiPlacement.PlayerDrags(g, 0.8f, 0.2f, shift: true);
+    kiln.UiPlacement.FrameWindows();
+    Assert.Null(g.DockedTo);                  // Shift: moved alone, undocked
+}
+```
+
 - **Outlines in the world** (`kiln.Outlines`, since 0.2.0-dev.30.3) <a id="outlines"></a>. `Ui.World.Outline`'s own code
   runs on the kit's kiln.render, so what a mod outlines is tested offline. `kiln.Outlines.All` lists every request the
   harness got (`FakeOutline`: entity, colour, pulse, priority, duration, state, reason, group, `ColorShared`, the mod
@@ -692,7 +720,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | Game textures (GameTexture) | real |  | Kiln.Api's GameTexture decodes and encodes game pixel formats (BC1 to BC7, packed, 8 to 64-bit) as in the game: pure code on the test's bytes, with the same answers as kiln mode's image.decode_texture and image.encode_texture; the game's own textures are offline (read texture data from a blob the test adds) |
 | Game features | unavailable |  | Game.HasFeature is false for every game feature (sigdb) unless the test overrides it; an override changes the answer only, nothing behind the feature is faked |
 | Tests.RunAsync | unavailable |  | Kiln.Testing's Tests.RunAsync from mod code says "Kiln.Host is not running" offline |
-| Screen and window placement (since 0.2.0-dev.31.11) | real |  | Kiln.Ui's own placement code: UiScreenOptions.Position, MoveTo and Resize on UiScreen and UiWindow (applied once, on the next frame; on a closed screen when it next opens), Placement, RememberPlacement in ui-placement.json in the harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Offline: kiln.ui itself (nothing is drawn), imgui.ini, size constraints a native plugin sets |
+| Screen and window placement (since 0.2.0-dev.31.11) | real |  | Kiln.Ui's own placement code: UiScreenOptions.Position, MoveTo and Resize on UiScreen and UiWindow (applied once, on the next frame; on a closed screen when it next opens), Placement, RememberPlacement in ui-placement.json in the harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Window docking (since 0.2.0-dev.31.16, mod API 0.2.23: Ui.FindWindow, AcceptDock, DockTo, Undock, DockChanged) with Kiln.Ui's own dock code: FrameWindows plays a frame of every open window (the group's leader first, the others beside it in the same frame, kept inside the viewport, a docked window waiting for its target, Shift, a drop beside the old side), PlayerDrags is the player holding and dragging one. Offline: kiln.ui itself (nothing is drawn), imgui.ini, size constraints a native plugin sets, which window's edge has the pointer where two touch |
 | Players | recording fake | `kiln.players` | Kiln.Players' own code on the kit's kiln.players: KilnHarness.Players.Join/Leave take effect at the next step (Players.All, Find, Joined/Left, PlayerJoinedEvent/PlayerLeftEvent); entity slot + 1, Steam id, admin bit, user-group rights, the test's positions; 16 slots. Unavailable: raw records, the game-log replay, the position probe for non-players, native subscribers |
 | Commands as a player, permissions | real |  | Kiln.Chat's Commands.Execute with a fake player as source (KilnHarness.RunCommand(player, line)) and Kiln.Permissions' real rules on permissions.json and enshrouded_server.json in the temp folder (WritePermissions, WriteServerConfig); @p and player names resolve against the fake players. Replies come back in the result and, through the fake kiln.chat, in the player's chat |
 | Saved data (WorldData, PlayerData) | recording fake | `kiln.saves` | Kiln.Saves' store on the kit's kiln.saves: a world id and revision per server folder, the save cycle on the steps (WorldSaving, staged generation, WorldSaved), the game's autosave (30 s virtual), player-left and shutdown saves; a harness on the same folder reads the last save (KilnHarness.Kill: no shutdown save). Unavailable: backups, the world file's path, the snapshot stage, a client's hosted world |

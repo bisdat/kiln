@@ -4,4 +4,6 @@ Kiln.TestKit.HarnessNpcSpeech.Calls.get -> int
 Kiln.TestKit.HarnessNpcSpeech.LinesOf(Kiln.EntityId npc, string! language = "en-us") -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.TestKit.HarnessNpcSpeech.ModeOf(Kiln.EntityId npc) -> Kiln.SpeechMode
 Kiln.TestKit.HarnessNpcSpeech.Saying(Kiln.EntityId npc, string! language = "en-us") -> string?
+Kiln.TestKit.HarnessUiPlacement.FrameWindows() -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWindow!, Kiln.UiPlacement>!
+Kiln.TestKit.HarnessUiPlacement.PlayerDrags(Kiln.UiWindow! window, float x, float y, bool shift = false) -> void
 Kiln.TestKit.KilnHarness.NpcSpeech.get -> Kiln.TestKit.HarnessNpcSpeech!

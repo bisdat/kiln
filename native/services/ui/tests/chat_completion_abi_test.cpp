@@ -16,7 +16,9 @@ static_assert(offsetof(KilnUiApi, pointer) == 1056);
 static_assert(offsetof(KilnUiApi, drag_source) == 1064);
 static_assert(offsetof(KilnUiApi, drop_target) == 1072);
 static_assert(offsetof(KilnUiApi, popups) == 1080);
-static_assert(sizeof(KilnUiApi) == 1088);
+// window_state (issue 149) after it: the table is 1096 bytes
+static_assert(offsetof(KilnUiApi, window_state) == 1088);
+static_assert(sizeof(KilnUiApi) == 1096);
 static_assert(sizeof(KilnUiPointer) == 24);
 static_assert(offsetof(KilnUiChatSearch, query) == 64);
 static_assert(offsetof(KilnUiChatSearch, lines) == 321);
