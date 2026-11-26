@@ -390,6 +390,19 @@ std::string bound_mod(KilnOwner owner, bool* revoked = nullptr) {
     return mod_id_ok(id, &err) ? id : std::string();
 }
 
+// The core's id of an owner as it keeps it ("emf:big_stacks", "mod:bigstacks"), for a code writer's row in registry.json
+// (registry_live.cpp name_code_writer). Empty: no such owner (revoked or never made), or an id that is not plain text.
+std::string owner_text(KilnOwner owner) {
+    const auto* t = owners();
+    if (!owner || !t || t->header.version < 2 || t->header.size < offsetof(KilnOwnersInternalApi, owner_id) + sizeof(void*) || !t->owner_id) return {};
+    char buf[128];
+    size_t len = 0;
+    if (t->owner_id(owner, buf, sizeof buf, &len) != KILN_OK || len == 0 || len >= sizeof buf) return {};
+    for (size_t i = 0; i < len; ++i)
+        if (static_cast<unsigned char>(buf[i]) < 0x20 || buf[i] == 0x7f) return {};
+    return std::string(buf, len);
+}
+
 KilnResult KILN_CALL t_status(KilnRegistryStatus* out) {
     if (!out || out->size < 40) return KILN_ERR_INVALID_ARGUMENT;
     const Runner::Counts c = runner().counts();
@@ -589,6 +602,7 @@ void bind_service() {
         in.left_out = h.left_out;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         in.suspects = &drift_suspects_now;
+        in.owner_name = &owner_text;
         if (!in.result.definitions.empty()) registry_entries_prepare(&in);
         const Result reconciled = in.result;
         registry_live_install(std::move(in));

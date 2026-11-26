@@ -210,8 +210,10 @@ void add_entry(Registry& r, uint32_t id, const char* name, size_t at_off, const 
 std::shared_ptr<registry::map::RegMap> g_regmap;
 registry::Result g_last_report;
 int g_reports = 0;
+std::function<std::string(KilnOwner)> g_owner_name;  // stage(): RegistryLive::owner_name (the core's id of an owner)
 
 void world() {
+    g_owner_name = {};
     g_write_limits.clear(); g_before_write = {}; g_after_each_write = {}; g_fail_addrs.clear(); g_integer_impacts.clear();
     g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
@@ -408,6 +410,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
         if (sp && sp->applies == registry::Applies::Restart) in.boot_fields[ref] = field;
     }
     in.rollback = rollback, in.left_out = left_out;  // a rolled-back start (stage.h LiveHandoff::rollback, left_out)
+    in.owner_name = g_owner_name;
     registry_live_install(std::move(in));
 }
 
@@ -928,6 +931,58 @@ void later_writes_reach_the_report() {
     check(at<uint32_t>(WOOD_AT) == 777, "and nothing was written over it");
     g_registry_now_ms = &steady_ms;
 }
+// registry-followups 1: a code writer's row names the Kiln place and the mod, never the game's debug or member names (the
+// rehearsal's "owner 67: items Material_T1_Wood_Logs.maxStackSize", EMF's big_stacks). kiln.content's own calls (set, set_stacks,
+// set_ref, kiln.gamedata's values) describe their layer in the game's words after the owner's label, and kiln.log's conflict
+// lines keep that; registry.json names "<mod>: <Kiln place>": the mod the owner's label gives, else the core's id of the owner
+// ("emf:big_stacks"), else the label. A source the mod chose itself (Content.Apply's label, a file name) stays as it is.
+void code_writers_are_named_in_kiln_words() {
+    world();
+    g_owner_name = [](KilnOwner o) -> std::string { return o == CODE ? "emf:big_stacks" : ""; };
+    g_files = {{"compat/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 30}]}})"}};
+    const auto files = files_of({{"compat", "compat/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    auto code = [](KilnOwner owner, uint32_t v, const std::string& source) {
+        uint8_t b[4];
+        std::memcpy(b, &v, 4);
+        check(store_put(owner, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, b, source), "code layer " + source);
+    };
+    set_owner_label(45, "mod bigstacks");
+    set_owner_label(46, "mod chosen");
+    set_owner_label(48, "mod files");
+    code(CODE, 120, "owner 44: items Material_T1_Wood_Logs.maxStackSize");      // EMF's big_stacks through kiln.content's set()
+    code(45, 121, "mod bigstacks: items Material_T1_Wood_Logs.maxStackSize");   // a Kiln mod's Content set()
+    code(46, 122, "chosen x2: items *");                                         // Content.Apply with the mod's own label
+    code(47, 123, "owner 47: items Material_T1_Wood_Logs.maxStackSize");        // an owner the core has no id for
+    code(48, 124, "mod files: content/b.json: items Material_T1_Wood_Logs");     // ApplyFile: the mod's file and its own selector
+    store_flush(nullptr);
+    apply_registry_files(files);  // a reload rebuilds the rows
+    const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    std::vector<registry::json> codes;
+    for (const auto& w : row["writers"])
+        if (w["kind"] == "code") codes.push_back(w);
+    check(codes.size() == 5, "five code writers: " + row["writers"].dump());
+    const std::string place = "items[game:material_t1_wood_logs].maxStack";
+    check(codes[0]["who"] == "emf:big_stacks: " + place && !codes[0].contains("mod"), "the core's id of an unlabelled owner: " + codes[0].dump());
+    check(codes[1]["who"] == "bigstacks: " + place && codes[1]["mod"] == "bigstacks", "a labelled mod: " + codes[1].dump());
+    check(codes[2]["who"] == "chosen x2: items *" && codes[2]["mod"] == "chosen", "the mod's own label stays: " + codes[2].dump());
+    check(codes[3]["who"] == "owner 47: " + place, "no id for the owner: its label, and the Kiln place: " + codes[3].dump());
+    check(codes[4]["who"] == "mod files: content/b.json: items Material_T1_Wood_Logs" && codes[4]["mod"] == "files",
+          "a file and selector the mod wrote stay: " + codes[4].dump());
+    check(row["winner"] == "mod files: content/b.json: items Material_T1_Wood_Logs" && row["result"] == 124, "the last code writer wins");
+    for (size_t i : {size_t(0), size_t(1), size_t(3)}) {
+        const std::string text = codes[i].dump();
+        check(text.find("Material_T1_Wood_Logs") == std::string::npos && text.find("maxStackSize") == std::string::npos,
+              "no game debug or member name in Kiln's own wording: " + text);
+    }
+    // kiln.log's conflict lines keep the store's own text (diagnostics)
+    bool kept = false;
+    for (const Conflict& c : store_conflicts()) kept = kept || c.loser == "owner 44: items Material_T1_Wood_Logs.maxStackSize";
+    check(kept, "the store's conflicts keep their text");
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1195,6 +1250,7 @@ int main() {
         {"drift_probe", drift_probe},
         {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
         {"later_writes_reach_the_report", later_writes_reach_the_report},
+        {"code_writers_are_named_in_kiln_words", code_writers_are_named_in_kiln_words},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

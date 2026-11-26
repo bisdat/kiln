@@ -86,6 +86,7 @@ struct LiveState {
     // bound slot (the game's bytes there and its store layers), when it last looked and how long the next look waits.
     uint64_t late_gen = 0, late_sig = 0, late_at = 0, late_wait = 0;
     size_t late_rebuilds = 0;  // in this install (kiln.log names the first one, the others go to the debug log)
+    std::map<KilnOwner, std::string> owner_names;  // the core's id of an owner a code writer's row names (name_code_writer)
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -1019,6 +1020,38 @@ std::string layer_mod_of(const Layer& l) {
     return {};
 }
 
+// registry-followups 1: a code writer's row in Kiln words. kiln.content's own calls (set, set_stacks, set_ref, kiln.gamedata's
+// values) describe their layer as "<owner's label>: <registry or section> <the entry's game name>.<the game's member or list>"
+// (the rehearsal's "owner 67: items Material_T1_Wood_Logs.maxStackSize", EMF's big_stacks); the store and kiln.log's conflict
+// lines keep that. The report names "<who>: <Kiln place>" instead: the mod the owner's label gives, else the core's id of the
+// owner ("emf:big_stacks"; a Kiln.Host owner's "mod:<id>" is that mod), else the label. A source the mod chose itself
+// (Content.Apply's own label, a file and the selector it wrote) is the mod's wording and stays.
+void name_code_writer(ChainRow& row, const Layer& layer, const Slot& slot, const registry::FieldRef& ref) {
+    const std::string label = owner_label(layer.owner);
+    const std::string head = label + ": ";
+    if (layer.source.rfind(head, 0) != 0) return;
+    const Entry* e = slot.kind >= KILN_CONTENT_ITEMS && slot.kind <= KILN_CONTENT_DROPS ? reg(slot.kind).get(slot.id) : nullptr;
+    const std::string rest = layer.source.substr(head.size());
+    const size_t space = rest.find(' ');
+    if (!e || e->name.empty() || space == std::string::npos || space == 0 || rest.compare(space + 1, e->name.size(), e->name) != 0 ||
+        rest.size() <= space + 1 + e->name.size() + 1 || rest[space + 1 + e->name.size()] != '.')
+        return;  // not kiln.content's own wording of this entry
+    std::string who = row.mod;
+    if (who.empty() && g.in && g.in->owner_name) {
+        auto it = g.owner_names.find(layer.owner);
+        if (it == g.owner_names.end()) {
+            std::string id = g.in->owner_name(layer.owner);
+            if (!id.empty()) it = g.owner_names.emplace(layer.owner, std::move(id)).first;
+        }
+        if (it != g.owner_names.end()) {
+            who = it->second;
+            if (who.rfind("mod:", 0) == 0 && who.size() > 4) row.mod = who = who.substr(4);
+        }
+    }
+    if (who.empty()) who = label;
+    row.who = who + ": " + ref.text();
+}
+
 // Replay the store's writes as whole field values. A pack or code call can write several slots
 // of the same list or formula, so apply all its slots before decoding that writer's row.
 void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveField& field) {
@@ -1062,6 +1095,7 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
                 writer.row.kind = layer.seq < kRegistrySeq ? registry::WriterKind::OldPack : registry::WriterKind::Code;
                 writer.row.mod = layer_mod_of(layer);
                 writer.row.who = layer.source;
+                if (writer.row.kind == registry::WriterKind::Code) name_code_writer(writer.row, layer, slot, ref);
             }
             writer.writes.push_back(write);
         }
@@ -1951,6 +1985,7 @@ void registry_live_install(RegistryLive in) {
     g.slot_places.clear();
     g.late_gen = g.late_sig = g.late_at = g.late_wait = 0;
     g.late_rebuilds = 0;
+    g.owner_names.clear();
 }
 
 std::shared_ptr<const registry::Schema> registry_live_schema() {
