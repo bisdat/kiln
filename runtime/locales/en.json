@@ -288,6 +288,8 @@
       "inactive": "ShroudForge does not run it right now; a change of its switch takes a second or two, or it starts with the next game start.",
       "effect": "ShroudForge Lua is active; reported effect: {effect}. {detail}",
       "effect_failed_help": "The mod reports that its change did not apply. ShroudForge's log has the details.",
+      "effect_last_failed": "ShroudForge runs its Lua; the mod reports that its last change did not apply: {detail}",
+      "effect_last_failed_help": "The mod is still loaded and running. kiln.log says why the change did not apply: a \"ShroudForge voxel write\" line for a change of the world's blocks, the [sf] lines for anything else.",
       "active": "ShroudForge runs its Lua; the mod reports no effect result."
     },
     "enshwick": {
