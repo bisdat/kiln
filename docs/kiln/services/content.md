@@ -80,6 +80,13 @@ Before 0.2.0-dev.31.13 only a change in the list of loaded mod ids re-applied th
 was when the mod stays in its place (the last loaded mod, for example one hot-loaded with `load`), so its old layer
 stayed until the next restart or file edit.
 
+The mod's packs apply in the place the mod had in the data-pack order at the start (next release): Kiln.Host loads a
+reloaded mod after the mods that stay, but Kiln.Content lists the mods to kiln.content with each mod in the place it first
+had, so a field two mods' packs set goes to the same mod as at the start (before, the reloaded mod's packs applied after
+every other mod's until the next start). An `unload` and a later `load` put the mod back in that place; a mod first loaded
+after the start comes after every mod before it. The registry stage composes the `registry` sections in the start's order
+too.
+
 - One line names the mod and the reason, then the usual summary:
   `mod skilltest was reloaded (1.0.0 -> 1.0.1): re-applying data packs (its old layer comes off, its current files apply)`.
   Other reasons: `was reloaded with <mod>` (a dependent reloaded with the mod it depends on), `was unloaded and loaded

@@ -151,8 +151,12 @@ public sealed unsafe class ContentPackReloadTests : FakeTableTest
         Assert.Equal(["reloaded lib: was reloaded (1.0.0)", "reloaded pack: was reloaded with lib (1.0.0)"], Calls);
     }
 
+    // registry-fixes item 2 (review-registry-reload Q1): Kiln.Host loads a reloaded mod after the mods that stay (its load index
+    // moves to the end), but its data packs keep the place they had: before, kiln.content got the list by load index, so the
+    // reloaded mod's pack layers applied after every other mod's and a field two packs set could switch winners until the next
+    // start. The registry stage's recompose keeps the start's order too.
     [Fact]
-    public void A_mod_that_moved_in_the_order_gets_the_new_list_and_its_reload()
+    public void A_reloaded_mod_keeps_its_place_in_the_data_pack_order()
     {
         Table(withReloaded: true);
         Load("a", "1.0.0");
@@ -160,11 +164,42 @@ public sealed unsafe class ContentPackReloadTests : FakeTableTest
         Publish("a", "b");
         Content.SyncMods();
         Calls.Clear();
-        Load("a", "1.0.0");  // a reload appends the mod behind the others
+        Load("a", "1.0.0");  // a reload appends the mod behind the others in Kiln.Host's load order
         Publish("b", "a");
         Content.OnModReloaded(Reloaded("a", "1.0.0"));
         Content.SyncMods();
-        Assert.Equal(["mods [\"b\",\"a\"]", "reloaded a: was reloaded (1.0.0)"], Calls);
+        Assert.Equal(["reloaded a: was reloaded (1.0.0)"], Calls);  // the pack list is the start's: a before b
+    }
+
+    // An unload and a later load put a mod back in its place; a mod first loaded after the start goes after the others, and a
+    // reload of it keeps that place.
+    [Fact]
+    public void A_mod_loaded_again_goes_back_to_its_place_and_a_new_one_goes_last()
+    {
+        Table(withReloaded: true);
+        Load("a", "1.0.0");
+        Load("b", "1.0.0");
+        Load("c", "1.0.0");
+        Publish("a", "b", "c");
+        Content.SyncMods();
+        Calls.Clear();
+        Publish("b", "c");  // `unload a`
+        Content.SyncMods();
+        Assert.Equal(["mods [\"b\",\"c\"]"], Calls);
+        Calls.Clear();
+        Load("a", "1.0.1");  // `load a`: last in Kiln.Host's order, first in the packs' as at the start
+        Load("late", "1.0.0");  // hot-loaded after the start: after every mod the start had
+        Publish("b", "c", "a", "late");
+        Content.SyncMods();
+        Assert.Equal(["mods [\"a\",\"b\",\"c\",\"late\"]"], Calls);
+        Calls.Clear();
+        Load("late", "1.0.1");
+        Load("b", "1.0.1");
+        Publish("c", "a", "late", "b");  // `reload late`, then `reload b`
+        Content.OnModReloaded(Reloaded("late", "1.0.1"));
+        Content.OnModReloaded(Reloaded("b", "1.0.1"));
+        Content.SyncMods();
+        Assert.Equal(["reloaded b: was reloaded (1.0.0 -> 1.0.1)", "reloaded late: was reloaded (1.0.0 -> 1.0.1)"], Calls);
     }
 
     [Fact]
@@ -208,10 +243,11 @@ public sealed unsafe class ContentPackReloadTests : FakeTableTest
         Content.SyncMods();
         Calls.Clear();
         Load("a", "1.0.0");
-        Publish("b", "a");
+        Load("c", "1.0.0");  // a reload of a and a new mod c between two looks: the list changes (c)
+        Publish("b", "a", "c");
         Content.OnModReloaded(Reloaded("a", "1.0.0"));
         Content.SyncMods();
-        Assert.Equal(["mods [\"b\",\"a\"]"], Calls);  // pack_mods re-applies at the next Pre: a ReloadPacks now would be a second one
+        Assert.Equal(["mods [\"a\",\"b\",\"c\"]"], Calls);  // pack_mods re-applies at the next Pre: a ReloadPacks now would be a second one
     }
 
     private static ModReloadedEvent Reloaded(string id, string version, params string[] cascade) => new(id, version, true, cascade);

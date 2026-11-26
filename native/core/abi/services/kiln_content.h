@@ -241,8 +241,8 @@ typedef struct KilnContentApi {
     KilnResult(KILN_CALL* label_owner)(KilnOwner owner, KilnStr label);
 
     /* Which mods' data packs apply, in which order: a JSON array of mod ids in load order (Kiln.Content passes the
-     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it; a reload keeps the list as it
-     * is when the mod stays in its place, so Kiln.Content also calls pack_mod_reloaded, which re-applies it).
+     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it; each mod keeps the place it
+     * first had, so a reload keeps the list as it is, and Kiln.Content also calls pack_mod_reloaded, which re-applies it).
      * "null" (the default) = every mod folder without a .disabled file, in folder order. A change after the world
      * loaded re-applies the packs at the next Pre. Any thread. */
     KilnResult(KILN_CALL* pack_mods)(KilnStr json);
