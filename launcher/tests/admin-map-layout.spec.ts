@@ -1,11 +1,13 @@
 // The admin Map page's layout, in mock mode: the map fills the page's height whatever the side panel holds (Markers,
 // Find & filter, Live), at desktop sizes, the Deck's 1280×800 and the window's smallest 1024×640, and the side panel
 // scrolls on its own. Kilnwarden found the bug (its 0.1.3 worked around it): .ka-mapwrap-page was not flex: 1, so
-// .ka-map-root { flex: 1 } took the side panel's content height and the map grew and shrank with the tab.
+// .ka-map-root { flex: 1 } took the side panel's content height and the map grew and shrank with the tab. In a host page
+// of no set height (the web harness) the map keeps the height the page measures.
 // Screenshots of each size and tab go to SHOTS_DIR (default .out/launcher/shots/; SHOTS=0 skips them).
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { kapServer } from "./fixtures/kapServer";
 
 const SHOTS = process.env.SHOTS_DIR || join(import.meta.dirname, "..", "..", ".out", "launcher", "shots");
 const SIZES = [
@@ -25,27 +27,27 @@ async function open(page: Page, route: string) {
   if (await page.evaluate((r) => location.hash !== `#${r}`, route)) await page.evaluate((r) => { location.hash = `#${r}`; }, route);
 }
 
-/** The map, its root and side panel, and the page area around them (.k-server-page), in viewport pixels. */
-function layout(page: Page): Promise<Layout> {
-  return page.evaluate(() => {
+/** The map, its root and side panel, and the page area around them (the launcher's .k-server-page), in viewport pixels. */
+function layout(page: Page, hostSel = ".k-server-page"): Promise<Layout> {
+  return page.evaluate((hostSel) => {
     const box = (s: string) => {
       const b = document.querySelector(s)!.getBoundingClientRect();
       return { top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) };
     };
     const panel = document.querySelector<HTMLElement>(".ka-map-panel")!;
     return {
-      map: box(".ka-map"), root: box(".ka-map-root"), side: box(".ka-map-side"), host: box(".k-server-page"),
+      map: box(".ka-map"), root: box(".ka-map-root"), side: box(".ka-map-side"), host: box(hostSel),
       panel: { client: panel.clientHeight, scroll: panel.scrollHeight }, vh: window.innerHeight,
     };
-  });
+  }, hostSel);
 }
 
 /** Opens a side panel tab and waits until its content and the layout have settled. */
-async function showTab(page: Page, label: string) {
+async function showTab(page: Page, label: string, hostSel?: string) {
   await page.getByRole("tab", { name: label, exact: true }).click();
   await expect(page.getByRole("tab", { name: label, exact: true })).toHaveClass(/\bon\b/);
   let last = "";
-  await expect.poll(async () => { const now = JSON.stringify(await layout(page)); const same = now === last; last = now; return same; }, { intervals: [150] }).toBe(true);
+  await expect.poll(async () => { const now = JSON.stringify(await layout(page, hostSel)); const same = now === last; last = now; return same; }, { intervals: [150] }).toBe(true);
 }
 
 for (const size of SIZES) {
@@ -85,6 +87,27 @@ for (const size of SIZES) {
     }
   });
 }
+
+test("in a host page of no set height (the admin pages' web harness) the map keeps MapView's height across the tabs", async ({ page }) => {
+  // the harness puts the pages in a plain scrolling block, no flex column: the map's height is MapView's `height`
+  await kapServer(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/src/admin/harness/index.html?kap=ws://kap.test/kap#/servers/lab/admin/map");
+  await expect(page.locator(".ka-map")).toBeVisible({ timeout: 30_000 });
+  await showTab(page, "Live", ".k-app");
+  await expect(page.locator(".ka-map-panel .ka-map-lrow").first()).toBeVisible({ timeout: 15_000 });
+  const seen: Layout[] = [];
+  for (const [, label] of TABS) {
+    await showTab(page, label, ".k-app");
+    seen.push(await layout(page, ".k-app"));
+  }
+  console.log(`harness 1280x800: map ${seen.map((s) => s.map.height).join("/")} px, root ${seen[0].root.top}-${seen[0].root.bottom}`);
+  expect(seen[1].map).toEqual(seen[0].map);
+  expect(seen[2].map).toEqual(seen[0].map);
+  // the page's own measure: the window's height under the page, less 18 px
+  expect(seen[0].root.bottom).toBe(seen[0].vh - 18);
+  for (const s of seen) expect(s.side.height).toBe(s.root.height);
+});
 
 test("the side panel scrolls on its own: the map stays put while the Live tab scrolls (1024×640)", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 640 });
