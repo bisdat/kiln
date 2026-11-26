@@ -19,7 +19,9 @@
 
 #include "content.h"
 #include "gamedata_bootview_eml.h"
+#include "registry/archive_journal.h"
 #include "services/kiln_caps.h"
+#include "services/kiln_eml.h"
 #include "services/kiln_launch.h"
 
 namespace kc {
@@ -73,13 +75,33 @@ struct Registered {
     Registered() { bootview::set_source(&kSource); }
 } const kRegistered;  // when kiln-content.dll loads
 
+// An EML start's live generation (outside kiln mode): kiln-eml's state of this process (kiln.eml v1 state_json, the text of
+// kiln/state/eml.json; registry/archive_journal.h eml_state_generation). false + *why: none.
+bool eml_state_live(std::string* hex, std::string* why) {
+    const auto get = reinterpret_cast<KilnEmlServiceFn>(eml_export(KILN_EML_SERVICE_EXPORT));
+    const KilnEmlApi* t = get ? get(1) : nullptr;
+    if (!t || t->header.version < 1 || t->header.size < offsetof(KilnEmlApi, state_json) + sizeof(void*) || !t->state_json)
+        return *why = "kiln-eml is not loaded in this start: no change journal names an archive writer's mods", false;
+    size_t len = 0;
+    KilnResult r = t->state_json(nullptr, 0, &len);
+    if ((r != KILN_OK && r != KILN_ERR_BUFFER_TOO_SMALL) || len == 0 || len > (size_t{16} << 20))
+        return *why = "kiln-eml's state of this start is not readable: no change journal is used", false;
+    std::string text(len, '\0');
+    size_t got = 0;
+    if (t->state_json(text.data(), text.size(), &got) != KILN_OK || got != len)
+        return *why = "kiln-eml's state of this start changed while it was read: no change journal is used", false;
+    return eml_state_generation(text, hex, why);
+}
+
 }  // namespace
 
-// The registry stage's journal check (registry/archive_journal.h): the generation kiln-eml published for this kiln-backend
-// launch (its identity's archive_sha256, the startup outcome's archiveSha256), lower-case hex. false + *why: none.
+// The registry stage's journal check (registry/archive_journal.h): the generation kiln-eml published or found live for this
+// start, lower-case hex. A kiln-backend launch: the generation kiln-eml granted (its identity's archive_sha256, the startup
+// outcome's archiveSha256). An EML start: the receipt kiln-eml's EML pass published or found live (eml.json "generation").
+// false + *why: none.
 bool eml_live_generation(std::string* hex, std::string* why) {
     kiln::boot_view::LaunchFacts launch;
-    if (!kiln_mode(&launch)) return *why = "only a start with Kiln's interpreter for ShroudForge mods (kiln mode) keeps a change journal", false;
+    if (!kiln_mode(&launch)) return eml_state_live(hex, why);
     KilnEmlArchiveIdentityV1 id{};
     id.size = sizeof id;
     if (published_identity(launch, &id, why) != KILN_OK) return false;
