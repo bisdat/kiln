@@ -126,3 +126,29 @@ test("the side panel scrolls on its own: the map stays put while the Live tab sc
   // the page itself does not scroll for it
   expect(await page.locator(".k-server-page").evaluate((e) => e.scrollTop)).toBe(0);
 });
+
+for (const size of SIZES) {
+  test(`the search results stay inside the map, their last hit in reach: ${size.name} ${size.width}×${size.height}`, async ({ page }) => {
+    // the list was 70vh tall from under the search box whatever the map's own height, so under the launcher's server
+    // header its end ran past the map's bottom edge, which clips it: the last hits could not be scrolled into view
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await open(page, "/servers/lab/admin/map");
+    await expect(page.locator(".ka-map")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("searchbox").fill("Brannoc");
+    const results = page.locator(".ka-map-results");
+    await expect(results.locator("button").first()).toBeVisible({ timeout: 15_000 });
+    // as many hits as the game's markers give (the mock has no map art, so few match): copies of the first
+    await results.evaluate((r) => {
+      const hit = r.querySelector("button")!;
+      for (let i = 0; i < 40; i++) r.appendChild(hit.cloneNode(true));
+    });
+    const rect = (sel: string) => page.locator(sel).evaluate((e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; });
+    const root = await rect(".ka-map-root");
+    const list = await rect(".ka-map-results");
+    expect(list.bottom, "the list ends inside the map").toBeLessThanOrEqual(root.bottom);
+    await results.evaluate((r) => { r.scrollTop = r.scrollHeight; });
+    const last = await results.locator("button").last().evaluate((e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; });
+    expect(last.bottom, "the last hit, scrolled to, is above the map's bottom edge").toBeLessThanOrEqual(root.bottom);
+    expect(last.top).toBeGreaterThanOrEqual(list.top);
+  });
+}
