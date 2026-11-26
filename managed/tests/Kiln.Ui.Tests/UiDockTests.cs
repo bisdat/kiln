@@ -599,7 +599,7 @@ public sealed unsafe class UiDockTests : IDisposable
     }
 
     [Fact]
-    public void A_target_that_closes_frees_the_docked_window_and_takes_it_back_when_it_opens()
+    public void A_target_that_closes_frees_the_docked_window_and_opens_beside_it_again()
     {
         var spells = Spells();
         var book = Grimoire();
@@ -614,7 +614,31 @@ public sealed unsafe class UiDockTests : IDisposable
         Assert.Equal(Handle(), book.DockedTo);
         spells.Show();
         Frame();
+        // the window on the screen stays where the player has it; the one that opens goes beside it (Fuzen's WindowPair)
+        Assert.Equal((1000f, 600f), (Of(book).X, Of(book).Y));
         AssertRightOf(spells, book);
+        Assert.Equal(new[] { book.Key, spells.Key }, Begun);
+    }
+
+    [Fact]
+    public void A_target_that_opens_beside_a_shown_window_takes_the_side_that_fits()
+    {
+        var spells = Spells();
+        var book = Grimoire();
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        spells.Hide();
+        Drag(book, 10, 600);  // at the left edge: Better Spells (300 wide) has no room on its left
+        Frame();
+        Release(book);
+        Frame();
+        spells.Show();
+        Frame();
+        Win t = Of(spells), d = Of(book);
+        Assert.Equal((10f, 600f), (d.X, d.Y));  // stays
+        Assert.Equal(d.X + d.W, t.X, 3);         // Better Spells on the other side: right of Grimoire
+        Assert.Equal(d.Y, t.Y, 3);
+        Assert.Equal(Handle(), book.DockedTo);   // the dock the mod asked for
     }
 
     [Fact]

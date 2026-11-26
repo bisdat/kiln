@@ -104,6 +104,33 @@ public sealed class UiDockKitTests
     }
 
     [Fact]
+    public void A_window_on_the_screen_stays_when_its_target_opens_and_a_pair_opened_again_waits_again()
+    {
+        using var kiln = new KilnHarness();
+        var (bs, book) = Pair(kiln);
+        book.DockTo(Ui.FindWindow("betterspells-dock", "spells")!, DockSide.Right);
+        kiln.UiPlacement.FrameWindows();
+        bs.Hide();
+        kiln.UiPlacement.PlayerDrags(book, 0.7f, 0.5f);  // Grimoire alone, where the player wants it
+        kiln.UiPlacement.FrameWindows();
+        var shown = kiln.UiPlacement.FrameWindows()[book];
+        bs.Show();
+        var f = kiln.UiPlacement.FrameWindows();
+        Assert.Equal(shown, f[book]);  // stays: Better Spells opens beside it
+        Assert.Equal(f[bs].Right, f[book].Left, 4);
+
+        bs.Hide();
+        book.Hide();
+        kiln.UiPlacement.FrameWindows();
+        book.Show();  // one key press for both again, Grimoire's binding first
+        f = kiln.UiPlacement.FrameWindows();
+        Assert.False(f.ContainsKey(book));
+        bs.Show();
+        f = kiln.UiPlacement.FrameWindows();
+        Assert.Equal(f[bs].Right, f[book].Left, 4);
+    }
+
+    [Fact]
     public void The_coverage_table_names_the_docking()
     {
         var row = Assert.Single(Coverage.All, r => r.Area.StartsWith("Screen and window placement", StringComparison.Ordinal));

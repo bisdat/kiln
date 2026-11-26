@@ -452,8 +452,11 @@ internal sealed class UiDockFrame
                 foreach (var m in Neighbours(members[i]))
                     if (grouped.Add(m)) members.Add(m);
             var top = members.First(m => m.Target == null);
+            // the one the player drags or resizes, else one a mod moves, else (the window the others dock to opening beside
+            // windows already on the screen) one already shown, so nothing on the screen jumps, else that window
             var leader = members.FirstOrDefault(m => m.Live.Moving) ?? members.FirstOrDefault(m => m.Live.Resizing) ??
-                         (top.W.Placer.MovePending ? top : members.FirstOrDefault(m => m.W.Placer.MovePending)) ?? top;
+                         (top.W.Placer.MovePending ? top : members.FirstOrDefault(m => m.W.Placer.MovePending)) ??
+                         (top.Appearing ? members.FirstOrDefault(m => !m.Appearing) : null) ?? top;
             var group = new List<Node> { leader };
             var seen = new HashSet<Node>(ReferenceEqualityComparer.Instance) { leader };
             for (var i = 0; i < group.Count; i++)
@@ -584,15 +587,17 @@ internal sealed class UiDockFrame
         if (!_nodes.TryGetValue(w, out var n) || n.Group == null) return plan;
         if (n.Parent is not { } p) return Clamp(n, plan);
         if (p.Rect is not { } r) return plan;
-        if (n.Fresh && n.ParentIsTarget && _vp.Valid && SizeOf(n) is { } z) Choose(n, r, z);  // the leader's rect was a guess
+        var edge = n.ParentIsTarget ? n : p;
+        if (edge.Fresh && _vp.Valid && SizeOf(n) is { } z) Choose(edge, r, z, !n.ParentIsTarget);  // the leader's rect was a guess
         var (x, y, px, py) = From(n, r);
         return plan.WithPos(x, y, UiPlan.Always, px, py);
     }
 
     // The leader's rect this frame as ImGui will have it after Begin (its plan where it applies, else where it is now: a
     // drag is already in), the others' from it at their last sizes (or their options' before their first frame). A dock
-    // that just became active takes its side here: the other one when the docked window does not fit on its own, decided
-    // once the leader's rect is known (until then it uses its own side). The group outside the viewport: the leader moved in.
+    // that just became active takes its side here: the other one when the window placed from the other does not fit on
+    // its own, decided once the leader's rect is known (until then it uses its own side). The group outside the viewport:
+    // the leader moved in.
     private UiPlan Clamp(Node n, UiPlan plan)
     {
         // a guess moves nothing: the next frame knows
@@ -603,7 +608,8 @@ internal sealed class UiDockFrame
         {
             if (SizeOf(m) is not { } z) return plan;
             var parent = rects[m.Parent!];
-            if (m.ParentIsTarget && m.Fresh) Choose(m, parent, z);
+            var edge = m.ParentIsTarget ? m : m.Parent!;
+            if (edge.Fresh) Choose(edge, parent, z, !m.ParentIsTarget);
             var r = TopLeft(From(m, parent), z.W, z.H);
             rects[m] = r;
             (x0, y0, x1, y1) = (MathF.Min(x0, r.X), MathF.Min(y0, r.Y), MathF.Max(x1, r.X + r.W), MathF.Max(y1, r.Y + r.H));
@@ -613,16 +619,17 @@ internal sealed class UiDockFrame
         return plan.WithPos(lead.Rect.X + dx, lead.Rect.Y + dy, UiPlan.Always, 0, 0);
     }
 
-    // a dock that just became active: its own side, or the other one when the docked window does not fit on its own
-    private void Choose(Node m, (float X, float Y, float W, float H) target, (float W, float H) size)
+    // A dock that just became active (edge: the window that docks): its own side, or the other one when the window placed
+    // from the other (the docked one, or with targetMoves its target) does not fit on its own side but fits on the other.
+    private void Choose(Node edge, (float X, float Y, float W, float H) from, (float W, float H) size, bool targetMoves)
     {
-        var side = m.Link!.Side;
-        if (!Fits(Beside(target, side, m.Offset), size, side) && Fits(Beside(target, Opposite(side), m.Offset), size, Opposite(side)))
-            side = Opposite(side);
-        m.Side = side;
-        m.Fresh = false;
-        m.W.Dock.Effective = side;
-        m.W.Dock.EffectiveSeq = m.Link.Seq;
+        bool FitsOn(DockSide s) => Fits(targetMoves ? Under(from, s, edge.Offset) : Beside(from, s, edge.Offset), size, s);
+        var side = edge.Link!.Side;
+        if (!FitsOn(side) && FitsOn(Opposite(side))) side = Opposite(side);
+        edge.Side = side;
+        edge.Fresh = false;
+        edge.W.Dock.Effective = side;
+        edge.W.Dock.EffectiveSeq = edge.Link.Seq;
     }
 
     private (float W, float H)? SizeOf(Node m)
