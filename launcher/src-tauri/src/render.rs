@@ -844,6 +844,9 @@ impl Relaunch {
             self.add(FORCE_RESTARTED, v);
         }
         crate::sandbox::keep(&mut self);
+        // the font cache was rebuilt in this chain of starts: no font cache hint again (crate::fonthang, dev.31.14)
+        #[cfg(target_os = "linux")]
+        crate::fonthang::keep(&mut self, crate::fonthang::fixed_before());
         self
     }
 
@@ -1723,6 +1726,7 @@ fn prepare_for_driver(args: &[String], nvidia: bool) {
     let dmabuf_restarted = std::env::var_os(DMABUF_RESTARTED).is_some();
     let x11_restarted = std::env::var(X11_RESTARTED).ok();
     let force_restarted = std::env::var(FORCE_RESTARTED).ok().filter(|v| v == "off");
+    crate::fonthang::seen_fixed(std::env::var_os(crate::fonthang::FIXED_VAR).is_some());
     // SAFETY: main, before any thread exists (the callers' contract).
     unsafe {
         for k in &ours {
@@ -1733,6 +1737,7 @@ fn prepare_for_driver(args: &[String], nvidia: bool) {
         std::env::remove_var(DMABUF_RESTARTED);
         std::env::remove_var(X11_RESTARTED);
         std::env::remove_var(FORCE_RESTARTED);
+        std::env::remove_var(crate::fonthang::FIXED_VAR);
     }
     // read only, before the beta copy's gate opens (state::dirs() refuses until then: 0.2.0-dev.29 to 29.17 never saw the marker)
     let dirs = crate::folder::found_dirs();
@@ -1969,7 +1974,9 @@ pub fn watch() {
 #[cfg(not(target_os = "linux"))]
 pub fn watch() {}
 
-/// The watchdog: the page's ready call in time, or the fallback.
+/// The watchdog: the page's ready call in time, or the fallback. A page whose web process is stuck in the font library
+/// gets the font cache hint instead of a restart (0.2.0-dev.31.14, crate::fonthang); the late point stays [`TIMEOUT`],
+/// whatever the box's load (a renderer problem, the common black window, gets its restart as soon as before).
 #[cfg(target_os = "linux")]
 fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
     let window = match WATCH.wait(begun, TIMEOUT, NO_WINDOW_TIMEOUT) {
@@ -1986,6 +1993,13 @@ fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
         Seen::Late { window } => window,
     };
     let what = if window { format!("the page did not start within {} s of the window", TIMEOUT.as_secs()) } else { format!("no window within {} s", NO_WINDOW_TIMEOUT.as_secs()) };
+    // a web process stuck in fontconfig: no renderer would help, so the font cache hint instead of a restart (and of a
+    // sticky marker); not conclusive: on as before
+    if window && crate::fonthang::check(&what, &|| WATCH.has_started()) == crate::fonthang::Checked::Started {
+        let after = WATCH.wait_late(begun);
+        log(&format!("the page started late, {} ms after the window was made", after.as_millis()));
+        return;
+    }
     match when_late_forced(&c, &d, &x, &f) {
         Late::NoForce => {
             let why = format!("The launcher turned this off by itself: {what} with GPU drawing forced on NVIDIA");

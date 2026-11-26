@@ -22,6 +22,9 @@ pub mod events;
 pub mod own_files;
 /// The process's data folder: found once, its lock, and the hold while a move runs (dev.26).
 pub mod folder;
+/// A window that can't draw because the page's web process is stuck in fontconfig: the font cache hint (Linux, dev.31.14).
+#[cfg(target_os = "linux")]
+pub mod fonthang;
 /// The backend timing harness (ignored tests; tools/launcher/perf.sh).
 #[cfg(test)]
 mod perf;

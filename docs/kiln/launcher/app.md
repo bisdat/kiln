@@ -51,7 +51,7 @@ the enabled implementation; no personal API key flow is supported. See [catalog.
 | `/editor` | the Save Editor (lazy chunk) | `editor_*`, `kiln-asset://` |
 | `/settings`, `/settings/<section>` | (dev.30 redesign, `pages/SettingsPage.tsx`, `pages/settings/`) Six sections down the left, each with a live line ("English · fire on · Deck: Auto"), the open one's groups as links under it and the launcher's version at the bottom; one section at a time on the right as titled groups of rows: a name, one line of help with More for the rest, "next start" where a setting applies later, the control on the right. `/settings` opens the section last shown in this run (General first). **General**: Language (the launcher's; Kiln's in the game, `ui.language`), Look (Animated fire: off draws the plain Play button), Steam Deck (Start in, Open Deck mode), On this computer (the AppImage's app menu entry). **Mods & profiles**: **Profiles** (`components/ProfilesSettings.tsx`; `#profiles`): every saved profile with its mod count over every kind and the server it is for, which one is loaded, Load (the main list then shows it), "Save current as..." (`profile_create` with the loaded one as `copyFrom`; the loaded one stays loaded), Rename, Folders and notes (name, mod data, drop-in folders, notes), Delete (typed; never a loaded one), and "No profile" (the game folder decides: `profile_deactivate`); the modpack flow's "Server: <name>" profiles are listed too; Crucible's packs under it (`#crucible`). Adding and removing mods ("Switch new mods on", default on; folder notes; the daily mod update check; "Type a mod's name to remove it", default off). **Library** (`components/LibrarySettings.tsx`, `#library`): how many mods and versions, the size on disk, the data folder (Change, Open), Clean up (every version no profile and no game's profile file uses, one `library_remove_many`; typed; never a version kept for a roll back), "Earlier versions to keep" (`keepVersions`, 0 to 5, default 1) and (dev.29) the earlier versions an update kept for a roll back behind Show, each with its size, its settings files and Remove ([catalog.md](catalog.md), "Rolling back an update"). **Game & Kiln** (the selected game; "For" picks another client): Games (detect/add/forget; each row says "custom folder" for one no Steam library knows, how it starts with the start dialog behind it, and an unknown game build; Default game; Save backups to keep), Kiln in the game (kiln.json's `ui.look`, `ui.theme`, `ui.background`, `ui.scale`, `ui.chatHistory`, `ui.chatCompletion`, `ui.outlines` via SchemaForm), ShroudForge (`#shroudforge`). **Graphics** (dev.29.18, a client only): one line per tool next to which Kiln's frame cap, DLSS settings and upscaler step aside (`GameStatus.graphicsStepAside`) at the top; Kiln's graphics tools (`#graphics`: kiln.json's `graphics` section: frame cap, DLSS preset and render scale, readout; `config_kiln_*`), "Behind the game's FSR 3" (the upscaler choice, the offer of its files, what runs now or ran in the last game) and "Upscaler files" (`components/UpscalerSettings.tsx`, `#upscalers`; section "Upscaler behind FSR 3 and the upscaler files" below). **Updates & online**: Launcher updates, Nexus Mods in enabled builds only (`#nexus`: OAuth account sign-in/sign-out and "Mod Manager Download links"; `components/NexusSettings.tsx`), Discord ("Show the Community page"), What Kiln sends (Crucible's install counts). **Advanced** (rarely needed): Drawing the launcher (Linux: without the GPU, the X11 switch), Protection (WebKit's sandbox, http modpacks), Steam folders, Kiln's file (the rest of kiln.json: everything but the entries above and `shroudforge.*`, any key a newer core adds included), Game art, Developer (the desktop app). **Search** (Ctrl+F; Esc clears) reads every row's name, help and More text in the launcher's language (and kiln.json keys): the hits are the working controls under their place ("Graphics ›", "Open in Graphics") with a count per section in the list; Enter opens the first. Enter, "Open in" and every `#<group>` link (`pages/settings/model.ts`, the old ones included) open the section, scroll to the row or group and flush it with ember for 2 s | `profile_*`, `library_unused`, `library_remove_many`, `app_settings_*`, `game_*`, `config_kiln_*`, `nexus_account`, `nexus_sign_in`, `nexus_sign_out`, `nexus_handler_*`, `vendor_*` |
 | `/about` | versions, CREDITS.md, "Theme and design: frostdev"; Updates (the state, Check now), in the Nexus Mods build "New versions: Nexus Mods" | `app_info` |
-| `/servers` | every server, one line each (or a redirect to the first server when there is no `ServersPage.tsx`) | `server_list` |
+| `/servers` | every server, one line each (or a redirect to the first server when there is no `ServersPage.tsx`); a server's pages are in [servers.md](servers.md). Its Overview has "Open web panel" while it runs with Kilnwarden (`kilnwarden`) or Kiln Web Admin (`kiln-webadmin`, Kilnwarden's old name; 0.2.0-dev.31.14: either id, Kilnwarden first) enabled | `server_list`, `admin_open_web_panel` |
 | `/community` | Kiln's Discord, all of it optional ([discord.md](discord.md)): Get help (Send a report, Save report instead), your support posts with their states and replies (Open in Discord; `···`: Copy link, It's fixed, Delete my post), the tester programme (Volunteer with the hardware shown first, the checklist), news and events, the Discord account (Sign in with Discord through frostdev.io, Sign out, Sign out and forget me, "Tell me when Kiln support replies"), Rich Presence with its preview card, links, "What is sent and kept". The last word of the header; new replies put a flame numeral after it. Settings, Updates & online, Discord: "Show the Community page" (default on): off hides the page, the numeral and every "Send to Kiln support", and the launcher stops everything it does with Discord. "Send to Kiln support" also sits on the Logs page's support report row, after the fix of Play's problem banners (Kiln is not loading, Kiln did not start, Kiln update failed, No mods loaded; ShroudForge's failed startup pass on Engines) and on Play's crash notice (a banner after the game closed while Kiln wrote a crash report in that run: See the crash report, then Send to Kiln support; it shows without the button when the page is hidden) | `community_*`, `tester_*` |
 
 "Shared archive backup differs" (`components/EngineStatus.tsx`): read-only guidance on Logs > Engines and the mods'
@@ -744,7 +744,9 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
   Without that message, start it with `--software-render` (`./Kiln*.AppImage --software-render`, or
   `kiln-launcher --software-render` for the .deb). Send `launcher.log` (the `render:`, `sandbox:` and `message:` lines),
   the terminal's output and, once the window works, a support report. The launcher ending at once with a `bwrap:` line
-  and "Failed to start dbus proxy" in the terminal is WebKit's sandbox: see the next section.
+  and "Failed to start dbus proxy" in the terminal is WebKit's sandbox: see the next section. A black window that GNOME
+  Web shares (it hangs too) is often a broken font cache: `fc-cache -r`, or move `~/.cache/fontconfig` away, then start
+  the launcher again (0.2.0-dev.31.14 offers this itself: the subsection after next).
 
 ### When the page's web process ends (Linux) (0.2.0-dev.31.13)
 `src-tauri/src/webproc.rs`, `src/shell/closeGuard.ts`. WebKitGTK runs the page in its own process (`WebKitWebProcess`).
@@ -809,6 +811,80 @@ only SIGTERM ended it).
   `tests/vanilla-guard.spec.ts` (a reload during a Vanilla start's wait for Steam shows the wait, not Play; a refused
   Play ends nothing). Debug and QA (`dev-eval`) builds only: `KILN_LAUNCHER_TEST_KILL_PAGE=<seconds>` ends the web process
   (SIGKILL: WebKit says `Crashed`) that long after each page start: the first end reloads, the second shows the screen.
+
+### A window that can't draw: a broken font cache (Linux) (0.2.0-dev.31.14)
+`src-tauri/src/fonthang.rs`, `src-tauri/src/dialog.rs` (`hint`), the watchdog in `src-tauri/src/render.rs`. A player
+(ZorinOS 18.1, kernel 7.0) saw only a black window in the AppImage and the .deb: an eu-stack of the stuck
+`WebKitWebProcess` showed one thread in fontconfig's `FcPatternGetString` (called from libwebkit2gtk-4.1) and the rest
+in `pthread_cond_timedwait`. Clearing the fontconfig cache fixed it; GNOME Web hung the same way. No renderer change
+helps there, and up to 31.13 the watchdog's restarts (and their sticky markers) were all the launcher did.
+- **When it looks**: at the watchdog's late point, the page not started and the window made: 15 s after the window, as
+  before, whatever the box's load (a renderer problem, the common black window, gets its restart as soon as before; the
+  load goes into the `fonts:` line, since a thread on a busy box gets less than half the CPU and rule A stays away).
+- **What it looks at** (cheap reads of each web process below the launcher, behind bwrap too; no ptrace, no eu-stack, no
+  signal): two looks 2 s apart at `/proc/<pid>/task/*/stat` (state, CPU time, page faults), `status` (voluntary
+  switches) and `io` (read/write system calls) of every thread; between them `/proc/<pid>/clear_refs` (`1`: below), then
+  `smaps` (libfontconfig's code mapping and its Referenced kB, the font cache files mapped, `*.cache-N`), `fd` (a font
+  cache file or its `.LCK`/`.NEW`/`.TMP` held open), `wchan` and `stack` (read when readable, usually not: for the log).
+- **`clear_refs`** (`1`): the kernel clears the accessed bits of the process's page table entries and the referenced
+  flag of the pages it maps, then flushes its TLB: one walk of its page tables under the mm's read lock, once per look
+  (12 to 16 ms for a test process with 1 GB resident; a web process holds a few hundred MB). Nothing of the process's
+  memory, data or soft-dirty bits changes; the only effect is that its pages look unused to reclaim for a moment (the
+  referenced flag of shared library pages is the system's, so other processes' pages too). The file is mode 0200 and the
+  process's own: the same user only, and not for a process that made itself non-dumpable (then root's: refused, so `io`
+  is unreadable too and the verdict is not conclusive). It is kept because it discriminates: a python3 loop outside
+  fontconfig with the library loaded showed 0 kB of its code touched in three looks of four (64 kB once, set by other
+  processes), one inside `FcPatternGetString` 12 to 76 kB every look.
+- **The rules** (`fonthang::decide`): the font cache hint only on evidence in fontconfig:
+  - A: the process's main thread running at both looks, on the CPU at least half of the 2 s, without one read or write
+    system call, without one voluntary switch and with at most 100 page faults in between (a font scan maps each font
+    file: tens of thousands; a loop over a mapped cache: none), with 8 s of CPU in all; its other threads together at
+    most 0.2 s; and libfontconfig's code touched in the gap. Referenced alone proves little (it also counts a page's
+    shared flags, which other processes using the library set: a sleeping test process showed 32 kB), so the main
+    thread's loop and the idle rest carry it;
+  - B: a font cache file held open at both looks while all threads together ran at most 0.2 s;
+  - anything else (no web process, a loop elsewhere, a font scan making system calls or faulting pages in, a thread that
+    blocked, a busy box where the thread got less CPU, `io` or `clear_refs` not allowed) is not conclusive: the watchdog
+    goes on as before (its restarts), and its last message lists the font cache step as one try ("Rebuild the font cache
+    and restart", with "run fc-cache -r, or remove ~/.cache/fontconfig, then restart the launcher").
+- **The hint** (native GTK over the window through its main loop; the desktop's tools when that loop does not answer
+  within 5 s, zenity, then kdialog; English only, like the other messages): "The window can't draw: your font cache
+  looks broken. Run fc-cache -r, or remove ~/.cache/fontconfig, then restart the launcher.", what the launcher saw, what
+  the fix does, `sudo fc-cache -r` for the system's cache if it still can't draw, and `launcher.log`'s path. Buttons:
+  - **Fix it and restart**: renames the user's font cache folder to `fontconfig.broken-<YYYYMMDD-HHMMSSZ>` next to it
+    (`-2`, `-3` when taken; never deleted; a symlink is renamed itself, its target is left alone), runs the host's
+    `fc-cache -r` when installed (without the AppImage's environment; 120 s at most, else stopped: fontconfig then
+    builds what is missing at the next start), then starts the launcher again (exec, with the same arguments and the
+    watchdog's restart variables, plus `KILN_LAUNCHER_FONTS_FIXED=1`). The folder is the one fontconfig uses:
+    `$XDG_CACHE_HOME/fontconfig` when that is set and not empty (fontconfig takes a relative value from the current
+    folder, unlike the XDG spec; so does the launcher), else `$HOME/.cache/fontconfig`;
+  - **Keep waiting** (Enter; also closing it): the hint goes, the launcher looks again 30 s later (the hint again on the
+    same evidence, else on as before);
+  - **Quit**.
+  A page that starts while the hint is up closes it by itself. The watchdog's restart is skipped on the specific hint
+  only: a renderer marker is never written for a font cache.
+- **Once per chain of starts**: a start after the fix (`KILN_LAUNCHER_FONTS_FIXED`, read and removed before anything
+  else, carried along by the watchdog's later restarts) never shows the hint again: the page still not starting means
+  the evidence was wrong or the cause lies elsewhere (the system's cache, another loop), so the watchdog goes on as
+  before (its renderer steps, then its last message). Without that, a wrong verdict would offer the same fix forever and
+  never reach the renderer step that may help.
+- **Without buttons**: when only notify-send could show the hint (the main loop did not answer, no zenity or kdialog),
+  the watchdog goes on as before at once instead of sending the notice again every 30 s.
+- **What it says**: one `fonts:` line per look in `launcher.log` (the late point, then everything both looks saw:
+  threads, the main thread's state, CPU, system calls, switches and page faults, the box's load, libfontconfig and how
+  much of its code was touched, the font caches mapped and how many in the user's folder, files held open, wchan, kernel
+  stack, the verdict and the next step), and one per choice (what was seen, the player's choice and, for the fix, what
+  was moved where and how `fc-cache -r` went). The hint's text goes to stderr and `message:` lines as every message's.
+- **Not on Windows or macOS**: `fonthang` is Linux only; the watchdog and the messages already were.
+- **Tests**: `cargo test -p kiln-launcher --lib fonthang` (the decision table on fake `/proc` trees, the parsers, the
+  XDG folder as fontconfig reads it, the hint once per chain of starts, what each answer leads to, the fix against a
+  temp HOME with a stand-in for `fc-cache` (also through a symlink), fc-cache failing or hanging, the hint's words); `--
+  --ignored live_processes_follow_the_rules` runs the rules on real processes of the test's own (python3 spinning in
+  `FcPatternGetString`: the hint; a shell's loop and a sleeping python3: not conclusive);
+  `dialog::tests::the_font_cache_hint_never_fixes_on_enter`,
+  `sandbox::tests::the_late_message_lists_the_font_cache_step`. Debug and QA (`dev-eval`) builds only:
+  `KILN_LAUNCHER_TEST_FONT_HINT=fonts|unclear` takes the probe's place, so the hint can be seen on a private Xvfb
+  display with `KILN_LAUNCHER_TEST_WITHHOLD_READY`.
 
 ## WebKit's sandbox (Linux)
 `src-tauri/src/sandbox.rs` (the choice, the probe, the messages' words), `src-tauri/src/dialog.rs` (the messages),
@@ -885,11 +961,12 @@ most three custom buttons, so the launcher calls GTK itself.
   player forced, a fallback whose restart failed): what was tried, WebKit's sandbox in this start, where `launcher.log`
   is, and that each button is a try (the cause is not known; offered also when the probe passed). Buttons: "Start
   without WebKit's sandbox" (only when WebKit runs it and no variable of the player's decides), "Start without the GPU"
-  (only when this start drew with the GPU; the player's click wins over `--gpu-render`), "Open the log folder" (the
-  message stays), "Quit". Closing it leaves the window as it is. It goes up over the window through its main loop; with
+  (only when this start drew with the GPU; the player's click wins over `--gpu-render`), "Rebuild the font cache and
+  restart" (0.2.0-dev.31.14, with a paragraph on GNOME Web hanging the same way: "A window that can't draw: a broken
+  font cache (Linux)" above), "Open the log folder" (the message stays), "Quit". Closing it leaves the window as it is. It goes up over the window through its main loop; with
   no answer from that loop within 5 s, through the tools above.
-- Enter (GTK's default button, zenity's and kdialog's first) never turns the sandbox off: that is always a button the
-  player picks. A zenity that cannot open a display (it ends with 1, as for Cancel; its stderr says "open display") is
+- Enter (GTK's default button, zenity's and kdialog's first) never turns the sandbox off and never moves the font cache
+  aside: those are always buttons the player picks. A zenity that cannot open a display (it ends with 1, as for Cancel; its stderr says "open display") is
   not taken as an answer: the next tool is asked.
 - What turning the sandbox off means (checked): the launcher's page is its own bundle. Its CSP (`tauri.conf.json`)
   allows scripts, styles, fonts and connections only from the bundle, the IPC and `kiln-asset:`, and from the internet

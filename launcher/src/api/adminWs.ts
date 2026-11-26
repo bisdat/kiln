@@ -1,4 +1,4 @@
-// The admin transport for web pages (Kiln Web Admin, through @kiln/admin-ui): KAP/1 frames as JSON over a WebSocket,
+// The admin transport for web pages (Kilnwarden, through @kiln/admin-ui): KAP/1 frames as JSON over a WebSocket,
 // one frame per message (admin-protocol.md section 12). The socket is already signed in: the host page gives its URL
 // (a cookie or a one-time ticket in it), the server side holds the admin token and has done the KAP handshake with
 // Kiln.Admin, so the browser never authenticates and never sees the token. The server opens with `hello`

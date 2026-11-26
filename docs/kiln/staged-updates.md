@@ -3,7 +3,7 @@
 A running server can't replace the DLLs it has loaded. A mod or Kiln update is therefore **staged** while the server
 runs and **applied at the next start**, before anything loads it. The previous version is kept, so a rollback is
 possible. Kiln.Admin's `update_*` ops stage, list, cancel and roll back
-([launcher/admin-protocol.md](launcher/admin-protocol.md) section 8). Kiln Web Admin uses those ops after it has
+([launcher/admin-protocol.md](launcher/admin-protocol.md) section 8). Kilnwarden (the web panel mod) uses those ops after it has
 downloaded an update and checked its signature. Kiln itself never downloads anything for this.
 
 Staged updates work on dedicated servers only. A game client ignores `kiln/staged`.
@@ -23,7 +23,7 @@ apply Kiln updates. kiln-core then logs a warning that a Kiln update is still wa
 ## Folders (`<server>/kiln/staged/`)
 | Path | What | Written by |
 |---|---|---|
-| `incoming/<anything>/` | sources a caller prepares (the files of a mod, or an unpacked Kiln runtime bundle) | the caller (Kiln Web Admin) |
+| `incoming/<anything>/` | sources a caller prepares (the files of a mod, or an unpacked Kiln runtime bundle) | the caller (Kilnwarden) |
 | `mods/<folder>/staged.json` + `files/` | a staged mod update: the next contents of `kiln/mods/<folder>` | `update_stage` |
 | `kiln/staged.json` + `files/<path>` | a staged Kiln update: the files that change, at their paths from the server folder | `update_stage` |
 | `previous/mods/<folder>/`, `previous/kiln/` | the version the last change replaced (`kept.json` + `files/`): what a rollback puts back | the start that applied it |
@@ -48,8 +48,8 @@ rollback touches it, and no plan, kept version or journal that names a path unde
 ## Formats
 `staged.json` (format 1):
 ```json
-{"format": 1, "kind": "mod", "folder": "kiln-webadmin", "id": "kiln-webadmin", "version": "1.2.0", "from": "1.1.0",
- "staged": "2026-11-23T10:00:00.000Z", "by": "kiln-webadmin: alice", "label": "nexus 1234 file 5678",
+{"format": 1, "kind": "mod", "folder": "kilnwarden", "id": "kilnwarden", "version": "1.2.0", "from": "1.1.0",
+ "staged": "2026-11-23T10:00:00.000Z", "by": "kilnwarden: alice", "label": "nexus 1234 file 5678",
  "files": [{"path": "kiln.mod.json", "sha256": "<64 hex>", "size": 123}, ...]}
 {"format": 1, "kind": "kiln", "version": "0.2.0-dev.30.10", "from": "0.2.0-dev.30.9", "staged": "...", "by": "...",
  "label": "...", "bundleSha256": "<64 hex>|null", "base": {"receipt": "<sha256 of kiln/.install.json>|null"},
