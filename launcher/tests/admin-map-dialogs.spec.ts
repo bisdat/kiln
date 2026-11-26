@@ -171,10 +171,12 @@ const inside = (a: Rect, b: Rect) => a.left >= b.left - 0.5 && a.top >= b.top - 
 const apart = (a: Rect, b: Rect) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
 
 /** A route left open on an earlier visit (the map keeps its state in the browser), so the page opens with it at every
- * size (the test's waypoint, where Measure from here would start one, lies under the banner at 1024×640). */
-async function openRoute(page: Page) {
-  await page.addInitScript((route) => localStorage.setItem("kiln.admin.map.v1", JSON.stringify({ route })), {
-    from: { kind: "point", name: WAYPOINT.name, ...WAYPOINT.pos }, to: { x: 7400, y: 95, z: 6600, name: "Dialog test spire" },
+ * size (the test's waypoint, where Measure from here would start one, lies under the banner at 1024×640). `view`: the
+ * map's saved view too (else it opens on the whole world). */
+async function openRoute(page: Page, view: { x: number; z: number; zoom: number } | null = null) {
+  await page.addInitScript((ui) => localStorage.setItem("kiln.admin.map.v1", JSON.stringify(ui)), {
+    route: { from: { kind: "point", name: WAYPOINT.name, ...WAYPOINT.pos }, to: { x: 7400, y: 95, z: 6600, name: "Dialog test spire" } },
+    view,
   });
 }
 
@@ -260,4 +262,35 @@ test("with no banner over the map (a host that drops it, as Kilnwarden does), th
   expect(await misses(route)).toEqual([]);
   await route.locator(".ka-map-x").click({ timeout: 5000 });
   await expect(route).toHaveCount(0);
+});
+
+// The pointer's coordinates over the map (.ka-map-coords, bottom left) show while the pointer is on the map. A host's
+// banner taller than the map fills the top column, which put the route panel at the column's foot, on the coordinates'
+// corner: they covered the start of the route ("…st cairn"). The column ends above that corner, so neither the banner
+// nor the route panel lies under them. The map opens zoomed in on the test's waypoint, so the gutter beside the column
+// is the world, where the pointer shows its coordinates.
+test("with a host's long banner and a route open, the pointer's coordinates keep their corner of the map", async ({ page }) => {
+  await withoutArt(page);
+  await openRoute(page, { x: WAYPOINT.pos.x, z: WAYPOINT.pos.z, zoom: 5 });
+  await hostWords(page);
+  await kapServer(page);
+  await page.setViewportSize({ width: 1024, height: 640 });
+  await page.goto(`${HARNESS}#/servers/lab/admin/map`);
+  const banner = page.locator(".ka-map-area > .ka-map-noart");
+  const route = page.locator(".ka-map-route");
+  await expect(banner.locator(".k-banner")).toBeVisible(LOAD);
+  await expect(route).toContainText("Dialog test spire");
+  await page.evaluate(() => document.fonts.ready);
+  // the banner takes all the room the column gives it (it scrolls), so the route panel stands at the column's foot
+  expect(await banner.evaluate((e) => e.scrollHeight > e.clientHeight)).toBe(true);
+  // the pointer on the map in the gutter left of the column, near the map's foot
+  const area = await rectOf(page.locator(".ka-map-area"));
+  await page.mouse.move(area.left + 28, area.bottom - 30);
+  await page.mouse.move(area.left + 28, area.bottom - 6, { steps: 4 });
+  const coords = page.locator(".ka-map-coords");
+  await expect(coords).toBeVisible();
+  const [c, b, r] = [await rectOf(coords), await rectOf(banner), await rectOf(route)];
+  expect.soft(apart(c, r), `the coordinates and the route panel do not overlap (${JSON.stringify(c)}, ${JSON.stringify(r)})`).toBe(true);
+  expect.soft(apart(c, b), `the coordinates and the banner do not overlap (${JSON.stringify(c)}, ${JSON.stringify(b)})`).toBe(true);
+  expect(await misses(route)).toEqual([]);
 });
