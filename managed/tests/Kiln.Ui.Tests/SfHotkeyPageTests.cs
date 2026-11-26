@@ -325,6 +325,23 @@ public sealed class SfHotkeyPageTests : IDisposable
     }
 
     [Fact]
+    public void A_text_field_clicked_while_the_box_waits_gets_what_is_typed_there()
+    {
+        // the player clicked the box, then clicked the field below it (or the search box) to type the shortcut instead: a
+        // left click is no press the box sees, so it still waits; the keys typed into the field are text, not the shortcut
+        var folder = Package("SDL:66");
+        var page = Page(folder);
+        Frame(page);
+        Arm(page, "F9");
+        var c = new UiNative.Key { Size = 24, Vk = 'C', Scan = 0x2E, Mods = (uint)KeyMods.Shift, Down = 1, TextInput = 1, Captured = 1 };
+        Assert.False(UiEngine.Key(c));  // the field's: kiln.ui gives it to the field and keeps it from the game
+        UiEngine.Key(c with { Down = 0 });
+        Assert.Null(UiEngine.CaptureId);
+        ShroudForgeUi.Flush();
+        Assert.Equal("SDL:66", Value(folder));
+    }
+
+    [Fact]
     public void Enter_that_ends_the_box_does_not_press_the_box_again()
     {
         var folder = Package("SDL:66");
