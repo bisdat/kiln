@@ -6,10 +6,13 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+#include <set>
+#include <mutex>
 
 #include "../registry/boot_hooks.h"
 #include "../registry/schema_ir.h"
 #include "../registry/stage.h"
+#include "../registry/report_writer.h"
 #include "../registry/stage_owner.h"
 
 namespace kc {
@@ -324,6 +327,36 @@ void live_report_written_off_thread(const std::string& dir) {
           "the file holds the newest report");
     std::string again;
     check(r.report_json(&again) == KILN_OK && json::parse(again) == json::parse(files.report), "report_json and the file agree after the writer ran");
+}
+// The service's writer (registry/report_writer.h, Env.post_report in stage_service.cpp): a real thread, the newest report.
+void report_writer_thread(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    auto env = env_of(&view, &files, dir, &sections);
+    kc::registry::ReportWriter writer;
+    std::mutex mu;
+    std::set<std::thread::id> threads;
+    int writes = 0;
+    env.post_report = [&](std::function<void()> fn) { writer.post(std::move(fn)); };
+    auto write = env.write_report;
+    env.write_report = [&, write](const std::string& t) {
+        std::lock_guard l(mu);
+        ++writes, threads.insert(std::this_thread::get_id());
+        return write(t);
+    };
+    stage::Runner r(env);
+    std::function<void(const Result&, bool)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    live_report(*live_result, true);
+    for (int i = 0; i < 20; ++i) live_report(*live_result, false);
+    writer.wait_idle();
+    std::lock_guard l(mu);
+    check(writes >= 2 && writes <= 22, "the writer wrote the live reports (" + std::to_string(writes) + " write(s) for 21 publishes)");
+    check(threads.size() == 2 && threads.count(std::this_thread::get_id()), "the start's report on the stage thread, the live ones on the writer's");
+    check(json::parse(files.report)["phase"] == "worldLoad" && json::parse(files.report)["generation"] == r.generation(), "the file holds the newest report");
 }
 Files warm_id_table(const std::string& dir) {
     TreeView view = world(); Files files;
@@ -947,6 +980,7 @@ int main(int argc, char** argv) {
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
         {"Q1 live_report_written_off_thread", [&] { live_report_written_off_thread(dir); }},
+        {"Q1 report_writer_thread", [&] { report_writer_thread(dir); }},
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
