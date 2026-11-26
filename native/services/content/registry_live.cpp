@@ -760,7 +760,11 @@ void bind_perks(const std::shared_ptr<Binding>& b) {
     for (int i = 0; i < 5; ++i) {
         const Field* r = sc.find("perkReferences[" + std::to_string(i) + "]");
         const Field* d = sc.find("perkIds[" + std::to_string(i) + "]");
-        if (!r || !d || r->bytes != 16 || d->bytes != 4) return (void)fail(b, "this game build's items have no perkReferences / perkIds");
+        if (!r || !d || r->bytes != 16 || d->bytes != 4) {
+            // Kiln words in the refusal, the game's members in kiln.log at debug level (registry-fixes item 5, P45)
+            LOGD("registry (live): %s: perk slot %d: perkReferences[%d] / perkIds[%d] missing or not 16 / 4 bytes", b->ref.text().c_str(), i, i, i);
+            return (void)fail(b, "this game build's items have no perk slots Kiln can write (Kiln's mapping of them needs an update)");
+        }
         refs.push_back(*r), ids.push_back(*d);
     }
     const uintptr_t base = b->entry.addr;
