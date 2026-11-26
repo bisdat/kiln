@@ -87,26 +87,52 @@ template <class F> bool guarded_value(F fn, uint32_t* out) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+// Kiln has the keyboard and mouse right now (its menu, a Kiln screen or text field, a ShroudForge shortcut's capture box):
+// kiln.ui's status, as Kiln's interpreter samples it (kiln-sfi input/feed.rs). A status that cannot be read counts as
+// not capturing, as before. Window thread, under g_mu (kiln.ui's status may be asked from any thread).
+bool kiln_captures() {
+    if (!g_ui || !g_ui->status) return false;
+    KilnUiStatus st{};
+    st.size = sizeof st;
+    return g_ui->status(&st) == KILN_OK && st.capturing != 0;
+}
+
+// A record that presses a key or a button (not a release, not a focus loss).
+bool is_press(const KilnUiWindowInput* r) {
+    switch (r->kind) {
+        case KILN_UI_INPUT_RAW_KEY: return (r->flags & RI_KEY_BREAK) == 0;
+        case KILN_UI_INPUT_WINDOW_KEY: return r->message == WM_KEYDOWN || r->message == WM_SYSKEYDOWN;
+        case KILN_UI_INPUT_MOUSE_BUTTON: return r->down != 0;
+        default: return false;
+    }
+}
+
 // One key goes through one of the two key functions (input_host.h): the raw record once the window gives raw keyboard
 // input, the window message while it has given none. The window gets both for a key (the game registers raw input
 // without RIDEV_NOLEGACY) and may take WM_INPUT ahead of the messages: a tap can arrive as raw press, raw release, then
 // WM_KEYDOWN, WM_KEYUP, which forwarded both ways would be two presses, and Print Screen's lone WM_KEYUP after its raw
 // release a second press too. Buttons the same way: raw button records, else the button messages. If the registration
 // is removed or targets a different window, resume legacy input, including the release of an already held raw key.
+// While Kiln has the keyboard (kiln_captures: its menu, a text field, a shortcut's capture box) no press reaches the
+// runtime, as Kiln's interpreter counts none then (0.2.0-dev.31.18, netjunk: a key typed or captured in Kiln's menu also
+// fired a ShroudForge mod's shortcut); every release does, so nothing stays held for ShroudForge.
 void KILN_CALL on_window_input(const KilnUiWindowInput* r, void*) {
     if (!r || r->size < sizeof(KilnUiWindowInput)) return;
     if (g_stopping.load(std::memory_order_acquire)) return;
     std::lock_guard lock(g_mu);
     if (!g_live) return;
+    const bool press = is_press(r);
     bool ok = true;
     switch (r->kind) {
         case KILN_UI_INPUT_RAW_KEY:
             g_raw_keys = true;
+            if (press && kiln_captures()) return;
             ok = guarded(g_fn.raw_key, r->make_code, r->flags, r->vkey);
             break;
         case KILN_UI_INPUT_WINDOW_KEY:
             if (g_raw_keys && kui::raw_input::registered_for(6, GetFocus())) return;
             g_raw_keys = false;
+            if (press && kiln_captures()) return;
             ok = guarded(g_fn.window_key, static_cast<uintptr_t>(r->wparam), static_cast<intptr_t>(r->lparam));
             break;
         case KILN_UI_INPUT_MOUSE_BUTTON:
@@ -115,6 +141,7 @@ void KILN_CALL on_window_input(const KilnUiWindowInput* r, void*) {
                 if (g_raw_buttons && kui::raw_input::registered_for(2, GetFocus())) return;
                 g_raw_buttons = false;
             }
+            if (press && kiln_captures()) return;
             ok = guarded(g_fn.mouse_button, r->button, r->down);
             break;
         case KILN_UI_INPUT_FOCUS_LOST:
