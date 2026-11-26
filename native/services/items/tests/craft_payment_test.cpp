@@ -226,7 +226,26 @@ int main() {
         reset();logs.clear();fixture::server_storage=false;
         CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
         CHECK(said("the server world's block placement transaction did not check out (its accessors)"));
-        fixture::server_storage=true;fixture::tx_fuel=true;
+        fixture::server_storage=true;
+        // review of #148: another world's placement (a hosting client's own world, Building Tools' redirect followed by the
+        // program's frame there too) says so as a placement, not as a craft
+        reset();logs.clear();wr(tx,0x70,uint64_t{0x55});
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        CHECK(said("block placement payment left to the game (not the server world's transaction") && !said("craft payment"));
+        wr(tx,0x70,bases);
+        // review of #148: a placement of more than 32 cost lines (a Building Tools area action or blueprint of many
+        // materials) is the game's, bag and base, and kiln.log says why (it said "the cost lines could not be read")
+        {
+            uint8_t many[33*24]={};
+            for (uint32_t i=0;i<33;++i) {wr(many+i*24,0x10,uint32_t{7}+i);wr(many+i*24,0x14,uint32_t{1});}
+            struct {void* ptr;uint64_t n;} long_costs{many,33};
+            reset();logs.clear();
+            CHECK(craft_pay_impl(tx,&long_costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+            CHECK(said("block placement payment left to the game (it names more than 32 cost lines") && !said("could not be read"));
+            long_costs.n=0;reset();logs.clear();
+            CHECK(craft_pay_impl(tx,&long_costs,1,1,nullptr,0x5678,&code)==0 && said("the cost lines could not be read"));
+        }
+        fixture::tx_fuel=true;
         reset();CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);  // a craft still uses it (every link crafts)
         t_build_pay=false;g_build.paid=0;reset();
         CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());  // no building symbols: never

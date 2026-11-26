@@ -831,6 +831,7 @@ struct RawCosts {
     uint32_t n;
     uint32_t item[32], count[32];
     uint32_t forced;
+    uint64_t lines = 0;  // how many the list holds (more than 32: n stays 0, the game's payment)
 };
 void costs_impl(void* p) {
     auto* c = static_cast<RawCosts*>(p);
@@ -839,6 +840,7 @@ void costs_impl(void* p) {
         uint64_t n;
     } s{};
     std::memcpy(&s, c->costs, sizeof s);
+    c->lines = s.n;
     if (!s.ptr || s.n == 0 || s.n > 32) return;
     for (uint64_t i = 0; i < s.n; ++i) {
         std::memcpy(&c->item[i], s.ptr + i * 24 + 0x10, 4);
@@ -1065,9 +1067,10 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         } else if (const uint32_t n = g_log_dry.take()) {
             TxWords w{static_cast<const uint8_t*>(tx), {}};
             guard(&tx_words_impl, &w, &fault);
-            LOGI("stations: craft payment left to the game (not the server world's transaction: bases words %p / %p, the "
+            LOGI("stations: %s payment left to the game (not the server world's transaction: bases words %p / %p, the "
                  "server's %p, accessors %s; words 0:%p 1:%p 3:%p 4:%p 5:%p 7:%p 12:%p 14:%p 1d:%p; mode %u, payer %u)%s",
-                 reinterpret_cast<void*>(head.bases), reinterpret_cast<void*>(head.arg4), srv_bases, same_bases ? "refused" : "not read",
+                 build ? "block placement" : "craft", reinterpret_cast<void*>(head.bases), reinterpret_cast<void*>(head.arg4), srv_bases,
+                 same_bases ? "refused" : "not read",
                  reinterpret_cast<void*>(w.w[0]), reinterpret_cast<void*>(w.w[1]), reinterpret_cast<void*>(w.w[3]),
                  reinterpret_cast<void*>(w.w[4]), reinterpret_cast<void*>(w.w[5]), reinterpret_cast<void*>(w.w[7]),
                  reinterpret_cast<void*>(w.w[0x12]), reinterpret_cast<void*>(w.w[0x14]), reinterpret_cast<void*>(w.w[0x1d]),
@@ -1111,7 +1114,9 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     // A refused base list is empty in the game too. Registered sources need their independent permission check.
     if (head.mode == 0 || (stock.err.error && !(g_craft_lab && owner > kMaxPlayerEntity))) list_ptr = list_n = 0;
     RawCosts rc{static_cast<const uint8_t*>(costs), static_cast<const uint8_t*>(extra), 0, {}, {}, 0};
-    if (!guard(&costs_impl, &rc, &fault) || rc.n == 0) return skip("the cost lines could not be read");
+    // review of #148: Building Tools' area actions charge up to 64 merged lines; more than 32 stay the game's (bag and base)
+    if (!guard(&costs_impl, &rc, &fault) || rc.n == 0)
+        return skip(rc.lines > 32 ? "it names more than 32 cost lines, which Kiln does not pay" : "the cost lines could not be read");
     std::vector<CraftCost> lines;
     std::vector<uint32_t> items;
     for (uint32_t i = 0; i < rc.n; ++i) {
