@@ -395,7 +395,10 @@ migrations apply to it like to any edit.
 
 A rollback **never touches saves**: it writes one file beside the plans. When it gives an item a lower max stack than a world
 already started with, or than the value under it, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
-rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback.
+rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback. The
+launcher's Conflicts view has the same as its **Registry plan** card (since 0.2.0-dev.31.14): the plans, the last start's
+rollback and a waiting request; **Roll back** shows the dry run's changes first and writes the request only on confirm,
+**Clear** removes it ([launcher/registry-conflicts.md](../../launcher/registry-conflicts.md)).
 
 ## Edits that change existing saves
 

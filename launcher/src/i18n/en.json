@@ -6839,6 +6839,45 @@
       "other": "{count} registry edits wait for a restart"
     },
     "restartHint": "Restart the game, or the server, to apply them. Each reason says what the start fixed.",
+    "plan": {
+      "title": "Registry plan",
+      "sub": "The edits the last start ran on, and the last good plan before it. A rollback starts the next start on that plan; saves are not touched.",
+      "rollback": "Roll back",
+      "clear": "Clear",
+      "unavailable": "The registry plans could not be read",
+      "current": "Plan of the last start: {plan}",
+      "previous": "Previous (last good) plan: {plan}",
+      "none": "none",
+      "lastRollback": "Rollback at the last start: {state} (plan {plan}) {reason}",
+      "noLastRollback": "Rollback at the last start: none",
+      "pending": "Rollback request: plan {plan}, requested {requested} by {by}. The next start runs on it.",
+      "noPending": "Rollback request: none",
+      "dryRun": {
+        "one": "Rolling back to plan {plan} changes {count} value back",
+        "other": "Rolling back to plan {plan} changes {count} values back"
+      },
+      "targetMods": "That plan's mods: {mods}",
+      "noMods": "no registry edits at all",
+      "changesUnknown": "What changes back is not known here ({why}); the start lists it.",
+      "noChanges": "No value changes back: the two plans resolve to the same values.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "no registry edit",
+      "moreChanges": {
+        "one": "… and {count} more (registry.json lists every one after the start).",
+        "other": "… and {count} more (registry.json lists every one after the start)."
+      },
+      "refusedWhole": "Nothing is written until you confirm. The start refuses the plan whole, and runs the mods' current edits, when one of its mods is not loaded at its version, one of its edits is refused on that game build, or it would change what saves hold.",
+      "confirmRollback": "Confirm roll back",
+      "confirmClear": "Confirm clear",
+      "cancel": "Cancel",
+      "clearTitle": "Remove the rollback request for plan {plan}",
+      "clearBody": "The next start runs on the mods' current registry edits again.",
+      "failed": "The rollback request could not be changed",
+      "requested": "Requested: the next start runs on plan {plan}, and every start after it until you clear it.",
+      "cleared": "Rollback request removed",
+      "nothingToClear": "There was no rollback request to remove",
+      "savesUntouched": "Saves are not touched. Restart the game (or the server) for it to take effect."
+    },
     "restartOmitted": {
       "one": "{count} more is not shown here: state/registry.json lists every one.",
       "other": "{count} more are not shown here: state/registry.json lists every one."

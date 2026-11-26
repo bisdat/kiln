@@ -4,7 +4,8 @@ import { emptyRegistryFixture, registryFixture } from "./fixtures/registryReport
 async function report(page: Page, value: unknown, error = false) {
   await page.route("**/src/registry/mock.ts*", route => route.fulfill({
     contentType: "application/javascript",
-    body: `export async function readMockRegistryReport() { ${error ? 'throw new Error("fixture: report unreadable")' : `return ${JSON.stringify(value === null ? null : typeof value === "string" ? value : JSON.stringify(value))}`}; }`,
+    body: `export async function readMockRegistryReport() { ${error ? 'throw new Error("fixture: report unreadable")' : `return ${JSON.stringify(value === null ? null : typeof value === "string" ? value : JSON.stringify(value))}`}; }
+export async function mockRegistryRollback(o) { return { plan: null, previous: null, rollback: null, pending: null, target: null, changes: [], changesUnknown: null, blocked: "fixture: no plans", dryRun: o.dryRun, wrote: false, cleared: o.clear ? false : null }; }`,
   }));
   await page.goto("/#/conflicts");
   await expect(page.getByRole("heading", { name: "Registry conflicts", exact: true })).toBeVisible();
