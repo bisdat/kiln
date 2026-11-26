@@ -143,6 +143,7 @@
       "read": "now",
       "backend": "live",
       "config": "StaminaCost",
+      "clientNeeds": true,
       "evidence": "docs/kiln/services/gamedata.md: costs are read at every payment"
     },
     "manaCost": {
