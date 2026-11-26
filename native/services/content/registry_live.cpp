@@ -1367,7 +1367,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
                 std::erase_if(bt.edits, [&](const registry::Edit& e) {
                     const std::string k = edit_key(e);
                     if (before.count(k) || (k.find('#') == std::string::npos && g.in->decoded.count(k))) return false;
-                    // the stable token first (registry.json, the reload reply, kilnctl status, the launcher; 0.2.0-dev.31.14)
+                    // the stable token first (registry.json, the reload reply, kilnctl status, the launcher)
                     registry::Refusal r;
                     r.mod = m.id, r.source = bt.source, r.stage = bt.stage, r.n = e.n;
                     r.registry = e.registry, r.id = e.select.id;
@@ -1400,7 +1400,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
         }
     registry::Result next = registry::compose(*g.in->schema, g.in->base, g.in->old, mods, g.in->result);
     // restart fields are the boot back-end's as written at the start: a reload changes them only at the next start. Each one
-    // whose value the reloaded sections change is a row of registry.json with the stable token (0.2.0-dev.31.14; before,
+    // whose value the reloaded sections change is a row of registry.json with the stable token (before,
     // only kiln.log said so), named for the changed section's last edit of it, so the next reload of that section replaces it.
     auto restart_writer = [&](const registry::FieldOutcome* fo) -> const registry::ChainRow* {
         if (!fo) return nullptr;
@@ -1833,7 +1833,7 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
         else if (field && field->applies == registry::Applies::Restart) { change->restart = true; reason = "RestartRequired: " + edit.registry + "." + field->name + " is read at game start"; }
         else if (field && !g.in->decoded.count(edit.registry + "." + field->name)) { change->restart = true; reason = "RestartRequired: the base did not read " + edit.registry + "." + field->name + " at start"; }
         if (reason.empty()) return false;
-        // the place too: the reload reply, kilnctl status and the launcher name the field that waits (0.2.0-dev.31.14)
+        // the place too: the reload reply, kilnctl status and the launcher name the field that waits
         refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, "", edit.registry, edit.select.id,
                            field ? field->name : std::string(), !edit.raw.empty()});
         return true;

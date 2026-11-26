@@ -715,7 +715,7 @@ void hot_reload() {
     check(reported("RestartRequired: items.levels.min: the base was read at start"), "a field the start never decoded: refused, needs a restart (the stable token first)");
 }
 
-// A reload whose registry edits need a restart says so where the admin looks (0.2.0-dev.31.14): every such row of
+// A reload whose registry edits need a restart says so where the admin looks: every such row of
 // registry.json starts with the stable token "RestartRequired: " and names the mod and the place, and counts has their
 // number. Before, only kiln.log said a restart field changes at the next start, and a new field's row had no token.
 std::vector<registry::Refusal> restart_rows() {

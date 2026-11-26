@@ -112,7 +112,7 @@ A mod's packs apply whole from one version, never half:
   since then had a broken file. A world reset forgets every old layer.
 - **A pack throws while it applies** (an unexpected value type in a section's code): the mod's application ends at that
   pack, and everything the mod's packs did in it comes off at once, in the mod's place in the load order
-  (0.2.0-dev.31.14; before, only its field and drop layers did, after every other mod had applied):
+  (next release; before, only its field and drop layers did, after every other mod had applied):
   - its field and drop layers;
   - the new items and recipes of its `add` lists. One it changed is the definition it had before again, as a new
     version with the clone, recipe and random-loot entry the game had (the game's maps point at them again), so what other

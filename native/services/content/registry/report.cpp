@@ -172,7 +172,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
 
     doc["counts"] = {{"fields", r.fields.size()}, {"conflicts", r.lines.size()}, {"refused", r.refused.size()}, {"added", r.added.size()}, {"removed", r.removed.size()}};
     // refused rows that wait for a restart (the stable token RESTART_REQUIRED_TOKEN first): what a reload, a live edit or a
-    // runtime pass left for the next start. Counted over every row, also those the refused cap leaves out (0.2.0-dev.31.14).
+    // runtime pass left for the next start. Counted over every row, also those the refused cap leaves out.
     doc["counts"]["restartRequired"] = std::count_if(r.refused.begin(), r.refused.end(), [](const Refusal& x) { return restart_required(x); });
     doc["truncated"] = {{"fields", r.fields.size() - doc["fields"].size()},
                         {"conflicts", r.lines.size() - doc["conflicts"].size()},

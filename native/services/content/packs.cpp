@@ -1076,7 +1076,7 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
         };
         // What one mod's packs did in this application that a store or drop layer does not hold comes off whole when one
         // of them throws: the definitions of its "add" lists (newcontent), gamedata clones and config adds, and what it
-        // applied in other services' sections (0.2.0-dev.31.14). Its layers and drop rules come off with its owner.
+        // applied in other services' sections. Its layers and drop rules come off with its owner.
         auto roll_back = [&](KilnOwner o) {
             store_drop_owner(o);
             drops_drop_owner(o);

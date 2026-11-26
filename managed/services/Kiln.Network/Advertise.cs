@@ -201,7 +201,7 @@ internal static partial class NetAdvertise
     }
 
     /// <summary>What a recompute follows: each mod's id, version, state and folder, and when its kiln.mod.json was written.
-    /// The last one since 0.2.0-dev.31.14: a `reload` that changes only "clients" (the version kept) changed what joining
+    /// The last one: a `reload` that changes only "clients" (the version kept) changed what joining
     /// players need, and the gate went on with the old answer for up to a minute, so a vanilla client could still join a
     /// server whose reloaded mod now needs Kiln.</summary>
     internal static string Signature(IEnumerable<(string Id, string Version, ModState State, string Directory)> mods) =>

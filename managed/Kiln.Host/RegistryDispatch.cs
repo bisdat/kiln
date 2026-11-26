@@ -23,7 +23,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private bool _dispatchingWorld, _starting, _flushing;
     private readonly RegistryWorldBinding _worldBinding = new();
     // The code each GameStart author ran with at this start (its folder's DLL hash), and the reloaded mods whose GameStart
-    // edits wait for the next start (0.2.0-dev.31.14): the reload reply names them (ReloadReplies).
+    // edits wait for the next start: the reload reply names them (ReloadReplies).
     private readonly Dictionary<string, string> _gameStartCode = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _restartNotes = new(StringComparer.Ordinal);
     private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, string code)

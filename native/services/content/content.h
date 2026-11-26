@@ -456,8 +456,8 @@ void nc_world_ready(uintptr_t world, uint32_t kind);  // try_ready: the active w
 void nc_world_stopping(uintptr_t world);          // world_reset, before the store is reset (world intact)
 void nc_packs_begin();                            // apply_packs, before apply_all_packs
 void nc_packs_end();                              // ... after: pack definitions not seen again are orphaned
-// One mod's pack application (apply_all_packs, store_mutex held), so that a pack that throws partway leaves nothing behind
-// (0.2.0-dev.31.14): nc_pack_mark(owner) before the mod's first pack; nc_pack_rollback(owner) puts every definition the
+// One mod's pack application (apply_all_packs, store_mutex held), so that a pack that throws partway leaves nothing behind:
+// nc_pack_mark(owner) before the mod's first pack; nc_pack_rollback(owner) puts every definition the
 // owner's packs added or changed since the mark back as it was then (one it added is orphaned, as a removed pack's is:
 // its id stays registered until a restart) and returns how many; the journal starts again from there (a rollback, then
 // the packs it had before, then a rollback again leaves the mark's state). nc_pack_unmark() ends it. Other owners'

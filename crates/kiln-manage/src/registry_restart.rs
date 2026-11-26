@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! What the registry left waiting for a restart (0.2.0-dev.31.14): the rows of `kiln/state/registry.json`'s `refused`
+//! What the registry left waiting for a restart: the rows of `kiln/state/registry.json`'s `refused`
 //! list whose reason starts with the stable token `RestartRequired: ` (native/services/content/registry/report.h). A
 //! reload, a runtime registry pass or a live edit leaves them: a restart field a reloaded pack changed (it applies at the
 //! next start), a field the start never read, a registry section or an entry operation added after the start. `kilnctl

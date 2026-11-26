@@ -13,7 +13,7 @@
 //  - kiln.mod.json changing without a reload (a hot edit) is a pack change too: the scan re-applies
 //  - a pack that throws while it applies: its mod's layers of that application come off, its packs from before apply
 //    again whole (also when they had ordinary field errors), with their registry sections, else none of its packs apply
-//  - a pack that throws leaves nothing of its mod behind (0.2.0-dev.31.14): what its "add" lists defined or changed comes
+//  - a pack that throws leaves nothing of its mod behind: what its "add" lists defined or changed comes
 //    off at once, in the mod's place in the load order, so a later mod applies over the state without it (new content is
 //    a model of newcontent.cpp's bookkeeping and pack journal here; packundo_test.cpp runs the real one)
 //  - built with kiln.gamedata's hooks (packreload_test.sh's second build): its template clones, config adds and other
@@ -608,7 +608,7 @@ void run() {
         check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw fixed: the new version applies (Wood 90)");
     }
 
-    // ---- a pack that throws leaves nothing of its mod behind (0.2.0-dev.31.14): what its "add" lists defined or changed,
+    // ---- a pack that throws leaves nothing of its mod behind: what its "add" lists defined or changed,
     // its template clones, config adds and other services' sections come off with its layers, at once, in its place in the
     // load order: a later mod applies over the state without it
     {

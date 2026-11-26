@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The kiln/control `reload <id>` reply with what the reload left waiting for a restart in the registry (0.2.0-dev.31.14).
+// The kiln/control `reload <id>` reply with what the reload left waiting for a restart in the registry.
 // A reload's registry work happens after the reload itself: the mod's data packs apply again at kiln.content's next Pre
 // (their registry sections are composed again there), and its HotReload / ModLoad pass runs at the next tick
 // (RegistryDispatch.FlushLoads). So the reply waits until both are done, a few steps (at most Timeout), then reads

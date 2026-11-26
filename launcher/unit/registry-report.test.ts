@@ -30,7 +30,7 @@ describe("untrusted registry report", () => {
   test("refusals retain RestartRequired and Unproven reasons", () => {
     expect(parse(registryFixture()).refused.map(x => x.reason)).toEqual(registryFixture().refused.map(x => x.reason));
   });
-  test("edits that wait for a restart are the refused rows with the token, counted over every row (0.2.0-dev.31.14)", () => {
+  test("edits that wait for a restart are the refused rows with the token, counted over every row", () => {
     const r = parse(registryFixture());
     expect(r.restart.total).toBe(1);  // counts has no restartRequired here (an older Kiln): the rows it lists
     expect(r.restart.rows.map(x => x.owner)).toEqual(["late"]);

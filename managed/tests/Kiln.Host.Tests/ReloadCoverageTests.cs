@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// What `reload <id>` covers (docs/kiln/architecture.md "What reload <id> covers", 0.2.0-dev.31.14): what it cannot change
+// What `reload <id>` covers (docs/kiln/architecture.md "What reload <id> covers"): what it cannot change
 // is refused with the reason first rather than half-applied.
 using Kiln.Host;
 using Xunit;

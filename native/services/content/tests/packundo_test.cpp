@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// kiln.content, host test: newcontent.cpp's pack journal (nc_pack_mark / nc_pack_rollback / nc_pack_unmark, content.h;
-// 0.2.0-dev.31.14). A mod's pack that throws partway leaves nothing of what its "add" lists defined or changed: packs.cpp
+// kiln.content, host test: newcontent.cpp's pack journal (nc_pack_mark / nc_pack_rollback / nc_pack_unmark, content.h).
+// A mod's pack that throws partway leaves nothing of what its "add" lists defined or changed: packs.cpp
 // marks the mod's owner before its first pack and rolls it back at the throw. Over the real newcontent.cpp (definitions,
 // their index by GUID and name, nc_packs_begin / nc_packs_end, the listing), with no world (nothing is synced), a fake
 // kiln API and owner labels:

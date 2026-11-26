@@ -20,7 +20,7 @@ export interface RegistryField {
 }
 export interface RegistryConflict { field: string; kind: string; winner: string; loser: string; certainty: string; certain: boolean; text: string }
 export interface RegistryRefusal { owner: string; field: string; stage: string; reason: string }
-/** Edits that wait for a restart (since 0.2.0-dev.31.14): refused rows whose reason starts with the stable token
+/** Edits that wait for a restart: refused rows whose reason starts with the stable token
  * "RestartRequired: " (native report.h). total: counts.restartRequired (every row, also those the native cap left out). */
 export interface RegistryRestart { total: number; rows: RegistryRefusal[] }
 export const RESTART_TOKEN = "RestartRequired: ";

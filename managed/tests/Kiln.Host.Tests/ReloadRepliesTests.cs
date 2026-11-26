@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The kiln/control `reload <id>` reply says what the reload left waiting for a restart in the registry (0.2.0-dev.31.14,
-// ReloadReplies): before, it was "reloaded <id> <version>" and only registry.json and kiln.log had the RestartRequired rows.
+// The kiln/control `reload <id>` reply says what the reload left waiting for a restart in the registry (ReloadReplies): before, it was "reloaded <id> <version>" and only registry.json and kiln.log had the RestartRequired rows.
 // The reply waits for the reload's registry work (its runtime pass, a queued data-pack application), at most 5 s, then names
 // the count and each mod and field of registry.json's rows with the stable token, for the reloaded mods only; data.registry
 // carries them for tools (the Web Admin mod reads it).

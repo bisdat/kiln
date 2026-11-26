@@ -39,7 +39,7 @@ void gd_world_reset();
 void gd_tick(uint64_t step);
 void gd_packs_begin();
 void gd_packs_end();
-// One mod's pack application (apply_all_packs, store_mutex held; as nc_pack_mark in content.h, 0.2.0-dev.31.14): a pack
+// One mod's pack application (apply_all_packs, store_mutex held; as nc_pack_mark in content.h): a pack
 // that throws partway leaves nothing of the owner's packs behind. gd_pack_rollback(owner) puts the clones the owner's
 // packs added or changed since the mark back as they were (one it added is orphaned, as a removed pack's is), forgets
 // the config adds of its layers (store_drop_owner takes the layers off; what it added must not join the array again)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// kiln.content gamedata, host test: the pack journal of gamedata.h (gd_pack_mark / gd_pack_rollback / gd_pack_unmark;
-// 0.2.0-dev.31.14). A mod's pack that throws partway leaves nothing of its gamedata behind: packs.cpp marks the mod's owner
+// kiln.content gamedata, host test: the pack journal of gamedata.h (gd_pack_mark / gd_pack_rollback / gd_pack_unmark).
+// A mod's pack that throws partway leaves nothing of its gamedata behind: packs.cpp marks the mod's owner
 // before its first pack and rolls it back at the throw. Over the real gamedata_clones.cpp (clone definitions, the pack
 // application's seen set, clones_packs_end's orphaning) and gamedata_packs.cpp (config adds, other services' sections),
 // with no world (nothing is registered) and a fake service section:

@@ -113,7 +113,7 @@ bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v
 bool read_recipe_stacks(const Entry&, uint32_t, std::vector<KilnContentStack>*) { return false; }
 bool nc_is_new(uint32_t, uint32_t) { return false; }
 void nc_pack_add(KilnOwner, uint32_t, const std::string&, const std::string&, ApplyResult*) {}
-// packs.cpp's per-mod rollback of a pack that throws (0.2.0-dev.31.14): no new content in this test
+// packs.cpp's per-mod rollback of a pack that throws: no new content in this test
 void nc_pack_mark(KilnOwner) {}
 uint32_t nc_pack_rollback(KilnOwner) { return 0; }
 void nc_pack_unmark() {}

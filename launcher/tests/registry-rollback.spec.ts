@@ -1,4 +1,4 @@
-// The Conflicts view's registry plan card (0.2.0-dev.31.14): kiln_manage::registry_plan through the launcher's
+// The Conflicts view's registry plan card: kiln_manage::registry_plan through the launcher's
 // registry_rollback command. The dry run's changes are shown before anything is written; Clear asks first too.
 import { expect, test, type Page } from "@playwright/test";
 import { registryFixture } from "./fixtures/registryReport";

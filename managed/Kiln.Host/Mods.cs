@@ -989,7 +989,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             var folder = _options.Profile.Folders.FirstOrDefault(f => f.Id == id && f.Enabled)?.Directory ?? System.IO.Path.Combine(_modsDirectory, id);
             if (!Manifest.IdPattern.IsMatch(id) || !File.Exists(System.IO.Path.Combine(folder, Manifest.FileName)))
                 return NativeModNamed(id)
-                    // a native mod (native.json): kiln-core loaded its DLLs at start and never unloads them (0.2.0-dev.31.14)
+                    // a native mod (native.json): kiln-core loaded its DLLs at start and never unloads them
                     ? new ModOperationResult(false, $"RestartRequired: {id} is a native mod (native.json): Kiln loads its DLLs at start and never unloads them, " +
                                                     "so a reload cannot change it; restart the game (or the server) to load a new version", [])
                     : new ModOperationResult(false, $"mod {id} is not loaded", []);

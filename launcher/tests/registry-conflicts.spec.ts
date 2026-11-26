@@ -21,7 +21,7 @@ test("missing report is explicit and reachable from launcher navigation", async 
 test("shows base, ordered owners and operations, winner, certainty and refusal reasons", async ({ page }) => {
   await report(page, registryFixture());
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
-  // the RestartRequired row is in the refused list, and (since 0.2.0-dev.31.14) in the restart card above it too
+  // the RestartRequired row is in the refused list, and in the restart card above it too
   await expect(page.locator(".registry-line").filter({ hasText: /RestartRequired: balance.levelCap/ })).toHaveCount(2);
   await expect(page.getByText("Unproven: items.maxStack (no verified mapping for this build)", { exact: true })).toBeVisible();
   await expect(page.getByText("Best-effort drift", { exact: true }).first()).toBeVisible();
@@ -38,7 +38,7 @@ test("shows base, ordered owners and operations, winner, certainty and refusal r
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
 });
 
-test("edits that wait for a restart come first, with their count, mod and field (0.2.0-dev.31.14)", async ({ page }) => {
+test("edits that wait for a restart come first, with their count, mod and field", async ({ page }) => {
   await report(page, { ...registryFixture(), counts: { ...registryFixture().counts, restartRequired: 3 } });
   await expect(page.getByRole("heading", { name: "Waits for a restart" })).toBeVisible();
   await expect(page.getByText("3 registry edits wait for a restart", { exact: true })).toBeVisible();
