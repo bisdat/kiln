@@ -249,6 +249,17 @@ public sealed class LastServerMissingTests : IDisposable
         Assert.Equal("last-server.json: rejected by your hosted world (srv-8383ec52951c, this game), missing creative", LastServer.LogLine(e));
     }
 
+    // A refusal without details (refused before the handshake was read) names nothing: then the comparison says what this
+    // game lacks, as for a welcome.
+    [Fact]
+    public void A_refusal_without_details_lists_what_the_game_lacks()
+    {
+        var advert = Advert("srv-0123456789ab", Advertised(Game("server")));
+        var player = Game("player", sfSurvival: false);
+        var e = LastServer.Answer("rejected", "needs mods", advert, null, [], hosted: false, [], player, DateTime.UtcNow);
+        Assert.Equal(["sf-survival"], ((JsonArray)e["missing"]!).Select(n => n!.GetValue<string>()));
+    }
+
     private static string Folder(string game, NetRequiredMod r) => r.Kind switch
     {
         "eml" => Path.Combine(game, "kiln", "eml", "mods", r.Id),
