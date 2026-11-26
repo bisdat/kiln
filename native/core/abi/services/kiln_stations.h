@@ -490,10 +490,11 @@ typedef struct KilnStationsApi {
     KilnResult(KILN_CALL* category_at)(uint32_t index, uint32_t* out_id);
     /* The recipes of a workshop (a station's Crafting.workshopId). */
     KilnResult(KILN_CALL* workshop_recipes)(uint32_t workshop, uint32_t* out, uint32_t capacity, uint32_t* out_count);
-    /* What a FILL request would do now (no game function runs). */
+    /* What a FILL request would do now (no game function runs). KILN_ERR_UNAVAILABLE for KILN_STATION_FILL_ITEM where
+     * fill_flags() does not name it. */
     KilnResult(KILN_CALL* plan)(const KilnStationRequest* request, KilnStationPlan* out);
     /* Queues an action. KILN_ERR_INVALID_ARGUMENT: bad size, action, flags or reserved fields, station 0, crafts outside
-     * 1..1000, keep_count over 64. KILN_ERR_UNAVAILABLE: the capability is off or no server world here.
+     * 1..1000 (1..65535 with KILN_STATION_FILL_ITEM), keep_count over 64, an item on anything but an item fill. KILN_ERR_UNAVAILABLE: the capability is off or no server world here.
      * KILN_ERR_BUFFER_TOO_SMALL: 1024 actions wait. KILN_OK: `done` (may be NULL) runs once. */
     KilnResult(KILN_CALL* submit)(KilnOwner owner, const KilnStationRequest* request, KilnStationDoneFn done, void* user,
                                   uint64_t* out_ticket);
