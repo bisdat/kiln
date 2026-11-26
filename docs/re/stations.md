@@ -826,7 +826,7 @@ snapshot kiln-items holds names, it returns the greater of the game's count and 
 item of the server's snapshot with count 0 (`set_craft_stock` keeps such a row: the snapshot stays on for the fill query
 above, and no count is raised): that screen's rows, the list's style-4 rows included, keep the game's counts, since their
 transfer control moves only what the bag and list A hold (§10.7); since 0.2.0-dev.31.15 those rows count the server's
-station rows instead (`kiln:craftstock` message 5: the bag, the Magic chests and the player's fill-opted links, per item the
+station rows instead (`kiln:craftstock` message 10: the bag, the Magic chests and the player's fill-opted links, per item the
 links hold), because the transfer then takes from those links too (§10.9). The list adds the fixed
 slots after the call, and the snapshot already holds those stacks (the server reads every link of the player, equipment
 included), so at the list Kiln first calls `stations/client.UiFixedSlotsCount` with the same item and view (only when the
@@ -1038,7 +1038,7 @@ So the move is exact and all or nothing, and the server decides it: a press the 
   game's own call, the Before and then After links pay the rest. Then the game's own `AutoTransferItem` once per layer
   (each link group's share from that group's containers with player 0, then the rest from list A with the player), and
   any code rolls the whole transaction back. One rate-limited `stations:` line per outcome.
-- Client, the count: the server sends `kiln:craftstock` message 5 per item the player's fill-opted links hold: bag +
+- Client, the count: the server sends `kiln:craftstock` message 10 per item the player's fill-opted links hold: bag +
   Magic chests of the player's base + those links (`source_stock(STOCK_FILLS)` leaves the base's Magic chests out since
   31.15, so a linked Magic chest is not counted twice). While a production station's screen is open the Kiln client hands
   those counts to the `stations.stock_ui` hook (`UiAvailableCount` at `AvailableRowRet1/2` answers the greater of the game's

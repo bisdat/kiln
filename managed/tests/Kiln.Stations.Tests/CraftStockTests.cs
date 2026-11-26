@@ -395,13 +395,43 @@ public sealed class CraftStockTests : IDisposable
     }
 
     [Fact]
+    public void Every_message_of_the_craftstock_channel_has_an_id_of_its_own()
+    {
+        // review of 0.2.0-dev.31.17 (GitHub #132): the station rows took message id 5, which DyeStock's rows hold on the same
+        // channel. NetChannel.Register threw in DyeStock.Attach, so CraftStock.Start gave the channel up (no dye, lock or
+        // build stock) and, on a client, never watched the screen (no crafting stock at all, the station rows included).
+        // The real registration on a fresh channel, with the shared stocks' attach flags cleared for it and put back after.
+        const System.Reflection.BindingFlags S = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var stocks = new[] { typeof(DyeStock), typeof(LockStock), typeof(BuildStock) };
+        var saved = stocks.Select(t => (t.GetField("_attached", S)!.GetValue(null), t.GetField("_channel", S)!.GetValue(null))).ToArray();
+        using var channel = Network.Channel("kiln:craftstock-ids-test", CraftStock.ChannelVersion, required: false);
+        try
+        {
+            foreach (var t in stocks) t.GetField("_attached", S)!.SetValue(null, false);
+            Assert.Null(Record.Exception(() => CraftStock.Register(channel)));
+            var byId = (System.Collections.IDictionary)typeof(NetChannel)
+                .GetField("ById", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(channel)!;
+            // 1 to 4 the snapshot, its hello and the fill buttons; 5, 6 dyes; 7, 8 locks; 9 building; 10 the station rows
+            Assert.Equal(Enumerable.Range(1, 10).Select(i => (ushort)i), byId.Keys.Cast<ushort>().Order());
+        }
+        finally
+        {
+            for (var i = 0; i < stocks.Length; i++)
+            {
+                stocks[i].GetField("_attached", S)!.SetValue(null, saved[i].Item1);
+                stocks[i].GetField("_channel", S)!.SetValue(null, saved[i].Item2);
+            }
+        }
+    }
+
+    [Fact]
     public void Station_rows_survive_the_wire_and_go_out_when_they_change()
     {
         var w = new NetWriter();
         CraftStockStationRows.Encode(new CraftStockStationRows([new CraftStockRow(Coal, 13), new CraftStockRow(Logs, 4)]), w);
         var r = new NetReader(w.ToArray());
         Assert.Equal([new CraftStockRow(Coal, 13), new CraftStockRow(Logs, 4)], CraftStockStationRows.Decode(ref r).Rows);
-        Assert.Equal((ushort)5, CraftStockStationRows.Id);
+        Assert.Equal((ushort)10, CraftStockStationRows.Id);
         // the session: sent with the first snapshot, again only when they change, and an empty list once when they go
         var p = new EntityId(5);
         var station = new Dictionary<uint, CraftStockRows> { [5] = Rows((Coal, 13)) };

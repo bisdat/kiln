@@ -405,7 +405,7 @@ rows only what their transfer buttons move. Those buttons are the game's own ite
 chests, so since 0.2.0-dev.30.8 a Kiln client shows the game's own counts there: no opted-in station outputs and no
 crafting-only links. Since 0.2.0-dev.31.15 the buttons also take from the player's `Fills` links
 ([Fills from linked sources](#fills-from-linked-sources)), and the rows count them: the server sends per item those links
-hold the bag, the Magic chests and the links together (`kiln:craftstock` message 5); a server without that sends nothing and
+hold the bag, the Magic chests and the links together (`kiln:craftstock` message 10); a server without that sends nothing and
 the rows keep the game's counts. Through 0.2.0-dev.30.7 the rows counted outputs and every link (9999+ of an ingredient
 only a link held), and the transfer buttons offered amounts whose press did nothing. Its "+1" / "+10" fill still lights when opted-in
 outputs cover it ([The station screen's fill button](#the-station-screens-fill-button)): that answer comes from the server,

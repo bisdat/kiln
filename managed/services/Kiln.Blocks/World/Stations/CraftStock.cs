@@ -20,9 +20,9 @@
 //    buttons move (the game's item transfer: the bag and the Magic chests), so the client names every item with none
 //    there (View): the rows keep the game's counts and the snapshot stays on for the fill buttons above.
 //  - Since 0.2.0-dev.31.15 those transfer buttons also take from the player's fill-opted links (Kiln's item fill,
-//    StationsCore.SourceItemFill): message 5 names, per item those links hold, the bag, the Magic chests and the links
+//    StationsCore.SourceItemFill): message 10 names, per item those links hold, the bag, the Magic chests and the links
 //    together, and the station screen counts that (View); every other item keeps the game's count. A server without it
-//    never sends message 5, and the rows stay the game's.
+//    never sends message 10, and the rows stay the game's.
 // docs/kiln/services/stations.md, "What each client shows".
 using System.Collections.Concurrent;
 using System.Text;
@@ -56,10 +56,10 @@ internal readonly record struct CraftStockRow(uint Item, uint Count);
 /// <summary>Server to client (GitHub #132, 0.2.0-dev.31.15): what a production station screen's ingredient rows may count,
 /// per item the player's fill-opted links hold: the bag, the Magic chests of the player's base and those links together
 /// (what the rows' transfer buttons move through Kiln's item fill). Empty: none (the game's counts). An older client has
-/// no message 5 and drops it.</summary>
+/// no message 10 and drops it. Id 10: 5 to 9 are DyeStock's, LockStock's and BuildStock's on this channel.</summary>
 internal sealed record CraftStockStationRows(CraftStockRow[] Rows)
 {
-    public const ushort Id = 5;
+    public const ushort Id = 10;
     public static void Encode(CraftStockStationRows m, NetWriter w) => CraftStockRows.Encode(new CraftStockRows(m.Rows), w);
     public static CraftStockStationRows Decode(ref NetReader r) => new(CraftStockRows.Decode(ref r).Rows);
 }
@@ -239,27 +239,7 @@ internal static class CraftStock
         ModContext.CurrentMod = null;  // Kiln's own channel, not a mod's
         try
         {
-            _channel = Network.Channel(ChannelName, ChannelVersion, required: false)
-                .Register<CraftStockRows>(CraftStockRows.Id, static (m, w) => CraftStockRows.Encode(m, w),
-                    static (ref NetReader r) => CraftStockRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientRows(m); },
-                    NetDirection.ToClient)
-                .Register<CraftStockHello>(CraftStockHello.Id, static (m, w) => CraftStockHello.Encode(m, w),
-                    static (ref NetReader r) => CraftStockHello.Decode(ref r), static (m, ctx) => Enqueue(ctx.Player, m.Open),
-                    NetDirection.ToServer)
-                // 0.2.0-dev.29.19: the station screen's fill buttons. An older peer has no such message ids and drops them.
-                .Register<CraftStockFillAsk>(CraftStockFillAsk.Id, static (m, w) => CraftStockFillAsk.Encode(m, w),
-                    static (ref NetReader r) => CraftStockFillAsk.Decode(ref r), static (m, ctx) => EnqueueAsk(ctx.Player, m.Keys),
-                    NetDirection.ToServer)
-                .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
-                    static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
-                    NetDirection.ToClient)
-                // 0.2.0-dev.31.15 (GitHub #132): the station screen's per-ingredient rows. An older peer drops the id.
-                .Register<CraftStockStationRows>(CraftStockStationRows.Id, static (m, w) => CraftStockStationRows.Encode(m, w),
-                    static (ref NetReader r) => CraftStockStationRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientStationRows(m); },
-                    NetDirection.ToClient);
-            DyeStock.Attach(_channel);
-            LockStock.Attach(_channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
-            BuildStock.Attach(_channel);  // GitHub #132, 0.2.0-dev.31.12: block placements from linked sources
+            _channel = Register(Network.Channel(ChannelName, ChannelVersion, required: false));
         }
         catch (Exception e)
         {
@@ -278,6 +258,34 @@ internal static class CraftStock
         {
             ModLog.Warn($"kiln.stations: the crafting menu does not count crafting sources (linked sources, station outputs) on this client: {e.Message}");
         }
+    }
+
+    /// <summary>Every message of the channel: this class's own, then those of the stocks that share it (DyeStock, LockStock,
+    /// BuildStock). Each id is taken once on a channel (NetChannel.Register throws on a second): a message added here takes
+    /// the next free id after all of them.</summary>
+    internal static NetChannel Register(NetChannel channel)
+    {
+        channel.Register<CraftStockRows>(CraftStockRows.Id, static (m, w) => CraftStockRows.Encode(m, w),
+                static (ref NetReader r) => CraftStockRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientRows(m); },
+                NetDirection.ToClient)
+            .Register<CraftStockHello>(CraftStockHello.Id, static (m, w) => CraftStockHello.Encode(m, w),
+                static (ref NetReader r) => CraftStockHello.Decode(ref r), static (m, ctx) => Enqueue(ctx.Player, m.Open),
+                NetDirection.ToServer)
+            // 0.2.0-dev.29.19: the station screen's fill buttons. An older peer has no such message ids and drops them.
+            .Register<CraftStockFillAsk>(CraftStockFillAsk.Id, static (m, w) => CraftStockFillAsk.Encode(m, w),
+                static (ref NetReader r) => CraftStockFillAsk.Decode(ref r), static (m, ctx) => EnqueueAsk(ctx.Player, m.Keys),
+                NetDirection.ToServer)
+            .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
+                static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
+                NetDirection.ToClient)
+            // 0.2.0-dev.31.15 (GitHub #132): the station screen's per-ingredient rows. An older peer drops the id.
+            .Register<CraftStockStationRows>(CraftStockStationRows.Id, static (m, w) => CraftStockStationRows.Encode(m, w),
+                static (ref NetReader r) => CraftStockStationRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientStationRows(m); },
+                NetDirection.ToClient);
+        DyeStock.Attach(channel);
+        LockStock.Attach(channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
+        BuildStock.Attach(channel);  // GitHub #132, 0.2.0-dev.31.12: block placements from linked sources
+        return channel;
     }
 
     // ================================================================ server ====
@@ -750,7 +758,7 @@ internal static class CraftStock
     // the hosting server's tick).
     private static readonly object ViewGate = new();
     private static CraftStockRows _rows = Off;
-    private static CraftStockRows _station = Off;  // the server's station rows (message 5), GitHub #132
+    private static CraftStockRows _station = Off;  // the server's station rows (message 10), GitHub #132
     private static bool _factory;
 
     /// <summary>Test hooks: whether the server takes hellos (hosting, or Kiln there); a hello sent; a snapshot applied.</summary>
