@@ -1305,7 +1305,7 @@ internal static class ShroudForgeMenu
             var f = ModCatalog.ReadState(src, "shroudforge.json");
             var claim = Read(f.Current ? f.Doc : null);
             return !(claim.Final || claim.MenuBy == "helper");
-        });
+        }, hosted: true);
     }
 
     /// <summary>A kiln-backend start: Kiln.Ui makes ShroudForge's menu event (auto-reset: presses that come before a wait
@@ -1336,7 +1336,7 @@ internal static class ShroudForgeMenu
     internal static void CloseForTests(nint h) => CloseHandle(h);
 
     /// <summary>Holds ShroudForge's menu key while <paramref name="keep"/> says so, toggling the page at each signal.</summary>
-    private static void Serve(string? sfKey, nint h, Func<bool> keep)
+    private static void Serve(string? sfKey, nint h, Func<bool> keep, bool hosted = false)
     {
         try
         {
@@ -1358,7 +1358,8 @@ internal static class ShroudForgeMenu
                 var wait = WaitForSingleObject(h, 2000);
                 if (wait != 0 && wait != 258) break;  // WAIT_TIMEOUT: check runtime lifecycle too
                 if (!keep()) break;
-                if (wait == 0) Toggle();
+                if (wait == 0 && hosted) ModToggled(ShroudForgeNews.Reload, () => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                else if (wait == 0) Toggle();
             }
         }
         finally
@@ -1370,7 +1371,10 @@ internal static class ShroudForgeMenu
     }
 
     /// <summary>The shortcut: opens the Kiln menu on ShroudForge, or closes it when it already shows ShroudForge.</summary>
-    public static void Toggle()
+    public static void Toggle() => Toggled();
+
+    /// <summary><see cref="Toggle"/>; true when it opened the page.</summary>
+    private static bool Toggled()
     {
         var page = ModManagerHost.Page;
         // a press before the page drew a frame finds its request still pending: that is the ShroudForge page too
@@ -1379,14 +1383,38 @@ internal static class ShroudForgeMenu
         {
             page.CancelRequest();
             Ui.MenuOpen = false;
+            return false;
         }
-        else Open();
+        Open();
+        return true;
     }
 
-    public static void Open()
+    public static void Open(string? mod = null)
     {
-        ModManagerHost.Page.Request(new EngineFilter("shroudforge"));
+        ModManagerHost.Page.Request(new EngineFilter("shroudforge"), mod);
         Ui.MenuOpen = true;
+    }
+
+    /// <summary>ShroudForge's runtime signalled the menu event (a mod's shroudforge.ui.toggle_modloader()) in a hosted
+    /// start: toggle the page as the shortcut does, and when that opened it, choose the mod whose notice came just now.
+    /// A mod opens ShroudForge's window to show what it published (Altar Cleanup: what its scan found and "press the key
+    /// again"); it may publish just before or just after it asks, so the notices are read again for a moment (menu
+    /// thread: file IO is fine here).</summary>
+    internal static void ModToggled(Func<IReadOnlyList<SfNews>> read, Func<long> nowSeconds, int tries = 8, int waitMs = 200)
+    {
+        var since = nowSeconds() - 3;
+        if (!Toggled()) return;
+        for (var i = 0; i < tries; i++)
+        {
+            if (ShroudForgeNews.Fresh(read(), nowSeconds(), since) is { } mod)
+            {
+                // still open on ShroudForge: the player did not close it meanwhile
+                var page = ModManagerHost.Page;
+                if (Ui.MenuOpen && (page.PendingRequest == "shroudforge" || page.Filter.Kind == "shroudforge")) Open(mod);
+                return;
+            }
+            if (waitMs > 0) Thread.Sleep(waitMs);
+        }
     }
 
     private const uint SYNCHRONIZE = 0x00100000;

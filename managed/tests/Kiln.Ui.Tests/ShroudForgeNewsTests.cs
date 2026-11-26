@@ -170,4 +170,51 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.Equal(0, asked);
         Assert.DoesNotContain("Press again", string.Join("\n", FakeUiTable.Texts));
     }
+
+    private static CatalogSnapshot TwoMods(long version) => new()
+    {
+        Version = version,
+        Mods = [new CatalogMod { Engine = "shroudforge", Id = "glider", Name = "Glider" }, new CatalogMod { Engine = "shroudforge", Id = "altar-cleanup", Name = "Altar Cleanup" }],
+        Engines = [new CatalogEngine { Kind = "shroudforge", Name = "ShroudForge", Count = 2 }],
+    };
+
+    [Fact]
+    public void A_request_for_a_mod_selects_its_row_once_the_list_has_it()
+    {
+        var page = new ModManagerPage();
+        page.Request(new EngineFilter("shroudforge"), "altar-cleanup");
+        page.TakeRequest();
+        page.Update(CatalogSnapshot.Empty, false);  // the menu opened before the list was read: the wish waits
+        page.Update(TwoMods(3), false);
+        Assert.Equal("altar-cleanup", page.Rows.Single(r => r.Key == page.Selected).Mod.Id);
+        page.Selected = page.Rows[0].Key;  // the player moves on: the request is spent
+        page.Update(TwoMods(4), false);
+        Assert.Equal("glider", page.Rows.Single(r => r.Key == page.Selected).Mod.Id);
+    }
+
+    [Fact]
+    public void A_mod_toggle_opens_the_page_on_the_mod_whose_notice_just_came()
+    {
+        Assert.False(FakeUiTable.MenuOpen);
+        // the mod asks for the window first and publishes a moment later: the page follows the notice once it lands
+        var reads = 0;
+        IReadOnlyList<SfNews> Read() => ++reads < 3 ? [] : [new SfNews("altar-cleanup.result", "altar-cleanup", "Found", "Press again", "info", 1000)];
+        ShroudForgeMenu.ModToggled(Read, () => 1001, tries: 5, waitMs: 0);
+        Assert.True(FakeUiTable.MenuOpen);
+        var page = ModManagerHost.Page;
+        page.TakeRequest();
+        page.Update(TwoMods(5), false);
+        Assert.Equal(("shroudforge", "altar-cleanup"), (page.Filter.Kind, page.Rows.Single(r => r.Key == page.Selected).Mod.Id));
+    }
+
+    [Fact]
+    public void A_mod_toggle_that_closes_the_page_waits_for_no_notice()
+    {
+        ShroudForgeMenu.Toggle();  // open (F9)
+        Assert.True(FakeUiTable.MenuOpen);
+        var reads = 0;
+        ShroudForgeMenu.ModToggled(() => { reads++; return []; }, () => 1001, tries: 5, waitMs: 0);
+        Assert.False(FakeUiTable.MenuOpen);
+        Assert.Equal(0, reads);
+    }
 }
