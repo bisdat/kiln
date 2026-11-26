@@ -356,6 +356,16 @@ impl<'a> GithubProvider<'a> {
         let before = entry.clone();
         let receipt_release = item.receipt.as_ref().and_then(|r| r.release_id.as_deref());
         let receipt_changed = entry.selection.is_some() && entry.receipt.release_id.as_deref() != receipt_release;
+        // Another copy is installed than the one the remembered answer was compared with (an update by drop, Add mod
+        // or import, a roll back), and that answer has nothing above it: typically the very version just installed,
+        // while a newer one may be out by now. A check that may ask does not reuse such an answer however recent it
+        // is (netjunk, 2026-11-26: "Update 0.2.10" with 0.2.10 installed and 0.2.12 out).
+        // (Once per check: a source this check asked already is not asked again for another copy.)
+        let installed = &item.target.library_ref;
+        let installed_changed = !run.asked.contains(&key)
+            && entry.selection.as_ref().is_some_and(|sel| {
+                (entry.receipt.version != installed.version || entry.receipt.hash != installed.hash) && !select::offers_more_than(sel, &installed.version)
+            });
 
         // Whether to ask, and if not, why not (None: because the remembered answer is recent enough).
         let ttl = if opts.automatic { STALE_AFTER_SECS } else { MANUAL_TTL_SECS };
@@ -375,7 +385,7 @@ impl<'a> GithubProvider<'a> {
             } else if entry_wait > 0 && (entry.reason == Some(UnknownReason::RateLimited) || !opts.refresh) {
                 // the wait after a failure; --refresh skips it unless the failure was a request limit
                 Some(entry.reason)
-            } else if !opts.refresh && !receipt_changed && entry.status != Some(Attempt::Failed) && entry.success_within(now, ttl) {
+            } else if !opts.refresh && !receipt_changed && !installed_changed && entry.status != Some(Attempt::Failed) && entry.success_within(now, ttl) {
                 Some(None)
             } else {
                 None
