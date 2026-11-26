@@ -465,13 +465,58 @@ void archive_journal_writers(const std::string& dir) {
     }
 }
 
+// Review (registry-writers): the journal lists resources by their key, so only a registry whose entries are each a whole
+// resource (items, drops, balance) can be named from it. A recipe is an element of the shared RecipeRegistryResource: its
+// recipeGuid is a member, not a resource key, so a package that wrote a resource with that GUID never wrote the recipe,
+// and a package that wrote the recipe list cannot be pinned on one recipe. Neither names the recipe; base.journal says so.
+std::vector<stage::Env::DataFile> recipe_sections(const Schema& schema) {
+    const std::string fast = R"({"registry": {"alter": [{"registry": "recipes", "select": {"id": "game:craft_planks"}, "field": "duration", "op": 1}]}})";
+    return stage::read_sections("bigmod", "2.0.0", {{"content/r.json", fast}}, schema);
+}
+void archive_journal_shared_resources(const std::string& dir) {
+    const std::string live = std::string(64, 'a');
+    // "other" wrote a resource whose GUID is the recipe's recipeGuid (g(101)); "lists" wrote the recipe list itself (g(100))
+    const std::string journal =
+        json{{"format", 1}, {"stem", "enshrouded_server"}, {"generation", live}, {"receiptSha256", std::string(64, 'b')}, {"dialect", "shroudforge"},
+             {"attempt", "first"}, {"truncated", false},
+             {"packages", json::array({{{"id", "other"}, {"version", "1.0.0"}, {"kind", "shroudforge"}, {"contentSha256", std::string(64, '1')},
+                                        {"settingsSha256", std::string(64, '2')}, {"truncated", false},
+                                        {"changed", json::array({{{"guid", g(101)}, {"typeHash", "01234567"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                        {"created", json::array()}, {"contents", json::array()}},
+                                       {{"id", "lists"}, {"version", "1.0.0"}, {"kind", "shroudforge"}, {"contentSha256", std::string(64, '3')},
+                                        {"settingsSha256", std::string(64, '4')}, {"truncated", false},
+                                        {"changed", json::array({{{"guid", g(100)}, {"typeHash", "89abcdef"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                        {"created", json::array()}, {"contents", json::array()}}})},
+             {"unattributed", {{"truncated", false}, {"changed", json::array()}, {"created", json::array()}, {"contents", json::array()}}}}
+            .dump();
+    TreeView view = world();
+    Files files;
+    stage::Env e = env_of(&view, &files, dir, &recipe_sections);
+    e.writer = "kiln-eml";
+    e.archive_journal = [&](std::string* generation, std::string*) -> std::optional<std::string> { return *generation = live, journal; };
+    stage::Runner r(std::move(e));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    const json* duration = nullptr;
+    for (const json& f : rep["fields"])
+        if (f["id"] == "game:craft_planks" && f["field"] == "duration") duration = &f;
+    check(duration != nullptr, "the recipe's duration row: " + rep["fields"].dump());
+    for (const json& w : (*duration)["writers"]) check(w["kind"] != "archiveWriter", "no package is named on a recipe: " + duration->dump());
+    for (const json& c : rep["conflicts"]) check(c["certainty"] != "named", "no named conflict line on a recipe: " + c.dump());
+    check(rep["base"]["journal"]["state"] == "read" && rep["base"]["journal"]["entries"] == 0, "the journal is read and names no entry: " + rep["base"].dump());
+    check(rep["base"]["journal"]["text"].get<std::string>().find("recipes") != std::string::npos,
+          "base.journal says recipes cannot be named from it: " + rep["base"].dump());
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
         {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
-        {"archive_journal_writers", [&] { archive_journal_writers(dir); }}};
+        {"archive_journal_writers", [&] { archive_journal_writers(dir); }},
+        {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

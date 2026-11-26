@@ -303,7 +303,8 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
 - **Kiln's registry stage** is one reader (since 0.2.0-dev.31.15, `native/services/content/registry/archive_journal.cpp`,
   MIT code over this file format): once per start it checks `generation` against the identity kiln-eml granted for the
   launch (`published_identity`'s `archive_sha256`) and names each package on the registry entries whose resource GUID it
-  lists (`changed` and `created`), as `archiveWriter` rows of certainty `named` in `kiln/state/registry.json`
+  lists (`changed` and `created`; only registries whose entries are whole resources: items, drops, balance, never the
+  elements of a shared resource such as a recipe), as `archiveWriter` rows of certainty `named` in `kiln/state/registry.json`
   ([registries guide](../modding/registries/README.md#who-else-wrote-a-field)).
 
 ## Tests

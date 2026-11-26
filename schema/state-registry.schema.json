@@ -132,7 +132,7 @@
         },
         "journal": {
           "type": "object",
-          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json, written by a kiln-mode start): read when it is this start's and its packages are named on the entries they wrote (writer rows of kind archiveWriter, certainty named); none when this start has none (hosted or installed ShroudForge, kiln-eml's EML dialect and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a format-1 journal. Since 0.2.0-dev.31.15.",
+          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json, written by a kiln-mode start): read when it is this start's and its packages are named on the entries they wrote (writer rows of kind archiveWriter, certainty named; only registries whose entries are each a whole resource: items, drops, balance, never a recipe or loot entry); none when this start has none (hosted or installed ShroudForge, kiln-eml's EML dialect and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a format-1 journal. Since 0.2.0-dev.31.15.",
           "required": ["state", "packages", "entries", "truncated"],
           "properties": {
             "state": { "enum": ["read", "none", "stale", "unreadable"] },

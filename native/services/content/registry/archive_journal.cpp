@@ -92,13 +92,15 @@ ArchiveJournal parse_archive_journal(const std::string& text, const std::string&
     return j;
 }
 
-size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, BaseModel* base) {
+size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, const std::set<std::string>& whole,
+                            BaseModel* base) {
     if (journal.state != "read" || !base) return 0;
-    // GUID -> the entries that are that resource (one per registry it is an entry of)
+    // GUID -> the entries that are that resource (one per registry it is an entry of); an element of a shared resource is
+    // not one (its GUID member is no resource key)
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> by_guid;
     for (const auto& [key, guid] : ids) {
         const size_t bar = key.find('|');
-        if (bar == std::string::npos || guid.empty()) continue;
+        if (bar == std::string::npos || guid.empty() || !whole.count(key.substr(0, bar))) continue;
         by_guid[lower(guid)].emplace_back(key.substr(0, bar), key.substr(bar + 1));
     }
     std::map<std::pair<std::string, std::string>, std::vector<std::string>> names;

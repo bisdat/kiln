@@ -369,8 +369,17 @@ struct Runner::Impl {
             else journal->text = why.empty() ? "this start's archive writer keeps no change journal: what it changed is part of the base and not named" : why;
             if (journal->state == "stale" || journal->state == "unreadable") log(1, "registry: " + journal->text);
         }
-        const size_t named = name_archive_writers(*journal, ids, base);
-        meta.base.journal = {journal->state, journal->text, journal->packages.size(), named, journal->truncated};
+        // only a registry whose entries are each a whole resource can be named from the journal's resource keys
+        std::set<std::string> whole;
+        std::string shared;
+        for (const auto& [name, rmap] : rm.registries)
+            if (rmap.entries.kind != map::EntryKind::Array) whole.insert(name);
+            else shared += (shared.empty() ? "" : ", ") + name;
+        const size_t named = name_archive_writers(*journal, ids, whole, base);
+        std::string text = journal->text;
+        if (journal->state == "read" && !shared.empty())
+            text += "; " + shared + " entries are not named (each is an element of a resource its registry's entries share, and the journal does not say which element a package wrote)";
+        meta.base.journal = {journal->state, text, journal->packages.size(), named, journal->truncated};
         if (journal->state == "read")
             log(0, "registry: " + journal->text + "; " + std::to_string(named) + (named == 1 ? " entry" : " entries") +
                        " of the registries name their archive-writer packages");

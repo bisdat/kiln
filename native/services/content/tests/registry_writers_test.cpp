@@ -7,6 +7,7 @@
 // the document it builds, for a schema check against schema/state-registry.schema.json.
 #include <cstdio>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -123,7 +124,8 @@ int main(int argc, char** argv) {
 
     // ---- naming entries ----
     BaseModel bm = base();
-    const size_t named = name_archive_writers(j, kIds, &bm);
+    const std::set<std::string> whole = {"items"};  // the registries whose entries are each a whole resource
+    const size_t named = name_archive_writers(j, kIds, whole, &bm);
     CHECK(named == 2, "two entries are named (the written one and the created one): " + std::to_string(named));
     const auto& stone = bm.registries["items"][0].archive;
     CHECK(stone == std::vector<std::string>({"shroudforge:alpha", "eml:bravo", "shroudforge:delta"}),
@@ -132,7 +134,17 @@ int main(int argc, char** argv) {
     CHECK(bm.registries["items"][2].archive == std::vector<std::string>({"shroudforge:alpha", "shroudforge:delta"}),
           "the package that created an entry is named on it, and a later one that wrote it");
     BaseModel none = base();
-    CHECK(name_archive_writers(stale, kIds, &none) == 0 && none.registries["items"][0].archive.empty(), "a stale journal names nothing");
+    CHECK(name_archive_writers(stale, kIds, whole, &none) == 0 && none.registries["items"][0].archive.empty(), "a stale journal names nothing");
+    // review: an element of a shared resource (a recipe) is never named, even when its GUID member is a resource the journal lists
+    BaseModel shared = base();
+    BaseModel::Entry recipe;
+    recipe.id = "game:craft_stone";
+    recipe.fields["duration"] = Value::number(2);
+    shared.registries["recipes"] = {recipe};
+    std::map<std::string, std::string> ids = kIds;
+    ids["recipes|game:craft_stone"] = kStoneGuid;
+    CHECK(name_archive_writers(j, ids, whole, &shared) == 2 && shared.registries["recipes"][0].archive.empty() && !shared.registries["items"][0].archive.empty(),
+          "a registry whose entries share a resource is not named from the journal's resource keys");
 
     // ---- the chain and the conflict line ----
     const Result r = compose(s, bm, {},

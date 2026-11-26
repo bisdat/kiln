@@ -13,6 +13,10 @@
 //  - the journal is per resource: a package is named on every field of an entry whose resource it wrote, whatever member
 //    it changed. "Wrote" means written, not changed (writing a field's current value lists the resource too). The journal
 //    can over-name a writer, never miss one, within its bounds;
+//  - only a registry whose entries are each one whole resource (regmap entries kind resource or single: items, drops,
+//    balance) can be named from it. An entry of a registry whose entries are the elements of a shared resource (kind
+//    array: recipes, loot) is never named: the journal lists the shared resource, not which element a package wrote, and
+//    an element's own GUID member (recipeGuid) is no resource key, so matching it could name a package that never wrote it;
 //  - a journal is used only when its generation is the start's live generation (the kiln-mode startup outcome's
 //    archiveSha256): a writer that ignores the receipt (hosted ShroudForge, another loader) can leave one behind that
 //    names another generation. Such a journal is "stale" and names nobody;
@@ -22,6 +26,7 @@
 #pragma once
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -61,9 +66,11 @@ inline std::string archive_writer_label(const std::string& who) {
     return who;
 }
 
-// Names the journal's packages on the base's game entries: every entry whose GUID (ids: "<registry>|<kiln id>" -> GUID
-// text, the model's id table) a package wrote or created gets that package, in run order (BaseModel::Entry::archive).
-// Returns how many entries were named.
-size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, BaseModel* base);
+// Names the journal's packages on the base's game entries: every entry of a registry in `whole` (its entries are each one
+// whole resource, so the id table's GUID is the resource's) whose GUID (ids: "<registry>|<kiln id>" -> GUID text, the
+// model's id table) a package wrote or created gets that package, in run order (BaseModel::Entry::archive). An entry of
+// any other registry is never named. Returns how many entries were named.
+size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, const std::set<std::string>& whole,
+                            BaseModel* base);
 
 }  // namespace kc::registry

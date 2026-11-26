@@ -309,6 +309,11 @@ base).
   field of that item a mod edits. "Wrote" means written, not changed: a package that set a value to what it already was is
   listed too. It can name a package that did not change a field; it never misses one that did, within its bounds (4,096
   rows per package, 32,768 in all; `base.journal.truncated` says when it ran out).
+- Only **items, drops and balance** are named: their entries are each one whole resource of the game's archive, which is
+  what the journal lists. A recipe or a loot entry is an element of a resource its whole registry shares (the recipe list,
+  the loot list), and the journal does not say which element a package wrote, so no package is named on recipes or loot
+  (`base.journal.text` says so). The balance table is one entry: a package that wrote any balance value is listed on every
+  balance field a mod edits.
 - `base.journal` in `registry.json` says what happened: `read` (with how many packages and entries), `none`, `stale` (a
   journal left by an earlier start, which names nobody) or `unreadable`, with a sentence.
 - **No names without a journal.** Hosted or installed ShroudForge (the default), kiln-eml's own EML pass (EML mods without

@@ -123,7 +123,7 @@ test("names archive-writer packages from kiln-eml's journal and labels drift bes
     text: "items[game:fixture_stack].maxStack: betterstacks (ShroudForge package) wrote this entry in the game's archive before Kiln; stacker's edit wins (D1): 10 -> 20" }];
   await report(page, { ...r, base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 1, entries: 1, truncated: false } },
     fields: [row], conflicts, counts: { ...r.counts, conflicts: 1 } });
-  await expect(page.getByText("Archive-writer packages named from kiln-eml's change journal: 1 packages, 1 entries.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Archive-writer packages named from kiln-eml's change journal: 1 packages, 1 entries (items, drops and balance only: a recipe or loot entry is not named).", { exact: true })).toBeVisible();
   await expect(page.getByText(/betterstacks \(ShroudForge package\) wrote this entry in the game's archive before Kiln; stacker's edit wins \(D1\)/)).toBeVisible();
   await expect(page.getByText("Named from journal", { exact: true }).first()).toBeVisible();
   const field = page.locator(".registry-field").first();
