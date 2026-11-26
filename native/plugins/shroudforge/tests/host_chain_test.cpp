@@ -33,6 +33,7 @@
 #include "registry.h"
 #include "services/hooks_chain.h"
 #include "services/hooks_internal.h"
+#include "services/kiln_build.h"
 #include "services/kiln_hooks.h"
 #include "services/service.h"
 #include "sf_internal.h"
@@ -390,6 +391,59 @@ const json* target_of(const json& map, uintptr_t live_addr) {
 
 }  // namespace
 
+// ---- a fake kiln.build and server world for the voxel writer (host_voxels.cpp) ----
+const void* g_fake_build = nullptr;
+uintptr_t g_server_world = 0;
+thread_local bool t_world_thread = false;
+bool g_post_refuses = false;
+std::mutex g_posts_mutex;
+std::vector<std::pair<KilnTaskFn, void*>> g_posts;
+KilnVoxel g_cells[16 * 16 * 16]{};
+uint32_t g_write_flags = 0;
+int g_build_writes = 0;
+bool g_tick_ok = true;  // kiln.build's members answer only on the "server world's thread"
+size_t cell_at(int x, int y, int z) { return (static_cast<size_t>(z) * 16 + y) * 16 + x; }
+KilnResult KILN_CALL fb_status(KilnBuildStatus* st) {
+    const uint32_t size = st->size;
+    std::memset(st, 0, sizeof *st);
+    st->size = size, st->read = st->write = st->world = 1;
+    return KILN_OK;
+}
+KilnResult KILN_CALL fb_ready(const int32_t*, const uint32_t*) { return t_world_thread ? KILN_OK : (g_tick_ok = false, KILN_ERR_WRONG_THREAD); }
+KilnResult KILN_CALL fb_read(const int32_t o[3], const uint32_t d[3], KilnVoxel* out, size_t) {
+    if (!t_world_thread) return g_tick_ok = false, KILN_ERR_WRONG_THREAD;
+    size_t j = 0;
+    for (uint32_t z = 0; z < d[2]; ++z)
+        for (uint32_t y = 0; y < d[1]; ++y)
+            for (uint32_t x = 0; x < d[0]; ++x) out[j++] = g_cells[cell_at(o[0] + x, o[1] + y, o[2] + z)];
+    return KILN_OK;
+}
+KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
+    if (!t_world_thread) return g_tick_ok = false, KILN_ERR_WRONG_THREAD;
+    ++g_build_writes;
+    g_write_flags = w->flags;
+    size_t j = 0;
+    for (uint32_t z = 0; z < w->dims[2]; ++z)
+        for (uint32_t y = 0; y < w->dims[1]; ++y)
+            for (uint32_t x = 0; x < w->dims[0]; ++x) g_cells[cell_at(w->origin[0] + x, w->origin[1] + y, w->origin[2] + z)] = w->cells[j++];
+    r->flags = KILN_BUILD_R_CHANGED | KILN_BUILD_R_VERIFIED;
+    r->blocks_written = 1;
+    return KILN_OK;
+}
+// the "server world": runs what was posted, on its own thread, after `delay_ms`
+void run_posts(unsigned delay_ms) {
+    std::thread([delay_ms] {
+        Sleep(delay_ms);
+        t_world_thread = true;
+        std::vector<std::pair<KilnTaskFn, void*>> todo;
+        {
+            std::lock_guard lock(g_posts_mutex);
+            todo.swap(g_posts);
+        }
+        for (auto& [fn, user] : todo) fn(user);
+    }).detach();
+}
+
 int main() {
     auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
     auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
@@ -422,9 +476,18 @@ int main() {
     api.size = sizeof api;
     api.abi_version = KILN_ABI_VERSION;
     api.service = [](KilnStr name, uint32_t min) -> const void* {
+        if (std::string_view(name.ptr, name.len) == KILN_BUILD_SERVICE) return g_fake_build;
         return std::string_view(name.ptr, name.len) == KILN_HOOKS_SERVICE && g_service->available && g_service->version >= min
                    ? g_service->table
                    : nullptr;
+    };
+    api.world = [](uint32_t kind) -> uintptr_t { return kind == KILN_WORLD_SERVER ? g_server_world : 0; };
+    api.on_tick_thread = []() -> bool { return t_world_thread; };
+    api.post = [](KilnOwner, KilnTaskFn fn, void* user) -> KilnResult {
+        if (g_post_refuses) return KILN_ERR_UNAVAILABLE;
+        std::lock_guard lock(g_posts_mutex);
+        g_posts.push_back({fn, user});
+        return KILN_OK;
     };
     std::puts("== the adapter's host table");
     g_host = ksf::host_table(&api, 7);
@@ -551,6 +614,49 @@ int main() {
     check(g_host->install_hook("x", reinterpret_cast<uintptr_t>(kPlaces[0].fn), 77, kCallbacks[0], 0) == 0, "an unknown kind: 0");
     check(g_host->install_hook("x", reinterpret_cast<uintptr_t>(kPlaces[0].fn), ksf::kHookPlain, nullptr, 0) == 0, "no callback: 0");
     g_host->remove_hook(0);  // harmless
+
+    // ---- 5. the voxel writer (kfc_host.h voxel_write_ready / voxel_write) ----
+    std::puts("== the voxel writer");
+    check(g_host->voxel_write_ready && g_host->voxel_write, "the table carries the voxel writer");
+    const int32_t at[3] = {2, 3, 4};
+    const uint32_t box[3] = {2, 1, 2};
+    const uint16_t cells[4] = {0x0000, 0xff81, 0xff82, 0x8001};
+    uint32_t outcome = 9;
+    check(g_host->voxel_write_ready() == 0, "no kiln.build: not ready");
+    check(!g_host->voxel_write(at, box, cells, 4, &outcome) && outcome == 1, "no kiln.build: refused before any change");
+    static KilnBuildApi fake{};
+    fake.header.size = sizeof fake, fake.header.version = KILN_BUILD_VERSION;
+    fake.status = &fb_status, fake.ready = &fb_ready, fake.read = &fb_read, fake.write = &fb_write;
+    g_fake_build = &fake;
+    check(g_host->voxel_write_ready() == 0 && !g_host->voxel_write(at, box, cells, 4, &outcome) && outcome == 1,
+          "no world this game hosts: not ready, refused");
+    g_server_world = 0x1234;
+    check(g_host->voxel_write_ready() == 1, "a hosted world: ready");
+    run_posts(30);
+    outcome = 9;
+    check(g_host->voxel_write(at, box, cells, 4, &outcome) && outcome == 0, "written on the server world's thread: outcome 0");
+    check(g_cells[cell_at(2, 3, 4)] == 0 && g_cells[cell_at(3, 3, 4)] == 0xff81 && g_cells[cell_at(2, 3, 5)] == 0xff82 &&
+          g_cells[cell_at(3, 3, 5)] == 0x8001 && g_tick_ok, "the cells landed, and kiln.build was only called there");
+    check(g_write_flags == (KILN_BUILD_F_IN_BASES | KILN_BUILD_F_GAME_SAVE), "the game's save rule, no base guard");
+    check(!g_host->voxel_write(at, box, cells, 3, &outcome) && outcome == 1, "a count that does not match its box: refused");
+    // a world that does not take the write within 2 s: cancelled and refused; when it runs later, it writes nothing
+    const int writes = g_build_writes;
+    const uint16_t other[4] = {1, 2, 3, 4};
+    outcome = 9;
+    check(!g_host->voxel_write(at, box, other, 4, &outcome) && outcome == 1, "a world that does not step: refused after the wait");
+    run_posts(0);
+    Sleep(200);
+    check(g_build_writes == writes && g_cells[cell_at(3, 3, 4)] == 0xff81, "the cancelled write never runs");
+    g_post_refuses = true;
+    check(!g_host->voxel_write(at, box, other, 4, &outcome) && outcome == 1, "a post Kiln refuses: refused");
+    g_post_refuses = false;
+    {
+        std::lock_guard lock(g_log_mutex);
+        bool said = false;
+        for (const auto& l : g_lines) said |= l.find("ShroudForge voxel write refused before changing the world") != std::string::npos &&
+                                              l.find("did not take the write within 2 seconds") != std::string::npos;
+        check(said, "kiln.log says why a write was refused");
+    }
 
     {
         std::lock_guard lock(g_log_mutex);
