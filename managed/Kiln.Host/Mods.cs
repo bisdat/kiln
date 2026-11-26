@@ -988,7 +988,11 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             // hold it now
             var folder = _options.Profile.Folders.FirstOrDefault(f => f.Id == id && f.Enabled)?.Directory ?? System.IO.Path.Combine(_modsDirectory, id);
             if (!Manifest.IdPattern.IsMatch(id) || !File.Exists(System.IO.Path.Combine(folder, Manifest.FileName)))
-                return new ModOperationResult(false, $"mod {id} is not loaded", []);
+                return NativeModNamed(id)
+                    // a native mod (native.json): kiln-core loaded its DLLs at start and never unloads them (0.2.0-dev.31.14)
+                    ? new ModOperationResult(false, $"RestartRequired: {id} is a native mod (native.json): Kiln loads its DLLs at start and never unloads them, " +
+                                                    "so a reload cannot change it; restart the game (or the server) to load a new version", [])
+                    : new ModOperationResult(false, $"mod {id} is not loaded", []);
             var first = TryLoad(folder, out var loadError, out var loadedNow);
             return new ModOperationResult(first, first ? $"loaded {string.Join(", ", loadedNow)} (it was not loaded)" : loadError, loadedNow);
         }
@@ -1014,6 +1018,26 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
         else directories.Add(record!.Directory);
         return FinishReload(id, directories, cascade);
+    }
+
+    /// <summary>Whether <paramref name="id"/> names a native mod (kiln_native.h): its drop-in folder <c>kiln/native/&lt;id&gt;</c>, or
+    /// kiln-core's <c>kiln/state/native.json</c> lists it (a profile's native mod).</summary>
+    internal bool NativeModNamed(string id)
+    {
+        if (!Manifest.IdPattern.IsMatch(id)) return false;
+        var kiln = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_modsDirectory));
+        if (kiln is null) return false;
+        if (File.Exists(System.IO.Path.Combine(kiln, "native", id, "native.json"))) return true;
+        try
+        {
+            var state = System.IO.Path.Combine(kiln, "state", "native.json");
+            if (!File.Exists(state) || new FileInfo(state).Length > 4 << 20) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(state));
+            return doc.RootElement.TryGetProperty("mods", out var mods) && mods.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                   mods.EnumerateArray().Any(m => m.ValueKind == System.Text.Json.JsonValueKind.Object && m.TryGetProperty("id", out var i) &&
+                                                  i.ValueKind == System.Text.Json.JsonValueKind.String && i.GetString() == id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { return false; }
     }
 
     private ModOperationResult FinishReload(string id, List<string> directories, List<string> cascade)
