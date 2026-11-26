@@ -870,8 +870,9 @@ std::vector<StoreSkipped> store_skipped() {
         const Field* f = nullptr;
         StoreSkipped x;
         x.addr = r.addr, x.kind = r.kind, x.id = r.id, x.mod = r.mod, x.source = r.source, x.revert = r.revert;
-        x.what = slot_what(s, &field, &f);
-        x.text = x.what + " was written by another writer after Kiln's layer: Kiln's " + (r.revert ? "revert" : "edit") + " not applied";
+        x.what = slot_what(s, &field, &f);  // game debug and member names: diagnostics only, never a report row (P32)
+        // the registry's report names the Kiln place instead (registry_live.cpp skipped_text)
+        x.text = std::string("a slot Kiln wrote was written by another writer after Kiln's layer: Kiln's ") + (r.revert ? "revert" : "edit") + " not applied";
         out.push_back(std::move(x));
     }
     return out;

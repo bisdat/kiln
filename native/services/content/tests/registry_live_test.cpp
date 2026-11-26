@@ -735,6 +735,23 @@ void another_writer_in_the_report() {
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
+    // P32: the row names the Kiln place, never the game's debug or member names
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer"), "the skipped row names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
+}
+// P32: a skipped revert (the pack removed after another writer took the slot) still names the Kiln place it had
+void skipped_revert_names_the_kiln_place() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    stage(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    apply_registry_files(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    mem<uint32_t>(WOOD_AT, 777);
+    apply_registry_files({});  // the pack removed: Kiln's revert is skipped
+    check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer: Kiln's revert not applied"),
+          "the skipped revert names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
 }
 // P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
 void live_transactions() {
@@ -882,6 +899,7 @@ int main() {
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
