@@ -3073,6 +3073,9 @@
       "title": "Appearance",
       "fire": "Animated fire",
       "fireHint": "The fire on Play (WebGL). Off: a plain Play button, easier on weak GPUs.",
+      "festive": "Festive season",
+      "festiveHint": "A winter mantel over the fire, with snow, until 7 January.",
+      "festiveMore": "Lamps, candles and lanterns of many winter traditions on a mantel over the fire, snow outside the arch and garlands on the pages, from the Monday after Thanksgiving weekend to 7 January. Off: the usual look for the rest of this season; it comes back next year.",
       "noGpu": "Draw the launcher without the GPU",
       "fireOffSoftware": "Off while the launcher draws without the GPU.",
       "fireOffEnv": "Off for this start: KILN_LAUNCHER_NO_WEBGL is set.",
@@ -4182,6 +4185,7 @@
     },
     "appShell": {
       "thanksgiving": "Happy Thanksgiving",
+      "festive": "Warm wishes for the season",
       "headStart": "{progress} · {step}",
       "pct": "{pct}%",
       "labelTime": "{label} {time}",
