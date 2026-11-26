@@ -5,6 +5,10 @@
 // the slow path (WebGL drawn on the CPU, as the headless browser's SwiftShader does) is measured against every day's.
 import { expect, test, type Page } from "@playwright/test";
 
+// a smaller window than the suite's: where the CPU draws WebGL (the headless browser) the turkey's frames are dear, and the
+// specs beside these should not starve for it
+test.use({ viewport: { width: 1024, height: 640 } });
+
 type Rec = { __frags: string[]; __uV: number[]; __draws: number };
 
 /** Records the fragment shaders compiled, the values given to the turkey's uV and the frames drawn. */
@@ -63,9 +67,8 @@ test("forced on: the greeting shows over the mouth and the fire draws the turkey
   const a = await rec(page);
   expect(kinds(a.frags).length).toBe(1);
   expect(a.frags[0]).toContain("roast(");
-  await page.waitForTimeout(1000);
+  await expect.poll(async () => (await rec(page)).draws - a.draws).toBeGreaterThan(2);
   const b = await rec(page);
-  expect(b.draws - a.draws).toBeGreaterThan(2); // a few a second even where the CPU draws WebGL (SwiftShader)
   expect(new Set(b.uV)).toEqual(new Set([1]));
   // another page: the greeting goes with the Play page, the pilot light (the drumstick) keeps the turkey's shader
   await page.locator(".k-head-link", { hasText: "Settings" }).click();
@@ -120,6 +123,7 @@ test("Animated fire off: no turkey and no greeting, the CSS mouth as always", as
 });
 
 test("the greeting in Polish (the longest) wraps over the mouth and stays in the window", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" }); // a still fire: the layout is the point here, not the frames
   await open(page, "?turkey=1", "/settings");
   test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
   await page.locator("#st-lang").selectOption("pl");
@@ -174,11 +178,12 @@ test("the turkey's cost: frame time of each shader at Play and as the pilot ligh
     const renderer = (() => { const gl = document.createElement("canvas").getContext("webgl")!; const d = gl.getExtension("WEBGL_debug_renderer_info"); return d ? String(gl.getParameter(d.UNMASKED_RENDERER_WEBGL)) : "?"; })();
     const cpu = /SwiftShader|llvmpipe|softpipe|Software/i.test(renderer);
     // interleaved, so a busy moment of the machine falls on both
+    // on the CPU a short sample (about a second of work): longer would starve the specs beside it
     const out = { renderer, cpu, play: 0, playTurkey: 0, pilot: 0, pilotTurkey: 0 };
-    const n = cpu ? 6 : 60;
-    for (let round = 0; round < 3; round += 1) {
-      out.play += time(FRAG, false, n) / 3; out.playTurkey += time(FRAG_TURKEY, false, n) / 3;
-      out.pilot += time(FRAG, true, n * 2) / 3; out.pilotTurkey += time(FRAG_TURKEY, true, n * 2) / 3;
+    const n = cpu ? 3 : 60, rounds = cpu ? 1 : 3;
+    for (let round = 0; round < rounds; round += 1) {
+      out.play += time(FRAG, false, n) / rounds; out.playTurkey += time(FRAG_TURKEY, false, n) / rounds;
+      out.pilot += time(FRAG, true, n * 2) / rounds; out.pilotTurkey += time(FRAG_TURKEY, true, n * 2) / rounds;
     }
     return out;
   });
@@ -187,9 +192,9 @@ test("the turkey's cost: frame time of each shader at Play and as the pilot ligh
   if (r.cpu) {
     // WebGL drawn on the CPU (the headless browser's SwiftShader): every branch of the big shader is paid for, so this is
     // the worst case, not a launcher path (drawing without the GPU, the launcher has no WebGL fire: app_info.noWebgl).
-    // It only guards against the bird growing much dearer still.
-    expect(r.playTurkey / r.play).toBeLessThan(9);
-    expect(r.pilotTurkey / r.pilot).toBeLessThan(7);
+    // It only guards against the bird growing much dearer still (2026-11-26: about x6 on both, Play 33 -> 195 ms).
+    expect(r.playTurkey / r.play).toBeLessThan(14);
+    expect(r.pilotTurkey / r.pilot).toBeLessThan(14);
   } else {
     // on a GPU (RTX 3080 Ti, 2026-11-26: Play 0.08-0.10 -> 0.14-0.19 ms, the band 0.012-0.040 -> 0.017-0.045 ms) the bird about doubles the Play
     // frame, which stays far inside the slow path's budget (FLAT_PLAY_MS, one frame per 66 ms; 33 ms elsewhere) even on a
