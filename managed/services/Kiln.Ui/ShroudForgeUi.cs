@@ -1361,7 +1361,7 @@ internal static class ShroudForgeMenu
                 if (wait != 0 && wait != 258) break;  // WAIT_TIMEOUT: check runtime lifecycle too
                 if (!keep()) break;
                 if (toasts is not null)
-                    foreach (var n in toasts.Poll(ShroudForgeNews.Reload()))
+                    foreach (var n in toasts.Poll(ShroudForgeNews.Reload(), Environment.TickCount64 / 1000.0))
                     {
                         var (text, kind) = SfNewsToasts.Text(n);
                         UiEngine.AddToast(text, kind, SfNewsToasts.Seconds);

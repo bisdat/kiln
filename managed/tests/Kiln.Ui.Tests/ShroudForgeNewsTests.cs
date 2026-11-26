@@ -294,12 +294,30 @@ public sealed class ShroudForgeNewsTests : IDisposable
     public void Each_notice_published_after_the_start_is_toasted_once_and_again_when_it_changes()
     {
         var toasts = new SfNewsToasts(startSeconds: 1000);
-        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 900)]));  // from an earlier game: in the page only
-        Assert.Equal(["altar-cleanup.result"], toasts.Poll([N("altar-cleanup.result", 1005), N("glider.hello", 990)]).Select(n => n.Id));
-        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 1005)]));  // the same notice
-        Assert.Equal([1010L], toasts.Poll([N("altar-cleanup.result", 1010)]).Select(n => n.UpdatedAt));  // republished
+        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 900)], 0));  // from an earlier game: in the page only
+        Assert.Equal(["altar-cleanup.result"], toasts.Poll([N("altar-cleanup.result", 1005), N("glider.hello", 990)], 1).Select(n => n.Id));
+        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 1005)], 2));  // the same notice
+        Assert.Equal([1010L], toasts.Poll([N("altar-cleanup.result", 1010)], 3).Select(n => n.UpdatedAt));  // republished
         var many = Enumerable.Range(0, 10).Select(i => N("m" + i + ".x", 1100 + i)).ToList();
-        Assert.Equal(SfNewsToasts.MaxPerPoll, toasts.Poll(many).Count);  // a burst does not fill the screen
+        // a burst does not fill the screen: the newest, in the room the two toasts above leave until they are gone
+        Assert.Equal(["m9.x"], toasts.Poll(many, 4).Select(n => n.Id));
+        var more = Enumerable.Range(0, 10).Select(i => N("n" + i + ".x", 1200 + i)).ToList();
+        Assert.Equal(["n9.x", "n8.x", "n7.x"], toasts.Poll(more.OrderByDescending(n => n.UpdatedAt).ToList(), 15).Select(n => n.Id));
+    }
+
+    [Fact]
+    public void At_most_three_notice_toasts_are_on_screen_at_once()
+    {
+        // a mod that publishes again and again (a counter, a status) would keep three toasts coming each second: kiln.ui
+        // keeps 8 and drops the oldest, so Kiln's own messages (a server's refusal) would be pushed off the screen. A
+        // notice that finds no room is only in the mod's details.
+        var toasts = new SfNewsToasts(startSeconds: 0);
+        var shown = 0;
+        for (var second = 0; second < 30; second++)
+            shown += toasts.Poll([N("counter.status", 100 + second, message: "Count " + second)], second).Count;
+        Assert.Equal(9, shown);  // 3 at seconds 0-2, 10-12 and 20-22: each toast stays 10 s
+        Assert.Equal(3, SfNewsToasts.MaxOnScreen);
+        Assert.Equal(10, SfNewsToasts.Seconds);
     }
 
     [Fact]
@@ -310,5 +328,26 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.Equal(("Only a message", ToastKind.Warning), SfNewsToasts.Text(N("a.b", 1, "", "Only a message", "warn")));
         Assert.Equal(("Failed: no altar here", ToastKind.Error), SfNewsToasts.Text(N("a.b", 1, "Failed", "no altar here", "error")));
         Assert.Equal(("Done", ToastKind.Success), SfNewsToasts.Text(N("a.b", 1, "Done", "", "success")));
+    }
+
+    [Fact]
+    public void A_toast_keeps_a_long_or_odd_notice_to_a_few_lines_of_plain_words()
+    {
+        // kiln.ui's toasts do not wrap, and a notice may hold 2,000 characters: one line that long runs off the screen,
+        // and a message of line breaks would cover it; control and invisible format characters (bidi overrides) are the
+        // mod's, not words. The mod's details show the whole notice.
+        var words = string.Join(" ", Enumerable.Range(0, 400).Select(i => "word" + i));
+        var (text, _) = SfNewsToasts.Text(N("a.b", 1, "Altar\tCleanup\u202E", "Line one\r\nLine two\u0007\n\n\n" + words));
+        var lines = text.Split('\n');
+        Assert.InRange(lines.Length, 2, 4);
+        Assert.All(lines, l => Assert.InRange(l.Length, 1, 96));
+        Assert.StartsWith("Altar Cleanup: Line one Line two word0 word1", text);
+        Assert.EndsWith("...", text);
+        Assert.DoesNotContain(text, c => c is < ' ' and not '\n' or '\u202E' or '\u007F');
+        // a word longer than a line (or words with no spaces between them) is cut at the line's end
+        var (one, _) = SfNewsToasts.Text(N("a.b", 1, "", new string('x', 150)));
+        Assert.Equal([96, 54], one.Split('\n').Select(l => l.Length));
+        // a short notice stays one line, as it came
+        Assert.Equal("Found: 487 blocks", SfNewsToasts.Text(N("a.b", 1, "  Found ", " 487   blocks ")).Text);
     }
 }

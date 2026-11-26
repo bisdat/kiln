@@ -174,34 +174,47 @@ internal static class ShroudForgeNews
 /// <summary>A hosted mod's new notices as Kiln's toasts, over the game: a ShroudForge mod cannot draw on the HUD, and
 /// what it publishes is what it has to tell the player now (Altar Cleanup: its scan's result and "press the cleanup key
 /// again within 60 seconds"). Only while Kiln answers ShroudForge's menu (no ShroudForge window runs to show its feed).
-/// A notice toasts once when it comes after this game started, and again when its mod publishes it anew. Not thread-safe:
-/// one poller (the ShroudForge menu thread).</summary>
+/// A notice toasts once when it comes after this game started, and again when its mod publishes it anew, while there is
+/// room on the screen for it. Not thread-safe: one poller (the ShroudForge menu thread).</summary>
 internal sealed class SfNewsToasts(long startSeconds)
 {
-    /// <summary>The most toasts one poll makes (the newest).</summary>
-    internal const int MaxPerPoll = 3;
+    /// <summary>The most notice toasts on the screen at once (the newest notices get the room). kiln.ui keeps 8 toasts and
+    /// drops the oldest: a burst, or a mod that publishes again and again (a counter, a status), must not push Kiln's own
+    /// messages off the screen. A notice that finds no room is in the mod's details only.</summary>
+    internal const int MaxOnScreen = 3;
     /// <summary>How long a toast stays: long enough to read a question with a time limit.</summary>
     internal const double Seconds = 10;
+    /// <summary>A toast's lines and their width in columns (a wide CJK character counts two). kiln.ui's toasts do not wrap,
+    /// and a notice may hold 2,000 characters; the mod's details show it whole.</summary>
+    internal const int MaxLines = 4, LineColumns = 96;
 
     private readonly Dictionary<string, long> _seen = new(StringComparer.Ordinal);
+    // when each toast still on the screen was made (the poller's clock, seconds)
+    private readonly Queue<double> _shown = new();
 
-    /// <summary>The notices of <paramref name="news"/> (newest first) not toasted yet, at most <see cref="MaxPerPoll"/>.</summary>
-    public IReadOnlyList<SfNews> Poll(IReadOnlyList<SfNews> news)
+    /// <summary>The notices of <paramref name="news"/> not toasted yet that fit on the screen at
+    /// <paramref name="nowSeconds"/> (a steady clock), newest first. The rest count as seen.</summary>
+    public IReadOnlyList<SfNews> Poll(IReadOnlyList<SfNews> news, double nowSeconds)
     {
+        while (_shown.Count > 0 && nowSeconds - _shown.Peek() >= Seconds) _shown.Dequeue();
         var fresh = new List<SfNews>();
-        foreach (var n in news)
+        foreach (var n in news.OrderByDescending(n => n.UpdatedAt))
         {
             if (n.UpdatedAt < startSeconds || _seen.TryGetValue(n.Id, out var at) && at >= n.UpdatedAt) continue;
             _seen[n.Id] = n.UpdatedAt;
-            if (fresh.Count < MaxPerPoll) fresh.Add(n);
+            if (_shown.Count >= MaxOnScreen) continue;
+            _shown.Enqueue(nowSeconds);
+            fresh.Add(n);
         }
         return fresh;
     }
 
-    /// <summary>A notice's toast: "title: message" (either alone when the other is empty), in its level's look.</summary>
+    /// <summary>A notice's toast: "title: message" (either alone when the other is empty) as plain words in at most
+    /// <see cref="MaxLines"/> lines, in its level's look.</summary>
     public static (string Text, ToastKind Kind) Text(SfNews n)
     {
-        var text = n.Title.Length == 0 ? n.Message : n.Message.Length == 0 ? n.Title : n.Title + ": " + n.Message;
+        string title = Plain(n.Title), message = Plain(n.Message);
+        var text = title.Length == 0 ? message : message.Length == 0 ? title : title + ": " + message;
         var kind = n.Level switch
         {
             "warn" or "warning" => ToastKind.Warning,
@@ -209,6 +222,70 @@ internal sealed class SfNewsToasts(long startSeconds)
             "success" => ToastKind.Success,
             _ => ToastKind.Info,
         };
-        return (ShroudForgeUi.Clip(text, 600), kind);
+        return (Wrap(text, LineColumns, MaxLines), kind);
+    }
+
+    /// <summary>The mod's text as words: each run of control characters (line breaks and tabs too) and spaces is one
+    /// space, and invisible format characters (bidi overrides, zero-width marks) are left out.</summary>
+    internal static string Plain(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var c in s)
+        {
+            if (char.IsControl(c) || char.IsWhiteSpace(c))
+            {
+                if (sb.Length > 0 && sb[^1] != ' ') sb.Append(' ');
+            }
+            else if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format) sb.Append(c);
+        }
+        return sb.ToString().TrimEnd(' ');
+    }
+
+    /// <summary><paramref name="s"/> (plain words) in lines of at most <paramref name="columns"/>, broken at spaces where it
+    /// can be (a longer word, or text without spaces, at the line's end); past <paramref name="maxLines"/> the last line
+    /// ends with "...".</summary>
+    internal static string Wrap(string s, int columns, int maxLines)
+    {
+        var lines = new List<string>();
+        var i = 0;
+        while (i < s.Length && lines.Count < maxLines)
+        {
+            int j = i, width = 0, space = -1;
+            while (j < s.Length && width + Columns(s[j]) <= columns)
+            {
+                if (s[j] == ' ') space = j;
+                width += Columns(s[j++]);
+            }
+            if (j < s.Length && s[j] != ' ' && space > i) j = space;
+            if (j < s.Length && j > i + 1 && char.IsHighSurrogate(s[j - 1])) j--;
+            if (j == i) j++;  // a character wider than a line: alone on it
+            lines.Add(s[i..j].TrimEnd(' '));
+            for (i = j; i < s.Length && s[i] == ' '; i++) { }
+        }
+        if (i < s.Length && lines.Count > 0)
+        {
+            var last = lines[^1];
+            while (last.Length > 0 && Width(last) + 3 > columns)
+                last = last[..(last.Length >= 2 && char.IsLowSurrogate(last[^1]) ? last.Length - 2 : last.Length - 1)];
+            lines[^1] = last.TrimEnd(' ') + "...";
+        }
+        return string.Join('\n', lines);
+    }
+
+    // a character's width in columns: two for the wide East Asian ranges (and a pair's high half), none for its low half
+    private static int Columns(char c) => c switch
+    {
+        >= '\u1100' and <= '\u115F' or >= '\u2E80' and <= '\uA4CF' or >= '\uAC00' and <= '\uD7A3' or >= '\uF900' and <= '\uFAFF' or
+            >= '\uFE30' and <= '\uFE4F' or >= '\uFF00' and <= '\uFF60' or >= '\uFFE0' and <= '\uFFE6' => 2,
+        _ when char.IsHighSurrogate(c) => 2,
+        _ when char.IsLowSurrogate(c) => 0,
+        _ => 1,
+    };
+
+    private static int Width(string s)
+    {
+        var w = 0;
+        foreach (var c in s) w += Columns(c);
+        return w;
     }
 }
