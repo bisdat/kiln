@@ -176,3 +176,35 @@ fn a_recovery_that_kept_the_game_files_does_not_say_the_game_data_was_put_back()
         assert!(text.contains("It put the game data back and the game started without them"), "{recovery:?}: {text}");
     }
 }
+
+/// Stale game data (HadToRegister, 2026-11-26): ShroudForge refused its clean copy of the game data because Steam's
+/// manifest lists other bytes than it has (an earlier copy of game files Auto Loot Plus had patched), and the game's
+/// files are not Steam's either. The line leads with the plain words and what the player does, before ShroudForge's
+/// long reasons (cut at 300 characters), and says the way out once, in full.
+#[test]
+fn a_clean_copy_with_an_uninstalled_mods_changes_leads_with_the_plain_words() {
+    let t = game("stale-copy");
+    let g = &t.0;
+    hosted_failure(g);
+    put(g, "kiln/state/shroudforge.json", format!(r#"{{"format":1,"mode":"failed","source":"bundled","pid":412,"side":"client","updated":{},
+        "bundled":{{"version":"1.8.1","build":"kiln.26b9fec"}},"startupPrepared":false,"runtime":"stopped",
+        "reason":"ShroudForge's startup preparation failed (startup asset mods or its DLL Manager)"}}"#, T0 + 5).as_bytes());
+    let refusal = "pregame phase failed: ShroudForge: Your game files still contain changes from a mod that isn't installed. Verify the \
+        game files in Steam (Properties > Installed Files > Verify integrity), then start again. (ShroudForge's clean copy of the game \
+        data, enshrouded.kfc.bak and enshrouded.kfc_resources.bak, is not the game's own: enshrouded.kfc.bak has other bytes than Steam's \
+        manifest lists (SHA-1) for build 26430625; it holds Auto Loot Plus's auto-smash program (it breaks props within 15 m of the \
+        player every second), resource a5c0de5a-1e00-4d0d-9a11-0000000a5000; and the game's current files are what ShroudForge's last \
+        start built over it, so no clean copy can be made from them. Nothing was changed.)";
+    put(g, "shroudforge/state.json", serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "assets": {
+        "status": "failed", "phase": "startup", "target": "enshrouded", "completedAt": T0 + 3, "error": refusal, "recoveryError": refusal,
+    }})).unwrap().as_slice());
+    let sf = row(&rows(g), "shroudforge").clone();
+    let failed = &sf["startupFailed"];
+    let text = failed["text"].as_str().unwrap_or_else(|| panic!("no startupFailed.text on ShroudForge's line: {sf}"));
+    assert!(text.starts_with("Your game files still contain changes from a mod that isn't installed. Verify the game files in Steam \
+        (Properties > Installed Files > Verify integrity), then start again"), "{text}");
+    assert!(text.contains("Auto Loot Plus"), "the known leftover is named: {text}");
+    assert!(text.contains("no ShroudForge mod ran in that start"), "{text}");
+    assert_eq!(text.matches("Verify").count(), 1, "the way out is said once: {text}");
+    assert_eq!(failed["staleGameData"], true, "{sf}");
+}
