@@ -233,6 +233,20 @@ then rename it to `test.cmd`: Kiln then never reads a half-uploaded file. Detail
 
 Restart the server after adding or removing mods.
 
+**Changing a mod while the server runs.** `kiln reload <id>` (or a `reload <id>` line in `kiln/control/<name>.cmd`) loads
+a Kiln mod's new version without a restart: its code, data packs, `blocks/` and `quests/` files apply again. Some parts
+only change at the next start, and the reload says so (next release):
+- refused, with the reason first: `RestartRequiredBoot: ...` for a mod with boot content (`"boot"` in its
+  `kiln.mod.json`, or in its new version's: the running version stays loaded), and `RestartRequired: <id> is a native
+  mod ...` for a mod in `kiln/native/`;
+- applied, with what waits named in the reply: `reloaded <id> 1.2.0; registry: 2 edits need a restart: <id>
+  balance.levelCap, ...`. Registry edits of values the game reads only at start (the balance table, and fields no mod
+  changed at the start) keep the start's value until you restart;
+- `kilnctl status <instance>` shows it too: `registry  2 registry edits wait for a restart: ...` (or `no registry edit
+  waits for a restart`).
+
+The full list, key by key: [architecture.md](architecture.md#what-reload-id-covers).
+
 **EML mods on a server that runs ShroudForge.** EML mods go into `mods/<mod>/` (the folder with the mod's `mod.json`).
 Without a profile, Kiln hosts ShroudForge on a server when `mods/` holds a switched-on ShroudForge mod, or when
 ShroudForge ran there before (its `shroudforge/state.json` records prepared asset mods). ShroudForge then runs the EML

@@ -335,6 +335,33 @@ picks, named by their values), so two mods' appends and removals stack. A list o
 exactly 5; `balance.altarsPerFlameLevel`, one value per flame level) is edited one element at a time
 (`xpPerLevel[2]`). A reference that may be absent (a recipe input's item or category) can be cleared.
 
+### What a reload changes
+A `reload <id>` (or an `unload` and a `load`) of a mod with registry edits changes what its `applies` allows now, and says
+what waits for the next start (next release). The rest of the mod's `kiln.mod.json`: [architecture.md](../../architecture.md#what-reload-id-covers).
+
+| The mod's edit | After the reload |
+|---|---|
+| a data pack's `registry` section, a field that applies `now` or `worldLoad` | composed again with every other mod's, in load order, at kiln.content's next Pre; registry.json has the new chain |
+| ... a field that applies `restart` | the start's value stays; the reloaded value applies at the next start. registry.json: `RestartRequired: <registry>[<id>].<field> is read at game start; the reloaded value applies at the next start` |
+| ... a field the start never read (no mod edited it at the start) | not applied: `RestartRequired: <registry>.<field>: the base was read at start; this edit was not applied` |
+| ... an entry add or remove the start did not have, or one it changed or dropped | the start's entry operation stays: `RestartRequired: <registry> entry intent changed after GameStart; ...` |
+| ... a section of a mod that had none at the start | not applied: `RestartRequired: a registry section added after the start needs a restart; ...` |
+| C# `HotReload` / `ModLoad` / `WorldLoad` | runs again (see the entry points above); a restart field or a field the start never read is refused for that pass with `RestartRequired: ...`, like a live edit |
+| C# `GameStart` only | does not run again: the start's edits stay. When the reloaded code differs from the code the start ran, the reload reply and kiln.log say `RestartRequired: <id>'s OnRegistry runs at GameStart only ([RegistryEntryPoints] has no HotReload or ModLoad): ...` |
+
+Every edit that waits starts with the stable token `RestartRequired: ` in registry.json's `refused` list, with the mod and
+the place (`registry`, `id`, `field`), and `counts.restartRequired` counts them all (also those the list's cap leaves
+out). Where they show:
+- the `kiln/control` reply of `reload <id>`: `reloaded <id> <version>; registry: 2 edits need a restart: <mod>
+  balance.levelCap, <mod> items[game:wood].levels.min (kiln/state/registry.json has each reason)`, and `data.registry`
+  (`restartRequired`, `edits[]`) for tools such as the Web Admin mod ([architecture.md](../../architecture.md#what-reload-id-covers));
+- `kilnctl status`: `registry  2 registry edits wait for a restart: ...` ([kilnctl.md](../../kilnctl.md));
+- the launcher's Conflicts view, first, as "Waits for a restart";
+- kiln.log, with each refused row.
+
+A restart (of the game, or of the server) applies them; nothing else does. A pack that throws while it applies leaves
+none of its mod's new registry section behind ([services/content.md](../../services/content.md#when-a-reload-fails-partway-020-dev3113)).
+
 ## Stages and conflicts
 
 At each start Kiln runs three stages, each across **all** mods (in the load order players see) before the next: every mod's
@@ -422,7 +449,10 @@ migrations apply to it like to any edit.
 
 A rollback **never touches saves**: it writes one file beside the plans. When it gives an item a lower max stack than a world
 already started with, or than the value under it, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
-rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback.
+rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback. The
+launcher's Conflicts view has the same as its **Registry plan** card (next release): the plans, the last start's
+rollback and a waiting request; **Roll back** shows the dry run's changes first and writes the request only on confirm,
+**Clear** removes it ([launcher/registry-conflicts.md](../../launcher/registry-conflicts.md)).
 
 ## Edits that change existing saves
 

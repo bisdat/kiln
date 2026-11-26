@@ -3,7 +3,8 @@
 // the real IR / composition (registry/ir.cpp, compose.cpp), the real formulas and the committed regmap (regmap/common + the
 // server record), on a made-up game memory: the fields of a composed stage written as evaluated layers above packs and below
 // code, relative edits re-evaluated over a pack's new value, hot reload (a changed section recomposed, a removed one leaving
-// nothing behind, a new field refused "needs a restart"), loud refusals, compare-before-write in the report.
+// nothing behind, a new field refused "RestartRequired: ..."), what a reload leaves for the next start (restart fields,
+// new fields, new sections: RestartRequired rows and counts.restartRequired), loud refusals, compare-before-write in the report.
 // registry_live_test.sh builds and runs it.
 #include <windows.h>
 #include <algorithm>
@@ -343,6 +344,10 @@ registry::BaseModel base() {
     lt.fields["rarities"] = registry::Value::of_list({registry::Value::text("common"), registry::Value::text("uncommon"), registry::Value::text("rare")});
     lt.fields["fixedRarity"] = registry::Value::text("none");
     b.registries["loot"].push_back(lt);
+    registry::BaseModel::Entry bal;  // a restart field's entry (the boot back-end's): a reload changes it at the next start
+    bal.id = "game:balance";
+    bal.fields["levelCap"] = registry::Value::integer(25);
+    b.registries["balance"].push_back(bal);
     return b;
 }
 
@@ -391,6 +396,13 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
         g_last_report = r;
         ++g_reports;
     };
+    // the restart fields as the boot back-end wrote them at the start (stage.cpp hands these over): a reload changes them
+    // only at the next start
+    for (const auto& [ref, field] : in.result.fields) {
+        const registry::RegistrySpec* rs = sc.registry(ref.registry);
+        const registry::FieldSpec* sp = rs ? rs->field(ref.field) : nullptr;
+        if (sp && sp->applies == registry::Applies::Restart) in.boot_fields[ref] = field;
+    }
     in.rollback = rollback, in.left_out = left_out;  // a rolled-back start (stage.h LiveHandoff::rollback, left_out)
     registry_live_install(std::move(in));
 }
@@ -721,7 +733,61 @@ void hot_reload() {
     files = files_of({{"b", "b/content/b.json"}});
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "levels.min", "op": 5}]}})";
     apply_registry_files(files);
-    check(reported("needs a restart"), "a field the start never decoded: refused, needs a restart");
+    check(reported("RestartRequired: items.levels.min: the base was read at start"), "a field the start never decoded: refused, needs a restart (the stable token first)");
+}
+
+// A reload whose registry edits need a restart says so where the admin looks: every such row of
+// registry.json starts with the stable token "RestartRequired: " and names the mod and the place, and counts has their
+// number. Before, only kiln.log said a restart field changes at the next start, and a new field's row had no token.
+std::vector<registry::Refusal> restart_rows() {
+    std::vector<registry::Refusal> out;
+    for (const registry::Refusal& r : g_last_report.refused)
+        if (r.reason.rfind("RestartRequired: ", 0) == 0) out.push_back(r);
+    return out;
+}
+const registry::Refusal* restart_row(const std::string& mod, const std::string& field) {
+    static registry::Refusal found;
+    for (const registry::Refusal& r : restart_rows())
+        if (r.mod == mod && r.field == field) return &(found = r);
+    return nullptr;
+}
+void restart_required_on_reload() {
+    world();
+    const std::string start = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 50},
+        {"registry": "balance", "select": {"id": "*"}, "field": "levelCap", "op": 30}]}})";
+    g_files = {{"m/content/a.json", start}};
+    const auto only_m = files_of({{"m", "m/content/a.json"}});
+    stage(only_m);
+    apply_registry_files(only_m);
+    check(restart_rows().empty(), "restart: at the start nothing waits for a restart");
+    // the reload: m's restart field changes, m names a field the start never decoded, and n brings a registry section the
+    // start did not have
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 50},
+        {"registry": "balance", "select": {"id": "*"}, "field": "levelCap", "op": 40},
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "levels.min", "op": 5}]}})";
+    g_files["n/content/n.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 2}}]}})";
+    const auto both = files_of({{"m", "m/content/a.json"}, {"n", "n/content/n.json"}});
+    apply_registry_files(both);
+    for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s: %s\n", r.mod.c_str(), r.reason.c_str());
+    check(at<uint32_t>(WOOD_AT) == 50, "restart: the live field still applies (maxStack 50)");
+    const registry::Refusal* cap = restart_row("m", "levelCap");
+    check(cap && cap->registry == "balance" && cap->reason.find("next start") != std::string::npos,
+          "restart: a changed restart field is a RestartRequired row naming m, balance and levelCap, applying at the next start");
+    const registry::Refusal* min = restart_row("m", "levels.min");
+    check(min && min->registry == "items" && min->id == "game:material_t1_wood_logs",
+          "restart: a field the start never decoded is a RestartRequired row naming m, items, the entry and levels.min");
+    check(std::any_of(restart_rows().begin(), restart_rows().end(), [](const registry::Refusal& r) { return r.mod == "n"; }),
+          "restart: a section added after the start is a RestartRequired row naming n");
+    const registry::json doc = registry::report_json(registry_schema(), g_last_report, {});
+    check(doc["counts"].value("restartRequired", 0) == 3, "restart: registry.json counts the three (counts.restartRequired)");
+    // back to the start's edits: nothing waits any more
+    g_files["m/content/a.json"] = start;
+    apply_registry_files(only_m);
+    check(restart_rows().empty(), "restart: the start's edits again, nothing waits for a restart");
+    check(registry::report_json(registry_schema(), g_last_report, {})["counts"].value("restartRequired", -1) == 0,
+          "restart: counts.restartRequired is 0");
 }
 
 // compare-before-write in the report: another writer's value stays
@@ -991,6 +1057,7 @@ int main() {
         {"perks_costs_unlock_loot", perks_costs_unlock_loot},
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
+        {"restart_required_on_reload", restart_required_on_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
         {"live_c_table", live_c_table},
         {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},

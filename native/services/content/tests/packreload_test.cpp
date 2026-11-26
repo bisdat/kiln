@@ -13,6 +13,12 @@
 //  - kiln.mod.json changing without a reload (a hot edit) is a pack change too: the scan re-applies
 //  - a pack that throws while it applies: its mod's layers of that application come off, its packs from before apply
 //    again whole (also when they had ordinary field errors), with their registry sections, else none of its packs apply
+//  - a pack that throws leaves nothing of its mod behind: what its "add" lists defined or changed comes
+//    off at once, in the mod's place in the load order, so a later mod applies over the state without it (new content is
+//    a model of newcontent.cpp's bookkeeping and pack journal here; packundo_test.cpp runs the real one)
+//  - built with kiln.gamedata's hooks (packreload_test.sh's second build): its template clones, config adds and other
+//    services' sections come off the same way (a model again; gdundo_test.cpp runs the real ones)
+//  - a pack that throws after an earlier pack of its mod switched the stack guard off: the guard is as before the reload
 //  - 300 reloads (good, broken, throwing): no new owners, nothing left queued
 // packreload_test.sh builds and runs it.
 #include <windows.h>
@@ -24,6 +30,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -109,7 +116,13 @@ size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
     return writes.size();
 }
 WriteStats write_stats() { return {}; }
-bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
+// the stack clamp's `jbe` (0x76; the guard makes it a `jmp`, 0xEB): only reached once a case sets E.guard
+uint8_t g_clamp_byte = 0x76;
+bool patch_code_byte(uintptr_t, uint8_t expect, uint8_t to) {
+    if (g_clamp_byte != expect) return false;
+    g_clamp_byte = to;
+    return true;
+}
 void* near_alloc(uintptr_t, size_t) { return nullptr; }
 uint32_t fnv1a(const void* p, size_t n) {
     uint32_t h = 2166136261u;
@@ -153,15 +166,161 @@ RecipeLayout RL;
 DropLayout DL;
 std::unordered_map<uint32_t, std::vector<uint8_t>> g_category_guid;
 
-// What the packs reach in the service's other files: no new content, no kitbash, no registry stage in this test.
-void nc_packs_begin() {}
-void nc_packs_end() {}
-// An "add" entry {"throw": "<what>"} throws while its pack applies (a section's code meeting a value type it did not expect):
-// the rule before it in the same pack has applied already.
-void nc_pack_add(KilnOwner, uint32_t, const std::string& list, const std::string&, ApplyResult* out) {
-    if (list.find("\"throw\"") != std::string::npos) throw std::runtime_error("[json.exception.type_error.302] type must be string, but is number");
-    out->errors.push_back("no new content here");
+// What the packs reach in the service's other files: no kitbash, no registry stage in this test. New content is a model of
+// newcontent.cpp's bookkeeping (definitions by name: owner, seen in this application, orphaned) and of its pack journal
+// (nc_pack_mark / rollback / unmark, content.h), so the cases see what packs.cpp asks of it and when.
+namespace model {
+struct Def {
+    KilnOwner owner = 0;
+    std::string v;  // the definition's "v": which version of the pack defined it
+    bool seen = true, orphan = false;
+};
+std::map<std::string, Def> defs;
+KilnOwner journal_owner = 0;
+std::vector<std::pair<std::string, std::optional<Def>>> journal;
+std::vector<std::string> events;  // "define <name>", "nc rollback <owner>", ... in order
+bool active(const std::string& name) {
+    const auto it = defs.find(name);
+    return it != defs.end() && !it->second.orphan;
 }
+std::string v_of(const std::string& name) { return defs.count(name) ? defs[name].v : std::string(); }
+}  // namespace model
+void nc_packs_begin() {
+    for (auto& [n, d] : model::defs) d.seen = false;
+}
+void nc_packs_end() {
+    for (auto& [n, d] : model::defs)
+        if (!d.seen) d.orphan = true;
+}
+void nc_pack_mark(KilnOwner owner) {
+    model::journal_owner = owner;
+    model::journal.clear();
+}
+uint32_t nc_pack_rollback(KilnOwner owner) {
+    model::events.push_back("nc rollback " + std::to_string(owner));
+    if (owner != model::journal_owner) return 0;
+    const uint32_t n = static_cast<uint32_t>(model::journal.size());
+    for (auto it = model::journal.rbegin(); it != model::journal.rend(); ++it) {
+        if (it->second) model::defs[it->first] = *it->second;
+        else model::defs[it->first].orphan = true, model::defs[it->first].seen = false;
+    }
+    model::journal.clear();
+    return n;
+}
+void nc_pack_unmark() { model::journal_owner = 0; }
+// An "add" list defines {"name", "v"} entries; an entry {"throw": "<what>"} throws while its pack applies (a section's code
+// meeting a value type it did not expect): what the list defined before it, and the rules before it, have applied already.
+void nc_pack_add(KilnOwner owner, uint32_t, const std::string& list, const std::string&, ApplyResult* out) {
+    const nlohmann::ordered_json l = nlohmann::ordered_json::parse(list);
+    for (const nlohmann::ordered_json& e : l) {
+        if (e.contains("throw")) throw std::runtime_error("[json.exception.type_error.302] type must be string, but is number");
+        const std::string name = e.value("name", "?");
+        if (owner == model::journal_owner &&
+            std::none_of(model::journal.begin(), model::journal.end(), [&](const auto& j) { return j.first == name; }))
+            model::journal.emplace_back(name, model::defs.count(name) ? std::optional<model::Def>(model::defs[name]) : std::nullopt);
+        model::defs[name] = model::Def{owner, e.value("v", ""), true, false};
+        model::events.push_back("define " + name);
+        ++out->applied;
+    }
+}
+#if KC_GAMEDATA
+using gdjson = nlohmann::ordered_json;
+// packreload_test.sh's second build (-DKILN_CONTENT_GAMEDATA): kiln.gamedata as a model of what a pack leaves outside the
+// store's layers, so the cases see what packs.cpp asks of it and when: template clones by name ("templates": {"add":
+// [{"name", "v"}]}), config adds (an item rule's "impactValues.<x>" path: gd_item_path), and other services' sections
+// ("creatures": {...}: the service's state per owner; {"throw": 1} in one throws while it applies), with the pack journal
+// of gamedata.h (gd_pack_mark / rollback / unmark).
+namespace gdmodel {
+struct Clone {
+    KilnOwner owner = 0;
+    std::string v;
+    bool seen = true, orphan = false;
+};
+std::map<std::string, Clone> clones;
+std::map<std::pair<KilnOwner, std::string>, gdjson> added;   // config adds: (owner, "<item>.<path>") -> value
+std::map<std::pair<std::string, KilnOwner>, std::string> service, cur, prev;  // (section, owner) -> the json it applied
+KilnOwner journal_owner = 0;
+std::vector<std::pair<std::string, std::optional<Clone>>> journal;
+}  // namespace gdmodel
+void gd_packs_begin() {
+    for (auto& [n, c] : gdmodel::clones) c.seen = false;
+    gdmodel::added.clear();  // every pack owner's layers were dropped
+    gdmodel::cur.clear();
+}
+void gd_packs_end() {
+    for (auto& [n, c] : gdmodel::clones)
+        if (!c.seen) c.orphan = true;
+    for (const auto& [k, v] : gdmodel::prev)
+        if (!gdmodel::cur.count(k)) gdmodel::service.erase(k);
+    gdmodel::prev = gdmodel::cur;
+}
+void gd_pack_mark(KilnOwner owner) {
+    gdmodel::journal_owner = owner;
+    gdmodel::journal.clear();
+}
+uint32_t gd_pack_rollback(KilnOwner owner) {
+    model::events.push_back("gd rollback " + std::to_string(owner));
+    if (owner != gdmodel::journal_owner) return 0;
+    uint32_t n = 0;
+    for (auto it = gdmodel::journal.rbegin(); it != gdmodel::journal.rend(); ++it, ++n) {
+        if (it->second) gdmodel::clones[it->first] = *it->second;
+        else gdmodel::clones[it->first].orphan = true, gdmodel::clones[it->first].seen = false;
+    }
+    gdmodel::journal.clear();
+    std::erase_if(gdmodel::added, [&](const auto& kv) { return kv.first.first == owner; });
+    std::erase_if(gdmodel::cur, [&](const auto& kv) { return kv.first.second == owner; });
+    std::erase_if(gdmodel::service, [&](const auto& kv) { return kv.first.second == owner; });
+    return n;
+}
+void gd_pack_unmark() { gdmodel::journal_owner = 0; }
+void gd_pack_adds(KilnOwner owner, uint64_t, const gdjson& doc, const std::string&, ApplyResult* out) {
+    if (!doc.contains("templates") || !doc["templates"].contains("add")) return;
+    for (const gdjson& e : doc["templates"]["add"]) {
+        const std::string name = e.value("name", "?");
+        if (owner == gdmodel::journal_owner &&
+            std::none_of(gdmodel::journal.begin(), gdmodel::journal.end(), [&](const auto& j) { return j.first == name; }))
+            gdmodel::journal.emplace_back(name, gdmodel::clones.count(name) ? std::optional<gdmodel::Clone>(gdmodel::clones[name]) : std::nullopt);
+        gdmodel::clones[name] = gdmodel::Clone{owner, e.value("v", ""), true, false};
+        model::events.push_back("clone " + name);
+        ++out->applied;
+    }
+}
+int gd_item_path(KilnOwner owner, uint64_t, const Entry& e, const std::string& path, const gdjson& val, const std::string&, std::string*) {
+    if (path.rfind("impactValues.", 0) != 0) return 0;
+    gdmodel::added[{owner, e.name + "." + path}] = val;  // a config the item does not have yet: added to its array
+    return 1;
+}
+void gd_pack_sections(KilnOwner owner, uint64_t, const gdjson& doc, const std::string&, ApplyResult* out) {
+    for (const char* k : {"abilities", "creatures"}) {  // in document order is all the model needs: these two, in this order
+        if (!doc.contains(k)) continue;
+        if (doc[k].contains("throw")) throw std::runtime_error(std::string("[json.exception.type_error.302] ") + k);
+        gdmodel::service[{k, owner}] = doc[k].dump();
+        gdmodel::cur[{k, owner}] = doc[k].dump();
+        model::events.push_back(std::string("section ") + k);
+        ++out->applied;
+    }
+}
+bool gd_is_section(const std::string& k) { return k == "templates" || k == "abilities" || k == "creatures"; }
+uint32_t gd_export(gdjson&, uint32_t) { return 0; }
+void gd_boot() {}
+void gd_boot_patches_bind() {}
+void gd_world_ready(uintptr_t, uint32_t) {}
+void gd_world_reset() {}
+void gd_tick(uint64_t) {}
+void gd_owner_gone(KilnOwner) {}
+void gd_owner_revoked(KilnOwner) {}
+std::string gd_slot_what(const Slot&, std::string* what) {
+    *what = "?";
+    return "gamedata";
+}
+std::string gd_layer_value(const Slot&, const uint8_t*) { return "?"; }
+namespace gd {
+void after_changes() {}
+void pending_mods_changed(const std::vector<std::string>&) {}
+void pending_owner_loaded(KilnOwner, const std::string&) {}
+KilnResult clones_define(KilnOwner, uint32_t, const std::string&, bool, const std::string&, std::string*) { return KILN_ERR_UNAVAILABLE; }
+}  // namespace gd
+#endif
 bool nc_is_new(uint32_t, uint32_t) { return false; }
 void nc_drops_table(const Entry&) {}
 void nc_world_ready(uintptr_t, uint32_t) {}
@@ -429,7 +588,8 @@ void run() {
         step();
         check(fake::read32(kStone) == 25, "throw: the layer the throwing pack wrote before it threw comes off (Stone back to other's 25)");
         check(fake::read32(kWood) == 90, "throw: the packs from before apply again, whole, though they had an ordinary field error (Wood 90)");
-        check(logged("a pack threw while it applied: the packs it had before apply again, whole"), "throw: a line says the packs from before apply again");
+        check(logged("a pack threw while it applied: what it did came off") && logged("; the packs it had before apply again, whole"),
+              "throw: a line says the packs from before apply again");
         check(staged_of("skilltest") == old_sections,
               "throw: the registry stage gets the section of the packs that apply (the one from before), not the throwing pack's");
         check(g_report.find("applying it failed") != std::string::npos && g_report.find("type_error") != std::string::npos,
@@ -445,13 +605,112 @@ void run() {
         fake::lines.clear();
         step();
         check(fake::read32(kWood) == 10 && fake::read32(kStone) == 25, "throw without a version before: none of the mod's packs apply (Wood 10, Stone 25)");
-        check(logged("a pack threw while it applied: none of its packs apply"), "throw without a version before: a line says none apply");
+        check(logged("a pack threw while it applied: what it did came off") && logged("; none of its packs apply"),
+              "throw without a version before: a line says none apply");
         check(staged_of("skilltest").empty(), "throw without a version before: no registry section of the mod reaches the stage");
         // fixed: the new version applies
         pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
         reloaded("skilltest", "was reloaded");
         step();
         check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw fixed: the new version applies (Wood 90)");
+    }
+
+    // ---- a pack that throws leaves nothing of its mod behind: what its "add" lists defined or changed,
+    // its template clones, config adds and other services' sections come off with its layers, at once, in its place in the
+    // load order: a later mod applies over the state without it
+    {
+        manifest("late", "late", "1.0.0");
+        pack("late", "late.json", R"({"format": 1, "items": {"add": [{"name": "Late", "v": "1"}]}})");
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}, "add": [{"name": "Axe", "v": "old"}, {"name": "Sword", "v": "old"}]},
+                 "templates": {"add": [{"name": "TplA", "v": "old"}]}, "abilities": {"v": "old"}})");
+        pack_mods(R"(["other","skilltest","late"])");
+        reloaded("skilltest", "was reloaded");
+        step();
+        check(model::active("Axe") && model::v_of("Sword") == "old" && model::active("Late"), "undo: the version before defines Axe and Sword, late defines Late");
+#if KC_GAMEDATA
+        check(gdmodel::clones.count("TplA") && gdmodel::clones["TplA"].v == "old" && !gdmodel::clones["TplA"].orphan, "undo: the version before clones TplA");
+        const auto service_of = [](const std::string& section) {
+            for (const auto& [k, v] : gdmodel::service)
+                if (k.first == section) return v;
+            return std::string();
+        };
+        check(service_of("abilities") == R"({"v":"old"})", "undo: the version before applies its abilities section");
+        // the new version: clones TplA again and TplB, adds a config to Wood, redefines Sword, adds Pick, applies its
+        // abilities section, then its creatures section throws
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "templates": {"add": [{"name": "TplA", "v": "new"}, {"name": "TplB", "v": "new"}]},
+                 "items": {"Wood": {"impactValues.Foo": 5}, "add": [{"name": "Sword", "v": "new"}, {"name": "Pick", "v": "new"}]},
+                 "abilities": {"v": "new"}, "creatures": {"throw": 1}})");
+#else
+        // the new version: redefines Sword, adds Pick, then its "add" list throws
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"add": [{"name": "Sword", "v": "new"}, {"name": "Pick", "v": "new"}, {"throw": 1}]}})");
+#endif
+        reloaded("skilltest", "was reloaded");
+        model::events.clear();
+        fake::lines.clear();
+        step();
+        check(!model::active("Pick"), "undo: an item the throwing pack added comes off (orphaned, as a removed pack's)");
+        check(model::active("Sword") && model::v_of("Sword") == "old", "undo: an item the throwing pack redefined is the version before's again");
+        check(model::active("Axe") && fake::read32(kWood) == 90, "undo: the packs from before apply again, whole (Axe, Wood 90)");
+        check(model::active("Late"), "undo: a later mod's definition is untouched");
+        const auto at = [](const std::string& e) {
+            const auto it = std::find_if(model::events.begin(), model::events.end(), [&](const std::string& x) { return x.rfind(e, 0) == 0; });
+            return it == model::events.end() ? model::events.size() + 1 : static_cast<size_t>(it - model::events.begin());
+        };
+        check(at("nc rollback") < at("define Late"), "undo: the throwing mod is rolled back in its place, before the next mod applies");
+        check(logged("a pack threw while it applied: what it did came off"), "undo: a line says what came off");
+#if KC_GAMEDATA
+        check(gdmodel::clones["TplB"].orphan, "undo: a template clone the throwing pack added comes off");
+        check(!gdmodel::clones["TplA"].orphan && gdmodel::clones["TplA"].v == "old", "undo: a clone the throwing pack redefined is the version before's again");
+        check(std::none_of(gdmodel::added.begin(), gdmodel::added.end(), [](const auto& kv) { return kv.first.second == "Wood.impactValues.Foo"; }),
+              "undo: a config the throwing pack added to an item is gone");
+        check(service_of("abilities") == R"({"v":"old"})", "undo: another service's section the throwing pack applied is the version before's again");
+        check(service_of("creatures").empty(), "undo: nothing of the section that threw stays");
+        check(at("gd rollback") < at("define Late"), "undo: gamedata is rolled back in its place too");
+#endif
+        // no version before (the mod's packs came off with an unload): nothing of the throwing pack's mod stays at all
+        pack_mods(R"(["other","late"])");
+        step();
+        pack_mods(R"(["other","skilltest","late"])");
+        step();
+        check(!model::active("Pick") && !model::active("Sword") && !model::active("Axe") && model::active("Late"),
+              "undo without a version before: none of the mod's definitions stay, the later mod's do");
+#if KC_GAMEDATA
+        check(gdmodel::clones["TplA"].orphan && gdmodel::clones["TplB"].orphan && service_of("abilities").empty() && gdmodel::added.empty(),
+              "undo without a version before: none of its clones, config adds or sections stay");
+#endif
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
+        fs::remove_all(mod_dir("late"));
+        pack_mods(R"(["other","skilltest"])");
+        step();
+    }
+
+    // ---- the stack guard is the whole game's: a pack of the mod that throws took it off ("options": {"stackGuard": false})
+    // before a later pack of the mod threw. It is as before the reload again (on: the game keeps stacks above an item's max),
+    // not off until the next application, with saved stacks cut down meanwhile.
+    {
+        E.guard = true, E.stack_clamp = 0x9000;
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 5}}})");  // lowers: no reason for the guard
+        reloaded("skilltest", "was reloaded");
+        step();
+        std::string why;
+        check(guard_set(true, &why) && guard_on(), "guard: on before the reload (another mod raised a max stack)");
+        pack("skilltest", "skills.json", R"({"format": 1, "options": {"stackGuard": false}, "items": {"Wood": {"maxStackSize": 5}}})");
+        pack("skilltest", "throws.json", R"({"format": 1, "items": {"add": [{"throw": 1}]}})");
+        reloaded("skilltest", "was reloaded");
+        fake::lines.clear();
+        step();
+        check(logged("a pack threw while it applied: what it did came off"), "guard: the mod's later pack threw");
+        check(fake::read32(kWood) == 5, "guard: the packs from before apply again (Wood 5)");
+        check(guard_on(), "guard: the stack guard the throwing mod's earlier pack switched off is on again, as before the reload");
+        fs::remove(mod_dir("skilltest") / "content" / "throws.json");
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
+        reloaded("skilltest", "was reloaded");
+        step();
+        guard_set(false, &why);
+        E.guard = false, E.stack_clamp = 0;
     }
 
     // ---- many reloads (good, broken, throwing, in turn): no new owners, nothing left queued, the last good version applies

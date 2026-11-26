@@ -1,9 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useGame, useGameStatus, usePoll } from "../api/hooks";
 import { useLanguage, useT } from "../i18n";
 import { Banner, Button, Card, EmptyState, Page, PageHeader, Skeleton, StatusPill, WellInput, errorText } from "../ui";
-import { readRegistryReport } from "./api";
+import { readRegistryReport, registryRollback, type RegistryRollback } from "./api";
 import { parseRegistryReport, reportFreshness, type RegistryField } from "./report";
 import "./registry.css";
 
@@ -42,10 +42,19 @@ function RegistryFor({ gameId }: { gameId: string }) {
           {!r.verified && <Banner tone="warn" title={t("registry.unverified")}>{t("registry.unverifiedBody")}</Banner>}
           <p className="registry-hint">{t("registry.certaintyHint")}</p>
         </Card>
+        <RegistryPlanCard gameId={gameId} snapshot={`${r.written}#${r.generation}`} />
         {(r.omitted > 0 || r.writersOmitted > 0) && <Banner tone="warn" title={t("registry.partial")}>
           {r.omitted > 0 && `${t("registry.partialRows", { count: r.omitted })} `}
           {r.writersOmitted > 0 && `${t("registry.partialWriters", { count: r.writersOmitted })} `}
           {t("registry.partialBody")}</Banner>}
+        {r.restart.total > 0 && <Card title={t("registry.restart")} sub={t("registry.restartSub")}>
+          <Banner tone="warn" title={t("registry.restartCount", { count: r.restart.total })}>
+            {r.restart.total > r.restart.rows.length ? t("registry.restartOmitted", { count: r.restart.total - r.restart.rows.length }) : t("registry.restartHint")}
+          </Banner>
+          <Rows rows={r.restart.rows} empty={t("registry.noRefused")} render={(x, i) => <article key={i} className="registry-line" data-testid="registry-restart-row">
+            <strong>{x.owner}</strong>{x.field && <div className="k-mono">{x.field}</div>}<p>{x.reason}</p>
+          </article>} />
+        </Card>}
         {r.empty ? <EmptyState title={t("registry.empty")} hint={t("registry.emptyHint")} /> : <>
           <Card title={t("registry.refused")} sub={t("registry.refusedSub")}>
             <Rows rows={r.refused} empty={t("registry.noRefused")} render={(x, i) => <article key={i} className="registry-line">
@@ -103,4 +112,66 @@ function FieldChain({ field: f }: { field: RegistryField }) {
       <p><strong>{t("registry.winner", { winner: f.winner })}</strong> · {t("registry.result")} <span className="k-mono">{f.result}</span></p>
     </div>}
   </details>;
+}
+
+const short = (hash: string | null | undefined) => (hash ?? "").slice(0, 12);
+function planValue(v: unknown, none: string): string {
+  if (v === null || v === undefined) return none;
+  const text = typeof v === "string" ? v : JSON.stringify(v);
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
+/** The registry stage's plans (kiln_manage::registry_plan) and a rollback to the previous (last good) one: the dry run's
+ * changes are shown before anything is written; Clear removes a waiting request. Saves are never touched. `snapshot`: the
+ * report's write time and generation, so a new report (a new start: its generation starts again at 1) reads the plans
+ * again. */
+function RegistryPlanCard({ gameId, snapshot }: { gameId: string; snapshot: string }) {
+  const t = useT();
+  const status = useQuery({ queryKey: ["registry_rollback", gameId, snapshot], retry: false,
+    queryFn: () => registryRollback(gameId, { clear: false, dryRun: true }) });
+  const [confirm, setConfirm] = useState<"rollback" | "clear" | null>(null);
+  const [done, setDone] = useState<RegistryRollback | null>(null);
+  const act = useMutation({
+    mutationFn: (clear: boolean) => registryRollback(gameId, { clear, dryRun: false }),
+    onSuccess: (answer) => { setDone(answer); setConfirm(null); void status.refetch(); },
+  });
+  const s = status.data;
+  const rb = s?.rollback ?? null;
+  return <Card title={t("registry.plan.title")} sub={t("registry.plan.sub")} data-testid="registry-plan"
+    actions={<>
+      <Button size="s" disabled={!s || !!s.blocked || act.isPending} onClick={() => { setDone(null); setConfirm("rollback"); }}>{t("registry.plan.rollback")}</Button>
+      <Button size="s" disabled={!s?.pending || act.isPending} onClick={() => { setDone(null); setConfirm("clear"); }}>{t("registry.plan.clear")}</Button>
+    </>}>
+    {status.isLoading ? <Skeleton /> : status.error ? <Banner tone="warn" title={t("registry.plan.unavailable")}>{errorText(status.error)}</Banner> : s && <>
+      <p>{t("registry.plan.current", { plan: short(s.plan) || t("registry.plan.none") })}</p>
+      <p>{t("registry.plan.previous", { plan: short(s.previous) || t("registry.plan.none") })}</p>
+      <p>{rb ? t("registry.plan.lastRollback", { state: String(rb.state ?? "?"), plan: short(typeof rb.plan === "string" ? rb.plan : ""),
+        reason: typeof rb.reason === "string" ? rb.reason : "" }) : t("registry.plan.noLastRollback")}</p>
+      <p>{s.pending ? t("registry.plan.pending", { plan: short(s.pending.plan), requested: s.pending.requested, by: s.pending.by }) : t("registry.plan.noPending")}</p>
+      {s.blocked && <p className="registry-hint">{s.blocked}</p>}
+    </>}
+    {confirm === "rollback" && s && !s.blocked && <Banner tone="warn" title={t("registry.plan.dryRun", { plan: short(s.target?.hash), count: s.changes.length })}
+      actions={<>
+        <Button size="s" variant="primary" loading={act.isPending} onClick={() => act.mutate(false)}>{t("registry.plan.confirmRollback")}</Button>
+        <Button size="s" onClick={() => setConfirm(null)}>{t("registry.plan.cancel")}</Button>
+      </>}>
+      <p>{t("registry.plan.targetMods", { mods: s.target?.mods.length ? s.target.mods.map(m => `${m.id} ${m.version}`).join(", ") : t("registry.plan.noMods") })}</p>
+      {s.changesUnknown ? <p>{t("registry.plan.changesUnknown", { why: s.changesUnknown })}</p>
+        : s.changes.length === 0 ? <p>{t("registry.plan.noChanges")}</p>
+        : <ul className="registry-plan-changes">{s.changes.slice(0, 50).map(c => <li key={c.field} className="k-mono" data-testid="registry-plan-change">
+            {t("registry.plan.change", { field: c.field, from: planValue(c.from, t("registry.plan.noEdit")), to: planValue(c.to, t("registry.plan.noEdit")) })}
+          </li>)}</ul>}
+      {s.changes.length > 50 && <p>{t("registry.plan.moreChanges", { count: s.changes.length - 50 })}</p>}
+      <p>{t("registry.plan.runningKeeps")}</p>
+      <p className="registry-hint">{t("registry.plan.refusedWhole")}</p>
+    </Banner>}
+    {confirm === "clear" && s?.pending && <Banner tone="info" title={t("registry.plan.clearTitle", { plan: short(s.pending.plan) })}
+      actions={<>
+        <Button size="s" variant="primary" loading={act.isPending} onClick={() => act.mutate(true)}>{t("registry.plan.confirmClear")}</Button>
+        <Button size="s" onClick={() => setConfirm(null)}>{t("registry.plan.cancel")}</Button>
+      </>}>{t("registry.plan.clearBody")}</Banner>}
+    {act.error && <Banner tone="warn" title={t("registry.plan.failed")}>{errorText(act.error)}</Banner>}
+    {done && <Banner tone="ok" title={done.cleared !== null ? (done.cleared ? t("registry.plan.cleared") : t("registry.plan.nothingToClear"))
+      : t("registry.plan.requested", { plan: short(done.pending?.plan ?? done.target?.hash) })}>{t("registry.plan.savesUntouched")}</Banner>}
+  </Card>;
 }

@@ -451,6 +451,13 @@ pub fn status(inst: &Instance) -> Result<i32> {
         let build = text.lines().rev().find(|l| l.contains("[kiln] build ")).map(|l| l.trim().to_string());
         let booted = if text.contains("boot complete") { "boot complete" } else { "no boot in kiln.log yet" };
         println!("kiln      deployed, policy {policy}, {booted}{}", build.map(|l| format!("; {l}")).unwrap_or_default());
+        // what a reload, a runtime pass or a live edit left waiting for a restart (registry.json's RestartRequired rows)
+        match kiln_manage::registry_restart::read(&inst.dir) {
+            Ok(Some(w)) => println!("registry  {}{}", kiln_manage::registry_restart::summary(&w, 5),
+                if w.total > 0 { format!(" ({} has each reason)", kiln_manage::registry_restart::REPORT_REL) } else { String::new() }),
+            Ok(None) => println!("registry  no {} yet", kiln_manage::registry_restart::REPORT_REL),
+            Err(e) => println!("registry  {}", e.message),
+        }
     } else {
         println!("kiln      not deployed");
     }

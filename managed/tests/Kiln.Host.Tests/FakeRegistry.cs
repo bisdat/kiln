@@ -40,7 +40,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
         Stage = (RegistryStageTable*)NativeMemory.AllocZeroed(88);
         Live = (RegistryLiveTable*)NativeMemory.AllocZeroed(56);
         *Stage = new() { Size = 88, Version = 1, Status = &StageStatus, Subscribe = &Subscribe, Submit = &StageSubmit,
-            Read = &ReadStage, Select = &Select, Ready = &Ready, Unsubscribe = &Unsubscribe };
+            Read = &ReadStage, Select = &Select, Report = &Report, Ready = &Ready, Unsubscribe = &Unsubscribe };
         *Live = new() { Size = 56, Version = 1, Begin = &Begin, Submit = &Submit, Commit = &Commit,
             Revert = &Revert, Read = &ReadLive, Status = &Status };
         Internal = (KilnRegistryHostApi*)NativeMemory.AllocZeroed((nuint)sizeof(KilnRegistryHostApi));
@@ -93,6 +93,11 @@ internal sealed unsafe class FakeRegistry : IDisposable
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Select(uint view, KilnStr registry, KilnStr selector, byte* output, nuint capacity, nuint* length) => Text("[\"game:wood\"]", output, capacity, length);
+    /// <summary>registry.json's text kiln.registry's report_json answers with (the reload reply reads it).</summary>
+    internal string ReportText = "{\"format\": 1, \"refused\": []}";
+    internal int ReportCalls;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int Report(byte* output, nuint capacity, nuint* length) { ++Current.ReportCalls; return Text(Current.ReportText, output, capacity, length); }
     private static ulong Add(nint fn, nint user, bool ready)
     {
         var handle = ++Current._next; Current._callbacks.Add(handle, (fn, user, ready)); return handle;

@@ -110,13 +110,33 @@ A mod's packs apply whole from one version, never half:
   this world has not yet applied the mod's packs with every file reading: the world's first load, the mod's first
   application after its packs came off (an `unload` seen as a change of the list, its files gone), or every application
   since then had a broken file. A world reset forgets every old layer.
-- **A pack throws while it applies** (an unexpected value type in a section's code): that mod's field and drop layers
-  of this application come off, and its packs from the last application in which every file read apply again, whole,
-  with their `registry` sections (ordinary problems in them, such as an unknown field, are reported as before and do not
-  stop them). Without such packs, or when one of them throws too, none of the mod's packs apply and no `registry` section
-  of it reaches the registry stage. The report lists the mod as `<mod> (set apart)`. Not rolled back: what the throwing
-  pack did before the throw outside the field and drop layers (new items or recipes of an `add` list, gamedata `add`
-  clones, a section another service registered); the next application without the throw puts them right.
+- **A pack throws while it applies** (an unexpected value type in a section's code): the mod's application ends at that
+  pack, and everything the mod's packs did in it comes off at once, in the mod's place in the load order
+  (next release; before, only its field and drop layers did, after every other mod had applied):
+  - its field and drop layers;
+  - the new items and recipes of its `add` lists. One it changed is the definition it had before again, as a new
+    version with the clone, recipe and random-loot entry the game had (the game's maps point at them again), so what
+    other mods' packs set on its fields applies as before. One it took from another mod's pack is that pack's again.
+    One it added comes off as a removed pack's does: its id stays registered until the next start, so nothing that holds
+    it breaks, and a recipe leaves its station;
+  - kiln.gamedata's `add` clones (templates, sequences, perks, buffs), the same way, and the configs its item paths added
+    to an item (`impactValues.<config>` the item did not have);
+  - what it applied in a section of another service (`creatures`, `abilities`): the service takes the mod's part off
+    (`pack:<mod>`, every source), also a section it had from the application before. A section that waited for its
+    service is forgotten;
+  - the stack guard, which is the whole game's: on or off as it was when the mod's packs began, if one of them switched
+    it (`"options": {"stackGuard": false}`, or a raised max stack turned it on).
+
+  Then its packs from the last application in which every file read apply again in that place, whole, with their
+  `registry` sections (ordinary problems in them, such as an unknown field, are reported as before and do not stop them).
+  Without such packs, or when one of them throws too, none of the mod's packs apply and no `registry` section of it
+  reaches the registry stage. Mods later in the load order apply over the result, so their layers are what they would be
+  without the pack that threw, and no other mod's definition, clone, config or section is touched. The report lists the
+  mod's files after the one that threw as `<file> (not applied: an earlier pack of the mod threw)` and the mod as
+  `<mod> (set apart)`; the log says `data packs of <mod>: a pack threw while it applied: what it did came off (<n>
+  definition(s), clone(s) and section(s) besides its layers); the packs it had before apply again, whole` (or `none of
+  its packs apply`). What a service does with its own state beyond its section (a creature it already spawned from it)
+  is the service's.
 - Inside one application the layers change under one store lock: no reader that takes it (a drop table being acquired,
   the content sync's export) sees a mix of the old and the new layer.
 

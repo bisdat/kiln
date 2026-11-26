@@ -370,7 +370,7 @@
     },
     "refused": {
       "type": "array",
-      "description": "Edits that were not applied, each with its reason (a malformed edit, an unmapped or unproven field, an entry that is not there or was removed by the game build, a conflict with an exclusive edit, a raw path that does not resolve on this build).",
+      "description": "Edits that were not applied, each with its reason (a malformed edit, an unmapped or unproven field, an entry that is not there or was removed by the game build, a conflict with an exclusive edit, a raw path that does not resolve on this build). A reason that starts with the stable token \"RestartRequired: \" is an edit that waits for the next start (a restart field a reload changed, a field the start never read, a section or entry operation added after the start); counts.restartRequired has their number.",
       "items": {
         "type": "object",
         "required": [
@@ -465,6 +465,11 @@
         "removed": {
           "type": "integer",
           "minimum": 0
+        },
+        "restartRequired": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Refused rows whose reason starts with the stable token \"RestartRequired: \" (next release): edits a reload, a runtime pass or a live edit left for the next start. Counted over every row, also those the refused cap leaves out."
         }
       },
       "additionalProperties": false

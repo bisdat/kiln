@@ -59,6 +59,7 @@
 //! | [`control`] | `kiln/control/*.cmd`, `kiln/control/console/*.cmd` |
 //! | [`util`] | paths, UTC time formatting, atomic writes, external commands (from kilnctl) |
 //! | [`wine`] | Wine runner selection and environment of server instances (from kilnctl) |
+//! | [`registry_restart`] | what the registry left waiting for a restart: `kiln/state/registry.json`'s RestartRequired rows |
 //! | [`state`] | `kiln/state/{boot,mods,native,last-server}.json` |
 //! | [`registry_plan`] | the registry stage's plans and a rollback to the previous (last good) one: `kiln/data/content/registry/` |
 //! | [`server`] | dedicated server instances, settings, SteamCMD, run, backups, remote |
@@ -152,6 +153,7 @@ pub mod config;
 pub mod control;
 pub mod jsonc;
 pub mod logs;
+pub mod registry_restart;
 pub mod report;
 pub mod tick_compare;
 pub mod saves;

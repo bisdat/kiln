@@ -108,6 +108,7 @@ pub const NAMES: &[&str] = &[
     "logs_unfollow",
     "logs_crash_reports",
     "registry_report_read",
+    "registry_rollback",
     "saves_list",
     "saves_backups",
     "saves_backup",
