@@ -381,4 +381,15 @@ public sealed unsafe class NpcSpeechTests : IDisposable
         Assert.Equal("Hallo", SpeechText.FromJson(json).For("*"));           // kiln.content shows it in English too
         Assert.DoesNotContain("\"*\"", SpeechText.Json(UiText.Of(("en", "Hi"), ("de", "Hallo"))));
     }
+
+    [Fact]
+    public void An_accepted_call_with_a_note_is_ok_by_the_result_rule()
+    {
+        // IKilnResult: Reason is null when Ok (KILN120, the kit's and tools' result checks read it so); the note stays on
+        // SpeechResult's own Reason
+        var r = new SpeechResult(true, "kiln.content's loca hooks are not here");
+        Assert.Null(((IKilnResult)r).Reason);
+        Assert.NotNull(r.Reason);
+        Assert.Equal("why", ((IKilnResult)SpeechResult.No("why")).Reason);
+    }
 }

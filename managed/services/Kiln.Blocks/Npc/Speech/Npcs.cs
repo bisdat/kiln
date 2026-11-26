@@ -16,6 +16,9 @@ namespace Kiln;
 /// (null when nothing to say).</param>
 public sealed record SpeechResult(bool Ok, string? Reason) : IKilnResult
 {
+    // IKilnResult's reason is null when the call was accepted; this record's own Reason keeps the note then.
+    string? IKilnResult.Reason => Ok ? null : Reason;
+
     internal static readonly SpeechResult Yes = new(true, null);
     internal static SpeechResult No(string why) => new(false, why);
     /// <summary>"ok" (with the note), or "refused:" and the reason.</summary>
