@@ -428,7 +428,7 @@ const KNOWN_LEFTOVERS: [(&str, &str); 2] = [
 ];
 
 /// kiln-eml (stale game data): the first known leftover the archive `header` lists, in words with its resource id.
-fn leftover(header: &KFCFile) -> Option<String> {
+pub(crate) fn leftover(header: &KFCFile) -> Option<String> {
     KNOWN_LEFTOVERS.iter().find_map(|(guid, what)| {
         let wanted = kfc::guid::Guid::parse(guid)?;
         header.resources().keys().iter().any(|id| id.guid() == wanted).then(|| format!("{what}, resource {guid}"))
@@ -491,14 +491,29 @@ fn judge(path: &Path, bak: &Path, live_may_be_taken: bool) -> Verdict {
     }
 }
 
-/// kiln-eml (stale game data): the refusal of a working baseline proven to carry a mod's changes: the plain words and
-/// what the player does first (Kiln's launcher cuts long words), then why.
-fn stale_words(stem: &str, why: &str) -> String {
-    let what = if stem == "enshrouded_server" {
+/// kiln-eml (stale game data): the plain words and what the player does, first in every refusal of stale game data.
+fn stale_lead(stem: &str) -> String {
+    if stem == "enshrouded_server" {
         format!("Your server files {STALE_WORDS}. Update the server files with SteamCMD's validate (app_update 2278520 validate), then start again.")
     } else {
         format!("Your game files {STALE_WORDS}. Verify the game files in Steam (Properties > Installed Files > Verify integrity), then start again.")
-    };
+    }
+}
+
+/// kiln-eml (stale game data, review): the refusal of game files that would become the working baseline and hold a known
+/// mod's program (`found`, in words).
+pub(crate) fn stale_live_words(stem: &str, found: &str) -> String {
+    format!(
+        "{} (the game's current files hold {found}, so Kiln takes no clean copy of the game data from them, and nothing \
+         was changed.)",
+        stale_lead(stem)
+    )
+}
+
+/// kiln-eml (stale game data): the refusal of a working baseline proven to carry a mod's changes: the plain words and
+/// what the player does first (Kiln's launcher cuts long words), then why.
+pub(crate) fn stale_words(stem: &str, why: &str) -> String {
+    let what = stale_lead(stem);
     format!(
         "{what} (Kiln's clean copy of the game data, {stem}.kfc.bak, {stem}.kfc_resources.bak and {stem}.kfc.bak.integrity, \
          is not the game's own: {why}. Kiln neither builds the game data from it nor puts it back, and nothing was \

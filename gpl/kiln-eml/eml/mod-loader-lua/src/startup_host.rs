@@ -505,6 +505,20 @@ impl<'guard> StartupHost<'guard> {
 pub const VERIFY_GAME_FILES: &str =
     "Verify the game files in Steam (Properties, Installed Files), then start the game again from the Kiln launcher";
 
+/// kiln-eml (stale game data, review): the refusal of a kiln-mode start whose working baseline holds a program a known
+/// mod creates (Auto Loot Plus's auto-smash program and aura, `load.rs` `KNOWN_LEFTOVERS`), or, when the game's files are
+/// about to become the working baseline (`live`), whose game files hold one; None when `header` holds none. Only the
+/// archive header is looked at (no file is read here): a kiln-mode start builds from such a pair, so the mod's
+/// changes stayed in the game data after the mod was removed (HadToRegister, 2026-11-26).
+pub fn known_leftover_refusal(stem: &str, header: &KFCFile, live: bool) -> Option<String> {
+    let found = crate::load::leftover(header)?;
+    Some(if live {
+        crate::load::stale_live_words(stem, &found)
+    } else {
+        crate::load::stale_words(stem, &format!("it holds {found}"))
+    })
+}
+
 /// `whole` is, byte for byte, the start of `file` (which may be longer).
 fn same_prefix(whole: &Path, file: &Path) -> io::Result<bool> {
     use io::Read;
