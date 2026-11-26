@@ -416,6 +416,15 @@ base).
 - **No names without a journal.** Hosted or installed ShroudForge (the default), kiln-eml's own EML pass (EML mods without
   kiln mode) and other loaders keep no change journal. What they wrote is still in the base, and registry edits still win
   over it, but no row names them; the report says so (`base.journal.state` `none`).
+- **Who published the base** (next release; before, `base.writer` said `none` on every start but a kiln-mode one, also where
+  kiln-eml or hosted ShroudForge had patched the archive): `base.writer` is this start's archive writer: `kiln-eml` (its EML
+  pass, or Kiln's interpreter in kiln mode), `shroudforge-hosted` or `shroudforge-installed` (ShroudForge reserved the startup
+  data writer), `external` (another loader's proxy ran instead of kiln-eml, or the game data differs from kiln-eml's vanilla
+  backup and is not its output) or `none` (the game's data as shipped, as far as kiln-eml can tell). `base.archive` says what
+  that rests on: kiln-eml's state of the start (`phase`, `patched`, `cached`, `restored`, `mods`), the name of kiln-eml's
+  ownership receipt (`receipt`, `kiln/eml/ownership/<stem>.json`) or of ShroudForge's record of its pass (`record`,
+  `<stem>.kfc.prepared.json`; named, never read), and a sentence. kilnctl's values diff still takes only `none` as the game's
+  own data ([regmap/README.md](../../../../regmap/README.md)).
 
 **The drift probe (best effort).** At each world load and each pack reload Kiln compares, for every field it writes live,
 the game's value just before Kiln's first write in that world with what the stage read at start plus the writers Kiln knows
