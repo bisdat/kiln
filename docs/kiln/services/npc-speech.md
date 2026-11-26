@@ -19,14 +19,20 @@ Requested by Marshall (Ryrin) for survival add-ons (NPCs that eat; craftspeople 
 | Managed | `managed/services/Kiln.Blocks/Npc/Speech/` (`Npcs`, `NpcSpeech`, `SpeechMode`, `SpeechResult`, `SayOptions`; channel `kiln:npcspeech`) |
 | Symbols | `sigdb/symbols/client.d/npcspeech.json` (features `npcspeech.bubble`, `npcspeech.voice`) |
 | Sample | `mods/samples/HungryCrafter` (`/hunger starve|feed [all]`) |
-| Tests | `native/services/npcspeech/tests/run.sh` (host: the bubble rule and the voice-over mute on fake structs), `managed/tests/Kiln.Blocks.Tests/NpcSpeechTests.cs`, `managed/tests/Kiln.TestKit.Tests/NpcSpeechFakeTests.cs` |
+| Tests | `native/services/npcspeech/tests/run.sh` (host: the bubble rule and the voice-over mute on fake structs), `managed/tests/Kiln.Blocks.Tests/NpcSpeechTests.cs`, `managed/tests/Kiln.TestKit.Tests/NpcSpeechFakeTests.cs`; lab: `mods/tests/npcspeech-test` (console driver) + `tools/nettest/npcspeechtest.py` (Kiln and vanilla lab peers) |
 | Evidence | [docs/re/npc-speech.md](../../re/npc-speech.md) |
 
 ## Status
 
 - **Static only** (client 26430625 / svn 1287369): the hooks' targets, the record layout and the bubble's parameters are
-  read in the code, and sigdb finds all of them on that build. The host half (the rule, the channel, what each client is
-  sent) is unit-tested. **Not seen in a game client yet**: the bubble showing Kiln's text, a Say over an NPC that is
+  read in the code, and sigdb finds all of them on that build.
+- **Lab, dedicated server 26430253** (2026-11-25, fresh world, no player; `npcspeech-test` + `HungryCrafter` deployed,
+  `tools/nettest/npcspeechtest.py`): **19 PASS, 0 FAIL**. The server lists `kiln:npcspeech` v1 (not required); a ready
+  Kiln peer gets the snapshot's Reset; Say goes out once with both languages and 30 s; Replace goes out with its three
+  lines and not again when repeated; a peer that joins later gets Reset, the Replace and the running Say (24.3 s left);
+  Suppress, StopSaying (an empty Say) and Clear (mode 0) go out; the vanilla peer gets no Kiln frame. kiln.log:
+  `npcspeech: npcspeech.bubble is off in this process (a dedicated server ...)` and the service skipped, no error.
+  `Npcs.Available` is false there, as it must be. **Not seen in a game client yet**: the bubble showing Kiln's text, a Say over an NPC that is
   not the target, Suppress hiding the greeting, the muted voice-over of a craftsperson. Marshall tests a dev build.
 
 ## Using it
