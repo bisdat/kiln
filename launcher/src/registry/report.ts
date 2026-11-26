@@ -22,6 +22,8 @@ export interface RegistryConflict { field: string; kind: string; winner: string;
 export interface RegistryRefusal { owner: string; field: string; stage: string; reason: string }
 export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
+  /** Whether the archive writer's packages are named (base.journal, since 0.2.0-dev.31.14); empty: nothing to say. */
+  journal: string;
   fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[];
   entries: { kind: string; registry: string; id: string; state: string; owner: string; source: string; reason: string }[]; omitted: number; empty: boolean;
   /** Earlier writers left out of field chains: native's truncated.writers plus this view's own 64-writer cut. */
@@ -62,6 +64,23 @@ export function redactRaw(s: string): string {
 const omitted = (x: unknown): number => x === undefined ? 0 : count(x);
 const optional = (x: unknown): string => x === undefined ? "" : text(x);
 const owner = (x: unknown): string => x === null ? t("registry.baseOwner") : text(x);
+// An archive-writer package (report.cpp: "shroudforge:<id>", "eml:<id>", "kiln-eml:unattributed") as players read it.
+function archiveOwner(who: string): string {
+  if (who === "kiln-eml:unattributed") return t("registry.archiveUnattributed");
+  const m = /^(shroudforge|eml):(.+)$/.exec(who);
+  return m ? t(m[1] === "eml" ? "registry.emlPackage" : "registry.sfPackage", { id: m[2] }) : who;
+}
+function writerKind(kind: string): string {
+  return kind === "archiveWriter" ? t("registry.kind.archiveWriter") : kind === "drift" ? t("registry.kind.drift") : kind;
+}
+// base.journal: absent in a report from before 0.2.0-dev.31.14, and nothing to say when the start had no archive writer.
+function journalLine(base: ObjectRow): string {
+  if (base.journal === undefined) return "";
+  const j = object(base.journal), state = text(j.state);
+  if (state === "read") return t(j.truncated === true ? "registry.journal.truncated" : "registry.journal.read", { packages: count(j.packages), entries: count(j.entries) });
+  if (state === "none" && text(base.writer) === "none") return "";
+  return t("registry.journal.notNamed", { reason: j.text === undefined ? t(`registry.journal.${state === "stale" || state === "unreadable" ? state : "none"}`) : redactRaw(text(j.text)) });
+}
 function certainty(x: unknown): string {
   return t(`registry.certainty.${x === "certain" || x === "named" || x === "bestEffort" ? x : "unknown"}`);
 }
@@ -153,7 +172,8 @@ export function parseRegistryReport(input: string): RegistryReport {
         // an element edit names its element ("entries[3].chance", report.cpp writer_json): shown when the lock knows the
         // list and leaf, so a chain says which element an operation changed
         const element = w.element === undefined || raw ? "" : isKilnField(text(f.registry), text(w.element)) ? text(w.element) : t("registry.elementHidden");
-        return { element, owner: optional(w.who) || optional(w.mod) || t("registry.referenceCheck"), kind: text(w.kind), stage: optional(w.stage),
+        const kind = text(w.kind), who = optional(w.who);
+        return { element, owner: kind === "archiveWriter" && who ? archiveOwner(who) : who || optional(w.mod) || t("registry.referenceCheck"), kind: writerKind(kind), stage: optional(w.stage),
           operation: w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
           value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty), certain: w.certainty === "certain" };
       }),
@@ -161,6 +181,7 @@ export function parseRegistryReport(input: string): RegistryReport {
   });
   return {
     written, generation: count(r.generation), phase: text(r.phase), baseOrigin: text(base.origin), baseWriter: text(base.writer), verified: regmap.verified,
+    journal: journalLine(base),
     fields: fieldRows, writersOmitted: omitted(truncated.writers) + launcherWriterCut,
     conflicts: conflicts.slice(0, REPORT_LIMITS.rows).map(x => {
       const c = object(x), field = text(c.field);
