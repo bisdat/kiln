@@ -205,6 +205,6 @@ fn a_clean_copy_with_an_uninstalled_mods_changes_leads_with_the_plain_words() {
         (Properties > Installed Files > Verify integrity), then start again"), "{text}");
     assert!(text.contains("Auto Loot Plus"), "the known leftover is named: {text}");
     assert!(text.contains("no ShroudForge mod ran in that start"), "{text}");
-    assert_eq!(text.matches("Verify").count(), 1, "the way out is said once: {text}");
+    assert_eq!(text.matches("Verify the game files").count(), 1, "the way out is said once: {text}");
     assert_eq!(failed["staleGameData"], true, "{sf}");
 }
