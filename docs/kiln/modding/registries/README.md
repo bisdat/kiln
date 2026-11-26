@@ -285,7 +285,7 @@ column says which fields this Kiln maps, which are unproven and why.
 
 `applies` describes when the **local game** consumes a value. The separate, per-field `joinedClient` marker in the
 schema, `RegistrySchema.Find(...).JoinedClient`, the generated property's `RegistryFieldAttribute.JoinedClient` and
-each generated page's **Joined client** column describe the multiplayer path. Keeping it separate is additive:
+each generated page's **Joined client** column describe the multiplayer path (since 0.2.0-dev.31.17, mod API 0.2.24). Keeping it separate is additive:
 `RegistryApplies` and its three existing values keep their meaning, and no existing property constructor changes.
 
 | Joined client | Server edit on an already joined Kiln client |
