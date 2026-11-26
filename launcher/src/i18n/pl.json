@@ -6526,8 +6526,8 @@
     "baseOrigin": "Pochodzenie bazy: {origin}",
     "archiveWriter": "Zapisujący archiwum: {writer}",
     "journal": {
-      "read": "Pakiety zapisującego archiwum nazwane z dziennika zmian kiln-eml: pakiety: {packages}, wpisy: {entries} (tylko przedmioty, dropy i balans: wpis receptury ani łupu nie jest nazywany).",
-      "truncated": "Pakiety zapisującego archiwum nazwane z dziennika zmian kiln-eml: pakiety: {packages}, wpisy: {entries} (tylko przedmioty, dropy i balans: wpis receptury ani łupu nie jest nazywany). Dziennik jest ucięty, więc pakiet mógł zapisać wpisy, których nie nazywa.",
+      "read": "Pakiety zapisującego archiwum nazwane z dziennika zmian kiln-eml: pakiety: {packages}, wpisy: {entries} (przebieg ShroudForge nazywa przedmioty, dropy i balans dla całego wpisu; przebieg EML nazywa pola zapisane przez jego mody, w recepturach i łupach według ich elementu).",
+      "truncated": "Pakiety zapisującego archiwum nazwane z dziennika zmian kiln-eml: pakiety: {packages}, wpisy: {entries} (przebieg ShroudForge nazywa przedmioty, dropy i balans dla całego wpisu; przebieg EML nazywa pola zapisane przez jego mody, w recepturach i łupach według ich elementu). Dziennik jest ucięty, więc pakiet mógł zapisać wpisy, których nie nazywa.",
       "notNamed": "Pakiety zapisującego archiwum nie są nazwane w tym uruchomieniu: {reason}",
       "none": "zapisujący archiwum tego uruchomienia nie prowadzi dziennika zmian.",
       "stale": "dziennik zmian należy do wcześniejszego uruchomienia.",
@@ -6535,15 +6535,17 @@
     },
     "sfPackage": "{id} (pakiet ShroudForge)",
     "emlPackage": "{id} (pakiet EML)",
-    "archiveUnattributed": "Zapis przy uruchomieniu, którego nie wykonał żaden pakiet (kiln-eml)",
+    "archiveUnattributed": "Zapis przy uruchomieniu, którego Kiln nie może przypisać żadnemu pakietowi (kiln-eml)",
     "archiveOp": "Nieznana (dziennik kiln-eml nazywa wpis zapisany przez ten pakiet, a nie to pole)",
+    "archiveOpField": "Nieznana (dziennik kiln-eml nazywa to pole jako zapisane przez ten pakiet, a nie wartość)",
     "kind": {
       "archiveWriter": "Zapisał ten wpis przed Kiln (archiwum)",
+      "archiveWriterField": "Zapisał to pole przed Kiln (archiwum)",
       "drift": "Zmienione poza Kiln"
     },
     "unverified": "Mapowanie niezweryfikowane",
     "unverifiedBody": "Zmiany pól mogą zostać odrzucone jako Unproven. Przeczytaj powód każdego odrzucenia.",
-    "certaintyHint": "Pewne = Kiln zaobserwował zapisującego. Nazwane z dziennika = pakiet ShroudForge lub EML, który według dziennika zmian kiln-eml zapisał wpis przed Kiln; zmiana Kiln wygrywa z nim. Szacowany dryf = wartość gry zmieniła się poza Kiln; podejrzani to wskazówka, a nie dowód, kto ją zapisał, ani że nie ma innego zapisującego.",
+    "certaintyHint": "Pewne = Kiln zaobserwował zapisującego. Nazwane z dziennika = pakiet ShroudForge lub EML, który według dziennika zmian kiln-eml zapisał wpis (a w przypadku moda EML pole) przed Kiln; zmiana Kiln wygrywa z nim. Szacowany dryf = wartość gry zmieniła się poza Kiln; podejrzani to wskazówka, a nie dowód, kto ją zapisał, ani że nie ma innego zapisującego.",
     "partial": "Niepełny raport",
     "partialRows": {
       "one": "Raport natywny lub limity bezpieczeństwa tego widoku pominęły {count} wiersz.",

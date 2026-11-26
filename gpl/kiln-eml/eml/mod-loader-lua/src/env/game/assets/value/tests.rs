@@ -279,3 +279,317 @@ fn a_mapped_array_count_beyond_its_bytes_is_a_lua_error_not_an_allocation() {
         assert!(err.contains(&want), "{err}");
     }
 }
+
+// kiln-eml: the change journal's member paths (env/writes.rs): each write is noted for the running entrypoint through
+// the value it goes into, and walking the value as it will be written gives every write's path at its published place
+// (0-based element indices): a field set, an element replaced or inserted whole, a list's membership changed; a write
+// into a value detached from the data before (an element since replaced) is not there, and neither is one made outside
+// a run; what was written in an element before it was replaced stays at its place. The same for a value a mod created (owned) as for the game's mapped data.
+#[test]
+fn writes_are_named_by_their_published_member_paths() {
+    use crate::env::writes::{Record, Recording};
+    use std::cell::RefCell;
+    let (lua, _registry) = lua_with_registry();
+    let record = RefCell::new(Record::default());
+    let walk = |lua: &mlua::Lua, global: &str| {
+        let data: LuaValue = lua.globals().get(global).unwrap();
+        let mut out = Vec::new();
+        walk_writes(&data, &mut String::new(), &mut out).unwrap();
+        out.sort();
+        out
+    };
+    lua.load("game.recipes[1].knowledgeRequirement.compareValue = 3").exec().unwrap();
+    assert!(walk(&lua, "game").is_empty(), "a write outside a run is not noted");
+    {
+        let _run = Recording::start();
+        {
+            let _a = Record::begin(&record, "a");
+            lua.load("game.recipes[1].knowledgeRequirement.compareValue = 1; game.recipes[1].knowledgeRequirement.compareValue = 2")
+                .exec()
+                .unwrap();
+        }
+        {
+            let _b = Record::begin(&record, "b");
+            lua.load("owned = own(plain(game)); push(owned.recipes, new_recipe(4)); owned.recipes[2].knowledgeRequirement = { knowledgeOrQueryId = { value = 6 }, compareValue = 0 }; push(game.recipes, new_recipe(5))")
+                .exec()
+                .unwrap();
+        }
+        let _c = Record::begin(&record, "c");
+        let remove_fn = lua
+            .create_function(|lua, (list, at): (AnyUserData, usize)| Ok(remove(&list, at, lua)?.1))
+            .unwrap();
+        lua.globals().set("remove_at", remove_fn).unwrap();
+        lua.load("local kept = game.recipes[2]; game.recipes[2] = new_recipe(9); kept.knowledgeRequirement.compareValue = 7; assert(remove_at(owned.recipes, 1))")
+            .exec()
+            .unwrap();
+    }
+    assert_eq!(
+        walk(&lua, "game"),
+        [
+            (1, "recipes[0].knowledgeRequirement.compareValue".to_string()),
+            (2, "recipes[1]".to_string()),
+            (2, "recipes[]".to_string()),
+            (3, "recipes[1]".to_string()),
+        ],
+        "a's field once; b's insertion a list write and its element, which c replaced since (b's write kept there: the new \
+         value could be a copy; c's write into the element it took out is not there)"
+    );
+    assert_eq!(
+        walk(&lua, "owned"),
+        [
+            (2, "recipes[0]".to_string()),
+            (2, "recipes[0].knowledgeRequirement".to_string()),
+            (2, "recipes[]".to_string()),
+            (3, "recipes[]".to_string()),
+        ],
+        "an owned value: b's element and the field b set in it, at index 0 since c removed the first element"
+    );
+}
+
+// kiln-eml (review: a replaced value's writes): a value put in place over another one may be a copy of it (a mod that
+// copies a field, an element or a resource's data into plain tables and assigns it back), so the writes logged in the
+// value it replaced are kept at that place: the earlier writer is still named there (over-naming one whose write the new
+// value dropped, never missing one whose write it kept). A struct field (mapped and owned) and a list element replaced by
+// plain copies of themselves; the replacing mod is named on what it put in place.
+#[test]
+fn a_replaced_value_keeps_the_writes_made_in_it_before() {
+    use crate::env::writes::{Record, Recording};
+    use std::cell::RefCell;
+    let (lua, _registry) = lua_with_registry();
+    let record = RefCell::new(Record::default());
+    let walk = |lua: &mlua::Lua, global: &str| {
+        let data: LuaValue = lua.globals().get(global).unwrap();
+        let mut out = Vec::new();
+        walk_writes(&data, &mut String::new(), &mut out).unwrap();
+        out.sort();
+        out.dedup();
+        out
+    };
+    {
+        let _run = Recording::start();
+        {
+            let _a = Record::begin(&record, "a");
+            lua.load(
+                "push(game.recipes, new_recipe(5)); game.recipes[1].knowledgeRequirement.compareValue = 4
+                game.recipes[2].knowledgeRequirement.knowledgeOrQueryId.value = 6
+                owned = own(plain(game)); owned.recipes[1].knowledgeRequirement.compareValue = 4",
+            )
+            .exec()
+            .unwrap();
+        }
+        let _b = Record::begin(&record, "b");
+        lua.load(
+            "game.recipes[1].knowledgeRequirement = plain(game.recipes[1].knowledgeRequirement)
+            game.recipes[2] = plain(game.recipes[2])
+            owned.recipes[1].knowledgeRequirement = plain(owned.recipes[1].knowledgeRequirement)",
+        )
+        .exec()
+        .unwrap();
+    }
+    let s = |w: u32, p: &str| (w, p.to_string());
+    assert_eq!(
+        walk(&lua, "game"),
+        [
+            s(1, "recipes[0].knowledgeRequirement.compareValue"),
+            s(1, "recipes[1]"),
+            s(1, "recipes[1].knowledgeRequirement.knowledgeOrQueryId.value"),
+            s(1, "recipes[]"),
+            s(2, "recipes[0].knowledgeRequirement"),
+            s(2, "recipes[1]"),
+        ],
+        "a's writes kept where b's copies replaced the values holding them"
+    );
+    assert_eq!(
+        walk(&lua, "owned"),
+        [s(1, "recipes[0].knowledgeRequirement.compareValue"), s(2, "recipes[0].knowledgeRequirement")],
+        "the same in a value a mod created"
+    );
+}
+
+// kiln-eml (review: kept writes move with their members): the writes kept from a value a copy replaced belong to the copy's
+// own members, so an element inserted or removed before one of them afterwards moves them with it: a's write into the
+// second recipe stays on that recipe (now the third) after the list was put back as a copy and another recipe inserted
+// in front; the same when the resource's data itself was replaced by a copy.
+#[test]
+fn kept_writes_move_with_the_members_of_the_copy() {
+    use crate::env::writes::{Record, Recording};
+    use std::cell::RefCell;
+    let (lua, _registry) = lua_with_registry();
+    let record = RefCell::new(Record::default());
+    let insert_fn = lua
+        .create_function(|lua, (list, at, value): (AnyUserData, usize, LuaValue)| Ok(insert(&list, at, &value, lua)?))
+        .unwrap();
+    lua.globals().set("insert_at", insert_fn).unwrap();
+    {
+        let _run = Recording::start();
+        {
+            let _a = Record::begin(&record, "a");
+            lua.load("push(game.recipes, new_recipe(5)); game.recipes[2].knowledgeRequirement.compareValue = 4").exec().unwrap();
+        }
+        {
+            let _b = Record::begin(&record, "b");
+            lua.load("game.recipes = game.recipes").exec().unwrap();
+        }
+        let _c = Record::begin(&record, "c");
+        lua.load("assert(insert_at(game.recipes, 1, new_recipe(6)))").exec().unwrap();
+    }
+    let data: LuaValue = lua.globals().get("game").unwrap();
+    let mut out = Vec::new();
+    walk_writes(&data, &mut String::new(), &mut out).unwrap();
+    out.sort();
+    out.dedup();
+    let a: Vec<&str> = out.iter().filter(|(w, _)| *w == 1).map(|(_, p)| p.as_str()).collect();
+    assert_eq!(
+        a,
+        ["recipes[2]", "recipes[2].knowledgeRequirement.compareValue", "recipes[]"],
+        "a's recipe (put in place whole) and its write moved with it: {out:?}"
+    );
+}
+
+// kiln-eml (review of the change journal's cost): a large EML mod set over one big shared registry, timed with the
+// write log off (outside a run: EML as before, one thread-local read per write) and on (a run recording per entrypoint),
+// and the walk that turns the logs into member paths against EML's own pass over the same tree before it serializes
+// (convert_lua_to_value). Not a pass/fail test: `cargo test --release -p mod-loader-lua journal_cost -- --ignored
+// --nocapture` prints the numbers.
+fn big_registry(n: u32) -> Rc<[u8]> {
+    let mut bytes = vec![0u8; 8 + 8 * n as usize];
+    bytes[0..4].copy_from_slice(&8u32.to_le_bytes());
+    bytes[4..8].copy_from_slice(&n.to_le_bytes());
+    for i in 0..n as usize {
+        bytes[8 + 8 * i..12 + 8 * i].copy_from_slice(&(100 + i as u32).to_le_bytes());
+    }
+    bytes.into()
+}
+
+#[test]
+#[ignore]
+fn journal_cost() {
+    use crate::env::writes::{Record, Recording, collect};
+    use std::{cell::RefCell, time::Instant};
+    const N: u32 = 5000;
+    const ROUNDS: u32 = 20;
+    let registry = recipe_fixture();
+    let bytes = big_registry(N);
+    let mods = r#"
+        -- a reader that walks everything (materializes every recipe), an unlocker that writes two fields of every recipe,
+        -- a mod that edits every 10th recipe, one that appends 100 recipes and one that replaces 50 recipes whole
+        local function reader(data) local s = 0 for _, r in ipairs(data.recipes) do s = s + r.knowledgeRequirement.compareValue end return s end
+        local function every_tenth(data) for i = 1, #data.recipes, 10 do data.recipes[i].knowledgeRequirement.compareValue = 2 end end
+        local function append(data) for i = 1, 100 do push(data.recipes, new_recipe(900000 + i)) end end
+        local function replace(data) for i = 1, 50 do data.recipes[i * 7] = new_recipe(800000 + i) end end
+        mods = { reader, function(d) unlock_all(d, 1715248921) end, every_tenth, append, replace }
+    "#;
+    let mut times = [0f64; 6];
+    for round in 0..ROUNDS {
+        for on in [false, true] {
+            let lua = mlua::Lua::new();
+            let mapped = MappedValue::from_bytes(&registry, registry.get(TypeIndex::new(REGISTRY)).unwrap(), &bytes).unwrap();
+            lua.globals().set("game", convert_value_to_lua(&mapped, &lua).unwrap()).unwrap();
+            let push_fn = lua
+                .create_function(|lua, (list, value): (AnyUserData, LuaValue)| Ok(push(&list, &value, lua)?))
+                .unwrap();
+            lua.globals().set("push", push_fn).unwrap();
+            lua.load("function new_recipe(id) return { knowledgeRequirement = { knowledgeOrQueryId = { value = id }, compareValue = 0 } } end
+                function unlock_all(data, id) for _, recipe in ipairs(data.recipes) do local q = recipe.knowledgeRequirement
+                if q.knowledgeOrQueryId.value ~= id then q.knowledgeOrQueryId.value = id end q.compareValue = 1 end end").exec().unwrap();
+            lua.load(mods).exec().unwrap();
+            let fns: Vec<mlua::Function> = lua.globals().get::<mlua::Table>("mods").unwrap().sequence_values().map(|f| f.unwrap()).collect();
+            let data: LuaValue = lua.globals().get("game").unwrap();
+            let record = RefCell::new(Record::default());
+            let t = Instant::now();
+            {
+                let _run = on.then(Recording::start);
+                for (i, f) in fns.iter().enumerate() {
+                    let _w = Record::begin(&record, &format!("mod{i}"));
+                    f.call::<()>(data.clone()).unwrap();
+                }
+            }
+            let mods_time = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let mut out = Vec::new();
+            walk_writes(&data, &mut String::new(), &mut out).unwrap();
+            let paths = out.len();
+            let r = collect(&record.borrow(), vec![(kfc::guid::ResourceId::new(kfc::guid::Guid::from([1; 16]), 1, 0), out)]);
+            let walk_time = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let value = convert_lua_to_value(&data, &handle(&registry, REGISTRY)).unwrap();
+            let convert_time = t.elapsed().as_secs_f64();
+            assert!(value.as_struct().is_some());
+            if round > 0 {
+                let k = if on { 3 } else { 0 };
+                times[k] += mods_time;
+                times[k + 1] += walk_time;
+                times[k + 2] += convert_time;
+            }
+            if on && round == ROUNDS - 1 {
+                let written: usize = r.packages.iter().map(|p| p.changed.iter().map(|c| c.paths.len()).sum::<usize>()).sum();
+                println!("journal_cost: {N} recipes, {paths} logged writes walked, {written} member paths in the record");
+            }
+        }
+    }
+    let ms = |x: f64| x * 1000.0 / (ROUNDS - 1) as f64;
+    println!(
+        "journal_cost (ms per pass, mean of {}): mods off {:.2} on {:.2} (+{:.1}%); walk off {:.2} on {:.2}; EML's convert {:.2} / {:.2}",
+        ROUNDS - 1,
+        ms(times[0]),
+        ms(times[3]),
+        (times[3] / times[0] - 1.0) * 100.0,
+        ms(times[1]),
+        ms(times[4]),
+        ms(times[2]),
+        ms(times[5])
+    );
+}
+
+// kiln-eml (review: the cost of a copy put back): a mod that writes two fields of every one of 5,000 recipes, then a mod
+// that assigns the recipe list back as a copy of itself (`data.recipes = data.recipes`: the copy keeps the 10,000 writes
+// made in the list it replaced). Timed with the write log off and on; `cargo test --release -p mod-loader-lua
+// journal_cost_copy_back -- --ignored --nocapture` prints the numbers.
+#[test]
+#[ignore]
+fn journal_cost_copy_back() {
+    use crate::env::writes::{Record, Recording};
+    use std::{cell::RefCell, time::Instant};
+    const N: u32 = 5000;
+    const ROUNDS: u32 = 5;
+    let registry = recipe_fixture();
+    let bytes = big_registry(N);
+    let mut times = [0f64; 2];
+    let mut kept = 0;
+    for _ in 0..ROUNDS {
+        for on in [false, true] {
+            let lua = mlua::Lua::new();
+            let mapped = MappedValue::from_bytes(&registry, registry.get(TypeIndex::new(REGISTRY)).unwrap(), &bytes).unwrap();
+            lua.globals().set("game", convert_value_to_lua(&mapped, &lua).unwrap()).unwrap();
+            lua.load("function unlock_all(data, id) for _, recipe in ipairs(data.recipes) do local q = recipe.knowledgeRequirement
+                if q.knowledgeOrQueryId.value ~= id then q.knowledgeOrQueryId.value = id end q.compareValue = 1 end end
+                function copy_back(data) data.recipes = data.recipes end").exec().unwrap();
+            let unlock: mlua::Function = lua.globals().get("unlock_all").unwrap();
+            let copy: mlua::Function = lua.globals().get("copy_back").unwrap();
+            let data: LuaValue = lua.globals().get("game").unwrap();
+            let record = RefCell::new(Record::default());
+            {
+                let _run = on.then(Recording::start);
+                {
+                    let _a = Record::begin(&record, "unlock");
+                    unlock.call::<()>((data.clone(), 1715248921)).unwrap();
+                }
+                let _b = Record::begin(&record, "copy");
+                let t = Instant::now();
+                copy.call::<()>(data.clone()).unwrap();
+                times[on as usize] += t.elapsed().as_secs_f64();
+            }
+            if on {
+                let mut out = Vec::new();
+                walk_writes(&data, &mut String::new(), &mut out).unwrap();
+                kept = out.iter().filter(|(w, _)| *w == 1).count();
+            }
+        }
+    }
+    println!(
+        "journal_cost_copy_back: {N} recipes, {kept} writes kept; the copy put back {:.2} ms off, {:.2} ms on",
+        times[0] * 1000.0 / ROUNDS as f64,
+        times[1] * 1000.0 / ROUNDS as f64
+    );
+    assert!(kept >= 2 * N as usize, "the unlocker's writes are kept: {kept}");
+}

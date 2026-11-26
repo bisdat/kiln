@@ -41,7 +41,9 @@ json writer_json(const ChainRow& r, size_t list_cap) {
         w["element"] = r.element.list + "[" + (r.element.all ? std::string("*") : std::to_string(r.element.index)) + "]" +
                        (r.element.leaf.empty() ? "" : "." + r.element.leaf);
     if (r.kind == WriterKind::ArchiveWriter) {
-        // no op: kiln-eml's journal names the entry's resource, not what the package did to this field (archive_journal.h)
+        // no op: kiln-eml's journal names the entry's resource (or, format 2, this field), not what the package did to the
+        // field (archive_journal.h)
+        w["named"] = r.archive_field ? "field" : "entry";
     } else if (r.list == ListOp::None) {
         if (r.op.set) write_value(w, "op", r.op.value, "opEntriesLeftOut", list_cap);
         else w["op"] = r.op.to_json();

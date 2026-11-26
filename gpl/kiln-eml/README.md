@@ -603,6 +603,24 @@ Each is marked `kiln-eml:` in the source.
     `backups_are_compared_with_the_files_steam_installed`, `a_file_is_steams_with_more_after_it_only_when_its_start_is_steams`,
     `m6_stale_backup` `kiln_mode_never_takes_or_builds_from_game_data_that_holds_a_known_mods_program`, `ownership`
     `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
+44. `mod-loader-lua` `env/writes.rs` (new), the value wrappers (`value/mapped.rs`, `value/simple.rs`, `value.rs`
+    `walk_writes`/`note_put`), `env/app_state.rs`, `env/game/assets.rs`, `runner/mod.rs`, `runner/state.rs`, `lib.rs` (`RunResult::journal`,
+    `RunResult::generation`) (kiln-eml's own code, next release): EML's pass records which mod wrote which resource
+    and where, for the EML dialect's change journal (kiln-eml `sf_startup/journal.rs`, format 2). The runner names the
+    running entrypoint (`require("mods.<id>")`; a mod's entry module is its own mod's code even when another mod requires
+    it before its turn); each value wrapper keeps a log of the writes made through it (a field
+    assigned, the value put in place whole, a list's membership changed), a resource's `data` replaced, a resource or a
+    content created are noted per writer; once the mods ran, `AppState::write_record` walks every materialized value as
+    it will be written and turns each log into a member path at its published place (`recipes[37].craftingDuration`,
+    `input[]`, `""` for the whole resource). Off outside a run (one thread-local read); in a run a write costs a
+    thread-local read and a scan of its value's own small log; a copy's log starts empty (the assignment that put it
+    there names its writer), a write into a value detached from its resource is not named, and the writes logged in a
+    value replaced (a field, an element, a variant's value, a resource's data) move onto the value put in its place,
+    member by member (`value::graft`), since the new value can be a copy of it. Nothing is compared or
+    serialized differently: the dirty flags and the bytes written are EML's. Tests: `env::writes` (2),
+    `value::tests::writes_are_named_by_their_published_member_paths`, `a_replaced_value_keeps_the_writes_made_in_it_before`,
+    `kept_writes_move_with_the_members_of_the_copy`, `journal_cost_copy_back` (ignored),
+    `journal_cost` (ignored: times the log and the walk), kiln-eml `m6_eml_journal`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
