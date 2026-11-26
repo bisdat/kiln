@@ -663,10 +663,17 @@ public sealed record UiWindowOptions
     /// when it was created.</summary>
     /// <remarks>Since 0.2.0-dev.31.11, mod API 0.2.20.</remarks>
     public string? PlacementId { get; init; }
+
+    /// <summary>Other windows, also other mods' ones, may dock to this one (<see cref="UiWindow.DockTo"/>): only a window
+    /// that accepts docks is found by <see cref="Ui.FindWindow"/> (under your mod's id and its <see cref="PlacementId"/>,
+    /// else its title when created). A window docked to it moves with it, and dragging that window moves this one too
+    /// (Shift drags one alone). Default false: no mod can find, read, dock to or move your window.</summary>
+    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    public bool AcceptDock { get; init; }
 }
 
 /// <summary>A Kiln window (Forge: a Screen). Draws every frame while open; closes with its X or <see cref="Open"/>.</summary>
-public sealed class UiWindow : IDisposable
+public sealed partial class UiWindow : IDisposable
 {
     private static int _ids;
 
@@ -680,6 +687,7 @@ public sealed class UiWindow : IDisposable
         Key = title + _id;
         _open = options.StartOpen && UiNative.DrawingOffReason == null;
         Placer = UiPlacer.For(owner, options.RememberPlacement, options.PlacementId, () => title, window: true);
+        DockKey = options.PlacementId ?? title;
     }
 
     private readonly string _id;

@@ -1,1 +1,31 @@
 #nullable enable
+Kiln.DockSide
+Kiln.DockSide.Bottom = 3 -> Kiln.DockSide
+Kiln.DockSide.Left = 0 -> Kiln.DockSide
+Kiln.DockSide.Right = 1 -> Kiln.DockSide
+Kiln.DockSide.Top = 2 -> Kiln.DockSide
+Kiln.UiDockChange
+Kiln.UiDockChange.ByPlayer.get -> bool
+Kiln.UiDockChange.DockedTo.get -> Kiln.UiWindowHandle?
+Kiln.UiDockChange.Offset.get -> float
+Kiln.UiDockChange.Side.get -> Kiln.DockSide
+Kiln.UiDockChange.UiDockChange() -> void
+Kiln.UiDraw.WindowMovedByUser.get -> bool
+Kiln.UiDraw.WindowResizedByUser.get -> bool
+Kiln.UiWindow.DockChanged -> System.Action<Kiln.UiDockChange>?
+Kiln.UiWindow.DockedTo.get -> Kiln.UiWindowHandle?
+Kiln.UiWindow.DockTo(Kiln.UiWindowHandle! target, Kiln.DockSide side, float offset = 0) -> void
+Kiln.UiWindowHandle
+Kiln.UiWindowHandle.Available.get -> bool
+Kiln.UiWindowHandle.Equals(Kiln.UiWindowHandle? other) -> bool
+Kiln.UiWindowHandle.ModId.get -> string!
+Kiln.UiWindowHandle.Open.get -> bool
+Kiln.UiWindowHandle.Placement.get -> Kiln.UiPlacement?
+Kiln.UiWindowHandle.PlacementId.get -> string!
+Kiln.UiWindowOptions.AcceptDock.get -> bool
+Kiln.UiWindowOptions.AcceptDock.init -> void
+Kiln.UiWindow.Undock() -> void
+override Kiln.UiWindowHandle.Equals(object? obj) -> bool
+override Kiln.UiWindowHandle.GetHashCode() -> int
+override Kiln.UiWindowHandle.ToString() -> string!
+static Kiln.Ui.FindWindow(string! modId, string! placementId) -> Kiln.UiWindowHandle?
