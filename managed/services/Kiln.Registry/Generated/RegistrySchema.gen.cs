@@ -43,11 +43,11 @@ public static partial class RegistrySchema
         new(0x0001001f, "items.armor.ice", RegistryFieldType.Int, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 100000.0, 0, null, null, null, "gear.armor", false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00010020, "items.armor.shroud", RegistryFieldType.Int, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 100000.0, 0, null, null, null, "gear.armor", false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00010021, "items.armor.lightning", RegistryFieldType.Int, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 100000.0, 0, null, null, null, "gear.armor", false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
-        new(0x00010022, "items.block", RegistryFieldType.Float, null, RegistryApplies.WorldLoad, RegistryOps.Number, 0.0, 1.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "unknown" },
+        new(0x00010022, "items.block", RegistryFieldType.Float, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 1.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00010023, "items.staminaCost", RegistryFieldType.Float, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 100000.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00010024, "items.manaCost", RegistryFieldType.Float, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 100000.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00010025, "items.fuel.burnTime", RegistryFieldType.Time, null, RegistryApplies.WorldLoad, RegistryOps.Number, 0.0, 86400.0, 0, null, null, "s", null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "unknown" },
-        new(0x00010026, "items.comfort", RegistryFieldType.Int, null, RegistryApplies.WorldLoad, RegistryOps.Number, 0.0, 1000.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "unknown" },
+        new(0x00010026, "items.comfort", RegistryFieldType.Int, null, RegistryApplies.Now, RegistryOps.Number, 0.0, 1000.0, 0, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00020001, "recipes.inputs", RegistryFieldType.List, RegistryFieldType.Struct, RegistryApplies.Now, RegistryOps.List, null, null, 32, null, null, null, null, false, false, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00020002, "recipes.inputs[].item", RegistryFieldType.Ref, null, RegistryApplies.Now, RegistryOps.Set, null, null, 0, null, "items", null, null, false, true, 0, null, 0, "0.1.0") { JoinedClient = "now" },
         new(0x00020003, "recipes.inputs[].category", RegistryFieldType.Ref, null, RegistryApplies.Now, RegistryOps.Set, null, null, 0, null, "inputCategories", null, null, false, true, 0, null, 0, "0.1.0") { JoinedClient = "now" },
@@ -114,7 +114,7 @@ public static partial class RegistrySchema
 
     private static readonly global::System.Collections.Generic.Dictionary<string, string> s_versions = new()
     {
-        ["items"] = "0.1.0",
+        ["items"] = "0.1.1",
         ["recipes"] = "0.1.0",
         ["loot"] = "0.1.0",
         ["drops"] = "0.1.0",

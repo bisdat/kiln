@@ -3,7 +3,7 @@
   "registrySchema": 1,
   "registry": "items",
   "typeName": "Item",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "stability": "experimental",
   "experimentalId": "KILNX031",
   "doc": "Every item the game or a mod defines: stack sizes, rarity, levels, the gear numbers a tooltip shows (power, speed, damage, armour), costs, perks and sockets.",
@@ -322,10 +322,10 @@
       "type": "float",
       "min": 0,
       "max": 1,
-      "applies": "worldLoad",
+      "applies": "now",
       "ops": "number",
-      "doc": "How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it.",
-      "joinedClient": "unknown"
+      "doc": "How well the item blocks (0 to 1). The game reads it for each new block or attack of the item, so an edit applies at the next one.",
+      "joinedClient": "now"
     },
     "staminaCost": {
       "type": "float",
@@ -348,7 +348,7 @@
     "fuel": {
       "type": "struct",
       "applies": "worldLoad",
-      "doc": "What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.",
+      "doc": "What the item gives as fuel. No game code reads the burn time on this game build (only whether an item is a fuel), so edits of it stay refused.",
       "fields": {
         "burnTime": {
           "type": "time",
@@ -366,10 +366,10 @@
       "type": "int",
       "min": 0,
       "max": 1000,
-      "applies": "worldLoad",
+      "applies": "now",
       "ops": "number",
-      "doc": "The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it.",
-      "joinedClient": "unknown"
+      "doc": "The comfort the item gives while a player plays it (the game's instruments). The game reads it at every pass, so an edit applies at once.",
+      "joinedClient": "now"
     }
   },
   "entry": {

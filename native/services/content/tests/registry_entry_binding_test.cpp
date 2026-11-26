@@ -20,7 +20,7 @@ int main() {
     entry_check(registry_live_status().active == 0, "initializing a definition creates no live transaction");
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"notAField", 99}}, &why), "unknown field refuses the unpublished definition");
     entry_check(why.find("notAField") != std::string::npos, "initialization failure names the Kiln field");
-    entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"block", 0.5}}, &why), "unproven field does not bypass mapping guards");
+    entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"fuel.burnTime", 30}}, &why), "unproven field does not bypass mapping guards");
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"hasDamage", true}}, &why), "read-only initialization is refused");
     Entry sword_clone = *reg(KILN_CONTENT_ITEMS).get(SWORD);
     // The fake config resolver recognizes this id and resolves slots from this clone's own address.

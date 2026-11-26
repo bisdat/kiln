@@ -346,6 +346,119 @@ void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
     else track_scalar(b, b->entry.addr + f->offset, *f);
 }
 
+// ---- flags: a bitmask member as a set of Kiln names (the row's values), held in the schema's order ----
+// The game's bit of a Kiln flag name on this build, or -1 when the game has no such value.
+int flag_bit(const Field& f, const rmap::Row* row, const std::string& kiln) {
+    const std::string name = game_name(row, kiln);
+    if (f.en)
+        for (auto& [n, x] : f.en->values)
+            if ((n == name || lower(n) == lower(name)) && x >= 0 && x < 64) return static_cast<int>(x);
+    return -1;
+}
+Value flags_kiln(const Field& f, const rmap::Row* row, const FieldSpec& spec, const uint8_t* bytes) {
+    const uint64_t mask = static_cast<uint64_t>(decode(f, bytes).i);
+    std::vector<Value> out;
+    for (const std::string& n : spec.enum_values)
+        if (const int bit = flag_bit(f, row, n); bit >= 0 && ((mask >> bit) & 1)) out.push_back(Value::text(n));
+    return Value::of_list(std::move(out));
+}
+// The bits of the names in v over the value below; bits Kiln has no name for stay as the game has them.
+bool flags_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, const uint8_t* below, uint8_t* out, std::string* why) {
+    if (v.kind != Value::List) return *why = "a flags value is a list of names", false;
+    uint64_t named = 0, set = 0;
+    for (const std::string& n : spec.enum_values)
+        if (const int bit = flag_bit(f, row, n); bit >= 0) named |= 1ull << bit;
+    for (const Value& x : v.list) {
+        const int bit = x.kind == Value::Text ? flag_bit(f, row, x.t) : -1;
+        if (bit < 0) return *why = "\"" + (x.kind == Value::Text ? x.t : x.text_of()) + "\" is not a value of " + f.path + " on this game build", false;
+        set |= 1ull << bit;
+    }
+    KilnContentValue kv{};
+    kv.type = KILN_CV_INT;
+    kv.i = static_cast<int64_t>((static_cast<uint64_t>(decode(f, below).i) & ~named) | set);
+    kv.f = static_cast<double>(kv.i);
+    return encode(f, kv, out, why);
+}
+
+void bind_flags(const std::shared_ptr<Binding>& b, const Field* f) {
+    const Field fc = *f;
+    LayerEval ev = [b, fc](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+        const rmap::Row* row = b->row ? &*b->row : nullptr;
+        const Value v = registry::evaluate(b->rows, flags_kiln(fc, row, b->spec, below), b->spec);
+        if (!flags_game(fc, row, b->spec, v, below, out, why)) return fail(b, *why);
+        return true;
+    };
+    const uintptr_t at = b->entry.addr + f->offset;
+    if (!put(b, index_of(b->kind, f), -1, at, f->bytes, std::move(ev))) return (void)fail(b, "the field is not readable");
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{at, f->bytes}},
+        [b, fc](const std::vector<SlotBytes>& bytes, std::vector<double>*) -> std::optional<Value> {
+            return flags_kiln(fc, b->row ? &*b->row : nullptr, b->spec, bytes[0].data());
+        }});
+}
+
+// ---- optionalEnum: [the switch (bool), the enum], one Kiln name; "none" is the switch off, the enum then left as it is ----
+Value optional_kiln(const Field& sw, const Field& en, const rmap::Row* row, const uint8_t* swb, const uint8_t* enb) {
+    if (decode(sw, swb).i == 0) return Value::text("none");
+    const int64_t x = decode(en, enb).i;
+    if (en.en)
+        for (auto& [n, v] : en.en->values)
+            if (v == x) return Value::text(kiln_name(row, n));
+    return Value::text(std::to_string(x));
+}
+// The game's value of a Kiln name other than "none", or nullopt when this build's enum has none.
+std::optional<int64_t> optional_game(const Field& en, const rmap::Row* row, const std::string& kiln) {
+    const std::string name = game_name(row, kiln);
+    if (en.en && !name.empty())
+        for (auto& [n, x] : en.en->values)
+            if (n == name || lower(n) == lower(name)) return x;
+    return std::nullopt;
+}
+
+void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, const Field* enf) {
+    const Field sw = *swf, en = *enf;
+    const uintptr_t base = b->entry.addr;
+    // the field's value over the values below the registry, `mine` (0: the switch, 1: the enum) taken from the slot evaluated
+    auto value = [b, sw, en, base](int mine, const uint8_t* below, std::string* why) -> std::optional<Value> {
+        uint8_t swb[kSlotBytes] = {}, enb[kSlotBytes] = {};
+        if (mine == 0) std::memcpy(swb, below, sw.bytes); else store_below_registry(base + sw.offset, sw.bytes, swb);
+        if (mine == 1) std::memcpy(enb, below, en.bytes); else store_below_registry(base + en.offset, en.bytes, enb);
+        const rmap::Row* row = b->row ? &*b->row : nullptr;
+        const Value v = registry::evaluate(b->rows, optional_kiln(sw, en, row, swb, enb), b->spec);
+        if (v.kind != Value::Text) return *why = "an optional enum's value is one name", std::nullopt;
+        if (v.t != "none" && !optional_game(en, row, v.t)) return *why = "\"" + v.t + "\" is not a value of " + en.path + " on this game build", std::nullopt;
+        return v;
+    };
+    LayerEval sw_ev = [b, sw, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+        const auto v = value(0, below, why);
+        if (!v) return fail(b, *why);
+        KilnContentValue kv{};
+        kv.type = KILN_CV_BOOL, kv.i = v->t != "none", kv.f = static_cast<double>(kv.i);
+        if (!encode(sw, kv, out, why)) return fail(b, *why);
+        return true;
+    };
+    LayerEval en_ev = [b, en, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
+        const auto v = value(1, below, why);
+        if (!v) return fail(b, *why);
+        if (v->t == "none") {  // the switch is off: the enum below stays
+            std::memcpy(out, below, en.bytes);
+            return true;
+        }
+        KilnContentValue kv{};
+        kv.type = KILN_CV_INT, kv.i = *optional_game(en, b->row ? &*b->row : nullptr, v->t), kv.f = static_cast<double>(kv.i);
+        if (!encode(en, kv, out, why)) return fail(b, *why);
+        return true;
+    };
+    if (!put(b, index_of(b->kind, swf), -1, base + sw.offset, sw.bytes, std::move(sw_ev)) ||
+        !put(b, index_of(b->kind, enf), -1, base + en.offset, en.bytes, std::move(en_ev)))
+        return (void)fail(b, "the field is not readable");
+    // a roll reads the switch, then the enum: the switch turns on after the enum lands and off before it changes
+    if (!g.reading) store_set_gate(base + sw.offset);
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{base + sw.offset, sw.bytes}, {base + en.offset, en.bytes}},
+        [b, sw, en](const std::vector<SlotBytes>& bytes, std::vector<double>*) -> std::optional<Value> {
+            return optional_kiln(sw, en, b->row ? &*b->row : nullptr, bytes[0].data(), bytes[1].data());
+        }});
+}
+
 // ---- formulas: power, armor ----
 void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Field*>& inputs) {
     std::vector<Field> fs;
@@ -792,6 +905,22 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
         }
         if (!f || ((!g.reading || g.initializing_entry) && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
         return bind_scalar(b, f);
+    }
+    const bool writing = !g.reading || g.initializing_entry;
+    if (conv == "flags") {  // a bitmask of the game's enum (loot.rarities)
+        const Field* f = rw.paths.size() == 1 ? sc.find(rw.paths[0]) : nullptr;
+        if (!f) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is missing on this game build");
+        if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en || (writing && !f->writable))
+            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask, so it is not writable on this game build");
+        return bind_flags(b, f);
+    }
+    if (conv == "optionalEnum") {  // [the switch, the enum] (loot.fixedRarity)
+        const Field* sw = rw.paths.size() == 2 ? sc.find(rw.paths[0]) : nullptr;
+        const Field* en = rw.paths.size() == 2 ? sc.find(rw.paths[1]) : nullptr;
+        if (!sw || !en) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[sw ? 1 : 0]) + " is missing on this game build");
+        if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en || (writing && (!sw->writable || !en->writable)))
+            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum, so they are not writable on this game build");
+        return bind_optional_enum(b, sw, en);
     }
     if (conv == "formula") {
         std::vector<const Field*> in;
@@ -1984,7 +2113,14 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                     g.refused.push_back({mod, "live:" + std::to_string(handle), registry::Stage::Alter, 0, reply.reason, ""});
                     queue_change_report();
                 } else {
-                    reply.outcome = g.pending_tables.empty() ? RegistryLiveOutcome::Applied : RegistryLiveOutcome::PendingResource;
+                    // pending only for this change's own fields: a drop table another change or a GameStart item removal's
+                    // disabled slots wait for leaves an unrelated change Applied (registry-proof, 31.x)
+                    const bool own_pending = std::any_of(g.pending_tables.begin(), g.pending_tables.end(), [&](const LiveState::Pending& p) {
+                        const auto it = g.in->result.fields.find(p.field);
+                        return it != g.in->result.fields.end() && std::any_of(it->second.chain.begin(), it->second.chain.end(),
+                            [&](const ChainRow& row) { return row.source.rfind(prefix, 0) == 0; });
+                    });
+                    reply.outcome = own_pending ? RegistryLiveOutcome::PendingResource : RegistryLiveOutcome::Applied;
                     // review2 S2: a worldLoad field is in place before a world's save is read. Written into a running world by
                     // any point but WORLD_LOAD, it is applied now and named: its full effect starts at the next world load.
                     if (change->point != KILN_REGISTRY_LIVE_WORLD_LOAD)

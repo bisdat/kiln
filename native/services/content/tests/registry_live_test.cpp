@@ -34,6 +34,8 @@ Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
 std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
 std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::function<void()> g_after_each_write; // test-only: after every single write lands (what a game thread could read between two)
+std::set<uintptr_t> g_fail_addrs; // test-only: writes to these addresses fail; the batch goes on with the others (as write_batch does)
 std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
@@ -56,9 +58,13 @@ size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
     for (size_t i = 0; i < writes.size(); ++i) {
         const Write& w = writes[i];
         if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        if (g_fail_addrs.count(w.addr)) { if (failed && !*failed) *failed = w.addr; continue; }
         std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+        if (g_after_each_write) g_after_each_write();
     }
-    return writes.size();
+    size_t done = writes.size();
+    for (const Write& w : writes) done -= g_fail_addrs.count(w.addr);
+    return done;
 }
 void* near_alloc(uintptr_t, size_t n) {
     void* p = g_arena + g_near;
@@ -200,7 +206,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
-    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_write_limits.clear(); g_before_write = {}; g_after_each_write = {}; g_fail_addrs.clear(); g_integer_impacts.clear();
     g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);
@@ -239,8 +245,19 @@ void world() {
     L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
     add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
     add_field(L.schema, fld("stackSizeMax", 0x04, 4, KILN_CV_INT));
+    // the game's LootableItemInfo: a Bitmask8<ItemRarity>, the fixed rarity's switch and the fixed rarity (an enum)
+    Field mask = fld("rarities", 0x08, 1, KILN_CV_INT);
+    mask.enum_kind = KILN_CONTENT_FLAGS;
+    mask.en = rar.en;
+    add_field(L.schema, mask);
+    add_field(L.schema, fld("useUiRarity", 0x09, 1, KILN_CV_BOOL));
+    Field fixed = fld("uiRarity", 0x0A, 1, KILN_CV_INT);
+    fixed.enum_kind = KILN_CONTENT_ENUM;
+    fixed.en = rar.en;
+    add_field(L.schema, fixed);
     add_entry(L, WOOD, "Material_T1_Wood_Logs", 0x40000, G1);
     mem<uint32_t>(0x40000, 1), mem<uint32_t>(0x40004, 5);
+    mem<uint8_t>(0x40008, 0x07), mem<uint8_t>(0x40009, 0), mem<uint8_t>(0x4000A, 2);  // common, uncommon, rare; no fixed rarity (rare below)
     mem<uint32_t>(STONE_AT, 50);
     mem<float>(SWORD_AT + 0x08, 1.0f), mem<float>(SWORD_AT + 0x0C, 1.0f), mem<uint32_t>(SWORD_AT + 0x10, 10), mem<uint32_t>(SWORD_AT + 0x14, 15);
     mem<float>(SWORD_AT + 0x90, 1.0f);
@@ -321,6 +338,8 @@ registry::BaseModel base() {
     lt.id = "game:material_t1_wood_logs";
     lt.fields["stack.min"] = registry::Value::integer(1);
     lt.fields["stack.max"] = registry::Value::integer(5);
+    lt.fields["rarities"] = registry::Value::of_list({registry::Value::text("common"), registry::Value::text("uncommon"), registry::Value::text("rare")});
+    lt.fields["fixedRarity"] = registry::Value::text("none");
     b.registries["loot"].push_back(lt);
     return b;
 }
@@ -365,7 +384,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
-    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "loot.rarities", "loot.fixedRarity", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
