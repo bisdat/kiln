@@ -1027,6 +1027,22 @@ void code_over_a_registry_value_is_reported() {
     bool any = false;
     for (const registry::Line& l : g_last_report.lines) any = any || (l.field == logs && l.loser == "m");
     check(!any && at<uint32_t>(WOOD_AT) == 2000, "code that keeps the registry's value: no line");
+    // the value code's op was computed on is the one kiln.content holds as the original (the game's before any Kiln layer),
+    // not the stage's base: here another loader made it 12 before Kiln's first write (a drift row), and the line says 12
+    world();
+    stage(files);
+    registry_live_world_begin();
+    mem<uint32_t>(WOOD_AT, 12);
+    apply_registry_files(files);
+    uint8_t c[4] = {48, 0, 0, 0};
+    store_put(45, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, c, "bigstacks x4 max 9999: items *");
+    store_flush(nullptr);
+    apply_registry_files(files);
+    line = nullptr;
+    for (const registry::Line& l : g_last_report.lines)
+        if (l.field == logs && l.loser == "m") line = &l;
+    check(line && line->text.find("sets 48 over m's 2400") != std::string::npos && line->text.find("game's value, 12,") != std::string::npos,
+          "the value code computed on: " + (line ? line->text : std::string("none")));
 }
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the

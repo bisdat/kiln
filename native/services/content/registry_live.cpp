@@ -1100,6 +1100,9 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
             writer.writes.push_back(write);
         }
     }
+    // what kiln.content holds as the original of each slot (the game's value before any Kiln layer): what a data-pack op of code
+    // was computed on (registry-followups 3)
+    const auto original = field.decode(bytes, nullptr);
     std::vector<double> formula_inputs;
     auto result = field.decode(effective, &formula_inputs);
     if (!result) return;
@@ -1221,8 +1224,9 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
         line.field = ref, line.winner = code_top->who, line.loser = reg_mod, line.kind = registry::LineKind::Overridden;
         line.text = ref.text() + ": " + code_top->who + " (a Content change made by code) sets " + registry::report_value_text(*result) +
                     " over " + reg_mod + "'s " + registry::report_value_text(*reg_value) +
-                    " (code wins over registry edits; a relative change made through Content is computed on the game's value, " +
-                    registry::report_value_text(fo.base) + ", not on the registry's)";
+                    " (code wins over registry edits; a relative change made through Content is computed on " +
+                    (added ? std::string("the entry's own value as its mod added it, ") : std::string("the game's value, ")) +
+                    registry::report_value_text(original ? *original : fo.base) + ", not on the registry's)";
         r.lines.push_back(std::move(line));
     }
     // a slot another writer changed after Kiln's layer (the store's compare-before-write skipped Kiln's write): the same
