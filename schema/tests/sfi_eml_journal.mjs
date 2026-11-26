@@ -204,6 +204,20 @@ for (const { schema: name, why, record } of invalid) {
   assert.equal(validators[name](record), false, why); ++assertions;
 }
 assert(invalid.filter(i => i.schema === 'eml-journal-2').length >= 10, 'format 2 has its own invalid fixtures'); ++assertions;
+// format 2's path bound, from the writer's RESOURCE_PATHS (a fixture of that many paths would be large): a resource with
+// that many paths is valid, one more is not; Kiln's reader takes the same bound (archive_journal.h kArchiveJournalPaths).
+{
+  const at = n => {
+    const r = JSON.parse(JSON.stringify(valid['eml-journal-2'].sixty_four_paths));
+    r.packages[0].changed[0].paths = Array.from({ length: n }, (_, i) => `f${String(i).padStart(5, '0')}`);
+    return r;
+  };
+  assert.equal(validators['eml-journal-2'](at(resourcePaths)), true, `${resourcePaths} paths`); ++assertions;
+  assert.equal(validators['eml-journal-2'](at(resourcePaths + 1)), false, `${resourcePaths + 1} paths`); ++assertions;
+  const reader = text('../../native/services/content/registry/archive_journal.h');
+  const m = /constexpr size_t kArchiveJournalPaths = (\d+);/.exec(reader);
+  assert(m && Number(m[1]) === resourcePaths, `Kiln's reader takes ${resourcePaths} paths per resource`); ++assertions;
+}
 // Coverage: both stems, both attempts, both kinds, a created resource named by another package, an explicit and a
 // random creation, a truncated journal, an unattributed write.
 const records = Object.values(valid['startup-journal']);

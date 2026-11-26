@@ -329,8 +329,8 @@ base).
   package that created an entry is named on the whole entry.
 - "Wrote" means written, not changed: a package that set a value to what it already was is listed too. The journal can
   name a package that did not change a field; it never misses one that did, within its bounds (4,096 rows per package,
-  32,768 in all, 64 member paths per resource; `base.journal.truncated` says when it ran out of rows; more paths than
-  that name the whole resource). So a package's row has no `op` (the journal does not say what the package did to the
+  32,768 in all, 16,384 member paths per resource and 8 MiB of paths in all; `base.journal.truncated` says when it ran
+  out of rows; more paths than that name the whole resource). So a package's row has no `op` (the journal does not say what the package did to the
   field; its `value` is the archive's, the base) and a package is never a field's `winner`: with no Kiln writer left, the
   archive's value stands as the base.
 - `base.journal` in `registry.json` says what happened: `read` (with how many packages and entries), `none`, `stale` (a

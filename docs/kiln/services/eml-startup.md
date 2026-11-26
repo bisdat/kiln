@@ -327,8 +327,10 @@ list's members, `""` for the whole resource), the ones it created and the conten
   byte). The same removals as format 1 apply (every publication and restore removes it first). A journal that cannot be
   written leaves the publication standing with a warning in kiln.log; Kiln then names none of its mods.
 - **Retry:** a mod whose Lua fails is dropped and the run repeats; only the committed run is recorded (`attempt` `retry`).
-- **Bounds:** format 1's, plus at most 64 member paths per resource (more: `[""]`, the whole resource) of at most 256 bytes
-  (longer: the member that holds it). A mod whose id is not a ShroudForge identifier is listed in `unattributed`.
+- **Bounds:** format 1's, plus at most 16,384 member paths per resource (more: `[""]`, the whole resource; room for a path
+  per recipe of the game's one recipe registry several times over) of at most 256 bytes (longer: the member that holds
+  it), and at most 8 MiB of paths in all (a resource past that is listed whole), so a journal stays below the 16 MiB a
+  reader takes. A mod whose id is not a ShroudForge identifier is listed in `unattributed`.
 - **Kiln's registry stage** reads it in an EML start against kiln-eml's `generation` (kiln.eml `state_json`, this process's
   eml.json) and names each mod on the Kiln fields its paths hold or lie in, recipes and loot entries by their element. A
   Kiln reader from before format 2 refuses it whole (it names nobody).

@@ -56,7 +56,7 @@ bool member_path(const std::string& p) {
 }
 
 // One package (or the unattributed bucket): its written and created resources, each GUID once; format 2: each written
-// resource's member paths (1 to 64, as the schema writes them). false + *why: malformed.
+// resource's member paths (1 to kArchiveJournalPaths, as the schema writes them). false + *why: malformed.
 bool changes_of(const json& c, ArchiveJournal::Package* p, int format, std::string* why) {
     if (!c.is_object()) return *why = "a package is not an object", false;
     if (c.contains("truncated") && c["truncated"].is_boolean()) p->truncated = c["truncated"].get<bool>();
@@ -70,8 +70,8 @@ bool changes_of(const json& c, ArchiveJournal::Package* p, int format, std::stri
             std::string g;
             if (!guid_of(k, &g)) return *why = std::string("a \"") + list + "\" row of " + who + " has no resource GUID", false;
             if (changed && format == 2) {
-                if (!k.contains("paths") || !k["paths"].is_array() || k["paths"].empty() || k["paths"].size() > 64)
-                    return *why = "a \"changed\" row of " + who + " has no list of 1 to 64 member paths", false;
+                if (!k.contains("paths") || !k["paths"].is_array() || k["paths"].empty() || k["paths"].size() > kArchiveJournalPaths)
+                    return *why = "a \"changed\" row of " + who + " has no list of 1 to " + std::to_string(kArchiveJournalPaths) + " member paths", false;
                 std::vector<std::string> paths;
                 for (const json& x : k["paths"]) {
                     if (!x.is_string() || !member_path(x.get<std::string>())) return *why = "a member path of " + who + " is not one the format writes", false;

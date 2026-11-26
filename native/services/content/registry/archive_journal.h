@@ -68,8 +68,11 @@ struct ArchiveJournal {
 };
 
 // The largest journal read: kiln-eml reads its own at most this big (StartupJournal::read), and its bounds keep one far
-// below (32,768 rows in all).
+// below (32,768 rows in all; format 2: at most 8 MiB of member paths).
 constexpr uintmax_t kArchiveJournalMax = 16u << 20;
+// Format 2: the most member paths one changed resource lists (kiln-eml RESOURCE_PATHS: a path per element of the
+// largest shared resource, 2,542 recipes, several times over; more and it is listed whole).
+constexpr size_t kArchiveJournalPaths = 16384;
 
 // The journal's text, read only from the game folder itself as kiln-eml writes it (kiln-eml refuses a linked archive or
 // state path): <kiln>/eml/ownership/<stem>.change-journal.json, where kiln is <game>/kiln. nullopt + *why when there is
@@ -83,7 +86,7 @@ std::optional<std::string> read_archive_journal(const std::filesystem::path& kil
 // The journal's text against the generation this start's archive writer published (lower-case hex, 64 digits). Never
 // throws: a malformed file is state "unreadable" with the reason. A package must be named as the format says (a ShroudForge
 // identifier, kind "shroudforge" or "eml", each id once; format 2: dialect "eml", kind "eml", every changed resource with
-// 1 to 64 member paths as the schema writes them): a journal that names one otherwise names nobody.
+// 1 to kArchiveJournalPaths member paths as the schema writes them): a journal that names one otherwise names nobody.
 ArchiveJournal parse_archive_journal(const std::string& text, const std::string& live_generation);
 
 // The live generation of an EML start (outside kiln mode) from kiln-eml's state of this process (kiln.eml state_json, the

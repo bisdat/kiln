@@ -512,6 +512,19 @@ int main(int argc, char** argv) {
             CHECK(j1.state == "read" && b1.registries["recipes"][0].archive == std::vector<std::string>({"eml:bravo"}) &&
                       b1.registries["recipes"][0].archive_fields.empty() && b1.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}),
                   "the recipe list replaced whole names its mod on every recipe, whole: " + j1.state + " " + j1.text);
+            // a recipe mod that wrote one field of a hundred recipes: a path each, named on that field of each
+            json many = json::array();
+            for (int i = 0; i < 100; ++i) many.push_back("recipes[" + std::to_string(i) + "].craftingDuration");
+            BaseModel b2 = fresh();
+            const ArchiveJournal j2 = parse_archive_journal(bravo_recipes(many).dump(), live);
+            name_archive_writers(j2, eids, {"items", "balance"}, &b2, &af);
+            CHECK(j2.state == "read" && b2.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b2.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b2.registries["recipes"][2].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}),
+                  "a hundred recipe paths read, each recipe named on its duration only: " + j2.state + " " + j2.text);
+            json over = json::array();
+            for (int i = 0; i <= 16384; ++i) over.push_back("recipes[" + std::to_string(i) + "]");
+            CHECK(parse_archive_journal(bravo_recipes(over).dump(), live).state == "unreadable", "more paths than the format writes: unreadable");
         }
     }
     // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----
