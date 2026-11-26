@@ -542,6 +542,39 @@ void old_writes_marks(const std::string& dir) {
     check(!rep["fields"].empty() && rep["refused"].empty(), "the recipe edit still composes: " + rep.dump().substr(0, 600));
 }
 
+// Review (registry-writers): an old document's element path ("recipes[0]...") names an element of ITS resource. With two
+// resources of the registry's type (two recipe lists; the model reads the first one's elements as the registry's entries),
+// element 0 of the second list is not the first list's recipe 0: no row of that document lies on game:craft_planks.
+void old_writes_element_of_its_resource(const std::string& dir) {
+    TreeView view = world();
+    json in = {{"itemStack", {{"item", 1001}, {"itemRef", g(1)}, {"count", 1}}}, {"inputItemCategory", {{"category", 0}, {"categoryRef", "none"}, {"count", 0}}}};
+    view.add("keen::RecipeRegistryResource", g(110),
+             {{"recipes", json::array({{{"debugName", "Craft_Logs"}, {"recipeGuid", g(111)}, {"recipeId", 5002}, {"input", json::array({in})},
+                                        {"output", json::array({{{"item", 1001}, {"itemRef", g(1)}, {"count", 1}}})}, {"craftingDuration", 4.0}}})},
+              {"inputCategories", json::array()}});
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &recipe_sections));
+    boothook::OldDoc slow;
+    slow.mod = "oldmod", slow.key = "slow";
+    slow.res = key_of(g(110), "keen::RecipeRegistryResource"), slow.type = "keen::RecipeRegistryResource";
+    slow.sets = {{"recipes[0].craftingDuration", 9.0}};
+    std::vector<OldWrite> got;
+    r.run([&](model::Model& m) { return got = boothook::old_writes({slow}, m); });
+    r.finish({});
+    bool logs = false, planks = false;
+    for (const OldWrite& w : got)
+        if (w.field.field == "duration") {
+            if (w.field.id == "game:craft_logs") logs = true;
+            if (w.field.id == "game:craft_planks") planks = true;
+        }
+    check(!planks, "the second list's recipe 0 is not the first list's: no row on game:craft_planks");
+    check(!logs, "the second list's recipes are no registry entries (the first list is read)");
+    for (const OldWrite& w : got) check(w.field.id != "game:craft_planks", "nothing of the document is on the other list's recipe: " + w.field.text());
+    const json rep = json::parse(files.report);
+    for (const json& f : rep["fields"])
+        for (const json& w : f["writers"]) check(w["kind"] != "oldPatch", "no old patch row in registry.json: " + f.dump());
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
@@ -550,7 +583,8 @@ int main(int argc, char** argv) {
         {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
         {"archive_journal_writers", [&] { archive_journal_writers(dir); }},
         {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }},
-        {"old_writes_marks", [&] { old_writes_marks(dir); }}};
+        {"old_writes_marks", [&] { old_writes_marks(dir); }},
+        {"old_writes_element_of_its_resource", [&] { old_writes_element_of_its_resource(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

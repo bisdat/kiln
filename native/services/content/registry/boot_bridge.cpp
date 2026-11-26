@@ -54,8 +54,10 @@ std::vector<OldWrite> old_writes(const std::vector<OldDoc>& docs, model::Model& 
                     const std::string n = p.substr(head.size(), close - head.size());
                     if (n.empty() || n.size() > 9 || !std::all_of(n.begin(), n.end(), [](char c) { return c >= '0' && c <= '9'; })) return false;
                     const size_t el = std::stoul(n);
+                    // the element of this document's resource: another resource of the type has an element N too
                     for (size_t i = 0; i < es->size(); ++i)
-                        if ((*es)[i].place.element == static_cast<int32_t>(el)) return *idx = i, *rest = p.substr(close + 2), true;
+                        if ((*es)[i].place.element == static_cast<int32_t>(el) && std::memcmp(&(*es)[i].place.key, &d.res, sizeof d.res) == 0)
+                            return *idx = i, *rest = p.substr(close + 2), true;
                     return false;
                 };
                 auto value_for = [&](const map::Row& row, const FieldSpec& spec, FieldType type, const nlohmann::json& v, Value* x) {
