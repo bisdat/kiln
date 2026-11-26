@@ -168,3 +168,29 @@ fn an_entry_module_another_mod_requires_first_writes_as_its_own_mod() {
         assert_eq!(ids.len(), 5, "each mod once: {ids:?}");
     }
 }
+
+// Review (a resource's data replaced): a mod that assigns a copy of a resource's data back (`r.data = r.data`, or plain
+// tables built from it) keeps what the mods before it wrote there, so they stay named on the members they wrote; the
+// copying mod is named on the whole resource. Three passes with four copying mods each: whatever the order, alpha is
+// named on its field.
+#[test]
+fn a_resource_replaced_by_a_copy_keeps_the_mods_that_wrote_it_before() {
+    for pass in 0..3 {
+        let f = ArchiveFixture::new(&format!("eml-journal-copy-{pass}"));
+        f.package("alpha", &format!("{GET}res(0).data.child.base = 41\n"), &["patch"]);
+        let mut ids = vec!["alpha".to_string()];
+        for n in 1..=4 {
+            let id = format!("copy{n}");
+            f.package(&id, &format!("{GET}local r = res(0)\nr.data = r.data\n"), &["patch"]);
+            ids.push(id);
+        }
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let out = run(&f, &ids);
+        assert_eq!(out.mods.iter().filter(|m| m.state == "loaded").count(), 5, "{:?}", out.mods);
+        let j = journal(&f, &format!("eml_copy_{pass}"));
+        assert_eq!(paths(package(&j, "alpha"), 0), ["child.base"], "pass {pass}: alpha stays named on its field: {j}");
+        for n in 1..=4 {
+            assert_eq!(paths(package(&j, &format!("copy{n}")), 0), [""], "pass {pass}: the whole resource");
+        }
+    }
+}

@@ -284,7 +284,7 @@ fn a_mapped_array_count_beyond_its_bytes_is_a_lua_error_not_an_allocation() {
 // the value it goes into, and walking the value as it will be written gives every write's path at its published place
 // (0-based element indices): a field set, an element replaced or inserted whole, a list's membership changed; a write
 // into a value detached from the data before (an element since replaced) is not there, and neither is one made outside
-// a run. The same for a value a mod created (owned) as for the game's mapped data.
+// a run; what was written in an element before it was replaced stays at its place. The same for a value a mod created (owned) as for the game's mapped data.
 #[test]
 fn writes_are_named_by_their_published_member_paths() {
     use crate::env::writes::{Record, Recording};
@@ -327,10 +327,12 @@ fn writes_are_named_by_their_published_member_paths() {
         walk(&lua, "game"),
         [
             (1, "recipes[0].knowledgeRequirement.compareValue".to_string()),
+            (2, "recipes[1]".to_string()),
             (2, "recipes[]".to_string()),
             (3, "recipes[1]".to_string()),
         ],
-        "a's field once; b's insertion a list write, its element replaced by c since (with c's write into it after)"
+        "a's field once; b's insertion a list write and its element, which c replaced since (b's write kept there: the new \
+         value could be a copy; c's write into the element it took out is not there)"
     );
     assert_eq!(
         walk(&lua, "owned"),
@@ -341,6 +343,66 @@ fn writes_are_named_by_their_published_member_paths() {
             (3, "recipes[]".to_string()),
         ],
         "an owned value: b's element and the field b set in it, at index 0 since c removed the first element"
+    );
+}
+
+// kiln-eml (review: a replaced value's writes): a value put in place over another one may be a copy of it (a mod that
+// copies a field, an element or a resource's data into plain tables and assigns it back), so the writes logged in the
+// value it replaced are kept at that place: the earlier writer is still named there (over-naming one whose write the new
+// value dropped, never missing one whose write it kept). A struct field (mapped and owned) and a list element replaced by
+// plain copies of themselves; the replacing mod is named on what it put in place.
+#[test]
+fn a_replaced_value_keeps_the_writes_made_in_it_before() {
+    use crate::env::writes::{Record, Recording};
+    use std::cell::RefCell;
+    let (lua, _registry) = lua_with_registry();
+    let record = RefCell::new(Record::default());
+    let walk = |lua: &mlua::Lua, global: &str| {
+        let data: LuaValue = lua.globals().get(global).unwrap();
+        let mut out = Vec::new();
+        walk_writes(&data, &mut String::new(), &mut out).unwrap();
+        out.sort();
+        out.dedup();
+        out
+    };
+    {
+        let _run = Recording::start();
+        {
+            let _a = Record::begin(&record, "a");
+            lua.load(
+                "push(game.recipes, new_recipe(5)); game.recipes[1].knowledgeRequirement.compareValue = 4
+                game.recipes[2].knowledgeRequirement.knowledgeOrQueryId.value = 6
+                owned = own(plain(game)); owned.recipes[1].knowledgeRequirement.compareValue = 4",
+            )
+            .exec()
+            .unwrap();
+        }
+        let _b = Record::begin(&record, "b");
+        lua.load(
+            "game.recipes[1].knowledgeRequirement = plain(game.recipes[1].knowledgeRequirement)
+            game.recipes[2] = plain(game.recipes[2])
+            owned.recipes[1].knowledgeRequirement = plain(owned.recipes[1].knowledgeRequirement)",
+        )
+        .exec()
+        .unwrap();
+    }
+    let s = |w: u32, p: &str| (w, p.to_string());
+    assert_eq!(
+        walk(&lua, "game"),
+        [
+            s(1, "recipes[0].knowledgeRequirement.compareValue"),
+            s(1, "recipes[1]"),
+            s(1, "recipes[1].knowledgeRequirement.knowledgeOrQueryId.value"),
+            s(1, "recipes[]"),
+            s(2, "recipes[0].knowledgeRequirement"),
+            s(2, "recipes[1]"),
+        ],
+        "a's writes kept where b's copies replaced the values holding them"
+    );
+    assert_eq!(
+        walk(&lua, "owned"),
+        [s(1, "recipes[0].knowledgeRequirement.compareValue"), s(2, "recipes[0].knowledgeRequirement")],
+        "the same in a value a mod created"
     );
 }
 

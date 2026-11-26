@@ -89,25 +89,46 @@ pub(crate) fn walk_writes(
 }
 
 /// kiln-eml: an array element `value` was put in place (set or inserted): a value with a log of its own is written whole
-/// there (its later index is where it ends up); a plain value is a write of the list's members.
+/// there (its later index is where it ends up), keeping `kept` (the writes logged in the element it replaced,
+/// [`replaced_writes`]); a plain value is a write of the list's members.
 pub(crate) fn note_put(
     list: &Writes,
     value: &LuaValue,
+    kept: &[(u32, String)],
 ) -> mlua::Result<()> {
     let LuaValue::UserData(ud) = value else {
         list.items();
         return Ok(());
     };
+    let put = |writes: &Writes| {
+        writes.whole();
+        writes.keep(kept);
+    };
     match ud.type_id() {
-        Some(id) if id == TypeId::of::<StructValue>() => ud.borrow::<StructValue>()?.writes().whole(),
-        Some(id) if id == TypeId::of::<MappedStructValue>() => ud.borrow::<MappedStructValue>()?.writes().whole(),
-        Some(id) if id == TypeId::of::<ArrayValue>() => ud.borrow::<ArrayValue>()?.writes().whole(),
-        Some(id) if id == TypeId::of::<MappedArrayValue>() => ud.borrow::<MappedArrayValue>()?.writes().whole(),
-        Some(id) if id == TypeId::of::<VariantValue>() => ud.borrow::<VariantValue>()?.writes().whole(),
-        Some(id) if id == TypeId::of::<MappedVariantValue>() => ud.borrow::<MappedVariantValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<StructValue>() => put(ud.borrow::<StructValue>()?.writes()),
+        Some(id) if id == TypeId::of::<MappedStructValue>() => put(ud.borrow::<MappedStructValue>()?.writes()),
+        Some(id) if id == TypeId::of::<ArrayValue>() => put(ud.borrow::<ArrayValue>()?.writes()),
+        Some(id) if id == TypeId::of::<MappedArrayValue>() => put(ud.borrow::<MappedArrayValue>()?.writes()),
+        Some(id) if id == TypeId::of::<VariantValue>() => put(ud.borrow::<VariantValue>()?.writes()),
+        Some(id) if id == TypeId::of::<MappedVariantValue>() => put(ud.borrow::<MappedVariantValue>()?.writes()),
         _ => list.items(),
     }
     Ok(())
+}
+
+/// kiln-eml: the writes logged in `old`'s tree, a value about to be replaced, as (writer, path from `path`): what the
+/// value put in its place keeps (env/writes.rs `Member::Kept`). Nothing for a plain value or outside a run.
+pub(crate) fn replaced_writes(
+    old: Option<&LuaValue>,
+    path: &str,
+) -> mlua::Result<Vec<(u32, String)>> {
+    let mut out = Vec::new();
+    if let Some(old @ LuaValue::UserData(_)) = old
+        && crate::env::writes::recording()
+    {
+        walk_writes(old, &mut path.to_owned(), &mut out)?;
+    }
+    Ok(out)
 }
 
 pub fn push(

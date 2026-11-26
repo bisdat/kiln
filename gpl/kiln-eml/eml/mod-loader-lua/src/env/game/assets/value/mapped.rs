@@ -5,7 +5,7 @@ use kfc::{resource::value::{Value, Variant}, reflection::{PrimitiveType, TypeMet
 use mlua::{AnyUserData, Function, MetaMethod, UserData};
 use ouroboros::self_referencing;
 
-use crate::{alias::{MappedArray, MappedStruct, MappedVariant, TypeHandle}, env::{game::value::{is_dirty_lua_value, note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind, value_to_lua}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
+use crate::{alias::{MappedArray, MappedStruct, MappedVariant, TypeHandle}, env::{game::value::{is_dirty_lua_value, note_put, replaced_writes, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind, value_to_lua}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
 
 // TODO: Add MappedBitmaskValue
 
@@ -136,7 +136,10 @@ impl MappedStructValue {
         let value = validate_and_clone_lua_value(value, &field_type, lua)
             .map_err(LuaError::external)?;
 
+        // kiln-eml: the writes logged in the value replaced stay this field's (env/writes.rs)
+        let mut kept = Vec::new();
         if let Some(entry) = self.cache.borrow_mut().get_mut(key) {
+            kept = replaced_writes(Some(entry), key)?;
             *entry = value;
         } else {
             self.cache.borrow_mut().insert(
@@ -147,6 +150,7 @@ impl MappedStructValue {
 
         self.dirty.set(true);
         self.writes.field(key); // kiln-eml
+        self.writes.keep(&kept); // kiln-eml
 
         Ok(())
     }
@@ -500,7 +504,12 @@ impl MappedArrayValue {
         let value = validate_and_clone_lua_value(value, self.element_type(), lua)
             .map_err(LuaError::external)?;
 
-        note_put(&self.writes, &value)?; // kiln-eml
+        // kiln-eml: the element put in place keeps the writes logged in the one it replaces (env/writes.rs)
+        let kept = match &self.values.borrow()[index] {
+            MappedArrayValueEntry::Value(old) => replaced_writes(Some(old), "")?,
+            MappedArrayValueEntry::Uninitialized(_) => Vec::new(),
+        };
+        note_put(&self.writes, &value, &kept)?; // kiln-eml
         self.values.borrow_mut()[index] = MappedArrayValueEntry::Value(value);
         self.dirty.set(true);
 
@@ -519,7 +528,7 @@ impl MappedArrayValue {
         let value = validate_and_clone_lua_value(value, self.element_type(), lua)
             .map_err(LuaError::external)?;
 
-        note_put(&self.writes, &value)?; // kiln-eml
+        note_put(&self.writes, &value, &[])?; // kiln-eml
         self.writes.items();
         self.values.borrow_mut().insert(
             index,
@@ -915,9 +924,12 @@ impl UserData for MappedVariantValue {
             let value = validate_and_clone_lua_value(&value, this.variant_type(), lua)
                 .map_err(LuaError::external)?;
 
+            // kiln-eml: the writes logged in the value replaced stay the variant's (its fields are at its own path)
+            let kept = replaced_writes(this.value.borrow().as_ref(), "")?;
             this.value.replace(Some(value));
             this.dirty.set(true);
             this.writes.whole(); // kiln-eml
+            this.writes.keep(&kept); // kiln-eml
 
             Ok(())
         });

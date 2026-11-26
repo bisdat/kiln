@@ -20,6 +20,11 @@
 //! - a write lands in the journal exactly when it can reach the published resource: a value a mod detached from its
 //!   resource (replaced, removed) and wrote afterwards is not in the tree any more, and is not named;
 //! - a copy assigned into a resource is that resource's write by the assigning mod (the copy's own log starts empty);
+//! - a value put in place over another one (a struct field, a list element, a variant's value, a resource's data) keeps
+//!   the writes logged in the one it replaced, at that place ([`Member::Kept`], [`Record::kept`]): the new value may be a
+//!   copy of the old one (a mod that copies the data into plain tables and assigns it back), so a writer before it stays
+//!   named there (over-naming one whose write the new value dropped, never missing one whose write it kept). A removed
+//!   or cleared element's writes leave with it;
 //! - list positions are the published ones: an element's index is where it is written, whatever moved it since.
 //!
 //! **Cost.** Off (one thread-local read) outside a run. In a run, a write costs a thread-local read and a scan of the
@@ -49,6 +54,8 @@ pub(crate) enum Member {
     Field(Box<str>),
     /// A list's membership changed (an insertion, removal or clear, or a plain element set).
     Items,
+    /// A write logged in a value this one replaced, at this path from this value ("": this value itself).
+    Kept(Box<str>),
 }
 
 /// A value wrapper's log of the writes made through it: (writer, member), each once. Eight bytes until written.
@@ -67,6 +74,19 @@ impl Writes {
     #[inline]
     pub(crate) fn field(&self, key: &str) {
         self.note(|m| matches!(m, Member::Field(k) if &**k == key), || Member::Field(key.into()))
+    }
+    /// The writes logged in the value this one (or, for a struct, its member) replaced: (writer, path from this value).
+    pub(crate) fn keep(&self, kept: &[(u32, String)]) {
+        if kept.is_empty() {
+            return;
+        }
+        let mut log = self.0.take().unwrap_or_default();
+        for (writer, rel) in kept {
+            if !log.iter().any(|(w, m)| w == writer && matches!(m, Member::Kept(r) if **r == **rel)) {
+                log.push((*writer, Member::Kept(rel.as_str().into())));
+            }
+        }
+        self.0.set(Some(log));
     }
     fn note(&self, same: impl Fn(&Member) -> bool, make: impl FnOnce() -> Member) {
         if !RECORDING.with(Cell::get) {
@@ -88,10 +108,22 @@ impl Writes {
                     Member::Whole => path.to_owned(),
                     Member::Field(key) => field_path(path, key),
                     Member::Items => format!("{path}[]"),
+                    Member::Kept(rel) => join_path(path, rel),
                 }));
             }
         }
         self.0.set(log);
+    }
+}
+
+/// `rel` (a path from the value at `path`, "" for that value) from the root.
+fn join_path(path: &str, rel: &str) -> String {
+    if rel.is_empty() {
+        path.to_owned()
+    } else if path.is_empty() || rel.starts_with('[') {
+        format!("{path}{rel}")
+    } else {
+        format!("{path}.{rel}")
     }
 }
 
@@ -165,6 +197,8 @@ impl Drop for Entered {
 pub(crate) struct Record {
     packages: Vec<String>,
     whole: Vec<(u32, ResourceId)>,
+    /// The writes logged in a resource's data before it was replaced whole: (writer, resource, path).
+    kept: Vec<(u32, ResourceId, String)>,
     created: Vec<(u32, ResourceId, bool)>,
     contents: Vec<(u32, ContentHash)>,
 }
@@ -201,6 +235,12 @@ impl Record {
     pub(crate) fn replaced(record: &RefCell<Record>, id: ResourceId) {
         if recording() {
             record.borrow_mut().whole.push((writer(), id));
+        }
+    }
+    /// `id`'s data is replaced whole: the writes logged in the data it had stay that resource's, at their paths.
+    pub(crate) fn kept(record: &RefCell<Record>, id: ResourceId, kept: Vec<(u32, String)>) {
+        if !kept.is_empty() {
+            record.borrow_mut().kept.extend(kept.into_iter().map(|(w, path)| (w, id, path)));
         }
     }
     /// The running entrypoint created `id`; `explicit`: with its own GUID and part.
@@ -265,6 +305,9 @@ pub(crate) fn collect(record: &Record, trees: Vec<(ResourceId, Vec<(u32, String)
     let slot = |w: u32| (w as usize).min(n);
     for (w, id) in &record.whole {
         written[slot(*w)].entry(*id).or_default().insert(String::new());
+    }
+    for (w, id, path) in &record.kept {
+        written[slot(*w)].entry(*id).or_default().insert(path.clone());
     }
     for (id, writes) in trees {
         for (w, path) in writes {

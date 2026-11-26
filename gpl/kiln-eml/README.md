@@ -586,9 +586,12 @@ Each is marked `kiln-eml:` in the source.
     it will be written and turns each log into a member path at its published place (`recipes[37].craftingDuration`,
     `input[]`, `""` for the whole resource). Off outside a run (one thread-local read); in a run a write costs a
     thread-local read and a scan of its value's own small log; a copy's log starts empty (the assignment that put it
-    there names its writer), and a write into a value detached from its resource is not named. Nothing is compared or
+    there names its writer), a write into a value detached from its resource is not named, and the writes logged in a
+    value replaced (a field, an element, a variant's value, a resource's data) stay at its place, since the new value can
+    be a copy of it. Nothing is compared or
     serialized differently: the dirty flags and the bytes written are EML's. Tests: `env::writes` (2),
-    `value::tests::writes_are_named_by_their_published_member_paths`.
+    `value::tests::writes_are_named_by_their_published_member_paths`, `a_replaced_value_keeps_the_writes_made_in_it_before`,
+    `journal_cost` (ignored: times the log and the walk), kiln-eml `m6_eml_journal`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

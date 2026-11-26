@@ -5,7 +5,7 @@ use kfc::{resource::value::{Value, Variant}, reflection::{PrimitiveType, TypeMet
 use mlua::{AnyUserData, Function, MetaMethod, UserData};
 use ouroboros::self_referencing;
 
-use crate::{alias::TypeHandle, env::{game::value::{note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
+use crate::{alias::TypeHandle, env::{game::value::{note_put, replaced_writes, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
 
 pub struct StructValue {
     r#type: TypeHandle,
@@ -119,7 +119,10 @@ impl StructValue {
         let value = validate_and_clone_lua_value(value, &field_type, lua)
             .map_err(LuaError::external)?;
 
+        // kiln-eml: the writes logged in the value replaced stay this field's (env/writes.rs)
+        let kept = replaced_writes(self.fields.borrow().get(&key), &key)?;
         self.writes.field(&key); // kiln-eml
+        self.writes.keep(&kept); // kiln-eml
         self.fields.borrow_mut().insert(key, value);
 
         Ok(())
@@ -391,7 +394,9 @@ impl ArrayValue {
         let value = validate_and_clone_lua_value(value, &self.inner_type, lua)
             .map_err(LuaError::external)?;
 
-        note_put(&self.writes, &value)?; // kiln-eml
+        // kiln-eml: the element put in place keeps the writes logged in the one it replaces (env/writes.rs)
+        let kept = replaced_writes(self.values.borrow().get(index), "")?;
+        note_put(&self.writes, &value, &kept)?; // kiln-eml
         self.values.borrow_mut()[index] = value;
 
         Ok(())
@@ -409,7 +414,7 @@ impl ArrayValue {
         let value = validate_and_clone_lua_value(value, &self.inner_type, lua)
             .map_err(LuaError::external)?;
 
-        note_put(&self.writes, &value)?; // kiln-eml
+        note_put(&self.writes, &value, &[])?; // kiln-eml
         self.writes.items();
         self.values.borrow_mut().insert(index, value);
 
@@ -699,9 +704,13 @@ impl UserData for VariantValue {
         fields.add_field_method_get("value", |_, this| Ok(this.value.clone()));
 
         fields.add_field_method_set("value", |lua, this, value: LuaValue| {
-            this.value = validate_and_clone_lua_value(&value, &this.variant_type, lua)
+            let value = validate_and_clone_lua_value(&value, &this.variant_type, lua)
                 .map_err(LuaError::external)?;
+            // kiln-eml: the writes logged in the value replaced stay the variant's (its fields are at its own path)
+            let kept = replaced_writes(Some(&this.value), "")?;
+            this.value = value;
             this.writes.whole(); // kiln-eml
+            this.writes.keep(&kept); // kiln-eml
 
             Ok(())
         });
