@@ -49,6 +49,8 @@ The stale-game-data patch (0.2.0-dev.31.16) pins fork branch `kiln-dev31-stale-d
 `6cb84f34`, with its review's commits on top, fast-forward): a clean copy of the game data goes back without
 a word only when Steam's manifest of the installed build lists it byte for byte, and is refused only when it is proven
 to carry a mod's changes (section 5.0, "A clean copy that carries an uninstalled mod's changes").
+The voxel-write patch (0.2.0-dev.31.next) pins fork branch `kiln-dev31-voxel-write` at `6cf01443` (on top of `a9dc2ad2`):
+`runtime.world.voxel.write` through the host's voxel writer (section 8, "Voxel writes through kiln.build").
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -1038,7 +1040,7 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 | `runtime.values.decode/encode/normalize_field/new` | plugin | `GameValueCodec`, `GameType.Defaults`, checked reflected values | C# host tests |
 | `runtime.functions.list/list_native/find/get/get_native/bind/get_operations/bind_modifier`, `runtime.impact.call` | plugin (profile-admitted operations only) | `Kiln.Hooks`, `Kiln.Abilities` (Impact) | — |
 | `runtime.world.cursor.get`, `runtime.world.building.submit/status/cancel` | plugin (client) | `Kiln.Build` | client |
-| `runtime.world.voxel.get_grid_spec/read/write` | plugin | `Build.Grid/Read/Write` (`Kiln.Build`) | API exists; SF voxel path unchecked here |
+| `runtime.world.voxel.get_grid_spec/read/write` | plugin; `write` through Kiln's host (see "Voxel writes through kiln.build" below) | `Build.Grid/Read/Write` (`Kiln.Build`) | lab dev31-sf-voxel-write (Altar Cleanup's shape); client unchecked |
 | `runtime.world.entity.query_props(_in_bounds)/get_transform/set_scale/spawn/place/destroy/finish_building/register_prop_recipes` | plugin | `Kiln.Spawn`, `Kiln.Build` | — (world-editor mod: client) |
 | `runtime.network.status/send/send_mod/accept/connected_peers/receive/receive_mod` | plugin (SF's Steam Networking Messages) | `Kiln.Network` (`ModCalls`) | lab: "Network service is ready ... role=server" |
 | `runtime.patch.available/set_enabled` | plugin (profile-defined patches; none on KFC4) | `Kiln.Hooks` | n/a on current builds |
@@ -1096,6 +1098,38 @@ runtime installs its hooks while it initialises, in the early phase.
 Tests: `native/plugins/shroudforge/tests/run.py` (fake runtime and fake `kiln.hooks`: offer, refusal, old runtime,
 switch), `native/plugins/shroudforge/tests/test-host-chain.sh` (the adapter against the real registry with a foreign
 `jmp` on one place) and, in the fork, `kfc-runtime-test-engine-hooks` (the installer with and without a host).
+
+### Voxel writes through `kiln.build` (dev.31)
+
+ShroudForge's own `runtime.world.voxel.write` (`voxels/write_registered_voxel_grid.cpp`) finds the game's block writer
+(`build/VoxelWrite`) by reading the game's code from the registered terraforming impact (`gameplay/TerraformImpact`) down
+to it, keeps those bytes as evidence and compares them again before every write. It refuses (outcome 1, "voxel write was
+rejected before changing the world") when a function on that path carries an entry jump (a detoured writer is never
+selected; the evidence path is read from live code) and, once the exe file cannot be compared with the loaded code
+(another module's call-site patches; "executable file refused ... live-only resolution" in the [sf] lines), as soon as any
+function it walks is hooked. Under Kiln the path is always hooked: `kiln.rules` (`rules.dig`) and the tools service's
+impact binding hook `TerraformImpact`, `kiln.tools.carve` the carve dispatcher that calls the writer, and mods hook more
+(XHL Vein Mining: `TerraformImpact`, the dispatcher and the block writer itself). So every write failed (netjunk,
+Altar Cleanup, 0.2.0-dev.31.17: "cleaning up 41640 cells in 28 chunks", then "write failed: voxel write was rejected
+before changing the world (0 cells changed so far, undo still works)").
+
+Since dev.31 the host table has two optional members, `voxel_write_ready` and `voxel_write` (fork `kiln-dev31-voxel-write`;
+`kiln/UPSTREAM-PATCHES.md`). With both, `kfc-runtime` passes the write and `runtime.has("runtime.world.voxel.write")` to
+the host and never resolves its own writer. The adapter (`src/host_voxels.cpp`, `src/voxel_write_core.h`) posts the write
+from ShroudForge's mods thread to the server world's thread and waits for it (a write the world has not begun within 2 s
+is cancelled there and refused). There it reads the box, returns success for an unchanged box, writes through
+`kiln.build` with `KILN_BUILD_F_IN_BASES | KILN_BUILD_F_GAME_SAVE` (no base guard and no Kiln save region, as ShroudForge:
+the game saves the cells inside base build zones), and checks the read-back. A mismatch is written back once (outcome 2);
+a fault or a failed put-back is outcome 3. Every refusal or failure goes to kiln.log as "ShroudForge voxel write refused
+before changing the world: <box>: <why>" (or "failed"), the first ten each start and then every 100th. Differences from
+ShroudForge's writer: `kiln.build` commits only the 8x8x8 blocks whose cells change, and it asks the game for tiles that
+are not streamed in (the write is then refused and the mod may try again). Calls go through the game's hooks as the
+game's own do. ShroudForge's own loader, the player's installed ShroudForge, and an older bundle keep upstream's writer.
+
+Tests: `native/plugins/shroudforge/tests/test-voxel-write.sh` (the core over a fake `kiln.build`, Linux),
+`test-host-chain.sh` section "the voxel writer" (posting, the wait and the cancel, Wine), the fork's
+`kfc-runtime-test-engine-hooks` section "voxel writer", and `native/services/build` `build-block-writer`
+(`KILN_BUILD_F_GAME_SAVE`).
 
 ## dev.20 mixed-server evidence
 
