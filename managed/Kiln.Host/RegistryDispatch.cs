@@ -22,6 +22,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private IDisposable? _ready;
     private bool _dispatchingWorld, _starting, _flushing;
     private readonly RegistryWorldBinding _worldBinding = new();
+    // The code each GameStart author ran with at this start (its folder's DLL hash), and the reloaded mods whose GameStart
+    // edits wait for the next start (0.2.0-dev.31.14): the reload reply names them (ReloadReplies).
+    private readonly Dictionary<string, string> _gameStartCode = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _restartNotes = new(StringComparer.Ordinal);
     private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, string code)
     {
         internal readonly Mod Instance = instance;
@@ -81,6 +85,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 var code = Code(directory);
                 var loaded = mods.CreateRegistryAuthor(manifest, directory, candidates);
                 if (loaded is null) continue;
+                _gameStartCode[manifest.Id] = code;
                 var (instance, context, assembly) = loaded.Value;
                 author = new Author(instance, context, assembly, code);
                 _authors.Add(author);
@@ -114,6 +119,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 record = new Runtime(instance, context, points, Code(directory), reload);
                 _runtime.Add(record);
             }
+            if (reload) NoteGameStart(context.Info.Id, points, record?.Code);
         }
         catch (Exception e) { Log(context.Info.Id + " runtime author setup", e); }
     }
@@ -140,6 +146,32 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         finally { _flushing = false; }
         TryWorld();
     }
+    // A reloaded mod's GameStart edits run again only at the next start ("Already committed GameStart layers stay until process
+    // restart, including through a runtime hot reload", registries/README.md): when its code changed (or it was no GameStart
+    // author at this start) and no runtime point of its own re-runs OnRegistry, say so, rather than leave the new code with the
+    // old edits silently.
+    private void NoteGameStart(string id, RegistryEntryPoint points, string? code)
+    {
+        _restartNotes.Remove(id);
+        if ((points & RegistryEntryPoint.GameStart) == 0 || (points & (RegistryEntryPoint.ModLoad | RegistryEntryPoint.HotReload)) != 0 || code is null) return;
+        var ran = _gameStartCode.TryGetValue(id, out var was);
+        if (ran && was == code) return;
+        var why = ran ? "the reloaded code" : "it was no GameStart author at this start: its code";
+        _restartNotes[id] = $"RestartRequired: {id}'s OnRegistry runs at GameStart only ([RegistryEntryPoints] has no HotReload or ModLoad): " +
+                            $"{why} changes its registry edits at the next start; until then the start's edits stay";
+        mods.Host.Log(LogLevel.Warn, $"registry: {_restartNotes[id]}");
+    }
+    /// <summary>What a reload of <paramref name="mods"/> left for the next start outside registry.json: GameStart edits whose
+    /// code changed (NoteGameStart). (mod, reason) pairs.</summary>
+    internal IReadOnlyList<(string Mod, string Reason)> RestartNotes(IReadOnlyCollection<string> mods) =>
+        _restartNotes.Where(n => mods.Contains(n.Key)).Select(n => (n.Key, n.Value)).ToList();
+    /// <summary>Whether a runtime pass of one of <paramref name="mods"/> still waits (its ModLoad / HotReload point after a
+    /// load or reload): the reload reply waits for it (ReloadReplies).</summary>
+    internal bool PassPending(IReadOnlyCollection<string> mods) =>
+        !_closed && _runtime.Exists(r => r.Pending && r.Context.Alive && mods.Contains(r.Context.Info.Id));
+    /// <summary>registry.json's text as kiln.registry has it now; null without the registry.</summary>
+    internal string? ReportJson() => _native.Available ? _native.ReportJson() : null;
+    internal bool Available => !_closed && _native.Available;
     private static string Code(string directory)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -485,6 +517,16 @@ internal sealed partial class ModManager
             _registryFault = e.Message;
         }
     }
+    /// <summary>The reload reply waits for this (ReloadReplies): a runtime registry pass of one of <paramref name="mods"/>, or
+    /// a data-pack application kiln.content has queued for its next Pre.</summary>
+    internal bool RegistryAvailable => _registry?.Available ?? false;
+    internal bool RegistryWorkPending(IReadOnlyCollection<string> mods) =>
+        (_registry?.PassPending(mods) ?? false) || ContentStatusProbe.ReloadPending(_host);
+    /// <summary>registry.json's text now (kiln.registry report_json); null without the registry.</summary>
+    internal string? RegistryReportJson() => _registry?.ReportJson();
+    /// <summary>The reloaded mods' GameStart edits that wait for the next start (RegistryDispatch.RestartNotes).</summary>
+    internal IReadOnlyList<(string Mod, string Reason)> RegistryRestartNotes(IReadOnlyCollection<string> mods) =>
+        _registry?.RestartNotes(mods) ?? [];
     internal List<(Manifest Manifest, string Directory)> RegistryCandidates()
     {
         var byId = BootCandidates().GroupBy(c => c.Manifest.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);

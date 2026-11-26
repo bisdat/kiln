@@ -219,6 +219,8 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     private TimeSpan _gcPause;
     private DateTime _statsSince = DateTime.UtcNow;
     private ReloadTest? _reloadTest;
+    // kiln/control reload replies waiting for the reload's registry work (ReloadReplies: what waits for a restart)
+    private readonly ReloadReplies _reloadReplies = new();
 
     private sealed class ReloadTest
     {
@@ -561,6 +563,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         SyncSubscriptions();
         if (_reloadTest is not null) StepReloadTest();
         if (Environment.TickCount64 >= _nextControl) PollControl();
+        StepReloadReplies(Environment.TickCount64);
         if (tick.Step % StatsEverySteps == 0) WriteStats();
         if (_postHandle == 0) PaceGc();
     }
@@ -672,6 +675,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
             SyncSubscriptions();
             if (_reloadTest is not null) StepReloadTest();
             if (Environment.TickCount64 >= _nextControl) PollControl();
+            StepReloadReplies(Environment.TickCount64);
             if (tick.Step % StatsEverySteps == 0) WriteStats();
             if (_postHandle == 0 && _clientPostHandle == 0) PaceGc();
         }
@@ -882,6 +886,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         var sw = Stopwatch.StartNew();
         var count = _mods.Mods.Count;
         _mods.PostEvent(new ServerStoppingEvent(step, reason));
+        StepReloadReplies(long.MaxValue);  // no step follows: the reload replies say what they know now
         _mods.UnloadAll("server stopping");
         Log(LogLevel.Info, $"lifecycle: server stopping ({reason}, step {step}): {count} mod(s) notified and unloaded in {sw.Elapsed.TotalMilliseconds:F1} ms");
         _stopped.Set();
@@ -1093,11 +1098,21 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
             }
             case "load" when args.Length == 2:
             case "unload" when args.Length == 2:
-            case "reload" when args.Length == 2:
             {
-                var op = args[0] switch { "load" => ModOperation.Load, "unload" => ModOperation.Unload, _ => ModOperation.Reload };
+                var op = args[0] switch { "load" => ModOperation.Load, _ => ModOperation.Unload };
                 var r = _mods.Execute(op, args[1]);
                 WriteResult(resultFile, command, r.Ok, r.Message, new { affected = r.Affected });
+                break;
+            }
+            case "reload" when args.Length == 2:
+            {
+                var r = _mods.Execute(ModOperation.Reload, args[1]);
+                // reloaded (not refused, not still waiting for its unload): the reply waits for the reload's registry work and
+                // says what of it waits for a restart (data.registry)
+                if (r.Ok && _mods.Find(args[1]) is not null && _mods.RegistryAvailable)
+                    _reloadReplies.Add(resultFile, command, r, r.Affected.Prepend(args[1]), Environment.TickCount64);
+                else
+                    WriteResult(resultFile, command, r.Ok, r.Message, new { affected = r.Affected });
                 break;
             }
             case "reload-test" when args.Length == 3 && int.TryParse(args[2], out var n) && n > 0:
@@ -1129,6 +1144,14 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
                                             "reload-test <id> <n> | test <id> [filter] | gc)");
         }
     }
+
+    private void StepReloadReplies(long now) =>
+        _reloadReplies.Step(now, mods => now != long.MaxValue && _mods.RegistryWorkPending(mods), _mods.RegistryReportJson,
+            _mods.RegistryRestartNotes, (file, command, ok, message, data) =>
+            {
+                try { WriteResult(file, command, ok, message, data); }
+                catch (Exception e) { Log(LogLevel.Warn, $"control: the reply of '{command}' could not be written: {e.Message}"); }
+            });
 
     /// <summary>One reload per step, so the test never stalls the server for more than one load (with its cascade).</summary>
     private void StepReloadTest()

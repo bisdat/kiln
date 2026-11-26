@@ -133,6 +133,12 @@ internal sealed unsafe class RegistryNative(IHostServices host)
         return NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(id, i => NativeCalls.WithUtf8(field, f =>
             Text((buffer, cap, length) => t->ReadPass(owner, r, i, f, buffer, cap, length)))));
     }
+    /// <summary>registry.json's text as kiln.registry has it now (report_json).</summary>
+    internal string ReportJson()
+    {
+        if (!Available || Stage->Report == null) throw new KilnUnavailableException("kiln.registry");
+        return Text((buffer, cap, length) => Stage->Report(buffer, cap, length));
+    }
     internal IReadOnlyList<string> Select(bool stage, string registry, string pattern) =>
         NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(JsonSerializer.Serialize(pattern), selector =>
             JsonSerializer.Deserialize<string[]>(Text((buffer, cap, length) => Stage->Select(stage ? 1u : 2u, r, selector, buffer, cap, length))) ?? []));
