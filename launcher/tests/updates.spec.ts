@@ -298,3 +298,21 @@ test("an update dropped on the launcher clears its notice at once, and the next 
   await expect(row(page, "New Items")).not.toContainText(/Update 1\.2\.0/, { timeout: 5000 });
   console.log("PASS updates.clears-after-update (launcher)");
 });
+
+// An update from the Catalog itself, with no page that reads the Library open (only the Catalog): the Catalog's banner
+// is worked out again at once (offline: nothing asked), not only on the way back to Play.
+test("an update from the Catalog clears the Catalog's banner at once", async ({ page }) => {
+  await page.goto("/?nexus=premium#/catalog");
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  await expect(page.getByText("Update ready: Weather Plus")).toBeVisible({ timeout: 10_000 });
+  const asked = (await requests(page)).filter((r) => !r.offline).length;
+  await page.getByRole("list", { name: "Mods" }).getByRole("listitem", { name: "Weather Plus", exact: true }).click();
+  const d = page.getByRole("dialog", { name: "Weather Plus" });
+  await d.getByRole("button", { name: "Update to 1.1.0" }).click();
+  await expect(page.locator(".k-toast").filter({ hasText: "Updated Weather Plus" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Update ready: Weather Plus")).toHaveCount(0, { timeout: 5000 });
+  expect((await requests(page)).filter((r) => !r.offline).length, "worked out offline").toBe(asked);
+  expect(await mock(page, "githubRequests")).toBe(0);
+  console.log("PASS updates.catalog-banner-clears (launcher)");
+});

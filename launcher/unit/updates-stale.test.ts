@@ -99,6 +99,30 @@ describe("the Library changes", () => {
     expect(runs).toBe(2);
   });
 
+  // An update from the Catalog page: no Library list is read there, the Catalog's install records are. Their newest
+  // versions and "update" flags are what a run reads again: those alone are no change (no run setting off another).
+  test("the Catalog's install records changing is a change too; what a check says of them is not", async () => {
+    const qc = new QueryClient();
+    let runs = 0;
+    const stop = watchLibrary(qc, () => { runs += 1; }, 0);
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    const rec = (gsid: string, version: string, update: boolean) => [{ modId: "316", name: "Weather Plus", fileId: "90316", fileName: "Weather Plus", versionId: `80${gsid}`,
+      versionGsid: gsid, version, refs: [{ kind: "kiln", id: "weather-plus", version: "1.4.2", hash: `kdh1:${gsid}` }], installed: "2026-11-20T00:00:00Z", source: "nxm",
+      info: { version, versionGsid: gsid, fileName: "Weather Plus", inLibrary: true, latestVersion: "1.1.0", latestGsid: "1016", updateAvailable: update } }];
+    qc.setQueryData(["nexus_installed"], rec("1006", "1.0.0", true));
+    await settle();
+    expect(runs).toBe(0);
+    // read again after a check: the update flag and the newest version are not the records
+    qc.setQueryData(["nexus_installed"], rec("1006", "1.0.0", false).map((m) => ({ ...m, info: { ...m.info, latestVersion: "1.2.0", latestGsid: "1020" } })));
+    await settle();
+    expect(runs).toBe(0);
+    // "Update to 1.1.0" in the Catalog: another upload installed
+    qc.setQueryData(["nexus_installed"], rec("1016", "1.1.0", false));
+    await settle();
+    expect(runs).toBe(1);
+    stop();
+  });
+
   // The offline check is shared (checkModUpdates hands a second caller the running one's answer): a change that comes
   // while it runs would get an answer read before that change. One run at a time, and one more after it for whatever
   // changed meanwhile.

@@ -67,7 +67,9 @@ const rowOffered = (s: ModUpdateStatus, installed?: string) =>
   installed === undefined || s.installedVersion !== s.libraryRef.version || up.offeredFor(s, installed);
 
 /** Keeps the shared result in step with the Library: when a Library list query reads other entries than before (a
- *  drop, Add mod, the Library's import, a catalog install, a roll back, a removal, a take-over), `run` works the
+ *  drop, Add mod, the Library's import, a catalog install, a roll back, a removal, a take-over), or the Catalog's list
+ *  of what it installed reads other install records (an install from the Catalog page, where no Library list is
+ *  read), `run` works the
  *  update result out again; by default an offline check (no request to any provider: what is remembered, compared
  *  with what is installed now), and the Catalog's list of what it installed is read again. Returns the unsubscribe.
  *  One run at a time: checkModUpdates hands a second offline check the running one's answer, read before the change
@@ -89,9 +91,15 @@ export function watchLibrary(qc: QueryClient, run: () => unknown = () => {
     });
   };
   const off = qc.getQueryCache().subscribe((e) => {
-    if (e.type !== "updated" || e.action.type !== "success" || e.query.queryKey[0] !== "library_list") return;
-    const entries = (e.query.state.data ?? []) as api.LibraryEntry[];
-    const print = JSON.stringify(entries.map((l) => [l.kind, l.id, l.versions.map((v) => [v.version, v.hash])]));
+    if (e.type !== "updated" || e.action.type !== "success") return;
+    const what = e.query.queryKey[0];
+    // the Library's entries; and the Catalog's install records, the one list the Catalog page reads (an update from the
+    // Catalog changes the Library while no page that reads the Library may be open). Not what the run itself reads
+    // again: a record's newest version and whether it is an update are left out, so a run never sets off another.
+    let print: string;
+    if (what === "library_list") print = JSON.stringify(((e.query.state.data ?? []) as api.LibraryEntry[]).map((l) => [l.kind, l.id, l.versions.map((v) => [v.version, v.hash])]));
+    else if (what === nx.nk.installed[0]) print = JSON.stringify(((e.query.state.data ?? []) as nx.InstalledCatalogMod[]).map((m) => [m.modId, m.fileId, m.versionGsid, m.refs.map((r) => [r.kind, r.id, r.version, r.hash])]));
+    else return;
     const before = seen.get(e.query.queryHash);
     seen.set(e.query.queryHash, print);
     if (before === undefined || before === print) return;
