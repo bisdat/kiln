@@ -48,6 +48,9 @@ test("edits that wait for a restart come first, with their count, mod and field 
   await expect(row).toContainText("late");
   await expect(row).toContainText("balance · levelCap");
   await expect(row).toContainText("RestartRequired: balance.levelCap is read at game start");
+});
+
+test("without edits that wait for a restart there is no restart card", async ({ page }) => {
   await report(page, { ...registryFixture(), refused: [registryFixture().refused[1]], counts: { ...registryFixture().counts, refused: 1, restartRequired: 0 } });
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Waits for a restart" })).toHaveCount(0);
