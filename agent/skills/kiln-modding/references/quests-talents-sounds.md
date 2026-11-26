@@ -109,7 +109,7 @@ builds them from the mod's files at boot, so changes need a restart).
 - `knowledge`: `{"name": {"scope": "world"}}`, resolved as `<mod>:<name>`.
 - Villagers: `Villagers.Find/Of/List`, `.Teleport`, `.GoTo`, `.Stay`, `.Follow`, `VillagerStateEvent`.
 
-## NPC speech bubbles (Kiln.Npcs, dev.31+)
+## NPC speech bubbles (Kiln.Npcs, dev.31.16+, mod API 0.2.23)
 Your text in the game's own speech bubble over a villager, craftsperson or assistant; the host decides, Kiln clients
 show it, vanilla clients keep the game's lines. `"side": "server"`, `"clients": "none"` is enough (players need Kiln, not the mod).
 ```csharp

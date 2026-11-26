@@ -6,13 +6,13 @@ public sealed partial class KilnHarness
     private HarnessNpcSpeech? _npcSpeech;
 
     /// <summary>The kit's fake kiln.npcspeech of this harness: what a Kiln client's speech bubble of each NPC would show
-    /// after the mod's <c>Npcs.Say</c> and <c>Npcs.Speech</c> calls. Since 0.2.0-dev.31.</summary>
+    /// after the mod's <c>Npcs.Say</c> and <c>Npcs.Speech</c> calls. Since 0.2.0-dev.31.16, mod API 0.2.23.</summary>
     public HarnessNpcSpeech NpcSpeech => _npcSpeech ??= new HarnessNpcSpeech(this);
 }
 
 /// <summary>
 /// What Kiln clients' speech bubbles would be told (<see cref="KilnHarness.NpcSpeech"/>): the effective override of each
-/// NPC (after every mod's priorities) and its running Say, with their texts. Since 0.2.0-dev.31.
+/// NPC (after every mod's priorities) and its running Say, with their texts. Since 0.2.0-dev.31.16, mod API 0.2.23.
 /// </summary>
 /// <remarks>
 /// <para><b>Modelled.</b> Kiln.Npcs' whole rule (owners, priorities, the most recent on a tie, a Say over an override and

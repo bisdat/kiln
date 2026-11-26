@@ -148,7 +148,7 @@ dev.28+ and dev.29+ (pages in the repository's `docs/kiln/`):
 | Equipment sets, tool wear | `services/items.md` |
 | Material pools, world tables | `services/worldtables.md` |
 | NPC roster past 64 | `services/npcs.md`, `services/quests.md` |
-| NPC speech bubbles: Say, Suppress, Replace (`Kiln.Npcs`, dev.31+) | `services/npc-speech.md` |
+| NPC speech bubbles: Say, Suppress, Replace (`Kiln.Npcs`, dev.31.16+) | `services/npc-speech.md` |
 | Gems | `services/gems.md`, `services/gems-new.md`, `services/gems-forge.md`, `services/gems-sockets.md`, `ui-gemforge.md` |
 | Bases and stations | `services/stations.md` |
 | Item icons and names, looks and themes, fonts | `ui.md` |
