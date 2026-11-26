@@ -5,7 +5,7 @@ use kfc::{resource::value::{Value, Variant}, reflection::{PrimitiveType, TypeMet
 use mlua::{AnyUserData, Function, MetaMethod, UserData};
 use ouroboros::self_referencing;
 
-use crate::{alias::TypeHandle, env::{game::value::{note_put, replaced_writes, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
+use crate::{alias::TypeHandle, env::{game::value::{Member, graft, note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, push_field, push_index}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
 
 pub struct StructValue {
     r#type: TypeHandle,
@@ -119,8 +119,8 @@ impl StructValue {
         let value = validate_and_clone_lua_value(value, &field_type, lua)
             .map_err(LuaError::external)?;
 
-        // kiln-eml: the writes logged in the value replaced stay this field's (env/writes.rs)
-        let kept = replaced_writes(self.fields.borrow().get(&key), &key)?;
+        // kiln-eml: the writes logged in the value replaced move onto the one put in its place (env/writes.rs)
+        let kept = graft(self.fields.borrow().get(&key), &value, &key)?;
         self.writes.field(&key); // kiln-eml
         self.writes.keep(&kept); // kiln-eml
         self.fields.borrow_mut().insert(key, value);
@@ -135,6 +135,17 @@ impl StructValue {
     /// kiln-eml: this value was put in place whole (note_put).
     pub(crate) fn writes(&self) -> &Writes {
         &self.writes
+    }
+
+    /// kiln-eml: the fields that are wrappers, and one of them (graft).
+    pub(crate) fn members(&self) -> Vec<(Member, LuaValue)> {
+        self.fields.borrow().iter().filter(|(_, v)| v.is_userdata()).map(|(k, v)| (Member::Key(k.clone()), v.clone())).collect()
+    }
+    pub(crate) fn member(&self, at: &Member) -> Option<LuaValue> {
+        match at {
+            Member::Key(key) => self.fields.borrow().get(key).cloned(),
+            _ => None,
+        }
     }
 
     /// kiln-eml: this value's logged writes and its fields' (env/writes.rs), `path` being its own path.
@@ -394,9 +405,10 @@ impl ArrayValue {
         let value = validate_and_clone_lua_value(value, &self.inner_type, lua)
             .map_err(LuaError::external)?;
 
-        // kiln-eml: the element put in place keeps the writes logged in the one it replaces (env/writes.rs)
-        let kept = replaced_writes(self.values.borrow().get(index), "")?;
-        note_put(&self.writes, &value, &kept)?; // kiln-eml
+        // kiln-eml: the writes logged in the element replaced move onto the one put in its place (env/writes.rs)
+        let kept = graft(self.values.borrow().get(index), &value, &format!("[{index}]"))?;
+        self.writes.keep(&kept);
+        note_put(&self.writes, &value)?; // kiln-eml
         self.values.borrow_mut()[index] = value;
 
         Ok(())
@@ -414,7 +426,7 @@ impl ArrayValue {
         let value = validate_and_clone_lua_value(value, &self.inner_type, lua)
             .map_err(LuaError::external)?;
 
-        note_put(&self.writes, &value, &[])?; // kiln-eml
+        note_put(&self.writes, &value)?; // kiln-eml
         self.writes.items();
         self.values.borrow_mut().insert(index, value);
 
@@ -456,6 +468,17 @@ impl ArrayValue {
     /// kiln-eml: this value was put in place whole (note_put).
     pub(crate) fn writes(&self) -> &Writes {
         &self.writes
+    }
+
+    /// kiln-eml: the elements that are wrappers, and one of them (graft).
+    pub(crate) fn members(&self) -> Vec<(Member, LuaValue)> {
+        self.values.borrow().iter().enumerate().filter(|(_, v)| v.is_userdata()).map(|(i, v)| (Member::Index(i), v.clone())).collect()
+    }
+    pub(crate) fn member(&self, at: &Member) -> Option<LuaValue> {
+        match at {
+            Member::Index(i) => self.values.borrow().get(*i).cloned(),
+            _ => None,
+        }
     }
 
     /// kiln-eml: this value's logged writes and its elements' (env/writes.rs), at their current indices.
@@ -689,6 +712,14 @@ impl VariantValue {
         &self.writes
     }
 
+    /// kiln-eml: its value when a wrapper, at its own path (graft).
+    pub(crate) fn members(&self) -> Vec<(Member, LuaValue)> {
+        if self.value.is_userdata() { vec![(Member::Same, self.value.clone())] } else { Vec::new() }
+    }
+    pub(crate) fn member(&self, at: &Member) -> Option<LuaValue> {
+        matches!(at, Member::Same).then(|| self.value.clone())
+    }
+
     /// kiln-eml: this value's logged writes and its value's (env/writes.rs): a variant's fields are at its own path.
     pub(crate) fn walk_writes(&self, path: &mut String, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
         self.writes.emit(path, out);
@@ -706,8 +737,8 @@ impl UserData for VariantValue {
         fields.add_field_method_set("value", |lua, this, value: LuaValue| {
             let value = validate_and_clone_lua_value(&value, &this.variant_type, lua)
                 .map_err(LuaError::external)?;
-            // kiln-eml: the writes logged in the value replaced stay the variant's (its fields are at its own path)
-            let kept = replaced_writes(Some(&this.value), "")?;
+            // kiln-eml: the writes logged in the value replaced move onto the new one (its fields are at the variant's path)
+            let kept = graft(Some(&this.value), &value, "")?;
             this.value = value;
             this.writes.whole(); // kiln-eml
             this.writes.keep(&kept); // kiln-eml

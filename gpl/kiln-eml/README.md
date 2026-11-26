@@ -587,10 +587,11 @@ Each is marked `kiln-eml:` in the source.
     `input[]`, `""` for the whole resource). Off outside a run (one thread-local read); in a run a write costs a
     thread-local read and a scan of its value's own small log; a copy's log starts empty (the assignment that put it
     there names its writer), a write into a value detached from its resource is not named, and the writes logged in a
-    value replaced (a field, an element, a variant's value, a resource's data) stay at its place, since the new value can
-    be a copy of it. Nothing is compared or
+    value replaced (a field, an element, a variant's value, a resource's data) move onto the value put in its place,
+    member by member (`value::graft`), since the new value can be a copy of it. Nothing is compared or
     serialized differently: the dirty flags and the bytes written are EML's. Tests: `env::writes` (2),
     `value::tests::writes_are_named_by_their_published_member_paths`, `a_replaced_value_keeps_the_writes_made_in_it_before`,
+    `kept_writes_move_with_the_members_of_the_copy`, `journal_cost_copy_back` (ignored),
     `journal_cost` (ignored: times the log and the walk), kiln-eml `m6_eml_journal`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout

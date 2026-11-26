@@ -5,7 +5,7 @@ use mod_loader::ModEnvironment;
 use once_cell::unsync::OnceCell;
 use kfc::{container::{KFCCursor, KFCFile, KFCReader}, guid::{ContentHash, ResourceId}, reflection::{LookupKey, TypeHandle, TypeIndex, TypeRegistry}, resource::value::Value};
 
-use crate::{RunArgs, alias::{MappedValue, PathBuf}, cache::CacheDiff, env::{Type, game::value::{is_dirty_lua_value, replaced_writes, walk_writes}, value::{convert_lua_to_value, convert_value_to_lua, validate_and_clone_lua_value}, writes}, log::warn, lua::{LuaError, LuaValue}};
+use crate::{RunArgs, alias::{MappedValue, PathBuf}, cache::CacheDiff, env::{Type, game::value::{graft, is_dirty_lua_value, walk_writes}, value::{convert_lua_to_value, convert_value_to_lua, validate_and_clone_lua_value}, writes}, log::warn, lua::{LuaError, LuaValue}};
 
 pub struct AppState {
     env: ModEnvironment,
@@ -516,8 +516,8 @@ impl ResourceInfo {
             lua,
         ).map_err(LuaError::external)?;
 
-        // kiln-eml: the writes logged in the data replaced stay this resource's, at their paths (env/writes.rs)
-        let kept = replaced_writes(self.value.borrow().as_ref(), "")?;
+        // kiln-eml: the writes logged in the data replaced move onto the data put in its place (env/writes.rs)
+        let kept = graft(self.value.borrow().as_ref(), &lua_value, "")?;
         writes::Record::kept(&app_state.writes, self.resource_id, kept);
         self.value.replace(Some(lua_value));
         self.is_dirty.replace(true);

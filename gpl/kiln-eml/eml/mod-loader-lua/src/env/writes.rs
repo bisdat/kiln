@@ -20,11 +20,13 @@
 //! - a write lands in the journal exactly when it can reach the published resource: a value a mod detached from its
 //!   resource (replaced, removed) and wrote afterwards is not in the tree any more, and is not named;
 //! - a copy assigned into a resource is that resource's write by the assigning mod (the copy's own log starts empty);
-//! - a value put in place over another one (a struct field, a list element, a variant's value, a resource's data) keeps
-//!   the writes logged in the one it replaced, at that place ([`Member::Kept`], [`Record::kept`]): the new value may be a
-//!   copy of the old one (a mod that copies the data into plain tables and assigns it back), so a writer before it stays
-//!   named there (over-naming one whose write the new value dropped, never missing one whose write it kept). A removed
-//!   or cleared element's writes leave with it;
+//! - a value put in place over another one (a struct field, a list element, a variant's value, a resource's data) takes
+//!   over the writes logged in the one it replaced ([`Member::Kept`], `value::graft`), member by member where it has
+//!   that member materialized (a copy has every member its source had), else on its nearest member that holds it: the
+//!   new value may be a copy of the old one (a mod that copies the data into plain tables and assigns it back), so a
+//!   writer before it stays named there (over-naming one whose write the new value dropped, never missing one whose
+//!   write it kept), and the writes move with their members afterwards (an element inserted before one moves them too).
+//!   A removed or cleared element's writes leave with it;
 //! - list positions are the published ones: an element's index is where it is written, whatever moved it since.
 //!
 //! **Cost.** Off (one thread-local read) outside a run. In a run, a write costs a thread-local read and a scan of the
@@ -54,7 +56,8 @@ pub(crate) enum Member {
     Field(Box<str>),
     /// A list's membership changed (an insertion, removal or clear, or a plain element set).
     Items,
-    /// A write logged in a value this one replaced, at this path from this value ("": this value itself).
+    /// A write logged in a value this one replaced (or in a member of it this one has not materialized), at this path from
+    /// this value ("": this value itself).
     Kept(Box<str>),
 }
 
@@ -75,17 +78,19 @@ impl Writes {
     pub(crate) fn field(&self, key: &str) {
         self.note(|m| matches!(m, Member::Field(k) if &**k == key), || Member::Field(key.into()))
     }
-    /// The writes logged in the value this one (or, for a struct, its member) replaced: (writer, path from this value).
+    /// Writes logged in a value this one replaced (`value::graft`): (writer, path from this value), each kept once. One
+    /// pass with a set: a value whose replaced counterpart had members this one lacks can take many at once.
     pub(crate) fn keep(&self, kept: &[(u32, String)]) {
         if kept.is_empty() {
             return;
         }
         let mut log = self.0.take().unwrap_or_default();
-        for (writer, rel) in kept {
-            if !log.iter().any(|(w, m)| w == writer && matches!(m, Member::Kept(r) if **r == **rel)) {
-                log.push((*writer, Member::Kept(rel.as_str().into())));
-            }
-        }
+        let add: Vec<(u32, Member)> = {
+            let mut seen: std::collections::HashSet<(u32, &str)> =
+                log.iter().filter_map(|(w, m)| if let Member::Kept(r) = m { Some((*w, &**r)) } else { None }).collect();
+            kept.iter().filter(|(w, r)| seen.insert((*w, r.as_str()))).map(|(w, r)| (*w, Member::Kept(r.as_str().into()))).collect()
+        };
+        log.extend(add);
         self.0.set(Some(log));
     }
     fn note(&self, same: impl Fn(&Member) -> bool, make: impl FnOnce() -> Member) {
@@ -197,7 +202,8 @@ impl Drop for Entered {
 pub(crate) struct Record {
     packages: Vec<String>,
     whole: Vec<(u32, ResourceId)>,
-    /// The writes logged in a resource's data before it was replaced whole: (writer, resource, path).
+    /// The writes logged in a resource's data before it was replaced whole that its new data could not take (it is no
+    /// value wrapper): (writer, resource, path).
     kept: Vec<(u32, ResourceId, String)>,
     created: Vec<(u32, ResourceId, bool)>,
     contents: Vec<(u32, ContentHash)>,
@@ -237,7 +243,8 @@ impl Record {
             record.borrow_mut().whole.push((writer(), id));
         }
     }
-    /// `id`'s data is replaced whole: the writes logged in the data it had stay that resource's, at their paths.
+    /// `id`'s data is replaced whole: the writes logged in the data it had that the new data could not take stay that
+    /// resource's, at their paths.
     pub(crate) fn kept(record: &RefCell<Record>, id: ResourceId, kept: Vec<(u32, String)>) {
         if !kept.is_empty() {
             record.borrow_mut().kept.extend(kept.into_iter().map(|(w, path)| (w, id, path)));
