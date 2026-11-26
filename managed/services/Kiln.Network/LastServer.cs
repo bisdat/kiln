@@ -27,7 +27,7 @@ internal static class LastServer
         {
             try
             {
-                var lacking = Missing(advert.Required, local);
+                var lacking = Lacking(advert.Required, local, KilnPaths.Server);
                 var missing = refusedFor is null ? lacking : NetRefusal.Missing(refusedFor, lacking);
                 var entry = Build(outcome, reason, advert, serverKiln, missing, DateTime.UtcNow);
                 Write(FilePath, entry);
@@ -99,7 +99,8 @@ internal static class LastServer
 
     internal sealed record Local(string Kind, string Id, string Folder);
 
-    /// <summary>This client's mod folders (managed mods from Kiln.Host, native mods from state/native.json).</summary>
+    /// <summary>This client's Kiln and native mods (managed mods from Kiln.Host, native mods from state/native.json). Other
+    /// engines' mods are read from the game folder by <see cref="Lacking"/>.</summary>
     private static List<Local> LocalMods()
     {
         var list = new List<Local>();
@@ -127,28 +128,49 @@ internal static class LastServer
         return list;
     }
 
-    /// <summary>Required ids this client lacks, or has with another hash. A Kiln mod is compared by its identity
-    /// (<see cref="DirHash.ModIdentity"/>): what the cook made on either machine does not count.</summary>
-    internal static List<string> Missing(IReadOnlyList<NetRequiredMod> required, List<Local> local)
+    /// <summary>The required ids this game lacks: <paramref name="local"/> (its Kiln and native mods) and the other
+    /// engines' mods in <paramref name="game"/>'s folders (ShroudForge, Flame, EML, EMF, Green Eye ...: the folders and
+    /// ids the server reads its own from, NetAdvertise.EngineMods), each kind compared as the server advertises it. Up to
+    /// 0.2.0-dev.31.17 only Kiln and native mods were looked at, so every other engine's mod was "missing", even in the
+    /// player's own hosted world.</summary>
+    internal static List<string> Lacking(IReadOnlyList<NetRequiredMod> required, List<Local> local, string game)
     {
-        var missing = new List<string>();
-        foreach (var r in required)
-        {
-            var have = local.FirstOrDefault(l => l.Kind == r.Kind && l.Id == r.Id);
-            if (have is null)
-            {
-                missing.Add(r.Id);
-                continue;
-            }
+        var kinds = required.Select(r => r.Kind).Where(k => k is not ("kiln" or "native")).ToHashSet(StringComparer.Ordinal);
+        var all = new List<Local>(local);
+        if (kinds.Count > 0)
             try
             {
-                if ((have.Kind == "kiln" ? DirHash.ModIdentity(have.Folder) : DirHash.Compute(have.Folder)) != r.Hash) missing.Add(r.Id);
+                all.AddRange(NetAdvertise.EngineMods(game, neededOnly: false, kinds).Select(c => new Local(c.Kind, c.Id, c.Dir)));
             }
-            catch (Exception)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                missing.Add(r.Id);
             }
-        }
+        return Missing(required, all, game);
+    }
+
+    /// <summary>Required ids none of <paramref name="local"/>'s mods of the same kind and id matches by the hash the
+    /// server advertises (<see cref="NetAdvertise.AdvertisedHash"/>: a Kiln mod by its identity, what the cook made on
+    /// either machine does not count; another engine's mod by what stays the same while it runs).
+    /// <paramref name="game"/>: the game folder whose kiln/state holds the receipts of Kiln's copies (null: this one).</summary>
+    internal static List<string> Missing(IReadOnlyList<NetRequiredMod> required, List<Local> local, string? game = null)
+    {
+        game ??= KilnPaths.Server;
+        var missing = new List<string>();
+        foreach (var r in required)
+            if (!local.Any(l => l.Kind == r.Kind && l.Id == r.Id && Has(l, r.Hash, game)))
+                missing.Add(r.Id);
         return missing;
+    }
+
+    private static bool Has(Local l, string hash, string game)
+    {
+        try
+        {
+            return NetAdvertise.AdvertisedHash(l.Kind, l.Folder, game) == hash;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }
