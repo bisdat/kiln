@@ -476,7 +476,8 @@ read again at that moment), and the newest 10 other plans (by the file's last wr
 again), and removes every other `plans/<sha256>.json`; kiln.log says how many (`registry: plans: removed ...`). Only plan files
 are removed: `plans/index.json`, a kept `plans/index.unreadable.json` and any other file stay. Nothing is removed by a start
 that failed or whose state is not known: one whose stage had no base to read, whose rollback request was refused (or cannot be
-read), whose `plans/index.json` could not be read, or that wrote no plan. `kilnctl registry rollback --to <hash>` can name
+read), whose `plans/index.json` could not be read, or that wrote no plan (a rolled-back start runs on a plan that is already
+there and writes none, so it removes none either). `kilnctl registry rollback --to <hash>` can name
 only a plan that is still there (a removed one is refused: "not in kiln/data/content/registry/plans").
 
 **The last good plan** is the last one a world started on without a refused edit (`plans/index.json` keeps it, the good one
