@@ -3,6 +3,7 @@
 // R1-R5, moved here). Harness as registry_stage_test.cpp. registry_stage_review_test.sh builds and runs it.
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -434,6 +435,90 @@ void lazy_base_keeps_pre_patch_resource_bytes(const std::string& dir) {
     check(runner.read(2, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "20",
           "the resolved lazy view includes the named legacy writer");
 }
+// A source that says which of its kind are still held (not released, not destroyed) and what each read.
+struct HeldSources {
+    std::set<model::Source*> held;
+};
+class Recording : public model::Source {
+   public:
+    Recording(std::unique_ptr<model::Source> in, std::shared_ptr<HeldSources> held) : in_(std::move(in)), held_(std::move(held)) { held_->held.insert(this); }
+    ~Recording() override { held_->held.erase(this); }
+    const char* name() const override { return in_->name(); }
+    bool list(const std::string& type, std::vector<KilnAssetKey>* out, std::string* why) override { return in_->list(type, out, why); }
+    bool count(const model::Place& p, size_t* n, std::string* why) override { return in_->count(p, n, why); }
+    bool member(const model::Place& p, const std::string& path, json* out, std::string* why) override { return in_->member(p, path, out, why); }
+    std::string digest() override { return in_->digest(); }
+    std::vector<std::pair<KilnAssetKey, std::string>> keys_read() const override { return in_->keys_read(); }
+    bool touch(const KilnAssetKey& key, const std::string& type, std::string* why) override { return in_->touch(key, type, why); }
+    void release() override { in_->release(); held_->held.erase(this); }
+
+   private:
+    std::unique_ptr<model::Source> in_;
+    std::shared_ptr<HeldSources> held_;
+};
+// review4 nit: the first start of a new game build with a frozen boot writer writes the id ledger, which reads every
+// resource; the source kept for the first-use decode holds only the frozen writers' resources, not the ledger's reads.
+void ledger_reads_are_not_kept_for_first_use(const std::string& dir) {
+    TreeView view = world(); Files files;  // no id table for this build yet
+    auto env = env_of(&view, &files, dir, &no_sections); env.prepare_live = true;
+    env.write_data = [&files](const std::string& rel, const std::string& t) {  // the ledger, not the synthetic cache digest
+        if (rel.rfind("ids-", 0) == 0) files.data[rel] = t;
+        return true;
+    };
+    auto held = std::make_shared<HeldSources>();
+    auto source = env.source;
+    env.source = [source, held](std::string* why) -> std::unique_ptr<model::Source> {
+        auto s = source(why);
+        return s ? std::make_unique<Recording>(std::move(s), held) : nullptr;
+    };
+    stage::Runner runner(std::move(env)); stage::LiveHandoff live;
+    runner.set_live([&](const stage::LiveHandoff& handoff) { live = handoff; });
+    stage::Runner::OldWritesFn old = [](model::Model&) {
+        OldWrite write; write.kind = WriterKind::OldPatch; write.mod = "old"; write.who = "old/stack";
+        write.field = {"items", "game:material_t1_wood_logs", "maxStack"}; write.op.mul = 2;
+        return std::vector<OldWrite>{write};
+    };
+    const KilnAssetKey frozen = key_of(g(1), "keen::ItemInfo");
+    runner.run(old, {{frozen, "keen::ItemInfo"}}); runner.finish({});
+    check(files.data.count("ids-server-" + kExe + ".json"), "the first start of the build writes the id ledger");
+    size_t reads = 0;
+    for (model::Source* s : held->held) reads += s->keys_read().size();
+    check(held->held.size() == 1 && reads == 1, "the source kept for first use holds the frozen resource only: " + std::to_string(held->held.size()) +
+                                                     " sources, " + std::to_string(reads) + " resources");
+    view.values[g(1)]["maxStackSize"] = 20;  // the legacy boot writer patches its resource
+    stage::LiveData data; std::string why;
+    check(live.prepare && live.prepare(&data, &why) && data.result.fields.at({"items", "game:material_t1_wood_logs", "maxStack"}).result == Value::integer(20),
+          "the first use still composes over the frozen pre-patch bytes (10 x2 = 20, not 40): " + why);
+}
+// review4 nit (NS1 edge): a registry user's stage that cannot read the base cannot freeze the old boot writers' resources
+// either; the first use then refuses, with that reason, rather than decode their patched bytes as the game's.
+void flagged_stage_without_a_base_refuses_first_use(const std::string& dir) {
+    TreeView view = world(); Files files = warm_id_table(dir);
+    auto env = env_of(&view, &files, dir, &no_sections); env.prepare_live = true;
+    env.write_data = {};
+    auto source = env.source; int opens = 0;
+    env.source = [&opens, source](std::string* why) -> std::unique_ptr<model::Source> {
+        if (++opens == 1) { *why = "the archive view is not open"; return nullptr; }
+        return source(why);
+    };
+    stage::Runner runner(std::move(env)); stage::LiveHandoff live;
+    runner.set_order(R"([{"mod":"author","version":"1.0.0","registry":true}])");
+    runner.set_live([&](const stage::LiveHandoff& handoff) { live = handoff; });
+    auto calls = std::make_shared<int>(0);
+    stage::Runner::OldWritesFn old = [calls](model::Model&) {
+        ++*calls;
+        OldWrite write; write.kind = WriterKind::OldPatch; write.mod = "old"; write.who = "old/stack";
+        write.field = {"items", "game:material_t1_wood_logs", "maxStack"}; write.op.mul = 2;
+        return std::vector<OldWrite>{write};
+    };
+    runner.run(old, {{key_of(g(1), "keen::ItemInfo"), "keen::ItemInfo"}}); runner.finish({});
+    view.values[g(1)]["maxStackSize"] = 20;  // the legacy boot writer patched its resource
+    stage::LiveData data; std::string why;
+    const bool prepared = live.prepare && live.prepare(&data, &why);
+    check(!prepared && why.find("could not be read at the stage") != std::string::npos,
+          "the first use refuses with the reason instead of reading the patched bytes: " +
+              (prepared ? "prepared, maxStack " + data.result.fields.at({"items", "game:material_t1_wood_logs", "maxStack"}).result.to_json().dump() : why));
+}
 void transaction_snapshot_is_not_worldload(const std::string& dir) {
     TreeView view = world();
     Files files;
@@ -831,6 +916,8 @@ int main(int argc, char** argv) {
         {"P2 full_live_cache_keeps_boot_targets", [&] { full_live_cache_keeps_boot_targets(dir); }},
         {"P2 lazy_base_waits_for_live_handoff", [&] { lazy_base_waits_for_live_handoff(dir); }},
         {"P2 lazy_base_keeps_pre_patch_resource_bytes", [&] { lazy_base_keeps_pre_patch_resource_bytes(dir); }},
+        {"nit ledger_reads_are_not_kept_for_first_use", [&] { ledger_reads_are_not_kept_for_first_use(dir); }},
+        {"nit flagged_stage_without_a_base_refuses_first_use", [&] { flagged_stage_without_a_base_refuses_first_use(dir); }},
         {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
         {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }},
         {"P2 revoked_queue", [&] { revoked_queue(dir); }},
