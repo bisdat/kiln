@@ -533,6 +533,19 @@ in `schema/fixtures/shroudforge/cases.json` exercise the Rust launcher and manag
 CRLF, typed numeric/bool/list options, chained/cyclic conditions, canonical SDL shortcut text, live/restart rules,
 refused edits and exact written bytes. No SF fork change or second UI executable is required.
 
+A `keybind` setting is a capture box (since 0.2.0-dev.31.18, `SfShortcuts.cs`): click it and press a key or the middle
+or a side mouse button, with Ctrl, Shift or Alt. Kiln stores SF's canonical text for the key's place
+(`Ctrl+Alt+Shift+Meta+SDL:<n>`, `Mouse:<n>`): the SDL code comes from the press's make code and E0 flag through SDL3's
+`windows_scancode_table` (Pause, Print Screen and Num Lock by their virtual key, as SF's own conversion), the same table
+the hosted runtime's feed and kiln-sfi's port use, so the captured code is the one SF sees for that key on any layout
+(the Ü key of a German keyboard is `SDL:47`). The box takes the press on the window thread like the Keys page's rebind
+(kept from the game and from key bindings, dropped when the page is not drawn; Escape closes the menu inside kiln.ui);
+Backspace, Delete or Unbind clear it; the wheel and controller buttons are refused with the reason (SF shortcuts read
+the keyboard and the mouse only). The text field below still takes SF's own form, and the page converts readable forms
+(`Ctrl+G`, `F5`, `Mouse4`, a layout character such as `Ü`) before it saves; the data layer and the shared fixtures stay
+strict. Shown names follow the player's keyboard layout for letter and punctuation keys (`KeyLayout.cs`, also on Kiln's
+Keys page); other keys keep Kiln's names.
+
 The ShroudForge group lists the profile's SF mods and every other package of SF's folder that SF reads, except
 Kiln's copies of the profile's EML mods: those are rows of the EML group, which say whether SF's switch runs them, and
 the launcher sets their switch from the profile. While SF runs, a player's own legacy EML folder (mod.json and
@@ -559,7 +572,7 @@ auto-reset signals. Managed tests exercise settings, writer coalescing/failure r
 A headless software preview renders the shared-fixture SF panel at 1280×800 and its main-menu page at 1920×1080.
 In an isolated server lab, the actual managed UI writer queue changed `sf-probe` live: setting on confirmed a guarded
 write, setting off restored the baseline, and the enabled switch deactivated/reactivated its runtime without errors.
-Neither proof is rendered game-client or Steam Deck interaction. Text-based keybind/color editing, combos in place
+Neither proof is rendered game-client or Steam Deck interaction. Keybind capture and text editing, color editing, combos in place
 of radio/segmented layouts, action execution, gamepad focus and gamescope presentation still need client checks.
 
 ### 5.4 `mods/tests/sf-probe` (lab probe, MIT)
