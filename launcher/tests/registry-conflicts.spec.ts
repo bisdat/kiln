@@ -123,7 +123,7 @@ test("names archive-writer packages from kiln-eml's journal and labels drift bes
     text: "items[game:fixture_stack].maxStack: betterstacks (ShroudForge package) wrote this entry in the game's archive before Kiln; stacker's edit wins (D1): 10 -> 20" }];
   await report(page, { ...r, base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 1, entries: 1, truncated: false } },
     fields: [row], conflicts, counts: { ...r.counts, conflicts: 1 } });
-  await expect(page.getByText("Archive-writer packages named from kiln-eml's change journal: 1 packages, 1 entries (items, drops and balance only: a recipe or loot entry is not named).", { exact: true })).toBeVisible();
+  await expect(page.getByText("Archive-writer packages named from kiln-eml's change journal: 1 packages, 1 entries (a ShroudForge pass names items, drops and balance per entry; an EML pass names the fields its mods wrote, on recipes and loot by their element).", { exact: true })).toBeVisible();
   await expect(page.getByText(/betterstacks \(ShroudForge package\) wrote this entry in the game's archive before Kiln; stacker's edit wins \(D1\)/)).toBeVisible();
   await expect(page.getByText("Named from journal", { exact: true }).first()).toBeVisible();
   const field = page.locator(".registry-field").first();
@@ -137,6 +137,26 @@ test("names archive-writer packages from kiln-eml's journal and labels drift bes
   await expect(owners.nth(1)).toContainText("Changed outside Kiln");
   await expect(owners.nth(1)).toContainText("Best-effort drift");
   await expect(owners.nth(2)).toContainText("stacker");
+});
+
+test("an EML mod named from its pass's journal on the field it wrote (since 0.2.0-dev.31.15)", async ({ page }) => {
+  const r = registryFixture();
+  const row = { ...r.fields[0], writers: [
+    { kind: "archiveWriter", who: "eml:betterstacks", value: 10, certainty: "named", named: "field" },
+    { kind: "registry", mod: "stacker", stage: "alter", n: 0, op: { mul: 2 }, value: 20, certainty: "certain" },
+  ], result: 20 };
+  const conflicts = [{ registry: "items", id: "game:fixture_stack", field: "items[game:fixture_stack].maxStack", kind: "composedOn", winner: "stacker",
+    loser: "eml:betterstacks", certainty: "named",
+    text: "items[game:fixture_stack].maxStack: betterstacks (EML package) wrote this field in the game's archive before Kiln; stacker's edit wins (D1): 10 -> 20" }];
+  await report(page, { ...r, base: { origin: "live", writer: "none", journal: { state: "read", packages: 1, entries: 1, truncated: false } },
+    fields: [row], conflicts, counts: { ...r.counts, conflicts: 1 } });
+  await expect(page.getByText(/betterstacks \(EML package\) wrote this field in the game's archive before Kiln; stacker's edit wins \(D1\)/)).toBeVisible();
+  const field = page.locator(".registry-field").first();
+  await field.locator("summary").click();
+  const owners = field.locator("ol li");
+  await expect(owners.nth(0)).toContainText("betterstacks (EML package)");
+  await expect(owners.nth(0)).toContainText("Wrote this field before Kiln (archive)");
+  await expect(owners.nth(0)).toContainText("Operation: Not known (kiln-eml's journal names this field as written by this package, not the value)");
 });
 
 test("a start whose archive writer keeps no journal says its packages are not named", async ({ page }) => {

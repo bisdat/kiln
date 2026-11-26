@@ -70,8 +70,11 @@ function archiveOwner(who: string): string {
   const m = /^(shroudforge|eml):(.+)$/.exec(who);
   return m ? t(m[1] === "eml" ? "registry.emlPackage" : "registry.sfPackage", { id: m[2] }) : who;
 }
-function writerKind(kind: string): string {
-  return kind === "archiveWriter" ? t("registry.kind.archiveWriter") : kind === "drift" ? t("registry.kind.drift") : kind;
+// An archive-writer row names the entry its package wrote, or (an EML pass's journal, `named: "field"`, since
+// 0.2.0-dev.31.15) this field.
+function writerKind(kind: string, named?: unknown): string {
+  if (kind === "archiveWriter") return t(named === "field" ? "registry.kind.archiveWriterField" : "registry.kind.archiveWriter");
+  return kind === "drift" ? t("registry.kind.drift") : kind;
 }
 // base.journal: absent in a report from before 0.2.0-dev.31.15, and nothing to say when the start had no archive writer.
 function journalLine(base: ObjectRow): string {
@@ -173,9 +176,9 @@ export function parseRegistryReport(input: string): RegistryReport {
         // list and leaf, so a chain says which element an operation changed
         const element = w.element === undefined || raw ? "" : isKilnField(text(f.registry), text(w.element)) ? text(w.element) : t("registry.elementHidden");
         const kind = text(w.kind), who = optional(w.who);
-        return { element, owner: kind === "archiveWriter" && who ? archiveOwner(who) : who || optional(w.mod) || t("registry.referenceCheck"), kind: writerKind(kind), stage: optional(w.stage),
-          // an archive-writer package: kiln-eml's journal names the entry, not what the package did to this field
-          operation: kind === "archiveWriter" ? t("registry.archiveOp")
+        return { element, owner: kind === "archiveWriter" && who ? archiveOwner(who) : who || optional(w.mod) || t("registry.referenceCheck"), kind: writerKind(kind, w.named), stage: optional(w.stage),
+          // an archive-writer package: kiln-eml's journal names the entry (or the field) it wrote, not what it did there
+          operation: kind === "archiveWriter" ? t(w.named === "field" ? "registry.archiveOpField" : "registry.archiveOp")
             : w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
           value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty), certain: w.certainty === "certain" };
       }),
