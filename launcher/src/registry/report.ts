@@ -22,7 +22,7 @@ export interface RegistryConflict { field: string; kind: string; winner: string;
 export interface RegistryRefusal { owner: string; field: string; stage: string; reason: string }
 export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
-  /** Whether the archive writer's packages are named (base.journal, since 0.2.0-dev.31.15); empty: nothing to say. */
+  /** Whether the archive writer's packages are named (base.journal, next release); empty: nothing to say. */
   journal: string;
   fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[];
   entries: { kind: string; registry: string; id: string; state: string; owner: string; source: string; reason: string }[]; omitted: number; empty: boolean;
@@ -70,13 +70,13 @@ function archiveOwner(who: string): string {
   const m = /^(shroudforge|eml):(.+)$/.exec(who);
   return m ? t(m[1] === "eml" ? "registry.emlPackage" : "registry.sfPackage", { id: m[2] }) : who;
 }
-// An archive-writer row names the entry its package wrote, or (an EML pass's journal, `named: "field"`, since
-// 0.2.0-dev.31.15) this field.
+// An archive-writer row names the entry its package wrote, or (an EML pass's journal, `named: "field"`, next
+// release) this field.
 function writerKind(kind: string, named?: unknown): string {
   if (kind === "archiveWriter") return t(named === "field" ? "registry.kind.archiveWriterField" : "registry.kind.archiveWriter");
   return kind === "drift" ? t("registry.kind.drift") : kind;
 }
-// base.journal: absent in a report from before 0.2.0-dev.31.15, and nothing to say when the start had no archive writer.
+// base.journal: absent in a report from before the next release, and nothing to say when the start had no archive writer.
 function journalLine(base: ObjectRow): string {
   if (base.journal === undefined) return "";
   const j = object(base.journal), state = text(j.state);

@@ -899,7 +899,7 @@ All written atomically; a file whose `pid` is not a live process is stale.
   older paths and the archive writer's packages below, then the registry's edits by stage and load order; each with its
   certainty: `certain` for Kiln's own writers, `named` for a ShroudForge/EML package kiln-eml's change journal names, with
   `named` `entry` or `field` saying whether the journal names it on the entry or on this field,
-  `bestEffort` for a `drift` row of the drift probe), the result and the winner; `base.journal` (since 0.2.0-dev.31.15)
+  `bestEffort` for a `drift` row of the drift probe), the result and the winner; `base.journal` (next release)
   says whether the journal named the archive writer's packages (`read`, `none`, `stale`, `unreadable`). Every
   conflict line (`conflicts[]`: `overridden`, `composed`, `composedOn`, `exclusive`, `dropped`, `yielded`, with winner,
   loser and one English sentence) and every refused edit (`refused[]`: mod, source, stage, ordinal, reason). `phase`

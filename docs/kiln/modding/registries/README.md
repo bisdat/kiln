@@ -299,9 +299,9 @@ with a certainty:
 (`kiln/eml/ownership/<exe name>.change-journal.json`): which package wrote or created which of the game's resources, in
 the order the packages ran. Two kinds of start write one:
 
-- **EML mods** (kiln-eml's own EML pass, a start with EML mods and without Kiln's interpreter for ShroudForge mods; since
-  0.2.0-dev.31.15): per EML mod, the resources it wrote and the **member paths** it wrote in each, at their places in the
-  data the game reads (format 2). A start that changed nothing keeps the journal of the start that published.
+- **EML mods** (kiln-eml's own EML pass, a start with EML mods and without Kiln's interpreter for ShroudForge mods; next
+  release): per EML mod, the resources it wrote and the **member paths** it wrote in each, at their places in the data
+  the game reads (format 2). A start that changed nothing keeps the journal of the start that published.
 - **Kiln's interpreter for ShroudForge mods** (kiln mode): per ShroudForge package (and the EML packages its pass ran),
   the resources it wrote or created (format 1, per resource).
 
@@ -318,8 +318,11 @@ base).
   Kiln computes from it); one that replaced a struct or a list on every field inside it; one that replaced the resource
   whole on every field of the entry. A recipe or a loot entry (an element of the recipe list or the loot list) is named by
   its element (`recipes[37].craftingDuration` names `recipes.duration` of the 38th recipe; a recipe put in place whole
-  names that recipe on every field). Inserting, removing or clearing elements of a list names no other element. The
-  field row's writer has `"named": "field"`.
+  names that recipe on every field; the recipe list replaced whole names every recipe). Inserting, removing or clearing
+  elements of a list names no other element. A mod that wrote a member before another mod replaced the value holding it
+  (a struct, an element, the resource's data) stays named there, since the new value can be a copy of the old one. A
+  mod's own entry module (`src/mod.lua`) writes as that mod, even when another mod requires it first. The field row's
+  writer has `"named": "field"`.
 - **Per entry (ShroudForge packages, created entries).** The kiln-mode journal names a package per **entry**: a package
   that wrote one member of an item is listed on every field of that item a mod edits (`"named": "entry"`). Only **items,
   drops and balance** are named from it: their entries are each one whole resource, which is what that journal lists; a

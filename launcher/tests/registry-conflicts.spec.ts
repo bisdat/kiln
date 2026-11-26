@@ -139,7 +139,7 @@ test("names archive-writer packages from kiln-eml's journal and labels drift bes
   await expect(owners.nth(2)).toContainText("stacker");
 });
 
-test("an EML mod named from its pass's journal on the field it wrote (since 0.2.0-dev.31.15)", async ({ page }) => {
+test("an EML mod named from its pass's journal on the field it wrote (next release)", async ({ page }) => {
   const r = registryFixture();
   const row = { ...r.fields[0], writers: [
     { kind: "archiveWriter", who: "eml:betterstacks", value: 10, certainty: "named", named: "field" },

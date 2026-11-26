@@ -300,7 +300,7 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
 - **Readers** use it only when `generation` is the start's live generation: a writer that ignores the receipt (hosted
   ShroudForge, another loader) can leave it naming a generation that is no longer live. Read it and close it at once (a
   reader that keeps it open on Windows can make the next kiln-mode start fail its removal).
-- **Kiln's registry stage** is one reader (since 0.2.0-dev.31.15, `native/services/content/registry/archive_journal.cpp`,
+- **Kiln's registry stage** is one reader (next release, `native/services/content/registry/archive_journal.cpp`,
   MIT code over this file format): once per start it checks `generation` against the identity kiln-eml granted for the
   launch (`published_identity`'s `archive_sha256`) and names each package on the registry entries whose resource GUID it
   lists (`changed` and `created`; only registries whose entries are whole resources: items, drops, balance, never the
@@ -310,7 +310,7 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
 ### EML's own pass (format 2)
 
 An EML start outside kiln mode (`runner::run`, kiln-eml's plugin with EML mods) that publishes a generation writes the
-same file in format 2 (`schema/sfi/eml-journal/eml-journal-2.schema.json`, dialect `eml`, since 0.2.0-dev.31.15): per
+same file in format 2 (`schema/sfi/eml-journal/eml-journal-2.schema.json`, dialect `eml`, next release): per
 EML mod of the committed run, in the order their entrypoints ran, the resources it wrote with the **member paths** it
 wrote in each, at their places in the published resource (`maxStackSize`, `recipes[37].craftingDuration`, `input[]` for a
 list's members, `""` for the whole resource), the ones it created and the contents it created; no plan digests (`null`).
@@ -318,8 +318,11 @@ list's members, `""` for the whole resource), the ones it created and the conten
 - **Recording:** EML's runtime (mod-loader-lua `env/writes.rs`, kiln-eml README change 43) names the running entrypoint
   and keeps a small log on each value wrapper of the writes made through it; once the mods ran it walks the values as
   they will be written, once, into paths. A write into a value detached from its resource is not listed; a copy assigned
-  into a resource is the assigning mod's. Off outside a run; in a run one thread-local read and a scan of a few entries
-  per write.
+  into a resource is the assigning mod's; a value put in place over another (a field, an element, a variant's value, the
+  resource's data) keeps the writes logged in the one it replaced, at that place (the new value can be a copy of it); a
+  mod's entry module writes as that mod, whoever requires it first. Off outside a run; in a run one thread-local read
+  and a scan of a few entries per write (5,000 recipes, 10,546 writes: about +3 to 5 % on the mods' Lua time; the walk
+  1.4 ms with nothing logged, 3.6 ms with those writes, beside 3.5 ms for EML's own conversion of the same tree).
 - **Binding:** `generation` and `receiptSha256` are the SHA-256 of the receipt the publication wrote. kiln-eml writes the
   journal after that publication, under its install lock, only while the receipt is still that one
   (`StartupJournal::write_for`), and reports the live generation in `kiln/state/eml.json` (`generation`, phase `done`): the
