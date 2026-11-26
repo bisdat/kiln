@@ -8,9 +8,10 @@
 //! first starts, so after that only its own endpoint is left.
 //!
 //! (review of 0.2.0-dev.31.14) A panel removes its file when it stops, but a crash skips that, so a file can be left
-//! from an earlier run. When both folders have one and the server's Kiln has the old copy loaded (or loading:
-//! `kiln/state/mods.json`), Kilnwarden is off and its file is the stale one: the old copy's is used. Either way the
-//! certificate pin is checked before any login is minted, so a stale file only ever costs an error, never a login.
+//! from an earlier run. When both folders have one and the server's Kiln has the old copy loaded, loading or disabled
+//! by its fault policy (`kiln/state/mods.json`; the states in which Kilnwarden stays off), Kilnwarden is off and its file
+//! is the stale one: the old copy's is used. Either way the certificate pin is checked before any login is minted, so a
+//! stale file only ever costs an error, never a login.
 
 use crate::{Error, ErrorCode, Result};
 
@@ -69,12 +70,15 @@ pub fn find<E>(
     }
 }
 
-/// Whether `kiln/state/mods.json` (its bytes) has the old copy loaded or still loading, the states in which Kilnwarden
-/// stays off. An unreadable file: false (Kilnwarden first).
+/// Whether `kiln/state/mods.json` (its bytes) has the old copy loaded, still loading or disabled by Kiln's fault policy:
+/// the states in which Kilnwarden stays off (its OnLoad asks Kiln's mod list for Pending, Loaded or Disabled). A
+/// fault-disabled mod never gets its OnUnload (Kiln only cuts its ticks and services), so its panel keeps listening and
+/// its file is the live one (review of 0.2.0-dev.31.14). The player's switch (a `.disabled` file) is `skipped`, and
+/// Kilnwarden runs then. An unreadable file: false (Kilnwarden first).
 pub fn old_copy_in_mods_json(bytes: &[u8]) -> bool {
     let Ok(doc) = serde_json::from_slice::<serde_json::Value>(bytes) else { return false };
     doc["mods"].as_array().is_some_and(|mods| {
-        mods.iter().any(|m| m["id"] == KILN_WEBADMIN.id && matches!(m["state"].as_str(), Some("loaded" | "pending")))
+        mods.iter().any(|m| m["id"] == KILN_WEBADMIN.id && matches!(m["state"].as_str(), Some("loaded" | "pending" | "disabled")))
     })
 }
 
@@ -137,12 +141,17 @@ mod tests {
         assert_eq!(m, KILNWARDEN);
     }
 
+    /// (review of 0.2.0-dev.31.14) The states in which Kilnwarden stays off next to the old copy (its OnLoad: Kiln's mod
+    /// list has `kiln-webadmin` Pending, Loaded or Disabled). Kiln's `disabled` is the fault policy's (loaded, then switched
+    /// off after too many faults, `reload` retries it; no OnUnload, so its panel keeps listening), not the player's switch
+    /// (a `.disabled` file: `skipped`).
     #[test]
-    fn the_old_copy_counts_while_loaded_or_loading() {
+    fn the_old_copy_counts_while_loaded_loading_or_fault_disabled() {
         let doc = |state: &str| format!(r#"{{"format":1,"pid":1,"mods":[{{"id":"kilnwarden","state":"loaded"}},{{"id":"kiln-webadmin","state":"{state}"}}]}}"#);
         assert!(old_copy_in_mods_json(doc("loaded").as_bytes()));
         assert!(old_copy_in_mods_json(doc("pending").as_bytes()));
-        for off in ["disabled", "failed", "skipped", "unloaded"] {
+        assert!(old_copy_in_mods_json(doc("disabled").as_bytes()), "disabled by the fault policy: Kilnwarden stays off");
+        for off in ["failed", "skipped", "unloaded"] {
             assert!(!old_copy_in_mods_json(doc(off).as_bytes()), "{off}");
         }
         assert!(!old_copy_in_mods_json(br#"{"mods":[{"id":"kilnwarden","state":"loaded"}]}"#));
