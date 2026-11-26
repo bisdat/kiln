@@ -277,7 +277,10 @@ mod tests {
         assert_eq!(plan(&g.0, "../x").unwrap_err().code, ErrorCode::InvalidArgument);
         assert!(plan(&g.0, &h('c')).unwrap_err().message.contains("not in kiln/data/content/registry/plans"));
         g.plan(&h('d'), json!({"format": 1, "key": {}, "boot": [], "live": []}));
-        assert!(plan(&g.0, &h('d')).unwrap_err().message.contains("older Kiln"));
+        let older = plan(&g.0, &h('d')).unwrap_err().message;
+        assert!(older.contains("older Kiln"));
+        // plans format 2 (with their edits) first ship in 0.2.0-dev.31.17: an earlier Kiln's plan has none to start on
+        assert!(older.contains("0.2.0-dev.31.17 or later"), "names the first release that writes format-2 plans: {older}");
         assert!(ask(&g.0, &h('d'), None, "test").is_err(), "and no request is written for it");
         assert_eq!(pending(&g.0).unwrap(), None);
     }
