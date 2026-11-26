@@ -1,7 +1,7 @@
 // The Conflicts page goes through the launcher's i18n like every other page: its header word, its page text and the
 // labels the report parser makes (certainty, hidden fields, freshness). Native reasons and conflict texts stay as written.
 import { afterAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import de from "../src/i18n/de.json";
 import { registerLocale, setLanguage } from "../src/i18n";
@@ -35,3 +35,26 @@ describe("registry conflicts i18n", () => {
       expect(page).not.toContain(s);
   });
 });
+
+// Every language the launcher ships translates the Conflicts page (as player storage did): a key English has is in each
+// locale, plural keys by their base (a language writes the forms it uses; Chinese, Japanese and Korean only `other`).
+const localeRoot = join(import.meta.dir, "../src/i18n");
+const flat = (o: Record<string, unknown>, p = ""): [string, unknown][] =>
+  Object.entries(o).flatMap(([k, v]) => (v && typeof v === "object" ? flat(v as Record<string, unknown>, `${p}${k}.`) : [[`${p}${k}`, v]]));
+const plural = (k: string) => k.replace(/\.(zero|one|two|few|many|other)$/, "");
+const shape = (table: Record<string, unknown>) => {
+  const keys = flat(table).map(([k]) => k);
+  return { plain: keys.filter((k) => plural(k) === k).sort(), plurals: [...new Set(keys.filter((k) => plural(k) !== k).map(plural))].sort() };
+};
+const englishRegistry = JSON.parse(readFileSync(join(localeRoot, "en.json"), "utf8")).registry;
+for (const file of readdirSync(localeRoot).filter((name) => name.endsWith(".json") && name !== "en.json")) {
+  test(`${file} translates every registry conflicts text`, () => {
+    const table = JSON.parse(readFileSync(join(localeRoot, file), "utf8")).registry ?? {};
+    expect(shape(table)).toEqual(shape(englishRegistry));
+    const rows = flat(table);
+    for (const [k, value] of rows) {
+      expect(typeof value === "string" && value.trim().length > 0).toBe(true);
+      if (plural(k) !== k) expect(rows.some(([x]) => x === `${plural(k)}.other`)).toBe(true);
+    }
+  });
+}
