@@ -20,13 +20,14 @@ std::mutex mu, install_mu;
 std::deque<std::shared_ptr<const ItemDetailCapture>> cache;
 std::atomic<bool> on{false};
 int installed = 0;
-using TextFn = void* (*)(void*, const text::GameText*, const void*, uint8_t);
-TextFn next = nullptr;
 thread_local bool has_value = false;
 thread_local DetailCopy* value_owner = nullptr;
 thread_local float stat_value = 0;
 
-void* text_hook(void* out, const text::GameText* text, const void* style, uint8_t mode) {
+// ui/NativeTextLineBody: NativeTextLine(object, text, style, mode)'s first instruction after its prologue (entry + 0x1c),
+// where rbx holds the text. A mid hook there, not a detour on the entry: Building Tools (0.34.0) finds the function by its
+// first 28 bytes once, 4 s after it loads, and its menu stays off when they are not the game's (since 0.2.0-dev.31.13).
+void capture_line(const text::GameText* text) {
     if (auto* c = current_detail(); c && c->capture && !c->suppress_capture) {
         text::GameText t{};
         if (!env().read(&t, reinterpret_cast<uintptr_t>(text), sizeof t) || t.n > KILN_UI_ITEM_DETAIL_TEXT_BYTES) {
@@ -39,17 +40,17 @@ void* text_hook(void* out, const text::GameText* text, const void* style, uint8_
             if (value_owner == c) has_value = false; // a nested panel cannot consume its caller's metadata
         }
     }
-    return next(out, text, style, mode);
 }
+void KILN_CALL text_mid(KilnRegisters* r, void*) { capture_line(reinterpret_cast<const text::GameText*>(r->rbx)); }
 
 bool install() {
     std::lock_guard lk(install_mu);
     if (installed) return installed > 0;
-    uintptr_t at = 0;
-    const bool ready = env().layout_supported && env().layout_supported() &&
-        sig_symbol("ui/NativeTextLine", &at) && detail_hook_install() && item_detail_stats_install();
-    if (!ready || env().hook_raw(at, "ui.item_detail/NativeTextLine", 0, reinterpret_cast<void*>(&text_hook),
-                                reinterpret_cast<void**>(&next)) != KILN_OK || !next) {
+    uintptr_t fn = 0, at = 0;
+    const bool ready = env().layout_supported && env().layout_supported() && sig_symbol("ui/NativeTextLine", &fn) &&
+        sig_symbol("ui/NativeTextLineBody", &at) && at > fn && at - fn < 0x40 && detail_hook_install() &&
+        item_detail_stats_install();
+    if (!ready || !env().hook_mid || env().hook_mid(at, "ui.item_detail/NativeTextLine", &text_mid) != KILN_OK) {
         installed = -1;
         if (env().row_off) env().row_off(row, "item detail capture hooks could not be installed");
         return false;
@@ -176,6 +177,6 @@ const KilnUiItemDetailApi* item_detail_table() {
 }
 void item_detail_reset_for_tests() {
     std::lock_guard lk(itemdetail::mu);
-    itemdetail::cache.clear(); itemdetail::installed = 0; itemdetail::on = false; itemdetail::next = nullptr;
+    itemdetail::cache.clear(); itemdetail::installed = 0; itemdetail::on = false;
 }
 } // namespace kiln::uivalues

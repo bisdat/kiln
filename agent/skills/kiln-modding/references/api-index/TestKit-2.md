@@ -1,4 +1,208 @@
-# TestKit (Kiln.TestKit): part 2 of 2
+# TestKit (Kiln.TestKit): part 2 of 3
+
+## TestKit.FakeVoxelRay `0.2.3` — A voxel ray a mod asked for (`Queries.RaycastVoxels`, `GroundBelow`, `VoxelLineOfSight`, a brain's sight).
+- `FakeVoxelRay()`
+- `FakeVoxelRay(WorldPosition From, WorldPosition To, byte Realm)`
+- `From { get; init; } -> WorldPosition` — Where the ray starts.
+- `Realm { get; init; } -> byte` — The realm the ray was cast in (0: the overworld).
+- `To { get; init; } -> WorldPosition` — Where the ray ends.
+
+## TestKit.FakeWorld `0.2.2` — The fake world of a harness (`KilnHarness.Entities`): entities with components laid out by Kiln.Game's types, under the real Kiln.World.
+- `All { get; } -> IReadOnlyList<EntityId>` — Every entity made here (and every fake player's entity that was given a component), by id.
+- `BusyReads { get; set; } -> int` `0.2.16` — The next `value` frame-quiet reads from tasks (`ReadMode.FrameQuiet`) answer `ReadStatus.Busy`, as when a server...
+- `BusyWrites { get; set; } -> int` `0.2.16` — The next `value` compare-exchanges from tasks (`WorldConcurrent.TryCompareExchange`) meet the engine's gate taken...
+- `Create() -> EntityId` — Makes an entity with no component and no position.
+- `Create(WorldPosition position) -> EntityId` — Makes an entity that stands at `position`: its `CurrentTransform` (identity rotation, scale 1), which...
+- `Destroy(EntityId entity) -> bool` — Takes an entity and its components out of the world.
+- `Exists(EntityId entity) -> bool` — Whether the entity is in the world: made here, or a fake player's.
+- `GameWrites<T>(string program, TestKit.FakeGameWriter<T>? each = null) -> IDisposable` — A program of the game that writes `T`: from now on `World.WriteInfo` and every tracked write of the type name it...
+- `Get<T>(EntityId entity) -> T` — The entity's component.
+- `GetBytes(EntityId entity, string component) -> byte[]?` — A copy of the component's bytes; null when the entity has none.
+- `Remove<T>(EntityId entity) -> bool` — Takes component `T` off an entity.
+- `Set<T>(EntityId entity, T value) -> TestKit.FakeWorld` — Puts component `T` on an entity, or replaces its value, as if the game had: no write tracking, no event, at once.
+- `SetBytes(EntityId entity, string component, ReadOnlySpan<byte> bytes) -> TestKit.FakeWorld` — Puts a component on an entity by its game name, as bytes: for a component no generated type names.
+- `SetPosition(EntityId entity, WorldPosition position) -> void` — Moves an entity (or gives it its first position): the position in its `CurrentTransform`.
+- `Track(string component, bool save, bool replication) -> void` — Says what the game's write tracking does with a component type, which the kit cannot know: a tracked write of it...
+- `TryGet<T>(EntityId entity, out T value) -> bool` — The entity's component; false when it has none (or one of another size).
+- `Writes { get; } -> IReadOnlyList<TestKit.FakeWorldWrite>` — Every tracked write a mod asked for that reached the world, in the order they ran, with what became of each (a write...
+
+## TestKit.FakeWorldPosition `0.2.17` — The local player's position, in metres (the publication carries it in 32.32 fixed point).
+- `FakeWorldPosition()`
+- `FakeWorldPosition(double X, double Y, double Z)`
+- `X { get; init; } -> double` — The X coordinate, in metres.
+- `Y { get; init; } -> double` — The Y coordinate, in metres.
+- `Z { get; init; } -> double` — The Z coordinate, in metres.
+
+## TestKit.FakeWorldSample `0.2.17` — What a test publishes through `HarnessUiSnapshot.Publish`: each group it gives is in the publication when something demanded it.
+- `HostHours { get; init; } -> double?` — The hour of the world this game hosts (`UiWorldFields.HostTime`).
+- `Inventory { get; init; } -> IReadOnlyList<TestKit.FakeWorldSlot>?` — The own inventory's nonempty slots (`UiWorldFields.LocalInventory`), in any order: the publication sorts them by...
+- `LocalPlayer { get; init; } -> uint` — The local player's entity (each inventory slot's holder).
+- `Position { get; init; } -> TestKit.FakeWorldPosition?` — The position (`UiWorldFields.LocalPosition`).
+- `Unavailable { get; init; } -> IReadOnlyDictionary<UiWorldFields, string>?` — Groups that are missing for a reason of their own, by one `UiWorldFields` bit each.
+- `Vitals { get; init; } -> TestKit.FakeVitals?` — Health, stamina and mana (`UiWorldFields.LocalVitals`).
+
+## TestKit.FakeWorldSlot `0.2.17` — One nonempty slot of the local player's own inventory.
+- `FakeWorldSlot()`
+- `FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0)`
+- `Count { get; init; } -> uint` — How many of the item the slot holds.
+- `Deconstruct(out uint Item, out uint Count, out uint InventoryPage, out uint SlotIndex, out uint Pide) -> void`
+- `Equals(TestKit.FakeWorldSlot other) -> bool`
+- `InventoryPage { get; init; } -> uint` — The inventory page the slot is on (part of the slot's binding key).
+- `Item { get; init; } -> uint` — The item in the slot, by the game's item id.
+- `static operator !=(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
+- `static operator ==(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
+- `Pide { get; init; } -> uint` — The id of the item's own per-item data in the game (gear: level, rarity, gems); 0 for an item without any.
+- `SlotIndex { get; init; } -> uint` — The slot's index on its page.
+
+## TestKit.FakeWorldWrite `0.2.2` — One tracked write a mod asked for, as the fake world ran it (`FakeWorld.Writes`).
+- `FakeWorldWrite(ulong Step, string? ModId, EntityId Entity, string Component, int Offset, WorldWriteStatus Status, byte[] Before, byte[] After)`
+- `After { get; init; } -> byte[]` — The same bytes afterwards.
+- `Before { get; init; } -> byte[]` — The bytes it named, as they were; empty when nothing was read.
+- `Component { get; init; } -> string` — The component's short name.
+- `Entity { get; init; } -> EntityId` — The entity.
+- `ModId { get; init; } -> string?` — The mod that asked; null for a call outside any mod.
+- `Offset { get; init; } -> int` — The first byte the write named.
+- `Status { get; init; } -> WorldWriteStatus` — What became of it.
+- `Step { get; init; } -> ulong` — The harness step at whose start the write ran: the step after the call.
+
+## TestKit.HarnessAmmoList `0.2.15` — The fake kiln.ui.ammo of a harness (`KilnHarness.AmmoList`): Ui.AmmoList's own code runs on it.
+- `Hold(AmmoListKind kind, ItemId weapon, params AmmoListRow[] gameRows) -> void` — The player holds `weapon` (a bow for `AmmoListKind.Arrow`, a staff for `AmmoListKind.Spell`): the game builds its...
+- `KnownItems(AmmoListKind kind, params ItemId[] items) -> void` — The client's items of this kind (the arrows, the spells): a snapshot naming any other item is refused, as the game...
+- `ModeOf(AmmoListKind kind) -> AmmoListMode?` — How the mods' rows go in (null: the game's list as it is).
+- `NewSession() -> void` — A new client session (the player left and joined again): the snapshots and queued picks are cleared, as native does...
+- `Pick(AmmoListKind kind, ItemId item) -> bool` — The player picks the row of `item`.
+- `Player { get; set; } -> EntityId` — The local player the lists are built for (the context's `Player`).
+- `Provided(AmmoListKind kind) -> IReadOnlyList<AmmoListRow>` — The mods' rows Kiln.Ui published for the list (composed, in order); empty while the game's list shows as it is.
+- `Publishes { get; } -> int` — Snapshots published so far (a clear included).
+- `Select(AmmoListKind kind, ItemId item) -> void` — The player moves the list's selection onto the row of `item`.
+- `Selected(AmmoListKind kind) -> ItemId?` — The item the selection rests on: it stays on its item when the rows change, and goes to the first row when its item...
+- `Session { get; } -> uint` — The client session the lists belong to (1 at the start).
+- `SetGameRows(AmmoListKind kind, params AmmoListRow[] gameRows) -> void` — The backpack changed: the game's own rows of the held weapon's list are now `gameRows`.
+- `Shown(AmmoListKind kind) -> IReadOnlyList<AmmoListRow>` — The list as the HUD shows it now: the game's rows, then (Append) or instead (Replace) the mods' rows.
+- `Unhold(AmmoListKind kind) -> void` — The weapon is put away: the list is not built (no context; its snapshot stays until Kiln.Ui publishes another).
+
+## TestKit.HarnessAssets `0.2.3` — The kit's kiln.assets of a harness (`KilnHarness.Assets`): Kiln.Assets' own code runs on it.
+- `AddGameBlob(byte[] bytes) -> string` — Adds `bytes` to the game's content index (in order; a hash already there is not listed twice by the catalog).
+- `CatalogGeneration { get; } -> ulong` — The catalog's generation: it grows with every change of the registrations.
+- `IndexReady { get; set; } -> bool` — Whether the game's content index can be read.
+- `Registrations { get; } -> IReadOnlyList<TestKit.FakeBlobRegistration>` — The live registrations, in the order that decides which one is served (the later one).
+
+## TestKit.HarnessBootPhase `0.2.3` — The boot phase of a harness (`KilnHarness.BootPhase`): a unit test of a mod's `OnBoot`.
+- `Run(string folder, bool commit = true) -> TestKit.BootRun` — Runs the OnBoot of the mod in `folder` (a built mod folder with a kiln.mod.json that has `"boot"`) and, with...
+- `Runs { get; } -> IReadOnlyList<TestKit.BootRun>` — Every run of this harness, in order.
+- `SetRecord(string key, string valueJson, Guid resourceId = default(Guid), uint typeHash = 0, int part = 0) -> void` — A record `boot.GameData.Read()` answers: its value as camelCase JSON.
+
+## TestKit.HarnessCamera `0.2.17` — The fake kiln.camera of a harness (`KilnHarness.Camera`): Kiln.Camera's own code runs on it.
+- `Calls { get; } -> IReadOnlyList<TestKit.FakeCameraCall>` — Every camera call the fake answered through its callback, in order.
+- `End(ulong lease, uint endReason) -> bool` — Ends an applied lease by itself, as the service would for `endReason` (`CameraEndReason`'s numbers: 2 expired, 3...
+- `Expire(ulong lease) -> bool` — Lets a lease run out, as its duration would: its change event (ended, expired) goes out at the next step.
+- `KilnClient(EntityId player, ulong parts = 30) -> void` — Makes `player`'s client a Kiln client that offers `parts` (`CameraCapability`'s local part bits: 2 pose, 4 lens, 8...
+- `Leases { get; } -> IReadOnlyList<ulong>` — The numbers of the leases that hold a camera now.
+- `RefuseNext(uint reason) -> void` — The next apply or update that the lease rules would accept is refused with `reason` instead (`CameraReason`'s...
+- `StopWorld() -> int` — The world stops: at the next step every applied lease ends `WorldStopped` and a waiting apply or update is answered...
+
+## TestKit.HarnessCapabilities `0.2.1` — The capability rows mods see offline (`KilnHarness.Capabilities`): every Kiln service the kit has no fake for is unavailable with reason `offline`, so a mod's own...
+- `All { get; } -> IReadOnlyList<TestKit.CapabilityRow>` — Every row, sorted by name.
+- `ClearOverride(string name) -> void` — Drops the test's override of `name`.
+- `Is(string name) -> bool` — Whether `name` is available (what `Game.HasFeature` answers).
+- `Override(string name, bool available, string? reasonText = null) -> void` — Switches a row on or off for this harness.
+- `Why(string name) -> string` — One sentence saying whether and why not, as a mod could log it.
+
+## TestKit.HarnessChat `0.2.2` — The fake kiln.chat of a harness (`KilnHarness.Chat`): Kiln.Chat's own code (`Chat`, `Chat.Received`, `ChatMessageEvent`, commands typed in chat) runs on it.
+- `Sent { get; } -> IReadOnlyList<TestKit.FakeChatLine>` — Every server line mods and Kiln sent, in order: one per `Broadcast`, `Tell` or `Say` line that reached a player...
+- `Typed { get; } -> IReadOnlyList<TestKit.FakeChatMessage>` — Every line the players typed, as delivered, in order (consumed ones included).
+
+## TestKit.HarnessClientSkills `0.2.22` — The client's skill tree of a harness (`KilnHarness.ClientSkills`): what `ClientSkills` reads on a joined client.
+- `AddNode(uint id, SkillNodeType type = SkillNodeType.PassiveSkill, int cost = 1, int maxLevel = 0, float uiX = 0, float uiY = 0, int classAlignment = 3, bool shadow = false) -> TestKit.FakeClientSkillNode` — Adds a node to the client's tree (the next tree index), locked.
+- `Clear() -> void` — Empties the tree (a world change).
+- `Link(uint from, uint to, bool bidirectional = false) -> uint` — Links two nodes of the tree; the link's id is returned.
+- `Loaded { get; set; } -> bool` — A copy exists (the client has a local player and its tree).
+- `Lock(uint id) -> void` — The player does not have the node.
+- `Player { get; set; } -> EntityId` — The local player (entity 1 unless a test says).
+- `Reads { get; } -> int` — How many reads mods made of the client's skill-tree view.
+- `Total { get; set; } -> int` — The player's skill points in all (level and skill-point knowledge, as the server counts them).
+- `Unlock(uint id, int level = 1) -> void` — The player has the node at `level` (1 for a plain node).
+
+## TestKit.HarnessClientStations `0.2.22` — The client's station cache of a harness (`KilnHarness.ClientStations`): what `ClientStations` reads on a joined client.
+- `Add(EntityId station, uint workshop, WorldPosition position, BaseId baseId = default(BaseId)) -> TestKit.FakeClientStation` — Puts a station into the client's cache (or returns the one there): no recipe, state NoRecipe.
+- `Clear() -> void` — Empties the client's cache (a world change).
+- `Clock { get; set; } -> TimeSpan` — The client's game clock (what the station's cycle start is measured on).
+- `Get(EntityId station) -> TestKit.FakeClientStation?` — The station in the client's cache, or null.
+- `Reads { get; } -> int` — How many reads mods made of the client's station view.
+- `Remove(EntityId station) -> bool` — Takes a station out of the client's cache (the server stopped sending it, its base went).
+- `SetRecipe(uint recipe, TimeSpan duration, IReadOnlyList<ItemId> outputs, IReadOnlyList<ItemId>? inputs = null) -> void` — A recipe as the client's data has it: its unscaled duration, its outputs and its input items (a category input's...
+- `SpeedFactor { get; set; } -> float` — The client's production speed factor (the game's FactorySpeed: a craft's time is multiplied by it).
+
+## TestKit.HarnessCombat `0.2.2` — The fake kiln.combat of a harness (`KilnHarness.Combat`): Kiln.Combat's own code (`Combat.GetHealth`, `SetHealth`, `Heal`, `Damage`, `Kill`, god mode...
+- `Health(EntityId entity) -> TestKit.FakeHealth?` — The entity's health; null when it has none.
+- `Hit(EntityId target, int amount, EntityId attacker = default(EntityId), EntityId source = default(EntityId)) -> ulong` — The game deals a hit: `amount` damage (negative: a healing hit) on `target`.
+- `Hits { get; } -> IReadOnlyList<TestKit.FakeHit>` — Every hit, mods' and the game's, in the order they were dealt.
+- `Respawn(EntityId entity, int health) -> void` — A dead player (or creature) is alive again with `health`: `PlayerRespawnEvent` at the next step.
+- `SetHealth(EntityId entity, int current, int max) -> void` — Gives an entity health, as the game's Health component holds it (no event).
+
+## TestKit.HarnessComponentChanges `0.2.4` — The fake kiln.component_changes of a harness (`KilnHarness.ComponentChanges`): Kiln.World's own consumer of `ComponentChanges.Watch` runs on it.
+- `PresentPairs { get; } -> int` — The present (entity, component) pairs the watches cover.
+- `QueuedFrames { get; } -> int` — The frames of changes that wait for the consumer (at most two).
+- `QueueOverflows { get; } -> ulong` — How often the queue was full and the watches were suspended.
+- `SetAttribute(EntityId entity, ObservedAttribute attribute, int current, int maximum) -> void` — The typed current and maximum value of an attribute as the game's attribute code would read them (the kit does not...
+- `Watches { get; } -> int` — How many watches exist.
+
+## TestKit.HarnessCrafting `0.2.15` — Player-source registrations and their filtered counts in the kit.
+- `BuildStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a block placement may use: the links registered with `CraftSourceOptions.Building` only, likewise.
+- `Dyes(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session generation...
+- `FillStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a production-station fill may take: the links registered with `CraftSourceOptions.Fills` only, with the...
+- `LockStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a lock may use: the links registered with `CraftSourceOptions.Locks` only, with the same filters...
+- `Sources { get; } -> IReadOnlyList<TestKit.FakeCraftSourceRegistration>` — Live registrations, in registration order.
+- `Stock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — Registered source counts only (not the bag), with the same per-player allow/deny union and current inventory...
+
+## TestKit.HarnessCreatureControl `0.2.3` — The fake kiln.creature_control of a harness (`KilnHarness.CreatureControl`): Kiln.CreatureControl's own code (`CreatureControl.Acquire`, `WaitActive`, `Inspect`...
+- `Calls { get; } -> IReadOnlyList<TestKit.FakeControlCall>` — Every call mods made, in order.
+- `IsControlled(EntityId body) -> bool` — True while the broker holds `body` (its AI-off layer and the SteeringAgent removal, in the game).
+- `SetBusy(EntityId body, bool busy = true) -> void` — Makes `body`'s current action keep playing (true) or end (false): a lease on it stays Pending while it plays, and...
+
+## TestKit.HarnessCrosshair `0.2.22` — The fake kiln.client.crosshair of a harness (`KilnHarness.Crosshair`): Kiln.Client's `Crosshair.Read` and `Crosshair.TryGet` run on it unchanged, from any thread.
+- `HarnessCrosshair(TestKit.KilnHarness harness)`
+- `Age(TimeSpan age) -> void` — The newest sample is `age` old at the next reads (past `Crosshair.FreshFor`: stale).
+- `Aim(WorldPosition position, Vector3? normal = null, float? distance = null, EntityId entity = default(EntityId), byte? voxelMaterial = null) -> void` — The game's trace hits `position`: a fresh sample with the next sequence.
+- `AimAtNothing() -> void` — The game's trace hits nothing within its reach (its status 31): a fresh miss with the next sequence.
+- `Clear() -> void` — No sample (as at the start of a client session), and no fault.
+- `Fault() -> void` — Copying the game's result faulted: reads answer faulted, no sample, until `HarnessCrosshair.Clear`.
+- `Reads { get; } -> int` — How many times mods read the crosshair (every get the fake answered).
+
+## TestKit.HarnessDecisions `0.2.4` — The fake kiln.decisions of a harness (`KilnHarness.Decisions`): Kiln's own dispatcher of decisions runs on it.
+- `Active { get; } -> int` — How many decisions are open (held, not ended).
+- `Outcomes { get; } -> IReadOnlyList<DecisionResult>` — How every decision ended so far, in order: what the service recorded, whether or not a mod listened for...
+- `RestartWorld() -> void` — The server world stops and the next one starts, as when a hosted world is switched: every open decision ends...
+
+## TestKit.HarnessGameTexts `0.2.22` — The game's text tables and the items' text tags of a harness (`KilnHarness.GameTexts`).
+- `Add(string language, uint locaId, string text) -> TestKit.HarnessGameTexts` — Adds (or replaces) a text of `language` (`"de-de"`; `"De_De"` works too), with the game's markup if you like.
+- `AddItem(ItemId item, ItemTextTags tags) -> TestKit.HarnessGameTexts` — Makes `item` a game item with these text tags (`Items.TextTags`); its texts are the tables' texts of the tags...
+- `Languages { get; } -> IReadOnlyList<string>` — The languages added so far, in order.
+- `Reads { get; } -> int` — How many times Kiln read a table of this harness (a table is read once, then kept).
+
+## TestKit.HarnessImpactNatives `0.2.4` — The fake kiln.abilities natives of a harness (`KilnHarness.ImpactNatives`): Kiln.Abilities' own code (`Abilities.Natives.RegisterSync`, `Attach`, `DeclareTyped`, an...
+- `AddProgram(uint program, params TestKit.FakeEcall[] calls) -> void` — Declares a game program in the world's ImpactRegistry with the natives it calls and where (the ECALL's call-site...
+- `Call(TestKit.FakeImpactCall call) -> TestKit.FakeImpactResult` — Makes one ECALL of `FakeImpactCall.Native`, as a program's step would, and waits for it.
+- `Calls { get; } -> IReadOnlyList<TestKit.FakeImpactCallRecord>` — Every call the test made, in order.
+- `OtherRead { get; } -> ISet<string>` — The types of impact_simulation's other_read list: what NativeContext.TryRead may read of any entity (with...
+- `OtherWrite { get; } -> ISet<string>` — The types of impact_simulation's other_write list: what NativeContext.TryWrite may write (and TryRead read).
+- `Serial { get; set; } -> bool` — The simulated pin-and-world-thread condition for ECS access (default true).
+- `SetGameNative(string native, TestKit.FakeGameNativeHandler? handler = null) -> void` — Makes `native` one of the game's natives (its node name, `"applyDamage"`, or "0x" and its hash) and says what it...
+
+## TestKit.HarnessInput `0.2.22` — The player's input for owning key listeners (`KilnHarness.Input`): KeyInput's and PadInput's own code runs on the kit's kiln.ui.input, whose ownership rules are the...
+- `ClearLogs() -> void` — Empties `HarnessInput.Game` and `HarnessInput.Others`.
+- `Down(KeyChord chord, int controller = 0) -> bool` — A new press of `chord`'s key with its modifiers (a "Pad:" chord on `controller`).
+- `Down(uint code, int controller = 0, KeyMods mods = KeyMods.None, Vector2? at = null) -> bool` — A new press of `code` (a key's virtual key, 0x01/0x02 the left/right button, 0x04..0x06 the middle and side buttons...
+- `FocusLost() -> void` — The game window lost the focus: every owner of a key or mouse button hears the end of its presses (KeyOwnEnd.Focus)...
+- `Game { get; } -> IReadOnlyList<string>` — What reached the game, in order: "down 2", "repeat 41", "up 20d@1" (hex codes, "@" a controller other than 0).
+- `HiddenFromGame(uint code, int controller = 0) -> bool` — The game is not told `code` is held although it is: an owned (or nobody's) press it never saw go down.
+- `Leak(uint code, int controller = 0) -> void` — The game saw the owned press of `code` go down after all (in the game: Alt+F4, or a mouse record Kiln could not...
+- `Others { get; } -> IReadOnlyList<string>` — What Kiln's other key handlers were given (listeners without KeyListenFlags.Own, key bindings, pointer subscribers)...
+- `Repeat(uint code, KeyMods mods = KeyMods.None) -> bool` — The auto-repeat of a held key.
+- `SetPad(int controller, PadButtons held, Vector2 leftStick = default(Vector2), Vector2 rightStick = default(Vector2), float leftTrigger = 0, float rightTrigger = 0) -> void` — The game's next poll of `controller` reads these: `held` buttons, the sticks (-1..1, after the dead zone) and the...
+- `Unplug(int controller) -> void` — The game's next poll of `controller` fails (unplugged): PadInput.Read says not connected.
+- `Up(uint code, int controller = 0, Vector2? at = null) -> bool` — The release of `code` (on `controller`).
+- `WorldChange() -> void` — The client world started or stopped: the owners of presses made before hear KeyOwnEnd.World; those presses' releases...
 
 ## TestKit.HarnessItems `0.2.2` — The fake kiln.items of a harness (`KilnHarness.Items`): Kiln.Items' own code (`Items` Give, Take, TakeSlot, Read, FindInventories, the catalog, `ItemsGivenEvent` and...
 - `AddContainer(EntityId entity, int inventories = 1) -> TestKit.FakeInventory` — Gives an entity of the fake world an inventory: a chest, a station.
@@ -126,322 +330,3 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 - `Parked { get; init; } -> bool` — Saved as parked (no mod had it registered then) rather than live.
 - `Records { get; init; } -> IReadOnlyList<TestKit.HarnessStorageRecord>` — Its stacks.
 - `Slots { get; init; } -> int` — The slots it had when it was saved.
-
-## TestKit.HarnessStorageRecord `0.2.16` — One record of a player storage in a test: a stack in a slot.
-- `HarnessStorageRecord()`
-- `HarnessStorageRecord(int Slot, ItemId Item, int Count, int Level = 0)`
-- `Count { get; init; } -> int` — How many.
-- `Deconstruct(out int Slot, out ItemId Item, out int Count, out int Level) -> void`
-- `Equals(TestKit.HarnessStorageRecord other) -> bool`
-- `Item { get; init; } -> ItemId` — The item.
-- `Level { get; init; } -> int` — Gear's level (0 for a plain stack).
-- `static operator !=(TestKit.HarnessStorageRecord left, TestKit.HarnessStorageRecord right) -> bool`
-- `static operator ==(TestKit.HarnessStorageRecord left, TestKit.HarnessStorageRecord right) -> bool`
-- `Slot { get; init; } -> int` — The slot in the storage (0 to slots - 1).
-
-## TestKit.HarnessTasks `0.2.10` — The Kiln tasks of a harness's mods (`KilnHarness.Tasks`).
-- `Live { get; } -> int` — The tasks that have not ended yet (and ended ones with a hop still to run).
-- `Settle(int maxSteps = 1000, TimeSpan? timeout = null) -> int` — Runs the mods' tasks to their end: waits while their work runs on the workers, and steps the server whenever all of...
-
-## TestKit.HarnessTerrain `0.2.3` — The fake world of a harness behind Kiln.Terrain (`KilnHarness.Terrain`): `Terrain.Inspect`, `Apply`, `Forget` and `Applied` run their own code on it.
-- `AddBase(CellBox box) -> void` — A player base: overlays leave blocks that touch `box` alone unless bases are allowed.
-- `Editing { get; set; } -> Action<CellBox>?` — Runs inside every write of an overlay where kiln.build posts its `BuildEditingEvent`: after the overlay read the...
-- `Get(CellPos at) -> Voxel` — The cell at `at`.
-- `GroundY { get; set; } -> int` — Cells below this height are solid ground, cells from it up are air, where nothing was set.
-- `Loaded { get; set; } -> bool` — Whether the voxel tiles are there.
-- `LoseLedger(string mod, bool wholeWorldData = false) -> bool` — Loses `mod`'s terrain ledger in this world, as when the world's Kiln data or the ledger key is lost; the cells and...
-- `Restart() -> void` — The server saves the world and starts again (`HarnessTerrain.SaveWorld`, then the next start).
-- `Revision { get; } -> uint` — The world file's revision; `HarnessTerrain.SaveWorld` adds one.
-- `SaveWorld() -> void` — The game writes the world file: the ledgers as they are now are in that save (a record made before it and lost after...
-- `Set(CellPos at, Voxel cell) -> void` — Sets one cell, as a player's edit would (no ledger knows of it).
-- `Witnessed(string mod) -> IReadOnlyList<string>` — The plans Kiln's witness has for `mod` in this world, sorted.
-- `WorldId { get; set; } -> string` — The world's id: a ledger belongs to one world.
-- `Writes { get; } -> IReadOnlyList<TestKit.FakeTerrainWrite>` — Every write overlays made, in order.
-
-## TestKit.HarnessTime `0.2.2` — The fake kiln.time of a harness (`KilnHarness.Time`): Kiln.Time's own code (`Time.OfDay`, `State`, `IsDay`, `Set`, `SetSpeed`, `SetCycle`, `TimeSetEvent`...
-- `Calls { get; } -> IReadOnlyList<TestKit.FakeTimeCall>` — Every change to the clock a mod made, in order.
-- `DayLength { get; set; } -> TimeSpan` — How long the day phase lasts in real time (the server's GameSettings dayTimeDuration, 2 to 60 minutes; default 30).
-- `Hours { get; } -> double` — The time of day now, 0..24.
-- `IsDay { get; } -> bool` — Whether it is day (06:00 to 18:00).
-- `NightLength { get; set; } -> TimeSpan` — How long the night phase lasts in real time (nightTimeDuration, 2 to 60 minutes; default 12).
-- `Set(double hours) -> void` — Sets the time of day as the game's own admin menu does (setTimeOfDay: the clock restarts in its first cycle), with...
-- `Speed { get; } -> double` — The speed the clock runs at (1: the game's; what a mod's `Time.SetSpeed` holds).
-
-## TestKit.HarnessTombstoneMode `0.2.16` — The game's tombstone setting at a death (`HarnessPlayerStorage.Die`).
-enum: AddBackpackMaterials, Everything, NoTombstone
-
-## TestKit.HarnessUiChest `0.2.17` — Models registrations and callbacks, not the game's row renderer.
-- `HarnessUiChest(TestKit.KilnHarness harness)`
-- `Buttons { get; } -> IReadOnlyList<string>` — Captions shown for the open storage chest, in registration order.
-- `Press(int index) -> bool` — Activates one visible button by its zero-based registration order.
-
-## TestKit.HarnessUiInventory `0.2.12` — The fake kiln.ui.inventory of a harness (`KilnHarness.UiInventory`): Ui.Inventory's own code runs on it.
-- `Click(int index, SlotButton button = SlotButton.Left, SlotModifiers modifiers = SlotModifiers.None) -> TestKit.FakeSlotClickResult` — The player presses `button` with `modifiers` on drawn slot `index`.
-- `ClickSubscriptions { get; } -> int` — OnClick subscriptions held now.
-- `CloseScreen() -> void` — Every menu closed: the play view (no slots drawn).
-- `Draw(HudScreen screen, params TestKit.FakeInventorySlot[] slots) -> void` — The game draws `slots` on `screen` (the latest UI frame from now on; the hovered slot is cleared).
-- `Drawn { get; } -> IReadOnlyList<TestKit.FakeInventorySlot>` — The slots of the latest `HarnessUiInventory.Draw` (empty before the first).
-- `Hover(int? index) -> void` — The cursor rests on drawn slot `index` (null: on none): what Ui.Inventory.Hovered reads.
-- `MarkOf(int index) -> SlotMark?` — The mark drawn slot `index` would show (null: none): an item mark of any mod first, then the MarkWhen rules in...
-- `OpenBackpack(params TestKit.FakeInventorySlot[] slots) -> void` — The player opens the backpack with these slots drawn (the backpack screen, HUD Backpack).
-- `OpenChest(EntityId chest, params TestKit.FakeInventorySlot[] slots) -> void` — The player opens the storage chest `chest` (its entity: what InventoryScreen.Container and GameScreen.Target carry)...
-- `PanelsShown { get; } -> IReadOnlyList<string>` — The titles of the Ui.Inventory.AddPanel panels that show on the open screen now (their Screens and When, in the...
-- `PressPad(string chord) -> TestKit.FakeSlotClickResult` `0.2.14` — The player presses a controller chord (`"Pad:LS"`, `"Pad:LB+A"`) while the game's selection rests on a drawn slot...
-- `Screen { get; } -> InventoryScreen?` — The backpack or chest screen open now (what Ui.Inventory.Screen says in a game), or null.
-- `Select(int? index) -> void` `0.2.14` — The game's own selection (a controller's: what Ui.Inventory.Selected reads, since 0.2.0-dev.30.5) rests on drawn...
-
-## TestKit.HarnessUiItemDetail `0.2.14` — Explicit game-panel captures for Ui.Values.ItemDetail.
-- `Capture(ItemId item, EntityId entity, int level, ItemRarity? rarity, params UiItemDetailLine[] lines) -> void` — Records a completed panel (owned copy).
-- `Clear() -> void` — Forgets every recorded panel, as on a client world change.
-
-## TestKit.HarnessUiNativeTints `0.2.17` — Evaluates Ui.Inventory.TintWhen without drawing.
-- `HarnessUiNativeTints(TestKit.KilnHarness harness)`
-- `TintOf(TestKit.FakeInventorySlot slot, Color background) -> Color` — Runs the rules over this copied slot (including plain stacks or empty slots).
-
-## TestKit.HarnessUiPlacement `0.2.20` — The overlay's frames for a mod's `UiScreen` and `UiWindow` placement (`KilnHarness.UiPlacement`): Kiln.Ui's own code decides where each goes.
-- `ContentSize { get; set; } -> (float Width, float Height)` — The size, in pixels at UI scale 1, that a window sized by its contents takes (Width or Height 0, or AutoResize).
-- `FilePath { get; } -> string?` — ui-placement.json in the harness's config folder (it exists once something was remembered).
-- `Frame(UiScreen screen) -> UiPlacement?` — One overlay frame of `screen`: where it is now (fractions of the viewport, sizes at UI scale 1), or null when it is...
-- `Frame(UiWindow window) -> UiPlacement?` — One overlay frame of `window`: where it is now, or null when it is hidden or removed.
-- `PlayerPlaces(UiScreen screen, float x, float y, float width, float height) -> void` — The player drags and resizes `screen` in its next frame: its centre to (`x`, `y`), fractions of the viewport, at...
-- `PlayerPlaces(UiWindow window, float x, float y, float width, float height) -> void` — The player drags and resizes `window` in its next frame (as for a screen).
-- `Remembered(UiScreen screen) -> UiPlacement?` — What Kiln remembers for `screen` (null: nothing, or it does not remember).
-- `Remembered(UiWindow window) -> UiPlacement?` — What Kiln remembers for `window` (null: nothing, or it does not remember).
-- `Restart() -> void` — A game start for placements: what Kiln remembers is read from ui-placement.json again (write it first to script a...
-- `Scale { get; set; } -> float` — The UI scale (1 unless the test says): sizes at UI scale 1 are multiplied by it.
-- `ViewportHeight { get; set; } -> float` — The display's height in pixels (1080 unless the test says).
-- `ViewportWidth { get; set; } -> float` — The display's width in pixels (1920 unless the test says).
-
-## TestKit.HarnessUiSnapshot `0.2.17` — The fake kiln.ui.snapshot of a harness (`KilnHarness.UiSnapshot`): Kiln.Blocks' BlockUi.ReadWorld, BlockUi.DemandWorld and the block runtime's `world.*` bindings run...
-- `Demanded { get; } -> UiWorldFields` — The groups the live demands ask for together (what the next publication carries).
-- `Demands { get; } -> int` — Demands held now (all mods, Kiln.Blocks' windows and HUD lines included).
-- `EndWorld() -> void` — A world or session change (the menu, a loading screen, a rejoin): the publication goes and every token is revoked at...
-- `Publication { get; } -> ulong` — The newest publication's id; 0 when there is none.
-- `Publish(TestKit.FakeWorldSample sample) -> ulong` — Makes `sample` the newest publication and returns its id (ids grow by one per publication).
-- `Tokens { get; } -> int` — Tokens not released yet (a read releases its own).
-
-## TestKit.HarnessUiValues `0.2.3` — The fake kiln.ui.values of a harness (`KilnHarness.UiValues`): Ui.Values' own code runs on it.
-- `Decisions { get; } -> IReadOnlyList<TestKit.FakeUiDecision>` — Every provider call of `HarnessUiValues.Draw` so far, in order.
-- `DetailLines(TestKit.FakeUiItem item) -> IReadOnlyList<string>` — Draws `item`'s detail view: the tooltip-lines providers run in order and the lines they added come back (at most 16...
-- `Draw(uint kind, TestKit.FakeUiItem item, TestKit.FakeUiBar game) -> TestKit.FakeUiBar` — Draws a value of `kind` (`UiValueKind`'s number: 0 detail, 1 slot, 2 held, 3 health, 4 stamina, 5 mana) for `item`...
-- `Registrations { get; } -> int` — Registrations held now (values and tooltip lines).
-
-## TestKit.HarnessWorld `0.2.1` — The world of a harness's server (`KilnHarness.World`): what the game's world file and its save cycle are to Kiln.Saves.
-- `Directory { get; } -> string` — The world's sidecar folder, `kiln/data/worlds/<id>`: mod data and per-world configs.
-- `Id { get; } -> Guid` — The world's id (what `Saves.WorldId` and `WorldData.WorldId` say).
-- `Loaded { get; } -> bool` — Whether the world has loaded (the first step after the server started).
-- `Revision { get; } -> uint` — The revision of the newest written save (0: never saved).
-- `Save(int maxSteps = 100) -> uint` — Saves the world now, as an admin's "save now": asks the game for a save and steps the server until the world file is...
-
-## TestKit.HarnessWorldTables `0.2.4` — Scripted process boot data, not a game or renderer.
-- `Dependency(string mod, string dependency) -> void` — Declares that `mod` depends on `dependency`, as if its manifest listed it.
-- `GameMaterial(string name, uint item, bool roof = false, bool terrain = false) -> void` — Scripts a game (vanilla) material that a pool entry may name as its `gameMaterial`.
-- `Material(string mod, string key, uint item, bool roof = false, bool live = true, bool terrain = false) -> void` — Configures a live or retained building/terrain material and its block item.
-- `PendingCount { get; } -> int` — How many accepted pool and brush definitions are pending: `HarnessWorldTables.PendingToolDefinitionsJson` copies them.
-- `PendingToolDefinitionsJson(string mod) -> string` `0.2.14` — A copy of the accepted pending policy-pool and computed brush descriptors, in world-table JSON form.
-- `Readiness { get; set; } -> CapacityReadiness` — The readiness the fake's boot tables report.
-- `ReservePoolId(uint id) -> void` — Models an occupied foreign pool ID so collision refusal can be tested without searching for an FNV collision.
-- `ServePool(string mod, string key, BuildingMaterialPoolBlock block) -> void` — Configures one actual served boot row.
-- `StorageFails { get; set; } -> bool` — When true, the fake refuses new pool and brush definitions with a storage failure, as if it could not persist them.
-- `TerrainBrushCells(string mod, string key) -> byte[]?` `0.2.14` — A copy of a pending sphere descriptor's raw fill bytes (x fastest, then y, then z), sampled at half-metre voxel...
-- `TerrainItem(string name, uint item, byte cell) -> void` `0.2.14` — Scripts a placeable terrain item's item-to-cell mapping.
-
-## TestKit.KilnHarness `0.2.1` — A Kiln server with no game, for mod tests under `dotnet test`: a temp server folder with its `kiln/` tree, mods loaded the way the game loads them (Kiln.Host's own...
-- `KilnHarness(TestKit.KilnHarnessOptions? options = null)` — Creates the temp server folder, points Kiln at it and starts the tick thread.
-- `AmmoList { get; } -> TestKit.HarnessAmmoList` `0.2.15` — The fake kiln.ui.ammo of this harness: the HUD's ammunition and spell lists Ui.AmmoList adds rows to (the game's...
-- `As(TestKit.ModHandle mod, Action action) -> void` — Runs `action` on the tick thread as code of `mod`: its `HostAccess.Current` and synchronization context are set as...
-- `As<T>(TestKit.ModHandle mod, Func<T> func) -> T` — Runs `action` on the tick thread as code of `mod`: its `HostAccess.Current` and synchronization context are set as...
-- `Assets { get; } -> TestKit.HarnessAssets` `0.2.3` — The kit's kiln.assets of this harness: the game's content index the blob catalog reads, and the content blobs mods...
-- `Boot() -> void` — Loads the waiting mods and starts the server (the first step) when that has not happened yet.
-- `BootPhase { get; } -> TestKit.HarnessBootPhase` `0.2.3` — The boot phase of this harness (Mod.OnBoot): run a boot mod's OnBoot as a start does, read what it staged and why it...
-- `Camera { get; } -> TestKit.HarnessCamera` `0.2.17` — The fake kiln.camera of this harness: the camera requests mods made, and leases a test lets run out.
-- `Capabilities { get; } -> TestKit.HarnessCapabilities` — Capability rows as mods see them offline, and the test's overrides.
-- `Chat { get; } -> TestKit.HarnessChat` `0.2.2` — The server's text chat as the kit's fake of kiln.chat keeps it: what the players typed and every server line mods sent.
-- `Combat { get; } -> TestKit.HarnessCombat` `0.2.2` — Health, hits and deaths in this server's fake world as the kit's fake of kiln.combat keeps them: the test gives...
-- `ComponentChanges { get; } -> TestKit.HarnessComponentChanges` `0.2.4` — The kit's fake kiln.component_changes of this harness: what is watched, and the typed values its attribute events carry.
-- `ConfigDirectory { get; } -> string` — `kiln/config`: mod configs (`Config.Directory`).
-- `ControlDirectory { get; } -> string` — `kiln/control`: the console folder is `control/console` (Kiln.Chat polls it).
-- `Crafting { get; } -> TestKit.HarnessCrafting` `0.2.15` — The linked crafting-source recording fake.
-- `CreatureControl { get; } -> TestKit.HarnessCreatureControl` `0.2.3` — The kit's fake kiln.creature_control of this harness: what a test scripts of the bodies a mod leases, and what the...
-- `CurrentStep { get; } -> ulong` — The last step that ran (0 before the first).
-- `DataDirectory { get; } -> string` — `kiln/data`: each mod's `ModContext.DataDirectory` is `data/<id>`.
-- `Decisions { get; } -> TestKit.HarnessDecisions` `0.2.4` — The kit's fake kiln.decisions of this harness: how the decisions mods were asked about ended.
-- `Dispose() -> void` — Stops the server (`ServerStoppingEvent`, every mod's `OnUnload` in reverse load order), logs any mod whose load...
-- `DumpLogs() -> string` — The captured lines as text, one per line (for an assertion message).
-- `EnterWorld() -> void` `0.2.10` — The player hosts or joins again, for the tasks (#82): new sessions of the side's worlds (the server world first on a...
-- `Entities { get; } -> TestKit.FakeWorld` `0.2.2` — The fake world's entities and components: what Kiln.World (`World`), Kiln.Game's typed reads and tracked writes run...
-- `FindLogs(string text, string? modId = null) -> IReadOnlyList<TestKit.LogLine>` — The lines whose text contains `text` (ordinal), optionally only those of one mod.
-- `GameLog(string text, LogLevel level = LogLevel.Info) -> void` — A line of the game's own log, delivered at the next step: to mods' `ModContext.GameLog` handlers, and to Kiln's...
-- `HasLog(string text, string? modId = null) -> bool` — Whether a line contains `text`, optionally only one of mod `modId`.
-- `ImpactNatives { get; } -> TestKit.HarnessImpactNatives` `0.2.4` — The kit's fake kiln.abilities natives of this harness: the game's programs and natives a test declares, and the...
-- `Items { get; } -> TestKit.HarnessItems` `0.2.2` — The items and inventories of this server as the kit's fake of kiln.items keeps them: the items the game has (the...
-- `Kill() -> void` — Ends the server the way `kill -9` does, as far as the world goes: the game makes no shutdown save, a save that is...
-- `KilnDirectory { get; } -> string` — `<server>/kiln`: what `KilnPaths.Root` points at while the harness lives.
-- `Language { get; set; } -> string` — The game's language as mods see it (`Game.Language`, and so `ModLocale.Get`): `"en-us"`, as a dedicated server...
-- `LeaveWorld() -> void` `0.2.10` — The player leaves the world, for the tasks (#82): its worlds' STOPPING, the client world first.
-- `static ListTests(Assembly assembly) -> IReadOnlyList<string>` — The `[KilnTest]` names of `assembly` in the order Kiln.Testing's runner runs them: by `Order`, then the type's full...
-- `Load<TMod>(TestKit.ModManifest? manifest = null) -> TestKit.ModHandle` — Loads a second, isolated copy of the assembly that holds `TMod`, as the game does: its files go into...
-- `LoadFolder(string path) -> TestKit.ModHandle` — Loads a built mod folder (its `kiln.mod.json`, assemblies, `locales/` and data), copied into `kiln/mods/<id>` as...
-- `LogFile { get; } -> string` `0.2.11` — The path of `kiln/logs/kiln.log`, the file the harness writes every captured line to.
-- `Logs { get; } -> IReadOnlyList<TestKit.LogLine>` — Every line Kiln wrote while this harness lived, in order.
-- `LogsDirectory { get; } -> string` — `kiln/logs`: `kiln.log` (every captured line), `mods.txt`, `tests/`.
-- `LogsOf(TestKit.ModHandle mod) -> IReadOnlyList<TestKit.LogLine>` — The lines mod `modId` wrote (its `Logger`, and Kiln's lines in its name such as an event handler that threw).
-- `LogsOf(string modId) -> IReadOnlyList<TestKit.LogLine>` — The lines mod `modId` wrote (its `Logger`, and Kiln's lines in its name such as an event handler that threw).
-- `MenuFrame() -> int` `0.2.12` — One UI frame of the game's main menu, for the tasks (#83): on the game's main thread, while no world runs (after...
-- `Mod(string id) -> TestKit.ModHandle` — The handle of a mod this harness was given (by id).
-- `ModsDirectory { get; } -> string` — `kiln/mods`: where the harness puts each mod's folder.
-- `ModValues { get; } -> TestKit.HarnessModValues` `0.2.17` — The fake of Kiln.ModValues' world store and live characters (created and installed on first use).
-- `NpcBodies { get; } -> TestKit.HarnessNpcBodies` `0.2.17` — The boot build's NPC body rows this harness's game reports: script what the start built, then test...
-- `OnMainThread(Action work) -> void` `0.2.10` — Runs `work` on the game client's main thread, where the client world steps (#82): a task started there belongs to...
-- `Outlines { get; } -> TestKit.HarnessOutlines` `0.2.13` — The fake kiln.render's outlines of this harness (Ui.World.Outline): what mods outlined, and the game's side of it...
-- `Players { get; } -> TestKit.HarnessPlayers` — The players on this server: `HarnessPlayers.Join` one, `FakePlayer.Leave`.
-- `PlayerStorage { get; } -> TestKit.HarnessPlayerStorage` `0.2.16` — The fake kiln.items.storage of this harness: the game's side of player storage (joins, restores, saves, leaves, deaths).
-- `Programs { get; } -> TestKit.HarnessPrograms` `0.2.4` — The game's ECS programs in the harness's fake server world (kiln.world v4): the ones a test declares, which...
-- `Queries { get; } -> TestKit.HarnessQueries` `0.2.3` — The fake kiln.queries of this harness: what a voxel ray answers, and the rays mods asked for.
-- `ReadLogFile() -> string` `0.2.11` — The text of `KilnHarness.LogFile` as written so far ("" when it was not created).
-- `Reload(TestKit.ModHandle mod, bool checkCollected = true) -> TestKit.ModHandle` — Reloads `mod` from its folder with its dependents (they unload first and load again after it), as the control...
-- `Repl { get; } -> TestKit.HarnessRepl` `0.2.17` — The fake kiln.repl of this harness (the network inspector, Kiln.Replication): the peers on the server's machine...
-- `ReplNet { get; } -> TestKit.HarnessReplNet` `0.2.17` — Script and inspect the fake kiln.repl.net service used by Kiln.Replication.
-- `ReportWorldRunning() -> void` — The game says its world runs (the line Kiln's lifecycle waits for): with `KilnHarnessOptions.WaitForWorldRunning`...
-- `Routines { get; } -> TestKit.HarnessRoutines` `0.2.17` — The kit's fake kiln.routines of this harness: the game time and the villagers' decisions a test plays, for the...
-- `Run(Action action) -> void` — Runs `action` on the tick thread, as Kiln (no mod).
-- `Run<T>(Func<T> func) -> T` — Runs `func` on the tick thread, as Kiln (no mod), and returns its result.
-- `RunCommand(CommandSource source, string line) -> CommandResult` — Runs a command line as `source` (see `KilnHarness.RunCommand`).
-- `RunCommand(TestKit.FakePlayer player, string line) -> CommandResult` — Runs a command line as `player` typed it in chat (`CommandSource.ForPlayer`), through the public `Commands.Execute`...
-- `RunCommand(string line) -> CommandResult` — Runs a command line as the server console (`CommandSource.Console`), through the public `Commands.Execute` on the...
-- `RunTest(TestKit.ModHandle mod, string name, TestKit.KilnTestOptions? options = null) -> TestKit.KilnTestResult` — Runs one `[KilnTest]` of `mod` through Kiln.Testing's own runner (as the control command `test <mod> =name` does)...
-- `RunTests(TestKit.ModHandle mod, TestKit.KilnTestOptions? options = null) -> IReadOnlyList<TestKit.KilnTestResult>` — Runs every `[KilnTest]` of `mod`, one `KilnHarness.RunTest` each, in the runner's order.
-- `ServerDirectory { get; } -> string` — The temp server folder (the game's install folder in a real server).
-- `Spawned { get; } -> TestKit.HarnessSpawn` `0.2.2` — What Kiln.Spawn (`Spawn`) did in this server's fake world: the templates the game has, the entities mods spawned...
-- `State { get; } -> TestKit.HarnessState` — Where the server is.
-- `StateDirectory { get; } -> string` — `kiln/state`: `mods.json` for the launcher.
-- `Step(int steps = 1) -> void` — Runs `steps` server steps, each in the order of Kiln.Host's Pre: the first one loads the mods waiting in `kiln/mods`...
-- `StepUntil(Func<bool> condition, int maxSteps = 1000, TimeSpan pace = default(TimeSpan)) -> int` — Steps until `condition` (checked on the tick thread before each step) is true; returns the steps it took (0 when it...
-- `Stop(string reason = "SIGINT") -> void` — Stops the server at once, as a stop signal does: `ServerStoppingEvent` with `reason`, then every mod's `OnUnload` in...
-- `Tasks { get; } -> TestKit.HarnessTasks` `0.2.10` — Kiln tasks (`ModContext.Tasks`) of the mods under this harness: they run on the kit's task pool, whose workers are...
-- `Terrain { get; } -> TestKit.HarnessTerrain` `0.2.3` — The fake world behind Kiln.Terrain in this harness: its cells, bases and what overlays wrote.
-- `Time { get; } -> TestKit.HarnessTime` `0.2.2` — The server's day/night clock as the kit's fake of kiln.time runs it on the harness's virtual time.
-- `UiChest { get; } -> TestKit.HarnessUiChest` `0.2.17` — Offline native chest-button registrations and activations.
-- `UiInventory { get; } -> TestKit.HarnessUiInventory` `0.2.12` — The fake kiln.ui.inventory of this harness: draw a screen's slots, hover and click one, and ask what mark a drawn...
-- `UiItemDetail { get; } -> TestKit.HarnessUiItemDetail` `0.2.14` — Recordings of the game's item-detail text and values (no game renderer is simulated).
-- `UiNativeTints { get; } -> TestKit.HarnessUiNativeTints` `0.2.17` — Offline native-background tint rules; no game drawing.
-- `UiPlacement { get; } -> TestKit.HarnessUiPlacement` `0.2.20` — Where a mod's screens and windows sit: play an overlay frame for one (`HarnessUiPlacement.Frame`), move it as the...
-- `UiSnapshot { get; } -> TestKit.HarnessUiSnapshot` `0.2.17` — The fake kiln.ui.snapshot of this harness (since 0.2.0-dev.31): publish the live game values that BlockUi.ReadWorld...
-- `UiValues { get; } -> TestKit.HarnessUiValues` `0.2.3` — The fake kiln.ui.values of this harness: draw a value or an item detail view through the registered Ui.Values providers.
-- `Unload(TestKit.ModHandle mod, bool checkCollected = true) -> void` — Unloads `mod`, and first every mod that depends on it (reverse order), as the control command `unload` does.
-- `World { get; } -> TestKit.HarnessWorld` — The world this server runs: its id, its saves, its sidecar folder.
-- `WorldTables { get; } -> TestKit.HarnessWorldTables` `0.2.4` — Scripts boot pool snapshots and registration refusals.
-- `WritePermissions(string json) -> void` — Writes `kiln/config/permissions.json` (JSONC, the format Kiln writes: groups, userGroups, players by SteamID64) and...
-- `WriteServerConfig(string json) -> void` — Writes the server's `enshrouded_server.json` in `KilnHarness.ServerDirectory` (Kiln.Permissions reads its...
-
-## TestKit.KilnHarnessOptions `0.2.1` — Settings of one `KilnHarness`.
-- `CallTimeout { get; init; } -> TimeSpan` — How long an ordinary harness call (including Step, Unload and Reload) may block its tick thread before the watchdog...
-- `CrashReports { get; init; } -> bool` — Crash reports (a mod disabled by the fault policy) are written to `kiln/crash-reports` in the temp folder.
-- `FaultLimit { get; init; } -> int` — Faults within `KilnHarnessOptions.FaultWindowSeconds` that disable a mod (kiln.json `mods.fault_limit`).
-- `FaultWindowSeconds { get; init; } -> double` — The fault window in seconds of the harness's virtual time (steps x `KilnHarnessOptions.WallDeltaMs`); 0: ever.
-- `KeepFolder { get; init; } -> bool` — Keep the temp server folder after `KilnHarness.Dispose` (also: environment `KILN_TESTKIT_KEEP=1`).
-- `LogSink { get; init; } -> Action<TestKit.LogLine>?` — Gets every captured log line as it is written (any thread), e.g. to show it in a test's output.
-- `ServerDirectory { get; init; } -> string?` — Run in an isolated test folder instead of a new temp one, e.g. the folder of an earlier harness that kept it...
-- `Side { get; init; } -> TestKit.HarnessSide` `0.2.10` — Which game process the harness stands for, for the mods' Kiln tasks: where their hops can go (the server world, the...
-- `StopTimeout { get; init; } -> TimeSpan` — How long Dispose may spend stopping the server before the watchdog stops the blocked callback and abandons the harness.
-- `TempDirectory { get; init; } -> string?` — Where the temp server folder is made; default the system's temp folder.
-- `TestTimeout { get; init; } -> TimeSpan` — The timeout of one mod's `[KilnTest]` run (kiln.json `mods.test_timeout_s`).
-- `ThrowOnModFault { get; init; } -> bool` — A harness call during which a mod faulted throws `ModFaultException` (default).
-- `WaitForOtherHarness { get; init; } -> TimeSpan` — How long a new harness waits for the one still alive in this process (harnesses run one at a time: Kiln's state is...
-- `WaitForWorldRunning { get; init; } -> bool` — False (default): like a server without the game-log mirror, `ServerStartedEvent` fires at the first step (source...
-- `WallDeltaMs { get; init; } -> double` — Wall-clock milliseconds one step stands for (`TickInfo.WallDeltaMs`); 40.8 is a dedicated server's 24.5 steps a second.
-- `WorldId { get; init; } -> Guid?` — The id of the world the server runs (`KilnHarness.World`); default the world the server folder ran last, or a new one.
-
-## TestKit.KilnTestOptions `0.2.1` — How `KilnHarness.RunTest` judges and guards one `[KilnTest]`.
-- `AllowUnavailable { get; init; } -> IReadOnlyCollection<string>` — Unavailable names (`kiln.spawn`, a game feature) a test may ask for and still count: for tests whose subject is the...
-- `static Default { get; } -> TestKit.KilnTestOptions` — The defaults.
-- `SetupTimeout { get; init; } -> TimeSpan` — How long `KilnTestSession`'s setup (and the server start) may block the tick thread (default 60 s).
-- `WatchdogGrace { get; init; } -> TimeSpan` — How much longer than the test's timeout one harness step may take before the watchdog stops the tick thread (default...
-
-## TestKit.KilnTestResult `0.2.1` — One `[KilnTest]` as the harness ran it.
-- `KilnTestResult(string Name, Testing.TestOutcome Outcome, TimeSpan Duration, string? Message, string? Stack, IReadOnlyList<string> Unavailable)`
-- `Duration { get; init; } -> TimeSpan` — How long it ran.
-- `Log { get; init; } -> IReadOnlyList<TestKit.LogLine>` — Every log line written while it ran.
-- `Message { get; init; } -> string?` — Why it failed, was skipped or timed out; for an offline skip also what the body did.
-- `Name { get; init; } -> string` — The test's name (`attr.Name ?? Class.Method`).
-- `Notes { get; init; } -> IReadOnlyList<string>` — What the kit did around the test (a fresh harness after a stopped test, faults of other code).
-- `Outcome { get; init; } -> Testing.TestOutcome` — The kit's verdict: Kiln.Testing's, except that a test that asked for something the kit does not fake is...
-- `Runner { get; init; } -> Testing.TestResult?` — What Kiln.Testing's runner reported for the test; null when the watchdog stopped it, or the runner never reported.
-- `Stack { get; init; } -> string?` — Where it failed (the assertion's frames), or for a stopped test the tick thread's stack where it blocked.
-- `Unavailable { get; init; } -> IReadOnlyList<string>` — The unavailable names (services, features) asked while it ran, by the test's mod or a mod it depends on, without the...
-
-## TestKit.KilnTestSession `0.2.1` — Runs a mod's `[KilnTest]` methods one by one on one harness and one load, as a server runs them, for a test framework's adapter (`Kiln.TestKit.Xunit.KilnTestSuite` is...
-- `KilnTestSession(Func<TestKit.KilnHarness, TestKit.ModHandle> setup, Func<TestKit.KilnHarnessOptions>? harnessOptions = null, TestKit.KilnTestOptions? options = null)` — A session that runs a mod's `[KilnTest]` methods on harnesses it makes, one after another.
-- `Dispose() -> void` — Disposes the current harness.
-- `DisposeError { get; } -> string?` — What the last dispose of a harness reported, if it did not stop cleanly.
-- `Harness { get; } -> TestKit.KilnHarness?` — The harness the next test runs on, if one is made (null before the first `KilnTestSession.Run`).
-- `HarnessCount { get; } -> int` — How many harnesses the session made (more than one after a stopped test).
-- `Run(string name) -> TestKit.KilnTestResult` — Runs the test named `name`.
-
-## TestKit.LogLine `0.2.1` — One line Kiln wrote to its log while a harness ran: a mod's `Logger`, Kiln's own code, or the host (the loader and the lifecycle).
-- `LogLine(long Sequence, ulong Step, LogLevel Level, string Source, string Text)`
-- `Level { get; init; } -> LogLevel` — The level.
-- `ModId { get; } -> string?` — The mod that wrote it, or null for Kiln and the host.
-- `Sequence { get; init; } -> long` — Order of writing, from 1.
-- `Source { get; init; } -> string` — `mod:<id>`, `kiln` (Kiln.Api and the services) or `host` (Kiln.Host).
-- `Step { get; init; } -> ulong` — The harness's step when it was written (0 before the first).
-- `Text { get; init; } -> string` — The text.
-
-## TestKit.ModFaultException `0.2.1` — A mod faulted (an exception Kiln's fault policy counted) during a harness call.
-- `Faults { get; } -> IReadOnlyList<string>` — Each fault as Kiln logged it (mod, where, the exception with its stack).
-
-## TestKit.ModHandle `0.2.1` — A test's handle on one mod of a `KilnHarness`: what a test keeps in a local.
-- `Context { get; } -> ModContext` — The running instance's context (loaded or disabled).
-- `Error { get; } -> string?` — Why the mod is not loaded or was disabled; null otherwise.
-- `Folder { get; } -> string` — The mod's folder, `kiln/mods/<folder>` in the harness's temp server folder.
-- `Id { get; } -> string` — The mod id.
-- `Info { get; } -> ModInfo` — The manifest's metadata, once the loader has read it.
-- `Instance { get; } -> Mod` — The running instance (loaded or disabled).
-- `IsLoaded { get; } -> bool` — `ModHandle.State` is Loaded.
-- `State { get; } -> ModState` — What the mod list says: `ModState.Pending` while it waits for the server's first step, Loaded, Disabled (fault...
-
-## TestKit.ModLeakException `0.2.1` — After an unload, a mod's load context was still alive: something outside the mod holds its code or objects, and in the game every reload of it would leak.
-- `ModIds { get; } -> IReadOnlyList<string>` — The mods whose load context is still alive.
-
-## TestKit.ModLoadException `0.2.1` — A mod did not load: the loader refused it (manifest, resolver, a missing dependency or feature) or its `OnLoad` threw.
-- `ModId { get; } -> string` — The mod that did not load (several, comma-separated, when more failed at the first step).
-- `Reason { get; } -> string` — The loader's reason, followed by what the capability rows say about any feature it named.
-- `State { get; } -> ModState` — Failed or Skipped, as the mod list says.
-
-## TestKit.ModManifest `0.2.1` — A `kiln.mod.json` built in code, for `KilnHarness.Load`.
-- `ModManifest(string id)` — A manifest built in code for a mod loaded by the harness.
-- `Advanced { get; set; } -> bool` — The `advanced` tier flag.
-- `ApiVersion { get; set; } -> string` — The Kiln API the mod was built for; default this Kiln's (`Mods.RuntimeApiVersion`).
-- `DependsOn(string id, string versionRange = "*", bool optional = false) -> TestKit.ModManifest` — Adds a dependency (`"kiln"` is Kiln itself).
-- `Exports(params string[] files) -> TestKit.ModManifest` — Adds exported assemblies (`exports`, file names such as `MyApi.dll`).
-- `Id { get; } -> string` — The mod id.
-- `LocalesDirectory { get; set; } -> string?` — A folder whose files become the mod's `locales/` (not written to the manifest).
-- `Name { get; set; } -> string?` — Display name; default the id.
-- `Requires(params string[] features) -> TestKit.ModManifest` — Adds required features (`features`): the resolver refuses the mod while one is unavailable.
-- `Set(string key, Json.Nodes.JsonNode? value) -> TestKit.ModManifest` — Any other manifest key (`tests`, `loadAfter`, `incompatible`...), as JSON.
-- `Side { get; set; } -> ModSide` — Server (default), client or both.
-- `SteamMessages { get; set; } -> bool` `0.2.13` — The `steamMessages` opt-in: the mod opens its own Steam peer message leases (Kiln.Network's `SteamMessages`).
-- `ToJson(string entryAssembly, string? entryType) -> string` — The manifest as the mod's `kiln.mod.json` would hold it.
-- `Version { get; set; } -> string` — The mod's version (semantic versioning); default 1.0.0.
-- `Writes(params string[] components) -> TestKit.ModManifest` `0.2.2` — The component types the mod writes through the game's write tracking (`"writes"`: short names such as `Fuel`): what...
-
-## TestKit.PhysicsCookResult `0.2.17` — What `FakePhysicsCookHost.Cook` did: `PhysicsCookResult.Ok` with the files it committed, or the reason it refused.
-- `PhysicsCookResult(bool Ok, string? Reason, IReadOnlyList<string> Files)`
-- `Files { get; init; } -> IReadOnlyList<string>` — The files committed by this cook, in the order given.
-- `Ok { get; init; } -> bool` — The files were committed and registered.
-- `Reason { get; init; } -> string?` — Why not (the cook's words: the field, the feature and its reason); null when `PhysicsCookResult.Ok`.
-
-## TestKit.Xunit.KilnSuiteLifetime `0.2.1` — The class fixture of every `KilnTestSuite`: when xunit has run the suite's tests it disposes this, and the suite's harness goes with it.
-- `Dispose() -> void` — Disposes the suite's harness.
-
-## TestKit.Xunit.KilnTestOrderer `0.2.1` — Orders a `KilnTestSuite`'s tests as Kiln.Testing's runner does, whatever subset xunit was asked to run; other tests of the class come after, in xunit's default order.
-- `OrderTestCases<TTestCase>(IReadOnlyCollection<TTestCase> testCases) -> IReadOnlyCollection<TTestCase>` — The suite's `[KilnTest]` cases in the in-game runner's order, then the class's other cases.
-
-## `TestKit.Xunit.KilnTestSuite<TMod>` `0.2.1` — Every `[KilnTest]` method of `TMod`'s assembly as an xunit test, run under a `KilnHarness` through Kiln.Testing's own runner: the same test body runs offline under...
-- `virtual AllowUnavailable { get; } -> IReadOnlyCollection<string>` — Unavailable names the tests may ask for and still count (tests of the unavailable path).
-- `virtual HarnessOptions() -> TestKit.KilnHarnessOptions` — The options of each harness the suite makes.
-- `KilnTest(string name) -> void` — One `[KilnTest]`, by name.
-- `static KilnTests { get; } -> IEnumerable<Xunit.TheoryDataRow<string>>` — The `[KilnTest]` names of `TMod`'s assembly, for xunit's discovery.
-- `virtual LoadMod(TestKit.KilnHarness kiln) -> TestKit.ModHandle` — Loads the mod whose tests run (default `kiln.Load<TMod>()`, its own manifest file); override for a `ModManifest`...
-- `virtual Setup(TestKit.KilnHarness kiln) -> void` — Before the mod loads, on each new harness: other mods it needs (a test mod's mod under test), fake players, config...
-- `virtual WatchdogGrace { get; } -> TimeSpan` — How much longer than its timeout a test may block the tick thread before the watchdog stops it.

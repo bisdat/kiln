@@ -162,9 +162,13 @@ impl TcpLink {
         let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
             .map_err(|e| Error::new(ErrorCode::AdminUnavailable, format!("KAP {}:{}: {e}", t.host, t.port)))?;
         let _ = s.set_nodelay(true);
-        s.set_read_timeout(Some(Duration::from_secs(protocol::HANDSHAKE_TIMEOUT_S + 1)))?;
+        // through an ssh tunnel the first byte also waits for ssh to connect and sign in (each connection runs its own
+        // `ssh -W`): the hello gets that time on top of the handshake's, as the tunnel had before 0.2.0-dev.31.12
+        let setup = if t.tunnel.is_some() { super::tunnel::SSH_SETUP } else { Duration::ZERO };
+        s.set_read_timeout(Some(Duration::from_secs(protocol::HANDSHAKE_TIMEOUT_S + 1) + setup))?;
         s.set_write_timeout(Some(Duration::from_secs(30)))?;
         let hello = read_frame(&mut s, protocol::MAX_SERVER_FRAME)?;
+        s.set_read_timeout(Some(Duration::from_secs(protocol::HANDSHAKE_TIMEOUT_S + 1)))?;
         let (nonce, ident, kiln) = match hello {
             Frame::Hello { proto, nonce, server, kiln, auth, .. } => {
                 if proto != protocol::PROTOCOL {
@@ -380,6 +384,7 @@ struct FileLink {
 /// closes with `retry`, and the reconnect takes TCP.
 struct Upgrade {
     server_dir: PathBuf,
+    prefix: Option<PathBuf>,
     server_id: String,
     /// endpoint.json's mtime before the TCP attempt that failed
     seen: Option<std::time::SystemTime>,
@@ -389,20 +394,20 @@ struct Upgrade {
 const UPGRADE_LOOK: Duration = Duration::from_secs(2);
 const UPGRADE_RETRY: Duration = Duration::from_secs(30);
 
-fn endpoint_mtime(server_dir: &Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(super::discover::admin_dir(server_dir).join(protocol::ENDPOINT_FILE)).and_then(|m| m.modified()).ok()
+fn endpoint_mtime(server_dir: &Path, prefix: Option<&Path>) -> Option<std::time::SystemTime> {
+    std::fs::metadata(super::discover::live_admin_dir_in(server_dir, prefix).join(protocol::ENDPOINT_FILE)).and_then(|m| m.modified()).ok()
 }
 
 impl Upgrade {
     /// True when Kiln.Admin answers a handshake now (the probe's own connection is closed again).
     fn ready(&mut self, last_try: &mut Instant) -> bool {
-        let m = endpoint_mtime(&self.server_dir);
+        let m = endpoint_mtime(&self.server_dir, self.prefix.as_deref());
         if m.is_none() || (m == self.seen && last_try.elapsed() < UPGRADE_RETRY) {
             return false;
         }
         self.seen = m;
         *last_try = Instant::now();
-        AdminClient::connect_local_tcp(&self.server_dir, &self.server_id).is_ok()
+        AdminClient::connect_local_tcp(&super::discover::live_admin_dir_in(&self.server_dir, self.prefix.as_deref()), &self.server_id).is_ok()
     }
 }
 
@@ -497,25 +502,48 @@ impl AdminClient {
             };
         }
         let dir = instance.dir.as_deref().ok_or_else(|| Error::invalid(format!("server {} has no folder", instance.id)))?;
-        AdminClient::connect_dir(dir, &instance.id, transport)
+        AdminClient::connect_dir_in(dir, instance.prefix.as_deref(), &instance.id, transport)
+    }
+
+    /// KAP to the Kiln.Admin of the data root `root` (resolved once by the caller, [`super::datadir::DataRoot`]): TCP
+    /// for a local server, ssh for a remote one. Open web panel reads Kiln Web Admin's listener from the same root, so
+    /// the one-time login it mints is always for the panel next to it.
+    pub fn connect_at(instance: &crate::server::instance::ServerInstance, root: &super::datadir::DataRoot) -> Result<AdminClient> {
+        match (instance.remote.as_ref(), root) {
+            (Some(remote), super::datadir::DataRoot::Remote(_)) => {
+                let dir = root.remote_mod("kiln-admin").unwrap_or_default();
+                AdminClient::connect_ssh_at(remote, &dir, &instance.id)
+            }
+            (None, super::datadir::DataRoot::Local(_)) => {
+                let dir = root.local_mod("kiln-admin").unwrap_or_default();
+                AdminClient::connect_local_tcp(&dir, &instance.id)
+            }
+            _ => Err(Error::invalid("a local server's data folder is on this machine, a remote server's on that one")),
+        }
     }
 
     /// Connects to the server in `server_dir` (on this machine).
     pub fn connect_dir(server_dir: &Path, server_id: &str, transport: Transport) -> Result<AdminClient> {
+        AdminClient::connect_dir_in(server_dir, None, server_id, transport)
+    }
+
+    /// The same with the server's Wine prefix (a profile data folder on a drive other than Z:).
+    pub fn connect_dir_in(server_dir: &Path, prefix: Option<&Path>, server_id: &str, transport: Transport) -> Result<AdminClient> {
+        let admin_dir = || super::discover::live_admin_dir_in(server_dir, prefix);
         match transport {
-            Transport::Tcp => AdminClient::connect_local_tcp(server_dir, server_id),
-            Transport::File => AdminClient::connect_file(FileBridge::locate(server_dir)?, server_id),
+            Transport::Tcp => AdminClient::connect_local_tcp(&admin_dir(), server_id),
+            Transport::File => AdminClient::connect_file(FileBridge::locate_in(server_dir, prefix)?, server_id),
             Transport::Ssh => Err(Error::new(ErrorCode::Unsupported, "ssh is for remote servers")),
             Transport::Auto => {
                 // read before the attempt: a listener that comes up during it still counts as a change
-                let seen = endpoint_mtime(server_dir);
-                match AdminClient::connect_local_tcp(server_dir, server_id) {
+                let seen = endpoint_mtime(server_dir, prefix);
+                match AdminClient::connect_local_tcp(&admin_dir(), server_id) {
                     Ok(c) => Ok(c),
                     Err(e) if e.code == ErrorCode::AuthFailed => Err(e),
                     Err(tcp) => {
-                        let bridge = FileBridge::locate(server_dir)?;
+                        let bridge = FileBridge::locate_in(server_dir, prefix)?;
                         if bridge.alive(Duration::from_secs(10)) {
-                            let upgrade = Upgrade { server_dir: server_dir.to_path_buf(), server_id: server_id.into(), seen };
+                            let upgrade = Upgrade { server_dir: server_dir.to_path_buf(), prefix: prefix.map(Path::to_path_buf), server_id: server_id.into(), seen };
                             AdminClient::open_file(bridge, server_id, Some(upgrade))
                         } else {
                             Err(Error::new(ErrorCode::AdminUnavailable, format!("no admin transport reaches {server_id}: {}; the file bridge is idle", tcp.message))
@@ -527,21 +555,32 @@ impl AdminClient {
         }
     }
 
-    fn connect_local_tcp(server_dir: &Path, server_id: &str) -> Result<AdminClient> {
-        let ep = super::discover::endpoint(server_dir)?
-            .ok_or_else(|| Error::new(ErrorCode::AdminUnavailable, "no kiln/data/kiln-admin/endpoint.json (server stopped, or KAP off)"))?;
-        let token = super::discover::token(server_dir)?;
+    /// KAP over TCP to the Kiln.Admin whose folder is `admin_dir` (endpoint.json and admin-token both from it).
+    fn connect_local_tcp(admin_dir: &Path, server_id: &str) -> Result<AdminClient> {
+        let ep = super::discover::endpoint_at(admin_dir)?
+            .ok_or_else(|| Error::new(ErrorCode::AdminUnavailable, "no kiln-admin/endpoint.json (server stopped, or KAP off)"))?;
+        let token = super::discover::token_at(admin_dir)?;
         AdminClient::connect_tcp(TcpTarget { host: ep.host, port: ep.port, token, server_id: server_id.into(), tunnel: None, transport: Transport::Tcp })
     }
 
     /// A remote server: endpoint and token over `ssh cat`, then a tunnel to its listener.
     pub fn connect_ssh(remote: &crate::server::remote::RemoteSpec, server_id: &str) -> Result<AdminClient> {
-        let ep = super::discover::remote_endpoint(remote)?
+        AdminClient::connect_ssh_at(remote, &super::discover::remote_admin_dir(remote), server_id)
+    }
+
+    /// The same with Kiln.Admin's folder on the remote machine given (an absolute path there).
+    pub fn connect_ssh_at(remote: &crate::server::remote::RemoteSpec, admin_dir: &str, server_id: &str) -> Result<AdminClient> {
+        let (ep, token) = super::discover::remote_endpoint_and_token_at(remote, admin_dir)?
             .ok_or_else(|| Error::new(ErrorCode::AdminUnavailable, format!("{}: no endpoint.json (server stopped, or KAP off)", remote.host)))?;
-        let token = super::discover::remote_token(remote)?;
         let tunnel = super::tunnel::SshTunnel::open(remote, ep.port)?;
         let port = tunnel.local_port;
+        let errors = tunnel.errors();
         AdminClient::connect_tcp(TcpTarget { host: "127.0.0.1".into(), port, token, server_id: server_id.into(), tunnel: Some(tunnel), transport: Transport::Ssh })
+            .map_err(|e| match errors() {
+                // the forwarded connection failed in ssh: say what ssh said
+                Some(ssh) => Error::new(ErrorCode::Network, format!("ssh tunnel to {}: {ssh}", remote.host)),
+                None => e,
+            })
     }
 
     pub fn connect_tcp(target: TcpTarget) -> Result<AdminClient> {

@@ -38,8 +38,8 @@ fn recv(s: &mut TcpStream) -> Option<Value> {
 
 /// A KAP/1 server: ops ping/echo/fail/slow, topic state (a push every 100 ms), drops every connection when `drop`
 /// is set, answers pings (counted), sends one ping itself; while `mute` is set it sends nothing at all.
-struct Mock {
-    port: u16,
+pub(crate) struct Mock {
+    pub(crate) port: u16,
     drop: Arc<AtomicBool>,
     mute: Arc<AtomicBool>,
     accepted: Arc<AtomicUsize>,
@@ -62,7 +62,7 @@ struct MockSide {
 }
 
 impl Mock {
-    fn start(token: [u8; 32], bad_ready_mac: bool) -> Mock {
+    pub(crate) fn start(token: [u8; 32], bad_ready_mac: bool) -> Mock {
         Mock::start_with(token, bad_ready_mac, 15, 45)
     }
 
@@ -118,7 +118,7 @@ fn serve(mut s: TcpStream, token: [u8; 32], side: MockSide) {
         return;
     }
     let smac = if bad_ready_mac { "00".repeat(32) } else { protocol::mac(&token, "kap1-ready", &nonce, &cnonce) };
-    send(&mut s, &json!({"t": "ready", "session": "s1", "mac": smac, "ops": ["ping", "echo", "fail", "slow"], "topics": ["state", "log"],
+    send(&mut s, &json!({"t": "ready", "session": "s1", "mac": smac, "ops": ["ping", "echo", "fail", "slow", "login_mint"], "topics": ["state", "log"],
         "limits": {"maxFrame": 16777216, "maxClientFrame": 1048576, "inflight": 64, "pingS": ping_s, "idleS": idle_s}})).unwrap();
     let w = Arc::new(Mutex::new(s.try_clone().unwrap()));
     let subscribed = Arc::new(AtomicBool::new(false));
@@ -148,6 +148,9 @@ fn serve(mut s: TcpStream, token: [u8; 32], side: MockSide) {
             Some("req") => match f["op"].as_str().unwrap_or("") {
                 "ping" => json!({"t": "res", "id": id, "ok": true, "op": "ping", "ms": 0, "data": {"pong": true}}),
                 "echo" => json!({"t": "res", "id": id, "ok": true, "op": "echo", "ms": 0, "data": f["args"]}),
+                // the launcher's "Open web panel" (admin-protocol.md, One-time login): a fixed secret the test can find
+                "login_mint" => json!({"t": "res", "id": id, "ok": true, "op": "login_mint", "ms": 0,
+                    "data": {"secret": "5e".repeat(32), "consumer": f["args"]["consumer"], "expiresAt": "2026-11-25T12:00:00Z", "ttlS": 60}}),
                 "fail" => json!({"t": "res", "id": id, "ok": false, "op": "fail", "ms": 0, "error": "entity must be an entity id", "code": "op_failed"}),
                 "slow" => {
                     let w = w.clone();
@@ -205,7 +208,7 @@ fn tcp_handshake_calls_pushes_and_pings() {
     m.write_endpoint(&dir, &TOKEN);
     let c = AdminClient::connect_dir(&dir, "srv-test", Transport::Auto).unwrap();
     assert_eq!(c.session().transport, Transport::Tcp);
-    assert_eq!(c.session().ops, ["ping", "echo", "fail", "slow"]);
+    assert_eq!(c.session().ops, ["ping", "echo", "fail", "slow", "login_mint"]);
     assert_eq!(c.session().server.id.as_deref(), Some("srv-test"));
     assert_eq!(c.call("ping", Default::default()).unwrap(), json!({"pong": true}));
     let mut args = serde_json::Map::new();

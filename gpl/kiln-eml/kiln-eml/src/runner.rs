@@ -426,6 +426,37 @@ pub(crate) fn runtime_unavailable(cfg: &RunConfig) -> String {
     "ShroudForge did not reserve this start (component missing, off, incompatible, or an older adapter); install/update the ShroudForge component and activate the profile again".into()
 }
 
+/// How many threads each block-compressed texture of a run is encoded on (kfc-content `set_encode_threads`; the bytes
+/// are the serial encode's). BC7 is nearly all of a texture-heavy run's time: EMF Beastmaster's three packs spent 397 of
+/// their 401 s of Lua in it on one core (0.2.0-dev.31.13). `kiln_mode`: kiln.launch backend `kiln`, whose pass can run
+/// while a package DLL's initializer holds the Windows loader lock, where a new thread cannot start: EML's serial encode
+/// there. `env`: KILN_EML_ENCODE_THREADS (1 = EML's serial encode; a count is used as it is, at most 64). Otherwise the
+/// PC's threads (`available`), at most 16.
+pub(crate) fn encode_threads(kiln_mode: bool, env: Option<&str>, available: usize) -> usize {
+    if kiln_mode {
+        return 1;
+    }
+    match env.and_then(|v| v.trim().parse::<usize>().ok()).filter(|&n| n >= 1) {
+        Some(n) => n.min(64),
+        None => available.clamp(1, 16),
+    }
+}
+
+/// The run's encode thread count, put back as it was when the run ends.
+pub(crate) struct EncodeThreads(usize);
+
+impl EncodeThreads {
+    pub(crate) fn set(threads: usize) -> Self {
+        Self(kfc::content::image::set_encode_threads(threads))
+    }
+}
+
+impl Drop for EncodeThreads {
+    fn drop(&mut self) {
+        kfc::content::image::set_encode_threads(self.0);
+    }
+}
+
 /// Runs EML over `mods` (the paths `discover::resolve` chose; `entries` are its entries, updated in place).
 pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> Outcome {
     // In this crate's unit tests a run holds the test gate (mod-loader-lua's test_gate.rs) from before RUN_LOCK: its locks
@@ -473,6 +504,11 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         out.ms = started.elapsed().as_secs_f64() * 1000.0;
         return out;
     }
+    // EML's run, outside kiln mode: in the plugin it runs in kiln-core's early step on the game's main thread, outside
+    // the loader lock (as the core's progress window thread does), so block-compressed textures may use the cores
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let _encode = EncodeThreads::set(encode_threads(false, std::env::var("KILN_EML_ENCODE_THREADS").ok().as_deref(), available));
+    tracing::debug!(threads = kfc::content::image::encode_threads(), "block-compressed textures: encode threads");
     // Reaching this runner means no ShroudForge writer reserved the run. Never run just the data half.
     {
         let why = runtime_skip_reason(cfg);
@@ -789,6 +825,54 @@ fn mib(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_compression_gets_the_cores_only_outside_kiln_mode() {
+        // EML's run (no kiln.launch backend kiln): the PC's threads, at most 16
+        assert_eq!(encode_threads(false, None, 16), 16);
+        assert_eq!(encode_threads(false, None, 32), 16);
+        assert_eq!(encode_threads(false, None, 4), 4);
+        assert_eq!(encode_threads(false, None, 0), 1);
+        // KILN_EML_ENCODE_THREADS: 1 is EML's serial encode; another count is used as it is (at most 64)
+        assert_eq!(encode_threads(false, Some("1"), 16), 1);
+        assert_eq!(encode_threads(false, Some(" 3 "), 16), 3);
+        assert_eq!(encode_threads(false, Some("200"), 16), 64);
+        for junk in ["0", "", "x", "-2", "2.5"] {
+            assert_eq!(encode_threads(false, Some(junk), 6), 6, "{junk:?} is not a count: the default");
+        }
+        // kiln mode: its pass can run while a package DLL holds the Windows loader lock, where a new thread cannot start
+        assert_eq!(encode_threads(true, None, 16), 1);
+        assert_eq!(encode_threads(true, Some("8"), 16), 1);
+    }
+
+    #[test]
+    fn a_run_puts_the_encode_setting_back() {
+        let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let before = kfc::content::image::encode_threads();
+        {
+            let _threads = EncodeThreads::set(5);
+            assert_eq!(kfc::content::image::encode_threads(), 5);
+        }
+        assert_eq!(kfc::content::image::encode_threads(), before);
+        // a panic in the run (kiln-eml unwinds: Cargo.toml's release profile) puts it back as well
+        let unwound = std::panic::catch_unwind(|| {
+            let _threads = EncodeThreads::set(7);
+            panic!("a panic in EML's run");
+        });
+        assert!(unwound.is_err());
+        assert_eq!(kfc::content::image::encode_threads(), before);
+        drop(_serial);
+        // a whole run (one that fails at once: no game here) leaves it as it found it
+        let dir = std::env::temp_dir().join(format!("kiln-eml-encode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = RunConfig { game_dir: Utf8PathBuf::from_path_buf(dir.clone()).unwrap(), ..Default::default() };
+        let out = run(&cfg, vec![Utf8PathBuf::from("/nonexistent/mod")], Vec::new());
+        assert_eq!(out.phase, Phase::Failed);
+        // read under RUN_LOCK: another test's run on another thread holds the PC's count while it runs
+        let _serial = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(kfc::content::image::encode_threads(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn names_the_failing_mod() {

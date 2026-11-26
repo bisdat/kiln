@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Pinned EMF 0.6.22 v49 ABI and production path/move refusals, with no game or engine services.
-// v47/v48/v49 queries (52/56/60 bytes) and v40/v41 move orders (128/136) must never be mistaken for
-// supported planning or movement. ASan checks exact old allocations; no callback or points read is allowed.
+// Pinned EMF 0.6.22 v49 ABI and production path refusals, with no game or engine services.
+// v47/v48/v49 queries (52/56/60 bytes) must never be mistaken for supported planning. ASan checks exact old
+// allocations; no callback is allowed. Move orders (v40/v41, 128/136 bytes) are carried since 0.2.0-dev.31.13:
+// tests/orders_test.cpp (api_orders.cpp), and fill_v40 leaves their slots to fill_orders.
 #include "emf_internal.h"
 #include "v26_model.h"
 
@@ -42,13 +43,12 @@ static_assert(offsetof(EmfMoveOrder, why) == 32 && v26::kMoveOrderV40Size == 128
 
 static int callbacks = 0;
 static void path_cb(EmfWorld*, uint32_t, const EmfPathResult*, const EmfPathPoint*, void*) { ++callbacks; }
-static void move_cb(EmfWorld*, uint32_t, uint32_t, void*) { ++callbacks; }
 
 int main() {
     EmfApi t{};
     fill_v40(&t);
-    CHECK(t.path_find && t.path_cancel && t.enemy_move && t.enemy_move_cancel && t.enemy_moving);
-    if (!t.path_find || !t.path_cancel || !t.enemy_move || !t.enemy_move_cancel || !t.enemy_moving) return 1;
+    CHECK(t.path_find && t.path_cancel && !t.enemy_move && !t.enemy_move_cancel && !t.enemy_moving);
+    if (!t.path_find || !t.path_cancel) return 1;
     auto* w = reinterpret_cast<EmfWorld*>(uintptr_t{0x1000});
     const std::string not_yet = "not available on Kiln yet";
 
@@ -92,44 +92,9 @@ int main() {
     CHECK(t.path_find(w, nullptr, &path_cb, nullptr) == 0 && t.path_find(w, &q, nullptr, nullptr) == 0);
     CHECK(!t.path_cancel(0) && !t.path_cancel(1) && !t.path_cancel(UINT32_MAX));
 
-    // A move refusal writes only why. Bogus points/world/entity make accidental forwarding or point reads visible.
-    EmfMoveOrder order{};
-    order.enemy = UINT32_MAX;
-    order.count = 16;
-    order.points = reinterpret_cast<const EmfPathPoint*>(uintptr_t{1});
-    for (const uint32_t size : {v26::kMoveOrderV40Size, uint32_t{sizeof order}}) {
-        for (const uint32_t flags : {0u, EMF_MOVE_ALLIES, EMF_MOVE_PEACEFUL_ALL, EMF_MOVE_CLEAR,
-                                    EMF_MOVE_ALLIES | EMF_MOVE_PEACEFUL | EMF_MOVE_CLEAR, EMF_MOVE_HOLD,
-                                    0x20u, 0x80000000u, UINT32_MAX}) {
-            order.size = size;
-            order.flags = flags;
-            std::memset(order.why, 0x5a, sizeof order.why);
-            auto old = std::make_unique<uint8_t[]>(size);
-            std::memcpy(old.get(), &order, size);
-            auto* req = reinterpret_cast<EmfMoveOrder*>(old.get());
-            const int before = unsupported_calls;
-            CHECK(t.enemy_move(w, req, &move_cb, &callbacks) == 0);
-            CHECK(unsupported_calls == before + 1 && last_why == not_yet);
-            CHECK(std::string(req->why) == not_yet);
-            CHECK(std::memcmp(old.get(), &order, offsetof(EmfMoveOrder, why)) == 0);
-            if (size > v26::kMoveOrderV40Size)
-                CHECK(std::memcmp(old.get() + v26::kMoveOrderV40Size,
-                                  reinterpret_cast<const uint8_t*>(&order) + v26::kMoveOrderV40Size,
-                                  size - v26::kMoveOrderV40Size) == 0);
-        }
-    }
-    order.size = sizeof order;
-    CHECK(t.enemy_move(nullptr, &order, nullptr, nullptr) == 0 && std::string(order.why) == not_yet);
-    CHECK(!t.enemy_move_cancel(0) && !t.enemy_move_cancel(1) && !t.enemy_move_cancel(UINT32_MAX));
-    CHECK(t.enemy_moving(w, order.enemy) == 0);
     CHECK(callbacks == 0 && refusals == 0);
-    // Undersized requests must not even clear why or inspect later fields.
-    order.size = v26::kMoveOrderV40Size - 1;
-    const EmfMoveOrder saved = order;
-    CHECK(t.enemy_move(w, &order, &move_cb, nullptr) == 0 && std::memcmp(&saved, &order, sizeof order) == 0);
-    CHECK(t.enemy_move(w, nullptr, &move_cb, nullptr) == 0 && refusals == 2 && callbacks == 0);
-    for (const char* fn : {"path_find", "path_cancel", "enemy_move", "enemy_move_cancel", "enemy_moving"})
+    for (const char* fn : {"path_find", "path_cancel"})
         CHECK(unsupported_fns.count(fn) == 1);
-    std::printf("path_test (EmfApi v49, v47/v48 callers, moves refused): %d checks, %d failures\n", checks, failures);
+    std::printf("path_test (EmfApi v49, v47/v48 callers, paths refused): %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

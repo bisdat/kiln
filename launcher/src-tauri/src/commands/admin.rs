@@ -5,29 +5,54 @@
 use crate::events::{AdminEventPayload, ADMIN};
 use kiln_manage::admin::client::{AdminClient, AdminSession, Transport};
 use kiln_manage::admin::hub::AdminHub;
-use kiln_manage::admin::web_panel::WebPanelTunnels;
+use kiln_manage::admin::web_panel::{WebPanelInfo, WebPanels};
 use crate::state::blocking;
 use kiln_manage::Error;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
 static HUB: OnceLock<AdminHub> = OnceLock::new();
-static WEB_PANEL_TUNNELS: OnceLock<Mutex<WebPanelTunnels>> = OnceLock::new();
+static WEB_PANELS: OnceLock<Mutex<WebPanels>> = OnceLock::new();
 
+/// The open web panels (one gateway per server, kiln_manage::admin::web_panel); their origins are kept in the data
+/// folder's web-panel-origins.json.
+fn web_panels() -> Result<&'static Mutex<WebPanels>, Error> {
+    if let Some(p) = WEB_PANELS.get() {
+        return Ok(p);
+    }
+    let file = crate::state::dirs()?.root.join(kiln_manage::admin::web_panel::origins::FILE);
+    Ok(WEB_PANELS.get_or_init(|| Mutex::new(WebPanels::new(file))))
+}
+
+/// At exit: every gateway and its ssh connections go.
 pub fn close_web_panel_tunnels() {
-    if let Some(tunnels) = WEB_PANEL_TUNNELS.get() {
-        tunnels.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    if let Some(panels) = WEB_PANELS.get() {
+        panels.lock().unwrap_or_else(|p| p.into_inner()).close_all();
     }
 }
 
+/// Opens the server's web panel in the browser (0.2.0-dev.31.12): through its own gateway on its own loopback
+/// origin, signed in with a one-time login that only a one-use bootstrap address hands over (never a command line).
 #[tauri::command]
-pub async fn admin_open_web_panel(server_id: String) -> Result<(), Error> {
+pub async fn admin_open_web_panel(server_id: String) -> Result<WebPanelInfo, Error> {
     blocking(move || {
         let server = kiln_manage::server::instance::get(&server_id)?;
-        let url = WEB_PANEL_TUNNELS.get_or_init(Mutex::default)
-            .lock().unwrap_or_else(|p| p.into_inner()).url(&server)?;
-        crate::state::open_external(std::ffi::OsStr::new(&url))
+        let opened = web_panels()?.lock().unwrap_or_else(|p| p.into_inner()).open(&server)?;
+        crate::state::open_external(std::ffi::OsStr::new(&opened.url))?;
+        Ok(opened.info)
     }).await
+}
+
+/// Closes the server's web panel gateway (its tabs lose the connection); whether one was open.
+#[tauri::command]
+pub async fn admin_close_web_panel(server_id: String) -> Result<bool, Error> {
+    blocking(move || Ok(web_panels()?.lock().unwrap_or_else(|p| p.into_inner()).close(&server_id))).await
+}
+
+/// The web panels open now (gateways that closed by themselves are gone).
+#[tauri::command]
+pub async fn admin_web_panels() -> Result<Vec<WebPanelInfo>, Error> {
+    blocking(move || Ok(web_panels()?.lock().unwrap_or_else(|p| p.into_inner()).list())).await
 }
 
 /// The process-wide hub; the first caller's AppHandle receives the events.

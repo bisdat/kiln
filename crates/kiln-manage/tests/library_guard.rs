@@ -39,12 +39,25 @@ fn import(dirs: &DataDirs, root: &Path, id: &str, version: &str, content: &str) 
     r.imported.iter().chain(&r.existing).find(|x| x.id == id && x.version == version).cloned().unwrap()
 }
 
+/// How the game names a library folder on this OS: through Wine's Z: drive on Linux, its own path on Windows.
+const HOST_MODE: PathMode = if cfg!(windows) { PathMode::Native } else { PathMode::Z };
+
+/// `p` as the game names it in its profile file in [`HOST_MODE`]: `Z:\...` on Linux, the plain path on Windows
+/// (without the `\\?\` prefix the temp folder's canonical path carries, as activation writes it).
+fn game_side(p: &Path) -> String {
+    if cfg!(windows) {
+        kiln_manage::winpath::plain(p.to_path_buf()).to_str().unwrap().to_string()
+    } else {
+        kiln_manage::winpath::unix_to_z(p).unwrap()
+    }
+}
+
 fn install(path: &Path, name: &str, kind: GameKind, mode: PathMode) -> GameInstall {
     std::fs::create_dir_all(path.join("kiln")).unwrap();
     let exe = if kind == GameKind::Server { game::SERVER_EXE } else { game::CLIENT_EXE };
     GameInstall {
         id: format!("g-{name}"), kind, path: path.to_path_buf(), exe: exe.into(), app_id: kiln_manage::CLIENT_APP_ID, library: None,
-        platform: Platform::Proton, prefix: None, build_id: None, exe_sha256: None, steam_flavor: None, path_mode: mode, source: "manual".into(),
+        platform: if cfg!(windows) { Platform::Windows } else { Platform::Proton }, prefix: None, build_id: None, exe_sha256: None, steam_flavor: None, path_mode: mode, source: "manual".into(),
     }
 }
 
@@ -80,7 +93,7 @@ fn removal_refuses_while_the_game_runs_and_force_does_not_change_that() {
     let r = import(&dirs, &t.0, "new-items", "1.0.0", "a");
     let folder = library::path_of(&dirs, &r).unwrap();
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
 
     for force in [false, true] {
         let e = library::remove_with(&dirs, &r, force, &mut only(&game_dir, game::CLIENT_EXE, running(4242, "enshrouded.exe"))).unwrap_err();
@@ -99,7 +112,7 @@ fn a_running_server_blocks_removal_only_when_its_profile_file_points_at_the_libr
     let dirs = DataDirs::at(t.0.join("data"));
     let r = import(&dirs, &t.0, "new-items", "1.0.0", "a");
     let other = import(&dirs, &t.0, "new-items", "1.1.0", "b");
-    let z = |x: &LibraryRef| kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, x).unwrap()).unwrap();
+    let z = |x: &LibraryRef| game_side(&library::path_of(&dirs, x).unwrap());
     // a server folder the launcher knows only through its server record, with its mods synced in as copies
     let srv = t.0.join("EnshroudedServer");
     put(&srv, "kiln/mods/new-items/.kiln-source.json", b"{}");
@@ -154,7 +167,7 @@ fn a_process_lookup_that_fails_refuses_instead_of_guessing() {
     let t = tmp("lookup");
     let dirs = DataDirs::at(t.0.join("data"));
     let r = import(&dirs, &t.0, "new-items", "1.0.0", "a");
-    game::write_record(&dirs, &install(&t.0.join("Enshrouded"), "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&t.0.join("Enshrouded"), "client", GameKind::Client, HOST_MODE), None).unwrap();
     let e = library::remove_with(&dirs, &r, true, &mut |_, _| Err(kiln_manage::Error::invalid("cannot inspect processes"))).unwrap_err();
     assert_eq!(e.message, "cannot inspect processes");
     assert!(library::path_of(&dirs, &r).unwrap().is_dir());
@@ -168,11 +181,11 @@ fn users_counts_the_files_the_game_holds() {
     let v2 = import(&dirs, &t.0, "new-items", "1.1.0", "b");
     let other = import(&dirs, &t.0, "other-mod", "1.0.0", "c");
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
     assert!(library::users(&dirs, &v1).is_empty());
 
     // The game's active profile.json points at v1 by its Z: path (no version or hash in the entry: older files)
-    let z = |r: &LibraryRef| kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, r).unwrap()).unwrap();
+    let z = |r: &LibraryRef| game_side(&library::path_of(&dirs, r).unwrap());
     write_profile_file(&game_dir, "kiln/profile.json", "work", serde_json::json!([{ "id": "new-items", "path": z(&v1) }]));
     assert_eq!(library::users(&dirs, &v1), ["work (active in Enshrouded)"]);
     assert!(library::users(&dirs, &v2).is_empty(), "another version of the mod is not used");
@@ -206,8 +219,8 @@ fn removal_goes_past_only_the_users_the_dialog_showed() {
     let dirs = DataDirs::at(t.0.join("data"));
     let r = import(&dirs, &t.0, "new-items", "1.0.0", "a");
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
-    let z = kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, &r).unwrap()).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
+    let z = game_side(&library::path_of(&dirs, &r).unwrap());
     write_profile_file(&game_dir, "kiln/profile.json", "work", serde_json::json!([{ "id": "new-items", "path": z }]));
     let users = library::users(&dirs, &r);
     assert_eq!(users, ["work (active in Enshrouded)"]);
@@ -236,8 +249,8 @@ fn a_left_over_play_once_file_does_not_pin_its_versions() {
     let dirs = DataDirs::at(t.0.join("data"));
     let v2 = import(&dirs, &t.0, "new-items", "2.0.0", "b");
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
-    let z = kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, &v2).unwrap()).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
+    let z = game_side(&library::path_of(&dirs, &v2).unwrap());
     write_profile_file(&game_dir, "kiln/profile.once.json", "tryout", serde_json::json!([{ "id": "new-items", "path": z }]));
     assert!(library::users(&dirs, &v2).is_empty());
     assert_eq!(library::unused(&dirs).unwrap(), vec![v2.clone()]);
@@ -265,11 +278,11 @@ fn clean_up_removes_a_batch_with_one_process_lookup_per_folder() {
     let dirs = DataDirs::at(t.0.join("data"));
     let refs: Vec<LibraryRef> = (0..6).map(|i| import(&dirs, &t.0, &format!("mod-{i}"), "1.0.0", &format!("c{i}"))).collect();
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
     let srv = t.0.join("EnshroudedServer");
     put(&t.0, "data/servers/home.json", format!(r#"{{ "id": "home", "dir": {:?} }}"#, srv.display().to_string()).as_bytes());
     // mod-0 is in the game's active profile file (Conflict without force), mod-1 is not in the library any more
-    let z = kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, &refs[0]).unwrap()).unwrap();
+    let z = game_side(&library::path_of(&dirs, &refs[0]).unwrap());
     write_profile_file(&game_dir, "kiln/profile.json", "work", serde_json::json!([{ "id": "mod-0", "path": z }]));
     library::remove_with(&dirs, &refs[1], false, &mut nothing).unwrap();
 
@@ -316,10 +329,10 @@ fn a_stale_active_file_still_protects_a_version_no_profile_lists() {
     let dirs = DataDirs::at(t.0.join("data"));
     let v1 = import(&dirs, &t.0, "new-items", "1.0.0", "a");
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
     let p = profile::create(&dirs, "Work", None).unwrap(); // lists nothing
     write_profile_file(&game_dir, "kiln/profile.json", &p.id, serde_json::json!([
-        { "id": "new-items", "version": v1.version, "hash": v1.hash, "path": kiln_manage::winpath::unix_to_z(&library::path_of(&dirs, &v1).unwrap()).unwrap() }]));
+        { "id": "new-items", "version": v1.version, "hash": v1.hash, "path": game_side(&library::path_of(&dirs, &v1).unwrap()) }]));
     assert_eq!(library::users(&dirs, &v1), [format!("{} (active in Enshrouded)", p.id)]);
     assert!(library::unused(&dirs).unwrap().is_empty());
 }
@@ -334,7 +347,7 @@ fn a_real_process_named_like_the_game_blocks_removal() {
     let dirs = DataDirs::at(t.0.join("data"));
     let r = import(&dirs, &t.0, "new-items", "1.0.0", "a");
     let game_dir = t.0.join("Enshrouded");
-    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+    game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
     let exe = game_dir.join(game::CLIENT_EXE);
     std::fs::copy(sleep, &exe).unwrap();
     let mut child = std::process::Command::new(&exe).arg("60").current_dir(&game_dir).spawn().unwrap();
@@ -366,10 +379,10 @@ fn a_symlinked_home_maps_both_ways() {
     for (data_root, written_through) in [(&link, &real), (&real, &link)] {
         let dirs = DataDirs::at(data_root.join("data"));
         let r = import(&dirs, data_root, "new-items", "1.0.0", "a");
-        game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, PathMode::Z), None).unwrap();
+        game::write_record(&dirs, &install(&game_dir, "client", GameKind::Client, HOST_MODE), None).unwrap();
         let entry = library::path_of(&dirs, &r).unwrap();
         let rel = entry.strip_prefix(data_root).unwrap();
-        let z = kiln_manage::winpath::unix_to_z(&written_through.join(rel)).unwrap();
+        let z = game_side(&written_through.join(rel));
         write_profile_file(&game_dir, "kiln/profile.json", "work", serde_json::json!([{ "id": "new-items", "path": z }]));
         assert_eq!(library::users(&dirs, &r), ["work (active in Enshrouded)"], "data at {}, Z: path {z}", data_root.display());
         assert!(library::unused(&dirs).unwrap().is_empty());

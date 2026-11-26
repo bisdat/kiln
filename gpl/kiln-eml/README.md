@@ -543,6 +543,38 @@ Each is marked `kiln-eml:` in the source.
     `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
     `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder
     through the production runner and the inspector, and the read-back as the second layer).
+41. `kfc-content` `image/encode.rs` (`encode_with_threads`, `encode_threads`, `set_encode_threads`) and
+    `kiln-eml/src/runner.rs` (`encode_threads`, `EncodeThreads`) (0.2.0-dev.31.13): a BC1 to BC7 texture is encoded in
+    strips of whole block rows, each by whichever thread takes it next (the calling thread and up to count - 1 helpers),
+    the strips then put into the output in order. The calling thread never waits for a helper to start (one created
+    while another thread holds the Windows loader lock runs only once it is free): it takes strips from the same counter
+    and waits only for strips a helper has taken; a helper that has not started, or that the OS refuses, leaves its
+    strips to the threads that run, never a panic, and while one has not started no new helper is made. So the helpers
+    own their input (a copy of the texture's RGBA8 pixels, freed when its last strip is done) and each strip has its own
+    buffer: about twice the serial encode's memory for the texture being encoded (review of 31.13; the test
+    `a_helper_that_has_not_started_yet_is_not_waited_for` in `encode.rs`). block_compression makes a new compressor for every block, so the bytes are the serial
+    encode's (`tests/parallel_encode.rs`: every BC format, uneven strips, more threads than rows, whole mip chains, very
+    wide and very tall textures, sizes that are not whole blocks; the refused-thread test in `encode.rs`). `encode`
+    stays EML's serial encode until the host sets a count; EML's run (`runner::run` outside kiln mode, which in the
+    plugin runs in kiln-core's early step outside the loader lock) sets the PC's threads, at most 16,
+    `KILN_EML_ENCODE_THREADS` overriding (1 = serial, at most 64, `0` or a non-number ignored), and puts the old count
+    back when it ends, also on an error or a panic. Kiln mode stays serial: its pass can run while a package DLL holds the loader lock,
+    where a new thread cannot start. EMF Beastmaster's three packs spent 397 of their 401 s of Lua in BC7.
+42. `mod-loader-lua` `steam_files.rs` (new) and `load.rs` (`create_backup_with`) (kiln-eml's own code, 0.2.0-dev.31.13):
+    a new working baseline is never taken from game files that Steam does not list as they are. `create_backup_with`
+    copies the game files over the backups when there are none, they are of another game build or they are stale.
+    The archive's own checks show that the game files are a whole archive, not that no program changed them since
+    Steam wrote them. Steam's record does: `steamapps/appmanifest_<app>.acf` names the installed depot manifests,
+    `<Steam>/depotcache/<depot>_<manifest>.manifest` lists each file's size and SHA-1 (Windows: also the depotcache of
+    the Steam installation the registry names). Where it lists `<stem>.kfc` and `<stem>.kfc_resources` otherwise, the
+    copy is refused ("... are not the files Steam installed for build <id> ... Verify the game files in Steam, then start
+    through Kiln again") and the pair present stays (after a game update the only clean copy there is); listed as they
+    are, or no manifest, the copy goes on as before. Only those two files are hashed, only on that path; nothing is
+    written. The same reader and rule as Kiln's ShroudForge fork (`check_steam_installed_files.rs`,
+    `verify_working_baseline.rs`), so both writers of the shared pair decide alike. Tests: load.rs
+    `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
+    adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
+    is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

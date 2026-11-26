@@ -1,4 +1,4 @@
-# TestKit (Kiln.TestKit): part 1 of 2
+# TestKit (Kiln.TestKit): part 1 of 3
 
 ## TestKit.BootRun `0.2.3` — One OnBoot run of the kit (`HarnessBootPhase.Run`).
 - `BootRun(string ModId, BootModState State, string? Reason, IReadOnlyList<TestKit.BootRunDefinition> Staged, IReadOnlyList<string> Definitions, IReadOnlyList<BootIssue> Issues)`
@@ -72,6 +72,35 @@ enum: Apply, Update, End
 - `Step { get; } -> ulong` — The step whose start delivered it (the step after it was typed).
 - `Text { get; } -> string` — The text as typed.
 
+## TestKit.FakeClientSkillNode `0.2.22` — One node of the client's tree in a harness (`HarnessClientSkills.AddNode`).
+- `ClassAlignment { get; set; } -> int` — Its class (0 Warrior, 1 Mage, 2 Ranger, 3 Neutral).
+- `Cost { get; set; } -> int` — Its cost per level.
+- `Id { get; } -> uint` — The node's id.
+- `Level { get; set; } -> int` — The player's level: 0 locked.
+- `MaxLevel { get; set; } -> int` — 0: one unlock.
+- `Shadow { get; set; } -> bool` — A shadow node.
+- `Type { get; set; } -> SkillNodeType` — Its type.
+- `UiX { get; set; } -> float` — Its x position on the skill screen.
+- `UiY { get; set; } -> float` — Its y position on the skill screen.
+
+## TestKit.FakeClientStation `0.2.22` — One station of the client's cache in a harness (`HarnessClientStations.Add`).
+- `Base { get; set; } -> BaseId` — The base the client grouped it under.
+- `Choices { get; } -> List<CategoryChoice>` — The selected recipe's category choices (at most 4 are read).
+- `CraftsLoaded { get; set; } -> int` — The complete crafts its inputs still hold after the cycle in progress.
+- `Inventory { get; set; } -> List<StationStack>?` — The client world's copy of the station's inventory; null: the client has none (outputs unknown).
+- `Needs { get; set; } -> StationNeeds` — What it lacks.
+- `NeedsEnergy { get; set; } -> bool` — It runs on rotational energy.
+- `Position { get; set; } -> WorldPosition` — Where it stands (read in 0.25 m steps).
+- `Recipe { get; set; } -> uint` — The selected recipe; 0: none.
+- `Run(uint recipe, int craftsLoaded, TimeSpan started) -> TestKit.FakeClientStation` — Runs `recipe`: state Running, its cycle started at `started`, with `craftsLoaded` more crafts loaded.
+- `Started { get; set; } -> TimeSpan` — The cycle's start on the client's clock (`HarnessClientStations.Clock`).
+- `State { get; set; } -> StationState` — Its state as the server sent it.
+- `Station { get; } -> EntityId` — The station.
+- `UseAllOptions { get; set; } -> bool` — "Use all ingredient options".
+- `Water { get; set; } -> int` — Its water in Fuel units (64 per charge).
+- `WaterMax { get; set; } -> int` — Its water capacity in Fuel units.
+- `Workshop { get; set; } -> uint` — Its workshop.
+
 ## TestKit.FakeControlCall `0.2.3` — One call a mod made to the fake kiln.creature_control.
 - `FakeControlCall(ulong Step, string Function, ulong Owner, EntityId Entity, ulong Lease, int Result, string Detail)`
 - `Detail { get; init; } -> string` — The lease state or reason it answered, in words.
@@ -93,6 +122,9 @@ enum: Apply, Update, End
 - `Order { get; init; } -> CraftSourceOrder` — Its position relative to station outputs.
 - `Owner { get; init; } -> ulong` — The registering native owner.
 - `Player { get; init; } -> EntityId` — The only player it supplies.
+
+## TestKit.FakeCrosshair `0.2.22` — Values the kit's crosshair fake gives every sample.
+- `const Session = 1 -> uint` — The client session of every sample (`CrosshairHit.ClientSession`).
 
 ## TestKit.FakeEcall `0.2.4` — One ECALL of a game program: the native it calls and the call-site id.
 - `FakeEcall()`
@@ -462,156 +494,3 @@ enum: Entity, Item, Destroy, Cleanup
 - `static operator !=(TestKit.FakeVoxelAnswer left, TestKit.FakeVoxelAnswer right) -> bool`
 - `static operator ==(TestKit.FakeVoxelAnswer left, TestKit.FakeVoxelAnswer right) -> bool`
 - `static Refused(string reason) -> TestKit.FakeVoxelAnswer` — Nothing is known, for `reason`: `NotLoaded`, `OutOfGrid`.
-
-## TestKit.FakeVoxelRay `0.2.3` — A voxel ray a mod asked for (`Queries.RaycastVoxels`, `GroundBelow`, `VoxelLineOfSight`, a brain's sight).
-- `FakeVoxelRay()`
-- `FakeVoxelRay(WorldPosition From, WorldPosition To, byte Realm)`
-- `From { get; init; } -> WorldPosition` — Where the ray starts.
-- `Realm { get; init; } -> byte` — The realm the ray was cast in (0: the overworld).
-- `To { get; init; } -> WorldPosition` — Where the ray ends.
-
-## TestKit.FakeWorld `0.2.2` — The fake world of a harness (`KilnHarness.Entities`): entities with components laid out by Kiln.Game's types, under the real Kiln.World.
-- `All { get; } -> IReadOnlyList<EntityId>` — Every entity made here (and every fake player's entity that was given a component), by id.
-- `BusyReads { get; set; } -> int` `0.2.16` — The next `value` frame-quiet reads from tasks (`ReadMode.FrameQuiet`) answer `ReadStatus.Busy`, as when a server...
-- `BusyWrites { get; set; } -> int` `0.2.16` — The next `value` compare-exchanges from tasks (`WorldConcurrent.TryCompareExchange`) meet the engine's gate taken...
-- `Create() -> EntityId` — Makes an entity with no component and no position.
-- `Create(WorldPosition position) -> EntityId` — Makes an entity that stands at `position`: its `CurrentTransform` (identity rotation, scale 1), which...
-- `Destroy(EntityId entity) -> bool` — Takes an entity and its components out of the world.
-- `Exists(EntityId entity) -> bool` — Whether the entity is in the world: made here, or a fake player's.
-- `GameWrites<T>(string program, TestKit.FakeGameWriter<T>? each = null) -> IDisposable` — A program of the game that writes `T`: from now on `World.WriteInfo` and every tracked write of the type name it...
-- `Get<T>(EntityId entity) -> T` — The entity's component.
-- `GetBytes(EntityId entity, string component) -> byte[]?` — A copy of the component's bytes; null when the entity has none.
-- `Remove<T>(EntityId entity) -> bool` — Takes component `T` off an entity.
-- `Set<T>(EntityId entity, T value) -> TestKit.FakeWorld` — Puts component `T` on an entity, or replaces its value, as if the game had: no write tracking, no event, at once.
-- `SetBytes(EntityId entity, string component, ReadOnlySpan<byte> bytes) -> TestKit.FakeWorld` — Puts a component on an entity by its game name, as bytes: for a component no generated type names.
-- `SetPosition(EntityId entity, WorldPosition position) -> void` — Moves an entity (or gives it its first position): the position in its `CurrentTransform`.
-- `Track(string component, bool save, bool replication) -> void` — Says what the game's write tracking does with a component type, which the kit cannot know: a tracked write of it...
-- `TryGet<T>(EntityId entity, out T value) -> bool` — The entity's component; false when it has none (or one of another size).
-- `Writes { get; } -> IReadOnlyList<TestKit.FakeWorldWrite>` — Every tracked write a mod asked for that reached the world, in the order they ran, with what became of each (a write...
-
-## TestKit.FakeWorldPosition `0.2.17` — The local player's position, in metres (the publication carries it in 32.32 fixed point).
-- `FakeWorldPosition()`
-- `FakeWorldPosition(double X, double Y, double Z)`
-- `X { get; init; } -> double` — The X coordinate, in metres.
-- `Y { get; init; } -> double` — The Y coordinate, in metres.
-- `Z { get; init; } -> double` — The Z coordinate, in metres.
-
-## TestKit.FakeWorldSample `0.2.17` — What a test publishes through `HarnessUiSnapshot.Publish`: each group it gives is in the publication when something demanded it.
-- `HostHours { get; init; } -> double?` — The hour of the world this game hosts (`UiWorldFields.HostTime`).
-- `Inventory { get; init; } -> IReadOnlyList<TestKit.FakeWorldSlot>?` — The own inventory's nonempty slots (`UiWorldFields.LocalInventory`), in any order: the publication sorts them by...
-- `LocalPlayer { get; init; } -> uint` — The local player's entity (each inventory slot's holder).
-- `Position { get; init; } -> TestKit.FakeWorldPosition?` — The position (`UiWorldFields.LocalPosition`).
-- `Unavailable { get; init; } -> IReadOnlyDictionary<UiWorldFields, string>?` — Groups that are missing for a reason of their own, by one `UiWorldFields` bit each.
-- `Vitals { get; init; } -> TestKit.FakeVitals?` — Health, stamina and mana (`UiWorldFields.LocalVitals`).
-
-## TestKit.FakeWorldSlot `0.2.17` — One nonempty slot of the local player's own inventory.
-- `FakeWorldSlot()`
-- `FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0)`
-- `Count { get; init; } -> uint` — How many of the item the slot holds.
-- `Deconstruct(out uint Item, out uint Count, out uint InventoryPage, out uint SlotIndex, out uint Pide) -> void`
-- `Equals(TestKit.FakeWorldSlot other) -> bool`
-- `InventoryPage { get; init; } -> uint` — The inventory page the slot is on (part of the slot's binding key).
-- `Item { get; init; } -> uint` — The item in the slot, by the game's item id.
-- `static operator !=(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
-- `static operator ==(TestKit.FakeWorldSlot left, TestKit.FakeWorldSlot right) -> bool`
-- `Pide { get; init; } -> uint` — The id of the item's own per-item data in the game (gear: level, rarity, gems); 0 for an item without any.
-- `SlotIndex { get; init; } -> uint` — The slot's index on its page.
-
-## TestKit.FakeWorldWrite `0.2.2` — One tracked write a mod asked for, as the fake world ran it (`FakeWorld.Writes`).
-- `FakeWorldWrite(ulong Step, string? ModId, EntityId Entity, string Component, int Offset, WorldWriteStatus Status, byte[] Before, byte[] After)`
-- `After { get; init; } -> byte[]` — The same bytes afterwards.
-- `Before { get; init; } -> byte[]` — The bytes it named, as they were; empty when nothing was read.
-- `Component { get; init; } -> string` — The component's short name.
-- `Entity { get; init; } -> EntityId` — The entity.
-- `ModId { get; init; } -> string?` — The mod that asked; null for a call outside any mod.
-- `Offset { get; init; } -> int` — The first byte the write named.
-- `Status { get; init; } -> WorldWriteStatus` — What became of it.
-- `Step { get; init; } -> ulong` — The harness step at whose start the write ran: the step after the call.
-
-## TestKit.HarnessAmmoList `0.2.15` — The fake kiln.ui.ammo of a harness (`KilnHarness.AmmoList`): Ui.AmmoList's own code runs on it.
-- `Hold(AmmoListKind kind, ItemId weapon, params AmmoListRow[] gameRows) -> void` — The player holds `weapon` (a bow for `AmmoListKind.Arrow`, a staff for `AmmoListKind.Spell`): the game builds its...
-- `KnownItems(AmmoListKind kind, params ItemId[] items) -> void` — The client's items of this kind (the arrows, the spells): a snapshot naming any other item is refused, as the game...
-- `ModeOf(AmmoListKind kind) -> AmmoListMode?` — How the mods' rows go in (null: the game's list as it is).
-- `NewSession() -> void` — A new client session (the player left and joined again): the snapshots and queued picks are cleared, as native does...
-- `Pick(AmmoListKind kind, ItemId item) -> bool` — The player picks the row of `item`.
-- `Player { get; set; } -> EntityId` — The local player the lists are built for (the context's `Player`).
-- `Provided(AmmoListKind kind) -> IReadOnlyList<AmmoListRow>` — The mods' rows Kiln.Ui published for the list (composed, in order); empty while the game's list shows as it is.
-- `Publishes { get; } -> int` — Snapshots published so far (a clear included).
-- `Select(AmmoListKind kind, ItemId item) -> void` — The player moves the list's selection onto the row of `item`.
-- `Selected(AmmoListKind kind) -> ItemId?` — The item the selection rests on: it stays on its item when the rows change, and goes to the first row when its item...
-- `Session { get; } -> uint` — The client session the lists belong to (1 at the start).
-- `SetGameRows(AmmoListKind kind, params AmmoListRow[] gameRows) -> void` — The backpack changed: the game's own rows of the held weapon's list are now `gameRows`.
-- `Shown(AmmoListKind kind) -> IReadOnlyList<AmmoListRow>` — The list as the HUD shows it now: the game's rows, then (Append) or instead (Replace) the mods' rows.
-- `Unhold(AmmoListKind kind) -> void` — The weapon is put away: the list is not built (no context; its snapshot stays until Kiln.Ui publishes another).
-
-## TestKit.HarnessAssets `0.2.3` — The kit's kiln.assets of a harness (`KilnHarness.Assets`): Kiln.Assets' own code runs on it.
-- `AddGameBlob(byte[] bytes) -> string` — Adds `bytes` to the game's content index (in order; a hash already there is not listed twice by the catalog).
-- `CatalogGeneration { get; } -> ulong` — The catalog's generation: it grows with every change of the registrations.
-- `IndexReady { get; set; } -> bool` — Whether the game's content index can be read.
-- `Registrations { get; } -> IReadOnlyList<TestKit.FakeBlobRegistration>` — The live registrations, in the order that decides which one is served (the later one).
-
-## TestKit.HarnessBootPhase `0.2.3` — The boot phase of a harness (`KilnHarness.BootPhase`): a unit test of a mod's `OnBoot`.
-- `Run(string folder, bool commit = true) -> TestKit.BootRun` — Runs the OnBoot of the mod in `folder` (a built mod folder with a kiln.mod.json that has `"boot"`) and, with...
-- `Runs { get; } -> IReadOnlyList<TestKit.BootRun>` — Every run of this harness, in order.
-- `SetRecord(string key, string valueJson, Guid resourceId = default(Guid), uint typeHash = 0, int part = 0) -> void` — A record `boot.GameData.Read()` answers: its value as camelCase JSON.
-
-## TestKit.HarnessCamera `0.2.17` — The fake kiln.camera of a harness (`KilnHarness.Camera`): Kiln.Camera's own code runs on it.
-- `Calls { get; } -> IReadOnlyList<TestKit.FakeCameraCall>` — Every camera call the fake answered through its callback, in order.
-- `End(ulong lease, uint endReason) -> bool` — Ends an applied lease by itself, as the service would for `endReason` (`CameraEndReason`'s numbers: 2 expired, 3...
-- `Expire(ulong lease) -> bool` — Lets a lease run out, as its duration would: its change event (ended, expired) goes out at the next step.
-- `KilnClient(EntityId player, ulong parts = 30) -> void` — Makes `player`'s client a Kiln client that offers `parts` (`CameraCapability`'s local part bits: 2 pose, 4 lens, 8...
-- `Leases { get; } -> IReadOnlyList<ulong>` — The numbers of the leases that hold a camera now.
-- `RefuseNext(uint reason) -> void` — The next apply or update that the lease rules would accept is refused with `reason` instead (`CameraReason`'s...
-- `StopWorld() -> int` — The world stops: at the next step every applied lease ends `WorldStopped` and a waiting apply or update is answered...
-
-## TestKit.HarnessCapabilities `0.2.1` — The capability rows mods see offline (`KilnHarness.Capabilities`): every Kiln service the kit has no fake for is unavailable with reason `offline`, so a mod's own...
-- `All { get; } -> IReadOnlyList<TestKit.CapabilityRow>` — Every row, sorted by name.
-- `ClearOverride(string name) -> void` — Drops the test's override of `name`.
-- `Is(string name) -> bool` — Whether `name` is available (what `Game.HasFeature` answers).
-- `Override(string name, bool available, string? reasonText = null) -> void` — Switches a row on or off for this harness.
-- `Why(string name) -> string` — One sentence saying whether and why not, as a mod could log it.
-
-## TestKit.HarnessChat `0.2.2` — The fake kiln.chat of a harness (`KilnHarness.Chat`): Kiln.Chat's own code (`Chat`, `Chat.Received`, `ChatMessageEvent`, commands typed in chat) runs on it.
-- `Sent { get; } -> IReadOnlyList<TestKit.FakeChatLine>` — Every server line mods and Kiln sent, in order: one per `Broadcast`, `Tell` or `Say` line that reached a player...
-- `Typed { get; } -> IReadOnlyList<TestKit.FakeChatMessage>` — Every line the players typed, as delivered, in order (consumed ones included).
-
-## TestKit.HarnessCombat `0.2.2` — The fake kiln.combat of a harness (`KilnHarness.Combat`): Kiln.Combat's own code (`Combat.GetHealth`, `SetHealth`, `Heal`, `Damage`, `Kill`, god mode...
-- `Health(EntityId entity) -> TestKit.FakeHealth?` — The entity's health; null when it has none.
-- `Hit(EntityId target, int amount, EntityId attacker = default(EntityId), EntityId source = default(EntityId)) -> ulong` — The game deals a hit: `amount` damage (negative: a healing hit) on `target`.
-- `Hits { get; } -> IReadOnlyList<TestKit.FakeHit>` — Every hit, mods' and the game's, in the order they were dealt.
-- `Respawn(EntityId entity, int health) -> void` — A dead player (or creature) is alive again with `health`: `PlayerRespawnEvent` at the next step.
-- `SetHealth(EntityId entity, int current, int max) -> void` — Gives an entity health, as the game's Health component holds it (no event).
-
-## TestKit.HarnessComponentChanges `0.2.4` — The fake kiln.component_changes of a harness (`KilnHarness.ComponentChanges`): Kiln.World's own consumer of `ComponentChanges.Watch` runs on it.
-- `PresentPairs { get; } -> int` — The present (entity, component) pairs the watches cover.
-- `QueuedFrames { get; } -> int` — The frames of changes that wait for the consumer (at most two).
-- `QueueOverflows { get; } -> ulong` — How often the queue was full and the watches were suspended.
-- `SetAttribute(EntityId entity, ObservedAttribute attribute, int current, int maximum) -> void` — The typed current and maximum value of an attribute as the game's attribute code would read them (the kit does not...
-- `Watches { get; } -> int` — How many watches exist.
-
-## TestKit.HarnessCrafting `0.2.15` — Player-source registrations and their filtered counts in the kit.
-- `BuildStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a block placement may use: the links registered with `CraftSourceOptions.Building` only, likewise.
-- `Dyes(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session generation...
-- `FillStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a production-station fill may take: the links registered with `CraftSourceOptions.Fills` only, with the...
-- `LockStock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` `0.2.21` — The counts a lock may use: the links registered with `CraftSourceOptions.Locks` only, with the same filters...
-- `Sources { get; } -> IReadOnlyList<TestKit.FakeCraftSourceRegistration>` — Live registrations, in registration order.
-- `Stock(EntityId player) -> IReadOnlyDictionary<ItemId, long>` — Registered source counts only (not the bag), with the same per-player allow/deny union and current inventory...
-
-## TestKit.HarnessCreatureControl `0.2.3` — The fake kiln.creature_control of a harness (`KilnHarness.CreatureControl`): Kiln.CreatureControl's own code (`CreatureControl.Acquire`, `WaitActive`, `Inspect`...
-- `Calls { get; } -> IReadOnlyList<TestKit.FakeControlCall>` — Every call mods made, in order.
-- `IsControlled(EntityId body) -> bool` — True while the broker holds `body` (its AI-off layer and the SteeringAgent removal, in the game).
-- `SetBusy(EntityId body, bool busy = true) -> void` — Makes `body`'s current action keep playing (true) or end (false): a lease on it stays Pending while it plays, and...
-
-## TestKit.HarnessDecisions `0.2.4` — The fake kiln.decisions of a harness (`KilnHarness.Decisions`): Kiln's own dispatcher of decisions runs on it.
-- `Active { get; } -> int` — How many decisions are open (held, not ended).
-- `Outcomes { get; } -> IReadOnlyList<DecisionResult>` — How every decision ended so far, in order: what the service recorded, whether or not a mod listened for...
-- `RestartWorld() -> void` — The server world stops and the next one starts, as when a hosted world is switched: every open decision ends...
-
-## TestKit.HarnessImpactNatives `0.2.4` — The fake kiln.abilities natives of a harness (`KilnHarness.ImpactNatives`): Kiln.Abilities' own code (`Abilities.Natives.RegisterSync`, `Attach`, `DeclareTyped`, an...
-- `AddProgram(uint program, params TestKit.FakeEcall[] calls) -> void` — Declares a game program in the world's ImpactRegistry with the natives it calls and where (the ECALL's call-site...
-- `Call(TestKit.FakeImpactCall call) -> TestKit.FakeImpactResult` — Makes one ECALL of `FakeImpactCall.Native`, as a program's step would, and waits for it.
-- `Calls { get; } -> IReadOnlyList<TestKit.FakeImpactCallRecord>` — Every call the test made, in order.
-- `OtherRead { get; } -> ISet<string>` — The types of impact_simulation's other_read list: what NativeContext.TryRead may read of any entity (with...
-- `OtherWrite { get; } -> ISet<string>` — The types of impact_simulation's other_write list: what NativeContext.TryWrite may write (and TryRead read).
-- `Serial { get; set; } -> bool` — The simulated pin-and-world-thread condition for ECS access (default true).
-- `SetGameNative(string native, TestKit.FakeGameNativeHandler? handler = null) -> void` — Makes `native` one of the game's natives (its node name, `"applyDamage"`, or "0x" and its hash) and says what it...

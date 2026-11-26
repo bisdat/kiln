@@ -52,20 +52,6 @@ inline long long _InterlockedOr64(volatile long long* p, long long v) {
 
 #include "../newcontent.cpp"
 
-// newcontent.cpp's registry hooks live in registry_live.cpp, which this test does not link (its kitbash clones carry no
-// registry id or fields): a definition with registry fields would be refused here, loudly, never initialized silently.
-namespace kc {
-bool registry_live_prepare_entry_identities(const registry::json& fields, std::string* why) {
-    if (fields.is_null() || fields.empty()) return true;
-    *why = "lateref-test: no registry back-end";
-    return false;
-}
-bool registry_live_initialize_entry(uint32_t, const Entry&, const std::string&, const registry::json&, std::string* why, const Schema*) {
-    *why = "lateref-test: no registry back-end";
-    return false;
-}
-}  // namespace kc
-
 // ============================================================================================= the fake game =====
 namespace fake {
 constexpr uint32_t kItemSize = 0x200;  // keen::ItemInfo here: id +0, GUID +4, debugName (BlobString) +0x1f0
@@ -370,6 +356,11 @@ bool store_drop(KilnOwner, uintptr_t) { return false; }
 bool store_original(uintptr_t, uint8_t, uint8_t*) { return false; }
 void store_originals(uintptr_t, size_t, uint8_t*) {}
 size_t store_flush(std::string*) { return 0; }
+// registry_live.cpp: no registry stage here (the test's definitions have no registry id or fields)
+bool registry_live_prepare_entry_identities(const registry::json&, std::string*) { return true; }
+bool registry_live_initialize_entry(uint32_t, const Entry&, const std::string&, const registry::json&, std::string*, const Schema*) {
+    return true;
+}
 }  // namespace kc
 
 // ============================================================================================= the cases =========

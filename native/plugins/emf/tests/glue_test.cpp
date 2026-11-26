@@ -918,16 +918,33 @@ static void test_v40(KilnApi &api) {
         CHECK(good == 8 && render_lookups == 1);
     }
     // the two chat functions come from fill_game (api_game.cpp, not built into this test), on_hit from fill_hits
-    // (api_hits.cpp: tests/hits_test.cpp)
+    // (api_hits.cpp: tests/hits_test.cpp); since 0.2.0-dev.31.13 the v32 buffs from fill_buffs (api_buffs.cpp) and the
+    // five v35 slots from fill_view (api_view.cpp; both tests/buffs_test.cpp), the six marker functions from
+    // fill_markers (api_markers.cpp: tests/markers_test.cpp) and the six v39/v40 order slots from fill_orders
+    // (api_orders.cpp: tests/orders_test.cpp)
     const size_t first = offsetof(EmfApi, on_player) / sizeof(void *), n = sizeof(EmfApi) / sizeof(void *);
     const auto *slots = reinterpret_cast<void *const *>(&t);
-    int empty = 0;
-    for (size_t i = first; i < n; ++i)
+    const size_t v32 = offsetof(EmfApi, buff_types) / sizeof(void *), v32_end = offsetof(EmfApi, on_buff) / sizeof(void *);
+    const size_t v35 = offsetof(EmfApi, player_view) / sizeof(void *), v35_end = offsetof(EmfApi, canvas_draw) / sizeof(void *);
+    int empty = 0, elsewhere = 0;
+    const size_t markers[] = {offsetof(EmfApi, marker_set), offsetof(EmfApi, marker_remove), offsetof(EmfApi, marker_clear),
+                              offsetof(EmfApi, marker_types), offsetof(EmfApi, marker_send), offsetof(EmfApi, marker_unsend)};
+    for (size_t o : markers) CHECK(!slots[o / sizeof(void *)]);
+    for (size_t i = first; i < n; ++i) {
+        if ((i >= v32 && i <= v32_end) || (i >= v35 && i <= v35_end)) {
+            elsewhere += !slots[i];
+            continue;
+        }
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
-            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *))
+            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *) &&
+            !(i >= offsetof(EmfApi, enemy_order) / sizeof(void *) && i <= offsetof(EmfApi, enemy_moving) / sizeof(void *)) &&
+            std::find(std::begin(markers), std::end(markers), i * sizeof(void *)) == std::end(markers))
             ++empty;
+    }
     CHECK(n - first == 54 && empty == 1 && !t.spawn_facing);  // spawn_facing is filled by fill_spawn, not fill_v40
+    CHECK(elsewhere == 12);
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
+    CHECK(!t.enemy_order && !t.enemy_order_cancel && !t.enemy_target && !t.enemy_move && !t.enemy_move_cancel && !t.enemy_moving);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
     const int before = unsupported_calls, refused_before = refusals;
@@ -946,83 +963,34 @@ static void test_v40(KilnApi &api) {
     EmfHitRule rule{};
     rule.size = sizeof rule;
     CHECK(t.hit_rule_add(&rule) == 0 && !t.hit_rule_remove(1));
-    EmfBuffType bt{};
-    EmfBuff b{};
-    CHECK(t.buff_types(w, &bt, 1) == 0 && !t.buff_type(w, 1, &bt) && t.buffs_of(w, 1, &b, 1) == 0);
-    dirty();
-    CHECK(!t.buff_text(1, 0, buf, sizeof buf) && buf[0] == 0);
-    auto buff_cb = [](EmfWorld *, const EmfBuffEvent *, void *) { ++v40_callbacks; };
-    CHECK(!t.buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) && !t.buff_remove(w, 1, 2, buff_cb, nullptr) &&
-          !t.on_buff(buff_cb, nullptr));
-    EmfMarker mk{};
-    mk.size = sizeof mk;
-    mk.id = "m";
-    EmfMapMarkerType mt{};
-    CHECK(!t.marker_set(&mk) && !t.marker_remove("m") && t.marker_clear() == 0 && t.marker_types(&mt, 1) == 0);
-    CHECK(t.marker_send(0, &mk, 1) == 0 && t.marker_unsend(0, "m") == 0);
     double x = 7, z = 9;
     CHECK(!t.map_cursor(&x, &z) && x == 7 && z == 9);
     CHECK(!t.on_map_click([](const EmfMapClick *, void *) { ++v40_callbacks; }, nullptr));
     CHECK(!t.map_action("a", "A", 0, [](EmfWorld *, const EmfMapDone *, void *) { ++v40_callbacks; }, nullptr));
     CHECK(!t.ground_at(w, 1, 2, [](EmfWorld *, const EmfGround *, void *) { ++v40_callbacks; }, nullptr));
-    EmfPlayerView view{};
-    view.size = sizeof view;
-    float explored = 4;
-    EmfGameMarker gm{};
-    EmfCanvas canvas{};
-    canvas.size = sizeof canvas;
-    EmfCanvasCmd cmd{};
-    CHECK(!t.player_view(&view) && !t.fog_at(1, 2, &explored) && explored == 4 && t.map_markers(&gm, 1) == 0);
-    CHECK(!t.canvas_set("c", &canvas) && !t.canvas_draw("c", &cmd, 1));
     EmfPathQuery q{};
     q.size = sizeof q;
     CHECK(t.path_find(w, &q, [](EmfWorld *, uint32_t, const EmfPathResult *, const EmfPathPoint *, void *) { ++v40_callbacks; },
                       nullptr) == 0 &&
           !t.path_cancel(1));
     CHECK(t.door_state(w, 1) == EMF_DOOR_NONE && !t.door_set(w, 1, 1, 0) && !t.door_lock(w, 1, 1));
-    CHECK(!t.enemy_order_cancel(1) && t.enemy_target(w, 1) == 0 && !t.enemy_move_cancel(1) && t.enemy_moving(w, 1) == 0);
     CHECK(v40_callbacks == 0);
     CHECK(refusals == refused_before);
 
-    // the three requests with a `why`: refused with the reason, and a request that is too small is refused untouched
+    // the request with a `why` (enemy orders and moves: tests/orders_test.cpp): refused with the reason, and a request that is too small is refused untouched
     EmfRemoveBuilding rb{};
     rb.size = sizeof rb;
     rb.entity = 5;
     rb.refunded = 77;
     CHECK(!t.remove_building(w, &rb) && rb.refunded == 0 && std::string(rb.why) == "not available on Kiln yet");
-    EmfEnemyOrder eo{};
-    eo.size = sizeof eo;
-    CHECK(t.enemy_order(w, &eo) == 0 && std::string(eo.why) == "not available on Kiln yet");
-    EmfMoveOrder mo{};
-    mo.size = sizeof mo;
-    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
-          std::string(mo.why) == "not available on Kiln yet");
-    // v41 (EMF 0.6.10): a mod built with 0.6.11's header sends 136 bytes with stuck_seconds and EMF_MOVE_PEACEFUL_ALL;
-    // one built with 0.6.8's sends 128. Both get the same refusal with its reason, and no callback.
-    CHECK(sizeof mo == 136);
-    mo = {};
-    mo.size = sizeof mo;
-    mo.flags = EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL;
-    mo.stuck_seconds = 30;
-    CHECK(t.enemy_move(w, &mo, [](EmfWorld *, uint32_t, uint32_t, void *) { ++v40_callbacks; }, nullptr) == 0 &&
-          std::string(mo.why) == "not available on Kiln yet");
-    mo = {};
-    mo.size = 128;
-    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && std::string(mo.why) == "not available on Kiln yet");
     const int counted = unsupported_calls - before;
-    CHECK(counted >= 42);  // every function that is not carried reported itself at least once
+    CHECK(counted >= 18);  // every function of this file that is not carried reported itself at least once
     rb = {};
     rb.size = sizeof rb - 1;
     rb.refunded = 77;
     CHECK(!t.remove_building(w, &rb) && rb.refunded == 77 && rb.why[0] == 0);
     CHECK(!t.remove_building(w, nullptr));
-    eo = {};
-    eo.size = 8;
-    CHECK(t.enemy_order(w, &eo) == 0 && eo.why[0] == 0 && t.enemy_order(w, nullptr) == 0);
-    mo = {};
-    mo.size = 8;
-    CHECK(t.enemy_move(w, &mo, nullptr, nullptr) == 0 && mo.why[0] == 0 && t.enemy_move(w, nullptr, nullptr, nullptr) == 0);
-    CHECK(refusals == refused_before + 6 && unsupported_calls - before == counted && v40_callbacks == 0);
+    CHECK(refusals == refused_before + 2 && unsupported_calls - before == counted && v40_callbacks == 0);
 
     // world_to_screen: kiln.render's answer; a point behind the camera (false) leaves px, py alone
     float px = -1, py = -1;
@@ -1099,11 +1067,7 @@ static void test_v46() {
     mo.size = 128;  // a mod built with EMF 0.6.8's header
     CHECK(t.villager_move(w, &mo, nullptr, nullptr) == 0 && mo.why == not_yet);
     CHECK(!t.villager_move_cancel(1) && t.villager_moving(w, 9) == 0);
-    // enemy_move with EMF_MOVE_HOLD (EMF: "EMF_MOVE_HOLD is for villager_move"): refused as every order on Kiln
-    mo = {};
-    mo.size = sizeof mo;
-    mo.flags = EMF_MOVE_HOLD;
-    CHECK(t.enemy_move(w, &mo, move_cb, nullptr) == 0 && mo.why == not_yet);
+    // enemy_move with EMF_MOVE_HOLD ("EMF_MOVE_HOLD is for villager_move"): tests/orders_test.cpp
     CHECK(v46_callbacks == 0 && refusals == refused_before);
     // each of the seven reported itself (one kiln.log line per mod and function, state/emf.json "unsupported")
     for (const char *fn : {"player_permissions", "break_blocks", "block_at", "find_wall", "villager_move",
@@ -1125,7 +1089,7 @@ static void test_v46() {
     CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
 }
 
-// A missing kiln.build and the unimplemented markers keep their documented unavailable answers.
+// A missing kiln.build keeps its documented unavailable answers (marker bars: tests/markers_test.cpp).
 static void test_v47() {
     EmfApi t{};
     fill_v40(&t);
@@ -1154,13 +1118,6 @@ static void test_v47() {
     std::memset(bb.why, 'x', sizeof bb.why);
     const auto saved = bb;
     CHECK(t.break_blocks(w, &bb, nullptr, nullptr) == 0 && std::memcmp(&saved, &bb, sizeof bb) == 0);
-    EmfMarker marker{};
-    marker.size = sizeof marker;
-    marker.id = "test.bar";
-    marker.flags = EMF_MARKER_BAR;
-    marker.bar = 0.5f;
-    CHECK(!t.marker_set(&marker) && t.marker_send(7, &marker, 1) == 0);
-    CHECK(unsupported_fns.count("marker_set") == 1 && unsupported_fns.count("marker_send") == 1);
 }
 
 static void test_wheel_and_right_clicks(KilnUiApi &ui) {

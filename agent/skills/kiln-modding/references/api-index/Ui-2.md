@@ -1,5 +1,32 @@
 # Ui (Kiln.Ui): part 2 of 2
 
+## Ui.World `0.2.13` — The game's world as this player's client draws it: outlines on entities with the game's own highlight (`World.Outline`).
+- `static ClearOutlines() -> void` — Takes every outline of your mod away (their handles end with `OutlineReason.Removed`).
+- `static DefaultOutlineColor { get; } -> Color` — The colour of an outline whose options name none: gold, (255, 196, 64).
+- `static Outline(EntityId entity, OutlineOptions? options = null) -> WorldOutline` — Outlines `entity`'s model with the game's own highlight, in this player's game, until you dispose the handle, your...
+- `const OutlineCapability = "ui.world_outline" -> string` — The capability row of `World.Outline`: a sigdb feature of the game client (kiln.render's palette hooks); kiln.render...
+- `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
+- `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
+- `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
+
+## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
+- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
+- `Current { get; init; } -> uint?` — The current number; null keeps it.
+- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
+- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
+- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
+- `static readonly None -> UiBarEdit` — Changes nothing.
+
+## UiBarProvider `0.2.3` — A value provider.
+- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
+
+## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
+- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
+- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
+- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
+- `LabelOverride { get; init; } -> UiText?` — The label.
+- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.
+
 ## UiChildFlags — Flags of `UiDraw.BeginChild`.
 enum: None, Border, Padding, AutoHeight, FrameStyle, NavFlattened
 

@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.21): part 1 of 3
+# Native ABI rows (mod API 0.2.22): part 1 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -219,6 +219,10 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_client.h `KilnClientApi.building_input_status` @64 `0.2.12`
 - kiln_client.h `KilnClientApi.building_input_cancel` @72 `0.2.12`
 
+## services/kiln_client_crosshair.h — service `kiln.client.crosshair`
+### KilnClientCrosshairApi — 16 bytes
+- kiln_client_crosshair.h `KilnClientCrosshairApi.get` @8 `0.2.22` — The newest sample, copied into *out (out->size >= sizeof(KilnCrosshairHit)); *out_reason (may be NULL)...
+
 ## services/kiln_combat.h — service `kiln.combat`
 ### KilnCombatApi — 128 bytes
 - kiln_combat.h `KilnCombatApi.health` @8 — NOT_FOUND: no such entity or it has no Health component.
@@ -258,7 +262,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_component_changes.h `KilnComponentChangesApiV1.watched` @136 `0.2.4`
 
 ## services/kiln_content.h — service `kiln.content`
-### KilnContentApi — 280 bytes
+### KilnContentApi — 288 bytes
 - kiln_content.h `KilnContentApi.status` @8 — any thread
 - kiln_content.h `KilnContentApi.count` @16 — Registries. count() is 0 until ready. find: debug name (exact, then case-insensitive), "0x1234abcd" /...
 - kiln_content.h `KilnContentApi.entry_at` @24
@@ -293,6 +297,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_content.h `KilnContentApi.txn_end` @256 `0.2.3`
 - kiln_content.h `KilnContentApi.text` @264 `0.2.10` — text: the game's text of a loca tag id in the language the game shows its texts in now, the way the game's...
 - kiln_content.h `KilnContentApi.text_info` @272 `0.2.10` — text_info: whether text() works here (the capability row content.text) and the game's text language now.
+- kiln_content.h `KilnContentApi.pack_mod_reloaded` @280 `0.2.22` — A mod of the pack_mods list was loaded again while the list stayed the same (a reload, or an unload and a...
 
 ## services/kiln_creature_control.h — service `kiln.creature_control`
 ### KilnCreatureControlApi — 96 bytes

@@ -5,7 +5,7 @@
 // activity panel above. Otherwise: the Kiln update when a newer runtime is here, the numbers that matter (players,
 // health, uptime, versions), one line about each section, who is online and the console. Kiln missing from the folder:
 // the Install Kiln banner first.
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { useAdminState, useInAdminProvider } from "../../api/admin";
@@ -18,6 +18,7 @@ import { elapsed, useServerFlow, type Flow } from "./serverActions";
 import { startStep, startTrack, startView } from "./startProgress";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerStatus, type ServerModX } from "./serverApi";
 import { kilnUpdateFor, shortKiln } from "./kilnUpdate";
+import { webPanelLines, webPanelOf } from "./webPanel";
 import { useT } from "../../i18n";
 
 /** Windows (WebView2): a Steam install starts without Wine there. */
@@ -191,26 +192,39 @@ function Steady({ id }: { id: string }) {
   );
 }
 
+/** "Open web panel" (0.2.0-dev.31.12): opens the panel in the browser through the launcher's gateway for this server,
+ *  then says where it is open and offers to close it (it also closes by itself after its last tab). */
 function OpenWebPanel({ id }: { id: string }) {
   const t = useT();
-  const [opening, setOpening] = useState(false);
+  const qc = useQueryClient();
+  const panels = useQuery({ queryKey: WEB_PANELS, queryFn: api.adminWebPanels, refetchInterval: 15_000, retry: false });
+  const open = webPanelOf(panels.data, id);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  async function open() {
-    setOpening(true);
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
     setError(undefined);
     try {
-      await api.adminOpenWebPanel(id);
+      await action();
     } catch (e) {
       setError((e as { message?: string } | null)?.message ?? t("servers.overview.webPanelError"));
     } finally {
-      setOpening(false);
+      setBusy(false);
+      void qc.invalidateQueries({ queryKey: WEB_PANELS });
     }
   }
-  return <div>
-    <Button size="s" disabled={opening} onClick={() => void open()}>{t("servers.overview.openWebPanel")}</Button>
+  return <div className="k-sov-webpanel">
+    <div className="k-sov-webpanel-actions">
+      <Button size="s" disabled={busy} onClick={() => void run(() => api.adminOpenWebPanel(id))}>{t("servers.overview.openWebPanel")}</Button>
+      {open && <Button size="s" variant="ghost" disabled={busy} onClick={() => void run(() => api.adminCloseWebPanel(id))}>{t("servers.overview.closeWebPanel")}</Button>}
+    </div>
+    {open && <ul className="k-sov-webpanel-status" aria-label={t("servers.overview.openWebPanel")}>
+      {webPanelLines(open, t).map((line) => <li key={line}>{line}</li>)}
+    </ul>}
     {error && <Banner tone="err" title={t("servers.overview.webPanelError")}>{error}</Banner>}
   </div>;
 }
+const WEB_PANELS = ["admin_web_panels"] as const;
 
 /** How many are online: Kiln.Admin's list when it is connected, else the status / query count. */
 function OnlineCount({ fallback }: { fallback: number | null }) {

@@ -11,6 +11,7 @@ import { Banner, Button, KeyValue, Modal, Skeleton, Toggle, errorText, fmtBytes,
 import { notifyActivation, notifyActivationOf } from "../../shell/notices";
 import { cookBeforePlay, cookingNotice } from "../../shell/cook";
 import { rememberLaunch } from "../../shell/play";
+import { isAlreadyStarting } from "../../shell/startProgress";
 import { useT } from "../../i18n";
 // the warning before Play
 import { isCanceledStart, launchWithPreflight } from "../../shell/sfiWarnings";
@@ -56,7 +57,7 @@ export default function ModpackOffer({ gameId, lastServer, open, onClose }: { ga
   const start = useMutation({
     mutationKey: ["launch_play"],
     mutationFn: async () => {
-      await api.launchBegin(gameId, "profile").catch(() => {});
+      await api.launchBegin(gameId, "profile").catch((e) => { if (isAlreadyStarting(e)) throw e; });
       void qc.invalidateQueries({ queryKey: ["launch_progress", gameId] });
       await cookBeforePlay(gameId, cookingNotice);
       // the warning before Play, as Play's own start has it
@@ -72,8 +73,9 @@ export default function ModpackOffer({ gameId, lastServer, open, onClose }: { ga
       notifyActivation(r.activation);
       onClose();
     } catch (e) {
-      // the start ended before the game existed: the launcher stops timing it
-      void api.launchEnd(gameId).catch(() => {});
+      // the start ended before the game existed: the launcher stops timing it (not a start pending from before, which
+      // refused this one: 0.2.0-dev.31.13)
+      if (!isAlreadyStarting(e)) void api.launchEnd(gameId).catch(() => {});
       // Cancel in the warning before Play: nothing opened, no toast
       if (isCanceledStart(e)) return;
       notifyActivationOf(e);

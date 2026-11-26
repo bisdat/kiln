@@ -412,8 +412,11 @@ struct PacksReport {
     std::vector<std::pair<std::string, ApplyResult>> files;  // rel path -> result
     std::vector<Conflict> conflicts;
 };
-// Reverts every pack owner, applies every pack file in order, flushes. Returns the report.
+// Reverts every pack owner, applies every pack file in order, flushes. Returns the report. A mod's packs apply whole from
+// one version: a mod with a file that cannot be read or is no pack keeps the packs of its last application in which every
+// file read (when this world had one), whole; else its readable files apply, as at a world load.
 PacksReport apply_all_packs(const std::vector<PackFile>& files);
+void packs_forget_kept();  // world reset: the next world applies its files from scratch
 std::string report_json(const PacksReport& r);
 std::string apply_result_json(const ApplyResult& r);
 bool dump_all(const std::string& path, std::string* error);

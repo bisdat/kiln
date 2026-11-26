@@ -1,0 +1,71 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.client.crosshair on the game client (since 0.2.0-dev.31.13, mod API 0.2.22; docs/kiln/services/client-crosshair.md; docs/re/client.md, 'The gameplay crosshair trace'). The client world's program client_cursor (registered under that name; 0x294620 on client 26430625) calls the game's gameplay scene trace once per step: a ray from the local player's camera along its forward axis, as long as the held item's reach (ItemInfo.equipment.maxDistance clamped to 7..31 m). The 112-byte result stays in client_cursor's frame at [rbp + crosshair.hit]; the observation is the instruction right after the call (a 7-byte lea, relocatable), where the result is complete and nothing has read it yet. The service reads registers and copies the result only. Every byte the decoder relies on is pinned by the probes on the trace body: the copy of the nearest hit row into the result and the result's stores (status +0, position +0x08, normal +0x14, material +0x60/+0x61, entity +0x64, squared distance +0x68), and the miss. Found on client 26430625 (5d9ef2f1...); tools/sigport/tests/test_client_crosshair.py checks it read-only.",
+  "symbols": {
+    "client/CrosshairObserved": {
+      "comment": "client_cursor's call of the trace (rcx = the result [rbp + crosshair.hit], rdx = the camera context, r8 = the descriptor at [rbp - 0x80]) and the next call that reads the same result (the terrain query, r9 = the result): the observation is the first instruction after the trace's call, lea r9, [rbp + crosshair.hit]. rbp is client_cursor's frame base, unchanged by the trace (nonvolatile).",
+      "find": [
+        {
+          "pattern": "4C 8D 45 80 48 8D 95 ?? ?? ?? ?? 48 8D 8D {client/crosshair.hit:d32} E8 {client/CrosshairTrace:rel32} 4C 8D 8D {client/crosshair.hit:d32} 4C 8D 45 80 48 8D 95 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? E8",
+          "offset": 23
+        }
+      ]
+    },
+    "@client/CrosshairTrace.rows": {
+      "comment": "the trace keeps the nearest hit row (104-byte rows, sorted by the squared distance at row + 0x5c): row + 0x0c..+0x5c to the result's +0x08..+0x58 (through rbp - 0x84 .. rbp - 0x34), row + 0x5c..+0x68 and row + 4 (the entity) to +0x58..+0x68",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/CrosshairTrace",
+            "size": 2032
+          },
+          "pattern": "0F 10 42 30 0F 10 0A 0F 10 72 50 0F 10 62 10 0F 10 6A 20 0F 10 52 40 0F 11 45 A0 F2 0F 10 42 60 0F 11 75 C0 F2 0F 11 45 D0 8B 45 D4 F2 0F 10 45 CC 89 45 38 66 48 0F 7E C8 48 C1 E8 20 0F 11 65 80 89 45 3C"
+        }
+      ]
+    },
+    "@client/CrosshairTrace.result": {
+      "comment": "the hit: status 0 at +0, the position block at +0x08, the row's fields to +0x58, the material, flag and entity block at +0x58, the squared distance (xmm6's top lane, row + 0x5c) at +0x68; r14 = the result",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/CrosshairTrace",
+            "size": 2032
+          },
+          "pattern": "45 89 7E 04 45 88 3E 41 0F 11 46 08 0F 10 45 30 45 0F 11 56 18 45 0F 11 5E 28 44 0F 28 9C 24 ?? ?? ?? ?? 45 0F 11 66 38 44 0F 28 A4 24 ?? ?? ?? ?? 45 0F 11 6E 48 44 0F 28 AC 24 ?? ?? ?? ?? 41 0F 11 46 58 F3 41 0F 11 76 68"
+        }
+      ]
+    },
+    "@client/CrosshairTrace.miss": {
+      "comment": "no hit within reach: every field zeroed (the entity and material block included), status 31 (0x1f)",
+      "find": [
+        {
+          "scope": {
+            "symbol": "client/CrosshairTrace",
+            "size": 2032
+          },
+          "pattern": "41 88 46 4C 66 41 89 46 61 48 8B 85 ?? ?? ?? ?? 4D 89 7E 50 4D 89 7E 58 45 89 7E 04 41 C6 06 1F"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "client/crosshair.hit": {
+      "value": 2704
+    }
+  },
+  "features": {
+    "client.crosshair_trace": {
+      "symbols": [
+        "client/CrosshairObserved",
+        "client/CrosshairTrace",
+        "@client/CrosshairTrace.rows",
+        "@client/CrosshairTrace.result",
+        "@client/CrosshairTrace.miss"
+      ],
+      "constants": [
+        "client/crosshair.hit"
+      ]
+    }
+  }
+}

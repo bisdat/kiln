@@ -242,6 +242,21 @@ pub fn create_backup_with(
         }
     }
     if retake || !bak_path.exists() || !validate_backup(path, bak_path) {
+        // kiln-eml (0.2.0-dev.31.13): a new working baseline is taken from the game files (none yet, one of another game
+        // build, or a stale one). Where Steam's manifest of the installed build is there, it says whether they are the
+        // files Steam installed; files it does not list as they are were changed by some program since, and are never
+        // the clean copy: the pair present stays as it is (after a game update it is the only clean copy there is),
+        // and Steam's file check gives files the next start takes. Kiln's ShroudForge fork decides the same way.
+        if let crate::steam_files::Installed::Differs { build, what } =
+            crate::steam_files::installed_files(root.as_std_path(), stem)
+        {
+            let kept = if bak_path.exists() { format!("; {bak_path} and {resources_bak} stay as they are") } else { String::new() };
+            anyhow::bail!(
+                "create_backup: the game's files are not the files Steam installed for {} ({what}), so Kiln takes no clean \
+                 copy of the game data from them{kept}. Verify the game files in Steam, then start through Kiln again",
+                crate::steam_files::Installed::build_words(&build)
+            );
+        }
         let live = path.with_extension("kfc_resources");
         info!(
             "Backing up the vanilla game data: {} and {} ({}) are copied, then read back for the seal",
@@ -895,6 +910,87 @@ mod kiln_tests {
         assert!(restore_backup(&kfc).is_err());
         assert_eq!(std::fs::read(resources).unwrap(), original);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// kiln-eml: a game folder of a Steam library (`<library>/steamapps/common/Enshrouded`) holding the fixture
+    /// archive, and the library.
+    fn library_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let library = PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-steam-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = library.join("steamapps/common/Enshrouded");
+        std::fs::create_dir_all(&dir).unwrap();
+        File::create(dir.join("g.kfc")).unwrap();
+        File::create(dir.join("g.kfc_resources")).unwrap();
+        KFCWriter::<Rc<KFCFile>, _>::new(&dir, "g", Rc::new(TypeRegistry::default()), "fixture")
+            .unwrap().finalize().unwrap();
+        (library, dir)
+    }
+    /// kiln-eml: the game files become a whole archive of `version` holding `content` (a game update, or another
+    /// program that writes the whole archive).
+    fn rewrite(dir: &PathBuf, version: &str, content: &[u8]) {
+        use kfc::guid::ContentHash;
+        for ext in ["kfc", "kfc_resources"] { std::fs::write(dir.join(format!("g.{ext}")), []).unwrap(); }
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "dat") { std::fs::remove_file(path).unwrap(); }
+        }
+        let mut writer: crate::transaction::Writer = KFCWriter::new_with_options(dir, "g", Rc::new(TypeRegistry::default()), version,
+            KFCWriteOptions::default()).unwrap();
+        writer.write_content(&ContentHash::from_data(content), content).unwrap();
+        writer.finalize().unwrap();
+    }
+    /// kiln-eml: Steam's records of build `build` listing the game files as they are now.
+    fn steam_lists(library: &PathBuf, dir: &PathBuf, build: &str) -> (Vec<u8>, Vec<u8>) {
+        let (kfc, resources) = (std::fs::read(dir.join("g.kfc")).unwrap(), std::fs::read(dir.join("g.kfc_resources")).unwrap());
+        crate::steam_files::fixture::install_steam_records(library.join("steamapps").as_std_path(), build,
+            &[("g.kfc", &kfc), ("g.kfc_resources", &resources)]);
+        (kfc, resources)
+    }
+    // kiln-eml (0.2.0-dev.31.13): after a game update the working baseline of the previous build is replaced by the game
+    // files only when they can be the new clean copy. Where Steam's manifest is there, files it does not list as they
+    // are were changed by some program since Steam wrote them: the old pair stays (it is the only clean copy there
+    // is) and the start says what the player does; Steam's file check puts its files back, and the next start takes
+    // those. Kiln's ShroudForge fork takes the same evidence (verify_working_baseline.rs).
+    #[test]
+    fn a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install() {
+        let (library, dir) = library_fixture("differs");
+        let kfc = dir.join("g.kfc");
+        create_backup(&kfc).unwrap();
+        let names = ["g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"];
+        let old: Vec<Vec<u8>> = names.iter().map(|n| std::fs::read(dir.join(n)).unwrap()).collect();
+        rewrite(&dir, "updated fixture", b"content of the updated game");
+        let steams = steam_lists(&library, &dir, "26430625");
+        rewrite(&dir, "updated fixture", b"content another program wrote");
+        let error = format!("{:#}", create_backup(&kfc).unwrap_err());
+        assert!(error.contains("are not the files Steam installed for build 26430625"), "{error}");
+        assert!(error.contains("Verify the game files in Steam"), "{error}");
+        for (name, bytes) in names.iter().zip(&old) {
+            assert_eq!(&std::fs::read(dir.join(name)).unwrap(), bytes, "{name} stays as it was");
+        }
+        // Steam's file check: the next start takes Steam's files as the new clean copy (adoption)
+        std::fs::write(dir.join("g.kfc"), &steams.0).unwrap();
+        std::fs::write(dir.join("g.kfc_resources"), &steams.1).unwrap();
+        let bak = create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), steams.0);
+        assert_eq!(std::fs::read(dir.join("g.kfc_resources.bak")).unwrap(), steams.1);
+        assert!(validate_backup(&kfc, &bak));
+        std::fs::remove_dir_all(library).unwrap();
+    }
+    // kiln-eml: the same update with the game files Steam installed: taken at once, as before Steam's word was read; a
+    // first backup is never taken from files Steam does not list as they are.
+    #[test]
+    fn a_backup_of_another_build_is_replaced_by_the_files_steam_installed() {
+        let (library, dir) = library_fixture("same");
+        let kfc = dir.join("g.kfc");
+        create_backup(&kfc).unwrap();
+        rewrite(&dir, "updated fixture", b"content of the updated game");
+        let steams = steam_lists(&library, &dir, "26430625");
+        let bak = create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), steams.0);
+        assert!(validate_backup(&kfc, &bak));
+        for name in ["g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"] { std::fs::remove_file(dir.join(name)).unwrap(); }
+        rewrite(&dir, "updated fixture", b"content another program wrote");
+        assert!(format!("{:#}", create_backup(&kfc).unwrap_err()).contains("are not the files Steam installed"));
+        assert!(!dir.join("g.kfc.bak").exists() && !dir.join("g.kfc_resources.bak").exists());
+        std::fs::remove_dir_all(library).unwrap();
     }
     #[test]
     fn interrupted_backup_seal_publication_can_be_recovered_before_patching() {

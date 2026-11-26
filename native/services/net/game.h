@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "session_io.h"  // FrameSink, kMaxMessagesPerDrain, the read/free and alloc/commit/abort pairing
+
 namespace knet {
 
 // Layout constants from sigdb (net/*). -1 = unknown.
@@ -36,11 +38,6 @@ struct Functions {
 extern Layout L;
 extern Functions F;
 
-constexpr uint32_t kMaxMessagesPerDrain = 512;  // the game's own per-socket per-frame bound
-
-// Receives one message read from a game socket. Called inside the guarded loop: must not throw.
-using FrameSink = void (*)(const uint8_t* data, uint64_t size, void* user);
-
 struct MachineSlot {
     uint32_t peer;
     uint8_t flags;
@@ -67,11 +64,12 @@ uintptr_t server_socket(uintptr_t gs, uint32_t peer, uintptr_t* session);
 // Client half. `gc` = GameClient. Socket of channel L.channel toward the server (0 when not connected).
 uintptr_t client_socket(uintptr_t gc, uintptr_t* session, uintptr_t* socket_set);
 
-// Reads every waiting message of `socket` into `sink`. Returns messages read, -1 when the game faulted.
+// Reads every waiting message of `socket` into `sink` (session_io.h drain_messages: every read message is freed, also
+// when the sink faults). Returns messages read, -1 when the game or the sink faulted.
 int drain(uintptr_t session, uintptr_t socket, FrameSink sink, void* user);
 
-// Sends one message. Returns the game's allocation status (0 = sent), 0xFE = too big for the socket (capacity in
-// *capacity), 0xFF = fault.
+// Sends one message (session_io.h send_message: an allocation is committed or aborted, also when the copy faults).
+// Returns the game's allocation status (0 = sent), 0xFE = too big for the socket (capacity in *capacity), 0xFF = fault.
 uint32_t send(uintptr_t session, uintptr_t socket, const uint8_t* data, uint32_t len, uint64_t* capacity);
 
 // The game's login-failure message to machine `peer` (kick). False on fault.

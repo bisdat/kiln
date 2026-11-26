@@ -63,3 +63,32 @@ enum: Unknown, Queued, Pressed, Dispatched, TimedOut, Cancelled
 
 ## ClientState — What runs in this process.
 enum: Menu, DedicatedServer, Hosting, Remote
+
+## Crosshair `0.2.22` — The game client's own crosshair hit, read-only: hit or miss, world position, surface normal, distance, the hit entity and the voxel material, with the client session...
+- `static Available { get; } -> bool` — True when the crosshair can be read here: the capability row is on and kiln.client.crosshair is there.
+- `const BusyRetries = 3 -> int` — How often `Crosshair.Read` asks again when a sample was being published.
+- `const Capability = "client.crosshair" -> string` — The capability row: available on a game client whose build has the game's crosshair trace verified (hooked at the...
+- `static FreshFor { get; } -> TimeSpan` — A sample older than this is stale (kiln_client_crosshair.h's `KILN_CROSSHAIR_FRESH_NS`: about 15 client steps).
+- `static Read(out CrosshairReason reason) -> CrosshairHit?` — The newest sample, fresh or not; null when there is none to give (`reason` says why).
+- `static TryGet(out CrosshairHit hit) -> bool` — A fresh sample of the live client session, hit or miss.
+
+## CrosshairHit `0.2.22` — One copy of the game's own crosshair hit: what the stock cursor and HUD see under the screen's centre, from the local player's camera along its forward axis.
+- `Age { get; init; } -> TimeSpan` — How old the sample was when it was read, rounded up to a whole tick (100 ns).
+- `ClientSession { get; init; } -> uint` — The client world session of the sample (`Client.ClientWorldSession`).
+- `ClientStep { get; init; } -> ulong` — The client world's step count at the sample (`Client.ClientWorldSteps`).
+- `Distance { get; init; } -> float?` — Metres from the trace's start to the hit.
+- `Entity { get; init; } -> EntityId` — The game's entity of the hit (a creature, a prop, a placed object), `EntityId.None` for terrain and without a hit.
+- `Equals(CrosshairHit other) -> bool`
+- `GameStatus { get; init; } -> uint` — The game's own result byte: 0 hit, 31 nothing within reach, 21 no usable camera direction.
+- `HasEntity { get; } -> bool` — True when the hit is an entity (`CrosshairHit.Entity` is not `EntityId.None`).
+- `IsFresh { get; } -> bool` — True when the sample was at most `Crosshair.FreshFor` old when it was read.
+- `IsHit { get; init; } -> bool` — The game's trace hit something within its reach.
+- `Normal { get; init; } -> Vector3?` — The surface normal at the hit, unit length.
+- `static operator !=(CrosshairHit left, CrosshairHit right) -> bool`
+- `static operator ==(CrosshairHit left, CrosshairHit right) -> bool`
+- `Position { get; init; } -> WorldPosition?` — The hit point in world metres: the game's own point, moved 1 cm either against the surface normal (into the surface...
+- `Sequence { get; init; } -> ulong` — Game traces copied since the game started; never 0 for a sample.
+- `VoxelMaterial { get; init; } -> byte?` — The voxel material id the game reports for the hit surface (terrain and voxel building cells; some colliders carry...
+
+## CrosshairReason `0.2.22` — Why `Crosshair.Read` has no fresh sample (kiln_client_crosshair.h's `KILN_CROSSHAIR_REASON_*`).
+enum: None, NoSample, Busy, Stale, Faulted

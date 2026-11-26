@@ -2,12 +2,14 @@
 // Cross-check of kiln lint's schema validator: validates files with ajv (draft 2020-12) against schema/*.schema.json
 // and prints one JSON line per file: {"file", "schema", "valid", "errors": [instancePath...]}.
 //   node crates/kiln-manage/tests/lint/ajv-check.mjs <schema dir> <launcher node_modules> <schema file> <json file>...
+// A file argument "@<list>" stands for the files named in <list>, one per line (for lists longer than a command line).
 // Used by tests/lint.rs (ajv_agrees): with launcher/node_modules, else with ajv installed for the test (ajv_modules).
 import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [schemaDir, modules, schemaName, ...files] = process.argv.slice(2);
+const [schemaDir, modules, schemaName, ...args] = process.argv.slice(2);
+const files = args.flatMap((a) => (a.startsWith("@") ? readFileSync(a.slice(1), "utf8").split(/\r?\n/).filter(Boolean) : [a]));
 const require = createRequire(join(resolve(modules), "x.js"));
 const Ajv2020 = require("ajv/dist/2020").default;
 const addFormats = require("ajv-formats").default;

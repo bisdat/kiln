@@ -800,6 +800,19 @@ Kiln.ItemRarity.Epic = 3 -> Kiln.ItemRarity
 Kiln.ItemRarity.Legendary = 4 -> Kiln.ItemRarity
 Kiln.ItemRarity.Rare = 2 -> Kiln.ItemRarity
 Kiln.ItemRarity.Uncommon = 1 -> Kiln.ItemRarity
+Kiln.ItemTextTags
+Kiln.ItemTextTags.Caption.get -> uint
+Kiln.ItemTextTags.Caption.init -> void
+Kiln.ItemTextTags.Deconstruct(out uint Name, out uint Caption, out uint Description, out uint Lore) -> void
+Kiln.ItemTextTags.Description.get -> uint
+Kiln.ItemTextTags.Description.init -> void
+Kiln.ItemTextTags.Equals(Kiln.ItemTextTags other) -> bool
+Kiln.ItemTextTags.ItemTextTags() -> void
+Kiln.ItemTextTags.ItemTextTags(uint Name, uint Caption, uint Description, uint Lore) -> void
+Kiln.ItemTextTags.Lore.get -> uint
+Kiln.ItemTextTags.Lore.init -> void
+Kiln.ItemTextTags.Name.get -> uint
+Kiln.ItemTextTags.Name.init -> void
 Kiln.Items
 Kiln.Items.Fuel
 Kiln.Items.PlayerStorages
@@ -1472,6 +1485,7 @@ override Kiln.ItemInfo.ToString() -> string!
 override Kiln.ItemLocation.GetHashCode() -> int
 override Kiln.ItemLocation.ToString() -> string!
 override Kiln.ItemMovedEvent.ToString() -> string!
+override Kiln.ItemTextTags.GetHashCode() -> int
 override Kiln.ItemsGivenEvent.ToString() -> string!
 override Kiln.ItemsResult.Equals(object? obj) -> bool
 override Kiln.ItemsResult.GetHashCode() -> int
@@ -1630,6 +1644,8 @@ static Kiln.ItemInfo.operator ==(Kiln.ItemInfo? left, Kiln.ItemInfo? right) -> b
 static Kiln.ItemInstanceExtensions.Location(this Kiln.ItemInstanceRef item) -> Kiln.ItemLocation?
 static Kiln.ItemLocation.operator !=(Kiln.ItemLocation left, Kiln.ItemLocation right) -> bool
 static Kiln.ItemLocation.operator ==(Kiln.ItemLocation left, Kiln.ItemLocation right) -> bool
+static Kiln.ItemTextTags.operator !=(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
+static Kiln.ItemTextTags.operator ==(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool
 static Kiln.Items.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!
 static Kiln.Items.ArmorAvailable.get -> bool
 static Kiln.Items.Available.get -> bool
@@ -1638,7 +1654,10 @@ static Kiln.Items.CaptureSet(Kiln.EntityId player) -> Kiln.EquipmentSetCaptureRe
 static Kiln.Items.ContainerName(Kiln.EntityId entity) -> string?
 static Kiln.Items.ContainerNamesAvailable.get -> bool
 static Kiln.Items.ContainerRenameAvailable.get -> bool
+static Kiln.Items.Description(Kiln.ItemId item) -> string?
+static Kiln.Items.DescriptionIn(Kiln.ItemId item, string? language) -> string?
 static Kiln.Items.DisplayName(Kiln.ItemId item) -> string?
+static Kiln.Items.DisplayNameIn(Kiln.ItemId item, string? language) -> string?
 static Kiln.Items.Equip(Kiln.EntityId player, Kiln.SlotId from, Kiln.EquipmentSlot? slot = null, Kiln.EquipOptions options = Kiln.EquipOptions.None, Kiln.EntityId itemEntity = default(Kiln.EntityId)) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
 static Kiln.Items.EquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
 static Kiln.Items.EquipSet(Kiln.EquipmentSetPlan! plan, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
@@ -1692,6 +1711,7 @@ static Kiln.Items.Status() -> Kiln.ItemsServiceStatus?
 static Kiln.Items.Status3() -> Kiln.ItemsV3Status?
 static Kiln.Items.Take(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.SlotId? from = null, bool exactSlot = false, Kiln.EntityId? itemEntity = null, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.TakeSlot(Kiln.EntityId target, Kiln.InventorySlot! slot, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
+static Kiln.Items.TextTags(Kiln.ItemId item) -> Kiln.ItemTextTags?
 static Kiln.Items.ToolWearStatus(Kiln.ItemId tool) -> Kiln.ToolWearState!
 static Kiln.Items.Transfers.Available.get -> bool
 static Kiln.Items.Transfers.Deny(Kiln.EntityId container, Kiln.TransferKinds kinds = Kiln.TransferKinds.Any) -> Kiln.TransferRule!
@@ -1784,6 +1804,8 @@ virtual Kiln.EquipmentSetSelection.PrintMembers(System.Text.StringBuilder! build
 ~override Kiln.ItemChange.ToString() -> string
 ~override Kiln.ItemId.Equals(object obj) -> bool (forwarded, contained in Kiln.Api)
 ~override Kiln.ItemLocation.Equals(object obj) -> bool
+~override Kiln.ItemTextTags.Equals(object obj) -> bool
+~override Kiln.ItemTextTags.ToString() -> string
 ~override Kiln.MoveChange.Equals(object obj) -> bool
 ~override Kiln.MoveChange.ToString() -> string
 ~override Kiln.OrphanTarget.Equals(object obj) -> bool

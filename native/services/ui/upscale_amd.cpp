@@ -78,29 +78,34 @@ class AmdBackend final : public Backend {
     }
 
     InstanceNeeds instance_needs() override { return {}; }
-    DeviceNeeds device_needs(const PhysicalDevice&) override {
-        // kiln/control/amd "fsr4ext on" (read here, when the game makes its device) puts FSR 4's native set back
-        const bool native = amd::parse_tuning(read_control()).fsr4ext;
-        std::string names;
-        for (const char* e : amd::fsr4_native_extensions()) names += (names.empty() ? "" : ", ") + std::string(e);
-        static bool said = false;
-        if (!said) {
-            said = true;
-            if (native)
-                logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR: the game's device also gets %s (kiln/control/amd \"fsr4ext on\")", names.c_str());
-            else
-                logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR: the game's device does not get %s: with them AMD's Vulkan FSR 4 drew dark "
-                     "scenes too dark on an RX 9070 XT (29.19), without them it runs as OptiScaler's working FSR 4 does; FSR 3.1 needs "
-                     "none of them (kiln/control/amd \"fsr4ext on\" adds them from the next game start)", names.c_str());
-        }
-        return amd::device_needs(native);
+    DeviceNeeds device_needs(const PhysicalDevice& gpu) override {
+        // which of FSR 4's sets the game's device gets: the one this GPU's FSR 4 model needs (upscale_amd_map.h
+        // choose_fsr4_set), or kiln/control/amd "fsr4ext off|on" (read here, when the game makes its device)
+        const amd::GpuFacts g = gpu_facts(gpu);
+        const amd::Fsr4SetChoice c = amd::choose_fsr4_set(g, amd::parse_tuning(read_control()).fsr4ext);
+        set_ = c.set;
+        std::string six;
+        for (const char* e : amd::fsr4_native_extensions()) six += (six.empty() ? "" : ", ") + std::string(e);
+        const char* gpu_name = gpu.props.deviceName[0] ? gpu.props.deviceName : "the GPU";
+        if (c.set == amd::Fsr4Set::int8)
+            logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR on %s: the game's device also gets FSR 4's INT8 set, "
+                 VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME " (computeDerivativeGroupLinear), not the rest of AMD's sample's set: %s",
+                 gpu_name, c.why.c_str());
+        else if (c.set == amd::Fsr4Set::native)
+            logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR on %s: the game's device also gets %s (%s)", gpu_name, six.c_str(), c.why.c_str());
+        else
+            logf(KILN_LOG_INFO, "graphics: upscaler: AMD FSR on %s: the game's device gets none of %s: %s; FSR 3.1 needs none of them "
+                 "(kiln/control/amd \"fsr4ext on\" adds them all from the next game start)", gpu_name, six.c_str(), c.why.c_str());
+        return amd::device_needs(c.set);
     }
 
     bool device_ready(const VkContext& vk, Why* why, std::string* detail) override {
         vk_ = vk;
-        device_path_ = vk.has_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) && vk.has_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)
-                           ? "device with cooperative matrix + FP8"
-                           : "device without cooperative matrix + FP8";
+        const bool derivatives_on =
+            vk.has_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME) &&
+            vk.has_feature(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+                           offsetof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR, computeDerivativeGroupLinear));
+        device_path_ = amd::fsr4_device_text(set_, derivatives_on);
         version_ids_.clear();
         version_names_.clear();
         if (!vk.needs_merged) {
@@ -212,7 +217,7 @@ class AmdBackend final : public Backend {
             *detail = mv;
             return false;
         }
-        *detail = "AMD FSR versions for this GPU: " + list;
+        *detail = "AMD FSR versions for this GPU: " + list + "; FSR 4 on the game's device: " + device_path_;
         return true;
     }
 
@@ -220,7 +225,8 @@ class AmdBackend final : public Backend {
         destroy();  // the core calls it first; once more is harmless
         tuning_ = amd::parse_tuning(read_control());  // a knob changed in a test applies at the next set-up
         const int fsr3 = amd::pick_fsr3(version_names_);
-        bool pin = amd_pins_fsr3(ci.amd) && fsr3 >= 0;
+        // FSR 3.1 when the player pins it, or for the rest of the game once FSR 4's picture came out black (step_down)
+        bool pin = (amd_pins_fsr3(ci.amd) || fsr4_off_) && fsr3 >= 0;
         // the create flags depend on what runs (FSR 4: no DYNAMIC_RESOLUTION, as OptiScaler's working FSR 4): what AMD's
         // selection will run, checked below against what it ran
         Running expect = amd::expected_running(version_names_, pin);
@@ -279,7 +285,9 @@ class AmdBackend final : public Backend {
         // what AMD FSR was told about the game's picture (kiln.log, for reports: the dark-picture fix of 29.19)
         *detail = "FSR " + version_name_ + " (" + amd::flags_text(amd::create_flags(ci, tuning_, expect)) +
                   (tuning_.changed() ? ", from kiln/control/amd" : "") + "; " + amd::tuning_text(running_, tuning_) + ", no exposure texture; " + device_path_ + ")" +
-                  (note.empty() ? "" : "; " + note) + kv_note;
+                  (note.empty() ? "" : "; " + note) +
+                  (fsr4_off_ && !amd_pins_fsr3(ci.amd) ? "; FSR 4's picture came out black on this GPU earlier in this game: FSR 3.1 until it restarts" : "") +
+                  kv_note;
         for (const auto& n : tuning_.notes) *detail += "; kiln/control/amd: not understood: " + n;
         return true;
     }
@@ -314,6 +322,19 @@ class AmdBackend final : public Backend {
 
     void reset() override { reset_ = true; }
 
+    bool step_down(std::string* detail) override {
+        // FSR 4's picture came out black or NaN (the core's output check): FSR 3.1 for the rest of the game, made now for
+        // the same sizes (create() retires the FSR 4 context first: the GPU may still run its last frames)
+        if (running_ != Running::amd_fsr4 || amd::pick_fsr3(version_names_) < 0) return false;
+        fsr4_off_ = true;
+        const CreateInfo ci = ci_;
+        std::string d;
+        const bool ok = create(ci, &d);
+        if (detail) *detail = d;
+        return ok && running_ == Running::amd_fsr3;
+    }
+    bool output_check() const override { return !tuning_.check_off; }
+
     void tick(uint64_t frame) override {
         if (frame > frame_) frame_ = frame;
         reap(false);
@@ -340,6 +361,47 @@ class AmdBackend final : public Backend {
     }
 
   private:
+    // What Kiln reads of the GPU before the game's device exists (upscale_amd_map.h GpuFacts): AMD's DLL is not mapped
+    // yet, so the GPU's own answers, as AMD's selection reads them.
+    static amd::GpuFacts gpu_facts(const PhysicalDevice& gpu) {
+        amd::GpuFacts g;
+        g.vendor = gpu.props.vendorID;
+        g.type = gpu.props.deviceType;
+        if (!gpu.gipa || !gpu.physical) return g;
+        std::vector<std::string> offered;
+        if (auto enum_ext = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(gpu.gipa(gpu.instance, "vkEnumerateDeviceExtensionProperties"))) {
+            uint32_t n = 0;
+            if (enum_ext(gpu.physical, nullptr, &n, nullptr) == VK_SUCCESS && n && n < 4096) {
+                std::vector<VkExtensionProperties> e(n);
+                if (enum_ext(gpu.physical, nullptr, &n, e.data()) == VK_SUCCESS)
+                    for (uint32_t i = 0; i < n; ++i) offered.emplace_back(e[i].extensionName);
+            }
+        }
+        auto has = [&](const char* name) { return std::find(offered.begin(), offered.end(), name) != offered.end(); };
+        g.coop_matrix_ext = has(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+        g.float8_ext = has(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+        g.derivatives_ext = has(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+        auto feats2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(gpu.gipa(gpu.instance, "vkGetPhysicalDeviceFeatures2"));
+        if (!feats2) feats2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(gpu.gipa(gpu.instance, "vkGetPhysicalDeviceFeatures2KHR"));
+        if (feats2 && (g.coop_matrix_ext || g.derivatives_ext)) {
+            // only the structs of extensions the GPU offers go into the chain
+            VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{};
+            cm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
+            VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR dv{};
+            dv.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR;
+            void* chain = nullptr;
+            if (g.derivatives_ext) dv.pNext = chain, chain = &dv;
+            if (g.coop_matrix_ext) cm.pNext = chain, chain = &cm;
+            VkPhysicalDeviceFeatures2 f2{};
+            f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            f2.pNext = chain;
+            feats2(gpu.physical, &f2);
+            g.coop_matrix = g.coop_matrix_ext && cm.cooperativeMatrix == VK_TRUE;
+            g.derivative_linear = g.derivatives_ext && dv.computeDerivativeGroupLinear == VK_TRUE;
+        }
+        return g;
+    }
+
     // <kiln>\control\amd (files_.dir is <kiln>\vendor\amd\<version>); empty when there is none
     std::string read_control() const {
         std::wstring kiln = files_.dir;
@@ -418,6 +480,8 @@ class AmdBackend final : public Backend {
     CreateInfo ci_;
     amd::Tuning tuning_;
     std::string device_path_ = "device not seen";
+    amd::Fsr4Set set_ = amd::Fsr4Set::none;  // FSR 4's set the game's device was asked for (device_needs)
+    bool fsr4_off_ = false;                  // FSR 4's picture came out black: FSR 3.1 for the rest of the game
     bool reset_ = true;
     uint64_t frame_ = 0;
     Running running_ = Running::off;

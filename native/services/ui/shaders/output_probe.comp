@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: MIT
+// kiln.ui upscaler swap, the output check (upscale_probe.h, upscale_probe_logic.h): one workgroup reads a 32x32 grid of
+// points of the game's colour (render size) and of the upscaler's output (upscale size) and writes, per invocation, how
+// many are not finite and the luminance of the others. Compiled by gen_output_probe.sh into output_probe_spv.h (glslc;
+// the generated header is committed, so a build needs no shader compiler).
+#version 450
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform sampler2D colour;                     // SHADER_READ_ONLY_OPTIMAL, the game's view
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D upscaled;   // GENERAL, the game's view (R16G16B16A16_SFLOAT)
+struct Slot {
+    uint tag;
+    uint colour_bad;
+    uint output_bad;
+    uint points;
+    float colour_max;
+    float colour_sum;
+    float output_max;
+    float output_sum;
+};
+layout(set = 0, binding = 2, std430) writeonly buffer Result { Slot slots[256]; } result;
+layout(push_constant) uniform Sizes {
+    uvec2 colour_size;
+    uvec2 output_size;
+    uint tag;
+} p;
+// not finite: every exponent bit set (by the bits, so no compiler may assume it away)
+bool finite3(vec3 v) { return all(notEqual(floatBitsToUint(v) & uvec3(0x7f800000u), uvec3(0x7f800000u))); }
+float lum(vec3 v) { return max(dot(v, vec3(0.2126, 0.7152, 0.0722)), 0.0); }
+void main() {
+    uint i = gl_LocalInvocationIndex;
+    Slot s;
+    s.tag = p.tag;
+    s.colour_bad = 0u;
+    s.output_bad = 0u;
+    s.points = 4u;
+    s.colour_max = 0.0;
+    s.colour_sum = 0.0;
+    s.output_max = 0.0;
+    s.output_sum = 0.0;
+    for (uint k = 0u; k < 4u; ++k) {
+        uint point = i * 4u + k;
+        vec2 uv = (vec2(float(point % 32u), float(point / 32u)) + 0.5) / 32.0;
+        ivec2 pc = min(ivec2(uv * vec2(p.colour_size)), ivec2(p.colour_size) - 1);
+        ivec2 po = min(ivec2(uv * vec2(p.output_size)), ivec2(p.output_size) - 1);
+        vec3 c = texelFetch(colour, pc, 0).rgb;
+        vec3 o = imageLoad(upscaled, po).rgb;
+        if (finite3(c)) {
+            float l = lum(c);
+            s.colour_max = max(s.colour_max, l);
+            s.colour_sum += l;
+        } else {
+            s.colour_bad += 1u;
+        }
+        if (finite3(o)) {
+            float l = lum(o);
+            s.output_max = max(s.output_max, l);
+            s.output_sum += l;
+        } else {
+            s.output_bad += 1u;
+        }
+    }
+    result.slots[i] = s;
+}

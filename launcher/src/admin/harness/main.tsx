@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AdminRoutes, ConfirmHost, Toaster, configureAdmin, createWebSocketTransport } from "../web";
+import { AdminConfigsPage, AdminRoutes, ConfirmHost, Toaster, configureAdmin, createWebSocketTransport } from "../web";
 
 const kap = new URLSearchParams(location.search).get("kap") ?? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/kap`;
 configureAdmin({ transport: createWebSocketTransport({ url: (serverId) => `${kap}/${encodeURIComponent(serverId)}` }) });
@@ -19,6 +19,8 @@ createRoot(document.getElementById("root")!).render(
         <div className="k-app" style={{ height: "100%", overflow: "auto" }}>
           <Routes>
             <Route path="servers/:id/admin/*" element={<AdminRoutes />} />
+            {/* as Kiln Web Admin mounts it: Configs is the server's own page in the launcher */}
+            <Route path="servers/:id/configs" element={<AdminConfigsPage />} />
             <Route path="*" element={<Navigate to="/servers/lab/admin/players" replace />} />
           </Routes>
         </div>

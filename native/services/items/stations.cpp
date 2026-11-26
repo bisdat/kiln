@@ -43,7 +43,9 @@
 #include "engine.h"
 #include "equip.h"
 #include "equip_logic.h"
+#include "kiln_call_site.hpp"
 #include "kiln_hook.hpp"
+#include "kiln_mid_frames.hpp"
 #include "../../core/src/hooks_protect_internal.h"
 #include "instances.h"
 #include "sets.h"
@@ -720,6 +722,18 @@ void lenders(KilnEntity target, int32_t base, const std::vector<uint32_t>& items
 // GetComponent reads. Every program that writes FactoryStation (the game's factory_station and player_crafting, Kiln's
 // kiln_items_stations) also writes Inventory, which the craft program writes too, so none runs while it does.
 
+// The game's call that ends at ret as the exe file has it calls target. Another module may have redirected the live call
+// (Building Tools 0.34.0 rewrites the blueprint program's payment call, and for its magic chests of all bases the build
+// cursor's stock count); kiln.hooks' read_original gives the file's bytes, else the live ones are read.
+bool call_matches(uintptr_t ret, uintptr_t target);
+bool call_matches_original(uintptr_t ret, uintptr_t target) {
+    const auto* h = kiln::hooks_v2(g_api);
+    uint8_t call[5] = {};
+    if (ret >= 5 && target && h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) &&
+        h->read_original && h->read_original(ret - 5, call, sizeof call) == KILN_OK)
+        return kiln::call_target(call, ret) == target;
+    return call_matches(ret, target);
+}
 bool call_matches(uintptr_t ret, uintptr_t target) {
     __try {
         if (!ret || !target) return false;
@@ -4469,34 +4483,112 @@ void hk_build_cursor(KilnRegisters& r) {
 // rules/ApplyMaterials(cost context, list, take): only the blueprint program's own take (build/BlueprintApplyRet) may pay
 // from building links; any other caller (props, undo, dismantling, terraforming, impact natives) and a give stay the game's.
 using BuildApplyFn = bool(__fastcall*)(void* ctx, void* list, uint8_t take);
+// Building Tools (0.34.0) redirects the blueprint program's call to its own code, which then calls ApplyMaterials (once
+// for the charge; its Replace refunds are gives): the caller is then in its DLL, and the game's call is found behind it
+// (kiln_call_site.hpp), so a placement it routes pays from the links as the game's own does. A take that cannot be
+// traced stays the game's payment (bag and base), with one kiln.log line per module.
+std::mutex g_build_foreign_mu;
+std::vector<std::string> g_build_foreign;
+void note_foreign_take(uintptr_t ret, uintptr_t site) {
+    char module[128];
+    kiln::module_name(ret, module, sizeof module);
+    const bool blueprint = site && site == g_build.blueprint_ret;
+    {
+        std::lock_guard lock(g_build_foreign_mu);
+        const std::string key = std::string(module) + (blueprint ? "|b" : site ? "|g" : "|-");
+        if (g_build_foreign.size() > 64 || std::find(g_build_foreign.begin(), g_build_foreign.end(), key) != g_build_foreign.end()) return;
+        g_build_foreign.push_back(key);
+    }
+    if (blueprint)
+        LOGI("build: %s makes the blueprint program's payments (its code calls ApplyMaterials for the game's call): block "
+             "placements through it pay from linked sources too", module);
+    else if (!site)
+        LOGW("build: a materials take from %s could not be traced to the game's call behind it: it pays from the bag and the "
+             "base only (the game's payment)", module);
+}
+uintptr_t build_payment_site(uintptr_t ret) {
+    const auto* h = kiln::hooks_v2(g_api);
+    const bool readable = h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) && h->read_original;
+    const uintptr_t site = kiln::game_call_of(ret, g_build.apply, [&](uintptr_t at, void* out, size_t n) {
+        return readable && h->read_original(at, out, n) == KILN_OK;
+    });
+    if (site != ret) note_foreign_take(ret, site);
+    return site;
+}
 bool __fastcall hk_build_apply(void* ctx, void* list, uint8_t take) {
     const uintptr_t ret = h_build_apply.caller();  // before the original
     struct Scope {
         bool saved = t_build_pay;
         ~Scope() { t_build_pay = saved; }
     } scope;
-    t_build_pay = take != 0 && ret == g_build.blueprint_ret && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
+    const bool candidate = take != 0 && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
+    const uintptr_t site = candidate && ret != g_build.blueprint_ret ? build_payment_site(ret) : ret;
+    t_build_pay = candidate && site == g_build.blueprint_ret;
     return h_build_apply.original<BuildApplyFn>()(ctx, list, take);
 }
 
+// True when the only bytes of [at, at + size) that are not the game's or Kiln's are the rel32 of the game's call that ends at
+// ret: another module redirected that call to its own code (Building Tools 0.34.0 does so with the blueprint program's
+// payment call and the build cursor's stock count). The cursor's hook reads the call's result whoever computed it; the
+// payment's scope finds the game's call behind the module's code (build_payment_site).
+bool only_call_redirected(const KilnHooksApi* h, uintptr_t at, size_t size, uintptr_t ret) {
+    if (!ret || !at || ret < at + 5 || ret > at + size) return false;
+    const auto ok = [&](uintptr_t a, size_t n) {
+        if (!n) return true;
+        uint32_t s = KILN_CODE_UNKNOWN;
+        uint64_t g = 0;
+        return h->code_state(a, n, &s, &g) == KILN_OK && (s == KILN_CODE_ORIGINAL || s == KILN_CODE_MANAGED);
+    };
+    return ok(at, ret - 4 - at) && ok(ret, at + size - ret);  // the E8 itself is the file's, its rel32 is not
+}
+std::mutex g_build_redirect_mu;
+std::vector<std::string> g_build_redirects;
+// Once per call site and module: which module the game's call now enters.
+void note_call_redirect_to(const char* what, uintptr_t ret, uintptr_t to) {
+    char module[128] = "another module";
+    if (to) kiln::module_name(to, module, sizeof module);
+    {
+        std::lock_guard lock(g_build_redirect_mu);
+        const std::string key = std::string(what) + "|" + module;
+        if (std::find(g_build_redirects.begin(), g_build_redirects.end(), key) != g_build_redirects.end()) return;
+        g_build_redirects.push_back(key);
+    }
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    LOGI("build: %s (rva 0x%llx) is redirected to %s's code: the building hooks follow the game's call through it", what,
+         static_cast<unsigned long long>(ret - 5 - base), module);
+}
+uintptr_t live_call_target(uintptr_t ret) {
+    __try {
+        return kiln::call_target(reinterpret_cast<const uint8_t*>(ret - 5), ret);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
 // Foreign code on what the building hooks read or rely on: the cursor's stock-count call and the count function (e.g.
 // Cross-Base Storage's build check), ApplyMaterials' entry and take, the blueprint program's call. Named once in kiln.log.
+// A redirect of the cursor's or the blueprint program's call alone is followed, not stood down for (only_call_redirected).
 bool build_code_ok(bool cursor, bool payment, PreviewCodeRefusal* why) {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
         why->name = "kiln.hooks' code-state check";
         return false;
     }
-    struct Dep { uintptr_t at; size_t size; const char* name; bool want; };
-    for (const Dep& d : {Dep{g_build.cursor_ret ? g_build.cursor_ret - 98 : 0, 98 + 6, "the build cursor's stock-count call", cursor},
-                         Dep{g_build.stock_fn, 0x40, "the base stock count (build check)", cursor},
-                         Dep{g_build.apply, 0x40, "ApplyMaterials", payment},
-                         Dep{g_build.paid ? g_build.paid - 17 : 0, 17 + 13, "ApplyMaterials' inventory payment call", payment},
-                         Dep{g_build.blueprint_ret ? g_build.blueprint_ret - 17 : 0, 17 + 4, "the blueprint program's payment call", payment}}) {
+    // call: the return address of the game's call in the range whose rel32 another module may redirect
+    struct Dep { uintptr_t at; size_t size; const char* name; bool want; uintptr_t call; };
+    for (const Dep& d : {Dep{g_build.cursor_ret ? g_build.cursor_ret - 98 : 0, 98 + 6, "the build cursor's stock-count call", cursor, g_build.cursor_ret},
+                         Dep{g_build.stock_fn, 0x40, "the base stock count (build check)", cursor, 0},
+                         Dep{g_build.apply, 0x40, "ApplyMaterials", payment, 0},
+                         Dep{g_build.paid ? g_build.paid - 17 : 0, 17 + 13, "ApplyMaterials' inventory payment call", payment, 0},
+                         Dep{g_build.blueprint_ret ? g_build.blueprint_ret - 17 : 0, 17 + 4, "the blueprint program's payment call", payment,
+                             g_build.blueprint_ret}}) {
         if (!d.want) continue;
         uint32_t state = KILN_CODE_UNKNOWN;
         uint64_t generation = 0;
         const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+        if (rc == KILN_OK && state == KILN_CODE_FOREIGN && only_call_redirected(h, d.at, d.size, d.call)) {
+            note_call_redirect_to(d.name, d.call, live_call_target(d.call));
+            continue;
+        }
         if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
             *why = {d.name, d.at, d.size, state, rc};
             return false;
@@ -4514,9 +4606,10 @@ void build_stand_down(const char* what, const PreviewCodeRefusal& why) {
 // The material selector's gatherer (build/client.MaterialRows, C 0x40e5d0) rebuilds up to kRowGroups groups of
 // kRowGroupStride bytes at its selector state: each group's rows {ptr +0, count +8}, 24-byte rows with the item at +0 and
 // the aggregate stock (u64) at +0x10. A group it rebuilds is zeroed and refilled (bag, then the base's stock map); one
-// it skips (currentOnly) keeps its rows. kiln-items wraps the gatherer: before the original it takes its own earlier
-// addition back from each row that still shows exactly what Kiln wrote, after it adds the server's building snapshot to
-// the first row of each linked item, and notes what it wrote. So a rebuilt row gets the links once, a kept row is not
+// it skips (currentOnly) keeps its rows. kiln-items wraps the gatherer from inside: at its first half
+// (build/client.MaterialRowsBody) it takes its own earlier addition back from each row that still shows exactly what Kiln
+// wrote, at its second (build/client.MaterialRowsDone) it adds the server's building snapshot to the first row of each
+// linked item, and notes what it wrote. So a rebuilt row gets the links once, a kept row is not
 // raised twice, and the menu shows bag + base + links, as the cursor counts them and the placement pays.
 constexpr uint32_t kRowGroups = 7;
 constexpr size_t kRowGroupStride = 0x648, kRowStride = 24, kRowStock = 0x10;
@@ -4529,8 +4622,9 @@ std::mutex g_build_rows_mu;
 std::map<RowKey, RowMark> g_build_marks;
 bool g_build_ui_feat = false;  // crafting.build_ui resolved (stations_resolve, a client)
 std::atomic<bool> g_build_rows_on{false}, g_build_rows_off{false};
-kiln::RawHook h_build_rows;
-uintptr_t g_build_rows_fn = 0, g_build_row_add = 0, g_build_stock_rows_ret = 0, g_build_row_stock = 0;
+kiln::MidHook2 h_build_rows_body, h_build_rows_done;
+uintptr_t g_build_rows_fn = 0, g_build_rows_body = 0, g_build_rows_done = 0, g_build_row_add = 0, g_build_stock_rows_ret = 0,
+          g_build_row_stock = 0;
 
 // Before the gatherer: every row of `state` that still shows what Kiln wrote gets the game's count back. Raw reads and
 // writes of the game's rows: the caller guards them.
@@ -4587,22 +4681,41 @@ void build_rows_guarded(uint8_t* state, const std::unordered_map<uint32_t, uint6
         LOGE("build: the build menu's material rows could not be read (0x%08lx): its counts are the game's again", code);
     }
 }
-using BuildRowsFn = uint64_t(__fastcall*)(void* state, void* access, uint8_t current_only);
-uint64_t __fastcall hk_build_rows(void* state, void* access, uint8_t current_only) {
-    auto* const s = static_cast<uint8_t*>(state);
-    std::unordered_map<uint32_t, uint64_t> linked;
-    bool raise = false;
-    {
+// The gatherer's two halves, mid hooks inside it since 0.2.0-dev.31.13 (until then a detour on its entry, which hid the
+// function from Building Tools 0.34.0: it finds it by its first 35 bytes, 4 s after it loads, for its full material list
+// and partial area actions; XHL). build/client.MaterialRowsBody (entry + 0x23, after the prologue: rcx the selector state)
+// takes Kiln's earlier additions back and notes the snapshot this call raises with; build/client.MaterialRowsDone (+ 0xa8a,
+// the epilogue on every path: rsi the state) adds it. The function's rsp is the same at both and pairs them
+// (kiln::MidFrames); kiln-tools' material picker has its halves on the same two sites.
+struct RowsCall {
+    explicit RowsCall(uint8_t* s) : state(s) {
         std::lock_guard lock(g_build_snap_mu);
         raise = g_build_on.load(std::memory_order_relaxed) && !g_build_have.empty();
         if (raise) linked = g_build_have;
     }
-    std::lock_guard rows(g_build_rows_mu);
-    if (s && !g_build_rows_off.load()) build_rows_guarded(s, nullptr);
-    const uint64_t r = h_build_rows.original<BuildRowsFn>()(state, access, current_only);
-    if (s && raise && !g_build_rows_off.load() && !g_build_off.load()) build_rows_guarded(s, &linked);
-    return r;
+    uint8_t* state;
+    bool raise = false;
+    std::unordered_map<uint32_t, uint64_t> linked;
+};
+thread_local kiln::MidFrames<RowsCall> t_build_rows;
+void build_rows_enter(uint8_t* state, uintptr_t frame) {
+    {
+        std::lock_guard rows(g_build_rows_mu);
+        if (state && !g_build_rows_off.load()) build_rows_guarded(state, nullptr);
+    }
+    t_build_rows.enter(frame, state);  // no room or no memory: this call shows the game's counts
 }
+void build_rows_leave(uintptr_t frame, uint8_t* state) {
+    RowsCall* const call = t_build_rows.leave(frame);
+    if (!call) return;  // its first half did not run (the hooks went in while it was inside)
+    if (call->state == state && state && call->raise && !g_build_rows_off.load() && !g_build_off.load()) {
+        std::lock_guard rows(g_build_rows_mu);
+        build_rows_guarded(state, &call->linked);
+    }
+    t_build_rows.pop();
+}
+void hk_build_rows_body(KilnRegisters& r) { build_rows_enter(reinterpret_cast<uint8_t*>(r.rcx), r.rsp); }
+void hk_build_rows_done(KilnRegisters& r) { build_rows_leave(r.rsp, reinterpret_cast<uint8_t*>(r.rsi)); }
 // Once the cursor hook is in: the menu's counts too, unless another module changed the gatherer or the row add.
 void build_rows_install() {
     if (!g_build_ui_feat || g_build_rows_on.load() || g_build_rows_off.load()) return;
@@ -4613,6 +4726,7 @@ void build_rows_install() {
     } else {
         struct Dep { uintptr_t at; size_t size; const char* name; };
         for (const Dep& d : {Dep{g_build_rows_fn, 0x40, "the build menu's material gatherer"},
+                             Dep{g_build_rows_done, 8, "the gatherer's epilogue"},
                              Dep{g_build_stock_rows_ret ? g_build_stock_rows_ret - 58 : 0, 58 + 4, "its base-stock record"},
                              Dep{g_build_row_add, 0x134, "the material row add"}}) {
             uint32_t state = KILN_CODE_UNKNOWN;
@@ -4633,10 +4747,14 @@ void build_rows_install() {
         lower("crafting.build_ui", KILN_CAP_REASON_FAULTED, "another module patched the build menu's gatherer (see kiln.log)");
         return;
     }
-    if (!h_build_rows.install(g_api, g_owner, g_build_rows_fn, reinterpret_cast<void*>(&hk_build_rows), "build/client.MaterialRows")) {
+    // the second half first: a call already inside the gatherer finds no first half there and keeps the game's counts
+    const bool done = h_build_rows_done.install(g_api, g_owner, g_build_rows_done, &hk_build_rows_done, "build/client.MaterialRowsDone");
+    if (!done || !h_build_rows_body.install(g_api, g_owner, g_build_rows_body, &hk_build_rows_body, "build/client.MaterialRowsBody")) {
+        const char* const err = done ? h_build_rows_body.error() : h_build_rows_done.error();
+        h_build_rows_done.revoke();
         g_build_rows_off.store(true);
-        LOGW("build: build/client.MaterialRows could not be hooked (%s): the build menu keeps the game's counts",
-             h_build_rows.error() ? h_build_rows.error() : "refused");
+        LOGW("build: the build menu's gatherer (build/client.MaterialRowsBody, build/client.MaterialRowsDone) could not be hooked "
+             "(%s): the build menu keeps the game's counts", err ? err : "refused");
         lower("crafting.build_ui", KILN_CAP_REASON_FAULTED, "the build menu's hook could not be installed (see kiln.log)");
         return;
     }
@@ -4830,17 +4948,24 @@ void lock_resolve() {
     }
 }
 
-// GitHub #132: the building hooks' symbols (sigdb server.d/build-sources.json), each call they rely on checked.
+// GitHub #132: the building hooks' symbols (sigdb server.d/build-sources.json), each call they rely on checked. The build
+// cursor's stock-count call and the blueprint program's payment call as the exe file has them (call_matches_original):
+// Building Tools (0.34.0) redirects their live rel32 4 s after it loads, which can be before this runs; build_code_ok then
+// follows that redirect when the hooks go in, as it does for one made later.
 void build_resolve() {
     if (!feat("crafting.build_sources")) return;
     if (!g_lock_current) sym("world/CurrentEntityId", &g_lock_current);
     g_build_feat = sym("build/CursorStockRet", &g_build.cursor_ret) && sym("build/StockCount", &g_build.stock_fn) &&
                    sym("rules/ApplyMaterials", &g_build.apply) && sym("build/BlueprintApplyRet", &g_build.blueprint_ret) &&
                    sym("build/ApplyMaterialsPaid", &g_build.paid) && sym("rules/InventoryPay", &g_build.pay_fn) &&
-                   call_matches(g_build.cursor_ret, g_build.stock_fn) && call_matches(g_build.blueprint_ret, g_build.apply) &&
-                   call_matches(g_build.paid, g_build.pay_fn) && g_lock_current && E.job_storage;
+                   call_matches_original(g_build.cursor_ret, g_build.stock_fn) &&
+                   call_matches_original(g_build.blueprint_ret, g_build.apply) && call_matches(g_build.paid, g_build.pay_fn) &&
+                   g_lock_current && E.job_storage;
     if (g_build_feat && g_api->side() == KILN_SIDE_CLIENT && feat("crafting.build_ui")) {  // the build menu's counts
-        g_build_ui_feat = sym("build/client.MaterialRows", &g_build_rows_fn) && sym("build/client.StockRowsRet", &g_build_stock_rows_ret) &&
+        g_build_ui_feat = sym("build/client.MaterialRows", &g_build_rows_fn) && sym("build/client.MaterialRowsBody", &g_build_rows_body) &&
+                          sym("build/client.MaterialRowsDone", &g_build_rows_done) && g_build_rows_body > g_build_rows_fn &&
+                          g_build_rows_body - g_build_rows_fn < 0x40 && g_build_rows_done > g_build_rows_body &&
+                          g_build_rows_done - g_build_rows_fn < 0xb3c && sym("build/client.StockRowsRet", &g_build_stock_rows_ret) &&
                           sym("build/client.MaterialRowAdd", &g_build_row_add) && sym("build/client.MaterialRowStock", &g_build_row_stock) &&
                           call_matches(g_build_stock_rows_ret, g_build_row_add) && g_build_row_stock > g_build_row_add &&
                           g_build_row_stock < g_build_row_add + 0x134;
@@ -5067,6 +5192,41 @@ void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
 
 bool stations_base_stock(std::vector<KilnEntity>* out) { return base_stock_all(out); }
 bool stations_is_factory(KilnEntity e) { return is_factory(e); }
+
+// kiln.stations.client (client_stations.cpp, 0.2.0-dev.31.13): a recipe of `registry` (the client world's
+// g38_items::RecipeRegistry), read through the game's RecipeFind with the layout kiln.stations reads every recipe with.
+// Read-only; on that world's thread.
+bool stations_recipe_facts(void* registry, uint32_t id, int64_t duration_at, int64_t* duration_ns,
+                           std::vector<uint32_t>* outputs, std::vector<uint32_t>* inputs) {
+    outputs->clear();
+    inputs->clear();
+    const auto* recipe = static_cast<const uint8_t*>(find_recipe(id, registry));
+    if (!recipe || duration_at <= 0) return false;
+    KilnStationRecipe r{};
+    r.size = sizeof r;
+    RecipeCall c{id, registry, &r, false};
+    unsigned long code = 0;
+    struct DurationRead {
+        const uint8_t* at;
+        int64_t* out;
+        static void run(void* p) {
+            auto* d = static_cast<DurationRead*>(p);
+            std::memcpy(d->out, d->at, sizeof *d->out);
+        }
+    } dur{recipe + duration_at, duration_ns};
+    if (!guard(&recipe_impl, &c, &code) || !c.found || !guard(&DurationRead::run, &dur, &code)) return false;
+    for (uint32_t i = 0; i < r.output_count; ++i) outputs->push_back(r.outputs[i].item);
+    for (uint32_t i = 0; i < r.input_count; ++i) {
+        if (r.inputs[i].item) inputs->push_back(r.inputs[i].item);
+        if (!r.inputs[i].category || G.cat_bits <= 0) continue;
+        KilnItemId items[64] = {};
+        float scaling[64] = {};
+        CatCall k{registry, r.inputs[i].category, 0, false, 0, items, scaling, 64, 0, false};
+        if (guard(&cat_impl, &k, &code) && k.found)
+            for (uint32_t j = 0; j < std::min<uint32_t>(k.n, 64); ++j) inputs->push_back(items[j]);
+    }
+    return true;
+}
 
 void stations_resolve() {
     g_api = items_api();

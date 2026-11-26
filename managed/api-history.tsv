@@ -4673,6 +4673,72 @@ managed	Kiln.Blocks	Kiln.ChoiceRow.ChoiceRow() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ChoiceRow.Equals(Kiln.ChoiceRow? other) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ChoiceRow.Label.get -> Kiln.UiText!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ChoiceRow.Label.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	Kiln.ClientStationInfo	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.<Clone>$() -> Kiln.ClientStationInfo!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Base.get -> Kiln.BaseId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Base.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.ClientStationInfo(Kiln.EntityId Station, uint Workshop, uint SelectedRecipe, Kiln.BaseId Base, Kiln.WorldPosition Position, Kiln.StationState State, Kiln.StationNeeds Needs, System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, bool UseAllOptions, int CraftsLoaded, int Water, int WaterMax, bool NeedsEnergy, System.TimeSpan? CraftDuration, System.TimeSpan? CraftRemaining, System.TimeSpan? Remaining, float? Progress, System.Collections.Generic.IReadOnlyList<Kiln.StationStack>? Outputs, ulong Step) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftDuration.get -> System.TimeSpan?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftDuration.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftRemaining.get -> System.TimeSpan?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftRemaining.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftsLoaded.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.CraftsLoaded.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Deconstruct(out Kiln.EntityId Station, out uint Workshop, out uint SelectedRecipe, out Kiln.BaseId Base, out Kiln.WorldPosition Position, out Kiln.StationState State, out Kiln.StationNeeds Needs, out System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>! SelectedChoices, out bool UseAllOptions, out int CraftsLoaded, out int Water, out int WaterMax, out bool NeedsEnergy, out System.TimeSpan? CraftDuration, out System.TimeSpan? CraftRemaining, out System.TimeSpan? Remaining, out float? Progress, out System.Collections.Generic.IReadOnlyList<Kiln.StationStack>? Outputs, out ulong Step) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.DisplayName.get -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Equals(Kiln.ClientStationInfo? other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.IsRunning.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Needs.get -> Kiln.StationNeeds	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Needs.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.NeedsEnergy.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.NeedsEnergy.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.StationStack>?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Outputs.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Position.get -> Kiln.WorldPosition	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Position.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Progress.get -> float?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Progress.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.RecipeName.get -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Remaining.get -> System.TimeSpan?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Remaining.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.SelectedChoices.get -> System.Collections.Generic.IReadOnlyList<Kiln.CategoryChoice>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.SelectedChoices.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.SelectedRecipe.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.SelectedRecipe.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.State.get -> Kiln.StationState	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.State.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Station.get -> Kiln.EntityId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Station.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Step.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Step.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.UseAllOptions.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.UseAllOptions.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Water.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Water.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.WaterMax.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.WaterMax.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Workshop.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationInfo.Workshop.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStations	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Age.get -> System.TimeSpan?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Age.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.ClientStationsStatus() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.ClientStationsStatus(bool On, bool World, bool Copying, int Rows, ulong Step, System.TimeSpan? Age, string! Detail) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Copying.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Copying.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Deconstruct(out bool On, out bool World, out bool Copying, out int Rows, out ulong Step, out System.TimeSpan? Age, out string! Detail) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Detail.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Detail.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Equals(Kiln.ClientStationsStatus other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.On.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.On.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Rows.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Rows.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Step.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.Step.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.World.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	Kiln.ClientStationsStatus.World.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Blocks	Kiln.ClientsLevel	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ClientsLevel.Kiln = 1 -> Kiln.ClientsLevel	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ClientsLevel.Mod = 2 -> Kiln.ClientsLevel	<=0.2.0-dev.26	<=0.2.1
@@ -9030,6 +9096,7 @@ managed	Kiln.Blocks	const Kiln.BaseRulesBlock.MaxAltars = 16 -> int	0.2.0-dev.31
 managed	Kiln.Blocks	const Kiln.Bases.Capability = "stations.read" -> string!	0.2.0-dev.29.14	0.2.6
 managed	Kiln.Blocks	const Kiln.BlockUi.Bindings.Capability = "ui.blocks.bindings" -> string!	0.2.0-dev.31	0.2.17
 managed	Kiln.Blocks	const Kiln.BlockUi.StateCapability = "ui.blocks.state" -> string!	0.2.0-dev.31	0.2.17
+managed	Kiln.Blocks	const Kiln.ClientStations.Capability = "stations.client_view" -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Blocks	const Kiln.Crafting.BuildSourcesCapability = "crafting.build_sources" -> string!	0.2.0-dev.31.12	0.2.21
 managed	Kiln.Blocks	const Kiln.Crafting.LockSourcesCapability = "items.lock_sources" -> string!	0.2.0-dev.31.12	0.2.21
 managed	Kiln.Blocks	const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!	0.2.0-dev.30.6	0.2.15
@@ -9233,6 +9300,10 @@ managed	Kiln.Blocks	override Kiln.ChoiceRow.<Clone>$() -> Kiln.ChoiceRow!	<=0.2.
 managed	Kiln.Blocks	override Kiln.ChoiceRow.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ChoiceRow.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ChoiceRow.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	override Kiln.ClientStationInfo.Equals(object? obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	override Kiln.ClientStationInfo.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	override Kiln.ClientStationInfo.ToString() -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	override Kiln.ClientStationsStatus.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Blocks	override Kiln.Clip.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.Clip.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.Clip.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -10327,6 +10398,16 @@ managed	Kiln.Blocks	static Kiln.ChainBlock.operator !=(Kiln.ChainBlock? left, Ki
 managed	Kiln.Blocks	static Kiln.ChainBlock.operator ==(Kiln.ChainBlock? left, Kiln.ChainBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.ChoiceRow.operator !=(Kiln.ChoiceRow? left, Kiln.ChoiceRow? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.ChoiceRow.operator ==(Kiln.ChoiceRow? left, Kiln.ChoiceRow? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static Kiln.ClientStationInfo.operator !=(Kiln.ClientStationInfo? left, Kiln.ClientStationInfo? right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStationInfo.operator ==(Kiln.ClientStationInfo? left, Kiln.ClientStationInfo? right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.All() -> System.Collections.Generic.IReadOnlyList<Kiln.ClientStationInfo!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.Near(Kiln.WorldPosition center, double radius = 16) -> System.Collections.Generic.IReadOnlyList<Kiln.ClientStationInfo!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.Open.get -> Kiln.ClientStationInfo?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.Read(Kiln.EntityId station) -> Kiln.ClientStationInfo?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStations.Status.get -> Kiln.ClientStationsStatus?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStationsStatus.operator !=(Kiln.ClientStationsStatus left, Kiln.ClientStationsStatus right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	static Kiln.ClientStationsStatus.operator ==(Kiln.ClientStationsStatus left, Kiln.ClientStationsStatus right) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Blocks	static Kiln.Clip.implicit operator Kiln.Clip!(string! name) -> Kiln.Clip!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.Clip.operator !=(Kiln.Clip? left, Kiln.Clip? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.Clip.operator ==(Kiln.Clip? left, Kiln.Clip? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -11269,6 +11350,8 @@ managed	Kiln.Blocks	~override Kiln.BlockRef<T>.Equals(object obj) -> bool	0.2.0-
 managed	Kiln.Blocks	~override Kiln.BlockRef<T>.ToString() -> string	0.2.0-dev.28	0.2.3
 managed	Kiln.Blocks	~override Kiln.CategoryChoice.Equals(object obj) -> bool	0.2.0-dev.29.14	0.2.6
 managed	Kiln.Blocks	~override Kiln.CategoryChoice.ToString() -> string	0.2.0-dev.29.14	0.2.6
+managed	Kiln.Blocks	~override Kiln.ClientStationsStatus.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Blocks	~override Kiln.ClientStationsStatus.ToString() -> string	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Blocks	~override Kiln.FillInput.Equals(object obj) -> bool	0.2.0-dev.29.14	0.2.6
 managed	Kiln.Blocks	~override Kiln.FillInput.ToString() -> string	0.2.0-dev.29.14	0.2.6
 managed	Kiln.Blocks	~override Kiln.IngredientOption.Equals(object obj) -> bool	0.2.0-dev.29.14	0.2.6
@@ -12960,6 +13043,40 @@ managed	Kiln.Client	Kiln.ClientState.DedicatedServer = 1 -> Kiln.ClientState	<=0
 managed	Kiln.Client	Kiln.ClientState.Hosting = 2 -> Kiln.ClientState	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	Kiln.ClientState.Menu = 0 -> Kiln.ClientState	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	Kiln.ClientState.Remote = 3 -> Kiln.ClientState	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Client	Kiln.Crosshair	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Age.get -> System.TimeSpan	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Age.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.ClientSession.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.ClientSession.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.ClientStep.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.ClientStep.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.CrosshairHit() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Distance.get -> float?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Distance.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Entity.get -> Kiln.EntityId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Entity.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Equals(Kiln.CrosshairHit other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.GameStatus.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.GameStatus.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.HasEntity.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.IsFresh.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.IsHit.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.IsHit.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Normal.get -> System.Numerics.Vector3?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Normal.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Position.get -> Kiln.WorldPosition?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Position.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Sequence.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.Sequence.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.VoxelMaterial.get -> byte?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairHit.VoxelMaterial.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason.Busy = 2 -> Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason.Faulted = 4 -> Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason.NoSample = 1 -> Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason.None = 0 -> Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	Kiln.CrosshairReason.Stale = 3 -> Kiln.CrosshairReason	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Client	[KILNX002]Kiln.SteamGuard	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	[KILNX002]Kiln.SteamGuardStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	[KILNX002]Kiln.SteamGuardStatus.Active.get -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -12993,10 +13110,13 @@ managed	Kiln.Client	[KILNX002]static Kiln.SteamGuardStatus.operator ==(Kiln.Stea
 managed	Kiln.Client	const Kiln.BuildingInput.Capability = "client.building_input" -> string!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	const Kiln.BuildingInput.MaxScale = 1024 -> float	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	const Kiln.BuildingInput.QueueTimeoutMilliseconds = 5000 -> int	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Client	const Kiln.Crosshair.BusyRetries = 3 -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	const Kiln.Crosshair.Capability = "client.crosshair" -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Client	override Kiln.BuildingInputRequest.ToString() -> string!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	override Kiln.BuildingInputResult.Equals(object? obj) -> bool	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	override Kiln.BuildingInputResult.GetHashCode() -> int	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	override Kiln.BuildingInputResult.ToString() -> string!	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Client	override Kiln.CrosshairHit.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Client	static Kiln.BuildingInput.Available.get -> bool	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	static Kiln.BuildingInput.Dismantle(Kiln.EntityId prop, Kiln.WorldPosition position, System.Numerics.Quaternion rotation, System.Numerics.Vector3? scale = null, uint expectedSession = 0) -> Kiln.BuildingInputResult!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Client	static Kiln.BuildingInput.Place(Kiln.WorldPosition position, System.Numerics.Quaternion rotation, System.Numerics.Vector3? scale = null, uint expectedSession = 0) -> Kiln.BuildingInputResult!	0.2.0-dev.30.3	0.2.13
@@ -13021,8 +13141,16 @@ managed	Kiln.Client	static Kiln.Client.Post(System.Action! work) -> void	<=0.2.0
 managed	Kiln.Client	static Kiln.Client.ServerWorldSession.get -> uint	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	static Kiln.Client.State.get -> Kiln.ClientState	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	static Kiln.Client.Tick -> Kiln.TickHandler?	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Client	static Kiln.Crosshair.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	static Kiln.Crosshair.FreshFor.get -> System.TimeSpan	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	static Kiln.Crosshair.Read(out Kiln.CrosshairReason reason) -> Kiln.CrosshairHit?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	static Kiln.Crosshair.TryGet(out Kiln.CrosshairHit hit) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	static Kiln.CrosshairHit.operator !=(Kiln.CrosshairHit left, Kiln.CrosshairHit right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	static Kiln.CrosshairHit.operator ==(Kiln.CrosshairHit left, Kiln.CrosshairHit right) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Client	~[KILNX002]override Kiln.SteamGuardStatus.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Client	~[KILNX002]override Kiln.SteamGuardStatus.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Client	~override Kiln.CrosshairHit.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Client	~override Kiln.CrosshairHit.ToString() -> string	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Combat	Kiln.AttributeIds	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Combat	Kiln.AttributeIds.AttributeIds() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Combat	Kiln.AttributeIds.AttributeIds(Kiln.GameAttribute Kind, uint CurrentId, uint MinId, uint MaxId, uint ComponentHash, bool GameClamp) -> void	<=0.2.0-dev.26	<=0.2.1
@@ -13946,6 +14074,25 @@ managed	Kiln.Content	Kiln.GameDataTexts.Equals(Kiln.GameDataTexts? other) -> boo
 managed	Kiln.Content	Kiln.GameDataTexts.GameDataTexts(string? Name = null, string? Description = null) -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	Kiln.GameDataTexts.Name.get -> string?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	Kiln.GameDataTexts.Name.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Content	Kiln.GameTextSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextSource.Game = 1 -> Kiln.GameTextSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextSource.KilnCatalog = 2 -> Kiln.GameTextSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextSource.None = 0 -> Kiln.GameTextSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.ContainsKey(uint key) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Count.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Get(System.Guid locaTag) -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Get(uint locaId) -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.GetEnumerator() -> System.Collections.Generic.IEnumerator<System.Collections.Generic.KeyValuePair<uint, string!>>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.GetPlain(uint locaId) -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Keys.get -> System.Collections.Generic.IEnumerable<uint>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Language.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Reason.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Source.get -> Kiln.GameTextSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.TryGetValue(uint key, out string! value) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.Values.get -> System.Collections.Generic.IEnumerable<string!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.GameTextTable.this[uint key].get -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	Kiln.GearArmorKind	0.2.0-dev.30	0.2.12
 managed	Kiln.Content	Kiln.GearArmorKind.Blunt = 4 -> Kiln.GearArmorKind	0.2.0-dev.30	0.2.12
 managed	Kiln.Content	Kiln.GearArmorKind.Cut = 2 -> Kiln.GearArmorKind	0.2.0-dev.30	0.2.12
@@ -14227,8 +14374,54 @@ managed	Kiln.Content	Kiln.TooltipValueFormat.Normal = 0 -> Kiln.TooltipValueForm
 managed	Kiln.Content	Kiln.TooltipValueFormat.Numberless = 5 -> Kiln.TooltipValueFormat	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	Kiln.TooltipValueFormat.Percentage = 1 -> Kiln.TooltipValueFormat	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	Kiln.TooltipValueFormat.Unknown = 6 -> Kiln.TooltipValueFormat	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	Kiln.VoxelMaterial	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.<Clone>$() -> Kiln.VoxelMaterial!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.CellId.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.CellId.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Deconstruct(out int CellId, out Kiln.VoxelMaterialKind Kind, out System.Guid Guid, out string! Name, out Kiln.ItemId LootItem, out int? ExchangeRate, out System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! PlacingItems, out string? Hardness, out int HealthPoints, out string? Label, out Kiln.VoxelMaterialLabelSource LabelSource) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Equals(Kiln.VoxelMaterial? other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.ExchangeRate.get -> int?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.ExchangeRate.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Guid.get -> System.Guid	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Guid.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Hardness.get -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Hardness.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.HealthPoints.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.HealthPoints.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Kind.get -> Kiln.VoxelMaterialKind	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Kind.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Label.get -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Label.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.LabelSource.get -> Kiln.VoxelMaterialLabelSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.LabelSource.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.LootItem.get -> Kiln.ItemId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.LootItem.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Name.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.Name.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.PlacingItems.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemId>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.PlacingItems.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterial.VoxelMaterial(int CellId, Kiln.VoxelMaterialKind Kind, System.Guid Guid, string! Name, Kiln.ItemId LootItem, int? ExchangeRate, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! PlacingItems, string? Hardness, int HealthPoints, string? Label, Kiln.VoxelMaterialLabelSource LabelSource) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.Count.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.Get(int cellId) -> Kiln.VoxelMaterial?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.GetEnumerator() -> System.Collections.Generic.IEnumerator<Kiln.VoxelMaterial!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.Language.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.PlacedBy(Kiln.ItemId item) -> Kiln.VoxelMaterial?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.Reason.get -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.WithLootItem(Kiln.ItemId item) -> System.Collections.Generic.IReadOnlyList<Kiln.VoxelMaterial!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialCatalog.this[int index].get -> Kiln.VoxelMaterial!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialKind	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialKind.Building = 1 -> Kiln.VoxelMaterialKind	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialKind.Terrain = 0 -> Kiln.VoxelMaterialKind	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialLabelSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialLabelSource.LootItem = 2 -> Kiln.VoxelMaterialLabelSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialLabelSource.None = 0 -> Kiln.VoxelMaterialLabelSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	Kiln.VoxelMaterialLabelSource.PlacingItem = 1 -> Kiln.VoxelMaterialLabelSource	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	const Kiln.Content.GameTextsCapability = "content.game_texts" -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	const Kiln.Content.GearCapability = "content.gear" -> string!	0.2.0-dev.30	0.2.12
 managed	Kiln.Content	const Kiln.Content.TextCapability = "content.text" -> string!	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	const Kiln.Content.VoxelMaterialsCapability = "content.voxel_materials" -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	const Kiln.ContentSync.ChannelName = "kiln:content" -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	const Kiln.ContentSync.ChannelVersion = "1" -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	const Kiln.CraftingGroups.Alchemist.Ammo = "0xc86873f9/a9502a9d-8b4a-47b1-89f8-84d6443c9fb2" -> string!	0.2.0-dev.30.5	0.2.14
@@ -14401,6 +14594,7 @@ managed	Kiln.Content	override Kiln.GameDataField.ToString() -> string!	<=0.2.0-d
 managed	Kiln.Content	override Kiln.GameDataTexts.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	override Kiln.GameDataTexts.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	override Kiln.GameDataTexts.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Content	override Kiln.GameTextTable.ToString() -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	override Kiln.GearStats.ToString() -> string!	0.2.0-dev.30	0.2.12
 managed	Kiln.Content	override Kiln.ItemDefinition.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	override Kiln.ItemDefinition.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
@@ -14429,6 +14623,10 @@ managed	Kiln.Content	override Kiln.TextsStatus.ToString() -> string!	<=0.2.0-dev
 managed	Kiln.Content	override Kiln.TooltipValue.Equals(object? obj) -> bool	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	override Kiln.TooltipValue.GetHashCode() -> int	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	override Kiln.TooltipValue.ToString() -> string!	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	override Kiln.VoxelMaterial.Equals(object? obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	override Kiln.VoxelMaterial.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	override Kiln.VoxelMaterial.ToString() -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	override Kiln.VoxelMaterialCatalog.ToString() -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	static Kiln.Content.Apply(string! json, string? source = null) -> Kiln.ContentReport!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.Content.ApplyFile(string! path) -> Kiln.ContentReport!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.Content.Arsenals.get -> Kiln.GameDataRegistry!	<=0.2.0-dev.26	<=0.2.1
@@ -14446,6 +14644,8 @@ managed	Kiln.Content	static Kiln.Content.Gear(Kiln.ItemId item) -> Kiln.GearStat
 managed	Kiln.Content	static Kiln.Content.Gear(string! item) -> Kiln.GearStats?	0.2.0-dev.30	0.2.12
 managed	Kiln.Content	static Kiln.Content.ItemData.get -> Kiln.GameDataRegistry!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.Content.Items.get -> Kiln.ContentRegistry!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Content	static Kiln.Content.LoadTextsAsync(string? language, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.GameTextTable!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	static Kiln.Content.LoadVoxelMaterialsAsync(string? language = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Kiln.VoxelMaterialCatalog!>!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	static Kiln.Content.Loot.get -> Kiln.ContentRegistry!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.Content.OnReady(System.Action<Kiln.ContentReadyEvent!>! handler) -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.Content.PackReport() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -14466,8 +14666,13 @@ managed	Kiln.Content	static Kiln.Content.Text(System.Guid locaTag) -> string?	0.
 managed	Kiln.Content	static Kiln.Content.Text(string! locaTag) -> string?	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	static Kiln.Content.Text(uint locaId) -> string?	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	static Kiln.Content.TextAvailable.get -> bool	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	static Kiln.Content.TextIn(System.Guid locaTag, string? language) -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	static Kiln.Content.TextIn(uint locaId, string? language) -> string?	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	static Kiln.Content.TextLanguage.get -> string?	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	static Kiln.Content.TextLanguages.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	static Kiln.Content.TooltipValues(Kiln.ItemId item) -> System.Collections.Generic.IReadOnlyList<Kiln.TooltipValue!>!	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	static Kiln.Content.TryGetTexts(string? language) -> Kiln.GameTextTable?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	static Kiln.Content.TryGetVoxelMaterials(string? language = null) -> Kiln.VoxelMaterialCatalog?	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	static Kiln.Content.UnregisterSection(string! name) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.ContentConflict.operator !=(Kiln.ContentConflict? left, Kiln.ContentConflict? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.ContentConflict.operator ==(Kiln.ContentConflict? left, Kiln.ContentConflict? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -14571,6 +14776,8 @@ managed	Kiln.Content	static Kiln.TextsStatus.operator !=(Kiln.TextsStatus? left,
 managed	Kiln.Content	static Kiln.TextsStatus.operator ==(Kiln.TextsStatus? left, Kiln.TextsStatus? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	static Kiln.TooltipValue.operator !=(Kiln.TooltipValue? left, Kiln.TooltipValue? right) -> bool	0.2.0-dev.29.18	0.2.10
 managed	Kiln.Content	static Kiln.TooltipValue.operator ==(Kiln.TooltipValue? left, Kiln.TooltipValue? right) -> bool	0.2.0-dev.29.18	0.2.10
+managed	Kiln.Content	static Kiln.VoxelMaterial.operator !=(Kiln.VoxelMaterial? left, Kiln.VoxelMaterial? right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Content	static Kiln.VoxelMaterial.operator ==(Kiln.VoxelMaterial? left, Kiln.VoxelMaterial? right) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Content	~override Kiln.ContentSyncStatus.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	~override Kiln.ContentSyncStatus.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Content	~override Kiln.ContentValue.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -17492,6 +17699,19 @@ managed	Kiln.Items	Kiln.ItemRarity.Epic = 3 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=
 managed	Kiln.Items	Kiln.ItemRarity.Legendary = 4 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemRarity.Rare = 2 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemRarity.Uncommon = 1 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.ItemTextTags	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Caption.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Caption.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Deconstruct(out uint Name, out uint Caption, out uint Description, out uint Lore) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Description.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Description.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Equals(Kiln.ItemTextTags other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.ItemTextTags() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.ItemTextTags(uint Name, uint Caption, uint Description, uint Lore) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Lore.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Lore.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Name.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	Kiln.ItemTextTags.Name.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	Kiln.Items	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.Items.Fuel	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.Items.PlayerStorages	0.2.0-dev.30.7	0.2.16
@@ -18164,6 +18384,7 @@ managed	Kiln.Items	override Kiln.ItemInfo.ToString() -> string!	<=0.2.0-dev.26	<
 managed	Kiln.Items	override Kiln.ItemLocation.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.ItemLocation.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.ItemMovedEvent.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	override Kiln.ItemTextTags.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	override Kiln.ItemsGivenEvent.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.ItemsResult.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.ItemsResult.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
@@ -18322,6 +18543,8 @@ managed	Kiln.Items	static Kiln.ItemInfo.operator ==(Kiln.ItemInfo? left, Kiln.It
 managed	Kiln.Items	static Kiln.ItemInstanceExtensions.Location(this Kiln.ItemInstanceRef item) -> Kiln.ItemLocation?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.ItemLocation.operator !=(Kiln.ItemLocation left, Kiln.ItemLocation right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.ItemLocation.operator ==(Kiln.ItemLocation left, Kiln.ItemLocation right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	static Kiln.ItemTextTags.operator !=(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	static Kiln.ItemTextTags.operator ==(Kiln.ItemTextTags left, Kiln.ItemTextTags right) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	static Kiln.Items.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.ArmorAvailable.get -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.Items.Available.get -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -18330,7 +18553,10 @@ managed	Kiln.Items	static Kiln.Items.CaptureSet(Kiln.EntityId player) -> Kiln.Eq
 managed	Kiln.Items	static Kiln.Items.ContainerName(Kiln.EntityId entity) -> string?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.ContainerNamesAvailable.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.ContainerRenameAvailable.get -> bool	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Items	static Kiln.Items.Description(Kiln.ItemId item) -> string?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	static Kiln.Items.DescriptionIn(Kiln.ItemId item, string? language) -> string?	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	static Kiln.Items.DisplayName(Kiln.ItemId item) -> string?	0.2.0-dev.29.15	0.2.7
+managed	Kiln.Items	static Kiln.Items.DisplayNameIn(Kiln.ItemId item, string? language) -> string?	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	static Kiln.Items.Equip(Kiln.EntityId player, Kiln.SlotId from, Kiln.EquipmentSlot? slot = null, Kiln.EquipOptions options = Kiln.EquipOptions.None, Kiln.EntityId itemEntity = default(Kiln.EntityId)) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!	0.2.0-dev.27	0.2.2
 managed	Kiln.Items	static Kiln.Items.EquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	static Kiln.Items.EquipSet(Kiln.EquipmentSetPlan! plan, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!	0.2.0-dev.29	0.2.4
@@ -18384,6 +18610,7 @@ managed	Kiln.Items	static Kiln.Items.Status() -> Kiln.ItemsServiceStatus?	<=0.2.
 managed	Kiln.Items	static Kiln.Items.Status3() -> Kiln.ItemsV3Status?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Take(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.SlotId? from = null, bool exactSlot = false, Kiln.EntityId? itemEntity = null, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.TakeSlot(Kiln.EntityId target, Kiln.InventorySlot! slot, bool dryRun = false) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	static Kiln.Items.TextTags(Kiln.ItemId item) -> Kiln.ItemTextTags?	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	static Kiln.Items.ToolWearStatus(Kiln.ItemId tool) -> Kiln.ToolWearState!	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	static Kiln.Items.Transfers.Available.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Transfers.Deny(Kiln.EntityId container, Kiln.TransferKinds kinds = Kiln.TransferKinds.Any) -> Kiln.TransferRule!	<=0.2.0-dev.26	<=0.2.1
@@ -18476,6 +18703,8 @@ managed	Kiln.Items	~override Kiln.ItemChange.Equals(object obj) -> bool	<=0.2.0-
 managed	Kiln.Items	~override Kiln.ItemChange.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.ItemId.Equals(object obj) -> bool (forwarded, contained in Kiln.Api)	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.ItemLocation.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	~override Kiln.ItemTextTags.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Items	~override Kiln.ItemTextTags.ToString() -> string	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Items	~override Kiln.MoveChange.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.MoveChange.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.OrphanTarget.Equals(object obj) -> bool	0.2.0-dev.30.7	0.2.16
@@ -25922,6 +26151,73 @@ managed	Kiln.Sigs	virtual Kiln.Sigs.Time.GetGameTime.Handler.Invoke(ref Kiln.Sig
 managed	Kiln.Sigs	virtual Kiln.Sigs.Time.SetTimeScale.Handler.Invoke(ref Kiln.Sigs.Time.SetTimeScale.Call call) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.Sigs	virtual Kiln.Sigs.Weather.SampleAt.Handler.Invoke(ref Kiln.Sigs.Weather.SampleAt.Call call) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.Sigs	virtual Kiln.Sigs.World.ReadOther.Handler.Invoke(ref Kiln.Sigs.World.ReadOther.Call call) -> void	0.2.0-dev.29	0.2.4
+managed	Kiln.Skills	Kiln.ClientSkillLink	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Bidirectional.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Bidirectional.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.ClientSkillLink() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.ClientSkillLink(uint Id, uint From, uint To, bool Bidirectional) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Deconstruct(out uint Id, out uint From, out uint To, out bool Bidirectional) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Equals(Kiln.ClientSkillLink other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.From.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.From.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Id.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.Id.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.To.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillLink.To.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.ClassAlignment.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.ClassAlignment.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.ClientSkillNode() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.ClientSkillNode(uint Id, int Index, Kiln.SkillNodeType Type, int ClassAlignment, int Cost, int MaxLevel, int Level, bool Unlocked, bool Shadow, float UiX, float UiY, int Incoming, int Outgoing) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Cost.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Cost.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Deconstruct(out uint Id, out int Index, out Kiln.SkillNodeType Type, out int ClassAlignment, out int Cost, out int MaxLevel, out int Level, out bool Unlocked, out bool Shadow, out float UiX, out float UiY, out int Incoming, out int Outgoing) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Equals(Kiln.ClientSkillNode other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Id.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Id.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Incoming.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Incoming.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Index.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Index.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Level.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Level.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.MaxLevel.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.MaxLevel.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Outgoing.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Outgoing.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Shadow.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Shadow.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Spent.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Type.get -> Kiln.SkillNodeType	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Type.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.UiX.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.UiX.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.UiY.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.UiY.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Unlocked.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillNode.Unlocked.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Age.get -> System.TimeSpan	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Age.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Available.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Available.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.ClientSkillPoints() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.ClientSkillPoints(Kiln.EntityId Player, int Total, int Spent, int Available, int UnlockedNodes, int TreeNodes, ulong Step, System.TimeSpan Age) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Deconstruct(out Kiln.EntityId Player, out int Total, out int Spent, out int Available, out int UnlockedNodes, out int TreeNodes, out ulong Step, out System.TimeSpan Age) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Equals(Kiln.ClientSkillPoints other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Player.get -> Kiln.EntityId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Player.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Spent.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Spent.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Step.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Step.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Total.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.Total.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.TreeNodes.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.TreeNodes.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.UnlockedNodes.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkillPoints.UnlockedNodes.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	Kiln.ClientSkills	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Skills	Kiln.GameNodeDefinition	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	Kiln.GameNodeDefinition.Class.get -> string?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	Kiln.GameNodeDefinition.Class.init -> void	<=0.2.0-dev.26	<=0.2.1
@@ -26290,6 +26586,12 @@ managed	Kiln.Skills	[KILNX001]static Kiln.GameTree.LabSetCarried(Kiln.TalentHold
 managed	Kiln.Skills	[KILNX001]static Kiln.GameTree.Simulate(params (Kiln.GameTreeSimOp Op, uint Node)[]! steps) -> System.Collections.Generic.IReadOnlyList<Kiln.GameTreeSimResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	[KILNX001]static Kiln.GameTreeSimResult.operator !=(Kiln.GameTreeSimResult? left, Kiln.GameTreeSimResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	[KILNX001]static Kiln.GameTreeSimResult.operator ==(Kiln.GameTreeSimResult? left, Kiln.GameTreeSimResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Skills	const Kiln.ClientSkills.Capability = "skills.client_view" -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	override Kiln.ClientSkillLink.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	override Kiln.ClientSkillNode.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	override Kiln.ClientSkillNode.ToString() -> string!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	override Kiln.ClientSkillPoints.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	override Kiln.ClientSkillPoints.ToString() -> string!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Skills	override Kiln.GameNodeInfo.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	override Kiln.GameNodeInfo.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	override Kiln.GameNodeInfo.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -26318,6 +26620,18 @@ managed	Kiln.Skills	override Kiln.TalentResult.ToString() -> string!	<=0.2.0-dev
 managed	Kiln.Skills	override Kiln.TalentStateMessage.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	override Kiln.TalentStateMessage.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	override Kiln.TalentStateMessage.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Skills	static Kiln.ClientSkillLink.operator !=(Kiln.ClientSkillLink left, Kiln.ClientSkillLink right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkillLink.operator ==(Kiln.ClientSkillLink left, Kiln.ClientSkillLink right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkillNode.operator !=(Kiln.ClientSkillNode left, Kiln.ClientSkillNode right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkillNode.operator ==(Kiln.ClientSkillNode left, Kiln.ClientSkillNode right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkillPoints.operator !=(Kiln.ClientSkillPoints left, Kiln.ClientSkillPoints right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkillPoints.operator ==(Kiln.ClientSkillPoints left, Kiln.ClientSkillPoints right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Find(uint id) -> Kiln.ClientSkillNode?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Links.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillLink>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Nodes.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillNode>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Points.get -> Kiln.ClientSkillPoints?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	static Kiln.ClientSkills.Unlocked.get -> System.Collections.Generic.IReadOnlyList<Kiln.ClientSkillNode>!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Skills	static Kiln.GameNodeInfo.operator !=(Kiln.GameNodeInfo? left, Kiln.GameNodeInfo? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	static Kiln.GameNodeInfo.operator ==(Kiln.GameNodeInfo? left, Kiln.GameNodeInfo? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	static Kiln.GameShadowMessage.operator !=(Kiln.GameShadowMessage? left, Kiln.GameShadowMessage? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -26391,6 +26705,10 @@ managed	Kiln.Skills	static readonly Kiln.TalentAttributes.Endurance -> System.Gu
 managed	Kiln.Skills	static readonly Kiln.TalentAttributes.Intelligence -> System.Guid	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	static readonly Kiln.TalentAttributes.Spirit -> System.Guid	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	static readonly Kiln.TalentAttributes.Strength -> System.Guid	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Skills	~override Kiln.ClientSkillLink.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	~override Kiln.ClientSkillLink.ToString() -> string	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	~override Kiln.ClientSkillNode.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Skills	~override Kiln.ClientSkillPoints.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Skills	~override Kiln.TalentHolder.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Skills	~override Kiln.TalentPointsInfo.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Spawn	Kiln.CleanupResult	<=0.2.0-dev.26	<=0.2.1
@@ -27279,6 +27597,54 @@ managed	Kiln.TestKit	Kiln.TestKit.FakeChatMessage.Consumed.get -> bool	0.2.0-dev
 managed	Kiln.TestKit	Kiln.TestKit.FakeChatMessage.Player.get -> Kiln.TestKit.FakePlayer?	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeChatMessage.Step.get -> ulong	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeChatMessage.Text.get -> string!	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.ClassAlignment.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.ClassAlignment.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Cost.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Cost.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Id.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Level.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Level.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.MaxLevel.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.MaxLevel.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Shadow.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Shadow.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Type.get -> Kiln.SkillNodeType	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.Type.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.UiX.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.UiX.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.UiY.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientSkillNode.UiY.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Base.get -> Kiln.BaseId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Base.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Choices.get -> System.Collections.Generic.List<Kiln.CategoryChoice>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.CraftsLoaded.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.CraftsLoaded.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Inventory.get -> System.Collections.Generic.List<Kiln.StationStack>?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Inventory.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Needs.get -> Kiln.StationNeeds	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Needs.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.NeedsEnergy.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.NeedsEnergy.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Position.get -> Kiln.WorldPosition	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Position.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Recipe.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Recipe.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Run(uint recipe, int craftsLoaded, System.TimeSpan started) -> Kiln.TestKit.FakeClientStation!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Started.get -> System.TimeSpan	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Started.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.State.get -> Kiln.StationState	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.State.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Station.get -> Kiln.EntityId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.UseAllOptions.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.UseAllOptions.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Water.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Water.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.WaterMax.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.WaterMax.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Workshop.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.FakeClientStation.Workshop.set -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.<Clone>$() -> Kiln.TestKit.FakeControlCall!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.FakeControlCall.Deconstruct(out ulong Step, out string! Function, out ulong Owner, out Kiln.EntityId Entity, out ulong Lease, out int Result, out string! Detail) -> void	0.2.0-dev.28	0.2.3
@@ -27321,6 +27687,7 @@ managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Owner.get -> ulong
 managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Owner.init -> void	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Player.get -> Kiln.EntityId	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.FakeCraftSourceRegistration.Player.init -> void	0.2.0-dev.30.6	0.2.15
+managed	Kiln.TestKit	Kiln.TestKit.FakeCrosshair	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall.Deconstruct(out string! Native, out uint Site) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.FakeEcall.Equals(Kiln.TestKit.FakeEcall other) -> bool	0.2.0-dev.29	0.2.4
@@ -27910,6 +28277,30 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessCapabilities.Why(string! name) -> strin
 managed	Kiln.TestKit	Kiln.TestKit.HarnessChat	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessChat.Sent.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeChatLine!>!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessChat.Typed.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeChatMessage!>!	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.AddNode(uint id, Kiln.SkillNodeType type = Kiln.SkillNodeType.PassiveSkill, int cost = 1, int maxLevel = 0, float uiX = 0, float uiY = 0, int classAlignment = 3, bool shadow = false) -> Kiln.TestKit.FakeClientSkillNode!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Clear() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Link(uint from, uint to, bool bidirectional = false) -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Loaded.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Loaded.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Lock(uint id) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Player.get -> Kiln.EntityId	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Player.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Reads.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Total.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Total.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientSkills.Unlock(uint id, int level = 1) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Add(Kiln.EntityId station, uint workshop, Kiln.WorldPosition position, Kiln.BaseId baseId = default(Kiln.BaseId)) -> Kiln.TestKit.FakeClientStation!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Clear() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Clock.get -> System.TimeSpan	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Clock.set -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Get(Kiln.EntityId station) -> Kiln.TestKit.FakeClientStation?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Reads.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.Remove(Kiln.EntityId station) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.SetRecipe(uint recipe, System.TimeSpan duration, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! outputs, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? inputs = null) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.SpeedFactor.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessClientStations.SpeedFactor.set -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCombat	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCombat.Health(Kiln.EntityId entity) -> Kiln.TestKit.FakeHealth?	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCombat.Hit(Kiln.EntityId target, int amount, Kiln.EntityId attacker = default(Kiln.EntityId), Kiln.EntityId source = default(Kiln.EntityId)) -> ulong	0.2.0-dev.27	0.2.2
@@ -27933,10 +28324,23 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeControlCall!>!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl.IsControlled(Kiln.EntityId body) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessCreatureControl.SetBusy(Kiln.EntityId body, bool busy = true) -> void	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.Age(System.TimeSpan age) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.Aim(Kiln.WorldPosition position, System.Numerics.Vector3? normal = null, float? distance = null, Kiln.EntityId entity = default(Kiln.EntityId), byte? voxelMaterial = null) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.AimAtNothing() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.Clear() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.Fault() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.HarnessCrosshair(Kiln.TestKit.KilnHarness! harness) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessCrosshair.Reads.get -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.HarnessDecisions	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessDecisions.Active.get -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessDecisions.Outcomes.get -> System.Collections.Generic.IReadOnlyList<Kiln.DecisionResult!>!	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessDecisions.RestartWorld() -> void	0.2.0-dev.29	0.2.4
+managed	Kiln.TestKit	Kiln.TestKit.HarnessGameTexts	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessGameTexts.Add(string! language, uint locaId, string! text) -> Kiln.TestKit.HarnessGameTexts!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessGameTexts.AddItem(Kiln.ItemId item, Kiln.ItemTextTags tags) -> Kiln.TestKit.HarnessGameTexts!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessGameTexts.Languages.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessGameTexts.Reads.get -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.AddProgram(uint program, params Kiln.TestKit.FakeEcall[]! calls) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.Call(Kiln.TestKit.FakeImpactCall! call) -> Kiln.TestKit.FakeImpactResult!	0.2.0-dev.29	0.2.4
@@ -27946,6 +28350,20 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.OtherWrite.get -> System.
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.Serial.get -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.Serial.set -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.HarnessImpactNatives.SetGameNative(string! native, Kiln.TestKit.FakeGameNativeHandler? handler = null) -> void	0.2.0-dev.29	0.2.4
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.ClearLogs() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Down(Kiln.KeyChord chord, int controller = 0) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Down(uint code, int controller = 0, Kiln.KeyMods mods = Kiln.KeyMods.None, System.Numerics.Vector2? at = null) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.FocusLost() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Game.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.HiddenFromGame(uint code, int controller = 0) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Leak(uint code, int controller = 0) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Others.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Repeat(uint code, Kiln.KeyMods mods = Kiln.KeyMods.None) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.SetPad(int controller, Kiln.PadButtons held, System.Numerics.Vector2 leftStick = default(System.Numerics.Vector2), System.Numerics.Vector2 rightStick = default(System.Numerics.Vector2), float leftTrigger = 0, float rightTrigger = 0) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Unplug(int controller) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.Up(uint code, int controller = 0, System.Numerics.Vector2? at = null) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessInput.WorldChange() -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.AddContainer(Kiln.EntityId entity, int inventories = 1) -> Kiln.TestKit.FakeInventory!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessItems.AddItem(string! name, int maxStack, Kiln.ItemCategory category = Kiln.ItemCategory.Materials, bool gear = false, Kiln.ItemRarity rarity = Kiln.ItemRarity.Common, int levelMin = 0, int levelMax = 0, System.Guid id = default(System.Guid)) -> Kiln.ItemId	0.2.0-dev.27	0.2.2
@@ -28178,6 +28596,9 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessUiValues.Decisions.get -> System.Collec
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiValues.DetailLines(Kiln.TestKit.FakeUiItem item) -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiValues.Draw(uint kind, Kiln.TestKit.FakeUiItem item, Kiln.TestKit.FakeUiBar game) -> Kiln.TestKit.FakeUiBar	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiValues.Registrations.get -> int	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	Kiln.TestKit.HarnessVoxelMaterials	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessVoxelMaterials.Add(int cellId, string! name, Kiln.ItemId lootItem = default(Kiln.ItemId), int? exchangeRate = null, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>? placingItems = null, string? hardness = null, int healthPoints = 0, System.Guid guid = default(System.Guid)) -> Kiln.TestKit.HarnessVoxelMaterials!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.HarnessVoxelMaterials.Reads.get -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.HarnessWorld	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessWorld.Directory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessWorld.Id.get -> System.Guid	0.2.0-dev.26	0.2.1
@@ -28208,12 +28629,15 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.BootPhase.get -> Kiln.TestKit.Harn
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Camera.get -> Kiln.TestKit.HarnessCamera!	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Capabilities.get -> Kiln.TestKit.HarnessCapabilities!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Chat.get -> Kiln.TestKit.HarnessChat!	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ClientSkills.get -> Kiln.TestKit.HarnessClientSkills!	0.2.0-dev.31.13	0.2.22
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ClientStations.get -> Kiln.TestKit.HarnessClientStations!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Combat.get -> Kiln.TestKit.HarnessCombat!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ConfigDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ControlDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Crafting.get -> Kiln.TestKit.HarnessCrafting!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.CreatureControl.get -> Kiln.TestKit.HarnessCreatureControl!	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Crosshair.get -> Kiln.TestKit.HarnessCrosshair!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.CurrentStep.get -> ulong	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.DataDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Decisions.get -> Kiln.TestKit.HarnessDecisions!	0.2.0-dev.29	0.2.4
@@ -28223,8 +28647,10 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.EnterWorld() -> void	0.2.0-dev.29.
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Entities.get -> Kiln.TestKit.FakeWorld!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.FindLogs(string! text, string? modId = null) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.LogLine!>!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.GameLog(string! text, Kiln.LogLevel level = Kiln.LogLevel.Info) -> void	0.2.0-dev.26	0.2.1
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.GameTexts.get -> Kiln.TestKit.HarnessGameTexts!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.HasLog(string! text, string? modId = null) -> bool	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ImpactNatives.get -> Kiln.TestKit.HarnessImpactNatives!	0.2.0-dev.29	0.2.4
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Input.get -> Kiln.TestKit.HarnessInput!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Items.get -> Kiln.TestKit.HarnessItems!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Kill() -> void	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.KilnDirectory.get -> string!	0.2.0-dev.26	0.2.1
@@ -28281,6 +28707,7 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiPlacement.get -> Kiln.TestKit.Ha
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.UiValues.get -> Kiln.TestKit.HarnessUiValues!	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Unload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> void	0.2.0-dev.26	0.2.1
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.VoxelMaterials.get -> Kiln.TestKit.HarnessVoxelMaterials!	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.World.get -> Kiln.TestKit.HarnessWorld!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.WorldTables.get -> Kiln.TestKit.HarnessWorldTables!	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.WritePermissions(string! json) -> void	0.2.0-dev.26	0.2.1
@@ -28441,6 +28868,7 @@ managed	Kiln.TestKit	[KILNX031]Kiln.TestKit.HarnessRegistry	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	[KILNX031]Kiln.TestKit.HarnessRegistry.Author(Kiln.TestKit.ModHandle! mod, Kiln.RegistryEntryPoint point = Kiln.RegistryEntryPoint.GameStart, Kiln.RegistryPhase phase = Kiln.RegistryPhase.Alter, Kiln.RegistryWorld? world = null) -> string?	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	[KILNX031]Kiln.TestKit.HarnessRegistry.Seed(string! registry, string! id, string! field, string! valueJson) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	[KILNX031]Kiln.TestKit.KilnHarness.Registry.get -> Kiln.TestKit.HarnessRegistry!	0.2.0-dev.31	0.2.17
+managed	Kiln.TestKit	const Kiln.TestKit.FakeCrosshair.Session = 1 -> uint	0.2.0-dev.31.13	0.2.22
 managed	Kiln.TestKit	const Kiln.TestKit.FakePhysicsCookHost.PendingReason = "game test pending: 16e-cc16e" -> string!	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	const Kiln.TestKit.HarnessSpawn.PickupTemplate = "Base_LootPickup_Generic_Gravity" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	override Kiln.TestKit.BootRun.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
@@ -29392,12 +29820,18 @@ managed	Kiln.Ui	Kiln.KeyInput	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyListenFlags	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyListenFlags.Mouse = 1 -> Kiln.KeyListenFlags	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyListenFlags.None = 0 -> Kiln.KeyListenFlags	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyListenFlags.Own = 4 -> Kiln.KeyListenFlags	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyListenFlags.Pad = 2 -> Kiln.KeyListenFlags	0.2.0-dev.30.5	0.2.14
+managed	Kiln.Ui	Kiln.KeyListenFlags.Pointer = 8 -> Kiln.KeyListenFlags	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyListener	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyListener.Disown(uint virtualKey = 0, int controller = 0) -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyListener.Dispose() -> void	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyListener.Mouse.get -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyListener.Ok.get -> bool	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyListener.Own.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyListener.Owns(uint virtualKey, int controller = 0) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyListener.Pad.get -> bool	0.2.0-dev.30.5	0.2.14
+managed	Kiln.Ui	Kiln.KeyListener.Pointer.get -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyListener.Reason.get -> string?	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyMods	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.KeyMods.Alt = 4 -> Kiln.KeyMods	<=0.2.0-dev.26	<=0.2.1
@@ -29408,21 +29842,37 @@ managed	Kiln.Ui	Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods	0.2.0-dev.30.5	0.2.14
 managed	Kiln.Ui	Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods	0.2.0-dev.30.5	0.2.14
 managed	Kiln.Ui	Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods	0.2.0-dev.30.5	0.2.14
 managed	Kiln.Ui	Kiln.KeyMods.Shift = 2 -> Kiln.KeyMods	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyOwnEnd.Focus = 1 -> Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyOwnEnd.Lost = 3 -> Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyOwnEnd.None = 0 -> Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyOwnEnd.World = 2 -> Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Captured.get -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Captured.init -> void	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Chord.get -> Kiln.KeyChord	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Code.get -> uint	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyPress.Controller.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Controller.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress.Deconstruct(out uint VirtualKey, out uint ScanCode, out Kiln.KeyMods Mods, out bool Down, out bool Repeat, out bool TextInput, out bool Captured) -> void	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Down.get -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Down.init -> void	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyPress.Ended.get -> Kiln.KeyOwnEnd	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Ended.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress.Equals(Kiln.KeyPress other) -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.IsMouse.get -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.IsPad.get -> bool	0.2.0-dev.30.5	0.2.14
+managed	Kiln.Ui	Kiln.KeyPress.IsPointer.get -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress.KeyPress() -> void	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.KeyPress(uint VirtualKey, uint ScanCode, Kiln.KeyMods Mods, bool Down, bool Repeat, bool TextInput, bool Captured) -> void	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyPress.Leaked.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Leaked.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress.Mods.get -> Kiln.KeyMods	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Mods.init -> void	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	Kiln.KeyPress.Owned.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Owned.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Position.get -> System.Numerics.Vector2?	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.KeyPress.Position.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.KeyPress.Repeat.get -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.Repeat.init -> void	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	Kiln.KeyPress.ScanCode.get -> uint	0.2.0-dev.29.19	0.2.11
@@ -29496,6 +29946,59 @@ managed	Kiln.Ui	Kiln.OutlineState.Ended = 3 -> Kiln.OutlineState	0.2.0-dev.30.3	
 managed	Kiln.Ui	Kiln.OutlineState.GameHighlight = 2 -> Kiln.OutlineState	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.OutlineState.Shown = 1 -> Kiln.OutlineState	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.OutlineState.Waiting = 0 -> Kiln.OutlineState	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Ui	Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.A = 4096 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.B = 8192 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Back = 32 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Down = 2 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.LB = 256 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.LT = 65536 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Left = 4 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.LeftStick = 64 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.None = 0 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.RB = 512 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.RT = 131072 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Right = 8 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.RightStick = 128 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Start = 16 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Up = 1 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.X = 16384 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadButtons.Y = 32768 -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadInput	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Buttons.get -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Buttons.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Connected.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Connected.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Controller.get -> int	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Controller.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Deconstruct(out int Controller, out bool Connected, out Kiln.PadButtons Buttons, out System.Numerics.Vector2 LeftStick, out System.Numerics.Vector2 RightStick, out float LeftTrigger, out float RightTrigger) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Equals(Kiln.PadState other) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Hidden.get -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Hidden.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.IsDown(Kiln.PadButtons buttons) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.LeftStick.get -> System.Numerics.Vector2	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.LeftStick.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.LeftTrigger.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.LeftTrigger.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Owned.get -> Kiln.PadButtons	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Owned.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Packet.get -> uint	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Packet.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.PadState() -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.PadState(int Controller, bool Connected, Kiln.PadButtons Buttons, System.Numerics.Vector2 LeftStick, System.Numerics.Vector2 RightStick, float LeftTrigger, float RightTrigger) -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.PolledAtMs.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.PolledAtMs.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Polls.get -> ulong	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.Polls.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RawSticks.get -> (short LeftX, short LeftY, short RightX, short RightY)	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RawSticks.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RawTriggers.get -> (byte Left, byte Right)	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RawTriggers.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RightStick.get -> System.Numerics.Vector2	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RightStick.init -> void	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RightTrigger.get -> float	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	Kiln.PadState.RightTrigger.init -> void	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	Kiln.Render	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.RenderCamera	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.RenderCamera.AgeMs.get -> uint	<=0.2.0-dev.26	<=0.2.1
@@ -30643,6 +31146,7 @@ managed	Kiln.Ui	Kiln.WorldOutline.Entity.get -> Kiln.EntityId	0.2.0-dev.30.3	0.2
 managed	Kiln.Ui	Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	Kiln.WorldOutline.State.get -> Kiln.OutlineState	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Ui	const Kiln.PadInput.Controllers = 4 -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	const Kiln.Ui.AmmoList.ListCapability = "ui.ammo.list" -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	const Kiln.Ui.AmmoList.PickCapability = "ui.ammo.pick" -> string!	0.2.0-dev.30.6	0.2.15
 managed	Kiln.Ui	const Kiln.Ui.Inventory.ChestButtonCapability = "ui.chest.buttons" -> string!	0.2.0-dev.31	0.2.17
@@ -30704,6 +31208,7 @@ managed	Kiln.Ui	override Kiln.ModStatus.ToString() -> string!	<=0.2.0-dev.26	<=0
 managed	Kiln.Ui	override Kiln.OutlineOptions.Equals(object? obj) -> bool	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	override Kiln.OutlineOptions.GetHashCode() -> int	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	override Kiln.OutlineOptions.ToString() -> string!	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Ui	override Kiln.PadState.GetHashCode() -> int	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	override Kiln.RenderStats.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.SlotClick.Equals(object? obj) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Ui	override Kiln.SlotClick.GetHashCode() -> int	0.2.0-dev.30	0.2.12
@@ -30831,6 +31336,10 @@ managed	Kiln.Ui	static Kiln.ModStatus.operator !=(Kiln.ModStatus? left, Kiln.Mod
 managed	Kiln.Ui	static Kiln.ModStatus.operator ==(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.OutlineOptions.operator !=(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool	0.2.0-dev.30.3	0.2.13
 managed	Kiln.Ui	static Kiln.OutlineOptions.operator ==(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool	0.2.0-dev.30.3	0.2.13
+managed	Kiln.Ui	static Kiln.PadInput.Available.get -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	static Kiln.PadInput.Read(int controller = 0) -> Kiln.PadState	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	static Kiln.PadState.operator !=(Kiln.PadState left, Kiln.PadState right) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	static Kiln.PadState.operator ==(Kiln.PadState left, Kiln.PadState right) -> bool	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	static Kiln.Render.Available.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Render.Camera.get -> Kiln.RenderCamera	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Render.CameraAvailable.get -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -31032,6 +31541,8 @@ managed	Kiln.Ui	~override Kiln.InventoryScreen.ToString() -> string	0.2.0-dev.30
 managed	Kiln.Ui	~override Kiln.KeyChord.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	~override Kiln.KeyPress.Equals(object obj) -> bool	0.2.0-dev.29.19	0.2.11
 managed	Kiln.Ui	~override Kiln.KeyPress.ToString() -> string	0.2.0-dev.29.19	0.2.11
+managed	Kiln.Ui	~override Kiln.PadState.Equals(object obj) -> bool	0.2.0-dev.31.13	0.2.22
+managed	Kiln.Ui	~override Kiln.PadState.ToString() -> string	0.2.0-dev.31.13	0.2.22
 managed	Kiln.Ui	~override Kiln.RenderStats.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	~override Kiln.RenderStats.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	~override Kiln.SlotMark.Equals(object obj) -> bool	0.2.0-dev.30	0.2.12
@@ -32418,6 +32929,7 @@ native	services/kiln_client.h	services/kiln_client.h:KilnClientApi:post	<=0.2.0-
 native	services/kiln_client.h	services/kiln_client.h:KilnClientApi:state	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_client.h	services/kiln_client.h:KilnClientApi:subscribe_tick	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_client.h	services/kiln_client.h:KilnClientApi:unsubscribe	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_client_crosshair.h	services/kiln_client_crosshair.h:KilnClientCrosshairApi:get	0.2.0-dev.31.13	0.2.22
 native	services/kiln_combat.h	services/kiln_combat.h:KilnCombatApi:attribute_add	0.2.0-dev.20	0.2.0
 native	services/kiln_combat.h	services/kiln_combat.h:KilnCombatApi:attribute_get	0.2.0-dev.20	0.2.0
 native	services/kiln_combat.h	services/kiln_combat.h:KilnCombatApi:attribute_ids	0.2.0-dev.20	0.2.0
@@ -32466,6 +32978,7 @@ native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:get	<=0.2.
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:icon_alias	0.2.0-dev.16	0.2.0
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:info	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:label_owner	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:pack_mod_reloaded	0.2.0-dev.31.13	0.2.22
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:pack_mods	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:reload_packs	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_content.h	services/kiln_content.h:KilnContentApi:report	<=0.2.0-dev.10	<=0.2.0
@@ -33007,6 +33520,9 @@ native	services/kiln_settings.h	services/kiln_settings.h:KilnSettingsApi:reset	<
 native	services/kiln_settings.h	services/kiln_settings.h:KilnSettingsApi:save	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_settings.h	services/kiln_settings.h:KilnSettingsApi:set	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_settings.h	services/kiln_settings.h:KilnSettingsApi:status	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_skills_client.h	services/kiln_skills_client.h:KilnSkillsClientApi:links	0.2.0-dev.31.13	0.2.22
+native	services/kiln_skills_client.h	services/kiln_skills_client.h:KilnSkillsClientApi:nodes	0.2.0-dev.31.13	0.2.22
+native	services/kiln_skills_client.h	services/kiln_skills_client.h:KilnSkillsClientApi:state	0.2.0-dev.31.13	0.2.22
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:capabilities	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:cleanup	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_spawn.h	services/kiln_spawn.h:KilnSpawnApi:destroy	<=0.2.0-dev.10	<=0.2.0
@@ -33069,6 +33585,9 @@ native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:status	
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:submit	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:watch	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:workshop_recipes	0.2.0-dev.29.14	0.2.6
+native	services/kiln_stations_client.h	services/kiln_stations_client.h:KilnStationsClientApi:station	0.2.0-dev.31.13	0.2.22
+native	services/kiln_stations_client.h	services/kiln_stations_client.h:KilnStationsClientApi:stations	0.2.0-dev.31.13	0.2.22
+native	services/kiln_stations_client.h	services/kiln_stations_client.h:KilnStationsClientApi:status	0.2.0-dev.31.13	0.2.22
 native	services/kiln_steamguard.h	services/kiln_steamguard.h:KilnSteamGuardApi:hold	0.2.0-dev.26	0.2.1
 native	services/kiln_steamguard.h	services/kiln_steamguard.h:KilnSteamGuardApi:latch	0.2.0-dev.26	0.2.1
 native	services/kiln_steamguard.h	services/kiln_steamguard.h:KilnSteamGuardApi:release	0.2.0-dev.26	0.2.1
@@ -33293,6 +33812,11 @@ native	services/kiln_ui_blocks.h	services/kiln_ui_blocks.h:KilnUiBlocksApi:item_
 native	services/kiln_ui_blocks.h	services/kiln_ui_blocks.h:KilnUiBlocksApi:set_next_item_open	0.2.0-dev.31	0.2.17
 native	services/kiln_ui_chest.h	services/kiln_ui_chest.h:KilnUiChestApi:subscribe	0.2.0-dev.31	0.2.17
 native	services/kiln_ui_chest.h	services/kiln_ui_chest.h:KilnUiChestApi:unsubscribe	0.2.0-dev.31	0.2.17
+native	services/kiln_ui_input.h	services/kiln_ui_input.h:KilnUiInputApi:disown	0.2.0-dev.31.13	0.2.22
+native	services/kiln_ui_input.h	services/kiln_ui_input.h:KilnUiInputApi:owns	0.2.0-dev.31.13	0.2.22
+native	services/kiln_ui_input.h	services/kiln_ui_input.h:KilnUiInputApi:pad_state	0.2.0-dev.31.13	0.2.22
+native	services/kiln_ui_input.h	services/kiln_ui_input.h:KilnUiInputApi:subscribe_owned	0.2.0-dev.31.13	0.2.22
+native	services/kiln_ui_input.h	services/kiln_ui_input.h:KilnUiInputApi:unsubscribe	0.2.0-dev.31.13	0.2.22
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:mapping	0.2.0-dev.30	0.2.12
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:screen_view	0.2.0-dev.30	0.2.12
 native	services/kiln_ui_inventory.h	services/kiln_ui_inventory.h:KilnUiInventoryApi:slot_at	0.2.0-dev.30	0.2.12

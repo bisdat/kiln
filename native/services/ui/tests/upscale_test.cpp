@@ -17,6 +17,7 @@
 #include "../graphics_settings.h"
 #include "../upscale_amd_map.h"
 #include "../upscale_logic.h"
+#include "../upscale_probe_logic.h"
 
 using namespace kui;
 using namespace kui::upscale;
@@ -588,10 +589,11 @@ static void amd_map() {
     CHECK(!need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
           !need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT));
     // ... and with kiln/control/amd "fsr4ext on" (read when the game makes its device) the whole set as before
-    const DeviceNeeds n4 = amd::device_needs(true);
+    const DeviceNeeds n4 = amd::device_needs(amd::Fsr4Set::native);
     for (const char* e : fsr4_native) CHECK(has_ext(n4, e));
     CHECK(need_of(n4, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) && n4.extensions.size() == n.extensions.size() + 6);
-    CHECK(amd::parse_tuning("fsr4ext on").fsr4ext && !amd::parse_tuning("").fsr4ext && amd::parse_tuning("fsr4ext on").changed());
+    CHECK(amd::parse_tuning("fsr4ext on").fsr4ext == amd::Fsr4Ext::on && amd::parse_tuning("").fsr4ext == amd::Fsr4Ext::automatic &&
+          amd::parse_tuning("fsr4ext on").changed());
     for (const auto& f : n.features) CHECK(!f.required && f.bytes.size() > 16);
     const FeatureNeed* ssc = need_of(n, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
     CHECK(ssc);
@@ -716,6 +718,155 @@ static void amd_map() {
     CHECK(ffxApiGetSurfaceFormatVK(VK_FORMAT_R16G16_SNORM) == FFX_API_SURFACE_FORMAT_UNKNOWN);
 }
 
+// FSR 4's sets on the game's device (0.2.0-dev.31.13): what AMD's selection takes on a GPU decides it, as the 2.4.0 DLL's
+// providers do (ffxProvider_FSR4::IsSupported for FP8; the INT8 models otherwise). On an RX 6900 XT (31.11, kiln-win1)
+// FSR 4 4.1.2's INT8 model drew a black screen on a device without compute-shader derivatives, which FSR 4's auto exposure
+// and the RDNA 3 / lite INT8 prepass declare; the RX 9070 XT's FP8 device stays without AMD's sample's set (29.21).
+static void amd_fsr4_sets() {
+    amd::GpuFacts rx6900;  // RDNA 2: no cooperative matrix, derivatives offered
+    rx6900.vendor = amd::kVendorAmd;
+    rx6900.type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+    rx6900.derivatives_ext = rx6900.derivative_linear = true;
+    amd::GpuFacts rx7900 = rx6900;  // RDNA 3: cooperative matrix, no FP8
+    rx7900.coop_matrix_ext = rx7900.coop_matrix = true;
+    amd::GpuFacts rx9070 = rx7900;  // RDNA 4: cooperative matrix + FP8
+    rx9070.float8_ext = true;
+    amd::GpuFacts apu = rx9070;     // an integrated AMD GPU with both: AMD's FP8 test leaves it to the INT8 models
+    apu.type = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    amd::GpuFacts nv = rx9070;
+    nv.vendor = 0x10de;
+    CHECK(!amd::amd_fp8_gpu(rx6900) && !amd::amd_fp8_gpu(rx7900) && amd::amd_fp8_gpu(rx9070) && !amd::amd_fp8_gpu(apu) && !amd::amd_fp8_gpu(nv));
+    amd::GpuFacts no_coop_feature = rx9070;  // offers both extensions but has no cooperativeMatrix: not FP8 for AMD
+    no_coop_feature.coop_matrix = false;
+    CHECK(!amd::amd_fp8_gpu(no_coop_feature));
+    using S = amd::Fsr4Set;
+    using E = amd::Fsr4Ext;
+    CHECK(amd::choose_fsr4_set(rx6900, E::automatic).set == S::int8 && amd::choose_fsr4_set(rx7900, E::automatic).set == S::int8);
+    CHECK(amd::choose_fsr4_set(apu, E::automatic).set == S::int8 && amd::choose_fsr4_set(no_coop_feature, E::automatic).set == S::int8);
+    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).set == S::none);  // the 9070 XT stays as 29.21 to 31.12
+    CHECK(amd::choose_fsr4_set(nv, E::automatic).set == S::none);
+    CHECK(amd::choose_fsr4_set(rx6900, E::off).set == S::none && amd::choose_fsr4_set(rx9070, E::on).set == S::native &&
+          amd::choose_fsr4_set(nv, E::on).set == S::native);
+    // the kiln.log reasons say which and why
+    const amd::Fsr4SetChoice c6 = amd::choose_fsr4_set(rx6900, E::automatic);
+    CHECK(c6.why.find("INT8") != std::string::npos && c6.why.find("compute-shader derivatives") != std::string::npos &&
+          c6.why.find("cannot be added") == std::string::npos);
+    amd::GpuFacts old_driver = rx6900;
+    old_driver.derivatives_ext = false;
+    CHECK(amd::choose_fsr4_set(old_driver, E::automatic).set == S::int8 &&
+          amd::choose_fsr4_set(old_driver, E::automatic).why.find("does not offer VK_KHR_compute_shader_derivatives") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(rx9070, E::automatic).why.find("FP8") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(nv, E::automatic).why.find("not an AMD GPU") != std::string::npos);
+    CHECK(amd::choose_fsr4_set(rx6900, E::off).why.find("fsr4ext off") != std::string::npos);
+    // the INT8 set: compute-shader derivatives (linear groups, what the SPIR-V declares), nothing else of the six
+    const DeviceNeeds base = amd::device_needs(S::none), int8 = amd::device_needs(S::int8);
+    CHECK(int8.extensions.size() == base.extensions.size() + 1 && has_ext(int8, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME));
+    for (const char* e : {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                          VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME})
+        CHECK(!has_ext(int8, e) && !has_ext(base, e));
+    CHECK(!has_ext(base, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME));
+    const FeatureNeed* dv = need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR);
+    CHECK(dv && !dv->required && !need_of(base, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR));
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR dvv;
+    std::memcpy(&dvv, dv->bytes.data(), sizeof dvv);
+    CHECK(dvv.computeDerivativeGroupLinear == VK_TRUE && dvv.computeDerivativeGroupQuads == VK_FALSE);
+    CHECK(!need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
+          !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES) &&
+          !need_of(int8, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES));
+    // the knobs: fsr4ext auto|off|on, check auto|off (anything else is not understood, and says so)
+    CHECK(amd::parse_tuning("fsr4ext auto").fsr4ext == E::automatic && !amd::parse_tuning("fsr4ext auto").changed());
+    CHECK(amd::parse_tuning("fsr4ext off").fsr4ext == E::off && amd::parse_tuning("fsr4ext off").changed());
+    CHECK(amd::parse_tuning("FSR4EXT=On").fsr4ext == E::on && amd::parse_tuning("fsr4ext int8").notes.size() == 1);
+    CHECK(amd::parse_tuning("check off").check_off && amd::parse_tuning("check off").changed() && !amd::parse_tuning("check auto").check_off &&
+          !amd::parse_tuning("").check_off && amd::parse_tuning("check maybe").notes.size() == 1);
+    CHECK(amd::tuning_text(Running::amd_fsr4, amd::parse_tuning("check off")) == "pre-exposure 1, no masks, planes swapped, no output check");
+    // the set-up line's device words
+    CHECK(amd::fsr4_device_text(S::int8, true) == "INT8 device: compute-shader derivatives on");
+    CHECK(amd::fsr4_device_text(S::int8, false).find("not on") != std::string::npos);
+    CHECK(amd::fsr4_device_text(S::none, false) == "device without FSR 4's sets" && amd::fsr4_device_text(S::native, true).find("fsr4ext on") != std::string::npos);
+}
+
+// The output check (upscale_probe_logic.h): the slots the probe shader writes, the verdict, when it runs and is read.
+static probe::Slot slot(uint32_t tag, float c_max, float c_sum, float o_max, float o_sum, uint32_t c_bad = 0, uint32_t o_bad = 0) {
+    probe::Slot s{};
+    s.tag = tag;
+    s.points = 4;
+    s.colour_bad = c_bad, s.output_bad = o_bad;
+    s.colour_max = c_max, s.colour_sum = c_sum, s.output_max = o_max, s.output_sum = o_sum;
+    return s;
+}
+static probe::Result fill(const probe::Slot& one, uint32_t tag = 7) {
+    std::vector<probe::Slot> s(probe::kThreads, one);
+    probe::Result r;
+    CHECK(probe::reduce(s.data(), probe::kThreads, tag, &r));
+    return r;
+}
+static void output_check() {
+    CHECK(probe::kBufferBytes == 8192 && probe::kPoints == 1024);
+    // a whole result needs every slot's tag (the GPU wrote all of them)
+    std::vector<probe::Slot> s(probe::kThreads, slot(7, 0.4f, 1.0f, 0.5f, 1.2f));
+    probe::Result r;
+    CHECK(probe::reduce(s.data(), probe::kThreads, 7, &r));
+    CHECK(r.colour.points == 1024 && r.output.points == 1024 && r.colour.nonfinite == 0);
+    CHECK(std::fabs(r.colour.mean_lum - 0.25) < 1e-6 && std::fabs(r.output.mean_lum - 0.3) < 1e-6 && std::fabs(r.output.max_lum - 0.5) < 1e-6);
+    s[200].tag = 6;  // one slot still from before
+    CHECK(!probe::reduce(s.data(), probe::kThreads, 7, &r));
+    CHECK(!probe::reduce(s.data(), probe::kThreads, 0, &r) && !probe::reduce(nullptr, 0, 7, &r));
+    // a picture, about as bright as the game's colour: fine
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.5f, 1.2f))) == probe::Verdict::ok);
+    // FSR 4 too dark (the RX 9070 XT's dark scenes) is still a picture: not this check's business
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.04f, 0.1f))) == probe::Verdict::ok);
+    // black: the RX 6900 XT's FSR 4 (31.11)
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f))) == probe::Verdict::black);
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.004f, 0.01f))) == probe::Verdict::black);
+    // NaN: a quarter of the points or more
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f, 0, 4))) == probe::Verdict::nan);
+    CHECK(probe::judge(fill(slot(7, 0.4f, 1.0f, 0.5f, 0.9f, 0, 1))) == probe::Verdict::nan);  // 1 of 4: 25%
+    {
+        std::vector<probe::Slot> few(probe::kThreads, slot(7, 0.4f, 1.0f, 0.5f, 1.2f));
+        for (int i = 0; i < 10; ++i) few[i].output_bad = 1, few[i].output_sum = 0.9f;  // 10 of 1024: a few stray NaN pixels
+        CHECK(probe::reduce(few.data(), probe::kThreads, 7, &r) && probe::judge(r) == probe::Verdict::ok);
+    }
+    // the game's own picture black (a load, a fade) or not finite: no verdict, the check looks again
+    CHECK(probe::judge(fill(slot(7, 0.0f, 0.0f, 0.0f, 0.0f))) == probe::Verdict::scene_black);
+    CHECK(probe::judge(fill(slot(7, 5e-6f, 1e-5f, 0.0f, 0.0f))) == probe::Verdict::scene_black);
+    CHECK(probe::judge(fill(slot(7, 0.0f, 0.0f, 0.0f, 0.0f, 4, 4))) == probe::Verdict::input_bad);
+    CHECK(probe::bad(probe::Verdict::black) && probe::bad(probe::Verdict::nan) && !probe::bad(probe::Verdict::scene_black) &&
+          !probe::bad(probe::Verdict::ok));
+    const std::string t = probe::readout_text(fill(slot(7, 0.4f, 1.0f, 0.0f, 0.0f)));
+    CHECK(t.find("output: mean luminance 0") != std::string::npos && t.find("0 of 1024 points not finite") != std::string::npos &&
+          t.find("the game's colour: mean 0.25") != std::string::npos);
+    CHECK(std::string(probe::verdict_text(probe::Verdict::nan)).find("NaN") != std::string::npos);
+    CHECK(fsr4_black_text("the picture is black") == "its picture came out wrong on this graphics card (the picture is black): FSR 3.1 runs until the game restarts");
+
+    // when: kWarmFrames after a set-up, read kReadFrames later, once
+    probe::Schedule c;
+    CHECK(!c.due_record(100) && !c.active());
+    c.arm(100);
+    CHECK(c.active() && !c.due_record(129) && c.due_record(130));
+    c.recorded(130, 9);
+    CHECK(!c.due_record(131) && !c.due_read(137) && c.due_read(138) && c.tag == 9 && !c.overdue(369) && c.overdue(370));
+    c.stop();
+    CHECK(!c.due_read(500) && !c.due_record(500) && !c.active());  // done: nothing per frame after the check
+    // the game's picture black: again a second later, up to kMaxTries
+    c.arm(0);
+    for (uint32_t i = 0; i < probe::kMaxTries; ++i) {
+        const uint64_t at = c.next;
+        CHECK(c.due_record(at));
+        c.recorded(at, i + 1);
+        if (i + 1 < probe::kMaxTries) {
+            CHECK(c.retry(at + probe::kReadFrames) && c.next == at + probe::kReadFrames + probe::kRetryFrames);
+        } else {
+            CHECK(!c.retry(at + probe::kReadFrames) && !c.active());
+        }
+    }
+    // a new set-up starts it again
+    c.arm(1000);
+    CHECK(c.due_record(1030) && c.tries == 0);
+    // the readback waits past the frames the GPU may still run (upscale_logic.h kRetireFrames)
+    CHECK(probe::kReadFrames > kRetireFrames);
+}
+
 int main(int argc, char** argv) {
     const std::string tmp = argc > 1 ? argv[1] : "/tmp";
     settings();
@@ -732,6 +883,8 @@ int main(int argc, char** argv) {
     amd_fsr4_model();
     amd_optiscaler_knobs();
     amd_fsr4_inputs();
+    amd_fsr4_sets();
+    output_check();
     exposure_range();
     std::printf("upscale_test: %d checks passed\n", g_checks);
     return 0;

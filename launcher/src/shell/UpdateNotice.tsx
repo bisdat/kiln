@@ -28,7 +28,7 @@ import { Button, IconButton, ProgressBar, toast, useTasks, waitTask } from "../u
 import { updateGame } from "./runtimeChange";
 import { useLaunchMemo } from "./play";
 import { useStartWarnings } from "./sfiWarnings";
-import { applyKey, applyWait, autoTried, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
+import { applyKey, applyWait, autoTried, loadDecided, restartHold, runtimeToApply, saveDecided, sessionStore, type ApplyWait, type RestartDecision } from "./updateApply";
 import { useUnsavedKind } from "./unsaved";
 import { usePendingEdits } from "../editor/kiln/pending";
 import { t, useT } from "../i18n";
@@ -127,8 +127,10 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   // a game whose status is not known yet: no countdown until it is (never a restart under a game that may run)
   const unknown = !!game && !gs.data;
   const version = s?.phase === "ready" && s.ready && !s.switching ? s.ready.version : null;
-  // per ready version: held (the game or unsaved work held it: it stays with the player) or stopped (Later, a failure)
-  const [decided, setDecided] = useState<Partial<Record<string, "held" | "stopped">>>({});
+  // per ready version: held (the game or unsaved work held it: it stays with the player) or stopped (Later, a failure);
+  // kept for this run of the launcher, so a page loaded again after its web process ended keeps them (updateApply.ts)
+  const [decided, setDecided] = useState<Partial<Record<string, RestartDecision>>>(() => loadDecided(sessionStore()));
+  useEffect(() => { saveDecided(sessionStore(), decided); }, [decided]);
   const mode = version ? decided[version] ?? "auto" : null;
   const holdKind = hold?.kind ?? null;
   useEffect(() => {

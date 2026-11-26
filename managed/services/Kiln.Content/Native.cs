@@ -129,6 +129,9 @@ internal static unsafe class ContentNative
         // ---- appended to v4 since 0.2.0-dev.29.18 (check Header.Size, HasText): the game's own texts (ContentText.cs) ----
         public delegate* unmanaged[Cdecl]<uint, byte*, nuint, nuint*, int> Text;
         public delegate* unmanaged[Cdecl]<TextInfo*, int> GetTextInfo;
+
+        // ---- appended to v4 since 0.2.0-dev.31.13 (check Header.Size, HasPackModReloaded): a mod of the list loaded again ----
+        public delegate* unmanaged[Cdecl]<NativeStr, NativeStr, int> PackModReloaded;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -145,6 +148,10 @@ internal static unsafe class ContentNative
     /// <summary>The table has the game-text slots (appended to v4 in 0.2.0-dev.29.18).</summary>
     internal static bool HasText(Table* t) =>
         t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.GetTextInfo)) + (uint)sizeof(nint) && t->Text != null && t->GetTextInfo != null;
+
+    /// <summary>The table has the PackModReloaded slot (appended to v4 in 0.2.0-dev.31.13).</summary>
+    internal static bool HasPackModReloaded(Table* t) =>
+        t != null && t->Header.Size >= (uint)Marshal.OffsetOf<Table>(nameof(Table.PackModReloaded)) + (uint)sizeof(nint) && t->PackModReloaded != null;
 
     /// <summary>The table has the IconAlias slot (appended to v4).</summary>
     internal static bool HasIconAlias(Table* t) =>

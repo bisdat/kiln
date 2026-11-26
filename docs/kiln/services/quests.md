@@ -105,6 +105,9 @@ No handler may change a definition's fields from these events. Actions run after
 ## How it works
 - **Start-up**: `Kiln.QuestsStartup` (`ServiceTick.AutoStart`) reads `quests/*.json` of every loaded mod; side `server` mods that load
   later with a hosted world are found within ~5 s. A mod that is no longer loaded loses its definitions; states stay.
+  A reload reads the mod's files again, and those of the dependents reloaded with it; an unload and a load that fall
+  between two checks (no reload event) do too, within ~5 s: the files follow the mod's load, not only its id
+  (0.2.0-dev.31.13).
 - **Which side**: the engine runs where `Lifecycle.IsServerRunning` holds: a dedicated server, or a client hosting. A joined client shows
   what the game replicates to it.
 - **Objective sources** are subscribed only when a definition uses them: `EntityDeathEvent` + `EntitySpawnedEvent`, `EntityDestroyedEvent`,

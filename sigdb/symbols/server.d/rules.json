@@ -33,6 +33,12 @@
         { "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 56 41 57 48 8D 6C 24 C0 48 81 EC 40 01 00 00 0F B6 85 88 00 00 00 4D 8B F1 88 44 24 28 49 8B F8 0F B6 85 80 00 00 00 4D 8B C8 4D 8B C6 88 44 24 20 48 8B F2 48 8B D9 E8 ?? ?? ?? ?? 48 8B 8E {rules/cursor.actor:d32} B2 07 E8 ?? ?? ?? ?? 45 33 FF 84 C0" }
       ]
     },
+    "rules/CursorFlagsStored": {
+      "comment": "kiln.rules' cursor waivers (cursor.cpp) hook here: rules/CursorFlags' instruction right after it stores the final flags (mov [rbx],edx after bit 12, the material check: rsi is the cursor context, passed to it as rcx; rbx the flags pointer), entry + 0xfa on both executables. Every path passes it; only bit 8 (AreaOccupied) is set after it. Not the entry: Building Tools (0.34.0) finds rules/CursorFlags by its first 42 bytes (and its MissingCall signature ends at + 0xfa), so Kiln's patch stays below both (docs/re/rules.md 2.1)",
+      "find": [
+        { "scope": { "symbol": "rules/CursorFlags", "size": 512 }, "pattern": "48 8B D7 48 8B CE E8 ?? ?? ?? ?? 8B 13 8B CA 0F BA F1 0C 0F BA EA 0C 84 C0 0F 44 D1 89 13 44 38 7F 54 0F 85", "offset": 30 }
+      ]
+    },
     "rules/ShroudDrain": {
       "comment": "fog_resistance_update: the fog-type dispatch (movzx ecx, bl) after the safe-zone override; r15 = ProgramContext, bl = fog type (2 dangerous, 3 deadly drain FogResistance and run the death check), r13w / r12w = the current / max value slots, [rsp+fog.attr] = FogResistance, [rsp+fog.actor] = Actor",
       "find": [
@@ -309,7 +315,7 @@
       "constants": ["storage.kind"]
     },
     "rules.cursor": {
-      "symbols": ["rules/CursorFlags", "rules/CurrentEntityId", "items/JobStorage"],
+      "symbols": ["rules/CursorFlags", "rules/CursorFlagsStored", "rules/CurrentEntityId", "items/JobStorage"],
       "constants": ["rules/cursor.actor", "storage.kind"]
     },
     "rules.shroud": {

@@ -72,6 +72,32 @@ pub(crate) fn plain_path(s: &str) -> std::borrow::Cow<'_, str> {
     if plain.len() == s.len() || is_absolute_game_path(&plain) { plain } else { s.into() }
 }
 
+/// A host path without Windows' verbatim prefix where it has a plain spelling ([`plain_path`]): what a player is shown
+/// for a canonicalized path (`C:\x`, not `\\?\C:\x`), and what comes back to be opened again. A path through a name
+/// Win32 reads as a device ([`dos_device_name`]) keeps the prefix too, as one through a name ending in a dot or space
+/// does. Elsewhere, and for a path that is not UTF-8, the path as it is.
+pub fn plain(path: PathBuf) -> PathBuf {
+    let plain = match path.to_str() {
+        // the parts after `\\?\` (a drive, `UNC` and a server, a volume) are never such names
+        Some(s) if s.starts_with(r"\\?\") && !s.split('\\').skip(3).any(dos_device_name) => plain_path(s).into_owned(),
+        _ => return path,
+    };
+    PathBuf::from(plain)
+}
+
+/// A file name Win32 reads as a DOS device in any folder without the verbatim prefix: `NUL` on Windows 11; also `CON`,
+/// `PRN`, `AUX`, `COM0`-`COM9`, `LPT0`-`LPT9` (and `COM¹`...) and the console names, with any extension (`aux.txt`), on
+/// Windows 10. Case and spaces before the extension do not matter.
+fn dos_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ').to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => ["COM", "LPT"].iter().any(|d| {
+            stem.strip_prefix(d).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{b9}" | "\u{b2}" | "\u{b3}"))
+        }),
+    }
+}
+
 /// Where `path` is below `base`, compared as Windows compares folders: without Windows' verbatim prefix (`\\?\C:\x` is
 /// `C:\x`, `\\?\UNC\s\x` is `\\s\x`; ShroudForge writes its `paths.mods` from a canonical path, which carries it, and
 /// Kiln names the game folder without it), `/` and `\` alike, empty and `.` parts dropped, case ignored (each
@@ -313,6 +339,29 @@ mod tests {
             assert!(!windows_same_folder(p, &strip_verbatim(p)));
         }
         assert!(!windows_same_folder("C:", r"C:\"), "drive current directory is not its root");
+    }
+
+    /// What a player is shown for a canonical path, and what comes back to be opened again: the plain spelling where it
+    /// names the same file, the verbatim one where Win32 reads the plain one as something else (a trailing dot or space
+    /// is trimmed; `NUL`, and before Windows 11 `CON`, `COM1`, `aux.txt` and the like, are devices in any folder).
+    #[test]
+    fn plain_drops_the_prefix_only_where_the_plain_path_names_the_same_file() {
+        let p = |s: &str| plain(PathBuf::from(s)).to_str().unwrap().to_string();
+        assert_eq!(p(r"\\?\C:\Users\u\Downloads"), r"C:\Users\u\Downloads");
+        assert_eq!(p(r"\\?\UNC\nas\share\mods"), r"\\nas\share\mods");
+        // longer than MAX_PATH: Rust's file calls add the prefix back themselves
+        let long = format!(r"\\?\C:\{}", vec!["a".repeat(100); 4].join(r"\"));
+        assert_eq!(p(&long), &long[4..]);
+        for keep in [r"\\?\C:\d\x.", r"\\?\C:\d\x \y", r"\\?\C:\d\nul", r"\\?\C:\d\NUL\y", r"\\?\C:\d\Nul.txt", r"\\?\C:\d\con", r"\\?\C:\d\aux.tar.gz",
+                     r"\\?\C:\d\COM1", r"\\?\C:\d\lpt9.log", r"\\?\C:\d\com¹", r"\\?\C:\d\CONOUT$", r"\\?\C:\d\nul .txt", r"\\?\UNC\nas\share\prn",
+                     r"\\?\Volume{1b3}\mods"] {
+            assert_eq!(p(keep), keep, "Win32 reads the plain spelling as another file");
+        }
+        for strip in [r"\\?\C:\d\null", r"\\?\C:\d\console", r"\\?\C:\d\com10", r"\\?\C:\d\nul-mod", r"\\?\C:\d\my.nul", r"\\?\C:\d\COM"] {
+            assert_eq!(p(strip), &strip[4..]);
+        }
+        assert_eq!(p("/home/u/x"), "/home/u/x");
+        assert_eq!(p(r"C:\d\nul"), r"C:\d\nul", "a path without the prefix is left as it is");
     }
 
     /// The launcher on Linux keeps comparing host paths exactly: `/game/Mods` and `/game/mods` are two folders there.

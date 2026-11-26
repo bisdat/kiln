@@ -128,7 +128,17 @@ Independently re-read from the read-only client `5d9ef2f1…` with targeted Ghid
 function-local disassembly) and LLVM disassembly. No client execution was performed.
 
 - `0x40e5d0` is `void(selectorState, access, bool currentOnly)`. It gathers inventory records, then building-stock
-  records. Its seven selector groups have stride **0x648**, not the separate player-ui pool cache's 0x610. Each group
+  records. **Where Kiln hooks it (since 0.2.0-dev.31.13): inside, never at the entry** [dis]. Its prologue ends at + `0x23`
+  (`lea r15,[rcx+0x638]`, 7 bytes; rcx/rdx/r8b still the caller's arguments), its one `ret` follows the epilogue that
+  starts at + `0xa8a` (`mov rbx,[rsp+0x1d0]`, 8 bytes) after the finalizer's call at + `0xa76`; nothing branches into
+  either site's bytes or past + `0xa8a` (the four switch tables included; the only case past the `ret` is the fatal
+  default), rsi holds the groups from + `0x3b` on and rsp does not change between the two. kiln-tools
+  (`tools/MaterialSelectorBody`/`Done`) and kiln-items (`build/client.MaterialRowsBody`/`Done`) put a mid hook on each and
+  pair them by rsp (`native/core/abi/kiln_mid_frames.hpp`). Building Tools 0.34.0 finds the function by its first 35 bytes,
+  checks + `0x194`, + `0x78f`, + `0x867` and the calls at + `0x705`, + `0x721`, + `0x876`, + `0x89d`, then redirects the
+  callers and the finalizer's call at + `0xa76` for its full material list and partial area actions; until 31.13 both
+  services detoured the entry and that lookup failed (XHL, 2026-11-25). `native/services/tools/tests/presentation_sigdb_test.py`
+  checks all of it on the client. Its seven selector groups have stride **0x648**, not the separate player-ui pool cache's 0x610. Each group
   has data/count/capacity at +0/+8/+0x10, 24-byte rows with item +0 and aggregate stock +0x10, selected index +0x628,
   has-selection byte +0x630, and mode +0x638. Finalizer `0x40dfe0` restores a selection by item identity. Filtering a
   group must remap the selected index or clear it; retaining an index after compaction selects another material.
@@ -207,7 +217,7 @@ Static qualification and portable fixtures do not establish actual menu renderin
 Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no client run. Served by kiln-tools as
 `kiln.ui.ammo` (`native/core/abi/services/kiln_ui_ammo.h`; managed `Ui.AmmoList`).
 
-- The existing builder `0x40e5d0` is extended (no second detour on it). Mod rows enter only as owned copies of a
+- The existing builder `0x40e5d0` is extended (no second hook on it; its two halves are mid hooks inside it since 0.2.0-dev.31.13, 1.2.2). Mod rows enter only as owned copies of a
   published snapshot; the builder never calls managed code.
 - The raw finalizer `0x40dfe0` (checked) keeps a provider row's item identity after the parent's re-finalization, so
   the selection stays on its item when rows change.

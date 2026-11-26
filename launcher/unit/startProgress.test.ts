@@ -2,8 +2,8 @@
 // (src/api/mockProgress.ts: the owner's start of 13 Nov, the port of kiln_manage::start_progress::estimate).
 import { expect, test } from "bun:test";
 import type { StartStep, StartTimeline } from "../src/api/commands";
-import { aboutText, preStartLine, quietText, startWords, stepLine, tookText } from "../src/shell/startProgress";
-import { clearStartHistory, endAt, estimate, mockBegin, mockProgress, ownerScript, setStartScript, type KeptStart, type StepNow } from "../src/api/mockProgress";
+import { aboutText, askedSteamAt, isAlreadyStarting, isVanillaStart, preStartLine, quietText, seededLaunch, startWords, stepLine, tookText } from "../src/shell/startProgress";
+import { clearStartHistory, endAt, estimate, mockAsked, mockBegin, mockHoldsNextStart, mockProgress, mockStartEnded, ownerScript, setStartScript, type KeptStart, type StepNow } from "../src/api/mockProgress";
 import shared from "../../crates/kiln-manage/tests/start-progress/estimate-cases.json";
 
 test("the time left is rounded as a person says it", () => {
@@ -128,4 +128,91 @@ test("a silent start names its step; at the last step it says the game is loadin
   expect(game).toBe("Kiln has loaded the mods. The game is still loading, or it is at its menu and Kiln did not see the menu appear; this goes away once you load a world.");
   // the mods that load at the first world, as before
   expect(quietText(quiet(step({ id: "mods", label: "Waiting for the game to load the mods" })))).toMatch(/^The game is waiting at its menu/);
+});
+
+// (review, 0.2.0-dev.31.13) a page loaded again after its web process ended knew nothing of a start Steam was asked
+// for and offered Play again: a second press could ask Steam again or start a second Proton. The backend's timeline
+// says when Steam was asked; shell/play.ts seeds the page's wait from it.
+test("a start Steam was asked for, as the backend follows it, is found after the page loads again", () => {
+  const step = (id: string, state: StartStep["state"], ms: number | null, tookMs: number | null = null): StartStep =>
+    ({ id, label: id, state, ms, tookMs, launcher: true });
+  const tl = (phase: StartTimeline["phase"], steps: StartStep[], atMs: number, launcher = true): StartTimeline => ({
+    phase, started: "2026-11-25T21:00:00.000Z", atMs, steps, launcher,
+    estimate: { leftMs: null, starts: 0, same: false, slow: null, fraction: 0, byTime: false, stepsDone: 0, stepsPlanned: 3, usual: [] },
+  });
+  const now = 1_000_000;
+  // Steam asked 40 s ago (the start began 52 s ago: the profile took 12 s)
+  const asking = tl("launcher", [step("profile", "done", 0, 12_000), step("steam", "running", 12_000)], 52_000);
+  expect(askedSteamAt(asking, now)).toBe(now - 40_000);
+  // not yet asked, the game runs, the start is not the launcher's, or nothing at all: no wait to seed
+  expect(askedSteamAt(tl("launcher", [step("profile", "running", 0), step("steam", "next", null)], 5_000), now)).toBeNull();
+  expect(askedSteamAt(tl("booting", [step("steam", "done", 12_000, 30_000)], 60_000), now)).toBeNull();
+  expect(askedSteamAt(tl("launcher", [step("steam", "running", 12_000)], 52_000, false), now)).toBeNull();
+  expect(askedSteamAt(null, now)).toBeNull();
+});
+
+// (0.2.0-dev.31.13) a Vanilla start is tracked by the backend too: the page loaded again takes its wait over as Vanilla
+// (its game is then said as Vanilla, not as a Kiln start without Kiln), without a bar; a refused second start is told
+// apart from a failed one (it ends nothing)
+test("a page loaded again takes a Vanilla start's wait over as Vanilla, and a Kiln start's with its mode", () => {
+  const step = (id: string, state: StartStep["state"], ms: number | null, tookMs: number | null = null): StartStep =>
+    ({ id, label: id, state, ms, tookMs, launcher: true });
+  const tl = (mode: StartTimeline["mode"], steps: StartStep[], atMs: number, phase: StartTimeline["phase"] = "launcher"): StartTimeline => ({
+    phase, started: "2026-11-25T21:00:00.000Z", atMs, steps, launcher: true, ...(mode !== undefined ? { mode } : {}),
+    estimate: { leftMs: null, starts: 0, same: false, slow: null, fraction: 0, byTime: false, stepsDone: 0, stepsPlanned: 2, usual: [] },
+  });
+  const now = 1_000_000;
+  const asked = [step("profile", "done", 0, 2_000), step("steam", "running", 2_000)];
+  expect(seededLaunch(tl("vanilla", asked, 32_000), now)).toEqual({ at: now - 30_000, mode: "vanilla" });
+  expect(seededLaunch(tl("no-mods", asked, 32_000), now)).toEqual({ at: now - 30_000, mode: "no-mods" });
+  // a backend before 31.13 says no mode: a start with the profile, as the page seeded it before
+  expect(seededLaunch(tl(undefined, asked, 32_000), now)).toEqual({ at: now - 30_000, mode: "profile" });
+  expect(seededLaunch(tl(null, asked, 32_000), now)).toEqual({ at: now - 30_000, mode: "profile" });
+  // Steam not asked yet, or no start: nothing to take over
+  expect(seededLaunch(tl("vanilla", [step("profile", "running", 0), step("steam", "next", null)], 1_000), now)).toBeNull();
+  expect(seededLaunch(null, now)).toBeNull();
+  // a Vanilla start's timeline holds Play without a bar (said as before)
+  expect(isVanillaStart(tl("vanilla", asked, 32_000))).toBe(true);
+  expect(isVanillaStart(tl("profile", asked, 32_000))).toBe(false);
+  expect(isVanillaStart(tl(undefined, asked, 32_000))).toBe(false);
+  expect(isVanillaStart(null)).toBe(false);
+});
+
+test("the backend's refusal of a second start is told apart from a failed start", () => {
+  expect(isAlreadyStarting({ code: "busy", message: "The game is already starting.", detail: { kind: "already_starting" } })).toBe(true);
+  // other busy answers, other refusals, and anything that is not a Kiln error end the start as before
+  expect(isAlreadyStarting({ code: "busy", message: "Too many tasks." })).toBe(false);
+  expect(isAlreadyStarting({ code: "busy", message: "x", detail: { kind: "tasks" } })).toBe(false);
+  expect(isAlreadyStarting({ code: "game_running", message: "Close the game first." })).toBe(false);
+  expect(isAlreadyStarting({ code: "refused", message: "x", detail: { kind: "already_starting" } })).toBe(false);
+  expect(isAlreadyStarting(new Error("boom"))).toBe(false);
+  expect(isAlreadyStarting(null)).toBe(false);
+});
+
+test("the browser mock follows a Vanilla start as the backend does, and holds the next start while Steam is asked", () => {
+  setStartScript(ownerScript({ scale: 1, noProcess: true }));
+  const g = "vanilla-guard-unit";
+  const t0 = Date.now();
+  mockBegin(g, "vanilla");
+  // Play pressed, Steam not asked yet: a timeline (Vanilla, no cook), and nothing held
+  const before = mockProgress(g, t0)!;
+  expect(before.mode).toBe("vanilla");
+  expect(before.steps.slice(0, 2).map((s) => s.id)).toEqual(["profile", "steam"]);
+  expect(before.steps.some((s) => s.id === "cook" || s.id === "boot-snapshot")).toBe(false);
+  expect(mockHoldsNextStart(g, false, t0)).toBe(false);
+  mockAsked(g);
+  expect(mockHoldsNextStart(g, false)).toBe(true);
+  // the game's process is there, or the wait is over: nothing held
+  expect(mockHoldsNextStart(g, true)).toBe(false);
+  expect(mockHoldsNextStart(g, false, Date.now() + 5 * 60_000 + 1)).toBe(false);
+  // Stop waiting / the start ended
+  mockStartEnded(g);
+  expect(mockHoldsNextStart(g, false)).toBe(false);
+  expect(mockProgress(g)).toBeNull();
+  // a Vanilla start whose game came is over: nothing of Kiln to follow
+  setStartScript(ownerScript({ scale: 0.001 }));
+  mockBegin(g, "vanilla");
+  expect(mockProgress(g, Date.now() + 60_000)).toBeNull();
+  mockStartEnded(g);
+  setStartScript(null);
 });

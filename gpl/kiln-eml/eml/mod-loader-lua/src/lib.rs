@@ -39,6 +39,8 @@ mod transaction;
 // kiln-eml: private preparation over the existing physical publisher (no Lua dialect changes).
 pub mod startup_host;
 mod ownership;
+// kiln-eml: Steam's word on the game's asset files before a new working baseline is taken from them.
+mod steam_files;
 mod cleanup;
 mod displacement;
 // kiln-eml: restoration needs exact writer ownership, not an input/performance cache.

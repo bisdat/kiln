@@ -153,4 +153,5 @@ pub struct KilnContentApi {
     pub txn_end: Option<unsafe extern "C" fn(u64, u32, *mut core::ffi::c_char, usize, *mut usize) -> KilnResult>,
     pub text: Option<unsafe extern "C" fn(u32, *mut core::ffi::c_char, usize, *mut usize) -> KilnResult>,
     pub text_info: Option<unsafe extern "C" fn(*mut KilnContentTextInfo) -> KilnResult>,
+    pub pack_mod_reloaded: Option<unsafe extern "C" fn(KilnStr, KilnStr) -> KilnResult>,
 }

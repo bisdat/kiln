@@ -120,10 +120,14 @@ fn zip_names(file: &Path) -> Vec<String> {
     (0..a.len()).map(|i| a.by_index(i).unwrap().name().unwrap().to_string()).collect()
 }
 
-/// The Python reference gives the hashes the fixture holds (skipped where there is no python3).
+/// The Python reference gives the hashes the fixture holds (skipped where there is no Python 3). Windows' `python3`
+/// may be the Store's placeholder, which only says to install Python and fails: the interpreter is the first of
+/// `python3` and `python` that answers `--version`.
 #[test]
 fn the_reference_agrees_with_the_fixture() {
     let script = repo().join("schema/fixtures/engine-identity/engine_identity.py");
-    let Ok(out) = std::process::Command::new("python3").arg("-I").arg(&script).arg("--check").output() else { return };
+    let works = |p: &&&str| std::process::Command::new(p).arg("--version").output().is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).starts_with("Python 3"));
+    let Some(python) = ["python3", "python"].iter().find(works) else { return };
+    let Ok(out) = std::process::Command::new(python).arg("-I").arg(&script).arg("--check").output() else { return };
     assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
 }

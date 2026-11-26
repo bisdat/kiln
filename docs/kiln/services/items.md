@@ -192,6 +192,15 @@ match, `KILN_ERR_BUFFER_TOO_SMALL` past `capacity` (the first `capacity` rows wr
   `DisplayName`, else its base item's name). On a dedicated server (no texts in its data), and until the game's texts are read
   (the first call starts that in the background), the English name Kiln ships (`ItemInfo.DisplayName`). Null for an id Kiln
   knows no name of. Icons: `Ui.ItemImage` ([ui.md](../ui.md#item-icons-and-names)).
+- Descriptions and names in a chosen language (since 0.2.0-dev.31.13, mod API 0.2.22; any side, any thread, never waits):
+  `Items.Description(item)` / `Items.DescriptionIn(item, language)` (the description without markup),
+  `Items.DisplayNameIn(item, language)` and `Items.TextTags(item)` (the loca tag ids of the item type's name, caption,
+  description and lore, from its `ItemInfo`; works on a server too). `language` is a key the game ships (`"de-de"`; `"de"`,
+  `"De_De"` work too; null: the player's). A language's table is read in the background at the first question: null until
+  then (`await Content.LoadTextsAsync(language)` first to have it at once). Unlike `DisplayName(item)`, `DisplayNameIn`
+  does not answer English for another language; English (`"en-us"`) falls back to the name Kiln ships. On a
+  dedicated server descriptions are null (no texts in its data). A new item: its definition's texts. Guide:
+  [content.md](content.md#game-texts-in-any-language-since-020-dev3113).
 - `Available` (service loaded), `CanTransact`, `Status()` (program state, pending, commits, detail).
 
 Rules: call on the tick thread (mod code always is; `Read`/`FindInventories` throw `InvalidOperationException`

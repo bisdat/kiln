@@ -372,6 +372,11 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-sov { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .k-sov > * { flex-shrink: 0; }
 .k-sov > .k-sov-console, .k-sov-start > .k-sov-live { flex-shrink: 1; }
+/* "Open web panel": the buttons, then where it is open (0.2.0-dev.31.12) */
+.k-sov-webpanel { display: flex; flex-direction: column; gap: 6px; }
+.k-sov-webpanel-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.k-sov-webpanel-status { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--k-text-2, inherit); }
+.k-sov-webpanel-status li:first-child { font-family: var(--k-font-mono); }
 .k-sov-start { flex-direction: row; gap: 26px; }
 .k-sov-live { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .k-sov-aside { flex: none; width: 250px; display: flex; flex-direction: column; gap: 12px; overflow: auto; border-left: 1px solid var(--k-line); padding-left: 22px; }

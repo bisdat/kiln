@@ -16,6 +16,11 @@
 //    the window gets each one as a raw record and as a message, a notch per WHEEL_DELTA. A press such a subscriber takes
 //    is kept from the game like a bound key (its raw record and its message); releases always pass. Over a Kiln panel
 //    the middle button and the wheel stay the panel's. Without such a subscriber none of this runs.
+//  - kiln.ui.input (0.2.0-dev.31.13, input_own.cpp / input_own.h): a press an owning subscriber takes (a key, the left,
+//    right, middle or a side button, a pad's button) is its own until the release: its repeats and its release go to
+//    that subscriber alone and are kept from the game too (the release's message, its raw record or the record's flag),
+//    and while it is held the button's MK_* bit is cleared from the game's mouse messages. Where the game saw the press
+//    go down after all (a mixed raw record without the GetRawInputData hook, Alt+F4) the release reaches it (own_leak).
 #include <windows.h>
 #include <windowsx.h>
 
@@ -34,6 +39,7 @@
 #include "imgui.h"
 #include "key_hold.h"
 #include "pad_slots.h"
+#include "pad_view.h"
 #include "key_names.h"
 #include "mouse_press.h"
 #include "pad_keys.h"
@@ -71,6 +77,10 @@ bool g_raw_keyboard_seen = false;
 hold::Keys g_keys;  // keys held, across a focus loss (key_hold.h; the wheel asks from other threads)
 int g_repress_said = 0;
 bool g_consumed[256] = {};  // vk consumed by a binding: swallow its legacy messages too
+bool g_up_kept[256] = {};   // an owned key's raw release was kept (kiln.ui.input): keep its WM_KEYUP too
+// The game got this key's WM_KEYDOWN / WM_SYSKEYDOWN and not yet its up (window thread): an owner that takes a press of
+// it later (its first raw record missing, the raw auto-repeat counted as the press) never keeps its up from the game.
+bool g_game_down[256] = {};
 // The game's chat field (ui.h ChatInputSink, chat_input_probe.cpp): set while chat history runs, null otherwise.
 std::atomic<const ChatInputSink*> g_chat_sink{nullptr};
 std::atomic<uint32_t> g_pressed_vk{0}, g_pressed_mods{0};
@@ -196,6 +206,22 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold
     k.repeat = repeat ? 1 : 0;
     k.text_input = g_text_input.load() ? 1 : 0;
     k.captured = capturing() ? 1 : 0;
+    // a press an owning subscriber took (kiln.ui.input): its repeats and its release are its own, before the chat field,
+    // Kiln's menu key and Escape and every key subscriber; kept from the game unless the game saw the press after all
+    if (own_wanted(from_mouse ? KILN_UI_OWN_MOUSE : KILN_UI_OWN_KEYS)) {
+        OwnInput e;
+        e.vk = vk;
+        e.scan = scan;
+        e.mods = k.mods;
+        e.time = static_cast<uint32_t>(GetMessageTime());
+        e.text_input = k.text_input != 0;
+        e.captured = k.captured != 0;
+        bool keep = false;
+        if (own_route(e, down, repeat, &keep)) {
+            g_consumed[vk] = down && keep;
+            return keep;
+        }
+    }
     if (down && !repeat && !from_mouse) {
         g_pressed_mods.store(k.mods);
         g_pressed_vk.store(vk);
@@ -204,6 +230,9 @@ bool on_key(uint32_t vk, uint32_t scan, bool down, bool from_mouse = false, hold
     // them for the game's UI thread. Kiln's own keys and the key subscribers get every other transition.
     const ChatInputSink* chat = from_mouse ? nullptr : g_chat_sink.load(std::memory_order_acquire);
     const bool consumed = (chat && chat->key(vk, k.mods, down, k.captured != 0)) || dispatch_key(k, from_mouse);
+    // an owner took a press of a key the game holds down (its WM_KEYDOWN reached the game before Kiln saw the press): the
+    // stuck-press guard (kiln.ui.input), its release reaches the game
+    if (down && consumed && !from_mouse && g_game_down[vk] && own_claimed() && own_hidden(vk, 0)) own_leak(vk, 0);
     if (!down) {
         g_consumed[vk] = false;
         return false;  // releases always reach the game
@@ -283,8 +312,8 @@ constexpr USHORT kRawButtonFlags = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUT
                                    RI_MOUSE_BUTTON_5_UP | RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL;
 
 // The presses a raw mouse record carries (middle and side buttons, presses before releases, and the wheel), dispatched.
-// Returns the record's flags whose presses Kiln keeps from the game. Over a Kiln panel the middle button's press and the
-// wheel are the panel's: no press.
+// Returns the record's flags whose presses Kiln keeps from the game, and the releases an owner keeps (kiln.ui.input).
+// Over a Kiln panel the middle button's press and the wheel are the panel's: no press.
 USHORT raw_mouse_presses(const RAWMOUSE& ms, bool over_panel) {
     static constexpr struct {
         uint32_t vk;
@@ -296,8 +325,8 @@ USHORT raw_mouse_presses(const RAWMOUSE& ms, bool over_panel) {
     USHORT kept = 0;
     for (const auto& b : kButtons)
         if ((f & b.down) && !(over_panel && b.vk == VK_MBUTTON) && mouse_button(mouse::Source::Raw, b.vk, true)) kept |= b.down;
-    for (const auto& b : kButtons)
-        if (f & b.up) mouse_button(mouse::Source::Raw, b.vk, false);
+    for (const auto& b : kButtons)  // an owned press's release is kept too (kiln.ui.input)
+        if ((f & b.up) && mouse_button(mouse::Source::Raw, b.vk, false)) kept |= b.up;
     // usButtonData holds one wheel's delta: a record turns one wheel
     const int32_t delta = static_cast<SHORT>(ms.usButtonData);
     if (!over_panel && (f & RI_MOUSE_WHEEL)) {
@@ -309,13 +338,14 @@ USHORT raw_mouse_presses(const RAWMOUSE& ms, bool over_panel) {
 }
 
 // The presses a mouse message carries (middle and side buttons, the wheel), dispatched. true = a press Kiln keeps from
-// the game. Over a Kiln panel the middle button and the wheel are the panel's: no press.
+// the game, or an owned press's release (kiln.ui.input). Over a Kiln panel the middle button and the wheel are the
+// panel's: no press.
 bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
     using mouse::Source;
     switch (m) {
         case WM_MBUTTONDOWN:
         case WM_MBUTTONDBLCLK: return !over_panel && mouse_button(Source::Message, VK_MBUTTON, true);
-        case WM_MBUTTONUP: mouse_button(Source::Message, VK_MBUTTON, false); return false;
+        case WM_MBUTTONUP: return mouse_button(Source::Message, VK_MBUTTON, false);  // an owned press's (kiln.ui.input)
         case WM_XBUTTONDOWN:
         case WM_XBUTTONDBLCLK:
         case WM_XBUTTONUP: {
@@ -323,7 +353,7 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
             bool kept = false;
             if (GET_XBUTTON_WPARAM(w) & XBUTTON1) kept = mouse_button(Source::Message, VK_XBUTTON1, down) || kept;
             if (GET_XBUTTON_WPARAM(w) & XBUTTON2) kept = mouse_button(Source::Message, VK_XBUTTON2, down) || kept;
-            return down && kept;
+            return kept;  // a release only when an owner keeps it (kiln.ui.input)
         }
         case WM_MOUSEWHEEL: return !over_panel && mouse_wheel(Source::Message, 0, GET_WHEEL_DELTA_WPARAM(w));
         case WM_MOUSEHWHEEL: return !over_panel && mouse_wheel(Source::Message, 1, GET_WHEEL_DELTA_WPARAM(w));
@@ -336,10 +366,11 @@ bool message_mouse_presses(UINT m, WPARAM w, bool over_panel) {
 // and notches are forgotten, without inventing key messages for either subscribers or the game (the v5 focus record
 // lets subscribers reset their own state).
 void forget_keys() {
-    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = false;
+    for (uint32_t vk = 0; vk < 256; ++vk) g_consumed[vk] = g_up_kept[vk] = g_game_down[vk] = false;
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
+    own_focus_lost();  // kiln.ui.input: every owner hears End Focus; a release that comes back later is the game's
 }
 
 // The keyboard is back: a key let go while the game had no focus is no longer held (input_key_held). Presses are not
@@ -512,8 +543,33 @@ bool guarded_pointer(KilnUiPointerFn fn, const KilnUiPointerPress* p, void* user
     }
 }
 
-// Pointer presses run: a subscriber exists, or a twin waits for its decision (also after the last one left).
-bool pointer_wanted() { return g_ptr_count.load(std::memory_order_relaxed) != 0 || g_twins.waiting() != 0; }
+// Pointer presses run: a subscriber or an owner (kiln.ui.input) exists, or a twin waits for its decision (also after the
+// last one left).
+bool pointer_wanted() {
+    return g_ptr_count.load(std::memory_order_relaxed) != 0 || g_twins.waiting() != 0 || own_wanted(KILN_UI_OWN_POINTER);
+}
+
+// A left/right button's transition for kiln.ui.input: the cursor (at, or where the system says; 0 when it cannot say),
+// the client size, the modifiers.
+OwnInput pointer_input(HWND h, uint32_t vk, uint32_t time, const POINT* at) {
+    OwnInput e;
+    e.vk = vk;
+    e.mods = current_mods();
+    e.time = time;
+    POINT pt{};
+    if (at) pt = *at;
+    else if (!GetCursorPos(&pt) || !ScreenToClient(h, &pt)) pt = {};
+    RECT rc{};
+    if (GetClientRect(h, &rc)) {
+        e.client_width = static_cast<float>(rc.right - rc.left);
+        e.client_height = static_cast<float>(rc.bottom - rc.top);
+    }
+    e.x = static_cast<float>(pt.x);
+    e.y = static_cast<float>(pt.y);
+    e.text_input = g_text_input.load();
+    e.captured = capturing();
+    return e;
+}
 
 // Asks the subscribers about one press at the cursor. true = keep it from the game.
 bool ask_pointer(HWND h, uint32_t button, uint32_t time, const POINT* at) {
@@ -561,16 +617,81 @@ bool ask_pointer(HWND h, uint32_t button, uint32_t time, const POINT* at) {
     return take;
 }
 
-// One left/right press from one source. true = keep it from the game.
+// One left/right press from one source. true = keep it from the game. The owners (kiln.ui.input) are offered it first:
+// one that takes it owns its release too (pointer_release); the pointer subscribers are not asked then.
 bool pointer_press(HWND h, mouse::Source s, uint32_t button, const POINT* at) {
     const uint32_t vk = button == 1 ? VK_LBUTTON : VK_RBUTTON;
     const uint32_t kind = mouse::button_kind(vk, true);
     const auto time = static_cast<uint32_t>(GetMessageTime());
     if (const auto twin = follow_twin(s, kind, 0, time); twin.matched) return twin.kept;
-    if (g_ptr_count.load(std::memory_order_relaxed) == 0) return false;
-    const bool taken = ask_pointer(h, button, time, at);
+    const bool owners = own_wanted(KILN_UI_OWN_POINTER);
+    if (g_ptr_count.load(std::memory_order_relaxed) == 0 && !owners) return false;
+    bool taken = false;
+    if (owners) {
+        const OwnInput e = pointer_input(h, vk, time, at);
+        own_route(e, true, false, nullptr);  // a new press of a claimed button: its release never came (lost)
+        taken = own_offer(e);
+    }
+    if (!taken && g_ptr_count.load(std::memory_order_relaxed) != 0) taken = ask_pointer(h, button, time, at);
     g_twins.lead(s, kind, 0, time, taken);
     return taken;
+}
+
+// One left/right release from one source (kiln.ui.input): the release of an owned press goes to its owner (or, its
+// owner gone, to nobody) and is kept from the game, once for its raw record and its message (they are twins). true =
+// keep it from the game. A release of a press nobody owns: false, and nothing waits for its twin.
+bool pointer_release(HWND h, mouse::Source s, uint32_t button, const POINT* at) {
+    const uint32_t vk = button == 1 ? VK_LBUTTON : VK_RBUTTON;
+    const uint32_t kind = mouse::button_kind(vk, false);
+    const auto time = static_cast<uint32_t>(GetMessageTime());
+    if (const auto twin = follow_twin(s, kind, 0, time); twin.matched) return twin.kept;
+    if (!own_claimed()) return false;
+    bool keep = false;
+    if (!own_route(pointer_input(h, vk, time, at), false, false, &keep)) return false;
+    g_twins.lead(s, kind, 0, time, keep);
+    return keep;
+}
+
+// The left/right releases of a raw record an owner keeps (their RI_MOUSE_*_UP flags).
+USHORT raw_pointer_releases(HWND h, const RAWMOUSE& ms) {
+    if (!(ms.usButtonFlags & (RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP)) || (!own_claimed() && !g_twins.waiting()))
+        return 0;
+    USHORT kept = 0;
+    if ((ms.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) && pointer_release(h, mouse::Source::Raw, 1, nullptr))
+        kept |= RI_MOUSE_LEFT_BUTTON_UP;
+    if ((ms.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) && pointer_release(h, mouse::Source::Raw, 3, nullptr))
+        kept |= RI_MOUSE_RIGHT_BUTTON_UP;
+    return kept;
+}
+
+// The owned presses (kiln.ui.input) among a raw record's downs that reach the game whole after all (no GetRawInputData
+// hook to take their flags out): the game saw them, so their releases must reach it too.
+void leak_raw_downs(USHORT downs) {
+    if (!own_claimed()) return;
+    if (downs & RI_MOUSE_LEFT_BUTTON_DOWN) own_leak(VK_LBUTTON, 0);
+    if (downs & RI_MOUSE_RIGHT_BUTTON_DOWN) own_leak(VK_RBUTTON, 0);
+    if (downs & RI_MOUSE_MIDDLE_BUTTON_DOWN) own_leak(VK_MBUTTON, 0);
+    if (downs & RI_MOUSE_BUTTON_4_DOWN) own_leak(VK_XBUTTON1, 0);
+    if (downs & RI_MOUSE_BUTTON_5_DOWN) own_leak(VK_XBUTTON2, 0);
+}
+
+// A WM_INPUT record handed to the game with `strip` (owned releases, kiln.ui.input) taken out: whole when it holds
+// nothing else (no game), else through the GetRawInputData hook; without the hook it reaches the game whole (the release
+// of a press the game never saw: nothing is held).
+LRESULT pass_raw_without(HWND h, UINT m, WPARAM w, LPARAM l, const RAWMOUSE& ms, USHORT strip) {
+    const bool moved = ms.lLastX != 0 || ms.lLastY != 0 || (ms.usFlags & MOUSE_MOVE_ABSOLUTE);
+    if (!moved && !(ms.usButtonFlags & kRawButtonFlags & ~strip)) {
+        DefWindowProcW(h, m, w, l);  // lets the system clean up the raw input
+        return 0;
+    }
+    if (g_game_raw_read_hooked) {
+        const RawEdit outer = t_raw_edit;
+        t_raw_edit = {reinterpret_cast<HRAWINPUT>(l), strip};
+        const LRESULT r = CallWindowProcW(g_chain.below, h, m, w, l);
+        t_raw_edit = outer;
+        return r;
+    }
+    return CallWindowProcW(g_chain.below, h, m, w, l);
 }
 
 // The left/right presses of a raw record a subscriber took (their RI_MOUSE_*_DOWN flags).
@@ -612,19 +733,27 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
                 const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
                 if (fed) feed_raw(*ri, m, w, l);
+                const bool mouse_record = ri->header.dwType == RIM_TYPEMOUSE;
                 // a left/right press a pointer subscriber took (subscribe_pointer_press): kept from the game like a key
-                // binding's press; its release and the record's other input still reach it
-                if (ri->header.dwType == RIM_TYPEMOUSE && !cap && pointer_wanted() &&
-                    (ri->data.mouse.usButtonFlags & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN)) && !hover_capture()) {
+                // binding's press; its release and the record's other input still reach it. One an owner took
+                // (kiln.ui.input) keeps its release from the game too: owned_up, the releases of owned left/right presses
+                // this record holds, decided after the record's presses (a very fast click holds both)
+                const bool pointer_record = mouse_record && !cap && pointer_wanted() &&
+                                            (ri->data.mouse.usButtonFlags & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN)) &&
+                                            !hover_capture();
+                USHORT owned_up = mouse_record && !pointer_record ? raw_pointer_releases(h, ri->data.mouse) : 0;
+                if (pointer_record) {
                     const RAWMOUSE& ms = ri->data.mouse;
-                    if (const USHORT taken = raw_pointer_presses(h, ms)) {
+                    const USHORT taken = raw_pointer_presses(h, ms);
+                    owned_up = raw_pointer_releases(h, ms);
+                    if (taken || owned_up) {
                         constexpr USHORT kPresses = RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_5_DOWN;
                         const USHORT kept = (ms.usButtonFlags & kRawButtonFlags & ~(RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP |
                                                                                     RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_UP)) &&
                                                     mouse_presses_wanted()
                                                 ? raw_mouse_presses(ms, false)
                                                 : 0;
-                        const USHORT own = taken | kept | static_cast<USHORT>((kept & kPresses) << 1);
+                        const USHORT own = taken | owned_up | kept | static_cast<USHORT>((kept & kPresses) << 1);
                         const bool moved = ms.lLastX != 0 || ms.lLastY != 0 || (ms.usFlags & MOUSE_MOVE_ABSOLUTE);
                         if (!moved && !(ms.usButtonFlags & kRawButtonFlags & ~own)) {
                             DefWindowProcW(h, m, w, l);  // lets the system clean up the raw input
@@ -637,6 +766,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                             t_raw_edit = outer;
                             return r;
                         }
+                        leak_raw_downs(own);  // an owner's press the game saw after all: its release reaches the game
                         if (!g_ptr_mixed_said) {
                             g_ptr_mixed_said = true;
                             logf(KILN_LOG_INFO, "ui: a raw mouse record held a press a pointer subscriber took and other "
@@ -652,8 +782,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     const bool down = (kb.Flags & RI_KEY_BREAK) == 0;
                     const uint32_t vk = kb.VKey;
                     const bool consumed = on_key(vk, kb.MakeCode | ((kb.Flags & RI_KEY_E0) ? 0x100u : 0u), down);
+                    if (vk < 256) g_up_kept[vk] = consumed && !down;
                     if ((consumed || cap) && down) {
                         DefWindowProcW(h, m, w, l);  // lets the system clean up the raw input
+                        return 0;
+                    }
+                    if (consumed) {  // an owned key's release (kiln.ui.input): the game never saw its press; its WM_KEYUP too
+                        DefWindowProcW(h, m, w, l);
                         return 0;
                     }
                 } else if (ri->header.dwType == RIM_TYPEMOUSE && !cap && hover_capture() &&
@@ -667,9 +802,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     const RAWMOUSE& ms = ri->data.mouse;
                     // middle and side buttons and wheel notches go to the key subscribers with captured 1 (the Keys
                     // page takes one for a binding); a notch taken there does not scroll the screen too
-                    const USHORT taken = (ms.usButtonFlags & kRawButtonFlags) && mouse_presses_wanted()
-                                             ? raw_mouse_presses(ms, false) & (RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL)
-                                             : 0;
+                    const USHORT presses = (ms.usButtonFlags & kRawButtonFlags) && mouse_presses_wanted() ? raw_mouse_presses(ms, false) : 0;
+                    const USHORT taken = presses & (RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL);
                     // a release the game saw the press of (e.g. the click that opened a Kiln screen) still reaches
                     // it, like key releases: nothing stays held
                     constexpr USHORT kUp = RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_UP |
@@ -677,6 +811,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     constexpr USHORT kDown = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN |
                                              RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL;
                     const bool release_only = (ms.usButtonFlags & kUp) && !(ms.usButtonFlags & kDown) && ms.lLastX == 0 && ms.lLastY == 0;
+                    owned_up |= presses & kUp;  // an owned middle or side press's release (kiln.ui.input): not the game's
                     g_n_raw.fetch_add(1, std::memory_order_relaxed);
                     if (ms.usFlags & MOUSE_MOVE_ABSOLUTE) g_n_raw_abs.fetch_add(1, std::memory_order_relaxed);
                     const WPARAM pw = static_cast<WPARAM>(static_cast<uint32_t>(ms.lLastX)) |
@@ -685,6 +820,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                                       (static_cast<LPARAM>(static_cast<USHORT>(ms.usButtonFlags & ~taken)) << 16) |
                                       (static_cast<LPARAM>(static_cast<uint16_t>(ms.usButtonData)) << 32);
                     enqueue(h, kRawMouseMsg, pw, pl);
+                    if (release_only && owned_up) return pass_raw_without(h, m, w, l, ms, owned_up);
                     if (release_only) break;
                     DefWindowProcW(h, m, w, l);
                     return 0;
@@ -695,10 +831,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     // button's or the wheel's input reaches the game with only the taken flags taken out (the import hook)
                     const RAWMOUSE& ms = ri->data.mouse;
                     const USHORT kept = raw_mouse_presses(ms, hover_capture());
-                    // a kept press's own release in the same record (a very fast click) needs no game either
+                    // a kept press's own release in the same record (a very fast click) needs no game either, nor an owned
+                    // press's release (kiln.ui.input: kept holds those of the middle and side buttons, owned_up the others)
                     constexpr USHORT kPresses = RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_5_DOWN;
-                    const USHORT own = kept | static_cast<USHORT>((kept & kPresses) << 1);  // each *_UP is its *_DOWN << 1
-                    if (kept) {
+                    const USHORT own = kept | owned_up | static_cast<USHORT>((kept & kPresses) << 1);  // each *_UP is its *_DOWN << 1
+                    owned_up = 0;  // decided here
+                    if (own) {
                         const bool moved = ms.lLastX != 0 || ms.lLastY != 0 || (ms.usFlags & MOUSE_MOVE_ABSOLUTE);
                         if (!moved && !(ms.usButtonFlags & kRawButtonFlags & ~own)) {
                             DefWindowProcW(h, m, w, l);  // lets the system clean up the raw input
@@ -711,6 +849,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                             t_raw_edit = outer;
                             return r;
                         }
+                        leak_raw_downs(own);  // an owner's press the game saw after all: its release reaches the game
                         if (!g_mixed_record_said) {
                             g_mixed_record_said = true;
                             logf(KILN_LOG_INFO, "ui: a raw mouse record held a press a key binding took and other input "
@@ -719,6 +858,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                         }
                     }
                 }
+                // the releases of owned presses in a record the branches above passed on
+                if (mouse_record && owned_up) return pass_raw_without(h, m, w, l, ri->data.mouse, owned_up);
             }
             break;
         }
@@ -749,9 +890,15 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             enqueue(h, m, w, l);
             if (cap || consumed) {
-                if (m == WM_SYSKEYDOWN && vk == VK_F4) break;  // Alt+F4 still closes the game
+                if (m == WM_SYSKEYDOWN && vk == VK_F4) {  // Alt+F4 still closes the game
+                    own_leak(vk, 0);  // stuck-press guard (kiln.ui.input): the game saw it, its release reaches it
+                    g_game_down[vk] = true;
+                    break;
+                }
                 return 0;
             }
+            if (own_claimed() && own_hidden(vk, 0)) own_leak(vk, 0);  // an owned key's down the game gets after all
+            g_game_down[vk] = true;
             break;
         }
         case WM_KEYUP:
@@ -759,19 +906,25 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (fed) feed(feed_record(KILN_UI_INPUT_WINDOW_KEY, m, w, l));
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
-            if (!g_raw_keyboard_seen) on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
+            bool owned = false;  // the release of a press an owner took (kiln.ui.input): the game never saw its press
+            if (!g_raw_keyboard_seen) owned = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
             else {
                 // The paired raw release may be missing even for a printable
                 // key routed by the legacy fallback above. Clear every key's
                 // consumed flag here, not just Tab/R/navigation: otherwise a
                 // typed search query can leave that VK stuck as consumed.
-                // Releases always pass through to Enshrouded.
+                // Releases pass through to Enshrouded, but for an owned key's.
                 if (const ChatInputSink* chat = g_chat_sink.load(std::memory_order_acquire))
                     chat->key(vk, current_mods(), false, cap);
                 g_consumed[vk] = false;
+                // its raw release was kept, or has not come yet (the claim still holds)
+                owned = g_up_kept[vk] || own_hidden(vk, 0);
+                g_up_kept[vk] = false;
             }
             enqueue(h, m, w, l);
-            break;  // releases always reach the game
+            if (owned && !g_game_down[vk]) return 0;  // never an up whose down the game saw (stuck-press guard)
+            g_game_down[vk] = false;
+            break;  // releases reach the game
         }
         case WM_CHAR:
         case WM_SYSCHAR:
@@ -841,8 +994,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 const bool kept = m != WM_MOUSEMOVE && mouse_presses_wanted() && message_mouse_presses(m, w, !cap && hover_capture());
                 const bool wheel = m == WM_MOUSEWHEEL || m == WM_MOUSEHWHEEL;
                 if (!(cap && kept && wheel)) enqueue(h, m, w, l);  // a notch the Keys page took does not scroll it too
-                if (cap && !is_button_up(m)) return 0;  // releases reach the game (see WM_INPUT)
-                if (kept) return (m == WM_XBUTTONDOWN || m == WM_XBUTTONDBLCLK) ? TRUE : 0;  // a key binding took it
+                if (cap && !is_button_up(m)) return 0;  // releases reach the game (see WM_INPUT), but an owned press's
+                if (kept) return (m == WM_XBUTTONDOWN || m == WM_XBUTTONDBLCLK || m == WM_XBUTTONUP) ? TRUE : 0;  // a key binding took it
+                // the release of a left/right press an owner took (kiln.ui.input; paired with its raw record)
+                if ((m == WM_LBUTTONUP || m == WM_RBUTTONUP) && (own_claimed() || g_twins.waiting())) {
+                    const POINT at{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+                    if (pointer_release(h, mouse::Source::Message, m == WM_LBUTTONUP ? 1 : 3, &at)) return 0;
+                }
                 // a left/right press a pointer subscriber took (subscribe_pointer_press; paired with its raw record)
                 if (!cap && (m == WM_LBUTTONDOWN || m == WM_LBUTTONDBLCLK || m == WM_RBUTTONDOWN || m == WM_RBUTTONDBLCLK) &&
                     pointer_wanted() && !hover_capture()) {
@@ -854,6 +1012,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if ((m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN || m == WM_LBUTTONDBLCLK ||
                      m == WM_RBUTTONDBLCLK || m == WM_MOUSEWHEEL || m == WM_MOUSEHWHEEL) && hover_capture())
                     return 0;
+                // a button an owner holds (kiln.ui.input) is not held for the game: its MK_* bit goes from the message's
+                // key state (the low word of wParam for every client mouse message)
+                if (m >= WM_MOUSEFIRST && m <= WM_MOUSELAST)
+                    if (const uint32_t mk = own_hidden_mk()) w &= ~static_cast<WPARAM>(mk);
             }
             break;
     }
@@ -919,10 +1081,14 @@ std::mutex g_pad_mu;
 kiln::ui::PadSlots g_pads;
 WORD g_pad_prev[4] = {}; // protected by g_pad_mu
 kui::pad::Controllers g_pad_buttons;
+kui::pad::View g_pad_views[4];          // kiln.ui.input pad_state: the game's last poll of each (protected by g_pad_mu)
+std::atomic<bool> g_xinput_hooked{false};
 PadState g_pad_fed{};
 bool g_pad_fed_any = false;
 
-void synth_escape() {
+}  // namespace
+
+void input_synth_escape() {
     KilnUiKey k{};
     k.size = sizeof k;
     k.vk = VK_ESCAPE;
@@ -930,30 +1096,59 @@ void synth_escape() {
     k.down = 1;
     k.text_input = g_text_input.load() ? 1 : 0;
     k.captured = 1;
+    const bool outer = keys_synthetic(true);  // never offered to an owner: its release does not come through on_key
     dispatch_key(k);
     k.down = 0;
     dispatch_key(k);
+    keys_synthetic(outer);
 }
+
+bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured) {
+    KilnUiKey k{};
+    k.size = sizeof k;
+    k.vk = vk;
+    k.mods = mods;
+    k.down = down ? 1 : 0;
+    k.text_input = g_text_input.load() ? 1 : 0;
+    k.captured = captured ? 1 : 0;
+    // a press an owner took (kiln.ui.input): its release is the owner's alone (the button stays hidden from the game
+    // until then, as any kept press: pad_keys.h)
+    if (own_wanted(KILN_UI_OWN_PAD)) {
+        OwnInput e;
+        e.vk = vk;
+        e.mods = mods;
+        e.controller = controller;
+        e.text_input = k.text_input != 0;
+        e.captured = captured;
+        bool keep = false;
+        if (own_route(e, down, false, &keep)) return down && keep;
+    }
+    const bool keep = keys_dispatch_to(k, KILN_UI_KEYS_PAD, controller);  // owners first, then the key subscribers
+    return down && keep;
+}
+
+KilnResult input_pad_state(uint32_t controller, KilnUiPadState* out) {
+    if (!out || out->size < sizeof(KilnUiPadState) || controller > 3) return KILN_ERR_INVALID_ARGUMENT;
+    const uint32_t owned = own_pad_owned(controller);
+    {
+        std::lock_guard<std::mutex> lk(g_pad_mu);
+        g_pad_views[controller].fill(controller, owned, out);
+    }
+    return g_xinput_hooked.load(std::memory_order_acquire) ? KILN_OK : KILN_ERR_UNAVAILABLE;
+}
+
+namespace {
 
 // The pad's buttons as key presses (0.2.0-dev.30.5, pad_keys.h) for the subscribers with KILN_UI_KEYS_PAD, on the thread
 // the game polls the pad from. Each controller has one synchronized tracker across all polling threads.
-// Returns the buttons kept from the game (hidden until their release); a kept B is reported in *b_kept.
+// Returns the buttons kept from the game (hidden until their release); a kept B is reported in *b_kept. The owners of
+// kiln.ui.input (0.2.0-dev.31.13) get the presses first (pad_key).
 uint32_t pad_presses(DWORD user, const PadState& pad, bool captured, bool* b_kept, bool connected = true) {
     if (!keys_pad_wanted()) {  // nobody listens: no presses, nothing kept (a hold that began with a listener ends here)
         g_pad_buttons.reset(user);
         return 0;
     }
-    auto deliver = [&](uint32_t vk, bool down, uint32_t mods) {
-        KilnUiKey k{};
-        k.size = sizeof k;
-        k.vk = vk;
-        k.mods = mods;
-        k.down = down ? 1 : 0;
-        k.text_input = g_text_input.load() ? 1 : 0;
-        k.captured = captured ? 1 : 0;
-        const bool keep = keys_dispatch_to(k, KILN_UI_KEYS_PAD);
-        return down && keep;
-    };
+    auto deliver = [&](uint32_t vk, bool down, uint32_t mods) { return pad_key(user, vk, down, mods, captured); };
     const uint32_t kept = connected ? g_pad_buttons.step(user, kui::pad::held(pad.buttons, pad.lt, pad.rt), deliver)
                                     : g_pad_buttons.disconnect(user, deliver);
     *b_kept = (kept & 0x2000u) != 0;
@@ -970,8 +1165,10 @@ DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
         g_pad_prev[user] = 0;
         // unplugged (or no pad there): nothing of it may stay held in Kiln's screens (only this pad's slot goes idle)
         g_pads.clear(user);
+        g_pad_views[user].lost(now_ms());
         return r;
     }
+    const PadState polled = st->pad;  // what the pad does, before Kiln hides anything (kiln.ui.input pad_state)
     const bool cap = capturing();
     bool b_kept = false;
     const uint32_t kept = pad_presses(user, st->pad, cap, &b_kept);
@@ -979,6 +1176,7 @@ DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
         {
             std::lock_guard<std::mutex> lk(g_pad_mu);
             g_pad_prev[user] = st->pad.buttons;
+            g_pad_views[user].poll(polled, st->packet, kept, now_ms());
         }
         kui::pad::hide(kept, &st->pad.buttons, &st->pad.lt, &st->pad.rt);  // a kept press never reaches the game
         return r;
@@ -992,9 +1190,11 @@ DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
         b_edge = (b & 0x2000) && !(g_pad_prev[user] & 0x2000) && !b_kept; // a kept B is not Escape
         g_pad_prev[user] = b;
         g_pads.update(user, fed);
+        // the game reads an idle pad while Kiln has the input: everything held is hidden from it
+        g_pad_views[user].poll(polled, st->packet, kept | kui::pad::held(polled.buttons, polled.lt, polled.rt), now_ms());
     }
     std::memset(&st->pad, 0, sizeof st->pad);  // the game sees an idle pad while Kiln has the input
-    if (b_edge) synth_escape();
+    if (b_edge) input_synth_escape();
     return r;
 }
 
@@ -1067,7 +1267,10 @@ void input_hook_xinput() {
             std::snprintf(name, sizeof name, "%ls", dll);
             logf(g_xinput_hook ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: gamepad: %s XInputGetState %s", name,
                  g_xinput_hook ? "hooked (idle for the game while Kiln has the input)" : "could not be hooked");
-            if (g_xinput_hook) hooked.store(true);  // not hooked: the next load tries again
+            if (g_xinput_hook) {
+                hooked.store(true);  // not hooked: the next load tries again
+                g_xinput_hooked.store(true, std::memory_order_release);
+            }
             break;
         }
         busy.clear();
