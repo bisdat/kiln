@@ -285,7 +285,7 @@ column says which fields this Kiln maps, which are unproven and why.
 
 `applies` describes when the **local game** consumes a value. The separate, per-field `joinedClient` marker in the
 schema, `RegistrySchema.Find(...).JoinedClient`, the generated property's `RegistryFieldAttribute.JoinedClient` and
-each generated page's **Joined client** column describe the multiplayer path. Keeping it separate is additive:
+each generated page's **Joined client** column describe the multiplayer path (since 0.2.0-dev.31.17, mod API 0.2.24). Keeping it separate is additive:
 `RegistryApplies` and its three existing values keep their meaning, and no existing property constructor changes.
 
 | Joined client | Server edit on an already joined Kiln client |
@@ -337,7 +337,7 @@ exactly 5; `balance.altarsPerFlameLevel`, one value per flame level) is edited o
 
 ### What a reload changes
 A `reload <id>` (or an `unload` and a `load`) of a mod with registry edits changes what its `applies` allows now, and says
-what waits for the next start (next release). The rest of the mod's `kiln.mod.json`: [architecture.md](../../architecture.md#what-reload-id-covers).
+what waits for the next start (since 0.2.0-dev.31.17). The rest of the mod's `kiln.mod.json`: [architecture.md](../../architecture.md#what-reload-id-covers).
 
 | The mod's edit | After the reload |
 |---|---|
@@ -513,7 +513,7 @@ migrations apply to it like to any edit.
 A rollback **never touches saves**: it writes one file beside the plans. When it gives an item a lower max stack than a world
 already started with, or than the value under it, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
 rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback. The
-launcher's Conflicts view has the same as its **Registry plan** card (next release): the plans, the last start's
+launcher's Conflicts view has the same as its **Registry plan** card (since 0.2.0-dev.31.17): the plans, the last start's
 rollback and a waiting request; **Roll back** shows the dry run's changes first and writes the request only on confirm,
 **Clear** removes it ([launcher/registry-conflicts.md](../../launcher/registry-conflicts.md)).
 

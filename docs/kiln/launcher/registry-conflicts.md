@@ -9,13 +9,13 @@ Refused edits retain their reasons, including `RestartRequired` and `Unproven`. 
 **Certain**, **Named from journal**, **Best-effort drift**, and **Unknown**; best-effort detection does not prove who
 wrote a value or that no other writer exists.
 
-**Waits for a restart** (next release) comes first when the snapshot has refused rows whose reason starts with
+**Waits for a restart** (since 0.2.0-dev.31.17) comes first when the snapshot has refused rows whose reason starts with
 the stable token `RestartRequired: `: the edits a reload, a runtime registry pass or a live edit left for the next start
 (a restart field a reloaded pack changed, a field the start never read, a section or entry operation added after the
 start). It shows `counts.restartRequired` (every such row, also those the native cap left out) and each retained row's
 mod, place and reason; the same rows stay in Refused edits.
 
-**Registry plan** (next release) names the plan the last start ran on, the previous (last good) plan, the
+**Registry plan** (since 0.2.0-dev.31.17) names the plan the last start ran on, the previous (last good) plan, the
 rollback of the last start (applied or refused, with why) and a rollback request waiting for the next start.
 **Roll back** first shows the dry run: the plan it goes to, its mods and versions, and every value that changes back
 (`field: from → to`, at most 50 shown); nothing is written until **Confirm roll back**. **Clear** (when a request waits)
@@ -34,7 +34,7 @@ The page refreshes the snapshot periodically and also offers an explicit refresh
 
 ## Launcher commands
 
-`registry_rollback({ gameId: string, clear: boolean, dryRun: boolean })` (next release) works on the known game
+`registry_rollback({ gameId: string, clear: boolean, dryRun: boolean })` (since 0.2.0-dev.31.17) works on the known game
 folder's `kiln/data/content/registry/` through `kiln_manage::registry_plan`, as `kilnctl registry rollback`: with `dryRun`
 it writes nothing and answers `{plan, previous, rollback, pending, target: {hash, mods}, changes: [{field, from, to}],
 changesUnknown, blocked, dryRun, wrote, cleared}`; without it, it writes the request for the previous (last good) plan
