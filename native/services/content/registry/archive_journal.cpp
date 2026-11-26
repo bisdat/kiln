@@ -46,6 +46,14 @@ bool changes_of(const json& c, ArchiveJournal::Package* p, std::string* why) {
     return true;
 }
 
+// A ShroudForge identifier, as the format names a package: 1 to 80 of A-Z a-z 0-9 . _ -
+bool sf_id(const std::string& id) {
+    if (id.empty() || id.size() > 80) return false;
+    for (const char c : id)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') return false;
+    return true;
+}
+
 ArchiveJournal unreadable(const std::string& why) {
     ArchiveJournal j;
     j.state = "unreadable";
@@ -73,12 +81,17 @@ ArchiveJournal parse_archive_journal(const std::string& text, const std::string&
     if (doc.contains("truncated") && doc["truncated"].is_boolean()) j.truncated = doc["truncated"].get<bool>();
     if (!doc.contains("packages") || !doc["packages"].is_array()) return unreadable("no packages");
     std::string why;
+    std::set<std::string> ids;
     for (const json& p : doc["packages"]) {
         ArchiveJournal::Package pkg;
         if (!p.is_object() || !p.contains("id") || !p["id"].is_string() || p["id"].get<std::string>().empty()) return unreadable("a package has no id");
         pkg.id = p["id"].get<std::string>();
+        // the name players and kiln.log read: only as the format allows it, never a line break or a disguised name
+        if (!sf_id(pkg.id)) return unreadable("a package id is not a ShroudForge identifier");
+        if (!ids.insert(pkg.id).second) return unreadable("the package " + pkg.id + " is listed twice");
         if (p.contains("version") && p["version"].is_string()) pkg.version = p["version"].get<std::string>();
-        pkg.kind = p.contains("kind") && p["kind"] == "eml" ? "eml" : "shroudforge";
+        if (!p.contains("kind") || (p["kind"] != "shroudforge" && p["kind"] != "eml")) return unreadable("the package " + pkg.id + " has no kind shroudforge or eml");
+        pkg.kind = p["kind"].get<std::string>();
         if (!changes_of(p, &pkg, &why)) return unreadable(why);
         j.packages.push_back(std::move(pkg));
     }

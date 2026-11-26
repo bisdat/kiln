@@ -7,6 +7,7 @@
 // the document it builds, for a schema check against schema/state-registry.schema.json.
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -116,6 +117,20 @@ int main(int argc, char** argv) {
     broken["packages"][0]["changed"][0]["guid"] = 7;
     const ArchiveJournal b = parse_archive_journal(broken.dump(), kGen);
     CHECK(b.state == "unreadable" && b.packages.empty(), "a malformed package: unreadable, nothing named: " + b.text);
+    // review: a package is named only as the format names one (a ShroudForge identifier, kind shroudforge or eml, once):
+    // anything else is a corrupt journal, which names nobody (a line break in a name would forge kiln.log lines)
+    for (const auto& [what, edit] : std::vector<std::pair<std::string, std::function<void(json&)>>>{
+             {"an id with a line break", [](json& d) { d["packages"][0]["id"] = "alpha\nregistry: forged line"; }},
+             {"an id with a space", [](json& d) { d["packages"][0]["id"] = "two words"; }},
+             {"an id of 81 characters", [](json& d) { d["packages"][0]["id"] = std::string(81, 'a'); }},
+             {"a kind that is not shroudforge or eml", [](json& d) { d["packages"][0]["kind"] = "dll"; }},
+             {"no kind", [](json& d) { d["packages"][0].erase("kind"); }},
+             {"one id twice", [](json& d) { d["packages"][1]["id"] = d["packages"][0]["id"]; }}}) {
+        json bad = json::parse(text);
+        edit(bad);
+        const ArchiveJournal x = parse_archive_journal(bad.dump(), kGen);
+        CHECK(x.state == "unreadable" && x.packages.empty(), what + ": unreadable, nothing named: " + x.state + " " + x.text);
+    }
     json big = json::parse(text);
     big["truncated"] = true;
     big["packages"][1]["truncated"] = true;

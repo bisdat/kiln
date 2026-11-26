@@ -51,7 +51,8 @@ struct ArchiveJournal {
 };
 
 // The journal's text against the generation this start's archive writer published (lower-case hex, 64 digits). Never
-// throws: a malformed file is state "unreadable" with the reason.
+// throws: a malformed file is state "unreadable" with the reason. A package must be named as the format says (a ShroudForge
+// identifier, kind "shroudforge" or "eml", each id once): a journal that names one otherwise names nobody.
 ArchiveJournal parse_archive_journal(const std::string& text, const std::string& live_generation);
 
 // What the report calls a package: "shroudforge:<id>" / "eml:<id>"; "kiln-eml:unattributed" for the unattributed bucket.
