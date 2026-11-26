@@ -295,6 +295,8 @@
 [KILNX031]Kiln.Registry.RegistryFieldAttribute
 [KILNX031]Kiln.Registry.RegistryFieldAttribute.Applies.get -> Kiln.RegistryApplies
 [KILNX031]Kiln.Registry.RegistryFieldAttribute.Field.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.get -> string!
+[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.set -> void
 [KILNX031]Kiln.Registry.RegistryFieldAttribute.RegistryFieldAttribute(string! field, Kiln.RegistryApplies applies) -> void
 [KILNX031]Kiln.Registry.RegistryFieldSpec
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Applies.get -> Kiln.RegistryApplies
@@ -303,6 +305,7 @@
 [KILNX031]Kiln.Registry.RegistryFieldSpec.FixedLength.get -> int
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Formula.get -> string?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Id.get -> int
+[KILNX031]Kiln.Registry.RegistryFieldSpec.JoinedClient.get -> string!
 [KILNX031]Kiln.Registry.RegistryFieldSpec.LengthField.get -> string?
 [KILNX031]Kiln.Registry.RegistryFieldSpec.LengthOffset.get -> int
 [KILNX031]Kiln.Registry.RegistryFieldSpec.Max.get -> double?

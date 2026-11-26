@@ -1,4 +1,1 @@
 #nullable enable
-[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.get -> string!
-[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.set -> void
-[KILNX031]Kiln.Registry.RegistryFieldSpec.JoinedClient.get -> string!
