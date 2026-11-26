@@ -13,7 +13,8 @@
 //! its version only.
 //!
 //! What it remembers is in [`super::cache`]: a source answered recently is not asked again (30 minutes for a check
-//! the player started, a day for the automatic one; `refresh` asks anyway), the list is asked for conditionally
+//! the player started, a day for the automatic one; `refresh` asks anyway; so does a check after another copy of the
+//! mod was installed when the remembered answer offers that copy nothing), the list is asked for conditionally
 //! (ETag, Last-Modified: a 304 confirms the earlier answer), a request limit (403 or 429 with GitHub's limit
 //! headers) stops every further request to GitHub until its reset and is not lifted by `refresh`, and any other
 //! failure waits 5 minutes, doubling up to a day. A failure never replaces an earlier success: that one is shown,
