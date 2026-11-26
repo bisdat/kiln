@@ -1360,12 +1360,7 @@ internal static class ShroudForgeMenu
                 var wait = WaitForSingleObject(h, hosted ? 1000u : 2000u);
                 if (wait != 0 && wait != 258) break;  // WAIT_TIMEOUT: check runtime lifecycle too
                 if (!keep()) break;
-                if (toasts is not null)
-                    foreach (var n in toasts.Poll(ShroudForgeNews.Reload(), Environment.TickCount64 / 1000.0))
-                    {
-                        var (text, kind) = SfNewsToasts.Text(n);
-                        UiEngine.AddToast(text, kind, SfNewsToasts.Seconds);
-                    }
+                if (toasts is not null) PollNews(toasts, ShroudForgeNews.Reload, UiEngine.AddToast, Environment.TickCount64 / 1000.0);
                 if (wait == 0 && hosted) ModToggled(ShroudForgeNews.Reload, () => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 else if (wait == 0) Toggle();
             }
@@ -1385,9 +1380,7 @@ internal static class ShroudForgeMenu
     private static bool Toggled()
     {
         var page = ModManagerHost.Page;
-        // a press before the page drew a frame finds its request still pending: that is the ShroudForge page too
-        var shown = page.PendingRequest == "shroudforge" || page.PendingRequest is null && page.Section == ModManagerSection.Mods && page.Filter.Kind == "shroudforge";
-        if (Ui.MenuOpen && shown)
+        if (Ui.MenuOpen && ShowsShroudForge(page))
         {
             page.CancelRequest();
             Ui.MenuOpen = false;
@@ -1396,6 +1389,11 @@ internal static class ShroudForgeMenu
         Open();
         return true;
     }
+
+    /// <summary>The page shows ShroudForge's mods, or will at its next frame: a press before the page drew a frame finds its
+    /// request still pending, which is the ShroudForge page too.</summary>
+    private static bool ShowsShroudForge(ModManagerPage page) =>
+        page.PendingRequest == "shroudforge" || page.PendingRequest is null && page.Section == ModManagerSection.Mods && page.Filter.Kind == "shroudforge";
 
     public static void Open(string? mod = null)
     {
@@ -1422,17 +1420,45 @@ internal static class ShroudForgeMenu
     {
         var since = nowSeconds() - 3;
         if (!Toggled()) return;
-        for (var i = 0; i < tries; i++)
+        try
         {
-            if (ShroudForgeNews.Fresh(read(), nowSeconds(), since) is { } mod)
+            for (var i = 0; i < tries; i++)
             {
-                // still open on ShroudForge: the player did not close it meanwhile
-                var page = ModManagerHost.Page;
-                if (Ui.MenuOpen && (page.PendingRequest == "shroudforge" || page.Filter.Kind == "shroudforge")) Open(mod);
-                return;
+                if (ShroudForgeNews.Fresh(read(), nowSeconds(), since) is { } mod)
+                {
+                    // still open on ShroudForge: the player did not close it or go to another section meanwhile
+                    if (Ui.MenuOpen && ShowsShroudForge(ModManagerHost.Page)) Open(mod);
+                    return;
+                }
+                if (waitMs > 0) Thread.Sleep(waitMs);
             }
-            if (waitMs > 0) Thread.Sleep(waitMs);
         }
+        catch (Exception e) { NewsFailed(e); }  // the page is open: only the mod's row is not chosen
+    }
+
+    /// <summary>A hosted start's new notices as Kiln's toasts (the menu thread, at each wake: <paramref name="read"/> is
+    /// ShroudForgeNews.Reload, <paramref name="toast"/> UiEngine.AddToast). Never throws: what goes wrong with
+    /// ShroudForge's file must not end the thread that holds F9 and toggle_modloader().</summary>
+    internal static void PollNews(SfNewsToasts toasts, Func<IReadOnlyList<SfNews>> read, Action<string, ToastKind, double> toast, double nowSeconds)
+    {
+        try
+        {
+            foreach (var n in toasts.Poll(read(), nowSeconds))
+            {
+                var (text, kind) = SfNewsToasts.Text(n);
+                toast(text, kind, SfNewsToasts.Seconds);
+            }
+        }
+        catch (Exception e) { NewsFailed(e); }
+    }
+
+    private static int _newsFailed;
+
+    // said once a game in kiln.log; the shortcut and the page work on
+    private static void NewsFailed(Exception e)
+    {
+        if (Interlocked.Exchange(ref _newsFailed, 1) == 0)
+            UiEngine.Log(LogLevel.Warn, $"ShroudForge mod news: {e.GetType().Name}: {e.Message} (said once a game; F9 and toggle_modloader() still work)");
     }
 
     private const uint SYNCHRONIZE = 0x00100000;

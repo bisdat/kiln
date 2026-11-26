@@ -284,6 +284,37 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.Equal(0, reads);
     }
 
+    [Fact]
+    public void A_mod_toggle_opens_the_page_even_when_the_news_cannot_be_read()
+    {
+        // the menu thread: an exception from ShroudForge's file would end F9 and toggle_modloader() for the whole game
+        ShroudForgeMenu.ModToggled(() => throw new InvalidOperationException("damaged state file"), () => 1001, tries: 3, waitMs: 0);
+        Assert.True(FakeUiTable.MenuOpen);
+        Assert.Equal("shroudforge", ModManagerHost.Page.PendingRequest);
+    }
+
+    [Fact]
+    public void A_mod_toggle_does_not_pull_the_player_back_from_another_section()
+    {
+        // the page opened, the player went to Keys before the notice landed (the 1.6 s the toggle waits for it)
+        var page = ModManagerHost.Page;
+        var reads = 0;
+        IReadOnlyList<SfNews> Read()
+        {
+            if (++reads == 1)
+            {
+                page.TakeRequest();
+                page.Section = ModManagerSection.Keys;
+                return [];
+            }
+            return [new SfNews("altar-cleanup.result", "altar-cleanup", "Found", "Press again", "info", 1000)];
+        }
+        ShroudForgeMenu.ModToggled(Read, () => 1001, tries: 3, waitMs: 0);
+        Assert.Equal(2, reads);
+        Assert.Null(page.PendingRequest);
+        Assert.Equal(ModManagerSection.Keys, page.Section);
+    }
+
     // Kiln's toasts: a notice a hosted mod publishes while the game runs shows over the game at once, as ShroudForge's
     // window would show it in its feed (netjunk 2026-11-26, Kiln 31.18: "the first press does nothing", the scan's
     // result and "press the cleanup key again within 60 seconds" were only in kiln.log)
@@ -318,6 +349,18 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.Equal(9, shown);  // 3 at seconds 0-2, 10-12 and 20-22: each toast stays 10 s
         Assert.Equal(3, SfNewsToasts.MaxOnScreen);
         Assert.Equal(10, SfNewsToasts.Seconds);
+    }
+
+    [Fact]
+    public void A_failing_news_poll_never_ends_the_menu_thread()
+    {
+        // ShroudForge's menu thread polls the news at each wake; an exception here would end F9 and toggle_modloader()
+        var toasts = new SfNewsToasts(startSeconds: 0);
+        ShroudForgeMenu.PollNews(toasts, () => throw new InvalidOperationException("damaged state file"), (_, _, _) => Assert.Fail("no toast"), 1);
+        ShroudForgeMenu.PollNews(toasts, () => [N("altar-cleanup.result", 5)], (_, _, _) => throw new IOException("toast"), 2);
+        var made = new List<(string, ToastKind, double)>();
+        ShroudForgeMenu.PollNews(toasts, () => [N("glider.hello", 6, "Glider", "Ready", "error")], (t, k, s) => made.Add((t, k, s)), 3);
+        Assert.Equal([("Glider: Ready", ToastKind.Error, SfNewsToasts.Seconds)], made);
     }
 
     [Fact]
