@@ -36,6 +36,10 @@
 #           managed/Kiln.Analyzers/tests/*, managed/services/Kiln.DevTools/tests
 #   stage   Kiln.Api, Kiln.Testing and every managed/services/* DLL from that build into $KILN_OUT/check/stage, the set
 #           managed/Kiln.Sdk/pack.sh stages and packs
+#   apis    managed/Kiln.Analyzers/tools/gen-apis.sh --check: the analyzers' API tables (KilnApis.g.cs: tick-thread,
+#           advanced, completed-task, capability-guard and service names) regenerated from the managed sources into a
+#           temporary file (its builds are incremental over this check's) and compared with the committed copy; a stale
+#           copy fails with the diff's first lines and the command that regenerates it (31.13 shipped one stale)
 #   index   the agent API index (agent/skills/kiln-modding/references/api-index/): tools/docs-site/api_index.py --check regenerates
 #           it from the PublicAPI record, the XML docs this build just wrote ($KILN_OUT/dotnet/bin/<project>/release) and
 #           managed/api-history.tsv, in memory (a couple of seconds, no build of its own), and fails when the committed copy
@@ -235,6 +239,20 @@ if ((built)); then
   done
   if ((${#missing[@]})); then result stage FAILED $((SECONDS - t)) "not built: ${missing[*]}"; failed+=(stage)
   else result stage OK $((SECONDS - t)) "$(find "$stage" -name 'Kiln.*.dll' | wc -l) DLLs in $stage"; fi
+
+  # apis
+  t=$SECONDS
+  "$repo/managed/Kiln.Analyzers/tools/gen-apis.sh" --check >"$work/apis.log" 2>&1
+  rc=$?
+  case $rc in
+    0) result apis OK $((SECONDS - t)) "KilnApis.g.cs matches the managed sources" ;;
+    1) result apis FAILED $((SECONDS - t)) "KilnApis.g.cs is stale (regenerate with KILN_OUT=<build dir> managed/Kiln.Analyzers/tools/gen-apis.sh and commit it):"
+       grep -vE '^(gen-apis: KilnApis.g.cs is STALE|  KILN_OUT=)' "$work/apis.log" | head -40
+       failed+=(apis) ;;
+    *) result apis FAILED $((SECONDS - t)) "gen-apis.sh --check could not run (exit $rc):"
+       tail -20 "$work/apis.log"
+       failed+=(apis) ;;
+  esac
 
   # index
   t=$SECONDS
