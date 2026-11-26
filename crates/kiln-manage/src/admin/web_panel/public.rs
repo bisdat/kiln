@@ -39,18 +39,7 @@ pub fn check(public: &PublicAddress, timeout: Duration) -> Result<(), Fallback> 
     let deadline = Instant::now() + timeout;
     let left = || deadline.saturating_duration_since(Instant::now());
     let addrs = resolve(&public.host, public.port, left()).ok_or(Fallback::Unreachable)?;
-    let mut socket = None;
-    for a in addrs {
-        let l = left();
-        if l.is_zero() {
-            break;
-        }
-        if let Ok(s) = TcpStream::connect_timeout(&a, l) {
-            socket = Some(s);
-            break;
-        }
-    }
-    let mut socket = socket.ok_or(Fallback::Unreachable)?;
+    let mut socket = connect(&addrs, deadline).ok_or(Fallback::Unreachable)?;
     let config = super::pin::pinned_config(&public.sha256).map_err(|_| Fallback::Refused)?;
     let name = rustls::pki_types::ServerName::try_from(public.host.clone()).map_err(|_| Fallback::Refused)?;
     let mut tls = rustls::ClientConnection::new(config, name).map_err(|_| Fallback::Refused)?;
@@ -109,6 +98,28 @@ fn resolve(host: &str, port: u16, within: Duration) -> Option<Vec<SocketAddr>> {
         Ok(Ok(v)) if !v.is_empty() => Some(v),
         _ => None,
     }
+}
+
+/// The most one address of several may take to open a connection before the next one is tried: a name usually has an
+/// IPv6 and an IPv4 address (the relay's has), and a route that swallows connections (broken IPv6) must not use up the
+/// whole check, as browsers try the next address after a moment too. The last address gets whatever time is left.
+const PER_ADDRESS: Duration = Duration::from_secs(1);
+
+/// A TCP connection to the first of `addrs` that answers before `deadline`; each address but the last gets its share
+/// of the time left, at most [`PER_ADDRESS`].
+pub(super) fn connect(addrs: &[SocketAddr], deadline: Instant) -> Option<TcpStream> {
+    for (i, a) in addrs.iter().enumerate() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let rest = (addrs.len() - i) as u32;
+        let within = if rest == 1 { left } else { (left / rest).min(PER_ADDRESS) };
+        if let Ok(s) = TcpStream::connect_timeout(a, within) {
+            return Some(s);
+        }
+    }
+    None
 }
 
 fn timeouts(s: &TcpStream, left: Duration) -> Result<(), Fallback> {

@@ -229,6 +229,31 @@ fn no_answer_in_time_is_unreachable() {
     assert_eq!(public::check(&nowhere, Duration::from_secs(3)), Err(public::Fallback::Unreachable));
 }
 
+/// (review) A name with two addresses where the first swallows connections without a word (a broken IPv6 route, with
+/// the relay's AAAA record first in the answer): the next address still gets its turn within the check's time, as a
+/// browser's would, instead of the first one taking all of it and the panel always opening on this computer.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_address_that_swallows_connections_leaves_time_for_the_next_one() {
+    use std::os::fd::AsRawFd;
+    // a listener whose queue is full drops further connection attempts without an answer (Linux)
+    let hole = TcpListener::bind("127.0.0.1:0").unwrap();
+    assert_eq!(unsafe { libc::listen(hole.as_raw_fd(), 0) }, 0);
+    let hole_addr = hole.local_addr().unwrap();
+    let _queued: Vec<_> = (0..2).filter_map(|_| TcpStream::connect_timeout(&hole_addr, Duration::from_millis(300)).ok()).collect();
+    assert!(TcpStream::connect_timeout(&hole_addr, Duration::from_millis(300)).is_err(), "the stand-in for a dead route answers nothing");
+    let good = TcpListener::bind("127.0.0.1:0").unwrap();
+    let good_addr = good.local_addr().unwrap();
+    let t = Instant::now();
+    let s = public::connect(&[hole_addr, good_addr], Instant::now() + Duration::from_secs(4));
+    assert_eq!(s.and_then(|s| s.peer_addr().ok()), Some(good_addr), "the second address, after {:?}", t.elapsed());
+    assert!(t.elapsed() < Duration::from_millis(1600), "{:?}", t.elapsed());
+    // a single address keeps the whole time
+    let t = Instant::now();
+    assert!(public::connect(&[hole_addr], Instant::now() + Duration::from_millis(1500)).is_none());
+    assert!(t.elapsed() >= Duration::from_millis(1400), "{:?}", t.elapsed());
+}
+
 // ------------------------------------------------------------------------------------------------- opening
 
 /// The panel on this machine (TLS handshake only, the gateway's pin check) and its file with `public`.
