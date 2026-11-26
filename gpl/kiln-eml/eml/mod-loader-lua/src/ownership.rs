@@ -2441,6 +2441,10 @@ pub(crate) mod tests {
         current["exports"] = serde_json::json!({"touched": [["path", "auto-loot-plus-report.txt", null]]});
         put(&current);
         assert_eq!(check(), Output, "scheme 2");
+        // kiln-eml (stale game data): the fork's scheme 3 (a pass whose clean copy Steam's manifest proved) proves the same
+        current["scheme"] = "kiln-sf-prepared 3".into();
+        put(&current);
+        assert_eq!(check(), Output, "scheme 3");
         // the build is compared only where both sides name one
         put(&record(serde_json::Value::Null));
         assert_eq!(check(), Output);

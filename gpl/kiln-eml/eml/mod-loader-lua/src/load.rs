@@ -992,6 +992,54 @@ mod kiln_tests {
         assert!(!dir.join("g.kfc.bak").exists() && !dir.join("g.kfc_resources.bak").exists());
         std::fs::remove_dir_all(library).unwrap();
     }
+    // kiln-eml (stale game data, HadToRegister 2026-11-26): a working baseline that an earlier start (with no Steam proof
+    // yet) took of game files another loader had already patched (Auto Loot Plus's auto-smash program), sealed, and
+    // built over at every start since. Its seal and its containers are right and the live header is built over it:
+    // only Steam's manifest tells that it is not the game's own. Nothing is built from it and it is not restored; the
+    // start says in plain words what the player does, and nothing changes. After Steam's file check the next start
+    // takes Steam's files as the new clean copy.
+    #[test]
+    fn a_backup_that_carries_a_mods_changes_is_neither_built_from_nor_restored() {
+        use kfc::guid::ContentHash;
+        let (library, dir) = library_fixture("stale-copy");
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        let steams = steam_lists(&library, &dir, "26430625");
+        // another loader writes a mod into the game files
+        let types = Rc::new(TypeRegistry::default());
+        let base = Rc::new(KFCFile::from_path(&kfc, false).unwrap());
+        let mut other: crate::transaction::Writer =
+            KFCWriter::new_incremental_with_options(&dir, "g", base, types.clone(), KFCWriteOptions::default()).unwrap();
+        other.write_content(&ContentHash::from_data(b"the auto-smash program"), b"the auto-smash program").unwrap();
+        other.finalize().unwrap();
+        // an earlier start's first backup of them, sealed
+        std::fs::copy(&kfc, &bak).unwrap();
+        std::fs::copy(dir.join("g.kfc_resources"), dir.join("g.kfc_resources.bak")).unwrap();
+        write_backup_seal(&kfc, &bak).unwrap();
+        // and its run over that backup
+        let base = Rc::new(KFCFile::from_path(&bak, false).unwrap());
+        let mut patch = create_writer(&dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"today's mods"), b"today's mods").unwrap();
+        patch.finalize().unwrap();
+        assert!(crate::ownership::owns_output(dir.as_std_path(), "g").unwrap());
+        let names = ["g.kfc", "g.kfc_resources", "g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"];
+        let before: Vec<Vec<u8>> = names.iter().map(|n| std::fs::read(dir.join(n)).unwrap()).collect();
+
+        let error = format!("{:#}", create_backup(&kfc).unwrap_err());
+        assert!(error.contains("Your game files still contain changes from a mod that isn't installed. Verify the game \
+            files in Steam (Properties > Installed Files > Verify integrity), then start again."), "{error}");
+        assert!(error.contains("g.kfc.bak has other bytes than Steam's manifest lists"), "{error}");
+        assert!(restore_backup(&kfc).is_err(), "nor is it restored");
+        for (name, bytes) in names.iter().zip(&before) {
+            assert_eq!(&std::fs::read(dir.join(name)).unwrap(), bytes, "{name} stays as it was");
+        }
+        // Steam's file check: the next start takes Steam's files as the new clean copy
+        std::fs::write(&kfc, &steams.0).unwrap();
+        std::fs::write(dir.join("g.kfc_resources"), &steams.1).unwrap();
+        let bak = create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), steams.0);
+        assert_eq!(std::fs::read(dir.join("g.kfc_resources.bak")).unwrap(), steams.1);
+        std::fs::remove_dir_all(library).unwrap();
+    }
     #[test]
     fn interrupted_backup_seal_publication_can_be_recovered_before_patching() {
         let dir = fixture();
