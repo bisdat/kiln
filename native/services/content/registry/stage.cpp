@@ -974,7 +974,9 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // no mod has registry content: nothing is read (an empty registry.json says so), except once per game build, when the
     // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
-    const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
+    // one lookup, nothing read (proof-2 N7: the table is about 1.9 MB); an env without data_exists reads it as before
+    const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() &&
+                             (d.env.data_exists ? !d.env.data_exists(ids_rel) : !d.env.read_data(ids_rel));
     // the highest max stack a world ever started with, per item (plans/index.json "stacks", never lowered: a save that world
     // wrote can hold such stacks), against this start's value, else the base's: lower, and a save can hold bigger stacks than
     // this start allows (saves.h stackCut)

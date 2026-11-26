@@ -57,6 +57,8 @@ struct Env {
     std::function<bool(const std::string& text)> write_report;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // The file is there (one file-system lookup, nothing read; proof-2 N7, as proof.h's exists); unset: read_data decides.
+    std::function<bool(const std::string& rel)> data_exists;
     // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
     // Closes the interval between the core marking an owner dead and delivering its retiring notification.
     std::function<bool(uint64_t owner)> owner_alive;

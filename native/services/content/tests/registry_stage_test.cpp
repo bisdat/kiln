@@ -458,10 +458,26 @@ void id_table_without_content(const std::string& dir) {
     TreeView view2 = world();
     Files files2;
     files2.data = files.data;
-    stage::Runner r2(env_of(&view2, &files2, dir, &no_sections));
+    // proof-2 N7: the id table (1.9 MB on a real build) is only looked up, never read whole, to learn that it exists
+    stage::Env e2 = env_of(&view2, &files2, dir, &no_sections);
+    size_t id_reads = 0, id_lookups = 0;
+    auto read = e2.read_data;
+    e2.read_data = [read, rel, &id_reads](const std::string& x) { if (x == rel) ++id_reads; return read(x); };
+    e2.data_exists = [&files2, rel, &id_lookups](const std::string& x) { if (x == rel) ++id_lookups; return files2.data.count(x) != 0; };
+    stage::Runner r2(std::move(e2));
     r2.run({});
     r2.finish({});
     check(view2.served.empty(), "the next start with no registry content reads nothing");
+    check(id_lookups == 1 && id_reads == 0, "the id table's existence is one lookup, nothing read: " + std::to_string(id_lookups) + " lookups, " +
+                                                std::to_string(id_reads) + " reads");
+    // without data_exists (an older host env) the read stays the fallback
+    TreeView view3 = world();
+    Files files3;
+    files3.data = files.data;
+    stage::Runner r3(env_of(&view3, &files3, dir, &no_sections));
+    r3.run({});
+    r3.finish({});
+    check(view3.served.empty(), "without data_exists the read decides, as before");
 }
 
 void bridge_write() {
