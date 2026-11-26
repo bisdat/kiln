@@ -1310,7 +1310,8 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     let n = finding(&r, "eml-under-shroudforge");
     assert!(n.text.starts_with("kiln-eml handed your 1 EML pack to ShroudForge at the last start: "), "{}", n.text);
     assert!(!r.summary.contains("EML's own loader runs"), "{}", r.summary);
-    assert!(r.findings.iter().filter(|x| x.id == "own-loader").all(|x| x.text.starts_with("kiln-shroudforge ")), "{:#?}", r.findings);
+    let own: Vec<&str> = r.findings.iter().filter(|x| x.id == "own-loader").map(|x| x.text.as_str()).collect();
+    assert!(!own.is_empty() && own.iter().all(|t| t.starts_with("kiln-shroudforge stood aside at the last start: ShroudForge's own loader")), "{own:#?}");
 }
 
 /// KR-YNQZ (31.11, 2026-11-26): Kiln hosted ShroudForge and kiln-eml handed all 8 EML packs to it, but the report was
