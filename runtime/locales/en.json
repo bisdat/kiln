@@ -464,7 +464,7 @@
       "finite": "{setting} takes a finite number",
       "null_first": "{setting}: \"{choice}\" cannot come first in this list (it has no value, and ShroudForge would refuse the mod)",
       "no_value_choice": "a choice without a value",
-      "shortcut": "{setting}: use an SDL shortcut such as Ctrl+SDL:66 or Mouse:4 (empty disables it; modifier order Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: Kiln cannot read \"{text}\" as a key. Click the shortcut box and press the key you want, or type one such as Ctrl+G, F5 or Mouse4. ShroudForge's own form (Ctrl+SDL:10, Mouse:4) works too; empty switches the shortcut off.",
       "length": "{setting} must be {min} to {max} characters long",
       "length_min": "{setting} must be {min} to any number of characters long",
       "range": "{setting} must be between {min} and {max}",

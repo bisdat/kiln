@@ -464,7 +464,7 @@
       "finite": "{setting} vuole un numero finito",
       "null_first": "{setting}: \"{choice}\" non può essere il primo di questo elenco (non ha valore, e ShroudForge rifiuterebbe la mod)",
       "no_value_choice": "una scelta senza valore",
-      "shortcut": "{setting}: usa una scorciatoia SDL come Ctrl+SDL:66 o Mouse:4 (vuoto la disattiva; ordine dei modificatori Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: Kiln non riesce a leggere \"{text}\" come un tasto. Fai clic sulla casella della scorciatoia e premi il tasto che vuoi, oppure scrivine uno come Ctrl+G, F5 o Mouse4. Funziona anche la forma di ShroudForge (Ctrl+SDL:10, Mouse:4); vuoto disattiva la scorciatoia.",
       "length": "{setting} deve essere lungo da {min} a {max} caratteri",
       "length_min": "{setting} deve essere lungo almeno {min} caratteri",
       "range": "{setting} deve essere tra {min} e {max}",

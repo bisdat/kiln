@@ -506,7 +506,7 @@ internal static class ShroudForgeUi
             {
                 Id = d.Key.Length <= 200 ? d.Key : "#" + made++,
                 Text = text,
-                KeyLabel = d.Control == "keybind" ? Clip(SdlKeys.Label(value is JsonValue kv && kv.GetValueKind() == JsonValueKind.String ? text : "") ?? text, 200) : "",
+                KeyLabel = d.Control == "keybind" ? Clip(value is JsonValue kv && kv.GetValueKind() == JsonValueKind.String ? SfShortcuts.Label(text) : text, 200) : "",
                 OptionIds = labels.Select((l, oi) => l + "###o" + oi).ToArray(),
                 Chosen = d.Options.Select(o => chosen?.Any(x => JsonNode.DeepEquals(x, o.Value)) == true).ToArray(),
                 ComboItems = d.Options.Count > 0 ? UiDraw.ComboItems(labels) : [],
@@ -821,7 +821,9 @@ internal static class ShroudForgeUi
                 using (ui.FontSize(14 * k))
                 using (ui.PushColor(UiColorSlot.Text, GameColors.Muted))
                     ui.TextWrapped(KilnText.T("shroudforge.shortcut_help"));
-                TextField(ui, folder, d, item.Text, width, text => JsonValue.Create(text));
+                // what the player types the way Kiln names keys ("Ctrl+G", "F5", "Mouse4") is saved in ShroudForge's form; text
+                // that is no shortcut goes on as typed, and the check says why it is refused
+                TextField(ui, folder, d, item.Text, width, text => JsonValue.Create(SfShortcuts.Normalize(text) ?? text));
                 return;
             }
             case ("boolean", _) when d.Options.Count == 0:
@@ -1089,9 +1091,6 @@ internal static class SdlKeys
         }
         return null;
     }
-
-    /// <summary>A ShroudForge shortcut for people: the keyboard part as Kiln names it, else the raw text.</summary>
-    public static string? Label(string binding) => ToKilnKey(binding) ?? (binding.Length > 0 ? binding : null);
 }
 
 /// <summary>ShroudForge's menu shortcut (F9 by default) and <c>shroudforge.ui.toggle_modloader()</c> when no ShroudForge

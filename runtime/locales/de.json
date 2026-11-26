@@ -464,7 +464,7 @@
       "finite": "{setting} braucht eine endliche Zahl",
       "null_first": "{setting}: \"{choice}\" darf nicht an erster Stelle dieser Liste stehen (sie hat keinen Wert, und ShroudForge würde die Mod ablehnen)",
       "no_value_choice": "eine Auswahl ohne Wert",
-      "shortcut": "{setting}: Nutze ein SDL-Tastenkürzel wie Ctrl+SDL:66 oder Mouse:4 (leer schaltet es aus; Reihenfolge der Zusatztasten Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: Kiln kann \"{text}\" nicht als Taste lesen. Klicke auf das Kürzelfeld und drücke die gewünschte Taste, oder tippe eine wie Ctrl+G, F5 oder Mouse4. ShroudForges eigene Schreibweise (Ctrl+SDL:10, Mouse:4) geht auch; leer schaltet das Kürzel aus.",
       "length": "{setting} muss {min} bis {max} Zeichen lang sein",
       "length_min": "{setting} muss mindestens {min} Zeichen lang sein",
       "range": "{setting} muss zwischen {min} und {max} liegen",

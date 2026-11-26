@@ -459,7 +459,7 @@
       "finite": "{setting} 必须为有限数值",
       "null_first": "{setting}：“{choice}”没有值，放在列表首位会导致 ShroudForge 拒绝加载模组",
       "no_value_choice": "无值的选项",
-      "shortcut": "{setting}：请输入 SDL 快捷键，例如 Ctrl+SDL:66 或 Mouse:4。留空即可禁用，修饰键顺序为 Ctrl、Alt、Shift、Meta",
+      "shortcut": "{setting}：Kiln 无法把“{text}”识别为按键。请点击快捷键框并按下想要的键，或输入 Ctrl+G、F5、Mouse4 这样的按键。ShroudForge 自己的写法（Ctrl+SDL:10、Mouse:4）也可以；留空即关闭快捷键。",
       "length": "{setting} 的长度应为 {min} 至 {max} 个字符",
       "length_min": "{setting} 至少需要 {min} 个字符，不限上限",
       "range": "{setting} 必须介于 {min} 和 {max} 之间",

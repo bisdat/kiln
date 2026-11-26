@@ -459,7 +459,7 @@
       "finite": "{setting}은(는) 유한한 숫자를 받습니다",
       "null_first": "{setting}: \"{choice}\"은(는) 이 목록의 맨 앞에 올 수 없습니다 (값이 없어 ShroudForge가 모드를 거부함)",
       "no_value_choice": "값이 없는 선택지",
-      "shortcut": "{setting}: Ctrl+SDL:66이나 Mouse:4 같은 SDL 단축키를 쓰세요 (비우면 꺼짐, 수정 키 순서 Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: \"{text}\"을(를) 키로 읽을 수 없습니다. 단축키 칸을 클릭하고 원하는 키를 누르거나 Ctrl+G, F5, Mouse4처럼 입력하세요. ShroudForge 고유 형식(Ctrl+SDL:10, Mouse:4)도 됩니다. 비우면 단축키가 꺼집니다.",
       "length": "{setting}은(는) {min}~{max}자여야 합니다",
       "length_min": "{setting}은(는) {min}자 이상이어야 합니다",
       "range": "{setting}은(는) {min}~{max} 사이여야 합니다",

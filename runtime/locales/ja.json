@@ -459,7 +459,7 @@
       "finite": "{setting} には有限の数値を指定します",
       "null_first": "{setting}: \"{choice}\" はこのリストの先頭にできません（値がなく、ShroudForge がモッドを拒否します）",
       "no_value_choice": "値のない選択肢",
-      "shortcut": "{setting}: Ctrl+SDL:66 や Mouse:4 のような SDL ショートカットを使ってください（空欄で無効、修飾キーの順番は Ctrl、Alt、Shift、Meta）",
+      "shortcut": "{setting}: 「{text}」をキーとして読み取れません。ショートカット欄をクリックして使いたいキーを押すか、Ctrl+G、F5、Mouse4 のように入力してください。ShroudForge 独自の書き方（Ctrl+SDL:10、Mouse:4）も使えます。空欄でショートカットは無効になります。",
       "length": "{setting} は {min}～{max} 文字にしてください",
       "length_min": "{setting} は {min} 文字以上にしてください",
       "range": "{setting} は {min}～{max} の範囲にしてください",

@@ -464,7 +464,7 @@
       "finite": "{setting} aceita um número finito",
       "null_first": "{setting}: \"{choice}\" não pode vir primeiro nesta lista (não tem valor, e o ShroudForge recusaria o mod)",
       "no_value_choice": "uma escolha sem valor",
-      "shortcut": "{setting}: use um atalho SDL como Ctrl+SDL:66 ou Mouse:4 (vazio desativa; ordem dos modificadores Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: o Kiln não consegue ler \"{text}\" como uma tecla. Clique na caixa do atalho e pressione a tecla que quiser, ou digite uma como Ctrl+G, F5 ou Mouse4. A forma do próprio ShroudForge (Ctrl+SDL:10, Mouse:4) também funciona; vazio desativa o atalho.",
       "length": "{setting} precisa ter de {min} a {max} caracteres",
       "length_min": "{setting} precisa ter {min} caracteres ou mais",
       "range": "{setting} precisa estar entre {min} e {max}",

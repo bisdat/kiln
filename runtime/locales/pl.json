@@ -474,7 +474,7 @@
       "finite": "{setting} przyjmuje skończoną liczbę",
       "null_first": "{setting}: \"{choice}\" nie może być pierwszy na tej liście (nie ma wartości, a ShroudForge odrzuciłby mod)",
       "no_value_choice": "wybór bez wartości",
-      "shortcut": "{setting}: użyj skrótu SDL, np. Ctrl+SDL:66 lub Mouse:4 (puste wyłącza; kolejność modyfikatorów Ctrl, Alt, Shift, Meta)",
+      "shortcut": "{setting}: Kiln nie rozpoznaje \"{text}\" jako klawisza. Kliknij pole skrótu i naciśnij wybrany klawisz albo wpisz np. Ctrl+G, F5 lub Mouse4. Zapis ShroudForge (Ctrl+SDL:10, Mouse:4) też działa; puste wyłącza skrót.",
       "length": "{setting} musi mieć od {min} do {max} znaków",
       "length_min": "{setting} musi mieć co najmniej {min} znaków",
       "range": "{setting} musi być między {min} a {max}",
