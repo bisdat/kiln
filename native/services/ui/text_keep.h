@@ -4,10 +4,12 @@
 //
 // A module in the game's process that answers a key with a key of its own (SendInput, keybd_event) typed that key into
 // Kiln's field too: ShroudLink's client add-on taps B (the game's backpack key, to open the player menu) when its MODS
-// key goes down, and with the MODS key on T every "t" typed in the Kiln menu's search came out "tb" (HadToRegister,
-// 0.2.0-dev.31.13). The add-on's window procedure sits above Kiln's, so it sees the T before Kiln can keep it.
+// key goes down (in its source; players know it as the key that opens its Assistants panel), and with that key on T every
+// "t" typed in the Kiln menu's search came out "tb" (HadToRegister, 0.2.0-dev.31.13). The add-on's window procedure sits
+// above Kiln's, so it sees the T before Kiln can keep it.
 //  - Sent: Kiln's hooks of SendInput and keybd_event write down each key press a module of the game's process sends
-//    while a Kiln text field has the keyboard (any thread). Releases are not written down: a release types nothing.
+//    while a Kiln text field has the keyboard (any thread; sent_key). Releases are not written down: a release types
+//    nothing. Nor are characters (KEYEVENTF_UNICODE): those are text, and they type.
 //  - Field (the window's thread): the next key message of that key (WM_KEYDOWN, WM_SYSKEYDOWN) takes it, whether or
 //    not a raw record (WM_INPUT) came for it: what reaches Kiln's field is the key messages and their characters, and
 //    one key's key messages come in the order its presses were made. A raw record may come ahead of the key messages
