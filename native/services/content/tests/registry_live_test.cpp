@@ -1144,6 +1144,54 @@ void gamedata_code_writer_in_kiln_words() {
     check(row.dump().find("Sword_T2") == std::string::npos && row.dump().find("impactValues") == std::string::npos,
           "no game item or member name in the row: " + row.dump());
 }
+// Review (registry-followups 3): the code-over-registry line said the code writer "sets" the value the game holds now. After a
+// later write outside Kiln (the late look's best-effort row) that is the other writer's value, not the code's: the line named
+// BigStacks as setting 777, and a code layer that kept the registry's own value got the line too. It names the value the
+// code layer gives; the write outside Kiln has its own best-effort line.
+void code_over_registry_line_names_the_code_value() {
+    world();
+    g_registry_now_ms = [] { return g_now; };
+    g_files = {{"m/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 200}}]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    const registry::FieldRef logs{"items", "game:material_t1_wood_logs", "maxStack"};
+    set_owner_label(45, "mod bigstacks");
+    auto code = [](uint32_t v) {
+        uint8_t b[4];
+        std::memcpy(b, &v, 4);
+        store_put(45, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, b, "bigstacks x4 max 9999: items *");
+        store_flush(nullptr);
+    };
+    auto code_line = [&]() -> const registry::Line* {
+        for (const registry::Line& l : g_last_report.lines)
+            if (l.field == logs && l.loser == "m" && l.certainty == registry::Certainty::Certain) return &l;
+        return nullptr;
+    };
+    code(40);
+    apply_registry_files(files);
+    mem<uint32_t>(WOOD_AT, 777);  // a DLL writes the game's memory after it
+    g_now += 11000;
+    registry_live_publish();
+    auto row = json_field(logs);
+    check(row["result"] == 777 && row["writers"].back()["kind"] == "drift", "the late look's best-effort row: " + row.dump());
+    const registry::Line* line = code_line();
+    check(line && line->text.find("sets 40 over m's 2000") != std::string::npos && line->text.find("777") == std::string::npos,
+          "the line names what the code layer sets: " + (line ? line->text : std::string("none")));
+    // code that keeps the registry's value, then a write outside Kiln: the code replaced nothing, no code line
+    code(2000);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 2000 && !code_line(), "code that keeps the registry's value: no line");
+    mem<uint32_t>(WOOD_AT, 777);
+    g_now += 11000;
+    registry_live_publish();
+    row = json_field(logs);
+    check(row["result"] == 777, "the write outside Kiln is in the report: " + row.dump());
+    check(!code_line(), "still no code line: " + (code_line() ? code_line()->text : std::string()));
+    g_registry_now_ms = &steady_ms;
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1415,6 +1463,7 @@ int main() {
         {"code_over_a_registry_value_is_reported", code_over_a_registry_value_is_reported},
         {"later_writes_look_a_batch_a_tick", later_writes_look_a_batch_a_tick},
         {"gamedata_code_writer_in_kiln_words", gamedata_code_writer_in_kiln_words},
+        {"code_over_registry_line_names_the_code_value", code_over_registry_line_names_the_code_value},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

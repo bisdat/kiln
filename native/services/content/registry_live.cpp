@@ -1232,10 +1232,12 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
     // kiln.content computes a data-pack op it was given (mul, add, raiseOnly, ...) on the game's original value, never on what
     // the registry made of it (services/content.md). That is how BigStacks' x4 raiseOnly gave wood logs 1000 over a registry
     // pack's 2000; it stays so (what older mod sets get must not change). The report says it: one certain line.
-    if (code_top && reg_value && !(*result == *reg_value)) {
+    // Review: the value the code layer gives (its row's), never the game's value now: a write outside Kiln after it (the late
+    // look's best-effort row below) is not the code's, and code that kept the registry's value replaced nothing.
+    if (code_top && reg_value && !(code_top->after == *reg_value)) {
         registry::Line line;
         line.field = ref, line.winner = code_top->who, line.loser = reg_mod, line.kind = registry::LineKind::Overridden;
-        line.text = ref.text() + ": " + code_top->who + " (a Content change made by code) sets " + registry::report_value_text(*result) +
+        line.text = ref.text() + ": " + code_top->who + " (a Content change made by code) sets " + registry::report_value_text(code_top->after) +
                     " over " + reg_mod + "'s " + registry::report_value_text(*reg_value) +
                     " (code wins over registry edits; a relative change made through Content is computed on " +
                     (added ? std::string("the entry's own value as its mod added it, ") : std::string("the game's value, ")) +
