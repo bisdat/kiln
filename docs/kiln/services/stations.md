@@ -1094,6 +1094,11 @@ native slot for them.
 - **0.2.0-dev.31.16 (GitHub #132):** a production station row's per-ingredient "+1" / "+n" take from the player's
   fill-opted links when the bag and the Magic chests fall short (Kiln's item fill, `stations.fill_items`), and a Kiln
   client's rows count those links. Thanks Fuzen777.
+- **0.2.0-dev.31.16 (GitHub #148):** `CraftSourceOptions.Building` links are added where the game adds the base's Magic
+  chests, so the hammer's list, the cursor and every tab of the material catalogue count a material only the links hold;
+  a placement's transaction is checked by its InventorySetup and Inventory accessors, so placements that need the links
+  pay from them (also Building Tools 0.34.0's, found by the blueprint program's own frame); a building hook's fault shows
+  as `crafting.build_sources` or `crafting.build_ui` faulted. Thanks Fuzen777.
 - **0.2.0-dev.31.13:** `ClientStations`, a read-only view of the game client's own station cache for a joined client:
   state, selected recipe, crafts loaded, water, the game HUD's remaining time and progress, finished outputs (mod API
   0.2.22, capability `stations.client_view`, native `kiln.stations.client`). Thanks XHL.

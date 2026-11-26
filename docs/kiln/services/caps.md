@@ -621,3 +621,15 @@ Player storage ([service contract](player-storage.md), [guide](../modding/player
 | `skills.client_view` | sigdb feature (`client.d/skills-client-view.json`), client only; lowered when `kiln.skills.client` is not loaded, on a layout mismatch or a fault | kiln.skills (kiln-skills.dll) | not yet observed in a running client | `ClientSkills` (Kiln.Skills) and `kiln.skills.client`: the local player's skill tree and points as the game client's skill screen has them ([skills.md](skills.md#on-a-joined-client-the-local-players-tree)). Off as `stations.client_view`; every member but `Available` throws `KilnUnavailableException` naming it |
 
 Owned input (`KeyListenFlags.Own` / `Pointer`, `PadInput`, `kiln.ui.input`, also 0.2.0-dev.31.13) has no row of its own, as `KeyInput` has none: a listener that cannot own says so in `KeyListener.Ok` / `Reason` (a Kiln without `kiln.ui.input`, a dedicated server), and `PadInput.Available` answers for the controllers' view ([ui.md](../ui.md)).
+
+## Rows added in 0.2.0-dev.31.16 / mod API 0.2.23
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `npcspeech.bubble` | sigdb feature (`client.d/npcspeech.json`), client only | core (sigdb); Kiln.Blocks reports it `wrong-side` on a dedicated server and `service-missing` on a client without kiln.npcspeech | not yet observed in a running client | this process shows Kiln.Npcs' lines in the game's NPC speech bubble (`Npcs.Available`, [npc-speech.md](npc-speech.md#capabilities-and-when-something-is-off)); a server without it still sends its decisions to its Kiln clients, so the calls are never put under it |
+| `npcspeech.voice` | sigdb feature (`client.d/npcspeech.json`), client only | core (sigdb); Kiln.Blocks lowers it with `npcspeech.bubble` where kiln.npcspeech is not here | not yet observed in a running client | the dialogue record's layout checks out: an NPC's greeting voice-overs are muted while Kiln speaks for it; off: the texts change, the voice-overs stay the game's |
+
+The station screen's per-ingredient fill of the same release is `stations.fill_items` (with the stations rows above).
+Window docking (`UiWindowOptions.AcceptDock`, `Ui.FindWindow`, kiln.ui's `window_state`, GitHub issue 149) has no row of
+its own: next to a kiln-ui.dll without `window_state` the window the others dock to always leads, so dragging a docked
+window does not move its target ([ui.md](../ui.md#docking-windows-since-020-dev3116-mod-api-0223)).

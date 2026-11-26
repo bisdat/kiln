@@ -17,7 +17,7 @@ internal sealed class NpcSpeechFakeState
 }
 
 /// <summary>The kit's fake of kiln.npcspeech (native/core/abi/services/kiln_npcspeech.h): set, say, text and clear_all
-/// recorded per NPC, so a test reads what a Kiln client's bubble would show. Since 0.2.0-dev.31 (npc-speech).</summary>
+/// recorded per NPC, so a test reads what a Kiln client's bubble would show. Since 0.2.0-dev.31.16 (npc-speech).</summary>
 internal sealed unsafe class NpcSpeechFake : IKitFake
 {
     private static N.Table* _table;
@@ -45,7 +45,7 @@ internal sealed unsafe class NpcSpeechFake : IKitFake
     public void BeforeStep(KilnHarness harness, ulong step) { }
     public void End(KilnHarness harness) { }
 
-    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new("NPC speech (since 0.2.0-dev.31)", CoverageKind.RecordingFake,
+    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new("NPC speech (since 0.2.0-dev.31.16)", CoverageKind.RecordingFake,
         [Service, N.BubbleCapability, N.VoiceCapability],
         "Kiln.Npcs on the kit's kiln.npcspeech: Npcs.Say, Npcs.Speech(...).Suppress / Replace / Clear with the owners' priorities, " +
         "and what a Kiln client's bubble of each NPC would be told (KilnHarness.NpcSpeech: ModeOf, LinesOf, Saying in a language). " +

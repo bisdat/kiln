@@ -48,6 +48,30 @@ const MAX_ERROR: usize = 300;
 /// The words ShroudForge's refusals of a game data copy end with (the fork's verify_working_baseline.rs `refusal`).
 const VERIFY_WORDS: &str = "Verify the game files in Steam";
 
+/// The words ShroudForge's refusal of a clean copy that is not the game's own begins with (stale game data, the fork's
+/// verify_working_baseline.rs `STALE_WORDS`; kiln-eml's load.rs says the same).
+const STALE_WORDS: &str = "still contain changes from a mod that isn't installed";
+
+/// The plain words for a clean copy of the game data that carries an uninstalled mod's changes, and what the player
+/// does (the fork's `stale_refusal` begins with them).
+fn stale_lead(server: bool) -> &'static str {
+    if server {
+        "Your server files still contain changes from a mod that isn't installed. Update the server files with SteamCMD's \
+            validate (app_update 2278520 validate), then start again"
+    } else {
+        "Your game files still contain changes from a mod that isn't installed. Verify the game files in Steam (Properties \
+            > Installed Files > Verify integrity), then start again"
+    }
+}
+
+/// The known leftover a refusal names ("it holds <what>, resource <id>"), without its id.
+fn leftover_named(words: &str) -> Option<String> {
+    let at = words.find("it holds ")? + "it holds ".len();
+    let rest = &words[at..];
+    let end = [", resource ", "; ", ". "].iter().filter_map(|mark| rest.find(mark)).min().unwrap_or(rest.len());
+    Some(rest[..end].to_string()).filter(|named| !named.is_empty())
+}
+
 /// What a player does when ShroudForge has no clean copy of the game data: Steam's file check, then a start.
 fn verify_cure(server: bool) -> String {
     if server {
@@ -115,6 +139,14 @@ pub struct SfStartupFailure {
     /// 0.2.0-dev.31.13). Then nothing was put back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kept_game_files: bool,
+    /// Stale game data (0.2.0-dev.31.16): ShroudForge refused its clean copy of the game data because it is not the
+    /// game's own (Steam's manifest lists other bytes, or it holds a known mod's program), and the game's files could not
+    /// be a new one ([`STALE_WORDS`]): the line leads with the plain words and what the player does.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale_game_data: bool,
+    /// The record is of the dedicated server's pass (its words name SteamCMD instead of Steam's file check).
+    #[serde(skip)]
+    server: bool,
     /// ShroudForge's words as the record has them, whole: a report redacts these, then puts them on one line and cuts
     /// them ([`SfStartupFailure::redacted`]).
     #[serde(skip)]
@@ -426,8 +458,11 @@ pub fn failure(game_dir: &Path, wine: bool) -> Option<SfStartupFailure> {
     // `refusal`), after words that the cut to MAX_ERROR characters can take away: the way out is said here in full.
     let refused = [Some(&raw_error), raw_retry_error.as_ref(), raw_recovery_error.as_ref()].into_iter().flatten()
         .any(|e| e.contains(VERIFY_WORDS));
-    let cure = cure.or_else(|| refused.then(|| verify_cure(server)));
-    Some(SfStartupFailure { error, at: completed.and_then(|c| i64::try_from(c).ok()).map(crate::util::rfc3339), own_loader,
+    let stale = [Some(&raw_error), raw_retry_error.as_ref(), raw_recovery_error.as_ref()].into_iter().flatten()
+        .any(|e| e.contains(STALE_WORDS));
+    // a stale clean copy's line leads with the way out (text): it is not said again at the end
+    let cure = if stale { cure } else { cure.or_else(|| refused.then(|| verify_cure(server))) };
+    Some(SfStartupFailure { stale_game_data: stale, server, error, at: completed.and_then(|c| i64::try_from(c).ok()).map(crate::util::rfc3339), own_loader,
         version: ran.version, build: ran.build, mods, cure, skipped: skipped_mods(&assets), retry_error: raw_retry_error.as_deref().map(one_line),
         recovery_error: raw_recovery_error.as_deref().map(one_line),
         kept_game_files: assets.get("recovery").and_then(|v| v.as_str()) == Some("kept"), raw_error, raw_retry_error, raw_recovery_error })
@@ -526,8 +561,18 @@ impl SfStartupFailure {
     /// What happened, which mods that leaves out and what to change, for a person. No full stop at the end (the
     /// launcher's notes and the report add their own).
     pub fn text(&self) -> String {
-        let mut t = format!("{} could not write its mods' changes into the game's data files at its last start{}: {}", self.who(),
-            self.at.as_deref().map(|a| format!(" ({a})")).unwrap_or_default(), self.error);
+        let at = self.at.as_deref().map(|a| format!(" ({a})")).unwrap_or_default();
+        let mut t = if self.stale_game_data {
+            // the plain words first: ShroudForge's own are long and cut
+            let words = [Some(&self.raw_error), self.raw_retry_error.as_ref(), self.raw_recovery_error.as_ref()].into_iter().flatten()
+                .find(|e| e.contains(STALE_WORDS)).cloned().unwrap_or_default();
+            let held = leftover_named(&words).map(|named| format!(": it holds {named}"))
+                .unwrap_or_else(|| ": a mod's changes are in it".into());
+            format!("{}. {} did not write its mods' changes into the game's data files at its last start{at}, because its clean copy \
+                of the game data is not the game's own{held}", stale_lead(self.server), self.who())
+        } else {
+            format!("{} could not write its mods' changes into the game's data files at its last start{at}: {}", self.who(), self.error)
+        };
         // Kiln's ShroudForge tried once more without the mod the pass failed in
         if let Some(second) = &self.retry_error {
             t.push_str(&format!(". It tried again without {}, and that failed too: {second}",
