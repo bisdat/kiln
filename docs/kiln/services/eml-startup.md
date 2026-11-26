@@ -295,8 +295,8 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
   leaves the publication standing with the warning `startup-journal-not-saved` and no cache record.
 - **Removal:** every publication (`prepare_from`, before it writes anything), the verified BASE (`restore_base`,
   `forget_receipt`) and EML's own no-mod restore (`before_restore`) remove it before the receipt or a live file changes;
-  one that cannot be removed refuses that publication or restore, with nothing changed. The EML dialect writes none (its
-  publication removes the previous one).
+  one that cannot be removed refuses that publication or restore, with nothing changed. A kiln-mode start in the EML
+  dialect writes none (its publication removes the previous one).
 - **Readers** use it only when `generation` is the start's live generation: a writer that ignores the receipt (hosted
   ShroudForge, another loader) can leave it naming a generation that is no longer live. Read it and close it at once (a
   reader that keeps it open on Windows can make the next kiln-mode start fail its removal).
@@ -306,6 +306,32 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
   lists (`changed` and `created`; only registries whose entries are whole resources: items, drops, balance, never the
   elements of a shared resource such as a recipe), as `archiveWriter` rows of certainty `named` in `kiln/state/registry.json`
   ([registries guide](../modding/registries/README.md#who-else-wrote-a-field)).
+
+### EML's own pass (format 2)
+
+An EML start outside kiln mode (`runner::run`, kiln-eml's plugin with EML mods) that publishes a generation writes the
+same file in format 2 (`schema/sfi/eml-journal/eml-journal-2.schema.json`, dialect `eml`, since 0.2.0-dev.31.15): per
+EML mod of the committed run, in the order their entrypoints ran, the resources it wrote with the **member paths** it
+wrote in each, at their places in the published resource (`maxStackSize`, `recipes[37].craftingDuration`, `input[]` for a
+list's members, `""` for the whole resource), the ones it created and the contents it created; no plan digests (`null`).
+
+- **Recording:** EML's runtime (mod-loader-lua `env/writes.rs`, kiln-eml README change 43) names the running entrypoint
+  and keeps a small log on each value wrapper of the writes made through it; once the mods ran it walks the values as
+  they will be written, once, into paths. A write into a value detached from its resource is not listed; a copy assigned
+  into a resource is the assigning mod's. Off outside a run; in a run one thread-local read and a scan of a few entries
+  per write.
+- **Binding:** `generation` and `receiptSha256` are the SHA-256 of the receipt the publication wrote. kiln-eml writes the
+  journal after that publication, under its install lock, only while the receipt is still that one
+  (`StartupJournal::write_for`), and reports the live generation in `kiln/state/eml.json` (`generation`, phase `done`): the
+  receipt it published, or the one an unchanged start found live (that start runs no Lua and keeps the journal byte for
+  byte). The same removals as format 1 apply (every publication and restore removes it first). A journal that cannot be
+  written leaves the publication standing with a warning in kiln.log; Kiln then names none of its mods.
+- **Retry:** a mod whose Lua fails is dropped and the run repeats; only the committed run is recorded (`attempt` `retry`).
+- **Bounds:** format 1's, plus at most 64 member paths per resource (more: `[""]`, the whole resource) of at most 256 bytes
+  (longer: the member that holds it). A mod whose id is not a ShroudForge identifier is listed in `unattributed`.
+- **Kiln's registry stage** reads it in an EML start against kiln-eml's `generation` (kiln.eml `state_json`, this process's
+  eml.json) and names each mod on the Kiln fields its paths hold or lie in, recipes and loot entries by their element. A
+  Kiln reader from before format 2 refuses it whole (it names nobody).
 
 ## Tests
 
