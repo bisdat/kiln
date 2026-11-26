@@ -1126,7 +1126,8 @@ reads the box, returns success for an unchanged box, writes through `kiln.build`
 `KILN_BUILD_F_IN_BASES | KILN_BUILD_F_GAME_SAVE` (no base guard and no Kiln save region, as ShroudForge: the game saves
 the cells inside base build zones, and in a chunk another Kiln edit keeps), and checks the read-back. A mismatch is written back once (outcome 2);
 a fault or a failed put-back is outcome 3. Every refusal or failure goes to kiln.log as "ShroudForge voxel write refused
-before changing the world: <box>: <why>" (or "failed"), the first ten each start and then every 100th. Differences from
+before changing the world: <box>: <why>" (or "failed"): the first ten of each reason, then every 100th; an uncertain
+outcome always. Differences from
 ShroudForge's writer: `kiln.build` commits only the 8x8x8 blocks whose cells change, and it asks the game for tiles that
 are not streamed in (the write is then refused and the mod may try again). Calls go through the game's hooks as the
 game's own do. ShroudForge's own loader, the player's installed ShroudForge, and an older bundle keep upstream's writer.
