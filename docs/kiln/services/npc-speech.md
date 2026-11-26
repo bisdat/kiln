@@ -85,6 +85,9 @@ out of range, an empty or too long text, no line or more than 32) throw `Argumen
 - **Texts**: a `string` is the same in every language; a `UiText` per language (exact key, the primary language, `en`,
   `*`, as Kiln's item texts; a text with neither `en` nor `*` shows its `UiText` fallback in the other languages). No
   game text entry, no resource patch: Kiln registers the text with kiln.content's loca hooks under a tag of its own.
+- **Distinct texts**: kiln.content keeps every text for the session, so a world holds up to 4096 distinct ones (Say
+  and Replace lines together, per client); past that a new text is not shown (the call answers `Ok` with a note) and
+  known ones still are. Keep numbers, names and timers that change often out of the texts.
 - **Sizes**: up to 200 characters per language, and all languages of one line (or one Say) together up to 2048 bytes
   of UTF-8, the size a Kiln client accepts (about three languages of 200 characters). Bigger throws
   `ArgumentException` at the call, not later on the clients.
@@ -135,7 +138,7 @@ Hooks go in with the first override or Say. Mods never call game functions.
 | `kiln.npcspeech` | the service is here (game client) | dedicated server, or an unknown client build: the calls still go out from a host; a joined client's own calls answer `Ok: false` |
 | `npcspeech.bubble` | this process shows Kiln's speech in its bubbles (`Npcs.Available`) | a dedicated server (wrong side: it sends, its clients show), or a client build without the bubble functions: kiln.log `npcspeech: npcspeech.bubble is off ...`, NPCs keep the game's lines on that client |
 | `npcspeech.voice` | the dialogue record's layout checks out | kiln.log `npcspeech: the dialogue record's layout did not check out ...`: texts change, voice-overs stay the game's |
-| `content.loca` | kiln.content's loca hooks | kiln.log `npcspeech: kiln.content's loca hooks ... are not here`: only Suppress works |
+| `content.loca` | kiln.content's loca hooks | kiln.log `npcspeech: kiln.content's loca hooks ... are not here`: only Suppress works; Replace and Say leave that client the game's lines (the call answers `Ok` with that note, a host still sends to its clients), and the next change of the NPC tries again |
 
 `kiln.log` lines on a client: `npcspeech: ready: bubble 0x..., draw 0x..., voice on; hooks go in with the first
 override or Say`, then `npcspeech: bubble hooks in (...)` at the first use.

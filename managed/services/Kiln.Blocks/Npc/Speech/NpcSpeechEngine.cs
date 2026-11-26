@@ -24,6 +24,8 @@ internal static class NpcSpeechEngine
     public const string ChannelVersion = "1";
     public const ushort MsgSpeech = 1, MsgSay = 2, MsgReset = 3;
     internal const int MaxLineBytes = SpeechText.MaxBytes;
+    /// <summary>Distinct texts a world registers with kiln.content (which keeps each for the process).</summary>
+    internal const int MaxTexts = 4096;
 
     internal static readonly SpeechBook Book = new();
     private static readonly object Gate = new();
@@ -137,40 +139,87 @@ internal static class NpcSpeechEngine
         }
     }
 
-    /// <summary>Tells kiln.npcspeech; null when it shows, else a note on why it does not here.</summary>
+    /// <summary>Tells kiln.npcspeech; null when it shows, else a note on why it does not here. Recorded as applied only
+    /// when it all went in, so the next change of that NPC tries again (kiln.content's hooks may come later).</summary>
     private static string? ApplyHere(uint npc, SpeechEffect eff, long now)
     {
         lock (Gate)
-        {
             if (Applied.TryGetValue(npc, out var was) && was.SameAs(eff)) return null;
-            if (eff.SameAs(SpeechEffect.None)) Applied.Remove(npc);
-            else Applied[npc] = eff;
-        }
         if (!SpeechNative.Loaded)  // a dedicated server has no bubbles: its clients show them, nothing to note
-            return IsHost ? null : "kiln.npcspeech is not here: this game shows no Kiln speech (an unknown game build?)";
-        var tags = new List<uint>();
-        string? note = null;
-        foreach (var line in eff.Lines)
         {
-            var json = SpeechText.Json(line);
-            var tag = SpeechText.Tag(json);
-            if (SpeechNative.Text(tag, json) != SpeechNative.Ok) note = "kiln.content's loca hooks are not here: Kiln's lines cannot show (Suppress still works)";
-            tags.Add(tag);
+            Remember(npc, eff);
+            return IsHost ? null : "kiln.npcspeech is not here: this game shows no Kiln speech (an unknown game build?)";
         }
-        var rc = eff.Mode == SpeechMode.Replace && tags.Count == 0 ? SpeechNative.InvalidArgument : SpeechNative.Set(npc, eff.Mode, tags.ToArray());
-        if (rc == SpeechNative.Unavailable) note = Capabilities.Why(SpeechNative.BubbleCapability);
+        string? note = null;
+        var mode = eff.Mode;
+        var tags = new List<uint>();
+        if (mode == SpeechMode.Replace)
+        {
+            // every line's text first: a tag nothing answers would show an empty bubble, so the game keeps its lines
+            foreach (var line in eff.Lines)
+            {
+                if (Register(line, ref note) is not { } tag)
+                {
+                    tags.Clear();
+                    break;
+                }
+                tags.Add(tag);
+            }
+            if (tags.Count == 0) mode = SpeechMode.Game;
+        }
+        var whole = mode == eff.Mode;
+        if (SpeechNative.Set(npc, mode, tags.ToArray()) == SpeechNative.Unavailable)
+        {
+            note = Capabilities.Why(SpeechNative.BubbleCapability);
+            whole = false;
+        }
         uint sayTag = 0, ms = 0;
         if (eff.Say is { } say && eff.SayUntilMs > now)
         {
-            var json = SpeechText.Json(say);
-            sayTag = SpeechText.Tag(json);
-            if (SpeechNative.Text(sayTag, json) != SpeechNative.Ok) note = "kiln.content's loca hooks are not here: Kiln's lines cannot show";
-            ms = (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds);
+            if (Register(say, ref note) is { } tag)
+            {
+                sayTag = tag;
+                ms = (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds);
+            }
+            else whole = false;
         }
-        var src = SpeechNative.Say(npc, sayTag, ms);
-        if (src == SpeechNative.Unavailable) note ??= Capabilities.Why(SpeechNative.BubbleCapability);
+        if (SpeechNative.Say(npc, sayTag, ms) == SpeechNative.Unavailable)
+        {
+            note ??= Capabilities.Why(SpeechNative.BubbleCapability);
+            whole = false;
+        }
+        if (whole) Remember(npc, eff);
+        else lock (Gate) Applied.Remove(npc);
         if (note is not null && Interlocked.Increment(ref _warned) <= 3) ModLog.Warn($"kiln.npcspeech: {note}");
         return note;
+    }
+
+    private static void Remember(uint npc, SpeechEffect eff)
+    {
+        lock (Gate)
+        {
+            if (eff.SameAs(SpeechEffect.None)) Applied.Remove(npc);
+            else Applied[npc] = eff;
+        }
+    }
+
+    /// <summary>The text's tag, once kiln.content answers it; null (and why, in <paramref name="note"/>) when not.</summary>
+    private static uint? Register(UiText text, ref string? note)
+    {
+        var json = SpeechText.Json(text);
+        var tag = SpeechText.Tag(json);
+        switch (SpeechNative.Text(tag, json))
+        {
+            case SpeechNative.Ok:
+                return tag;
+            case SpeechNative.TooManyTexts:
+                note = $"this world already has {MaxTexts} distinct NPC speech texts (kiln.content keeps each for the session): " +
+                       "a new one is not shown; keep numbers and names that change often out of the texts";
+                return null;
+            default:
+                note = "kiln.content's loca hooks are not here: Kiln's lines cannot show, the game keeps its own (Suppress still works)";
+                return null;
+        }
     }
 
     private static void Broadcast(uint npc, SpeechEffect eff, long now)
@@ -311,6 +360,9 @@ internal static class NpcSpeechEngine
             Sent.Clear();
         }
         SpeechNative.ClearAll();
+        // the next world registers its texts again (kiln.content keeps the same text as it is): its own bound, and a
+        // test kit's next harness, whose fake starts without texts, gets them
+        SpeechNative.ForgetTexts();
     }
 
     /// <summary>Tests: back to a fresh start.</summary>

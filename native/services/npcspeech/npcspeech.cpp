@@ -55,8 +55,8 @@ npcspeech::Layout g_lay;      // the record's lists (voice) and the two structs 
 bool g_bubble_ok = false;     // npcspeech.bubble: both hooks and their layout
 bool g_voice_ok = false;      // npcspeech.voice: the record's lists
 using SetTextsFn = void (*)(uint32_t, const char*, size_t);
-SetTextsFn g_set_texts = nullptr;
-bool g_texts_ok = false;
+// kiln.content's text setter; found once, never reset (any thread reads it)
+std::atomic<SetTextsFn> g_set_texts{nullptr};
 
 bool constant(const char* name, int64_t* out) { return g_api->constant(S(name), out) == KILN_OK; }
 
@@ -78,12 +78,13 @@ void resolve() {
     if (!g_voice_ok) g_lay.entry_size = 0;  // the core never touches a record without the whole layout
 }
 
-void resolve_texts() {
-    g_texts_ok = false;
-    g_set_texts = nullptr;
-    if (!g_api->feature(S("content.loca"))) return;
-    if (HMODULE m = GetModuleHandleW(L"kiln-content.dll")) g_set_texts = reinterpret_cast<SetTextsFn>(GetProcAddress(m, "kc_nc_set_texts"));
-    g_texts_ok = g_set_texts != nullptr;
+// True when kiln.content's loca hooks answer Kiln's tags; looks again while not (kiln.content may load after this service).
+bool texts_here() {
+    if (g_set_texts.load(std::memory_order_acquire)) return true;
+    if (!g_api->feature(S("content.loca"))) return false;
+    if (HMODULE m = GetModuleHandleW(L"kiln-content.dll"))
+        if (auto f = reinterpret_cast<SetTextsFn>(GetProcAddress(m, "kc_nc_set_texts"))) g_set_texts.store(f, std::memory_order_release);
+    return g_set_texts.load(std::memory_order_acquire) != nullptr;
 }
 
 // ------------------------------------------------------------------------------------------------ hooks ----------
@@ -154,10 +155,12 @@ KilnResult usable() {
     if (!g_bubble_ok || g_install_failed.load()) return KILN_ERR_UNAVAILABLE;
     return KILN_OK;
 }
+// A tag kiln.content's loca hooks do not answer shows an empty bubble: Replace and Say need them (Suppress does not).
 
 KilnResult KILN_CALL set(KilnEntity npc, uint32_t mode, const uint32_t* tags, uint32_t n) {
     if (KilnResult rc = usable(); rc != KILN_OK) return rc;
     if (!npcspeech::Core::valid_set(npc, mode, tags, n)) return KILN_ERR_INVALID_ARGUMENT;
+    if (mode == KILN_SPEECH_REPLACE && !texts_here()) return KILN_ERR_UNAVAILABLE;
     if (mode != KILN_SPEECH_GAME && !install()) return KILN_ERR_UNAVAILABLE;
     g_core.set(npc, mode, tags, n);
     return KILN_OK;
@@ -166,16 +169,15 @@ KilnResult KILN_CALL set(KilnEntity npc, uint32_t mode, const uint32_t* tags, ui
 KilnResult KILN_CALL say(KilnEntity npc, uint32_t tag, uint32_t ms) {
     if (KilnResult rc = usable(); rc != KILN_OK) return rc;
     if (!npc || ms > KILN_SPEECH_MAX_SAY_MS) return KILN_ERR_INVALID_ARGUMENT;
-    if (tag && ms && !install()) return KILN_ERR_UNAVAILABLE;
+    if (tag && ms && (!texts_here() || !install())) return KILN_ERR_UNAVAILABLE;
     g_core.say(npc, tag, ms, GetTickCount64());
     return KILN_OK;
 }
 
 KilnResult KILN_CALL text(uint32_t tag, const char* json, size_t len) {
     if (!tag || !json || !len || len > 64 * 1024) return KILN_ERR_INVALID_ARGUMENT;
-    if (!g_texts_ok) resolve_texts();  // kiln.content may load after this service
-    if (!g_texts_ok) return KILN_ERR_UNAVAILABLE;
-    g_set_texts(tag, json, len);
+    if (!texts_here()) return KILN_ERR_UNAVAILABLE;
+    g_set_texts.load(std::memory_order_acquire)(tag, json, len);
     g_core.count_text(tag);
     return KILN_OK;
 }
@@ -187,8 +189,7 @@ KilnResult KILN_CALL clear_all() {
 
 KilnResult KILN_CALL status(KilnNpcSpeechStatus* out) {
     if (!out || out->size < sizeof(KilnNpcSpeechStatus)) return KILN_ERR_INVALID_ARGUMENT;
-    if (!g_texts_ok) resolve_texts();
-    out->resolved = (g_bubble_at ? 1u : 0u) | (g_draw_at ? 2u : 0u) | (g_voice_ok ? 4u : 0u) | (g_texts_ok ? 8u : 0u);
+    out->resolved = (g_bubble_at ? 1u : 0u) | (g_draw_at ? 2u : 0u) | (g_voice_ok ? 4u : 0u) | (texts_here() ? 8u : 0u);
     if (!g_bubble_ok) out->resolved &= ~3u;
     out->installed = g_installed.load() ? 3u : 0u;
     const auto c = g_core.counts();
@@ -204,8 +205,7 @@ KilnResult KILN_CALL status(KilnNpcSpeechStatus* out) {
 const KilnNpcSpeechApi kTable = {{sizeof(KilnNpcSpeechApi), KILN_NPCSPEECH_VERSION}, &set, &say, &text, &clear_all, &status};
 
 void KILN_CALL on_ready(void*) {
-    resolve_texts();
-    if (!g_texts_ok) NS_W("kiln.content's loca hooks (content.loca) are not here: Kiln's lines cannot be shown, only Suppress works");
+    if (!texts_here()) NS_W("kiln.content's loca hooks (content.loca) are not here: Kiln's lines cannot be shown, only Suppress works");
 }
 
 void KILN_CALL on_unload(void*) {

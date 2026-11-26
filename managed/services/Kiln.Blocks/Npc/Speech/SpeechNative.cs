@@ -9,6 +9,8 @@ internal static unsafe class SpeechNative
     public const string Name = "kiln.npcspeech";
     public const uint Version = 1;
     public const int Ok = 0, InvalidArgument = 1, Unavailable = 3;
+    /// <summary><see cref="Text"/>: the world's bound of distinct texts is reached (NpcSpeechEngine.MaxTexts).</summary>
+    public const int TooManyTexts = -1;
     public const string BubbleCapability = "npcspeech.bubble";
     public const string VoiceCapability = "npcspeech.voice";
 
@@ -79,7 +81,7 @@ internal static unsafe class SpeechNative
         return t->GetStatus(&s) == Ok ? s : null;
     }
 
-    /// <summary>Registers the text of a tag once per process (kiln.content keeps it).</summary>
+    /// <summary>Registers the text of a tag once per world (kiln.content keeps it).</summary>
     private static readonly HashSet<uint> Registered = new();
 
     public static int Text(uint tag, string json)
@@ -89,6 +91,7 @@ internal static unsafe class SpeechNative
         lock (Registered)
         {
             if (Registered.Contains(tag)) return Ok;
+            if (Registered.Count >= NpcSpeechEngine.MaxTexts) return TooManyTexts;
             var bytes = System.Text.Encoding.UTF8.GetBytes(json);
             int rc;
             fixed (byte* p = bytes) rc = t->Text(tag, p, (nuint)bytes.Length);

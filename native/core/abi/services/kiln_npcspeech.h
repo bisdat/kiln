@@ -42,11 +42,11 @@ typedef struct KilnNpcSpeechApi {
     KilnServiceHeader header; /* { sizeof(KilnNpcSpeechApi), KILN_NPCSPEECH_VERSION } */
     /* The effective override of one NPC (the caller resolves owners and priorities). mode KILN_SPEECH_*; tags/n the lines
      * of Replace (1..KILN_SPEECH_MAX_LINES, nonzero), ignored otherwise. Any thread. KILN_ERR_UNAVAILABLE: the bubble
-     * hooks are not on this build (or not on a dedicated server); KILN_ERR_INVALID_ARGUMENT: a bad mode, entity 0, no or
-     * too many tags. */
+     * hooks are not on this build (or not on a dedicated server), or (Replace) kiln.content's loca hooks are not here,
+     * so no tag would show a text; KILN_ERR_INVALID_ARGUMENT: a bad mode, entity 0, no or too many tags. */
     KilnResult(KILN_CALL* set)(KilnEntity npc, uint32_t mode, const uint32_t* tags, uint32_t n);
     /* One tag in the NPC's bubble for ms (1..KILN_SPEECH_MAX_SAY_MS); tag 0 or ms 0 ends a running Say. A new Say replaces
-     * the old one. Any thread. Errors as set(). */
+     * the old one. Any thread. Errors as set() (KILN_ERR_UNAVAILABLE also without kiln.content's loca hooks). */
     KilnResult(KILN_CALL* say)(KilnEntity npc, uint32_t tag, uint32_t ms);
     /* The texts of a loca tag: "text" or {"en": "...", "de": "..."} ("*" = every language), UTF-8 JSON. The same tag and
      * texts again change nothing. Any thread. KILN_ERR_UNAVAILABLE: kiln.content's loca hooks are not here. */

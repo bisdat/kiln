@@ -340,6 +340,40 @@ public sealed unsafe class NpcSpeechTests : IDisposable
     }
 
     [Fact]
+    public void Without_the_text_hooks_the_game_keeps_its_lines_until_they_come()
+    {
+        _textRc = SpeechNative.Unavailable;   // kiln.content's loca hooks are not (yet) here
+        var r = Npcs.Speech(Ramone).Replace("No food, no work.");
+        Assert.True(r.Ok);
+        Assert.Contains("loca", r.Reason);
+        Assert.DoesNotContain(Snapshot(), c => c.StartsWith($"set {Ramone.Value} 2", StringComparison.Ordinal));
+        Npcs.Say(Balthazar, "Hungry!", TimeSpan.FromSeconds(3));
+        Assert.Contains($"say {Balthazar.Value} 00000000 0", Snapshot());     // no empty bubble
+        Assert.DoesNotContain(Snapshot(), c => c.StartsWith($"say {Balthazar.Value} ", StringComparison.Ordinal) && !c.EndsWith(" 0", StringComparison.Ordinal));
+        Assert.Equal(2, Wire.Count);                                         // the clients still get both
+
+        _textRc = 0;                                                         // kiln.content came: the same call shows
+        Npcs.Speech(Ramone).Replace("No food, no work.");
+        Assert.Contains(Snapshot(), c => c.StartsWith($"set {Ramone.Value} 2 [", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Distinct_texts_stop_at_a_bound()
+    {
+        // every distinct text stays in kiln.content for the session: a mod (or a host) making new ones without end
+        // would grow every Kiln client's memory without end
+        for (var i = 0; i < NpcSpeechEngine.MaxTexts; i++)
+            Assert.Null(Npcs.Say(Ramone, $"line {i}", TimeSpan.FromSeconds(2)).Reason);
+        var r = Npcs.Say(Ramone, "one too many", TimeSpan.FromSeconds(2));
+        Assert.True(r.Ok);
+        Assert.Contains("texts", r.Reason);
+        Assert.EndsWith(" 00000000 0", Snapshot()[^1]);
+        Assert.Null(Npcs.Say(Ramone, "line 7", TimeSpan.FromSeconds(2)).Reason);   // a known one still shows
+        NpcSpeechEngine.WorldEnded();
+        Assert.Null(Npcs.Say(Ramone, "one too many", TimeSpan.FromSeconds(2)).Reason);   // a new world starts again
+    }
+
+    [Fact]
     public void Texts_keep_their_letters_and_have_a_text_for_every_language()
     {
         Assert.Contains("Zurück", SpeechText.Json(UiText.Of(("de", "Zurück"))));

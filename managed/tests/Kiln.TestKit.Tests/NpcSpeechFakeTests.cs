@@ -42,4 +42,19 @@ public sealed class NpcSpeechFakeTests
         Assert.Equal(calls, h.NpcSpeech.Calls);
         h.Run(() => Npcs.Speech(Npc).Clear());
     }
+
+    [Fact]
+    public void A_second_harness_shows_the_same_texts_and_starts_clear()
+    {
+        for (var round = 0; round < 2; round++)
+        {
+            using var h = new KilnHarness();
+            h.Step();
+            Assert.Equal(SpeechMode.Game, h.NpcSpeech.ModeOf(Npc));   // nothing left from the last harness
+            Assert.True(h.Run(() => Npcs.Say(Npc, "Same words", TimeSpan.FromSeconds(30)).Ok));
+            Assert.Equal("Same words", h.NpcSpeech.Saying(Npc));
+            Assert.True(h.Run(() => Npcs.Speech(Npc).Replace("Same line").Ok));
+            Assert.Equal(["Same line"], h.NpcSpeech.LinesOf(Npc));
+        }
+    }
 }
