@@ -428,7 +428,7 @@ re-registers cannot exhaust the shared 4096-registration limit; their old handle
 | `crafting.source_ui` (`Crafting.SourceUiCapability`) | Kiln client. Needs the recipe-input and crafting-menu dry-run symbols and the `kiln.rules` payment hook. No client/offline, an unresolved hook, or another module's patch of the code the dry run reads means the game's own status and counts remain. |
 | `crafting.build_ui` (since 0.2.0-dev.31.12) | Kiln client: the build menu's material counts include the building links. Off when a symbol of `sigdb/symbols/client.d/build-ui.json` does not resolve; faulted when another module patched the menu's gatherer or its row add, or a row could not be read (the menu keeps the game's counts; the cursor and the placement still count the links). |
 | `crafting.build_sources` (`Crafting.BuildSourcesCapability`, since 0.2.0-dev.31.12) | Server or host: the build cursor's material check and the blueprint placement's payment ([Building from linked sources](#building-from-linked-sources)); a Kiln client: its own build cursor. Off when a symbol of `sigdb/symbols/server.d/build-sources.json` does not resolve; faulted when a hook could not go in, faulted at run time, or another module patched the code it relies on (kiln.log names it). |
-| `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12, mod API 0.2.21) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check and locked prompt. Off when a symbol of `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in, a hook faulted at run time, or another module patched the code a lock hook reads (kiln.log names it). |
+| `items.lock_sources` (`Crafting.LockSourcesCapability`, since 0.2.0-dev.31.12, mod API 0.2.21) | Server or host: the lock check and lock payment ([Locks from linked sources](#locks-from-linked-sources)); a Kiln client: its lock check, its locked prompt and the prompt's requirement line (since 0.2.0-dev.31.15). Off when a symbol of the feature in `sigdb/symbols/server.d/lock-sources.json` (and on a client `client.d/lock-sources.json`) does not resolve, when `crafting.sources` is off, and faulted when a hook could not go in, a hook faulted at run time, or another module patched the code a lock hook reads (kiln.log names it). The requirement line (`locks/client.LockRowCount`) is display only and not part of the feature (a hosting client's server half shares it): where it does not resolve, another module patched it, its hook cannot go in or it faults, only the line keeps the game's count (logged) and this row stays as it is. |
 
 `Kiln.TestKit` records the real managed API on its fake native table: `h.Crafting.Sources` lists live registrations and
 `h.Crafting.Stock(player)` reads registered-only, filtered, permission-checked counts. It models disposal and mod unload,
@@ -470,17 +470,26 @@ How it works ([docs/re/locks.md](../../re/locks.md)):
   the player's opted-in links (read on the tick thread every 30 steps, and when a link is added or removed). Its lock
   payment (`interaction_attempt`) pays what the bag left from the links, after a recount of each through the
   transaction's accessors.
-- A Kiln client's lock check and its locked prompt count the bag plus the server's **lock snapshot**, on the channel
+- A Kiln client's lock check, its locked prompt and the prompt's requirement line ("Required: Lockpick", red while
+  short; the game's HUD counts the bag for it once more, so it has its own hook since 0.2.0-dev.31.15) count the bag plus
+  the server's **lock snapshot**, on the channel
   `kiln:craftstock`: a player with an opted-in link is told the server supports it; the client's checks note each lock
   item they meet without a row, the client asks about those (up to 16, again after 5 s while unanswered), and the server
   sends per asked item what the links hold, again whenever it changes. The first look at a new kind of lock may still show
-  it locked for a moment, until the row arrives (about a second). It is only UI help: the server checks the press again.
+  it locked for a moment, until the row arrives (about a second); the prompt counts again every frame, so it turns met
+  without looking away. It is only UI help: the server checks the press again. On a hosted world the host's own client
+  gets the snapshot in process from its server half (no network).
 - The hooks go in on demand: the server's when a link with `Locks` exists, the client's when a Kiln server's snapshot is
   on. With no opted-in link the game's code runs untouched.
 
 kiln.log, one line per decision, rate-limited (`locks:`): `the server world's lock check of item 0x... (player N) counts
 the linked sources: bag a + linked b, needs n`; `... refused: <check> (bag a, linked b, needs n)` with the check `no
-snapshot from the server`, `no snapshot row for the item yet`, `source not opted in`, `short count`; on payment `player N's
+snapshot from the server`, `no snapshot row for the item yet`, `source not opted in`, `short count`; the prompt's
+requirement line, once per change (since 0.2.0-dev.31.15): `the lock prompt's requirement line counts the linked
+sources: item 0x..., bag a + linked b, needs n (shown met)` or `... counts the bag only: item 0x..., <check> (bag a,
+linked b, needs n)`, and when the line alone keeps the game's count (its site does not resolve, another module patched
+it, its hook cannot go in or faulted: the rest keeps counting the links) `the lock prompt's requirement line keeps the
+game's count ...`, `... stands down ...` or `... hook faulted ...`; on payment `player N's
 lock of item 0x... xn: the bag paid a, b from k linked source(s)`, or `left to the game: <check>` (`short count`, `source
 not opted in`, `every opted-in link's item filter refuses the item`, `a stack the server no longer sees`, `the player's
 links belong to an earlier login`, `not the server world's transaction`), `rolled back: container C's take ...`; a
@@ -490,7 +499,8 @@ stand-down names the function and any foreign module found on it (`locks: ... st
 (`h.Crafting.LockStock(player)`: opted-in links only, filters, login and permission). It does not run the game's lock
 check, the interaction payment or a client's snapshot. Native host tests (`items-lock-sources-test`) run the real hooks'
 handlers on fake registers and a fake transaction; `lock_sources_sigdb_test.py` qualifies the sites on the pinned builds.
-Not seen in a real game yet (0.2.0-dev.31.12).
+Seen in a real game (Fuzen777, a hosted world on 0.2.0-dev.31.13): the lock opens and pays from a linked chest; the
+requirement line's fix (0.2.0-dev.31.15) not yet.
 
 ### Fills from linked sources
 
