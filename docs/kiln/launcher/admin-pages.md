@@ -143,6 +143,14 @@ hub over a fake transport), `admin-tauri-transport.test.ts` (the launcher's tran
 page (`src/admin/harness/index.html?kap=<ws url>`, served by the launcher's dev server, not part of a build) against
 the browser mock's world behind a fake socket, with a Tauri stand-in that must never be called.
 
+Dialogs over the map: Leaflet's panes, its canvas and controls and the map's own overlays use z-indexes of 400 to 1200.
+`.ka-map-root` is a stacking context of its own (`isolation: isolate` in `map/map.css`), so they stay below what a host
+puts on the body: the design system's dialogs (`.k-modal-backdrop`, z-index 50: `ConfirmHost`'s confirmations, a host's
+own dialogs) and toasts (60). In the launcher the sheet (`.k-sheet`, z-index 3) already held them; a host with nothing
+around the pages had dialogs over the map that took no clicks (Kilnwarden 0.1.3, where Leaflet's canvas took them).
+Check: `tests/admin-map-dialogs.spec.ts` opens the map's Delete waypoint confirmation over the map, in the launcher and
+in the harness, and clicks across it.
+
 ### A strict Content-Security-Policy (0.2.0-dev.31.13)
 The pages run under Kilnwarden's header (`default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self';
 connect-src 'self'; img-src 'self' data: blob:; ...`, no `'unsafe-inline'`, no `'unsafe-eval'`). What that refuses, and
