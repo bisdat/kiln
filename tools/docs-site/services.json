@@ -245,7 +245,7 @@
         },
         {
           "name": "identity.entities",
-          "members": 14
+          "members": 18
         },
         {
           "name": "items.inventory_kinds",
@@ -320,6 +320,7 @@
         "FrostMark",
         "FrostboltBlock",
         "FurnitureBlocks",
+        "HungryCrafter",
         "ItemBlocks",
         "LootBlocks",
         "MaterialSample",
@@ -438,6 +439,7 @@
         "FetchNearby",
         "FrostMark",
         "GemEffects",
+        "HungryCrafter",
         "ItemData",
         "ItemFallback",
         "LightsOut",
@@ -612,6 +614,7 @@
         "CreatureBlocks",
         "CreatureControlSample",
         "EliteVukah",
+        "HungryCrafter",
         "NpcSample",
         "RuleVukah",
         "VillagerRoutine"
@@ -1288,6 +1291,10 @@
       ],
       "capabilities": [
         {
+          "name": "identity.entities",
+          "members": 5
+        },
+        {
           "name": "kiln.skills",
           "members": 5
         }
@@ -1484,6 +1491,7 @@
       "samples": [
         "AffixSword",
         "BigCan",
+        "HungryCrafter",
         "ItemData",
         "MarkersSample",
         "MaterialSample",
@@ -1547,6 +1555,7 @@
         "Decisions",
         "FetchNearby",
         "FrostMark",
+        "HungryCrafter",
         "LightsOut",
         "MaterialSample",
         "NpcSample",

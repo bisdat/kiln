@@ -345,6 +345,28 @@ enum: DistanceAndFaction, Voxels
 - `InBase { get; init; } -> bool` — A base is fine (the default): a friendly NPC may stand in one, so it comes as near as `NpcPlace.Distance` asks while...
 - `Once { get; init; } -> bool` — Only the first time in a world.
 
+## Npcs `0.2.22` — Friendly NPCs' speech bubbles: a mod's own lines in the game's bubble over a villager, craftsperson or assistant.
+- `static Available { get; } -> bool` — This game shows Kiln's speech in its own bubbles (a game client whose kiln.npcspeech found the bubble on this build...
+- `static CanSpeak(EntityId npc) -> bool` — The entity is a friendly NPC with dialogue lines, the kind that has a speech bubble (a villager, a craftsperson, an...
+- `static IsSaying(EntityId npc) -> bool` — True when a Say is showing over the NPC now.
+- `static readonly MaxSay -> TimeSpan` — The shortest and longest `Npcs.Say`.
+- `static readonly MinSay -> TimeSpan` — The shortest and longest `Npcs.Say`.
+- `static Say(EntityId npc, UiText text, TimeSpan duration, SayOptions? options = null) -> SpeechResult` — As `Npcs.Say`, with a text per language (`UiText.Of(("en", "I'm starving"), ("de", "Ich verhungere"))`).
+- `static Say(EntityId npc, string text, TimeSpan duration, SayOptions? options = null) -> SpeechResult` — Shows `text` in the NPC's speech bubble for `duration` (0.5 s to 60 s), with no voice-over, also when the NPC is not...
+- `static Speech(EntityId npc) -> NpcSpeech` — The calling mod's override of the NPC's greeting bubble (a new handle each call; they all name the same override).
+- `static SpeechOf(EntityId npc) -> SpeechMode` — What the NPC's greeting bubble does now, from every mod's overrides (a Say aside).
+- `static StopSaying(EntityId npc) -> void` — Ends the calling mod's Say over the NPC before its time (another mod's Say stays).
+
+## NpcSpeech `0.2.22` — One mod's override of one NPC's greeting bubble (`Npcs.Speech`).
+- `Clear() -> void` — Ends this override: the next mod's shows, else the game's own lines.
+- `Mode { get; } -> SpeechMode` — What this override does now (`SpeechMode.Game` when it is clear).
+- `ModId { get; } -> string` — The mod this override belongs to ("kiln" outside a mod).
+- `Npc { get; } -> EntityId` — The NPC.
+- `Priority { get; set; } -> int` — Its rank against other mods' overrides of the same NPC (higher wins).
+- `Replace(IEnumerable<UiText> lines) -> SpeechResult` — As `NpcSpeech.Replace`, with a text per language for each line (`UiText.Of(("en", "..."), ("de", "..."))`).
+- `Replace(params string[] lines) -> SpeechResult` — The NPC's greeting bubble shows one of these lines instead of its own (a new pick each time the game picks a new...
+- `Suppress() -> SpeechResult` — No greeting bubble while this override is on, and no greeting voice-over (a player who presses E still gets the...
+
 ## Price — A price: so many of an item.
 - `Price(ItemRef Item, int Count)`
 - `Count { get; init; } -> int` — How many of it.
@@ -449,6 +471,10 @@ enum: None, Chosen, Started, Completed, Refused, Suspended
 - `On { get; init; } -> RuleMode` — When it is looked at: every `RuleBlock.Every` seconds by default, or on entering a phase, starting an attack, ...
 - `When { get; init; } -> IReadOnlyList<RuleCondition>` — All of these hold.
 
+## SayOptions `0.2.22` — How a `Npcs.Say` goes.
+- `SayOptions(bool Interrupt = true)`
+- `Interrupt { get; init; } -> bool` — True (the default): it replaces a Say that is still showing over that NPC, also another mod's.
+
 ## Shape — Where particles head at spawn: `Shape.Up`, `Shape.Sphere`, `Shape.Outward`, or `Shape.Cone`.
 - `static Cone(float degrees) -> Shape` — A cone around up: half angle in degrees, 0 to 180.
 - `static readonly Outward -> Shape` — Away from the centre of the `ParticleBlock.Shape`: out of a sphere, along a disc's plane, across a line.
@@ -464,6 +490,14 @@ enum: None, Chosen, Started, Completed, Refused, Suspended
 - `DayOnly { get; init; } -> bool` — Only by day.
 - `NightOnly { get; init; } -> bool` — Only at night.
 - `Replaces { get; init; } -> string` — A game creature: `GameTemplates` constant or name.
+
+## SpeechMode `0.2.22` — What an NPC's greeting bubble does now.
+enum: Game, Suppress, Replace
+
+## SpeechResult `0.2.22` — The answer to a speech call.
+- `SpeechResult(bool Ok, string? Reason)`
+- `Ok { get; init; } -> bool` — True when it was accepted.
+- `Reason { get; init; } -> string?` — Why not (null when `Ok`), or, when accepted, a note on where it cannot show (null when nothing to say).
 
 ## Sphere — A sphere.
 - `static Of(double radius) -> ColliderBlock` — A sphere collider of this radius in metres.

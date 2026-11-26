@@ -109,6 +109,24 @@ builds them from the mod's files at boot, so changes need a restart).
 - `knowledge`: `{"name": {"scope": "world"}}`, resolved as `<mod>:<name>`.
 - Villagers: `Villagers.Find/Of/List`, `.Teleport`, `.GoTo`, `.Stay`, `.Follow`, `VillagerStateEvent`.
 
+## NPC speech bubbles (Kiln.Npcs, dev.31+)
+Your text in the game's own speech bubble over a villager, craftsperson or assistant; the host decides, Kiln clients
+show it, vanilla clients keep the game's lines. `"side": "server"`, `"clients": "none"` is enough (players need Kiln, not the mod).
+```csharp
+Npcs.Say(npc, "I'm starving...", TimeSpan.FromSeconds(6));          // once, now, no voice; 0.5-60 s; UiText for languages
+var s = Npcs.Speech(npc);                                           // this mod's override of that NPC
+s.Replace("No food, no work.", "My stomach...");                    // greets with these (1-32 lines, <= 200 chars), no voice
+s.Suppress();                                                       // or: no greeting bubble
+s.Clear();                                                          // the game's lines again (also on unload / world end)
+```
+- Several mods: highest `Priority`, then the most recent. A Say shows over any override; a newer Say replaces it
+  (`SayOptions(Interrupt: false)` waits for another mod's). `Npcs.SpeechOf`, `IsSaying`, `CanSpeak` (tick), `Available`.
+- A mod on both sides decides on the host (`Lifecycle.IsServerRunning`); a joined client's own calls change only its screen.
+- Never guard the calls with `Npcs.Available` / `Capabilities.Is("npcspeech.bubble")`: both are false on a dedicated
+  server (no bubbles of its own), which still sends; guarded, no player sees anything. The calls never throw for it.
+- Not changed: farewell lines, the talk gesture when a player presses E. Tests: `KilnHarness.NpcSpeech` (`ModeOf`,
+  `LinesOf`, `Saying`). Sample `HungryCrafter`. `services/npc-speech.md`.
+
 ## Sounds (`assets/cook.json`, service Audio)
 `"side": "both"` or `"client"`, `"clients": "mod"`. Ship your audio and the recipe. Plain JSON: no comments. Template: `kiln new sound`.
 ```json

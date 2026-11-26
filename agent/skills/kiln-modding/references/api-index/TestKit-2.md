@@ -230,6 +230,12 @@
 - `Ready(string mod, string npc, Guid template = default(Guid), Guid model = default(Guid), Guid graph = default(Guid), string? closure = null, ulong generation = 1) -> void` — The start built `npc` of `mod`: Ready.
 - `Removed(string mod, string npc, ulong generation = 0) -> void` — `npc` of `mod` was Ready at the previous start and is gone now: Removed.
 
+## TestKit.HarnessNpcSpeech `0.2.22` — What Kiln clients' speech bubbles would be told (`KilnHarness.NpcSpeech`): the effective override of each NPC (after every mod's priorities) and its running Say, with...
+- `Calls { get; } -> int` — How many set and say calls reached the fake (a test that expects nothing new compares it).
+- `LinesOf(EntityId npc, string language = "en-us") -> IReadOnlyList<string>` — The lines a `SpeechMode.Replace` shows, in `language` (a game language key such as "en-us" or "de-de"); empty otherwise.
+- `ModeOf(EntityId npc) -> SpeechMode` — What the NPC's greeting bubble does: `SpeechMode.Game` when Kiln leaves it to the game.
+- `Saying(EntityId npc, string language = "en-us") -> string?` — The text of the Say showing over the NPC now, in `language`; null when none.
+
 ## TestKit.HarnessOutlines `0.2.13` — The fake kiln.render's outlines of a harness (`KilnHarness.Outlines`): Ui.World.Outline's own code runs on it.
 - `All { get; } -> IReadOnlyList<TestKit.FakeOutline>` — Every request this harness got, oldest first, ended ones too.
 - `Despawn(EntityId entity) -> int` — `entity` leaves the client world: every live request on it ends now (`OutlineReason.Despawned`).

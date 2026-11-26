@@ -72,7 +72,9 @@ internal static class ServiceTick
          // 0.2.0-dev.31 (16a): station menus' runtime, so that "the mods' menus are declared" comes also without any menu
          ("Kiln.Blocks", "Kiln.StationMenuStartup"),
          // dev.31 (09 S5): kiln:ui-command, the receiver of joined players' UI commands, also with no UI block mod
-         ("Kiln.Blocks", "Kiln.UiCommandStartup")];
+         ("Kiln.Blocks", "Kiln.UiCommandStartup"),
+         // dev.31 (npc-speech, Marshall/Ryrin's request): the channel kiln:npcspeech, there before anyone joins
+         ("Kiln.Blocks", "Kiln.NpcSpeechStartup")];
 
     /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
     /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's
