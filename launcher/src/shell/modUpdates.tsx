@@ -59,7 +59,12 @@ export async function checkNow(qc: QueryClient) {
  *  `installed`: the version the row shows. An update the row's copy already has (a result from before the player
  *  updated) is no notice: "Update 0.2.10" never stands beside 0.2.10. */
 export const noticeable = (s: ModUpdateStatus | undefined, installed?: string): s is ModUpdateStatus =>
-  !!s && !!s.source && ((up.hasUpdate(s) && (installed === undefined || up.offeredFor(s, installed))) || (s.state === "unknown" && s.reason !== "not_checked"));
+  !!s && !!s.source && ((up.hasUpdate(s) && rowOffered(s, installed)) || (s.state === "unknown" && s.reason !== "not_checked"));
+
+/** Whether an update is still something for the row's copy. Only where the status counts in the Library's versions
+ *  (GitHub: tags against manifests); Nexus Mods numbers its uploads its own way, which says nothing about the row's. */
+const rowOffered = (s: ModUpdateStatus, installed?: string) =>
+  installed === undefined || s.installedVersion !== s.libraryRef.version || up.offeredFor(s, installed);
 
 /** Keeps the shared result in step with the Library: when a Library list query reads other entries than before (a
  *  drop, Add mod, the Library's import, a catalog install, a roll back, a removal, a take-over), `run` works the
@@ -91,7 +96,7 @@ export function UpdateBadge({ status, installed }: { status: ModUpdateStatus | u
   if (!noticeable(status, installed)) return null;
   const w = up.updateWords(status);
   const url = up.pageOf(status);
-  if (!up.hasUpdate(status) || (installed !== undefined && !up.offeredFor(status, installed)) || !url) return <span className="k-tone-idle k-mod-update" title={w.detail}>{status.state === "unknown" ? (status.stale ? t("shell.modUpdates.stale") : t("shell.modUpdates.unknown")) : w.word}</span>;
+  if (!up.hasUpdate(status) || !rowOffered(status, installed) || !url) return <span className="k-tone-idle k-mod-update" title={w.detail}>{status.state === "unknown" ? (status.stale ? t("shell.modUpdates.stale") : t("shell.modUpdates.unknown")) : w.word}</span>;
   return (
     <button type="button" className="k-link k-mod-update" title={t("shell.modUpdates.badgeTip", { detail: w.detail })} aria-label={t("shell.modUpdates.badgeAria", { word: w.word, name: status.name })}
       onClick={() => openUpdatePage(status)}>{w.word}</button>

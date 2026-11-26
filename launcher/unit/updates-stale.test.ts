@@ -11,6 +11,8 @@ const status = (patch: Partial<ModUpdateStatus>): ModUpdateStatus => ({
   source: { provider: "github", destination: "frostdev-ops/kiln-auto-loot", origin: "manifest", authenticated: false },
   installedVersion: "0.2.9", candidateVersion: "0.2.10", candidateIdentity: null, state: "available", compatibility: "unknown", coverage: "complete",
   checkedAt: "2026-11-25T12:00:00Z", stale: false, reason: null, pageUrl: "https://github.com/frostdev-ops/kiln-auto-loot/releases/tag/v0.2.10", ...patch,
+  // a GitHub status counts in the Library's versions: its installed version is its Library entry's
+  ...(patch.installedVersion && !patch.libraryRef ? { libraryRef: { kind: "kiln", id: "kiln-auto-loot", version: patch.installedVersion, hash: `kdh1:${patch.installedVersion}` } } : {}),
 });
 
 describe("versions", () => {
@@ -53,6 +55,11 @@ describe("an offer", () => {
     // a new upload of the version the row has stays a notice; one of a version below the row's does not
     expect(noticeable(status({ state: "new-upload", installedVersion: "0.2.10", candidateVersion: "0.2.10" }), "0.2.10")).toBe(true);
     expect(noticeable(status({ state: "new-upload", installedVersion: "0.2.10", candidateVersion: "0.2.10" }), "0.2.11")).toBe(false);
+    // Nexus Mods numbers its uploads its own way (Weather Plus: 1.0.0 → 1.1.0 there, 1.4.2 in its manifest): the row's
+    // version says nothing about them
+    const nexus = status({ libraryRef: { kind: "kiln", id: "weather-plus", version: "1.4.2", hash: "kdh1:w" }, installedVersion: "1.0.0", candidateVersion: "1.1.0",
+      source: { provider: "nexus", destination: "enshrouded/316/90316", origin: "receipt", authenticated: true } });
+    expect(noticeable(nexus, "1.4.2")).toBe(true);
     // what could not be told is still said
     expect(noticeable(status({ state: "unknown", reason: "network", candidateVersion: null }), "0.2.10")).toBe(true);
   });
