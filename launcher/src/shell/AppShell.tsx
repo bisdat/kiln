@@ -3,8 +3,8 @@
 // Play button, which shrinks to a pilot light in the corner while a sheet is up), toasts and the splash.
 // Mounts the backend event feeds once, the first run's game detection, the window-wide mod drop, the rows' right click
 // (ui/Menu.tsx) and the Install Kiln confirm.
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { NavLink, UNSAFE_LocationContext as LocationContext, useLocation, useNavigate, useNavigationType, useOutlet } from "react-router-dom";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate, useNavigationType, useOutlet } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppInfo, useBackendEvents, useNexusEnabled, useSettings } from "../api/hooks";
 import { isTauri } from "../api/commands";
@@ -38,6 +38,8 @@ import { useCrucibleOn } from "../crucible/state";
 import { SfiWarningHost } from "../components/SfiWarningDialog";
 // unsaved work on a page asks before the page is left
 import { LeaveGuardHost } from "./leaveGuard";
+// the address a page sees while it lingers after it was left
+import { PageLocation } from "./pageLocation";
 
 const MOTION = "(prefers-reduced-motion: reduce)";
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.(MOTION).matches;
@@ -219,15 +221,14 @@ export function AppShell() {
   const pageKey = loc.pathname.startsWith("/settings/") ? "/settings" : loc.pathname;
   // the page keeps the address it was opened at: while the sheet (or the hero) lingers with a page that was left, that
   // page must not see the new address. A server's admin pages are routes of their own (admin/index.tsx), which read "/"
-  // as their index and sent Play back to the server's Players tab (netjunk, 2026-11-26)
+  // as their index and sent Play back to the server's Players tab (netjunk, 2026-11-26): shell/pageLocation.tsx
   const navType = useNavigationType();
-  const here = useMemo(() => ({ location: loc, navigationType: navType }), [loc, navType]);
   const page = (
-    <LocationContext.Provider value={here}>
+    <PageLocation location={loc} type={navType}>
       <RouteErrorBoundary key={pageKey} resetKey={loc.pathname}>
         <Suspense fallback={<div className="k-page"><Skeleton lines={4} /></div>}><div className="k-route">{outlet}</div></Suspense>
       </RouteErrorBoundary>
-    </LocationContext.Provider>
+    </PageLocation>
   );
   const sheet = useLinger<ReactNode>(page, !isPlay, 480);
   const hero = useLinger<ReactNode>(page, isPlay, 360);
