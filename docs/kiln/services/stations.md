@@ -607,6 +607,13 @@ the game's respec item (Runes). docs/re/respec.md has the game's code.
   changes, about every 1.2 s) and both checks count it on top of the game's count; the respec tree's Rune row shows the
   same total. A hosting player's own screens get it in process.
 
+Tested: `native/services/items/tests/respec_sources_test.cpp` (the payment's respec branch, the snapshot, the client
+checks, the stand-downs), `respec_sources_sigdb_test.py` on the pinned exes, and the lab test `mods/tests/respec-test` on
+a dedicated server (20 PASS, [docs/re/respec.md section 5](../../re/respec.md#5-lab-dev31-respec-lab)): the unlearn and the
+paid reset through the game's own input handler, paid from a linked chest. A lab has no logged-in player, so it starts the
+server with `KILN_STATIONS_CRAFT_LAB=1`, which also lets a spawned player character have respec links of its own (never
+a real player; kiln.log warns at start).
+
 Needs `crafting.respec_sources` on the server or host. Where another module patched the respec payer or its payment call,
 Kiln stands the respec half down with one kiln.log line naming the function, the first foreign byte and its module; the
 same links keep crafting and the other purposes. kiln.log: `respec: a link opted in with Respec: ...` once; `respec: a skill

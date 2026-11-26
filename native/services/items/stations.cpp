@@ -956,9 +956,10 @@ struct CraftStats {
     std::atomic<uint32_t> rollback{0};      // a take faulted, or a line stayed short after a take: 4, the craft rolled back
     std::atomic<uint32_t> skipped{0};       // the game's for another reason (unreadable, an item twice, a stock list too long)
     std::atomic<uint32_t> lab{0};           // KILN_STATIONS_CRAFT_LAB's stand-in stock list was used
+    std::atomic<uint32_t> respec{0};        // GitHub #150: calls of the respec payer (respec/RespecPaid), whatever came of them
 };
 CraftStats CS;
-constexpr uint32_t kCraftStatCount = 13;
+constexpr uint32_t kCraftStatCount = 14;
 bool g_craft_lab = false;  // KILN_STATIONS_CRAFT_LAB=1 (stations_resolve): labs only, never a real server
 // The server world's bases system and recipe registry, cached by the tick thread (Pre) for the payment.
 std::atomic<void*> g_srv_bases{nullptr}, g_srv_recipes{nullptr};
@@ -1081,6 +1082,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         return 0;
     }
     const int kind = respec ? kPayRespec : build ? kPayBuild : kPayCraft;
+    if (respec) CS.respec.fetch_add(1, std::memory_order_relaxed);
     const bool linked_only = kind != kPayCraft;  // one purpose's links: no station outputs, the transaction's reads only
     const char* const what = respec ? "a skill respec" : build ? "a block placement" : "a craft";
     const char* const tag = respec ? "respec" : "stations";  // kiln.log's prefix: respec lines read as the locks: lines do
@@ -1882,7 +1884,7 @@ void fill_hook_on_demand() {
 uint32_t craft_stats(uint32_t* out, uint32_t n) {
     const std::atomic<uint32_t>* f[kCraftStatCount] = {&CS.calls, &CS.idle, &CS.other_world, &CS.mode0, &CS.no_access,
                                                        &CS.considered, &CS.covered, &CS.short_, &CS.paid, &CS.from_outputs,
-                                                       &CS.rollback, &CS.skipped, &CS.lab};
+                                                       &CS.rollback, &CS.skipped, &CS.lab, &CS.respec};
     for (uint32_t i = 0; out && i < n && i < kCraftStatCount; ++i) out[i] = f[i]->load(std::memory_order_relaxed);
     return kCraftStatCount;
 }
@@ -6370,7 +6372,7 @@ extern "C" KILN_EXPORT int kiln_stations_craft_adjust(uint32_t recipe, uint32_t 
 }
 
 // The craft payment's counters (labs, diagnostics; not an ABI): calls, idle, other_world, mode0, no_access, considered,
-// covered, short, paid, from_outputs, rollback, skipped, lab, in that order. Writes up to n; returns how many there are.
+// covered, short, paid, from_outputs, rollback, skipped, lab, respec (GitHub #150), in that order. Writes up to n; returns how many there are.
 extern "C" KILN_EXPORT uint32_t kiln_stations_craft_stats(uint32_t* out, uint32_t n) {
     return kitems::craft_stats(out, n);
 }

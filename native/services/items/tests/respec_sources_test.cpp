@@ -215,6 +215,9 @@ int main() {
     CHECK(respec(10,2,3,20,&rc)==0 && fixture::calls.empty() && logged("respec: player 1's skill respec left to the game: the server half's code check has not run yet"));
     // the server's Pre: a link with Respec exists and the code checks out -> ready
     respec_server_pre();CHECK(g_respec_ready.load() && logged("a link opted in with Respec"));
+    // every call of the respec payer is counted (kiln_stations_craft_stats' 14th value), whatever came of it
+    {uint32_t st[14]={};CHECK(kiln_stations_craft_stats(st,14)==14);const uint32_t before=st[13];
+     respec(2,2,0,20,&rc);respec(2,2,0,20,&rc,0x1234);kiln_stations_craft_stats(st,14);CHECK(st[13]==before+1);}
     // (a) the bag covers it: the game's own payment, no take by Kiln, nothing from the links
     CHECK(respec(2,2,0,20,&rc)==0 && fixture::calls.empty() && fixture::inventory[LINK][RUNE]==20);
     // ... the bag and the Magic chest together: still the game's

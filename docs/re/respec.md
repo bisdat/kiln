@@ -97,7 +97,27 @@ is sent. The server has no screen check of its own: a respec that reaches it is 
 - **A hosting client's prediction world** runs the same payer on its own transaction: its bases word is not the server
   world's, so it stays the game's (one `respec:` line); the server's state then reaches the prediction.
 
-## 5. Not seen yet
-No client run. The lab (section 6 of the release's report) checks the server half through the game's own input handler.
-Open questions only a game answers: that the node and the altar redraw as offered in the same frame as the hook raises the
-count (the screens recount every frame, so they should); the prediction world's brief mismatch on a hosting client.
+## 5. Lab (dev31-respec) **[lab]**
+**2026-11-26, server 26430253, `mods/tests/respec-test`, the craft lab's save (one base): 20 PASS, 0 FAIL.** A lab has no
+logged-in player, so the server ran with `KILN_STATIONS_CRAFT_LAB=1`: a spawned player character (`1_Player`, entity
+2619, standing in the base) gets respec links of its own through the private `kiln_stations_lab_respec_link` (only with
+that switch, only for an id outside the player range). The vanilla node `0xc01ee111` (cost 2) went into its tree as a
+save holds it (`GameTree.LabPutInSave`, `changeCount` bumped so the game rebuilt its masks: 2 points spent), and every
+unlearn and reset went through the game's own input handler (`GameTree.GameRequest`). Each case is read against Kiln's
+payment counters (`kiln_stations_craft_stats`, whose 14th value counts the respec payer's calls):
+- `crafting.respec_sources` resolved on the running server;
+- no link: the payer's `InventoryPay` call reached Kiln (`respec +1`, idle), the game refused: the node stayed;
+- Runes only in the linked chest (5): the unlearn was paid from it (3 left), the node was gone; kiln.log `respec: a skill
+  respec paid 2 from additional crafting sources (... the bag and Magic chests counted 0, paid 0 ...)`;
+- one Rune in the bag: the bag 1, the link 1; two in the bag: the game's own payment (`covered`), the link untouched;
+- one Rune in the link only: refused (`short by 1 of item 0x41a792dc`), nothing moved, the node stayed;
+- one Rune in a Magic chest of the base: the chest before the link;
+- the paid reset with 2 points spent: 2 from the link; a reset with nothing spent: the payer never reached `InventoryPay`
+  (`respec +0`), the link untouched.
+
+## 6. Not seen yet
+No client run: the unlearn's and the altar's checks on a Kiln client (section 3, the mid hooks) are read from the code
+and host-tested only. The join check's free reset is static evidence (a character without a client never passes that
+check). Open questions only a game answers: that the node and the altar redraw as offered in the frame the hook raises the
+count (the screens recount every frame, so they should); a real player's respec with a mod's link (the lab used the lab
+stand-in for the player record); a hosting client's prediction world in the moment before the server's state arrives.
