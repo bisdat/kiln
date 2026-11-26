@@ -6,7 +6,8 @@ pinned client (26430625, 5d9ef2f1) and dedicated server (26430253, f0d824be): th
 What it pins: the lock check's item count call (locks/LockCountRet) and what the mid hook there reads (rbp-0x68 the
 result, r14 the InteractionLock, [rsp+0x58] the context), interaction_attempt's lock payment (locks/LockPaid: rbp+0x230
 the transaction, [rsp+0x58] PayMaterial's result, r14 the guest, rsi the lock, the Consume test after it), the locked
-prompt's count (locks/client.UiLockCountRet, client only), the InteractionLock offsets the patterns capture, and that a
+prompt's count (locks/client.UiLockCountRet, client only), the prompt's requirement row and its own bag count that
+decides the row's colour (locks/client.LockRowCount, client only), the InteractionLock offsets the patterns capture, and that a
 changed byte at each call turns the feature off."""
 import argparse
 import copy
@@ -59,6 +60,7 @@ def main():
     check(hashlib.sha256(client.read_bytes()).hexdigest() == CLIENT, 'qualified client identity (26430625)')
     check(hashlib.sha256(server.read_bytes()).hexdigest() == SERVER, 'qualified dedicated identity (26430253)')
     c, s = Image(client), Image(server)
+    found_client = {}
     expect = {
         'client': (c, {'locks/LockCountRet': 0x2c5547, 'locks/InventoryItemCount': 0xe93160, 'locks/LockPaid': 0x2a7efe,
                        'locks/client.UiLockCountRet': 0x2bc483, 'gems/PayMaterial': 0x411330}),
@@ -68,6 +70,8 @@ def main():
     for side, (image, rvas) in expect.items():
         doc = doc_for(side)
         found, consts, features = Resolver(image, doc).run()
+        if side == 'client':
+            found_client = found
         check(features['locks'], f'{side}: items.lock_sources resolves')
         for name, rva in rvas.items():
             check(found[name]['ok'] and found[name]['rva'] == rva, f'{side}: {name} = {rva:#x}')
@@ -116,6 +120,35 @@ def main():
     check(raw[at - 0x49:at - 0x46] == bytes.fromhex('8B5F10') and bytes.fromhex('488D8D20060000') in raw[at - 0x40:at - 0x20] and
           raw[at + 6:at + 10] == bytes.fromhex('0FB74716') and bytes.fromhex('39852806000073') in raw[at:at + 0x30],
           'client: the prompt counts into rbp+0x620 (count +0x628) for the lock in rdi and compares with its amount')
+    # the prompt's requirement row (the HUD, client only): its own count of the item in the local player's bag (the UI's
+    # inventory mirror, C 0xd40fe0) decides the row's colour; locks/client.LockRowCount is right after that count, where
+    # r8d holds it and r14 the prompt record (player_ui's +0x2bc0: +0xd8 item = +0x2c98, +0xdc amount = +0x2c9c)
+    row = 0xbf73be
+    check(found_client['locks/client.LockRowCount']['ok'] and found_client['locks/client.LockRowCount']['rva'] == row,
+          f'client: locks/client.LockRowCount = {row:#x}')
+    check(rel(raw, row - 0x44) == 0xd40fe0 and raw[row - 0x3f:row - 0x38] == bytes.fromhex('458B9ED8000000') and
+          raw[row - 0x38:row - 0x35] == bytes.fromhex('448BC7'),
+          'client: the row counts after the bag mirror (C 0xd40fe0): item from r14+0xd8, the count in r8d from 0')
+    check(bytes.fromhex('450344D210') in raw[row - 0x20:row] and raw[row:row + 8] == bytes.fromhex('410FB78EDC000000'),
+          'client: the loop adds each matching stack to r8d; the site reads the amount from r14+0xdc')
+    tail = raw[row:row + 0x30]
+    check(bytes.fromhex('44898544020000') in tail and bytes.fromhex('443BC1') in tail and bytes.fromhex('0F938548020000') in tail,
+          'client: the row stores r8d as its count and sets met = count >= max(amount, 1) (cmp r8d,ecx; setae)')
+    check(rel(raw, 0xbf7469) == 0xbf1ea0 and raw[0xbf2141:0xbf2146] == bytes.fromhex('450FB67E30') and
+          raw[0xbf2455:0xbf2459] == bytes.fromhex('41387E30'),
+          'client: the row draw (C 0xbf1ea0) picks its colour and text style by that met byte (row +0x30)')
+    check(raw[0x2bc483:0x2bc489] == bytes.fromhex('899E982C0000') and raw[0x2bc48d:0x2bc494] == bytes.fromhex('6689869C2C0000') and
+          raw[0xbf7134:0xbf713b] == bytes.fromhex('4D8DB7C02B0000'),
+          'client: player_ui writes the item +0x2c98 and amount +0x2c9c; the HUD reads them as r14 = +0x2bc0 (+0xd8, +0xdc)')
+    altered = copy.copy(c)
+    b = bytearray(raw)
+    b[row + 1] = 0x90
+    altered.img = bytes(b)
+    check(not Resolver(altered, doc_for('client')).run()[2]['locks'], 'client: a changed requirement row disables items.lock_sources')
+    check(not Resolver(s, {'symbols': {'locks/client.LockRowCount': copy.deepcopy(
+              {name: doc for name, doc, _ in compose('client')}['lock-sources.json']['symbols']['locks/client.LockRowCount'])},
+              'features': {'row': {'symbols': ['locks/client.LockRowCount']}}}).run()[2]['row'],
+          'the requirement row\'s site is absent from the dedicated server')
     print(f'lock sources sigdb: {checks} passed, 0 failed')
 
 
