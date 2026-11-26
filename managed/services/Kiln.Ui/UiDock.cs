@@ -597,26 +597,51 @@ internal sealed class UiDockFrame
     // drag is already in), the others' from it at their last sizes (or their options' before their first frame). A dock
     // that just became active takes its side here: the other one when the window placed from the other does not fit on
     // its own, decided once the leader's rect is known (until then it uses its own side). The group outside the viewport:
-    // the leader moved in.
+    // the leader moved in, the window the others dock to first (see Fit).
     private UiPlan Clamp(Node n, UiPlan plan)
     {
         // a guess moves nothing: the next frame knows
         if (!_vp.Valid || Estimate(n, plan) is not { Known: true } lead) return plan;
         var rects = new Dictionary<Node, (float X, float Y, float W, float H)>(ReferenceEqualityComparer.Instance) { [n] = lead.Rect };
-        float x0 = lead.Rect.X, y0 = lead.Rect.Y, x1 = lead.Rect.X + lead.Rect.W, y1 = lead.Rect.Y + lead.Rect.H;
         foreach (var m in n.Group!.Skip(1))
         {
             if (SizeOf(m) is not { } z) return plan;
             var parent = rects[m.Parent!];
             var edge = m.ParentIsTarget ? m : m.Parent!;
             if (edge.Fresh) Choose(edge, parent, z, !m.ParentIsTarget);
-            var r = TopLeft(From(m, parent), z.W, z.H);
-            rects[m] = r;
-            (x0, y0, x1, y1) = (MathF.Min(x0, r.X), MathF.Min(y0, r.Y), MathF.Max(x1, r.X + r.W), MathF.Max(y1, r.Y + r.H));
+            rects[m] = TopLeft(From(m, parent), z.W, z.H);
         }
-        float dx = Shift(x0, x1, _vp.Width), dy = Shift(y0, y1, _vp.Height);
+        // the player holds a resize grip or border of the leader: ImGui keeps that edge at the pointer and the opposite one
+        // where the window is put, so moving it in would grow it by the move every frame (native window_state_test). It
+        // stays; the group goes back inside when they let go.
+        if (n.Live.Resizing) return plan;
+        var order = n.Group!.OrderBy(Depth).ToArray();
+        float dx = Fit(order.Select(m => (rects[m].X, rects[m].W)), _vp.Width), dy = Fit(order.Select(m => (rects[m].Y, rects[m].H)), _vp.Height);
         if (MathF.Abs(dx) < 0.01f && MathF.Abs(dy) < 0.01f) return plan;
         return plan.WithPos(lead.Rect.X + dx, lead.Rect.Y + dy, UiPlan.Always, 0, 0);
+    }
+
+    // how many docks away from the window the others dock to (the group's root: 0)
+    private static int Depth(Node m)
+    {
+        var d = 0;
+        for (var x = m.Target; x != null; x = x.Target) d++;
+        return d;
+    }
+
+    // The smallest move along one axis that keeps the windows inside the viewport (0..max), taken nearest the group's
+    // root first: a window that cannot be inside with the ones before it is left out, so a group too big for the viewport
+    // keeps the window the others dock to inside and a docked window (a wide one, a far offset) never pushes it out. A
+    // window bigger than the viewport: its start at 0.
+    private static float Fit(IEnumerable<(float At, float Length)> spans, float max)
+    {
+        float lo = float.NegativeInfinity, hi = float.PositiveInfinity;
+        foreach (var (at, length) in spans)
+        {
+            float a = -at, b = MathF.Max(a, max - at - length);
+            if (a <= hi && b >= lo) (lo, hi) = (MathF.Max(lo, a), MathF.Min(hi, b));
+        }
+        return Math.Clamp(0f, lo, hi);
     }
 
     // A dock that just became active (edge: the window that docks): its own side, or the other one when the window placed
@@ -639,8 +664,6 @@ internal sealed class UiDockFrame
         var o = m.W.Options;
         return o.Width > 0 && o.Height > 0 && !o.AutoResize ? (o.Width * _vp.SafeScale, o.Height * _vp.SafeScale) : null;
     }
-
-    private static float Shift(float lo, float hi, float max) => hi - lo >= max ? -lo : lo < 0 ? -lo : hi > max ? max - hi : 0;
 
     // Known: from what Kiln asks this frame or where ImGui has it; not known: a guess (the options' first place, which
     // ImGui skips when imgui.ini has the window).

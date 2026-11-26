@@ -34,6 +34,9 @@ public sealed unsafe class UiDockTests : IDisposable
         public bool Ever, Moving, Resizing;
         public (float X, float Y)? DragTo;           // the player's drag, applied before Begin ("NewFrame")
         public (float X, float Y, float W, float H)? ResizeTo;  // the player's resize, applied inside Begin
+        // the player holds the right border at this x: inside Begin, after any SetNextWindowPos, ImGui keeps that edge at
+        // the pointer and the window's left edge where it is (UpdateWindowManualResize), every frame while held
+        public float? RightEdgeAt;
     }
 
     private static readonly Dictionary<string, Win> Wins = [];
@@ -124,6 +127,7 @@ public sealed unsafe class UiDockTests : IDisposable
         if (_nextPos is { } p && Applies(p.Cond)) (w.X, w.Y) = (p.X - p.Px * w.W, p.Y - p.Py * w.H);
         if (w.ResizeTo is { } r) (w.X, w.Y, w.W, w.H) = r;
         w.ResizeTo = null;
+        if (w.Resizing && w.RightEdgeAt is { } edge) w.W = edge - w.X;
         w.Ever = true;
         w.LastFrame = _frame;
         _nextPos = null;
@@ -548,6 +552,68 @@ public sealed unsafe class UiDockTests : IDisposable
         Drag(book, -400, 100);  // its target would start left of 0
         Frame();
         Assert.Equal(0, t.X, 3);
+        AssertRightOf(spells, book);
+    }
+
+    [Fact]
+    public void A_resize_that_pushes_the_docked_window_out_does_not_drag_the_resized_window_along()
+    {
+        var spells = Spells();  // 330..630
+        var book = Grimoire();  // 240 wide, docked on its right
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        var t = Of(spells);
+        t.Resizing = true;
+        t.RightEdgeAt = 1800;  // the player holds the right border there: Grimoire would end at 2040
+        for (var i = 0; i < 6; i++)
+        {
+            Frame();
+            Assert.Equal(330, t.X, 3);  // its left edge stays where it was, the right one at the pointer
+            Assert.Equal(1800, t.X + t.W, 3);
+            AssertRightOf(spells, book);
+        }
+        t.Resizing = false;
+        t.RightEdgeAt = null;
+        Frame();  // let go: the pair goes back inside
+        Assert.Equal(1920, Of(book).X + Of(book).W, 3);
+        AssertRightOf(spells, book);
+        Assert.Equal(1470, t.W, 3);
+    }
+
+    [Fact]
+    public void A_docked_window_can_never_push_the_window_it_docks_to_off_the_screen()
+    {
+        var spells = Spells();  // 330, 440, 300 x 200
+        Frame();
+        var hostile = Window(_grimoire, "Far", new UiWindowOptions { Width = 100, Height = 100 });
+        hostile.DockTo(Handle(), DockSide.Left, -5000);  // far above it
+        var wall = Window(_grimoire, "Wall", new UiWindowOptions { Width = 1900, Height = 100 });
+        wall.DockTo(Handle(), DockSide.Left);  // wider than the room beside it on either side
+        for (var i = 0; i < 3; i++) Frame();
+        var t = Of(spells);
+        Assert.Equal((330f, 440f), (t.X, t.Y));
+        Assert.Equal(t.X, Of(wall).X + Of(wall).W, 3);  // still docked, as far in as its target allows
+        Assert.Equal(t.Y - 5000, Of(hostile).Y, 3);
+    }
+
+    [Fact]
+    public void A_group_too_big_for_the_viewport_keeps_the_window_the_others_dock_to_inside()
+    {
+        var spells = Window(_spells, "Better Spells", new UiWindowOptions { Width = 1000, Height = 200, Position = (0.3f, 0.5f), AcceptDock = true, PlacementId = "spells" });
+        var book = Window(_grimoire, "Grimoire", new UiWindowOptions { Width = 1000, Height = 160 });
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        Frame();
+        var t = Of(spells);
+        Assert.Equal(0.3f * 1920 - 500, t.X, 3);  // where its options put it: Grimoire hangs over the right edge
+        AssertRightOf(spells, book);
+        Drag(spells, 600, 300);  // the player still drags it anywhere inside
+        Frame();
+        Assert.Equal((600f, 300f), (t.X, t.Y));
+        AssertRightOf(spells, book);
+        Drag(spells, 1000, 300);  // but never out
+        Frame();
+        Assert.Equal(920, t.X, 3);
         AssertRightOf(spells, book);
     }
 
