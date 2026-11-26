@@ -2,7 +2,7 @@ use std::any::TypeId;
 use kfc::{resource::value::Value, reflection::{PrimitiveType, TypeIndex}};
 use mlua::AnyUserData;
 
-use crate::{alias::{MappedValue, TypeHandle}, env::value::{converter::{value_to_lua, Converter, LuaConversionError}, mapped::{MappedArrayValue, MappedStructValue, MappedVariantValue}, simple::{ArrayValue, StructValue, VariantValue}, validator::{LuaValidationError, Validator}}, lua::LuaValue};
+use crate::{alias::{MappedValue, TypeHandle}, env::{value::{converter::{value_to_lua, Converter, LuaConversionError}, mapped::{MappedArrayValue, MappedStructValue, MappedVariantValue}, simple::{ArrayValue, StructValue, VariantValue}, validator::{LuaValidationError, Validator}}, writes::Writes}, lua::LuaValue};
 
 mod converter;
 mod validator;
@@ -66,6 +66,47 @@ pub fn is_dirty_lua_value(
         },
         _ => Ok(false)
     }
+}
+
+/// kiln-eml: the writes logged in `lua_value`'s tree, as (writer, member path from `path`) (env/writes.rs). A plain value
+/// logs nothing of its own: its writes are its container's.
+pub(crate) fn walk_writes(
+    lua_value: &LuaValue,
+    path: &str,
+    out: &mut Vec<(u32, String)>,
+) -> mlua::Result<()> {
+    let LuaValue::UserData(ud) = lua_value else { return Ok(()) };
+    match ud.type_id() {
+        Some(id) if id == TypeId::of::<StructValue>() => ud.borrow::<StructValue>()?.walk_writes(path, out),
+        Some(id) if id == TypeId::of::<MappedStructValue>() => ud.borrow::<MappedStructValue>()?.walk_writes(path, out),
+        Some(id) if id == TypeId::of::<ArrayValue>() => ud.borrow::<ArrayValue>()?.walk_writes(path, out),
+        Some(id) if id == TypeId::of::<MappedArrayValue>() => ud.borrow::<MappedArrayValue>()?.walk_writes(path, out),
+        Some(id) if id == TypeId::of::<VariantValue>() => ud.borrow::<VariantValue>()?.walk_writes(path, out),
+        Some(id) if id == TypeId::of::<MappedVariantValue>() => ud.borrow::<MappedVariantValue>()?.walk_writes(path, out),
+        _ => Ok(()),
+    }
+}
+
+/// kiln-eml: an array element `value` was put in place (set or inserted): a value with a log of its own is written whole
+/// there (its later index is where it ends up); a plain value is a write of the list's members.
+pub(crate) fn note_put(
+    list: &Writes,
+    value: &LuaValue,
+) -> mlua::Result<()> {
+    let LuaValue::UserData(ud) = value else {
+        list.items();
+        return Ok(());
+    };
+    match ud.type_id() {
+        Some(id) if id == TypeId::of::<StructValue>() => ud.borrow::<StructValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<MappedStructValue>() => ud.borrow::<MappedStructValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<ArrayValue>() => ud.borrow::<ArrayValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<MappedArrayValue>() => ud.borrow::<MappedArrayValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<VariantValue>() => ud.borrow::<VariantValue>()?.writes().whole(),
+        Some(id) if id == TypeId::of::<MappedVariantValue>() => ud.borrow::<MappedVariantValue>()?.writes().whole(),
+        _ => list.items(),
+    }
+    Ok(())
 }
 
 pub fn push(

@@ -575,6 +575,19 @@ Each is marked `kiln-eml:` in the source.
     `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
     adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
     is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
+43. `mod-loader-lua` `env/writes.rs` (new), the value wrappers (`value/mapped.rs`, `value/simple.rs`, `value.rs`
+    `walk_writes`/`note_put`), `env/app_state.rs`, `env/game/assets.rs`, `runner/mod.rs`, `lib.rs` (`RunResult::journal`,
+    `RunResult::generation`) (kiln-eml's own code, 0.2.0-dev.31.15): EML's pass records which mod wrote which resource
+    and where, for the EML dialect's change journal (kiln-eml `sf_startup/journal.rs`, format 2). The runner names the
+    running entrypoint (`require("mods.<id>")`); each value wrapper keeps a log of the writes made through it (a field
+    assigned, the value put in place whole, a list's membership changed), a resource's `data` replaced, a resource or a
+    content created are noted per writer; once the mods ran, `AppState::write_record` walks every materialized value as
+    it will be written and turns each log into a member path at its published place (`recipes[37].craftingDuration`,
+    `input[]`, `""` for the whole resource). Off outside a run (one thread-local read); in a run a write costs a
+    thread-local read and a scan of its value's own small log; a copy's log starts empty (the assignment that put it
+    there names its writer), and a write into a value detached from its resource is not named. Nothing is compared or
+    serialized differently: the dirty flags and the bytes written are EML's. Tests: `env::writes` (2),
+    `value::tests::writes_are_named_by_their_published_member_paths`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

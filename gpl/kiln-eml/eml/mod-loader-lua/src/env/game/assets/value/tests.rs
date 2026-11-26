@@ -279,3 +279,67 @@ fn a_mapped_array_count_beyond_its_bytes_is_a_lua_error_not_an_allocation() {
         assert!(err.contains(&want), "{err}");
     }
 }
+
+// kiln-eml: the change journal's member paths (env/writes.rs): each write is noted for the running entrypoint through
+// the value it goes into, and walking the value as it will be written gives every write's path at its published place
+// (0-based element indices): a field set, an element replaced or inserted whole, a list's membership changed; a write
+// into a value detached from the data before (an element since replaced) is not there, and neither is one made outside
+// a run. The same for a value a mod created (owned) as for the game's mapped data.
+#[test]
+fn writes_are_named_by_their_published_member_paths() {
+    use crate::env::writes::{Record, Recording};
+    use std::cell::RefCell;
+    let (lua, _registry) = lua_with_registry();
+    let record = RefCell::new(Record::default());
+    let walk = |lua: &mlua::Lua, global: &str| {
+        let data: LuaValue = lua.globals().get(global).unwrap();
+        let mut out = Vec::new();
+        walk_writes(&data, "", &mut out).unwrap();
+        out.sort();
+        out
+    };
+    lua.load("game.recipes[1].knowledgeRequirement.compareValue = 3").exec().unwrap();
+    assert!(walk(&lua, "game").is_empty(), "a write outside a run is not noted");
+    {
+        let _run = Recording::start();
+        {
+            let _a = Record::begin(&record, "a");
+            lua.load("game.recipes[1].knowledgeRequirement.compareValue = 1; game.recipes[1].knowledgeRequirement.compareValue = 2")
+                .exec()
+                .unwrap();
+        }
+        {
+            let _b = Record::begin(&record, "b");
+            lua.load("owned = own(plain(game)); push(owned.recipes, new_recipe(4)); owned.recipes[2].knowledgeRequirement = { knowledgeOrQueryId = { value = 6 }, compareValue = 0 }; push(game.recipes, new_recipe(5))")
+                .exec()
+                .unwrap();
+        }
+        let _c = Record::begin(&record, "c");
+        let remove_fn = lua
+            .create_function(|lua, (list, at): (AnyUserData, usize)| Ok(remove(&list, at, lua)?.1))
+            .unwrap();
+        lua.globals().set("remove_at", remove_fn).unwrap();
+        lua.load("local kept = game.recipes[2]; game.recipes[2] = new_recipe(9); kept.knowledgeRequirement.compareValue = 7; assert(remove_at(owned.recipes, 1))")
+            .exec()
+            .unwrap();
+    }
+    assert_eq!(
+        walk(&lua, "game"),
+        [
+            (1, "recipes[0].knowledgeRequirement.compareValue".to_string()),
+            (2, "recipes[]".to_string()),
+            (3, "recipes[1]".to_string()),
+        ],
+        "a's field once; b's insertion a list write, its element replaced by c since (with c's write into it after)"
+    );
+    assert_eq!(
+        walk(&lua, "owned"),
+        [
+            (2, "recipes[0]".to_string()),
+            (2, "recipes[0].knowledgeRequirement".to_string()),
+            (2, "recipes[]".to_string()),
+            (3, "recipes[]".to_string()),
+        ],
+        "an owned value: b's element and the field b set in it, at index 0 since c removed the first element"
+    );
+}

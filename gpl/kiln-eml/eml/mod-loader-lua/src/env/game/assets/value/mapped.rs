@@ -5,7 +5,7 @@ use kfc::{resource::value::{Value, Variant}, reflection::{PrimitiveType, TypeMet
 use mlua::{AnyUserData, Function, MetaMethod, UserData};
 use ouroboros::self_referencing;
 
-use crate::{alias::{MappedArray, MappedStruct, MappedVariant, TypeHandle}, env::{game::value::is_dirty_lua_value, value::{converter::{Converter, LuaConversionErrorKind, value_to_lua}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
+use crate::{alias::{MappedArray, MappedStruct, MappedVariant, TypeHandle}, env::{game::value::{is_dirty_lua_value, note_put, walk_writes}, value::{converter::{Converter, LuaConversionErrorKind, value_to_lua}, name_of, validate_and_clone_lua_value, validator::try_clone_lua_value}, writes::{Writes, field_path}}, lua::{FunctionArgs, LuaError, LuaValue, MethodArgs}};
 
 // TODO: Add MappedBitmaskValue
 
@@ -13,6 +13,8 @@ pub struct MappedStructValue {
     data: MappedStruct,
     cache: Rc<RefCell<HashMap<String, LuaValue>>>,
     dirty: Cell<bool>,
+    // kiln-eml: the writes made through this value, for the change journal (env/writes.rs)
+    writes: Writes,
 }
 
 impl MappedStructValue {
@@ -23,6 +25,7 @@ impl MappedStructValue {
             data,
             cache: Default::default(),
             dirty: Cell::new(false),
+            writes: Writes::default(),
         }
     }
 
@@ -89,6 +92,8 @@ impl MappedStructValue {
             data: self.data.clone(),
             cache: Rc::new(RefCell::new(cache)),
             dirty: self.dirty.clone(),
+            // kiln-eml: a copy's writes are its new place's (the assignment that puts it there notes them)
+            writes: Writes::default(),
         })
     }
 
@@ -141,7 +146,21 @@ impl MappedStructValue {
         }
 
         self.dirty.set(true);
+        self.writes.field(key); // kiln-eml
 
+        Ok(())
+    }
+
+    /// kiln-eml: this value's logged writes and its materialized fields' (env/writes.rs), `path` being its own path.
+    pub(crate) fn writes(&self) -> &Writes {
+        &self.writes
+    }
+
+    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+        self.writes.emit(path, out);
+        for (key, value) in self.cache.borrow().iter() {
+            walk_writes(value, &field_path(path, key), out)?;
+        }
         Ok(())
     }
 
@@ -343,6 +362,8 @@ pub struct MappedArrayValue {
     data: MappedArray,
     values: Rc<RefCell<Vec<MappedArrayValueEntry>>>,
     dirty: Cell<bool>,
+    // kiln-eml: the writes made through this value, for the change journal (env/writes.rs)
+    writes: Writes,
 }
 
 #[derive(Debug, Clone)]
@@ -365,6 +386,7 @@ impl MappedArrayValue {
             data,
             values: Rc::new(RefCell::new(cache)),
             dirty: Cell::new(false),
+            writes: Writes::default(),
         }
     }
 
@@ -430,6 +452,7 @@ impl MappedArrayValue {
             data: self.data.clone(),
             values: Rc::new(RefCell::new(cloned_cache)),
             dirty: self.dirty.clone(),
+            writes: Writes::default(), // kiln-eml
         })
     }
 
@@ -472,6 +495,7 @@ impl MappedArrayValue {
         let value = validate_and_clone_lua_value(value, self.element_type(), lua)
             .map_err(LuaError::external)?;
 
+        note_put(&self.writes, &value)?; // kiln-eml
         self.values.borrow_mut()[index] = MappedArrayValueEntry::Value(value);
         self.dirty.set(true);
 
@@ -490,6 +514,8 @@ impl MappedArrayValue {
         let value = validate_and_clone_lua_value(value, self.element_type(), lua)
             .map_err(LuaError::external)?;
 
+        note_put(&self.writes, &value)?; // kiln-eml
+        self.writes.items();
         self.values.borrow_mut().insert(
             index,
             MappedArrayValueEntry::Value(value)
@@ -524,6 +550,7 @@ impl MappedArrayValue {
 
         self.values.borrow_mut().remove(index);
         self.dirty.set(true);
+        self.writes.items(); // kiln-eml
 
         Ok(Some(value))
     }
@@ -533,7 +560,23 @@ impl MappedArrayValue {
 
         self.values.borrow_mut().clear();
         self.dirty.set(true);
+        self.writes.items(); // kiln-eml
 
+        Ok(())
+    }
+
+    /// kiln-eml: this value's logged writes and its materialized elements' (env/writes.rs), at their current indices.
+    pub(crate) fn writes(&self) -> &Writes {
+        &self.writes
+    }
+
+    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+        self.writes.emit(path, out);
+        for (i, entry) in self.values.borrow().iter().enumerate() {
+            if let MappedArrayValueEntry::Value(value) = entry {
+                walk_writes(value, &format!("{path}[{i}]"), out)?;
+            }
+        }
         Ok(())
     }
 
@@ -741,6 +784,8 @@ pub struct MappedVariantValue {
     data: MappedVariant,
     value: RefCell<Option<LuaValue>>,
     dirty: Cell<bool>,
+    // kiln-eml: the writes made through this value, for the change journal (env/writes.rs)
+    writes: Writes,
 }
 
 impl MappedVariantValue {
@@ -750,6 +795,7 @@ impl MappedVariantValue {
             data,
             value: RefCell::new(None),
             dirty: Cell::new(false),
+            writes: Writes::default(),
         }
     }
 
@@ -799,6 +845,7 @@ impl MappedVariantValue {
                 None => RefCell::new(None),
             },
             dirty: self.dirty.clone(),
+            writes: Writes::default(), // kiln-eml
         })
     }
 
@@ -819,6 +866,20 @@ impl MappedVariantValue {
         }
 
         Ok(false)
+    }
+
+    /// kiln-eml: this value's logged writes and its value's (env/writes.rs): a variant's fields are at its own path.
+    pub(crate) fn walk_writes(&self, path: &str, out: &mut Vec<(u32, String)>) -> mlua::Result<()> {
+        self.writes.emit(path, out);
+        if let Some(value) = self.value.borrow().as_ref() {
+            walk_writes(value, path, out)?;
+        }
+        Ok(())
+    }
+
+    /// kiln-eml: this value was put in place whole (note_put).
+    pub(crate) fn writes(&self) -> &Writes {
+        &self.writes
     }
 
 }
@@ -848,6 +909,7 @@ impl UserData for MappedVariantValue {
 
             this.value.replace(Some(value));
             this.dirty.set(true);
+            this.writes.whole(); // kiln-eml
 
             Ok(())
         });
