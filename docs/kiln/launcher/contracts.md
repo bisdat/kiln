@@ -954,7 +954,8 @@ All written atomically; a file whose `pid` is not a live process is stale.
   or "", folder}`). Example: `{"format":1,"plugin":"kiln-set","pid":388,"status":"running","mods":[{"id":"sprint",
   "name":"Sprint Forever","version":"1.0.0","status":"loaded","reason":"","folder":"…\\shrouded_engine_tweaks\\mods\\sprint"}]}`.
 - `last-server.json` (Kiln.Network on a client): `written`, `outcome` (`rejected|welcome|vanilla`), `reason`,
-  `server{id, name, address, kiln}`, `modpack`, `required[]`, `truncated`, `missing[]`, `history[]` (<= 20 earlier
+  `server{id, name, address, kiln}`, `modpack`, `required[]`, `truncated`, `missing[]`, `hosted` (the game's own hosted
+  world: nothing missing, never offered; absent in an older file: the launcher compares the server id), `history[]` (<= 20 earlier
   entries, newest first, without their own history).
 
 ### 5.10 Admin endpoint
