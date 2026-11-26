@@ -65,7 +65,7 @@ inline ArchiveBase archive_base(const ArchiveBaseInputs& in) {
         out.writer = in.backend == "kiln" ? "kiln-eml" : "none";
         a["source"] = "none";
         a["text"] = in.backend == "kiln"
-                        ? "Kiln's interpreter for ShroudForge mods (kiln mode) published the archive through kiln-eml; kiln-eml's own state was not readable"
+                        ? "Kiln's interpreter for ShroudForge mods (kiln mode) has this start; kiln-eml's state was not readable, so Kiln cannot say what it published"
                         : "kiln-eml is not running: Kiln cannot tell whether another loader patched the archive; it reads it as the game's own";
         return out;
     }
@@ -87,9 +87,20 @@ inline ArchiveBase archive_base(const ArchiveBaseInputs& in) {
     const std::string receipt = "kiln/eml/ownership/" + stem + ".json";
     const bool loaders = st.contains("loaders") && st["loaders"].is_array() && !st["loaders"].empty();
     if (in.backend == "kiln") {
+        // the writer stays kiln-eml whatever the pass did (as before); the sentence says what it did (startup_seam.rs
+        // settle_entries: done = committed or cached, idle = unchanged or restored, failed = refused or failed; run_kiln's
+        // start that ran no pass is idle or failed too). Review: it said "published the archive" on every phase.
         out.writer = "kiln-eml";
         a["receipt"] = file(receipt);
-        a["text"] = "Kiln's interpreter for ShroudForge mods (kiln mode) published the archive through kiln-eml (its change journal names the packages)";
+        const std::string who = "Kiln's interpreter for ShroudForge mods (kiln mode)";
+        a["text"] = phase == "done"                         ? who + " published the archive through kiln-eml (its change journal names the packages)"
+                    : phase == "idle" && flag("restored") ? who + " put the game's own data back from kiln-eml's vanilla backup this start"
+                    : phase == "idle"                     ? who + " published nothing this start (no startup pass ran, or it changed nothing): "
+                                                              "the archive is as an earlier start left it"
+                    : phase == "failed"                   ? who + ": its startup pass failed this start and published nothing; the archive is "
+                                                              "as an earlier start left it"
+                                                          : who + " has this start; kiln-eml's phase " + (phase.empty() ? std::string("is not known") : phase) +
+                                                                " says nothing of what it published";
     } else if (phase == "done") {
         out.writer = "kiln-eml";
         a["receipt"] = file(receipt);

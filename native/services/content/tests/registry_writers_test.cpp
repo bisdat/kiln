@@ -650,6 +650,23 @@ int main(int argc, char** argv) {
         b = with("kiln", R"({"phase": "done", "file": "enshrouded_server", "patched": 4, "mods": []})");
         CHECK(b.writer == "kiln-eml", "kiln mode: kiln-eml");
         CHECK(with("kiln", nullptr).writer == "kiln-eml", "kiln mode without kiln-eml's state: kiln-eml all the same (as before)");
+        // review: kiln mode's sentence follows kiln-eml's phase (startup_seam.rs settle_entries: done = committed or cached, idle =
+        // unchanged or restored, failed = refused or failed, and run_kiln's start with no pass): it said "published the archive"
+        // on every one. The writer stays kiln-eml, as before.
+        CHECK(b.archive.value("text", "").find("published the archive") != std::string::npos, "a done pass published it: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "restored": true, "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("published the archive") == std::string::npos &&
+                  b.archive.value("text", "").find("vanilla backup") != std::string::npos,
+              "kiln mode put the game's own data back: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "restored": false, "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("published nothing") != std::string::npos,
+              "kiln mode published nothing this start: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "failed", "file": "enshrouded_server", "restored": false, "error": "x", "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("failed") != std::string::npos &&
+                  b.archive.value("text", "").find("published the archive") == std::string::npos,
+              "kiln mode's pass failed: " + b.archive.dump());
+        CHECK(with("kiln", nullptr).archive.value("text", "").find("published the archive") == std::string::npos,
+              "kiln mode without kiln-eml's state: what was published is not known: " + with("kiln", nullptr).archive.dump());
         // no kiln-eml: Kiln cannot tell; "none", as before, and the sentence says so
         b = with("hosted", nullptr);
         CHECK(b.writer == "none" && b.archive.value("source", "") == "none" && !b.archive.value("text", "").empty(),
