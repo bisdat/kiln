@@ -52,7 +52,9 @@ void logf(int level, const char* fmt, ...) {
     std::fprintf(stderr, "%s\n", b);
     if (g_log_lines.size() < 100000) g_log_lines.push_back(std::to_string(level) + " " + b);
 }
+size_t g_rd_calls = 0;  // test-only: reads of game memory (what one tick of the later-writes look reads)
 bool rd(uintptr_t address, void* out, size_t n) {
+    ++g_rd_calls;
     if (address < A(0) || address + n > A(sizeof g_arena)) return false;
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
@@ -211,9 +213,11 @@ std::shared_ptr<registry::map::RegMap> g_regmap;
 registry::Result g_last_report;
 int g_reports = 0;
 std::function<std::string(KilnOwner)> g_owner_name;  // stage(): RegistryLive::owner_name (the core's id of an owner)
+std::function<void(RegistryLive&)> g_stage_extra;    // stage(): more base entries, ids and numbers (composed again after it)
 
 void world() {
     g_owner_name = {};
+    g_stage_extra = {};
     g_write_limits.clear(); g_before_write = {}; g_after_each_write = {}; g_fail_addrs.clear(); g_integer_impacts.clear();
     g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
@@ -397,6 +401,10 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
+    if (g_stage_extra) {
+        g_stage_extra(in);
+        in.result = registry::compose(sc, in.base, old, mods);
+    }
     in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "loot.rarities", "loot.fixedRarity", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
@@ -1044,6 +1052,67 @@ void code_over_a_registry_value_is_reported() {
     check(line && line->text.find("sets 48 over m's 2400") != std::string::npos && line->text.find("game's value, 12,") != std::string::npos,
           "the value code computed on: " + (line ? line->text : std::string("none")));
 }
+// Review (registry-followups 1): the later-writes look runs in the tick's publish under the store's lock, and read every bound
+// slot in one tick (a slot's bytes and its store signature): about 19 ms at 40,000 slots with four layers each (a loot or
+// stacks pack over every entry binds that many), every 10 s, and every 2 s while the store moves, also holding up the game's
+// job threads waiting for the lock. A look now reads at most kLateBatch slots a tick and goes on at the next ticks; a write
+// it finds anywhere is in registry.json within the look's ticks, as before.
+void later_writes_look_a_batch_a_tick() {
+    world();
+    g_registry_now_ms = [] { return g_now; };
+    constexpr size_t kBulk = 2500;  // more than two batches
+    constexpr size_t kBulkAt = 0x50000;
+    Registry& I = g_regs[KILN_CONTENT_ITEMS];
+    std::vector<std::string> names;
+    for (size_t i = 0; i < kBulk; ++i) names.push_back("Bulk_" + std::to_string(i));
+    for (size_t i = 0; i < kBulk; ++i) {
+        uint8_t guid[16] = {0xB0, 0x1C};
+        std::memcpy(guid + 4, &i, sizeof i);
+        add_entry(I, static_cast<uint32_t>(0x100000 + i), names[i].c_str(), kBulkAt + i * 4, guid);
+        mem<uint32_t>(kBulkAt + i * 4, 20);
+    }
+    g_stage_extra = [](RegistryLive& in) {
+        for (size_t i = 0; i < kBulk; ++i) {
+            const std::string id = "game:bulk_" + std::to_string(i);
+            registry::BaseModel::Entry e;
+            e.id = id;
+            e.fields["maxStack"] = registry::Value::integer(20);
+            in.base.registries["items"].push_back(e);
+            in.ids["items|" + id] = guid_text(g_regs[KILN_CONTENT_ITEMS].get(static_cast<uint32_t>(0x100000 + i))->guid);
+            in.nums["items|" + id] = static_cast<uint32_t>(0x100000 + i);
+        }
+    };
+    g_files = {{"bulk/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:bulk_*"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"bulk", "bulk/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    check(at<uint32_t>(kBulkAt) == 40 && at<uint32_t>(kBulkAt + (kBulk - 1) * 4) == 40, "the pack's x2 on every bulk item");
+    const int reports = g_reports;
+    g_now += 11000;  // the timer's look is due
+    g_rd_calls = 0;
+    registry_live_publish();
+    check(g_rd_calls <= kLateBatch, "one tick of the look reads at most a batch of slots (" + std::to_string(g_rd_calls) + " reads)");
+    check(g_reports == reports, "nothing changed so far");
+    // a write outside Kiln on the last bound slot: found by the same look, a batch a tick
+    mem<uint32_t>(kBulkAt + (kBulk - 1) * 4, 777);
+    int ticks = 1;
+    for (; ticks < 16 && g_reports == reports; ++ticks) {
+        g_rd_calls = 0;
+        registry_live_publish();
+        check(g_reports != reports || g_rd_calls <= kLateBatch, "every tick of the look reads at most a batch (" + std::to_string(g_rd_calls) + ")");
+    }
+    check(g_reports == reports + 1, "the write is in registry.json within the look (" + std::to_string(ticks) + " ticks)");
+    const auto row = json_field({"items", "game:bulk_" + std::to_string(kBulk - 1), "maxStack"});
+    check(row["result"] == 777 && row["writers"].back()["kind"] == "drift", "a best-effort row, last: " + row.dump());
+    // the next look starts over from the new report: nothing changed since, nothing rebuilt
+    const int after = g_reports;
+    g_now += 11000;
+    for (int t = 0; t < 16; ++t) registry_live_publish();
+    check(g_reports == after, "a whole look over unchanged slots rebuilds nothing");
+    g_registry_now_ms = &steady_ms;
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1313,6 +1382,7 @@ int main() {
         {"later_writes_reach_the_report", later_writes_reach_the_report},
         {"code_writers_are_named_in_kiln_words", code_writers_are_named_in_kiln_words},
         {"code_over_a_registry_value_is_reported", code_over_a_registry_value_is_reported},
+        {"later_writes_look_a_batch_a_tick", later_writes_look_a_batch_a_tick},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

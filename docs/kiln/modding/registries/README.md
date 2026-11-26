@@ -455,9 +455,10 @@ loader's change through Kiln) and every 10 s for a write outside it, comparing e
 report saw. When one changed, `registry.json` and the Conflicts view get the field's new writers and result (a code writer
 as above; a write outside Kiln as a best-effort row last, with a line: "the game's value changed outside Kiln after Kiln's
 last write in this world"); no new generation, no ready event, nothing written into the game. A field that keeps changing
-is looked at less often (up to once a minute). kiln.log says so once. A look costs a read of each slot Kiln writes live
-(a few thousand at most) and nothing when nothing changed. A write outside Kiln that comes back to Kiln's value between
-two looks is not seen. A suspect list is a hint, not proof: a writer that hooks nothing is not
+is looked at less often (up to once a minute). kiln.log says so once. A look reads each slot Kiln writes live, at most
+1,024 of them a tick (a pack over every entry's stacks or drops writes tens of thousands: its look takes a few dozen ticks),
+and rebuilds nothing when nothing changed; when something did, the rebuild costs what a pack reload's report costs. A write
+outside Kiln that comes back to Kiln's value between two looks is not seen. A suspect list is a hint, not proof: a writer that hooks nothing is not
 seen, and a field nobody edits through the registry is not checked. Neither is an entry an old boot resource patch (an
 `OnBoot` or `resourcePatches` document) writes: the game holds Kiln's own patch there, and many of its paths (a formula's
 input, an element of a list of structs, `[*]` over every recipe) have no field row to explain it, so a change there is
