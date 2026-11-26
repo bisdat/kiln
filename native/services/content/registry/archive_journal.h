@@ -22,10 +22,13 @@
 //    names another generation. Such a journal is "stale" and names nobody;
 //  - only kiln-mode starts write one. Hosted or installed ShroudForge, kiln-eml's own EML dialect and other loaders keep
 //    none: their pregame values are in the base and the report says no journal named them (Journal::state).
-// Plain data: no file, no game memory, no lock.
+// Plain data apart from read_archive_journal (one file): no game memory, no lock.
 #pragma once
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -49,6 +52,19 @@ struct ArchiveJournal {
     std::vector<Package> packages;  // in run order
     Package unattributed;           // id empty: writes made while no entrypoint ran
 };
+
+// The largest journal read: kiln-eml reads its own at most this big (StartupJournal::read), and its bounds keep one far
+// below (32,768 rows in all).
+constexpr uintmax_t kArchiveJournalMax = 16u << 20;
+
+// The journal's text, read only from the game folder itself as kiln-eml writes it (kiln-eml refuses a linked archive or
+// state path): <kiln>/eml/ownership/<stem>.change-journal.json, where kiln is <game>/kiln. nullopt + *why when there is
+// none, when the kiln folder, eml, ownership or the file is a link (is_link: a symbolic link, a junction or any other
+// reparse point), when it is no regular file, larger than kArchiveJournalMax, or unreadable. Read and closed at once (an
+// open handle can make the next kiln-mode start fail to remove it).
+using ArchiveLinkTest = std::function<bool(const std::filesystem::path&)>;
+std::optional<std::string> read_archive_journal(const std::filesystem::path& kiln, const std::filesystem::path& stem, const ArchiveLinkTest& is_link,
+                                                std::string* why);
 
 // The journal's text against the generation this start's archive writer published (lower-case hex, 64 digits). Never
 // throws: a malformed file is state "unreadable" with the reason. A package must be named as the format says (a ShroudForge

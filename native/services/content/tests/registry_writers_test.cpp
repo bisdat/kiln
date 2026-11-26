@@ -6,11 +6,14 @@
 // registry.json's base.journal. argv[1]: the repository root (for the schema fixture); argv[2] (optional): where to write
 // the document it builds, for a schema check against schema/state-registry.schema.json.
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <set>
 #include <sstream>
 #include <string>
+
+#include <unistd.h>
 
 #include "../registry/archive_journal.h"
 #include "../registry/drift.h"
@@ -140,6 +143,49 @@ int main(int argc, char** argv) {
           "who: <kind>:<package>");
     CHECK(archive_writer_label("shroudforge:alpha") == "alpha (ShroudForge package)" && archive_writer_label("eml:bravo") == "bravo (EML package)",
           "a package's label in messages");
+
+    // ---- the file (review: only from the game folder itself, bounded, never through a link) ----
+    {
+        namespace fs = std::filesystem;
+        const fs::path tmp = fs::temp_directory_path() / ("kiln-writers-test-" + std::to_string(::getpid()));
+        fs::remove_all(tmp);
+        const fs::path kiln = tmp / "game" / "kiln", own = kiln / "eml" / "ownership";
+        fs::create_directories(own);
+        const std::string name = "enshrouded_server.change-journal.json";
+        std::string why;
+        CHECK(!read_archive_journal(kiln, "enshrouded_server", {}, &why) && why.find("wrote no change journal") != std::string::npos, "no file: none, with why: " + why);
+        std::ofstream(own / name, std::ios::binary) << text;
+        const auto got = read_archive_journal(kiln, "enshrouded_server", {}, &why);
+        CHECK(got && *got == text, "the journal beside the receipt is read whole");
+        // a junction or another reparse point (Windows), as the caller's link test says
+        why.clear();
+        CHECK(!read_archive_journal(kiln, "enshrouded_server", [&](const fs::path& p) { return p == own; }, &why) && why.find("is a link") != std::string::npos,
+              "a reparse point on the way is not followed: " + why);
+        // a symbolic link out of the game folder: the ownership folder, or the file itself
+        const fs::path outside = tmp / "elsewhere";
+        fs::create_directories(outside);
+        std::ofstream(outside / name, std::ios::binary) << text;
+        const fs::path kiln2 = tmp / "game2" / "kiln";
+        fs::create_directories(kiln2 / "eml");
+        fs::create_directory_symlink(outside, kiln2 / "eml" / "ownership");
+        why.clear();
+        CHECK(!read_archive_journal(kiln2, "enshrouded_server", {}, &why) && why.find("kiln/eml/ownership is a link") != std::string::npos,
+              "a linked ownership folder is not followed: " + why);
+        const fs::path kiln3 = tmp / "game3" / "kiln";
+        fs::create_directories(kiln3 / "eml" / "ownership");
+        fs::create_symlink(outside / name, kiln3 / "eml" / "ownership" / name);
+        why.clear();
+        CHECK(!read_archive_journal(kiln3, "enshrouded_server", {}, &why) && why.find("the journal is a link") != std::string::npos, "a linked file is not followed: " + why);
+        // larger than kiln-eml's own bound: not read (nothing is parsed)
+        fs::resize_file(own / name, kArchiveJournalMax + 1);
+        why.clear();
+        CHECK(!read_archive_journal(kiln, "enshrouded_server", {}, &why) && why.find("larger than 16 MiB") != std::string::npos, "an oversized file is not read: " + why);
+        fs::remove(own / name);
+        fs::create_directory(own / name);
+        why.clear();
+        CHECK(!read_archive_journal(kiln, "enshrouded_server", {}, &why) && why.find("no regular file") != std::string::npos, "a folder in its place is not read: " + why);
+        fs::remove_all(tmp);
+    }
 
     // ---- naming entries ----
     BaseModel bm = base();

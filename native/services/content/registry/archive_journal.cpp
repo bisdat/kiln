@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <set>
 
 namespace kc::registry {
@@ -62,6 +63,29 @@ ArchiveJournal unreadable(const std::string& why) {
 }
 
 }  // namespace
+
+std::optional<std::string> read_archive_journal(const std::filesystem::path& kiln, const std::filesystem::path& stem, const ArchiveLinkTest& is_link,
+                                                std::string* why) {
+    namespace fs = std::filesystem;
+    const fs::path file = kiln / "eml" / "ownership" / (stem.native() + fs::path(".change-journal.json").native());
+    std::error_code ec;
+    if (!fs::exists(fs::symlink_status(file, ec)))
+        return *why = "kiln-eml wrote no change journal for this start (kiln/eml/ownership): its packages are not named", std::nullopt;
+    const std::pair<fs::path, const char*> parts[] = {{kiln, "the kiln folder"}, {kiln / "eml", "kiln/eml"}, {kiln / "eml" / "ownership", "kiln/eml/ownership"}, {file, "the journal"}};
+    for (const auto& [p, name] : parts)
+        if (fs::is_symlink(fs::symlink_status(p, ec)) || (is_link && is_link(p)))
+            return *why = std::string("kiln-eml's change journal is not read: ") + name + " is a link, which may lead out of the game folder", std::nullopt;
+    if (!fs::is_regular_file(fs::symlink_status(file, ec))) return *why = "kiln-eml's change journal is no regular file: not read", std::nullopt;
+    const uintmax_t size = fs::file_size(file, ec);
+    if (ec) return *why = "kiln-eml's change journal could not be read", std::nullopt;
+    if (size > kArchiveJournalMax) return *why = "kiln-eml's change journal is larger than 16 MiB: not read", std::nullopt;
+    std::ifstream in(file, std::ios::binary);
+    std::string text;
+    text.resize(static_cast<size_t>(size));
+    if (!in || !in.read(text.data(), static_cast<std::streamsize>(size)) || in.peek() != std::char_traits<char>::eof())
+        return *why = "kiln-eml's change journal could not be read whole (it changed while it was read)", std::nullopt;
+    return text;
+}
 
 ArchiveJournal parse_archive_journal(const std::string& text, const std::string& live_generation) {
     const json doc = json::parse(text, nullptr, false);

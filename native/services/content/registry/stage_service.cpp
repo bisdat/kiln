@@ -24,6 +24,7 @@
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "pristine.h"
+#include "archive_journal.h"
 #include "drift.h"
 #include "entry_compat.h"
 #include "visibility.h"
@@ -163,21 +164,19 @@ std::string writer_of() {
     return st.backend == KILN_LAUNCH_BACKEND_KILN ? "kiln-eml" : "none";
 }
 
-// kiln-eml's change journal of this start (archive_journal.h): <kiln>/eml/ownership/<exe stem>.change-journal.json, read
-// and closed at once (an open handle can make the next kiln-mode start fail to remove it), at most 32 MiB.
+// kiln-eml's change journal of this start (archive_journal.h read_archive_journal): <kiln>/eml/ownership/<exe
+// stem>.change-journal.json, only from the game folder itself (no part of the path a symbolic link, a junction or another
+// reparse point, as kiln-eml refuses for its own writes), read and closed at once, at most 16 MiB.
 std::optional<std::string> archive_journal(std::string* generation, std::string* why) {
     if (!eml_live_generation(generation, why)) return std::nullopt;
     wchar_t exe[MAX_PATH * 2] = {};
     const DWORD n = GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(std::size(exe)));
     if (n == 0 || n >= std::size(exe)) return *why = "the game's file name is not known", std::nullopt;
-    const fs::path file = u8(api_path(KILN_PATH_KILN)) / u8"eml" / u8"ownership" / (fs::path(exe).stem().wstring() + L".change-journal.json");
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec))
-        return *why = "kiln-eml wrote no change journal for this start (kiln/eml/ownership): its packages are not named", std::nullopt;
-    if (fs::file_size(file, ec) > 32u * 1024 * 1024 || ec) return *why = "kiln-eml's change journal is larger than 32 MiB: not read", std::nullopt;
-    auto text = read_whole(file);
-    if (!text) *why = "kiln-eml's change journal could not be read";
-    return text;
+    const auto reparse = [](const fs::path& p) {
+        const DWORD a = GetFileAttributesW(p.c_str());
+        return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    };
+    return read_archive_journal(u8(api_path(KILN_PATH_KILN)), fs::path(exe).stem(), reparse, why);
 }
 
 // The drift probe's suspects (drift.h): the hook map's foreign modules and hosted ShroudForge. Once per world, no lock held.
