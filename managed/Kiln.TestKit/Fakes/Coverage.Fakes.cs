@@ -12,7 +12,7 @@ public static partial class Coverage
             "harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). " +
             "KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver " +
             "and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Window docking " +
-            "(since 0.2.0-dev.31.next: Ui.FindWindow, AcceptDock, DockTo, Undock, DockChanged) with Kiln.Ui's own dock code: " +
+            "(since 0.2.0-dev.31.16, mod API 0.2.23: Ui.FindWindow, AcceptDock, DockTo, Undock, DockChanged) with Kiln.Ui's own dock code: " +
             "FrameWindows plays a frame of every open window (the group's leader first, the others beside it in the same frame, " +
             "kept inside the viewport, a docked window waiting for its target, Shift, a drop beside the old side), PlayerDrags " +
             "is the player holding and dragging one. Offline: kiln.ui itself (nothing is drawn), imgui.ini, size constraints a " +

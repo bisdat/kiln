@@ -16,8 +16,8 @@
  * then subscribe_pointer_press (0.2.0-dev.30): left and right presses over the game's own UI, take or pass,
  * then chat_search (issue #44 Phase 1c, internal only): native Ctrl+R history search snapshots,
  * then pointer, drag_source and drop_target (0.2.0-dev.30.3): the pointer and held buttons, and drag and drop between
- * widgets, for frame callbacks, then popups (0.2.0-dev.31.9): the game's popup panels, then window_state (issue 149): a
- * window's place and whether the player drags or resizes it, for window docking.
+ * widgets, for frame callbacks, then popups (0.2.0-dev.31.9): the game's popup panels, then window_state (0.2.0-dev.31.16,
+ * issue 149): a window's place and whether the player drags or resizes it, for window docking.
  *
  * How (docs/re/client-render.md):
  *  - The game loads vulkan-1.dll at run time and presents with vkQueuePresentKHR on queue family 0 (no static Vulkan
@@ -1419,7 +1419,7 @@ typedef struct KilnUiApi {
      * than KILN_UI_POPUPS_MAX panels, KILN_UI_POPUP_UNKNOWN says that some panel has no rectangle. Any thread.
      * INVALID_ARGUMENT: NULL or size too small. */
     KilnResult(KILN_CALL* popups)(KilnUiPopups* out);
-    /* Additive size-guarded tail (0.2.0-dev.31.next, GitHub issue 149; check header.size >= offsetof(KilnUiApi,
+    /* Additive size-guarded tail (0.2.0-dev.31.16, GitHub issue 149; check header.size >= offsetof(KilnUiApi,
      * window_state) + sizeof(void*) and the pointer): a window as Dear ImGui has it now (KilnUiWindowState; set out->size
      * first), what Kiln.Ui's window docking reads before it begins each window. Frame callbacks only.
      * name: the window's name as given to begin ("Title###id": ImGui's id rules); empty = the window being drawn now (its

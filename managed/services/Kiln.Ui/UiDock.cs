@@ -16,7 +16,7 @@
 namespace Kiln;
 
 /// <summary>Which side of the other window a docked window sits on (<see cref="UiWindow.DockTo"/>). Since
-/// 0.2.0-dev.31.next (GitHub issue 149).</summary>
+/// 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</summary>
 public enum DockSide
 {
     /// <summary>Left of it: the docked window's right edge on its left edge.</summary>
@@ -34,7 +34,7 @@ public enum DockSide
 /// (<see cref="Ui.FindWindow"/>): what <see cref="UiWindow.DockTo"/> takes. The handle is a name, looked up each time it is
 /// used: it keeps nothing of the other mod alive, and when that mod reloads and makes its window again (the same id, still
 /// accepting docks), the same handle answers it, and a window docked to it goes back beside it. Two handles of the same mod
-/// and id are equal. Any thread. Since 0.2.0-dev.31.next (GitHub issue 149).
+/// and id are equal. Any thread. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).
 /// </summary>
 public sealed class UiWindowHandle : IEquatable<UiWindowHandle>
 {
@@ -78,7 +78,7 @@ public sealed class UiWindowHandle : IEquatable<UiWindowHandle>
     public override string ToString() => ModId + "/" + PlacementId;
 }
 
-/// <summary>A window's dock changed (<see cref="UiWindow.DockChanged"/>). Since 0.2.0-dev.31.next (GitHub issue 149).</summary>
+/// <summary>A window's dock changed (<see cref="UiWindow.DockChanged"/>). Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</summary>
 public readonly struct UiDockChange
 {
     internal UiDockChange(UiWindowHandle? dockedTo, DockSide side, float offset, bool byPlayer)
@@ -123,7 +123,7 @@ public sealed partial class UiWindow
     /// is drawn where it is, and goes beside the target when that opens. A later call replaces the dock. Does nothing on
     /// a removed window. Any thread.</summary>
     /// <remarks>A remembering window (<see cref="UiWindowOptions.RememberPlacement"/>) does not remember places it only got
-    /// from its dock: opened alone it goes back to where the player left it. Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// from its dock: opened alone it goes back to where the player left it. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="target"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="target"/> is this window.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A side that is none of the four, or an offset that is not a finite number.</exception>
@@ -156,7 +156,7 @@ public sealed partial class UiWindow
 
     /// <summary>Takes the window out of its dock (it stays where it is). The player dropping it near its old side does not
     /// dock it again after this (it does after their own Shift drag). Does nothing when it is not docked. Any thread.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     [AnyThread]
     public void Undock()
     {
@@ -174,14 +174,14 @@ public sealed partial class UiWindow
     /// <summary>The window this one is docked to (<see cref="DockTo"/>); null when it is not docked. It stays set while the
     /// target is closed, or gone with its mod (<see cref="UiWindowHandle.Available"/>): the dock comes back with it. Any
     /// thread.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     [AnyThread]
     public UiWindowHandle? DockedTo => Dock.Current?.Target;
 
     /// <summary>The window's dock changed: your <see cref="DockTo"/> / <see cref="Undock"/> (on the thread that called it), or
     /// the player's Shift drag or drop beside its old target (<see cref="UiDockChange.ByPlayer"/>, on the render thread,
     /// right after the frame's windows: keep it short, post game work to the game's threads). Runs as your mod.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     public event Action<UiDockChange>? DockChanged;
 
     internal void RaiseDockChanged(UiDockChange change)
@@ -197,7 +197,7 @@ public static partial class Ui
     /// (<see cref="UiWindow.DockTo"/>) or read whether it is open and where it is; null when that mod is not loaded or has no
     /// such window now (or its window does not accept docks). A window that does not accept docks is never found. Your own
     /// mod's windows too. Any thread.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     /// <exception cref="ArgumentException">An empty or blank mod id or placement id.</exception>
     [AnyThread]
     public static UiWindowHandle? FindWindow(string modId, string placementId)
@@ -213,12 +213,12 @@ public sealed unsafe partial class UiDraw
     /// <summary>The player holds the current window to drag it this frame (also while the pointer stays still), as Dear
     /// ImGui has it: tells their drag from your own <see cref="UiWindow.MoveTo"/>. Inside a window's draw (also inside a
     /// child region: its window). False elsewhere, and on a kiln-ui.dll without window_state (an older Kiln).</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     public bool WindowMovedByUser => UiNative.ReadWindowState("") is { } s && (s.Flags & UiNative.WindowMoving) != 0;
 
     /// <summary>The player holds one of the current window's resize grips or borders this frame. Inside a window's draw;
     /// false elsewhere, and on a kiln-ui.dll without window_state.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     public bool WindowResizedByUser => UiNative.ReadWindowState("") is { } s && (s.Flags & UiNative.WindowResizing) != 0;
 }
 

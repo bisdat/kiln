@@ -668,7 +668,7 @@ public sealed record UiWindowOptions
     /// that accepts docks is found by <see cref="Ui.FindWindow"/> (under your mod's id and its <see cref="PlacementId"/>,
     /// else its title when created). A window docked to it moves with it, and dragging that window moves this one too
     /// (Shift drags one alone). Default false: no mod can find, read, dock to or move your window.</summary>
-    /// <remarks>Since 0.2.0-dev.31.next (GitHub issue 149).</remarks>
+    /// <remarks>Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     public bool AcceptDock { get; init; }
 }
 

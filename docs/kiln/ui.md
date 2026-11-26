@@ -260,9 +260,9 @@ Kiln clamps the move, so a Better Spells screen at the right edge puts Grimoire 
 needs nothing new in kiln.ui (the managed side uses the window position, size and rect slots it already had). Tested
 without a game, not yet seen in a running game. In the test kit: `KilnHarness.UiPlacement`
 ([unit tests](modding/unit-tests.md#ui-placement)). For two windows that stay together, use
-[docking](#docking-windows-since-020-dev31next) instead: no messages, no lag.
+[docking](#docking-windows-since-020-dev3116-mod-api-0223) instead: no messages, no lag.
 
-### Docking windows (since 0.2.0-dev.31.next)
+### Docking windows (since 0.2.0-dev.31.16, mod API 0.2.23)
 A window can dock to another window, also one of another mod, and Kiln keeps the two together in every frame, on the
 render thread (GitHub issue 149, thanks Fuzen777: what Grimoire and Better Spells did with messages, frame counting and
 a Shift listener, a frame or two late). Windows (`UiWindow`) only; screens do not dock.
@@ -788,8 +788,8 @@ if (ui.KeyPressed(UiKey.Tab, claim: true)) NextTab();                  // claim:
 - `ui.HeldMods` is the `KeyMods` (Ctrl, Shift, Alt) Dear ImGui's io has this frame, from the game window's key messages,
   whether or not Kiln has the input; a focus loss (alt-tab) clears it, so a release lost to alt-tab never leaves Shift
   held. For a Shift+drag or Shift+wheel there is no need for a `KeyInput` listener of your own.
-  `ui.WindowMovedByUser` / `ui.WindowResizedByUser` (since 0.2.0-dev.31.next) say the player drags or resizes the
-  current window this frame ([docking](#docking-windows-since-020-dev31next)).
+  `ui.WindowMovedByUser` / `ui.WindowResizedByUser` (since 0.2.0-dev.31.16, mod API 0.2.23) say the player drags or resizes the
+  current window this frame ([docking](#docking-windows-since-020-dev3116-mod-api-0223)).
 - `ui.HasLayout` is false on an older kiln.ui: each call then falls back to the older one or does nothing.
 
 ### The pointer, held buttons and drag and drop (since 0.2.0-dev.30.3)
@@ -1515,9 +1515,9 @@ The pointer and drag and drop (0.2.0-dev.30.3): `pointer(&KilnUiPointer)`, `drag
 `drop_target(kind, out, capacity, &len)`, inside a frame callback, a size-guarded tail at byte 1056
 ([services/ui.md](services/ui.md#the-pointer-and-drag-and-drop-020-dev303)).
 
-A window's state (0.2.0-dev.31.next, GitHub issue 149): `window_state(name, &KilnUiWindowState)`, inside a frame
+A window's state (0.2.0-dev.31.16, mod API 0.2.23, GitHub issue 149): `window_state(name, &KilnUiWindowState)`, inside a frame
 callback, a size-guarded tail at byte 1088: where a window is now and whether the player drags or resizes it, what
-Kiln.Ui's window docking reads ([services/ui.md](services/ui.md#a-windows-state-for-docking-020-dev31next-github-issue-149)).
+Kiln.Ui's window docking reads ([services/ui.md](services/ui.md#a-windows-state-for-docking-020-dev3116-mod-api-0223-github-issue-149)).
 
 `kiln_ui.h` (later additions, check `header.size`): `screen`, `subscribe_screen`, `subscribe_ui_tick`,
 `menu_add` / `menu_set` (`KILN_UI_MENU_MAIN` / `PAUSE`), `push_style` / `pop_style`, `image_*`, `combo`,

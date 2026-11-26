@@ -30,7 +30,7 @@ public sealed partial class KilnHarness
 /// what <see cref="UiScreen.Placement"/> reads after; a remembering screen or window writes ui-placement.json in the
 /// harness's config folder at once (in a game: about a second after the change). <see cref="PlayerPlaces(UiScreen, float, float, float, float)"/>
 /// is the player's drag or resize in the next frame; <see cref="Restart"/> is a game start (the file is read again).</para>
-/// <para><b>Docking</b> (<see cref="UiWindow.DockTo"/>, since 0.2.0-dev.31.next). <see cref="FrameWindows"/> is one overlay frame
+/// <para><b>Docking</b> (<see cref="UiWindow.DockTo"/>, since 0.2.0-dev.31.16, mod API 0.2.23). <see cref="FrameWindows"/> is one overlay frame
 /// of every open window, in the order and with the places Kiln.Ui's own dock code gives them (the group's leader first, the
 /// others beside it in the same frame, kept inside the viewport, a docked window waiting for its closed target, Shift, a drop
 /// beside the old side): use it, not <see cref="Frame(UiWindow)"/>, for docked windows. <see cref="PlayerDrags"/> is the player
@@ -156,7 +156,7 @@ public sealed class HarnessUiPlacement
 
     /// <summary>One overlay frame of every open <see cref="UiWindow"/> (of every mod in the harness), docked ones together:
     /// where each one is now (fractions of the viewport, sizes at UI scale 1), keyed by window. A window that is closed,
-    /// removed, or waiting for its dock's target is not in it. Since 0.2.0-dev.31.next (GitHub issue 149).</summary>
+    /// removed, or waiting for its dock's target is not in it. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</summary>
     public IReadOnlyDictionary<UiWindow, UiPlacement> FrameWindows()
     {
         var vp = Viewport;
@@ -191,7 +191,7 @@ public sealed class HarnessUiPlacement
     /// <summary>The player holds <paramref name="window"/> and drags it in the next <see cref="FrameWindows"/>, its centre to
     /// (<paramref name="x"/>, <paramref name="y"/>), fractions of the viewport, with Shift held or not (Shift: it moves alone and
     /// leaves its dock). The frame after without another drag is the drop (a window that was undocked by Shift docks again
-    /// there when it is within 16 pixels of its old side). Since 0.2.0-dev.31.next (GitHub issue 149).</summary>
+    /// there when it is within 16 pixels of its old side). Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</summary>
     public void PlayerDrags(UiWindow window, float x, float y, bool shift = false)
     {
         ArgumentNullException.ThrowIfNull(window);

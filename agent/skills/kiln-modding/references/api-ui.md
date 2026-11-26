@@ -82,7 +82,7 @@ mod and id in `ui-placement.json` beside `keybinds.json` (config folder), across
 remembered > options; everything Kiln places stays inside the viewport. Beside another mod's screen:
 `MoveTo(other.Right, other.Y, pivotX: 0)` with the other's `Placement` shared through `Mods.Send`. Tests:
 `kiln.UiPlacement.Frame(screen)`, `PlayerPlaces`, `Remembered`, `Restart` (docs/kiln/ui.md "Placing screens and windows").
-**Docking windows (0.2.0-dev.31.next, GitHub issue 149; tested offline, not yet seen in a game).** Prefer it over
+**Docking windows (0.2.0-dev.31.16+, mod API 0.2.23, GitHub issue 149; tested offline, not yet seen in a game).** Prefer it over
 `Mods.Send` + `MoveTo` for two windows that stay together. The target opts in with `UiWindowOptions.AcceptDock = true`
 (+ `PlacementId`); another mod gets `Ui.FindWindow(modId, placementId)` (a `UiWindowHandle`, null when that window is not
 there or does not accept docks; a name, so it survives the target's reload: `Available`, `Open`, `Placement`) and calls
