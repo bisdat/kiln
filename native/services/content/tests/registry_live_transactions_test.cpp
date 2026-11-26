@@ -1082,6 +1082,15 @@ void live_refusals_name_kiln_fields_never_game_members() {
     g_regs[KILN_CONTENT_LOOT].schema.fields[g_regs[KILN_CONTENT_LOOT].schema.by_path.at("useUiRarity")].writable = false;
     registry_live_commit(71, change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])"), &reply);
     refused("optional enum read-only", {"uiRarity", "useUiRarity"}, "loot[game:material_t1_wood_logs].fixedRarity", "is read-only on this game build");
+    // review-registry-fixes: the perk slots the build does not have (refList: references and ids in step)
+    fresh_live(); g_log_lines.clear();
+    {
+        auto& sc = g_regs[KILN_CONTENT_ITEMS].schema;
+        sc.by_path.erase("perkIds[0]"), sc.by_lower.erase("perkids[0]");
+    }
+    registry_live_commit(71, change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"perks","list":{"append":["game:perk_b"]}}])"), &reply);
+    refused("perk slots", {"perkReferences", "perkIds"}, "items[game:material_t1_wood_logs].perks", "have no perk slots Kiln can write");
+    check(debug_names("perkIds"), "perk slots: kiln.log names the game's members at debug level, for maintainers");
 }
 void loot_fixed_rarity_read_write_revert() {
     fresh_loot(); RegistryLiveReply reply;

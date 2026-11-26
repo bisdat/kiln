@@ -196,7 +196,8 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     private readonly Queue<string> _autoTests = new();
     private readonly SemVersion _kilnVersion, _apiVersion;
     private readonly Dictionary<string, string> _sources = new(StringComparer.Ordinal);  // folder -> profile | dropin
-    // the side each mod of this start's load order had (LoadAll): it holds until the process ends (SideRefusal)
+    // the side each mod of this start's load order had (LoadAll; on a client that may host, its server mods' from the registry
+    // stage's order too): it holds until the process ends (SideRefusal)
     private readonly Dictionary<string, ManifestSide> _startSides = new(StringComparer.Ordinal);
     private volatile ModEntry[] _snapshot = [];
     private long _modsJsonGeneration;
@@ -303,6 +304,10 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             }
             candidates.Add(d);
         }
+        // a client that may host a world: the registry stage ordered its server mods too, with their side (RegistryOrder), though
+        // they load only while it hosts, so LoadAll's order below does not have them (review-registry-fixes)
+        if (_options.Side == ManifestSide.Client && _options.HostedServerMods)
+            foreach (var (id, _, side) in RegistryOrder()) _startSides.TryAdd(id, side);
         _reportStart = true;
         List<string> loaded;
         try { loaded = LoadSet(candidates); }
@@ -1068,8 +1073,8 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         return null;
     }
 
-    /// <summary>The side a mod has in this process: the start's (it was in the start's load order), else its running version's.
-    /// Null: neither (a first load).</summary>
+    /// <summary>The side a mod has in this process: the start's (it was in the start's load order, or a hosting client's registry
+    /// order), else its running version's. Null: neither (a first load).</summary>
     private ManifestSide? SideInProcess(string id) =>
         _startSides.TryGetValue(id, out var side) ? side : Find(id)?.Manifest.Side;
 

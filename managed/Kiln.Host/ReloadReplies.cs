@@ -35,8 +35,9 @@ internal sealed class ReloadReplies
     /// applied; <paramref name="Previous"/>: its packs from before apply again, whole (else none of its packs apply).</summary>
     internal sealed record SetApart(string Mod, string File, string Reason, bool Previous);
 
-    /// <summary>The data packs' part: <paramref name="Known"/> false when no pack report was read (no kiln.content, an older one,
-    /// a reply added without the content generation).</summary>
+    /// <summary>The data packs' part: <paramref name="Known"/> false when no report of an application after the reload was read (no
+    /// kiln.content, an older one, a reply added without the content generation, off its world's thread, or only the report of an
+    /// application from before the reload: the one after it had not run when the reply was due).</summary>
     internal sealed record PackOutcome(bool Known, IReadOnlyList<SetApart> SetApart)
     {
         internal static readonly PackOutcome Unknown = new(false, []);
@@ -147,7 +148,7 @@ internal sealed class ReloadReplies
 
     /// <summary>kiln.content's pack report (<paramref name="report"/>, its report() JSON): the "setApart" rows of
     /// <paramref name="mods"/> when the report is of an application after generation <paramref name="after"/> (the one the
-    /// reload ran after); none for an older report. Not known: no report, or not JSON.</summary>
+    /// reload ran after). Not known: no report, not JSON, a report of that generation or older, or one without the setApart list.</summary>
     internal static PackOutcome PacksOf(string? report, IReadOnlyCollection<string> mods, ulong after)
     {
         if (string.IsNullOrEmpty(report)) return PackOutcome.Unknown;
@@ -157,16 +158,19 @@ internal sealed class ReloadReplies
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return PackOutcome.Unknown;
             var generation = root.TryGetProperty("generation", out var g) && g.ValueKind == JsonValueKind.Number && g.TryGetUInt64(out var n) ? n : 0;
+            // a report of an application from before the reload (the one after it is delayed, or no world applies it yet), or an
+            // older kiln.content's without the list, says nothing of the reloaded mods' new packs: not known, never "none set apart"
+            if (generation <= after || !root.TryGetProperty("setApart", out var apart) || apart.ValueKind != JsonValueKind.Array)
+                return PackOutcome.Unknown;
             var rows = new List<SetApart>();
-            if (generation > after && root.TryGetProperty("setApart", out var apart) && apart.ValueKind == JsonValueKind.Array)
-                foreach (var row in apart.EnumerateArray())
-                {
-                    if (row.ValueKind != JsonValueKind.Object) continue;
-                    var mod = Text(row, "mod");
-                    if (!mods.Contains(mod)) continue;
-                    rows.Add(new SetApart(mod, Text(row, "file"), Text(row, "reason"),
-                        row.TryGetProperty("previous", out var prev) && prev.ValueKind == JsonValueKind.True));
-                }
+            foreach (var row in apart.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var mod = Text(row, "mod");
+                if (!mods.Contains(mod)) continue;
+                rows.Add(new SetApart(mod, Text(row, "file"), Text(row, "reason"),
+                    row.TryGetProperty("previous", out var prev) && prev.ValueKind == JsonValueKind.True));
+            }
             return new PackOutcome(true, rows);
         }
         catch (JsonException) { return PackOutcome.Unknown; }

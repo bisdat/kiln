@@ -261,5 +261,411 @@
         "contents": []
       }
     }
+  },
+  "eml-journal-2": {
+    "two_mods": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    },
+    "retry_whole_and_elements": {
+      "format": 2,
+      "stem": "enshrouded_server",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "retry",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "whole",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                ""
+              ]
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "recipes",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "3c0a5e77-2f41-4b6a-9e10-5d8c7b6a5f40",
+              "typeHash": "7e3a11c9",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "recipes[2]",
+                "recipes[37].craftingDuration",
+                "recipes[]"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    },
+    "truncated_unattributed": {
+      "format": 2,
+      "stem": "enshrouded_server",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": true,
+      "packages": [
+        {
+          "id": "whole",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                ""
+              ]
+            }
+          ],
+          "created": [],
+          "contents": []
+        },
+        {
+          "id": "recipes",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": true,
+          "changed": [
+            {
+              "guid": "3c0a5e77-2f41-4b6a-9e10-5d8c7b6a5f40",
+              "typeHash": "7e3a11c9",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "recipes[2]",
+                "recipes[37].craftingDuration",
+                "recipes[]"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [
+          {
+            "guid": "aaaaaaaa-0000-4000-8000-000000000001",
+            "typeHash": "8b4f2d1e",
+            "part": 0,
+            "createdBy": null,
+            "paths": [
+              ""
+            ]
+          }
+        ],
+        "created": [],
+        "contents": []
+      }
+    },
+    "sixty_four_paths": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "f000",
+                "f001",
+                "f002",
+                "f003",
+                "f004",
+                "f005",
+                "f006",
+                "f007",
+                "f008",
+                "f009",
+                "f010",
+                "f011",
+                "f012",
+                "f013",
+                "f014",
+                "f015",
+                "f016",
+                "f017",
+                "f018",
+                "f019",
+                "f020",
+                "f021",
+                "f022",
+                "f023",
+                "f024",
+                "f025",
+                "f026",
+                "f027",
+                "f028",
+                "f029",
+                "f030",
+                "f031",
+                "f032",
+                "f033",
+                "f034",
+                "f035",
+                "f036",
+                "f037",
+                "f038",
+                "f039",
+                "f040",
+                "f041",
+                "f042",
+                "f043",
+                "f044",
+                "f045",
+                "f046",
+                "f047",
+                "f048",
+                "f049",
+                "f050",
+                "f051",
+                "f052",
+                "f053",
+                "f054",
+                "f055",
+                "f056",
+                "f057",
+                "f058",
+                "f059",
+                "f060",
+                "f061",
+                "f062",
+                "f063"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
   }
 }

@@ -209,6 +209,34 @@ public sealed unsafe class ReloadRepliesTests : ModsFixture
         Assert.Equal(1, packReads);
     }
 
+    // review-registry-fixes: a reply written before the application after the reload (it is delayed past the reply's 5 s, or no
+    // world is loaded to apply it) has only the report of an application from before the reload. That report says nothing of
+    // the reloaded mod's new packs: data.packs is not known then, never "known, nothing set apart".
+    [Fact]
+    public void A_pack_report_from_before_the_reload_is_not_known()
+    {
+        var before = ReloadReplies.PacksOf(Packs, ["undo-lab"], after: 7);   // the report is of generation 7, the reload ran after it
+        Assert.False(before.Known);
+        Assert.Empty(before.SetApart);
+        Assert.Equal("", ReloadReplies.PacksSuffix(before));
+        Assert.True(ReloadReplies.PacksOf(Packs, ["nothing-here"], after: 6).Known);  // an application after the reload: known, none set apart
+        // an older kiln.content's report has no setApart list: what it set apart is not known either
+        Assert.False(ReloadReplies.PacksOf("""{"generation": 9, "packs": []}""", ["undo-lab"], after: 0).Known);
+
+        var replies = new ReloadReplies();
+        var written = new List<(string Message, JsonNode Data)>();
+        replies.Add("r.result.json", "reload undo-lab", new ModOperationResult(true, "reloaded undo-lab 1.0.1", ["undo-lab"]), ["undo-lab"], now: 0,
+            packsAfter: 7);
+        // the application stays queued: the reply is written at its deadline, with the report of generation 7
+        replies.Step(ReloadReplies.Timeout.Ticks / TimeSpan.TicksPerMillisecond + 1, _ => true, () => Report, _ => [], () => Packs,
+            (_, _, _, message, data) => written.Add((message, JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(data))!)));
+        var (m, d) = Assert.Single(written);
+        Assert.StartsWith("reloaded undo-lab 1.0.1", m);
+        Assert.DoesNotContain("data packs", m);
+        Assert.False(d["packs"]!["known"]!.GetValue<bool>());
+        Assert.Empty(d["packs"]!["setApart"]!.AsArray());
+    }
+
     // Kiln.Host reads kiln.content's generation (KilnContentStatus.generation, offset 40) and its pack report (report(), the
     // table's 18th function: offset 144) through the table, as it reads reload_pending
     [Fact]

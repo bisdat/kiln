@@ -172,14 +172,26 @@ struct EntryState {
     std::string like;
     bool retired = false;  // the ids ledger retired this id: never added again, never edited
     std::vector<std::string> archive;  // BaseModel::Entry::archive: the archive-writer packages that wrote it (a game entry only)
+    std::map<std::string, std::set<std::string>> archive_fields;  // BaseModel::Entry::archive_fields: packages named per field
+    // The packages named on `field`, in run order: each whole-entry package, and each per-field one whose fields hold it.
+    std::vector<std::pair<std::string, bool>> archive_for(const std::string& field) const {
+        std::vector<std::pair<std::string, bool>> out;
+        for (const std::string& who : archive) {
+            const auto it = archive_fields.find(who);
+            if (it == archive_fields.end()) out.emplace_back(who, false);
+            else if (it->second.count(field)) out.emplace_back(who, true);
+        }
+        return out;
+    }
 };
 
 // An archive-writer package's row of a field: what the archive holds, which is the base (D1). Never "another writer" for
 // exclusive or yield (note_row), but the row a registry edit's line names when it is the one just below.
-ChainRow archive_row(const std::string& who, const Value& base) {
+ChainRow archive_row(const std::string& who, const Value& base, bool by_field) {
     ChainRow r;
     r.kind = WriterKind::ArchiveWriter;
     r.who = who;
+    r.archive_field = by_field;
     r.op.set = true;
     r.op.value = base;
     r.after = base;
@@ -263,12 +275,12 @@ struct State {
             if (const FieldOutcome* p = parent ? parent->find_field(f) : nullptr) it->second = *p;
             else {
                 it->second.result = it->second.base = base_of(f);
-                // the packages that wrote the entry before Kiln, below every Kiln writer (archive_journal.h). The journal names
-                // the entry, not the field: no package is the field's winner (with no Kiln writer the archive's value, the
-                // base, stands)
+                // the packages that wrote the entry (or, from format 2's member paths, this field) before Kiln, below every
+                // Kiln writer (archive_journal.h). The journal names the write, not the value: no package is the field's
+                // winner (with no Kiln writer the archive's value, the base, stands)
                 const EntryState* e = entry(f.registry, f.id);
                 if (e && !e->added && it->second.base.kind != Value::None)
-                    for (const std::string& who : e->archive) it->second.chain.push_back(archive_row(who, it->second.base));
+                    for (const auto& [who, by_field] : e->archive_for(f.field)) it->second.chain.push_back(archive_row(who, it->second.base, by_field));
             }
         }
         return it->second;
@@ -572,6 +584,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         LineKind kind = LineKind::Overridden;
         std::string other;
         Certainty certainty = Certainty::Certain;
+        bool by_field = false;  // the archive-writer package below is named on this field (format 2), not the entry
         std::optional<FieldRef> supersede;  // the other scale's chain this absolute value overrides
         std::string over_who, over_place;
         Certainty over_cert = Certainty::Certain;
@@ -628,8 +641,9 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         const ChainRow* prev = fo && !fo->chain.empty() ? &fo->chain.back() : nullptr;  // the row just before this edit
         ChainRow seed;  // a field not touched yet: its archive rows come with the touch, so the last package is the row below
         if (!fo)
-            if (const EntryState* es = s.entry(t.ref.registry, t.ref.id); es && !es->added && !es->archive.empty() && cur.kind != Value::None)
-                seed = archive_row(es->archive.back(), cur), prev = &seed;
+            if (const EntryState* es = s.entry(t.ref.registry, t.ref.id); es && !es->added && cur.kind != Value::None)
+                if (const auto named = es->archive_for(t.ref.field); !named.empty())
+                    seed = archive_row(named.back().first, cur, named.back().second), prev = &seed;
         const ChainRow* last_other = other_row(fo, w.mod, false);  // the latest other writer that is not the archive writer (base, D1)
         const ChainRow* excl = other_row(fo, w.mod, true);         // the latest other writer whose edit is exclusive
         const bool earlier = last_other != nullptr;                // an earlier writer for yield: not the archive writer, not the mod itself
@@ -668,6 +682,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
             }
             st.other = prev->who;
             st.certainty = certainty_of(prev->kind);
+            st.by_field = prev->archive_field;
         }
         steps.push_back(std::move(st));
         return true;
@@ -719,10 +734,11 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         fo.winner = w.mod;
         if (report && st.line) {
             const std::string place = place_text(t), was = report_value_text(before), now = report_value_text(st.next);
-            // an archive-writer package below: the journal names the entry's resource, not the field (archive_journal.h)
+            // an archive-writer package below: the journal names the entry's resource (format 1) or this field (format 2's
+            // member paths), never the value it wrote (archive_journal.h)
             std::string text = st.certainty == Certainty::Named
-                                   ? cat({place, ": ", archive_writer_label(st.other), " wrote this entry in the game's archive before Kiln; ", w.mod,
-                                          "'s edit wins (D1): ", was, " -> ", now})
+                                   ? cat({place, ": ", archive_writer_label(st.other), st.by_field ? " wrote this field" : " wrote this entry",
+                                          " in the game's archive before Kiln; ", w.mod, "'s edit wins (D1): ", was, " -> ", now})
                                : st.kind == LineKind::Overridden ? cat({place, ": ", w.mod, " sets ", now, " over ", st.other, "'s ", was, " (the later one wins)"})
                                : st.kind == LineKind::ComposedOn ? cat({place, ": ", w.mod, "'s change composed on ", st.other, "'s value: ", was, " -> ", now})
                                                                  : cat({place, ": ", w.mod, "'s change stacks on ", st.other, "'s: ", was, " -> ", now});
@@ -1454,6 +1470,7 @@ static State base_state(const BaseModel& base) {
             x.removed = !e.removed_in.empty();
             x.removed_by = e.removed_in.empty() ? "" : "game build " + e.removed_in;
             x.archive = e.archive;
+            x.archive_fields = e.archive_fields;
             s.add_entry(reg, std::move(x));
         }
     // retired ids ("<registry>|<id>") hold their place, removed: an add of one is refused as taken, an edit as missing

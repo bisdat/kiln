@@ -116,6 +116,8 @@ int main(int argc, char** argv) {
     CHECK(parse_archive_journal("{", kGen).state == "unreadable", "not JSON: unreadable");
     json other = json::parse(text);
     other["format"] = 2;
+    CHECK(parse_archive_journal(other.dump(), kGen).state == "unreadable", "format 2 of the ShroudForge dialect: unreadable");
+    other["format"] = 3;
     CHECK(parse_archive_journal(other.dump(), kGen).state == "unreadable", "another format: unreadable");
     json broken = json::parse(text);
     broken["packages"][0]["changed"][0]["guid"] = 7;
@@ -340,6 +342,225 @@ int main(int argc, char** argv) {
     CHECK(doc2["base"]["journal"]["state"] == "none" && doc2["base"]["journal"]["text"] == "hosted ShroudForge keeps no change journal",
           "without a journal base.journal says so: " + doc2["base"].dump());
     if (argc > 2) std::ofstream(argv[2]) << doc.dump(2);
+
+    // ---- the EML dialect (format 2): kiln-eml's own record of a fixed EML pass (gpl/kiln-eml/kiln-eml/tests/
+    // journal_contract.rs `the_eml_pass_makes_the_record_kilns_reader_is_tested_on` fails unless this fixture is byte for
+    // byte that record): named per field on items and balance, per element on recipes and loot ----
+    {
+        std::ifstream ef(root + "/schema/sfi/eml-journal/fixtures/kiln-eml-writer-eml.json");
+        std::stringstream es;
+        es << ef.rdbuf();
+        const std::string written = es.str();
+        std::string live;
+        for (int i = 0; i < 32; ++i) live += "ef";
+        const std::string stone = "1d622bd9-8170-41b1-822e-d3984b386d95", logs = "aaaaaaaa-0000-4000-8000-000000000001",
+                          made = "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13", table = "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+                          recipes = "3c0a5e77-2f41-4b6a-9e10-5d8c7b6a5f40", loot = "6e9f0a12-7c3d-4b85-a1f6-0d2e4c6b8a91";
+        const ArchiveJournal e = parse_archive_journal(written, live);
+        CHECK(!written.empty() && e.state == "read" && e.format == 2 && e.dialect == "eml" && !e.truncated, "the EML pass's record reads: " + e.state + " " + e.text);
+        CHECK(e.packages.size() == 3 && e.packages[0].id == "alpha" && e.packages[0].kind == "eml" && e.packages[1].id == "bravo" &&
+                  e.packages[2].id == "charlie" && e.packages[2].version.empty(),
+              "its mods in run order (the one whose id cannot be named is not a package)");
+        CHECK(e.packages.size() == 3 && e.packages[0].paths.at(stone) == std::vector<std::string>({"maxStackSize"}) &&
+                  e.packages[1].paths.at(recipes) == std::vector<std::string>({"recipes[2]", "recipes[]"}) &&
+                  e.unattributed.paths.at(logs) == std::vector<std::string>({""}),
+              "each written resource with its member paths");
+        CHECK(parse_archive_journal(written, std::string(64, 'c')).state == "stale", "another generation: stale, names nobody");
+        CHECK(e.text.find("EML mods") != std::string::npos, "base.journal says EML mods: " + e.text);
+        // the bad ones: format 2 is the EML dialect's and its paths are the schema's
+        const json good = json::parse(written);
+        for (const auto& [what, edit] : std::vector<std::pair<std::string, std::function<void(json&)>>>{
+                 {"format 3", [](json& d) { d["format"] = 3; }},
+                 {"format 2 of the ShroudForge dialect", [](json& d) { d["dialect"] = "shroudforge"; }},
+                 {"a ShroudForge package in an EML pass", [](json& d) { d["packages"][0]["kind"] = "shroudforge"; }},
+                 {"a changed row without paths", [](json& d) { d["packages"][0]["changed"][0].erase("paths"); }},
+                 {"no paths at all", [](json& d) { d["packages"][0]["changed"][0]["paths"] = json::array(); }},
+                 {"a path with a space", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"max Stack"}; }},
+                 {"a path with a line break", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"a\nregistry: forged"}; }},
+                 {"a negative element", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"recipes[-1]"}; }},
+                 {"a path of 257 bytes", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {std::string(257, 'a')}; }}}) {
+            json bad = good;
+            edit(bad);
+            const ArchiveJournal x = parse_archive_journal(bad.dump(), live);
+            CHECK(x.state == "unreadable" && x.packages.empty(), what + ": unreadable, nothing named: " + x.state + " " + x.text);
+        }
+        // the base: items (whole resources), the balance table, three recipes and a loot entry (elements of shared resources)
+        BaseModel eb;
+        auto entry = [](const std::string& id, std::initializer_list<std::pair<const char*, Value>> f) {
+            BaseModel::Entry x;
+            x.id = id;
+            for (const auto& [k, v] : f) x.fields[k] = v;
+            return x;
+        };
+        eb.registries["items"] = {entry("game:stone", {{"maxStack", Value::integer(10)}, {"power", Value::number(31)}, {"perks", Value::of_list({})}}),
+                                  entry("game:logs", {{"maxStack", Value::integer(10)}}), entry("bravo:made", {{"maxStack", Value::integer(1)}})};
+        eb.registries["balance"] = {entry("game:balance", {{"levelCap", Value::integer(25)}, {"skillPointsPerLevel", Value::integer(1)}})};
+        eb.registries["recipes"] = {entry("game:craft_a", {{"duration", Value::number(1)}}), entry("game:craft_b", {{"duration", Value::number(2)}}),
+                                    entry("game:craft_c", {{"duration", Value::number(3)}})};
+        eb.registries["loot"] = {entry("game:stone", {{"stack.max", Value::integer(5)}, {"stack.min", Value::integer(1)}})};
+        const std::map<std::string, std::string> eids = {{"items|game:stone", stone}, {"items|game:logs", logs}, {"items|bravo:made", made},
+                                                         {"balance|game:balance", table}, {"recipes|game:craft_b", "99999999-0000-4000-8000-000000000000"}};
+        ArchiveFields af;
+        af.rows["items"] = {{"maxStack", {"maxStackSize"}}, {"power", {"damageSetup.dmgMod", "damageSetup.speedMod", "itemLevelRange.minLevel"}},
+                            {"perks", {"perkReferences", "perkIds"}}};
+        af.rows["balance"] = {{"levelCap", {"playerLevelCap"}}, {"skillPointsPerLevel", {"skillPointsPerLevel"}}};
+        af.rows["recipes"] = {{"duration", {"craftingDuration"}}, {"inputs", {"input"}}};
+        af.rows["loot"] = {{"stack.max", {"stackSizeMax"}}, {"stack.min", {"stackSizeMin"}}};
+        af.array = {{"recipes", "recipes"}, {"loot", "items"}};
+        const std::map<int32_t, std::string> recipe_elements = {{0, "game:craft_a"}, {1, "game:craft_b"}, {2, "game:craft_c"}}, loot_elements = {{0, "game:stone"}};
+        af.elements = [&](const std::string& reg, const std::string& guid) -> const std::map<int32_t, std::string>* {
+            if (reg == "recipes" && guid == recipes) return &recipe_elements;
+            if (reg == "loot" && guid == loot) return &loot_elements;
+            return nullptr;
+        };
+        CHECK(name_archive_writers(e, eids, {"items", "balance"}, &eb, &af) == 7, "seven entries named (stone, logs, made, balance, two recipes, a loot entry)");
+        const auto& st = eb.registries["items"][0];
+        CHECK(st.archive == std::vector<std::string>({"eml:alpha", "eml:bravo"}) &&
+                  st.archive_fields.at("eml:alpha") == std::set<std::string>({"maxStack"}) && st.archive_fields.at("eml:bravo") == std::set<std::string>({"power"}),
+              "the stone: alpha on its stack size, bravo on its power (a formula input)");
+        CHECK(eb.registries["items"][1].archive == std::vector<std::string>({"kiln-eml:unattributed"}) && eb.registries["items"][1].archive_fields.empty(),
+              "the logs replaced whole by a mod whose id cannot be named: unattributed, the whole entry");
+        CHECK(eb.registries["items"][2].archive == std::vector<std::string>({"eml:bravo"}) && eb.registries["items"][2].archive_fields.empty(), "a creation: its creator, whole");
+        CHECK(eb.registries["balance"][0].archive_fields.at("eml:alpha") == std::set<std::string>({"levelCap"}), "the balance table: the level cap only");
+        CHECK(eb.registries["recipes"][0].archive.empty(), "a recipe nobody wrote (only the list's members changed) is not named");
+        CHECK(eb.registries["recipes"][1].archive == std::vector<std::string>({"eml:alpha"}) && eb.registries["recipes"][1].archive_fields.at("eml:alpha") == std::set<std::string>({"duration"}),
+              "recipe 1: alpha on its duration, by its element (never by the element's own GUID member)");
+        CHECK(eb.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && eb.registries["recipes"][2].archive_fields.empty(),
+              "recipe 2 put in place whole by bravo: the whole entry");
+        CHECK(eb.registries["loot"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"stack.max"}), "a loot entry by its element: its stack size");
+        CHECK(archive_fields_of(af.rows["items"], {"damageSetup"}) == std::set<std::string>({"power"}) &&
+                  archive_fields_of(af.rows["items"], {"perkIds[]"}) == std::set<std::string>({"perks"}) &&
+                  archive_fields_of(af.rows["items"], {"maxStackSizeX"}).empty() && archive_fields_of(af.rows["items"], {""}).size() == 3,
+              "a path names the fields it holds or lies in, at member boundaries only; \"\" names every field");
+        // the same journal without the regmap's fields: per entry as before, never an element
+        BaseModel plain = eb;
+        for (auto& [reg, es2] : plain.registries)
+            for (auto& x : es2) x.archive.clear(), x.archive_fields.clear();
+        CHECK(name_archive_writers(e, eids, {"items", "balance"}, &plain) == 4 && plain.registries["items"][0].archive_fields.empty() &&
+                  plain.registries["recipes"][1].archive.empty(),
+              "without the fields: per entry on whole resources, no element");
+        // composition: a row only on the fields a mod is named on, and the line says the field
+        Schema es3;
+        RegistrySpec items;
+        items.name = "items", items.version = "1.0.0";
+        FieldSpec ms;
+        ms.name = "maxStack", ms.type = FieldType::Int, ms.min = 1, ms.max = 65535, ms.applies = Applies::WorldLoad;
+        FieldSpec pw;
+        pw.name = "power", pw.type = FieldType::Float, pw.min = 0, pw.max = 100000, pw.applies = Applies::Now;
+        items.fields[ms.name] = ms;
+        items.fields[pw.name] = pw;
+        RegistrySpec recipes_spec;
+        recipes_spec.name = "recipes", recipes_spec.version = "1.0.0";
+        FieldSpec du;
+        du.name = "duration", du.type = FieldType::Float, du.min = 0, du.max = 100000, du.applies = Applies::Now;
+        recipes_spec.fields[du.name] = du;
+        es3.registries["items"] = items;
+        es3.registries["recipes"] = recipes_spec;
+        BaseModel cb;
+        cb.registries["items"] = eb.registries["items"];
+        cb.registries["recipes"] = eb.registries["recipes"];
+        const Result cr = compose(es3, cb, {},
+                                  {mod("big", {batch(es3, "big", "alter", R"([{"registry": "items", "select": {"id": "game:stone"}, "field": "maxStack", "op": 100},
+                                                                               {"registry": "items", "select": {"id": "game:stone"}, "field": "power", "op": {"mul": 2}},
+                                                                               {"registry": "items", "select": {"id": "game:logs"}, "field": "maxStack", "op": 50},
+                                                                               {"registry": "recipes", "select": {"id": "game:craft_*"}, "field": "duration", "op": 9}])")})});
+        const auto& msc = cr.fields.at({"items", "game:stone", "maxStack"}).chain;
+        CHECK(msc.size() == 2 && msc[0].kind == WriterKind::ArchiveWriter && msc[0].who == "eml:alpha" && msc[0].archive_field && msc[1].kind == WriterKind::Registry,
+              "the stone's stack size: alpha's row (by field), not bravo's");
+        const auto& pwc = cr.fields.at({"items", "game:stone", "power"}).chain;
+        CHECK(pwc.size() == 2 && pwc[0].who == "eml:bravo" && pwc[0].archive_field, "its power: bravo's row");
+        const auto& lgc = cr.fields.at({"items", "game:logs", "maxStack"}).chain;
+        CHECK(lgc.size() == 2 && lgc[0].who == "kiln-eml:unattributed" && !lgc[0].archive_field, "the logs: the whole entry's row");
+        CHECK(cr.fields.at({"recipes", "game:craft_a", "duration"}).chain.size() == 1 && cr.fields.at({"recipes", "game:craft_b", "duration"}).chain.size() == 2 &&
+                  cr.fields.at({"recipes", "game:craft_c", "duration"}).chain[0].who == "eml:bravo",
+              "recipes: rows on the elements their mods wrote only");
+        const Line* fl = nullptr;
+        const Line* wl = nullptr;
+        for (const Line& l : cr.lines) {
+            if (l.field.id == "game:stone" && l.field.field == "maxStack") fl = &l;
+            if (l.field.id == "game:logs") wl = &l;
+        }
+        CHECK(fl && fl->certainty == Certainty::Named && fl->text.find("alpha (EML package) wrote this field in the game's archive before Kiln; big's edit wins (D1)") != std::string::npos,
+              "the line says the mod wrote this field: " + (fl ? fl->text : std::string()));
+        CHECK(wl && wl->text.find("wrote this entry") != std::string::npos, "a whole-entry name still says the entry: " + (wl ? wl->text : std::string()));
+        ReportMeta em;
+        em.written = "2026-11-26T05:00:00Z", em.generation = 1, em.base.writer = "kiln-eml";
+        em.regmap = {"server", std::string(64, 'f'), "", false};
+        const json ed = report_json(es3, cr, em);
+        std::string named_field, named_entry;
+        for (const json& f : ed["fields"]) {
+            if (f["id"] == "game:stone" && f["field"] == "maxStack") named_field = f["writers"][0].value("named", "");
+            if (f["id"] == "game:logs") named_entry = f["writers"][0].value("named", "");
+        }
+        CHECK(named_field == "field" && named_entry == "entry", "registry.json says what the journal names the package on: " + named_field + "/" + named_entry);
+        if (argc > 3) std::ofstream(argv[3]) << ed.dump(2);
+        // ---- review: a list replaced whole, a path per element past 64, a GUID listed twice, the unreadable text ----
+        {
+            auto fresh = [&] {
+                BaseModel b = eb;
+                for (auto& [reg, es2] : b.registries)
+                    for (auto& x : es2) x.archive.clear(), x.archive_fields.clear();
+                return b;
+            };
+            auto bravo_recipes = [&](const json& paths) {
+                json d = good;
+                for (json& c : d["packages"][1]["changed"])
+                    if (c["guid"] == recipes) c["paths"] = paths;
+                return d;
+            };
+            // the recipe list replaced whole ("recipes": a field of the resource's root holding every element)
+            BaseModel b1 = fresh();
+            const ArchiveJournal j1 = parse_archive_journal(bravo_recipes({"recipes"}).dump(), live);
+            name_archive_writers(j1, eids, {"items", "balance"}, &b1, &af);
+            CHECK(j1.state == "read" && b1.registries["recipes"][0].archive == std::vector<std::string>({"eml:bravo"}) &&
+                      b1.registries["recipes"][0].archive_fields.empty() && b1.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}),
+                  "the recipe list replaced whole names its mod on every recipe, whole: " + j1.state + " " + j1.text);
+            // a recipe mod that wrote one field of a hundred recipes: a path each, named on that field of each
+            json many = json::array();
+            for (int i = 0; i < 100; ++i) many.push_back("recipes[" + std::to_string(i) + "].craftingDuration");
+            BaseModel b2 = fresh();
+            const ArchiveJournal j2 = parse_archive_journal(bravo_recipes(many).dump(), live);
+            name_archive_writers(j2, eids, {"items", "balance"}, &b2, &af);
+            CHECK(j2.state == "read" && b2.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b2.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b2.registries["recipes"][2].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}),
+                  "a hundred recipe paths read, each recipe named on its duration only: " + j2.state + " " + j2.text);
+            json over = json::array();
+            for (int i = 0; i <= 16384; ++i) over.push_back("recipes[" + std::to_string(i) + "]");
+            CHECK(parse_archive_journal(bravo_recipes(over).dump(), live).state == "unreadable", "more paths than the format writes: unreadable");
+            // one GUID listed twice (another part): its paths together, so an element is still named by them
+            json twice = bravo_recipes({"recipes[2]"});
+            json row = {{"guid", recipes}, {"typeHash", "00000001"}, {"part", 1}, {"createdBy", nullptr}, {"paths", {"recipes[0].craftingDuration"}}};
+            twice["packages"][1]["changed"].push_back(row);
+            BaseModel b3 = fresh();
+            const ArchiveJournal j3 = parse_archive_journal(twice.dump(), live);
+            name_archive_writers(j3, eids, {"items", "balance"}, &b3, &af);
+            CHECK(j3.state == "read" && b3.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b3.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b3.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && b3.registries["recipes"][2].archive_fields.empty(),
+                  "a GUID listed twice: the elements its paths name are named: " + j3.state + " " + j3.text);
+            // a format-2 journal that is malformed is not called a format-1 one
+            json bad = good;
+            bad["packages"][0]["changed"][0]["paths"] = json::array();
+            const ArchiveJournal j4 = parse_archive_journal(bad.dump(), live);
+            CHECK(j4.state == "unreadable" && j4.text.find("format-1") == std::string::npos && j4.text.find("format 1 or 2") != std::string::npos,
+                  "the unreadable text says what Kiln reads: " + j4.text);
+        }
+    }
+    // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----
+    {
+        std::string hex, why;
+        const std::string g(64, 'a');
+        CHECK(eml_state_generation(R"({"format":1,"phase":"done","cached":true,"generation":")" + g + R"("})", &hex, &why) && hex == g,
+              "done with a generation: that one");
+        CHECK(!eml_state_generation(R"({"phase":"aside","aside":"ShroudForge"})", &hex, &why) && why.find("stood aside") != std::string::npos, "aside: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"idle"})", &hex, &why) && why.find("no EML mod") != std::string::npos, "idle: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"failed","error":"x"})", &hex, &why) && why.find("did not end well") != std::string::npos, "failed: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"done","patched":0})", &hex, &why) && why.find("no live generation") != std::string::npos,
+              "done, no generation (an older kiln-eml): " + why);
+        CHECK(!eml_state_generation(R"({"phase":"done","generation":"xyz"})", &hex, &why), "a generation that is no SHA-256");
+        CHECK(!eml_state_generation("{", &hex, &why), "not JSON");
+    }
 
     // ---- the drift probe's suspects (drift.h) ----
     const json map = json::parse(R"({"foreign": [{"symbol": "a", "rva": "0x10", "module": "xhl-core.dll", "offset": "0x1", "own": false},

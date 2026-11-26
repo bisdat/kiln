@@ -79,6 +79,44 @@ public sealed class ReloadSideTests : ModsFixture
         Assert.Equal("1.1.0", mods.Find("sided")?.Manifest.Version);
     }
 
+    // review-registry-fixes: a client that may host a world hands its side "server" mods to the registry stage too (RegistryOrder:
+    // they are in the start's registry snapshot with side server), but loads them only when it hosts, so they were never in
+    // LoadAll's load order. A new version with another side then loaded with the next hosted world (or after an unload and a
+    // load while hosting): the side-both lists named it while the start's registry values still left its fields out.
+    [Fact]
+    public void A_hosting_clients_server_mod_keeps_the_side_the_start_ordered_it_with()
+    {
+        var host = new FakeHost();
+        var dir = Mod("hosted", "1.0.0", "server");
+        using var mods = NewManager(host, new ModManagerOptions
+        {
+            Side = ManifestSide.Client, HostedServerMods = true, KilnVersion = host.Version, HasFeature = host.HasFeature,
+            StateFile = Path.Combine(LogsDir, "mods.txt"), TestResultsDirectory = Path.Combine(LogsDir, "tests"),
+        });
+        mods.LoadAll();
+        Assert.Null(mods.Find("hosted"));                       // a server mod waits for a hosted world
+        Assert.Equal(["hosted"], mods.StartHosting());
+        mods.StopHosting("test");
+
+        // the next hosted world: the server mod's new version with side both does not load
+        Mod("hosted", "1.1.0", "both");
+        Assert.Empty(mods.StartHosting());
+        Assert.Null(mods.Find("hosted"));
+        Assert.StartsWith("RestartRequired: mod hosted's new version changes \"side\" in kiln.mod.json (server -> both)",
+            Kiln.Mods.Get("hosted")?.Error ?? "");
+
+        // while hosting: the start's side loads as before; an unload and a load with another side is refused
+        Mod("hosted", "1.2.0", "server");
+        Assert.True(mods.TryLoad(dir, out var again), again);
+        Assert.Equal("1.2.0", mods.Find("hosted")?.Manifest.Version);
+        Assert.True(mods.Unload("hosted", out _));
+        Mod("hosted", "1.3.0", "both");
+        Assert.False(mods.TryLoad(dir, out var error));
+        Assert.StartsWith("RestartRequired: mod hosted's new version changes \"side\" in kiln.mod.json (server -> both)", error);
+        Assert.Null(mods.Find("hosted"));
+        mods.StopHosting("test");
+    }
+
     // A mod this start did not load (hot-loaded later with `load`) keeps the side its running version loaded with.
     [Fact]
     public void A_mod_loaded_after_the_start_keeps_the_side_it_loaded_with()

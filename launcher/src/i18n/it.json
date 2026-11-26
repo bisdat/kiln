@@ -6232,8 +6232,8 @@
     "baseOrigin": "Origine della base: {origin}",
     "archiveWriter": "Scrittore dell'archivio: {writer}",
     "journal": {
-      "read": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (solo oggetti, drop e bilanciamento: una voce di ricetta o di bottino non viene indicata).",
-      "truncated": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (solo oggetti, drop e bilanciamento: una voce di ricetta o di bottino non viene indicata). Il diario è troncato, quindi un pacchetto può aver scritto voci che non indica.",
+      "read": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (un passaggio ShroudForge indica oggetti, drop e bilanciamento per voce; un passaggio EML indica i campi scritti dalle sue mod, su ricette e bottino tramite il loro elemento).",
+      "truncated": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (un passaggio ShroudForge indica oggetti, drop e bilanciamento per voce; un passaggio EML indica i campi scritti dalle sue mod, su ricette e bottino tramite il loro elemento). Il diario è troncato, quindi un pacchetto può aver scritto voci che non indica.",
       "notNamed": "I pacchetti dello scrittore dell'archivio non sono indicati in questo avvio: {reason}",
       "none": "lo scrittore dell'archivio di questo avvio non tiene un diario delle modifiche.",
       "stale": "il diario delle modifiche appartiene a un avvio precedente.",
@@ -6241,15 +6241,17 @@
     },
     "sfPackage": "{id} (pacchetto ShroudForge)",
     "emlPackage": "{id} (pacchetto EML)",
-    "archiveUnattributed": "Una scrittura all'avvio che nessun pacchetto ha fatto (kiln-eml)",
+    "archiveUnattributed": "Una scrittura all'avvio di nessun pacchetto che Kiln possa indicare (kiln-eml)",
     "archiveOp": "Non nota (il diario di kiln-eml indica la voce scritta da questo pacchetto, non questo campo)",
+    "archiveOpField": "Non nota (il diario di kiln-eml indica questo campo come scritto da questo pacchetto, non il valore)",
     "kind": {
       "archiveWriter": "Ha scritto questa voce prima di Kiln (archivio)",
+      "archiveWriterField": "Ha scritto questo campo prima di Kiln (archivio)",
       "drift": "Cambiato fuori da Kiln"
     },
     "unverified": "Mappatura non verificata",
     "unverifiedBody": "Le modifiche ai campi possono essere rifiutate come Unproven. Leggi il motivo di ogni rifiuto.",
-    "certaintyHint": "Certo = Kiln ha osservato lo scrittore. Indicato dal diario = un pacchetto ShroudForge o EML che il diario delle modifiche di kiln-eml indica come autore della voce prima di Kiln; la modifica di Kiln prevale su di esso. Deriva stimata = il valore del gioco è cambiato fuori da Kiln; i sospetti sono un indizio, non una prova di chi l'ha scritto né che non esistano altri scrittori.",
+    "certaintyHint": "Certo = Kiln ha osservato lo scrittore. Indicato dal diario = un pacchetto ShroudForge o EML che il diario delle modifiche di kiln-eml indica come autore della voce (o, per una mod EML, del campo) prima di Kiln; la modifica di Kiln prevale su di esso. Deriva stimata = il valore del gioco è cambiato fuori da Kiln; i sospetti sono un indizio, non una prova di chi l'ha scritto né che non esistano altri scrittori.",
     "partial": "Rapporto parziale",
     "partialRows": {
       "one": "{count} riga è stata omessa dal rapporto nativo o dai limiti di sicurezza di questa vista.",

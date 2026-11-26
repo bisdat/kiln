@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln-eml's startup change journal (schema/sfi/eml-journal/): the per-package record of what a kiln-mode ShroudForge
-// pass changed, bound to one generation. Schema contract tests over the fixtures and, with EML_JOURNAL_DIR=<folder>,
+// pass changed, bound to one generation (format 1, startup-journal.schema.json), and the EML dialect's record of what EML's
+// own pass changed, with member paths (format 2, eml-journal-2.schema.json). Schema contract tests over the fixtures and, with EML_JOURNAL_DIR=<folder>,
 // over journals kiln-eml's own tests wrote there (EML_JOURNAL_OUT). Not a test of the GPL writer itself.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -14,6 +15,7 @@ const read = p => JSON.parse(text(p));
 const valid = read('../sfi/eml-journal/fixtures/valid.json');
 const invalid = read('../sfi/eml-journal/fixtures/invalid.json');
 const schema = read('../sfi/eml-journal/startup-journal.schema.json');
+const schema2 = read('../sfi/eml-journal/eml-journal-2.schema.json');
 const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
   { cwd: fileURLToPath(here), encoding: 'utf8' }).trim();
 const candidates = [process.env.AJV_2020,
@@ -32,10 +34,14 @@ ajv.addSchema(state);
 ajv.addSchema(outcome);
 let assertions = 0;
 const files = readdirSync(new URL('../sfi/eml-journal/', here)).filter(n => n.endsWith('.schema.json')).sort();
-assert.deepEqual(files, ['startup-journal.schema.json'], 'one schema'); ++assertions;
+assert.deepEqual(files, ['eml-journal-2.schema.json', 'startup-journal.schema.json'], 'one schema per format'); ++assertions;
 assert.equal(schema.$id, 'eml-journal/startup-journal.schema.json'); ++assertions;
+assert.equal(schema2.$id, 'eml-journal/eml-journal-2.schema.json'); ++assertions;
 ajv.addSchema(schema);
+ajv.addSchema(schema2);
 const validate = ajv.getSchema('eml-journal/startup-journal.schema.json');
+const validate2 = ajv.getSchema('eml-journal/eml-journal-2.schema.json');
+const validators = { 'startup-journal': validate, 'eml-journal-2': validate2 };
 
 // Kept out of the strictly read outcome: the outcome schema has no journal member and its format stays 1.
 assert(!Object.keys(outcome.properties).some(k => /journal/i.test(k)), 'the outcome stays as it is'); ++assertions;
@@ -45,7 +51,15 @@ for (const [ours, theirs, why] of [
   [schema.$defs.sfId.pattern, state.$defs.sfId.pattern, 'sfId'],
   [schema.$defs.sha256.pattern, kilnCommon.$defs.sha256.pattern, 'sha256'],
   [schema.$defs.package.properties.version.maxLength, outcome.$defs.row.properties.version.maxLength, 'version'],
-  [schema.properties.attempt.enum.join(), outcome.properties.attempt.enum.filter(a => a !== 'none').join(), 'attempt']]) {
+  [schema.properties.attempt.enum.join(), outcome.properties.attempt.enum.filter(a => a !== 'none').join(), 'attempt'],
+  // format 2 shares format 1's grammar and lists
+  [schema2.$defs.sfId.pattern, schema.$defs.sfId.pattern, 'format 2 sfId'],
+  [schema2.$defs.sha256.pattern, schema.$defs.sha256.pattern, 'format 2 sha256'],
+  [schema2.$defs.guid.pattern, schema.$defs.guid.pattern, 'format 2 guid'],
+  [JSON.stringify(schema2.$defs.createdList), JSON.stringify(schema.$defs.createdList), 'format 2 createdList'],
+  [JSON.stringify(schema2.$defs.contentList), JSON.stringify(schema.$defs.contentList), 'format 2 contentList'],
+  [JSON.stringify(schema2.$defs.changes), JSON.stringify(schema.$defs.changes), 'format 2 changes'],
+  [schema2.properties.attempt.enum.join(), schema.properties.attempt.enum.join(), 'format 2 attempt']]) {
   assert.equal(ours, theirs, why); ++assertions;
 }
 // Bounds: packages mirror the plan (the outcome's rows bound); each bucket's lists hold at most the writer's
@@ -57,14 +71,23 @@ const total = constant('TOTAL_ENTRIES');
 assert.equal(schema.properties.packages.maxItems, outcome.properties.packages.maxItems, 'packages: the plan bound'); ++assertions;
 for (const list of ['changedList', 'createdList', 'contentList']) {
   assert.equal(schema.$defs[list].maxItems, perPackage, list); ++assertions;
+  assert.equal(schema2.$defs[list].maxItems, perPackage, `format 2 ${list}`); ++assertions;
 }
 assert(schema.description.includes(`at most ${perPackage} entries`) && schema.description.includes(`${total} in all`)); ++assertions;
+// format 2's path bounds are the writer's (RESOURCE_PATHS, PATH_BYTES)
+const resourcePaths = constant('RESOURCE_PATHS');
+const pathBytes = constant('PATH_BYTES');
+assert.equal(schema2.$defs.changedList.items.properties.paths.maxItems, resourcePaths); ++assertions;
+assert.equal(schema2.$defs.path.maxLength, pathBytes); ++assertions;
+assert(schema2.description.includes(`at most ${perPackage} entries`) && schema2.description.includes(`${total} in all`) &&
+  schema2.description.includes(`at most ${resourcePaths} paths`) && schema2.description.includes(`at most ${pathBytes} bytes`)); ++assertions;
 
 // Field order: a typed serializer writes these, in this order.
 const ORDER = ['format', 'stem', 'generation', 'receiptSha256', 'dialect', 'attempt', 'truncated', 'packages', 'unattributed'];
 const PACKAGE = ['id', 'version', 'kind', 'contentSha256', 'settingsSha256', 'truncated', 'changed', 'created', 'contents'];
 const CHANGES = ['truncated', 'changed', 'created', 'contents'];
 const CHANGED = ['guid', 'typeHash', 'part', 'createdBy'];
+const CHANGED2 = [...CHANGED, 'paths'];
 const CREATED = ['ordinal', 'guid', 'typeHash', 'part', 'explicit'];
 const CONTENT = ['guid', 'size'];
 assert.deepEqual(Object.keys(schema.properties), ORDER); ++assertions;
@@ -77,11 +100,18 @@ for (const [def, order] of [['changedList', CHANGED], ['createdList', CREATED], 
   assert.deepEqual(Object.keys(schema.$defs[def].items.properties), order, def); ++assertions;
   assert.deepEqual([...schema.$defs[def].items.required].sort(), [...order].sort(), def); ++assertions;
 }
+assert.deepEqual(Object.keys(schema2.properties), ORDER); ++assertions;
+for (const [def, order] of [['package', PACKAGE], ['changes', CHANGES]]) {
+  assert.deepEqual(Object.keys(schema2.$defs[def].properties), order, `format 2 ${def}`); ++assertions;
+}
+assert.deepEqual(Object.keys(schema2.$defs.changedList.items.properties), CHANGED2); ++assertions;
+assert.deepEqual([...schema2.$defs.changedList.items.required].sort(), [...CHANGED2].sort()); ++assertions;
 
 // Rules JSON Schema cannot say (the writer keeps them; consumers rely on them).
 const keyOf = e => `${e.guid}/${e.typeHash}/${e.part}`;
 function rules(j, label) {
   const inOrder = (o, order, where) => assert.deepEqual(Object.keys(o), order, `${label}: ${where} field order`);
+  const changedOrder = j.format === 2 ? CHANGED2 : CHANGED;
   inOrder(j, ORDER, 'record');
   const ids = j.packages.map(p => p.id);
   assert.equal(new Set(ids).size, ids.length, `${label}: one entry per package`); ++assertions;
@@ -90,7 +120,12 @@ function rules(j, label) {
   let entries = 0;
   for (const [id, b] of buckets) {
     inOrder(b, id === null ? CHANGES : PACKAGE, id ?? 'unattributed');
-    for (const e of b.changed) inOrder(e, CHANGED, 'changed');
+    for (const e of b.changed) inOrder(e, changedOrder, 'changed');
+    // format 2: a resource's paths sorted (code units), each once, the whole resource alone
+    for (const e of b.changed.filter(() => j.format === 2)) {
+      assert.deepEqual(e.paths, [...new Set(e.paths)].sort(), `${label}: ${id}: paths sorted, each once`); ++assertions;
+      assert(!e.paths.includes('') || e.paths.length === 1, `${label}: ${id}: the whole resource alone`); ++assertions;
+    }
     for (const e of b.created) inOrder(e, CREATED, 'created');
     for (const e of b.contents) inOrder(e, CONTENT, 'contents');
     const n = b.changed.length + b.created.length + b.contents.length;
@@ -131,13 +166,17 @@ function rules(j, label) {
   }
 }
 
-// Every valid fixture validates and keeps the rules; format 2 and an unknown member at any object level are refused.
-assert.deepEqual(Object.keys(valid), ['startup-journal']); ++assertions;
-for (const [label, record] of Object.entries(valid['startup-journal'])) {
-  assert(validate(record), `${label}: ${JSON.stringify(validate.errors)}`); ++assertions;
+// Every valid fixture validates and keeps the rules; the other format, the other schema and an unknown member at any object
+// level are refused.
+assert.deepEqual(Object.keys(valid), ['startup-journal', 'eml-journal-2']); ++assertions;
+for (const [name, label, record] of Object.entries(valid).flatMap(([n, v]) => Object.entries(v).map(([l, r]) => [n, l, r]))) {
+  const own = validators[name];
+  assert(own(record), `${label}: ${JSON.stringify(own.errors)}`); ++assertions;
   rules(record, label);
-  const bad = structuredClone(record); bad.format = 2;
-  assert.equal(validate(bad), false, `${label}: format`); ++assertions;
+  const bad = structuredClone(record); bad.format = record.format === 1 ? 2 : 1;
+  assert.equal(own(bad), false, `${label}: format`); ++assertions;
+  const other = name === 'startup-journal' ? validate2 : validate;
+  assert.equal(other(record), false, `${label}: the other format's schema refuses it`); ++assertions;
   const objects = [];
   const walk = (v, path) => { if (v && typeof v === 'object') { if (!Array.isArray(v)) objects.push(path);
     for (const [k, c] of Object.entries(v)) walk(c, [...path, k]); } };
@@ -145,7 +184,7 @@ for (const [label, record] of Object.entries(valid['startup-journal'])) {
   for (const path of objects) {
     const nested = structuredClone(record);
     path.reduce((o, k) => o[k], nested).silent_extension = true;
-    assert.equal(validate(nested), false, `${label}: unknown member at ${path.join('.') || '(root)'}`); ++assertions;
+    assert.equal(own(nested), false, `${label}: unknown member at ${path.join('.') || '(root)'}`); ++assertions;
   }
 }
 // Every invalid fixture (one valid fixture with one rule broken, at most two leaf paths away) is refused.
@@ -159,10 +198,25 @@ const leaves = (a, b, path = '') => {
   return [path];
 };
 for (const { schema: name, why, record } of invalid) {
-  assert.equal(name, 'startup-journal');
-  const nearest = Math.min(...Object.values(valid['startup-journal']).map(v => leaves(v, record).length));
+  assert(name in validators, `${why}: schema ${name}`);
+  const nearest = Math.min(...Object.values(valid[name]).map(v => leaves(v, record).length));
   assert(nearest >= 1 && nearest <= 2, `${why}: ${nearest} changes from the nearest valid fixture`); ++assertions;
-  assert.equal(validate(record), false, why); ++assertions;
+  assert.equal(validators[name](record), false, why); ++assertions;
+}
+assert(invalid.filter(i => i.schema === 'eml-journal-2').length >= 10, 'format 2 has its own invalid fixtures'); ++assertions;
+// format 2's path bound, from the writer's RESOURCE_PATHS (a fixture of that many paths would be large): a resource with
+// that many paths is valid, one more is not; Kiln's reader takes the same bound (archive_journal.h kArchiveJournalPaths).
+{
+  const at = n => {
+    const r = JSON.parse(JSON.stringify(valid['eml-journal-2'].sixty_four_paths));
+    r.packages[0].changed[0].paths = Array.from({ length: n }, (_, i) => `f${String(i).padStart(5, '0')}`);
+    return r;
+  };
+  assert.equal(validators['eml-journal-2'](at(resourcePaths)), true, `${resourcePaths} paths`); ++assertions;
+  assert.equal(validators['eml-journal-2'](at(resourcePaths + 1)), false, `${resourcePaths + 1} paths`); ++assertions;
+  const reader = text('../../native/services/content/registry/archive_journal.h');
+  const m = /constexpr size_t kArchiveJournalPaths = (\d+);/.exec(reader);
+  assert(m && Number(m[1]) === resourcePaths, `Kiln's reader takes ${resourcePaths} paths per resource`); ++assertions;
 }
 // Coverage: both stems, both attempts, both kinds, a created resource named by another package, an explicit and a
 // random creation, a truncated journal, an unattributed write.
@@ -179,16 +233,32 @@ for (const [what, ok] of [
   ['unattributed', records.some(r => r.unattributed.changed.length > 0)]]) {
   assert(ok, `a fixture with ${what}`); ++assertions;
 }
+const records2 = Object.values(valid['eml-journal-2']);
+const paths2 = records2.flatMap(r => [...r.packages, r.unattributed].flatMap(p => p.changed.flatMap(c => c.paths)));
+for (const [what, ok] of [
+  ['format 2: both stems', ['enshrouded', 'enshrouded_server'].every(s => records2.some(r => r.stem === s))],
+  ['format 2: both attempts', ['first', 'retry'].every(a => records2.some(r => r.attempt === a))],
+  ['format 2: the whole resource', paths2.includes('')],
+  ['format 2: a list element', paths2.some(p => /\[[0-9]+\]/.test(p))],
+  ['format 2: a list membership', paths2.some(p => p.endsWith('[]'))],
+  ['format 2: a nested field', paths2.some(p => /^[^[]+\.[^[]+$/.test(p))],
+  ['format 2: createdBy', records2.some(r => r.packages.some(p => p.changed.some(c => c.createdBy)))],
+  ['format 2: truncated', records2.some(r => r.truncated)],
+  ['format 2: unattributed', records2.some(r => r.unattributed.changed.length > 0)],
+  ['format 2: a version not known', records2.some(r => r.packages.some(p => p.version === null))]]) {
+  assert(ok, `a fixture with ${what}`); ++assertions;
+}
 // kiln-eml's own record of a fixed pass (gpl/kiln-eml/kiln-eml/tests/journal_contract.rs fails unless it is byte for byte
 // what the writer makes; Kiln's native reader is tested on it, native/services/content/tests/registry_writers_test.cpp):
 // valid, in field order (raw text), the rules kept.
-{
-  const raw = text('../sfi/eml-journal/fixtures/kiln-eml-writer.json').trimEnd();
+// The EML dialect's (kiln-eml-writer-eml.json, format 2, the same test's second half) likewise.
+for (const [name, own] of [['kiln-eml-writer.json', validate], ['kiln-eml-writer-eml.json', validate2]]) {
+  const raw = text(`../sfi/eml-journal/fixtures/${name}`).trimEnd();
   const record = JSON.parse(raw);
-  assert(validate(record), `kiln-eml-writer.json: ${JSON.stringify(validate.errors)}`); ++assertions;
-  rules(record, 'kiln-eml-writer.json');
+  assert(own(record), `${name}: ${JSON.stringify(own.errors)}`); ++assertions;
+  rules(record, name);
   let at = 0;
-  for (const field of ORDER) { const i = raw.indexOf(`"${field}":`, at); assert(i >= at, `kiln-eml-writer.json: ${field}`); at = i; }
+  for (const field of ORDER) { const i = raw.indexOf(`"${field}":`, at); assert(i >= at, `${name}: ${field}`); at = i; }
   ++assertions;
 }
 // The journals kiln-eml's tests wrote (EML_JOURNAL_OUT), when given: valid, in field order (raw text), the rules kept.
@@ -198,7 +268,8 @@ if (process.env.EML_JOURNAL_DIR) {
   for (const name of readdirSync(dir).filter(n => n.endsWith('.json')).sort()) {
     const raw = readFileSync(join(dir, name), 'utf8');
     const record = JSON.parse(raw);
-    assert(validate(record), `${name}: ${JSON.stringify(validate.errors)}`); ++assertions;
+    const own = record.format === 2 ? validate2 : validate;
+    assert(own(record), `${name}: ${JSON.stringify(own.errors)}`); ++assertions;
     rules(record, name);
     let at = 0;
     for (const field of ORDER) { const i = raw.indexOf(`"${field}":`, at); assert(i >= at, `${name}: ${field}`); at = i; }

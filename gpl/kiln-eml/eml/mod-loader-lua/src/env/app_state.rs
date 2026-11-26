@@ -5,7 +5,7 @@ use mod_loader::ModEnvironment;
 use once_cell::unsync::OnceCell;
 use kfc::{container::{KFCCursor, KFCFile, KFCReader}, guid::{ContentHash, ResourceId}, reflection::{LookupKey, TypeHandle, TypeIndex, TypeRegistry}, resource::value::Value};
 
-use crate::{RunArgs, alias::{MappedValue, PathBuf}, cache::CacheDiff, env::{Type, game::value::is_dirty_lua_value, value::{convert_lua_to_value, convert_value_to_lua, validate_and_clone_lua_value}}, log::warn, lua::{LuaError, LuaValue}};
+use crate::{RunArgs, alias::{MappedValue, PathBuf}, cache::CacheDiff, env::{Type, game::value::{graft, is_dirty_lua_value, walk_writes}, value::{convert_lua_to_value, convert_value_to_lua, validate_and_clone_lua_value}, writes}, log::warn, lua::{LuaError, LuaValue}};
 
 pub struct AppState {
     env: ModEnvironment,
@@ -24,6 +24,9 @@ pub struct AppState {
     new_contents: RefCell<HashMap<ContentHash, Vec<u8>>>,
     resources: RefCell<HashMap<ResourceId, Rc<ResourceInfo>>>,
     types: RefCell<HashMap<TypeIndex, LuaValue>>,
+
+    // kiln-eml: who wrote which resource in this run (env/writes.rs), for the EML dialect's change journal
+    writes: RefCell<writes::Record>,
 }
 
 pub struct AppConfig {
@@ -182,7 +185,45 @@ impl AppState {
             new_contents: RefCell::new(HashMap::new()),
             resources: RefCell::new(HashMap::new()),
             types: RefCell::new(HashMap::new()),
+
+            writes: RefCell::new(writes::Record::default()),
         }
+    }
+
+    /// kiln-eml: `package`'s entrypoint begins; what it writes is its own until the guard is dropped (env/writes.rs).
+    pub(crate) fn begin_writer(&self, package: &str) -> writes::Entrypoint {
+        writes::Record::begin(&self.writes, package)
+    }
+
+    /// kiln-eml: `package`'s entry module runs, whoever required it: what it writes is `package`'s until the guard is
+    /// dropped (env/writes.rs).
+    pub(crate) fn enter_writer(&self, package: &str) -> writes::Entered {
+        writes::Record::enter(&self.writes, package)
+    }
+
+    /// kiln-eml: the running entrypoint created `id` (`explicit`: with its own GUID and part), or the content `hash`.
+    pub(crate) fn note_created(&self, id: ResourceId, explicit: bool) {
+        writes::Record::created(&self.writes, id, explicit);
+    }
+    pub(crate) fn note_content(&self, hash: ContentHash) {
+        writes::Record::content(&self.writes, hash);
+    }
+
+    /// kiln-eml: who wrote what in this run, per writer (env/writes.rs), from each resource's value as it will be
+    /// written: call it once the mods ran, before their resources are serialized.
+    pub(crate) fn write_record(&self) -> mlua::Result<writes::WriteRecord> {
+        let mut trees = Vec::new();
+        let mut path = String::new();
+        for info in self.resources.borrow().values() {
+            if let Some(value) = info.value.borrow().as_ref() {
+                let mut out = Vec::new();
+                walk_writes(value, &mut path, &mut out)?;
+                if !out.is_empty() {
+                    trees.push((info.resource_id, out));
+                }
+            }
+        }
+        Ok(writes::collect(&self.writes.borrow(), trees))
     }
     #[inline]
     pub fn env(&self) -> &ModEnvironment {
@@ -475,8 +516,12 @@ impl ResourceInfo {
             lua,
         ).map_err(LuaError::external)?;
 
+        // kiln-eml: the writes logged in the data replaced move onto the data put in its place (env/writes.rs)
+        let kept = graft(self.value.borrow().as_ref(), &lua_value, "")?;
+        writes::Record::kept(&app_state.writes, self.resource_id, kept);
         self.value.replace(Some(lua_value));
         self.is_dirty.replace(true);
+        writes::Record::replaced(&app_state.writes, self.resource_id); // kiln-eml
 
         Ok(())
     }
