@@ -2743,6 +2743,26 @@ fn check_unlisted(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&Dat
         shown.join(", "), if off.len() > 15 { ", ..." } else { "" }, if off.len() == 1 { "it" } else { "them" }, kinds.join(", ")));
 }
 
+/// The progress.json of a start that began at `launched` (unix seconds) or later, give or take boot.json's 30 s, and ended
+/// while Kiln was starting: not `ready`, `idle` or `failed` (each written with boot.json, or after it).
+fn stopped_while_starting(game: &Path, launched: i64) -> Option<crate::start_progress::Progress> {
+    let p = crate::start_progress::parse_progress(&std::fs::read_to_string(rel(game, crate::start_progress::PROGRESS_JSON)).ok()?)?;
+    let started = crate::start_progress::parse_ms(&p.started)?.div_euclid(1000);
+    (started + 30 >= launched && !p.is_final()).then_some(p)
+}
+
+/// The step a start began last, as the launcher's start window says it: "Running the early plugins (ShroudForge, 3 of 5)".
+fn progress_step(p: &crate::start_progress::Progress) -> Option<String> {
+    let s = p.steps.last()?;
+    let label = if s.label.is_empty() { s.id.as_str() } else { s.label.as_str() };
+    let count = match (s.done, s.total) {
+        (Some(d), Some(t)) => Some(format!("{d} of {t}")),
+        _ => None,
+    };
+    let more: Vec<String> = [s.detail.clone().filter(|d| !d.is_empty()), count].into_iter().flatten().collect();
+    Some(if more.is_empty() { label.to_string() } else { format!("{label} ({})", more.join(", ")) })
+}
+
 /// The last start did not load Kiln: the game runs without a fresh boot.json, a launch from the launcher wrote none,
 /// or the game ran and Kiln's proxy never logged anything. Under Proton without the DLL override, why.
 #[allow(clippy::too_many_arguments)]
@@ -2777,9 +2797,20 @@ fn check_not_loaded(cx: &mut Ctx, install: Option<&GameInstall>, dirs: Option<&D
     {
         let boot_at = boot_time.map(crate::util::unix);
         if boot_at.is_none_or(|b| b + 30 < launched) {
-            cx.find("not-loaded", Level::Problem, format!(
-                "The last start from the launcher ({}) did not load Kiln: boot.json is {}.{why}",
-                last.launched, boot_at.map(|b| format!("older ({})", crate::util::rfc3339(b))).unwrap_or_else(|| "missing".into())));
+            let boot_is = boot_at.map(|b| format!("older ({})", crate::util::rfc3339(b))).unwrap_or_else(|| "missing".into());
+            // Kiln loaded in that start when its progress.json is of it: the game ended while Kiln was starting (KR-YNQZ:
+            // in ShroudForge's early step, 1.2 s in), which is no reason to doubt dinput8.dll
+            let text = match stopped_while_starting(&i.path, launched) {
+                Some(p) => {
+                    let secs = p.at_ms as f64 / 1000.0;
+                    let at = progress_step(&p).map(|s| format!("its last step, {secs:.1} s in, was \"{s}\""))
+                        .unwrap_or_else(|| format!("{secs:.1} s in, before its first step"));
+                    format!("The last start from the launcher ({}) loaded Kiln (pid {}), but the game ended before Kiln finished starting: \
+                        {at} ({}), and boot.json is {boot_is}.", last.launched, p.pid, crate::start_progress::PROGRESS_JSON)
+                }
+                None => format!("The last start from the launcher ({}) did not load Kiln: boot.json is {boot_is}.{why}", last.launched),
+            };
+            cx.find("not-loaded", Level::Problem, text);
             said = true;
         }
     }

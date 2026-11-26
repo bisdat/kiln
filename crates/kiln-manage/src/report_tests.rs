@@ -1109,6 +1109,43 @@ fn kiln_did_not_load() {
     assert!(!ids(&build(&g.input())).contains(&"not-loaded"));
 }
 
+/// KR-YNQZ (31.11, 2026-11-26): the last start from the launcher ended in Kiln's early plugins (ShroudForge preparing,
+/// 1.2 s in), and the game no longer ran when the report was written. kiln.log and progress.json name that start's
+/// process; there was no boot.json. The report said "did not load Kiln: boot.json is missing. Check that dinput8.dll in
+/// the game folder is Kiln's and that no antivirus blocks it": a wrong cause and wrong advice, Kiln had loaded. That
+/// start's progress.json says how far it got. The fixtures are that report's progress.json and kiln.log.
+#[test]
+fn a_start_that_ended_while_kiln_was_starting_did_load_kiln() {
+    const PROGRESS: &str = include_str!("../tests/fixtures/kr-ynqz/progress.json");
+    const LOG: &str = include_str!("../tests/fixtures/kr-ynqz/kiln.log");
+    let f = Fx::healthy("kr-ynqz-boot");
+    f.rm("kiln/state/boot.json");
+    f.w("kiln/logs/kiln.log", LOG);
+    let dirs = DataDirs::at(f.root.join("data"));
+    std::fs::create_dir_all(dirs.installs()).unwrap();
+    let launch = |at: &str| std::fs::write(dirs.installs().join("c7a3e1f0-2b4d-4e6f-8a9b-0c1d2e3f4a5b.launch.json"),
+        format!(r#"{{"fingerprint":"kms1:x","mode":"profile","launched":"{at}"}}"#)).unwrap();
+    launch("2026-11-26T15:25:06Z");
+    // no progress.json: nothing says Kiln loaded
+    assert!(finding(&build(&f.input()), "not-loaded").text.contains("did not load Kiln: boot.json is missing"));
+    f.w("kiln/state/progress.json", PROGRESS);
+    let r = build(&f.input());
+    let n = finding(&r, "not-loaded");
+    assert_eq!(n.level, Level::Problem);
+    assert_eq!(n.text, "The last start from the launcher (2026-11-26T15:25:06Z) loaded Kiln (pid 18264), but the game ended before \
+        Kiln finished starting: its last step, 1.2 s in, was \"Running the early plugins (ShroudForge, 3 of 5)\" \
+        (kiln/state/progress.json), and boot.json is missing.");
+    // an older boot.json: said as before
+    f.boot(None);
+    let old = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_795_700_000);
+    std::fs::File::options().write(true).open(f.game.join("kiln/state/boot.json")).unwrap().set_modified(old).unwrap();
+    assert!(finding(&build(&f.input()), "not-loaded").text.ends_with("and boot.json is older (2026-11-26T13:33:20Z)."), "{:?}", build(&f.input()).findings);
+    f.rm("kiln/state/boot.json");
+    // a progress.json of an earlier start (over 30 s before the launch) says nothing about this one
+    launch("2026-11-26T15:30:00Z");
+    assert!(finding(&build(&f.input()), "not-loaded").text.contains("did not load Kiln: boot.json is missing"));
+}
+
 #[test]
 fn unknown_build_and_safe_idle() {
     let f = Fx::healthy("build");
