@@ -34,7 +34,7 @@ fn log(msg: &str) {
 }
 
 /// launcher.log's path, for the message.
-fn log_path() -> String {
+pub(crate) fn log_path() -> String {
     crate::state::dirs().ok().or_else(crate::folder::found_dirs)
         .map(|d| d.logs().join("launcher.log").display().to_string()).unwrap_or_else(|| "(no data folder)".into())
 }
@@ -111,7 +111,8 @@ fn ask_gtk_here(m: &Message) -> Option<Option<Action>> {
 /// The page did not start and the launcher has nothing left to try by itself (crate::render's watchdog thread). The
 /// message goes up through the window's main loop; when that does not answer, through the desktop's tools from here.
 pub fn late(render: &crate::render::Choice, what: &str, restart_failed: Option<&str>) {
-    let mut m = crate::sandbox::late_message(crate::sandbox::state(), render, what, &log_path());
+    // the cause is not known: the font cache step is one of the tries (crate::fonthang)
+    let mut m = crate::sandbox::late_message(crate::sandbox::state(), render, what, &log_path(), Some(&crate::fonthang::shown_dir()));
     if let Some(e) = restart_failed {
         m.body = m.body.replacen("starting again without it did not work.", &format!("starting again without it did not work ({e})."), 1);
     }
@@ -201,19 +202,128 @@ fn act_late(m: &Message, a: Action, main_thread: bool) -> bool {
             log(&format!("PROBLEM: could not start again: {err}; start the launcher with {}", crate::render::ARG_SOFTWARE));
             false
         }
-        Action::Quit => {
-            match APP.get() {
-                Some(app) => app.exit(0),
-                None => std::process::exit(0),
-            }
-            if !main_thread {
-                // the main loop may be what does not answer
-                std::thread::sleep(Duration::from_secs(3));
-                std::process::exit(0);
-            }
+        Action::FixFonts => {
+            // fc-cache can take a while: never on the window's main loop; the new start replaces this process
+            let label = label_of(m, Action::FixFonts);
+            let _ = std::thread::Builder::new().name("kiln-fonts-fix".into())
+                .spawn(move || crate::fonthang::fix_and_restart("the cause is not known", label));
             false
         }
-        Action::StartAnyway => false,
+        Action::Quit => {
+            quit(main_thread);
+            false
+        }
+        Action::StartAnyway | Action::KeepWaiting => false,
+    }
+}
+
+/// The player's Quit in a message: the launcher's own exit (`main_thread`: called on the window's main loop; else the
+/// main loop may be what does not answer, so the process ends 3 s later anyway).
+pub fn quit(main_thread: bool) {
+    match APP.get() {
+        Some(app) => app.exit(0),
+        None => std::process::exit(0),
+    }
+    if !main_thread {
+        std::thread::sleep(Duration::from_secs(3));
+        std::process::exit(0);
+    }
+}
+
+// ---------------------------------------------------------------- the font cache hint
+
+/// What became of the font cache hint ([`hint`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hint {
+    Chose(Action),
+    /// Closed without a button.
+    Closed,
+    /// Only a notice without buttons could show it (notify-send), or nothing could: nobody can answer it.
+    Notice,
+    /// The page started while it was up: it closed by itself.
+    Started,
+}
+
+thread_local! {
+    /// The hint that is up (the window's main loop only).
+    static HINT: std::cell::RefCell<Option<gtk::MessageDialog>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The font cache hint (crate::fonthang::check, on the watchdog's thread): over the window, not modal, until the player
+/// answers or `started()` says the page started after all (then it closes by itself). The desktop's tools when the
+/// window's main loop does not put it up within [`SHOWN_WITHIN`].
+pub fn hint(m: &Message, started: &dyn Fn() -> bool) -> Hint {
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::sync::Arc;
+    say(m);
+    let (shown_tx, shown_rx) = std::sync::mpsc::channel::<()>();
+    let (tx, rx) = std::sync::mpsc::channel::<Option<Action>>();
+    // the main loop answered too late: it puts up nothing then
+    let gone = Arc::new(AtomicBool::new(false));
+    let up = match (APP.get(), test_setting().as_deref()) {
+        (Some(app), t) if t != Some("tools") => {
+            let (app2, m2, gone2) = (app.clone(), m.clone(), gone.clone());
+            app.run_on_main_thread(move || show_hint(&app2, m2, shown_tx, tx, &gone2)).is_ok() && shown_rx.recv_timeout(SHOWN_WITHIN).is_ok()
+        }
+        _ => false,
+    };
+    if !up {
+        gone.store(true, Ordering::SeqCst);
+        log("the window's main loop did not put the hint up: the desktop's tools");
+        return match zenity(m, Closed::Nothing).or_else(|| kdialog(m, Closed::Nothing)) {
+            Some(Some(a)) => Hint::Chose(a),
+            Some(None) => Hint::Closed,
+            None => {
+                notice(m);
+                Hint::Notice
+            }
+        };
+    }
+    loop {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(Some(a)) => return Hint::Chose(a),
+            Ok(None) | Err(RecvTimeoutError::Disconnected) => return Hint::Closed,
+            Err(RecvTimeoutError::Timeout) if started() => {
+                if let Some(app) = APP.get() {
+                    let _ = app.run_on_main_thread(close_hint);
+                }
+                return Hint::Started;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+/// On the main thread: the hint over the window; a button or closing it answers once.
+fn show_hint(app: &tauri::AppHandle, m: Message, shown: std::sync::mpsc::Sender<()>, answer: std::sync::mpsc::Sender<Option<Action>>,
+    gone: &AtomicBool) {
+    use gtk::prelude::*;
+    use tauri::Manager;
+    if gone.load(Ordering::SeqCst) {
+        return;
+    }
+    let parent = app.get_webview_window("main").and_then(|w| w.gtk_window().ok());
+    let d = build(&m, parent.as_ref());
+    auto_answer(&d);
+    let focus = default_button(&m);
+    d.connect_response(move |d, r| {
+        d.hide();
+        HINT.with(|h| h.borrow_mut().take());
+        let _ = answer.send(index(r).and_then(|i| m.buttons.get(i)).map(|b| b.0));
+    });
+    d.show_all();
+    if let Some(b) = d.widget_for_response(gtk::ResponseType::Other(focus as u16)) {
+        b.grab_focus();
+    }
+    HINT.with(|h| *h.borrow_mut() = Some(d));
+    let _ = shown.send(());
+}
+
+/// On the main thread: the hint goes (the page started).
+fn close_hint() {
+    use gtk::prelude::*;
+    if let Some(d) = HINT.with(|h| h.borrow_mut().take()) {
+        d.hide();
     }
 }
 
@@ -242,10 +352,14 @@ fn build(m: &Message, parent: Option<&impl gtk::prelude::IsA<gtk::Window>>) -> g
     d
 }
 
-/// The button Enter presses: the first one that does not lower protection. Turning WebKit's sandbox off is always a
-/// button of its own the player picks, never what a stray Enter does.
+/// The button Enter presses: the first one that neither lowers protection nor changes the player's files. Turning
+/// WebKit's sandbox off and moving the font cache aside are always buttons the player picks, never what a stray Enter does.
 fn default_button(m: &Message) -> usize {
-    m.buttons.iter().position(|b| b.0 != Action::SandboxOff).unwrap_or(0)
+    m.buttons.iter().position(|b| enter_may(b.0)).unwrap_or(0)
+}
+
+fn enter_may(a: Action) -> bool {
+    !matches!(a, Action::SandboxOff | Action::FixFonts)
 }
 
 /// The default button has the focus (a selectable text would otherwise get it, all selected).
@@ -294,6 +408,11 @@ fn ask_tools(m: &Message, closed: Closed) -> Option<Option<Action>> {
     if let Some(a) = kdialog(m, closed) {
         return Some(a);
     }
+    notice(m).then_some(None)
+}
+
+/// notify-send: the message without buttons (the text names the flags). False: it could not show it either.
+fn notice(m: &Message) -> bool {
     let mut body = m.body.clone();
     let flags: Vec<&str> = m.buttons.iter().filter_map(|b| match b.0 {
         Action::SandboxOff => Some(crate::sandbox::ARG_OFF),
@@ -307,13 +426,13 @@ fn ask_tools(m: &Message, closed: Closed) -> Option<Option<Action>> {
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
         .status().is_ok_and(|s| s.success());
     log(if ok { "the message went out as a desktop notice (notify-send)" } else { "no tool could show the message (zenity, kdialog, notify-send)" });
-    ok.then_some(None)
+    ok
 }
 
 /// The buttons as a tool shows them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToolButtons {
-    /// Its OK button, the one Enter presses: never "Turn the sandbox off" while another is there.
+    /// Its OK button, the one Enter presses: never "Turn the sandbox off" or the font cache fix while another is there.
     ok: (Action, &'static str),
     /// The label of its Cancel button, which means what closing means.
     cancel: &'static str,
@@ -329,7 +448,7 @@ fn tool_buttons(m: &Message, closed: Closed) -> Option<ToolButtons> {
     if left.is_empty() {
         return None;
     }
-    let ok = left.remove(left.iter().position(|b| b.0 != Action::SandboxOff).unwrap_or(0));
+    let ok = left.remove(left.iter().position(|b| enter_may(b.0)).unwrap_or(0));
     Some(ToolButtons { ok, cancel, extra: left })
 }
 
@@ -374,7 +493,7 @@ fn kdialog(m: &Message, closed: Closed) -> Option<Option<Action>> {
     let b = tool_buttons(m, closed)?;
     let mut cmd = kiln_manage::hostenv::command("kdialog");
     cmd.args(["--title", &m.title]);
-    // at most three buttons: OK, the next one ("Turn the sandbox off" when it is there, else Quit), what closing means
+    // at most three buttons: OK, the next one ("Turn the sandbox off", else the font cache fix, else Quit), what closing means
     match kdialog_second(&b) {
         Some(second) => cmd.args(["--yesnocancel", &m.body, "--yes-label", b.ok.1, "--no-label", second.1, "--cancel-label", b.cancel]),
         None => cmd.args(["--yesno", &m.body, "--yes-label", b.ok.1, "--no-label", b.cancel]),
@@ -385,7 +504,7 @@ fn kdialog(m: &Message, closed: Closed) -> Option<Option<Action>> {
 
 fn kdialog_second(b: &ToolButtons) -> Option<(Action, &'static str)> {
     let find = |a: Action| b.extra.iter().find(|x| x.0 == a);
-    find(Action::SandboxOff).or_else(|| find(Action::Quit)).or(b.extra.first()).copied()
+    find(Action::SandboxOff).or_else(|| find(Action::FixFonts)).or_else(|| find(Action::Quit)).or(b.extra.first()).copied()
 }
 
 /// kdialog's exit: 0 yes, 1 no, 2 cancel (a `--yesno` has no cancel: its no is what closing means); a crash or no
@@ -454,6 +573,28 @@ mod tests {
         assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "", ""), Some(None));
         assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "", "Failed to open display"), None);
         assert_eq!(zenity_answer(&late, Closed::Nothing, Some(1), "Quit", ""), Some(Some(A::Quit)));
+    }
+
+    /// (0.2.0-dev.31.14) The font cache hint: Enter keeps waiting (it never moves the player's files), the tools keep the
+    /// fix, and closing chooses nothing (the launcher looks again later).
+    #[test]
+    fn the_font_cache_hint_never_fixes_on_enter() {
+        const FIX: (A, &str) = (A::FixFonts, "Fix it and restart");
+        const KEEP: (A, &str) = (A::KeepWaiting, "Keep waiting");
+        let hint = msg(&[FIX, KEEP, QUIT]);
+        assert_eq!(hint.buttons[default_button(&hint)].0, A::KeepWaiting);
+        let b = tool_buttons(&hint, Closed::Nothing).unwrap();
+        assert_eq!(b, ToolButtons { ok: KEEP, cancel: "Close", extra: vec![FIX, QUIT] });
+        assert_eq!(zenity_answer(&b, Closed::Nothing, Some(1), "Fix it and restart\n", ""), Some(Some(A::FixFonts)));
+        assert_eq!(zenity_answer(&b, Closed::Nothing, Some(1), "", ""), Some(None));
+        assert_eq!(kdialog_second(&b), Some(FIX));
+        assert_eq!(kdialog_answer(&b, Closed::Nothing, Some(1)), Some(Some(A::FixFonts)));
+        // the late message with the font cache step (the cause not known): Enter is the next try or the log folder
+        let late = msg(&[NO_GPU, (A::FixFonts, "Rebuild the font cache and restart"), LOGS, QUIT]);
+        assert_eq!(late.buttons[default_button(&late)].0, A::NoGpu);
+        let soft = msg(&[(A::FixFonts, "Rebuild the font cache and restart"), LOGS, QUIT]);
+        assert_eq!(soft.buttons[default_button(&soft)].0, A::OpenLogs);
+        assert_eq!(tool_buttons(&soft, Closed::Nothing).unwrap().ok, LOGS);
     }
 
     #[test]

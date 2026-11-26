@@ -717,6 +717,10 @@ pub enum Action {
     NoGpu,
     /// Open the folder of launcher.log (the message stays).
     OpenLogs,
+    /// Move the user's font cache aside, run `fc-cache -r` and start again (crate::fonthang, 0.2.0-dev.31.14).
+    FixFonts,
+    /// The font cache hint goes away; the launcher looks again later (crate::fonthang).
+    KeepWaiting,
     Quit,
 }
 
@@ -726,6 +730,16 @@ pub struct Message {
     pub title: String,
     pub body: String,
     pub buttons: Vec<(Action, &'static str)>,
+}
+
+/// The font cache step's button in the late message.
+pub const FONTS_LABEL: &str = "Rebuild the font cache and restart";
+
+/// The font cache step's words in the late message (`dir`: the user's font cache folder as shown).
+pub fn font_step(dir: &str) -> String {
+    format!("If GNOME Web or another program that shows web pages hangs the same way, your font cache may be broken: run \
+        fc-cache -r, or remove {dir}, then restart the launcher. \"{FONTS_LABEL}\" does that and keeps the old folder \
+        (renamed with today's date and time).")
 }
 
 /// Where the proper fix is written down.
@@ -802,7 +816,9 @@ pub fn tried(c: &crate::render::Choice) -> String {
 
 /// The message when the page did not start and the launcher has nothing left to try by itself. `what`: the watchdog's
 /// words ("the page did not start within 15 s of the window"); `log`: launcher.log's path.
-pub fn late_message(s: Option<&State>, render: &crate::render::Choice, what: &str, log: &str) -> Message {
+/// `fonts`: the user's font cache folder as shown (crate::fonthang::shown_dir): the font cache step is one of the tries
+/// (Linux, 0.2.0-dev.31.14); None leaves it out.
+pub fn late_message(s: Option<&State>, render: &crate::render::Choice, what: &str, log: &str, fonts: Option<&str>) -> Message {
     let sandbox = match s {
         None => "unknown".to_string(),
         Some(s) => {
@@ -834,8 +850,12 @@ pub fn late_message(s: Option<&State>, render: &crate::render::Choice, what: &st
     if render.mode == crate::render::Mode::Gpu {
         buttons.push((Action::NoGpu, "Start without the GPU"));
     }
+    if fonts.is_some() {
+        buttons.push((Action::FixFonts, FONTS_LABEL));
+    }
     buttons.push((Action::OpenLogs, "Open the log folder"));
     buttons.push((Action::Quit, "Quit"));
+    let fonts = fonts.map(|dir| format!("\n\n{}", font_step(dir))).unwrap_or_default();
     let tries = if buttons.len() > 2 {
         "The cause is not known, so each button below is a try."
     } else {
@@ -848,7 +868,7 @@ pub fn late_message(s: Option<&State>, render: &crate::render::Choice, what: &st
     Message {
         title: "Kiln Launcher: the window did not start".into(),
         body: format!(
-            "{head}\n\nTried: {}.\nWebKit's sandbox: {sandbox}.\n\n{tries} launcher.log has the details:\n{log}\nPlease send it when you \
+            "{head}\n\nTried: {}.\nWebKit's sandbox: {sandbox}.{fonts}\n\n{tries} launcher.log has the details:\n{log}\nPlease send it when you \
             report this.",
             tried(render)),
         buttons,
@@ -1148,13 +1168,13 @@ mod tests {
         assert_eq!(m.buttons, vec![(Action::StartAnyway, "Start anyway"), (Action::Quit, "Quit")]);
         assert!(m.body.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0 keeps it on") && !m.body.contains("Turning the sandbox off:"), "{}", m.body);
         assert!(m.body.contains("Or start the launcher without WEBKIT_FORCE_SANDBOX=1"), "{}", m.body);
-        let late = late_message(Some(&yours), &soft, what, "/x/launcher.log");
+        let late = late_message(Some(&yours), &soft, what, "/x/launcher.log", None);
         assert!(!offered(&late) && late.body.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0 keeps it on"), "{}", late.body);
         assert!(finding(&yours).unwrap().text.contains("Your own WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=0"));
         // WebKitGTK 2.38 reads no WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: the launcher's variable would change nothing
         let mut old = state(webkit_use((2, 38, 6), Some("1"), None), uid_map());
         old.webkit_version = (2, 38, 6);
-        assert!(!old.can_turn_off() && !offered(&start_message(&old)) && !offered(&late_message(Some(&old), &soft, what, "/x")));
+        assert!(!old.can_turn_off() && !offered(&start_message(&old)) && !offered(&late_message(Some(&old), &soft, what, "/x", None)));
         assert!(start_message(&old).body.contains("This WebKitGTK (2.38) has no switch to turn its sandbox off"), "{}", start_message(&old).body);
         // where it works, it is offered and says what off means
         let ok = state(forced(), uid_map());
@@ -1173,7 +1193,7 @@ mod tests {
         let log = "/home/player/.local/share/kiln/logs/launcher.log";
         // the player's case: software mode tried, the sandbox not in use, bwrap fails on the system: the log and Quit
         let unused = state(webkit_use((2, 50, 4), None, None), uid_map());
-        let m = late_message(Some(&unused), &soft, what, log);
+        let m = late_message(Some(&unused), &soft, what, log, None);
         assert_eq!(m.title, "Kiln Launcher: the window did not start");
         assert_eq!(m.buttons, vec![(Action::OpenLogs, "Open the log folder"), (Action::Quit, "Quit")]);
         for want in ["The launcher's page did not start within 15 s of the window, so the window stays empty.",
@@ -1184,7 +1204,7 @@ mod tests {
         }
         // the sandbox on and the GPU asked for: both are offered, and the message says each is a try
         let on = state(forced(), Probe::Works);
-        let m = late_message(Some(&on), &gpu, what, log);
+        let m = late_message(Some(&on), &gpu, what, log, None);
         assert_eq!(m.buttons.iter().map(|b| b.0).collect::<Vec<_>>(), [Action::SandboxOff, Action::NoGpu, Action::OpenLogs, Action::Quit]);
         assert_eq!(m.buttons[0].1, "Start without WebKit's sandbox");
         assert_eq!(m.buttons[1].1, "Start without the GPU");
@@ -1194,13 +1214,33 @@ mod tests {
         let mut off = state(webkit_use((2, 50, 4), Some("1"), Some("1")), Probe::Works);
         off.choice = c(Want::Off, Why::Marker);
         off.var = Var::Set;
-        let m = late_message(Some(&off), &soft, what, log);
+        let m = late_message(Some(&off), &soft, what, log, None);
         assert!(!m.buttons.iter().any(|b| b.0 == Action::SandboxOff));
         assert!(m.body.contains("WebKit's sandbox: off (your choice from an earlier start)"), "{}", m.body);
         // the player's own variable keeps it on: not offered either
         let mut yours = state(forced(), Probe::Works);
         yours.var = Var::Yours("0".into());
-        assert!(!late_message(Some(&yours), &soft, what, log).buttons.iter().any(|b| b.0 == Action::SandboxOff));
+        assert!(!late_message(Some(&yours), &soft, what, log, None).buttons.iter().any(|b| b.0 == Action::SandboxOff));
+    }
+
+    /// (0.2.0-dev.31.14) The cause not known: the font cache step is one of the tries, never the default (Enter), and
+    /// the message no longer says nothing is left.
+    #[test]
+    fn the_late_message_lists_the_font_cache_step() {
+        use crate::render::{Choice as R, Mode, Why as RW};
+        let soft = R { mode: Mode::Software, why: RW::Restart, ignored: None };
+        let unused = state(webkit_use((2, 50, 4), None, None), uid_map());
+        let m = late_message(Some(&unused), &soft, "the page did not start within 15 s of the window", "/x/launcher.log", Some("~/.cache/fontconfig"));
+        assert_eq!(m.buttons, vec![(Action::FixFonts, "Rebuild the font cache and restart"), (Action::OpenLogs, "Open the log folder"), (Action::Quit, "Quit")]);
+        for want in ["WebKit's sandbox: not in use", "your font cache may be broken: run fc-cache -r, or remove ~/.cache/fontconfig, then restart \
+            the launcher.", "keeps the old folder", "each button below is a try", "/x/launcher.log"] {
+            assert!(m.body.contains(want), "{want}\n{}", m.body);
+        }
+        assert!(m.body.find("font cache").unwrap() < m.body.find("launcher.log has").unwrap());
+        assert!(!m.body.contains("nothing left to try"));
+        let gpu = R { mode: Mode::Gpu, why: RW::Default, ignored: None };
+        let m = late_message(Some(&state(forced(), Probe::Works)), &gpu, "x", "/x", Some("/x/fontconfig"));
+        assert_eq!(m.buttons.iter().map(|b| b.0).collect::<Vec<_>>(), [Action::SandboxOff, Action::NoGpu, Action::FixFonts, Action::OpenLogs, Action::Quit]);
     }
 
     #[test]
@@ -1228,7 +1268,7 @@ mod tests {
         unused.appimage = true;
         assert!(finding(&unused).is_none() && !unused.probe_is_news());
         let soft = R { mode: Mode::Software, why: RW::Argument, ignored: None };
-        let m = late_message(Some(&unused), &soft, "the page did not start within 15 s of the window", "/x/launcher.log");
+        let m = late_message(Some(&unused), &soft, "the page did not start within 15 s of the window", "/x/launcher.log", None);
         assert!(!m.body.contains("bwrap"), "{}", m.body);
         assert!(unused.says().contains("this AppImage's WebKit cannot run its sandbox"), "{}", unused.says());
         let mut forced_ai = state(forced(), missing);

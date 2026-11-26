@@ -445,8 +445,8 @@ mod linux {
     use super::*;
     use std::path::Path;
 
-    /// The web processes below this one, with their resident memory (kB).
-    pub(super) fn web_processes() -> Vec<(u32, u64)> {
+    /// The web processes below this one, with their resident memory (kB); also crate::fonthang's probe.
+    pub(crate) fn web_processes() -> Vec<(u32, u64)> {
         let procs: Vec<(u32, String, u32)> = std::fs::read_dir("/proc").into_iter().flatten().flatten()
             .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
             .filter_map(|pid| {
@@ -683,6 +683,8 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 pub use linux::watch;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::web_processes;
 
 #[cfg(test)]
 mod tests {
