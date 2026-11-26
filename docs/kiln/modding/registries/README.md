@@ -386,6 +386,7 @@ with a certainty:
 | Writer | Certainty | Where Kiln learns it |
 |---|---|---|
 | Kiln's older paths (boot resource patches, data packs, `Content.*` code) and registry edits | `certain` | Kiln applies them itself |
+| A change made through Kiln's content service by code, also another loader's (an EMF DLL mod's `set_item_max_stack`) | `certain` | named `<who>: <Kiln place>`, `<who>` being the mod, else the loader's own name for its mod (`emf:big_stacks`); a label the mod gave its change (`Content.Apply(json, "bigstacks x4")`) stays as it wrote it (next release; before, such a row named the game's item and member, `owner 67: items Material_T1_Wood_Logs.maxStackSize`) |
 | A ShroudForge or EML package that wrote the entry before Kiln (`archiveWriter`, who `shroudforge:<package>` or `eml:<package>`) | `named` | kiln-eml's change journal of a kiln-mode start (below) |
 | Something outside Kiln changed the game's value (`drift`, who `outside Kiln (best effort; suspects: ...)`) | `bestEffort` | the drift probe at each world load and pack reload (below) |
 
@@ -424,7 +425,18 @@ the row says so and names the suspects Kiln can see, the modules that patched ga
 row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything. It runs whenever Kiln
 rebuilds `registry.json`'s live rows (at each world load and pack reload, and when a live change or a drop table the game
 loads later changes them; never per tick) and costs one more read of each field it writes live, about a tenth of what
-rebuilding the rows costs anyway. A suspect list is a hint, not proof: a writer that hooks nothing is not
+rebuilding the rows costs anyway.
+
+**Writes after the last report** (next release; before, they stayed out of `registry.json` until the next pack reload or
+world load: the compat rehearsal saw wood logs at 300 there while EMF's big_stacks had made them 1200). Kiln also looks
+again between those rebuilds, never per tick: about 2 s after a change through Kiln's content service (code, another
+loader's change through Kiln) and every 10 s for a write outside it, comparing each field it writes live with what the last
+report saw. When one changed, `registry.json` and the Conflicts view get the field's new writers and result (a code writer
+as above; a write outside Kiln as a best-effort row last, with a line: "the game's value changed outside Kiln after Kiln's
+last write in this world"); no new generation, no ready event, nothing written into the game. A field that keeps changing
+is looked at less often (up to once a minute). kiln.log says so once. A look costs a read of each slot Kiln writes live
+(a few thousand at most) and nothing when nothing changed. A write outside Kiln that comes back to Kiln's value between
+two looks is not seen. A suspect list is a hint, not proof: a writer that hooks nothing is not
 seen, and a field nobody edits through the registry is not checked. Neither is an entry an old boot resource patch (an
 `OnBoot` or `resourcePatches` document) writes: the game holds Kiln's own patch there, and many of its paths (a formula's
 input, an element of a list of structs, `[*]` over every recipe) have no field row to explain it, so a change there is

@@ -700,7 +700,7 @@
         },
         "who": {
           "type": "string",
-          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\", \"eml:<package>\" (an EML package of the kiln-mode startup pass), \"kiln-eml:unattributed\" (a startup write no package made), \"outside Kiln (best effort; suspects: ...)\" (a drift row)."
+          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"<mod or loader's mod>: <Kiln place>\" (a code change made through Kiln's content service, also another loader's: \"emf:big_stacks: items[game:material_t1_wood_logs].maxStack\"; since the next release, before it the game's item and member), \"shroudforge:<package>\", \"eml:<package>\" (an EML package of the kiln-mode startup pass), \"kiln-eml:unattributed\" (a startup write no package made), \"outside Kiln (best effort; suspects: ...)\" (a drift row)."
         },
         "stage": {
           "enum": [
