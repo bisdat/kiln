@@ -115,7 +115,11 @@ and answers the rest in `left`.
   the HUD's count `r8d` is below `max(amount, 1)`, `r8d` becomes bag + the snapshot's row, so the line shows met and its
   count the same as the press. kiln.log logs the line's state once per change (the HUD runs every frame):
   `locks: the lock prompt's requirement line counts the linked sources: item 0x..., bag a + linked b, needs n (shown
-  met)` or `... counts the bag only: item 0x..., <check> (bag a, linked b, needs n)`.
+  met)` or `... counts the bag only: item 0x..., <check> (bag a, linked b, needs n)`. The line is display only and a
+  hosting client's server half shares `items.lock_sources`, so this site is not part of the feature: where it does not
+  resolve, another module patched its code, its hook cannot go in or it faults, only the line keeps the game's count
+  (`locks: the lock prompt's requirement line keeps the game's count ...` / `... stands down ...` / `... hook faulted
+  ...`); the checks, the locked prompt and the payment keep counting the links and the capability row is not lowered.
 - **A hosted world:** the host's process has one kiln-items for its server and client worlds. The server half's
   `LockStock` hands the host's own player its message in process (`Client.IsHosting && Client.LocalPlayer == player`,
   no network; the host's asks go straight to the server half's queue), so the host's client world gets
