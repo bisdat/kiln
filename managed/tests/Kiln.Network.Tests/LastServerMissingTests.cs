@@ -159,16 +159,35 @@ public sealed class LastServerMissingTests : IDisposable
         Assert.Equal(["combat_tweaks", "sf-survival"], LastServer.Lacking(required, [new LastServer.Local("kiln", "creative", kilnNamesake)], player).Order(StringComparer.Ordinal));
     }
 
-    // A mod switched off in the player's game is still there (its switch is not part of its identity), as a Kiln mod that
-    // is disabled counts as there.
+    // A mod switched off in the player's game does not run there, and the server needs it running: it is missing, as a
+    // Kiln mod switched off in the profile (Skipped, not in the client's list) is. ShroudForge's switch is enabled: false
+    // in extended.mod.json (Kiln writes it so for a mod switched off in the profile and keeps the copy); a ShroudForge mod
+    // whose targets leave out "client" does not run on a client either. Its identity is the same as the server's copy
+    // (extended.mod.json is left out of it): a switched-off copy must not stand in for a running one.
     [Fact]
-    public void A_shroudforge_mod_switched_off_on_the_player_is_not_missing()
+    public void A_mod_switched_off_in_the_players_game_is_missing()
     {
         var server = Game("server");
         var required = Advertised(server);
         var player = Game("player");
-        Write(Path.Combine(player, "mods", "combat_tweaks", "extended.mod.json"), """{"schemaVersion":1,"enabled":false}""");
-        Assert.Empty(LastServer.Lacking(required, [], player));
+        Write(Path.Combine(player, "mods", "combat_tweaks", "extended.mod.json"), """{"schemaVersion":1,"enabled":false,"settings":{"t":1}}""");
+        Write(Path.Combine(player, "mods", "altar-cleanup", "extended.mod.json"), """{"schemaVersion":1,"enabled":true,"targets":["server"]}""");
+        Assert.Equal(["altar-cleanup", "combat_tweaks"], LastServer.Lacking(required, [], player).Order(StringComparer.Ordinal));
+    }
+
+    // The same id twice in the player's mods folder, one copy switched off: only the copy that runs counts.
+    [Fact]
+    public void A_switched_off_copy_does_not_stand_in_for_the_running_one()
+    {
+        var server = Game("server");
+        var required = Advertised(server);
+        var player = Game("player");
+        File.WriteAllText(Path.Combine(player, "mods", "combat_tweaks", "combat.dll"), "MZ combat, another build");
+        var old = Path.Combine(player, "mods", "combat_tweaks-old");
+        Write(Path.Combine(old, "mod.json"), """{"id":"combat_tweaks","version":"0.7.2"}""");
+        Write(Path.Combine(old, "extended.mod.json"), """{"schemaVersion":1,"enabled":false}""");
+        Write(Path.Combine(old, "combat.dll"), "MZ combat");
+        Assert.Equal(["combat_tweaks"], LastServer.Lacking(required, [], player));
     }
 
     [Fact]
@@ -214,7 +233,7 @@ public sealed class LastServerMissingTests : IDisposable
         var remote = LastServer.Answer("welcome", null, advert with { ServerName = "Ember Isles" }, null, null, hosted: false, [], game, DateTime.UtcNow);
         Assert.False(remote["hosted"]!.GetValue<bool>());
         Assert.Equal(["combat_tweaks"], ((JsonArray)remote["missing"]!).Select(n => n!.GetValue<string>()));
-        Assert.Equal("last-server.json: welcome from server srv-8383ec52951c \"Ember Isles\", missing combat_tweaks (this game lacks them or has another version)",
+        Assert.Equal("last-server.json: welcome from server srv-8383ec52951c \"Ember Isles\", missing combat_tweaks (this game lacks them, has them switched off or has another version)",
             LastServer.LogLine(remote));
     }
 

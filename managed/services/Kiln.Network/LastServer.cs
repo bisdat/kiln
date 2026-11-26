@@ -74,7 +74,7 @@ internal static class LastServer
             : $"server {id}" + (string.IsNullOrWhiteSpace(name) ? "" : $" \"{name}\"");
         var line = $"last-server.json: {outcome} {(outcome == "rejected" ? "by" : "from")} {who}";
         var missing = entry["missing"] is JsonArray m ? m.Select(x => x?.GetValue<string>()).ToList() : [];
-        if (missing.Count > 0) line += $", missing {string.Join(", ", missing)}" + (hosted ? "" : " (this game lacks them or has another version)");
+        if (missing.Count > 0) line += $", missing {string.Join(", ", missing)}" + (hosted ? "" : " (this game lacks them, has them switched off or has another version)");
         else if (outcome == "welcome") line += ", nothing missing";
         if (entry["modpack"]?["url"]?.GetValue<string>() is { } url) line += $", modpack {url}";
         return line;
@@ -166,10 +166,14 @@ internal static class LastServer
     }
 
     /// <summary>The required ids this game lacks: <paramref name="local"/> (its Kiln and native mods) and the other
-    /// engines' mods in <paramref name="game"/>'s folders (ShroudForge, Flame, EML, EMF, Green Eye ...: the folders and
-    /// ids the server reads its own from, NetAdvertise.EngineMods), each kind compared as the server advertises it. Up to
-    /// 0.2.0-dev.31.17 only Kiln and native mods were looked at, so every other engine's mod was "missing", even in the
-    /// player's own hosted world.</summary>
+    /// engines' mods in <paramref name="game"/>'s folders (ShroudForge, Flame, Green Eye, SET ...: the folders and ids the
+    /// server reads its own from, NetAdvertise.EngineMods), each kind compared as the server advertises it. Only mods
+    /// that run here count: one switched off (ShroudForge's <c>enabled: false</c>, which Kiln writes for a mod switched
+    /// off in the profile; <c>targets</c> without "client") is missing, the server needs it running, as a Kiln mod
+    /// switched off in the profile is. Mods a Kiln client runs from the Library (EML's, EMF's DLL mods and Shroudtopia's
+    /// without that engine's own loader) are not in those folders and so still count as missing. Up to 0.2.0-dev.31.17
+    /// only Kiln and native mods were looked at, so every other engine's mod was "missing", even in the player's own
+    /// hosted world.</summary>
     internal static List<string> Lacking(IReadOnlyList<NetRequiredMod> required, List<Local> local, string game)
     {
         var kinds = required.Select(r => r.Kind).Where(k => k is not ("kiln" or "native")).ToHashSet(StringComparer.Ordinal);
@@ -177,7 +181,7 @@ internal static class LastServer
         if (kinds.Count > 0)
             try
             {
-                all.AddRange(NetAdvertise.EngineMods(game, neededOnly: false, kinds).Select(c => new Local(c.Kind, c.Id, c.Dir)));
+                all.AddRange(NetAdvertise.EngineMods(game, kinds).Select(c => new Local(c.Kind, c.Id, c.Dir)));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
             {
