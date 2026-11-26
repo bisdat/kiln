@@ -1075,12 +1075,16 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             return ok;
         };
         // What one mod's packs did in this application that a store or drop layer does not hold comes off whole when one
-        // of them throws: the definitions of its "add" lists (newcontent; 0.2.0-dev.31.14). Its layers and drop rules come
-        // off with its owner.
+        // of them throws: the definitions of its "add" lists (newcontent), gamedata clones and config adds, and what it
+        // applied in other services' sections (0.2.0-dev.31.14). Its layers and drop rules come off with its owner.
         auto roll_back = [&](KilnOwner o) {
             store_drop_owner(o);
             drops_drop_owner(o);
-            return nc_pack_rollback(o);
+            uint32_t n = nc_pack_rollback(o);
+#if KC_GAMEDATA
+            n += gd_pack_rollback(o);
+#endif
+            return n;
         };
         // Each mod's packs apply in its place in the load order. A pack that throws partway (an unexpected value type)
         // ends that mod's application: what its packs did in it comes off, then its packs from before apply again in its
@@ -1093,6 +1097,9 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             while (end < packs.size() && packs[end].file.mod == mod) ++end;
             const KilnOwner o = owner_of(mod);
             nc_pack_mark(o);
+#if KC_GAMEDATA
+            gd_pack_mark(o);
+#endif
             bool threw_here = false;
             for (size_t i = at; i < end; ++i) {
                 ParsedPack& pack = packs[i];
@@ -1132,16 +1139,19 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
                     const uint64_t mi = mod_index(mod);
                     const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > mi; });
                     sections.insert(pos, std::make_move_iterator(again_sections.begin()), std::make_move_iterator(again_sections.end()));
-                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s) besides its "
-                         "layers); the packs it had before apply again, whole", mod.c_str(), undone);
+                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s), clone(s) and "
+                         "section(s) besides its layers); the packs it had before apply again, whole", mod.c_str(), undone);
                 } else {
                     roll_back(o);
-                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s) besides its "
-                         "layers); none of its packs apply", mod.c_str(), undone);
+                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s), clone(s) and "
+                         "section(s) besides its layers); none of its packs apply", mod.c_str(), undone);
                 }
                 rep.files.emplace_back(mod + " (set apart)", std::move(r));
             }
             nc_pack_unmark();
+#if KC_GAMEDATA
+            gd_pack_unmark();
+#endif
             at = end;
         }
         for (ParsedPack& r : refused) rep.files.emplace_back(r.file.rel + " (not applied)", std::move(r.report));

@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <unordered_set>
 
@@ -131,6 +132,29 @@ int64_t g_storage = 0, g_tarr = 0, g_tcap = 0, g_tcount = 0;
 bool g_templates = false;
 KilnOwner g_defs_owner = 0;
 std::set<std::string> g_seen_pack;  // pack definitions (guid text) seen in the current pack application
+// One mod's pack application (clones_pack_mark .. clones_pack_unmark): each clone the owner's packs added or changed since
+// the mark, in the order of its first change, with a copy from before (none: the packs added it) and whether a pack of
+// this application had already defined it (g_seen_pack). By GUID: g_defs is a vector of values. Under g_mu.
+struct PackJournal {
+    struct Touch {
+        std::array<uint8_t, 16> guid{};
+        std::optional<Def> was;
+        bool seen = false;
+    };
+    KilnOwner owner = 0;
+    std::vector<Touch> touched;
+};
+PackJournal g_pack_journal;
+void journal_touch(KilnOwner owner, const uint8_t guid[16], const Def* now, bool seen) {
+    if (!owner || owner != g_pack_journal.owner) return;
+    for (const auto& t : g_pack_journal.touched)
+        if (std::memcmp(t.guid.data(), guid, 16) == 0) return;
+    PackJournal::Touch t;
+    std::memcpy(t.guid.data(), guid, 16);
+    if (now) t.was = *now;
+    t.seen = seen;
+    g_pack_journal.touched.push_back(std::move(t));
+}
 
 using GetBuffFn = uintptr_t(__fastcall*)(uint32_t id, uintptr_t registry);
 GetBuffFn g_get_buff = nullptr;  // optional (gamedata/GetBuffType): the game's own lookup, for the self-check
@@ -2095,9 +2119,13 @@ KilnResult define_parsed(KilnOwner owner, uint32_t section, const gjson& j, Def 
     };
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
-    if (pack) g_seen_pack.insert(guid_text(d.guid));
-    std::string state = d.placeholder ? "placeholder" : "defined";
     auto it = std::find_if(g_defs.begin(), g_defs.end(), [&](const Def& x) { return std::memcmp(x.guid, d.guid, 16) == 0; });
+    if (pack) {
+        const std::string gt = guid_text(d.guid);
+        journal_touch(owner, d.guid, it != g_defs.end() ? &*it : nullptr, g_seen_pack.count(gt) != 0);  // a marked owner's pack
+        g_seen_pack.insert(gt);
+    }
+    std::string state = d.placeholder ? "placeholder" : "defined";
     if (it != g_defs.end()) {
         if (it->section != section) return fail("the GUID is a " + std::string(section_name(it->section)) + " clone's");
         if (it->base != d.base && it->data) return fail("a registered clone cannot change its base (" + it->base + "); use a new GUID");
@@ -2679,6 +2707,59 @@ gjson clones_export(uint32_t section) {
 void clones_packs_begin() {
     std::lock_guard lock(g_mu);
     g_seen_pack.clear();
+}
+
+void clones_pack_mark(KilnOwner owner) {
+    std::lock_guard lock(g_mu);
+    g_pack_journal = PackJournal{owner, {}};
+}
+
+void clones_pack_unmark() {
+    std::lock_guard lock(g_mu);
+    g_pack_journal = PackJournal{};
+}
+
+uint32_t clones_pack_rollback(KilnOwner owner) {
+    std::lock_guard l1(store_mutex());  // before g_mu, as everywhere
+    std::lock_guard lock(g_mu);
+    if (!owner || owner != g_pack_journal.owner) return 0;
+    uint32_t n = 0;
+    const uintptr_t w = active_world();
+    const bool live = w && g_api->on_world_thread(active_kind()) && res_ready();
+    for (auto t = g_pack_journal.touched.rbegin(); t != g_pack_journal.touched.rend(); ++t) {
+        const std::string gt = guid_text(t->guid.data());
+        if (t->seen) g_seen_pack.insert(gt);
+        else g_seen_pack.erase(gt);  // clones_packs_end orphans it unless a pack defines it again
+        auto it = std::find_if(g_defs.begin(), g_defs.end(), [&](const Def& x) { return std::memcmp(x.guid, t->guid.data(), 16) == 0; });
+        if (it == g_defs.end()) continue;
+        ++n;
+        if (!t->was) {
+            // added by the packs: off as a removed pack's clone is (a registered one keeps its record, reserved)
+            it->orphan = true;
+            LOGI("gamedata: %s clone %s (%s) comes off: the pack that added it threw while it applied", section_name(it->section),
+                 it->name.c_str(), gt.c_str());
+            continue;
+        }
+        const Def& was = *t->was;
+        if (it->owner == was.owner && it->source == was.source && it->fields == was.fields && it->body == was.body &&
+            it->texts == was.texts && it->placeholder == was.placeholder && it->orphan == was.orphan && it->mod == was.mod)
+            continue;  // the pack that threw left it as it was
+        // as define_parsed redefines it, with the definition from before the pack: its record is written again from it
+        if (it->placeholder != was.placeholder) it->rebuild = it->data != 0;
+        it->owner = was.owner, it->source = was.source, it->fields = was.fields, it->body = was.body, it->orphan = was.orphan;
+        it->texts = was.texts, it->placeholder = was.placeholder, it->mod = was.mod, it->reg_id = was.reg_id;
+        it->warnings = was.warnings;
+        ++it->version;
+        LOGI("gamedata: %s clone %s (%s) is back as it was before the pack that threw (%s)", section_name(it->section), it->name.c_str(),
+             gt.c_str(), owner_label(it->owner).c_str());
+        if (live) register_def(*it, w);
+    }
+    g_pack_journal.touched.clear();  // the mark stays: what applies next in its place is journaled from here
+    if (n) {
+        publish_budget();
+        changed();
+    }
+    return n;
 }
 
 void clones_packs_end() {

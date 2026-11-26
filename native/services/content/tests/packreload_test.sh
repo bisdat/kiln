@@ -9,7 +9,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 : "${KILN_OUT:?set KILN_OUT to the build directory}"
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
-for variant in content; do
+for variant in content gamedata; do
     defs=()
     [ "$variant" = gamedata ] && defs=(-DKILN_CONTENT_GAMEDATA)
     echo "== packreload-test (host, $variant)"
