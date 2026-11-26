@@ -440,6 +440,24 @@ fn an_nxm_download_is_checked_added_to_the_profile_recorded_and_undoable() {
     let n = m.calls("/versions");
     cat.check_updates(&d, false).unwrap();
     assert_eq!(m.calls("/versions"), n);
+
+    // the player gets 1.3.0 by hand (the file's page, then a drop or Add mod: a library import) instead of through the
+    // catalog: no "Update to 1.3.0" beside the 1.3.0 that is in (netjunk, 2026-11-26), with nothing asked
+    let by_hand = t.0.join("lantern-glow-1.3.0.zip");
+    let manifest_130 = String::from_utf8(MANIFEST.to_vec()).unwrap().replace("1.2.0", "1.3.0");
+    std::fs::write(&by_hand, zip_of(&[("lantern-glow/kiln.mod.json", manifest_130.as_bytes()), ("lantern-glow/LanternGlow.dll", b"dll 1.3")])).unwrap();
+    crate::library::import(&d, &[by_hand], &mut crate::task::NoProgress).unwrap();
+    let after = cat.installed(&d).unwrap();
+    assert!(after[0].info.in_library && !after[0].info.update_available, "{:?}", after[0].info);
+    assert_eq!(after[0].info.latest_version.as_deref(), Some("1.3.0"), "what Nexus Mods has is still known");
+    // a newer upload after that one is an update again
+    m.json("GET", &format!("{API}/v3/mod-files/90310/versions"), json!({"data": {"versions": [
+        version_json("310", "1009", "1.3.0", "3", manifest, "main"),
+        version_json("310", "1012", "1.4.0", "4", manifest, "main"),
+    ]}}));
+    let u = cat.check_updates(&d, true).unwrap();
+    assert!(u[0].info.update_available && u[0].info.latest_version.as_deref() == Some("1.4.0"), "{:?}", u[0].info);
+    assert_eq!(m.calls("/versions"), n + 1);
 }
 
 #[test]
