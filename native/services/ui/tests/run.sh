@@ -118,6 +118,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$he
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
+# a key press a mod sends while a Kiln text field has the keyboard stays out of the field (text_keep.h, HadToRegister's
+# "tb"): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/text_keep_test.cpp" -o "$out/text_keep_test"
+"$out/text_keep_test"
 # the pad Kiln's screens follow: every poll per user, a stick back at centre included, dead zones (pad_slots.h, kiln#123)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_slots_test.cpp" -o "$out/pad_slots_test"
 "$out/pad_slots_test"
