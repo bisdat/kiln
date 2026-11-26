@@ -288,3 +288,66 @@ access lists, `sigdb/types/client` for the layout. Used by kiln.client's buildin
   `0x863cb0` (a second caller of `0x3a8970`) have no code or data reference besides `.pdata` (rel32 scan of `.text`, 64-bit
   and 32-bit address search). Which server program consumes which bit was not traced; the layout and bits are the
   reflected ones.
+
+## The gameplay crosshair trace (kiln.client.crosshair, 26430625, 2026-11-25)
+What the stock cursor and HUD see under the screen's centre, for `kiln.client.crosshair`
+([services/client-crosshair.md](../kiln/services/client-crosshair.md)). Static only (python capstone on a read-only copy
+of `enshrouded.exe` 26430625, `5d9ef2f1…`; the sigdb feature `client.crosshair_trace`,
+`sigdb/symbols/client.d/client-crosshair.json`; checked by `tools/sigport/tests/test_client_crosshair.py`). Not yet
+observed in a running client. XHL's reference (*Enshrouded game interfaces used by XHL Kiln mods*, 2026-11-24, "Scene
+hit under the gameplay cursor") names the same two functions and result fields; every claim below was re-derived from
+the binary, and where it differs it says so.
+
+- **The program:** `client_cursor`, a client-world program (`interval 1`, writes `ClientCursor` and
+  `ClientPlayerInput`; `sigdb/programs/client/5d9ef2f1…`), body `0x294620` (its registration row at `0x1df8400`:
+  name pointer to `"client_cursor"`, length 13, then the function `0x140294620`). The call site's unwind chunk
+  `0x29466f..0x296372` chains back to `0x294620`. It runs in the client step's program phase (step 4 of "The local
+  input path" above), every step it does not skip the local player for.
+- **The trace:** `0x28caa0`. A rel32 scan of `.text` finds exactly one call or tail jump to it: `0x295608` in
+  `client_cursor`. Arguments: `rcx` = the result, `lea rcx, [rbp + 0xa90]` (112 bytes; the next local starts at
+  `rbp + 0xb00`); `rdx` = the camera context `[rbp + 0x3f0]` (the local camera: i64 32.32 position at `+0x640..+0x650`,
+  quaternion at `+0x658..+0x664`, a start offset along the forward axis at `+0x678`); `r8` = the 104-byte descriptor
+  at `[rbp - 0x80]` (held item pointer at `+0x60`, query kind byte `+3`, collider mask `+8`, flags `+0xc`). The next call
+  (`0x295626`, the terrain query `0x2905c0`) takes the same descriptor and the result as `r9`.
+- **The ray:** from the camera position moved `[ctx + 0x678]` metres along the camera's forward axis (the rotated
+  `-Z`, computed from the quaternion in the prologue), so it starts on that axis, not at the eye; length = the held
+  item's reach `[item + 0x3ac]` (XHL: `ItemInfo.equipment` `+0x104` → `EquipmentSetup.maxDistance` `+0x2a8`; this
+  repo's reflection dump has no `ItemInfo`, so that split is XHL's) with `maxss 7.0`, `minss 31.0`
+  (`0x28cdd0..0x28cdfd`; no item: 7 m). A degenerate rotation (all forward components within 1e-5 of 0) writes status
+  `0x15` and returns (`0x28cbd9`). Positions become float metres by `cvtsi2ss` and `* 2^-32`.
+- **The scene query:** descriptor kind 5 goes to `0x9a5510`, every other kind to `0xa0e090` (`0x28d01c`), which picks
+  the physics world (`[rdx + 0x1a0]` → `0xa0e0e0`) or the collider grid (`0xa0cf80`). Both fill rows of 104 bytes
+  (`0x68`; inline capacity 64 at `[rbp + 0x98]` in the trace's frame) and sort them by the float at row `+0x5c`
+  ascending (`0x9549b0`: `comiss` on `+0x5c`). Row writers: the voxel leaf `0xa08260` writes `+0x0c` position, `+0x18`
+  normal (copy at `+0x30`), `+0x58` the linear distance, `+0x5c` the **squared** distance from the ray start
+  (`0xa08485..0xa08499`), `+0x04` = 0 (no entity), `+0x64` the voxel material byte and `+0x65` = 1; the physics path
+  `0xa0e23f..0xa0e356` writes `+0x04` from the body record's `+0x6c` (the same field is compared with the descriptor's
+  ignore id and, with flag `0x40`, against ids 1..1023: an **entity id**), `+0x5c` = (t·length)², `+0x64` from the
+  record's `+0x74` when not 0; `0xa07dc0` and `0xa05640` write the same `+0x0c/+0x18/+0x58/+0x5c` fields.
+- **The result** (`r14` in the trace, written at `0x28d0ba..0x28d22e`): the nearest row is copied out of the list
+  (`@client/CrosshairTrace.rows`) and stored (`@client/CrosshairTrace.result`):
+
+  | Result | From | Meaning |
+  |---|---|---|
+  | `+0x00` u8 | 0 | status: 0 hit; `0x1f` (31) no row (`0x28d084`, every field zeroed first); `0x15` (21) no camera direction |
+  | `+0x08` f32[3] | row `+0x0c` | hit position, world metres, moved 1 cm: when row `+0x40` has flag `0x10` and the held item's byte `+0x1b1` is set, p -= 0.01·n, 1 cm against the row's surface normal (into the surface; `0x28d153..0x28d18f`, the constant 0.01 at `0x1413d111c`, `subss`); else p -= 0.01·forward, 1 cm back along the ray (`0x28d1a2..0x28d1da`) |
+  | `+0x14` f32[3] | row `+0x18` | surface normal |
+  | `+0x20..+0x57` | row `+0x24..+0x5b` | the rest of the row (unused by Kiln) |
+  | `+0x58` f32 | row `+0x5c` | squared distance (again) |
+  | `+0x60` u8, `+0x61` u8 | row `+0x64`, `+0x65` | voxel material id, and its "set" flag |
+  | `+0x64` u32 | row `+0x04` | entity id. In the `0x10`/`+0x1b1` branch with two or more rows it is the **second** row's `+0x04` (`mov eax,[rdx+0x6c]` at `0x28d19a`, 0x68 + 4) while position, normal and distances stay the first row's |
+  | `+0x68` f32 | row `+0x5c` | squared distance from the ray start (`xmm6` lane 3) |
+
+  XHL's "status `+0x00`, material `+0x60`/`+0x61`, entity `+0x64`, distance squared `+0x68`" matches; the position at
+  `+0x08` and the normal at `+0x14` are not in XHL's text and were derived here.
+- **Where Kiln reads it:** `0x29560d`, the instruction after the call: `lea r9, [rbp + 0xa90]` (7 bytes, no
+  rip-relative operand, relocatable by a mid hook). The result is complete there and nothing has read it yet; `rbp` is
+  `client_cursor`'s frame (nonvolatile across the call). A thread returning from the trace returns to the instruction's
+  start, which is outside the bytes a detour replaces. XHL calls the trace itself with a private descriptor (31 m reach,
+  extra collider bits); Kiln does not call it and does not change the descriptor, so the sample is exactly what the game
+  computed for the stock cursor that step.
+- **Not verified without a live game:** that `client_cursor` runs the trace every step in every state (it returns early
+  when `0x9c2780` or the per-entity check `0x3bb740` says no: `0x294669`, `0x294744`); which thread runs it (the
+  client step's program phase may use job threads; the copy is lock-free for that reason); the entity semantics of row
+  `+0x04` for every collider kind (from the physics row writer and XHL's use); whether the material flag is ever set
+  for a non-voxel collider in practice.

@@ -351,12 +351,18 @@ Kiln.KeyInput
 Kiln.KeyListenFlags
 Kiln.KeyListenFlags.Mouse = 1 -> Kiln.KeyListenFlags
 Kiln.KeyListenFlags.None = 0 -> Kiln.KeyListenFlags
+Kiln.KeyListenFlags.Own = 4 -> Kiln.KeyListenFlags
 Kiln.KeyListenFlags.Pad = 2 -> Kiln.KeyListenFlags
+Kiln.KeyListenFlags.Pointer = 8 -> Kiln.KeyListenFlags
 Kiln.KeyListener
+Kiln.KeyListener.Disown(uint virtualKey = 0, int controller = 0) -> int
 Kiln.KeyListener.Dispose() -> void
 Kiln.KeyListener.Mouse.get -> bool
 Kiln.KeyListener.Ok.get -> bool
+Kiln.KeyListener.Own.get -> bool
+Kiln.KeyListener.Owns(uint virtualKey, int controller = 0) -> bool
 Kiln.KeyListener.Pad.get -> bool
+Kiln.KeyListener.Pointer.get -> bool
 Kiln.KeyListener.Reason.get -> string?
 Kiln.KeyMods
 Kiln.KeyMods.Alt = 4 -> Kiln.KeyMods
@@ -367,21 +373,37 @@ Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods
 Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods
 Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods
 Kiln.KeyMods.Shift = 2 -> Kiln.KeyMods
+Kiln.KeyOwnEnd
+Kiln.KeyOwnEnd.Focus = 1 -> Kiln.KeyOwnEnd
+Kiln.KeyOwnEnd.Lost = 3 -> Kiln.KeyOwnEnd
+Kiln.KeyOwnEnd.None = 0 -> Kiln.KeyOwnEnd
+Kiln.KeyOwnEnd.World = 2 -> Kiln.KeyOwnEnd
 Kiln.KeyPress
 Kiln.KeyPress.Captured.get -> bool
 Kiln.KeyPress.Captured.init -> void
 Kiln.KeyPress.Chord.get -> Kiln.KeyChord
 Kiln.KeyPress.Code.get -> uint
+Kiln.KeyPress.Controller.get -> int
+Kiln.KeyPress.Controller.init -> void
 Kiln.KeyPress.Deconstruct(out uint VirtualKey, out uint ScanCode, out Kiln.KeyMods Mods, out bool Down, out bool Repeat, out bool TextInput, out bool Captured) -> void
 Kiln.KeyPress.Down.get -> bool
 Kiln.KeyPress.Down.init -> void
+Kiln.KeyPress.Ended.get -> Kiln.KeyOwnEnd
+Kiln.KeyPress.Ended.init -> void
 Kiln.KeyPress.Equals(Kiln.KeyPress other) -> bool
 Kiln.KeyPress.IsMouse.get -> bool
 Kiln.KeyPress.IsPad.get -> bool
+Kiln.KeyPress.IsPointer.get -> bool
 Kiln.KeyPress.KeyPress() -> void
 Kiln.KeyPress.KeyPress(uint VirtualKey, uint ScanCode, Kiln.KeyMods Mods, bool Down, bool Repeat, bool TextInput, bool Captured) -> void
+Kiln.KeyPress.Leaked.get -> bool
+Kiln.KeyPress.Leaked.init -> void
 Kiln.KeyPress.Mods.get -> Kiln.KeyMods
 Kiln.KeyPress.Mods.init -> void
+Kiln.KeyPress.Owned.get -> bool
+Kiln.KeyPress.Owned.init -> void
+Kiln.KeyPress.Position.get -> System.Numerics.Vector2?
+Kiln.KeyPress.Position.init -> void
 Kiln.KeyPress.Repeat.get -> bool
 Kiln.KeyPress.Repeat.init -> void
 Kiln.KeyPress.ScanCode.get -> uint
@@ -455,6 +477,59 @@ Kiln.OutlineState.Ended = 3 -> Kiln.OutlineState
 Kiln.OutlineState.GameHighlight = 2 -> Kiln.OutlineState
 Kiln.OutlineState.Shown = 1 -> Kiln.OutlineState
 Kiln.OutlineState.Waiting = 0 -> Kiln.OutlineState
+Kiln.PadButtons
+Kiln.PadButtons.A = 4096 -> Kiln.PadButtons
+Kiln.PadButtons.B = 8192 -> Kiln.PadButtons
+Kiln.PadButtons.Back = 32 -> Kiln.PadButtons
+Kiln.PadButtons.Down = 2 -> Kiln.PadButtons
+Kiln.PadButtons.LB = 256 -> Kiln.PadButtons
+Kiln.PadButtons.LT = 65536 -> Kiln.PadButtons
+Kiln.PadButtons.Left = 4 -> Kiln.PadButtons
+Kiln.PadButtons.LeftStick = 64 -> Kiln.PadButtons
+Kiln.PadButtons.None = 0 -> Kiln.PadButtons
+Kiln.PadButtons.RB = 512 -> Kiln.PadButtons
+Kiln.PadButtons.RT = 131072 -> Kiln.PadButtons
+Kiln.PadButtons.Right = 8 -> Kiln.PadButtons
+Kiln.PadButtons.RightStick = 128 -> Kiln.PadButtons
+Kiln.PadButtons.Start = 16 -> Kiln.PadButtons
+Kiln.PadButtons.Up = 1 -> Kiln.PadButtons
+Kiln.PadButtons.X = 16384 -> Kiln.PadButtons
+Kiln.PadButtons.Y = 32768 -> Kiln.PadButtons
+Kiln.PadInput
+Kiln.PadState
+Kiln.PadState.Buttons.get -> Kiln.PadButtons
+Kiln.PadState.Buttons.init -> void
+Kiln.PadState.Connected.get -> bool
+Kiln.PadState.Connected.init -> void
+Kiln.PadState.Controller.get -> int
+Kiln.PadState.Controller.init -> void
+Kiln.PadState.Deconstruct(out int Controller, out bool Connected, out Kiln.PadButtons Buttons, out System.Numerics.Vector2 LeftStick, out System.Numerics.Vector2 RightStick, out float LeftTrigger, out float RightTrigger) -> void
+Kiln.PadState.Equals(Kiln.PadState other) -> bool
+Kiln.PadState.Hidden.get -> Kiln.PadButtons
+Kiln.PadState.Hidden.init -> void
+Kiln.PadState.IsDown(Kiln.PadButtons buttons) -> bool
+Kiln.PadState.LeftStick.get -> System.Numerics.Vector2
+Kiln.PadState.LeftStick.init -> void
+Kiln.PadState.LeftTrigger.get -> float
+Kiln.PadState.LeftTrigger.init -> void
+Kiln.PadState.Owned.get -> Kiln.PadButtons
+Kiln.PadState.Owned.init -> void
+Kiln.PadState.Packet.get -> uint
+Kiln.PadState.Packet.init -> void
+Kiln.PadState.PadState() -> void
+Kiln.PadState.PadState(int Controller, bool Connected, Kiln.PadButtons Buttons, System.Numerics.Vector2 LeftStick, System.Numerics.Vector2 RightStick, float LeftTrigger, float RightTrigger) -> void
+Kiln.PadState.PolledAtMs.get -> ulong
+Kiln.PadState.PolledAtMs.init -> void
+Kiln.PadState.Polls.get -> ulong
+Kiln.PadState.Polls.init -> void
+Kiln.PadState.RawSticks.get -> (short LeftX, short LeftY, short RightX, short RightY)
+Kiln.PadState.RawSticks.init -> void
+Kiln.PadState.RawTriggers.get -> (byte Left, byte Right)
+Kiln.PadState.RawTriggers.init -> void
+Kiln.PadState.RightStick.get -> System.Numerics.Vector2
+Kiln.PadState.RightStick.init -> void
+Kiln.PadState.RightTrigger.get -> float
+Kiln.PadState.RightTrigger.init -> void
 Kiln.Render
 Kiln.RenderCamera
 Kiln.RenderCamera.AgeMs.get -> uint
@@ -1602,6 +1677,7 @@ Kiln.WorldOutline.Entity.get -> Kiln.EntityId
 Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!
 Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason
 Kiln.WorldOutline.State.get -> Kiln.OutlineState
+const Kiln.PadInput.Controllers = 4 -> int
 const Kiln.Ui.AmmoList.ListCapability = "ui.ammo.list" -> string!
 const Kiln.Ui.AmmoList.PickCapability = "ui.ammo.pick" -> string!
 const Kiln.Ui.Inventory.ChestButtonCapability = "ui.chest.buttons" -> string!
@@ -1663,6 +1739,7 @@ override Kiln.ModStatus.ToString() -> string!
 override Kiln.OutlineOptions.Equals(object? obj) -> bool
 override Kiln.OutlineOptions.GetHashCode() -> int
 override Kiln.OutlineOptions.ToString() -> string!
+override Kiln.PadState.GetHashCode() -> int
 override Kiln.RenderStats.GetHashCode() -> int
 override Kiln.SlotClick.Equals(object? obj) -> bool
 override Kiln.SlotClick.GetHashCode() -> int
@@ -1790,6 +1867,10 @@ static Kiln.ModStatus.operator !=(Kiln.ModStatus? left, Kiln.ModStatus? right) -
 static Kiln.ModStatus.operator ==(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool
 static Kiln.OutlineOptions.operator !=(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
 static Kiln.OutlineOptions.operator ==(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
+static Kiln.PadInput.Available.get -> bool
+static Kiln.PadInput.Read(int controller = 0) -> Kiln.PadState
+static Kiln.PadState.operator !=(Kiln.PadState left, Kiln.PadState right) -> bool
+static Kiln.PadState.operator ==(Kiln.PadState left, Kiln.PadState right) -> bool
 static Kiln.Render.Available.get -> bool
 static Kiln.Render.Camera.get -> Kiln.RenderCamera
 static Kiln.Render.CameraAvailable.get -> bool
@@ -1991,6 +2072,8 @@ virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in K
 ~override Kiln.KeyChord.Equals(object obj) -> bool
 ~override Kiln.KeyPress.Equals(object obj) -> bool
 ~override Kiln.KeyPress.ToString() -> string
+~override Kiln.PadState.Equals(object obj) -> bool
+~override Kiln.PadState.ToString() -> string
 ~override Kiln.RenderStats.Equals(object obj) -> bool
 ~override Kiln.RenderStats.ToString() -> string
 ~override Kiln.SlotMark.Equals(object obj) -> bool

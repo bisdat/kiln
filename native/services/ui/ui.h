@@ -12,6 +12,7 @@
 #include "overlay_mode.h"
 #include "services/kiln_render.h"
 #include "services/kiln_ui.h"
+#include "services/kiln_ui_input.h"
 
 namespace kui {
 
@@ -163,10 +164,48 @@ KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t 
 KilnResult keys_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a key subscription
 bool keys_dispatch(const KilnUiKey& key, bool mouse);  // to the subscribers that get it; true = one of them took it
 bool keys_mouse_wanted();                  // a subscriber gets mouse presses (any thread)
-// 0.2.0-dev.30.5: to the subscribers whose flags hold `need` (0 = every one: a keyboard key); true = one of them took it
-bool keys_dispatch_to(const KilnUiKey& key, uint32_t need);
+// 0.2.0-dev.30.5: to the subscribers whose flags hold `need` (0 = every one: a keyboard key); true = one of them took it.
+// Since 0.2.0-dev.31.13 a new press goes to the owning subscribers first (input_own.cpp): one that takes it owns it, and
+// none of the subscribers gets it. `controller`: a pad's XInput user (KILN_UI_KEYS_PAD), 0 otherwise.
+bool keys_dispatch_to(const KilnUiKey& key, uint32_t need, uint32_t controller = 0);
 bool keys_pad_wanted();                    // a subscriber gets pad presses (KILN_UI_KEYS_PAD; any thread)
+// A key Kiln makes itself is dispatched on this thread while on (input_synth_escape): keys_dispatch_to never offers it to
+// the owning subscribers (kiln.ui.input). Returns the previous value (to restore).
+bool keys_synthetic(bool on);
 size_t keys_count();
+
+// ---- input_own.cpp (kiln.ui.input, kiln_ui_input.h, 0.2.0-dev.31.13): a press an owning subscriber took is its own
+// until the release (the rules: input_own.h) ----
+struct OwnInput {
+    uint32_t vk = 0, scan = 0, mods = 0, controller = 0, time = 0;
+    float x = 0, y = 0, client_width = 0, client_height = 0;  // the pointer's
+    bool text_input = false, captured = false;
+};
+KilnResult own_subscribe(KilnOwner owner, uint32_t sources, KilnUiOwnedFn fn, void* user, KilnHandle* out);
+KilnResult own_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not an owning subscription
+uint32_t own_disown(KilnHandle h, uint32_t vk, uint32_t controller);
+bool own_owns(KilnHandle h, uint32_t vk, uint32_t controller);
+bool own_wanted(uint32_t sources);  // an owning subscriber of one of `sources` exists, or a press is claimed (any thread)
+bool own_claimed();                 // a press is claimed (an owner's or nobody's) now (any thread)
+// A later down or up of a claimed press: true = ownership decided it (nobody else may get it), *keep = keep it from the
+// game. A new press of a claimed code ends that claim (lost) and answers false: offer it.
+bool own_route(const OwnInput& e, bool down, bool repeat, bool* keep);
+bool own_offer(const OwnInput& e);              // a new press, to the owners; true = one took it (keep it from the game)
+void own_leak(uint32_t vk, uint32_t controller);  // the game saw this press go down after all: its release reaches it
+bool own_hidden(uint32_t vk, uint32_t controller);  // held, and the game has not seen it go down
+uint32_t own_hidden_mk();                       // MK_* bits of such mouse buttons (cleared from the game's mouse messages)
+uint32_t own_pad_owned(uint32_t controller);    // a controller's owned buttons (KilnUiPadState.owned bits)
+void own_focus_lost();                          // window thread
+void own_world_poll();                          // the game's UI thread, each frame (game.cpp)
+const KilnUiInputApi* input_table();
+// input.cpp: the pad view for kiln.ui.input pad_state (any thread)
+KilnResult input_pad_state(uint32_t controller, KilnUiPadState* out);
+// input.cpp: one controller button's transition from the XInput hook (pad_keys.h Tracker's callback): owned presses,
+// then the key subscribers. true = keep this press from the game until its release. Polling thread.
+bool pad_key(uint32_t controller, uint32_t vk, bool down, uint32_t mods, bool captured);
+// input.cpp: a pad's B as Escape while Kiln has the input (the XInput hook, polling thread): its press and release to Kiln's
+// own Escape and the key subscribers, never to the owning subscribers (kiln.ui.input: they were offered the B itself).
+void input_synth_escape();
 
 // ---- ui.cpp ----
 // Builds one ImGui frame (NewFrame, frame callbacks, the fallback menu, Render). Render thread. False = nothing drawn.

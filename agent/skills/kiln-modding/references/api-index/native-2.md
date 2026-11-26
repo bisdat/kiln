@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.21): part 2 of 3
+# Native ABI rows (mod API 0.2.22): part 2 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -455,6 +455,12 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_settings.h `KilnSettingsApi.resend` @72 — Asks the game to send the settings block to every player with the next server-info message.
 - kiln_settings.h `KilnSettingsApi.save` @80 — Writes the live values into enshrouded_server.json (status.config_path) with "gameSettingsPreset"...
 - kiln_settings.h `KilnSettingsApi.last_error` @88 — The calling thread's last refusal or error text of set/reset/save ("" if none).
+
+## services/kiln_skills_client.h — service `kiln.skills.client`
+### KilnSkillsClientApi — 32 bytes
+- kiln_skills_client.h `KilnSkillsClientApi.state` @8 `0.2.22`
+- kiln_skills_client.h `KilnSkillsClientApi.nodes` @16 `0.2.22`
+- kiln_skills_client.h `KilnSkillsClientApi.links` @24 `0.2.22`
 
 ## services/kiln_spawn.h — service `kiln.spawn`
 ### KilnSpawnApi — 136 bytes

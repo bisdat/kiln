@@ -98,3 +98,81 @@ fn shroudforges_line_has_the_failure_only_while_the_record_says_failed() {
     let rows = rows(g);
     assert!(rows.iter().all(|r| r.get("startupFailed").is_none_or(|v| v.is_null())), "{rows:?}");
 }
+
+/// kiln-win1 (0.2.0-dev.31.11, 2026-11-25): the pass failed, and so did the recovery after it (0.2.0-dev.31.13's
+/// ShroudForge records why in `recoveryError`), so ShroudForge's preparation returned false and Kiln's adapter wrote
+/// `failed` (with `startupPrepared` false since 31.13). The engine list said nothing of it: it read the record only
+/// while the adapter said `hosted`. Now ShroudForge's line says that no ShroudForge mod ran, why, and how to get a clean
+/// copy of the game data back; and the line never claims the game data was put back.
+#[test]
+fn a_failed_recovery_says_no_shroudforge_mod_ran_and_how_to_get_a_clean_copy() {
+    let t = game("recovery-failed");
+    let g = &t.0;
+    hosted_failure(g);
+    put(g, "kiln/state/shroudforge.json", format!(r#"{{"format":1,"mode":"failed","source":"bundled","pid":412,"side":"client","updated":{},
+        "bundled":{{"version":"1.7.9","build":"kiln.ba755a7"}},"startupPrepared":false,"runtime":"stopped",
+        "reason":"ShroudForge's startup preparation failed (startup asset mods or its DLL Manager)"}}"#, T0 + 5).as_bytes());
+    let refusal = "pregame phase failed: ShroudForge: the clean copy of the game data (enshrouded.kfc.bak, enshrouded.kfc_resources.bak) \
+        cannot be used: it is of game version 1273043|^/game38/branches/release_1.0|2026-10-20T14:55:29.904125Z, the game's files are of \
+        1287369|^/game38/branches/release_1.0|2026-11-04T11:17:54.051725Z; and the game's current files are not the files Steam installed \
+        for build 26430625 (enshrouded.kfc has other bytes than Steam's manifest lists (SHA-1)), so no new copy can be made from them. \
+        Verify the game files in Steam (or update the server files with SteamCMD's validate), then start again";
+    put(g, "shroudforge/state.json", serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "assets": {
+        "status": "failed", "phase": "startup", "target": "enshrouded", "completedAt": T0 + 3,
+        "error": "pregame phase failed: debugConsole.toggleKey: Hotkey must be an SDL binding string",
+        "recoveryError": refusal,
+    }})).unwrap().as_slice());
+    let sf = row(&rows(g), "shroudforge").clone();
+    let text = sf["startupFailed"]["text"].as_str().unwrap_or_else(|| panic!("no startupFailed.text on ShroudForge's line: {sf}"));
+    assert!(text.contains("debugConsole.toggleKey"), "{text}");
+    assert!(text.contains("It could not put the game data back either"), "{text}");
+    assert!(text.contains("no ShroudForge mod ran in that start"), "{text}");
+    assert!(!text.contains("It put the game data back and the game started without them"), "{text}");
+    assert!(text.contains("Verify integrity of game files"), "the way out survives the cut of ShroudForge's long words: {text}");
+    assert_eq!(sf["startupFailed"]["recoveryError"].as_str().map(|r| r.starts_with("pregame phase failed: ShroudForge: the clean copy")), Some(true), "{sf}");
+
+    // The same refusal ended the pass and its recovery: said once.
+    put(g, "shroudforge/state.json", serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "assets": {
+        "status": "failed", "phase": "startup", "target": "enshrouded", "completedAt": T0 + 3, "error": refusal, "recoveryError": refusal,
+    }})).unwrap().as_slice());
+    let sf = row(&rows(g), "shroudforge").clone();
+    let text = sf["startupFailed"]["text"].as_str().unwrap();
+    assert!(text.contains("It changed no game file, and no ShroudForge mod ran in that start"), "{text}");
+    assert!(!text.contains("could not put the game data back either"), "{text}");
+
+    // An adapter that failed before it prepared anything (no startupPrepared): the record is not this start's word.
+    put(g, "kiln/state/shroudforge.json", format!(r#"{{"format":1,"mode":"failed","source":"bundled","pid":412,"side":"client","updated":{},
+        "reason":"EML writer is already active or incompatible; refusing a second KFC writer"}}"#, T0 + 5).as_bytes());
+    assert!(row(&rows(g), "shroudforge").get("startupFailed").is_none_or(|v| v.is_null()));
+}
+
+/// Review (0.2.0-dev.31.13): after a game update the pass failed and its recovery kept the game's own files (they are a
+/// clean copy the pass did not change; ShroudForge's record says `recovery: kept`). The line said "It put the game data
+/// back", which it did not: it changed no game file. A pair that went back (`recovery: restored`, or a record without
+/// the word, from before 31.13) is still said to be put back.
+#[test]
+fn a_recovery_that_kept_the_game_files_does_not_say_the_game_data_was_put_back() {
+    let t = game("recovery-kept");
+    let g = &t.0;
+    hosted_failure(g);
+    let record = |recovery: Option<&str>| {
+        let mut assets = serde_json::json!({"status": "failed", "phase": "startup", "target": "enshrouded", "completedAt": T0 + 3,
+            "error": "pregame phase failed: debugConsole.toggleKey: Hotkey must be an SDL binding string"});
+        if let Some(recovery) = recovery {
+            assets["recovery"] = recovery.into();
+        }
+        serde_json::to_vec(&serde_json::json!({"schemaVersion": 1, "assets": assets})).unwrap()
+    };
+    put(g, "shroudforge/state.json", &record(Some("kept")));
+    let sf = row(&rows(g), "shroudforge").clone();
+    let text = sf["startupFailed"]["text"].as_str().unwrap_or_else(|| panic!("no startupFailed.text on ShroudForge's line: {sf}"));
+    assert!(!text.contains("put the game data back"), "{text}");
+    assert!(text.contains("It changed no game file, and the game started without them"), "{text}");
+    assert!(text.contains("(bone-caller)"), "the mods of the pass are still named: {text}");
+    for recovery in [Some("restored"), None] {
+        put(g, "shroudforge/state.json", &record(recovery));
+        let sf = row(&rows(g), "shroudforge").clone();
+        let text = sf["startupFailed"]["text"].as_str().unwrap();
+        assert!(text.contains("It put the game data back and the game started without them"), "{recovery:?}: {text}");
+    }
+}

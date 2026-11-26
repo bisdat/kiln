@@ -2044,6 +2044,15 @@
       "sshTunnel": "SSH tunnel",
       "openWebPanel": "Open web panel",
       "webPanelError": "Could not open the web panel",
+      "webPanelOpen": "Web panel open at {origin}",
+      "webPanelViaSsh": "through SSH",
+      "webPanelNote": {
+        "one": "Opened in your browser. It closes by itself {count} minute after its last tab.",
+        "other": "Opened in your browser. It closes by itself {count} minutes after its last tab."
+      },
+      "webPanelShared": "This system can't give each server its own address, so panels of different servers share their sign-in cookies.",
+      "webPanelFingerprint": "Certificate {fingerprint}",
+      "closeWebPanel": "Close web panel",
       "noKiln": "Kiln isn't installed",
       "stopToInstall": "Stop the server to install it.",
       "facts": "Server facts",

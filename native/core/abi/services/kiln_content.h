@@ -29,7 +29,9 @@
  *
  * Data packs: <game>/kiln/mods/<mod>/content/<file>.json, applied in mod load order (pack_mods; without it folder
  * order, skipping folders with a .disabled file) when the registries have loaded, re-applied when a file changes
- * (checked every ~2 s) or the set of loaded mods changes. Format: docs/kiln/services/content.md.
+ * (checked every ~2 s; a file of content/ or the mod's kiln.mod.json), the set of loaded mods changes, or a loaded mod is
+ * loaded again (pack_mod_reloaded). A mod's packs apply whole from one version: when a file of a mod cannot be read or is
+ * no pack, the mod keeps the packs it had (if this world applied them). Format: docs/kiln/services/content.md.
  *
  * Which world: the table works on the registries of the **server world** (a dedicated server, or a client while it
  * hosts), else, in a client joined to another machine's game, on the **client world**'s own registries
@@ -45,7 +47,7 @@
  * definitions (new items and recipes); v4 appends set_ref / undefine_owner / info (kitbash references,
  * per-language texts, loot / drops / knowledge of new items, missing-content placeholders) and the field flag in
  * KilnContentField.reserved[0]; icon_alias, txn_begin / txn_end (0.2.0-dev.28) and text / text_info (0.2.0-dev.29.18:
- * the game's own texts on a client) are appended to v4 (check header.size). Check header.version (or header.size)
+ * the game's own texts on a client) and pack_mod_reloaded (0.2.0-dev.31.13) are appended to v4 (check header.size). Check header.version (or header.size)
  * before calling an appended function. */
 #ifndef KILN_CONTENT_H
 #define KILN_CONTENT_H
@@ -149,7 +151,7 @@ typedef struct KilnContentStatus {
     uint8_t ready;          /* registries loaded and data packs applied */
     uint8_t registries;     /* KILN_CONTENT_HAS_* */
     uint8_t stack_guard;    /* 1: stacks above an item's max are kept (not cut down by the game) */
-    uint8_t reload_pending; /* 1: a data-pack re-application is queued for the next Pre (pack_mods changed) */
+    uint8_t reload_pending; /* 1: a data-pack re-application is queued for the next Pre (pack_mods changed, pack_mod_reloaded) */
     uint32_t items, recipes, loot, drops;
     uint32_t packs;         /* data-pack files applied */
     uint32_t pack_errors;   /* problems in the last application (see report()) */
@@ -239,7 +241,8 @@ typedef struct KilnContentApi {
     KilnResult(KILN_CALL* label_owner)(KilnOwner owner, KilnStr label);
 
     /* Which mods' data packs apply, in which order: a JSON array of mod ids in load order (Kiln.Content passes the
-     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it, a reload re-applies it).
+     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it; a reload keeps the list as it
+     * is when the mod stays in its place, so Kiln.Content also calls pack_mod_reloaded, which re-applies it).
      * "null" (the default) = every mod folder without a .disabled file, in folder order. A change after the world
      * loaded re-applies the packs at the next Pre. Any thread. */
     KilnResult(KILN_CALL* pack_mods)(KilnStr json);
@@ -342,6 +345,17 @@ typedef struct KilnContentApi {
     /* text_info: whether text() works here (the capability row content.text) and the game's text language now. Any
      * thread. KILN_ERR_INVALID_ARGUMENT: out NULL or out->size smaller than this struct. */
     KilnResult(KILN_CALL* text_info)(KilnContentTextInfo* out);
+
+    /* ---- appended to v4, since 0.2.0-dev.31.13 ---- */
+
+    /* A mod of the pack_mods list was loaded again while the list stayed the same (a reload, or an unload and a load
+     * between two pack_mods calls; Kiln.Content tells it from the mod's load, not its id): its data packs come off and
+     * its current files apply at the next Pre, as after an unload and a load, with one line "mod <mod> <reason>:
+     * re-applying data packs" (reason e.g. "was reloaded (1.0.0 -> 1.0.1)"). Nothing is queued before the world's
+     * registries are ready (the world load applies the current files), for a mod that is not in the list, or applied
+     * for a mod that has no data packs now and had none in the last application. Any thread. KILN_ERR_INVALID_ARGUMENT:
+     * no mod id. */
+    KilnResult(KILN_CALL* pack_mod_reloaded)(KilnStr mod, KilnStr reason);
 } KilnContentApi;
 
 

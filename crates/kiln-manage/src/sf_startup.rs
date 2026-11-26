@@ -6,7 +6,11 @@
 //! `failed`), `phase`, `target` (`enshrouded`, `enshrouded_server`), `completedAt` (unix seconds) and, when it failed,
 //! `error` (ShroudForge's `asset_preparation/apply_asset_mods.rs` and `recover_failed_startup_assets.rs`). After a
 //! failed pass ShroudForge puts the game data back and lets the game start, so every mod that needs the pass is missing
-//! and only ShroudForge's own log and window say so. [`failure`] reads the record, so Kiln's launcher and its support
+//! and only ShroudForge's own log and window say so. When it cannot put the game data back, Kiln's ShroudForge (since
+//! 0.2.0-dev.31.13) says why in `recoveryError`; its preparation then returned false, Kiln's adapter wrote `failed`
+//! with `startupPrepared` false, and no ShroudForge mod ran in that start. When the failed pass changed no game file and
+//! the game's own files are a clean copy (a game update), its recovery keeps them instead and says so in `recovery`
+//! (`kept`; `restored` when the pair went back). [`failure`] reads the record, so Kiln's launcher and its support
 //! report say it too.
 //!
 //! The record names no process, so [`failure`] ties it to Kiln's last start (`kiln/state/boot.json`): it was written in
@@ -41,6 +45,21 @@ use std::path::{Path, PathBuf};
 
 /// ShroudForge's words are quoted up to this many characters.
 const MAX_ERROR: usize = 300;
+/// The words ShroudForge's refusals of a game data copy end with (the fork's verify_working_baseline.rs `refusal`).
+const VERIFY_WORDS: &str = "Verify the game files in Steam";
+
+/// What a player does when ShroudForge has no clean copy of the game data: Steam's file check, then a start.
+fn verify_cure(server: bool) -> String {
+    if server {
+        "To give it a clean copy of the game data again, update the server files with SteamCMD's validate \
+            (app_update 2278520 validate), then start the server again"
+            .into()
+    } else {
+        "To give it a clean copy of the game data again: in Steam, right-click Enshrouded, Properties, Installed Files, \
+            Verify integrity of game files, then start the game again from the Kiln launcher"
+            .into()
+    }
+}
 /// Mod ids named in a sentence.
 const MAX_NAMES: usize = 5;
 /// Entries of the record's `skipped` read.
@@ -86,12 +105,24 @@ pub struct SfStartupFailure {
     /// The second pass's error (the record's `retryError`), on one line as `error` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_error: Option<String>,
+    /// Why ShroudForge could not put the game data back after the failed pass (the record's `recoveryError`, written by
+    /// Kiln's ShroudForge since 0.2.0-dev.31.13), on one line as `error` is. Then its preparation returned false and no
+    /// ShroudForge mod ran in that start, not only the mods of the pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_error: Option<String>,
+    /// The recovery after the failed pass kept the game's own files: the pass had changed none of them, and they are a
+    /// clean copy of their own (a game update; the record's `recovery` is `kept`, written by Kiln's ShroudForge since
+    /// 0.2.0-dev.31.13). Then nothing was put back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept_game_files: bool,
     /// ShroudForge's words as the record has them, whole: a report redacts these, then puts them on one line and cuts
     /// them ([`SfStartupFailure::redacted`]).
     #[serde(skip)]
     raw_error: String,
     #[serde(skip)]
     raw_retry_error: Option<String>,
+    #[serde(skip)]
+    raw_recovery_error: Option<String>,
 }
 
 /// A mod ShroudForge's startup pass ran without (the record's `skipped`, written by Kiln's ShroudForge since
@@ -313,9 +344,14 @@ fn ran(game_dir: &Path, completed: Option<u64>, kept: bool) -> Option<Ran> {
     }
     let installed = crate::shroudforge::detect(game_dir);
     let own_files = installed.as_ref().is_some_and(|i| i.bootstrap || i.dbghelp);
-    let hosted = current && word("mode") == Some("hosted");
+    // Kiln's adapter hosted ShroudForge, and its startup preparation returned false (it then writes `failed`, with
+    // `startupPrepared` false since 0.2.0-dev.31.13): ShroudForge's record is that start's word on why
+    let prepare_failed = word("mode") == Some("failed")
+        && status.as_ref().and_then(|s| s.get("startupPrepared")).and_then(|v| v.as_bool()) == Some(false);
+    let hosted = current && (word("mode") == Some("hosted") || prepare_failed);
     let own_loader = match (current, word("mode")) {
         (true, Some("hosted")) => false,
+        (true, Some("failed")) if prepare_failed => false,
         (true, Some("self-hosted")) => true,
         // Kiln's adapter has not said anything in this folder: ShroudForge's own loader, while it is installed
         _ if status.is_none() => own_files,
@@ -385,9 +421,16 @@ pub fn failure(game_dir: &Path, wine: bool) -> Option<SfStartupFailure> {
         }
     });
     let raw_retry_error = assets.get("retryError").and_then(|v| v.as_str()).map(str::to_owned);
+    let raw_recovery_error = assets.get("recoveryError").and_then(|v| v.as_str()).map(str::to_owned);
+    // ShroudForge's refusals of a game data copy end with what the player does (the fork's verify_working_baseline.rs
+    // `refusal`), after words that the cut to MAX_ERROR characters can take away: the way out is said here in full.
+    let refused = [Some(&raw_error), raw_retry_error.as_ref(), raw_recovery_error.as_ref()].into_iter().flatten()
+        .any(|e| e.contains(VERIFY_WORDS));
+    let cure = cure.or_else(|| refused.then(|| verify_cure(server)));
     Some(SfStartupFailure { error, at: completed.and_then(|c| i64::try_from(c).ok()).map(crate::util::rfc3339), own_loader,
         version: ran.version, build: ran.build, mods, cure, skipped: skipped_mods(&assets), retry_error: raw_retry_error.as_deref().map(one_line),
-        raw_error, raw_retry_error })
+        recovery_error: raw_recovery_error.as_deref().map(one_line),
+        kept_game_files: assets.get("recovery").and_then(|v| v.as_str()) == Some("kept"), raw_error, raw_retry_error, raw_recovery_error })
 }
 
 /// The mod ShroudForge's last startup pass in this game folder ran without, after the pass failed in it, or None: no such
@@ -490,8 +533,16 @@ impl SfStartupFailure {
             t.push_str(&format!(". It tried again without {}, and that failed too: {second}",
                 self.skipped.first().map(|m| m.label()).unwrap_or_else(|| "the mod it failed in".into())));
         }
-        t.push_str(". It put the game data back and the game started without them");
+        match self.recovery_error.as_deref() {
+            // the same refusal ended the pass and the recovery after it
+            Some(r) if r == self.error => t.push_str(". It changed no game file, and no ShroudForge mod ran in that start"),
+            Some(r) => t.push_str(&format!(". It could not put the game data back either ({r}), so no ShroudForge mod ran in that start")),
+            // the recovery kept the game's own files, which the failed pass did not change (a game update)
+            None if self.kept_game_files => t.push_str(". It changed no game file, and the game started without them"),
+            None => t.push_str(". It put the game data back and the game started without them"),
+        }
         match self.mods.len() {
+            _ if self.recovery_error.is_some() => {}
             0 => {}
             n => {
                 let names = if n > MAX_NAMES { format!("{} and {} more", self.mods[..MAX_NAMES].join(", "), n - MAX_NAMES) } else { self.mods.join(", ") };
@@ -518,6 +569,10 @@ impl SfStartupFailure {
             (Some(second), None) => format!("; again: {second}"),
             _ => String::new(),
         };
+        let again = match &self.recovery_error {
+            Some(r) => format!("{again}; not put back: {r}"),
+            None => again,
+        };
         format!("failed{}: {}{again} (ShroudForge {}{}, {})", self.at.as_deref().map(|a| format!(" at {a}")).unwrap_or_default(), self.error,
             self.version.as_deref().unwrap_or("of unknown version"), self.build.as_deref().map(|b| format!(", build {b}")).unwrap_or_default(),
             if self.own_loader { "its own loader" } else { "hosted by Kiln" })
@@ -529,7 +584,9 @@ impl SfStartupFailure {
     pub fn redacted(&self, redact: impl Fn(&str) -> String) -> SfStartupFailure {
         let raw_error = redact(&self.raw_error);
         let raw_retry_error = self.raw_retry_error.as_deref().map(&redact);
+        let raw_recovery_error = self.raw_recovery_error.as_deref().map(&redact);
         SfStartupFailure { error: one_line(&raw_error), raw_error, retry_error: raw_retry_error.as_deref().map(one_line), raw_retry_error,
+            recovery_error: raw_recovery_error.as_deref().map(one_line), raw_recovery_error,
             skipped: self.skipped.iter().map(|m| m.redacted(&redact)).collect(), ..self.clone() }
     }
 }

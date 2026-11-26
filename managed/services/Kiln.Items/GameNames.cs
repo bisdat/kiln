@@ -308,6 +308,10 @@ internal static class GameNames
         return null;
     }
 
+    /// <summary>The game's item list is read (this starts the read; <paramref name="wait"/>: on a worker, wait for it up to
+    /// 10 s). Since 0.2.0-dev.31.13 (the voxel material labels wait for it).</summary>
+    public static bool DataReady(bool wait = false) => Data(wait) != null;
+
     /// <summary>The GUID of a game item (an ItemInfo of the game's own data), from any thread. With <paramref name="wait"/> (a
     /// worker thread) the first call reads the data now; else null until it is read.</summary>
     public static Guid? ItemGuid(ItemId id, bool wait = false) =>

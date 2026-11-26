@@ -90,6 +90,38 @@ public sealed unsafe class DataPassProgressTests : IDisposable
         Assert.NotNull(Blocks.Find("keen", a));
     }
 
+    /// <summary>The live server's data-pack report (0.2.0-dev.31.10) has the same shape here: a mod unloaded and loaded again
+    /// between two passes (no ModReloadedEvent) keeps its id, so the pass took it as done. Its new load's files compile, and
+    /// what the last load compiled goes.</summary>
+    [Fact]
+    public void An_unload_and_a_load_between_two_passes_compile_the_new_files()
+    {
+        var id = Uid("again");
+        var entry = Mod(id, ("a.json", $$"""{ "format": 1, "affixes": { "keen": {{Keen}} } }"""));
+        var contexts = new List<ModContext>();
+        ModEntry Loaded()
+        {
+            var info = new ModInfo(id, id, "1", entry.Directory);
+            contexts.Add(HostAccess.CreateContext(info, (ulong)(700 + contexts.Count), "."));
+            return new ModEntry(id, id, "1", entry.Directory, ModSide.Server, ModState.Loaded, null, [], 0, info);
+        }
+        var first = Loaded();
+        ModsBackend.Current = new ListedMods(first);
+        Pass();
+        Assert.NotNull(Blocks.Find("keen", id));
+        File.WriteAllText(Path.Combine(entry.Directory, "blocks", "a.json"), $$"""{ "format": 1, "affixes": { "edge": {{Keen.Replace("Keen", "Edge")}} } }""");
+        BlocksStartup.FollowLoad(first);  // the same load: nothing again
+        Pass();
+        Assert.NotNull(Blocks.Find("keen", id));
+        var second = Loaded();  // `unload`, then `load`, since the last pass
+        ModsBackend.Current = new ListedMods(second);
+        BlocksStartup.FollowLoad(second);
+        Pass();
+        Assert.NotNull(Blocks.Find("edge", id));
+        Assert.Null(Blocks.Find("keen", id));
+        foreach (var c in contexts) c.Retire();
+    }
+
     [Fact]
     public void Counting_survives_every_kind_of_bad_file_and_counts_only_blocks()
     {

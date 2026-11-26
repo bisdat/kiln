@@ -29,6 +29,9 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
 void upscale_device_destroy(VkDevice device);  // vk.cpp's vkDestroyDevice hook, before the real call
 // graphics_status: the phase B fields (out->size >= KILN_UI_GRAPHICS_STATUS_SIZE_V2)
 void upscale_status(KilnUiGraphicsStatus* out);
+// FSR 3.1 runs in place of FSR 4 for the rest of the game because the output check found FSR 4's picture black or NaN
+// (any thread): true, with the readout's words (upscale_logic.h fsr4_black_text) in *why.
+bool upscale_fsr4_black(std::string* why);
 VkDevice vk_swapchain_device();  // vk.cpp: the device of the game's last swapchain (any thread)
 int vk_install_count();           // vk.cpp: how many times Kiln's Vulkan hooks went in (once per mapping of vulkan-1.dll)
 

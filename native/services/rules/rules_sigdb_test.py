@@ -60,8 +60,8 @@ def guard_document(doc):
 
 def check_boundaries(side, image, doc, symbols):
     decoder = Cs(CS_ARCH_X86, CS_MODE_64)
-    names = ["rules/FlyGate", "rules/ZoneFlag", "rules/ShroudDrain", "rules/GlideGravity", "rules/GlideStamina",
-             "rules/LocoStateWrite", "rules/FlightGravity"]
+    names = ["rules/FlyGate", "rules/ZoneFlag", "rules/CursorFlagsStored", "rules/ShroudDrain", "rules/GlideGravity",
+             "rules/GlideStamina", "rules/LocoStateWrite", "rules/FlightGravity"]
     if side == "client":
         names += ["rules/client.HealthbarRay", "rules/client.CameraInput"]
     for name in names:
@@ -494,6 +494,79 @@ def check_noclip(side, image, doc, symbols, constants):
     only_noclip_off([(off + 57, b"\xeb\x00")], "an exit that falls out of the function instead of returning")
 
 
+# Building Tools 0.34.0 (github.com/AleksanderWojtal-CC/Enshrouded-BuildingTools, src/main.cpp SIG_CURSOR_FLAGS and
+# SIG_MISSING_CALL) finds rules/CursorFlags by its first 42 bytes, once, 4 s after it loads, then redirects the game's
+# calls to it (four on the client, two on the server); its MissingCall signature is the material check's call and the store after it (entry + 0xe2 ..
+# + 0xfa). Kiln's cursor waivers hook below both (cursor.cpp), so the two work in either load order.
+BT_ENTRY = 42
+BT_MISSING = (0xE2, 0xFA)
+MATERIAL_CHECK = {"server": 0x99750, "client": 0x28AB60}
+
+
+def kiln_patch(image, site):
+    """What kiln.hooks writes at `site`: a 5-byte jump, the rest of the instructions it moves filled with nop."""
+    decoder = Cs(CS_ARCH_X86, CS_MODE_64)
+    moved = 0
+    for i in decoder.disasm(image.img[site:site + 32], site):
+        moved += i.size
+        if moved >= 5:
+            break
+    return changed(image, [(site, b"\xe9\x11\x11\x11\x11" + b"\x90" * (moved - 5))]), moved
+
+
+def calls_to(image, target):
+    raw, lo, hi = image.img, image.text_va, image.text_va + len(image.text)
+    n, i = 0, raw.find(b"\xe8", lo, hi)
+    while i != -1:
+        if i + 5 <= hi and i + 5 + int.from_bytes(raw[i + 1:i + 5], "little", signed=True) == target:
+            n += 1
+        i = raw.find(b"\xe8", i + 1, hi)
+    return n
+
+
+def check_cursor(side, image, doc, symbols):
+    entry, site = symbols["rules/CursorFlags"]["rva"], symbols["rules/CursorFlagsStored"]["rva"]
+    check(site == entry + 0xFA, f"{side} the cursor waivers' site is rules/CursorFlags + 0xfa ({site:#x})")
+    decoder = Cs(CS_ARCH_X86, CS_MODE_64)
+    body = list(decoder.disasm(image.img[entry:entry + 0x2A0], entry))
+    ret = next(i for i in body if i.mnemonic == "ret")
+    before = [i for i in body if i.address < site]
+    after = [i for i in body if site <= i.address <= ret.address]
+    text = lambda i: f"{i.mnemonic} {i.op_str}"
+    check(text(before[-1]) == "mov dword ptr [rbx], edx", f"{side} the site follows the store of the final flags")
+    check(text(after[0]) == "cmp byte ptr [rdi + 0x54], r15b" and after[1].mnemonic == "jne",
+          f"{side} the site's instructions: cmp (4 bytes) and jne rel32 (moved by safetyhook)")
+    regs = ("rbx", "ebx", "bx", "bl", "rsi", "esi", "si", "sil")
+    writes = [text(i) for i in before if i.op_str.split(",")[0] in regs and i.mnemonic not in ("cmp", "test", "push", "bt")]
+    check(writes == ["mov rsi, rdx", "mov rbx, rcx"], f"{side} rbx (the flags) and rsi (the cursor context) are set once at the entry")
+    call = next(i for i in reversed(before) if i.mnemonic == "call")
+    check(int(call.op_str, 16) == MATERIAL_CHECK[side] and text(before[before.index(call) - 1]) == "mov rcx, rsi",
+          f"{side} the material check takes rsi as the cursor context, right before the store")
+    over = [text(i) for i in before if i.mnemonic.startswith("j") and i.op_str.startswith("0x") and int(i.op_str, 16) > site]
+    check(not over, f"{side} no branch before the site jumps over it: every path passes it")
+    stores = [text(i) for i in after if i.op_str.startswith("dword ptr [rbx]") and i.mnemonic not in ("cmp", "test", "bt")]
+    check(stores == ["or dword ptr [rbx], 0x100"], f"{side} after the site the game only sets bit 8 (AreaOccupied), which no rule waives")
+    check(not any(i.mnemonic == "ret" for i in before), f"{side} the function does not return before the site")
+
+    signature = bytes(image.img[entry:entry + BT_ENTRY])
+    missing = bytes(image.img[entry + BT_MISSING[0]:entry + BT_MISSING[1]])
+    raw, lo, hi = image.img, image.text_va, image.text_va + len(image.text)
+    check(raw.find(signature, lo, hi) == entry and raw.find(signature, entry + 1, hi) == -1,
+          f"{side} Building Tools' 42-byte entry signature has one match, at the entry")
+    calls = calls_to(image, entry)
+    want = {"server": 2, "client": 4}[side]  # the server cursor's primary and secondary; the client's cursor too
+    check(calls == want, f"{side} the game calls rules/CursorFlags from {want} places (what Building Tools redirects)")
+    patched, moved = kiln_patch(image, site)
+    check(moved == 10, f"{side} Kiln's patch covers 10 bytes at the site")
+    raw = patched.img
+    check(raw.find(signature, lo, hi) == entry and raw.find(signature, entry + 1, hi) == -1 and
+          bytes(raw[entry + BT_MISSING[0]:entry + BT_MISSING[1]]) == missing and calls_to(patched, entry) == calls,
+          f"{side} with Kiln's hook in, Building Tools still finds CursorFlags, the calls to it and its MissingCall bytes")
+    # Until 0.2.0-dev.31.13 the hook was at the entry: the signature then misses, as XHL saw (overlap objects off).
+    old, _ = kiln_patch(image, entry)
+    check(old.img.find(signature, lo, hi) == -1, f"{side} (an entry hook, as before 0.2.0-dev.31.13, hides that signature)")
+
+
 def run(side, path):
     tree = Tree(ROOT / "sigdb" / "symbols" / (side + ".json"))
     check(not tree.problems, side + " definition tree has no duplicate entries")
@@ -515,6 +588,7 @@ def run(side, path):
     check_flight_rows(side, image, symbols, constants)
     check_noclip(side, image, tree.doc, symbols, constants)
     check_boundaries(side, image, tree.doc, symbols)
+    check_cursor(side, image, tree.doc, symbols)
     check_glide_stick(side, image, tree.doc, symbols, constants, features)
     check_glide_steer(side, image, tree.doc, symbols, constants, features)
     if side == "client":

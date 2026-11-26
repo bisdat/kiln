@@ -18,7 +18,12 @@ impl FileBridge {
     /// The bridge folder of a server folder: kiln/data/kiln-admin/config.json `bridge` (a host path, or a `Z:\`
     /// path as the game sees it), else `<server>/shroudforge/exports/emberwatch`.
     pub fn locate(server_dir: &Path) -> Result<FileBridge> {
-        let cfg = server_dir.join("kiln/data/kiln-admin/config.json");
+        Self::locate_in(server_dir, None)
+    }
+
+    /// The same with the server's Wine prefix (a profile data folder on a drive other than Z:).
+    pub fn locate_in(server_dir: &Path, prefix: Option<&Path>) -> Result<FileBridge> {
+        let cfg = super::discover::live_admin_dir_in(server_dir, prefix).join("config.json");
         if let Ok(text) = std::fs::read_to_string(&cfg) {
             if let Ok(v) = super::parse_jsonc(&text) {
                 if let Some(b) = v.get("bridge").and_then(|b| b.as_str()).filter(|b| !b.is_empty()) {

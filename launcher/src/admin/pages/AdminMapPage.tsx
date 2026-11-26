@@ -1,10 +1,12 @@
 // /servers/:id/admin/map: the world map with the live overlays (players, waypoints, graves,
 // protection zones, enemies) and the game's markers: MapView (../map).
 import { useLayoutEffect, useRef, useState } from "react";
+import { useT } from "../../i18n";
 import { withAdmin } from "../common";
 import { MapView } from "../map/MapView";
 
 function MapPage() {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(480);
   useLayoutEffect(() => {
@@ -18,6 +20,8 @@ function MapPage() {
   }, []);
   return (
     <div ref={ref} className="ka-mapwrap-page">
+      {/* the page's name for screen readers and outlines: the map fills the page, no visible header */}
+      <h1 className="k-sr-only">{t("admin.pages.map")}</h1>
       <MapView height={h} />
     </div>
   );

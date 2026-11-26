@@ -52,6 +52,9 @@ public static class Texts
     private static TaskCompletionSource<bool>? _inFlight;  // the load that runs now, outside the lock
     private static long _epoch;  // bumped by Reset: a load still running from before publishes nothing
 
+    /// <summary>The table when it is loaded, without loading it (Content.TryGetTexts on a server, since 0.2.0-dev.31.13).</summary>
+    internal static IReadOnlyDictionary<uint, string>? Loaded => _table;
+
     /// <summary>True when a table is loaded (this loads it on the first call).</summary>
     public static bool Available => Table() is not null;
 

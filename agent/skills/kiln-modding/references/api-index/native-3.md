@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.21): part 3 of 3
+# Native ABI rows (mod API 0.2.22): part 3 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -42,6 +42,12 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_stations.h `KilnStationsApi.set_lock_stock` @288 `0.2.21` — locks from linked sources, since 0.2.0-dev.31.12 (GitHub #147; capability items.lock_sources; header.size...
 - kiln_stations.h `KilnStationsApi.lock_asks` @296 `0.2.21` — A Kiln client: the lock items its lock checks (the press and the locked prompt) met while the snapshot was...
 - kiln_stations.h `KilnStationsApi.set_build_stock` @304 `0.2.21` — block placements from linked sources, since 0.2.0-dev.31.12 (GitHub #132; capability...
+
+## services/kiln_stations_client.h — service `kiln.stations.client`
+### KilnStationsClientApi — 32 bytes
+- kiln_stations_client.h `KilnStationsClientApi.status` @8 `0.2.22`
+- kiln_stations_client.h `KilnStationsClientApi.stations` @16 `0.2.22`
+- kiln_stations_client.h `KilnStationsClientApi.station` @24 `0.2.22`
 
 ## services/kiln_steamguard.h — service `kiln.steamguard`
 ### KilnSteamGuardApi — 40 bytes
@@ -304,6 +310,14 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ### KilnUiChestApi — 24 bytes
 - kiln_ui_chest.h `KilnUiChestApi.subscribe` @8 `0.2.17` — OK+out.ok=0: budget (REGISTRATION_BUDGET/TEXT_BUDGET) or duplicate caption (REJECTED).
 - kiln_ui_chest.h `KilnUiChestApi.unsubscribe` @16 `0.2.17`
+
+## services/kiln_ui_input.h — service `kiln.ui.input`
+### KilnUiInputApi — 48 bytes
+- kiln_ui_input.h `KilnUiInputApi.subscribe_owned` @8 `0.2.22` — fn(input) for every new press of 'sources' (KILN_UI_OWN_*), and the repeats, release and end of the...
+- kiln_ui_input.h `KilnUiInputApi.unsubscribe` @16 `0.2.22` — Ends a subscription (KILN_OK: a call in flight has ended; from inside a kiln.ui callback it may answer...
+- kiln_ui_input.h `KilnUiInputApi.disown` @24 `0.2.22` — Gives up the subscription's press of 'vk' on 'controller' (vk 0: every press it owns) without a callback...
+- kiln_ui_input.h `KilnUiInputApi.owns` @32 `0.2.22` — The subscription owns the press of 'vk' on 'controller' now.
+- kiln_ui_input.h `KilnUiInputApi.pad_state` @40 `0.2.22` — Controller 0..3 as the game's last poll read it (above; set out->size first).
 
 ## services/kiln_ui_inventory.h — service `kiln.ui.inventory`
 ### KilnUiInventoryApi — 48 bytes

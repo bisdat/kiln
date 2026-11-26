@@ -76,6 +76,27 @@ describe("@kiln/admin-ui", () => {
     });
   }
 
+  test("the entry writes no inline style or script into HTML (Kiln Web Admin's CSP: style-src 'self', script-src 'self')", () => {
+    // what a strict CSP refuses: a style attribute in HTML a module writes (a Leaflet divIcon's or tooltip's html, an
+    // innerHTML) or sets as an attribute, a <style> element, raw HTML from React, eval. Allowed and used: React's
+    // style={{...}} and element.style (the CSSOM). tests/admin-ui-csp.spec.ts runs the pages under the real header.
+    const RULES: [RegExp, string][] = [
+      [/\sstyle\s*=\s*(?:\\?["'`]|\$\{)/, "a style attribute in an HTML string"],
+      [/setAttribute(?:NS)?\(\s*(?:null\s*,\s*)?["'`]style["'`]/, "setAttribute(\"style\")"],
+      [/<style[\s>]|createElement\(\s*["'`]style["'`]/, "a <style> element"],
+      [/dangerouslySetInnerHTML|insertAdjacentHTML/, "raw HTML"],
+      [/\beval\(|new Function\(/, "eval"],
+    ];
+    const found: string[] = [];
+    for (const f of graph(join(SRC, "admin", "web.ts"), false).files.filter((f) => /\.tsx?$/.test(f))) {
+      readFileSync(join(LAUNCHER, f), "utf8").split("\n").forEach((line, i) => {
+        if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+        for (const [re, what] of RULES) if (re.test(line)) found.push(`${f}:${i + 1}: ${what}`);
+      });
+    }
+    expect(found).toEqual([]);
+  });
+
   test("the WebSocket transport alone reaches nothing of the launcher's backend", () => {
     const g = graph(join(SRC, "api", "adminWs.ts"), true);
     expect(g.bare.filter((b) => b.startsWith("@tauri-apps/"))).toEqual([]);

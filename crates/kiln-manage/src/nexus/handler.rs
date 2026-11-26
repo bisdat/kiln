@@ -812,6 +812,14 @@ fn private_dir_inner(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Secures a Nexus state folder or file: owned by this user, with a protected DACL for this user and SYSTEM only.
+///
+/// The owner check accepts what this user's own launcher makes. A launcher started "as administrator" makes its folders
+/// and files owned by BUILTIN\Administrators (an elevated token's default owner), not by the user; such a folder (also
+/// one an older build left by an elevated start) is taken over: its owner becomes the user. Anything owned by another
+/// account is refused. The DACL names the user's SID, not OWNER RIGHTS: a record an elevated start writes into the
+/// folder later (owned by Administrators, never secured on its own) inherits access for the user, so a start without
+/// elevation can still read and replace it.
 #[cfg(windows)]
 fn secure_windows_dir(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -819,11 +827,13 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
     #[link(name = "advapi32")]
     unsafe extern "system" {
         fn ConvertStringSecurityDescriptorToSecurityDescriptorW(s: *const u16, revision: u32, descriptor: *mut *mut core::ffi::c_void, size: *mut u32) -> i32;
+        fn ConvertSidToStringSidW(sid: *const core::ffi::c_void, text: *mut *mut u16) -> i32;
         fn SetFileSecurityW(path: *const u16, information: u32, descriptor: *const core::ffi::c_void) -> i32;
         fn GetNamedSecurityInfoW(path: *mut u16, object_type: u32, information: u32, owner: *mut *mut core::ffi::c_void, group: *mut *mut core::ffi::c_void, dacl: *mut *mut core::ffi::c_void, sacl: *mut *mut core::ffi::c_void, descriptor: *mut *mut core::ffi::c_void) -> u32;
         fn OpenProcessToken(process: *mut core::ffi::c_void, access: u32, token: *mut *mut core::ffi::c_void) -> i32;
         fn GetTokenInformation(token: *mut core::ffi::c_void, class: u32, info: *mut core::ffi::c_void, len: u32, needed: *mut u32) -> i32;
         fn EqualSid(first: *const core::ffi::c_void, second: *const core::ffi::c_void) -> i32;
+        fn IsWellKnownSid(sid: *const core::ffi::c_void, kind: i32) -> i32;
     }
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -831,33 +841,70 @@ fn secure_windows_dir(path: &Path) -> Result<()> {
         fn GetCurrentProcess() -> *mut core::ffi::c_void;
         fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
     }
+    const TOKEN_USER: u32 = 1;
+    const TOKEN_GROUPS: u32 = 2;
+    const TOKEN_OWNER: u32 = 4;
+    const WIN_BUILTIN_ADMINISTRATORS_SID: i32 = 26;
+    /// A token information class read into pointer-aligned words (TOKEN_USER and TOKEN_OWNER start with the SID pointer).
+    unsafe fn token_info(token: *mut core::ffi::c_void, class: u32) -> Option<Vec<usize>> {
+        let mut needed = 0;
+        // SAFETY: a size query (null buffer), then a buffer of at least `needed` bytes.
+        unsafe {
+            GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed);
+            if needed == 0 { return None; }
+            let mut words = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            (GetTokenInformation(token, class, words.as_mut_ptr().cast(), (words.len() * std::mem::size_of::<usize>()) as u32, &mut needed) != 0).then_some(words)
+        }
+    }
     let mut name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // Check ownership before applying an OWNER RIGHTS DACL: a precreated foreign directory must not retain access.
+    // Check ownership before applying the DACL: a precreated foreign directory must not be adopted.
     let mut owner = std::ptr::null_mut();
     let mut original = std::ptr::null_mut();
     let mut token = std::ptr::null_mut();
-    // SAFETY: valid NUL-terminated name and system-owned handles/descriptors freed before returning.
+    // The user's SID as SDDL text, and whether the owner must become the user (false: the user owns it already).
+    let (user_text, take_over): (String, bool);
+    // SAFETY: valid NUL-terminated name and system-owned handles/descriptors freed before returning; the SID pointers
+    // read from the token buffers live as long as those buffers.
     unsafe {
         let rc = GetNamedSecurityInfoW(name.as_mut_ptr(), 1, 1, &mut owner, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), &mut original);
         if rc != 0 { return Err(Error::new(ErrorCode::Permission, format!("checking Nexus folder owner: error {rc}"))); }
         if OpenProcessToken(GetCurrentProcess(), 8, &mut token) == 0 { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
-        let mut needed = 0;
-        GetTokenInformation(token, 1, std::ptr::null_mut(), 0, &mut needed);
-        let mut words = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
-        let ok = GetTokenInformation(token, 1, words.as_mut_ptr().cast(), (words.len() * std::mem::size_of::<usize>()) as u32, &mut needed);
-        let same = ok != 0 && EqualSid(owner, words[0] as *const core::ffi::c_void) != 0;
-        CloseHandle(token); LocalFree(original);
-        if !same { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
+        let user = token_info(token, TOKEN_USER);
+        let default_owner = token_info(token, TOKEN_OWNER);
+        let groups = token_info(token, TOKEN_GROUPS);
+        CloseHandle(token);
+        let Some(user) = user.filter(|w| w[0] != 0) else { LocalFree(original); return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")) };
+        let user_sid = user[0] as *const core::ffi::c_void;
+        let owned_by_user = EqualSid(owner, user_sid) != 0;
+        // what this process makes: an elevated token's default owner is BUILTIN\Administrators
+        let owned_by_default = default_owner.as_ref().is_some_and(|w| w[0] != 0 && EqualSid(owner, w[0] as *const core::ffi::c_void) != 0);
+        // what an elevated start of this user made, seen without elevation (the Administrators group is deny-only then)
+        let owned_by_our_admins = IsWellKnownSid(owner, WIN_BUILTIN_ADMINISTRATORS_SID) != 0 && groups.as_ref().is_some_and(|w| {
+            // TOKEN_GROUPS: a DWORD count, then SID_AND_ATTRIBUTES { PSID, DWORD } entries from the next pointer-aligned word
+            let count = w[0] as u32 as usize;
+            (0..count).filter_map(|i| w.get(1 + 2 * i)).any(|&sid| sid != 0 && IsWellKnownSid(sid as *const core::ffi::c_void, WIN_BUILTIN_ADMINISTRATORS_SID) != 0)
+        });
+        LocalFree(original);
+        if !owned_by_user && !owned_by_default && !owned_by_our_admins { return Err(Error::new(ErrorCode::Permission, "Nexus state folder belongs to another account")); }
+        take_over = !owned_by_user;
+        let mut text = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user_sid, &mut text) == 0 { return Err(Error::new(ErrorCode::Permission, "cannot check Nexus folder owner")); }
+        let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+        user_text = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+        LocalFree(text.cast());
     }
-    // Protected DACL, inherited by files/subdirectories: only object owner and SYSTEM have access.
-    let sddl: Vec<u16> = "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)".encode_utf16().chain(Some(0)).collect();
+    // Protected DACL, inherited by files/subdirectories: only this user and SYSTEM have access. The owner becomes the
+    // user in the same call when it was Administrators.
+    let owner_part = if take_over { format!("O:{user_text}") } else { String::new() };
+    let sddl: Vec<u16> = format!("{owner_part}D:P(A;OICI;FA;;;{user_text})(A;OICI;FA;;;SY)").encode_utf16().chain(Some(0)).collect();
+    let information = if take_over { 0x80000005 } else { 0x80000004 }; // PROTECTED_DACL | DACL (| OWNER)
     let mut descriptor = std::ptr::null_mut();
     // SAFETY: NUL-terminated buffers and descriptor allocated by the system, released with LocalFree.
     unsafe {
         if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) == 0 {
             return Err(crate::util::io_at(path, "securing")(std::io::Error::last_os_error()));
         }
-        let ok = SetFileSecurityW(name.as_ptr(), 0x80000004, descriptor);
+        let ok = SetFileSecurityW(name.as_ptr(), information, descriptor);
         LocalFree(descriptor);
         if ok == 0 { return Err(crate::util::io_at(path, "securing")(std::io::Error::last_os_error())); }
     }
@@ -1131,6 +1178,194 @@ mod safety_tests {
             Ok(())
         }
         fn forward(&self, _: &Previous, _: &str) -> Result<()> { Ok(()) }
+    }
+
+    /// Whether the user of this process owns `path` (its owner SID is the token's user SID).
+    #[cfg(windows)]
+    fn owned_by_this_user(path: &Path) -> bool {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{EqualSid, GetFileSecurityW, GetSecurityDescriptorOwner, GetTokenInformation, OWNER_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: NUL-terminated name, buffers sized by the size queries, the token handle closed before returning.
+        unsafe {
+            let mut needed = 0;
+            GetFileSecurityW(name.as_ptr(), OWNER_SECURITY_INFORMATION, std::ptr::null_mut(), 0, &mut needed);
+            let mut sd = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetFileSecurityW(name.as_ptr(), OWNER_SECURITY_INFORMATION, sd.as_mut_ptr().cast(), needed, &mut needed), 0);
+            let (mut owner, mut defaulted) = (std::ptr::null_mut(), 0);
+            assert_ne!(GetSecurityDescriptorOwner(sd.as_mut_ptr().cast(), &mut owner, &mut defaulted), 0);
+            let mut token: HANDLE = std::ptr::null_mut();
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token), 0);
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            let mut user = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetTokenInformation(token, TokenUser, user.as_mut_ptr().cast(), needed, &mut needed), 0);
+            CloseHandle(token);
+            EqualSid(owner, (*(user.as_ptr() as *const TOKEN_USER)).User.Sid) != 0
+        }
+    }
+
+    /// A launcher started as administrator makes its folders owned by BUILTIN\Administrators, not by the user (an
+    /// elevated token's default owner; the win1 runner's SSH session is elevated too). Its Nexus state works and becomes
+    /// the user's, so a start without elevation can use it later; without elevation the user owns it from the start.
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_this_account_made_is_secured_and_becomes_the_users() {
+        let root = temp();
+        let made_here = root.join("state");
+        std::fs::create_dir(&made_here).unwrap(); // owned by the token's default owner, as private_dir makes it
+        private_dir_inner(&made_here).expect("a folder this process made is its own");
+        assert!(owned_by_this_user(&made_here), "the folder is the user's after securing");
+        let lock = open_lock(&made_here, "test.lock").expect("a lock file in it");
+        drop(lock);
+        assert!(owned_by_this_user(&made_here.join("test.lock")));
+        // secured again (the next start): still accepted, still the user's
+        private_dir_inner(&made_here).unwrap();
+        assert!(owned_by_this_user(&made_here));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(sd: *const core::ffi::c_void, revision: u32, information: u32, text: *mut *mut u16, len: *mut u32) -> i32;
+        fn ConvertSidToStringSidW(sid: *const core::ffi::c_void, text: *mut *mut u16) -> i32;
+    }
+
+    /// Text Windows allocated (LocalFree), as a String.
+    #[cfg(windows)]
+    unsafe fn local_text(text: *mut u16) -> String {
+        // SAFETY: a NUL-terminated string the system allocated, freed here.
+        unsafe {
+            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            windows_sys::Win32::Foundation::LocalFree(text.cast());
+            s
+        }
+    }
+
+    /// This process's user SID as text (`S-1-5-21-...`).
+    #[cfg(windows)]
+    fn user_sid() -> String {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        // SAFETY: a buffer sized by the size query, the token handle closed before returning.
+        unsafe {
+            let mut token: HANDLE = std::ptr::null_mut();
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token), 0);
+            let mut needed = 0;
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+            let mut user = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetTokenInformation(token, TokenUser, user.as_mut_ptr().cast(), needed, &mut needed), 0);
+            CloseHandle(token);
+            let mut text = std::ptr::null_mut();
+            assert_ne!(ConvertSidToStringSidW((*(user.as_ptr() as *const TOKEN_USER)).User.Sid, &mut text), 0);
+            local_text(text)
+        }
+    }
+
+    /// `path`'s owner, group and access list, in a buffer for the security calls.
+    #[cfg(windows)]
+    fn security_of(path: &Path) -> Vec<usize> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GetFileSecurityW, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let information = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        // SAFETY: NUL-terminated name, a buffer sized by the size query.
+        unsafe {
+            let mut needed = 0;
+            GetFileSecurityW(name.as_ptr(), information, std::ptr::null_mut(), 0, &mut needed);
+            let mut sd = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+            assert_ne!(GetFileSecurityW(name.as_ptr(), information, sd.as_mut_ptr().cast(), needed, &mut needed), 0, "{}", path.display());
+            sd
+        }
+    }
+
+    /// `path`'s access list in SDDL (`D:P(A;OICI;FA;;;SY)...`).
+    #[cfg(windows)]
+    fn dacl_sddl(path: &Path) -> String {
+        let sd = security_of(path);
+        let mut text = std::ptr::null_mut();
+        // SAFETY: a security descriptor GetFileSecurityW filled; the text is freed by local_text.
+        unsafe {
+            assert_ne!(ConvertSecurityDescriptorToStringSecurityDescriptorW(sd.as_ptr().cast(), 1, windows_sys::Win32::Security::DACL_SECURITY_INFORMATION, &mut text, std::ptr::null_mut()), 0);
+            local_text(text)
+        }
+    }
+
+    /// Whether a start of this user WITHOUT elevation may read and write `path`: Windows' own access check with this
+    /// process's token restricted the way a start without elevation has it (BUILTIN\Administrators for deny only). Run
+    /// elevated (as the win1 runner is), this tells what a later normal start can do with what an elevated one made.
+    #[cfg(windows)]
+    fn usable_without_elevation(path: &Path) -> bool {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{AccessCheck, CreateRestrictedToken, CreateWellKnownSid, DuplicateToken, GENERIC_MAPPING, MapGenericMask,
+            SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
+        use windows_sys::Win32::Storage::FileSystem::{FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut sd = security_of(path);
+        // SAFETY: buffers of the documented sizes; every handle is closed before returning.
+        unsafe {
+            let mut admins = vec![0usize; (SECURITY_MAX_SID_SIZE as usize).div_ceil(std::mem::size_of::<usize>())];
+            let mut size = SECURITY_MAX_SID_SIZE;
+            assert_ne!(CreateWellKnownSid(WinBuiltinAdministratorsSid, std::ptr::null_mut(), admins.as_mut_ptr().cast(), &mut size), 0);
+            let (mut token, mut restricted, mut client): (HANDLE, HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            assert_ne!(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &mut token), 0);
+            let deny_only = SID_AND_ATTRIBUTES { Sid: admins.as_mut_ptr().cast(), Attributes: 0 };
+            assert_ne!(CreateRestrictedToken(token, 0, 1, &deny_only, 0, std::ptr::null(), 0, std::ptr::null(), &mut restricted), 0);
+            assert_ne!(DuplicateToken(restricted, SecurityImpersonation, &mut client), 0);
+            let mapping = GENERIC_MAPPING { GenericRead: FILE_GENERIC_READ, GenericWrite: FILE_GENERIC_WRITE, GenericExecute: FILE_GENERIC_EXECUTE, GenericAll: FILE_ALL_ACCESS };
+            let mut want = FILE_GENERIC_READ | FILE_GENERIC_WRITE;
+            MapGenericMask(&mut want, &mapping);
+            let mut privileges = [0usize; 64];
+            let mut privileges_len = std::mem::size_of_val(&privileges) as u32;
+            let (mut granted, mut status) = (0u32, 0);
+            let ok = AccessCheck(sd.as_mut_ptr().cast(), client, want, &mapping, privileges.as_mut_ptr().cast(), &mut privileges_len, &mut granted, &mut status);
+            let error = std::io::Error::last_os_error();
+            CloseHandle(client); CloseHandle(restricted); CloseHandle(token);
+            assert_ne!(ok, 0, "access check on {}: {error}", path.display());
+            status != 0 && granted & want == want
+        }
+    }
+
+    /// A launcher started as administrator writes its Nexus records as BUILTIN\Administrators (the elevated token's
+    /// default owner). A later start of the same player without elevation must still read and replace them, as it does
+    /// the folder and its locks; and nobody else is let in: the folder's protected access list names only the user and
+    /// SYSTEM.
+    #[cfg(windows)]
+    #[test]
+    fn what_an_elevated_start_writes_stays_usable_without_elevation_and_private() {
+        let root = temp();
+        let state = root.join("state");
+        private_dir_inner(&state).unwrap();
+        drop(open_lock(&state, "test.lock").unwrap());
+        let inbox = state.join("inbox");
+        private_dir_inner(&inbox).unwrap();
+        let record = state.join("record.json");
+        let link = inbox.join("0000000000001-00000000.json");
+        for p in [&record, &link] {
+            if crate::nexus::enabled() {
+                crate::nexus::keystore::write_private(p, &serde_json::json!({ "url": "nxm://enshrouded/mods/1/files/2" })).unwrap();
+            } else {
+                std::fs::write(p, b"{}").unwrap(); // as write_private makes it: a new file in the folder
+            }
+        }
+        for p in [&state, &state.join("test.lock"), &inbox, &record, &link] {
+            assert!(usable_without_elevation(p), "a start without elevation cannot use {}: {}", p.display(), dacl_sddl(p));
+        }
+        let user = user_sid();
+        for dir in [&state, &inbox] {
+            let sddl = dacl_sddl(dir);
+            assert!(sddl.starts_with("D:P"), "protected, nothing inherited: {sddl}");
+            for ace in sddl.split('(').skip(1) {
+                let ace = ace.trim_end_matches(')');
+                let sid = ace.rsplit(';').next().unwrap();
+                assert!(ace.starts_with("A;") && (sid == user || sid == "SY" || sid == "OW"), "only the user and SYSTEM: {sddl}");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

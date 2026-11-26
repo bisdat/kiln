@@ -467,12 +467,13 @@
       "summary": "Side, session state, local player and the client world's tick",
       "guides": [
         "docs/kiln/modding/client-hooks.md",
-        "docs/kiln/services/client-building-input.md"
+        "docs/kiln/services/client-building-input.md",
+        "docs/kiln/services/client-crosshair.md"
       ],
       "capabilities": [
         {
           "name": "identity.entities",
-          "members": 5
+          "members": 6
         }
       ],
       "samples": [

@@ -6,7 +6,8 @@
 //
 // The client role's state machine (one link: its server):
 //   Idle (no link, no client world, no marker channel)
-//   Hello: HELLO now, again every 1 s five times, then every 5 s; a new nonce per link generation, client world and restart
+//   Hello: HELLO now, again every 1 s five times, then after 5 s doubling to at most 60 s (a server that never answers);
+//     a new nonce per link generation, client world and restart
 //   Linked (WELCOME with our nonce and a nonzero server epoch): data of that tuple only; old tuples are ignored.
 //     SNAP_BEGIN/CHUNK/END stage a whole snapshot (512 rows, 256 KiB, 5 s), validated 128 rows per step, published at
 //     once when complete and its digest matches; DELTA and POSE need applied + 1 (a gap asks for RESYNC); a transaction
@@ -108,6 +109,7 @@ private:
     void ack(uint64_t applied, uint8_t status, const std::string& reason);
     void resync(uint8_t reason, uint64_t now);
     void hello(uint64_t now);
+    static uint64_t hello_interval(uint32_t sent);  // the wait after the sent-th HELLO without an answer
     void send_catalog();
     void enqueue(uint32_t message, std::vector<uint8_t>&& bytes);
     wire::Header header(uint64_t seq) const;

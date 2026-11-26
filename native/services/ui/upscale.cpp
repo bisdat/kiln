@@ -42,6 +42,7 @@
 #include "upscale.h"
 #include "upscale_backend.h"
 #include "upscale_logic.h"
+#include "upscale_probe.h"
 #include "upscale_reentry.h"
 #include "vendor_file.h"
 
@@ -142,6 +143,15 @@ PFN_vkCmdBlitImage p_blit = nullptr;
 PFN_vkDeviceWaitIdle p_wait_idle = nullptr;
 PFN_vkGetPhysicalDeviceFormatProperties p_format_props = nullptr;
 VkPhysicalDevice g_phys = VK_NULL_HANDLE;
+
+// The output check (upscale_probe.h, upscale_probe_logic.h; main thread): once after each set-up, a look at a few
+// hundred points of the backend's output; a black or NaN picture from FSR 4 makes FSR 3.1 run for the rest of the game.
+OutputProbe g_probe;
+bool g_probe_ok = false;            // its Vulkan functions are there on the game's device
+probe::Schedule g_check;
+uint32_t g_probe_tag = 0;
+std::atomic<bool> g_fsr4_black{false};  // FSR 4's picture came out black: FSR 3.1 runs until the game restarts
+std::string g_fsr4_black_why;           // g_mu: "the picture is black" or "...not a number"
 
 void set_detail(const std::string& d) {
     std::lock_guard lk(g_mu);
@@ -472,6 +482,11 @@ void upscale_device_end(void* scope, const VkDeviceCreateInfo* used, VkResult r,
     g_device_ready = true;
     g_why = static_cast<uint32_t>(Why::none);
     set_detail(detail);
+    {
+        std::string pd;
+        g_probe_ok = guarded([&]() { g_probe_ok = g_probe.init(g_vk, &pd); }) && g_probe_ok;
+        if (!g_probe_ok) logf(KILN_LOG_WARN, "graphics: upscaler: the output check is off on this device: %s", pd.empty() ? "a fault" : pd.c_str());
+    }
     logf(KILN_LOG_INFO, "graphics: upscaler: %s is ready on the game's device%s%s", g_backend->name().c_str(), detail.empty() ? "" : ": ",
          detail.c_str());
 }
@@ -487,6 +502,9 @@ void upscale_device_destroy(VkDevice device) {
     }
     g_ctx = false;
     g_running = static_cast<uint32_t>(Running::off);
+    if (g_probe_ok) guarded([&]() { g_probe.destroy(); });
+    g_probe_ok = false;
+    g_check.stop();
     g_device.store(VK_NULL_HANDLE);
     logf(KILN_LOG_INFO, "graphics: upscaler: the game's device %p is destroyed: the upscaler's Vulkan objects went first",
          reinterpret_cast<void*>(device));
@@ -651,6 +669,12 @@ bool ensure_context(const Frame& f) {
     g_ctx = true;
     g_ci = ci;
     g_hist.drop();
+    // the output check looks at this context's picture once, after its first frames
+    bool check = false;
+    if (g_probe_ok && KUI_GUARD("the backend's output check setting", check = g_backend->output_check()) && check)
+        g_check.arm(g_fsr_frames.load(std::memory_order_relaxed));
+    else
+        g_check.stop();
     g_running = static_cast<uint32_t>(g_backend->running());
     g_version = g_backend->version();
     g_amd_pinned = amd_pins_fsr3(ci.amd) && g_backend->choice() == Choice::amd;
@@ -659,6 +683,62 @@ bool ensure_context(const Frame& f) {
          detail.empty() ? "" : ": ", detail.c_str());
     set_detail(detail);
     return true;
+}
+
+// The output check's result, read some frames after its probe (main thread, the game's FSR 3 frame `n`, before the
+// frame's context is made). A black or NaN picture: FSR 4 steps down to FSR 3.1 for the rest of the game (one kiln.log
+// line with the readout), any other upscaler gives way to the game's own FSR 3. False: the session fell back.
+bool check_output(uint64_t n) {
+    if (!g_check.due_read(n)) return true;
+    probe::Result r;
+    if (!g_probe.read(g_check.tag, &r)) {
+        if (g_check.overdue(n)) {
+            g_check.stop();
+            logf(KILN_LOG_WARN, "graphics: upscaler: the output check got no result from the GPU in %llu frames: no check for this set-up",
+                 static_cast<unsigned long long>(probe::kReadGiveUp));
+        }
+        return true;
+    }
+    const probe::Verdict v = probe::judge(r);
+    const std::string name = g_backend ? g_backend->name() : std::string("the upscaler");
+    if (v == probe::Verdict::ok) {
+        g_check.stop();
+        static uint32_t said = 0;
+        if (said++ < 8)
+            logf(KILN_LOG_INFO, "graphics: upscaler: %s's output check: %s (%s)", name.c_str(), probe::verdict_text(v), probe::readout_text(r).c_str());
+        return true;
+    }
+    if (!probe::bad(v)) {
+        // the game's own picture is black (a load, a fade): no verdict yet
+        if (!g_check.retry(n))
+            logf(KILN_LOG_INFO, "graphics: upscaler: %s's output check gave up after %u tries: %s (%s)", name.c_str(), probe::kMaxTries,
+                 probe::verdict_text(v), probe::readout_text(r).c_str());
+        return true;
+    }
+    g_check.stop();
+    const bool fsr4 = static_cast<Running>(g_running.load()) == Running::amd_fsr4;
+    if (fsr4 && g_backend && may(Call::create)) {
+        std::string d;
+        bool ok = false;
+        if (!KUI_GUARD("the backend's step to FSR 3.1", ok = g_backend->step_down(&d))) return false;
+        if (ok) {
+            g_running = static_cast<uint32_t>(g_backend->running());
+            g_version = g_backend->version();
+            g_hist.drop();
+            {
+                std::lock_guard lk(g_mu);
+                g_fsr4_black_why = probe::verdict_text(v);
+            }
+            g_fsr4_black = true;
+            logf(KILN_LOG_WARN, "graphics: upscaler: %s's output check: %s (%s): %s runs in its place until the game restarts (%s)", name.c_str(),
+                 probe::verdict_text(v), probe::readout_text(r).c_str(), g_backend->name().c_str(), d.c_str());
+            // FSR 3.1's picture is looked at too
+            g_check.arm(n);
+            return true;
+        }
+    }
+    fall_back(Why::runtime_failed, name + "'s picture came out wrong: " + probe::verdict_text(v) + " (" + probe::readout_text(r) + ")");
+    return false;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -751,6 +831,11 @@ void hk_fsr(void* ctx, uint8_t* fsr, uint8_t* desc) {
             g_ctx = false;
             g_running = static_cast<uint32_t>(Running::off);
         }
+        game_fsr(ctx, fsr, desc);
+        return;
+    }
+    // the output check's result, once it is in (it may step FSR 4 down to FSR 3.1, or end the swap for the session)
+    if (!check_output(n)) {
         game_fsr(ctx, fsr, desc);
         return;
     }
@@ -869,6 +954,22 @@ void blit_fallback(VkCommandBuffer cb, const Frame& f) {
     p_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
 }
 
+// The output check's probe, recorded right after the backend's work in the frame's command buffer (upscale_probe.h).
+void record_check(VkCommandBuffer cb, const Frame& f) {
+    if (++g_probe_tag == 0) ++g_probe_tag;
+    const uint32_t tag = g_probe_tag;
+    std::string detail;
+    bool ok = false;
+    if (!guarded([&]() { ok = g_probe.record(cb, f, tag, &detail); })) detail = "a fault in Kiln's output check";
+    if (ok) {
+        g_check.recorded(f.frame, tag);
+        return;
+    }
+    g_check.stop();
+    static uint32_t said = 0;
+    if (said++ < 4) logf(KILN_LOG_WARN, "graphics: upscaler: the output check did not run: %s", detail.c_str());
+}
+
 void run_cmd(VkCommandBuffer cb, const KCmd& c) {
     Slot& s = g_slots[c.slot % kSlots];
     if (s.seq.load(std::memory_order_acquire) != c.seq) {
@@ -892,6 +993,7 @@ void run_cmd(VkCommandBuffer cb, const KCmd& c) {
                  g_backend->name().c_str(), static_cast<unsigned long long>(k), range.text().c_str());
             range.reset();
         }
+        if (g_probe_ok && g_check.due_record(f.frame)) record_check(cb, f);
         return;
     }
     if (live && !ok && !g_failed.load()) fall_back(Why::runtime_failed, detail.empty() ? "the upscale failed" : detail);
@@ -1006,6 +1108,15 @@ void upscale_start(const gfx::Settings& s, uint32_t aside, const std::string& as
          "and checks %s's files when the game makes its Vulkan instance", name, g_backend->component());
 }
 
+bool upscale_fsr4_black(std::string* why) {
+    if (!g_fsr4_black.load()) return false;
+    if (why) {
+        std::lock_guard lk(g_mu);
+        *why = fsr4_black_text(g_fsr4_black_why);
+    }
+    return true;
+}
+
 void upscale_settings(const gfx::Settings& s) {
     g_choice = static_cast<uint32_t>(s.upscaler);
     g_pin = static_cast<uint32_t>(s.amd_pin);
@@ -1065,6 +1176,8 @@ void upscale_status(KilnUiGraphicsStatus* out) {
         detail = g_detail;
     }
     if (detail.empty() && o.why != Why::none) detail = why_text(o.why);
+    // FSR 3.1 runs because FSR 4's picture came out black: said in the detail (for logs and tooltips; no reason code)
+    if (detail.empty() && o.running == Running::amd_fsr3 && g_fsr4_black.load()) upscale_fsr4_black(&detail);
     copy_detail(out->upscale_detail, sizeof out->upscale_detail, detail);
 }
 

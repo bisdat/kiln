@@ -201,7 +201,7 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     if (!e || e->kind >= KILN_WORLD_KINDS) return;
     if (e->event == KILN_WORLD_STARTED) {
         net_world_started(static_cast<uint8_t>(e->kind));
-        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); }
+        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); orders_world_started(); }
         windows_world_started(static_cast<uint8_t>(e->kind));
         return;
     }
@@ -209,11 +209,14 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     net_world_stopping(static_cast<uint8_t>(e->kind));
     if (e->kind == KILN_WORLD_SERVER) {
         terrain_world_stopping();
+        orders_world_stopping();
+        buffs_world_stopping();
         events_world_stopping();
         components_world_stopping();
     }
     if (e->kind == KILN_WORLD_CLIENT) events_world_stopping(EMF_WORLD_CLIENT);  // the client world's relays (0.2.0-dev.29)
     windows_world_stopping(static_cast<uint8_t>(e->kind));
+    markers_world_stopping(static_cast<uint8_t>(e->kind));  // v33: that world's markers of every mod (0.2.0-dev.31.13)
 }
 
 void KILN_CALL on_ready(void*) {
@@ -294,11 +297,13 @@ void KILN_CALL on_ready(void*) {
 
 void KILN_CALL on_unload(void*) {
     terrain_world_stopping();
+    orders_shutdown();
     net_shutdown();
     events_shutdown();
     program_hooks_shutdown();
     components_world_stopping();
     windows_shutdown();
+    markers_shutdown();  // release_owner of every mod with markers (kiln.markers requires it before a publisher goes)
     write_status();
     io_stop(2000);  // the last emf.json (on_unload's own limit is 3 s)
 }
@@ -328,6 +333,8 @@ void dispatch_server_pre() {
     g_pre_parts.begin(qpc_ns());
     terrain_server_pre();
     g_pre_parts.part("blocks", qpc_ns());
+    buffs_server_pre();
+    g_pre_parts.part("buffs", qpc_ns());
     net_server_pre();
     g_pre_parts.part("net", qpc_ns());
     game_server_pre(&g_pre_parts);

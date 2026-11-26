@@ -101,9 +101,10 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
             return
         calls = log.read_text().splitlines()
         if (extra_env or {}).get('KILN_SF_FAIL_PREPARE'):
-            # the preparation failed: no runtime is created, and the status does not say the startup pass is done
+            # the preparation failed: no runtime is created, and the status says the startup preparation returned
+            # false (the launcher then reads ShroudForge's record of the pass as this start's: kiln-manage sf_startup.rs)
             assert calls.count('prepare') == 1 and 'create' not in calls, (name, calls)
-            assert status['mode'] == 'failed' and 'startupPrepared' not in status, (name, status)
+            assert status['mode'] == 'failed' and status.get('startupPrepared') is False, (name, status)
             print('PASS', name)
             return
         assert status['source'] == ('installed' if (installed == 'good' and use_installed) or name == 'bundled-corrupt' else 'bundled'), (name, status)

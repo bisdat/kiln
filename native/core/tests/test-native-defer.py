@@ -82,7 +82,24 @@ int main(int, char** argv){
  Channel collision;check(!collision.open(true),"core refuses an already-existing channel instead of trusting its contents");
  ++fake_pid;times_fail=true;Channel no_identity;check(!no_identity.open(true),"missing process identity fails open without creating a wait");times_fail=false;
  std::ifstream shipped_file(argv[2]);std::stringstream shipped_text;shipped_text<<shipped_file.rdbuf();
- auto shipped=parse_rules(shipped_text.str(),"shipped");check(shipped.ok && shipped.dropped==0 && shipped.rules.size()==2,"all shipped rules parse");
+ auto shipped=parse_rules(shipped_text.str(),"shipped");
+ {std::vector<std::string> ids;for(const auto& r:shipped.rules)ids.push_back(r.id);
+  const std::vector<std::string> want={"shroudtopia-item-skill-text-original-code","auto-loot-plus-before-ultimate-asi-loader",
+   "livemap-known-hooks","creative-mode-building-tools-hud-dispatch","creative-mode-building-tools-native-hud-dispatch"};
+  check(shipped.ok && shipped.dropped==0 && ids==want,"all shipped rules parse");}
+ // 0.2.0-dev.31.13 (XHL): Creative Mode 3.2.0 rewrites the HUD screen dispatch Building Tools looks for. A warning when
+ // both run, whichever way Building Tools is loaded (ShroudForge/XHL package: BuildingTools.dll; Kiln's Library: the
+ // native mod building-tools), never for one of them alone.
+ {auto fired=[&](Facts f){std::vector<std::string> ids;for(const Rule* r:evaluate(shipped.rules,f))if(r->action=="warn")ids.push_back(r->id);return ids;};
+  Facts both;both.modules={"creative.dll","BuildingTools.dll"};
+  check(fired(both)==std::vector<std::string>{"creative-mode-building-tools-hud-dispatch"},"Creative Mode and Building Tools' DLL: one warning");
+  Facts library;library.modules={"CREATIVE.DLL","dinput8.dll"};library.mods={"native:building-tools"};
+  check(fired(library)==std::vector<std::string>{"creative-mode-building-tools-native-hud-dispatch"},"Creative Mode and Building Tools from Kiln's Library: one warning");
+  Facts creative_only;creative_only.modules={"creative.dll"};creative_only.mods={"flame:creative"};
+  Facts tools_only;tools_only.modules={"BuildingTools.dll"};tools_only.mods={"native:building-tools"};
+  check(fired(creative_only).empty() && fired(tools_only).empty(),"one of them alone: no warning");
+  bool says=false;for(const auto& r:shipped.rules)if(r.id=="creative-mode-building-tools-hud-dispatch")says=r.message.find("+0xC60A22")!=std::string::npos&&r.message.find("not through Kiln")!=std::string::npos;
+  check(says,"the warning names the patched bytes and that Kiln is not the cause");}
  Facts package_start;package_start.mods={"shroudtopia:item-skill-text"};Facts package_own;
  package_own.mods={"native:auto-doors-new-version"};package_own.modules={"powrprof.dll","AutoDoors/bin/ad_core.dll"};
  // 0.2.0-dev.29.5 (inbox 33): Auto Doors started late does nothing (it must start before the game registers its programs),

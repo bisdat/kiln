@@ -1129,6 +1129,9 @@ export interface StartTimeline {
   launcher: boolean;
   /** Steam was asked a minute ago or more and the game's process does not exist yet: no number. */
   steamSlow?: boolean;
+  /** (0.2.0-dev.31.13) How the launcher's start was started (launch_begin's mode); absent: not said. A Vanilla start is
+   *  followed too until its game is there, and shown without a bar. */
+  mode?: LaunchMode | null;
 }
 export interface RequiredMod {
   id: string;
@@ -1402,6 +1405,12 @@ export const taskGet = (taskId: TaskId) => call<Task>("task_get", { taskId });
 export const taskCancel = (taskId: TaskId) => call<null>("task_cancel", { taskId });
 /** The first screen is up (once per start: shell/started.ts). */
 export const appStarted = () => call<null>("app_started");
+/** The page took the window's close request (shell/closeGuard.ts): `asking` the player, or closing. Without it the
+ *  backend closes the window by itself a few seconds later (src-tauri/src/webproc.rs). */
+export const appCloseSeen = (asking: boolean) => call<null>("app_close_seen", { asking });
+/** Whether closing the window now would lose work (shell/closeGuard.ts, at its start and at every change): a slow page
+ *  with unsaved work gets longer to answer a close (src-tauri/src/webproc.rs). */
+export const appCloseUnsaved = (unsaved: boolean) => call<null>("app_close_unsaved", { unsaved });
 /** Visibility alone does not prove painting. Two visible animation frames can confirm a renderer startup. */
 export const appRenderFrame = (painted: boolean, visible: boolean) => call<string | null>("app_render_frame", { painted, visible });
 /** What the page measured about its drawing (shell/renderReport.ts), into launcher.log: at most two lines a start. */
@@ -2229,7 +2238,27 @@ export const serverConsoleClose = (subscription: string) => call<null>("server_c
 // admin.rs (hooks in ./admin.ts)
 export const adminConnect = (serverId: ServerId, transport: AdminTransport = "auto") => call<AdminSession>("admin_connect", { serverId, transport });
 export const adminDisconnect = (session: string) => call<null>("admin_disconnect", { session });
-export const adminOpenWebPanel = (serverId: ServerId) => call<null>("admin_open_web_panel", { serverId });
+/** An open web panel (kiln_manage::admin::web_panel::WebPanelInfo, 0.2.0-dev.31.12): the server's own loopback origin,
+ *  reached through the launcher's gateway (a TCP connection on this machine, or ssh -W to a remote server). */
+export interface WebPanelInfo {
+  serverId: ServerId;
+  /** `https://127.x.y.z:port` (`http://` for a panel without TLS). */
+  origin: string;
+  /** The pinned certificate's SHA-256 (hex), null without TLS. */
+  fingerprint: string | null;
+  via: "local" | "ssh";
+  /** False when this system could not give the server its own loopback address (cookies shared on 127.0.0.1). */
+  isolated: boolean;
+  /** The gateway closes this long after the panel's last tab. */
+  idleCloseS: number;
+  connections: number;
+}
+/** Opens the server's web panel in the browser, signed in as the owner; the panel as the window shows it. */
+export const adminOpenWebPanel = (serverId: ServerId) => call<WebPanelInfo>("admin_open_web_panel", { serverId });
+/** Closes the server's web panel gateway: whether one was open. */
+export const adminCloseWebPanel = (serverId: ServerId) => call<boolean>("admin_close_web_panel", { serverId });
+/** The web panels open now. */
+export const adminWebPanels = () => call<WebPanelInfo[]>("admin_web_panels");
 export const adminSessions = () => call<AdminSession[]>("admin_sessions");
 /** The op's `data`; rejects with op_failed (message = the op's error) when it answers ok=false. */
 export const adminCall = <T = Json>(session: string, op: string, args: Record<string, Json> = {}) => call<T>("admin_call", { session, op, args });
@@ -2436,7 +2465,7 @@ export const COMMANDS = [
   "server_restart", "server_update", "server_deploy", "server_settings_get", "server_settings_set", "server_mods",
   "server_mods_sync", "server_mod_enable", "server_backups", "server_backup_create", "server_backup_restore", "server_query",
   "server_modpack_status", "server_modpack_build", "server_modpack_publish",
-  "admin_connect", "admin_open_web_panel", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
+  "admin_connect", "admin_open_web_panel", "admin_close_web_panel", "admin_web_panels", "admin_disconnect", "admin_sessions", "admin_call", "admin_subscribe", "admin_unsubscribe",
   "modpack_pending", "modpack_inspect", "modpack_install", "modpack_dismiss",
   "config_kiln_read", "config_kiln_set", "config_kiln_reset",
   // Settings' ShroudForge card
@@ -2454,7 +2483,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
+  "app_started", "app_close_seen", "app_close_unsaved", "app_render_frame", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

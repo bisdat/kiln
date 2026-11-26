@@ -431,7 +431,15 @@ for (var r = lease.Receive(4100, buffer); r.Ok; r = lease.Receive(4100, buffer))
 - Per client, server side: token buckets of `messagesPerSecond` (default 200) and `bytesPerSecond` (default 512 KiB),
   each with a 2 s burst. Excess is dropped. `floodKickDrops` (default 2000) drops within 10 s kick the client.
   kiln.net adds its own per-peer cap underneath (2000 frames/s, 4 MiB/s) and bounded queues.
+- A frame the game refuses for now (its bandwidth budget) waits in kiln.net's retry queue, in order, for at most 2 s;
+  at most 8192 frames wait in all. Then `Send` reports it as not sent.
 - Kiln pings Ready peers every 10 s (`NetPeer.RoundTrip`).
+- Shutdown (since 0.2.0-dev.31.13): once the game's shutdown begins (its `Trigger gameflow shutdown` line: Ctrl+C,
+  the console's quit, a game client quitting), kiln.net sends nothing more, to any peer, and drops what waits; from the
+  server world's stop until the next world starts, the server role sends nothing. Channel 12 is still read and freed
+  then (the game never holds a Kiln frame), but nothing is delivered. `Send` returns false. kiln.log logs each
+  peer's Kiln traffic when it goes and when the server world stops (`Kiln frames in N (B bytes), out N (B bytes),
+  N dropped, N refused by the game`).
 
 ## `kiln/config/network.json` (server)
 ```json

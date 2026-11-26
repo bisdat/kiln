@@ -860,8 +860,11 @@ mod tests {
             }
             World { root }
         }
+        /// The image path the game's process reports for install `d`: through Wine's Z: drive on Linux, the native path
+        /// on Windows (where `host_path_of` takes it as it is).
         fn image(&self, d: &str) -> String {
-            crate::winpath::unix_to_z(&self.root.join(d).join("enshrouded_server.exe")).unwrap()
+            let exe = self.root.join(d).join("enshrouded_server.exe");
+            if cfg!(windows) { exe.to_str().unwrap().to_string() } else { crate::winpath::unix_to_z(&exe).unwrap() }
         }
         fn put(&self, d: &str, desc: &Descriptor) {
             let f = self.root.join(d).join("kiln/state/debug").join(format!("{}.json", desc.windows_pid));

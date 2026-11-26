@@ -13,12 +13,15 @@
 - `static GameDataAvailable { get; } -> bool` — kiln.gamedata is loaded (it is ready once `Content.Ready`; see `Content.GameDataStatus`).
 - `static GameDataDefinitions() -> IReadOnlyList<GameDataDefinition>` — Every clone definition of kiln.gamedata (templates, sequences, perks, buffs; data packs, code, the content sync...
 - `static GameDataStatus() -> string` — kiln.gamedata's state as JSON: `{ready, detail, resources, sections: {name: {available, count, changed}}, externals}`.
+- `const GameTextsCapability = "content.game_texts" -> string` `0.2.22` — The capability row of `Content.TextIn`, `Content.TryGetTexts` and `Content.LoadTextsAsync`: available on a game...
 - `static Gear(ContentEntry item) -> GearStats` `0.2.12` — The typed gear values of an entry of `Content.Items`.
 - `static Gear(ItemId item) -> GearStats?` `0.2.12` — The typed gear values of an item type; null when there is no such item.
 - `static Gear(string item) -> GearStats?` `0.2.12` — The typed gear values of an item type (a debug name, `"0x..."` id or GUID), in the game's tooltip numbers; null when...
 - `const GearCapability = "content.gear" -> string` `0.2.12` — The capability of `Content.Gear` and the data packs' "gear" section.
 - `static ItemData { get; } -> GameDataRegistry` — Items through kiln.gamedata (config values, lists): `impactValues.ManaCost`, `sequences[0].triggeredBy`.
 - `static Items { get; } -> ContentRegistry` — Items (`keen::ItemInfo`): id = ItemId, name = debug name (`Material_T1_Wood_Logs`).
+- `static LoadTextsAsync(string? language, CancellationToken cancellationToken = default(CancellationToken)) -> Task<GameTextTable>` `0.2.22` — Reads one language's texts (see `Content.TryGetTexts` for `language`) and completes with the table, on a worker...
+- `static LoadVoxelMaterialsAsync(string? language = null, CancellationToken cancellationToken = default(CancellationToken)) -> Task<VoxelMaterialCatalog>` `0.2.22` — Reads the game's voxel materials and `language`'s texts (see `Content.TryGetVoxelMaterials`) and completes with the...
 - `static Loot { get; } -> ContentRegistry` — Random loot per item (`keen::LootableItemInfo`): id = the item's ItemId.
 - `static OnReady(Action<ContentReadyEvent> handler) -> void` — Runs `handler` as the calling mod every time the registries are (re)applied: at world load after the data packs, and...
 - `static PackReport() -> string` — The last data-pack application as JSON...
@@ -39,9 +42,15 @@
 - `static Text(uint locaId) -> string?` `0.2.10` — The game's own text of a loca tag id (`FNV-1a` over the tag GUID's 16 bytes: a tooltip row's `locaId`, `Texts.TagOf`...
 - `static TextAvailable { get; } -> bool` `0.2.10` — True when `Content.Text` can answer here: a game client whose game has looked up a text already.
 - `const TextCapability = "content.text" -> string` `0.2.10` — The capability row of `Content.Text`: available on a game client once the game has looked up its first text (its...
+- `static TextIn(Guid locaTag, string? language) -> string?` `0.2.22` — The text of a LocaTag reference (a GUID, hashed as the game does) in `language`; see `Content.TextIn`.
+- `static TextIn(uint locaId, string? language) -> string?` `0.2.22` — The text of a loca tag id in `language` with the game's markup, on any thread, without waiting...
 - `static TextLanguage { get; } -> string?` `0.2.10` — The language the game shows its texts in now, as the game's key (`"en-us"`, `"de-de"`, `"pt-br"`), or null when...
+- `static TextLanguages { get; } -> IReadOnlyList<string>` `0.2.22` — The languages the game ships texts in, as the game keys them (`"en-us"`, `"de-de"`, `"pt-br"`, ...
 - `static TooltipValues(ItemId item) -> IReadOnlyList<TooltipValue>` `0.2.10` — The rows of an item type's tooltip (its `uiValues`) with their labels in the player's language: the numbers a spell...
+- `static TryGetTexts(string? language) -> GameTextTable?` `0.2.22` — One language's texts when they are read already, without waiting: `language` is a key the game ships...
+- `static TryGetVoxelMaterials(string? language = null) -> VoxelMaterialCatalog?` `0.2.22` — The game's voxel materials with labels in `language` (a key the game ships, `"de-de"`; null the player's game...
 - `static UnregisterSection(string name) -> bool` — Removes a section registered with `Content.RegisterSection`.
+- `const VoxelMaterialsCapability = "content.voxel_materials" -> string` `0.2.22` — The capability row of `Content.TryGetVoxelMaterials` and `Content.LoadVoxelMaterialsAsync`: available on both sides...
 
 ## ContentChange `0.2.2` — What a `ContentChangedEvent` reports.
 enum: Set, Reset, Applied, Reverted
@@ -623,6 +632,25 @@ enum: Templates, Arsenals, Sequences, Buffs, Perks, Skills, Items
 - `Description { get; init; } -> string?` — The shown description; null: not given.
 - `Name { get; init; } -> string?` — The shown name; null: not given.
 
+## GameTextSource `0.2.22` — Where a `GameTextTable`'s texts come from.
+enum: None, Game, KilnCatalog
+
+## GameTextTable `0.2.22` — One language's game texts: loca tag id -> text, with the game's markup (`<b>`, `<lorename>`, ...; `GameTextTable.GetPlain` strips it).
+- `Available { get; } -> bool` — The table has texts (`GameTextTable.Source` is not `GameTextSource.None`).
+- `ContainsKey(uint key) -> bool` — The table has a text for the tag id.
+- `Count { get; } -> int` — How many texts the table has.
+- `Get(Guid locaTag) -> string?` — The text of a LocaTag reference (a GUID, as `ItemInfo.name`), hashed as the game does.
+- `Get(uint locaId) -> string?` — The text of a loca tag id with the game's markup, or null (no such text, an empty one).
+- `GetEnumerator() -> IEnumerator<KeyValuePair<uint, string>>` — Every (tag id, text) pair, with markup.
+- `GetPlain(uint locaId) -> string?` — As `GameTextTable.Get` without the game's markup tags, trimmed; null for none or an empty one.
+- `Keys { get; } -> IEnumerable<uint>` — Every tag id the table has a text for.
+- `Language { get; } -> string` — The language, as the game keys it (`"de-de"`).
+- `Reason { get; } -> string` — Why there are no texts ("" when `GameTextTable.Available`): a dedicated server, a language the game does not ship, a...
+- `Source { get; } -> GameTextSource` — Where the texts come from; `GameTextSource.None` when there are none.
+- `this[uint key] { get; } -> string` — The text of a tag id (with markup).
+- `TryGetValue(uint key, out string value) -> bool` — The text of a tag id (with markup), when the table has one.
+- `Values { get; } -> IEnumerable<string>` — Every text (with markup).
+
 ## GearArmorKind `0.2.12` — A kind of armour an item gives (`GearStats.Armor`).
 enum: Physical, Magical, Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning
 
@@ -816,3 +844,34 @@ enum: Always, LikeBase
 
 ## TooltipValueFormat `0.2.10` — How the game shows a tooltip row's number (`impact::ImpcatValueNumberFormat`, spelled as the game spells it).
 enum: Normal, Percentage, Duration, DurationMilliseconds, Float, Numberless, Unknown
+
+## VoxelMaterial `0.2.22` — One of the game's voxel materials, keyed by its cell id (the low byte of a voxel cell): what it is, what digging it gives and at what rate, which items place it, and...
+- `VoxelMaterial(int CellId, VoxelMaterialKind Kind, Guid Guid, string Name, ItemId LootItem, int? ExchangeRate, IReadOnlyList<ItemId> PlacingItems, string? Hardness, int HealthPoints, string? Label, VoxelMaterialLabelSource LabelSource)`
+- `CellId { get; init; } -> int` — The cell id: 1..127 terrain, 128..255 building.
+- `ExchangeRate { get; init; } -> int?` — How many cells of it one `VoxelMaterial.LootItem` is (`terrainPerLootItemExchangeRate` /...
+- `Guid { get; init; } -> Guid` — The material's GUID as a save keeps it (`VoxelWorldResource.materialGuids`); `Guid.Empty` when the world table has...
+- `Hardness { get; init; } -> string?` — The game's hardness category (`"Soft"` ...
+- `HealthPoints { get; init; } -> int` — How many hits of strength 1 a cell takes (`healthPoints`).
+- `Kind { get; init; } -> VoxelMaterialKind` — Terrain or building.
+- `Label { get; init; } -> string?` — A player-facing name in `VoxelMaterialCatalog.Language`: an item's name (see `LabelSource`), without markup; null...
+- `LabelSource { get; init; } -> VoxelMaterialLabelSource` — Which item `VoxelMaterial.Label` names.
+- `LootItem { get; init; } -> ItemId` — What digging it gives (`terrainItem` / `materialItem`); `default` for none (an unbreakable material).
+- `Name { get; init; } -> string` — Kiln's stable name of the game material (`"TerrainStone"`, `"WoodRough"`), the one `WorldTables.GameMaterialId` and...
+- `PlacingItems { get; init; } -> IReadOnlyList<ItemId>` — The items that place it (their `equipment.voxelData`), the one `VoxelMaterial.Name` comes from first, the rest by...
+
+## VoxelMaterialCatalog `0.2.22` — The game's voxel materials with labels in one language (`Content.TryGetVoxelMaterials`): every material the terraforming registry configures, by cell id.
+- `Available { get; } -> bool` — The game's registry could be read: the catalog has its materials.
+- `Count { get; } -> int` — How many materials (terrain and building).
+- `Get(int cellId) -> VoxelMaterial?` — The material of a cell id (a cell's low byte), or null: 0, an id the game does not configure, out of range.
+- `GetEnumerator() -> IEnumerator<VoxelMaterial>` — Every material, in cell id order.
+- `Language { get; } -> string` — The language of the labels (`"de-de"`).
+- `PlacedBy(ItemId item) -> VoxelMaterial?` — The material an item places (a building block, a terrain block of the build menu), or null.
+- `Reason { get; } -> string` — Why there are no materials ("" when `VoxelMaterialCatalog.Available`).
+- `this[int index] { get; } -> VoxelMaterial` — The materials in cell id order.
+- `WithLootItem(ItemId item) -> IReadOnlyList<VoxelMaterial>` — The materials whose digging gives `item`, in cell id order (several share one: five rubble ids give the same...
+
+## VoxelMaterialKind `0.2.22` — Which cell domain a `VoxelMaterial` is in.
+enum: Terrain, Building
+
+## VoxelMaterialLabelSource `0.2.22` — Which item a `VoxelMaterial.Label` is the name of.
+enum: None, PlacingItem, LootItem

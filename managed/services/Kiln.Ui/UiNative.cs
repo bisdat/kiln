@@ -162,6 +162,49 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, uint, float, float, byte> InputTextEx;
     }
 
+    /// <summary>KilnUiOwnedInput (kiln_ui_input.h, kiln.ui.input v1, 0.2.0-dev.31.13): one owned-input callback's record.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct OwnedInput
+    {
+        public uint Size, Kind, Source, Vk, Scan, Mods, Controller, End, Time, Flags;
+        public float X, Y, ClientWidth, ClientHeight;
+        public byte TextInput, Captured, R0, R1;
+        public uint R2;
+    }
+
+    /// <summary>KilnUiPadState (kiln_ui_input.h, 0.2.0-dev.31.13).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PadState
+    {
+        public uint Size, Controller;
+        public byte Connected, R0, R1, R2;
+        public uint Buttons, Owned, Hidden;
+        public float LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger;
+        public short RawLeftX, RawLeftY, RawRightX, RawRightY;
+        public byte RawLeftTrigger, RawRightTrigger, R3, R4;
+        public uint Packet;
+        public ulong PollMs, Polls;
+        public uint R5, R6;
+    }
+
+    /// <summary>kiln.ui.input v1 (kiln_ui_input.h, 0.2.0-dev.31.13): input a mod owns from its press to its release, and the
+    /// controllers' view. A table of its own next to kiln.ui.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct InputTable
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<ulong, uint, delegate* unmanaged[Cdecl]<OwnedInput*, void*, uint>, void*, ulong*, int> SubscribeOwned;
+        public delegate* unmanaged[Cdecl]<ulong, int> Unsubscribe;
+        public delegate* unmanaged[Cdecl]<ulong, uint, uint, uint> Disown;
+        public delegate* unmanaged[Cdecl]<ulong, uint, uint, byte> Owns;
+        public delegate* unmanaged[Cdecl]<uint, PadState*, int> PadStateFn;
+    }
+
+    // kiln_ui_input.h's numbers
+    public const uint OwnKeys = 1, OwnMouse = 2, OwnPointer = 4, OwnPad = 8;
+    public const uint OwnedPress = 1, OwnedRepeat = 2, OwnedRelease = 3, OwnedEnd = 4;
+    public const uint OwnedLeaked = 1, OwnTake = 1, OwnPass = 0;
+
     /// <summary>KilnUiCursor (kiln_ui.h v3).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct Cursor
@@ -998,6 +1041,25 @@ internal static unsafe class UiNative
     private static BlocksTable* _blocks;
     private static bool _blocksTried;
 
+    /// <summary>kiln.ui.input v1, or null on a Kiln without it (older than 0.2.0-dev.31.13, a dedicated server): owning
+    /// key listeners and the controllers' view are then off. Not cached while absent: kiln-ui.dll may publish it after a
+    /// mod's first call.</summary>
+    public static InputTable* Input
+    {
+        get
+        {
+            if (_input != null) return _input;
+            var t = Services.Get<InputTable>("kiln.ui.input", 1);
+            if (t != null && t->Header.Size >= (uint)sizeof(InputTable)) _input = t;
+            return _input;
+        }
+    }
+
+    private static InputTable* _input;
+
+    /// <summary>Tests: a fake kiln.ui.input (null: look the service up again).</summary>
+    internal static void SetInputForTests(InputTable* table) => _input = table;
+
     /// <summary>Tests: a fake kiln.ui.blocks (null: look the service up again).</summary>
     internal static void SetBlocksForTests(BlocksTable* table)
     {
@@ -1015,6 +1077,7 @@ internal static unsafe class UiNative
         _table6 = null;
         _blocks = null;
         _blocksTried = false;
+        _input = null;
         LooksOverride = null;
         ImageExOverride = null;
 
