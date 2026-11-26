@@ -4,7 +4,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const LOAD = { timeout: 30_000 };
-type Mock = { __kilnMock: { calls: () => string[]; setServer: (o: unknown) => void } };
+type Mock = { __kilnMock: { calls: () => string[]; setServer: (o: unknown) => void; planCommand: (cmd: string, plan: unknown) => void } };
 
 async function open(page: Page, route: string) {
   await page.goto(`/#${route}`);
@@ -98,4 +98,65 @@ test("a stopped server's config file changed by hand asks before Play, and Save 
   expect(await calls(page)).toContain("config_write");
   await page.waitForTimeout(900);
   await expect(page).toHaveURL(/#\/$/);
+});
+
+test("server settings: Save and leave that fails stays, with the work and the reason", async ({ page }) => {
+  await open(page, "/servers/lab/settings");
+  await expect(nameInput(page)).toBeVisible(LOAD);
+  await nameInput(page).fill("Renamed lab");
+  await page.evaluate(() => (window as unknown as Mock).__kilnMock.planCommand("server_settings_set",
+    { error: { code: "conflict", message: "The server is running and rewrites this file: stop it first." } }));
+  await header(page).getByRole("link", { name: "Play", exact: true }).click();
+  await dialog(page).getByRole("button", { name: "Save and leave" }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByText("The server is running and rewrites this file: stop it first.")).toBeVisible();
+  await expect(page).toHaveURL(/#\/servers\/lab\/settings$/);
+  await expect(nameInput(page)).toHaveValue("Renamed lab");
+  // past the sheet's drop: still here; and the next way out asks again
+  await page.waitForTimeout(900);
+  await expect(page).toHaveURL(/#\/servers\/lab\/settings$/);
+  await header(page).getByRole("link", { name: "Play", exact: true }).click();
+  await expect(dialog(page)).toBeVisible();
+  await dialog(page).getByRole("button", { name: "Save and leave" }).click();
+  await expect(page).toHaveURL(/#\/$/);
+});
+
+test("server settings: the server starting while the dialog asks does not strand the player", async ({ page }) => {
+  await open(page, "/servers/lab/settings");
+  await expect(nameInput(page)).toBeVisible(LOAD);
+  await nameInput(page).fill("Renamed lab");
+  await header(page).getByRole("link", { name: "Logs", exact: true }).click();
+  await expect(dialog(page)).toBeVisible();
+  // the server starts: its settings are read again and say so (the game rewrites the file while it runs, so the page drops
+  // the edits it can no longer save); nothing is left to ask about, and the way out the player chose goes on
+  await page.evaluate(`(async () => {
+    const { serverMockHandlers } = await import("/src/pages/servers/mockServers.ts");
+    const mock = window.__kilnMock;
+    mock.planCommand("server_settings_get", { result: { ...serverMockHandlers.server_settings_get({ serverId: "lab" }), running: true } });
+    mock.setServer({ running: true });
+  })()`);
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/logs$/);
+  expect(await calls(page)).not.toContain("server_settings_set");
+});
+
+test("back and forward with nothing unsaved go as before, without a word", async ({ page }) => {
+  await open(page, "/servers/lab/overview");
+  await expect(tabs(page)).toBeVisible(LOAD);
+  await tabs(page).getByRole("link", { name: /^Settings/ }).click();
+  await expect(nameInput(page)).toBeVisible(LOAD);
+  await header(page).getByRole("link", { name: "Play", exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/servers\/lab\/settings$/);
+  await expect(nameInput(page)).toBeVisible(LOAD);
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/servers\/lab\/overview$/);
+  await page.goForward();
+  await expect(page).toHaveURL(/#\/servers\/lab\/settings$/);
+  await page.goForward();
+  await expect(page).toHaveURL(/#\/$/);
+  await page.waitForTimeout(900);
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(dialog(page)).toHaveCount(0);
 });
