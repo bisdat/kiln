@@ -2,7 +2,8 @@
 // kiln.content registry: the best-effort drift probe's names (commitment 7: other loaders' DLL patches and hooks are
 // best effort and labelled so).
 //
-// At each world load and each pack reload the live back-end (registry_live.cpp live_row) compares, for every field it
+// Whenever the live back-end rebuilds registry.json's live rows (registry_live.cpp report -> live_row: each world load and
+// pack reload, and a live change or a drop table bound later in the world; never per tick) it compares, for every field it
 // binds, the game's value just before Kiln's first write in this world (the store slots' originals) with what the stage
 // read at resources-ready and the writers Kiln knows below the packs (archive-writer packages, old boot patches). When they
 // differ and none of them explains it, something outside Kiln changed the value (another DLL engine, a hook, a memory

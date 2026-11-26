@@ -327,8 +327,10 @@ the game's value just before Kiln's first write in that world with what the stag
 below the packs. When they differ, something outside Kiln changed the value (another DLL engine, a hook, a memory write):
 the row says so and names the suspects Kiln can see, the modules that patched game code before Kiln hooked it (the hook map,
 `kiln/state/hooks.json`) and hosted ShroudForge when it runs. A slot another writer changes after Kiln's layer gets the same
-row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything and costs one read per
-field per world load or reload, never per tick. A suspect list is a hint, not proof: a writer that hooks nothing is not
+row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything. It runs whenever Kiln
+rebuilds `registry.json`'s live rows (at each world load and pack reload, and when a live change or a drop table the game
+loads later changes them; never per tick) and costs one more read of each field it writes live, about a tenth of what
+rebuilding the rows costs anyway. A suspect list is a hint, not proof: a writer that hooks nothing is not
 seen, and a field nobody edits through the registry is not checked. Neither is an entry an old boot resource patch (an
 `OnBoot` or `resourcePatches` document) writes: the game holds Kiln's own patch there, and many of its paths (a formula's
 input, an element of a list of structs, `[*]` over every recipe) have no field row to explain it, so a change there is
