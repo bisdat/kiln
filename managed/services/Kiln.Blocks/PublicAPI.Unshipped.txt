@@ -1,1 +1,4 @@
 #nullable enable
+const Kiln.Crafting.RespecSourcesCapability = "crafting.respec_sources" -> string!
+Kiln.CraftSourceOptions.Respec.get -> bool
+Kiln.CraftSourceOptions.Respec.init -> void
