@@ -13,6 +13,9 @@
 //  - kiln.mod.json changing without a reload (a hot edit) is a pack change too: the scan re-applies
 //  - a pack that throws while it applies: its mod's layers of that application come off, its packs from before apply
 //    again whole (also when they had ordinary field errors), with their registry sections, else none of its packs apply
+//  - a pack that throws leaves nothing of its mod behind (0.2.0-dev.31.14): what its "add" lists defined or changed comes
+//    off at once, in the mod's place in the load order, so a later mod applies over the state without it (new content is
+//    a model of newcontent.cpp's bookkeeping and pack journal here; packundo_test.cpp runs the real one)
 //  - 300 reloads (good, broken, throwing): no new owners, nothing left queued
 // packreload_test.sh builds and runs it.
 #include <windows.h>
@@ -24,6 +27,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -153,14 +157,62 @@ RecipeLayout RL;
 DropLayout DL;
 std::unordered_map<uint32_t, std::vector<uint8_t>> g_category_guid;
 
-// What the packs reach in the service's other files: no new content, no kitbash, no registry stage in this test.
-void nc_packs_begin() {}
-void nc_packs_end() {}
-// An "add" entry {"throw": "<what>"} throws while its pack applies (a section's code meeting a value type it did not expect):
-// the rule before it in the same pack has applied already.
-void nc_pack_add(KilnOwner, uint32_t, const std::string& list, const std::string&, ApplyResult* out) {
-    if (list.find("\"throw\"") != std::string::npos) throw std::runtime_error("[json.exception.type_error.302] type must be string, but is number");
-    out->errors.push_back("no new content here");
+// What the packs reach in the service's other files: no kitbash, no registry stage in this test. New content is a model of
+// newcontent.cpp's bookkeeping (definitions by name: owner, seen in this application, orphaned) and of its pack journal
+// (nc_pack_mark / rollback / unmark, content.h), so the cases see what packs.cpp asks of it and when.
+namespace model {
+struct Def {
+    KilnOwner owner = 0;
+    std::string v;  // the definition's "v": which version of the pack defined it
+    bool seen = true, orphan = false;
+};
+std::map<std::string, Def> defs;
+KilnOwner journal_owner = 0;
+std::vector<std::pair<std::string, std::optional<Def>>> journal;
+std::vector<std::string> events;  // "define <name>", "nc rollback <owner>", ... in order
+bool active(const std::string& name) {
+    const auto it = defs.find(name);
+    return it != defs.end() && !it->second.orphan;
+}
+std::string v_of(const std::string& name) { return defs.count(name) ? defs[name].v : std::string(); }
+}  // namespace model
+void nc_packs_begin() {
+    for (auto& [n, d] : model::defs) d.seen = false;
+}
+void nc_packs_end() {
+    for (auto& [n, d] : model::defs)
+        if (!d.seen) d.orphan = true;
+}
+void nc_pack_mark(KilnOwner owner) {
+    model::journal_owner = owner;
+    model::journal.clear();
+}
+uint32_t nc_pack_rollback(KilnOwner owner) {
+    model::events.push_back("nc rollback " + std::to_string(owner));
+    if (owner != model::journal_owner) return 0;
+    const uint32_t n = static_cast<uint32_t>(model::journal.size());
+    for (auto it = model::journal.rbegin(); it != model::journal.rend(); ++it) {
+        if (it->second) model::defs[it->first] = *it->second;
+        else model::defs[it->first].orphan = true, model::defs[it->first].seen = false;
+    }
+    model::journal.clear();
+    return n;
+}
+void nc_pack_unmark() { model::journal_owner = 0; }
+// An "add" list defines {"name", "v"} entries; an entry {"throw": "<what>"} throws while its pack applies (a section's code
+// meeting a value type it did not expect): what the list defined before it, and the rules before it, have applied already.
+void nc_pack_add(KilnOwner owner, uint32_t, const std::string& list, const std::string&, ApplyResult* out) {
+    const nlohmann::ordered_json l = nlohmann::ordered_json::parse(list);
+    for (const nlohmann::ordered_json& e : l) {
+        if (e.contains("throw")) throw std::runtime_error("[json.exception.type_error.302] type must be string, but is number");
+        const std::string name = e.value("name", "?");
+        if (owner == model::journal_owner &&
+            std::none_of(model::journal.begin(), model::journal.end(), [&](const auto& j) { return j.first == name; }))
+            model::journal.emplace_back(name, model::defs.count(name) ? std::optional<model::Def>(model::defs[name]) : std::nullopt);
+        model::defs[name] = model::Def{owner, e.value("v", ""), true, false};
+        model::events.push_back("define " + name);
+        ++out->applied;
+    }
 }
 bool nc_is_new(uint32_t, uint32_t) { return false; }
 void nc_drops_table(const Entry&) {}
@@ -429,7 +481,8 @@ void run() {
         step();
         check(fake::read32(kStone) == 25, "throw: the layer the throwing pack wrote before it threw comes off (Stone back to other's 25)");
         check(fake::read32(kWood) == 90, "throw: the packs from before apply again, whole, though they had an ordinary field error (Wood 90)");
-        check(logged("a pack threw while it applied: the packs it had before apply again, whole"), "throw: a line says the packs from before apply again");
+        check(logged("a pack threw while it applied: what it did came off") && logged("; the packs it had before apply again, whole"),
+              "throw: a line says the packs from before apply again");
         check(staged_of("skilltest") == old_sections,
               "throw: the registry stage gets the section of the packs that apply (the one from before), not the throwing pack's");
         check(g_report.find("applying it failed") != std::string::npos && g_report.find("type_error") != std::string::npos,
@@ -445,13 +498,57 @@ void run() {
         fake::lines.clear();
         step();
         check(fake::read32(kWood) == 10 && fake::read32(kStone) == 25, "throw without a version before: none of the mod's packs apply (Wood 10, Stone 25)");
-        check(logged("a pack threw while it applied: none of its packs apply"), "throw without a version before: a line says none apply");
+        check(logged("a pack threw while it applied: what it did came off") && logged("; none of its packs apply"),
+              "throw without a version before: a line says none apply");
         check(staged_of("skilltest").empty(), "throw without a version before: no registry section of the mod reaches the stage");
         // fixed: the new version applies
         pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
         reloaded("skilltest", "was reloaded");
         step();
         check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw fixed: the new version applies (Wood 90)");
+    }
+
+    // ---- a pack that throws leaves nothing of its mod behind (0.2.0-dev.31.14): what its "add" lists defined or changed,
+    // its template clones, config adds and other services' sections come off with its layers, at once, in its place in the
+    // load order: a later mod applies over the state without it
+    {
+        manifest("late", "late", "1.0.0");
+        pack("late", "late.json", R"({"format": 1, "items": {"add": [{"name": "Late", "v": "1"}]}})");
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}, "add": [{"name": "Axe", "v": "old"}, {"name": "Sword", "v": "old"}]},
+                 "templates": {"add": [{"name": "TplA", "v": "old"}]}, "abilities": {"v": "old"}})");
+        pack_mods(R"(["other","skilltest","late"])");
+        reloaded("skilltest", "was reloaded");
+        step();
+        check(model::active("Axe") && model::v_of("Sword") == "old" && model::active("Late"), "undo: the version before defines Axe and Sword, late defines Late");
+        // the new version: redefines Sword, adds Pick, then its "add" list throws
+        pack("skilltest", "skills.json",
+             R"({"format": 1, "items": {"add": [{"name": "Sword", "v": "new"}, {"name": "Pick", "v": "new"}, {"throw": 1}]}})");
+        reloaded("skilltest", "was reloaded");
+        model::events.clear();
+        fake::lines.clear();
+        step();
+        check(!model::active("Pick"), "undo: an item the throwing pack added comes off (orphaned, as a removed pack's)");
+        check(model::active("Sword") && model::v_of("Sword") == "old", "undo: an item the throwing pack redefined is the version before's again");
+        check(model::active("Axe") && fake::read32(kWood) == 90, "undo: the packs from before apply again, whole (Axe, Wood 90)");
+        check(model::active("Late"), "undo: a later mod's definition is untouched");
+        const auto at = [](const std::string& e) {
+            const auto it = std::find_if(model::events.begin(), model::events.end(), [&](const std::string& x) { return x.rfind(e, 0) == 0; });
+            return it == model::events.end() ? model::events.size() + 1 : static_cast<size_t>(it - model::events.begin());
+        };
+        check(at("nc rollback") < at("define Late"), "undo: the throwing mod is rolled back in its place, before the next mod applies");
+        check(logged("a pack threw while it applied: what it did came off"), "undo: a line says what came off");
+        // no version before (the mod's packs came off with an unload): nothing of the throwing pack's mod stays at all
+        pack_mods(R"(["other","late"])");
+        step();
+        pack_mods(R"(["other","skilltest","late"])");
+        step();
+        check(!model::active("Pick") && !model::active("Sword") && !model::active("Axe") && model::active("Late"),
+              "undo without a version before: none of the mod's definitions stay, the later mod's do");
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
+        fs::remove_all(mod_dir("late"));
+        pack_mods(R"(["other","skilltest"])");
+        step();
     }
 
     // ---- many reloads (good, broken, throwing, in turn): no new owners, nothing left queued, the last good version applies

@@ -5,7 +5,8 @@
 # kitbash reference written only by the world that has the clone, a hosted server world's clone only in server Pre
 # (lateref_test.cpp, host, and under ThreadSanitizer); a mod's data packs following its load: a reload re-applies them, a
 # reload whose new files do not all read keeps them whole (packreload_test.cpp, host: content.cpp over the real packs.cpp and
-# store.cpp); a drop table patched before any caller walks it, whichever thread
+# store.cpp), and a pack that throws partway leaves nothing of its mod behind (packundo_test.cpp: newcontent.cpp's pack
+# journal); a drop table patched before any caller walks it, whichever thread
 # acquires it first (droptable_test.cpp, host: content.cpp's hook body, and under ThreadSanitizer); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
 # (nearmem.cpp): the policy against simulated address spaces on the host (near_test.cpp: the layout of GitHub issue 14,
 # the Wine layout, no free hole, budget, top and bottom of the address space), then the Windows side (nearwin.h) on a
@@ -40,6 +41,7 @@ bash "$here/itemfind_test.sh"
 bash "$here/lateref_test.sh"
 bash "$here/droptable_test.sh"
 bash "$here/packreload_test.sh"
+bash "$here/packundo_test.sh"
 bash "$here/menugroup_test.sh"
 bash "$here/text_test.sh"
 bash "$here/bootpack_test.sh"
