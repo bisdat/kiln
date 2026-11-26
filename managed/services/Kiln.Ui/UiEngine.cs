@@ -734,6 +734,9 @@ internal static unsafe class UiEngine
         }
         // a capture box (a ShroudForge mod's shortcut): the same rules as the Keys page's "press a key"
         if (_box is not null && down && k.Repeat == 0 && !Ui.MenuOpen) _box = null;
+        // a Kiln text field has the keyboard since (the player clicked the field below the box, or the search box: a left
+        // click is no press the box sees): what is typed there is text, not the shortcut
+        if (_box is not null && down && k.TextInput != 0) _box = null;
         if (_box is { } box && down)
         {
             if (k.Repeat != 0) return true;  // a held key's repeats while it waits
