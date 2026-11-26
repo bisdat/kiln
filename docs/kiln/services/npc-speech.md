@@ -79,7 +79,10 @@ out of range, an empty or too long text, no line or more than 32) throw `Argumen
 - **One override per mod and NPC.** Several mods can each have one. The highest `Priority` shows; on a tie the most
   recent `Suppress`/`Replace`. When it clears, the next one shows, else the game's own lines.
 - **One Say per NPC.** It shows over any override and ends at its time, with `StopSaying`, or with a newer Say.
-- **It all ends** when the mod unloads (its overrides and Says) and when the world ends (everything).
+- **It all ends** when the mod unloads (its overrides and Says) and when the world ends (everything). The owner is the
+  mod whose code makes the call (`ModContext.CurrentMod`: the tick thread, Kiln's tasks, event handlers); a call from a
+  thread the mod started itself belongs to no mod (`"kiln"`) and ends with the world, not with the mod. A
+  `NpcSpeech` handle keeps the mod it was made for on any thread.
 - **Replace picks per greeting**: each time the game would pick a new line, the NPC shows one of yours (at random among
   them); the same pick stays while the game shows the same line.
 - **Texts**: a `string` is the same in every language; a `UiText` per language (exact key, the primary language, `en`,
@@ -128,6 +131,12 @@ Hooks go in with the first override or Say. Mods never call game functions.
 - **Suppress** hides the greeting bubble and its voice-over. When a player opens the NPC's menu (E), the server still
   plays the NPC's talk gesture and mumble (its animation, [hyp], not seen); the menu itself is unchanged.
 - **Farewells** ("See you soon!") are drawn by the dialogue menu's own path, which Kiln does not change yet.
+- **The menu's own line**: when the NPC has a greeting with a condition (a quest hint), the menu (E) shows that line
+  itself, as the game wrote it; the bubble above shows yours. While Kiln speaks for the NPC that line plays no
+  voice-over either.
+- **Voice-overs are muted for the next pick**: a greeting the game already picked when your override began (the
+  player was looking at the NPC) keeps its voice-over for that one greeting. The transition line ("Anything else?")
+  is not muted; no NPC of the game has a voice-over on it (client 26430625).
 - **No "would greet now" event**: the game decides that on each client (its target and range), with no server event
   to hook.
 - The game's setting "NPC Speech Bubbles" off: no bubbles, also no Kiln ones.
@@ -157,14 +166,16 @@ Assert.Equal(SpeechMode.Replace, h.NpcSpeech.ModeOf(npc));
 Assert.Equal(["No food, no work."], h.NpcSpeech.LinesOf(npc));      // LinesOf(npc, "de-de"): German
 ```
 
-Not modelled: the game's bubble (target, range, random pick, voice-overs) and the network.
+Not modelled: the game's bubble (target, range, random pick, voice-overs) and the network. A Say's duration runs on
+real time, as on a server: the kit's steps do not move it (use `Npcs.StopSaying`, or a short Say and `StepUntil`).
 
 ## Manual test (a real client)
 With `mods/samples/HungryCrafter` on the host (a hosted world, or a dedicated server and a joined Kiln client):
 
 1. Stand near a villager, `/hunger starve`: "I'm starving... I can't work like this." over its head for 8 s, no voice.
-2. Walk away and back, target it: one of the three complaints instead of "Hello, Flameborn!"; press E: the same line,
-   no voice-over (a craftsperson's greeting voice stays silent).
+2. Walk well away (out of the settlement, so the game forgets its last pick) and back, target it: one of the three
+   complaints instead of "Hello, Flameborn!"; press E: the same line, no voice-over (a craftsperson's greeting voice
+   stays silent).
 3. `/hunger feed`: "Thank you, Flameborn! Back to work.", then its own greetings again.
 4. German text language: the German lines.
 5. A vanilla client on the same server: the game's lines throughout, no error, no disconnect.

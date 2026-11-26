@@ -62,6 +62,16 @@ Not followed: whether `0xb0f2c0`'s event reaches the server as `SelectDialogOpti
 show the talk gesture when a player presses E); where the farewell text of `0xd95ca0` is drawn; the NPC layer's own
 range (which NPCs get an entry).
 
+Review 2026-11-26 **[dis] [data]**: the voice-over events (`0xb0f2c0`, type 0x55 `{+4 entity, +8 line, +0xc Guid}`) carry
+the GUID the slot copied at pick time: the priority line's at the next `PickLines`, the plain greeting's when the
+dialogue opens (`0xd49c50`, and `0xd95ca0`'s own pick or the copy at `+0x30974`), the transition line's after it
+closes (`0xd49d00`). A greeting picked before Kiln muted the record keeps its voice for that one greeting. The
+transition list (`+0xa5e0`) is not muted; none of the 41 villager / workshop templates has a voice-over on a
+transition line (`tools/kfc` decode of each). The menu shows a priority line's text itself (`0xd80ab0`: window
+`+0x2b0`, the voice event from a copy of the record's entry), the farewell likewise (`0xd80a30`). The bubble's
+params are a stack copy NpcBubble builds for each call (`[rbp-0x60]` → `[rbp-0x40]`), so Kiln's writes never outlive
+the draw; BubbleDraw's other caller (`0xc442bb`) is outside NpcBubble.
+
 ## 3. Greeting range and cooldowns (server) **[refl] [data]**
 
 `npc_behavior` (server #294) writes the player's `NpcDialogPartner {isInGreetingRange, lastGreetingTime}` and the NPC's
