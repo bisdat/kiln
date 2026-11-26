@@ -106,7 +106,7 @@ consumers run under a structured-exception guard: a faulting subscriber is remov
 
 ### What `reload <id>` covers
 A reload unloads the mod and its dependents (dependents first), reads its `kiln.mod.json` and files again and loads them
-in a new load context, after the mods that stay loaded (the next release documents this table and enforces its refusals).
+in a new load context, after the mods that stay loaded (documented, and its refusals enforced, since 0.2.0-dev.31.17).
 
 | Part of the mod | `reload <id>` |
 |---|---|
@@ -115,7 +115,7 @@ in a new load context, after the mods that stay loaded (the next release documen
 | `apiVersion`, `dependencies`, `incompatible`, `features` | checked again. A refusal leaves the mod (and its dependents) unloaded, and the reply says why; a later `load` or `reload` retries |
 | `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place in the load order until the next start (their data packs and registry sections keep the start's place); a changed order takes effect then |
 | `side` | refused, `RestartRequired: mod <id>'s new version changes "side" in kiln.mod.json (server -> both): ...` (next release), before anything unloads, so the running version stays (a dependent whose new version changes its side refuses the reload the same way). A mod's side holds until the next start: the join checks players against the start's side-`both` mod lists and registry values (`bootSync`, network.md "Registry boot values and order"), which leave out the fields a one-side mod writes, so a side changed in place made every Kiln client's join differ until a restart. An `unload` and a `load` with another side is refused the same way (the mod stays unloaded). The side compared is the one the mod had in the start's load order (on a client that may host a world, its `server` mods' too: the registry stage ordered them with that side, though they load only while it hosts, so a new version with another side does not load with the next hosted world either), or for a mod the start did not order, its running version's |
-| `clients` | what joining players need follows at the next second (next release; before, up to a minute); players already in the world are not checked again |
+| `clients` | what joining players need follows at the next second (since 0.2.0-dev.31.17; before, up to a minute); players already in the world are not checked again |
 | `steamMessages`, `tests` | apply (the new load's owner gets the grant; `autoRun` runs after the load) |
 | `writes` | a new entry needs a restart: kiln.world reads the lists when the server starts, and the reloaded mod's tracked writes of a type it adds are refused (`NotDeclared`) until then |
 | `boot` | refused, `RestartRequiredBoot: ...`: a mod with boot content in this process, and a mod (or one of its dependents) whose new version adds `boot`; both before anything unloads, so the running versions stay as they were. Boot content (`OnBoot`, `resourcePatches`, `baseRules`, `gearRules`) never changes without a restart |
@@ -125,7 +125,7 @@ in a new load context, after the mods that stay loaded (the next release documen
 | registry entry points (`[RegistryEntryPoints]`) | `HotReload` runs; `ModLoad` runs again when there is no `HotReload`; `WorldLoad` runs for the world that exists; `GameStart` does not run again: its edits stay as the start composed them, and when the reloaded code differs the reply says `RestartRequired: <id>'s OnRegistry runs at GameStart only ...` |
 | native mods (`native.json`, `kiln/native/<id>/`) | refused, `RestartRequired: <id> is a native mod ...`: kiln-core loads their DLLs at start and never unloads them |
 
-**The reply says what waits for a restart** (next release). `reload <id>`'s result waits for the reload's
+**The reply says what waits for a restart** (since 0.2.0-dev.31.17). `reload <id>`'s result waits for the reload's
 registry work (the mod's runtime pass, its data packs' application at kiln.content's next Pre; a few steps, at most 5 s),
 then adds `; registry: <n> edit(s) need(s) a restart: <mod> <place>, ...` to the message, and its `data` gets
 `registry`: `{known, settled, restartRequired, edits: [{mod, registry, id, field, reason, source}]}` for the reloaded

@@ -24110,6 +24110,8 @@ managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryEntryOperations	0.2.0-dev.
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.Applies.get -> Kiln.RegistryApplies	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.Field.get -> string!	0.2.0-dev.31	0.2.17
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.get -> string!	0.2.0-dev.31.17	0.2.24
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.set -> void	0.2.0-dev.31.17	0.2.24
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.RegistryFieldAttribute(string! field, Kiln.RegistryApplies applies) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Applies.get -> Kiln.RegistryApplies	0.2.0-dev.31	0.2.17
@@ -24118,6 +24120,7 @@ managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Field.get -> str
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.FixedLength.get -> int	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Formula.get -> string?	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Id.get -> int	0.2.0-dev.31	0.2.17
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.JoinedClient.get -> string!	0.2.0-dev.31.17	0.2.24
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthField.get -> string?	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthOffset.get -> int	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Max.get -> double?	0.2.0-dev.31	0.2.17
