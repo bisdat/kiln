@@ -236,5 +236,8 @@ std::vector<Env::DataFile> read_sections(const std::string& mod, const std::stri
 Runner& runner();
 // Binds the tables (kiln.registry v1, kiln.internal.registry v1) from kiln_plugin_main.
 void bind_service();
+// kiln.content's exit step (KilnPluginInfo.on_unload): waits up to 2 s for the report writer (Env.post_report), so the newest
+// live report is in state/registry.json before the process ends.
+void flush_reports();
 
 }  // namespace kc::registry::stage

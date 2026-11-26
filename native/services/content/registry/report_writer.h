@@ -4,6 +4,7 @@
 // review Q1: a late rebuild's JSON and file took 87 ms at 10,000 bound fields and 370 ms at 40,000 on the tick).
 // Header-only, without windows.h (host test: tests/registry_stage_review_test.cpp).
 #pragma once
+#include <chrono>
 #include <condition_variable>
 #include <exception>
 #include <functional>
@@ -20,7 +21,7 @@ public:
     ReportWriter(const ReportWriter&) = delete;
     ReportWriter& operator=(const ReportWriter&) = delete;
     // Runs what is pending and ends the thread. The service never destroys its writer (as the runner: a DLL detach at
-    // process exit never waits for a thread); tests do.
+    // process exit never waits for a thread); its exit step flushes it instead (flush). Tests do.
     ~ReportWriter() {
         {
             std::lock_guard lock(mu_);
@@ -41,6 +42,11 @@ public:
     void wait_idle() {
         std::unique_lock lock(mu_);
         idle_cv_.wait(lock, [this] { return !pending_ && !running_; });
+    }
+    // The same for at most `max`; false: something is still pending or running (kiln.content's exit step, which has 3 s).
+    bool flush(std::chrono::milliseconds max) {
+        std::unique_lock lock(mu_);
+        return idle_cv_.wait_for(lock, max, [this] { return !pending_ && !running_; });
     }
     size_t runs() const {
         std::lock_guard lock(mu_);

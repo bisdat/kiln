@@ -116,6 +116,12 @@ std::optional<std::string> read_whole(const fs::path& p) {
     return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
 fs::path data_root() { return u8(data_dir()) / u8"content" / u8"registry"; }
+// The thread that makes live registry reports' JSON and state/registry.json (Env.post_report). Never destroyed, as the
+// runner: a DLL detach at process exit never waits for a thread; kiln.content's exit step flushes it (flush_reports).
+ReportWriter& report_writer() {
+    static ReportWriter& writer = *new ReportWriter([](const char* what) { LOGW("registry: state/registry.json was not written: %s", what); });
+    return writer;
+}
 
 // Install-wide compatibility, deliberately outside the per-build cache tree and every save directory.
 bool pin_definition(const EntryRef& ref, const json& body, std::string* why) {
@@ -314,11 +320,8 @@ Env make_env() {
         return out;
     };
     e.write_report = [](const std::string& text) { return write_whole(u8(api_path(KILN_PATH_STATE)) / u8"registry.json", text); };
-    // a live report's JSON and file on a thread of its own, never on the world tick (owner 11-26; never destroyed, as the runner)
-    e.post_report = [](std::function<void()> fn) {
-        static ReportWriter& writer = *new ReportWriter([](const char* what) { LOGW("registry: state/registry.json was not written: %s", what); });
-        writer.post(std::move(fn));
-    };
+    // a live report's JSON and file on a thread of its own, never on the world tick (owner 11-26)
+    e.post_report = [](std::function<void()> fn) { report_writer().post(std::move(fn)); };
     e.write_data = [](const std::string& rel, const std::string& text) { return write_whole(data_root() / u8(rel), text); };
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
     e.data_exists = [](const std::string& rel) {
@@ -567,6 +570,11 @@ const KilnRegistryHostApi kHostTable = {{sizeof(KilnRegistryHostApi), KILN_REGIS
 Runner& runner() {
     static Runner& r = *new Runner(make_env());  // never destroyed: the tables live as long as the process
     return r;
+}
+
+void flush_reports() {
+    if (!report_writer().flush(std::chrono::milliseconds(2000)))
+        LOGW("registry: the newest report was still being written to state/registry.json at exit (gave up after 2 s)");
 }
 
 void bind_service() {
