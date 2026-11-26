@@ -56,6 +56,13 @@ struct ReportCaps {
     size_t list_entries = 64;                                                 // first entries kept per list value or operand
 };
 
+// A refused row that waits for a restart starts with this stable token (0.2.0-dev.31.14): a reload or a runtime pass changed
+// an edit the start fixed (a restart field, a field the start never decoded, a section or an entry operation added after
+// it), or a live edit named such a field. registry.json counts them (counts.restartRequired); the kiln/control reload reply,
+// kilnctl status and the launcher's Conflicts view list them.
+inline constexpr const char* RESTART_REQUIRED_TOKEN = "RestartRequired: ";
+inline bool restart_required(const Refusal& r) { return r.reason.rfind(RESTART_REQUIRED_TOKEN, 0) == 0; }
+
 // The registry.json document (format 1).
 json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, const ReportCaps& caps = {});
 

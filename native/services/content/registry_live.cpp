@@ -1346,9 +1346,12 @@ void recompose(const std::vector<RegistrySection>& sections) {
                 std::erase_if(bt.edits, [&](const registry::Edit& e) {
                     const std::string k = edit_key(e);
                     if (before.count(k) || (k.find('#') == std::string::npos && g.in->decoded.count(k))) return false;
+                    // the stable token first (registry.json, the reload reply, kilnctl status, the launcher; 0.2.0-dev.31.14)
                     registry::Refusal r;
                     r.mod = m.id, r.source = bt.source, r.stage = bt.stage, r.n = e.n;
-                    r.reason = k + ": needs a restart: the base was read at start; this edit was not applied";
+                    r.registry = e.registry, r.id = e.select.id;
+                    r.field = e.element.on ? e.element.list : e.raw.empty() ? registry::generic_path(e.field) : std::string();
+                    r.reason = "RestartRequired: " + k + ": the base was read at start; this edit was not applied";
                     g.refused.push_back(r);
                     return true;
                 });
@@ -1371,10 +1374,44 @@ void recompose(const std::vector<RegistrySection>& sections) {
         if (std::none_of(mods.begin(), mods.end(), [&](const registry::ModInput& m) { return m.id == s.mod; })) {
             registry::Refusal r;
             r.mod = s.mod, r.source = s.source;
-            r.reason = "a registry section added after the start needs a restart; this edit was not applied";
+            r.reason = "RestartRequired: a registry section added after the start needs a restart; this edit was not applied";
             g.refused.push_back(r);
         }
     registry::Result next = registry::compose(*g.in->schema, g.in->base, g.in->old, mods, g.in->result);
+    // restart fields are the boot back-end's as written at the start: a reload changes them only at the next start. Each one
+    // whose value the reloaded sections change is a row of registry.json with the stable token (0.2.0-dev.31.14; before,
+    // only kiln.log said so), named for the changed section's last edit of it, so the next reload of that section replaces it.
+    auto restart_writer = [&](const registry::FieldOutcome* fo) -> const registry::ChainRow* {
+        if (!fo) return nullptr;
+        for (auto row = fo->chain.rbegin(); row != fo->chain.rend(); ++row)
+            if (row->kind == registry::WriterKind::Registry && stale.count(row->mod + "|" + row->source)) return &*row;
+        return nullptr;
+    };
+    std::set<registry::FieldRef> restart_refs;
+    for (const auto* fields : {&next.fields, &g.in->result.fields})
+        for (const auto& [fr, fo] : *fields) {
+            const registry::RegistrySpec* rs = g.in->schema->registry(fr.registry);
+            const FieldSpec* sp = rs ? rs->field(fr.field) : nullptr;
+            if (sp && sp->applies == registry::Applies::Restart) restart_refs.insert(fr);
+        }
+    for (const registry::FieldRef& fr : restart_refs) {
+        const auto now = next.fields.find(fr);
+        const auto old = g.in->result.fields.find(fr);
+        const registry::FieldOutcome* now_fo = now == next.fields.end() ? nullptr : &now->second;
+        const registry::FieldOutcome* old_fo = old == g.in->result.fields.end() ? nullptr : &old->second;
+        if (now_fo && old_fo && now_fo->result == old_fo->result) continue;
+        if (!now_fo && !old_fo) continue;
+        LOGI("registry: %s changes at the next start (a restart field)", fr.text().c_str());
+        const registry::ChainRow* by = restart_writer(now_fo);
+        if (!by) by = restart_writer(old_fo);  // the reloaded section no longer edits it: named for the edit it had
+        if (!by) continue;                     // not a reloaded section's (an old path's); kiln.log has it
+        registry::Refusal r;
+        r.mod = by->mod, r.source = by->source, r.stage = by->stage, r.n = by->n;
+        r.registry = fr.registry, r.id = fr.id, r.field = fr.field, r.raw = registry::is_raw_field(fr.field);
+        r.reason = "RestartRequired: " + fr.text() + " is read at game start; the reloaded value applies at the next start";
+        if (std::none_of(again.begin(), again.end(), [&](const auto& x) { return x.mod == r.mod && x.source == r.source && x.n == r.n && x.reason == r.reason; }))
+            again.push_back(std::move(r));
+    }
     // what the stage refused outside compose stays (but the data sections' own: they were read and checked again above)
     std::vector<registry::Refusal> kept;
     for (const registry::Refusal& r : g.in->pre_refused)
@@ -1382,15 +1419,6 @@ void recompose(const std::vector<RegistrySection>& sections) {
     for (const auto& row : again)
         if (std::none_of(kept.begin(), kept.end(), [&](const auto& old) { return old.mod == row.mod && old.source == row.source && old.n == row.n && old.reason == row.reason; })) kept.push_back(row);
     next.refused.insert(next.refused.begin(), kept.begin(), kept.end());
-    // restart fields are the boot back-end's as written at the start: a reload changes them only at the next start
-    for (const auto& [fr, fo] : next.fields) {
-        const registry::RegistrySpec* rs = g.in->schema->registry(fr.registry);
-        const FieldSpec* sp = rs ? rs->field(fr.field) : nullptr;
-        if (!sp || sp->applies != registry::Applies::Restart) continue;
-        auto old = g.in->result.fields.find(fr);
-        if (old == g.in->result.fields.end() || !(old->second.result == fo.result))
-            LOGI("registry: %s changes at the next start (a restart field)", fr.text().c_str());
-    }
     std::erase_if(next.fields, [&](const auto& kv) {
         const registry::RegistrySpec* rs = g.in->schema->registry(kv.first.registry);
         const FieldSpec* sp = rs ? rs->field(kv.first.field) : nullptr;
@@ -1763,7 +1791,9 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
         else if (field && field->applies == registry::Applies::Restart) { change->restart = true; reason = "RestartRequired: " + edit.registry + "." + field->name + " is read at game start"; }
         else if (field && !g.in->decoded.count(edit.registry + "." + field->name)) { change->restart = true; reason = "RestartRequired: the base did not read " + edit.registry + "." + field->name + " at start"; }
         if (reason.empty()) return false;
-        refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, ""});
+        // the place too: the reload reply, kilnctl status and the launcher name the field that waits (0.2.0-dev.31.14)
+        refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, "", edit.registry, edit.select.id,
+                           field ? field->name : std::string(), !edit.raw.empty()});
         return true;
     });
     for (auto& edit : batch.edits) edit.per_entry = per_entry(*change);  // review4 NS6: entry points refuse per entry
