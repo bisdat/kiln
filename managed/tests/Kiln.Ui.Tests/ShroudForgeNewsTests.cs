@@ -96,4 +96,78 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.Null(ShroudForgeNews.Fresh(news, nowSeconds: 200, sinceSeconds: 198));  // an old notice opens nothing
         Assert.Null(ShroudForgeNews.Fresh(news, nowSeconds: 50, sinceSeconds: 48));  // nor one dated ahead of the clock
     }
+
+    private string Package(string id, string settings)
+    {
+        var folder = Path.Combine(_root, "mods", id);
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "mod.json"), $$"""{"id":"{{id}}","name":"{{id}}","version":"1.0.0","capabilities":["runtime"]}""");
+        File.WriteAllText(Path.Combine(folder, "extended.mod.json"), "{\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"settings\": " + settings + "\n}\n");
+        ShroudForgeUi.Load(folder);
+        return folder;
+    }
+
+    private const string KeySettings = """{ "cleanupKey": { "value": "SDL:89", "label": "Clean up altar zone", "control": "keybind", "applyAt": "live" } }""";
+
+    private static CatalogMod Mod(string folder, string id, SfiRow? sfi = null) =>
+        new() { Engine = "shroudforge", Id = id, Name = id, Folder = folder, State = ModRunState.Loaded, Active = true, Sfi = sfi };
+
+    private static ModManagerPage Page(params CatalogMod[] mods) => new()
+    {
+        Source = () => new CatalogSnapshot
+        {
+            Version = 1, Mods = mods, Engines = [new CatalogEngine { Kind = "shroudforge", Name = "ShroudForge", Count = mods.Length }],
+        },
+        Filter = new EngineFilter("shroudforge"), Selected = ModManagerLogic.KeyOf(mods[0]),
+    };
+
+    private void Frame(ModManagerPage page)
+    {
+        _ui.Frame.Number++;
+        page.Draw(_ui, new PageRect(0, 0, 1800, 900), 1);
+    }
+
+    [Fact]
+    public void The_details_of_a_hosted_mod_show_its_newest_notices_and_where_its_keys_work()
+    {
+        State(Event("altar-cleanup", "result", "Altar Cleanup: 487 blocks found", "Press Keypad 1 again within 60 seconds to clean up.", 100));
+        var folder = Package("altar-cleanup", KeySettings);
+        ShroudForgeNews.Reload();
+        var page = Page(Mod(folder, "altar-cleanup"));
+        FakeUiTable.Texts.Clear();
+        Frame(page);
+        var drawn = string.Join("\n", FakeUiTable.Texts);
+        Assert.Contains("Altar Cleanup: 487 blocks found", drawn);
+        Assert.Contains("Press Keypad 1 again within 60 seconds to clean up.", drawn);
+        Assert.Contains(KilnText.T("shroudforge.news.keys_after_menu", ("key", ShroudForgeMenu.KeyName)), drawn);
+    }
+
+    [Fact]
+    public void Another_mods_notices_are_not_drawn_in_these_details()
+    {
+        State(Event("glider", "hello", "Glider news", "Ready to fly", 100));
+        var folder = Package("altar-cleanup", KeySettings);
+        ShroudForgeNews.Reload();
+        var page = Page(Mod(folder, "altar-cleanup"));
+        FakeUiTable.Texts.Clear();
+        Frame(page);
+        var drawn = string.Join("\n", FakeUiTable.Texts);
+        Assert.DoesNotContain("Glider news", drawn);
+        Assert.DoesNotContain(KilnText.T("shroudforge.news.label"), drawn);
+    }
+
+    [Fact]
+    public void A_kiln_backend_row_never_reads_ShroudForges_state_file()
+    {
+        var asked = 0;
+        ShroudForgeNews.StatePath = () => { asked++; return StatePath; };
+        State(Event("altar-cleanup", "result", "Found", "Press again", 100));
+        var folder = Package("altar-cleanup", KeySettings);
+        var page = Page(Mod(folder, "altar-cleanup", new SfiRow(SfiBranchKind.Kiln, true, [])));
+        FakeUiTable.Texts.Clear();
+        Frame(page);
+        Frame(page);
+        Assert.Equal(0, asked);
+        Assert.DoesNotContain("Press again", string.Join("\n", FakeUiTable.Texts));
+    }
 }

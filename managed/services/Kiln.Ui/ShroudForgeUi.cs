@@ -655,6 +655,9 @@ internal static class ShroudForgeUi
         }
         var now = Current(folder, out var error);
         var p = now.Package;
+        // what the mod published for the player, which ShroudForge's own window shows in its news (a hosted or installed
+        // start: a kiln-backend start never reads ShroudForge's folders)
+        if (m.Sfi is null) News(ui, m, folder, p, s, k, label);
         label(ui, KilnText.T("shroudforge.labels.settings"), s);
         var view = ViewFor(folder, Packages.GetOrAdd(folder, _ => new Entry()), now);
         if (p is null || view?.Error is not null || view is null)
@@ -732,6 +735,57 @@ internal static class ShroudForgeUi
             using (ui.FontSize(13 * k))
             using (ui.PushColor(UiColorSlot.Text, GameColors.Faint))
                 ui.TextWrapped(SfiNextStartNote);
+    }
+
+    /// <summary>The most notices of one mod drawn in its details (newest first).</summary>
+    internal const int NewsShown = 3;
+
+    /// <summary>A hosted mod's newest notices (shroudforge.notifications.publish, ShroudForgeNews.cs): a ShroudForge mod
+    /// cannot draw on the game's HUD, so this is where it tells the player what it found or what to press, and why it
+    /// opens ShroudForge's window (here: this page). netjunk, Altar Cleanup's "Ask before cleaning up". A mod with
+    /// shortcuts also gets the line that they work once the menu is closed: Kiln keeps every key press from ShroudForge
+    /// while its menu has the keyboard (kiln-shroudforge key_feed.cpp), as ShroudForge counts none while its own window is
+    /// in front (create_mod_api.rs is_game_focused).</summary>
+    private static void News(UiDraw ui, CatalogMod m, string folder, SfPackage? p, float s, float k, Action<UiDraw, string, float> label)
+    {
+        var all = ShroudForgeNews.Cached();
+        if (all.Count == 0) return;
+        var dir = Path.GetFileName(folder);
+        List<SfNews>? mine = null;
+        foreach (var n in all)
+        {
+            if (n.ModId != m.Id && n.ModId != p?.Id && n.ModId != dir) continue;
+            (mine ??= []).Add(n);
+            if (mine.Count == NewsShown) break;
+        }
+        if (mine is null) return;
+        label(ui, KilnText.T("shroudforge.news.label"), s);
+        foreach (var n in mine)
+        {
+            using (ui.FontSize(13 * k))
+            using (ui.PushColor(UiColorSlot.Text, GameColors.Faint))
+                ui.Text(When(n.UpdatedAt));
+            if (n.Title.Length > 0)
+                using (ui.FontSize(17 * k))
+                using (ui.PushColor(UiColorSlot.Text, GameColors.GoldBright))
+                    ui.TextWrapped(Clip(n.Title, MaxDrawnText));
+            if (n.Message.Length > 0)
+                using (ui.PushColor(UiColorSlot.Text, n.Level is "warn" or "warning" or "error" ? GameColors.Warning : GameColors.Text))
+                    ui.TextWrapped(Clip(n.Message, MaxDrawnText));
+            ui.Space(1, 4 * s);
+        }
+        if (p is not null && p.Settings.Any(x => x.Control == "keybind"))
+            using (ui.FontSize(14 * k))
+            using (ui.PushColor(UiColorSlot.Text, GameColors.Muted))
+                ui.TextWrapped(KilnText.T("shroudforge.news.keys_after_menu", ("key", ShroudForgeMenu.KeyName)));
+    }
+
+    /// <summary>When a notice came, in the player's local time (the date too when it was not today).</summary>
+    internal static string When(long unixSeconds)
+    {
+        if (unixSeconds is < 0 or > 253402300799) return "";
+        var at = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).ToLocalTime();
+        return at.Date == DateTimeOffset.Now.Date ? at.ToString("t", CultureInfo.CurrentCulture) : at.ToString("g", CultureInfo.CurrentCulture);
     }
 
     // Kiln's interpreter's rows
@@ -1176,6 +1230,9 @@ internal static class ShroudForgeMenu
     internal const string BindingId = "shroudforge.menu";
     private static int _started;
     private static KeyBinding? _binding;
+
+    /// <summary>The key that toggles Kiln's ShroudForge page (F9 unless the player remapped it), for the page's words.</summary>
+    internal static string KeyName => _binding is { Key: { IsNone: false } key } ? key.ToString() : "F9";
 
     /// <summary>The status file's word for who answers ShroudForge's menu; null while it is not decided (or not this start).</summary>
     internal readonly record struct Claim(string? MenuBy, string? Key, bool Final);
