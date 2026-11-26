@@ -1,0 +1,71 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.npcspeech (dev.31, Marshall/Ryrin's request): the game's speech bubble over a friendly NPC, client build 26430625 / svn 1287369. Evidence: docs/re/npc-speech.md (static only: the bubble showing is for a real client to confirm). The HUD's NPC layer (doNpcUIWindow, '[GameUi] NPC Layer') calls NpcBubble(entry, layer, slots, pos) per nearby NPC: entry+0 is the NPC's entity id, entry+8 its dialogue record (ui_dialog's per-NPC record, 0x14b80 B, in G38UiPlayData+0x463de0). NpcBubble picks lines through PickLines(slot, record, storeGlobal) and draws the bubble with BubbleDraw(params): params+0 the line's loca tag, +4 show (fades), +5 hide at once; a tag of 0 keeps it hidden. PickLines is an anchor only (never hooked or called): the record's greeting lists are captured from its code. Lists: priority init lines (ptr, u64 count), plain greetings (ptr, u64 count); entries of rec.entry_size bytes with rec.vo_slots inline voice-over GUIDs at rec.entry_vo.",
+  "symbols": {
+    "npcspeech/NpcBubble": {
+      "comment": "void(NpcLayerEntry*, void* layer, Slots*, const Pos*): one NPC's bubble state machine and draw. 2 callers, both in doNpcUIWindow",
+      "find": [
+        { "pattern": "4C 89 4C 24 20 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 48 8D 6C 24 90 48 81 EC 70 01 00 00 48 8B 05 ?? ?? ?? ?? 4D 8B E0" }
+      ]
+    },
+    "npcspeech/BubbleDraw": {
+      "comment": "void(BubbleParams*): the speech bubble widget. 2 callers: NpcBubble and one other HUD element (left alone: Kiln acts only inside NpcBubble)",
+      "find": [
+        { "pattern": "40 55 53 41 56 48 8D AC 24 90 FC FF FF 48 81 EC 70 04 00 00 48 8B 05 ?? ?? ?? ?? 33 DB 4C 8B F1 48 8B 90 D0 00 00 00 48 39 9A A8 3A 03 00" }
+      ]
+    },
+    "npcspeech/PickLines": {
+      "comment": "void(BubbleSlot*, DialogueRecord*, bool): picks a random priority line, plain greeting and transition line into the slot. Anchor for the record captures only",
+      "find": [
+        { "pattern": "48 89 74 24 18 55 57 41 54 41 55 41 56 48 8B EC 48 83 EC 40 4C 8B 0D ?? ?? ?? ?? 45 33 E4 45 0F B6 E8 48 8B F2 4C 8B F1" }
+      ]
+    },
+    "@npcspeech/PickLines.fields": {
+      "find": [
+        {
+          "scope": { "symbol": "npcspeech/PickLines", "size": 700 },
+          "pattern": "4C 8D BA {npcspeech/rec.plain_count:d32} 4C 39 A2 {npcspeech/rec.prio_count:d32} 75 ??"
+        },
+        {
+          "scope": { "symbol": "npcspeech/PickLines", "size": 700 },
+          "pattern": "48 85 D2 74 70 FF CA 49 8B C9 E8 ?? ?? ?? ?? 48 8B 9E {npcspeech/rec.prio_list:d32} 8B C0 48 69 C8 {npcspeech/rec.entry_size:d32} 48 03 D9"
+        },
+        {
+          "scope": { "symbol": "npcspeech/PickLines", "size": 700 },
+          "pattern": "48 8B 9E {npcspeech/rec.plain_list:d32} 49 8D 7E 34 8B C0 48 69 C8 {npcspeech/rec.entry_size:d32} 48 03 D9 0F B6 93 ?? ?? ?? ?? 84 D2"
+        },
+        {
+          "scope": { "symbol": "npcspeech/PickLines", "size": 700 },
+          "pattern": "0F 10 8C CB {npcspeech/rec.entry_vo:d32} 0F 11 4D E8 0F 10 45 E0 66 0F 15 C9 41 0F 11 46 04"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "npcspeech/rec.prio_list": { "min_votes": 1, "comment": "record: the priority init lines' entries (pointer); 0x90 on 26430625" },
+    "npcspeech/rec.prio_count": { "min_votes": 1, "comment": "record: their count (u64); 0x98" },
+    "npcspeech/rec.plain_list": { "min_votes": 1, "comment": "record: the plain greetings' entries (pointer); 0x5338" },
+    "npcspeech/rec.plain_count": { "min_votes": 1, "comment": "record: their count (u64); 0x5340" },
+    "npcspeech/rec.entry_size": { "min_votes": 2, "comment": "one line entry: {u32 lineId; u32 bodyTexts[32] +8; u8 n +0x88; Guid vo[32] +0x8c; u8 nVo +0x28c}; 0x294" },
+    "npcspeech/rec.entry_vo": { "min_votes": 1, "comment": "the entry's inline voice-over GUIDs; 0x8c" },
+    "npcspeech/rec.vo_slots": { "value": 32, "comment": "voice-over GUIDs per entry (the game stops at more than 32, creatures.md 7.8)" },
+    "npcspeech/entry.record": { "value": 8, "comment": "NpcBubble's entry: +0 entity id (u32), +8 the dialogue record (pointer)" },
+    "npcspeech/bubble.text": { "value": 0, "comment": "BubbleDraw's params: the loca tag" },
+    "npcspeech/bubble.show": { "value": 4, "comment": "BubbleDraw's params: show (u8; fades in / out)" },
+    "npcspeech/bubble.reset": { "value": 5, "comment": "BubbleDraw's params: hide at once (u8)" }
+  },
+  "features": {
+    "npcspeech.bubble": {
+      "symbols": ["npcspeech/NpcBubble", "npcspeech/BubbleDraw"],
+      "constants": ["npcspeech/entry.record", "npcspeech/bubble.text", "npcspeech/bubble.show", "npcspeech/bubble.reset"],
+      "comment": "Kiln's lines in the game's NPC speech bubble (Kiln.Npcs Say / Suppress / Replace) on a game client."
+    },
+    "npcspeech.voice": {
+      "symbols": ["npcspeech/PickLines", "@npcspeech/PickLines.fields"],
+      "constants": ["npcspeech/rec.prio_list", "npcspeech/rec.prio_count", "npcspeech/rec.plain_list", "npcspeech/rec.plain_count",
+                    "npcspeech/rec.entry_size", "npcspeech/rec.entry_vo", "npcspeech/rec.vo_slots"],
+      "comment": "While Kiln speaks for an NPC, the greeting lines' voice-overs of its dialogue record are muted (put back after). Off: texts change, voices stay the game's."
+    }
+  }
+}
