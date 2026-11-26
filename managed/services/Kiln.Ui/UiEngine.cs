@@ -91,6 +91,7 @@ internal static unsafe class UiEngine
     private static volatile CaptureBox? _box;     // a "press a key" box outside the Keys page (ShroudForge shortcuts)
     private static bool _boxDrawn;                // ... drawn this frame
     private static volatile Tuple<string, long>? _boxEnded;  // the box a press last ended, and when
+    private const string RemapBox = "keys\n";     // _boxEnded's id of a Keys page rebind: this and the binding's id
     private static bool _keysDrawn;               // the Keys tab was drawn this frame
     private static long _keysDrawnAtMs;           // ... and when it was drawn last
     private static bool _pageHost;      // this Kiln.Ui draws the Kiln menu inside the game's main menu (kiln.ui v4)
@@ -721,6 +722,7 @@ internal static unsafe class UiEngine
             }
             _remapping = null;
             _remapPadHeld = 0;
+            _boxEnded = Tuple.Create(RemapBox + id, Environment.TickCount64);
             if (pad)
             {
                 RemapTo(id, new KeyChord(k.Vk, mods));
@@ -1109,8 +1111,12 @@ internal static unsafe class UiEngine
         ui.Text(what);
         ui.Tooltip(id);
         ui.NextColumn();
-        // the names in the player's keyboard layout (KeyLayout: "Ü" where Kiln stores LeftBracket); the stored form stays
-        if (ui.Button((_remapping == id ? KilnText.T("keys.press") : KeyLayout.Show(key)) + "###key", 160 * ui.Scale)) _remapping = _remapping == id ? null : id;
+        // the names in the player's keyboard layout (KeyLayout: "Ü" where Kiln stores LeftBracket); the stored form stays.
+        // One id while the label changes, so ImGui's navigation may press it with the Enter or Space that just ended the
+        // rebind: that press does not arm it again (as a ShroudForge shortcut's capture box)
+        if (ui.Button((_remapping == id ? KilnText.T("keys.press") : KeyLayout.Show(key)) + "###key", 160 * ui.Scale) &&
+            !CaptureJustEnded(RemapBox + id))
+            _remapping = _remapping == id ? null : id;
         ui.NextColumn();
         ui.TextDisabled(KeyLayout.Show(def));
         ui.NextColumn();
