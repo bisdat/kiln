@@ -8009,9 +8009,10 @@
             "wheel_active": 624,
             "wheel_close": 616,
             "wheel_open": 608,
-            "window_rect": 560
+            "window_rect": 560,
+            "window_state": 1088
           },
-          "size": 1088
+          "size": 1096
         },
         "KilnUiChatCompletion": {
           "align": 4,
@@ -8454,9 +8455,21 @@
             "wparam": 32
           },
           "size": 48
+        },
+        "KilnUiWindowState": {
+          "align": 4,
+          "fields": {
+            "flags": 4,
+            "height": 20,
+            "size": 0,
+            "width": 16,
+            "x": 8,
+            "y": 12
+          },
+          "size": 24
         }
       },
-      "sha256": "69e4b569e6f0e697a9289032dfd7d9e57e70aa58ce3a05a17f51f7d2ecd10441"
+      "sha256": "4a16bb9ab51c619ee96e805c7f1fd5931ba445876139a0ff936ed387a319c28a"
     },
     "native/core/abi/services/kiln_ui_ammo.h": {
       "function_macros": [],
@@ -10315,7 +10328,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "c1936deb7e5f55923983c9f4b9b780bd8a42dee1ae919f657e83d600baaa6135",
+    "src/layout.rs": "008ccb10185043a4f5fa617eeb4a254ae6e693c258440786fa3c79b22250d51b",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10384,7 +10397,7 @@
     "src/services/kiln_tools.rs": "29589637b553d897c23d3ab438dabb493f4ebe359dba5cc1cec5d5f978b341c9",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
-    "src/services/kiln_ui.rs": "2c68e06c25019ed9772a97af9886812dde74b1f49faf3e86fed9776ade93af8d",
+    "src/services/kiln_ui.rs": "a164afeb9718d2dcd4ae87a5e87aadf9cc3133297d286d6d75b9a7a5d634299d",
     "src/services/kiln_ui_ammo.rs": "6533ca816d68b06c9cd461564a7a15fa56df804e22e0f26dc6d590e93171ffa7",
     "src/services/kiln_ui_blocks.rs": "cf0d0e1760465229c8b1c2f2e0c6a0a9764476feffa231677c78f87c5921d011",
     "src/services/kiln_ui_chest.rs": "9f1aaa1a9f8e9f0fb65f3f6e3339f325cec6f92a743bfba5211110b802567315",

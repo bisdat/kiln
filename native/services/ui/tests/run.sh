@@ -8,6 +8,8 @@ export KILN_OUT
 out=$KILN_OUT/ui-host-test
 mkdir -p "$out"
 bash "$here/run-window-constraints.sh"
+# window_state and the ImGui behaviour window docking relies on (GitHub issue 149)
+bash "$here/run-window-state.sh"
 # Kiln's graphics tools: the frame cap's pacing, kiln.json "graphics", the DLSS render size, when they step aside, NGX's
 # parameter slots (frame_pacer.h, graphics_settings.h, graphics_aside.h, ngx_param.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/graphics_test.cpp" -o "$out/graphics_test"
