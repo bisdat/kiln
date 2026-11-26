@@ -87,7 +87,8 @@
         "tools/MaterialSelectorBody": "kiln-tools' first half of the picker (+ 0x23: the material filter of Kiln mods' building tools, the ammo picker)",
         "tools/MaterialSelectorDone": "kiln-tools' second half (+ 0xa8a, the epilogue, after the finalizer call Building Tools redirects)",
         "build/client.MaterialRowsBody": "kiln-items' first half of the build menu's linked counts (the same site as tools/MaterialSelectorBody)",
-        "build/client.MaterialRowsDone": "kiln-items' second half (the same site as tools/MaterialSelectorDone)"
+        "build/client.MaterialRowsDone": "kiln-items' second half (the same site as tools/MaterialSelectorDone)",
+        "build/client.StockRowsRet": "kiln-items' stock step (+ 0x87b, since GitHub #148: 7 bytes right after the base-stock row add whose call at + 0x876 Building Tools follows): the building links' count of each pool material through the game's row add"
       }
     },
     {

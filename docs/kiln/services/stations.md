@@ -27,7 +27,8 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
 | `stations.craft_sources` | the same opt-in, as the last source of a player's craft ([Station outputs in a craft](#station-outputs-in-a-craft)); lowered at the first world when kiln.rules' payment hook is not in (Creative Mode runs, kiln-rules.dll missing) |
 | `stations.craft_ui` | a Kiln client's crafting menu can offer a craft those outputs complete: since 0.2.0-dev.31 through the game's own dry run, when its payment is short only of materials the server's snapshot covers ([What each client shows](#what-each-client-shows), `client.d/stations-craft-ui.json`); lowered when kiln.rules' payment hook is not in. A vanilla client has neither |
-| `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows. Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
+| `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows, and since 0.2.0-dev.31.16 counts there what their transfer buttons move with the player's fill-opted links ([Fills from linked sources](#fills-from-linked-sources)). Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
+| `stations.fill_items` | the server runs a production station row's per-ingredient "+1" / "+n" (the game's item transfer) as Kiln's item fill when only the player's fill-opted links cover it ([Fills from linked sources](#fills-from-linked-sources), `server.d/stations.json`, since 0.2.0-dev.31.16); off with `stations.fill` |
 | `stations.fill_ui` | a Kiln client's station screen offers its "+1" / "+10" fill when only those outputs can cover it ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); its hook goes in only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 | `stations.client_view` | `ClientStations` (since 0.2.0-dev.31.13, mod API 0.2.22): a game client's own station cache, read-only, also on a joined client ([On a joined client: the client's own station view](#on-a-joined-client-the-clients-own-station-view), `client.d/stations-client-view.json`). Off on a dedicated server, on a build sigdb does not qualify, after a fault |
 
@@ -364,8 +365,8 @@ in the base's own stock. A linked container offers every item the filter allows.
 through `Stations.SetOutputSource`, under its existing per-item safety rules. A link serves crafting. Since
 0.2.0-dev.31.12 it can also serve production-station fills (`Fills`, [below](#fills-from-linked-sources)), block
 placements (`Building`, [below](#building-from-linked-sources)) and locks (`Locks`); each is off by default. The
-transfer buttons of a production station's ingredient rows (the game's own item transfer) still move only from the bag and
-the Magic chests, and since 0.2.0-dev.30.8 those rows show the game's own counts (see below).
+transfer buttons of a production station's ingredient rows (the game's own item transfer) move from the bag and the Magic
+chests and, since 0.2.0-dev.31.16, from the player's fill-opted links; those rows count the same (see below).
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -401,9 +402,12 @@ keeps the game's menu counts. A missing input snapshot is never truncated: over 
 
 A **production station's screen** (a mill, a kiln, a smelter: `GameScreen.Crafting.IsFactory`) counts in its ingredient
 rows only what their transfer buttons move. Those buttons are the game's own item transfer, from the bag and the Magic
-chests, so since 0.2.0-dev.30.8 a Kiln client shows the game's own counts there: neither linked containers nor opted-in
-station outputs, with a server of any version. Through 0.2.0-dev.30.7 it counted both (9999+ of an ingredient only a link
-held), and its transfer buttons offered amounts whose press did nothing. Its "+1" / "+10" fill still lights when opted-in
+chests, so since 0.2.0-dev.30.8 a Kiln client shows the game's own counts there: no opted-in station outputs and no
+crafting-only links. Since 0.2.0-dev.31.16 the buttons also take from the player's `Fills` links
+([Fills from linked sources](#fills-from-linked-sources)), and the rows count them: the server sends per item those links
+hold the bag, the Magic chests and the links together (`kiln:craftstock` message 10); a server without that sends nothing and
+the rows keep the game's counts. Through 0.2.0-dev.30.7 the rows counted outputs and every link (9999+ of an ingredient
+only a link held), and the transfer buttons offered amounts whose press did nothing. Its "+1" / "+10" fill still lights when opted-in
 outputs cover it ([The station screen's fill button](#the-station-screens-fill-button)): that answer comes from the server,
 not from the rows, so a row can read 0 while "+1" lights. The category option picker of a crafting menu counts in the
 game's own code and keeps the game's counts.
@@ -510,6 +514,14 @@ stations (a forge, a smelter, a charcoal kiln...) for its player:
   Magic chests cannot cover the fill but the fill-opted links can, Kiln.Blocks runs the press as Kiln's fill (the game's
   is canceled). A Kiln client's "+1" / "+10" light up from the server's answer; a vanilla client's stay greyed when the bag
   and the Magic chests alone fall short (its game never sends that press).
+- **The ingredient rows' own "+1" / "+n"** (since 0.2.0-dev.31.16, capability `stations.fill_items`; the game's item
+  transfer of one ingredient): when the bag and the Magic chests of the player's base cannot cover the amount and the
+  fill-opted links can, the server runs the press as Kiln's item fill: exactly that amount of that item, the bag and the
+  Magic chests first, then `BeforeStationOutputs` links, then `AfterStationOutputs` links, in one transaction that a short
+  or refused take rolls back; the game's press is canceled once Kiln's is queued. A Kiln client's rows show the bag, the
+  Magic chests and the links together for the items the links hold, and their buttons light from that count (the game's
+  own widget: no answer is asked). A vanilla client's rows keep the game's count, so their buttons stay grey when only
+  links hold the item. No station outputs and no named chests on this path.
 - **`Stations.Fill` and `Stations.Plan`** take from them when the options say `UseLinkedSources = true` and name the
   `Player` (default false: a mod's fill never empties a player's links unless it asks). `FillInput.Linked` and
   `StationResult.FromLinked` say what the links hold and gave.
@@ -525,10 +537,11 @@ Why off by default: a fill moves whole crafts' worth of inputs (10 crafts of a s
 in other bases at once, and a link made for crafting did not ask for that (Streamlined Logistics' Auto-Stations, for one,
 restocks stations itself). A link opts in with one flag.
 
-Not covered: the ingredient rows' transfer control (`+N` of one ingredient, the game's item transfer) stays the game's,
-as does a station's own production cycle. kiln.log on the server: `kiln.stations: player P's fill of station S ran as
-Kiln's fill with station outputs and linked sources: ... (n item(s) from station outputs, m from linked sources)`, or at
-debug level why the press stayed the game's.
+Not covered: a station's own production cycle. kiln.log on the server: `kiln.stations: player P's fill of station S ran as
+Kiln's fill with station outputs and linked sources: ... (n item(s) from station outputs, m from linked sources)`; for an
+ingredient row's press `stations: player P's transfer of N x item 0x... into station S: a from the bag and the base's Magic
+chests, b from linked sources` (or `short ... nothing moved`, or `the game refused it (code c): nothing moved`; at most 16
+lines, then one every 10 s); at debug level why a press stayed the game's.
 
 ### Building from linked sources
 
@@ -549,6 +562,15 @@ debug level why the press stayed the game's.
 
 - **The build menu's material counts** (a Kiln client, capability `crafting.build_ui`): each material row shows the bag,
   the base's Magic chests and the building links (the same snapshot), so the menu, the cursor and the placement agree.
+  Since GitHub #148 the links are added where the game adds the base's Magic chests, so a material only the links hold is
+  listed too: in the hammer's list, under the cursor and in every tab of the material catalogue (Backpack & Magic Chests,
+  All Materials, the amount sort; Last Used and Favorites list only their own materials, as for the base's chests).
+  Until then only rows the game had made counted the links, which in practice were Last Used and Favorites.
+- **With Building Tools** (0.34.0 routes the blueprint program's payment through its own code): Kiln finds the game's call
+  behind it on the stack, and since #148, where that walk does not reach the game, by the blueprint program's own frame
+  (the cost context it passed on); `build: BuildingTools.dll makes the blueprint program's payments ...` says so once.
+  A placement whose cost list has more than 32 lines (a large Building Tools area action or blueprint of many materials)
+  stays the game's payment, from the bag and the base only (`... left to the game (it names more than 32 cost lines ...`).
 
 Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, and a
 vanilla client's menu and cursor (they show the bag and the base; its game does not send a placement only links cover). Cross-Base Storage's
@@ -560,7 +582,10 @@ building half down with one kiln.log line naming the function, the first foreign
 module's behaviour alone; crafting, fills and locks from the same links keep working. kiln.log: `build: a link opted in
 with Building: ...` once, then per change `build: the server world's material check of item 0x... (player P) counts the
 building links: bag b + base s + linked l, needs n` (or `refused: short count`), and `stations: a block placement paid n
-from additional crafting sources ...` / `... left to the game ...` / `... rolled back ...`.
+from additional crafting sources ...` / `... left to the game ...` / `... rolled back ...`, and when the server
+world's transaction does not check out, `stations: the server world's block placement transaction did not check out
+(its accessors) ...` (a placement's transaction is checked by its InventorySetup and Inventory accessors since #148: the
+blueprint program's has no Fuel accessor, and before that every placement paid from the bag and the base alone).
 
 ### Beside other native mods
 
@@ -1066,6 +1091,14 @@ native slot for them.
 
 ## Changelog
 
+- **0.2.0-dev.31.16 (GitHub #132):** a production station row's per-ingredient "+1" / "+n" take from the player's
+  fill-opted links when the bag and the Magic chests fall short (Kiln's item fill, `stations.fill_items`), and a Kiln
+  client's rows count those links. Thanks Fuzen777.
+- **0.2.0-dev.31.16 (GitHub #148):** `CraftSourceOptions.Building` links are added where the game adds the base's Magic
+  chests, so the hammer's list, the cursor and every tab of the material catalogue count a material only the links hold;
+  a placement's transaction is checked by its InventorySetup and Inventory accessors, so placements that need the links
+  pay from them (also Building Tools 0.34.0's, found by the blueprint program's own frame); a building hook's fault shows
+  as `crafting.build_sources` or `crafting.build_ui` faulted. Thanks Fuzen777.
 - **0.2.0-dev.31.13:** `ClientStations`, a read-only view of the game client's own station cache for a joined client:
   state, selected recipe, crafts loaded, water, the game HUD's remaining time and progress, finished outputs (mod API
   0.2.22, capability `stations.client_view`, native `kiln.stations.client`). Thanks XHL.

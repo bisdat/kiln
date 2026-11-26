@@ -93,6 +93,18 @@ kiln.ui subclasses the window (`SetWindowLongPtrW(GWLP_WNDPROC)`, re-applied if 
 - Every window message ImGui cares about is queued and replayed into ImGui's Win32 backend on the render thread just
   before each frame (ImGui's IO is not thread-safe; the WndProc runs on the main thread, presents on the render
   thread).
+- Key presses that a module of the game's process sends (`SendInput`, `keybd_event`, both inline-hooked from
+  `input_install_iat`) while a Kiln text field has the keyboard (`io.WantTextInput`) never reach that field. Each one is
+  recorded before the call goes on. The next key message of its key on the window thread (`WM_KEYDOWN` or
+  `WM_SYSKEYDOWN`, with a raw record or without) takes the record, and that key message and its characters are not
+  queued for ImGui (`native/services/ui/text_keep.h`). Raw records play no part: one may come ahead of an earlier
+  press's key message, or not at all. Characters a module types (`KEYEVENTF_UNICODE`) are text and are not recorded.
+  The game and the key subscribers get all of them as before. Why: ShroudLink's client add-on (0.8.1,
+  `client/src/input.rs` `press_menu_key`) subclasses the window above Kiln and taps B by scan code (the game's backpack
+  key) when its MODS key (the key players know as the one for its Assistants panel) goes down. With that key on T, every
+  "t" typed in the Kiln menu's search came out "tb" (HadToRegister, 31.13). Input from other programs is not sent from
+  the game's process, so it types as before. Under Wine/Proton the keyboard, Steam Input and Steam's on-screen keyboard
+  reach the game through the Unix-side display driver, never user32's `SendInput`, so they type as before too.
 - Native subscribers of `subscribe_window_input` (kiln.ui v5, [ui.md](../kiln/ui.md#c-native-plugins)) get the key,
   button and focus-loss records on the main thread as they arrive, before any of the above.
 

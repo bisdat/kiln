@@ -31,6 +31,10 @@
 //     held; the pointer and key subscribers are not asked; focus loss, unsubscribe and a world change (a fake
 //     kiln.client) end it; Alt+F4 and a mixed raw record without the GetRawInputData hook (stuck-press guard) let the
 //     release reach the game; an owner that passes changes nothing; a faulting owner is removed.
+//   - a key press a module of this process sends (SendInput, keybd_event: Kiln's hooks, text_keep.h) while a Kiln text
+//     field has the keyboard types nothing into it, nor reaches it as a key; the player's own press of that key right
+//     after does, as does input from no device that was not sent from this process, and a press sent while no field had
+//     the keyboard.
 // Lines: "PASS ...", "FAIL ...". Exit code 0 = no FAIL.
 #include <windows.h>
 
@@ -1612,6 +1616,193 @@ void replay_screen_opens() {
     ImGui::DestroyContext();
 }
 
+// ---- a key press a mod sends while a Kiln text field has the keyboard (text_keep.h; HadToRegister, 31.13: "t" typed
+// "tb" in the Kiln menu's search, as ShroudLink's client add-on taps B when its MODS key T goes down) ----
+std::string imgui_text() {
+    std::string s;
+    for (const ImGuiInputEvent& e : ImGui::GetCurrentContext()->InputEventsQueue)
+        if (e.Type == ImGuiInputEventType_Text) s += static_cast<char>(e.Text.Char);
+    return s;
+}
+int imgui_key_downs(ImGuiKey key) {
+    int n = 0;
+    for (const ImGuiInputEvent& e : ImGui::GetCurrentContext()->InputEventsQueue)
+        if (e.Type == ImGuiInputEventType_Key && e.Key.Key == key && e.Key.Down) ++n;
+    return n;
+}
+// What Windows gives the game window for one tap of a letter key: its raw records from a keyboard (or, for a press a
+// module sent, from no device), the key messages, the character TranslateMessage made.
+void tap(UINT vk, UINT scan, char c, bool keyboard = true) {
+    const LPARAM down = raw_key(static_cast<USHORT>(scan), RI_KEY_MAKE, static_cast<USHORT>(vk));
+    const LPARAM up = raw_key(static_cast<USHORT>(scan), RI_KEY_BREAK, static_cast<USHORT>(vk));
+    if (keyboard) {  // a keyboard's records name their device; SendInput's name none
+        g_raw[down - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+        g_raw[up - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+    }
+    send(WM_INPUT, RIM_INPUT, down);
+    send(WM_KEYDOWN, vk, key_l(scan, false, false));
+    send(WM_CHAR, static_cast<WPARAM>(c), key_l(scan, false, false));
+    send(WM_INPUT, RIM_INPUT, up);
+    send(WM_KEYUP, vk, key_l(scan, false, true));
+}
+// ShroudLink's press_menu_key (client/src/input.rs): B by its scan code, down and up, in one SendInput call
+UINT send_b() {
+    INPUT in[2]{};
+    for (INPUT& i : in) {
+        i.type = INPUT_KEYBOARD;
+        i.ki.wScan = 0x30;
+        i.ki.dwFlags = KEYEVENTF_SCANCODE;
+    }
+    in[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    return SendInput(2, in, sizeof(INPUT));
+}
+// A character typed from the game's process (KEYEVENTF_UNICODE: an on-screen keyboard or a paste), down and up
+UINT send_char(wchar_t c) {
+    INPUT in[2]{};
+    for (INPUT& i : in) {
+        i.type = INPUT_KEYBOARD;
+        i.ki.wScan = static_cast<WORD>(c);
+        i.ki.dwFlags = KEYEVENTF_UNICODE;
+    }
+    in[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    return SendInput(2, in, sizeof(INPUT));
+}
+// The presses of `vk` Kiln's own key handling got (g_kiln_keys)
+int kiln_downs(uint32_t vk) {
+    char want[32];
+    std::snprintf(want, sizeof want, "vk=%u ", vk);
+    int n = 0;
+    for (const auto& x : kui::g_kiln_keys)
+        if (x.rfind(want, 0) == 0 && x.find(" down=1 ") != std::string::npos) ++n;
+    return n;
+}
+void mod_sent_key_in_text_field() {
+    fresh();
+    ImGui::CreateContext();
+    ImGui::GetIO().DisplaySize = ImVec2(1920, 1080);
+    check(ImGui_ImplWin32_Init(g_win), "text field: ImGui's Win32 backend on the test window");
+    kui::input_replay();
+    imgui_events_taken();
+    kui::g_menu_open = true;  // the Kiln menu, its search field has the keyboard
+    kui::g_text_input = true;
+    kui::input_capture_changed();
+    kui::input_replay();
+    imgui_events_taken();
+
+    // the player types "t t"; after each T the add-on taps B from the game's process (here SendInput reaches no window:
+    // no desktop; the harness plays what Windows gives the game window for it)
+    tap('T', 0x14, 't');
+    send_b();
+    tap('B', 0x30, 'b', false);
+    tap(VK_SPACE, 0x39, ' ');
+    tap('T', 0x14, 't');
+    send_b();
+    tap('B', 0x30, 'b', false);
+    kui::input_replay();
+    check(imgui_text() == "t t", "text field: a press a mod sends with SendInput types nothing (\"t t\", not \"tb tb\"): \"%s\"",
+          imgui_text().c_str());
+    check(imgui_key_downs(ImGuiKey_B) == 0, "text field: nor does its key reach the field (%d B downs)", imgui_key_downs(ImGuiKey_B));
+    imgui_events_taken();
+
+    // keybd_event, the older call, the same
+    keybd_event('B', 0x30, 0, 0);
+    keybd_event('B', 0x30, KEYEVENTF_KEYUP, 0);
+    tap('B', 0x30, 'b', false);
+    kui::input_replay();
+    check(imgui_text().empty(), "text field: a press a mod sends with keybd_event types nothing: \"%s\"", imgui_text().c_str());
+    imgui_events_taken();
+
+    // the player's own B types, also right after a sent one
+    send_b();
+    tap('B', 0x30, 'b', false);
+    tap('B', 0x30, 'b');
+    tap('A', 0x1E, 'a');
+    kui::input_replay();
+    check(imgui_text() == "ba", "text field: the player's own B right after a sent one types (\"ba\"): \"%s\"", imgui_text().c_str());
+    imgui_events_taken();
+
+    // another program's input (an on-screen keyboard: from no device, never sent from the game's process) types
+    tap('B', 0x30, 'b', false);
+    kui::input_replay();
+    check(imgui_text() == "b", "text field: another program's input types: \"%s\"", imgui_text().c_str());
+    imgui_events_taken();
+
+    // two Bs in a row, the sent one's and the player's, with both raw records ahead of the key messages (a message pump
+    // may take the WM_INPUTs first): one types, and Kiln's key handling gets both
+    kui::g_kiln_keys.clear();
+    send_b();
+    {
+        const LPARAM sent_down = raw_key(0x30, RI_KEY_MAKE, 'B'), sent_up = raw_key(0x30, RI_KEY_BREAK, 'B');
+        const LPARAM own_down = raw_key(0x30, RI_KEY_MAKE, 'B'), own_up = raw_key(0x30, RI_KEY_BREAK, 'B');
+        g_raw[own_down - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+        g_raw[own_up - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+        send(WM_INPUT, RIM_INPUT, sent_down);
+        send(WM_INPUT, RIM_INPUT, sent_up);
+        send(WM_INPUT, RIM_INPUT, own_down);
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+        send(WM_CHAR, 'b', key_l(0x30, false, false));
+        send(WM_KEYUP, 'B', key_l(0x30, false, true));
+        send(WM_INPUT, RIM_INPUT, own_up);
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+        send(WM_CHAR, 'b', key_l(0x30, false, false));
+        send(WM_KEYUP, 'B', key_l(0x30, false, true));
+    }
+    kui::input_replay();
+    check(imgui_text() == "b" && imgui_key_downs(ImGuiKey_B) == 1,
+          "text field: a sent B and the player's B, their raw records first: one types (\"b\", 1 B down): \"%s\", %d B downs",
+          imgui_text().c_str(), imgui_key_downs(ImGuiKey_B));
+    check(kiln_downs('B') == 2, "text field: Kiln's key handling gets both B presses (%d):%s", kiln_downs('B'),
+          join(kui::g_kiln_keys).c_str());
+    imgui_events_taken();
+
+    // a sent B whose key message comes without a raw record although raw keyboard records came before (Proton need not
+    // deliver every key as one): kept out all the same, and the player's A and B after it type, in that order
+    send_b();
+    send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+    send(WM_CHAR, 'b', key_l(0x30, false, false));
+    send(WM_KEYUP, 'B', key_l(0x30, false, true));
+    tap('A', 0x1E, 'a');
+    tap('B', 0x30, 'b');
+    kui::input_replay();
+    check(imgui_text() == "ab", "text field: a sent B without its raw record types nothing, the player's \"ab\" after it types: \"%s\"",
+          imgui_text().c_str());
+    imgui_events_taken();
+
+    // a character typed from the game's process (KEYEVENTF_UNICODE: an on-screen keyboard or a paste, text by intent and
+    // never a game key) types, with a raw record or without
+    send_char(L'x');
+    send(WM_INPUT, RIM_INPUT, raw_key(0, RI_KEY_MAKE, VK_PACKET));
+    send(WM_KEYDOWN, VK_PACKET, key_l(0, false, false));
+    send(WM_CHAR, 'x', key_l(0, false, false));
+    send(WM_INPUT, RIM_INPUT, raw_key(0, RI_KEY_BREAK, VK_PACKET));
+    send(WM_KEYUP, VK_PACKET, key_l(0, false, true));
+    send_char(L'y');
+    send(WM_KEYDOWN, VK_PACKET, key_l(0, false, false));
+    send(WM_CHAR, 'y', key_l(0, false, false));
+    send(WM_KEYUP, VK_PACKET, key_l(0, false, true));
+    kui::input_replay();
+    check(imgui_text() == "xy", "text field: characters typed from the game's process (KEYEVENTF_UNICODE) type (\"xy\"): \"%s\"",
+          imgui_text().c_str());
+    imgui_events_taken();
+
+    // no text field has the keyboard: nothing is written down, a sent press is a key like any other
+    kui::g_text_input = false;
+    send_b();
+    kui::g_text_input = true;
+    tap('B', 0x30, 'b', false);
+    kui::input_replay();
+    check(imgui_text() == "b", "text field: a press a mod sent while no field had the keyboard is no sent press: \"%s\"",
+          imgui_text().c_str());
+    imgui_events_taken();
+
+    kui::g_text_input = false;
+    kui::g_menu_open = false;
+    kui::input_capture_changed();
+    kui::input_replay();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+}
+
 // ---- subscribe_pointer_press (0.2.0-dev.30): left/right presses over the game's UI for the core's slot clicks ----
 struct PointerLog {
     std::vector<KilnUiPointerPress> asked;
@@ -2175,6 +2366,7 @@ int main() {
     mouse_subscribers();
     mouse_key_names();
     replay_screen_opens();
+    mod_sent_key_in_text_field();
 
     std::printf("%s: %d checks, %d failed\n", g_fails ? "FAIL" : "PASS", g_checks, g_fails);
     return g_fails ? 1 : 0;

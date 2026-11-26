@@ -105,6 +105,11 @@ Kiln.CraftingScreen.Station.get -> Kiln.EntityId
 Kiln.CraftingScreen.Station.init -> void
 Kiln.CraftingScreen.Workshop.get -> uint
 Kiln.CraftingScreen.Workshop.init -> void
+Kiln.DockSide
+Kiln.DockSide.Bottom = 3 -> Kiln.DockSide
+Kiln.DockSide.Left = 0 -> Kiln.DockSide
+Kiln.DockSide.Right = 1 -> Kiln.DockSide
+Kiln.DockSide.Top = 2 -> Kiln.DockSide
 Kiln.GameLanguage
 Kiln.GameScreen
 Kiln.GameScreen.Crafting.get -> Kiln.CraftingScreen?
@@ -840,6 +845,12 @@ Kiln.UiCursor.X.get -> float
 Kiln.UiCursor.X.init -> void
 Kiln.UiCursor.Y.get -> float
 Kiln.UiCursor.Y.init -> void
+Kiln.UiDockChange
+Kiln.UiDockChange.ByPlayer.get -> bool
+Kiln.UiDockChange.DockedTo.get -> Kiln.UiWindowHandle?
+Kiln.UiDockChange.Offset.get -> float
+Kiln.UiDockChange.Side.get -> Kiln.DockSide
+Kiln.UiDockChange.UiDockChange() -> void
 Kiln.UiDraw
 Kiln.UiDraw.BeginChild(string! id, float width = 0, float height = 0) -> bool
 Kiln.UiDraw.BeginChild(string! id, float width, float height, Kiln.UiChildFlags flags, Kiln.UiWindowFlags windowFlags = Kiln.UiWindowFlags.None) -> bool
@@ -948,7 +959,9 @@ Kiln.UiDraw.Tooltip(string! text) -> void
 Kiln.UiDraw.TreeNode(string! label) -> bool
 Kiln.UiDraw.TreePop() -> void
 Kiln.UiDraw.Width.get -> float
+Kiln.UiDraw.WindowMovedByUser.get -> bool
 Kiln.UiDraw.WindowRect.get -> (float X, float Y, float Width, float Height)
+Kiln.UiDraw.WindowResizedByUser.get -> bool
 Kiln.UiFont
 Kiln.UiFont.Default = 0 -> Kiln.UiFont
 Kiln.UiFont.Game = 1 -> Kiln.UiFont
@@ -1534,6 +1547,9 @@ Kiln.UiWheelOptions.Title.init -> void
 Kiln.UiWheelOptions.UiWheelOptions() -> void
 Kiln.UiWindow
 Kiln.UiWindow.Dispose() -> void
+Kiln.UiWindow.DockChanged -> System.Action<Kiln.UiDockChange>?
+Kiln.UiWindow.DockTo(Kiln.UiWindowHandle! target, Kiln.DockSide side, float offset = 0) -> void
+Kiln.UiWindow.DockedTo.get -> Kiln.UiWindowHandle?
 Kiln.UiWindow.Hide() -> void
 Kiln.UiWindow.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void
 Kiln.UiWindow.Open.get -> bool
@@ -1544,14 +1560,24 @@ Kiln.UiWindow.Resize(float width, float height) -> void
 Kiln.UiWindow.Show() -> void
 Kiln.UiWindow.Title.get -> string!
 Kiln.UiWindow.Toggle() -> void
+Kiln.UiWindow.Undock() -> void
 Kiln.UiWindowFlags
 Kiln.UiWindowFlags.AlwaysVerticalScrollbar = 16384 -> Kiln.UiWindowFlags
 Kiln.UiWindowFlags.NoBackground = 128 -> Kiln.UiWindowFlags
 Kiln.UiWindowFlags.NoScrollWithMouse = 16 -> Kiln.UiWindowFlags
 Kiln.UiWindowFlags.NoScrollbar = 8 -> Kiln.UiWindowFlags
 Kiln.UiWindowFlags.None = 0 -> Kiln.UiWindowFlags
+Kiln.UiWindowHandle
+Kiln.UiWindowHandle.Available.get -> bool
+Kiln.UiWindowHandle.Equals(Kiln.UiWindowHandle? other) -> bool
+Kiln.UiWindowHandle.ModId.get -> string!
+Kiln.UiWindowHandle.Open.get -> bool
+Kiln.UiWindowHandle.Placement.get -> Kiln.UiPlacement?
+Kiln.UiWindowHandle.PlacementId.get -> string!
 Kiln.UiWindowOptions
 Kiln.UiWindowOptions.<Clone>$() -> Kiln.UiWindowOptions!
+Kiln.UiWindowOptions.AcceptDock.get -> bool
+Kiln.UiWindowOptions.AcceptDock.init -> void
 Kiln.UiWindowOptions.AutoResize.get -> bool
 Kiln.UiWindowOptions.AutoResize.init -> void
 Kiln.UiWindowOptions.BackgroundAlpha.get -> float?
@@ -1803,6 +1829,9 @@ override Kiln.UiValueIdentity.GetHashCode() -> int
 override Kiln.UiWheelOptions.Equals(object? obj) -> bool
 override Kiln.UiWheelOptions.GetHashCode() -> int
 override Kiln.UiWheelOptions.ToString() -> string!
+override Kiln.UiWindowHandle.Equals(object? obj) -> bool
+override Kiln.UiWindowHandle.GetHashCode() -> int
+override Kiln.UiWindowHandle.ToString() -> string!
 override Kiln.UiWindowOptions.Equals(object? obj) -> bool
 override Kiln.UiWindowOptions.GetHashCode() -> int
 override Kiln.UiWindowOptions.ToString() -> string!
@@ -1908,6 +1937,7 @@ static Kiln.Ui.Crafting.AddTab(uint workshop, Kiln.UiText! label, System.Collect
 static Kiln.Ui.Crafting.Current.get -> Kiln.CraftingScreen?
 static Kiln.Ui.Crafting.Describe(uint workshop = 0) -> string!
 static Kiln.Ui.Crafting.MenuAvailable.get -> bool
+static Kiln.Ui.FindWindow(string! modId, string! placementId) -> Kiln.UiWindowHandle?
 static Kiln.Ui.Frame -> System.Action<Kiln.UiDraw!>?
 static Kiln.Ui.Inventory.AddChestButton(string! caption, System.Action<Kiln.InventoryScreen>! handler) -> System.IDisposable!
 static Kiln.Ui.Inventory.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.InventoryScreen>! draw, Kiln.InventoryPanelOptions? options = null) -> System.IDisposable!
@@ -2032,6 +2062,8 @@ static Kiln.UiWheel.IsValidHoldKey(uint vk) -> bool
 static Kiln.UiWheel.PageCount(int entries) -> int
 static Kiln.UiWheelOptions.operator !=(Kiln.UiWheelOptions? left, Kiln.UiWheelOptions? right) -> bool
 static Kiln.UiWheelOptions.operator ==(Kiln.UiWheelOptions? left, Kiln.UiWheelOptions? right) -> bool
+static Kiln.UiWindowHandle.operator !=(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool
+static Kiln.UiWindowHandle.operator ==(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool
 static Kiln.UiWindowOptions.operator !=(Kiln.UiWindowOptions? left, Kiln.UiWindowOptions? right) -> bool
 static Kiln.UiWindowOptions.operator ==(Kiln.UiWindowOptions? left, Kiln.UiWindowOptions? right) -> bool
 static Kiln.VisibleSlot.operator !=(Kiln.VisibleSlot? left, Kiln.VisibleSlot? right) -> bool

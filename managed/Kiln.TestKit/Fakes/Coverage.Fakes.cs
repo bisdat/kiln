@@ -11,8 +11,12 @@ public static partial class Coverage
             "on the next frame; on a closed screen when it next opens), Placement, RememberPlacement in ui-placement.json in the " +
             "harness's config folder (per mod and id, clamped into the viewport; a corrupt file is kept as .bad). " +
             "KilnHarness.UiPlacement.Frame plays one overlay frame on a viewport the test sets, with ImGui's Always, FirstUseEver " +
-            "and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Offline: kiln.ui " +
-            "itself (nothing is drawn), imgui.ini, size constraints a native plugin sets");
+            "and Appearing and its 32-pixel minimum; PlayerPlaces is the player's drag, Restart a game start. Window docking " +
+            "(since 0.2.0-dev.31.16, mod API 0.2.23: Ui.FindWindow, AcceptDock, DockTo, Undock, DockChanged) with Kiln.Ui's own dock code: " +
+            "FrameWindows plays a frame of every open window (the group's leader first, the others beside it in the same frame, " +
+            "kept inside the viewport, a docked window waiting for its target, Shift, a drop beside the old side), PlayerDrags " +
+            "is the player holding and dragging one. Offline: kiln.ui itself (nothing is drawn), imgui.ini, size constraints a " +
+            "native plugin sets, which window's edge has the pointer where two touch");
         Row("Players", CoverageKind.RecordingFake,
             "Kiln.Players' own code on the kit's kiln.players: KilnHarness.Players.Join/Leave take effect at the next step " +
             "(Players.All, Find, Joined/Left, PlayerJoinedEvent/PlayerLeftEvent); entity slot + 1, Steam id, admin bit, user-group " +

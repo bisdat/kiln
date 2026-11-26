@@ -21,6 +21,9 @@
 //    that subscriber alone and are kept from the game too (the release's message, its raw record or the record's flag),
 //    and while it is held the button's MK_* bit is cleared from the game's mouse messages. Where the game saw the press
 //    go down after all (a mixed raw record without the GetRawInputData hook, Alt+F4) the release reaches it (own_leak).
+//  - Key presses a module of the game's process sends (SendInput, keybd_event: hooked) while a Kiln text field has the
+//    keyboard stay out of the field, their key messages and characters (text_keep.h; HadToRegister's "tb", a mod that
+//    taps B when its key T goes down). The game and the key subscribers get them as before.
 #include <windows.h>
 #include <windowsx.h>
 
@@ -44,6 +47,7 @@
 #include "mouse_press.h"
 #include "pad_keys.h"
 #include "safetyhook.hpp"
+#include "text_keep.h"
 #include "ui.h"
 #include "raw_input_source.h"
 #include "wndproc_chain.h"
@@ -81,6 +85,10 @@ bool g_up_kept[256] = {};   // an owned key's raw release was kept (kiln.ui.inpu
 // The game got this key's WM_KEYDOWN / WM_SYSKEYDOWN and not yet its up (window thread): an owner that takes a press of
 // it later (its first raw record missing, the raw auto-repeat counted as the press) never keeps its up from the game.
 bool g_game_down[256] = {};
+// Key presses a module of the game's process sent while a Kiln text field had the keyboard (any thread), and the
+// window thread's side: which key messages and characters stay out of the field (text_keep.h).
+textkeep::Sent g_sent;
+textkeep::Field g_text_field;
 // The game's chat field (ui.h ChatInputSink, chat_input_probe.cpp): set while chat history runs, null otherwise.
 std::atomic<const ChatInputSink*> g_chat_sink{nullptr};
 std::atomic<uint32_t> g_pressed_vk{0}, g_pressed_mods{0};
@@ -370,6 +378,8 @@ void forget_keys() {
     g_pressed_vk.store(0, std::memory_order_relaxed);
     g_twins.clear();
     g_notches.clear();
+    g_text_field.forget();
+    g_sent.clear();
     own_focus_lost();  // kiln.ui.input: every owner hears End Focus; a release that comes back later is the game's
 }
 
@@ -869,6 +879,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             bool consumed = false;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
+            // a press a mod sent while a Kiln text field had the keyboard (the next key message of its key, with a raw
+            // record or without): it and its characters stay out of the field (text_keep.h)
+            const bool text_kept = g_text_field.key_down(vk, g_sent.take(vk, now_ms()));
             if (!g_raw_keyboard_seen)
                 consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
             else {
@@ -888,7 +901,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     if (consumed) g_consumed[vk] = true;
                 }
             }
-            enqueue(h, m, w, l);
+            if (!text_kept) enqueue(h, m, w, l);
             if (cap || consumed) {
                 if (m == WM_SYSKEYDOWN && vk == VK_F4) {  // Alt+F4 still closes the game
                     own_leak(vk, 0);  // stuck-press guard (kiln.ui.input): the game saw it, its release reaches it
@@ -907,6 +920,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
             bool owned = false;  // the release of a press an owner took (kiln.ui.input): the game never saw its press
+            g_text_field.key_up(vk);  // a kept press's characters have come
             if (!g_raw_keyboard_seen) owned = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, false);
             else {
                 // The paired raw release may be missing even for a printable
@@ -946,7 +960,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 chat && !cap && (m != WM_SYSCHAR || altgr_syschar) &&
                 !(m == WM_UNICHAR && w == UNICODE_NOCHAR))
                 chat_consumed = chat->text(static_cast<uint32_t>(w));
-            enqueue(h, m, w, l);
+            if (!g_text_field.character()) enqueue(h, m, w, l);  // not a character of a press a mod sent (text_keep.h)
             if (cap || chat_consumed) return 0;
             break;
         }
@@ -1278,6 +1292,76 @@ void input_hook_xinput() {
 }
 
 namespace {
+
+// ---- key presses a module of the game's process sends (text_keep.h) ----
+// While a Kiln text field has the keyboard, each key press sent through SendInput or keybd_event is written down before
+// the call goes on, so the window thread can keep it out of the field when it comes (it may come before the call
+// returns). The input itself goes on unchanged.
+SafetyHookInline g_send_input_hook, g_keybd_event_hook;
+thread_local bool t_in_keybd_event = false;  // keybd_event may go through SendInput (older Wine's did): one press, one mark
+std::atomic<int> g_sent_said{0};
+
+static_assert(textkeep::kExtendedKey == KEYEVENTF_EXTENDEDKEY && textkeep::kKeyUp == KEYEVENTF_KEYUP &&
+                  textkeep::kUnicode == KEYEVENTF_UNICODE && textkeep::kScanCode == KEYEVENTF_SCANCODE,
+              "text_keep.h's KEYEVENTF_* are winuser.h's");
+static_assert(VK_LSHIFT == 0xA0 && VK_RMENU == 0xA5 && VK_SHIFT == 0x10 && VK_CONTROL == 0x11 && VK_MENU == 0x12,
+              "text_keep.h's virtual keys are winuser.h's");
+
+// The key a sent press comes to the window as, 0 = none to write down (a release, a character: text_keep.h sent_key).
+uint32_t sent_vk(WORD vk, WORD scan, DWORD flags) {
+    return textkeep::sent_key(vk, scan, flags, [](uint32_t code) { return static_cast<uint32_t>(MapVirtualKeyW(code, MAPVK_VSC_TO_VK)); });
+}
+
+void note_sent(uint32_t vk, void* caller) {
+    if (vk == 0 || vk > 255) return;
+    g_sent.add(vk, now_ms());
+    if (g_sent_said.fetch_add(1, std::memory_order_relaxed) >= 3) return;
+    HMODULE m = nullptr;
+    wchar_t path[MAX_PATH] = {};
+    char who[MAX_PATH] = "a module";
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           static_cast<LPCWSTR>(caller), &m) && m && GetModuleFileNameW(m, path, MAX_PATH))
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, who, sizeof(who) - 1, nullptr, nullptr);
+    char name[32];
+    keys::name(vk, name, sizeof name);
+    logf(KILN_LOG_INFO, "ui: %s sent a key press (%s) while a Kiln text field had the keyboard: it stays out of the field, "
+         "the game and key listeners get it as before (said up to 3 times)", who, name);
+}
+
+// The key presses of one SendInput call (a bad array is SendInput's to refuse: nothing is written down).
+void note_sent_inputs(UINT n, const INPUT* in, void* caller) {
+    __try {
+        for (UINT i = 0; i < n; ++i)
+            if (in[i].type == INPUT_KEYBOARD) note_sent(sent_vk(in[i].ki.wVk, in[i].ki.wScan, in[i].ki.dwFlags), caller);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+UINT WINAPI hk_send_input(UINT n, LPINPUT in, int size) {
+    if (in && n && size == static_cast<int>(sizeof(INPUT)) && !t_in_keybd_event && g_text_input.load(std::memory_order_relaxed))
+        note_sent_inputs(n, in, _ReturnAddress());
+    return g_send_input_hook.call<UINT>(n, in, size);
+}
+
+void WINAPI hk_keybd_event(BYTE vk, BYTE scan, DWORD flags, ULONG_PTR extra) {
+    if (g_text_input.load(std::memory_order_relaxed)) note_sent(sent_vk(vk, scan, flags), _ReturnAddress());
+    const bool outer = t_in_keybd_event;
+    t_in_keybd_event = true;
+    g_keybd_event_hook.call<void>(vk, scan, flags, extra);
+    t_in_keybd_event = outer;
+}
+
+void hook_sent_keys() {
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    void* send_input = user32 ? reinterpret_cast<void*>(GetProcAddress(user32, "SendInput")) : nullptr;
+    void* keybd = user32 ? reinterpret_cast<void*>(GetProcAddress(user32, "keybd_event")) : nullptr;
+    if (send_input && !g_send_input_hook) g_send_input_hook = safetyhook::create_inline(send_input, reinterpret_cast<void*>(&hk_send_input));
+    if (keybd && !g_keybd_event_hook) g_keybd_event_hook = safetyhook::create_inline(keybd, reinterpret_cast<void*>(&hk_keybd_event));
+    const bool a = static_cast<bool>(g_send_input_hook), b = static_cast<bool>(g_keybd_event_hook);
+    logf(a && b ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: SendInput %s, keybd_event %s (a key press a mod sends while a Kiln "
+         "text field has the keyboard stays out of the field)", a ? "hooked" : "not hooked", b ? "hooked" : "not hooked");
+}
+
 }  // namespace
 
 void input_set_chat_sink(const ChatInputSink* sink) { g_chat_sink.store(sink, std::memory_order_release); }
@@ -1298,6 +1382,7 @@ void input_install_iat() {
         g_game_raw_read = reinterpret_cast<GetRawInputDataFn>(c);
         g_game_raw_read_hooked = true;
     }
+    hook_sent_keys();  // key presses a mod sends while a Kiln text field has the keyboard (text_keep.h)
     logf(a && b ? KILN_LOG_INFO : KILN_LOG_WARN, "ui: cursor import slots: SetCursorPos %s, ClipCursor %s; GetRawInputData %s",
          a ? "hooked" : "not found", b ? "hooked" : "not found", c ? "hooked (a taken mouse press leaves the record the game reads)" : "not found");
 }

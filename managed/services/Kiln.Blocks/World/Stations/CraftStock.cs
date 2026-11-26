@@ -19,6 +19,10 @@
 //  - A production station's screen (0.2.0-dev.30.8, GitHub #132): its ingredient rows count only what their transfer
 //    buttons move (the game's item transfer: the bag and the Magic chests), so the client names every item with none
 //    there (View): the rows keep the game's counts and the snapshot stays on for the fill buttons above.
+//  - Since 0.2.0-dev.31.16 those transfer buttons also take from the player's fill-opted links (Kiln's item fill,
+//    StationsCore.SourceItemFill): message 10 names, per item those links hold, the bag, the Magic chests and the links
+//    together, and the station screen counts that (View); every other item keeps the game's count. A server without it
+//    never sends message 10, and the rows stay the game's.
 // docs/kiln/services/stations.md, "What each client shows".
 using System.Collections.Concurrent;
 using System.Text;
@@ -48,6 +52,17 @@ internal sealed record CraftStockRows(CraftStockRow[] Rows)
 }
 
 internal readonly record struct CraftStockRow(uint Item, uint Count);
+
+/// <summary>Server to client (GitHub #132, 0.2.0-dev.31.16): what a production station screen's ingredient rows may count,
+/// per item the player's fill-opted links hold: the bag, the Magic chests of the player's base and those links together
+/// (what the rows' transfer buttons move through Kiln's item fill). Empty: none (the game's counts). An older client has
+/// no message 10 and drops it. Id 10: 5 to 9 are DyeStock's, LockStock's and BuildStock's on this channel.</summary>
+internal sealed record CraftStockStationRows(CraftStockRow[] Rows)
+{
+    public const ushort Id = 10;
+    public static void Encode(CraftStockStationRows m, NetWriter w) => CraftStockRows.Encode(new CraftStockRows(m.Rows), w);
+    public static CraftStockStationRows Decode(ref NetReader r) => new(CraftStockRows.Decode(ref r).Rows);
+}
 
 /// <summary>Client to server: a crafting menu opened (and, every 5 s, is still open) or closed.</summary>
 internal sealed record CraftStockHello(bool Open)
@@ -185,6 +200,8 @@ internal static class CraftStock
         public readonly List<FillKey> Asked = [];  // the station screen's fills the client asked about, oldest first
         public string? FillSent;                   // the key of the last answers that went out
         public bool FillDue;
+        public string? StationSent = "";           // the key of the last station rows that went out ("": none, as the client
+                                                   // starts; null: the last send failed)
     }
 
     private static readonly object Gate = new();
@@ -205,6 +222,9 @@ internal static class CraftStock
     /// <summary>Test hooks: the answers for a player's asked fills (null: the real plan), their delivery.</summary>
     internal static Func<EntityId, IReadOnlyList<FillKey>, FillAnswer[]>? FillBuildHook;
     internal static Func<EntityId, CraftStockFillAnswers, bool>? FillSendHook;
+    /// <summary>Test hooks: a player's station rows (null: the real count), their delivery.</summary>
+    internal static Func<EntityId, CraftStockRows>? StationBuildHook;
+    internal static Func<EntityId, CraftStockStationRows, bool>? StationSendHook;
 
     /// <summary>Registers the channel (and on a client the screen watch). Idempotent; a refused channel is not retried.</summary>
     internal static void Start()
@@ -219,23 +239,7 @@ internal static class CraftStock
         ModContext.CurrentMod = null;  // Kiln's own channel, not a mod's
         try
         {
-            _channel = Network.Channel(ChannelName, ChannelVersion, required: false)
-                .Register<CraftStockRows>(CraftStockRows.Id, static (m, w) => CraftStockRows.Encode(m, w),
-                    static (ref NetReader r) => CraftStockRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientRows(m); },
-                    NetDirection.ToClient)
-                .Register<CraftStockHello>(CraftStockHello.Id, static (m, w) => CraftStockHello.Encode(m, w),
-                    static (ref NetReader r) => CraftStockHello.Decode(ref r), static (m, ctx) => Enqueue(ctx.Player, m.Open),
-                    NetDirection.ToServer)
-                // 0.2.0-dev.29.19: the station screen's fill buttons. An older peer has no such message ids and drops them.
-                .Register<CraftStockFillAsk>(CraftStockFillAsk.Id, static (m, w) => CraftStockFillAsk.Encode(m, w),
-                    static (ref NetReader r) => CraftStockFillAsk.Decode(ref r), static (m, ctx) => EnqueueAsk(ctx.Player, m.Keys),
-                    NetDirection.ToServer)
-                .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
-                    static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
-                    NetDirection.ToClient);
-            DyeStock.Attach(_channel);
-            LockStock.Attach(_channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
-            BuildStock.Attach(_channel);  // GitHub #132, 0.2.0-dev.31.12: block placements from linked sources
+            _channel = Register(Network.Channel(ChannelName, ChannelVersion, required: false));
         }
         catch (Exception e)
         {
@@ -254,6 +258,34 @@ internal static class CraftStock
         {
             ModLog.Warn($"kiln.stations: the crafting menu does not count crafting sources (linked sources, station outputs) on this client: {e.Message}");
         }
+    }
+
+    /// <summary>Every message of the channel: this class's own, then those of the stocks that share it (DyeStock, LockStock,
+    /// BuildStock). Each id is taken once on a channel (NetChannel.Register throws on a second): a message added here takes
+    /// the next free id after all of them.</summary>
+    internal static NetChannel Register(NetChannel channel)
+    {
+        channel.Register<CraftStockRows>(CraftStockRows.Id, static (m, w) => CraftStockRows.Encode(m, w),
+                static (ref NetReader r) => CraftStockRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientRows(m); },
+                NetDirection.ToClient)
+            .Register<CraftStockHello>(CraftStockHello.Id, static (m, w) => CraftStockHello.Encode(m, w),
+                static (ref NetReader r) => CraftStockHello.Decode(ref r), static (m, ctx) => Enqueue(ctx.Player, m.Open),
+                NetDirection.ToServer)
+            // 0.2.0-dev.29.19: the station screen's fill buttons. An older peer has no such message ids and drops them.
+            .Register<CraftStockFillAsk>(CraftStockFillAsk.Id, static (m, w) => CraftStockFillAsk.Encode(m, w),
+                static (ref NetReader r) => CraftStockFillAsk.Decode(ref r), static (m, ctx) => EnqueueAsk(ctx.Player, m.Keys),
+                NetDirection.ToServer)
+            .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
+                static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
+                NetDirection.ToClient)
+            // 0.2.0-dev.31.16 (GitHub #132): the station screen's per-ingredient rows. An older peer drops the id.
+            .Register<CraftStockStationRows>(CraftStockStationRows.Id, static (m, w) => CraftStockStationRows.Encode(m, w),
+                static (ref NetReader r) => CraftStockStationRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientStationRows(m); },
+                NetDirection.ToClient);
+        DyeStock.Attach(channel);
+        LockStock.Attach(channel);  // GitHub #147, 0.2.0-dev.31.12: locks from linked sources
+        BuildStock.Attach(channel);  // GitHub #132, 0.2.0-dev.31.12: block placements from linked sources
+        return channel;
     }
 
     // ================================================================ server ====
@@ -403,6 +435,78 @@ internal static class CraftStock
             }
         }
         RefreshFill(player, s, rows.Rows.Length > 0);
+        RefreshStation(player, s);
+    }
+
+    // The station screen's per-ingredient rows (GitHub #132, 0.2.0-dev.31.16): again when they changed, and at the session's
+    // first pass; an empty list once when they go. A send that did not go out is tried again at the next pass.
+    private static void RefreshStation(EntityId player, Session s)
+    {
+        CraftStockRows rows;
+        try
+        {
+            rows = StationView(player);
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            rows = Off;
+        }
+        var key = Key(rows);
+        lock (Gate)
+        {
+            if (!Sessions.TryGetValue(player.Value, out var live) || !ReferenceEquals(live, s)) return;
+            if (s.StationSent == key) return;
+        }
+        var ok = DeliverStation(player, new CraftStockStationRows(rows.Rows));
+        lock (Gate) s.StationSent = ok ? key : null;
+    }
+
+    /// <summary>What a player's production station screen may count (tick thread): per item the player's fill-opted links
+    /// hold, the bag, the Magic chests of the player's base and those links. Empty unless the row's press can take from
+    /// the links (<see cref="StationsCore.SourceItemFill"/>'s rules: stations.fill, an item-fill kiln-items.dll, a
+    /// fill-opted link, CanAccessInventories, a base).</summary>
+    internal static CraftStockRows StationView(EntityId player)
+    {
+        if (StationBuildHook is { } hook) return hook(player);
+        if (!Capabilities.Is(Stations.FillCapability) || !Stations.Available || !Players.Available || !StationsCore.FillLinksOf(player) ||
+            !StationsCore.Backend.HasItemFills) return Off;
+        if (Players.Find(player) is not { InGame: true } who || StationsCore.CanAccessInventories(who) is not true) return Off;
+        if (Bases.Of(player) is not { } home) return Off;
+        var (rc, links) = CraftingCore.FillStock(player);  // the Magic chests of the player's base left out: counted below
+        if (rc != StationsNative.Ok || links.Length == 0) return Off;
+        var linked = new Dictionary<uint, long>();
+        foreach (var row in links) linked[row.Item] = linked.GetValueOrDefault(row.Item) + row.Count;
+        var bag = new Dictionary<uint, long>();
+        if (Items.Read(player) is { } inv)
+            foreach (var slot in inv.Slots)
+                if (slot.Item.Value != 0 && slot.Count > 0) bag[slot.Item.Value] = bag.GetValueOrDefault(slot.Item.Value) + slot.Count;
+        if (!StockCache.TryGetValue(home.Id, out var stock)) StockCache[home.Id] = stock = Bases.Stock(home.Id);
+        var chests = new Dictionary<uint, long>();
+        foreach (var (item, count) in stock) chests[item.Value] = count;
+        return StationCompose(linked, bag, chests);
+    }
+
+    /// <summary>The station rows on plain values: per item the links hold (count above 0), the bag, the chests and the
+    /// links together, sorted; none at all when that is more than <see cref="MaxRows"/> rows (never a cut list).</summary>
+    internal static CraftStockRows StationCompose(IReadOnlyDictionary<uint, long> linked, IReadOnlyDictionary<uint, long> bag,
+        IReadOnlyDictionary<uint, long> chests)
+    {
+        var rows = new List<CraftStockRow>();
+        foreach (var (item, n) in linked.OrderBy(kv => kv.Key))
+        {
+            if (item == 0 || n <= 0) continue;
+            var total = n + bag.GetValueOrDefault(item) + chests.GetValueOrDefault(item);
+            rows.Add(new CraftStockRow(item, (uint)Math.Min(total, uint.MaxValue)));
+        }
+        return rows.Count > MaxRows ? Off : new CraftStockRows([.. rows]);
+    }
+
+    private static bool DeliverStation(EntityId player, CraftStockStationRows m)
+    {
+        if (StationSendHook is { } hook) return hook(player, m);
+        if (Client.IsHosting && Client.HasLocalPlayer && Client.LocalPlayer == player) return ApplyStation(new CraftStockRows(m.Rows));
+        if (_channel is null || Network.PeerOf(player) is not { } peer || !peer.HasChannel(ChannelName)) return false;
+        return _channel.SendTo(player, m);
     }
 
     // The answers for the session's asked fills: again when one is asked, and when an answer changed (the refresh
@@ -576,8 +680,20 @@ internal static class CraftStock
     /// rows' transfer buttons move, the game's own item transfer from the bag and the Magic chests, which is the game's
     /// own count: there every item is named with none, so no row is raised and the snapshot stays on for the "+1" / "+10"
     /// answers (the fill takes the outputs; those buttons do not read the rows).</summary>
-    internal static CraftStockRows View(CraftStockRows rows, bool factory) =>
-        factory ? new CraftStockRows([.. rows.Rows.Select(r => r with { Count = 0 })]) : rows;
+    internal static CraftStockRows View(CraftStockRows rows, bool factory) => View(rows, factory, Off);
+
+    /// <summary>The same with the server's station rows (GitHub #132, 0.2.0-dev.31.16): a production station's screen
+    /// counts, per item they name, what its transfer buttons now move through Kiln's item fill (the bag, the Magic chests
+    /// and the player's fill-opted links); every other item of the snapshot is named with none (the game's count).</summary>
+    internal static CraftStockRows View(CraftStockRows rows, bool factory, CraftStockRows station)
+    {
+        if (!factory) return rows;
+        var counts = station.Rows.Where(r => r.Item != 0).GroupBy(r => r.Item).ToDictionary(g => g.Key, g => g.Last().Count);
+        var named = rows.Rows.Select(r => r with { Count = counts.GetValueOrDefault(r.Item) }).ToList();
+        var seen = rows.Rows.Select(r => r.Item).ToHashSet();
+        named.AddRange(station.Rows.Where(r => r.Item != 0 && r.Count > 0 && seen.Add(r.Item)));
+        return new CraftStockRows([.. named.Take(MaxRows)]);
+    }
 
     /// <summary>A production station's screen (keen::HudScreenType FactoryCrafting).</summary>
     internal static bool IsFactory(GameScreen s) => s.Hud == HudScreen.FactoryCrafting || s.Crafting is { IsFactory: true };
@@ -606,6 +722,7 @@ internal static class CraftStock
         lock (ViewGate)
         {
             _rows = Off;
+            _station = Off;
             _factory = false;
         }
         while (Inbox.TryDequeue(out _)) { }
@@ -618,6 +735,8 @@ internal static class CraftStock
         SendHook = null;
         FillBuildHook = null;
         FillSendHook = null;
+        StationBuildHook = null;
+        StationSendHook = null;
         AskHook = null;
         ServerSideHook = null;
         HelloHook = null;
@@ -639,6 +758,7 @@ internal static class CraftStock
     // the hosting server's tick).
     private static readonly object ViewGate = new();
     private static CraftStockRows _rows = Off;
+    private static CraftStockRows _station = Off;  // the server's station rows (message 10), GitHub #132
     private static bool _factory;
 
     /// <summary>Test hooks: whether the server takes hellos (hosting, or Kiln there); a hello sent; a snapshot applied.</summary>
@@ -676,7 +796,11 @@ internal static class CraftStock
         _lastHello = Environment.TickCount64;
         SendHello(open);
         _lastAsked = "";
-        if (!open) Apply(Off);
+        if (!open)
+        {
+            lock (ViewGate) _station = Off;  // the server sends them again for the next menu
+            Apply(Off);
+        }
     }
 
     private static void SwitchTick(bool on)
@@ -795,7 +919,27 @@ internal static class CraftStock
         lock (ViewGate)
         {
             _rows = rows;
-            return Push(View(rows, _factory));
+            return Push(View(rows, _factory, _station));
+        }
+    }
+
+    // The server's station rows (the client's main thread). Ones that arrive after the menu closed are not kept.
+    internal static void ClientStationRows(CraftStockStationRows m) => ClientStationRows(new CraftStockRows(m.Rows));
+
+    internal static void ClientStationRows(CraftStockRows m)
+    {
+        if (!_open) return;
+        ApplyStation(m);
+    }
+
+    /// <summary>Keeps the server's station rows and applies the snapshot again when a production station's screen is open.</summary>
+    internal static bool ApplyStation(CraftStockRows station)
+    {
+        if (!_open) station = Off;
+        lock (ViewGate)
+        {
+            _station = station;
+            return !_factory || Push(View(_rows, true, station));
         }
     }
 
@@ -807,7 +951,7 @@ internal static class CraftStock
         {
             if (_factory == factory) return;
             _factory = factory;
-            if (_rows.Rows.Length > 0) Push(View(_rows, factory));
+            if (_rows.Rows.Length > 0 || _station.Rows.Length > 0) Push(View(_rows, factory, _station));
         }
     }
 

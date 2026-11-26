@@ -99,22 +99,93 @@ std::vector<uintptr_t> foreign;
 using ApplyFn = bool(__fastcall*)(void*,void*,uint8_t);
 bool seen_scope = false; int apply_calls = 0;
 bool __fastcall fake_apply(void*,void*,uint8_t) { seen_scope = t_build_pay; ++apply_calls; return true; }
-// the build menu's gatherer: rebuilds the groups in `rebuild` from `game` (group -> item -> the game's count)
-std::set<uint32_t> rebuild;
-std::map<uint32_t,std::map<uint32_t,uint64_t>> game;
-int rows_calls = 0;
-uint64_t __fastcall fake_rows(void* state,void*,uint8_t) {
-    ++rows_calls;
-    for (uint32_t g : rebuild) {
-        auto* group=static_cast<uint8_t*>(state)+g*kRowGroupStride; auto* rows=rd<uint8_t*>(group,0); const uint64_t n=rd<uint64_t>(group,8);
-        for (uint64_t i=0;i<n;++i) wr<uint64_t>(rows+i*kRowStride,kRowStock,game[g][rd<uint32_t>(rows+i*kRowStride,0)]);
+// The build menu's gatherer as the game runs it (C 0x40e5d0, docs/re/stations.md section 13), with kiln-items' three mid
+// hooks where the game reaches them. Seven groups of kRowGroupStride bytes ({rows, count, capacity, grow} and the sort
+// mode at +0x638: 0 Backpack & Magic Chests, 1 Last Used, 2 by amount, 3 All Materials, 4 Favorites). A group it rebuilds
+// has its stock zeroed (modes 1, 2 and 4 its rows dropped too); modes 1 and 4 get a zero row per listed material; then the
+// bag's stacks and, per pool material, the base's published stock through the row add, and after each material the
+// stock loop's step (build/client.StockRowsRet, where kiln-items adds the links).
+struct Row { uint32_t item; uint32_t key_lo; uint32_t key_hi; uint32_t pad; uint64_t stock; };
+static_assert(sizeof(Row) == kRowStride);
+struct Group { Row* rows; uint64_t count, capacity; void* grow; };
+std::vector<Row> storage[kRowGroups];
+int grow_calls = 0, row_add_calls = 0;
+uint32_t last_key = 0;
+bool __fastcall fake_grow(void*, int64_t, uint64_t) { return true; }  // only its presence matters here
+Group& group_at(uint8_t* state, uint32_t g) { return *reinterpret_cast<Group*>(state + static_cast<size_t>(g) * kRowGroupStride); }
+uint8_t& mode_of(uint8_t* state, uint32_t g) { return state[static_cast<size_t>(g) * kRowGroupStride + 0x638]; }
+// the game's row add (C 0x40c010): add to the item's row; else append one, but never in modes 1 and 4 unless it is a
+// listed material's zero row; a full group grows through its callback (the test's groups have room, or none)
+void __fastcall fake_row_add(void* g, const uint32_t* record, uint32_t key, uint64_t slot, uint8_t pool_row) {
+    ++row_add_calls;
+    auto& group = *static_cast<Group*>(g);
+    const uint8_t mode = static_cast<uint8_t*>(g)[0x638];
+    const uint64_t count = record[2] ? 1 : record[1];
+    for (uint64_t i = 0; i < group.count; ++i)
+        if (group.rows[i].item == record[0]) { group.rows[i].stock += count; return; }
+    if (!pool_row && (mode == 1 || mode == 4)) return;
+    if (group.count + 1 > group.capacity) {
+        if (!group.grow) std::abort();  // the game's fatal error: Kiln must never get here
+        ++grow_calls;
+        return;
     }
-    return 7;
+    last_key = key;
+    group.rows[group.count++] = Row{record[0], key, static_cast<uint32_t>(slot), 0, count};
+}
+uint32_t no_container = 0xffff1234;  // build/client.NoContainerKey's u32
+struct Pool { std::vector<uint8_t> bytes; uint32_t group; };
+Pool make_pool(uint32_t group, std::vector<uint32_t> items) {
+    Pool p{std::vector<uint8_t>(0x10 + 4 * items.size()), group};
+    wr<int32_t>(p.bytes.data(), 8, 8);  // the materials 8 bytes after +8
+    wr<uint32_t>(p.bytes.data(), 0xc, static_cast<uint32_t>(items.size()));
+    for (size_t i = 0; i < items.size(); ++i) wr<uint32_t>(p.bytes.data() + 0x10, i * 4, items[i]);
+    return p;
+}
+std::vector<Pool> pools;
+std::map<uint32_t, std::vector<uint32_t>> listed;                    // group -> Last Used / Favorites materials
+std::map<uint32_t, std::map<uint32_t, uint32_t>> bag, base_stock;   // group -> item -> count
+uint32_t current_group = 0;
+int rows_calls = 0;
+bool hook_body = true, hook_step = true, hook_done = true;           // which of Kiln's sites the hooks are in at
+void gather(uint8_t* state, uint8_t only) {
+    ++rows_calls;
+    volatile uint8_t mark = 0;
+    const auto frame = reinterpret_cast<uintptr_t>(&mark);
+    if (hook_body) { KilnRegisters r{}; r.rcx = reinterpret_cast<uintptr_t>(state); r.rsp = frame; hk_build_rows_body(r); }
+    for (uint32_t g = 0; g < kRowGroups; ++g) {
+        if (only && g != current_group) continue;
+        Group& group = group_at(state, g);
+        const uint8_t mode = mode_of(state, g);
+        if (mode == 1 || mode == 2 || mode == 4) group.count = 0;
+        for (uint64_t i = 0; i < group.count; ++i) group.rows[i].stock = 0;
+        if (mode == 1 || mode == 4)
+            for (uint32_t item : listed[g]) { const uint32_t rec[3] = {item, 0, 0}; fake_row_add(&group, rec, no_container, 0, 1); }
+    }
+    for (auto& [g, items] : bag)
+        if (!only || g == current_group)
+            for (auto [item, n] : items) { const uint32_t rec[3] = {item, n, 0}; fake_row_add(&group_at(state, g), rec, 77, 3, 0); }
+    for (Pool& p : pools) {
+        if (only && p.group != current_group) continue;
+        const uint32_t n = rd<uint32_t>(p.bytes.data(), 0xc);
+        for (uint64_t i = 0; i < n; ++i) {
+            const uint32_t item = rd<uint32_t>(p.bytes.data() + 0x10, i * 4);
+            if (p.group < kRowGroups && base_stock[p.group].count(item)) {
+                const uint32_t rec[3] = {item, base_stock[p.group][item], 0};
+                fake_row_add(&group_at(state, p.group), rec, 88, 0, 0);
+            }
+            if (hook_step) {
+                KilnRegisters r{}; r.rsi = reinterpret_cast<uintptr_t>(state); r.rsp = frame;
+                r.r15 = reinterpret_cast<uintptr_t>(p.bytes.data()); r.r14 = i; r.r12 = 0x500 | p.group;  // r12's upper bits are not the group
+                hk_build_rows_add(r);
+            }
+        }
+    }
+    if (hook_done) { KilnRegisters r{}; r.rsi = reinterpret_cast<uintptr_t>(state); r.rsp = frame; hk_build_rows_done(r); }
 }
 uintptr_t apply_caller = 0;
 KilnResult KILN_CALL mid2(KilnOwner,uintptr_t target,const KilnHookOrder*,KilnMidFn,void*,KilnHandle* h) { ++mid2_links[target]; *h = 100 + target; return KILN_OK; }
 KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** next,KilnHandle* h) {
-    ++raw_links[target]; *next = target == g_build_rows_fn ? reinterpret_cast<void*>(&fake_rows) : reinterpret_cast<void*>(&fake_apply);
+    ++raw_links[target]; *next = reinterpret_cast<void*>(&fake_apply);
     *h = 200 + target; return KILN_OK;
 }
 uintptr_t KILN_CALL caller(KilnHandle) { return apply_caller; }
@@ -230,6 +301,11 @@ int main() {
     {KilnRegisters r{};r.rax=1;r.rbx=0;r.rbp=9;r.rsi=0x10;r.rdi=reinterpret_cast<uintptr_t>(cursor);logs.clear();hk_build_cursor(r);
      CHECK(r.rax==1 && g_build_off.load() && logged("material hook faulted"));
      r.rsi=reinterpret_cast<uintptr_t>(query);r.rax=10;r.rbx=5;r.rbp=40;fixture::world_kind=0;hk_build_cursor(r);CHECK(r.rax==10);  // off: the game's
+     // review of #148: the fault lowers crafting.build_sources to faulted on the next Pre (docs: "faulted at run time"),
+     // as a lock hook's does; never from inside the hook (a game worker thread), and once
+     CHECK(!lowered.count("crafting.build_sources"));
+     build_client_pre();CHECK(lowered["crafting.build_sources"]==KILN_CAP_REASON_FAULTED);
+     lowered.clear();build_client_pre();build_server_pre(4);CHECK(lowered.empty());
      g_build_off.store(false);}
     // ---- review of 31.12: a building link to a Magic chest of the base the player stands in counts once ----
     // The cursor adds the links to the game's own count of the base (eax), and the placement pays the base list first and
@@ -259,6 +335,25 @@ int main() {
         CHECK(look(0,10,5,40)==45);
         in_base = true; player_placed = false; g_build_dirty.store(true); build_cache_refresh(7);
         CHECK(look(0,10,5,40)==45);                                                     // no position: nothing left out
+        // GitHub #132 (0.2.0-dev.31.16): the FILLS rows leave the base's Magic chests out as well (the station screen's
+        // rows add the bag and those chests themselves, and the item fill pays them first): a fill link to BUILD counts once
+        {
+            const uint64_t f1 = add(BUILD, KILN_CRAFT_SOURCE_FILLS), f2 = add(BUILD2, KILN_CRAFT_SOURCE_FILLS);
+            auto fills = [&] {
+                KilnStationStack out[8] = {}; uint32_t n = 0;
+                std::map<uint32_t, uint32_t> m;
+                if (t_source_stock(PLAYER, KILN_CRAFT_SOURCE_STOCK_FILLS, out, 8, &n) == KILN_OK)
+                    for (uint32_t i = 0; i < n; ++i) m[out[i].item] = out[i].count;
+                return m;
+            };
+            CHECK(f1 && f2 && (fills() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));  // no position: every fill link
+            player_placed = true;
+            CHECK((fills() == std::map<uint32_t, uint32_t>{{STONE, 5}}));                          // in the base: BUILD is the base's
+            in_base = false;
+            CHECK((fills() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));              // in no base: every link again
+            in_base = true; player_placed = false;
+            t_remove_source(10, f1); t_remove_source(10, f2);
+        }
         g_w = nullptr; G.base_at = nullptr; G.bases_count = G.stride = G.stock_items = G.stock_items_count = 0;
         G.stock_water = G.stock_water_count = G.aabb_y = G.zone_mask_rel = 0; std::memset(bases + 0x100, 0, 0x100);
         g_build_dirty.store(true); build_cache_refresh(8);
@@ -277,68 +372,119 @@ int main() {
         // code): with no game call of ApplyMaterials behind it on this stack, the take is the game's, and kiln.log says so
         apply_caller=0x7ff800001234;
         CHECK(hk_build_apply(nullptr,list,1) && !seen_scope && logged("could not be traced to the game's call behind it"));
+        // GitHub #148: Building Tools 0.34.0's pay_hook passes the blueprint program's own cost context on. That context is
+        // the program's rsp + 0x50, so its call's return slot (build/BlueprintApplyRet) is ctx - 0x58, and its transaction
+        // lies in the same frame (ctx + 0x5d0): a stack frame laid out so is the program's call in progress
+        {
+            alignas(16) uint64_t frame[0xd0] = {};                       // on this thread's stack, above the hook's frame
+            auto* fctx = reinterpret_cast<uint8_t*>(frame) + 0x58;
+            frame[0] = g_build.blueprint_ret;
+            wr<uint64_t>(fctx, 8, reinterpret_cast<uint64_t>(fctx + 0x5d0));
+            logs.clear();
+            CHECK(hk_build_apply(fctx,list,1) && seen_scope && !t_build_pay);
+            CHECK(logged("makes the blueprint program's payments (its code calls ApplyMaterials for the game's call, found by the program's own frame)"));
+            CHECK(hk_build_apply(fctx,list,0) && !seen_scope);                                    // a give: never
+            frame[0] = g_build.blueprint_ret + 1;CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // another call's slot
+            frame[0] = g_build.blueprint_ret;fctx[0] = 1;CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // not mode 0
+            fctx[0] = 0;wr<uint64_t>(fctx, 8, uint64_t{0x10});CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // its tx elsewhere
+            wr<uint64_t>(fctx, 8, reinterpret_cast<uint64_t>(fctx + 0x5d0));
+            std::vector<uint8_t> heap(0x700, 0);                             // a context that is not on this stack
+            wr<uint64_t>(heap.data(), 0, g_build.blueprint_ret);wr<uint64_t>(heap.data() + 0x58, 8, reinterpret_cast<uint64_t>(heap.data() + 0x628));
+            CHECK(hk_build_apply(heap.data() + 0x58,list,1) && !seen_scope);
+            apply_caller=g_build.blueprint_ret;frame[0] = 0;
+            CHECK(hk_build_apply(fctx,list,1) && seen_scope);                // the game's own call: its return address decides
+        }
         apply_caller=g_build.blueprint_ret;
         g_build_off.store(false);h_build_apply={};raw_links.clear();
     }
-    // ---- the build menu's material counts: bag + base + links, once, whatever the gatherer rebuilt ----
+    // ---- the build menu's material counts: bag + base + links in every tab, the hammer's list and the cursor ----
+    // GitHub #148 (Fuzen777, 31.13): a material only the links hold had no row in Backpack & Magic Chests, All Materials, the
+    // amount sort, the hammer's list or under the cursor (only Last Used and Favorites list materials before the bag and the
+    // base add theirs), so it showed 0 or not at all; Kiln raised the rows that existed. Now it adds where the base does.
     {
-        g_build_ui_feat=true;g_build_rows_fn=0x14040e5d0;g_build_row_add=0x14040c010;g_build_stock_rows_ret=0x14040ee4b;
+        g_build_ui_feat=true;g_build_rows_fn=0x14040e5d0;g_build_stock_rows_ret=0x14040ee4b;
         g_build_rows_body=g_build_rows_fn+0x23;g_build_rows_done=g_build_rows_fn+0xa8a;
-        // the gatherer as the game runs it with Kiln's two halves in: its body between them, this call's frame as its rsp
-        auto gather=[&](uint8_t* s,uint8_t only) {
-            volatile uint8_t mark=0;const auto frame=reinterpret_cast<uintptr_t>(&mark);
-            build_rows_enter(s,frame);const uint64_t r=fake_rows(s,nullptr,only);build_rows_leave(frame,s);return r;
-        };
+        g_build_row_add=reinterpret_cast<uintptr_t>(&fake_row_add);g_build_no_container=reinterpret_cast<uintptr_t>(&no_container);
         std::vector<uint8_t> state(kRowGroups*kRowGroupStride+0x10,0);
-        uint8_t g1[3*kRowStride]={}, g3[1*kRowStride]={};
-        wr(g1,0,STONE);wr(g1,kRowStride,WOOD);wr(g1,2*kRowStride,uint32_t{0x99});wr(g3,0,STONE);
-        wr(state.data()+1*kRowGroupStride,0,static_cast<uint8_t*>(g1));wr(state.data()+1*kRowGroupStride,8,uint64_t{3});
-        wr(state.data()+3*kRowGroupStride,0,static_cast<uint8_t*>(g3));wr(state.data()+3*kRowGroupStride,8,uint64_t{1});
-        auto stock=[&](uint8_t* rows,int i) {return rd<uint64_t>(rows+i*kRowStride,kRowStock);};
-        KilnStationStack snap[2]={{STONE,35},{WOOD,4}};
-        CHECK(t_set_build_stock(1,snap,2)==KILN_OK);
-        game={{1,{{STONE,10},{WOOD,0},{0x99,3}}},{3,{{STONE,2}}}};rebuild={1,3};
-        CHECK(gather(state.data(),0)==7);
-        CHECK(stock(g1,0)==45 && stock(g1,1)==4 && stock(g1,2)==3 && stock(g3,0)==37);  // every group holding a linked item
-        rebuild={};                                                                      // currentOnly: nothing rebuilt
-        gather(state.data(),1);
-        CHECK(stock(g1,0)==45 && stock(g1,1)==4 && stock(g3,0)==37);                    // raised once, not twice
-        game[1][STONE]=12;rebuild={1};                                                   // the bag gained 2 stone
-        gather(state.data(),1);
-        CHECK(stock(g1,0)==47 && stock(g3,0)==37);
-        wr<uint64_t>(g3,kRowStock,50);rebuild={};                                       // the game changed a kept row itself
-        gather(state.data(),1);
-        CHECK(stock(g3,0)==85);                                                          // its value is the game's, plus the links
-        snap[0].count=5;t_set_build_stock(1,snap,2);rebuild={1,3};game[3][STONE]=2;
+        for (uint32_t g=0;g<kRowGroups;++g) {
+            storage[g].assign(16,Row{});
+            group_at(state.data(),g)=Group{storage[g].data(),0,16,nullptr};
+        }
+        constexpr uint32_t ROOF=0x55, SAND=0x66;
+        auto stock=[&](uint32_t g,uint32_t item)->int64_t {
+            const Group& group=group_at(state.data(),g);
+            for (uint64_t i=0;i<group.count;++i) if (group.rows[i].item==item) return static_cast<int64_t>(group.rows[i].stock);
+            return -1;  // no row: not listed
+        };
+        // blocks (group 3), roofs (group 4), terrain (group 2); the hammer's blocks in Backpack & Magic Chests (mode 0)
+        pools={make_pool(3,{STONE,WOOD,0x99}),make_pool(4,{ROOF}),make_pool(2,{SAND}),make_pool(7,{STONE})};
+        mode_of(state.data(),2)=3;mode_of(state.data(),3)=0;mode_of(state.data(),4)=1;listed[4]={ROOF};
+        base_stock[3]={{WOOD,10}};bag[3]={{WOOD,2}};
+        KilnStationStack snap[3]={{STONE,35},{WOOD,4},{ROOF,6}};
+        CHECK(t_set_build_stock(1,snap,3)==KILN_OK);
+        logs.clear();
         gather(state.data(),0);
-        CHECK(stock(g1,0)==17 && stock(g3,0)==7);                                       // a new snapshot
-        t_set_build_stock(0,nullptr,0);rebuild={};
-        gather(state.data(),1);
-        CHECK(stock(g1,0)==12 && stock(g1,1)==0 && stock(g3,0)==2 && g_build_marks.empty());  // off: the game's counts again
-        CHECK(rows_calls==6);
-        // a state that cannot be read: the original still runs, the menu keeps the game's counts from then on
-        t_set_build_stock(1,snap,2);logs.clear();
-        std::vector<uint8_t> broken(kRowGroups*kRowGroupStride,0);wr(broken.data(),0,reinterpret_cast<uint8_t*>(0x10));wr(broken.data(),8,uint64_t{1});
-        rebuild={};CHECK(gather(broken.data(),1)==7 && g_build_rows_off.load() && logged("material rows could not be read"));
-        gather(state.data(),1);CHECK(stock(g1,0)==12);
+        CHECK(stock(3,STONE)==35 && stock(3,WOOD)==16 && stock(3,0x99)==-1);  // the linked-only stone is listed, wood is bag + base + links
+        CHECK(last_key==no_container && logged("the build menu lists a material from the building links"));
+        CHECK(stock(4,ROOF)==6);                                              // Last Used lists it: links added to its zero row
+        CHECK(stock(2,SAND)==-1);                                             // not linked: the game's (no row)
+        // the amount sort (mode 2) and All Materials (mode 3) list the linked-only stone too, every rebuild counts it once
+        mode_of(state.data(),3)=2;gather(state.data(),0);CHECK(stock(3,STONE)==35 && stock(3,WOOD)==16);
+        mode_of(state.data(),3)=3;gather(state.data(),0);gather(state.data(),0);CHECK(stock(3,STONE)==35 && stock(3,WOOD)==16);
+        // Last Used and Favorites list only their own materials: the links never add a row there
+        mode_of(state.data(),3)=1;listed[3]={WOOD};gather(state.data(),0);CHECK(stock(3,STONE)==-1 && stock(3,WOOD)==16);
+        mode_of(state.data(),3)=4;listed[3]={STONE};gather(state.data(),0);CHECK(stock(3,STONE)==35 && stock(3,WOOD)==-1);
+        mode_of(state.data(),3)=0;listed[3]={};gather(state.data(),0);
+        // a material in two pools of one group: the links count once (the cursor and the payment count them once)
+        pools.push_back(make_pool(3,{STONE}));gather(state.data(),0);CHECK(stock(3,STONE)==35);pools.pop_back();
+        // currentOnly: only the current group is rebuilt and only its materials reach the step; the others keep their rows
+        current_group=4;snap[0].count=5;t_set_build_stock(1,snap,3);
+        gather(state.data(),1);CHECK(stock(3,STONE)==35 && stock(4,ROOF)==6);
+        current_group=3;gather(state.data(),1);CHECK(stock(3,STONE)==5 && stock(3,WOOD)==16);
+        // a full group without a grow callback (the game would stop): no row added; with one, the game's add grows it
+        {Group& g3=group_at(state.data(),3);const uint64_t cap=g3.capacity;g3.count=0;g3.capacity=1;
+         base_stock[3]={};bag[3]={{WOOD,2}};row_add_calls=0;gather(state.data(),0);
+         CHECK(stock(3,WOOD)==6 && stock(3,STONE)==-1);
+         int grows=grow_calls;g3.grow=reinterpret_cast<void*>(&fake_grow);gather(state.data(),0);CHECK(grow_calls==grows+1);
+         g3.grow=nullptr;g3.capacity=cap;g3.count=0;base_stock[3]={{WOOD,10}};}
+        // the snapshot off: the game's counts and rows again
+        t_set_build_stock(0,nullptr,0);mode_of(state.data(),3)=2;gather(state.data(),0);CHECK(stock(3,STONE)==-1 && stock(3,WOOD)==12);
+        t_set_build_stock(1,snap,3);gather(state.data(),0);CHECK(stock(3,STONE)==5);
+        // a step whose first half did not run (the hooks went in while a call was inside): nothing added
+        hook_body=false;gather(state.data(),0);CHECK(stock(3,STONE)==-1 && t_build_rows.depth()==0);hook_body=true;
+        // a call that never reached its last half is dropped by the next one on the thread
+        hook_done=false;gather(state.data(),0);hook_done=true;gather(state.data(),0);CHECK(stock(3,STONE)==5 && t_build_rows.depth()==0);
+        // a pool that cannot be read: this call keeps the game's counts, the menu's half stands down with one line
+        logs.clear();pools.push_back(Pool{{},3});pools.back().bytes.assign(0x10,0);wr<int32_t>(pools.back().bytes.data(),8,0x7ff00000);
+        wr<uint32_t>(pools.back().bytes.data(),0xc,1);
+        gather(state.data(),0);
+        CHECK(g_build_rows_off.load() && logged("material rows could not be read"));
+        pools.pop_back();gather(state.data(),0);CHECK(stock(3,STONE)==-1 && stock(3,WOOD)==12);  // off: the game's
+        // review of #148: crafting.build_ui is lowered to faulted on the next Pre (docs: "a row could not be read"), once;
+        // the cursor and the placement keep theirs
+        CHECK(!lowered.count("crafting.build_ui"));
+        t_set_build_stock(0,nullptr,0);  // (the client's Pre then installs nothing here)
+        build_client_pre();CHECK(lowered["crafting.build_ui"]==KILN_CAP_REASON_FAULTED && !lowered.count("crafting.build_sources"));
+        lowered.clear();build_client_pre();CHECK(lowered.empty());
         g_build_rows_off.store(false);
-        // a second half whose first did not run (the hooks went in while a call was inside): the game's counts, nothing raised
-        {volatile uint8_t mark=0;const auto frame=reinterpret_cast<uintptr_t>(&mark);t_set_build_stock(1,snap,2);rebuild={1};game[1][STONE]=12;
-         fake_rows(state.data(),nullptr,1);build_rows_leave(frame,state.data());CHECK(stock(g1,0)==12 && t_build_rows.depth()==0 && g_build_marks.empty());}
-        t_set_build_stock(0,nullptr,0);raw_links.clear();g_build_marks.clear();
+        CHECK(rows_calls>=18);
+        t_set_build_stock(0,nullptr,0);raw_links.clear();pools.clear();listed.clear();bag.clear();base_stock.clear();
     }
     // ---- install on demand: the server once a Building link exists, a client once its snapshot is on ----
     g_build_apply_on.store(false);g_build_cursor_on.store(false);mid2_links.clear();raw_links.clear();
     build_client_pre();CHECK(mid2_links.empty());                       // no snapshot: nothing goes in
     CHECK(t_set_build_stock(1,rows,2)==KILN_OK);logs.clear();
     build_client_pre();CHECK(mid2_links[g_build.cursor_ret]==1 && mid2_links[g_build_rows_body]==1 && mid2_links[g_build_rows_done]==1 &&
-                             logged("this client's build cursor counts"));
+                             mid2_links[g_build_stock_rows_ret]==1 && logged("this client's build cursor counts"));
     // XHL, 2026-11-25: kiln-items hooked the gatherer's entry, which Building Tools 0.34.0 finds by its first 35 bytes (and
     // then the bytes and calls up to + 0xa7a), so its full material list and partial area actions stayed off. Now inside it.
     CHECK(!raw_links.count(g_build_rows_fn) && !mid2_links.count(g_build_rows_fn));
     for (const auto& [at, n] : mid2_links) CHECK(n && (at < g_build_rows_fn || at >= g_build_rows_fn + 35));
-    for (uintptr_t bt : {0x194, 0x705, 0x721, 0x78f, 0x867, 0x876, 0x89d, 0xa76})
-        for (const auto& [at, n] : mid2_links) CHECK(at + 5 <= g_build_rows_fn + bt || at >= g_build_rows_fn + bt + 7);
+    // the bytes Building Tools reads (offset, size) and what each of Kiln's mid hooks there moves (#148: the stock step too)
+    const std::map<uintptr_t, size_t> moved{{g_build_rows_body, 7}, {g_build_stock_rows_ret, 7}, {g_build_rows_done, 8}};
+    for (auto [bt, size] : std::vector<std::pair<uintptr_t, size_t>>{{0x194, 3}, {0x705, 5}, {0x721, 5}, {0x78f, 7}, {0x867, 7}, {0x876, 5}, {0x89d, 5}, {0xa76, 5}})
+        for (const auto& [at, n] : mid2_links)
+            if (moved.count(at)) CHECK(at + moved.at(at) <= g_build_rows_fn + bt || at >= g_build_rows_fn + bt + size);
     CHECK(g_build_rows_on.load() && logged("the build menu's material counts include the building links"));
     build_server_pre(5);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1 && mid2_links[g_build_rows_body]==1);  // shared
     build_server_pre(6);CHECK(raw_links[g_build.apply]==1 && mid2_links[g_build.cursor_ret]==1);  // once

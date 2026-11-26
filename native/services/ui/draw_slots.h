@@ -224,6 +224,7 @@ bool KILN_CALL t_is_item_clicked(uint32_t button) {
 #include "draw_slots_looks.inl"
 #include "draw_slots_blocks.inl"
 #include "draw_slots_pointer.inl"
+#include "draw_slots_window.inl"
 
 }  // namespace
 }  // namespace kui_draw

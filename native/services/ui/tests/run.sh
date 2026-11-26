@@ -8,6 +8,8 @@ export KILN_OUT
 out=$KILN_OUT/ui-host-test
 mkdir -p "$out"
 bash "$here/run-window-constraints.sh"
+# window_state and the ImGui behaviour window docking relies on (GitHub issue 149)
+bash "$here/run-window-state.sh"
 # Kiln's graphics tools: the frame cap's pacing, kiln.json "graphics", the DLSS render size, when they step aside, NGX's
 # parameter slots (frame_pacer.h, graphics_settings.h, graphics_aside.h, ngx_param.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" "$here/graphics_test.cpp" -o "$out/graphics_test"
@@ -118,6 +120,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -I"$he
 # one key press counts once, also across a focus loss (key_hold.h, GitHub issue 39): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/key_hold_test.cpp" -o "$out/key_hold_test"
 "$out/key_hold_test"
+# a key press a mod sends while a Kiln text field has the keyboard stays out of the field (text_keep.h, HadToRegister's
+# "tb"): plain logic
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/text_keep_test.cpp" -o "$out/text_keep_test"
+"$out/text_keep_test"
 # the pad Kiln's screens follow: every poll per user, a stick back at centre included, dead zones (pad_slots.h, kiln#123)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_slots_test.cpp" -o "$out/pad_slots_test"
 "$out/pad_slots_test"

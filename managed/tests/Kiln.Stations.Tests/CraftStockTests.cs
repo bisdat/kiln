@@ -340,6 +340,124 @@ public sealed class CraftStockTests : IDisposable
         Assert.Equal(n, applied.Count);
     }
 
+    [Fact]
+    public void A_production_station_screen_counts_the_fill_opted_links_its_transfer_buttons_move()
+    {
+        // GitHub #132 (0.2.0-dev.31.16): the per-ingredient "+1" / "+n" take from the player's fill-opted links now
+        // (Kiln's item fill), so the server names what those rows may count: the bag, the Magic chests and those links
+        var applied = new List<CraftStockRows>();
+        CraftStock.HelloHook = _ => { };
+        CraftStock.ApplyHook = r =>
+        {
+            applied.Add(r);
+            return true;
+        };
+        CraftStock.ServerSideHook = () => true;
+        using var k = new KilnHarness();
+        k.Capabilities.Override(CraftStock.StockUiCapability, true);
+        var snapshot = Rows((Coal, 21), (Scrap, 2), (Twig, 5));
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Factory());
+        CraftStock.ClientRows(snapshot);
+        CraftStock.ClientStationRows(Rows((Coal, 13), (Logs, 4)));
+        // coal and logs as the station rows say; the other items named with none (the game's counts)
+        Assert.Equal([new CraftStockRow(Coal, 13), new CraftStockRow(Scrap, 0), new CraftStockRow(Twig, 0), new CraftStockRow(Logs, 4)],
+            applied[^1].Rows);
+        // a crafting menu: the crafting snapshot as before
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.Crafting));
+        Assert.Equal(snapshot.Rows, applied[^1].Rows);
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Factory());
+        Assert.Equal(13u, applied[^1].Rows.Single(r => r.Item == Coal).Count);
+        // the server says the links hold none any more: the game's counts again
+        CraftStock.ClientStationRows(Rows());
+        Assert.All(applied[^1].Rows, r => Assert.Equal(0u, r.Count));
+        CraftStock.ClientStationRows(Rows((Coal, 13)));
+        // closed: everything goes, and a reopened station screen counts nothing of the links until the server says so again
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.InGame));
+        Assert.Empty(applied[^1].Rows);
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Factory());
+        CraftStock.ClientRows(snapshot);
+        Assert.All(applied[^1].Rows, r => Assert.Equal(0u, r.Count));
+        // late rows after a close are not kept
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.InGame));
+        var n = applied.Count;
+        CraftStock.ClientStationRows(Rows((Coal, 13)));
+        Assert.Equal(n, applied.Count);
+    }
+
+    [Fact]
+    public void The_station_rows_count_the_bag_the_magic_chests_and_the_fill_opted_links_of_the_linked_items_only()
+    {
+        var rows = CraftStock.StationCompose(D((Coal, 6), (Logs, 4), (Twig, 0)), D((Coal, 2), (Scrap, 9)), D((Coal, 5), (Scrap, 3)));
+        Assert.Equal([new CraftStockRow(Coal, 13), new CraftStockRow(Logs, 4)], rows.Rows);  // sorted; scrap is no link's: the game's
+        Assert.Empty(CraftStock.StationCompose(D(), D((Coal, 2)), D((Coal, 5))).Rows);
+        var many = Enumerable.Range(1, CraftStock.MaxRows + 1).ToDictionary(i => (uint)i, _ => 1L);
+        Assert.Empty(CraftStock.StationCompose(many, D(), D()).Rows);  // never a cut list: none rather than a wrong count
+    }
+
+    [Fact]
+    public void Every_message_of_the_craftstock_channel_has_an_id_of_its_own()
+    {
+        // review of 0.2.0-dev.31.16 (GitHub #132): the station rows took message id 5, which DyeStock's rows hold on the same
+        // channel. NetChannel.Register threw in DyeStock.Attach, so CraftStock.Start gave the channel up (no dye, lock or
+        // build stock) and, on a client, never watched the screen (no crafting stock at all, the station rows included).
+        // The real registration on a fresh channel, with the shared stocks' attach flags cleared for it and put back after.
+        const System.Reflection.BindingFlags S = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var stocks = new[] { typeof(DyeStock), typeof(LockStock), typeof(BuildStock) };
+        var saved = stocks.Select(t => (t.GetField("_attached", S)!.GetValue(null), t.GetField("_channel", S)!.GetValue(null))).ToArray();
+        using var channel = Network.Channel("kiln:craftstock-ids-test", CraftStock.ChannelVersion, required: false);
+        try
+        {
+            foreach (var t in stocks) t.GetField("_attached", S)!.SetValue(null, false);
+            Assert.Null(Record.Exception(() => CraftStock.Register(channel)));
+            var byId = (System.Collections.IDictionary)typeof(NetChannel)
+                .GetField("ById", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(channel)!;
+            // 1 to 4 the snapshot, its hello and the fill buttons; 5, 6 dyes; 7, 8 locks; 9 building; 10 the station rows
+            Assert.Equal(Enumerable.Range(1, 10).Select(i => (ushort)i), byId.Keys.Cast<ushort>().Order());
+        }
+        finally
+        {
+            for (var i = 0; i < stocks.Length; i++)
+            {
+                stocks[i].GetField("_attached", S)!.SetValue(null, saved[i].Item1);
+                stocks[i].GetField("_channel", S)!.SetValue(null, saved[i].Item2);
+            }
+        }
+    }
+
+    [Fact]
+    public void Station_rows_survive_the_wire_and_go_out_when_they_change()
+    {
+        var w = new NetWriter();
+        CraftStockStationRows.Encode(new CraftStockStationRows([new CraftStockRow(Coal, 13), new CraftStockRow(Logs, 4)]), w);
+        var r = new NetReader(w.ToArray());
+        Assert.Equal([new CraftStockRow(Coal, 13), new CraftStockRow(Logs, 4)], CraftStockStationRows.Decode(ref r).Rows);
+        Assert.Equal((ushort)10, CraftStockStationRows.Id);
+        // the session: sent with the first snapshot, again only when they change, and an empty list once when they go
+        var p = new EntityId(5);
+        var station = new Dictionary<uint, CraftStockRows> { [5] = Rows((Coal, 13)) };
+        var sent = new List<CraftStockRows>();
+        CraftStock.StationBuildHook = e => station.TryGetValue(e.Value, out var x) ? x : CraftStock.Off;
+        CraftStock.StationSendHook = (_, m) =>
+        {
+            sent.Add(new CraftStockRows(m.Rows));
+            return true;
+        };
+        _rows[5] = Rows((Coal, 3));
+        CraftStock.Enqueue(p, true);
+        CraftStock.Pump(7);
+        Assert.Equal(Rows((Coal, 13)).Rows, Assert.Single(sent).Rows);
+        for (ulong s = 8; s <= 90; s++) CraftStock.Pump(s);
+        Assert.Single(sent);
+        station[5] = Rows((Coal, 11));
+        CraftStock.Pump(120);
+        Assert.Equal(2, sent.Count);
+        station.Remove(5);
+        CraftStock.Pump(150);
+        CraftStock.Pump(180);
+        Assert.Equal(3, sent.Count);
+        Assert.Empty(sent[2].Rows);
+    }
+
     private static GameScreen Factory() => Screen(ScreenKind.Crafting) with
     {
         Hud = HudScreen.FactoryCrafting,
