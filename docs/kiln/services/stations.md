@@ -546,6 +546,8 @@ debug level why the press stayed the game's.
 - **With Building Tools** (0.34.0 routes the blueprint program's payment through its own code): Kiln finds the game's call
   behind it on the stack, and since #148, where that walk does not reach the game, by the blueprint program's own frame
   (the cost context it passed on); `build: BuildingTools.dll makes the blueprint program's payments ...` says so once.
+  A placement whose cost list has more than 32 lines (a large Building Tools area action or blueprint of many materials)
+  stays the game's payment, from the bag and the base only (`... left to the game (it names more than 32 cost lines ...`).
 
 Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, and a
 vanilla client's menu and cursor (they show the bag and the base; its game does not send a placement only links cover). Cross-Base Storage's
