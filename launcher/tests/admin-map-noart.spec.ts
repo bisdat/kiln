@@ -2,9 +2,13 @@
 // the Markers tab's line. The launcher's words ("Preparing map art…", "Map art needs the Enshrouded client", "No map data
 // yet: the launcher prepares it…") speak of its own Game art; Kilnwarden makes no art (its owner copies the launcher's)
 // and says how instead. The host here is the test's, put where the web harness (src/admin/harness) reads it; the
-// launcher itself (mock mode) keeps its own words.
+// launcher itself (mock mode) keeps its own words. A screenshot of the host's words goes to SHOTS_DIR (SHOTS=0 skips it).
 import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { kapServer } from "./fixtures/kapServer";
+
+const SHOTS = process.env.SHOTS_DIR || join(import.meta.dirname, "..", "..", ".out", "launcher", "shots");
 
 const HARNESS = "/src/admin/harness/index.html?kap=ws://kap.test/kap#/servers/lab/admin/map";
 const LOAD = { timeout: 30_000 };
@@ -65,6 +69,10 @@ test("a host's words replace the banner over the map and the Markers tab's line"
   const panel = await markersTab(page);
   await expect(panel).toContainText("No markers without the map art: copy it from the Kiln Launcher (the notice over the map).");
   await expect(panel).not.toContainText(LAUNCHER_MARKERS);
+  if (process.env.SHOTS !== "0") {
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "map-noart-host-words.png") });
+  }
 });
 
 test("a host may drop the banner over the map (its own notice says it) and still words the Markers tab", async ({ page }) => {
