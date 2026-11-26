@@ -2017,23 +2017,24 @@ pub fn build(input: &ReportInput) -> Report {
             cx.find("native-loader", Level::Warning, format!("The profile's {}.", crate::profile::native_loader_warning(id, *engine, file)));
         }
     }
-    // Kiln hosted ShroudForge in the start its state file is of: that file's pid, when it is the last start's (the
-    // process boot.json names, when there is one). Without a pid the file is of no known start.
     let boot_pid = boot.as_ref().map(|b| u64::from(b.pid));
-    let sf_hosted_pid = engines.iter().filter(|e| e.kind == ModKind::ShroudForge).filter_map(|e| e.state.as_ref())
-        .find(|st| jstr(st.get("mode")).as_deref() == Some("hosted"))
-        .and_then(|st| st.get("pid").and_then(|v| v.as_u64()))
-        .filter(|pid| boot_pid.is_none_or(|b| b == *pid));
-    // ShroudForge's state file: its pid and mode (kiln-eml's handoff names Kiln's ShroudForge unless that start's file
-    // says another mode)
-    let sf_state: Option<(u64, String)> = engines.iter().filter(|e| e.kind == ModKind::ShroudForge).filter_map(|e| e.state.as_ref())
-        .find_map(|st| Some((st.get("pid").and_then(|v| v.as_u64())?, jstr(st.get("mode")).unwrap_or_default())));
-    let sf = sf_state.as_ref().map(|(p, m)| (*p, m.as_str()));
     // the last start's process: kiln.log's last boot (written first: a start that did not get to boot.json, KR-YNQZ),
     // else boot.json's
     let log_pid = tail(&rel(&game, "kiln/logs/kiln.log"), KILN_LOG_MAX).ok().flatten()
         .and_then(|(text, _)| crate::logs::boot_state(&text).pid).map(u64::from);
     let last_pid = log_pid.or(boot_pid);
+    // Kiln hosted ShroudForge in the start its state file is of: that file's pid, when it is the last start's (the
+    // process above, when one is known; boot.json's alone would take a pair of the start before for a later start
+    // that ended before its boot.json). Without a pid the file is of no known start.
+    let sf_hosted_pid = engines.iter().filter(|e| e.kind == ModKind::ShroudForge).filter_map(|e| e.state.as_ref())
+        .find(|st| jstr(st.get("mode")).as_deref() == Some("hosted"))
+        .and_then(|st| st.get("pid").and_then(|v| v.as_u64()))
+        .filter(|pid| last_pid.is_none_or(|b| b == *pid));
+    // ShroudForge's state file: its pid and mode (kiln-eml's handoff names Kiln's ShroudForge unless that start's file
+    // says another mode)
+    let sf_state: Option<(u64, String)> = engines.iter().filter(|e| e.kind == ModKind::ShroudForge).filter_map(|e| e.state.as_ref())
+        .find_map(|st| Some((st.get("pid").and_then(|v| v.as_u64())?, jstr(st.get("mode")).unwrap_or_default())));
+    let sf = sf_state.as_ref().map(|(p, m)| (*p, m.as_str()));
     let handoff = |kind: ModKind, st: &serde_json::Value| eml_handoff(kind, st, sf, sf_hosted_pid, last_pid);
     let _ = writeln!(ls, "Engines:");
     let mut any_engine = false;

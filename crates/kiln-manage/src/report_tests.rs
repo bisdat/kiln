@@ -1425,6 +1425,13 @@ fn state_files_of_another_start_do_not_stand_for_the_last_one() {
     // kiln-eml's file is the last start's: it speaks for it, whatever ShroudForge's file is of
     assert!(last(said(&sf(r#""pid":7,"#), &eml(r#""pid":412,"#))), "ShroudForge's file is older");
     assert!(last(said(&sf(""), &eml(r#""pid":412,"#))), "ShroudForge's file names no pid");
+    // review of KR-YNQZ's fix: a later start (pid 500) is in kiln.log but got to no boot.json (it ended in its early
+    // plugins, as KR-YNQZ's did): the pair of boot.json's start (412) is of the start before, not of the last one
+    f.w("kiln/logs/kiln.log", "[I 11:00:00.000] [kiln] Kiln 0.2.0-dev.22 starting (pid 412)\r\n\
+        [I 11:00:00.100] [kiln] boot complete; handing control to the game\r\n\
+        [I 12:00:00.000] [kiln] Kiln 0.2.0-dev.22 starting (pid 500)\r\n");
+    assert!(other(said(&sf(r#""pid":412,"#), &eml(r#""pid":412,"#)), "an earlier start (pid 412) than the last one (pid 500)"),
+        "boot.json's pair, a later start in kiln.log");
 }
 
 /// Nexus report (11 Nov 2026, The Worst Map Mod): a Greeneye mod says what it found and patched only in its own log and
