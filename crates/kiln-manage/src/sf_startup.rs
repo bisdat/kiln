@@ -139,7 +139,7 @@ pub struct SfStartupFailure {
     /// 0.2.0-dev.31.13). Then nothing was put back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kept_game_files: bool,
-    /// Stale game data (0.2.0-dev.31.next): ShroudForge refused its clean copy of the game data because it is not the
+    /// Stale game data (0.2.0-dev.31.16): ShroudForge refused its clean copy of the game data because it is not the
     /// game's own (Steam's manifest lists other bytes, or it holds a known mod's program), and the game's files could not
     /// be a new one ([`STALE_WORDS`]): the line leads with the plain words and what the player does.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

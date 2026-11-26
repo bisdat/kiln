@@ -165,7 +165,7 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   refused by SF's own settings, left the old pair and no ShroudForge mod ran), and neither SF nor kiln-eml takes a new
   pair from game files that Steam's manifest of the installed build does not list as they are (size and SHA-1, read
   from `<Steam>/depotcache`; refused with "Verify the game files in Steam", the old pair stays; no manifest: the rules
-  below decide as before). Since the stale-game-data patch (0.2.0-dev.31.next) both also ask Steam's manifest about the
+  below decide as before). Since the stale-game-data patch (0.2.0-dev.31.16) both also ask Steam's manifest about the
   pair itself before they build from it or put it back: a pair an earlier start took of game files another loader had
   patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program, weeks after the mod was removed) is whole,
   sealed and built over, and only Steam's word shows it is not the game's own. A pair Steam lists otherwise is retaken

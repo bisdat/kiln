@@ -579,7 +579,7 @@ Each is marked `kiln-eml:` in the source.
     (`create_backup_with`, `restore_backup_as`, `judge`, `Verdict`, `stale_words`, `stale_live_words`, `doubt_words`,
     `set_aside_backups`, `STALE_WORDS`, `KNOWN_LEFTOVERS`), `startup_host.rs` (`known_leftover_refusal`), `ownership.rs`
     (`SF_PREPARED_SCHEMES`), `kiln-eml` `startup.rs` (`witness`: `baseline-stale-data`) (kiln-eml's own code, stale game
-    data, 0.2.0-dev.31.next, and its review): a working baseline that passes every check (its seal, its containers, a
+    data, 0.2.0-dev.31.16, and its review): a working baseline that passes every check (its seal, its containers, a
     live header built over it) is still not the game's own when an earlier start took it of game files another loader
     had patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program). Before kiln-eml builds from the pair
     in EML mode or puts it back, Steam's manifest of the installed build is asked about the backups themselves (in the

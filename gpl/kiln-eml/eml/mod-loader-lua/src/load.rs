@@ -242,7 +242,7 @@ pub fn create_backup_with(
         }
     }
     let mut usable = !retake && bak_path.exists() && validate_backup(path, bak_path);
-    // kiln-eml (stale game data, 0.2.0-dev.31.next): a pair that passes every check above is still not the game's own
+    // kiln-eml (stale game data, 0.2.0-dev.31.16): a pair that passes every check above is still not the game's own
     // when an earlier start took it of game files another loader had patched (HadToRegister, 2026-11-26: Auto Loot
     // Plus's auto-smash program, weeks after the mod was removed). Steam's manifest of the installed build says whether
     // it is Steam's. A pair it lists otherwise is refused only where it is proven to carry a mod's changes; beside game

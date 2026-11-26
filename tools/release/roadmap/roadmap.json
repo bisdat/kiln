@@ -3671,7 +3671,7 @@
       "version": "0.2.0-dev.31.16",
       "status": "next",
       "title": "NPC speech, docked windows, linked-chest building",
-      "summary": "Mods can make NPCs speak and dock their windows together; building and station fills use linked chests; typing in Kiln's search is fixed.",
+      "summary": "Mods can make NPCs speak and dock their windows together; building and station fills use linked chests; removed mods leave nothing behind in your game data.",
       "patch": true,
       "features": [
         {
@@ -3697,6 +3697,11 @@
         {
           "title": "Typing in Kiln's search fixed",
           "text": "Keys another mod sends no longer end up in Kiln's text fields.",
+          "area": "core"
+        },
+        {
+          "title": "No leftovers of removed mods",
+          "text": "Kiln checks its clean copy of the game data against Steam's files, so an uninstalled mod's changes no longer stay in your game.",
           "area": "core"
         }
       ]

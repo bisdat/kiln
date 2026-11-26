@@ -57,7 +57,7 @@ pub fn installed_files(root: &Path, stem: &str) -> Installed {
     compare(root, stem, &files)
 }
 
-/// kiln-eml (stale game data, 0.2.0-dev.31.next): what Steam's manifests say about the working baseline of `stem`,
+/// kiln-eml (stale game data, 0.2.0-dev.31.16): what Steam's manifests say about the working baseline of `stem`,
 /// `<stem>.kfc.bak` and `<stem>.kfc_resources.bak`: whether they are byte for byte the `<stem>.kfc` and
 /// `<stem>.kfc_resources` Steam installed for the installed build. A backup an earlier start took of game files another
 /// loader had already patched is sealed, whole and built over, so nothing but Steam's word tells it from the game's

@@ -45,8 +45,8 @@ whole before either backup gets its name and keeps a set-aside whole pair beside
 game update, when the pass fails"), and on top of it fork branch `kiln-dev31-fast-encode` (`6cb84f34`): a pregame
 pass encodes block-compressed textures on the PC's threads with the serial encode's bytes, and `game.assets.get_content`
 answers a blob created earlier in the same pass (section 5.0, "Textures on every core, and blobs made earlier in the pass").
-The stale-game-data patch (0.2.0-dev.31.next) pins fork branch `kiln-dev31-stale-data` (`26b9fece`, on top of `6cb84f34`)
-with its review's commits on top (`review-stale-data-sf`, fast-forward): a clean copy of the game data goes back without
+The stale-game-data patch (0.2.0-dev.31.16) pins fork branch `kiln-dev31-stale-data` at `a9dc2ad2` (`26b9fece`, on top of
+`6cb84f34`, with its review's commits on top, fast-forward): a clean copy of the game data goes back without
 a word only when Steam's manifest of the installed build lists it byte for byte, and is refused only when it is proven
 to carry a mod's changes (section 5.0, "A clean copy that carries an uninstalled mod's changes").
 
@@ -200,8 +200,8 @@ pair), red before; Linux and native Windows (kiln-win1). kiln-eml `load::kiln_te
 kiln-manage `tests/sf_startup.rs` (2 new), red before; native `run.py` `prepare-fails`. Not run against a real game
 update or a real client.
 
-**A clean copy that carries an uninstalled mod's changes** (fork branch `kiln-dev31-stale-data`, `26b9fece`,
-0.2.0-dev.31.next). HadToRegister (2026-11-25/26) saw props break on their own within 15 m, through walls, with
+**A clean copy that carries an uninstalled mod's changes** (fork branch `kiln-dev31-stale-data`, `26b9fece`
+and its review to `a9dc2ad2`, 0.2.0-dev.31.16). HadToRegister (2026-11-25/26) saw props break on their own within 15 m, through walls, with
 20,000/200,000 damage numbers, for weeks, with Kiln Auto Loot off; Steam's "Verify integrity of game files" ended it.
 The cause was Auto Loot Plus (his first mod, long removed), whose Lua part creates an impact program
 (`a5c0de5a-1e00-4d0d-9a11-0000000a5000`, `autosmash.impact`: every second, `ForEachEntityWithFactionInRange` over
