@@ -5,7 +5,7 @@
   "gameBuild": "1287369",
   "steamBuild": "26430253",
   "verified": true,
-  "proof": "kilnctl regproof (2026-11-25 21:39:18Z): first build (no reflection diff); formulas 10/10; round trip 98/100 fields; ids 0 kept, 24100 added, 0 removed, 0 GUID changes; rows ok 98/100 (2 unproven)",
+  "proof": "kilnctl regproof (2026-11-26 00:03:46Z): first build (no reflection diff); formulas 10/10; round trip 98/100 fields; ids 0 kept, 24100 added, 0 removed, 0 GUID changes; rows ok 98/100 (2 unproven)",
   "regmapDigest": "0e04638e4f3fb9fc8cc9638077b7ed54453b7e91b86659a583fb54cfa338ea19",
   "provenBy": "lab",
   "layouts": {
