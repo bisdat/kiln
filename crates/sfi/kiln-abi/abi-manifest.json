@@ -6938,11 +6938,12 @@
             "choices": 24,
             "crafts": 16,
             "flags": 8,
+            "item": 72,
             "keep": 64,
             "keep_count": 60,
             "player": 56,
             "recipe": 20,
-            "reserved": 72,
+            "reserved": 76,
             "size": 0,
             "station": 12
           },
@@ -7010,6 +7011,7 @@
             "craft_items": 224,
             "events": 160,
             "fill_asks": 240,
+            "fill_flags": 312,
             "header": 0,
             "last_seq": 168,
             "lock_asks": 296,
@@ -7033,7 +7035,7 @@
             "watch": 152,
             "workshop_recipes": 120
           },
-          "size": 312
+          "size": 320
         },
         "KilnStationsStatus": {
           "align": 4,
@@ -7056,7 +7058,7 @@
           "size": 188
         }
       },
-      "sha256": "edc51fafe20ca385c28bc871569913bc13162c3872d2e3606304beb186ad0970"
+      "sha256": "2ea217eacb7fec0d8e59646ea790df403601500835b835d78b9d29f7d398254a"
     },
     "native/core/abi/services/kiln_stations_client.h": {
       "function_macros": [],
@@ -10315,7 +10317,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "c1936deb7e5f55923983c9f4b9b780bd8a42dee1ae919f657e83d600baaa6135",
+    "src/layout.rs": "7e731d3f8a9a6e5bb956dd93f78a2e573a47fdb3335e2648cfaa8b9735e745c8",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10374,7 +10376,7 @@
     "src/services/kiln_skills_client.rs": "77c319c395ef94591f37bfb76a007a25a5b8a3f8f971a9613fb01bf133de21ed",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
     "src/services/kiln_station_menus.rs": "f9755639d612efc6c34785105f36e6798337387dfe8a642b78ca413a1e70cac8",
-    "src/services/kiln_stations.rs": "fd739f6ddec50acd622a5474e32a3e1ea3de0c48f106dcba5f2afc51e511c154",
+    "src/services/kiln_stations.rs": "b689caf7d94c157f434e9bd618b8eb34b32a0371e49eb6142833e3d9dbf272b4",
     "src/services/kiln_stations_client.rs": "de710dc230986c0b606b9594a313660301616c2e4dfde3fdbcd80fbfd6c4eb4b",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",

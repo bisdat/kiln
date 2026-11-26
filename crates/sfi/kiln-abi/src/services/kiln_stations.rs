@@ -42,6 +42,7 @@ pub const KILN_STATION_EV_STATE: i32 = 1;
 pub const KILN_STATION_FILL: i32 = 1;
 pub const KILN_STATION_FILL_ADD: i32 = 1;
 pub const KILN_STATION_FILL_EXACT: i32 = 2;
+pub const KILN_STATION_FILL_ITEM: i32 = 512;
 pub const KILN_STATION_FILL_LINKED: i32 = 256;
 pub const KILN_STATION_FILL_NO_OUTPUTS: i32 = 128;
 pub const KILN_STATION_FLAG_STOP_PENDING: i32 = 1;
@@ -210,7 +211,8 @@ pub struct KilnStationRequest {
     pub player: KilnEntity,
     pub keep_count: u32,
     pub keep: *const KilnStationStack,
-    pub reserved: [u32; 4],
+    pub item: KilnItemId,
+    pub reserved: [u32; 3],
     pub chest_count: u32,
     pub chest_reserved: u32,
     pub chests: *const KilnEntity,
@@ -376,6 +378,7 @@ pub struct KilnStationsApi {
     pub set_lock_stock: Option<unsafe extern "C" fn(u32, *const KilnStationStack, u32) -> KilnResult>,
     pub lock_asks: Option<unsafe extern "C" fn(*mut KilnItemId, u32, *mut u32) -> KilnResult>,
     pub set_build_stock: Option<unsafe extern "C" fn(u32, *const KilnStationStack, u32) -> KilnResult>,
+    pub fill_flags: Option<unsafe extern "C" fn() -> u32>,
 }
 
 #[repr(C)]
