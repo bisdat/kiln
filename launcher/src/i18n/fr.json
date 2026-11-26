@@ -6264,6 +6264,57 @@
     "emptyHint": "Le rapport est présent et valide, mais ne contient aucun champ, conflit, refus ni changement d'entrée.",
     "refused": "Modifications refusées",
     "refusedSub": "Ces modifications n'ont pas été appliquées. RestartRequired demande un redémarrage du jeu ; Unproven demande une correspondance vérifiée dans Kiln.",
+    "restart": "En attente d'un redémarrage",
+    "restartSub": "Un rechargement ou une modification en direct a changé ces modifications du registre après le démarrage du jeu. Elles s'appliquent au prochain démarrage du jeu (ou du serveur) ; d'ici là, le jeu garde les valeurs avec lesquelles il a démarré.",
+    "restartCount": {
+      "one": "{count} modification du registre attend un redémarrage",
+      "other": "{count} modifications du registre attendent un redémarrage"
+    },
+    "restartHint": "Redémarrez le jeu, ou le serveur, pour les appliquer. Chaque raison indique ce que le démarrage a fixé.",
+    "plan": {
+      "title": "Plan du registre",
+      "sub": "Les modifications avec lesquelles le dernier démarrage a tourné, et le dernier bon plan avant lui. Un retour en arrière fait tourner le prochain démarrage sur ce plan ; les sauvegardes ne sont pas touchées.",
+      "rollback": "Revenir en arrière",
+      "clear": "Retirer",
+      "unavailable": "Les plans du registre n'ont pas pu être lus",
+      "current": "Plan du dernier démarrage : {plan}",
+      "previous": "Plan précédent (dernier bon) : {plan}",
+      "none": "aucun",
+      "lastRollback": "Retour en arrière au dernier démarrage : {state} (plan {plan}) {reason}",
+      "noLastRollback": "Retour en arrière au dernier démarrage : aucun",
+      "pending": "Demande de retour en arrière : plan {plan}, demandée {requested} par {by}. Le prochain démarrage tourne sur ce plan.",
+      "noPending": "Demande de retour en arrière : aucune",
+      "dryRun": {
+        "one": "Au prochain démarrage, le plan {plan} rétablit {count} valeur",
+        "other": "Au prochain démarrage, le plan {plan} rétablit {count} valeurs"
+      },
+      "targetMods": "Mods de ce plan : {mods}",
+      "noMods": "aucune modification du registre",
+      "changesUnknown": "Ce qui est rétabli n'est pas connu ici ({why}) ; le démarrage le liste.",
+      "noChanges": "Aucune valeur n'est rétablie : les deux plans donnent les mêmes valeurs.",
+      "change": "{field} : {from} → {to}",
+      "noEdit": "aucune modification du registre",
+      "moreChanges": {
+        "one": "… et {count} de plus (registry.json les liste toutes après le démarrage).",
+        "other": "… et {count} de plus (registry.json les liste toutes après le démarrage)."
+      },
+      "runningKeeps": "Rien ne change dans un jeu ou un serveur en cours d'exécution : il garde le plan avec lequel il a démarré jusqu'à son prochain démarrage.",
+      "refusedWhole": "Rien n'est écrit avant votre confirmation. Le démarrage refuse le plan en entier, et applique les modifications actuelles des mods, quand l'un de ses mods n'est pas chargé dans sa version, qu'une de ses modifications est refusée sur cette version du jeu ou qu'il changerait ce que contiennent les sauvegardes.",
+      "confirmRollback": "Confirmer le retour en arrière",
+      "confirmClear": "Confirmer le retrait",
+      "cancel": "Annuler",
+      "clearTitle": "Retirer la demande de retour en arrière pour le plan {plan}",
+      "clearBody": "Le prochain démarrage tourne de nouveau sur les modifications actuelles du registre des mods.",
+      "failed": "La demande de retour en arrière n'a pas pu être modifiée",
+      "requested": "Demandé : le prochain démarrage tourne sur le plan {plan}, ainsi que chaque démarrage suivant jusqu'à ce que vous la retiriez.",
+      "cleared": "Demande de retour en arrière retirée",
+      "nothingToClear": "Il n'y avait aucune demande de retour en arrière à retirer",
+      "savesUntouched": "Les sauvegardes ne sont pas touchées. Redémarrez le jeu (ou le serveur) pour que cela prenne effet."
+    },
+    "restartOmitted": {
+      "one": "{count} de plus n'est pas affichée ici : state/registry.json les liste toutes.",
+      "other": "{count} de plus ne sont pas affichées ici : state/registry.json les liste toutes."
+    },
     "noRefused": "Aucune modification refusée dans le rapport affiché.",
     "conflicts": "Conflits et dérives",
     "conflictsSub": "Gagnants et autres propriétaires tels qu'enregistrés au moment de l'instantané.",

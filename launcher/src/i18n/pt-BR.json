@@ -6264,6 +6264,57 @@
     "emptyHint": "O relatório existe e é válido, mas não contém campos, conflitos, recusas nem alterações de entradas.",
     "refused": "Alterações recusadas",
     "refusedSub": "Estas alterações não foram aplicadas. RestartRequired exige reiniciar o jogo; Unproven exige um mapeamento verificado no Kiln.",
+    "restart": "Aguarda um reinício",
+    "restartSub": "Um recarregamento ou uma alteração ao vivo mudou estas alterações do registro depois que o jogo iniciou. Elas valem no próximo início do jogo (ou do servidor); até lá o jogo mantém os valores com que iniciou.",
+    "restartCount": {
+      "one": "{count} alteração do registro aguarda um reinício",
+      "other": "{count} alterações do registro aguardam um reinício"
+    },
+    "restartHint": "Reinicie o jogo, ou o servidor, para aplicá-las. Cada motivo diz o que o início fixou.",
+    "plan": {
+      "title": "Plano do registro",
+      "sub": "As alterações com que o último início rodou e o último plano bom antes dele. Uma reversão faz o próximo início rodar nesse plano; os saves não são tocados.",
+      "rollback": "Reverter",
+      "clear": "Remover",
+      "unavailable": "Não foi possível ler os planos do registro",
+      "current": "Plano do último início: {plan}",
+      "previous": "Plano anterior (último bom): {plan}",
+      "none": "nenhum",
+      "lastRollback": "Reversão no último início: {state} (plano {plan}) {reason}",
+      "noLastRollback": "Reversão no último início: nenhuma",
+      "pending": "Pedido de reversão: plano {plan}, pedido {requested} por {by}. O próximo início roda nele.",
+      "noPending": "Pedido de reversão: nenhum",
+      "dryRun": {
+        "one": "No próximo início, o plano {plan} volta {count} valor",
+        "other": "No próximo início, o plano {plan} volta {count} valores"
+      },
+      "targetMods": "Mods desse plano: {mods}",
+      "noMods": "nenhuma alteração do registro",
+      "changesUnknown": "O que volta não é conhecido aqui ({why}); o início lista.",
+      "noChanges": "Nenhum valor volta: os dois planos dão os mesmos valores.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "nenhuma alteração do registro",
+      "moreChanges": {
+        "one": "… e mais {count} (registry.json lista todas depois do início).",
+        "other": "… e mais {count} (registry.json lista todas depois do início)."
+      },
+      "runningKeeps": "Nada muda num jogo ou servidor que está rodando agora: ele mantém o plano com que iniciou até iniciar de novo.",
+      "refusedWhole": "Nada é gravado até você confirmar. O início recusa o plano inteiro, e usa as alterações atuais dos mods, quando um dos mods dele não está carregado na sua versão, uma das alterações dele é recusada nessa versão do jogo ou ele mudaria o que os saves guardam.",
+      "confirmRollback": "Confirmar reversão",
+      "confirmClear": "Confirmar remoção",
+      "cancel": "Cancelar",
+      "clearTitle": "Remover o pedido de reversão para o plano {plan}",
+      "clearBody": "O próximo início volta a rodar nas alterações atuais do registro dos mods.",
+      "failed": "Não foi possível mudar o pedido de reversão",
+      "requested": "Pedido: o próximo início roda no plano {plan}, assim como cada início seguinte até você removê-lo.",
+      "cleared": "Pedido de reversão removido",
+      "nothingToClear": "Não havia pedido de reversão para remover",
+      "savesUntouched": "Os saves não são tocados. Reinicie o jogo (ou o servidor) para que tenha efeito."
+    },
+    "restartOmitted": {
+      "one": "Mais {count} não é mostrada aqui: state/registry.json lista todas.",
+      "other": "Mais {count} não são mostradas aqui: state/registry.json lista todas."
+    },
     "noRefused": "Nenhuma alteração recusada no relatório exibido.",
     "conflicts": "Conflitos e divergências",
     "conflictsSub": "Vencedores e outros donos como registrados no momento do retrato.",

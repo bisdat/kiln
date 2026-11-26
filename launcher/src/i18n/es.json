@@ -6264,6 +6264,57 @@
     "emptyHint": "El informe existe y es válido, pero no contiene campos, conflictos, rechazos ni cambios de entradas.",
     "refused": "Cambios rechazados",
     "refusedSub": "Estos cambios no se aplicaron. RestartRequired necesita reiniciar el juego; Unproven necesita una asignación verificada en Kiln.",
+    "restart": "Espera un reinicio",
+    "restartSub": "Una recarga o un cambio en vivo cambió estos cambios del registro después de iniciarse el juego. Se aplican en el próximo inicio del juego (o del servidor); hasta entonces el juego conserva los valores con los que se inició.",
+    "restartCount": {
+      "one": "{count} cambio del registro espera un reinicio",
+      "other": "{count} cambios del registro esperan un reinicio"
+    },
+    "restartHint": "Reinicia el juego, o el servidor, para aplicarlos. Cada motivo dice qué fijó el inicio.",
+    "plan": {
+      "title": "Plan del registro",
+      "sub": "Los cambios con los que se ejecutó el último inicio y el último plan bueno anterior. Una reversión hace que el próximo inicio use ese plan; las partidas guardadas no se tocan.",
+      "rollback": "Revertir",
+      "clear": "Quitar",
+      "unavailable": "No se pudieron leer los planes del registro",
+      "current": "Plan del último inicio: {plan}",
+      "previous": "Plan anterior (último bueno): {plan}",
+      "none": "ninguno",
+      "lastRollback": "Reversión en el último inicio: {state} (plan {plan}) {reason}",
+      "noLastRollback": "Reversión en el último inicio: ninguna",
+      "pending": "Solicitud de reversión: plan {plan}, solicitada {requested} por {by}. El próximo inicio usa ese plan.",
+      "noPending": "Solicitud de reversión: ninguna",
+      "dryRun": {
+        "one": "En el próximo inicio, el plan {plan} devuelve {count} valor a su estado anterior",
+        "other": "En el próximo inicio, el plan {plan} devuelve {count} valores a su estado anterior"
+      },
+      "targetMods": "Mods de ese plan: {mods}",
+      "noMods": "ningún cambio del registro",
+      "changesUnknown": "Aquí no se sabe qué vuelve atrás ({why}); el inicio lo lista.",
+      "noChanges": "Ningún valor vuelve atrás: los dos planes dan los mismos valores.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "sin cambio del registro",
+      "moreChanges": {
+        "one": "… y {count} más (registry.json los lista todos después del inicio).",
+        "other": "… y {count} más (registry.json los lista todos después del inicio)."
+      },
+      "runningKeeps": "Nada cambia en un juego o servidor que se esté ejecutando ahora: conserva el plan con el que se inició hasta que vuelva a iniciarse.",
+      "refusedWhole": "No se escribe nada hasta que confirmes. El inicio rechaza el plan entero, y usa los cambios actuales de los mods, cuando uno de sus mods no está cargado en su versión, uno de sus cambios se rechaza en esa versión del juego o cambiaría lo que contienen las partidas guardadas.",
+      "confirmRollback": "Confirmar reversión",
+      "confirmClear": "Confirmar quitar",
+      "cancel": "Cancelar",
+      "clearTitle": "Quitar la solicitud de reversión del plan {plan}",
+      "clearBody": "El próximo inicio vuelve a usar los cambios actuales del registro de los mods.",
+      "failed": "No se pudo cambiar la solicitud de reversión",
+      "requested": "Solicitado: el próximo inicio usa el plan {plan}, y cada inicio posterior hasta que la quites.",
+      "cleared": "Solicitud de reversión quitada",
+      "nothingToClear": "No había ninguna solicitud de reversión que quitar",
+      "savesUntouched": "Las partidas guardadas no se tocan. Reinicia el juego (o el servidor) para que surta efecto."
+    },
+    "restartOmitted": {
+      "one": "{count} más no se muestra aquí: state/registry.json los lista todos.",
+      "other": "{count} más no se muestran aquí: state/registry.json los lista todos."
+    },
     "noRefused": "No hay cambios rechazados en el informe mostrado.",
     "conflicts": "Conflictos y derivas",
     "conflictsSub": "Ganadores y otros dueños tal como se registraron al tomar la instantánea.",

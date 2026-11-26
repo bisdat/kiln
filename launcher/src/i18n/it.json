@@ -6264,6 +6264,57 @@
     "emptyHint": "Il rapporto c'è ed è valido, ma non contiene campi, conflitti, rifiuti o modifiche alle voci.",
     "refused": "Modifiche rifiutate",
     "refusedSub": "Queste modifiche non sono state applicate. RestartRequired richiede il riavvio del gioco; Unproven richiede una mappatura verificata in Kiln.",
+    "restart": "In attesa di un riavvio",
+    "restartSub": "Un ricaricamento o una modifica dal vivo ha cambiato queste modifiche del registro dopo l'avvio del gioco. Si applicano al prossimo avvio del gioco (o del server); fino ad allora il gioco mantiene i valori con cui è stato avviato.",
+    "restartCount": {
+      "one": "{count} modifica del registro attende un riavvio",
+      "other": "{count} modifiche del registro attendono un riavvio"
+    },
+    "restartHint": "Riavvia il gioco, o il server, per applicarle. Ogni motivo dice che cosa ha fissato l'avvio.",
+    "plan": {
+      "title": "Piano del registro",
+      "sub": "Le modifiche con cui è partito l'ultimo avvio e l'ultimo piano buono prima di esso. Un ripristino fa partire il prossimo avvio con quel piano; i salvataggi non vengono toccati.",
+      "rollback": "Ripristina",
+      "clear": "Rimuovi",
+      "unavailable": "Non è stato possibile leggere i piani del registro",
+      "current": "Piano dell'ultimo avvio: {plan}",
+      "previous": "Piano precedente (ultimo buono): {plan}",
+      "none": "nessuno",
+      "lastRollback": "Ripristino all'ultimo avvio: {state} (piano {plan}) {reason}",
+      "noLastRollback": "Ripristino all'ultimo avvio: nessuno",
+      "pending": "Richiesta di ripristino: piano {plan}, richiesta {requested} da {by}. Il prossimo avvio parte con esso.",
+      "noPending": "Richiesta di ripristino: nessuna",
+      "dryRun": {
+        "one": "Al prossimo avvio, il piano {plan} riporta indietro {count} valore",
+        "other": "Al prossimo avvio, il piano {plan} riporta indietro {count} valori"
+      },
+      "targetMods": "Mod di quel piano: {mods}",
+      "noMods": "nessuna modifica del registro",
+      "changesUnknown": "Qui non si sa che cosa torna indietro ({why}); l'avvio lo elenca.",
+      "noChanges": "Nessun valore torna indietro: i due piani danno gli stessi valori.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "nessuna modifica del registro",
+      "moreChanges": {
+        "one": "… e {count} in più (registry.json li elenca tutti dopo l'avvio).",
+        "other": "… e {count} in più (registry.json li elenca tutti dopo l'avvio)."
+      },
+      "runningKeeps": "Non cambia nulla in un gioco o server in esecuzione ora: mantiene il piano con cui è stato avviato finché non si riavvia.",
+      "refusedWhole": "Non viene scritto nulla finché non confermi. L'avvio rifiuta il piano per intero, e usa le modifiche attuali delle mod, quando una delle sue mod non è caricata nella sua versione, una delle sue modifiche viene rifiutata su quella versione del gioco o cambierebbe ciò che contengono i salvataggi.",
+      "confirmRollback": "Conferma il ripristino",
+      "confirmClear": "Conferma la rimozione",
+      "cancel": "Annulla",
+      "clearTitle": "Rimuovi la richiesta di ripristino per il piano {plan}",
+      "clearBody": "Il prossimo avvio torna a usare le modifiche attuali del registro delle mod.",
+      "failed": "Non è stato possibile cambiare la richiesta di ripristino",
+      "requested": "Richiesto: il prossimo avvio parte con il piano {plan}, e così ogni avvio successivo finché non la rimuovi.",
+      "cleared": "Richiesta di ripristino rimossa",
+      "nothingToClear": "Non c'era alcuna richiesta di ripristino da rimuovere",
+      "savesUntouched": "I salvataggi non vengono toccati. Riavvia il gioco (o il server) perché abbia effetto."
+    },
+    "restartOmitted": {
+      "one": "{count} in più non è mostrata qui: state/registry.json le elenca tutte.",
+      "other": "{count} in più non sono mostrate qui: state/registry.json le elenca tutte."
+    },
     "noRefused": "Nessuna modifica rifiutata nel rapporto mostrato.",
     "conflicts": "Conflitti e derive",
     "conflictsSub": "Vincitori e altri proprietari come registrati al momento dell'istantanea.",

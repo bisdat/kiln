@@ -6602,6 +6602,53 @@
     "emptyHint": "报告存在且有效，但不含任何字段、冲突、拒绝或条目变更。",
     "refused": "被拒绝的修改",
     "refusedSub": "这些修改未生效。RestartRequired 需要重启游戏；Unproven 需要 Kiln 中经过验证的映射。",
+    "restart": "等待重启",
+    "restartSub": "游戏启动后，一次重新加载或实时修改改变了这些注册表修改。它们在游戏（或服务器）下次启动时生效；在此之前，游戏保留启动时的值。",
+    "restartCount": {
+      "other": "{count} 项注册表修改等待重启"
+    },
+    "restartHint": "重启游戏或服务器即可应用它们。每条原因都说明了启动时确定了什么。",
+    "plan": {
+      "title": "注册表方案",
+      "sub": "上次启动所用的修改，以及在它之前的最后一个正常方案。回滚会让下次启动使用该方案；不会触及存档。",
+      "rollback": "回滚",
+      "clear": "清除",
+      "unavailable": "无法读取注册表方案",
+      "current": "上次启动的方案：{plan}",
+      "previous": "之前（最后正常）的方案：{plan}",
+      "none": "无",
+      "lastRollback": "上次启动时的回滚：{state}（方案 {plan}）{reason}",
+      "noLastRollback": "上次启动时的回滚：无",
+      "pending": "回滚请求：方案 {plan}，由 {by} 于 {requested} 请求。下次启动将使用它。",
+      "noPending": "回滚请求：无",
+      "dryRun": {
+        "other": "下次启动时，方案 {plan} 会改回 {count} 个值"
+      },
+      "targetMods": "该方案的模组：{mods}",
+      "noMods": "完全没有注册表修改",
+      "changesUnknown": "此处不知道哪些值会改回（{why}）；启动时会列出。",
+      "noChanges": "没有值会改回：两个方案得出相同的值。",
+      "change": "{field}：{from} → {to}",
+      "noEdit": "没有注册表修改",
+      "moreChanges": {
+        "other": "……另有 {count} 项（启动后 registry.json 会全部列出）。"
+      },
+      "runningKeeps": "正在运行的游戏或服务器不会有任何变化：在重新启动之前，它保留启动时的方案。",
+      "refusedWhole": "在你确认之前不会写入任何内容。当方案中的某个模组未以其版本加载、它的某项修改在该游戏版本上被拒绝，或它会改变存档中的内容时，启动会整体拒绝该方案，并使用模组当前的修改。",
+      "confirmRollback": "确认回滚",
+      "confirmClear": "确认清除",
+      "cancel": "取消",
+      "clearTitle": "清除对方案 {plan} 的回滚请求",
+      "clearBody": "下次启动将重新使用模组当前的注册表修改。",
+      "failed": "无法更改回滚请求",
+      "requested": "已请求：下次启动将使用方案 {plan}，之后的每次启动也是如此，直到你清除它。",
+      "cleared": "已清除回滚请求",
+      "nothingToClear": "没有可清除的回滚请求",
+      "savesUntouched": "不会触及存档。重启游戏（或服务器）后生效。"
+    },
+    "restartOmitted": {
+      "other": "另有 {count} 项未在此显示：state/registry.json 列出了全部。"
+    },
     "noRefused": "显示的报告中没有被拒绝的修改。",
     "conflicts": "冲突与偏差",
     "conflictsSub": "胜出方和其他来源以快照时的记录为准。",

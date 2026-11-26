@@ -6264,6 +6264,57 @@
     "emptyHint": "Der Bericht ist vorhanden und gültig, enthält aber keine Felder, Konflikte, Ablehnungen oder Eintragsänderungen.",
     "refused": "Abgelehnte Änderungen",
     "refusedSub": "Diese Änderungen wurden nicht angewendet. RestartRequired braucht einen Neustart des Spiels; Unproven braucht eine geprüfte Zuordnung in Kiln.",
+    "restart": "Wartet auf einen Neustart",
+    "restartSub": "Ein Neuladen oder eine Live-Änderung hat diese Registeränderungen nach dem Spielstart geändert. Sie gelten ab dem nächsten Start des Spiels (oder des Servers); bis dahin behält das Spiel die Werte, mit denen es gestartet ist.",
+    "restartCount": {
+      "one": "{count} Registeränderung wartet auf einen Neustart",
+      "other": "{count} Registeränderungen warten auf einen Neustart"
+    },
+    "restartHint": "Starte das Spiel oder den Server neu, um sie anzuwenden. Jeder Grund sagt, was der Start festgelegt hat.",
+    "plan": {
+      "title": "Registerplan",
+      "sub": "Die Änderungen, mit denen der letzte Start lief, und der letzte gute Plan davor. Ein Rollback lässt den nächsten Start mit diesem Plan laufen; Spielstände bleiben unberührt.",
+      "rollback": "Zurückrollen",
+      "clear": "Entfernen",
+      "unavailable": "Die Registerpläne konnten nicht gelesen werden",
+      "current": "Plan des letzten Starts: {plan}",
+      "previous": "Vorheriger (letzter guter) Plan: {plan}",
+      "none": "keiner",
+      "lastRollback": "Rollback beim letzten Start: {state} (Plan {plan}) {reason}",
+      "noLastRollback": "Rollback beim letzten Start: keiner",
+      "pending": "Rollback-Anfrage: Plan {plan}, angefragt {requested} von {by}. Der nächste Start läuft mit ihm.",
+      "noPending": "Rollback-Anfrage: keine",
+      "dryRun": {
+        "one": "Beim nächsten Start setzt Plan {plan} {count} Wert zurück",
+        "other": "Beim nächsten Start setzt Plan {plan} {count} Werte zurück"
+      },
+      "targetMods": "Mods dieses Plans: {mods}",
+      "noMods": "überhaupt keine Registeränderungen",
+      "changesUnknown": "Was zurückgesetzt wird, ist hier nicht bekannt ({why}); der Start listet es auf.",
+      "noChanges": "Kein Wert wird zurückgesetzt: Beide Pläne ergeben dieselben Werte.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "keine Registeränderung",
+      "moreChanges": {
+        "one": "… und {count} weiterer (registry.json listet nach dem Start jeden auf).",
+        "other": "… und {count} weitere (registry.json listet nach dem Start jeden auf)."
+      },
+      "runningKeeps": "In einem Spiel oder Server, der gerade läuft, ändert sich nichts: Er behält den Plan, mit dem er gestartet ist, bis er neu startet.",
+      "refusedWhole": "Nichts wird geschrieben, bevor du bestätigst. Der Start lehnt den Plan als Ganzes ab und verwendet die aktuellen Änderungen der Mods, wenn einer seiner Mods nicht in seiner Version geladen ist, eine seiner Änderungen auf diesem Spiel-Build abgelehnt wird oder er ändern würde, was Spielstände enthalten.",
+      "confirmRollback": "Zurückrollen bestätigen",
+      "confirmClear": "Entfernen bestätigen",
+      "cancel": "Abbrechen",
+      "clearTitle": "Rollback-Anfrage für Plan {plan} entfernen",
+      "clearBody": "Der nächste Start läuft wieder mit den aktuellen Registeränderungen der Mods.",
+      "failed": "Die Rollback-Anfrage konnte nicht geändert werden",
+      "requested": "Angefragt: Der nächste Start läuft mit Plan {plan}, ebenso jeder Start danach, bis du die Anfrage entfernst.",
+      "cleared": "Rollback-Anfrage entfernt",
+      "nothingToClear": "Es gab keine Rollback-Anfrage zum Entfernen",
+      "savesUntouched": "Spielstände bleiben unberührt. Starte das Spiel (oder den Server) neu, damit es wirkt."
+    },
+    "restartOmitted": {
+      "one": "{count} weitere wird hier nicht angezeigt: state/registry.json listet jede auf.",
+      "other": "{count} weitere werden hier nicht angezeigt: state/registry.json listet jede auf."
+    },
     "noRefused": "Keine abgelehnten Änderungen im angezeigten Bericht.",
     "conflicts": "Konflikte und Abweichungen",
     "conflictsSub": "Gewinner und andere Besitzer wie zum Zeitpunkt des Snapshots festgehalten.",
