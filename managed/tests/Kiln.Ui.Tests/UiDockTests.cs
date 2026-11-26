@@ -904,6 +904,35 @@ public sealed unsafe class UiDockTests : IDisposable
     }
 
     [Fact]
+    public void A_remembering_window_undocked_by_its_mod_keeps_the_player_s_own_place_with_no_dock_left_anywhere()
+    {
+        Spells(remember: true);
+        var book = Grimoire(remember: true);
+        Frame();
+        Drag(book, 1500, 800);
+        Frame();
+        Release(book);
+        Frame();
+        UiPlacements.Flush();
+        var own = UiPlacements.Get("grimoire", true, "grimoire")!.Value;
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();  // beside Better Spells: a place from the dock
+        book.Undock();  // no dock left on any open window
+        Frame();
+        Frame();
+        UiPlacements.Flush();
+        var kept = UiPlacements.Get("grimoire", true, "grimoire")!.Value;
+        Assert.Equal(own.X, kept.X, 4);
+        Assert.Equal(own.Y, kept.Y, 4);
+        Drag(book, 900, 100);  // the player places it alone: that is remembered
+        Frame();
+        Release(book);
+        Frame();
+        UiPlacements.Flush();
+        Assert.Equal((900 + 120f) / 1920, UiPlacements.Get("grimoire", true, "grimoire")!.Value.X, 4);
+    }
+
+    [Fact]
     public void A_remembering_docked_window_still_remembers_its_size()
     {
         Spells();

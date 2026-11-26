@@ -353,13 +353,7 @@ internal sealed class UiDockFrame
         var f = new UiDockFrame(vp, ++UiDocking.FrameNo);
         // no open window has or had a dock: drawn as before, in their order (kiln.ui is asked only about a window whose
         // place came from a dock, to know when the player or the mod gives it its own again)
-        if (open.All(w => w.Dock.Current == null && SnapOf(w) == null))
-        {
-            foreach (var w in open)
-                if (w.Dock.Placed) Track(new Node(w, live(w), false, w.Placer.Opens, null));
-            f._order.AddRange(open);
-            return f;
-        }
+        var fast = open.All(w => w.Dock.Current == null && SnapOf(w) == null);
         foreach (var w in open)
         {
             var st = w.Dock;
@@ -368,7 +362,14 @@ internal sealed class UiDockFrame
             // (the frame count alone misses that: no frame runs Kiln.Ui's windows while none is open)
             var appearing = st.DrawnFrame != f._frame - 1 || st.DrawnOpens != opens;
             if (appearing) st.WasMoving = false;
-            f._nodes[w] = new Node(w, live(w), appearing, opens, st.Current);
+            f._nodes[w] = new Node(w, fast && !st.Placed ? default : live(w), appearing, opens, fast ? null : st.Current);
+        }
+        if (fast)
+        {
+            foreach (var w in open)
+                if (w.Dock.Placed) Track(f._nodes[w]);
+            f._order.AddRange(open);
+            return f;
         }
         var nodes = open.Select(w => f._nodes[w]).ToArray();
         var scale = vp.SafeScale;
