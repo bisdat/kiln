@@ -112,6 +112,10 @@ using BaseAtFn = BaseHit*(__fastcall*)(BaseHit* out, void* bases, const float* p
 //                        u32 station, u16 crafts, u32 waterCharges, u32 player)
 using FillFn = int32_t(__fastcall*)(void* tx, const void* stock, const void* inputs, uint32_t station, uint16_t crafts,
                                     uint32_t water_charges, uint32_t player);
+// AutoTransferItem(tx, {u32* ids, count}* stock, item, station, u16 amount, player): the station screen's per-ingredient
+// transfer (S 0x198bf0, C 0x3f7950; docs/re/stations.md section 10.9). 0 moved, 4 short, 2 no room.
+using ItemFillFn = int32_t(__fastcall*)(void* tx, const void* stock, uint32_t item, uint32_t station, uint16_t amount,
+                                        uint32_t player);
 // ResolveRecipeInputs(recipe, DynamicArray<RecipeItemStack 24 B>* out, const RecipeInputCategorySelections*, RecipeRegistry*)
 using ResolveFn = void(__fastcall*)(const void* recipe, void* out, const void* selections, void* recipes);
 using InvalidateFn = void(__fastcall*)(void* factory_info, uint32_t station);
@@ -131,6 +135,7 @@ using PayFn = PayOut*(__fastcall*)(PayOut* out, void* tx, uint32_t entity, uint3
 struct Game {
     BaseAtFn base_at = nullptr;
     FillFn fill = nullptr;
+    ItemFillFn fill_item = nullptr;  // GitHub #132 (0.2.0-dev.31.15)
     ResolveFn resolve = nullptr;
     InvalidateFn invalidate = nullptr;
     SpeedFn speed = nullptr;
@@ -148,6 +153,7 @@ struct Game {
     int64_t recipe_duration = 0, recipe_water = 0;
     bool registered_ok = false;
     bool read = false, fill_ok = false, control = false, events = false, outputs_ok = false, craft_ok = false;
+    bool fill_items_ok = false;  // stations.fill_items: the per-ingredient transfer (KILN_STATION_FILL_ITEM)
 };
 // The station a CraftRecipe call is paying for, set by kiln.gameplay's craft hook for the duration of that call
 // (same thread). 0: the hook is not in this call.
@@ -2049,6 +2055,50 @@ void plan_tick(const KilnStationRequest& r, const KilnEntity* chest_ids, uint32_
     finish_plan(r, p);
 }
 
+// GitHub #132 (0.2.0-dev.31.15): the plan of an item fill (KILN_STATION_FILL_ITEM): the station's pile, the bag and the
+// Magic chests of the station's base (the game's own call), the player's fill-opted links; one input {item, 1}.
+void plan_item_tick(const KilnStationRequest& r, PlanOut* p) {
+    FsBytes fs{};
+    if (!factory_of(r.station, &fs)) return say(p, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+    KilnVec3 pos{};
+    RawBases rb{};
+    if (!position_of(r.station, &pos) || !read_bases(&rb)) return say(p, KILN_STATION_NO_BASE, "the bases cannot be read");
+    p->base = base_index_at(rb.sys, pos);
+    if (p->base < 0) return say(p, KILN_STATION_NO_BASE, "station %u stands in no base", r.station);
+    std::unordered_map<uint32_t, uint64_t> have, stock, bag;
+    count_items(r.station, &have);
+    std::vector<KilnEntity> list;
+    if (base_list(rb, static_cast<uint32_t>(p->base), false, &list))
+        for (KilnEntity c : list) count_items(c, &stock);
+    if (r.player) count_items(r.player, &bag);
+    LinkUse links;
+    const bool linked = fill_links_wanted(r);
+    if (linked) {
+        std::unordered_set<uint32_t> skip{r.station};
+        skip.insert(list.begin(), list.end());
+        links = links_for(craft_sources_copy(r.player), &CraftSource::fills, r.player, {r.item}, skip,
+                          [&](uint32_t pl, uint32_t c) { return source_access(rb.sys, pl, c); },
+                          [&](uint32_t c, uint32_t item) -> uint64_t {
+                              std::unordered_map<uint32_t, uint64_t> held;
+                              count_items(c, &held);
+                              const auto n = held.find(item);
+                              return n == held.end() ? 0 : n->second;
+                          });
+    }
+    const InputNow x = item_fill_input(r.item, have[r.item], stock[r.item] + bag[r.item], links.before_of(r.item), links.after_of(r.item));
+    const ItemFill f = item_fill_plan(r.flags, r.crafts, x);
+    p->in.push_back(x);
+    p->loaded = f.math.loaded;
+    p->affordable = f.math.affordable;
+    p->wanted = f.math.wanted;
+    p->planned = f.math.planned;
+    p->limit = f.math.limit;
+    p->status = f.math.status;
+    if (p->status != KILN_STATION_DONE)
+        std::snprintf(p->why, sizeof p->why, "the bag, the base's Magic chests%s hold %u of item 0x%08x", linked ? " and the fill-opted links" : "",
+                      p->affordable, r.item);
+}
+
 // ================================================================================ the program ====
 
 const char* const kSingRead[5] = {"BalancingRegistry", "g38_items::ItemRegistry", "impact::AttributeRegistry",
@@ -2516,6 +2566,157 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     finish(res, KILN_STATION_REFUSED, "the game's fill refused it (code %u)", static_cast<uint32_t>(at.code));
 }
 
+// ---- GitHub #132 (0.2.0-dev.31.15): the per-ingredient transfer (KILN_STATION_FILL_ITEM, docs/re/stations.md §10.9) ----
+// The game's own AutoTransferItem, as the press runs it (player_crafting's AutomaticTransfer with an item), once per
+// layer inside one transaction: each link group's share from that group's containers with player 0, then the rest from
+// the station's base list A with the player (the bag first). Any code rolls everything back. One kiln.log line per
+// outcome (g_log_item).
+struct ItemFillCall {
+    void* tx;
+    const uint64_t* stock;  // {u32* ids, count, ...}
+    uint32_t item, station, amount, player;
+    int32_t rc;
+};
+void item_fill_call_impl(void* p) {
+    auto* f = static_cast<ItemFillCall*>(p);
+    f->rc = G.fill_item(f->tx, f->stock, f->item, f->station, static_cast<uint16_t>(f->amount), f->player);
+}
+LogLimit g_log_item{16};
+
+void run_item_fill(const Run& run, const Req& q, KilnStationResult* res) {
+    const KilnStationRequest& r = q.r;
+    if (!G.fill_items_ok) return finish(res, KILN_STATION_UNAVAILABLE, "stations.fill_items is off on this build");
+    const uint8_t* fsp = other(run, run.acc_factory, r.station, static_cast<uint64_t>(G.fs_size));
+    if (!fsp) return finish(res, KILN_STATION_NOT_A_STATION, "entity %u has no FactoryStation", r.station);
+    res->state_before = res->state_after = fsp[kFsState];
+    res->stopped_before = res->stopped_after = fsp[G.fs_stopped];
+    res->recipe = 0;
+    const uint8_t* tr = other(run, run.acc_transform, r.station, 24);
+    if (!tr) return finish(res, KILN_STATION_NOT_A_STATION, "station %u has no position", r.station);
+    float pos[3];
+    for (int k = 0; k < 3; ++k) pos[k] = static_cast<float>(static_cast<double>(rd<int64_t>(tr, 8 * k)) * (1.0 / 4294967296.0));
+    const int32_t base = base_index_at(run.bases, KilnVec3{pos[0], pos[1], pos[2]});
+    if (base < 0) return finish(res, KILN_STATION_NO_BASE, "station %u stands in no base", r.station);
+    uint64_t stock[4] = {};  // the base's list A, as BaseStockForPlayer hands it to the game's handler
+    {
+        const auto* sb = static_cast<const uint8_t*>(run.bases);
+        const int64_t off = static_cast<int64_t>(base) * G.stride;
+        stock[0] = rd<uint64_t>(sb, G.stock_items + off);
+        stock[1] = rd<uint64_t>(sb, G.stock_items_count + off);
+    }
+    std::unordered_map<uint32_t, uint64_t> have, stocked, bag;
+    count_pages(run.a, r.station, &have);
+    std::vector<KilnEntity> magic;
+    for (uint64_t i = 0; i < stock[1] && stock[0]; ++i) {
+        magic.push_back(reinterpret_cast<const uint32_t*>(stock[0])[i]);
+        count_pages(run.a, magic.back(), &stocked);
+    }
+    if (r.player) count_pages(run.a, r.player, &bag);
+    // the player's fill-opted links, revalidated here as the recipe fill revalidates them (run_fill)
+    LinkUse links;
+    const bool linked = fill_links_wanted(r);
+    if (linked) {
+        std::unordered_set<uint32_t> skip{r.station};
+        skip.insert(magic.begin(), magic.end());
+        links = links_for(craft_sources_copy(r.player), &CraftSource::fills, r.player, {r.item}, skip,
+                          [&](uint32_t pl, uint32_t c) {
+                              if (!source_access(run.bases, pl, c)) return false;
+                              PageSet pages{};
+                              bool init = false;
+                              uint8_t flags = 0;
+                              return read_pages(run.a, c, &pages, &init) && init && setup_flags(run.a, c, &flags) && !setup_is_person(flags);
+                          },
+                          [&](uint32_t c, uint32_t item) -> uint64_t {
+                              std::unordered_map<uint32_t, uint64_t> held;
+                              count_pages(run.a, c, &held);
+                              const auto n = held.find(item);
+                              return n == held.end() ? 0 : n->second;
+                          });
+    }
+    const uint64_t before_n = have[r.item];
+    const ItemFill f = item_fill_plan(r.flags, r.crafts, item_fill_input(r.item, before_n, stocked[r.item] + bag[r.item],
+                                                                         links.before_of(r.item), links.after_of(r.item)));
+    res->crafts_requested = r.crafts;
+    res->crafts_before = res->crafts_after = static_cast<uint32_t>(std::min<uint64_t>(before_n, UINT32_MAX));
+    const auto say_line = [&](const char* text) {
+        if (const uint32_t n = g_log_item.take()) LOGI("%s%s", text, n > 1 ? " (more held back)" : "");
+    };
+    if (f.math.status != KILN_STATION_DONE) {
+        res->limited_by = KILN_STATION_LIMIT_STOCK;
+        res->short_item = r.item;
+        say_line(item_fill_text(f, r.item, r.crafts, r.station, r.player).c_str());
+        char why[128];
+        std::snprintf(why, sizeof why, "the bag, the base's Magic chests%s hold %u of item 0x%08x", linked ? " and the fill-opted links" : "",
+                      f.math.affordable, r.item);
+        return finish_text(res, KILN_STATION_NOT_ENOUGH, why);
+    }
+    const bool dry = (r.flags & KILN_STATION_DRY_RUN) != 0;
+    alignas(16) uint8_t setup[kSetupBlock];
+    setup_for_fill(run, r.player, pos, setup);
+    char fault[128] = "";
+    unsigned long code = 0;
+    E.tx_ctor(g_tx);
+    E.tx_init(g_tx, setup);
+    auto call = [&](const uint64_t* from, uint32_t amount, KilnEntity pl) -> int32_t {
+        ItemFillCall c{g_tx, from, r.item, r.station, amount, pl, -1};
+        // the game's function owns nothing of ours: a fault leaves the transaction to roll back
+        if (!guard(&item_fill_call_impl, &c, &code)) {
+            abandon_tx(g_tx);
+            std::snprintf(fault, sizeof fault, "the game faulted (0x%08lx) in its item transfer into station %u", code, r.station);
+            return kAttemptFault;
+        }
+        return c.rc;
+    };
+    int32_t rc0 = 0;
+    const auto take_links = [&](uint32_t share, const std::unordered_map<uint32_t, std::vector<uint32_t>>& by) {
+        if (!share || rc0 != 0) return;
+        const auto it = by.find(r.item);
+        if (it == by.end() || it->second.empty()) {
+            rc0 = 4;
+            return;
+        }
+        const uint64_t from[4] = {reinterpret_cast<uint64_t>(it->second.data()), it->second.size(), 0, 0};
+        rc0 = call(from, share, 0);
+    };
+    take_links(f.linked, links.before);
+    take_links(f.linked_after, links.after);
+    if (rc0 == 0 && f.game) rc0 = call(stock, f.game, r.player);
+    if (rc0 == kAttemptFault) {
+        switch_off(fault);
+        return finish_text(res, KILN_STATION_UNAVAILABLE, fault);
+    }
+    if (rc0 != 0) {
+        E.rollback(g_tx);
+        E.free_arrays(g_tx);
+        res->game_error = rc0;
+        char line[320];
+        std::snprintf(line, sizeof line, "stations: player %u's transfer of %u x item 0x%08x into station %u: the game refused it (code %d): nothing moved",
+                      r.player, r.crafts, r.item, r.station, rc0);
+        say_line(line);
+        if (rc0 == 2) {
+            res->limited_by = KILN_STATION_LIMIT_ROOM;
+            return finish(res, KILN_STATION_NO_ROOM, "the station has no room for %u of item 0x%08x (the game's code 2)", r.crafts, r.item);
+        }
+        if (rc0 == 4) {
+            res->limited_by = KILN_STATION_LIMIT_STOCK;
+            res->short_item = r.item;
+            return finish(res, KILN_STATION_NOT_ENOUGH, "a source paid less than it was counted to hold (the game's code 4): nothing moved");
+        }
+        return finish(res, KILN_STATION_REFUSED, "the game's item transfer refused it (code %u)", static_cast<uint32_t>(rc0));
+    }
+    res->change_count = 0;
+    ledger(g_tx, res);
+    if (dry) E.rollback(g_tx);
+    else E.commit(g_tx);
+    E.free_arrays(g_tx);
+    res->from_linked = f.linked + f.linked_after;
+    res->crafts_added = f.math.planned;
+    res->crafts_after = static_cast<uint32_t>(std::min<uint64_t>(before_n + f.math.planned, UINT32_MAX));
+    if (!dry && G.invalidate && run.factory_info) G.invalidate(run.factory_info, r.station);
+    if (!dry) say_line(item_fill_text(f, r.item, r.crafts, r.station, r.player).c_str());
+    res->status = KILN_STATION_DONE;
+}
+
 // ---- STOP / RESUME / SELECT inside the program ----
 uint8_t* write_factory(const Run& run, KilnEntity e) {
     uint32_t size = 0;
@@ -2828,7 +3029,8 @@ struct ActCall {
 };
 void act_impl(void* p) {
     auto* a = static_cast<ActCall*>(p);
-    if (a->q->r.action == KILN_STATION_FILL) run_fill(*a->run, *a->q, a->res);
+    if (a->q->r.action == KILN_STATION_FILL && (a->q->r.flags & KILN_STATION_FILL_ITEM)) run_item_fill(*a->run, *a->q, a->res);
+    else if (a->q->r.action == KILN_STATION_FILL) run_fill(*a->run, *a->q, a->res);
     else if (a->q->r.action == KILN_STATION_COLLECT) run_collect(*a->run, *a->q, a->res);
     else run_control(*a->run, *a->q, a->res, &a->keep_waiting);
 }
@@ -3543,6 +3745,7 @@ KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
     constexpr uint32_t kPlanLinked = static_cast<uint32_t>(offsetof(KilnStationPlan, linked));  // a caller before 31.12
     if (!r || !out || out->size < kPlanV1) return KILN_ERR_INVALID_ARGUMENT;
     if (r->action != KILN_STATION_FILL || !request_valid(*r)) return KILN_ERR_INVALID_ARGUMENT;
+    if ((r->flags & KILN_STATION_FILL_ITEM) && (!G.fill_items_ok || g_off.load())) return KILN_ERR_UNAVAILABLE;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     const uint32_t size = out->size;
     const bool with_outputs = size >= kPlanChests;
@@ -3555,7 +3758,8 @@ KilnResult KILN_CALL t_plan(const KilnStationRequest* r, KilnStationPlan* out) {
     out->station = r->station;
     PlanOut p;
     const bool named = r->size >= sizeof(KilnStationRequest);
-    plan_tick(*r, named ? r->chests : nullptr, named ? r->chest_count : 0, &p);
+    if (r->flags & KILN_STATION_FILL_ITEM) plan_item_tick(*r, &p);
+    else plan_tick(*r, named ? r->chests : nullptr, named ? r->chest_count : 0, &p);
     out->status = p.status;
     out->recipe = p.recipe;
     out->base_index = p.base;
@@ -3599,6 +3803,7 @@ KilnResult KILN_CALL t_submit(KilnOwner owner, const KilnStationRequest* r, Kiln
     };
     const bool fill = r->action == KILN_STATION_FILL;
     if (g_off.load() || (fill ? !G.fill_ok : !G.control)) return refuse(fill ? "stations.fill is off" : "stations.control is off");
+    if (fill && (r->flags & KILN_STATION_FILL_ITEM) && !G.fill_items_ok) return refuse("stations.fill_items is off");
     const int state = g_state.load();
     if (!g_w || !g_tx || state == KILN_ITEMS_PROGRAM_NONE || state == KILN_ITEMS_PROGRAM_BROKEN)
         return refuse("the program kiln_items_stations is not registered or broke");
@@ -4311,8 +4516,10 @@ KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStati
         void* const bases = singleton("PlayerBasesSystemServer");
         if (!bases) return KILN_ERR_UNAVAILABLE;
         const bool building = (flags & KILN_CRAFT_SOURCE_STOCK_BUILDING) != 0;
+        // both leave out the Magic chests of the player's base: the bag and they pay first and are counted apart (FILLS
+        // since 0.2.0-dev.31.15, for the station screen's per-ingredient rows)
         const auto rows = link_rows(bases, player, craft_sources_copy(player), building ? &CraftSource::building : &CraftSource::fills,
-                                    building ? player_base_chests(player) : std::unordered_set<uint32_t>{});
+                                    player_base_chests(player));
         *out_count = static_cast<uint32_t>(rows.size());
         if (capacity < rows.size()) return KILN_ERR_BUFFER_TOO_SMALL;
         if (!rows.empty()) std::memcpy(out, rows.data(), rows.size() * sizeof rows[0]);
@@ -4856,6 +5063,15 @@ KilnResult KILN_CALL t_set_build_stock(uint32_t on, const KilnStationStack* rows
     return KILN_OK;
 }
 
+// GitHub #132 (0.2.0-dev.31.15): the FILL flags this build takes (the managed side asks before it names FILL_ITEM).
+uint32_t KILN_CALL t_fill_flags() {
+    if (!G.fill_ok || g_off.load()) return 0;
+    uint32_t f = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER | KILN_STATION_FILL_NO_OUTPUTS;
+    if (G.registered_ok) f |= KILN_STATION_FILL_LINKED;
+    if (G.fill_items_ok) f |= KILN_STATION_FILL_ITEM;
+    return f;
+}
+
 const KilnStationsApi kTable = {
     {sizeof(KilnStationsApi), KILN_STATIONS_VERSION},
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
@@ -4864,6 +5080,7 @@ const KilnStationsApi kTable = {
     &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock, &dyes_set_stock,
     &t_set_lock_stock, &t_lock_asks,
     &t_set_build_stock,  // GitHub #132 (0.2.0-dev.31.12), after #147's members
+    &t_fill_flags,       // GitHub #132 (0.2.0-dev.31.15)
 };
 
 bool sym(const char* name, uintptr_t* out) {
@@ -5302,6 +5519,11 @@ void stations_resolve() {
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
     G.control = G.read && feat("stations.control") && (G.invalidate || sym("stations/FactoryInfoInvalidate", &G.invalidate));
+    // GitHub #132 (0.2.0-dev.31.15): the per-ingredient transfer's own function, pinned by sigdb at the press's call
+    // (@stations/AutoTransferAction.item: tx, list A, item, station, u16 amount, player)
+    G.fill_items_ok = G.fill_ok && feat("stations.fill_items") && sym("stations/AutoTransferItem", &G.fill_item);
+    if (!G.fill_items_ok && G.fill_ok && feat("stations.fill_items"))
+        lower("stations.fill_items", KILN_CAP_REASON_SYMBOL_MISSING, "the game's item transfer did not resolve on this build");
     {  // the per-item take of AutoTransferRecipe and its 24-byte input stacks (item +0x10, count +0x14), checked on this build
         int64_t stack_item = 0, stack_size = 0;
         G.outputs_ok = G.fill_ok && feat("stations.output_sources") && cst("stations/stack.item", &stack_item) &&
@@ -5341,9 +5563,9 @@ void stations_resolve() {
         set_detail(why);
         if (feat("stations.read")) lower("stations.read", KILN_CAP_REASON_SYMBOL_MISSING, why);
     }
-    LOGI("stations: reads %s, fill %s, control %s, events %s, output sources %s, craft sources %s (need kiln.world for the program)",
+    LOGI("stations: reads %s, fill %s, control %s, events %s, output sources %s, craft sources %s, item fills %s (need kiln.world for the program)",
          G.read ? "on" : "OFF", G.fill_ok ? "on" : "OFF", G.control ? "on" : "OFF", G.events ? "on" : "OFF",
-         G.outputs_ok ? "on" : "OFF", G.craft_ok ? "on" : "OFF");
+         G.outputs_ok ? "on" : "OFF", G.craft_ok ? "on" : "OFF", G.fill_items_ok ? "on" : "OFF");
 }
 
 void stations_register(const KilnWorldApi* w) {
@@ -5361,7 +5583,7 @@ void stations_register(const KilnWorldApi* w) {
     if (!G.read) return;
     if (!w || w->header.size < sizeof(KilnWorldApi)) {
         lower("stations.read", KILN_CAP_REASON_SERVICE_MISSING, "kiln.stations needs kiln.world (entity reads and its program)");
-        G.read = G.fill_ok = G.control = G.events = false;
+        G.read = G.fill_ok = G.control = G.events = G.fill_items_ok = false;
         return;
     }
     g_w = w;
@@ -5369,7 +5591,7 @@ void stations_register(const KilnWorldApi* w) {
     g_tx = static_cast<uint8_t*>(VirtualAlloc(nullptr, static_cast<SIZE_T>(E.tx_size), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     if (!g_tx) {
         set_detail("no memory for the stations' transaction");
-        G.fill_ok = G.control = false;
+        G.fill_ok = G.control = G.fill_items_ok = false;
         return;
     }
     std::vector<KilnStr> sr, sw, orr, ow, eo;
@@ -5395,7 +5617,7 @@ void stations_register(const KilnWorldApi* w) {
     if (w->register_program(items_owner(), &d, &g_prog) != KILN_OK) {
         lower("stations.fill", KILN_CAP_REASON_FAULTED, "kiln.world refused the program kiln_items_stations (see kiln.log)");
         lower("stations.control", KILN_CAP_REASON_FAULTED, "kiln.world refused the program kiln_items_stations (see kiln.log)");
-        G.fill_ok = G.control = false;
+        G.fill_ok = G.control = G.fill_items_ok = false;
         return;
     }
     g_state.store(KILN_ITEMS_PROGRAM_PENDING);
