@@ -55,6 +55,10 @@ struct BaseModel {
         std::string removed_in;  // not empty: the alias ledger says this game build removed it
         // Internal flattened stack ranges, one per drop group. Never part of schema fields or author-facing values.
         std::vector<std::pair<size_t, size_t>> drop_groups;
+        // The archive-writer packages that wrote or created this entry's resource before Kiln, in the order they ran
+        // ("shroudforge:<id>", "eml:<id>"; archive_journal.h). Each touched field of the entry gets one ArchiveWriter row
+        // per package at the bottom of its chain, valued at the base (the archive's bytes are the base, D1).
+        std::vector<std::string> archive;
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again

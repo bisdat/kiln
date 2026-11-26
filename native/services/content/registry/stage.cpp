@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.content registry stage: the stage runner (stage.h).
 #include "stage.h"
+#include "archive_journal.h"
 #include "unmapped.h"
 
 #include <algorithm>
@@ -356,6 +357,24 @@ struct Runner::Impl {
     ReportMeta meta;
     std::vector<BootResource> boot;
     std::map<std::string, uint64_t> edits_by_mod;
+    // the archive writer's change journal, read once per start (archive_journal.h)
+    std::optional<ArchiveJournal> journal;
+    // Names the journal's packages on base's entries (ids: the model's id table) and records it for registry.json's base.
+    void name_archive(BaseModel* base, const std::map<std::string, std::string>& ids) {
+        if (!journal) {
+            journal.emplace();
+            std::string generation, why;
+            const std::optional<std::string> text = env.archive_journal ? env.archive_journal(&generation, &why) : std::nullopt;
+            if (text) *journal = parse_archive_journal(*text, generation);
+            else journal->text = why.empty() ? "this start's archive writer keeps no change journal: what it changed is part of the base and not named" : why;
+            if (journal->state == "stale" || journal->state == "unreadable") log(1, "registry: " + journal->text);
+        }
+        const size_t named = name_archive_writers(*journal, ids, base);
+        meta.base.journal = {journal->state, journal->text, journal->packages.size(), named, journal->truncated};
+        if (journal->state == "read")
+            log(0, "registry: " + journal->text + "; " + std::to_string(named) + (named == 1 ? " entry" : " entries") +
+                       " of the registries name their archive-writer packages");
+    }
 
     void log(int level, const std::string& line) {
         if (env.log) env.log(level, line);
@@ -861,6 +880,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
             if (d.env.write_data && want_all) d.env.write_data(ids_rel, m->id_table_json().dump());
             if (need.raw.empty()) write_base_cache(d.env, family, *src, *inventory, base, d.ids, d.nums, d.decoded);
         }
+        d.name_archive(&base, d.ids);
         if (old_fn) old = old_fn(*m);
         for (const std::string& n : m->take_notes()) d.log(0, "registry: " + n);
     }
@@ -950,6 +970,7 @@ bool Runner::prepare_live(LiveData* out, std::string* why) {
                     data.decoded = model.decoded();
                     write_base_cache(d.env, family, source, inventory, data.base, data.ids, data.nums, data.decoded);
                 }
+                d.name_archive(&data.base, data.ids);
                 data.old = d.lazy_old ? d.lazy_old(model) : d.old;
                 data.result = compose(d.schema, data.base, data.old, d.inputs);
                 data.result.refused.insert(data.result.refused.begin(), d.outside.begin(), d.outside.end());

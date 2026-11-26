@@ -409,12 +409,69 @@ void other_mapping_report(const std::string& dir) {
     check(rep["regmap"]["verified"] == false && rep["regmap"]["record"].is_string(), "registry.json: a record of another mapping is not verified");
 }
 
+// kiln-eml's change journal of this start names the package that wrote the plank before Kiln (archive_journal.h): its row
+// lies below the registry edits, named, and the conflict line says the registry edit wins (D1); a journal of another
+// generation names nobody and registry.json says why; without one, base.journal says this start has none.
+void archive_journal_writers(const std::string& dir) {
+    auto journal = [](const std::string& generation) {
+        return json{{"format", 1}, {"stem", "enshrouded_server"}, {"generation", generation}, {"receiptSha256", std::string(64, 'b')},
+                    {"dialect", "shroudforge"}, {"attempt", "first"}, {"truncated", false},
+                    {"packages", json::array({{{"id", "betterstacks"}, {"version", "1.0.0"}, {"kind", "shroudforge"},
+                                               {"contentSha256", std::string(64, '1')}, {"settingsSha256", std::string(64, '2')}, {"truncated", false},
+                                               {"changed", json::array({{{"guid", g(2)}, {"typeHash", "8c3dbe3d"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                               {"created", json::array()}, {"contents", json::array()}}})},
+                    {"unattributed", {{"truncated", false}, {"changed", json::array()}, {"created", json::array()}, {"contents", json::array()}}}}
+            .dump();
+    };
+    const std::string live = std::string(64, 'a');
+    for (const std::string& written : {live, std::string(64, 'c'), std::string()}) {
+        TreeView view = world();
+        Files files;
+        stage::Env e = env_of(&view, &files, dir, &sections);
+        e.writer = "kiln-eml";
+        if (!written.empty())
+            e.archive_journal = [&](std::string* generation, std::string*) -> std::optional<std::string> { return *generation = live, journal(written); };
+        stage::Runner r(std::move(e));
+        const auto docs = old_patch();
+        const auto boot = r.run([&](model::Model& m) { return boothook::old_writes(docs, m); });
+        r.finish({{boot.at(0).fields.at(0).field, true, Value::integer(60), ""}});
+        const json rep = json::parse(files.report);
+        const json* plank = nullptr;
+        for (const json& f : rep["fields"])
+            if (f["id"] == "game:plank" && f["field"] == "maxStack") plank = &f;
+        check(plank != nullptr, "the plank's maxStack row");
+        bool line = false;
+        for (const json& c : rep["conflicts"])
+            line = line || (c["loser"] == "shroudforge:betterstacks" && c["certainty"] == "named" &&
+                            c["text"].get<std::string>().find("betterstacks (ShroudForge package) wrote this entry") != std::string::npos);
+        if (written == live) {
+            check(rep["base"]["journal"]["state"] == "read" && rep["base"]["journal"]["entries"] == 1, "base.journal: read, one entry named: " + rep["base"].dump());
+            check((*plank)["writers"][0]["kind"] == "archiveWriter" && (*plank)["writers"][0]["who"] == "shroudforge:betterstacks" &&
+                      (*plank)["writers"][0]["certainty"] == "named" && (*plank)["writers"][0]["value"] == 20 && (*plank)["result"] == 160,
+                  "the package is the plank's first writer, named, at the base value; the registry's x4 x2 still give 160: " + plank->dump());
+            check(line, "a conflict line names the package and says the registry edit wins: " + rep["conflicts"].dump());
+            bool other = false;
+            for (const json& f : rep["fields"])
+                for (const json& w : f["writers"]) other = other || (f["id"] != "game:plank" && w["kind"] == "archiveWriter");
+            check(!other, "no other entry names the package");
+        } else {
+            check((*plank)["writers"][0]["kind"] == "registry" && !line, "no package is named");
+            const std::string state = rep["base"]["journal"]["state"];
+            check(written.empty() ? state == "none" : state == "stale", "base.journal says why nothing is named: " + rep["base"].dump());
+            bool warned = false;
+            for (const std::string& l : files.log) warned = warned || (l.rfind("1 ", 0) == 0 && l.find("another generation") != std::string::npos);
+            check(written.empty() || warned, "a stale journal is a warning in kiln.log");
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
-        {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }}};
+        {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
+        {"archive_journal_writers", [&] { archive_journal_writers(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

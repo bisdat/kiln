@@ -74,4 +74,19 @@ struct Registered {
 } const kRegistered;  // when kiln-content.dll loads
 
 }  // namespace
+
+// The registry stage's journal check (registry/archive_journal.h): the generation kiln-eml published for this kiln-backend
+// launch (its identity's archive_sha256, the startup outcome's archiveSha256), lower-case hex. false + *why: none.
+bool eml_live_generation(std::string* hex, std::string* why) {
+    kiln::boot_view::LaunchFacts launch;
+    if (!kiln_mode(&launch)) return *why = "only a start with Kiln's interpreter for ShroudForge mods (kiln mode) keeps a change journal", false;
+    KilnEmlArchiveIdentityV1 id{};
+    id.size = sizeof id;
+    if (published_identity(launch, &id, why) != KILN_OK) return false;
+    static const char* digits = "0123456789abcdef";
+    hex->clear();
+    for (uint8_t b : id.archive_sha256) hex->push_back(digits[b >> 4]), hex->push_back(digits[b & 15]);
+    return true;
+}
+
 }  // namespace kc

@@ -36,6 +36,10 @@
 #include "stage.h"
 #include "stage_owner.h"
 
+namespace kc {
+bool eml_live_generation(std::string* hex, std::string* why);  // gamedata_bootview_eml.cpp
+}
+
 namespace kc::registry::stage {
 
 namespace {
@@ -158,6 +162,23 @@ std::string writer_of() {
     return st.backend == KILN_LAUNCH_BACKEND_KILN ? "kiln-eml" : "none";
 }
 
+// kiln-eml's change journal of this start (archive_journal.h): <kiln>/eml/ownership/<exe stem>.change-journal.json, read
+// and closed at once (an open handle can make the next kiln-mode start fail to remove it), at most 32 MiB.
+std::optional<std::string> archive_journal(std::string* generation, std::string* why) {
+    if (!eml_live_generation(generation, why)) return std::nullopt;
+    wchar_t exe[MAX_PATH * 2] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(std::size(exe)));
+    if (n == 0 || n >= std::size(exe)) return *why = "the game's file name is not known", std::nullopt;
+    const fs::path file = u8(api_path(KILN_PATH_KILN)) / u8"eml" / u8"ownership" / (fs::path(exe).stem().wstring() + L".change-journal.json");
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec))
+        return *why = "kiln-eml wrote no change journal for this start (kiln/eml/ownership): its packages are not named", std::nullopt;
+    if (fs::file_size(file, ec) > 32u * 1024 * 1024 || ec) return *why = "kiln-eml's change journal is larger than 32 MiB: not read", std::nullopt;
+    auto text = read_whole(file);
+    if (!text) *why = "kiln-eml's change journal could not be read";
+    return text;
+}
+
 Env make_env() {
     Env e;
     KilnBuildInfo bi{};
@@ -178,6 +199,7 @@ Env make_env() {
     e.pid = GetCurrentProcessId();
     e.now = &utc_now;
     e.writer = writer_of();
+    e.archive_journal = &archive_journal;
     e.source = [](std::string* why) -> std::unique_ptr<model::Source> {
         kiln::boot_view::LiveView& v = live_view();
         v.restart(); // each owned source is a new read generation; the prior stage/ledger source may be released

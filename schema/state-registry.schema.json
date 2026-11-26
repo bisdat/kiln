@@ -129,6 +129,19 @@
         "token": {
           "type": "string",
           "description": "The archive writer's publication token, when it has one."
+        },
+        "journal": {
+          "type": "object",
+          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json, written by a kiln-mode start): read when it is this start's and its packages are named on the entries they wrote (writer rows of kind archiveWriter, certainty named); none when this start has none (hosted or installed ShroudForge, kiln-eml's EML dialect and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a format-1 journal. Since 0.2.0-dev.31.14.",
+          "required": ["state", "packages", "entries", "truncated"],
+          "properties": {
+            "state": { "enum": ["read", "none", "stale", "unreadable"] },
+            "packages": { "type": "integer", "minimum": 0, "description": "The packages the journal lists (0 unless read)." },
+            "entries": { "type": "integer", "minimum": 0, "description": "The registry entries of this start's base it named." },
+            "truncated": { "type": "boolean", "description": "The journal left entries out past its bounds: a package may have written entries it does not name." },
+            "text": { "type": "string", "description": "One English sentence: what was read, or why nothing is named." }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -493,7 +506,7 @@
             "registry",
             "check"
           ],
-          "description": "archiveWriter: a ShroudForge or EML package's pregame value (named from the archive writer's journal); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed)."
+          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed)."
         },
         "mod": {
           "type": "string",
@@ -501,7 +514,7 @@
         },
         "who": {
           "type": "string",
-          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\"."
+          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\", \"eml:<package>\" (an EML package of the kiln-mode startup pass), \"kiln-eml:unattributed\" (a startup write no package made)."
         },
         "stage": {
           "enum": [

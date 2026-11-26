@@ -68,6 +68,10 @@ struct Env {
     uint32_t pid = 0;
     std::string kiln_version, side, exe_sha256;
     std::string writer = "none";  // the archive writer of this start (kiln-eml, shroudforge-hosted, external, none)
+    // The archive writer's change journal (archive_journal.h): its text and the generation this start's archive writer
+    // published (lower-case hex). nullopt + *why: this start has none (why says which loader path keeps none). Asked once,
+    // when the stage reads its base; unset: no journal.
+    std::function<std::optional<std::string>(std::string* generation, std::string* why)> archive_journal;
 };
 
 // The boot back-end's part of one resource: the registry rows of each boot-routed field, evaluated over the value the old
