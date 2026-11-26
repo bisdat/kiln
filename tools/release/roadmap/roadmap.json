@@ -1,6 +1,20 @@
 {
   "released": [
     {
+      "version": "0.2.0-dev.31.15",
+      "date": "2026-11-25",
+      "title": "Lock prompts count linked chests",
+      "summary": "A lock's \"Required\" line turns green when a linked chest holds the item.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Lock prompts count linked chests",
+          "text": "A lock's \"Required: Lockpick\" line turns green when a linked chest has the pick, on a hosted world and on a Kiln server.",
+          "area": "core"
+        }
+      ]
+    },
+    {
       "version": "0.2.0-dev.31.14",
       "date": "2026-11-25",
       "title": "Kilnwarden's web panel and a font-cache fix",
@@ -3654,22 +3668,8 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.31.15",
-      "status": "next",
-      "title": "Lock prompts count linked chests",
-      "summary": "A lock's \"Required\" line turns green when a linked chest holds the item.",
-      "patch": true,
-      "features": [
-        {
-          "title": "Lock prompts count linked chests",
-          "text": "A lock's \"Required: Lockpick\" line turns green when a linked chest has the pick, on a hosted world and on a Kiln server.",
-          "area": "core"
-        }
-      ]
-    },
-    {
       "version": "0.2.0-dev.32",
-      "status": "planned",
+      "status": "next",
       "title": "Pets, taming and more registries",
       "summary": "Pets that follow and fight for their owner, taming, and Kiln registries for creatures, spells, buffs, perks, stations, world rules and skills.",
       "features": [
