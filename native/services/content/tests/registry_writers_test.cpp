@@ -525,6 +525,17 @@ int main(int argc, char** argv) {
             json over = json::array();
             for (int i = 0; i <= 16384; ++i) over.push_back("recipes[" + std::to_string(i) + "]");
             CHECK(parse_archive_journal(bravo_recipes(over).dump(), live).state == "unreadable", "more paths than the format writes: unreadable");
+            // one GUID listed twice (another part): its paths together, so an element is still named by them
+            json twice = bravo_recipes({"recipes[2]"});
+            json row = {{"guid", recipes}, {"typeHash", "00000001"}, {"part", 1}, {"createdBy", nullptr}, {"paths", {"recipes[0].craftingDuration"}}};
+            twice["packages"][1]["changed"].push_back(row);
+            BaseModel b3 = fresh();
+            const ArchiveJournal j3 = parse_archive_journal(twice.dump(), live);
+            name_archive_writers(j3, eids, {"items", "balance"}, &b3, &af);
+            CHECK(j3.state == "read" && b3.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b3.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b3.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && b3.registries["recipes"][2].archive_fields.empty(),
+                  "a GUID listed twice: the elements its paths name are named: " + j3.state + " " + j3.text);
         }
     }
     // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----

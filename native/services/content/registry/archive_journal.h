@@ -58,8 +58,8 @@ struct ArchiveJournal {
     struct Package {
         std::string id, version, kind;  // kind "shroudforge" | "eml"
         std::vector<std::string> changed, created;  // resource GUIDs, lower case, as the game prints them
-        // format 2: the member paths written in each changed resource (GUID -> paths, sorted; "" the whole resource).
-        // A GUID without paths (format 1, or listed twice with other type hashes or parts) is named whole.
+        // format 2: the member paths written in each changed resource (GUID -> paths, sorted; "" the whole resource; a
+        // GUID listed with several type hashes or parts: all their paths). A GUID without paths (format 1) is named whole.
         std::map<std::string, std::vector<std::string>> paths;
         bool truncated = false;
     };

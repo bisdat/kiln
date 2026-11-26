@@ -61,7 +61,7 @@ bool changes_of(const json& c, ArchiveJournal::Package* p, int format, std::stri
     if (!c.is_object()) return *why = "a package is not an object", false;
     if (c.contains("truncated") && c["truncated"].is_boolean()) p->truncated = c["truncated"].get<bool>();
     const std::string who = p->id.empty() ? "the unattributed bucket" : p->id;
-    std::set<std::string> seen, twice;
+    std::set<std::string> seen;
     for (const char* list : {"changed", "created"}) {
         if (!c.contains(list) || !c[list].is_array()) return *why = std::string("a package has no \"") + list + "\" list", false;
         const bool changed = std::string(list) == "changed";
@@ -77,16 +77,19 @@ bool changes_of(const json& c, ArchiveJournal::Package* p, int format, std::stri
                     if (!x.is_string() || !member_path(x.get<std::string>())) return *why = "a member path of " + who + " is not one the format writes", false;
                     paths.push_back(x.get<std::string>());
                 }
-                // one GUID with other type hashes or parts: a resource Kiln does not tell apart, named whole
-                if (p->paths.count(g)) twice.insert(g);
-                else p->paths[g] = std::move(paths);
+                // one GUID with other type hashes or parts (resources Kiln does not tell apart by GUID): their paths
+                // together, so what any of them names is named
+                auto& all = p->paths[g];
+                all.insert(all.end(), paths.begin(), paths.end());
             }
             if (seen.insert(std::string(list) + g).second) out.push_back(std::move(g));
         }
     }
-    for (const std::string& g : twice) p->paths.erase(g);
-    for (auto& [g, paths] : p->paths)
-        if (std::find(paths.begin(), paths.end(), std::string()) != paths.end()) paths = {std::string()};
+    for (auto& [g, paths] : p->paths) {
+        std::sort(paths.begin(), paths.end());
+        paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+        if (!paths.empty() && paths.front().empty()) paths = {std::string()};
+    }
     return true;
 }
 
