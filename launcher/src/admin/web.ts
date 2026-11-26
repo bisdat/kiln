@@ -1,4 +1,4 @@
-// @kiln/admin-ui: the launcher's admin pages for hosts outside the Tauri app (Kiln Web Admin). The same pages, hooks
+// @kiln/admin-ui: the launcher's admin pages for hosts outside the Tauri app (Kilnwarden). The same pages, hooks
 // and hub as the launcher's server pages; KAP/1 reaches Kiln.Admin through the transport the host configures, here the
 // WebSocket one (KAP/1 frames as JSON over a signed-in socket). Docs: docs/kiln/launcher/admin-pages.md, "The
 // @kiln/admin-ui package"; the socket's protocol: admin-protocol.md section 12.

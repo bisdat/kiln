@@ -170,7 +170,7 @@ The process then exits with a code that says so; restarting gives the same stop,
 
 ### Restarts from an admin tool
 
-Since 0.2.0-dev.30.9 an admin tool (Kiln Web Admin, through Kiln.Admin's `server_restart`) can restart the server: a
+Since 0.2.0-dev.30.9 an admin tool (Kilnwarden, through Kiln.Admin's `server_restart`) can restart the server: a
 countdown in chat, a save, then the same stop as Ctrl-C. Whether the server comes back depends on what runs it:
 - **kilnctl's systemd unit** (`kiln@.service`): yes. `kilnctl run` exits 75 after such a stop, and the unit restarts the
   server 15 s later. A unit of your own needs `RestartForceExitStatus=75` for that, and `SuccessExitStatus=75` so it is
@@ -359,7 +359,7 @@ anything it overwrites.
 
 ### Staged updates (0.2.0-dev.30.9)
 
-An admin tool can also stage a mod or Kiln update while the server is running. Kiln Web Admin does this through
+An admin tool can also stage a mod or Kiln update while the server is running. Kilnwarden does this through
 Kiln.Admin. The update is applied at the next start, before anything loads it:
 - **Kiln** is applied by `dinput8.dll` before it loads `kiln/kiln-core.dll`.
 - **Mods** (`kiln/mods/<folder>`) are applied by Kiln before it reads any mod.

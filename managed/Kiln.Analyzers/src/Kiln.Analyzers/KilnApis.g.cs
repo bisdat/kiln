@@ -920,6 +920,7 @@ internal static partial class KilnApis
         "P:Kiln.Content.StackGuard=kiln.content", // returns false first when the table of kiln.content is null
         "P:Kiln.CreatureControl.Available=kiln.creature_control", // CreatureControlNative.T != null: Services.Get("kiln.creature_control")
         "P:Kiln.Creatures.Available=kiln.creatures", // CreaturesNative.T != null: Services.Get("kiln.creatures")
+        "P:Kiln.Crosshair.Available=client.crosshair,kiln.client.crosshair", // CrosshairNative.Members != null: Services.Get("kiln.client.crosshair"); Is("client.crosshair")
         "P:Kiln.EcsPrograms.Available=kiln.world", // Table != null: Services.Get("kiln.world")
         "P:Kiln.EcsPrograms.SupportsOtherWrites=kiln.world", // Table != null: Services.Get("kiln.world")
         "P:Kiln.EntityData.Available=kiln.saves,kiln.spawn", // via Kiln.Saves.Available; via Kiln.SpawnLink.Available
@@ -945,6 +946,7 @@ internal static partial class KilnApis
         "P:Kiln.Knowledge.Available=kiln.knowledge", // KnowledgeNative.T != null: Services.Get("kiln.knowledge")
         "P:Kiln.MarkersLab.Available=kiln.markers.lab", // T != null: Services.Get("kiln.markers.lab")
         "P:Kiln.NoClip.Available=rules.noclip", // Is("rules.noclip")
+        "P:Kiln.PadInput.Available=kiln.ui.input", // returns false first when the table of kiln.ui.input is null
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
         "P:Kiln.PlayerCharacters.Available=kiln.characters", // T != null: Services.Get("kiln.characters")
         "P:Kiln.PlayerStates.Available=kiln.playerstate", // returns false first when the table of kiln.playerstate is null

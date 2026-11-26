@@ -364,7 +364,7 @@ pub fn bootstrap_page(target: &str) -> (String, String) {
         c => c.to_string(),
     }).collect();
     let html = format!(
-        "<!doctype html><html lang=en><meta charset=utf-8><meta name=referrer content=no-referrer><title>Kiln Web Admin</title>\
+        "<!doctype html><html lang=en><meta charset=utf-8><meta name=referrer content=no-referrer><title>Web panel</title>\
          <script>{script}</script><noscript><meta http-equiv=refresh content=\"0;url={attr}\"></noscript>\
          <p style=\"font:16px system-ui\">Opening the web panel…</p></html>"
     );
@@ -444,7 +444,7 @@ pub fn not_local(addr: SocketAddr) -> Error {
     Error::new(
         ErrorCode::Unsupported,
         format!(
-            "Kiln Web Admin listens on {addr}, which is another machine. The launcher opens a panel only on this machine or \
+            "The web panel listens on {addr}, which is another machine. The launcher opens a panel only on this machine or \
              through SSH, so the browser's connection is the one it checked: add the server as a remote (SSH) server, or open \
              https://{addr} yourself and sign in with a password."
         ),
