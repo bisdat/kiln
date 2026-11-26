@@ -39,6 +39,7 @@ pub mod kiln_markers_lab;
 pub mod kiln_mod_values;
 pub mod kiln_net;
 pub mod kiln_npcai;
+pub mod kiln_npcspeech;
 pub mod kiln_pacing;
 pub mod kiln_playeranim;
 pub mod kiln_players;

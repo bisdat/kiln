@@ -5012,6 +5012,40 @@
       },
       "sha256": "01f0be1033aab372218b7867f525906d0dd494c079bea39ca6799c2ca5464c33"
     },
+    "native/core/abi/services/kiln_npcspeech.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnNpcSpeechApi": {
+          "align": 8,
+          "fields": {
+            "clear_all": 32,
+            "header": 0,
+            "say": 16,
+            "set": 8,
+            "status": 40,
+            "text": 24
+          },
+          "size": 48
+        },
+        "KilnNpcSpeechStatus": {
+          "align": 8,
+          "fields": {
+            "bubbles": 24,
+            "changed": 32,
+            "installed": 8,
+            "muted": 40,
+            "overrides": 12,
+            "resolved": 4,
+            "says": 16,
+            "size": 0,
+            "texts": 20
+          },
+          "size": 48
+        }
+      },
+      "sha256": "7c10859b1e3ca5e4dc288a1fe3431c7af165a5d6dbf159255a9b671b29321ab9"
+    },
     "native/core/abi/services/kiln_pacing.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -10315,7 +10349,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "c1936deb7e5f55923983c9f4b9b780bd8a42dee1ae919f657e83d600baaa6135",
+    "src/layout.rs": "ef27464a0052ae1940d6b12f6f1507b6eda79e0b0344ab3817362f6cc216a367",
     "src/services/kiln_abilities.rs": "a24dff6123db80e30ed1b2e33f87c772a40982ec3ce379347ca96bb81579f6cb",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10355,6 +10389,7 @@
     "src/services/kiln_mod_values.rs": "b8ffa4c778b215cf6b6a9137e8b1ec0925ccdc0a9b23a916c352d9aeee00af90",
     "src/services/kiln_net.rs": "a80d9ff754549a78c03fdc6423f97a582bacbcc11a114ce68a75ecefd873b9ca",
     "src/services/kiln_npcai.rs": "479ad37b5babfc928b3cbb617ca391a623f64a11f3e4f8cf24e42e8a9241cdfa",
+    "src/services/kiln_npcspeech.rs": "57cba882ba80ce3202d1582b2cc736c4e4f18d52dc15f49c345b9125353e0536",
     "src/services/kiln_pacing.rs": "2cc1f9c6c389216b999d3cccf105d3fb348c7605400e76858ec40628e40c04b3",
     "src/services/kiln_playeranim.rs": "6c643167c2d27d84553f2756f7942b58194c8552574e1724980b54b1d7fd5dd8",
     "src/services/kiln_players.rs": "dc3f63ebf4167a06131ce27f55bfc771f00a802eca21fe04ae2541bc5f76a5cd",
@@ -10400,7 +10435,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "e937c553198937325a60e4b2efaa80b62371af0a8c13bfa594c68bde09119a83"
+    "src/services/mod.rs": "ff80f65ba3f1bbe1a2c97ad75826ecabb47456dfc87cdeda348ddfafa42bc7ec"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
