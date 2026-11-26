@@ -338,7 +338,27 @@ internal static class BlockJson
 internal static class BlocksStartup
 {
     private static readonly HashSet<string> Done = new();
+    // The load whose data files Done holds, per mod (its owner: Kiln.Host makes one per load; 0 = not known). A reload,
+    // or an unload and a load between two passes, keeps the id; a new owner says the files are the new load's to compile.
+    private static readonly Dictionary<string, ulong> DoneLoads = new(StringComparer.Ordinal);
     private static IDisposable? _tick, _reloads;
+
+    private static ulong LoadOf(ModEntry m) => m.Info is { } info ? ModContext.FindLive(info)?.Owner ?? 0 : 0;
+
+    // The mod is loaded again: its data files compile again at the next pass, and what its earlier load compiled goes.
+    private static void LoadedAgain(string id)
+    {
+        Done.Remove(id);
+        DoneLoads.Remove(id);
+        var mod = Blocks.AllMods.FirstOrDefault(m => m.Id == id);
+        // A new OnLoad that defined blocks already reset/read its data (DataLoaded is still false).
+        // Otherwise this is the previous lifetime, even if unload and reload fell between data passes.
+        if (mod != null && (!mod.OwnedByMod || mod.DataLoaded))
+        {
+            Reskins.Unloaded(id);
+            BlockJson.Unloaded(mod);
+        }
+    }
     private static readonly object Gate = new();
 
     static BlocksStartup() => Touch();
@@ -356,26 +376,22 @@ internal static class BlocksStartup
         if (dir.Length > 0) BlockJson.Read(mod, dir);
     }
 
+    /// <summary>A loaded mod: an unload and a load since the last pass (no ModReloadedEvent) compile this load's files, not
+    /// the last one's.</summary>
+    internal static void FollowLoad(ModEntry m)
+    {
+        if (Done.Contains(m.Id) && DoneLoads.TryGetValue(m.Id, out var was) && was != 0 && LoadOf(m) is var load && load != 0 && load != was)
+            LoadedAgain(m.Id);
+    }
+
     private static void OnTick(ulong step)
     {
         if (step % 10 != 3) return;
         // from the service's own tick, so that the subscription is the service's: a mod's would end with the mod
         _reloads ??= Events.On<ModReloadedEvent>(e =>
         {
-            void Reloaded(string id)
-            {
-                Done.Remove(id);
-                var mod = Blocks.AllMods.FirstOrDefault(m => m.Id == id);
-                // A new OnLoad that defined blocks already reset/read its data (DataLoaded is still false).
-                // Otherwise this is the previous lifetime, even if unload and reload fell between data passes.
-                if (mod != null && (!mod.OwnedByMod || mod.DataLoaded))
-                {
-                    Reskins.Unloaded(id);
-                    BlockJson.Unloaded(mod);
-                }
-            }
-            Reloaded(e.Id);
-            foreach (var dependent in e.Cascade) Reloaded(dependent);
+            LoadedAgain(e.Id);
+            foreach (var dependent in e.Cascade) LoadedAgain(dependent);
         });
         BlockRuntime.WriteReports();
         BlockRuntime.SubscribeSignals();
@@ -386,11 +402,16 @@ internal static class BlocksStartup
         // An unloaded mod's data files compile again when it is loaded again (a reload clears it through ModReloadedEvent), and its material
         // replacements go (Vfx/Reskins.cs).
         foreach (var m in Mods.All)
-            if (m.IsLoaded) NpcBodies.ModLoaded(m.Id);
+            if (m.IsLoaded)
+            {
+                NpcBodies.ModLoaded(m.Id);
+                FollowLoad(m);
+            }
             else if (m.State != ModState.Pending)
             {
                 NpcBodies.ModUnloaded(m.Id);  // a Ready body stays until the process ends: RemovalPendingRestart
                 Done.Remove(m.Id);
+                DoneLoads.Remove(m.Id);
                 Reskins.Unloaded(m.Id);
                 var old = Blocks.AllMods.FirstOrDefault(b => b.Id == m.Id);
                 if (old != null && (old.DataLoaded || old.Data != null || old.OwnedByMod)) BlockJson.Unloaded(old);
@@ -446,6 +467,7 @@ internal static class BlocksStartup
             {
                 if (!Due(m)) continue;
                 Done.Add(m.Id);
+                DoneLoads[m.Id] = LoadOf(m);
                 var mod = Blocks.ModFor(m.Id, () => BlocksBridge.ServiceOwner($"blocks:{m.Id}"));
                 if (mod.Owner == 0) mod.Owner = BlocksBridge.ServiceOwner($"blocks:{m.Id}");
                 var n = BlockJson.LoadMod(mod, m.Directory, (section, name) => Report($"{m.Id}: {section} {name}"));

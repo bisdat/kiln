@@ -1,13 +1,28 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "ItemDetail text/value capture for Kiln windows (#120); reuses the measured item-view and tooltip seams. Capture is scoped to the existing ItemDetail hook.",
-  "symbols": {},
+  "comment": "ItemDetail text/value capture for Kiln windows (#120); reuses the measured item-view and tooltip seams. Capture is scoped to the existing ItemDetail hook. The capture's text hook is a mid hook below ui/NativeTextLine's entry (ui/NativeTextLineBody, since 0.2.0-dev.31.13).",
+  "symbols": {
+    "ui/NativeTextLineBody": {
+      "comment": "kiln-core's item-detail capture (services/ui_item_detail.cpp) hooks here: ui/NativeTextLine's first instruction after its prologue, xor edx,edx (entry + 0x1c): rbx (and still rdx) the text, rcx the line object. Not the entry: Building Tools (0.34.0) finds ui/NativeTextLine by its first 28 bytes (UiBeginText, which its menu draws with), so Kiln's patch stays below them (docs/kiln/engines/README.md). Client 0xb1da2c",
+      "find": [
+        {
+          "scope": {
+            "symbol": "ui/NativeTextLine",
+            "size": 64
+          },
+          "pattern": "48 83 EC 50 48 8B DA 41 0F B6 F9 33 D2 49 8B F0 4C 8B F1 E8",
+          "offset": 11
+        }
+      ]
+    }
+  },
   "features": {
     "ui.item_detail": {
       "symbols": [
         "ui/ItemDetail",
         "ui/NativeTextLine",
+        "ui/NativeTextLineBody",
         "ui/DetailStatsBlockCall",
         "ui/DetailAfterStats",
         "ui/StatValueDraw"

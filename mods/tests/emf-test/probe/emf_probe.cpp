@@ -265,21 +265,46 @@ void v40_checks(EmfWorld* w) {
     check(!A->on_hit_before([](EmfWorld*, EmfHit*, void*) { ++g_v40_callbacks; }, nullptr) && A->hit_rule_add(&rule) == 0 &&
               !A->hit_rule_remove(1),
           "hits: on_hit_before, hit_rule_add, hit_rule_remove answer false / 0");
+    // buffs are carried since 0.2.0-dev.31.13: the server world's types, an entity's buffs; gives and removals of a type
+    // the game does not have (and gives with an item) are refused at once, without a callback; a dedicated server has
+    // no texts
     EmfBuffType bt{};
-    EmfBuff bf{};
+    EmfBuff bf[40]{};
     auto buff_cb = [](EmfWorld*, const EmfBuffEvent*, void*) { ++g_v40_callbacks; };
+    const uint32_t types = A->buff_types(w, nullptr, 0);
+    EmfBuffType first{};
+    const bool listed = types > 0 && A->buff_types(w, &first, 1) == types && A->buff_type(w, first.id, &bt) && bt.id == first.id &&
+                        bt.size == sizeof bt && bt.slot <= EMF_BUFF_TERRAIN;
+    check(listed && !A->buff_type(w, 0x6b656d00u, &bt), "buffs: buff_types lists the game's types, buff_type finds one");
     dirty();
-    check(A->buff_types(w, &bt, 1) == 0 && !A->buff_type(w, 1, &bt) && !A->buff_text(1, 0, buf, sizeof buf) && buf[0] == 0 &&
-              A->buffs_of(w, 1, &bf, 1) == 0 && !A->buff_apply(w, 1, 2, 0, 0, 0, buff_cb, nullptr) &&
-              !A->buff_remove(w, 1, 2, buff_cb, nullptr) && !A->on_buff(buff_cb, nullptr),
-          "buffs: the seven functions answer false / 0");
+    check(!A->buff_text(first.id, 0, buf, sizeof buf) && buf[0] == 0, "buffs: buff_text is false on a dedicated server");
+    check(A->buffs_of(w, 1, bf, 40) <= 40, "buffs: buffs_of answers on the server world");
+    check(!A->buff_apply(w, 1, 0x6b656d00u, 0, 0, 0, buff_cb, nullptr) && !A->buff_remove(w, 1, 0x6b656d00u, buff_cb, nullptr) &&
+              !A->buff_apply(w, 1, first.id, 0, 0, 7, buff_cb, nullptr) && !A->buff_apply(w, 1, first.id, -1, 0, 0, buff_cb, nullptr),
+          "buffs: an unknown type, an item and a negative duration are refused at once");
+    check(A->on_buff([](EmfWorld*, const EmfBuffEvent*, void*) {}, nullptr) && !A->on_buff(nullptr, nullptr),
+          "buffs: on_buff takes a callback and refuses none");
+    // markers since 0.2.0-dev.31.13 (kiln.markers): a dedicated server draws nothing of its own, it sends
     EmfMarker mk{};
     mk.size = sizeof mk;
     mk.id = "probe";
+    mk.x = 100;
+    mk.y = 50;
+    mk.z = 100;
+    mk.text = "EMF probe";
+    mk.flags = EMF_MARKER_WORLD | EMF_MARKER_EDGE_ARROW;
     EmfMapMarkerType mt{};
-    check(!A->marker_set(&mk) && !A->marker_remove("probe") && A->marker_clear() == 0 && A->marker_types(&mt, 1) == 0 &&
-              A->marker_send(0, &mk, 1) == 0 && A->marker_unsend(0, "probe") == 0,
-          "markers: the six functions answer false / 0");
+    check(!A->marker_set(&mk) && !A->marker_remove("probe") && A->marker_clear() == 0,
+          "markers: marker_set, marker_remove, marker_clear answer false / 0 on a dedicated server (it draws nothing)");
+    const uint32_t map_types = A->marker_types(&mt, 1);
+    check(map_types == 0 || (mt.size == sizeof mt && mt.id != 0), "markers: marker_types answers the catalog's map types or 0",
+          std::to_string(map_types));
+    const uint32_t reached = A->marker_send(0, &mk, 1);
+    check(reached <= 32, "markers: marker_send to every player answers how many Kiln players it reached", std::to_string(reached));
+    EmfMarker badid = mk;
+    badid.id = "bad id";
+    check(A->marker_send(0, &badid, 1) == 0 && A->marker_unsend(0, "bad id") == 0, "markers: a bad id is refused (0)");
+    check(A->marker_unsend(0, "probe") <= 32 && A->marker_unsend(0, "probe") == 0, "markers: marker_unsend takes it off every game, once");
     double mx = 7, mz = 9;
     check(!A->map_cursor(&mx, &mz) && mx == 7 && mz == 9 && !A->on_map_click([](const EmfMapClick*, void*) { ++g_v40_callbacks; }, nullptr) &&
               !A->map_action("probe", "Probe", 0, [](EmfWorld*, const EmfMapDone*, void*) { ++g_v40_callbacks; }, nullptr) &&
@@ -294,7 +319,7 @@ void v40_checks(EmfWorld* w) {
     EmfCanvasCmd cmd{};
     check(!A->player_view(&view) && !A->fog_at(0, 0, &explored) && explored == 4 && A->map_markers(&gm, 1) == 0 &&
               !A->canvas_set("probe", &canvas) && !A->canvas_draw("probe", &cmd, 1),
-          "minimap parts: player_view, fog_at, map_markers, canvas_set, canvas_draw answer false / 0");
+          "minimap parts: player_view (no player on a dedicated server), fog_at, map_markers, canvas_set, canvas_draw answer false / 0");
     EmfRemoveBuilding rb{};
     rb.size = sizeof rb;
     rb.entity = F.villager;
@@ -326,7 +351,8 @@ void v40_checks(EmfWorld* w) {
     check(A->enemy_order(w, &eo) == 0 && eo.why[0] != 0 && !A->enemy_order_cancel(1) && A->enemy_target(w, F.villager) == 0 &&
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
-          "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
+          "enemy orders and moves (carried since 0.2.0-dev.31.13): an order without a creature is refused with its reason, "
+          "no order 1 to cancel, a villager has no pick and no move", std::string(eo.why));
     // v43 (EMF 0.6.13) to v47 (0.6.19); v48 (0.6.20) added no function (path_find's as_entity: above)
     uint32_t perms = 0x3F;
     check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
@@ -385,7 +411,8 @@ void v40_checks(EmfWorld* w) {
     bar.id = "emf_probe.bar";
     bar.flags = EMF_MARKER_BAR;
     bar.bar = 0.5f;
-    check(!A->marker_set(&bar) && A->marker_send(1, &bar, 1) == 0, "marker bars are not carried yet");
+    check(!A->marker_set(&bar) && A->marker_send(0x7FFFFF01u, &bar, 1) == 0,
+          "marker bars: no marker_set on a dedicated server; nobody gets a marker sent to an entity that is no player");
     check(g_v40_callbacks == 0, "no callback of a function that is not carried was called");
 }
 

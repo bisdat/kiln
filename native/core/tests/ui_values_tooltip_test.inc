@@ -55,6 +55,7 @@ void prime_tooltip(bool with_h2 = true) {
     fake::symbols["ui/DetailStatsModel"] = 0x140c110d5ull;
     fake::symbols["ui/DetailHeaderModel"] = 0x140c10f30ull;
     fake::symbols["ui/NativeTextLine"] = 0x140b1da10ull;
+    fake::symbols["ui/NativeTextLineBody"] = 0x140b1da2cull;  // item-detail capture's mid hook (entry + 0x1c)
     fake::symbols["ui/NativeTextDraw"] = 0x140b25160ull;
     fake::symbols["ui/UiNodeAlign"] = 0x1411ced70ull;
     fake::symbols["ui/UiNodeSize"] = 0x1411cf360ull;

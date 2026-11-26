@@ -382,6 +382,11 @@ inline const char* why_text(Why w) {
     }
     return "";
 }
+// What the readout and the status say while FSR 3.1 runs because FSR 4's picture came out black or NaN (the output
+// check, upscale_probe_logic.h; `what`: its verdict in words). English, as why_text.
+inline std::string fsr4_black_text(const std::string& what) {
+    return "its picture came out wrong on this graphics card (" + what + "): FSR 3.1 runs until the game restarts";
+}
 inline const char* running_name(Running r) {
     switch (r) {
         case Running::off: return "off";

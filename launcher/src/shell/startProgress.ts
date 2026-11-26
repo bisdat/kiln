@@ -1,7 +1,8 @@
 // What a start is doing, in words (launch_progress, kiln_manage::start_progress; docs/kiln/launcher/app.md "What a start
 // is doing"): the running step's line, the time left as a person reads it, where the number comes from, and what the
 // bar says to a screen reader. Shared by the Play page, the top bar's pill, the mouth and the Deck's Home.
-import type { PreStart, StartStep, StartTimeline } from "../api/commands";
+import type { LaunchMode, PreStart, StartStep, StartTimeline } from "../api/commands";
+import { toKilnError } from "../api/shared";
 import { t } from "../i18n";
 
 /** The label launch_play gives the `steam` step of a direct start (src-tauri commands/launch.rs). */
@@ -34,6 +35,39 @@ export function quietIsKiln(tl: StartTimeline): boolean {
 }
 /** The timeline is shown in place of the boot stages (a dev.26 runtime's `legacy` and the end states are not). */
 export const showsProgress = (tl: StartTimeline | null | undefined): tl is StartTimeline => !!tl && ACTIVE.has(tl.phase);
+
+/** (0.2.0-dev.31.13) When this launcher asked Steam (or started the game directly) for the start the backend still
+ *  follows, on the clock `now` is read from: the timeline is the launcher's, its `steam` step runs (no game process
+ *  yet) and the game does not run. Null otherwise. A page loaded again after its web process ended
+ *  (src-tauri/src/webproc.rs) remembers no start: shell/play.ts seeds its wait from this, so Play is not offered again
+ *  while Steam prepares the game (a second press could ask Steam again or start a second Proton). */
+export function askedSteamAt(tl: StartTimeline | null | undefined, now: number): number | null {
+  if (!tl || !tl.launcher || (tl.phase !== "launcher" && tl.phase !== "waiting")) return null;
+  const steam = tl.steps.find((s) => s.id === "steam");
+  if (!steam || steam.state !== "running" || steam.ms == null) return null;
+  return now - Math.max(0, tl.atMs - steam.ms);
+}
+
+/** (0.2.0-dev.31.13) The wait a page loaded again takes over from the backend's timeline (askedSteamAt), with the start's
+ *  mode: a Vanilla start is one too (the backend follows it and refuses a second start meanwhile), and its game is
+ *  then shown as Vanilla, not as a Kiln start without Kiln. A timeline that does not say its mode is a start with the
+ *  profile (the backend before 31.13). Null: no wait to take over. */
+export function seededLaunch(tl: StartTimeline | null | undefined, now: number): { at: number; mode: LaunchMode } | null {
+  const at = askedSteamAt(tl, now);
+  return at == null ? null : { at, mode: tl?.mode ?? "profile" };
+}
+
+/** (0.2.0-dev.31.13) The backend refused a start because another start of the game is pending (Steam asked, no game
+ *  yet; src-tauri commands/launch.rs `already_starting`): `busy` with `detail.kind` "already_starting". The pending
+ *  start is not this Play's to end: no launch_end for it. */
+export function isAlreadyStarting(e: unknown): boolean {
+  const k = toKilnError(e);
+  return k.code === "busy" && (k.detail as { kind?: unknown } | null | undefined)?.kind === "already_starting";
+}
+
+/** (0.2.0-dev.31.13) A Vanilla start's timeline (the backend follows it until its game is there): it holds Play while it
+ *  waits for Steam, and is said as before, without a bar. */
+export const isVanillaStart = (tl: StartTimeline | null | undefined): boolean => tl?.mode === "vanilla";
 
 /** "about 40 s", "about 1 min 25 s", "a few seconds": rounded to 5 s above 20 s, whole seconds from 5 to 20 s. */
 export function aboutText(ms: number): string {

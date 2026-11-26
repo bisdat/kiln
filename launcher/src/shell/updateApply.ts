@@ -8,6 +8,30 @@
 import type { GameStatus } from "../api/commands";
 import type { UnsavedKind } from "./unsaved";
 
+/** The player's Later (or a hold for good: the game or unsaved work held it) per ready version. */
+export type RestartDecision = "held" | "stopped";
+const DECIDED = "kiln.update.decided";
+
+/** (0.2.0-dev.31.13) The decisions of this run of the launcher (sessionStorage): a page loaded again after its web process
+ *  ended (src-tauri/src/webproc.rs) does not count down to a restart the player put off with Later. A new start of the
+ *  launcher forgets them, as before. Anything unreadable is no decision. */
+export function loadDecided(store: Pick<Storage, "getItem"> | null): Partial<Record<string, RestartDecision>> {
+  try {
+    const v: unknown = JSON.parse(store?.getItem(DECIDED) ?? "{}");
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).filter(([, d]) => d === "held" || d === "stopped")) as Partial<Record<string, RestartDecision>>;
+  } catch { return {}; }
+}
+
+export function saveDecided(store: Pick<Storage, "setItem"> | null, decided: Partial<Record<string, RestartDecision>>): void {
+  try { store?.setItem(DECIDED, JSON.stringify(decided)); } catch { /* no storage: this page only, as before 31.13 */ }
+}
+
+/** The page's sessionStorage, or null where there is none. */
+export function sessionStore(): Storage | null {
+  try { return typeof sessionStorage === "undefined" ? null : sessionStorage; } catch { return null; }
+}
+
 /** What holds the restart: the game, unsaved work (both hold it for good: the player restarts), a start of the game
  *  under way, the save editor writing a save (a save or a restore: the close guard asks then too) or a task (each waited
  *  for; a start that brings the game holds it for good then). */

@@ -106,6 +106,51 @@ enum: None, Wood, Stone, Metal
 - `Category { get; init; } -> uint` — The ingredient category's id.
 - `Index { get; init; } -> int` — The option's index in the category (`IngredientCategory.Options`).
 
+## ClientStationInfo `0.2.22` — One production station as the game client's own station cache has it (`ClientStations`).
+- `ClientStationInfo(EntityId Station, uint Workshop, uint SelectedRecipe, BaseId Base, WorldPosition Position, StationState State, StationNeeds Needs, IReadOnlyList<CategoryChoice> SelectedChoices, bool UseAllOptions, int CraftsLoaded, int Water, int WaterMax, bool NeedsEnergy, TimeSpan? CraftDuration, TimeSpan? CraftRemaining, TimeSpan? Remaining, float? Progress, IReadOnlyList<StationStack>? Outputs, ulong Step)`
+- `Base { get; init; } -> BaseId` — The base the client grouped it under.
+- `CraftDuration { get; init; } -> TimeSpan?` — One craft of the selected recipe on this client (the recipe's time and the client's copy of the production speed...
+- `CraftRemaining { get; init; } -> TimeSpan?` — What is left of the cycle in progress, at least zero; null unless `ClientStationInfo.State` is Running and the time...
+- `CraftsLoaded { get; init; } -> int` — The complete crafts its inputs still hold after the cycle in progress (the server's count).
+- `DisplayName { get; } -> string?` — The workshop's name in the player's language ("Charcoal Kiln"), from the game's data (`Stations.WorkshopName`); null...
+- `IsRunning { get; } -> bool` — A cycle is running (`ClientStationInfo.State` is Running).
+- `Needs { get; init; } -> StationNeeds` — What it lacks (the game's missing requirements).
+- `NeedsEnergy { get; init; } -> bool` — It runs on rotational energy (it needs a power source in range).
+- `Outputs { get; init; } -> IReadOnlyList<StationStack>?` — Finished stacks of the selected recipe's outputs (an item that is no input of it) in the client world's copy of the...
+- `Position { get; init; } -> WorldPosition` — Where it stands, in 0.25 m steps (as sent).
+- `Progress { get; init; } -> float?` — 0..1 of the cycle in progress; null as `CraftRemaining`.
+- `RecipeName { get; } -> string?` — The selected recipe's name (`Stations.RecipeName`); null without a recipe.
+- `Remaining { get; init; } -> TimeSpan?` — Until every loaded craft is done: the time the game's HUD shows ("finishes in"), at least zero; null as...
+- `SelectedChoices { get; init; } -> IReadOnlyList<CategoryChoice>` — The category choices of the selected recipe ("any wood": which wood).
+- `SelectedRecipe { get; init; } -> uint` — The recipe it repeats; 0 when none is chosen.
+- `State { get; init; } -> StationState` — Its state as the server last sent it.
+- `Station { get; init; } -> EntityId` — The station (the server's entity id; the client uses the same ids).
+- `Step { get; init; } -> ulong` — The client world's step of the copy.
+- `UseAllOptions { get; init; } -> bool` — "Use all ingredient options" is on.
+- `Water { get; init; } -> int` — Its water, in the game's Fuel units (64 per charge); 0 without water.
+- `WaterMax { get; init; } -> int` — Its water capacity, in Fuel units.
+- `Workshop { get; init; } -> uint` — Its workshop (`Crafting.workshopId`): which recipes it runs.
+
+## ClientStations `0.2.22` — The production stations (kilns, smelters, looms, seed beds: every station with the game's `FactoryStation`) as the game client itself knows them, read-only: for a...
+- `static All() -> IReadOnlyList<ClientStationInfo>` — Every station in the client's cache, in the cache's order (grouped by base).
+- `static Available { get; } -> bool` — The view works here now: a game client whose build qualifies the station cache, nothing faulted.
+- `const Capability = "stations.client_view" -> string` — The capability row: the client's station cache can be read here (sigdb feature, since 0.2.0-dev.31.13, mod API 0.2.22).
+- `static Near(WorldPosition center, double radius = 16) -> IReadOnlyList<ClientStationInfo>` — The stations of the cache within `radius` metres of `center` (your player's or the camera's position), nearest first.
+- `static Open { get; } -> ClientStationInfo?` — The station whose screen the local player has open (the game's production-station screen, the entity of...
+- `static Read(EntityId station) -> ClientStationInfo?` — One station of the cache; null when the client's cache does not have it (not in a known base, not sent, not copied yet).
+- `static Status { get; } -> ClientStationsStatus?` — What works and the copy's age; null when kiln.stations.client is not here.
+
+## ClientStationsStatus `0.2.22` — What `ClientStations` works with now.
+- `ClientStationsStatus()`
+- `ClientStationsStatus(bool On, bool World, bool Copying, int Rows, ulong Step, TimeSpan? Age, string Detail)`
+- `Age { get; init; } -> TimeSpan?` — Since the copy was taken; null when there is none.
+- `Copying { get; init; } -> bool` — A read in the last 5 seconds keeps the copying on.
+- `Detail { get; init; } -> string` — Why it is off, in words; while it is on and has no copy yet, why none was taken (the cache not in the client world...
+- `On { get; init; } -> bool` — The client's station cache can be read on this build and nothing faulted.
+- `Rows { get; init; } -> int` — Stations in the copy.
+- `Step { get; init; } -> ulong` — The client world's step of the copy (0: none yet).
+- `World { get; init; } -> bool` — A client world runs now (in game, not in the menu).
+
 ## CollectWhat `0.2.6` — What `Stations.Collect` moves.
 enum: Outputs, Leftovers, All
 
@@ -341,36 +386,3 @@ enum: Soft, SlightlyHard, ModeratelyHard, Hard, VeryHard, Unbreakable
 - `TweakPlaced { get; init; } -> FieldValues` — The same for the template it places: `TweakPlaced = { { GameFields.Templates.Shelter.CheckRange, 20 } }`.
 - `Visual { get; init; } -> PartRef<VisualBlock>?` — What it looks like, as a block or the name of one defined once.
 - `Was { get; init; } -> string?` — The name this block had before a rename.
-
-## PropRef — A prop that `PropBlock.Provides` a crafting prop, by handle or name: a block of this mod, or `"other-mod:name"`.
-- `PropRef()`
-- `PropRef(string Value)`
-- `static implicit operator PropRef(BlockHandle handle) -> PropRef` — A prop by its handle.
-- `static implicit operator PropRef(string value) -> PropRef` — A prop by its name in this mod, or `"other-mod:name"`.
-- `Value { get; init; } -> string` — The prop's name: a block of this mod, or `"other-mod:name"`.
-
-## RequiresBlock — When a player may use it.
-- `Count { get; init; } -> int` — How many of `RequiresBlock.Item`.
-- `If { get; init; } -> Func<Player, bool>?` — From code: your own check, on the tick thread.
-- `Item { get; init; } -> ItemRef?` — An item in the player's bag: a `GameItems` constant or an item of this mod.
-- `Time { get; init; } -> DayPart?` — Only by day, or only by night.
-- `Unless { get; init; } -> IReadOnlyList<PlayerStateRef>?` — Not while the player is in any of these.
-- `Uses { get; init; } -> bool` — The use takes `RequiresBlock.Item` from the bag, as a lockpick goes.
-- `When { get; init; } -> IReadOnlyList<PlayerStateRef>?` — Only while the player is in one of these states.
-
-## RunningBlock — What a station shows while it runs.
-- `Sound { get; init; } -> SoundRef?` — A looping sound in place of its kind's: a cue of this mod (then `clients: mod`), `"other-mod:name"`, or a cue's GUID.
-- `Vfx { get; init; } -> VfxRef?` — In place of its kind's fire or steam.
-
-## SeatBlock — A seat: the game's sitting, and comfort of the chair category.
-- `Sits { get; init; } -> SpotBlock?` — Where the player sits.
-
-## SpotBlock — Where on the thing the player sits or lies, in its own axes: metres from its origin, and which way they face, in degrees about the vertical (0: its +z).
-- `At { get; init; } -> Vector3` — Metres from the thing's origin, in its own axes.
-- `Facing { get; init; } -> double` — Degrees about the vertical, which way the player faces.
-
-## StationAction `0.2.6` — Which station action.
-enum: Fill, Stop, Resume, Select, Collect
-
-## StationActionStatus `0.2.6` — What a station action did.
-enum: Done, Partial, NotEnough, NoRoom, NotAStation, NoBase, NoRecipe, WrongWorkshop, Unchanged, Locked, Refused, Unavailable, Dropped, TimedOut, QueueFull, Canceled

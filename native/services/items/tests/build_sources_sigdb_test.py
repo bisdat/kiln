@@ -78,14 +78,23 @@ def main():
     symbols = {}
     for _, part, _ in compose('client'):
         symbols.update(part.get('symbols', {}))
-    ui_names = ['build/client.MaterialRows', 'build/client.StockRowsRet', 'build/client.MaterialRowAdd', 'build/client.MaterialRowStock']
+    ui_names = ['build/client.MaterialRows', 'build/client.MaterialRowsBody', 'build/client.MaterialRowsDone', 'build/client.StockRowsRet',
+                'build/client.MaterialRowAdd', 'build/client.MaterialRowStock']
     doc = {'symbols': symbols, 'features': {'ui': {'symbols': ui_names}}}
     image = Image(client)
     found, _, features = Resolver(image, doc).run()
     check(features['ui'], 'client crafting.build_ui resolves')
-    for name, rva in zip(ui_names, [0x40e5d0, 0x40ee4b, 0x40c010, 0x40c0f4]):
+    for name, rva in zip(ui_names, [0x40e5d0, 0x40e5f3, 0x40f05a, 0x40ee4b, 0x40c010, 0x40c0f4]):
         check(found[name]['rva'] == rva, f'client {name} = {rva:#x}')
     raw = image.img
+    # the gatherer's two halves are inside it, clear of what Building Tools 0.34.0 reads (src/main.cpp SIG_STOCKS: the first
+    # 35 bytes, then + 0x194, + 0x705, + 0x721, + 0x78f, + 0x867, + 0x876, + 0x89d and the call it redirects at + 0xa76);
+    # presentation_sigdb_test.py checks the two sites' registers and branches
+    fn = found['build/client.MaterialRows']['rva']
+    read = [(0, 35), (0x194, 3), (0x705, 5), (0x721, 5), (0x78F, 7), (0x867, 7), (0x876, 5), (0x89D, 5), (0xA76, 5)]
+    for name in ('build/client.MaterialRowsBody', 'build/client.MaterialRowsDone'):
+        at = found[name]['rva'] - fn
+        check(all(at + 5 <= o or at >= o + n for o, n in read), f'client {name} (+ {at:#x}) is off the bytes Building Tools reads')
     check(bytes.fromhex('4869C848060000') in raw[0x40ee11:0x40ee4b], 'a group is 0x648 bytes (imul rcx,rax,0x648)')
     check(raw[0x40e694:0x40e69b] == bytes.fromhex('4989AFD0F9FFFF'), 'a rebuilt group is zeroed first (mov [r15-0x630],rbp: its count)')
     check(raw[0x40c0f9:0x40c105] == bytes.fromhex('488D0C40488B0748016CC810'), 'a row is 24 bytes, its stock a u64 at +0x10')

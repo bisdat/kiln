@@ -129,6 +129,14 @@ pub fn read_file(remote: &RemoteSpec, relative: &str) -> Result<Vec<u8>> {
     run_bytes(remote, &["cat", "--", &path], Duration::from_secs(30))
 }
 
+/// Reads a remote file by its absolute path (a profile's data folder may be outside the server folder).
+pub fn read_abs_file(remote: &RemoteSpec, path: &str) -> Result<Vec<u8>> {
+    if !path.starts_with('/') || path.contains('\0') || path.contains('\n') || path.split('/').any(|s| s == "..") {
+        return Err(Error::invalid(format!("{path:?} must be an absolute path on the server")));
+    }
+    run_bytes(remote, &["cat", "--", path], Duration::from_secs(30))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -141,6 +141,22 @@ export const withLevel = (label: string, level?: number | string | null) => (lev
 const tip = (title: string, sub = "", extra = "") => `<b>${esc(title)}</b>${sub ? `<span>${sub}</span>` : ""}${extra}`;
 const iconPx = (z: number) => Math.max(12, Math.min(40, 6 + z * 5));
 
+/** A player's dot and name label. The health bar's width (--hp) is set through the CSSOM once Leaflet has built the
+ *  icon: a style="..." in the icon's HTML is an inline style attribute, which a strict Content-Security-Policy refuses
+ *  (Kiln Web Admin's style-src 'self'); element.style is not subject to it. */
+class PlayerIcon extends L.DivIcon {
+  private readonly hp: string | null;
+  constructor(options: L.DivIconOptions, hp: string | null) {
+    super(options);
+    this.hp = hp;
+  }
+  override createIcon(oldIcon?: HTMLElement): HTMLElement {
+    const div = super.createIcon(oldIcon);
+    if (this.hp != null) div.querySelector("em")?.style.setProperty("--hp", this.hp);
+    return div;
+  }
+}
+
 // ------------------------------------------------------------------ canvas icon markers
 type Img = HTMLImageElement & { waiting: Set<L.Layer & { redraw: () => void; _map?: L.Map }> };
 interface ImgMarkerOptions extends L.CircleMarkerOptions {
@@ -559,10 +575,10 @@ export class MapEngine {
   // ------------------------------------------------------------------ live overlays
   private playerIcon(p: AdminPlayer) {
     const hp = p.healthMax ? Math.max(0, Math.min(1, (p.health ?? 0) / p.healthMax)) : null;
-    return L.divIcon({
+    return new PlayerIcon({
       className: "ka-player", iconSize: [16, 16], iconAnchor: [8, 8],
-      html: `<i></i><span>${esc(p.name || tr("admin.common.playerEntity", { entity: p.entity }))}${hp != null ? `<em style="--hp:${Math.round(hp * 100)}%"></em>` : ""}</span>`,
-    });
+      html: `<i></i><span>${esc(p.name || tr("admin.common.playerEntity", { entity: p.entity }))}${hp != null ? "<em></em>" : ""}</span>`,
+    }, hp == null ? null : `${Math.round(hp * 100)}%`);
   }
 
   setPlayers(list: AdminPlayer[]) {

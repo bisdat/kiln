@@ -144,9 +144,21 @@ void logf(int level, const char* fmt, ...) {
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
+    va_list again;
+    va_copy(again, ap);
     const int n = std::vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    if (n > 0) g_api->log(g_owner, level, KilnStr{buf, static_cast<size_t>(std::min(n, static_cast<int>(sizeof(buf) - 1)))});
+    if (n > 0 && static_cast<size_t>(n) >= sizeof(buf)) {
+        // a long line (the upscaler's device report lists every extension and feature): whole, up to 16 KB, never cut
+        // at 1023 characters as up to 0.2.0-dev.31.12 (the device's "lacks" list was lost on an RX 6900 XT)
+        std::string big(std::min<size_t>(static_cast<size_t>(n), 16384) + 1, '\0');
+        const int m = std::vsnprintf(big.data(), big.size(), fmt, again);
+        va_end(again);
+        if (m > 0) g_api->log(g_owner, level, KilnStr{big.data(), std::min(static_cast<size_t>(m), big.size() - 1)});
+        return;
+    }
+    va_end(again);
+    if (n > 0) g_api->log(g_owner, level, KilnStr{buf, static_cast<size_t>(n)});
 }
 
 void set_error(const char* fmt, ...) {
@@ -426,6 +438,7 @@ KilnResult KILN_CALL t_unsubscribe(KilnHandle h) {
     if (const KilnResult r = keys_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // key callbacks (keys.cpp)
     if (const KilnResult r = input_feed_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // window input (v5)
     if (const KilnResult r = input_pointer_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // pointer presses (dev.30)
+    if (const KilnResult r = own_unsubscribe(h); r != KILN_ERR_NOT_FOUND) return r;  // owned input (kiln.ui.input, 31.13)
     if (game_unsubscribe(h)) return KILN_OK;  // menu entries, screen and UI-tick subscriptions
     // Frame callbacks run under Vulkan's mutex. Look up local handles first to avoid recursively locking it.
     if (t_in_frame) return KILN_ERR_WRONG_THREAD;
@@ -881,6 +894,8 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (game) api->register_service(owner, KilnStr{KILN_UI_TICK_SERVICE, sizeof(KILN_UI_TICK_SERVICE) - 1}, &kTickTable);
     api->register_service(owner, KilnStr{KILN_RENDER_SERVICE, sizeof(KILN_RENDER_SERVICE) - 1}, render_table());
     api->register_service(owner, KilnStr{KILN_UI_BLOCKS_SERVICE, sizeof(KILN_UI_BLOCKS_SERVICE) - 1}, &kBlocksTable);
+    // input a plugin owns from press to release, and the controllers' view (0.2.0-dev.31.13, input_own.cpp)
+    api->register_service(owner, KilnStr{KILN_UI_INPUT_SERVICE, sizeof(KILN_UI_INPUT_SERVICE) - 1}, input_table());
     const auto result = api->register_service(owner, KilnStr{KILN_UI_SERVICE, sizeof(KILN_UI_SERVICE) - 1}, &kTable);
     if (!overlay_drawing_on()) report_drawing_off(g_overlay_reason);
     return result;

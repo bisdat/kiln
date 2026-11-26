@@ -171,6 +171,19 @@ u32)`: `0x9e850` (the main checks), then bit 0 (invalid transform) from the acto
   blueprint registry entry, so a Remove asking on its input has no material and always sets the bit; it turns the
   check off on an input bound to a Remove. The two bytes gate nothing else: the server cursor's only other read of them
   (S `0x9daa8`) computes the float CursorFlags hands `0x99750` alone (its seventh argument, `[rbp+0x90]`).
+- **Where Kiln hooks it (0.2.0-dev.31.13): `rules/CursorFlagsStored`, entry + `0xfa` (S `0x9fc1a`, C `0x29c0aa`), not the
+  entry** [dis]. The function stores the flags with bit 12 decided (`mov [rbx], edx`, + `0xf8`) and every path passes the
+  next instruction (`cmp byte [rdi+0x54], r15b; jne`: no branch before it jumps past it, the one `ret` is after it);
+  after it the game only ORs bit 8 into `[rbx]` (the collider query), which no rule waives. There `rbx` is the flags
+  pointer and `rsi` the cursor context (`mov rbx, rcx` / `mov rsi, rdx` at the entry, the only writes; rsi is the material
+  check's `rcx` right before the store). kiln-rules clears the waived bits in `[rbx]`; the patch moves the cmp and the
+  jne (10 bytes). Until 31.13 Kiln hooked the entry (a 5-byte jump installed when kiln-rules loads): Building Tools 0.34.0
+  finds this function by its first 42 bytes once, 4 s after its DLL loads, and then redirects the game's calls to it (four
+  on the client, two on the server), so its "overlap objects" stayed off next to Kiln (XHL, 2026-11-25). Its
+  `MissingCall` signature (the material check's call and the store, + `0xe2` .. + `0xfa`) ends right before Kiln's site.
+  Other code seen on this function in players' `hooks.json`: Unified Tweaks Live's patch at the epilogue (+ `0x27f`, 8
+  bytes) and CarryOn's jump at the entry; both are clear of the site. `native/services/rules/rules_sigdb_test.py` checks
+  all of this on both executables, `cursor_hook_test.cpp` runs the hook and Building Tools' lookup without a game.
 
 | Bit | `CursorFlag` | Kiln rule that clears it |
 |---|---|---|
@@ -556,7 +569,8 @@ client's two guards (docs/re/client.md):
 | `rules/CurrentEntityId` (captured) | `0x65b870` | `0x9bf9e0` | `rules.fly`, `rules.cursor` |
 | `rules/fly.entity`, `rules/fly.actor` | `0x6dc`, `0xa8` | the same | `rules.fly` |
 | `rules/ZoneFlag` (offset 12) | `0x9cfaf` | `0x297c1f` | `rules.zone` |
-| `rules/CursorFlags` (`rules/cursor.actor` 0xf8 / client 0x108, a check) | `0x9fb20` | `0x29bfb0` | `rules.cursor` |
+| `rules/CursorFlags` (`rules/cursor.actor` 0xf8 / client 0x108, a check; the scope of the next row, not hooked) | `0x9fb20` | `0x29bfb0` | `rules.cursor` |
+| `rules/CursorFlagsStored` (the mid hook: after the flags' store, below the entry) | `0x9fc1a` | `0x29c0aa` | `rules.cursor` |
 | `rules/ShroudDrain` (+ `@rules/ShroudDrain.delta`, which checks `StepDelta`; offset 101; `rules/fog.actor` 0x48, `rules/fog.attr` 0x78, `rules/fog.state` 0xbf8) | `0xc1f35` | `0x2d5f95` | `rules.shroud` |
 | `rules/GlideStep` (+ `@rules/GlideStep.abort/.xform/.velocity`, `@rules/Loco.input`, `@rules/Input.mask`, `@rules/Input.trigger`; `QuatRotate`, `StepDelta` captured) | `0x1d2320` | `0x432a80` | `rules.glide` |
 | `rules/GlideGravity` (offset 133; `rules/grav.actor` 0xaf) | `0xa0f13` | `0x2a3643` | `rules.glide` |

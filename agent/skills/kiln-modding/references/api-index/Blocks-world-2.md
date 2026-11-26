@@ -1,5 +1,38 @@
 # Blocks (Kiln.Blocks): world, part 2 of 2
 
+## PropRef — A prop that `PropBlock.Provides` a crafting prop, by handle or name: a block of this mod, or `"other-mod:name"`.
+- `PropRef()`
+- `PropRef(string Value)`
+- `static implicit operator PropRef(BlockHandle handle) -> PropRef` — A prop by its handle.
+- `static implicit operator PropRef(string value) -> PropRef` — A prop by its name in this mod, or `"other-mod:name"`.
+- `Value { get; init; } -> string` — The prop's name: a block of this mod, or `"other-mod:name"`.
+
+## RequiresBlock — When a player may use it.
+- `Count { get; init; } -> int` — How many of `RequiresBlock.Item`.
+- `If { get; init; } -> Func<Player, bool>?` — From code: your own check, on the tick thread.
+- `Item { get; init; } -> ItemRef?` — An item in the player's bag: a `GameItems` constant or an item of this mod.
+- `Time { get; init; } -> DayPart?` — Only by day, or only by night.
+- `Unless { get; init; } -> IReadOnlyList<PlayerStateRef>?` — Not while the player is in any of these.
+- `Uses { get; init; } -> bool` — The use takes `RequiresBlock.Item` from the bag, as a lockpick goes.
+- `When { get; init; } -> IReadOnlyList<PlayerStateRef>?` — Only while the player is in one of these states.
+
+## RunningBlock — What a station shows while it runs.
+- `Sound { get; init; } -> SoundRef?` — A looping sound in place of its kind's: a cue of this mod (then `clients: mod`), `"other-mod:name"`, or a cue's GUID.
+- `Vfx { get; init; } -> VfxRef?` — In place of its kind's fire or steam.
+
+## SeatBlock — A seat: the game's sitting, and comfort of the chair category.
+- `Sits { get; init; } -> SpotBlock?` — Where the player sits.
+
+## SpotBlock — Where on the thing the player sits or lies, in its own axes: metres from its origin, and which way they face, in degrees about the vertical (0: its +z).
+- `At { get; init; } -> Vector3` — Metres from the thing's origin, in its own axes.
+- `Facing { get; init; } -> double` — Degrees about the vertical, which way the player faces.
+
+## StationAction `0.2.6` — Which station action.
+enum: Fill, Stop, Resume, Select, Collect
+
+## StationActionStatus `0.2.6` — What a station action did.
+enum: Done, Partial, NotEnough, NoRoom, NotAStation, NoBase, NoRecipe, WrongWorkshop, Unchanged, Locked, Refused, Unavailable, Dropped, TimedOut, QueueFull, Canceled
+
 ## StationBlock — A station a player builds: a prop that makes things.
 - `Kind { get; init; } -> StationKind?` — The game's station it starts from: its model, collision and sound, and the menu it opens.
 - `Menu { get; init; } -> PartRef<MenuBlock>?` — The menu it opens.

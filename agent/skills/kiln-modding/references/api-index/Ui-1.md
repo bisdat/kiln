@@ -234,17 +234,24 @@ enum: Backpack, Chest, All
 - `static PressCode(uint virtualKey, uint scanCode) -> uint` — The code a binding stores for a press of `virtualKey` with `scanCode`, as the Kiln menu's Keys page saves it: a...
 
 ## KeyListener `0.2.11` — A listener made by `KeyInput.Listen`.
+- `Disown(uint virtualKey = 0, int controller = 0) -> int` `0.2.22` — Gives up the press of `virtualKey` (0: every press the listener owns), without a call: its repeats and release reach...
 - `Dispose() -> void` — Stops the listener: once it returns, no new press reaches it.
 - `Mouse { get; } -> bool` — It gets the mouse inputs of `KeyListenFlags.Mouse` as well.
 - `Ok { get; } -> bool` — True when the listener gets presses.
+- `Own { get; } -> bool` `0.2.22` — It owns the presses it keeps (`KeyListenFlags.Own`).
+- `Owns(uint virtualKey, int controller = 0) -> bool` `0.2.22` — It owns the press of `virtualKey` (on `controller`, for a controller's button) now: pressed, kept, not yet released.
 - `Pad { get; } -> bool` `0.2.14` — It gets a game controller's buttons (`KeyListenFlags.Pad`) as well.
+- `Pointer { get; } -> bool` `0.2.22` — It gets the left and right mouse buttons (`KeyListenFlags.Pointer`).
 - `Reason { get; } -> string?` — Why it gets none (no Kiln overlay here: a dedicated server, or kiln-ui.dll did not load); null when `KeyListener.Ok`.
 
 ## KeyListenFlags `0.2.11` — What a key listener gets besides keyboard keys.
-enum: None, Mouse, Pad `0.2.14`
+enum: None, Mouse, Pad `0.2.14`, Own `0.2.22`, Pointer `0.2.22`
 
 ## KeyMods — Modifier keys of a binding.
 enum: None, Ctrl, Shift, Alt, PadLB `0.2.14`, PadRB `0.2.14`, PadLT `0.2.14`, PadRT `0.2.14`
+
+## KeyOwnEnd `0.2.22` — Why a press a listener owned (`KeyListenFlags.Own`) ended without its release (`KeyPress.Ended`).
+enum: None, Focus, World, Lost
 
 ## KeyPress `0.2.11` — One press or release of a key or a mouse input, as Kiln's overlay got it from the game's window (before the game sees it).
 - `KeyPress()`
@@ -252,10 +259,16 @@ enum: None, Ctrl, Shift, Alt, PadLB `0.2.14`, PadRB `0.2.14`, PadLT `0.2.14`, Pa
 - `Captured { get; init; } -> bool` — Kiln's overlay has the input now (the Kiln menu or a Kiln screen is open).
 - `Chord { get; } -> KeyChord` — The press as the Kiln menu's Keys page saves it: `KeyPress.Code` with `KeyPress.Mods`.
 - `Code { get; } -> uint` — The code a binding stores for this press (`KeyInput.PressCode`): a punctuation key is the key at that place of a US...
+- `Controller { get; init; } -> int` `0.2.22` — For a game controller's button (`KeyPress.IsPad`) of an owning listener: the controller, 0 to 3 (XInput's user...
 - `Down { get; init; } -> bool` — A press (true) or a release.
+- `Ended { get; init; } -> KeyOwnEnd` `0.2.22` — Not `KeyOwnEnd.None`: this is no real release but the end of ownership of a press the listener owned...
 - `IsMouse { get; } -> bool` — A mouse input: the middle or a side button, or a notch of the wheel.
 - `IsPad { get; } -> bool` `0.2.14` — A game controller's button (`KeyListenFlags.Pad`).
+- `IsPointer { get; } -> bool` `0.2.22` — The left (0x01) or right (0x02) mouse button, which only an owning listener gets (`KeyListenFlags.Pointer`).
+- `Leaked { get; init; } -> bool` `0.2.22` — The game saw this owned press go down after all (Alt+F4, which always reaches the game, or a mouse record Kiln could...
 - `Mods { get; init; } -> KeyMods` — Ctrl, Shift and Alt held at the time.
+- `Owned { get; init; } -> bool` `0.2.22` — This repeat or release (or `KeyPress.Ended`) belongs to a press the listener owns (`KeyListenFlags.Own`): nobody...
+- `Position { get; init; } -> Vector2?` `0.2.22` — For the left and right buttons (`KeyPress.IsPointer`): the cursor in the game window's client pixels at the press...
 - `Repeat { get; init; } -> bool` — The auto-repeat of a held key.
 - `ScanCode { get; init; } -> uint` — The key's scan code (0x100 set for an extended key); 0 for the mouse and for a key sent without one.
 - `TextInput { get; init; } -> bool` — A Kiln text field has the keyboard (the player is typing in Kiln's overlay).
@@ -295,6 +308,33 @@ enum: None, Pending, Outshone, NoModel, SwitchedOff, Removed, Despawned, WorldEn
 
 ## OutlineState `0.2.13` — Where an outline stands (`WorldOutline.State`; `WorldOutline.Reason` says why).
 enum: Waiting, Shown, GameHighlight, Ended
+
+## PadButtons `0.2.22` — A game controller's buttons as bits (`PadState.Buttons`): bit `code - 0x200` of the `KeyChord` codes of "Pad:" chords (kiln_ui.h KILN_UI_VK_PAD_*), the triggers as...
+enum: None, Up, Down, Left, Right, Start, Back, LeftStick, RightStick, LB, RB, A, B, X, Y, LT, RT
+
+## PadInput `0.2.22` — The game controllers, read only: what the game's last poll of each read (the game polls XInput every frame), for a mod that follows the sticks or the triggers rather...
+- `static Available { get; } -> bool` — True where Kiln reads the controllers: a game client whose Kiln has kiln.ui.input and saw the game load XInput.
+- `const Controllers = 4 -> int` — How many controllers XInput has: 0 to 3.
+- `static Read(int controller = 0) -> PadState` — Controller `controller` (0 to 3) as the game's last poll read it; not `PadState.Connected` before a poll, when it is...
+
+## PadState `0.2.22` — One game controller as the game's last poll of it read it (`PadInput.Read`), before Kiln hid a kept or owned button from the game.
+- `PadState()`
+- `PadState(int Controller, bool Connected, PadButtons Buttons, Vector2 LeftStick, Vector2 RightStick, float LeftTrigger, float RightTrigger)`
+- `Buttons { get; init; } -> PadButtons` — The buttons held.
+- `Connected { get; init; } -> bool` — The game's last poll of it succeeded.
+- `Controller { get; init; } -> int` — The controller, 0 to 3 (XInput's user index).
+- `Hidden { get; init; } -> PadButtons` — The buttons the game reads as up now although they are held: owned, kept by a key listener or binding, or everything...
+- `IsDown(PadButtons buttons) -> bool` — Every one of `buttons` is held (false for `PadButtons.None`).
+- `LeftStick { get; init; } -> Vector2` — The left stick, -1 to 1 each way (right and up positive), XInput's dead zone (7849 of 32767, radially) taken out...
+- `LeftTrigger { get; init; } -> float` — The left trigger, 0 to 1: 0 under a pull of 30 of 255, above 0 from there (when `PadButtons.LT` is held).
+- `Owned { get; init; } -> PadButtons` — The buttons an owning key listener (`KeyListenFlags.Own`) owns now.
+- `Packet { get; init; } -> uint` — XInput's packet number of the poll (it changes when the controller's state does).
+- `PolledAtMs { get; init; } -> ulong` — When the game last polled it, in milliseconds since the PC started (GetTickCount64); 0 before any poll.
+- `Polls { get; init; } -> ulong` — The game's polls of this controller since Kiln started (0: never polled; the state is then empty).
+- `RawSticks { get; init; } -> (short LeftX, short LeftY, short RightX, short RightY)` — XInput's own stick values (-32768 to 32767), before the dead zone.
+- `RawTriggers { get; init; } -> (byte Left, byte Right)` — XInput's own trigger values (0 to 255).
+- `RightStick { get; init; } -> Vector2` — The right stick, likewise (dead zone 8689).
+- `RightTrigger { get; init; } -> float` — The right trigger, likewise.
 
 ## Render — Render events, the game's camera and frame diagnostics (client).
 - `static Available { get; } -> bool` — Render events and drawing work in this process (a game client with Kiln's overlay).
@@ -563,30 +603,3 @@ enum: End, AfterStats
 - `static SubscribeSlots(Action<VisibleSlotsResult> onFrame) -> UiValueRegistration` — Calls `onFrame` once per completed UI frame, on the game client's main thread right after the frame.
 - `const TooltipCapability = "ui.values.tooltip_lines" -> string` — The capability row of the tooltip lines and the details window.
 - `static TooltipLines(ItemId item, UiTooltipProvider provider) -> UiValueRegistration` — Adds lines for `item` (0: every item) to Kiln's "Item details" window.
-
-## Ui.World `0.2.13` — The game's world as this player's client draws it: outlines on entities with the game's own highlight (`World.Outline`).
-- `static ClearOutlines() -> void` — Takes every outline of your mod away (their handles end with `OutlineReason.Removed`).
-- `static DefaultOutlineColor { get; } -> Color` — The colour of an outline whose options name none: gold, (255, 196, 64).
-- `static Outline(EntityId entity, OutlineOptions? options = null) -> WorldOutline` — Outlines `entity`'s model with the game's own highlight, in this player's game, until you dispose the handle, your...
-- `const OutlineCapability = "ui.world_outline" -> string` — The capability row of `World.Outline`: a sigdb feature of the game client (kiln.render's palette hooks); kiln.render...
-- `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
-- `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
-- `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
-
-## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
-- `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
-- `Current { get; init; } -> uint?` — The current number; null keeps it.
-- `Fraction { get; init; } -> float?` — The bar's fill, 0 to 1; null keeps it.
-- `Label { get; init; } -> UiLabelEdit?` — What to do with the label (detail bars only); null keeps it.
-- `Max { get; init; } -> uint?` — The maximum number; null keeps it.
-- `static readonly None -> UiBarEdit` — Changes nothing.
-
-## UiBarProvider `0.2.3` — A value provider.
-- `Invoke(in UiValueContext context, in UiItemView item, UiBarValue accumulated) -> UiProviderDecision`
-
-## UiBarValue `0.2.3` — A value as the game would draw it after the earlier providers.
-- `UiBarValue(float Fraction, uint Current, uint Max, UiText? LabelOverride)`
-- `Current { get; init; } -> uint` — The current number, in the units of the kind (`UiValueKind`).
-- `Fraction { get; init; } -> float` — How full the bar is, 0 to 1.
-- `LabelOverride { get; init; } -> UiText?` — The label.
-- `Max { get; init; } -> uint` — The maximum number, in the units of the kind.

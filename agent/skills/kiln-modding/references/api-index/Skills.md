@@ -1,5 +1,52 @@
 # Skills (Kiln.Skills)
 
+## ClientSkillLink `0.2.22` — One link of the client's skill tree (`ClientSkills.Links`).
+- `ClientSkillLink()`
+- `ClientSkillLink(uint Id, uint From, uint To, bool Bidirectional)`
+- `Bidirectional { get; init; } -> bool` — It works both ways.
+- `From { get; init; } -> uint` — The node it leads from.
+- `Id { get; init; } -> uint` — The link's id.
+- `To { get; init; } -> uint` — The node it leads to.
+
+## ClientSkillNode `0.2.22` — One node of the client's skill tree and the local player's level of it (`ClientSkills.Nodes`).
+- `ClientSkillNode()`
+- `ClientSkillNode(uint Id, int Index, SkillNodeType Type, int ClassAlignment, int Cost, int MaxLevel, int Level, bool Unlocked, bool Shadow, float UiX, float UiY, int Incoming, int Outgoing)`
+- `ClassAlignment { get; init; } -> int` — 0 Warrior, 1 Mage, 2 Ranger, 3 Neutral.
+- `Cost { get; init; } -> int` — Skill points (per level for a node with levels).
+- `Id { get; init; } -> uint` — The node's id (the game's SkillNodeId, as `SkillNode.Id`).
+- `Incoming { get; init; } -> int` — Links into it.
+- `Index { get; init; } -> int` — Its tree index.
+- `Level { get; init; } -> int` — The local player's level: 0 locked, 1 for a plain node, up to `MaxLevel`.
+- `MaxLevel { get; init; } -> int` — 0: one unlock; else levels 1..MaxLevel.
+- `Outgoing { get; init; } -> int` — Links out of it.
+- `Shadow { get; init; } -> bool` — A shadow node past the game's caps (its state is Kiln's table, as the server sent it).
+- `Spent { get; } -> int` — What its levels cost now: `ClientSkillNode.Cost` times `ClientSkillNode.Level`.
+- `Type { get; init; } -> SkillNodeType` — What kind of node it is.
+- `UiX { get; init; } -> float` — Its x position on the game's skill screen.
+- `UiY { get; init; } -> float` — Its y position on the game's skill screen.
+- `Unlocked { get; init; } -> bool` — The player has it (`Level` above 0).
+
+## ClientSkillPoints `0.2.22` — The local player's skill points as the client's skill screen has them (`ClientSkills.Points`).
+- `ClientSkillPoints()`
+- `ClientSkillPoints(EntityId Player, int Total, int Spent, int Available, int UnlockedNodes, int TreeNodes, ulong Step, TimeSpan Age)`
+- `Age { get; init; } -> TimeSpan` — Since the copy was taken.
+- `Available { get; init; } -> int` — Left to spend: `Total` minus `Spent`, at least 0 (the screen's "available").
+- `Player { get; init; } -> EntityId` — The local player.
+- `Spent { get; init; } -> int` — Spent on unlocked nodes, shadow nodes included.
+- `Step { get; init; } -> ulong` — The client world's step of the copy.
+- `Total { get; init; } -> int` — Skill points in all (from the level and the skill-point knowledge, as the server counts them).
+- `TreeNodes { get; init; } -> int` — Nodes in the client's tree.
+- `UnlockedNodes { get; init; } -> int` — Nodes with a level above 0.
+
+## ClientSkills `0.2.22` — The local player's skill tree as the game client itself holds it, read-only: the tree's layout (every node, its position on the skill screen, its links), the player's...
+- `static Available { get; } -> bool` — The view works here now (a game client whose build qualifies the screen data, nothing faulted).
+- `const Capability = "skills.client_view" -> string` — The capability row: the client's skill tree can be read here (sigdb feature, since 0.2.0-dev.31.13, mod API 0.2.22).
+- `static Find(uint id) -> ClientSkillNode?` — The node with this id in the client's tree, or null.
+- `static Links { get; } -> IReadOnlyList<ClientSkillLink>` — Every link of the client's tree (node ids; bidirectional links work both ways).
+- `static Nodes { get; } -> IReadOnlyList<ClientSkillNode>` — Every node of the client's tree by tree index, with the local player's level of it: the tree's layout and the...
+- `static Points { get; } -> ClientSkillPoints?` — The local player's skill points and counts; null before the first copy (no local player, the tree not loaded, or the...
+- `static Unlocked { get; } -> IReadOnlyList<ClientSkillNode>` — The nodes the local player has (level above 0), by tree index.
+
 ## GameNodeDefinition — A node for the game's own skill tree (drawn by the game's skill-tree screen, unlocked with the game's skill points, effects run by the game).
 - `Class { get; init; } -> string?` — "Warrior", "Mage", "Ranger" or "Neutral" (default: the like node's).
 - `Configs { get; init; } -> IReadOnlyDictionary<uint, double>?` — Number configs of the like node to change: config id (0x...) -> value.

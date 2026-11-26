@@ -54,14 +54,17 @@ KilnResult KILN_CALL read_original(uintptr_t address,void* out,uint64_t size) {
 KilnResult KILN_CALL code_state(uintptr_t,uint64_t,uint32_t* state,uint64_t* generation) {*state=KILN_CODE_ORIGINAL;*generation=1;return KILN_OK;}
 KilnOwner KILN_CALL owner_create(KilnStr name) {CHECK(text(name)=="kiln.tools.presentation");record("presentation child");return child;}
 KilnResult KILN_CALL retiring(KilnOwner owner,KilnOwnerRetiringFn,void*,KilnHandle* out) {CHECK(owner==child);*out=99;record("retiring subscription");return KILN_OK;}
+std::vector<uintptr_t> hooked; // every address a Kiln hook patches (a raw link's or a mid link's jump)
 KilnResult KILN_CALL raw(KilnOwner owner,uintptr_t target,const KilnHookOrder*,void*,void** original,KilnHandle* out) {
-    CHECK(owner==child);
+    CHECK(owner==child);hooked.push_back(target);
     for(const auto& [name,address]:addresses)if(address==target)events.push_back(name);
     *original=reinterpret_cast<void*>(target);*out=target;return KILN_OK;
 }
 KilnResult KILN_CALL mid(KilnOwner owner,uintptr_t target,const KilnHookOrder*,KilnMidFn,void*,KilnHandle* out,uint32_t* unchecked) {
-    CHECK(owner==child&&target==addresses["tools/BrushQueryFrame"]);CHECK(observer_tick&&observer_world);
-    record("tools/BrushQueryFrame");*out=target;*unchecked=0;return KILN_OK;
+    CHECK(owner==child);CHECK(observer_tick&&observer_world);hooked.push_back(target);
+    bool known=false;
+    for(const auto& [name,address]:addresses)if(address==target&&name!="frame prefix"){events.push_back(name);known=true;}
+    CHECK(known);*out=target;*unchecked=0;return KILN_OK;
 }
 KilnResult KILN_CALL revoke(KilnHandle) {return KILN_OK;}
 KilnResult KILN_CALL revoke_hooks(KilnOwner owner) {
@@ -87,6 +90,25 @@ KilnResult KILN_CALL state(KilnClientState* out) {*out={};out->size=sizeof *out;
 bool KILN_CALL client_thread() {return true;}
 uintptr_t KILN_CALL client_world() {return 0;}
 KilnResult KILN_CALL register_service(KilnOwner owner,KilnStr name,const void*) {CHECK(owner==parent&&(text(name)==KILN_TOOLS_SERVICE||text(name)==KILN_UI_AMMO_SERVICE));return KILN_OK;}
+// Building Tools 0.34.0 (src/main.cpp SIG_STOCKS, its "full material list" and "partial area actions") finds
+// tools/MaterialSelector by one exact match of its first 35 bytes, then checks bytes at + 0x194, + 0x78f and + 0x867 and
+// follows the calls at + 0x705, + 0x721, + 0x876, + 0x89d and + 0xa76 (it redirects the last, the finalizer's). Once,
+// 4 s after its DLL loads. True when it would still find all of it with a 5-byte jump at every address Kiln hooked.
+bool bt_finds_stocks() {
+    constexpr uintptr_t fn=0x40000;constexpr size_t size=0xb3c,signature=35;
+    std::vector<uint8_t> image(size,0xcc);
+    std::memcpy(image.data(),originals[fn].data(),originals[fn].size());
+    const auto& done=originals[0x40a8a];std::memcpy(image.data()+0xa8a,done.data(),done.size());
+    struct Check {size_t at;std::vector<uint8_t> bytes;};
+    const Check checks[]={{0x194,{0x44,0x8b,0x05}},{0x705,{0xe8}},{0x721,{0xe8}},{0x78f,{0x48,0x8d,0xbe,0xf8,0x2b,0x00,0x00}},
+                          {0x867,{0x48,0x69,0xc8,0x48,0x06,0x00,0x00}},{0x876,{0xe8}},{0x89d,{0xe8}},{0xa76,{0xe8}}};
+    for(const auto& c:checks)std::memcpy(image.data()+c.at,c.bytes.data(),c.bytes.size());
+    const std::vector<uint8_t> before=image;
+    for(const uintptr_t t:hooked)if(t>=fn&&t<fn+size)for(size_t i=0;i<5&&t-fn+i<size;++i)image[t-fn+i]=i?0x11:0xe9;
+    if(std::memcmp(image.data(),before.data(),signature))return false;
+    for(const auto& c:checks)if(std::memcmp(image.data()+c.at,before.data()+c.at,c.bytes.size()==1?5:c.bytes.size()))return false; // a call: E8 + rel32
+    return true;
+}
 size_t position(const char* event) {const auto i=std::find(events.begin(),events.end(),event);CHECK(i!=events.end());return size_t(i-events.begin());}
 }
 bool kiln_tools_impact_install(const KilnApi*,KilnOwner owner,KilnToolAreaCheck) noexcept {CHECK(owner==fixture::parent);fixture::record("impact");return true;}
@@ -115,6 +137,8 @@ int main() {
     bytes("tools/MaterialPreview",0x20000,"48 89 5C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F9 FF FF 48 81 EC 50 07 00 00");
     bytes("tools/RootIdentity",0x30000,"48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00");
     bytes("tools/MaterialSelector",0x40000,"48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5");
+    addresses["tools/MaterialSelectorBody"]=0x40023; // lea r15,[rcx+0x638], inside the bytes above
+    bytes("tools/MaterialSelectorDone",0x40a8a,"48 8B 9C 24 D0 01 00 00 48 81 C4 90 01 00 00 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3");
     bytes("frame prefix",0x50000,"0F 29 85 00 01 00 00 E8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 C8 00 00 00 48 81 C1 E0 A7 00 00 E8 ?? ?? ?? ?? 89 45 74");
     addresses["tools/BrushQueryFrame"]=0x50007;
     bytes("tools/BrushQuery",0x60000,"4C 89 44 24 18 48 89 54 24 10 55 53 56 41 54 41 55 41 57 48 8D 6C 24 D1 48 81 EC C8 00 00 00");
@@ -137,13 +161,19 @@ int main() {
     KilnPluginInfo info{};CHECK(kiln_plugin_main(&host,fixture::parent,&info)==KILN_OK);CHECK(events.empty());CHECK(info.on_ready&&info.on_unload);
     info.on_ready(nullptr);
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})CHECK(kiln_tools_hook_installed(id));
+    // XHL, 2026-11-25: kiln-tools hooked the selector's entry when it loaded, 4 s before Building Tools scans for it, so its
+    // full material list and partial area actions stayed off. The selector's two halves are inside the function now.
+    CHECK(bt_finds_stocks());
+    CHECK(std::find(hooked.begin(),hooked.end(),addresses["tools/MaterialSelector"])==hooked.end());
     CHECK(position("impact")<position("area")&&position("area")<position("carve"));
     CHECK(position("carve")<position("payment")&&position("payment")<position("history"));
     CHECK(position("history")<position("presentation child"));
     CHECK(position("retiring subscription")<position("tools/TerrainConfigLookup"));
     CHECK(position("tools/TerrainConfigLookup")<position("tools/MaterialPreview"));
-    CHECK(position("held Post")<position("tools/MaterialSelector")&&position("tools/MaterialSelector")<position("tools/BrushQueryFrame"));
-    CHECK(position("tools/MaterialSelector")<position("ui/AmmoFinalizer")&&position("ui/AmmoFinalizer")<position("ui/AmmoPick"));
+    // the second half first: a call already inside the body when they go in finds no first half and stays the game's
+    CHECK(position("held Post")<position("tools/MaterialSelectorDone")&&position("tools/MaterialSelectorDone")<position("tools/MaterialSelectorBody"));
+    CHECK(position("tools/MaterialSelectorBody")<position("tools/BrushQueryFrame"));
+    CHECK(position("tools/MaterialSelectorBody")<position("ui/AmmoFinalizer")&&position("ui/AmmoFinalizer")<position("ui/AmmoPick"));
     const auto installed=events.size();info.on_unload(nullptr);
     CHECK(events.size()==installed+1&&events.back()=="close and drain");CHECK(!hook_retirements&&!owner_retirements&&observer_tick&&observer_world);
     drained=true;info.on_unload(nullptr);

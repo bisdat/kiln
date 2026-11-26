@@ -23,6 +23,10 @@
   unlocked when a linked node is unlocked (or a root is next to it) and the points suffice.
 - Characters live on the player's machine: the server sends the changed character back to the client, which saves it.
 
+**On a joined client** (no server world: kiln.progression answers nothing there) the local player's tree, levels and skill
+points as the client holds them are `ClientSkills` (Kiln.Skills, since 0.2.0-dev.31.13, read-only):
+[skills.md](skills.md#on-a-joined-client-the-local-players-tree).
+
 ## C#
 Reference Kiln.Players as for `Players` (docs/kiln/services/players.md).
 

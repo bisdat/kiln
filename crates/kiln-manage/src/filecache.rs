@@ -274,6 +274,10 @@ mod tests {
     fn windows_directory_keys_track_added_files() {
         let d = tmp("directory-key");
         let before = FileKey::of(&d).expect("directory metadata has a cache key");
+        // NTFS stamps a folder's change with the system's coarse clock (one tick: about 1 ms, up to 15.6 ms): a file
+        // added within the tick that made the folder leaves both times as they were. Add it a tick later, as anything
+        // after the folder's last key was read.
+        std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(d.join("new.bin"), b"new").unwrap();
         assert_ne!(FileKey::of(&d), Some(before), "adding a file changes its directory's key");
         std::fs::remove_dir_all(d).unwrap();

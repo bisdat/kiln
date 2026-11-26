@@ -40,6 +40,7 @@ static_assert(sizeof(KilnContentStack) == 32);
 static_assert(sizeof(KilnContentStatus) == 208 && offsetof(KilnContentStatus, detail) == 48);
 static_assert(sizeof(KilnContentTextInfo) == 192 && offsetof(KilnContentTextInfo, language_key) == 16 && offsetof(KilnContentTextInfo, detail) == 32);
 static_assert(offsetof(KilnContentApi, text) == offsetof(KilnContentApi, txn_end) + sizeof(void*) && offsetof(KilnContentApi, text_info) == offsetof(KilnContentApi, text) + sizeof(void*));
+static_assert(offsetof(KilnContentApi, pack_mod_reloaded) == offsetof(KilnContentApi, text_info) + sizeof(void*) && sizeof(KilnContentApi) == offsetof(KilnContentApi, pack_mod_reloaded) + sizeof(void*));
 // kiln.stationmenus v1 (kiln_station_menus.h; managed mirror: Kiln.Content/StationMenuNative.cs)
 static_assert(sizeof(KilnStationMenusInfo) == 216 && offsetof(KilnStationMenusInfo, generation) == 16 &&
               offsetof(KilnStationMenusInfo, remote_generation) == 24 && offsetof(KilnStationMenusInfo, layers) == 32 &&
@@ -196,6 +197,13 @@ std::mutex g_filter_mu;
 bool g_have_filter = false;
 std::vector<std::string> g_filter;
 std::atomic<bool> g_filter_changed{false};
+// pack_mod_reloaded: mods of the list that were loaded again (a reload, or an unload and a load between two pack_mods),
+// with the reason Kiln.Content gives; their packs come off and apply again at the next Pre. g_filter_mu.
+struct Reloaded {
+    std::string mod, reason;
+};
+std::vector<Reloaded> g_reloaded;
+std::unordered_set<std::string> g_applied_mods;  // the mods whose packs the last application applied (g_filter_mu: world_reset may run on the destroying thread)
 
 // A timing report in lines of a length the log keeps whole.
 void log_timing(const char* what, const std::string& text) {
@@ -228,6 +236,11 @@ void apply_packs(bool reload) {
     gd_packs_end();
 #endif
     rep.skipped = skipped;
+    {
+        std::lock_guard lock(g_filter_mu);
+        g_applied_mods.clear();
+        for (const PackFile& f : files) g_applied_mods.insert(f.mod);
+    }
     for (const std::string& m : skipped)
         LOGW("data packs of %s skipped: Kiln.Host did not load the mod (its \"mod ... not loaded\" / \"skipped\" line above and kiln/logs/mods.txt say why)", m.c_str());
     g_report = report_json(rep);
@@ -404,6 +417,12 @@ void world_reset(bool revert, const char* why) {
 #if KC_GAMEDATA
     gd_world_reset();
 #endif
+    packs_forget_kept();
+    {
+        std::lock_guard lock(g_filter_mu);
+        g_reloaded.clear();  // the next world's load applies every current file
+        g_applied_mods.clear();
+    }
     {
         std::lock_guard lock(g_seen_mu);
         g_seen.clear();
@@ -452,8 +471,34 @@ void pre(const KilnTickInfo* tick, uint32_t kind, uintptr_t world) {
             LOGD("store lock, the last 250 steps: %s", lock_report(true).c_str());
         }
     }
-    if (g_filter_changed.exchange(false)) {
-        LOGI("the set of loaded mods changed: re-applying data packs");
+    std::vector<Reloaded> reloaded;
+    {
+        std::lock_guard lock(g_filter_mu);
+        reloaded.swap(g_reloaded);
+    }
+    const bool set_changed = g_filter_changed.exchange(false);
+    bool reapply = set_changed;
+    if (!reloaded.empty()) {
+        // a mod's packs follow its load: a mod loaded again re-applies when it has packs now or had them in the last application
+        std::string sig;
+        std::vector<PackFile> now = discover_packs(&sig);
+        std::unordered_set<std::string> applied;
+        {
+            std::lock_guard lock(g_filter_mu);
+            std::vector<std::string> skipped;
+            if (g_have_filter) now = order_packs(now, g_filter, &skipped);
+            applied = g_applied_mods;
+        }
+        for (const Reloaded& r : reloaded) {
+            const bool has = applied.count(r.mod) ||
+                             std::any_of(now.begin(), now.end(), [&](const PackFile& f) { return f.mod == r.mod; });
+            if (!has) continue;
+            LOGI("mod %s %s: re-applying data packs (its old layer comes off, its current files apply)", r.mod.c_str(), r.reason.c_str());
+            reapply = true;
+        }
+    }
+    if (reapply) {
+        if (set_changed) LOGI("the set of loaded mods changed: re-applying data packs");
         apply_packs(true);
     } else if (pack_scan_due()) {
         std::string sig;
@@ -575,7 +620,10 @@ KilnResult KILN_CALL t_status(KilnContentStatus* out) {
         out->conflicts = conflicts;
     }
     out->stack_guard = guard_on();
-    out->reload_pending = g_filter_changed.load();
+    {
+        std::lock_guard lock(g_filter_mu);
+        out->reload_pending = g_filter_changed.load() || !g_reloaded.empty();
+    }
     out->packs = g_pack_count;
     out->pack_errors = g_pack_errors;
     out->generation = g_generation.load();
@@ -973,6 +1021,19 @@ KilnResult KILN_CALL t_pack_mods(KilnStr text) {
     return KILN_OK;
 }
 
+KilnResult KILN_CALL t_pack_mod_reloaded(KilnStr mod, KilnStr reason) {
+    std::string id = str(mod), why = str(reason);
+    if (id.empty()) return KILN_ERR_INVALID_ARGUMENT;
+    if (why.empty()) why = "was loaded again";
+    std::lock_guard lock(g_filter_mu);
+    // before the world's registries are ready the world load applies the current files anyway
+    if (!g_ready.load()) return KILN_OK;
+    if (g_have_filter && std::find(g_filter.begin(), g_filter.end(), id) == g_filter.end()) return KILN_OK;  // not loaded: its packs are off
+    std::erase_if(g_reloaded, [&](const Reloaded& r) { return r.mod == id; });
+    g_reloaded.push_back(Reloaded{std::move(id), std::move(why)});
+    return KILN_OK;
+}
+
 KilnResult KILN_CALL t_export_changes(uint32_t kinds, char* buf, size_t cap, size_t* len) {
     if (len) *len = 0;
     if (!tick()) return KILN_ERR_WRONG_THREAD;
@@ -1069,6 +1130,7 @@ const KilnContentApi kTable = {
     /* appended to v4 */ &t_icon_alias,
     /* appended to v4, since 0.2.0-dev.28 */ &t_txn_begin, &t_txn_end,
     /* appended to v4, since 0.2.0-dev.29.18 */ &nc_text_api, &nc_text_info_api,
+    /* appended to v4, since 0.2.0-dev.31.13 */ &t_pack_mod_reloaded,
 };
 
 // ============================================================================================= boot ============

@@ -556,7 +556,7 @@ void read_impl(uintptr_t world, void* registry, KilnEntity e, ReadOut* out) {
                 }
                 if (sl.pide) {
                     sl.flags |= KILN_ITEMS_SLOT_GEAR;
-                    sl.reserved = stamp_for(sl.pide, sl.item);  // v4: its stamp, at this read
+                    if (!out->no_stamp) sl.reserved = stamp_for(sl.pide, sl.item);  // v4: its stamp, at this read
                     if (const auto* is = static_cast<const uint8_t*>(component(world, kHashItemState, sl.pide,
                                                                                 kItemStateSize))) {
                         sl.state = rd<uint16_t>(is, 0x0E);

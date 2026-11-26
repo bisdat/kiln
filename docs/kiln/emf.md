@@ -96,8 +96,9 @@ EMF 0.6.10 (API v41) and 0.6.11 (v42) only raised the version: v41 gave move ord
 `EMF_MOVE_PEACEFUL_ALL`, v42 gave path results the door each point goes through (`EmfPathResult.doors`); the table
 stayed 1088 bytes. Since 0.2.0-dev.28 kiln-emf says version 42, so a mod whose `mod.json` says `"emf": 41` or `42`
 loads instead of being refused ("needs EMF API v42; kiln-emf provides v40"), and `emf::has_v41()` and `has_v42()`
-answer true. The functions those fields belong to, `enemy_move` and `path_find`, are still among the ones Kiln does not
-carry: a move order of either size (128 or 136 bytes) is refused with its reason, and no path result reaches a mod.
+answer true. Since 0.2.0-dev.31.13 `enemy_move` is carried and reads `stuck_seconds` when a 136-byte order has it (a
+128-byte order gets the 15 s default); `EMF_MOVE_PEACEFUL_ALL` is refused with its reason. `path_find` is still among
+the functions Kiln does not carry: no path result reaches a mod.
 
 EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) grew the table to 1144 bytes: the game's own permissions of a player
 (`player_permissions`), breaking player-built blocks (`break_blocks`, `block_at`, `find_wall`; v45 spares the world's
@@ -118,7 +119,7 @@ provenance and raw material hardness/health;
 `find_wall_ex(..., EMF_FIND_TERRAIN)` includes only player-placed terrain. Breaks never remove natural/unknown terrain,
 even with `EMF_BREAK_WORLD`. Damage uses native building cracks and caller-configured terrain health ×250 / 20-second
 healing. `EMF_BREAK_DROPS` still refuses the whole request (id 0, the documented unavailable reason, no callback).
-`EMF_MARKER_BAR` remains unavailable. Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
+Since 0.2.0-dev.31.13 `EMF_MARKER_BAR` is drawn as ten cells after the marker's text (below). Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
 cleanup just outside the box. Ruin protection still shrinks building spheres as EMF does; terrain keeps the original
 radius and its own natural/unknown-cell protection. Spheres crossing a grid edge skip only the outside cells;
 wholly outside or unloaded spheres are successful no-ops. A non-fault refusal fails only that request, not later
@@ -142,7 +143,8 @@ admits manifest requirements through `"emf": 49`; version 50 and later remain re
 layouts are preserved. `has_v49()` now reports the contract version, **not path or movement availability**.
 `EmfPathQuery.as_state` adds calm/Guard planning (56 to 60 bytes); `EMF_MOVE_CLEAR` requests wall-clear arrival.
 Neither feature is implemented here: all `path_find` queries return 0, logged, without a callback or result;
-all valid-size `enemy_move` orders return 0 and `why = "not available on Kiln yet"`, without a callback or movement.
+an `enemy_move` order with `EMF_MOVE_CLEAR` returns 0 with its reason (`enemy_move` itself is carried since
+0.2.0-dev.31.13, below), without a callback or movement.
 Unknown states and flags are also no-action refusals, never downgraded to calm planning or movement without the flag.
 This does not enable Kiln-native path/orders hooks or establish gameplay parity for EMF 0.6.22's mods.
 
@@ -163,19 +165,50 @@ Kiln does not carry every function EMF added since. Carried: chat lines without 
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
 since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the server applies to a creature, player
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
-Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
-language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
-and villager moves. A mod that calls one of those gets
+Kiln yet, and the mod's log says so once). Since 0.2.0-dev.31.13 also:
+- buffs (`buff_types`, `buff_type`, `buff_text`, `buffs_of`, `buff_apply`, `buff_remove`, `on_buff`; Lua `emf.buffs`,
+  `emf.apply_buff`, `emf.remove_buff` and the rest): giving and removing run the game's own buff natives, so the
+  effect, the HUD icon and saving are the game's; a give with an `item` is refused;
+- `player_view` (the local player's position, heading and camera direction);
+- markers (`marker_set` ... `marker_unsend`, Lua `emf.marker` ... `emf.unsend_marker`, and v47's bar) on Kiln's own
+  marker service: a world label, Kiln's compass strip for the edge arrow, and the game's map with one of its icons;
+  the mapping and what differs are in [emf-parity.md](emf-parity.md#markers-on-kiln-v33-and-v47s-bar);
+- enemy orders and move orders (`enemy_order` ... `enemy_moving`) on `kiln.creature_control` leases: the game's own AI
+  attacks or walks, and an order with `damage` or a move with the peaceful or clear options is refused with its reason.
+
+Not yet: player join/leave/death events, item names and the game's language, character names, changing hits
+(`on_hit_before`, hit rules), map clicks and map actions, canvases and the rest of the minimap's parts (`fog_at`,
+`map_markers`), `remove_building`, paths, doors, a player's game permissions and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
 
 What that means for EMF's own mods of 0.6.8, read from their source (not seen with a player):
-- **minimap** draws nothing (`emf.canvas`, `emf.player_view` and `emf.map_markers` are not carried).
-- **Beastmaster**: its markers sent to players (`emf.send_marker`), its buff reads and removals (`emf.buffs`,
-  `emf.remove_buff`) and its reads of `emf.player_view` and `emf.enemy_moving` give nothing; the rest runs as
-  before.
+- **minimap** draws nothing (`emf.canvas`, `emf.fog_at` and `emf.map_markers` are not carried; `emf.player_view` is
+  since 0.2.0-dev.31.13).
+- **Beastmaster** (1.22.0): since 0.2.0-dev.31.13 it runs fully on Kiln alone, without EMF (read from its source; not
+  yet seen with a player):
+  - Taming: a tamed beast loses its debuffs (`emf.buffs` lists them, `emf.remove_buff` takes each one off through
+    the game's own removeBuff, so a player's bleed no longer kills the wolf once its guard ends).
+  - `beastmaster.spawn` puts the beast 5 m in the camera's direction (`emf.player_view`; on the host's console thread
+    from the server world's copy of the host's player).
+  - Markers (`/beastmaster markers on`, `/beastmaster stable_markers on`): each beast you have out gets its name and
+    its health as ten cells (`Rex [########..]`) over its head, following it, on Kiln's compass strip (direction and
+    distance) and on the map as one of the game's pin icons; the stables show on the map, and within 200 m in the
+    world. Players who joined need Kiln 0.2.0-dev.31.12 or later on their own game (not EMF; Beastmaster there is
+    not needed); a player without Kiln sees none.
+  - `emf.enemy_order(world, beast, target, {seconds = ..., allies = true})` (grounds.lua: a beast at a Training
+    Grounds attacks the dummy's invisible target, renewed every few seconds) answers the order's id: kiln-emf takes a
+    `kiln.creature_control` combat lease on the beast, holds the target as its pick through `kiln.creatures` and
+    sends the game's threat, so the beast goes for it; `emf.enemy_order_cancel` (grounds.lua, home.lua: the scene
+    ends, the player pets it) ends it at once and gives the lease back. Before, every call answered `nil` and the
+    beast sniffed about instead.
+  - `emf.enemy_moving(world, beast)` (home.lua, pack.lua) answers another mod's move on the beast (its id, else
+    `nil`), so Beastmaster does not turn, settle, leash or send back a beast that another EMF mod walks somewhere.
+  - Orders and moves are server-side, as on EMF: a host or a dedicated server. A beast another Kiln mod controls
+    (a Kiln pet's follow lease) cannot be moved by an EMF mod: the move answers `nil` and "creature control: Busy:
+    ...". Orders with `damage` and moves with the peaceful or clear options are refused with their reason; see
+    [emf-parity.md](emf-parity.md#v28-to-v40-emf-063-to-068).
 - **teleports**: the map action (Shift and hold on the map) is not offered and it cannot look the ground up for a
   spot (`map_action`, `ground_at`); its commands work as before.
 
@@ -347,8 +380,7 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - Turned spawns: on a disposable world, ask a v47 mod to spawn a door/target at yaw 0 and 90 degrees with the
   same extra components. Check both the visible facing and a creature's interaction with the target, not just its
-  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below; marker bars
-  still log their unavailable answer without changes.
+  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,
   with the same mods in your own game. You stay connected after 60 s; `kiln.log` has `EMF mods check: against the
   server's mods: same mods`. With a mod missing on your side that the server requires, one note names it.

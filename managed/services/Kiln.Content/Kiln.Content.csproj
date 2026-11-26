@@ -19,6 +19,9 @@
     <InternalsVisibleTo Include="Kiln.Ui.Tests" />
     <InternalsVisibleTo Include="Kiln.Items.Tests" />
     <InternalsVisibleTo Include="StationMenusTest" />
+    <!-- the kit's content lookups fake (Fakes/GameLookups/) scripts the voxel material source (VoxelMaterialData.UseSource) -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
+    <InternalsVisibleTo Include="Kiln.TestKit.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />

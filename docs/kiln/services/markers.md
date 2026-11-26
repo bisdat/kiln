@@ -104,6 +104,9 @@ the game's transport pads every payload with zeros to a multiple of 4 bytes, and
 ("a bad marker message from peer 0x…: the message has bytes after its end", every 5 s, while the client kept saying
 HELLO). Since 0.2.0-dev.31.12 both ends take up to 3 zero bytes after a message when its length is a multiple of 4,
 and nothing else. Both ends need 0.2.0-dev.31.12: an older client still refuses a newer server's padded messages.
+Since 0.2.0-dev.31.13 a client whose HELLO gets no answer (such an older server, or a server whose world is gone while
+the connection lingers) says HELLO once a second five times, then after 5, 10, 20 and 40 s, then once a minute; a new
+connection, client world or lapsed lease starts over at once a second.
 
 ## Limits
 Kiln's own policy, not the game's: 128 markers per mod and source, 512 local and 512 received on a client (1024 in all),

@@ -945,6 +945,7 @@ KilnResult KILN_CALL t_buffs(KilnEntity e, KilnPlayerBuff* out, uint32_t capacit
                 b.entity = rec[0];
                 b.slot = g.slot;
                 b.cleansed = rec[2] & 0xFF;
+                b.index = i;
                 if (const uint8_t* net = rec[0] ? comp_of(world, C_BUFFNET, rec[0]) : nullptr) {
                     __try {
                         b.life_ns = rd_field<int64_t>(net, L.bn_life);

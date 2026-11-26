@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers and v31 on_hit (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v49 answers, v31 on_hit, v32 buffs, v33 markers, v35 player_view and v39/v40 orders (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -23,16 +23,29 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -o "$out/glue_test"
 "$out/glue_test" "$out"
 "$out/glue_test" "$out" no-render
-# v49 (EMF 0.6.22): v47/v48/v49 path and old/new move no-action refusals against the production api_v40.cpp (also built natively: emf-path-test).
+# v49 (EMF 0.6.22): v47/v48/v49 path no-action refusals against the production api_v40.cpp (also built natively: emf-path-test).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/path_test.cpp" "$here/../src/api_v40.cpp" -o "$out/path_test"
 "$out/path_test"
+# v39 enemy orders and v40 move orders on kiln.creature_control leases, kiln.creatures and kiln.spawn (0.2.0-dev.31.13;
+# also built natively: emf-orders-test).
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/orders_test.cpp" "$here/../src/api_v40.cpp" "$here/../src/api_orders.cpp" "$here/../src/orders_model.cpp" \
+    -o "$out/orders_test"
+"$out/orders_test"
 # v44/v45/v47 terrain translation, async queue and callback timing.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/terrain_test.cpp" "$here/../src/api_terrain.cpp" -o "$out/terrain_test"
 "$out/terrain_test"
+# v33 markers and v47 bars on kiln.markers (0.2.0-dev.31.13): the production adapter with a fake kiln.markers.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/markers_test.cpp" "$here/../src/api_markers.cpp" -o "$out/markers_test"
+"$out/markers_test"
+"$out/markers_test" no-service
 # Spawn-time yaw and component forwarding use the production adapter (no game).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
@@ -44,6 +57,14 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     "$here/hits_test.cpp" "$here/../src/api_hits.cpp" "$here/../src/hits_model.cpp" "$here/../src/api_events.cpp" \
     -o "$out/hits_test"
 for mode in "" no-mods no-relay mod-event bad-layout bad-size; do "$out/hits_test" $mode; done
+# v32 buffs and v35 player_view (0.2.0-dev.31.13): the production adapters with fake services; the two Impact programs
+# through kiln.abilities' own verifier
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -D__fastcall= \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    -I"$here/../../../services/abilities" \
+    "$here/buffs_test.cpp" "$here/../src/buffs_model.cpp" "$here/../src/api_buffs.cpp" "$here/../src/api_view.cpp" \
+    "$here/../src/api_v40.cpp" "$here/../src/api_terrain.cpp" "$here/../../../services/abilities/verify.cpp" -o "$out/buffs_test"
+for mode in "" client server; do "$out/buffs_test" $mode; done
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -DKEMF_NET_CLIENT_TEST \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
     "$here/net_test.cpp" "$here/../src/api_net.cpp" "$here/../src/api_net_client.cpp" \

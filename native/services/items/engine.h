@@ -262,6 +262,9 @@ struct ReadOut {
     uint32_t capacity;
     uint32_t written;
     bool found;
+    // set by the caller: leave the stamp table alone (slot.reserved stays 0). kiln.stations.client reads the client world,
+    // whose item entities the server-world stamp table must not learn (review 31.13).
+    bool no_stamp = false;
 };
 bool read_inventory(uintptr_t world, void* registry, KilnEntity entity, ReadOut* out, unsigned long* code);
 // Entity-map scan. ids: capacity entries; *total = matches.

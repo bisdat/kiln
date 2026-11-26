@@ -5,8 +5,10 @@
 
 pub mod bridge;
 pub mod client;
+pub mod datadir;
 pub mod discover;
 pub mod hub;
+pub mod peer;
 pub mod protocol;
 pub mod tunnel;
 #[cfg(feature = "web-panel")]

@@ -26,6 +26,26 @@
         }
       ]
     },
+    "tools/MaterialSelectorBody": {
+      "comment": "kiln-tools' first half of the material selector (selector_enter in hooks/presentation.cpp): tools/MaterialSelector's first instruction after its prologue, lea r15,[rcx+0x638] (entry + 0x23): rcx the groups, rdx the access, r8b currentOnly, rsp the function's (the same at tools/MaterialSelectorDone). Not the entry: Building Tools (0.34.0) finds the function by its first 35 bytes (docs/kiln/engines/README.md). Client 0x40e5f3",
+      "find": [
+        {
+          "scope": { "symbol": "tools/MaterialSelector", "size": 64 },
+          "pattern": "48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",
+          "offset": 9
+        }
+      ]
+    },
+    "tools/MaterialSelectorDone": {
+      "comment": "kiln-tools' second half (selector_leave): the epilogue's first instruction, mov rbx,[rsp+0x1d0] (entry + 0xa8a), after the finalizer's call (+ 0xa76, which Building Tools redirects) and its temporary's release; every path to the one ret passes it and nothing jumps past it; rsi still holds the groups (written once, at + 0x3b). Client 0x40f05a",
+      "find": [
+        {
+          "scope": { "symbol": "tools/MaterialSelector", "size": 2876 },
+          "pattern": "45 33 C0 48 8D 4C 24 60 33 D2 E8 ?? ?? ?? ?? 48 8B 9C 24 D0 01 00 00 48 81 C4 90 01 00 00 41 5F 41 5E 41 5D 41 5C 5F 5E 5D C3",
+          "offset": 15
+        }
+      ]
+    },
     "tools/MaterialPreview": {
       "find": [
         {
@@ -130,6 +150,8 @@
     "tools.material_picker": {
       "symbols": [
         "tools/MaterialSelector",
+        "tools/MaterialSelectorBody",
+        "tools/MaterialSelectorDone",
         "GetComponent"
       ]
     },
@@ -153,6 +175,8 @@
     "ui.ammo.list": {
       "symbols": [
         "tools/MaterialSelector",
+        "tools/MaterialSelectorBody",
+        "tools/MaterialSelectorDone",
         "ui/AmmoFinalizer",
         "ui/AmmoPick",
         "ui/AmmoItemLookup",
@@ -162,6 +186,8 @@
     "ui.ammo.pick": {
       "symbols": [
         "tools/MaterialSelector",
+        "tools/MaterialSelectorBody",
+        "tools/MaterialSelectorDone",
         "ui/AmmoFinalizer",
         "ui/AmmoPick",
         "ui/AmmoItemLookup",

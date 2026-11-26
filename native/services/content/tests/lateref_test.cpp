@@ -356,6 +356,11 @@ bool store_drop(KilnOwner, uintptr_t) { return false; }
 bool store_original(uintptr_t, uint8_t, uint8_t*) { return false; }
 void store_originals(uintptr_t, size_t, uint8_t*) {}
 size_t store_flush(std::string*) { return 0; }
+// registry_live.cpp: no registry stage here (the test's definitions have no registry id or fields)
+bool registry_live_prepare_entry_identities(const registry::json&, std::string*) { return true; }
+bool registry_live_initialize_entry(uint32_t, const Entry&, const std::string&, const registry::json&, std::string*, const Schema*) {
+    return true;
+}
 }  // namespace kc
 
 // ============================================================================================= the cases =========

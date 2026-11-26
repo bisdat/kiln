@@ -13,43 +13,6 @@ Functions F;
 
 namespace {
 
-// Result of SessionRead (0x28 bytes): +0 status (0 = a message), +8 message handle (SessionFree takes &res.handle),
-// +0x18 data, +0x20 size in bytes.
-struct ReadRes {
-    uint8_t status;
-    uint8_t pad[7];
-    uint64_t handle;
-    uint64_t handle2;
-    const uint8_t* data;
-    uint64_t size;
-};
-static_assert(sizeof(ReadRes) == 0x28);
-
-// Result of SessionAlloc (0x38 bytes): +0 status, +8 handle (Commit/Abort take &res.handle), +0x20 final size (u32,
-// set before Commit), +0x28 buffer, +0x30 capacity in bytes.
-struct AllocRes {
-    uint8_t status;
-    uint8_t pad[7];
-    uint64_t handle;
-    uint64_t h1;
-    uint64_t h2;
-    uint32_t size;
-    uint32_t pad2;
-    uint8_t* data;
-    uint64_t capacity;
-};
-static_assert(sizeof(AllocRes) == 0x38);
-static_assert(offsetof(AllocRes, size) == 0x20 && offsetof(AllocRes, data) == 0x28);
-
-// SessionAlloc's request: explicit = 0 asks for the socket's maximum (8 KiB on channel 12).
-struct AllocSpec {
-    uint64_t min_size;
-    uint64_t max_size;
-    uint8_t explicit_size;
-    uint8_t pad[7];
-};
-static_assert(sizeof(AllocSpec) == 0x18);
-
 using ReadFn = ReadRes*(__fastcall*)(ReadRes* out, uintptr_t session, uintptr_t socket);
 using FreeFn = void(__fastcall*)(uintptr_t session, uint64_t* handle);
 using AllocFn = AllocRes*(__fastcall*)(AllocRes* out, uintptr_t session, uintptr_t socket, const AllocSpec* spec);
@@ -158,54 +121,86 @@ uintptr_t client_socket(uintptr_t gc, uintptr_t* session, uintptr_t* socket_set)
     }
 }
 
+// The game's message calls for session_io.cpp, one structured-exception guard each: a fault in one call is that call's
+// failure, so the pairing rules there hold (every read freed, every allocation committed or aborted).
+namespace {
+
+bool g_read(uintptr_t session, uintptr_t socket, ReadRes* out) {
+    __try {
+        reinterpret_cast<ReadFn>(F.read)(out, session, socket);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_release(uintptr_t session, uint64_t* handle) {
+    __try {
+        reinterpret_cast<FreeFn>(F.free)(session, handle);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_alloc(uintptr_t session, uintptr_t socket, const AllocSpec* spec, AllocRes* out) {
+    __try {
+        reinterpret_cast<AllocFn>(F.alloc)(out, session, socket, spec);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_commit(uintptr_t session, uint64_t* handle) {
+    __try {
+        reinterpret_cast<CommitFn>(F.commit)(session, handle);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_abort(uintptr_t session, uint64_t* handle) {
+    __try {
+        reinterpret_cast<CommitFn>(F.abort)(session, handle);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_copy(uint8_t* to, const uint8_t* from, size_t n, size_t pad) {
+    __try {
+        std::memcpy(to, from, n);
+        if (pad) std::memset(to + n, 0, pad);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool g_deliver(FrameSink sink, const uint8_t* data, uint64_t size, void* user) {
+    __try {
+        sink(data, size, user);  // the sinks catch their own C++ exceptions; this catches hardware faults
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+const SessionCalls kGame{&g_read, &g_release, &g_alloc, &g_commit, &g_abort, &g_copy, &g_deliver};
+
+}  // namespace
+
 int drain(uintptr_t session, uintptr_t socket, FrameSink sink, void* user) {
     if (!valid_ptr(session) || !valid_ptr(socket) || !F.read || !F.free) return -1;
-    const auto read = reinterpret_cast<ReadFn>(F.read);
-    const auto release = reinterpret_cast<FreeFn>(F.free);
-    int n = 0;
-    __try {
-        for (uint32_t i = 0; i < kMaxMessagesPerDrain; ++i) {
-            ReadRes r;
-            std::memset(&r, 0, sizeof(r));
-            read(&r, session, socket);
-            if (r.status != 0) break;
-            if (r.data && r.size > 0) sink(r.data, r.size, user);
-            release(session, &r.handle);
-            ++n;
-        }
-        return n;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
+    return drain_messages(kGame, session, socket, sink, user);
 }
 
 uint32_t send(uintptr_t session, uintptr_t socket, const uint8_t* data, uint32_t len, uint64_t* capacity) {
     if (!valid_ptr(session) || !valid_ptr(socket) || !F.alloc || !F.commit || !F.abort) return 0xFF;
-    const auto alloc = reinterpret_cast<AllocFn>(F.alloc);
-    const auto commit = reinterpret_cast<CommitFn>(F.commit);
-    const auto abort = reinterpret_cast<CommitFn>(F.abort);
-    __try {
-        AllocRes r;
-        std::memset(&r, 0, sizeof(r));
-        AllocSpec spec;
-        std::memset(&spec, 0, sizeof(spec));
-        alloc(&r, session, socket, &spec);
-        if (capacity) *capacity = r.capacity;
-        if (r.status != 0) return r.status ? r.status : 0xFF;
-        // The game's bit writers flush whole 32-bit words: keep the size a multiple of 4 (zero padding).
-        const uint32_t padded = (len + 3u) & ~3u;
-        if (!r.data || r.capacity < padded) {
-            abort(session, &r.handle);
-            return 0xFE;
-        }
-        std::memcpy(r.data, data, len);
-        if (padded > len) std::memset(r.data + len, 0, padded - len);
-        r.size = padded;
-        commit(session, &r.handle);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return 0xFF;
-    }
+    return send_message(kGame, session, socket, data, len, capacity);
 }
 
 bool login_failure(uintptr_t gs, uint32_t peer, uint8_t reason) {

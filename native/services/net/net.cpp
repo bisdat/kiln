@@ -41,9 +41,11 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "game.h"
+#include "outbound.h"
 #include "kiln_api.h"
 #include "lab.h"
 #include "nlohmann/json.hpp"
@@ -90,6 +92,8 @@ constexpr uint64_t kRetryMs = 2000;
 constexpr double kPeerFramesPerSec = 2000, kPeerFrameBurst = 4000;
 constexpr double kPeerBytesPerSec = 4.0 * 1024 * 1024, kPeerByteBurst = 8.0 * 1024 * 1024;
 constexpr uint64_t kLabIdleMs = 60000;
+// The game's own line when its shutdown begins (Ctrl+C, the console's quit): kiln.net sends nothing from then on.
+constexpr std::string_view kShutdownLine = "Trigger gameflow shutdown";
 
 constexpr uint8_t kKnock[4] = KILN_NET_KNOCK_INIT;
 constexpr uint8_t kLoginGameplayReady = 2;               // keen::GameMessageLoginType::GameplayReady
@@ -153,6 +157,7 @@ struct Peer {
     bool has_player = false;
     uint64_t up_ms = 0, last_rx_ms = 0;
     uint64_t rx_frames = 0, rx_bytes = 0, tx_frames = 0, tx_bytes = 0, dropped = 0;
+    uint64_t refused = 0;  // frames the game refused or that waited too long (send failures)
     Bucket bucket;
     // The Kiln-only templates there were when it was last cleared (withhold_set off), and kiln.assets' count then.
     std::shared_ptr<const KnownTemplates> known;
@@ -162,12 +167,6 @@ struct Peer {
 struct Frame {
     KilnPeer peer;
     std::vector<uint8_t> data;
-};
-
-struct Pending {
-    KilnPeer peer;
-    std::vector<uint8_t> data;
-    uint64_t since;
 };
 
 struct Sub {
@@ -184,7 +183,6 @@ std::mutex g_mu;  // everything below
 std::map<KilnPeer, Peer> g_peers;         // server role (game + lab)
 std::vector<Frame> g_inbox;               // server role
 size_t g_inbox_bytes = 0;
-std::deque<Pending> g_retry;              // server role, game frames the game refused for now
 std::vector<Sub> g_subs;
 std::vector<std::pair<KilnPeer, uint32_t>> g_pending_events;  // server role, delivered in the next Pre
 std::set<KilnPeer> g_proved;              // peers a frame came from: they have Kiln
@@ -262,6 +260,18 @@ struct Counters {
     std::atomic<uint64_t> rx_frames{0}, rx_bytes{0}, tx_frames{0}, tx_bytes{0}, dropped{0}, send_failures{0}, drains{0},
         game_frames{0};
 } C;
+
+// The gate (nothing is sent once the game's shutdown begins, nor from the server world's stop to the next start) and the
+// server role's retry queue (frames the game refused for now, in order, at most kOutboxFrames and kRetryMs old).
+knet::Outbound g_out{kOutboxFrames, kRetryMs};
+
+// One line of a peer's Kiln traffic, for the peer's DOWN and the world's stop (what Kiln sent a peer that went bad).
+void log_traffic(const Peer& p, const char* what) {
+    logf(KILN_LOG_INFO, "net: peer 0x%x ('%s') %s: Kiln frames in %llu (%llu bytes), out %llu (%llu bytes), %llu dropped, %llu refused by the game",
+         p.id, p.rec.name, what, static_cast<unsigned long long>(p.rx_frames), static_cast<unsigned long long>(p.rx_bytes),
+         static_cast<unsigned long long>(p.tx_frames), static_cast<unsigned long long>(p.tx_bytes), static_cast<unsigned long long>(p.dropped),
+         static_cast<unsigned long long>(p.refused));
+}
 
 std::vector<Sub> subs_snapshot() {
     std::lock_guard<std::mutex> lk(g_mu);
@@ -380,7 +390,8 @@ void sink_server(const uint8_t* data, uint64_t size, void* user) {
 
 void sink_server_impl(const uint8_t* data, uint64_t size, DrainCtx* ctx) {
     C.game_frames.fetch_add(1, std::memory_order_relaxed);
-    if (size == 0 || size > 65536) {
+    // From the game's shutdown (or the world's stop) on, a frame is read and freed but goes nowhere: nothing answers it.
+    if (!g_out.server_open() || size == 0 || size > 65536) {
         C.dropped.fetch_add(1, std::memory_order_relaxed);
         return;
     }
@@ -472,6 +483,8 @@ KilnResult end_refused(uintptr_t gs, KilnPeer peer, const char* why) {
 
 // Ends holds, inside ServerReceive: the game processes the held Gameplay Ready just as if it had arrived now.
 void gate_pump(uintptr_t gs) {
+    // From the game's shutdown on, no held Gameplay Ready goes on and no login failure is sent: the world is ending.
+    if (!g_out.server_open()) return;
     std::vector<KilnPeer> go, refuse;
     {
         std::lock_guard<std::mutex> lk(g_mu);
@@ -673,8 +686,13 @@ void note_kept_newer() {
 void drain_server(uintptr_t gs) {
     if (!gs) return;
     g_step.fetch_add(1, std::memory_order_acq_rel);  // see g_step
-    g_gs.store(gs, std::memory_order_relaxed);
-    if (!g_server_seen.exchange(true)) logf(KILN_LOG_INFO, "net: GameServer at %p (server role ready)", reinterpret_cast<void*>(gs));
+    // After the server world's stop (until the next one starts) this GameServer is going away: its channel 12 is still
+    // read and freed below, but it is not taken as the one to send on.
+    const bool world_down = g_out.server_world_down();
+    if (!world_down) {
+        g_gs.store(gs, std::memory_order_relaxed);
+        if (!g_server_seen.exchange(true)) logf(KILN_LOG_INFO, "net: GameServer at %p (server role ready)", reinterpret_cast<void*>(gs));
+    }
     C.drains.fetch_add(1, std::memory_order_relaxed);
     knet::MachineSlot slots[32];
     const int n = knet::read_machine_slots(gs, slots, 32);
@@ -693,6 +711,7 @@ void drain_server(uintptr_t gs) {
             C.dropped.fetch_add(1);
         }
     }
+    if (world_down) return;
     flush_retry(gs);
     gate_pump(gs);
 }
@@ -705,7 +724,30 @@ void hk_after_sync(safetyhook::Context& ctx) {
 // ---------------------------------------------------------------------------------------------------------------
 // Server role: send
 
+// A frame the game refused or that waited too long: counted for its peer.
+void note_refused(KilnPeer peer) {
+    C.send_failures.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_mu);
+    auto it = g_peers.find(peer);
+    if (it != g_peers.end()) {
+        it->second.dropped++;
+        it->second.refused++;
+    }
+}
+
+void note_sent(KilnPeer peer, size_t len) {
+    C.tx_frames.fetch_add(1, std::memory_order_relaxed);
+    C.tx_bytes.fetch_add(len, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_mu);
+    auto it = g_peers.find(peer);
+    if (it != g_peers.end()) {
+        it->second.tx_frames++;
+        it->second.tx_bytes += len;
+    }
+}
+
 KilnResult send_game(KilnPeer to, const uint8_t* data, uint32_t len, bool queue_on_fail) {
+    if (!g_out.server_open()) return KILN_ERR_UNAVAILABLE;  // the game's shutdown began, or the server world stopped
     const uintptr_t gs = g_gs.load(std::memory_order_relaxed);
     if (!gs) return KILN_ERR_UNAVAILABLE;
     uintptr_t session = 0;
@@ -714,14 +756,7 @@ KilnResult send_game(KilnPeer to, const uint8_t* data, uint32_t len, bool queue_
     uint64_t cap = 0;
     const uint32_t st = knet::send(session, socket, data, len, &cap);
     if (st == 0) {
-        C.tx_frames.fetch_add(1, std::memory_order_relaxed);
-        C.tx_bytes.fetch_add(len, std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lk(g_mu);
-        auto it = g_peers.find(to);
-        if (it != g_peers.end()) {
-            it->second.tx_frames++;
-            it->second.tx_bytes += len;
-        }
+        note_sent(to, len);
         return KILN_OK;
     }
     if (st == 0xFE) {
@@ -732,63 +767,29 @@ KilnResult send_game(KilnPeer to, const uint8_t* data, uint32_t len, bool queue_
         return KILN_ERR_BUFFER_TOO_SMALL;
     }
     if (queue_on_fail) {
-        std::lock_guard<std::mutex> lk(g_mu);
-        if (g_retry.size() < kOutboxFrames) {
-            g_retry.push_back(Pending{to, std::vector<uint8_t>(data, data + len), now_ms()});
-            return KILN_OK;
-        }
+        const auto q = g_out.queue(to, data, len, now_ms());
+        if (q == knet::Outbound::Queued::Yes) return KILN_OK;
+        if (q == knet::Outbound::Queued::Closed) return KILN_ERR_UNAVAILABLE;
     }
-    C.send_failures.fetch_add(1, std::memory_order_relaxed);
+    note_refused(to);
     static std::atomic<int> logged{0};
     if (logged.fetch_add(1) < 10) logf(KILN_LOG_WARN, "net: the game refused a frame to 0x%x (status %u)", to, st);
     return KILN_ERR_INTERNAL;
 }
 
+// Frames the game refused for now, in order, on the server thread (outbound.h: bounded, dropped once the gate closes).
 void flush_retry(uintptr_t gs) {
-    if (!gs) return;
-    std::deque<Pending> work;
-    {
-        std::lock_guard<std::mutex> lk(g_mu);
-        if (g_retry.empty()) return;
-        work.swap(g_retry);
-    }
-    const uint64_t t = now_ms();
-    std::deque<Pending> keep;
-    bool blocked = false;
-    for (auto& p : work) {
-        if (!blocked) {
-            uintptr_t session = 0;
-            const uintptr_t socket = knet::server_socket(gs, p.peer, &session);
-            if (!socket) {
-                C.send_failures.fetch_add(1);
-                continue;
-            }
-            uint64_t cap = 0;
-            const uint32_t st = knet::send(session, socket, p.data.data(), static_cast<uint32_t>(p.data.size()), &cap);
-            if (st == 0) {
-                C.tx_frames.fetch_add(1);
-                C.tx_bytes.fetch_add(p.data.size());
-                continue;
-            }
-            blocked = true;  // keep order: everything after waits too
-        }
-        if (t - p.since > kRetryMs) {
-            C.send_failures.fetch_add(1);
-            std::lock_guard<std::mutex> lk(g_mu);
-            auto it = g_peers.find(p.peer);
-            if (it != g_peers.end()) it->second.dropped++;
-            continue;
-        }
-        keep.push_back(std::move(p));
-    }
-    std::lock_guard<std::mutex> lk(g_mu);
-    for (auto it = keep.rbegin(); it != keep.rend(); ++it) g_retry.push_front(std::move(*it));
-}
-
-bool has_pending_for(KilnPeer peer) {
-    for (const auto& p : g_retry)
-        if (p.peer == peer) return true;
-    return false;
+    if (!gs || g_out.pending() == 0) return;
+    const auto send = [gs](uint32_t peer, const uint8_t* data, size_t len) {
+        uintptr_t session = 0;
+        const uintptr_t socket = knet::server_socket(gs, peer, &session);
+        if (!socket) return knet::Outbound::Sent::Never;
+        uint64_t cap = 0;
+        if (knet::send(session, socket, data, static_cast<uint32_t>(len), &cap) != 0) return knet::Outbound::Sent::Later;
+        note_sent(peer, len);
+        return knet::Outbound::Sent::Ok;
+    };
+    g_out.flush(now_ms(), send, [](uint32_t peer) { note_refused(peer); });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -834,7 +835,8 @@ void poll_lab(std::vector<Event>& events) {
         }
         note_proof_locked(id);
         if (n == sizeof(kKnock) && std::memcmp(buf, kKnock, sizeof(kKnock)) == 0) continue;
-        if (static_cast<size_t>(n) > 65535 || g_inbox.size() >= kInboxFrames || !p.bucket.take(static_cast<size_t>(n))) {
+        if (!g_out.server_open() || static_cast<size_t>(n) > 65535 || g_inbox.size() >= kInboxFrames ||
+            !p.bucket.take(static_cast<size_t>(n))) {
             p.dropped++;
             C.dropped.fetch_add(1);
             continue;
@@ -880,7 +882,7 @@ void refresh_game_peers(std::vector<Event>& events) {
     for (auto it = g_peers.begin(); it != g_peers.end();) {
         if (it->second.transport == KILN_NET_TRANSPORT_GAME && !live.count(it->first)) {
             events.push_back({it->first, KILN_NET_PEER_DOWN});
-            logf(KILN_LOG_INFO, "net: peer 0x%x down ('%s')", it->first, it->second.rec.name);
+            log_traffic(it->second, "down");
             g_held.erase(it->first);
             g_let_in.erase(it->first);
             g_refused.erase(it->first);
@@ -1065,7 +1067,7 @@ void sink_client(const uint8_t* data, uint64_t size, void*) {
 
 void sink_client_impl(const uint8_t* data, uint64_t size) {
     C.game_frames.fetch_add(1, std::memory_order_relaxed);
-    if (size == 0 || size > 65536) {
+    if (!g_out.client_open() || size == 0 || size > 65536) {  // after the game's shutdown: read and freed, delivered nowhere
         C.dropped.fetch_add(1);
         return;
     }
@@ -1128,6 +1130,12 @@ void client_deliver() {
 }
 
 void client_flush(uintptr_t session, uintptr_t socket) {
+    if (!g_out.client_open()) {  // the game's shutdown began: nothing more goes to the server
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_client_outbox.clear();
+        g_client_outbox_bytes = 0;
+        return;
+    }
     for (int i = 0; i < 4096; ++i) {
         std::vector<uint8_t> f;
         {
@@ -1168,7 +1176,7 @@ void client_queue_knock_locked() {
 // The proof while the client loads: bounded, because a vanilla server logs one warning per frame on this channel.
 void client_knock_on_time() {
     std::lock_guard<std::mutex> lk(g_mu);
-    if (!g_client_up || g_client_heard || g_knocks >= std::size(kKnockMs)) return;
+    if (!g_out.client_open() || !g_client_up || g_client_heard || g_knocks >= std::size(kKnockMs)) return;
     if (now_ms() - g_server_peer.up_ms < kKnockMs[g_knocks]) return;
     ++g_knocks;
     client_queue_knock_locked();
@@ -1292,17 +1300,21 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     client_deliver();
 }
 
-void server_stopped() {
+// The server world stops (`dropped`: frames that were waiting for the game, now dropped): every peer ends with it.
+void server_stopped(size_t dropped) {
     std::vector<Event> events;
     {
         std::lock_guard<std::mutex> lk(g_mu);
-        for (const auto& [peer, p] : g_peers) events.push_back({peer, KILN_NET_PEER_DOWN});
+        for (const auto& [peer, p] : g_peers) {
+            events.push_back({peer, KILN_NET_PEER_DOWN});
+            if (!is_local_machine(peer)) log_traffic(p, "ends with the server world");
+        }
+        if (dropped) logf(KILN_LOG_INFO, "net: the server world stops: %zu frame(s) that waited for the game dropped; nothing is sent until the next world starts", dropped);
         g_peers.clear();
         g_lab_by_key.clear();
         g_pending_events.clear();
         g_inbox.clear();
         g_inbox_bytes = 0;
-        g_retry.clear();
         g_proved.clear();
         g_held.clear();
         g_let_in.clear();
@@ -1319,11 +1331,30 @@ void server_stopped() {
 }
 
 void KILN_CALL on_world_event(const KilnWorldEvent* ev, void*) {
-    if (ev && ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_SERVER) server_stopped();
+    if (ev && ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_SERVER) server_stopped(g_out.server_world_stopped());
+    if (ev && ev->event == KILN_WORLD_STARTED && ev->kind == KILN_WORLD_SERVER) g_out.server_world_started();
     if (ev && ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_CLIENT) {
         client_set_up(false, 0);
         client_deliver();
     }
+}
+
+// The game's shutdown line (Kiln's log thread, possibly late): the gate closes for good, in both roles. What waits is
+// dropped; channel 12 is still read and freed (the game never holds a Kiln frame), and nothing answers it.
+void KILN_CALL on_game_log(int32_t, KilnStr text, void*) {
+    if (!text.ptr || std::string_view(text.ptr, text.len).find(kShutdownLine) == std::string_view::npos) return;
+    size_t dropped = 0;
+    if (!g_out.begin_shutdown(&dropped)) return;
+    size_t client = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        client = g_client_outbox.size();
+        g_client_outbox.clear();
+        g_client_outbox_bytes = 0;
+    }
+    C.dropped.fetch_add(dropped + client, std::memory_order_relaxed);
+    logf(KILN_LOG_INFO, "net: the game began its shutdown: kiln.net sends nothing more, to any peer (%zu frame(s) that waited dropped); "
+         "channel 12 is still read and freed, and nothing answers it", dropped + client);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1414,7 +1445,7 @@ KilnResult KILN_CALL t_send(KilnPeer to, const uint8_t* data, uint32_t len) {
     if (!data || len == 0) return KILN_ERR_INVALID_ARGUMENT;
     if (len > g_max_frame.load()) return KILN_ERR_BUFFER_TOO_SMALL;
     if (to == KILN_NET_PEER_SERVER) {
-        if (!g_client_role || g_client_faulted.load()) return KILN_ERR_UNAVAILABLE;
+        if (!g_client_role || g_client_faulted.load() || !g_out.client_open()) return KILN_ERR_UNAVAILABLE;
         std::lock_guard<std::mutex> lk(g_mu);
         if (!g_client_up) return KILN_ERR_NOT_FOUND;
         if (g_client_outbox.size() >= kOutboxFrames || g_client_outbox_bytes + len > kOutboxBytes) {
@@ -1427,6 +1458,7 @@ KilnResult KILN_CALL t_send(KilnPeer to, const uint8_t* data, uint32_t len) {
         return KILN_OK;
     }
     if (to & KILN_NET_PEER_LAB) {
+        if (!g_out.server_open()) return KILN_ERR_UNAVAILABLE;
         uint64_t key = 0;
         {
             std::lock_guard<std::mutex> lk(g_mu);
@@ -1443,13 +1475,17 @@ KilnResult KILN_CALL t_send(KilnPeer to, const uint8_t* data, uint32_t len) {
     }
     if (!g_server_role) return KILN_ERR_UNAVAILABLE;
     if (!on_server_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!g_out.server_open()) return KILN_ERR_UNAVAILABLE;
     {
         std::lock_guard<std::mutex> lk(g_mu);
         if (!g_peers.count(to)) return KILN_ERR_NOT_FOUND;
-        if (has_pending_for(to)) {  // keep order behind frames already waiting
-            g_retry.push_back(Pending{to, std::vector<uint8_t>(data, data + len), now_ms()});
-            return KILN_OK;
-        }
+    }
+    if (g_out.pending_for(to)) {  // keep order behind frames already waiting (bounded: kOutboxFrames in all)
+        const auto q = g_out.queue(to, data, len, now_ms());
+        if (q == knet::Outbound::Queued::Yes) return KILN_OK;
+        if (q == knet::Outbound::Queued::Closed) return KILN_ERR_UNAVAILABLE;
+        note_refused(to);
+        return KILN_ERR_BUFFER_TOO_SMALL;
     }
     return send_game(to, data, len, true);
 }
@@ -2069,6 +2105,13 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (g_world_api) {
         KilnHandle h = 0;
         g_api->subscribe_world(g_owner, &on_world_event, nullptr, &h);
+    }
+    // The game's shutdown line closes the gate (on_game_log). Without kiln.log's lines (an older core) the server world's
+    // stop still closes the server role.
+    if (api->size >= offsetof(KilnApi, subscribe_log) + sizeof(void*) && api->subscribe_log) {
+        KilnHandle h = 0;
+        if (api->subscribe_log(owner, &on_game_log, nullptr, &h) != KILN_OK)
+            logf(KILN_LOG_WARN, "net: no game log lines here: the game's shutdown does not stop Kiln's frames before the world stops");
     }
     // Steam peer-to-peer messages: exports, owner and capability row now; the exit flag at exit
     init_steam_messages();

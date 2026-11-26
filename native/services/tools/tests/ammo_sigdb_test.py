@@ -65,7 +65,10 @@ class AmmoQualification(unittest.TestCase):
         self.assertEqual(bytes(image[0x40c174:0x40c185]),bytes.fromhex('8b44242889829800000044898a9c000000'))
         self.assertEqual(bytes(image[0x40c198:0x40c1a7]),bytes.fromhex('8b82980000004289841940060000c3'))
         source=(ROOT/"native/services/tools/hooks/presentation.cpp").read_text()
-        self.assertEqual(source.count('install(selector_hook,'),1)
+        # the selector's two halves are mid hooks inside it (install_selector), never a detour on its entry
+        self.assertEqual(source.count('held_ready&&install_selector()'),1)
+        self.assertNotIn('selector_hook',source)
+        self.assertIn('"tools/MaterialSelectorBody"',source);self.assertIn('"tools/MaterialSelectorDone"',source)
         self.assertNotIn('0x40f046',source)
 
     def pdata_chunk(self,rva):

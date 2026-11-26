@@ -99,7 +99,9 @@ consumers run under a structured-exception guard: a faulting subscriber is remov
 - GC: workstation + concurrent, 512 MB hard limit; a pacer runs gen0 collections at the end of a step after 8 MB of
   allocation, where the frame has slack.
 - Control folder `kiln/control/<name>.cmd` → `<name>.result.json`: `mods`, `load <folder>`, `unload <id>`,
-  `reload <id>`, `reload-test <id> <n>` (one reload per step, then a leak check), `gc`.
+  `reload <id>`, `reload-test <id> <n>` (one reload per step, then a leak check), `gc`. A `reload` (or an `unload` and a
+  `load`) takes the mod's data layers off and applies its current files again: data packs, Kiln.Quests' `quests/*.json` and
+  Kiln.Blocks' `blocks/*.json` follow the mod's load, not only its id (0.2.0-dev.31.13; services/content.md "Reloads and edits").
 
 ## Layout on a server
 See `tools/deploy-server.sh`. Kiln's own files live under `<server>/kiln/`; only `dinput8.dll` sits next to the exe.

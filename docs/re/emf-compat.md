@@ -62,7 +62,7 @@ is at 1000, `enemy_move` at 1064 and the last slot, `spawn_facing`, at 1152. No 
 |---|---|---|
 | `EmfPathQuery` | alignment 4; v37/v47 size 52, v48 size 56, v49 size 60; `moves` is `uint16_t` at 32; `max_nodes` is `uint32_t` at 48; `as_entity` is `uint32_t` at 52; appended `as_state` is `uint32_t` at 56 | `EMF_PATH_AS_CALM = 0`, `EMF_PATH_AS_GUARD = 1`. Guard needs an enemy `as_entity`, its extended move bits and roaming costs, in a server-world callback. Unknown states are refused upstream. Kiln refuses **all** queries before reading them, including old/short queries and unknown states: 0, unsupported log, no callback/result, no state change. |
 | `EmfPathResult` | unchanged from v48: size 48, alignment 8; `const uint32_t* doors` at 24, `uint16_t moves` at 32, `uint8_t jump_up/jump_down` at 34/35, `float width/height` at 36/40; field end 44, padded size 48 | Neither old 32-byte nor current 48-byte results are delivered by this adapter. |
-| `EmfMoveOrder` | unchanged size 136, alignment 8; `uint32_t flags` at 8; `const EmfPathPoint* points` at 16; `char why[96]` at 32; `float stuck_seconds` at 128 and `float hold_seconds` at 132; v40 minimum prefix 128 | New `EMF_MOVE_CLEAR = 0x10`, enemy moves only: an arrival point requires a building-block-clear line 1 m above both feet positions; not terrain line-of-sight. Upstream refuses unknown flags and CLEAR if wall checks are unavailable. Kiln refuses every valid-size move, writes only the unavailable `why`, and reads no points; unknown flags do not become a supported move. Undersized requests are refused untouched. |
+| `EmfMoveOrder` | unchanged size 136, alignment 8; `uint32_t flags` at 8; `const EmfPathPoint* points` at 16; `char why[96]` at 32; `float stuck_seconds` at 128 and `float hold_seconds` at 132; v40 minimum prefix 128 | New `EMF_MOVE_CLEAR = 0x10`, enemy moves only: an arrival point requires a building-block-clear line 1 m above both feet positions; not terrain line-of-sight. Upstream refuses unknown flags and CLEAR if wall checks are unavailable. Since 0.2.0-dev.31.13 Kiln carries `enemy_move` (api_orders.cpp) and refuses CLEAR with its `why` before any point is read; unknown flags do not become a supported move. Undersized requests are refused untouched. |
 | `EmfOffer` | unchanged size 24, alignment 8; `uint32_t sequence` at 16; `uint8_t range_m` at 20 | New named constant `EMF_SEQUENCE_CHEST = 0x3E49C160` uses the entity's own `InventorySetup`; an offer does not create inventory. Existing offer translation preserves the hash in `InteractionOfferRuntime` bytes at 8. Host tests prove byte forwarding, not a storage-screen or inventory gameplay check. |
 
 ### Lua, keys and loader behavior
@@ -98,8 +98,9 @@ is at 1000, `enemy_move` at 1064 and the last slot, `spawn_facing`, at 1152. No 
 
 `tests/abi_test.cpp` freezes types/offsets and the whole slot map; `tests/v26_model_test.cpp` covers v48/v49 table
 sizes, minimum-version normalization and unknown later versions, plus chest-sequence bytes. `tests/path_test.cpp`
-runs the production refusal adapter against fakes with exact 52/56/60-byte queries, 128/136-byte move orders,
-calm/Guard/unknown states, CLEAR/mixed/unknown flags, null inputs and callback sentinels (ASan/UBSan on the host).
+runs the production refusal adapter against fakes with exact 52/56/60-byte queries, calm/Guard/unknown states, null
+inputs and callback sentinels (ASan/UBSan on the host); since 0.2.0-dev.31.13 the 128/136-byte move orders and
+CLEAR/mixed/unknown flags are `tests/orders_test.cpp` (the carried `enemy_move`).
 Those tests must pass without paths, movement, new game hooks, or any game services. The live probes' current-header
 version pins are updated, but no probe/game/server was launched. Full player-facing feature parity, Lua DLL startup,
 release payload equivalence, keys UI, and in-game chest behavior remain unverified. The separate #142 Kiln-native
@@ -264,6 +265,78 @@ point.
   keep other sections and keys. `<game>/emf/config/<id>.ini` is a mirror, written when content differs. The schema
   snapshot follows contracts.md 5.5: `type` is the Kiln kind, `emfType` / `choices` / `options` / `step` / `group` /
   `enabledWhen` ride along.
+
+## v39 enemy orders and v40 move orders (`api_orders.cpp`, `orders_model.*`; since 0.2.0-dev.31.13)
+
+EMF's rules come from its header (v39/v40 comments) and its own core (`src/core/enemy_orders.cpp`,
+`move_orders.cpp`, upstream 0.6.9, read for the checks, texts, limits and statuses; nothing copied into Kiln's game
+code). How each part reaches the game on Kiln, and the evidence for it:
+
+| EMF does | Kiln does | Evidence |
+|---|---|---|
+| writes `SelectedTargets[0]` (target, root) and `DynamicAggro.allowTargetSwitches = false` after every step | `kiln.creatures` `target_prefer`: the pick and `DynamicAggro.nextAllowedTargetChangeTime` = never, re-asserted every Pre | docs/re/npc-internals.md 4.4 [rt]: the game switches only when now passes that time, `allowTargetSwitches` is the game's own end-of-update write |
+| an alarmed aggro entry (100) and `state = Combat` for an enemy at rest | `kiln.creatures` command ATTACK (AddThreatTargetEvent, threat 100; again every 3 s while it is out of its fight with the target) | docs/re/creatures.md 11 [rt]: AddThreatTargetEvent put a PlayerAlly Vukah in Combat with the target as `SelectedTargets[0]` |
+| `damage`: a hit rule | refused with EMF's own "hit rules are off on this game build" | Kiln carries no `hit_rule_add` |
+| the guard order on a waypoint (StartGuardingEvent through its own program), Idle first for a calm creature | `kiln.creatures` command GUARD; no state write | docs/re/creatures.md 12 [dis][rt]: StartGuardingEvent sets `guardEntityId` within 2 s and Guard walks the path walker; [rt] a guard of an entity 12-25 m away |
+| the waypoint: the TestTransform template through `spawn` | the same template through `kiln.spawn` (no track, transient) | EMF's GUID, `kWaypointGuid` |
+| `currentGuardTargetDistance` (+0x468) of the creature for the arrival radius | `guardSetup.targetDistance` of its template (`kiln.creatures` `ai_get`) x 1.2 | docs/re/creatures.md 12 [dis]: the guard distance is that value times a random factor on entering Guard (2.5-3.6 m for 3 m) |
+| `guardEntityId` and `homeZonePosition` written when the move ends | GUARD / STOP_GUARD commands; `kiln.creatures` set `KILN_CF_HOME` without a layer | the same events; the home field is kiln.creatures' |
+| nothing stands between EMF and another controller | each order and move holds a `kiln.creature_control` lease: PetCombat (orders) and EngineGuard (moves), both AI-on | docs/kiln/services/creature-control.md: AI-on roles keep the game's AI running and the SteeringAgent in place; the base group makes a move on another owner's pet Busy |
+
+Not qualified from static evidence, and so not done: clearing fights on the way (`EMF_MOVE_PEACEFUL`,
+`_PEACEFUL_ALL`: EMF writes the aggro slots and the pick; Kiln has no service that clears them), the wall check of
+`EMF_MOVE_CLEAR`, writing the AI state (Combat to Idle at an order's end, Idle before a guard). Each is refused with
+its reason or left to the game, as the parity rows say. No live game run checked any of it (no client or server was
+started for this change).
+
+## v32 buffs and v35 player_view
+
+Since 0.2.0-dev.31.13 (`api_buffs.cpp`, `api_view.cpp`, `buffs_model.cpp`). No hook, signature or engine call was
+added: every engine access goes through an existing Kiln service or reads static data.
+
+- **BuffType records** (`buff_types`, `buff_type`, `buff_text`, and the slot/faction/default time `buff_apply` and
+  `buff_remove` use): `BuffRegistry` singleton → `+0x20` collection resource (the qword kiln.gamedata finds at run
+  time and checks against sigdb `gamedata/buffreg.collection`, taken from getBuffType's `mov r11, [rdx+disp8]` on both
+  executables; kiln-emf refuses when that capture is not 0x20) → `+0x18` `buffs` BlobArray `{s32 self-relative, u32
+  count}` → 184-byte records (docs/re/gamedata.md: `BlobArray<BuffType 184 B>` **[refl]**). The fields at EMF's
+  offsets, against what Kiln knows:
+
+  | Offset | Field (Kiln's catalog of the reflection, in order) | EMF | Kiln evidence |
+  |---|---|---|---|
+  | 0x00 | `buffTypeId` u32 | id | docs/re/gamedata.md: id `+0` **[dis]** |
+  | 0x04, 0x05 | `slot` (BuffSlotType u8: Food, Buff, Debuff, Rested, TerrainDebuff), `applyType` (Invalid, ResetTime, ReplaceAtEnd, Replace) | slot, apply_type | catalog order and enum names |
+  | 0x08 | `defaultLifeTime` Time | default_ns | catalog order; gamedata.md runs changed it (3 → 9 s) **[rt]** |
+  | 0x10, 0x20 | `name`, `description` (LocaTag GUIDs) | name_tag, desc_tag (FNV-1a) | catalog order; kiln.content `text()` takes FNV-1a of a LocaTag GUID |
+  | 0x30..0x32 | `isFoodPoison`, `hideInUi`, `showAsTag` | flags | catalog order |
+  | 0x49, 0x4a | `despawnOnDeath`, `isSaved` | flags | gamedata.md: isSaved `+0x4a` **[dis]** |
+  | 0x5c | `factionExcludeMask` u16 (bit 7 = Player) | faction_exclude | catalog order and enum (Environment .. Ancients; Player is bit 7) |
+  | 0x88, 0x98 | `onTimeout` (follow-up GUID first), `onTimeoutIsSet` | follow_up | gamedata.md: onTimeout `+0x88` **[dis]**; kiln.gamedata reads `onTimeout.followUp` |
+
+  Kiln's content catalog of the server (`<Kiln data>/catalog/server.json`, `fields.buffs`, the game's reflection)
+  lists `buffTypeId, slot, applyType, defaultLifeTime, name, description, isFoodPoison, hideInUi, showAsTag,
+  requiresSameGemForDisplay, icon, color, hideDurationInUi, despawnOnDeath, isSaved, impact, factionExcludeMask,
+  impactValues, uiValues, onCreate, whileApplied, onTimeout, onTimeoutIsSet`. Laid out with their sizes (u32, u8, u8,
+  Time at 8, two GUIDs, four bools, a 16-byte icon reference at 0x34, a u32 colour at 0x44, two bools, isSaved, a
+  16-byte program reference at 0x4c, u16) the offsets are EMF's, and the arrays after them land on Kiln's disassembled
+  configurations +0x60, uiValues +0x70, onCreate +0x78, whileApplied +0x80 and onTimeout +0x88. Not read back in a
+  live process by this change.
+- **An entity's buffs:** `kiln.playerstate` `buffs()` reads `keen::ecs::BuffContainer` (472 B: `foodBuffs[4]` +0,
+  `genericBuffs[16]` +48, `genericDebuffs[16]` +240, `restedBuff` +432, `terrainDebuff` +444, each `BuffInstance
+  {buffEntityId, typeId, cleansed}` of 12 B) and the buff entity's `BuffNetworkData {lifeTime, endOfLife, buffTypeId,
+  level}` by reflection (sigdb/types/*). The record's new `index` is the array index in its group. BuffContainer is not
+  on a client world (docs/re/player-state.md: server only **[dis] [rt]**).
+- **Giving / removing:** kiln.abilities' natives table names `applyBuff` 0x91f30b26 (argc 5, server fn +0x17cb50) and
+  `removeBuff` 0xca687904 (argc 3; verify.cpp: its third argument is dereferenced unchecked, so the program always
+  connects it) (docs/re/abilities.md). applyBuff hashes the buff reference's GUID and looks it up in the buff registry;
+  its result byte is 1 when it applied (ShroudLink's notes, `native/plugins/shroudlink/upstream/server/src/buffs.rs`).
+  kiln-emf's programs push the arguments in Kiln.Abilities' order (managed/tests/Kiln.Blocks.Tests/RemoveBuffTests.cs
+  fixes the remove order), `GSTORE` the apply result into a bool and set a bool Done; both pass kiln.abilities'
+  verifier in the host test. The impact entity is the game's generic impact template `a4207ae9-...` with Impact,
+  ImpactHierarchy and Faction components (sizes 24, 16, 1 from sigdb/types), as Kiln.Abilities' RunProgram spawns it.
+- **player_view:** `keen::ecs::CurrentTransform` = `WorldTransform {WorldPosition position (3 x s64, 32.32 fixed) +0,
+  Quaternion orientation +24, float3 scale +40}` (56 B, sigdb/types, both sides). Camera: `kiln.render` camera(),
+  whose rotation is camera space to world (docs/re/client-render.md "The camera"). Headings: forward = q · (0, 0, 1),
+  `atan2(x, z)` in degrees, as EMF's player_view.cpp.
 
 ## Signature aliases (EMF name → Kiln sigdb), server svn 1285601
 `tools/sigport/sigdb_check.py` resolved Kiln's symbols offline against the server exe (sha `c5c9fe50…`). Each EMF

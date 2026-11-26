@@ -14,5 +14,7 @@
   <ItemGroup>
     <!-- BuildingInputTests: the binding's layout (BuildingInputNative) against kiln_client.h -->
     <InternalsVisibleTo Include="Kiln.Api.Tests" />
+    <!-- the test kit's kiln.client.crosshair fake (Fakes/Crosshair) mirrors CrosshairNative -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
   </ItemGroup>
 </Project>

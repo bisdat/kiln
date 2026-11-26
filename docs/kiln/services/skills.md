@@ -211,6 +211,53 @@ They draw from their own 243-node tree. The screen ignores mask bits past its ow
 the id-list count), but its points sum would read past its node array. So mods that add game-tree nodes declare
 `clients: "mod"` and servers refuse vanilla clients (the rule for content only Kiln clients can show).
 
+### On a joined client: the local player's tree
+`ClientSkills` (since 0.2.0-dev.31.13, mod API 0.2.22, `Kiln.Skills`; native `kiln.skills.client`,
+`native/core/abi/services/kiln_skills_client.h`) reads the local player's skill tree as the game client itself holds it:
+the tree's layout, the player's unlocked nodes and levels, and their skill points. It works on a joined client, where
+`Progression` and `GameTree`'s tree reads have no server world, and on a hosting player's own client. Read-only: unlocking
+stays the game's screen or your server half's `Progression.Unlock`. Thanks XHL (BD Manager), whose reference named the
+screen's data.
+
+| Member | What |
+|---|---|
+| `ClientSkills.Available` | the view works here |
+| `Points` | `ClientSkillPoints`: `Player`, `Total`, `Spent` (shadow nodes included), `Available` (total minus spent, at least 0: the screen's "available"), `UnlockedNodes`, `TreeNodes`, `Step`, `Age`; null before the first copy |
+| `Nodes` | every node by tree index: `ClientSkillNode` `Id`, `Index`, `Type`, `ClassAlignment`, `Cost`, `MaxLevel`, `Level`, `Unlocked`, `Shadow`, `UiX`, `UiY`, `Incoming`, `Outgoing`, `Spent` |
+| `Unlocked` | the nodes with a level above 0 |
+| `Links` | `ClientSkillLink` `Id`, `From`, `To`, `Bidirectional` |
+| `Find(id)` | one node, or null |
+
+Where it comes from, all in the client's world: the skill tree it loaded (Kiln's expanded resource when mods add nodes:
+the same nodes the game's screen draws) and what the game's skill-screen program (`skilltree_ui`) fills every client step
+for the local player from the replicated character data (`PlayerSkillsUi`: the unlock masks and levels): one record per
+node with its level and unlocked flag (Kiln's screen hook writes the shadow nodes' records from the table the server sent),
+the points spent (the game's own `PointsSpent`, which Kiln's hook makes count shadow nodes) and available. The total comes
+from the player's replicated attributes. What the server changes (an unlock, a respec, the points of a level-up) shows on
+the client's next update of its player, as on the game's screen. Any thread: every read answers from the copy of the
+client world's last step, taken while some mod read it in the last 5 seconds; the first read after a pause answers from the
+previous copy (or none).
+
+```csharp
+// a skill-point summary on a joined client: "4 of 30 skill points left (26 spent, 11 nodes)"
+if (ClientSkills.Available && ClientSkills.Points is { } p)
+{
+    Log.Info(p.ToString());
+    foreach (var n in ClientSkills.Unlocked.OrderByDescending(n => n.Spent).Take(3))
+        Log.Info($"  0x{n.Id:x8} {n.Type} {(n.MaxLevel > 0 ? $"{n.Level}/{n.MaxLevel}" : "unlocked")}: {n.Spent} points");
+    // locked nodes linked from one the player has, that the points cover (the game's own rules decide at the unlock)
+    var nodes = ClientSkills.Nodes.ToDictionary(n => n.Id);
+    var next = ClientSkills.Links.Where(l => nodes.TryGetValue(l.From, out var f) && f.Unlocked && nodes.ContainsKey(l.To))
+        .Select(l => nodes[l.To]).Where(n => !n.Unlocked && n.Cost <= p.Available).Distinct().Count();
+    Log.Info($"  {next} node(s) to take next");
+}
+```
+
+Capability `skills.client_view` (sigdb, `client.d/skills-client-view.json`); off (a dedicated server, an unqualified
+build, a fault), every member but `Available` throws `KilnUnavailableException` naming it. TestKit:
+`KilnHarness.ClientSkills` (`AddNode`, `Link`, `Unlock`, `Lock`, `Total`, `Loaded`). C: `kiln.skills.client` v1 (`state`,
+`nodes`, `links`; any thread). Evidence: [docs/re/progression.md section 8](../../re/progression.md#8-the-local-players-tree-on-a-game-client-since-020-dev3113).
+
 ## B. Kiln talent trees
 
 ### Data (the same `skills/*.json`, key `"trees"`)
@@ -324,6 +371,9 @@ Skills.Lock / Respec / Grant(tree, h, points) / Points(tree, h) / State(tree, h)
 - `resource(which)`: expanded / game / copy path, with the round-trip check;
 - the shadow table: `shadow_on`, `shadow_nodes`, `shadow_get`, `shadow_set`, `shadow_changes`, and the diagnostics
   `spent`, `is_unlocked`, `game_request`. `game_request` sends a player entity's unlock input the way its client would; its test-only operations (3 and up) are refused unless `<kiln>/data/skills/lab-ops` exists.
+
+- `kiln.skills.client` v1 (since 0.2.0-dev.31.13, its own table, `native/core/abi/services/kiln_skills_client.h`): `state`,
+  `nodes`, `links`, the local player's tree as the client holds it, read-only, any thread ([On a joined client](#on-a-joined-client-the-local-players-tree)).
 
 ## Test (lab, no player)
 ```sh
@@ -504,7 +554,8 @@ Stop the lab, restore the save backup (the whole LOCAL folder, `backup/` include
 Kiln.Skills follows [the API contract](../modding/contract.md).
 
 - **Capabilities.** `kiln.skills` and its server-side sigdb features `skills.functions`, `skills.login_guard`,
-  `skills.shadow`, `skills.tree_load` (lowered by Kiln.Skills when the service is not loaded). Kiln's own talent trees
+  `skills.shadow`, `skills.tree_load` (lowered by Kiln.Skills when the service is not loaded). Since 0.2.0-dev.31.13 also
+  `skills.client_view` (`ClientSkills`, lowered when `kiln.skills.client` is not loaded). Kiln's own talent trees
   (`Skills`) are managed and need no capability; nodes in the game's tree (`GameTree.Define`, `DefineJson`, `Dump`,
   `Resource`) carry `[RequiresCapability("kiln.skills")]` and throw `KilnUnavailableException` naming it (a
   `NotSupportedException`, as before).

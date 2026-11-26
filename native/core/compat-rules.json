@@ -27,6 +27,24 @@
       "action": "known",
       "subject": { "module": "iphlpapi.dll" },
       "message": "Live Map (IPHLPAPI.DLL in the game folder, a stand-alone server map) hooks a few game functions before Kiln (players/RegisterSingleton, time.daytime_update); Kiln chains over its hooks and both run. Nothing to fix."
+    },
+    {
+      "id": "creative-mode-building-tools-hud-dispatch",
+      "when": [
+        { "module": "creative.dll" },
+        { "module": "BuildingTools.dll" }
+      ],
+      "action": "warn",
+      "message": "Creative Mode (creative.dll; 3.2.0 seen) and Building Tools clash in the game client, not through Kiln: Creative Mode rewrites the game's HUD screen dispatch (enshrouded.exe +0xC60A22 on 1.0.1.2) for its own menu, and Building Tools looks for those very bytes once, 4 s after it loads, to add its own screen. Building Tools' menu (Home), tools wheel (Caps Lock) and exact placement window then stay off; its other keys still work. To use them, switch Creative Mode off in the profile (Kiln's own /creative does not touch that code), or ask either mod's author: Building Tools could follow Creative Mode's jump there."
+    },
+    {
+      "id": "creative-mode-building-tools-native-hud-dispatch",
+      "when": [
+        { "module": "creative.dll" },
+        { "mod": "native:building-tools" }
+      ],
+      "action": "warn",
+      "message": "Creative Mode (creative.dll; 3.2.0 seen) and Building Tools clash in the game client, not through Kiln: Creative Mode rewrites the game's HUD screen dispatch (enshrouded.exe +0xC60A22 on 1.0.1.2) for its own menu, and Building Tools looks for those very bytes once, 4 s after it loads, to add its own screen. Building Tools' menu (Home), tools wheel (Caps Lock) and exact placement window then stay off; its other keys still work. To use them, switch Creative Mode off in the profile (Kiln's own /creative does not touch that code), or ask either mod's author: Building Tools could follow Creative Mode's jump there."
     }
   ]
 }

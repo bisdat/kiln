@@ -7,6 +7,9 @@ the typed holes, regenerates patterns, and writes a candidate build record. `kil
 boots a lab copy with the self tests, and marks the build verified only when everything is green.
 
 Code: `tools/sigport/` (Python 3 + capstone, MIT). Tests: `python3 -m unittest discover -s tools/sigport/tests`.
+Other mods' own byte scans (what a native mod looks game code up by at startup, and the Kiln symbols on those bytes):
+`sigdb/foreign/*.json`, checked by `tests/test_foreign_scans.py` on the pinned executables
+([engines/README.md](engines/README.md#mods-that-find-game-code-by-its-bytes)).
 Benchmarks: `tools/sigport/bench.py`. Results: `sigdb/evidence/sigport-bench-2026-11-04.json`.
 
 ## Quick use

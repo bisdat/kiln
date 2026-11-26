@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Host checks of rule publication, ABI compatibility, Shroud floors, client ray guards and the flight, NoClip, creative
-# and glider-steering hooks.
+# Host checks of rule publication, ABI compatibility, Shroud floors, client ray guards and the flight, NoClip, creative,
+# glider-steering and build-cursor hooks.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=${KILN_OUT:-$here/../../build}/rules-guards
@@ -21,6 +21,9 @@ cxx=${CXX:-$(command -v clang++ || command -v g++)}
 "$cxx" -std=c++20 -O2 -Wall -Wextra -Wno-unused-function -pthread -I"$here/tests/stubs" -I"$here/../../core/abi" \
     -o "$out/steer_hook_test" "$here/steer_hook_test.cpp"
 "$out/steer_hook_test"
+"$cxx" -std=c++20 -O2 -Wall -Wextra -Wno-unused-function -pthread -I"$here/tests/stubs" -I"$here/../../core/abi" \
+    -o "$out/cursor_hook_test" "$here/cursor_hook_test.cpp"
+"$out/cursor_hook_test"
 "$cxx" -std=c++20 -O2 -Wall -Wextra -Wno-unused-function -pthread -I"$here/tests/stubs" -I"$here/../../core/abi" \
     -I"$here/../../plugins/flame/include" -o "$out/creative_hook_test" "$here/creative_hook_test.cpp"
 "$out/creative_hook_test"
