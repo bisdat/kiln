@@ -132,7 +132,7 @@
         },
         "journal": {
           "type": "object",
-          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json, written by a kiln-mode start): read when it is this start's and its packages are named on the entries they wrote (writer rows of kind archiveWriter, certainty named); none when this start has none (hosted or installed ShroudForge, kiln-eml's EML dialect and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a format-1 journal. Since 0.2.0-dev.31.14.",
+          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json, written by a kiln-mode start): read when it is this start's and its packages are named on the entries they wrote (writer rows of kind archiveWriter, certainty named); none when this start has none (hosted or installed ShroudForge, kiln-eml's EML dialect and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a format-1 journal. Since 0.2.0-dev.31.15.",
           "required": ["state", "packages", "entries", "truncated"],
           "properties": {
             "state": { "enum": ["read", "none", "stale", "unreadable"] },
@@ -507,7 +507,7 @@
             "check",
             "drift"
           ],
-          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed). drift (since 0.2.0-dev.31.14): the best-effort drift probe found the game's value changed outside Kiln (between the stage's read and Kiln's first write in the world, or after Kiln's layer) with no writer Kiln knows to explain it; who names the suspects Kiln can see, certainty bestEffort."
+          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed). drift (since 0.2.0-dev.31.15): the best-effort drift probe found the game's value changed outside Kiln (between the stage's read and Kiln's first write in the world, or after Kiln's layer) with no writer Kiln knows to explain it; who names the suspects Kiln can see, certainty bestEffort."
         },
         "mod": {
           "type": "string",
