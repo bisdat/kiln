@@ -143,7 +143,9 @@ addresses, game executable hashes, runtime live layers or report truncation. Ser
 The order hash covers participating mods and their resolved field contributions in registry load order; mods with no
 participating boot edits do not contribute. A field that a mod with side `server` or `client` writes (by any path) is
 left out, because the other side never runs that mod; `kiln.boot` leaves such mods out too. The immutable start snapshot remains available as `bootSync` in
-`kiln/state/registry.json` after world load and hot reload too.
+`kiln/state/registry.json` after world load and hot reload too. A `reload <id>` (or an `unload` and a `load`) whose new
+`kiln.mod.json` changes the mod's `side` is refused (`RestartRequired: ...`, the running version stays; next release), so
+the side-`both` lists the join compares keep the sides this snapshot was made with.
 
 Each side hashes its own fields, so a field that one side leaves out and the other keeps would make every join differ,
 with nothing the player can change. A start therefore sends no `kiln.registry.boot` (and registry.json has no

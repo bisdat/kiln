@@ -145,6 +145,120 @@ public sealed unsafe class ReloadRepliesTests : ModsFixture
         owner.Retire();
     }
 
+    // registry-fixes item 3 (review-registry-reload Q2): a data pack that threw while the reload's application applied it set its
+    // mod apart (what it did came off; its packs from before apply again, or none), and only kiln.log and Content.PackReport()
+    // said so: the reply said "reloaded <id>". kiln.content's pack report lists the mods set apart ("setApart"); the reply names
+    // the reloaded mods' rows of the application after the reload, and data.packs carries them. Additive: message prefix and
+    // data.registry as before.
+    private const string Packs = """
+        {"generation": 7, "packs": [{"file": "undo-lab/content/a.json", "applied": 2, "errors": [], "warnings": []}], "skipped": [], "conflicts": [],
+         "setApart": [
+          {"mod": "undo-lab", "file": "undo-lab/content/b.json", "reason": "[json.exception.type_error.302] type must be string, but is object", "previous": true},
+          {"mod": "lib", "file": "lib/content/x.json", "reason": "boom", "previous": false},
+          {"mod": "other", "file": "other/content/o.json", "reason": "x", "previous": true}]}
+        """;
+
+    [Fact]
+    public void ADataPackThatThrewIsNamedForTheReloadedModsOfTheApplicationAfterTheReload()
+    {
+        var o = ReloadReplies.PacksOf(Packs, ["undo-lab", "lib"], after: 6);
+        Assert.True(o.Known);
+        Assert.Equal(new[] { "undo-lab", "lib" }, o.SetApart.Select(x => x.Mod));  // not the other mod's row
+        var suffix = ReloadReplies.PacksSuffix(o);
+        Assert.Equal("; data packs: undo-lab's undo-lab/content/b.json threw while it applied ([json.exception.type_error.302] type must be " +
+                     "string, but is object) and was set apart: what it did came off and the packs it had before apply again; lib's " +
+                     "lib/content/x.json threw while it applied (boom) and was set apart: what it did came off and none of its packs apply " +
+                     "(kiln/logs/kiln.log has each line)", suffix);
+        // an application from before the reload (its generation is not after the reload's): not this reload's
+        Assert.Empty(ReloadReplies.PacksOf(Packs, ["undo-lab"], after: 7).SetApart);
+        Assert.Equal("", ReloadReplies.PacksSuffix(ReloadReplies.PacksOf(Packs, ["undo-lab"], after: 7)));
+        Assert.Equal("", ReloadReplies.PacksSuffix(ReloadReplies.PacksOf(Packs, ["nothing-here"], after: 0)));
+        Assert.False(ReloadReplies.PacksOf(null, ["undo-lab"], after: 0).Known);         // no kiln.content: the reply as before
+        Assert.False(ReloadReplies.PacksOf("{not json", ["undo-lab"], after: 0).Known);
+        Assert.Empty(ReloadReplies.PacksOf("""{"generation": 9, "packs": []}""", ["undo-lab"], after: 0).SetApart);  // an older kiln.content
+    }
+
+    [Fact]
+    public void TheReplyNamesASetApartPackAndItsDataCarriesIt()
+    {
+        var replies = new ReloadReplies();
+        var written = new List<(bool Ok, string Message, JsonNode Data)>();
+        void Write(string file, string command, bool ok, string message, object data) =>
+            written.Add((ok, message, JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(data))!));
+        var packReads = 0;
+        replies.Add("r.result.json", "reload undo-lab", new ModOperationResult(true, "reloaded undo-lab 1.0.1", ["undo-lab"]), ["undo-lab"], now: 0,
+            packsAfter: 6);
+        replies.Add("s.result.json", "reload undo-lab", new ModOperationResult(true, "reloaded undo-lab 1.0.2", ["undo-lab"]), ["undo-lab"], now: 0);
+        for (var step = 0; step <= ReloadReplies.MinSteps; ++step)
+            replies.Step(step, _ => false, () => Report, _ => [], () => { ++packReads; return Packs; }, Write);
+        Assert.Equal(2, written.Count);
+        var (ok, message, data) = written[0];
+        Assert.True(ok);  // the reload itself did what it says: the mod is loaded; its packs are what applies
+        Assert.StartsWith("reloaded undo-lab 1.0.1; data packs: undo-lab's undo-lab/content/b.json threw while it applied", message);
+        Assert.True(data["packs"]!["known"]!.GetValue<bool>());
+        var row = data["packs"]!["setApart"]![0]!;
+        Assert.Equal("undo-lab", row["mod"]!.GetValue<string>());
+        Assert.Equal("undo-lab/content/b.json", row["file"]!.GetValue<string>());
+        Assert.True(row["previous"]!.GetValue<bool>());
+        Assert.NotNull(data["registry"]);   // the registry part as before
+        Assert.Equal("undo-lab", data["affected"]![0]!.GetValue<string>());
+        // a reply added without the content generation (an older kiln.content, or none) reads no pack report and says nothing of it
+        var (_, plain, plainData) = written[1];
+        Assert.Equal("reloaded undo-lab 1.0.2", plain);
+        Assert.False(plainData["packs"]!["known"]!.GetValue<bool>());
+        Assert.Equal(1, packReads);
+    }
+
+    // review-registry-fixes: a reply written before the application after the reload (it is delayed past the reply's 5 s, or no
+    // world is loaded to apply it) has only the report of an application from before the reload. That report says nothing of
+    // the reloaded mod's new packs: data.packs is not known then, never "known, nothing set apart".
+    [Fact]
+    public void A_pack_report_from_before_the_reload_is_not_known()
+    {
+        var before = ReloadReplies.PacksOf(Packs, ["undo-lab"], after: 7);   // the report is of generation 7, the reload ran after it
+        Assert.False(before.Known);
+        Assert.Empty(before.SetApart);
+        Assert.Equal("", ReloadReplies.PacksSuffix(before));
+        Assert.True(ReloadReplies.PacksOf(Packs, ["nothing-here"], after: 6).Known);  // an application after the reload: known, none set apart
+        // an older kiln.content's report has no setApart list: what it set apart is not known either
+        Assert.False(ReloadReplies.PacksOf("""{"generation": 9, "packs": []}""", ["undo-lab"], after: 0).Known);
+
+        var replies = new ReloadReplies();
+        var written = new List<(string Message, JsonNode Data)>();
+        replies.Add("r.result.json", "reload undo-lab", new ModOperationResult(true, "reloaded undo-lab 1.0.1", ["undo-lab"]), ["undo-lab"], now: 0,
+            packsAfter: 7);
+        // the application stays queued: the reply is written at its deadline, with the report of generation 7
+        replies.Step(ReloadReplies.Timeout.Ticks / TimeSpan.TicksPerMillisecond + 1, _ => true, () => Report, _ => [], () => Packs,
+            (_, _, _, message, data) => written.Add((message, JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(data))!)));
+        var (m, d) = Assert.Single(written);
+        Assert.StartsWith("reloaded undo-lab 1.0.1", m);
+        Assert.DoesNotContain("data packs", m);
+        Assert.False(d["packs"]!["known"]!.GetValue<bool>());
+        Assert.Empty(d["packs"]!["setApart"]!.AsArray());
+    }
+
+    // Kiln.Host reads kiln.content's generation (KilnContentStatus.generation, offset 40) and its pack report (report(), the
+    // table's 18th function: offset 144) through the table, as it reads reload_pending
+    [Fact]
+    public void TheHostReadsTheContentGenerationAndThePackReport()
+    {
+        var host = new FakeHost();
+        Assert.Null(ContentStatusProbe.Generation(host));
+        Assert.Null(ContentStatusProbe.PackReport(host));
+        var table = (ContentTable*)NativeMemory.AllocZeroed((nuint)sizeof(ContentTable));
+        try
+        {
+            *table = new ContentTable { Size = 288, Version = 4, Status = &ContentStatus, Report = &ContentReport };
+            host.Services["kiln.content"] = (nint)table;
+            Assert.Equal(7UL, ContentStatusProbe.Generation(host));
+            Assert.Equal(Packs, ContentStatusProbe.PackReport(host));
+            table->Size = 144;  // a table without report(): no pack report, the generation still reads
+            Assert.Null(ContentStatusProbe.PackReport(host));
+            Assert.Equal(7UL, ContentStatusProbe.Generation(host));
+        }
+        finally { host.Services.Remove("kiln.content"); NativeMemory.Free(table); }
+    }
+
     [RegistryEntryPoints(RegistryEntryPoint.ModLoad | RegistryEntryPoint.HotReload)]
     private sealed class Author : Mod
     {
@@ -195,6 +309,8 @@ public sealed unsafe class ReloadRepliesTests : ModsFixture
     {
         internal uint Size, Version;
         internal delegate* unmanaged[Cdecl]<byte*, int> Status;
+        internal fixed long Before[16];  // count .. reload_packs
+        internal delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int> Report;
     }
     private static bool _queued;
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -202,6 +318,17 @@ public sealed unsafe class ReloadRepliesTests : ModsFixture
     {
         if (*(uint*)status != 208) return KilnAbi.ErrInvalidArgument;  // KilnContentStatus is 208 bytes
         status[7] = _queued ? (byte)1 : (byte)0;                         // reload_pending at offset 7
+        *(ulong*)(status + 40) = 7;                                      // generation at offset 40
+        return 0;
+    }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ContentReport(byte* buffer, nuint cap, nuint* len)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(Packs);
+        *len = (nuint)bytes.Length;
+        if (cap <= (nuint)bytes.Length) { if (cap > 0) { bytes.AsSpan(0, (int)cap - 1).CopyTo(new Span<byte>(buffer, (int)cap - 1)); buffer[cap - 1] = 0; } return 0; }  // cut at cap
+        bytes.CopyTo(new Span<byte>(buffer, bytes.Length));
+        buffer[bytes.Length] = 0;
         return 0;
     }
 }

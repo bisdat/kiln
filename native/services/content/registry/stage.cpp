@@ -388,6 +388,7 @@ struct Runner::Impl {
     // plans (registry-rollback): plans/index.json as this start read it (the last good plan, the plan the last world ran on),
     // and the plan this start runs on when a rollback applied (its hash and its own "previous")
     json index = json::object();
+    bool index_unreadable = false;  // plans/index.json could not be read at this start: which plans to keep is not known
     std::string rollback, rollback_previous;
     std::vector<std::string> left_out;  // a rolled-back start's mods the plan does not hold (registry.json rollback.leftOut)
     // registry.json "saves" (saves.h): this start's notes from the stage itself (the max stack against the plan the last world
@@ -946,6 +947,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
             } else {
                 // review: a write cut short or a bad hand edit. Kept for a person to read; the next world's start writes a new
                 // index. The highest max stacks worlds started with are unknown now: the stack guard keeps every saved stack whole.
+                d.index_unreadable = true;
                 if (d.env.write_data) d.env.write_data("plans/index.unreadable.json", *t);
                 std::string w;
                 const bool guarded = d.env.stack_guard && d.env.stack_guard(&w);
@@ -1741,7 +1743,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         live.changed = [publish](const Result& r, bool world) { publish(r, true, false, world); };
         if (d.env.prepare_live && !d.full_live) live.prepare = [this](LiveData* data, std::string* why) { return prepare_live(data, why); };
     }
-    if (!plan_rel.empty() && !d.env.write_data(plan_rel, plan_text)) d.log(1, "registry: the plan could not be written");
+    const bool plan_written = !plan_rel.empty() && d.env.write_data(plan_rel, plan_text);
+    if (!plan_rel.empty() && !plan_written) d.log(1, "registry: the plan could not be written");
     if (d.env.write_report && !d.env.write_report(report_text)) d.log(1, "registry: state/registry.json could not be written");
     // The installer copies borrowed handoff maps outside this lock (store -> runner is the lock order).
     // Fail closed for polling readers until that copy completes; preparation must not mutate those maps concurrently.
@@ -1761,6 +1764,70 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
     } catch (...) { complete_handoff(); throw; }
     complete_handoff();
     notify_ready(ready, Phase::Start, gen);
+    // the end of a successful start: plans no start needs any more go (never on an error path: a start without a base, an
+    // index that could not be read, a refused rollback, a plan that was not written; an exception above never gets here)
+    if (plan_written) prune_plans();
+}
+
+std::vector<std::string> plans_to_prune(const std::vector<Env::DataEntry>& files, const std::set<std::string>& keep, size_t newest) {
+    std::vector<const Env::DataEntry*> others;
+    for (const Env::DataEntry& f : files) {
+        if (f.name.size() != 64 + 5 || f.name.compare(64, 5, ".json") != 0 || !is_hash(f.name.substr(0, 64))) continue;  // only plans
+        if (!keep.count(f.name.substr(0, 64))) others.push_back(&f);
+    }
+    std::sort(others.begin(), others.end(), [](const Env::DataEntry* a, const Env::DataEntry* b) {
+        return a->time != b->time ? a->time > b->time : a->name < b->name;
+    });
+    std::vector<std::string> out;
+    for (size_t i = newest; i < others.size(); ++i) out.push_back(others[i]->name);
+    return out;
+}
+
+// registry-fixes item 6 (review-registry-rollback Q5): each start with registry edits writes its plan, and none was ever
+// removed, so the plans folder grew without bound. Kept: the last good plan and its previous, the plan the last world ran on
+// (plans/index.json as this start read it), this start's plan and its previous, every plan a pending rollback.json names
+// (read again now: kilnctl may have written one since the stage read it) with the plan it rolls away from, and the newest
+// kKeptOtherPlans others; the other plan files are removed. Nothing is removed when which plans are needed is not known (an
+// index or a rollback request that cannot be read) or when this start failed (no base, a refused rollback).
+void Runner::prune_plans() {
+    Impl& d = *d_;
+    std::set<std::string> keep;
+    {
+        std::lock_guard lk(d.mu);
+        if (!d.env.list_data || !d.env.remove_data || !d.env.read_data || d.counts.failed || d.index_unreadable ||
+            d.meta.plan.hash.empty() || (d.meta.rollback.is_object() && d.meta.rollback.value("state", std::string()) == "refused"))
+            return;
+        keep.insert(d.meta.plan.hash);
+        if (is_hash(d.meta.plan.previous)) keep.insert(d.meta.plan.previous);
+        for (const char* k : {"good", "world"})
+            if (d.index.contains(k) && d.index[k].is_object())
+                for (const char* m : {"plan", "previous"})
+                    if (d.index[k].contains(m) && d.index[k][m].is_string() && is_hash(d.index[k][m].get<std::string>()))
+                        keep.insert(d.index[k][m].get<std::string>());
+        if (is_hash(d.rollback)) keep.insert(d.rollback);
+        if (is_hash(d.rollback_previous)) keep.insert(d.rollback_previous);
+    }
+    if (const auto req = d.env.read_data("rollback.json")) {
+        const json q = json::parse(*req, nullptr, false);
+        if (!q.is_object() || !q.contains("plan") || !q["plan"].is_string() || !is_hash(q["plan"].get<std::string>())) {
+            d.log(1, "registry: plans: kiln/data/content/registry/rollback.json cannot be read, so no plan is removed at this start");
+            return;
+        }
+        keep.insert(q["plan"].get<std::string>());
+        if (q.contains("from") && q["from"].is_string() && is_hash(q["from"].get<std::string>())) keep.insert(q["from"].get<std::string>());
+    }
+    const std::vector<std::string> gone = plans_to_prune(d.env.list_data("plans"), keep, kKeptOtherPlans);
+    size_t removed = 0;
+    std::string failed;
+    for (const std::string& name : gone) {
+        if (d.env.remove_data("plans/" + name)) ++removed;
+        else failed += (failed.empty() ? "" : ", ") + name.substr(0, 12);
+    }
+    if (removed)
+        d.log(0, "registry: plans: removed " + std::to_string(removed) + " older plan(s) from kiln/data/content/registry/plans (kept: the last good "
+                 "plan and its previous, the plan the last world ran on, this start's, a pending rollback's, and the newest " +
+                 std::to_string(kKeptOtherPlans) + " others)");
+    if (!failed.empty()) d.log(1, "registry: plans: could not remove " + failed + " (they stay; the next start tries again)");
 }
 
 uint64_t Runner::generation() const {

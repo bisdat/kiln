@@ -42,12 +42,15 @@ std::set<uintptr_t> g_fail_addrs; // test-only: writes to these addresses fail; 
 std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
-void logf(int, const char* fmt, ...) {
+std::vector<std::string> g_log_lines;  // test-only: every kiln.log line, "<level> <text>" (KILN_LOG_DEBUG lines too)
+void logf(int level, const char* fmt, ...) {
+    char b[4096];
     va_list a;
     va_start(a, fmt);
-    std::vfprintf(stderr, fmt, a);
+    std::vsnprintf(b, sizeof b, fmt, a);
     va_end(a);
-    std::fputc('\n', stderr);
+    std::fprintf(stderr, "%s\n", b);
+    if (g_log_lines.size() < 100000) g_log_lines.push_back(std::to_string(level) + " " + b);
 }
 bool rd(uintptr_t address, void* out, size_t n) {
     if (address < A(0) || address + n > A(sizeof g_arena)) return false;

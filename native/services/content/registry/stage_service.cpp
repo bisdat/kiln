@@ -278,6 +278,24 @@ Env make_env() {
         std::error_code ec;
         return fs::is_regular_file(data_root() / u8(rel), ec);
     };
+    // the plans' pruning (registry-fixes item 6): the regular files of a data folder with their last write, and removing one
+    e.list_data = [](const std::string& rel) {
+        std::vector<Env::DataEntry> out;
+        std::error_code ec;
+        for (auto it = fs::directory_iterator(data_root() / u8(rel), ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+            std::error_code fe;
+            if (!it->is_regular_file(fe) || it->is_symlink(fe)) continue;
+            const auto when = fs::last_write_time(it->path(), fe);
+            if (fe) continue;
+            const std::u8string name = it->path().filename().u8string();
+            out.push_back({std::string(name.begin(), name.end()), static_cast<int64_t>(when.time_since_epoch().count())});
+        }
+        return out;
+    };
+    e.remove_data = [](const std::string& rel) {
+        std::error_code ec;
+        return fs::remove(data_root() / u8(rel), ec) && !ec;
+    };
     e.entry_support = &nc_registry_supports;
     e.stack_guard = [](std::string* why) { return guard_set(true, why); };
     e.log = [](int level, const std::string& line) {

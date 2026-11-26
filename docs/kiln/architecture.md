@@ -113,13 +113,13 @@ in a new load context, after the mods that stay loaded (documented, and its refu
 | `version`, `name`, `description`, `authors` (`author`), `license`, `url`, `updates`, `kilnBuild`, `advanced` (the new load's `ModInfo.Advanced`), `systems` (a declaration for tools) | read again |
 | `entryAssembly`, `entryType`, the mod's DLLs, `exports` | the new code loads; dependents reload with it |
 | `apiVersion`, `dependencies`, `incompatible`, `features` | checked again. A refusal leaves the mod (and its dependents) unloaded, and the reply says why; a later `load` or `reload` retries |
-| `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place until the next start; a changed order takes effect then |
-| `side` | the mod loads again only on a side it names (else the reply fails, the mod stays unloaded); kiln.content reads it again for the mod's data packs |
+| `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place in the load order until the next start (their data packs and registry sections keep the start's place); a changed order takes effect then |
+| `side` | refused, `RestartRequired: mod <id>'s new version changes "side" in kiln.mod.json (server -> both): ...` (next release), before anything unloads, so the running version stays (a dependent whose new version changes its side refuses the reload the same way). A mod's side holds until the next start: the join checks players against the start's side-`both` mod lists and registry values (`bootSync`, network.md "Registry boot values and order"), which leave out the fields a one-side mod writes, so a side changed in place made every Kiln client's join differ until a restart. An `unload` and a `load` with another side is refused the same way (the mod stays unloaded). The side compared is the one the mod had in the start's load order (on a client that may host a world, its `server` mods' too: the registry stage ordered them with that side, though they load only while it hosts, so a new version with another side does not load with the next hosted world either), or for a mod the start did not order, its running version's |
 | `clients` | what joining players need follows at the next second (since 0.2.0-dev.31.17; before, up to a minute); players already in the world are not checked again |
 | `steamMessages`, `tests` | apply (the new load's owner gets the grant; `autoRun` runs after the load) |
 | `writes` | a new entry needs a restart: kiln.world reads the lists when the server starts, and the reloaded mod's tracked writes of a type it adds are refused (`NotDeclared`) until then |
 | `boot` | refused, `RestartRequiredBoot: ...`: a mod with boot content in this process, and a mod (or one of its dependents) whose new version adds `boot`; both before anything unloads, so the running versions stay as they were. Boot content (`OnBoot`, `resourcePatches`, `baseRules`, `gearRules`) never changes without a restart |
-| data packs (`content/*.json`) | apply again, whole, from the new files or the previous version (services/content.md "When a reload fails partway"), in the mod's new place in the load order (after the mods that stayed): a field another mod's pack sets too goes to whichever is later now, until the next start; a pack that throws leaves nothing of the mod's new version behind |
+| data packs (`content/*.json`) | apply again, whole, from the new files or the previous version (services/content.md "When a reload fails partway"), in the place the mod had in the data-pack order at the start (next release; before, in its new place after the mods that stayed, so a field another mod's pack sets too could change winners until the next start): a field two mods' packs set goes to the same mod as at the start. An `unload` and a `load` put the mod back in that place too; a mod first loaded after the start comes after the others. A pack that throws leaves nothing of the mod's new version behind |
 | a data pack's `registry` section | composed again with the other mods', in the start's load order; an edit the start fixed waits for a restart (a restart field, a field the start never read, a section or entry operation added after the start): registry.json says `RestartRequired: ...` ([modding/registries](modding/registries/README.md#what-a-reload-changes)) |
 | `blocks/*.json`, `quests/*.json` | apply again (Kiln.Blocks, Kiln.Quests) |
 | registry entry points (`[RegistryEntryPoints]`) | `HotReload` runs; `ModLoad` runs again when there is no `HotReload`; `WorldLoad` runs for the world that exists; `GameStart` does not run again: its edits stay as the start composed them, and when the reloaded code differs the reply says `RestartRequired: <id>'s OnRegistry runs at GameStart only ...` |
@@ -133,6 +133,16 @@ mods (`settled: false`: the world was not ready, so their edits were not all app
 such as the Web Admin mod: read `data.registry` of the reload's result, and `counts.restartRequired` plus the `refused`
 rows whose reason starts with `RestartRequired: ` in `kiln/state/registry.json` for everything that waits (also what a
 live edit left). `kilnctl status` prints the same as one line, and the launcher's Conflicts view lists them first.
+
+**The reply says when a data pack threw** (next release). When a data pack of a reloaded mod throws while the
+application after the reload applies it, kiln.content sets the mod apart (services/content.md "When a reload fails
+partway"): the reply adds `; data packs: <mod>'s <mod folder>/content/<file> threw while it applied (<what>) and was set
+apart: what it did came off and the packs it had before apply again` (or `... and none of its packs apply`) before the
+registry part, and `data` gets `packs`: `{known, setApart: [{mod, file, reason, previous}]}` (`previous`: its packs from
+before apply again, whole; `known: false`: no report of an application after the reload was read, for example without kiln.content, off its world's thread, or when no application followed the reload yet: before a world loads, or past the reply's 5 s). The reload itself
+still succeeded (`ok` true): the mod is loaded; what applies of its packs is what the reply says. Both parts are
+additive: the message starts as before, and `data.affected` and `data.registry` are unchanged. The same rows are the
+`setApart` list of kiln.content's pack report (`Content.PackReport()`'s source, `kiln_content.h` `report`).
 
 ## Layout on a server
 See `tools/deploy-server.sh`. Kiln's own files live under `<server>/kiln/`; only `dinput8.dll` sits next to the exe.

@@ -290,7 +290,7 @@ previous build where the side has none yet; `--accept <registry.field>` takes a 
 | `~/.local/state/kiln/regproof/<name>/<sha12>-<time>/` | `regproof`, `update`, `port`: the proof's report, `NEXT.txt`, step reports, values changelog, the record candidate (`--out` instead) |
 | `~/.local/state/kiln/regmap-ids/<side>/ids-*.json`, `values-*.json`, `harvested/ids-*.json` (`$KILN_REGMAP_IDS`) | `regproof`, `update`, `port`: a verified proof's id table and values export per game build (never overwritten), tables harvested from data folders (game names: outside any repository) |
 | `<dir>/kiln/regmap/server/<sha>.json`, `<dir>/kiln/data/content/registry/ids-server-<sha>.json` | `regproof --mark` / `update` (a verified record), the new build's id table when the instance runs it |
-| `<dir>/kiln/data/content/registry/rollback.json` | `registry rollback` (removed by `registry rollback --clear`); the plans beside it are kiln.content's |
+| `<dir>/kiln/data/content/registry/rollback.json` | `registry rollback` (removed by `registry rollback --clear`); the plans beside it are kiln.content's (it keeps the ones a start or a pending rollback needs and the newest 10 others, and removes the rest at the end of a successful start: [registries README](modding/registries/README.md#plans-and-rollback)) |
 
 Restore a backup with the server stopped: `tar -xzf <backup> -C <dir>` (replaces `savegame/`).
 

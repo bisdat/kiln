@@ -80,6 +80,13 @@ Before 0.2.0-dev.31.13 only a change in the list of loaded mod ids re-applied th
 was when the mod stays in its place (the last loaded mod, for example one hot-loaded with `load`), so its old layer
 stayed until the next restart or file edit.
 
+The mod's packs apply in the place the mod had in the data-pack order at the start (next release): Kiln.Host loads a
+reloaded mod after the mods that stay, but Kiln.Content lists the mods to kiln.content with each mod in the place it first
+had, so a field two mods' packs set goes to the same mod as at the start (before, the reloaded mod's packs applied after
+every other mod's until the next start). An `unload` and a later `load` put the mod back in that place; a mod first loaded
+after the start comes after every mod before it. The registry stage composes the `registry` sections in the start's order
+too.
+
 - One line names the mod and the reason, then the usual summary:
   `mod skilltest was reloaded (1.0.0 -> 1.0.1): re-applying data packs (its old layer comes off, its current files apply)`.
   Other reasons: `was reloaded with <mod>` (a dependent reloaded with the mod it depends on), `was unloaded and loaded
@@ -135,7 +142,9 @@ A mod's packs apply whole from one version, never half:
   mod's files after the one that threw as `<file> (not applied: an earlier pack of the mod threw)` and the mod as
   `<mod> (set apart)`; the log says `data packs of <mod>: a pack threw while it applied: what it did came off (<n>
   definition(s), clone(s) and section(s) besides its layers); the packs it had before apply again, whole` (or `none of
-  its packs apply`). What a service does with its own state beyond its section (a creature it already spawned from it)
+  its packs apply`). The report's `setApart` list has one row per mod set apart in that application (`mod`, `file`: the
+  pack that threw, `reason`: what it threw, `previous`: whether its packs from before apply again), and the reply of a
+  `reload <id>` names them (next release; [architecture.md](../architecture.md#what-reload-id-covers)). What a service does with its own state beyond its section (a creature it already spawned from it)
   is the service's.
 - Inside one application the layers change under one store lock: no reader that takes it (a drop table being acquired,
   the content sync's export) sees a mix of the old and the new layer.

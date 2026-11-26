@@ -4426,35 +4426,69 @@ bool nc_registry_apply_visibility(std::string* why) {
 
 namespace {
 // One mod's pack application (nc_pack_mark .. nc_pack_unmark, content.h): each definition the owner's packs added or
-// changed since the mark, in the order of its first change, with a copy of it from before that change (null: the packs
-// added it). Under store_mutex; apply_all_packs holds it for the whole application, so no other definition comes between.
+// changed since the mark, in the order of its first change. packs.cpp marks every mod at every application (world load,
+// each pack reload), so this runs for every definition a pack applies again, not only when a pack throws: membership is
+// a hash lookup, and a redefinition that leaves the definition's text as it was (the same pack applying again) keeps only
+// what it changes (owner, label, source, pack, mod, seen, orphan), never a copy of the definition (registry-fixes item 4:
+// before, a copy of each and a scan of what the journal held, quadratic per mod). Under store_mutex; apply_all_packs holds
+// it for the whole application, so no other definition comes between.
+struct PackTouch {
+    DefPtr def;
+    bool added = false;                // the packs added it
+    std::shared_ptr<const Def> was;    // its definition as at the mark, copied at the first change of its text; null: none
+    KilnOwner owner = 0;               // what a redefinition changes besides the text, as at the mark
+    std::string owner_label, source, mod;
+    bool pack = false, seen = false, orphan = false;
+};
 struct PackJournal {
     KilnOwner owner = 0;
-    std::vector<std::pair<DefPtr, std::shared_ptr<const Def>>> touched;
-    bool has(const DefPtr& d) const {
-        return std::any_of(touched.begin(), touched.end(), [&](const auto& t) { return t.first == d; });
-    }
+    std::vector<PackTouch> touched;
+    std::unordered_map<const Def*, size_t> at;  // touched by definition
+    size_t copies = 0;                          // definitions copied (tests)
 } g_journal;
 
-// Before a pack of the marked owner changes `d` (store_mutex held): the first change keeps a copy.
-void journal_change(const DefPtr& d, KilnOwner owner, bool pack) {
-    if (!pack || !owner || owner != g_journal.owner || g_journal.has(d)) return;
-    g_journal.touched.emplace_back(d, std::make_shared<const Def>(*d));
+PackTouch& journal_touch(const DefPtr& d, bool added) {
+    const auto [it, fresh] = g_journal.at.try_emplace(d.get(), g_journal.touched.size());
+    if (fresh) {
+        PackTouch t;
+        t.def = d, t.added = added;
+        t.owner = d->owner, t.owner_label = d->owner_label, t.source = d->source, t.mod = d->mod;
+        t.pack = d->pack, t.seen = d->seen, t.orphan = d->orphan;
+        g_journal.touched.push_back(std::move(t));
+    }
+    return g_journal.touched[it->second];
+}
+
+// Before a pack of the marked owner changes `d` (store_mutex held): the first change records what it was; `text`: this change
+// replaces the definition's text (a new version), so a copy of the definition is kept, once.
+void journal_change(const DefPtr& d, KilnOwner owner, bool pack, bool text = true) {
+    if (!pack || !owner || owner != g_journal.owner) return;
+    PackTouch& t = journal_touch(d, false);
+    if (text && !t.added && !t.was) {
+        t.was = std::make_shared<const Def>(*d);
+        ++g_journal.copies;
+    }
 }
 void journal_added(const DefPtr& d, KilnOwner owner, bool pack) {
-    if (!pack || !owner || owner != g_journal.owner || g_journal.has(d)) return;
-    g_journal.touched.emplace_back(d, nullptr);
+    if (!pack || !owner || owner != g_journal.owner || g_journal.at.count(d.get())) return;
+    journal_touch(d, true);
 }
 }  // namespace
 
 void nc_pack_mark(KilnOwner owner) {
     std::lock_guard lock(store_mutex());
-    g_journal = PackJournal{owner, {}};
+    g_journal = PackJournal{};
+    g_journal.owner = owner;
 }
 
 void nc_pack_unmark() {
     std::lock_guard lock(store_mutex());
     g_journal = PackJournal{};
+}
+
+size_t nc_pack_journal_copies() {
+    std::lock_guard lock(store_mutex());
+    return g_journal.copies;
 }
 
 uint32_t nc_pack_rollback(KilnOwner owner) {
@@ -4464,10 +4498,10 @@ uint32_t nc_pack_rollback(KilnOwner owner) {
         std::lock_guard lock(store_mutex());
         if (!owner || owner != g_journal.owner) return 0;
         for (auto it = g_journal.touched.rbegin(); it != g_journal.touched.rend(); ++it) {
-            const DefPtr& d = it->first;
-            const Def* was = it->second.get();
+            const DefPtr& d = it->def;
+            const Def* was = it->was.get();
             ++n;
-            if (!was) {
+            if (it->added) {
                 // added by the packs: off as a removed pack's definition is (its id stays registered until the server
                 // restarts, so nothing that holds it breaks; a recipe leaves its station). Its packs from before define it
                 // again when they have it.
@@ -4477,7 +4511,7 @@ uint32_t nc_pack_rollback(KilnOwner owner) {
                      d->kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d->name.c_str(), d->guid_s.c_str());
                 continue;
             }
-            if (d->version != was->version || d->text != was->text || d->placeholder != was->placeholder) {
+            if (was && (d->version != was->version || d->text != was->text || d->placeholder != was->placeholder)) {
                 // its definition as at the mark, as a new version (as a redefinition), with the clones, the recipe and the
                 // random-loot entry the game had then (their memory stays valid, as the memory of the version that threw
                 // does): the next sync points the game's maps at them again. A layer is an address in them, so the layers
@@ -4495,16 +4529,18 @@ uint32_t nc_pack_rollback(KilnOwner owner) {
                 *d = std::move(back);
                 g_index.rename(d, now_name);
                 rebuilt.push_back(d);
-            } else {
-                d->owner = was->owner, d->owner_label = was->owner_label, d->source = was->source, d->pack = was->pack;
-                d->mod = was->mod;
             }
-            d->seen = was->seen;
-            d->orphan = was->orphan;
+            // what a redefinition changes besides the text, as at the mark (a copy taken at a later change of the text holds
+            // what an earlier redefinition of the same application set)
+            d->owner = it->owner, d->owner_label = it->owner_label, d->source = it->source, d->pack = it->pack;
+            d->mod = it->mod;
+            d->seen = it->seen;
+            d->orphan = it->orphan;
             LOGI("new content: %s %s (%s) is back as it was before the pack that threw (%s)", d->kind == KILN_CONTENT_ITEMS ? "item" : "recipe",
                  d->name.c_str(), d->guid_s.c_str(), d->owner_label.c_str());
         }
         g_journal.touched.clear();  // the mark stays: what applies next in its place is journaled from here
+        g_journal.at.clear();
     }
     for (const DefPtr& d : rebuilt) {
         if (d->kind == KILN_CONTENT_ITEMS) {
@@ -4728,7 +4764,7 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
             const bool same = cur->text == d->text;
             const bool adopt = cur->orphan || cur->owner != owner;
             const bool takeover = cur->placeholder && !d->placeholder;
-            journal_change(cur, owner, pack);  // a pack of a marked owner: as it was, for its rollback
+            journal_change(cur, owner, pack, !same);  // a pack of a marked owner: as it was, for its rollback (a copy only for a new text)
             cur->owner = owner, cur->owner_label = d->owner_label, cur->source = source, cur->pack = pack;
             cur->seen = true;
             if (cur->orphan) {

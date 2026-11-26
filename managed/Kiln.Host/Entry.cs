@@ -1110,7 +1110,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
                 // reloaded (not refused, not still waiting for its unload): the reply waits for the reload's registry work and
                 // says what of it waits for a restart (data.registry)
                 if (r.Ok && _mods.Find(args[1]) is not null && _mods.RegistryAvailable)
-                    _reloadReplies.Add(resultFile, command, r, r.Affected.Prepend(args[1]), Environment.TickCount64);
+                    _reloadReplies.Add(resultFile, command, r, r.Affected.Prepend(args[1]), Environment.TickCount64, ContentStatusProbe.Generation(this));
                 else
                     WriteResult(resultFile, command, r.Ok, r.Message, new { affected = r.Affected });
                 break;
@@ -1147,7 +1147,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
 
     private void StepReloadReplies(long now) =>
         _reloadReplies.Step(now, mods => now != long.MaxValue && _mods.RegistryWorkPending(mods), _mods.RegistryReportJson,
-            _mods.RegistryRestartNotes, (file, command, ok, message, data) =>
+            _mods.RegistryRestartNotes, () => ContentStatusProbe.PackReport(this), (file, command, ok, message, data) =>
             {
                 try { WriteResult(file, command, ok, message, data); }
                 catch (Exception e) { Log(LogLevel.Warn, $"control: the reply of '{command}' could not be written: {e.Message}"); }

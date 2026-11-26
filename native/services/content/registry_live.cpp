@@ -225,7 +225,27 @@ Value to_kiln(const Field& f, const rmap::Row* row, const FieldSpec& spec, const
     }
 }
 
-bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, uint8_t* out, std::string* why) {
+// A live refusal names Kiln's field and entry, never the game's member (owner's principle: mods and players see Kiln names;
+// registry-fixes item 5). encode (refl.cpp) names the member it writes: its refusals here say "the game's storage of this
+// field" instead, and kiln.log keeps the member at debug level for maintainers. `name`: the field as mods name it.
+bool encode_kiln(const Field& f, const KilnContentValue& kv, uint8_t* out, std::string* why, const std::string& name) {
+    if (encode(f, kv, out, why)) return true;
+    if (!why || f.path.empty()) return false;
+    LOGD("registry (live): %s: %s", name.c_str(), why->c_str());
+    const std::string& m = f.path;
+    if (why->rfind(m + " is read-only", 0) == 0) *why = "this field is read-only on this game build";
+    else if (why->rfind(m + " cannot be written", 0) == 0) *why = "this field cannot be written on this game build";
+    else if (const size_t at = why->find(" does not fit " + m); at != std::string::npos)
+        *why = why->substr(0, at) + " does not fit the game's storage of this field" + why->substr(at + 14 + m.size());
+    return false;
+}
+// The field as mods name it: "<registry>.<field>"; a raw member (the Advanced tier) is the member path the mod named.
+std::string kiln_field_name(const registry::FieldRef& fr) {
+    return registry::is_raw_field(fr.field) ? fr.field.substr(4) : fr.registry + "." + fr.field;
+}
+
+bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, uint8_t* out, std::string* why,
+             const std::string& name) {
     KilnContentValue kv{};
     switch (spec.type) {
         case FieldType::Int:
@@ -242,12 +262,12 @@ bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const 
             if (f.en)
                 for (auto& [n, x] : f.en->values)
                     if (!found && (n == name || lower(n) == lower(name))) kv.type = KILN_CV_INT, kv.i = x, found = true;
-            if (!found) return *why = "\"" + v.t + "\" is not a value of " + f.path + " on this game build", false;
+            if (!found) return *why = "\"" + v.t + "\" is not a value of " + name + " on this game build", false;
             break;
         }
         default: return *why = "this kind of field is not written live", false;
     }
-    return encode(f, kv, out, why);
+    return encode_kiln(f, kv, out, why, name);
 }
 
 bool in_range(const FieldSpec& spec, const Value& v, std::string* why) {
@@ -345,7 +365,7 @@ void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value under = to_kiln(fc, row, b->spec, below);
         const Value v = registry::evaluate(b->rows, under, b->spec);
-        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
+        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");
@@ -369,21 +389,22 @@ Value flags_kiln(const Field& f, const rmap::Row* row, const FieldSpec& spec, co
     return Value::of_list(std::move(out));
 }
 // The bits of the names in v over the value below; bits Kiln has no name for stay as the game has them.
-bool flags_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, const uint8_t* below, uint8_t* out, std::string* why) {
+bool flags_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, const uint8_t* below, uint8_t* out, std::string* why,
+                const std::string& name) {
     if (v.kind != Value::List) return *why = "a flags value is a list of names", false;
     uint64_t named = 0, set = 0;
     for (const std::string& n : spec.enum_values)
         if (const int bit = flag_bit(f, row, n); bit >= 0) named |= 1ull << bit;
     for (const Value& x : v.list) {
         const int bit = x.kind == Value::Text ? flag_bit(f, row, x.t) : -1;
-        if (bit < 0) return *why = "\"" + (x.kind == Value::Text ? x.t : x.text_of()) + "\" is not a value of " + f.path + " on this game build", false;
+        if (bit < 0) return *why = "\"" + (x.kind == Value::Text ? x.t : x.text_of()) + "\" is not a value of " + name + " on this game build", false;
         set |= 1ull << bit;
     }
     KilnContentValue kv{};
     kv.type = KILN_CV_INT;
     kv.i = static_cast<int64_t>((static_cast<uint64_t>(decode(f, below).i) & ~named) | set);
     kv.f = static_cast<double>(kv.i);
-    return encode(f, kv, out, why);
+    return encode_kiln(f, kv, out, why, name);
 }
 
 void bind_flags(const std::shared_ptr<Binding>& b, const Field* f) {
@@ -391,7 +412,7 @@ void bind_flags(const std::shared_ptr<Binding>& b, const Field* f) {
     LayerEval ev = [b, fc](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value v = registry::evaluate(b->rows, flags_kiln(fc, row, b->spec, below), b->spec);
-        if (!flags_game(fc, row, b->spec, v, below, out, why)) return fail(b, *why);
+        if (!flags_game(fc, row, b->spec, v, below, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     const uintptr_t at = b->entry.addr + f->offset;
@@ -431,7 +452,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value v = registry::evaluate(b->rows, optional_kiln(sw, en, row, swb, enb), b->spec);
         if (v.kind != Value::Text) return *why = "an optional enum's value is one name", std::nullopt;
-        if (v.t != "none" && !optional_game(en, row, v.t)) return *why = "\"" + v.t + "\" is not a value of " + en.path + " on this game build", std::nullopt;
+        if (v.t != "none" && !optional_game(en, row, v.t)) return *why = "\"" + v.t + "\" is not a value of " + kiln_field_name(b->ref) + " on this game build", std::nullopt;
         return v;
     };
     LayerEval sw_ev = [b, sw, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
@@ -439,7 +460,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         if (!v) return fail(b, *why);
         KilnContentValue kv{};
         kv.type = KILN_CV_BOOL, kv.i = v->t != "none", kv.f = static_cast<double>(kv.i);
-        if (!encode(sw, kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(sw, kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     LayerEval en_ev = [b, en, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
@@ -451,7 +472,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         }
         KilnContentValue kv{};
         kv.type = KILN_CV_INT, kv.i = *optional_game(en, b->row ? &*b->row : nullptr, v->t), kv.f = static_cast<double>(kv.i);
-        if (!encode(en, kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(en, kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, swf), -1, base + sw.offset, sw.bytes, std::move(sw_ev)) ||
@@ -475,7 +496,10 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
         in.push_back(as_double(decode(fs[0], below)));
         for (size_t k = 1; k < fs.size(); ++k) {
             uint8_t x[kSlotBytes] = {};
-            if (!store_effective(base + fs[k].offset, fs[k].bytes, x)) return fail(b, *why = fs[k].path + " is not readable");
+            if (!store_effective(base + fs[k].offset, fs[k].bytes, x)) {
+                LOGD("registry (live): %s: the formula's input %s is not readable", b->ref.text().c_str(), fs[k].path.c_str());
+                return fail(b, *why = "a value this field's formula reads is not readable");
+            }
             in.push_back(as_double(decode(fs[k], x)));
         }
         const gear::Constants c = constants();
@@ -487,7 +511,7 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
             return fail(b, *why = "the formula " + b->row->formula + " gives no game value for " + v.text_of());
         KilnContentValue kv{};
         kv.type = KILN_CV_FLOAT, kv.f = game;
-        if (!encode(fs[0], kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(fs[0], kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, inputs[0]), -1, base + fs[0].offset, fs[0].bytes, std::move(ev)))
@@ -690,7 +714,7 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
                 KilnContentValue kv{};
                 if (fk.vt == KILN_CV_FLOAT) kv.type = KILN_CV_FLOAT, kv.f = x->as_double();
                 else kv.type = KILN_CV_INT, kv.i = std::llround(x->as_double());
-                if (!encode(fk, kv, out, why)) return fail(b, *why);
+                if (!encode_kiln(fk, kv, out, why, kiln_field_name(b->ref) + "[]." + kDropLeaves[k].leaf)) return fail(b, *why);
                 return true;
             };
             const uintptr_t at = refs[i].addr + fields[k]->offset;
@@ -736,7 +760,11 @@ void bind_perks(const std::shared_ptr<Binding>& b) {
     for (int i = 0; i < 5; ++i) {
         const Field* r = sc.find("perkReferences[" + std::to_string(i) + "]");
         const Field* d = sc.find("perkIds[" + std::to_string(i) + "]");
-        if (!r || !d || r->bytes != 16 || d->bytes != 4) return (void)fail(b, "this game build's items have no perkReferences / perkIds");
+        if (!r || !d || r->bytes != 16 || d->bytes != 4) {
+            // Kiln words in the refusal, the game's members in kiln.log at debug level (registry-fixes item 5, P45)
+            LOGD("registry (live): %s: perk slot %d: perkReferences[%d] / perkIds[%d] missing or not 16 / 4 bytes", b->ref.text().c_str(), i, i, i);
+            return (void)fail(b, "this game build's items have no perk slots Kiln can write (Kiln's mapping of them needs an update)");
+        }
         refs.push_back(*r), ids.push_back(*d);
     }
     const uintptr_t base = b->entry.addr;
@@ -811,7 +839,7 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
         if (vf.vt == KILN_CV_INT && v.numeric() && std::isfinite(v.as_double()) && std::trunc(v.as_double()) != v.as_double())
             return fail(b, *why = std::string(kNotExact) + b->ref.registry + "." + b->ref.field + " of " + b->ref.id +
                 " is a whole number on this build; " + v.text_of() + " was not written");
-        if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why)) return fail(b, *why);
+        if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put_at(b, s.kind, s.id, s.field, -1, s.addr, vf.bytes, std::move(ev))) return (void)fail(b, "the config value is not readable");
@@ -860,6 +888,16 @@ void bind_unlock(const std::shared_ptr<Binding>& b) {
 }
 
 // ---- one field ----
+// A refusal of the mapping on this build: in Kiln words (the field and entry), the regmap path in kiln.log at debug level for
+// maintainers, never in the refusal (owner's principle; registry-fixes item 5). The words keep the phrases the proof producer
+// (RegistryProofTestMod.IsDisagreement) takes for a mapping that disagrees with the build: "is missing on this game build",
+// "is not writable on this game build".
+constexpr const char* kMappingUpdate = " (Kiln's mapping of it needs an update)";
+void refuse_mapping(const registry::FieldRef& fr, const std::vector<const ChainRow*>& rows, const std::string& why, const std::string& member) {
+    LOGD("registry (live): %s: %s (regmap path %s)", fr.text().c_str(), why.c_str(), member.c_str());
+    refuse(fr, rows, why);
+}
+
 void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const std::vector<const ChainRow*> rows = registry_rows(fo);
     if (rows.empty()) return;  // only older writers: nothing of the registry's
@@ -901,6 +939,7 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const rmap::Row& rw = row->second;
     if (rw.backend != rmap::Backend::Live) return refuse(fr, rows, "this field has no live back-end on this game build");
     const std::string& conv = rw.conv;
+    const std::string member0 = rw.paths.empty() ? std::string("?") : rw.paths[0];
     if (conv == "int" || conv == "float" || conv == "bool" || conv == "time" || conv == "enum") {
         const Field* f = rw.paths.empty() ? nullptr : sc.find(rw.paths[0]);
         // refl.cpp exposes a one-scalar struct (GemSlotOverride {isSet}) at its parent path.
@@ -909,33 +948,36 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
             const Field* flat = sc.find(rw.paths[0].substr(0, rw.paths[0].size() - flag.size()));
             if (flat && flat->vt == KILN_CV_BOOL) f = flat;
         }
-        if (!f || ((!g.reading || g.initializing_entry) && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
+        if (!f) return refuse_mapping(fr, rows, std::string("the game's value of this field is missing on this game build") + kMappingUpdate, member0);
+        if ((!g.reading || g.initializing_entry) && !f->writable)
+            return refuse_mapping(fr, rows, "the game's value of this field is not writable on this game build", member0);
         return bind_scalar(b, f);
     }
     const bool writing = !g.reading || g.initializing_entry;
     if (conv == "flags") {  // a bitmask of the game's enum (loot.rarities)
         const Field* f = rw.paths.size() == 1 ? sc.find(rw.paths[0]) : nullptr;
-        if (!f) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is missing on this game build");
+        if (!f) return refuse_mapping(fr, rows, std::string("the game's value of this field is missing on this game build") + kMappingUpdate, member0);
         if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en)
-            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask on this game build");
-        if (writing && !f->writable) return refuse(fr, rows, "the game member " + rw.paths[0] + " is read-only on this game build");
+            return refuse_mapping(fr, rows, std::string("the game's value of this field is not a bitmask on this game build") + kMappingUpdate, member0);
+        if (writing && !f->writable) return refuse_mapping(fr, rows, "the game's value of this field is read-only on this game build", member0);
         return bind_flags(b, f);
     }
     if (conv == "optionalEnum") {  // [the switch, the enum] (loot.fixedRarity)
         const Field* sw = rw.paths.size() == 2 ? sc.find(rw.paths[0]) : nullptr;
         const Field* en = rw.paths.size() == 2 ? sc.find(rw.paths[1]) : nullptr;
-        if (!sw || !en) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[sw ? 1 : 0]) + " is missing on this game build");
+        const std::string both = rw.paths.size() == 2 ? rw.paths[0] + " and " + rw.paths[1] : member0;
+        if (!sw || !en) return refuse_mapping(fr, rows, std::string("a game value of this field is missing on this game build") + kMappingUpdate, both);
         if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en)
-            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum on this game build");
+            return refuse_mapping(fr, rows, std::string("the game's values of this field are not a switch and an enum on this game build") + kMappingUpdate, both);
         if (writing && (!sw->writable || !en->writable))
-            return refuse(fr, rows, "the game member " + rw.paths[sw->writable ? 1 : 0] + " is read-only on this game build");
+            return refuse_mapping(fr, rows, "a game value of this field is read-only on this game build", both);
         return bind_optional_enum(b, sw, en);
     }
     if (conv == "formula") {
         std::vector<const Field*> in;
         for (const std::string& p : rw.paths) {
             const Field* f = sc.find(p);
-            if (!f) return refuse(fr, rows, "the game member " + p + " is missing on this game build");
+            if (!f) return refuse_mapping(fr, rows, std::string("a game value this field's formula reads is missing on this game build") + kMappingUpdate, p);
             in.push_back(f);
         }
         if (in.empty() || !registry::formulas::known(rw.formula)) return refuse(fr, rows, "unknown formula " + rw.formula);
