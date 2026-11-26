@@ -54,7 +54,10 @@ public sealed class DockNotesMod : Mod
         var book = _window!.DockedTo;
         if (book is null) ui.TextWrapped("On their own. Drop them next to the spell book to dock them again.");
         else if (!book.Available) ui.TextWrapped("Docked to the spell book, which is not loaded: they come back beside it when it is.");
+        else if (!book.Open) ui.TextWrapped("Docked to the spell book, which is closed: it opens beside them.");
         else ui.TextWrapped("Docked to the spell book: drag either window, both move. Shift+drag these notes to move them alone.");
-        if (ui.WindowMovedByUser) ui.TextDisabled((ui.HeldMods & KeyMods.Shift) != 0 ? "(moving alone)" : "(moving with the book)");
+        // Shift held, Kiln took the notes off the book before this frame's draw: DockedTo is null already
+        if (ui.WindowMovedByUser) ui.TextDisabled(book is { Open: true } ? "(moving with the book)" : "(moving alone)");
+        else if ((ui.HeldMods & KeyMods.Shift) != 0 && book is { Open: true }) ui.TextDisabled("(Shift: a drag moves them alone)");
     }
 }

@@ -271,33 +271,41 @@ a Shift listener, a frame or two late). Windows (`UiWindow`) only; screens do no
 |---|---|
 | `UiWindowOptions.AcceptDock` | other windows may dock to this one; default false. Without it a window cannot be found, docked to, read or moved by another mod |
 | `Ui.FindWindow(modId, placementId)` | a `UiWindowHandle` for that mod's window with that `PlacementId` (else its title when made) that accepts docks; null when there is none now |
-| `UiWindowHandle.Available`, `.Open`, `.Placement`, `.ModId`, `.PlacementId` | read only; a handle is a name, looked up each time (two of the same mod and id are equal) |
+| `UiWindowHandle.Available`, `.Open`, `.Placement`, `.ModId`, `.PlacementId` | read only; a handle is a name, looked up each time (two of the same mod and id are equal, also with `==`) |
 | `UiWindow.DockTo(handle, side, offset = 0)` | docks this window on `DockSide.Left` / `Right` / `Top` / `Bottom` of that one, `offset` pixels at UI scale 1 along the shared edge (down for Left and Right, right for Top and Bottom) |
 | `UiWindow.Undock()`, `UiWindow.DockedTo` | leaves the dock (stays where it is); the handle it is docked to, or null |
 | `UiWindow.DockChanged` | a `UiDockChange` (`DockedTo`, `Side`, `Offset`, `ByPlayer`) whenever the dock changes |
 | `UiDraw.WindowMovedByUser`, `UiDraw.WindowResizedByUser` | inside a window's draw: the player holds it to drag it, or holds a resize grip or border, this frame |
 
 - **Together in the same frame.** Kiln draws each group of docked windows from the one that leads it this frame (the one
-  the player drags or resizes, else one with a waiting `MoveTo`, else the window the others dock to) and places every
-  other one from its neighbour's rect of that same frame. So a drag, a resize of the shared edge, or a `MoveTo` of either
+  the player drags or resizes, else one with a waiting `MoveTo`, else the window the others dock to, unless that one is
+  just opening beside a window already on the screen: then that window) and places every other one from its
+  neighbour's rect of that same frame. So a drag, a resize of the shared edge, or a `MoveTo` of either
   window moves the other with it, with no lag. Docking only moves windows, it never resizes them.
 - **Both ways.** Dragging the docked window moves the window it is docked to as well: the pair moves as one. A `MoveTo`
   of the docked window moves the pair too. That is why the target has to accept docks.
 - **Shift.** Holding Shift while dragging one of them, the player moves it alone: it leaves its dock (`DockChanged`
-  with `ByPlayer`), and so do windows docked to it. Dropped again within 16 pixels (UI scale 1) of its old side, while
-  the two overlap along it, it docks again there, at the offset it was dropped at (`DockChanged`, `ByPlayer`). After
-  your own `Undock()`, a drop does not dock it again.
+  with `ByPlayer`), and so do windows docked to it. Dropped again within 16 pixels (UI scale 1) of its old side (the
+  side it asked for, or the other one it was shown on), while the two overlap along it, it docks again there, at the
+  offset it was dropped at (`DockChanged`, `ByPlayer`, with that side). After your own `Undock()`, a drop does not dock
+  it again.
 - **Kept on the screen.** The group is kept inside the viewport (the player drags it against a wall), and a dock that
-  becomes active (the window or its target opens, `DockTo`, a drop) uses the other side when the docked window does not
-  fit on its own side but fits there (a target at the right edge: the window docked Right opens on its left). `DockTo`
-  does not change: the next time the dock becomes active it tries its own side first.
-- **Opening.** A window docked to an open window appears beside it in its first frame. When the docked window opens
-  while its target exists but is closed (one key press opening both, its binding first), it is not drawn until the
-  target opens, a quarter of a second at most: it never shows at its own place first. With the target closed longer,
-  it is drawn where it is, and goes beside the target when that opens.
+  becomes active (the window or its target opens, `DockTo`, a drop) uses the other side when the window that goes
+  beside the other does not fit on its own side but fits there (a target at the right edge: the window docked Right
+  opens on its left). `DockTo` does not change: the next time the dock becomes active it tries its own side first. A
+  group too big for the viewport keeps the window the others dock to inside first, then as many of the windows docked
+  to it as still fit: a docked window (a wide one, a far offset) never pushes the window it docks to off the screen.
+  While the player holds a resize border the group is not moved (ImGui would grow the window instead); it goes back
+  inside when they let go.
+- **Opening.** A window docked to an open window appears beside it in its first frame, and a window others dock to
+  that opens while one of them is on the screen appears beside that one: a window already shown never jumps. When the
+  docked window opens while its target exists but is closed (one key press opening both, its binding first), it is not
+  drawn until the target opens, a quarter of a second at most: it never shows at its own place first. With the target
+  closed longer, it is drawn where it is, and the target opens beside it.
 - **Closed, unloaded, back.** While the target is closed, or its mod is not loaded, the docked window is free and
-  `DockedTo` stays: the dock comes back when the target opens again, also a reloaded mod's new window with the same
-  `PlacementId` that accepts docks (the handle is the name). A window docked to nothing open is drawn exactly as before.
+  `DockedTo` stays: the dock comes back when the target opens again (beside the docked window when that is shown), also
+  a reloaded mod's new window with the same `PlacementId` that accepts docks (the handle is the name). A window docked
+  to nothing open is drawn exactly as before.
 - **Loops.** `DockTo` refuses the window itself (`ArgumentException`) and a target that is docked to it, directly or
   through others (`InvalidOperationException`). A loop that only forms later, as mods come and go, is cut each frame:
   the newer dock is left out. A window docks to one window; several may dock to one, and chains work.

@@ -3,12 +3,14 @@
 // dev31/out/issue-149-window-dock/DESIGN.md). A window docks to another one (also another mod's, when that one accepts
 // docks) and Kiln keeps them together in the overlay's frame, on the render thread, in the same frame:
 //  - each frame the windows of a dock group are drawn from the one that leads it (the one the player drags or resizes,
-//    else one with a waiting MoveTo, else the group's root), and every other one is placed from its neighbour's rect of
-//    this frame (SetNextWindowPos, ImGuiCond_Always, with a pivot so the shared edge is exact while its size is unknown);
-//  - the group is kept inside the viewport (the leader moved back in before its Begin), and a docked window that does not
-//    fit on its side when its dock becomes active goes on the other side;
+//    else one with a waiting MoveTo, else the group's root, unless the root just opens beside a window already shown:
+//    then that one, so nothing on the screen jumps), and every other one is placed from its neighbour's rect of this
+//    frame (SetNextWindowPos, ImGuiCond_Always, with a pivot so the shared edge is exact while its size is unknown);
+//  - the group is kept inside the viewport (the leader moved back in before its Begin; the root first, so a docked
+//    window never pushes the window it docks to out; not while the player holds the leader's resize border), and a
+//    window placed from the other that does not fit on its side when the dock becomes active goes on the other side;
 //  - Shift held while the player drags one: it moves alone and leaves its dock (and the windows docked to it leave it);
-//    dropped within 16 px of its old side, it docks again;
+//    dropped within 16 px of its old side (or the side it was shown on), it docks again;
 //  - a docked window whose target exists but is closed waits (up to 250 ms, not drawn) when it opens, so one key press
 //    opening both never shows it at its own place first.
 // Native: kiln.ui's window_state (kiln_ui.h, issue 149) says before each Begin where a window is this frame and whether the
@@ -126,12 +128,13 @@ public sealed partial class UiWindow
     /// <see cref="DockSide.Top"/> / <see cref="DockSide.Bottom"/>). While both are open Kiln keeps them together in every
     /// frame: when the player drags or resizes either one, or a mod moves either one (<see cref="MoveTo"/>), the other moves
     /// with it in the same frame, and the pair is kept inside the viewport (a window that does not fit on its side when it
-    /// docks goes on the other side). Kiln only moves windows for this, never resizes them. Holding Shift, the player drags
-    /// one alone: it leaves the dock (<see cref="DockChanged"/>); dropped within 16 pixels of its old side, it docks again.
-    /// When this window opens while the target is closed, it waits for it (up to a quarter of a second, not drawn), so one
-    /// key press opening both shows it beside the target at once; the target closed for longer, or not there: this window
-    /// is drawn where it is, and goes beside the target when that opens. A later call replaces the dock. Does nothing on
-    /// a removed window. Any thread.</summary>
+    /// docks goes on the other side; a pair too big for it keeps the target inside). Kiln only moves windows for this, never
+    /// resizes them. Holding Shift, the player drags one alone: it leaves the dock (<see cref="DockChanged"/>); dropped
+    /// within 16 pixels of its old side, it docks again. When this window opens while the target is closed, it waits for it
+    /// (up to a quarter of a second, not drawn), so one key press opening both shows it beside the target at once; the
+    /// target closed for longer, or not there: this window is drawn where it is, and the target opens beside it. A window
+    /// already on the screen never jumps when the other one opens. A later call replaces the dock. Does nothing on a removed
+    /// window. Any thread.</summary>
     /// <remarks>A remembering window (<see cref="UiWindowOptions.RememberPlacement"/>) does not remember places it only got
     /// from its dock: opened alone it goes back to where the player left it. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="target"/> is null.</exception>
