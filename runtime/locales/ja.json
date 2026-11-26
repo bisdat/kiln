@@ -397,8 +397,8 @@
       "settings": "スイッチと設定"
     },
     "news": {
-      "label": "このMODからのお知らせ",
-      "keys_after_menu": "このMODのキーは、このメニューを閉じると（{key} または Esc）ゲーム内で使えます。ShroudForge 本体のウィンドウと同じです。"
+      "label": "このモッドからのお知らせ",
+      "keys_after_menu": "このモッドのキーは、このメニューを閉じると（{key} または Esc）ゲーム内で使えます。ShroudForge 本体のウィンドウと同じです。"
     },
     "waits": {
       "restart": "次回のゲーム起動: ShroudForge がこのモッドの変更された設定を読み込むのは、ゲームを再起動したときだけです。",

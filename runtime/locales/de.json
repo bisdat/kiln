@@ -404,7 +404,7 @@
     },
     "news": {
       "label": "NEUIGKEITEN DIESER MOD",
-      "keys_after_menu": "Ihre Tasten wirken im Spiel, sobald dieses Menü geschlossen ist ({key} oder Esc), wie bei ShroudForges eigenem Fenster."
+      "keys_after_menu": "Die Tasten dieser Mod wirken im Spiel, sobald dieses Menü geschlossen ist ({key} oder Esc), wie bei ShroudForges eigenem Fenster."
     },
     "waits": {
       "restart": "Den nächsten Spielstart: ShroudForge lädt die geänderte Konfiguration dieser Mod erst, wenn das Spiel neu startet.",
