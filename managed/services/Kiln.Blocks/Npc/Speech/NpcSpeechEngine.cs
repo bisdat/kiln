@@ -23,7 +23,7 @@ internal static class NpcSpeechEngine
     public const string ChannelName = "kiln:npcspeech";
     public const string ChannelVersion = "1";
     public const ushort MsgSpeech = 1, MsgSay = 2, MsgReset = 3;
-    private const int MaxLineBytes = 2048;
+    internal const int MaxLineBytes = SpeechText.MaxBytes;
 
     internal static readonly SpeechBook Book = new();
     private static readonly object Gate = new();
@@ -195,24 +195,43 @@ internal static class NpcSpeechEngine
                 _ => 0,
             };
         }
-        catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException)
+        catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException or ArgumentException)
         {
+            // ArgumentException: over the channel's limit (network.json's maxMessageBytes set below what 32 lines need)
             if (Interlocked.Increment(ref _warned) <= 3) ModLog.Warn($"kiln.npcspeech: could not send to the clients: {e.Message}");
+        }
+    }
+
+    private static void SendTo(NetChannel channel, NetPeer peer, object m)
+    {
+        try
+        {
+            _ = m switch
+            {
+                SpeechMsg s => channel.SendTo(peer, s),
+                SayMsg s => channel.SendTo(peer, s),
+                SpeechResetMsg s => channel.SendTo(peer, s),
+                _ => false,
+            };
+        }
+        catch (Exception e) when (e is InvalidOperationException or KilnUnavailableException or ArgumentException)
+        {
+            if (Interlocked.Increment(ref _warned) <= 3) ModLog.Warn($"kiln.npcspeech: could not send to {peer}: {e.Message}");
         }
     }
 
     /// <summary>Host: everything to one client that just became ready (a Reset first).</summary>
     internal static void Snapshot(NetPeer peer)
     {
-        if (!IsHost || _channel is null || !peer.HasChannel(ChannelName)) return;
+        if (!IsHost || _channel is not { } channel || !peer.HasChannel(ChannelName)) return;
         var now = Clock();
-        _channel.SendTo(peer, new SpeechResetMsg(true));
+        SendTo(channel, peer, new SpeechResetMsg(true));
         foreach (var npc in Book.Npcs())
         {
             var eff = Book.Effective(npc, now);
-            if (eff.Mode != SpeechMode.Game) _channel.SendTo(peer, new SpeechMsg(npc, eff.Mode, eff.Lines.Select(SpeechText.Json).ToArray()));
+            if (eff.Mode != SpeechMode.Game) SendTo(channel, peer, new SpeechMsg(npc, eff.Mode, eff.Lines.Select(SpeechText.Json).ToArray()));
             if (eff.Say is { } s && eff.SayUntilMs > now)
-                _channel.SendTo(peer, new SayMsg(npc, SpeechText.Json(s), (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds)));
+                SendTo(channel, peer, new SayMsg(npc, SpeechText.Json(s), (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds)));
         }
     }
 

@@ -66,8 +66,10 @@ public sealed class NpcSpeech
     }
 
     /// <summary>As <see cref="Replace(string[])"/>, with a text per language for each line
-    /// (<c>UiText.Of(("en", "..."), ("de", "..."))</c>).</summary>
-    /// <exception cref="ArgumentException">No line, more than 32, or an empty or too long one.</exception>
+    /// (<c>UiText.Of(("en", "..."), ("de", "..."))</c>). A line's languages travel together: up to 2048 bytes of UTF-8
+    /// in all (about three languages of 200 characters).</summary>
+    /// <exception cref="ArgumentException">No line, more than 32, or an empty or too long one (a text over 200
+    /// characters, or the languages of a line over 2048 bytes together).</exception>
     public SpeechResult Replace(IEnumerable<UiText> lines)
     {
         ArgumentNullException.ThrowIfNull(lines);
@@ -112,7 +114,8 @@ public static class Npcs
     /// <summary>As <see cref="Say(EntityId, string, TimeSpan, SayOptions?)"/>, with a text per language
     /// (<c>UiText.Of(("en", "I'm starving"), ("de", "Ich verhungere"))</c>).</summary>
     /// <exception cref="ArgumentException"><paramref name="npc"/> is None, the duration is out of range, or a text is
-    /// empty or longer than 200 characters.</exception>
+    /// empty or longer than 200 characters, or its languages are over 2048 bytes of UTF-8 together (about three
+    /// languages of 200 characters).</exception>
     public static SpeechResult Say(EntityId npc, UiText text, TimeSpan duration, SayOptions? options = null)
     {
         if (npc.IsNone) throw new ArgumentException("no NPC (EntityId.None)", nameof(npc));

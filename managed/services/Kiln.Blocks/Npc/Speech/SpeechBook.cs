@@ -172,15 +172,25 @@ internal static class SpeechText
 {
     public const int MaxLines = 32;
     public const int MaxChars = 200;
+    /// <summary>A line's JSON (every language of it) as UTF-8: one wire string, which a Kiln client reads with this
+    /// limit (32 of them stay under the channel's 96 KiB).</summary>
+    public const int MaxBytes = 2048;
 
-    /// <summary>{"en": "...", "*": "..."}: what kiln.content's loca hooks take, the languages in a stable order.</summary>
+    // Letters as they are ("Zurück", not "Zur\u00FCck"): six bytes for every non-ASCII letter would fill MaxBytes fast.
+    // Quotes, backslashes and control characters are still escaped; the JSON only goes to kiln.content and to clients.
+    private static readonly System.Text.Json.JsonSerializerOptions Options =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>{"en": "...", "*": "..."}: what kiln.content's loca hooks take, the languages in a stable order. A text
+    /// with neither "en" nor "*" gets a "*" (the text UiText falls back to): kiln.content would leave every other
+    /// language empty, an empty bubble.</summary>
     public static string Json(UiText? t)
     {
         if (t is null) return "";
-        var keys = t.Languages.Select(k => k.Trim().ToLowerInvariant()).Distinct().OrderBy(k => k, StringComparer.Ordinal);
         var map = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var k in keys) map[k] = t.For(k);
-        return System.Text.Json.JsonSerializer.Serialize(map);
+        foreach (var k in t.Languages.Select(k => k.Trim().ToLowerInvariant()).Distinct()) map[k] = t.For(k);
+        if (!map.ContainsKey("en") && !map.ContainsKey("*")) map["*"] = t.For("en");
+        return System.Text.Json.JsonSerializer.Serialize(map, Options);
     }
 
     /// <summary>The text back from its JSON (a joined client's copy of what the server sent).</summary>
@@ -215,6 +225,9 @@ internal static class SpeechText
             if (string.IsNullOrWhiteSpace(s)) return $"the text for '{k}' is empty";
             if (s.Length > MaxChars) return $"the text for '{k}' is longer than {MaxChars} characters";
         }
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(Json(t));
+        if (bytes > MaxBytes)
+            return $"its {t.Languages.Count} languages together are {bytes} bytes as sent to Kiln clients, more than {MaxBytes} (fewer languages or shorter texts)";
         return null;
     }
 }

@@ -292,4 +292,33 @@ public sealed unsafe class NpcSpeechTests : IDisposable
         foreach (var m in members)
             Assert.True(m.GetCustomAttributes(typeof(RequiresCapabilityAttribute), false).Length == 0, $"{m.DeclaringType!.Name}.{m.Name}");
     }
+
+    [Fact]
+    public void Lines_the_clients_would_drop_are_refused_and_three_languages_of_200_characters_fit()
+    {
+        // every language of a line travels in one string a client reads with a 2 KiB limit
+        var many = UiText.Of(Enumerable.Range(0, 12).Select(i => ($"x{i}", new string('ж', 200))).ToArray());
+        Assert.Throws<ArgumentException>(() => Npcs.Say(Ramone, many, TimeSpan.FromSeconds(2)));
+        Assert.Throws<ArgumentException>(() => Npcs.Speech(Ramone).Replace([many]));
+        Assert.Empty(Wire);
+
+        var three = UiText.Of(("en", new string('a', 200)), ("de", new string('ü', 200)), ("fr", new string('é', 200)));
+        Assert.True(Npcs.Say(Ramone, three, TimeSpan.FromSeconds(2)).Ok);
+        var say = Assert.IsType<SayMsg>(Assert.Single(Wire));
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(say.Text) <= NpcSpeechEngine.MaxLineBytes, $"{say.Text.Length} chars");
+        Assert.Equal(new string('ü', 200), SpeechText.FromJson(say.Text).For("de-de"));
+        var w = new NetWriter();
+        NpcSpeechEngine.EncodeSpeech(new SpeechMsg(Ramone.Value, SpeechMode.Replace, Enumerable.Repeat(say.Text, 32).ToArray()), w);
+        var r = new NetReader(w.ToArray());
+        Assert.Equal(32, NpcSpeechEngine.DecodeSpeech(ref r).Lines.Length);   // what a Kiln client reads back
+    }
+
+    [Fact]
+    public void Texts_keep_their_letters_and_have_a_text_for_every_language()
+    {
+        Assert.Contains("Zurück", SpeechText.Json(UiText.Of(("de", "Zurück"))));
+        var json = SpeechText.Json(UiText.Of(("de", "Hallo")));
+        Assert.Equal("Hallo", SpeechText.FromJson(json).For("*"));           // kiln.content shows it in English too
+        Assert.DoesNotContain("\"*\"", SpeechText.Json(UiText.Of(("en", "Hi"), ("de", "Hallo"))));
+    }
 }

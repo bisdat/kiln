@@ -64,7 +64,7 @@ Find the NPCs with `Villagers.List()` / `Villagers.Of(entity)` (Kiln.Creatures) 
 | `void Npcs.StopSaying(EntityId npc)` | any | ends the calling mod's Say before its time |
 | `NpcSpeech Npcs.Speech(EntityId npc)` | any | the calling mod's override of the NPC |
 | `SpeechResult NpcSpeech.Suppress()` | any | no greeting bubble, no greeting voice-over |
-| `SpeechResult NpcSpeech.Replace(params string[] lines)`, `Replace(IEnumerable<UiText> lines)` | any | the NPC picks from these lines (1 to 32, up to 200 characters) instead of its own, no voice-over |
+| `SpeechResult NpcSpeech.Replace(params string[] lines)`, `Replace(IEnumerable<UiText> lines)` | any | the NPC picks from these lines (1 to 32, up to 200 characters; a line's languages up to 2048 bytes of UTF-8 together) instead of its own, no voice-over |
 | `void NpcSpeech.Clear()` | any | the next mod's override, else the game's own lines |
 | `SpeechMode NpcSpeech.Mode`, `int NpcSpeech.Priority`, `EntityId Npc`, `string ModId` | any | this override |
 | `SpeechMode Npcs.SpeechOf(EntityId npc)`, `bool Npcs.IsSaying(EntityId npc)` | any | what the NPC does now, from every mod |
@@ -83,8 +83,11 @@ out of range, an empty or too long text, no line or more than 32) throw `Argumen
 - **Replace picks per greeting**: each time the game would pick a new line, the NPC shows one of yours (at random among
   them); the same pick stays while the game shows the same line.
 - **Texts**: a `string` is the same in every language; a `UiText` per language (exact key, the primary language, `en`,
-  `*`, as Kiln's item texts). No game text entry, no resource patch: Kiln registers the text with kiln.content's loca
-  hooks under a tag of its own.
+  `*`, as Kiln's item texts; a text with neither `en` nor `*` shows its `UiText` fallback in the other languages). No
+  game text entry, no resource patch: Kiln registers the text with kiln.content's loca hooks under a tag of its own.
+- **Sizes**: up to 200 characters per language, and all languages of one line (or one Say) together up to 2048 bytes
+  of UTF-8, the size a Kiln client accepts (about three languages of 200 characters). Bigger throws
+  `ArgumentException` at the call, not later on the clients.
 
 ## Where it shows
 
