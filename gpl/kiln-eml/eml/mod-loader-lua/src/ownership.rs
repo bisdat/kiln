@@ -433,8 +433,9 @@ pub fn owns_output(root: &Path, stem: &str) -> io::Result<bool> {
 /// writes beside the working backup after a successful startup asset pass (`<stem>.kfc.prepared.json`), and removes
 /// before a pass changes anything: its schemes, and the part of the resource file it hashes at each end. Scheme 2
 /// (0.2.0-dev.31.12) changed only the record's export state (`exports`), which this proof does not read; its `files`
-/// and `build` are scheme 1's.
-const SF_PREPARED_SCHEMES: [&str; 2] = ["kiln-sf-prepared 1", "kiln-sf-prepared 2"];
+/// and `build` are scheme 1's. Scheme 3 (stale game data, 0.2.0-dev.31.next) is scheme 2 written by a pass whose clean
+/// copy Steam's manifest proved: the same record.
+const SF_PREPARED_SCHEMES: [&str; 3] = ["kiln-sf-prepared 1", "kiln-sf-prepared 2", "kiln-sf-prepared 3"];
 const SF_PREPARED_EDGE: u64 = 1 << 20;
 
 /// kiln-eml: what Kiln's bundled ShroudForge's record of its last startup asset pass proves about the live pair

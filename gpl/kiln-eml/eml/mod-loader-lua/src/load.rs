@@ -241,7 +241,15 @@ pub fn create_backup_with(
             anyhow::bail!("create_backup: backup pair {bak_path} and {resources} does not match the seal Kiln recorded for the game's own files; verify the game files in Steam, then start through Kiln again");
         }
     }
-    if retake || !bak_path.exists() || !validate_backup(path, bak_path) {
+    let usable = !retake && bak_path.exists() && validate_backup(path, bak_path);
+    // kiln-eml (stale game data, 0.2.0-dev.31.next): a pair that passes every check above is still not the game's own
+    // when an earlier start took it of game files another loader had patched (HadToRegister, 2026-11-26: Auto Loot
+    // Plus's auto-smash program, weeks after the mod was removed). Steam's manifest of the installed build says so
+    // where it is there; nothing is built from such a pair and nothing changes.
+    if usable && let Some(why) = not_the_games_own(path, bak_path) {
+        anyhow::bail!("{}", stale_words(stem, &why));
+    }
+    if !usable {
         // kiln-eml (0.2.0-dev.31.13): a new working baseline is taken from the game files (none yet, one of another game
         // build, or a stale one). Where Steam's manifest of the installed build is there, it says whether they are the
         // files Steam installed; files it does not list as they are were changed by some program since, and are never
@@ -331,6 +339,11 @@ pub(crate) fn restore_backup_as(
 
     let root = path.parent().ok_or(())?;
     let stem = path.file_stem().ok_or(())?;
+    // kiln-eml (stale game data): a backup that is not the game's own never goes back over the game files
+    if let Some(why) = not_the_games_own(path, bak_path) {
+        warn!(path = ?path, backup_path = ?bak_path, "{}", stale_words(stem, &why));
+        return Err(());
+    }
     // kiln-eml: the backup goes live only when every container it lists is there at its size (the game refuses to start
     // on a container of another size): a backup that does not describe the game's data files is never put back.
     let base = KFCFile::from_path(bak_path, false).map_err(|_| ())?;
@@ -375,6 +388,61 @@ pub(crate) fn restore_backup_as(
         tracing::warn!(%error, "The vanilla data is back; container files EML had added were left in place");
     }
     Ok(())
+}
+
+/// kiln-eml (stale game data): the plain words a refusal of a working baseline that is not the game's own begins with
+/// (Kiln's launcher looks for them; Kiln's ShroudForge fork says the same, `verify_working_baseline.rs`).
+pub const STALE_WORDS: &str = "still contain changes from a mod that isn't installed";
+
+/// kiln-eml (stale game data): programs that known mods create and that are never in the game's own data: a backup that
+/// holds one is not the game's own, also where no Steam manifest is there to say so (the same list as the fork's).
+const KNOWN_LEFTOVERS: [(&str, &str); 2] = [
+    (
+        "a5c0de5a-1e00-4d0d-9a11-0000000a5000",
+        "Auto Loot Plus's auto-smash program (it breaks props within 15 m of the player every second)",
+    ),
+    ("a5c0de5a-1e00-4d0d-9a11-0000000a5002", "Auto Loot Plus's auto-smash aura"),
+];
+
+/// kiln-eml (stale game data): the first known leftover the archive `header` lists, in words with its resource id.
+fn leftover(header: &KFCFile) -> Option<String> {
+    KNOWN_LEFTOVERS.iter().find_map(|(guid, what)| {
+        let wanted = kfc::guid::Guid::parse(guid)?;
+        header.resources().keys().iter().any(|id| id.guid() == wanted).then(|| format!("{what}, resource {guid}"))
+    })
+}
+
+/// kiln-eml (stale game data): why the working baseline `bak` of the game archive `path` is not the game's own, or None:
+/// Steam's manifest of the installed build lists other bytes than the backups have, or, where no manifest is there, the
+/// backup holds a known leftover. Reads both backups (SHA-1) where a manifest lists them.
+fn not_the_games_own(path: &Path, bak: &Path) -> Option<String> {
+    use crate::steam_files::Installed;
+    let (root, stem) = (path.parent()?, path.file_stem()?);
+    let found = || KFCFile::from_path(bak, false).ok().as_ref().and_then(leftover);
+    match crate::steam_files::installed_backups(root.as_std_path(), stem) {
+        Installed::Same { .. } => None,
+        Installed::Differs { build, what } => Some(format!(
+            "{what} for {}{}",
+            Installed::build_words(&build),
+            found().map(|found| format!("; it holds {found}")).unwrap_or_default()
+        )),
+        Installed::Unknown(_) => found().map(|found| format!("it holds {found}")),
+    }
+}
+
+/// kiln-eml (stale game data): the refusal of a working baseline that is not the game's own: the plain words and what
+/// the player does first (Kiln's launcher cuts long words), then why.
+fn stale_words(stem: &str, why: &str) -> String {
+    let what = if stem == "enshrouded_server" {
+        format!("Your server files {STALE_WORDS}. Update the server files with SteamCMD's validate (app_update 2278520 validate), then start again.")
+    } else {
+        format!("Your game files {STALE_WORDS}. Verify the game files in Steam (Properties > Installed Files > Verify integrity), then start again.")
+    };
+    format!(
+        "{what} (Kiln's clean copy of the game data, {stem}.kfc.bak, {stem}.kfc_resources.bak and {stem}.kfc.bak.integrity, \
+         is not the game's own: {why}. Kiln neither builds the game data from it nor puts it back, and nothing was \
+         changed. If this comes back after Steam's file check, move those three files out of the game folder.)"
+    )
 }
 
 /// kiln-eml: the seal is there, and the backups' lengths are not the ones it recorded (a game update changes the header

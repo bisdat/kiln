@@ -53,6 +53,24 @@ pub struct Listed {
 
 /// What Steam's manifests say about the asset files of `stem` in the game folder `root`.
 pub fn installed_files(root: &Path, stem: &str) -> Installed {
+    let files = [root.join(format!("{stem}.kfc")), root.join(format!("{stem}.kfc_resources"))];
+    compare(root, stem, &files)
+}
+
+/// kiln-eml (stale game data, 0.2.0-dev.31.next): what Steam's manifests say about the working baseline of `stem`,
+/// `<stem>.kfc.bak` and `<stem>.kfc_resources.bak`: whether they are byte for byte the `<stem>.kfc` and
+/// `<stem>.kfc_resources` Steam installed for the installed build. A backup an earlier start took of game files another
+/// loader had already patched is sealed, whole and built over, so nothing but Steam's word tells it from the game's
+/// own (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program in the clean copy). Kiln's ShroudForge fork asks
+/// the same (`installed_backups` in `check_steam_installed_files.rs`).
+pub fn installed_backups(root: &Path, stem: &str) -> Installed {
+    let files = [root.join(format!("{stem}.kfc.bak")), root.join(format!("{stem}.kfc_resources.bak"))];
+    compare(root, stem, &files)
+}
+
+/// Compares `files` (in the place of `<stem>.kfc` and `<stem>.kfc_resources`) with what Steam's manifests of the
+/// installed build list for those two names.
+fn compare(root: &Path, stem: &str, files: &[PathBuf; 2]) -> Installed {
     let app = if stem == "enshrouded_server" { "2278520" } else { "1203620" };
     let Some((steamapps, acf)) = app_manifest(root, app) else {
         return Installed::Unknown(format!("there is no Steam manifest appmanifest_{app}.acf for the game folder"));
@@ -96,8 +114,9 @@ pub fn installed_files(root: &Path, stem: &str) -> Installed {
         if listed.len() != names.len() {
             continue;
         }
-        for (name, listed) in names.iter().zip(&listed) {
-            match differs(&root.join(name), listed) {
+        for (path, listed) in files.iter().zip(&listed) {
+            let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+            match differs(path, listed) {
                 Ok(None) => {}
                 Ok(Some(what)) => return Installed::Differs { build, what: format!("{name} {what}") },
                 Err(error) => return Installed::Unknown(format!("{name} cannot be read: {error}")),
@@ -549,6 +568,25 @@ mod tests {
         fs::write(game.join("enshrouded.kfc"), FILES[1].1).unwrap();
         assert!(matches!(installed_files(&game, "enshrouded"),
             Installed::Differs { what, .. } if what == "enshrouded.kfc_resources has 37 bytes, Steam's manifest lists 29"));
+    }
+
+    /// kiln-eml (stale game data): the working backups are compared with what Steam installed under the game files' names.
+    #[test]
+    fn backups_are_compared_with_the_files_steam_installed() {
+        let (library, game) = library(&FILES);
+        install_steam_records(&library.0.join("steamapps"), "26430625", &FILES);
+        fs::write(game.join("enshrouded.kfc.bak"), FILES[1].1).unwrap();
+        fs::write(game.join("enshrouded.kfc_resources.bak"), FILES[2].1).unwrap();
+        assert_eq!(installed_backups(&game, "enshrouded"), Installed::Same { build: Some("26430625".into()) });
+        fs::write(game.join("enshrouded.kfc.bak"), b"the header Steam installeD").unwrap();
+        assert_eq!(
+            installed_backups(&game, "enshrouded"),
+            Installed::Differs {
+                build: Some("26430625".into()),
+                what: "enshrouded.kfc.bak has other bytes than Steam's manifest lists (SHA-1)".into()
+            }
+        );
+        assert_eq!(installed_files(&game, "enshrouded"), Installed::Same { build: Some("26430625".into()) });
     }
 
     #[test]
