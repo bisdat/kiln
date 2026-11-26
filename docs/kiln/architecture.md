@@ -110,7 +110,7 @@ in a new load context, after the mods that stay loaded (the next release documen
 
 | Part of the mod | `reload <id>` |
 |---|---|
-| `version`, `name`, `description`, `authors`, `license`, `url`, `updates`, `kilnBuild`, `systems` (a declaration for tools) | read again |
+| `version`, `name`, `description`, `authors` (`author`), `license`, `url`, `updates`, `kilnBuild`, `advanced` (the new load's `ModInfo.Advanced`), `systems` (a declaration for tools) | read again |
 | `entryAssembly`, `entryType`, the mod's DLLs, `exports` | the new code loads; dependents reload with it |
 | `apiVersion`, `dependencies`, `incompatible`, `features` | checked again. A refusal leaves the mod (and its dependents) unloaded, and the reply says why; a later `load` or `reload` retries |
 | `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place until the next start; a changed order takes effect then |
