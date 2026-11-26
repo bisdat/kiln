@@ -3668,8 +3668,22 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.32",
+      "version": "0.2.0-dev.31.16",
       "status": "next",
+      "title": "Typing in Kiln's search fixed",
+      "summary": "Typing T in Kiln's search no longer adds a \"b\" when another mod sends keys.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Typing in Kiln's search fixed",
+          "text": "Key presses another mod sends while you type in a Kiln text field no longer end up in it (ShroudLink's Assistants key on T made every t a \"tb\").",
+          "area": "core"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.32",
+      "status": "planned",
       "title": "Pets, taming and more registries",
       "summary": "Pets that follow and fight for their owner, taming, and Kiln registries for creatures, spells, buffs, perks, stations, world rules and skills.",
       "features": [
