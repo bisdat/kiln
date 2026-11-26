@@ -269,8 +269,9 @@ bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, st
                 if (f.optional) return *out = Value{}, true;
                 return *err = f.name + ": a reference that is not optional cannot be cleared (null)", false;
             }
-            // TODO(S5): an id named as a value (a perk, an item of a recipe) is not checked to exist here; S5's model refuses one
-            // that names no entry (per edit, at composition).
+            // An id named as a value (a perk, an item of a recipe) is only checked for its shape here. Composition refuses a
+            // mod id that names no entry (compose.cpp check_references), and the back-end refuses a game id this build or
+            // world lacks when it writes (registry_live.cpp id_num), per edit.
             if (!j.is_string() || j.get<std::string>().find(':') == std::string::npos)
                 return *err = f.name + ": an id (\"game:<name>\" or \"<mod>:<name>\") is expected, not " + brief(j), false;
             *out = Value::text(j.get<std::string>());

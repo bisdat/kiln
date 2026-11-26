@@ -913,16 +913,19 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     if (conv == "flags") {  // a bitmask of the game's enum (loot.rarities)
         const Field* f = rw.paths.size() == 1 ? sc.find(rw.paths[0]) : nullptr;
         if (!f) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is missing on this game build");
-        if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en || (writing && !f->writable))
-            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask, so it is not writable on this game build");
+        if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en)
+            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask on this game build");
+        if (writing && !f->writable) return refuse(fr, rows, "the game member " + rw.paths[0] + " is read-only on this game build");
         return bind_flags(b, f);
     }
     if (conv == "optionalEnum") {  // [the switch, the enum] (loot.fixedRarity)
         const Field* sw = rw.paths.size() == 2 ? sc.find(rw.paths[0]) : nullptr;
         const Field* en = rw.paths.size() == 2 ? sc.find(rw.paths[1]) : nullptr;
         if (!sw || !en) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[sw ? 1 : 0]) + " is missing on this game build");
-        if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en || (writing && (!sw->writable || !en->writable)))
-            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum, so they are not writable on this game build");
+        if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en)
+            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum on this game build");
+        if (writing && (!sw->writable || !en->writable))
+            return refuse(fr, rows, "the game member " + rw.paths[sw->writable ? 1 : 0] + " is read-only on this game build");
         return bind_optional_enum(b, sw, en);
     }
     if (conv == "formula") {

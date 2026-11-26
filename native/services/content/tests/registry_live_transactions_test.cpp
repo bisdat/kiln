@@ -985,6 +985,36 @@ void loot_flags_foreign_revert_is_skipped() {
     registry_live_revert(71, h, &reply);
     check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(MASK_AT) == 0x10, "a flags revert keeps another writer's byte (compare before write)");
 }
+// review-registry-proof nit: a read-only bitmask is refused as read-only, not as "is not a bitmask"
+void loot_flags_read_only_is_refused_as_read_only() {
+    fresh_loot(); RegistryLiveReply reply;
+    auto& L = g_regs[KILN_CONTENT_LOOT];
+    Field& mask = L.schema.fields[L.schema.by_path.at("rarities")];
+    mask.writable = false;
+    auto h = change(71, "a", "[{" + loot_wood + R"("field":"rarities","op":["epic"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("is read-only on this game build") != std::string::npos &&
+              reply.reason.find("is not a bitmask") == std::string::npos,
+          "a read-only bitmask says read-only: " + reply.reason);
+    check(at<uint8_t>(MASK_AT) == 0x07, "nothing is written");
+    fresh_loot();
+    Field& plain = g_regs[KILN_CONTENT_LOOT].schema.fields[g_regs[KILN_CONTENT_LOOT].schema.by_path.at("rarities")];
+    plain.enum_kind = KILN_CONTENT_ENUM;  // a build where the member is a plain enum
+    h = change(71, "a", "[{" + loot_wood + R"("field":"rarities","op":["epic"]}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("is not a bitmask on this game build") != std::string::npos,
+          "a member that is no bitmask says so: " + reply.reason);
+}
+void loot_fixed_rarity_read_only_is_refused_as_read_only() {
+    fresh_loot(); RegistryLiveReply reply;
+    auto& L = g_regs[KILN_CONTENT_LOOT];
+    L.schema.fields[L.schema.by_path.at("uiRarity")].writable = false;
+    const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("read-only on this game build") != std::string::npos &&
+              reply.reason.find("are not a switch and an enum") == std::string::npos,
+          "a read-only switch or enum says read-only: " + reply.reason);
+}
 void loot_fixed_rarity_read_write_revert() {
     fresh_loot(); RegistryLiveReply reply;
     check(loot_read("fixedRarity") == R"("none")", "the switch off reads as none (the enum below it is the game's own)");
@@ -1163,6 +1193,8 @@ int main() {
         {"loot_flags_keep_bits_kiln_has_no_name_for", loot_flags_keep_bits_kiln_has_no_name_for},
         {"loot_flags_value_missing_on_the_build_is_refused", loot_flags_value_missing_on_the_build_is_refused},
         {"loot_flags_foreign_revert_is_skipped", loot_flags_foreign_revert_is_skipped},
+        {"loot_flags_read_only_is_refused_as_read_only", loot_flags_read_only_is_refused_as_read_only},
+        {"loot_fixed_rarity_read_only_is_refused_as_read_only", loot_fixed_rarity_read_only_is_refused_as_read_only},
         {"loot_fixed_rarity_read_write_revert", loot_fixed_rarity_read_write_revert},
         {"loot_fixed_rarity_none_keeps_the_games_enum", loot_fixed_rarity_none_keeps_the_games_enum},
         {"loot_fixed_rarity_value_missing_on_the_build_is_refused", loot_fixed_rarity_value_missing_on_the_build_is_refused},
