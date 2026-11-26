@@ -103,7 +103,9 @@ in this world, a config the entry lacks, or a value its storage cannot hold exac
 with `Refused > 0` and the first reason. An entry refused at binding is left out for that world only; a ModLoad change
 tries it again in the next world. GameStart edits bind per entry the same way at world load (a conflict at the stage itself
 still refuses the edit). `Registry.Change` stays all-or-nothing: a binding or evaluation failure of any entry refuses the
-whole transaction with the same reason, and nothing of it is written. A throwing callback submits none of that turn's buffered edits and
+whole transaction with the same reason, and nothing of it is written. A game memory write that fails after every retry is
+different in kind: it takes back the whole change that owns the slot for that world, at an entry point too (never another
+change), so a change is either all written or not at all; a take-back Kiln cannot prove is `Unverified`. A throwing callback submits none of that turn's buffered edits and
 reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
 can retry the author. When Kiln itself cannot take the pass yet (its begin or commit is refused because the live back-end is
 still being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that

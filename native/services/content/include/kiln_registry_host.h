@@ -38,7 +38,10 @@ typedef struct KilnRegistryHostApi {
     /* Kiln.Host's runtime load order (the launcher profile's order: required and optional dependencies, loadAfter,
      * loadBefore, ties by id) as a JSON array [{"mod": "<id>", "version": "<version>"}], every loaded Kiln mod once. A
      * row may add "registry": true: the mod's code uses the registry API (OnRegistry, Registry.Change/Read), so the stage
-     * decodes the game's base at resources-ready, before packs write resident pages, not at first use. A second call
+     * decodes the game's base at resources-ready, before packs write resident pages, not at first use. A row may add
+     * "side": "server" | "client" for a one-side mod (kiln.mod.json's side; "both" or absent: both sides): the join's
+     * registry fingerprint (bootSync) leaves out every boot field such a mod writes (docs/kiln/services/README.md). An
+     * older kiln-content.dll ignores the key. A second call
      * replaces the first. KILN_ERR_INVALID_ARGUMENT: not such an array, or a mod twice (nothing changes). */
     KilnResult(KILN_CALL* set_order)(KilnStr order_json);
     /* KILN_REGISTRY_MODE_*. KILN_ERR_INVALID_ARGUMENT: another value. */

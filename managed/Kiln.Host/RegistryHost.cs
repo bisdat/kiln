@@ -163,7 +163,7 @@ internal sealed partial class ModManager
             var candidates = RegistryCandidates();
             var directories = candidates.Select(c => c.Directory).ToArray();
             foreach (var (manifest, directory) in candidates)
-                if (manifest.HasCode && RegistryDeclarations.MightOverride(Path.Combine(directory, manifest.EntryAssembly), directories))
+                if (manifest.HasCode && RegistryDeclarations.UsesRegistry(Path.Combine(directory, manifest.EntryAssembly), directories))
                     users.Add(manifest.Id);
         }
         catch (Exception) { /* metadata only: an unreadable folder is no registry user, and the stage stays lazy */ }

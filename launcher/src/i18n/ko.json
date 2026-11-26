@@ -6068,6 +6068,102 @@
       "unknown": "Kiln은 어떤 게임 파일을 되돌릴지 알 수 없습니다: {reason}."
     }
   },
+  "registry": {
+    "title": "레지스트리 충돌",
+    "gameUnavailable": "게임 선택 불가",
+    "noGame": "선택된 게임 없음",
+    "noGameHint": "설정에서 설치된 게임을 선택하면 해당 게임의 레지스트리 스냅샷을 읽을 수 있습니다.",
+    "sub": "이 게임의 저장된 레지스트리 스냅샷입니다. 실시간 정보도, 다음 시작의 예측도 아닙니다.",
+    "refresh": "보고서 새로 고침",
+    "unavailable": "레지스트리 보고서를 읽을 수 없음",
+    "missing": "아직 레지스트리 보고서가 없음",
+    "missingHint": "Kiln이 이 게임의 kiln/state/registry.json을 아직 쓰지 않았습니다. 살펴볼 레지스트리 스냅샷이 없습니다.",
+    "stale": "오래된 스냅샷",
+    "staleBody": "{reason} 아래 값은 저장된 스냅샷의 값이며, 현재 월드나 모드 목록과 같다고 보장되지 않습니다.",
+    "snapshot": "스냅샷",
+    "snapshotSub": "{time} · 세대 {generation} · {phase}",
+    "baseOrigin": "기준 출처: {origin}",
+    "archiveWriter": "아카이브 작성자: {writer}",
+    "unverified": "매핑 미검증",
+    "unverifiedBody": "필드 변경이 Unproven으로 거부될 수 있습니다. 각 거부의 이유를 확인하세요.",
+    "certaintyHint": "확실 = Kiln이 작성자를 관찰했습니다. 저널로 확인 = 아카이브 작성자 기준의 귀속입니다. 추정 차이는 누가 썼는지도, 다른 작성자가 없다는 것도 증명하지 않습니다.",
+    "partial": "일부 보고서",
+    "partialRows": {
+      "other": "네이티브 보고서 또는 이 화면의 안전 한도 때문에 {count}개 행이 빠졌습니다."
+    },
+    "partialWriters": {
+      "other": "이전 작성자 {count}명이 작성자 체인에서 빠졌습니다."
+    },
+    "partialBody": "텍스트와 목록 값도 제한되므로 전체 기록이 아닙니다.",
+    "empty": "이 스냅샷에는 레지스트리 변경이 없음",
+    "emptyHint": "보고서는 있고 유효하지만 필드, 충돌, 거부, 항목 변경이 없습니다.",
+    "refused": "거부된 변경",
+    "refusedSub": "이 변경은 적용되지 않았습니다. RestartRequired는 게임을 다시 시작해야 하고, Unproven은 Kiln에 검증된 매핑이 필요합니다.",
+    "noRefused": "표시된 보고서에 거부된 변경이 없습니다.",
+    "conflicts": "충돌 및 차이",
+    "conflictsSub": "승자와 다른 주체는 스냅샷 시점에 기록된 그대로입니다.",
+    "noConflicts": "표시된 보고서에 충돌 행이 없습니다.",
+    "conflictLine": "{kind} · 승자: {winner} · 다른 주체: {loser}",
+    "fields": "필드 및 작성자 체인",
+    "fieldsSub": "이전 작성자가 먼저 나옵니다. 필드를 펼치면 기준, 작업, 결과가 보입니다.",
+    "filter": "필드나 주체로 필터",
+    "noMatch": "이 필터에 맞는 표시 필드가 없습니다.",
+    "noFields": "표시된 보고서에 필드 행이 없습니다.",
+    "entries": "항목 변경",
+    "noEntries": "항목 변경이 없습니다.",
+    "added": "추가됨",
+    "removed": "제거됨",
+    "previous": "이전",
+    "next": "다음",
+    "page": "{pages}쪽 중 {page}쪽 · 표시된 행 {count}개",
+    "summary": "승자: {winner} · 결과: {result}",
+    "summaryOmitted": {
+      "other": "이전 작성자 {count}명 생략"
+    },
+    "applies": "적용: {applies} · 기준 출처: {origin}",
+    "baseValue": "기준 값: {value}",
+    "writersOmitted": {
+      "other": "이전 작성자 {count}명을 생략했습니다. 체인의 보존된 끝부분만 표시합니다."
+    },
+    "element": "요소: {element}",
+    "operation": "작업: {operation}",
+    "after": "이후: {value}",
+    "noWriters": "작성자 행이 없습니다. 기준 값이 결과를 정합니다.",
+    "formula": "수식 입력(계산 순서): {inputs}",
+    "winner": "승자: {winner}",
+    "result": "결과:",
+    "certainty": {
+      "certain": "확실",
+      "named": "저널로 확인",
+      "bestEffort": "추정 차이",
+      "unknown": "알 수 없음"
+    },
+    "advancedField": "고급 필드(세부 정보 숨김)",
+    "advancedReason": "고급 필드(매핑 세부 정보 숨김).",
+    "advancedConflict": "고급 필드 충돌. 매핑 세부 정보는 숨겨집니다.",
+    "unknownField": "{field} (이 런처가 모르는 필드)",
+    "elementHidden": "요소 세부 정보 숨김",
+    "baseOwner": "기준",
+    "noOwner": "없음",
+    "referenceCheck": "Kiln 참조 검사",
+    "referenceOp": "참조 검사",
+    "fresh": {
+      "clock": "보고서 시각을 확인할 수 없습니다.",
+      "process": "현재 게임 프로세스를 확인할 수 없습니다.",
+      "stopped": "게임이 실행 중이 아닙니다. 마지막으로 저장된 스냅샷입니다.",
+      "previousStart": "이 보고서는 현재 게임 시작보다 이전의 것입니다.",
+      "old": "이 스냅샷은 24시간이 넘었습니다.",
+      "start": "현재 게임 시작을 확인할 수 없습니다."
+    },
+    "error": {
+      "tooLarge": "레지스트리 보고서가 이 화면이 읽는 8 MiB 한도를 넘습니다. 전체를 읽으려면 게임 폴더의 kiln/state/registry.json을 여세요.",
+      "nesting": "레지스트리 보고서의 중첩 한도를 넘었습니다.",
+      "structure": "레지스트리 보고서의 구조 한도를 넘었습니다.",
+      "notJson": "레지스트리 보고서가 올바른 JSON이 아닙니다.",
+      "format": "지원하지 않는 레지스트리 보고서 형식입니다(예상 값: 1).",
+      "malformed": "잘못된 레지스트리 보고서입니다({part})."
+    }
+  },
   "playerStorage": {
     "tab": "보관함",
     "title": "플레이어 보관함",

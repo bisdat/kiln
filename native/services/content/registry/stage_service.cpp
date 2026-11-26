@@ -35,6 +35,7 @@
 #include "proof.h"
 #include "stage.h"
 #include "stage_owner.h"
+#include "live_table.h"
 
 namespace kc::registry::stage {
 
@@ -225,6 +226,10 @@ Env make_env() {
     e.write_report = [](const std::string& text) { return write_whole(u8(api_path(KILN_PATH_STATE)) / u8"registry.json", text); };
     e.write_data = [](const std::string& rel, const std::string& text) { return write_whole(data_root() / u8(rel), text); };
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
+    e.data_exists = [](const std::string& rel) {
+        std::error_code ec;
+        return fs::is_regular_file(data_root() / u8(rel), ec);
+    };
     e.entry_support = &nc_registry_supports;
     e.stack_guard = [](std::string* why) { return guard_set(true, why); };
     e.log = [](int level, const std::string& line) {
@@ -277,28 +282,6 @@ void lab_proof() {
 }
 
 // ---- the C tables ----
-std::string str(KilnStr s) { return s.ptr ? std::string(s.ptr, s.len) : std::string(); }
-bool str_ok(KilnStr s, size_t max) { return (s.ptr || !s.len) && s.len <= max; }
-
-KilnResult copy_out(const std::string& text, char* buf, size_t cap, size_t* out_len) {
-    if (!buf && cap) return KILN_ERR_INVALID_ARGUMENT;
-    if (out_len) *out_len = text.size();
-    if (cap) {
-        const size_t n = std::min(text.size(), cap - 1);
-        std::memcpy(buf, text.data(), n);
-        buf[n] = 0;
-    }
-    return text.size() + 1 > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
-}
-void report_out(const std::string& text, char* buf, size_t cap, size_t* out_len) {
-    if (out_len) *out_len = text.size();
-    if (buf && cap) {
-        const size_t n = std::min(text.size(), cap - 1);
-        std::memcpy(buf, text.data(), n);
-        buf[n] = 0;
-    }
-}
-
 #if defined(_MSC_VER) || defined(__clang__) && defined(_WIN32)
 // A mod's native callback, guarded: a fault inside it is caught (only plain data in this frame).
 bool guarded_stage(KilnRegistryStageFn fn, const KilnRegistryStageInfo* info, void* user) {
@@ -430,67 +413,6 @@ KilnResult KILN_CALL t_subscribe_ready(KilnOwner owner, KilnRegistryReadyFn fn, 
 }
 KilnResult KILN_CALL t_unsubscribe(KilnHandle h) { return runner().unsubscribe(h); }
 
-KilnResult live_owner(KilnOwner owner, std::string* mod = nullptr) {
-    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
-    bool revoked = false;
-    const std::string id = bound_mod(owner, &revoked);
-    if (revoked) return KILN_ERR_REVOKED;
-    if (id.empty()) return KILN_ERR_INVALID_ARGUMENT;
-    if (mod) *mod = id;
-    return KILN_OK;
-}
-bool live_out_ok(KilnRegistryLiveResult* out) { return !out || out->size >= sizeof(*out); }
-void live_out(const RegistryLiveReply& reply, KilnRegistryLiveResult* out) {
-    if (!out) return;
-    std::memset(out, 0, sizeof(*out)); out->size = sizeof(*out);
-    out->outcome = static_cast<uint32_t>(reply.outcome); out->accepted = reply.accepted;
-    out->refused = reply.refused; out->skipped = reply.skipped; out->world = reply.world;
-    out->generation = runner().generation();
-    size_t n = std::min(reply.reason.size(), sizeof(out->reason) - 1);
-    while (n && n < reply.reason.size() && (static_cast<unsigned char>(reply.reason[n]) & 0xc0) == 0x80) --n;
-    std::memcpy(out->reason, reply.reason.data(), n);
-}
-KilnResult KILN_CALL l_begin(KilnOwner owner, uint32_t point, KilnHandle* out) {
-    if (!out) return KILN_ERR_INVALID_ARGUMENT;
-    std::string mod; const KilnResult rc = live_owner(owner, &mod);
-    return rc == KILN_OK ? registry_live_begin(owner, mod, point, out) : rc;
-}
-KilnResult KILN_CALL l_submit(KilnOwner owner, KilnHandle handle, KilnStr ir, KilnRegistryLiveResult* out, char* buf, size_t cap, size_t* len) {
-    if (!live_out_ok(out) || !str_ok(ir, KILN_REGISTRY_MAX_IR_BYTES) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
-    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    RegistryLiveReply reply; std::string text;
-    const KilnResult rc = registry_live_submit(owner, handle, str(ir), &reply, &text);
-    live_out(reply, out); report_out(text, buf, cap, len); return rc;
-}
-KilnResult KILN_CALL l_commit(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
-    if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
-    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    RegistryLiveReply reply; const KilnResult rc = registry_live_commit(owner, handle, &reply);
-    live_out(reply, out); return rc;
-}
-KilnResult KILN_CALL l_revert(KilnOwner owner, KilnHandle handle, KilnRegistryLiveResult* out) {
-    if (!live_out_ok(out)) return KILN_ERR_INVALID_ARGUMENT;
-    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    RegistryLiveReply reply; const KilnResult rc = registry_live_revert(owner, handle, &reply);
-    live_out(reply, out); return rc;
-}
-KilnResult KILN_CALL l_read(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
-    if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
-    const KilnResult own = live_owner(owner); if (own != KILN_OK) return own;
-    std::string text; const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text);
-    return rc == KILN_OK ? copy_out(text, buf, cap, len) : rc;
-}
-KilnResult KILN_CALL l_status(KilnRegistryLiveStatus* out) {
-    if (!out || out->size < sizeof(*out)) return KILN_ERR_INVALID_ARGUMENT;
-    const auto status = registry_live_status();
-    std::memset(out, 0, sizeof(*out)); out->size = sizeof(*out);
-    out->world = status.world; out->world_kind = status.world_kind;
-    out->generation = runner().generation(); out->drafts = status.drafts; out->active = status.active;
-    return KILN_OK;
-}
-const KilnRegistryLiveApi kLiveTable = {{sizeof(KilnRegistryLiveApi), KILN_REGISTRY_LIVE_VERSION},
-    &l_begin, &l_submit, &l_commit, &l_revert, &l_read, &l_status};
-
 const KilnRegistryApi kTable = {
     {sizeof(KilnRegistryApi), KILN_REGISTRY_VERSION},
     &t_status, &t_schema, &t_field_info, &t_subscribe_stage, &t_submit, &t_read, &t_select, &t_report, &t_subscribe_ready, &t_unsubscribe,
@@ -506,7 +428,7 @@ KilnResult KILN_CALL h_set_mode(uint32_t mode) { return runner().set_mode(mode);
 KilnResult KILN_CALL h_read_pass(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
     if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
     std::string mod;
-    const KilnResult own = live_owner(owner, &mod);
+    const KilnResult own = bound_owner(owner, &mod);
     if (own != KILN_OK) return own;
     std::string text;
     const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text, mod);
@@ -607,7 +529,10 @@ void bind_service() {
     });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);
     const KilnResult b = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_HOST_SERVICE, sizeof(KILN_REGISTRY_HOST_SERVICE) - 1}, &kHostTable);
-    const KilnResult c = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_LIVE_SERVICE, sizeof(KILN_REGISTRY_LIVE_SERVICE) - 1}, &kLiveTable);
+    LiveTableEnv live_env;
+    live_env.bound_mod = [](KilnOwner owner, bool* revoked) { return bound_mod(owner, revoked); };
+    live_env.generation = [] { return runner().generation(); };
+    const KilnResult c = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_LIVE_SERVICE, sizeof(KILN_REGISTRY_LIVE_SERVICE) - 1}, live_table(live_env));
     if (a != KILN_OK || b != KILN_OK || c != KILN_OK) LOGW("registry: kiln.registry rc %d, kiln.internal.registry rc %d, kiln.registry.live rc %d", a, b, c);
 }
 

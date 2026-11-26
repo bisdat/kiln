@@ -6,6 +6,7 @@
 // nothing behind, a new field refused "needs a restart"), loud refusals, compare-before-write in the report.
 // registry_live_test.sh builds and runs it.
 #include <windows.h>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +19,7 @@
 #include "../registry/report.h"
 #include "../registry/schema_ir.h"
 #include "../registry_live.h"
+#include "../registry/live_table.h"
 #include "../store.cpp"
 #include "../registry_live.cpp"
 
@@ -735,6 +737,23 @@ void another_writer_in_the_report() {
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
+    // P32: the row names the Kiln place, never the game's debug or member names
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer"), "the skipped row names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
+}
+// P32: a skipped revert (the pack removed after another writer took the slot) still names the Kiln place it had
+void skipped_revert_names_the_kiln_place() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    stage(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    apply_registry_files(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    mem<uint32_t>(WOOD_AT, 777);
+    apply_registry_files({});  // the pack removed: Kiln's revert is skipped
+    check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer: Kiln's revert not applied"),
+          "the skipped revert names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
 }
 // P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
 void live_transactions() {
@@ -755,6 +774,97 @@ void live_transactions() {
     check(registry_live_revert(78, h, &reply) == KILN_ERR_INVALID_ARGUMENT, "another owner cannot revert it");
     check(registry_live_revert(77, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "revert restores the layer below");
     check(registry_live_revert(77, h, &reply) == KILN_ERR_NOT_FOUND, "revert does not reuse stale handles");
+}
+
+// review2 S5 remainder: kiln.registry.live's C table (registry/live_table.cpp: the wrappers kiln-content.dll registers),
+// bound to a fake owner table and generation: argument and owner checks, the result struct, the copies out.
+std::string fake_bound_mod(KilnOwner owner, bool* revoked) {
+    *revoked = owner == 99;  // revoked (or never made)
+    return owner == 77 ? "change" : std::string();  // 55: an owner bound to no mod id
+}
+bool utf8_whole(const char* s) {
+    for (size_t i = 0; s[i];) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const size_t n = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 0;
+        if (!n) return false;
+        for (size_t k = 1; k < n; ++k)
+            if ((static_cast<unsigned char>(s[i + k]) & 0xc0) != 0x80) return false;
+        i += n;
+    }
+    return true;
+}
+void live_c_table() {
+    world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({});
+    registry::stage::LiveTableEnv env;
+    env.bound_mod = &fake_bound_mod;
+    env.generation = [] { return uint64_t(41); };
+    const KilnRegistryLiveApi* t = registry::stage::live_table(env);
+    check(t->header.size == sizeof(KilnRegistryLiveApi) && t->header.version == KILN_REGISTRY_LIVE_VERSION, "C table: header size and version");
+    KilnHandle h = 0;
+    check(t->begin(77, KILN_REGISTRY_LIVE_MANUAL, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C begin: no out handle is refused");
+    check(t->begin(0, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_INVALID_ARGUMENT && !h, "C begin: owner 0 is refused");
+    check(t->begin(55, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_INVALID_ARGUMENT && !h, "C begin: an owner bound to no mod is refused");
+    check(t->begin(99, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_REVOKED && !h, "C begin: a revoked owner is REVOKED");
+    check(t->begin(77, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_OK && h, "C begin: the bound owner gets a handle");
+    const std::string ir = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":3}}]})";
+    const KilnStr irs{ir.data(), ir.size()};
+    KilnRegistryLiveResult r{};
+    r.size = sizeof r - 8;
+    check(t->submit(77, h, irs, &r, nullptr, 0, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a result struct shorter than v1 is refused");
+    r.size = sizeof r;
+    check(t->submit(77, h, irs, &r, nullptr, 8, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a cap without a buffer is refused");
+    check(t->submit(77, h, KilnStr{nullptr, 4}, &r, nullptr, 0, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a null text with a length is refused");
+    check(t->submit(99, h, irs, &r, nullptr, 0, nullptr) == KILN_ERR_REVOKED, "C submit: a revoked owner is REVOKED");
+    size_t len = 0;
+    char rep[8];
+    check(t->submit(77, h, irs, &r, rep, sizeof rep, &len) == KILN_OK && r.size == sizeof r && r.accepted == 1 && r.generation == 41,
+          "C submit: accepted, the result struct filled (size, accepted, the stage's generation)");
+    check(len > 0 && std::strlen(rep) == std::min(len, sizeof rep - 1), "C submit: the report is cut to the buffer, 0-terminated, its whole length in out_len");
+    std::memset(&r, 0x5a, sizeof r);
+    r.size = sizeof r + 16;  // a newer caller's bigger struct: v1's part is written, the size says v1
+    const KilnResult committed = t->commit(77, h, &r);
+    const size_t used = strnlen(r.reason, sizeof r.reason);
+    check(committed == KILN_OK && r.outcome == KILN_REGISTRY_LIVE_APPLIED && r.size == sizeof r && r.generation == 41 && r.reserved == 0 &&
+              used < sizeof r.reason && std::all_of(r.reason + used, r.reason + sizeof r.reason, [](char c) { return c == 0; }),
+          "C commit: Applied, the struct zeroed then filled (outcome " + std::to_string(r.outcome) + ", reason \"" + std::string(r.reason, used) + "\")");
+    check(at<uint32_t>(WOOD_AT) == 30, "C commit: the change is written (10 x3)");
+    char buf[2];
+    len = 0;
+    const char* reg = "items"; const char* id = "game:material_t1_wood_logs"; const char* field = "maxStack";
+    const KilnStr R{reg, 5}, I{id, std::strlen(id)}, F{field, std::strlen(field)};
+    check(t->read(77, R, I, F, buf, sizeof buf, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 2 && buf[0] == '3' && buf[1] == 0,
+          "C read: a buffer too small says so, the cut text 0-terminated, the whole length in out_len");
+    char whole[16];
+    check(t->read(77, R, I, F, whole, sizeof whole, &len) == KILN_OK && std::string(whole) == "30", "C read: the value as text");
+    check(t->read(77, R, I, F, nullptr, 4, &len) == KILN_ERR_INVALID_ARGUMENT, "C read: a cap without a buffer is refused");
+    check(t->read(55, R, I, F, whole, sizeof whole, &len) == KILN_ERR_INVALID_ARGUMENT, "C read: an owner bound to no mod is refused");
+    KilnRegistryLiveStatus st{};
+    st.size = sizeof st - 4;
+    check(t->status(&st) == KILN_ERR_INVALID_ARGUMENT && t->status(nullptr) == KILN_ERR_INVALID_ARGUMENT, "C status: a short or missing struct is refused");
+    st.size = sizeof st;
+    check(t->status(&st) == KILN_OK && st.size == sizeof st && st.generation == 41 && st.world != 0 && st.world_kind == KILN_WORLD_SERVER && st.active >= 1,
+          "C status: the world, its kind, the generation and the active changes");
+    check(t->revert(99, h, &r) == KILN_ERR_REVOKED && at<uint32_t>(WOOD_AT) == 30, "C revert: a revoked owner is REVOKED, nothing changes");
+    r.size = 4;
+    check(t->revert(77, h, &r) == KILN_ERR_INVALID_ARGUMENT && at<uint32_t>(WOOD_AT) == 30, "C revert: a short result struct is refused before anything changes");
+    r.size = sizeof r;
+    check(t->revert(77, h, &r) == KILN_OK && r.outcome == KILN_REGISTRY_LIVE_REVERTED && at<uint32_t>(WOOD_AT) == 10, "C revert: Reverted, the value back");
+    check(t->commit(77, h, nullptr) == KILN_ERR_NOT_FOUND, "C commit: a reverted handle is gone (a null result struct is allowed)");
+    // a long reason is cut on a UTF-8 boundary: an entry id of 2-byte characters (no such entry in this world, so the
+    // binding refuses it and names its place) runs past the 192-byte reason; the odd prefix puts a cut inside a character
+    for (const char* prefix : {"game:x", "game:xy"}) {
+        KilnHandle h2 = 0;
+        t->begin(77, KILN_REGISTRY_LIVE_MANUAL, &h2);
+        std::string id = prefix;
+        for (int i = 0; i < 150; ++i) id += "\xc3\xa9";  // é
+        const std::string bad = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":")" + id + R"(","field":"maxStack","op":3}]})";
+        t->submit(77, h2, KilnStr{bad.data(), bad.size()}, &r, nullptr, 0, nullptr);
+        t->commit(77, h2, &r);
+        const size_t n = std::strlen(r.reason);
+        check(n > 0 && n < sizeof r.reason && utf8_whole(r.reason) && r.outcome != KILN_REGISTRY_LIVE_APPLIED,
+              "C result: a long reason is cut on a UTF-8 boundary and 0-terminated (" + std::to_string(n) + " bytes): " + std::string(r.reason, std::min<size_t>(n, 60)));
+        t->revert(77, h2, &r);
+    }
 }
 
 void live_transaction_foreign_revert() {
@@ -882,6 +992,8 @@ int main() {
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"live_c_table", live_c_table},
+        {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

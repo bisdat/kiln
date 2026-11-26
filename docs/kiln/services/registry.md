@@ -107,7 +107,8 @@ lacks, an inexact whole-number value) is refused alone and counted, the rest app
 has two refusal boundaries: any entry-operation refusal commits none of its valid fields, and a binding or evaluation
 refusal of any field takes the whole candidate back. Field-only parse/mapping/composition-conflict/restart-field refusals
 remain per edit: valid live fields in that draft may still commit. A candidate's own failed write takes it back too;
-an unproved take-back is **Unverified**, not success.
+an unproved take-back is **Unverified**, not success. A failed write is whole-change at an entry point as well: per entry
+refusals are for binding and evaluation, which happen before anything is written.
 
 Cost storage is checked per entry on the running build. A fractional mana/stamina cost for an entry with whole-number
 storage is refused, never rounded; float-config entries keep fractional values. A Manual transaction's result uses

@@ -302,10 +302,10 @@ bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and 
 struct StoreSkipped {
     uintptr_t addr = 0;
     uint32_t kind = 0, id = 0;
-    std::string what;  // "items Material_T1_Wood_Logs.maxStackSize"
+    std::string what;  // "items Material_T1_Wood_Logs.maxStackSize": game names, diagnostics only, never in a report (P32)
     std::string mod, source;  // the registry layer's
     bool revert = false;      // the revert of a dropped registry layer
-    std::string text;         // the report line
+    std::string text;         // without a place ("a slot Kiln wrote ..."); registry_live names the Kiln field
 };
 std::vector<StoreSkipped> store_skipped();
 bool store_drop(KilnOwner owner, uintptr_t addr);  // removes one layer

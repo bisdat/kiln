@@ -974,7 +974,9 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // no mod has registry content: nothing is read (an empty registry.json says so), except once per game build, when the
     // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
-    const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
+    // one lookup, nothing read (proof-2 N7: the table is about 1.9 MB); an env without data_exists reads it as before
+    const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() &&
+                             (d.env.data_exists ? !d.env.data_exists(ids_rel) : !d.env.read_data(ids_rel));
     // the highest max stack a world ever started with, per item (plans/index.json "stacks", never lowered: a save that world
     // wrote can hold such stacks), against this start's value, else the base's: lower, and a save can hold bigger stacks than
     // this start allows (saves.h stackCut)
@@ -996,6 +998,27 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     const bool freeze_old = !eager && d.env.prepare_live && !freeze.empty();
     std::unique_ptr<model::Source> src = !eager && !ids_missing && !freeze_old ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
     if ((!eager || (!want_base && !src)) && d.env.prepare_live) d.lazy_old = old_fn; // production supplies owned document copies
+    // Only the once-per-build id ledger: no stable field decode on unused starts (entries only, with the reference tables).
+    auto write_id_ledger = [&](model::Source& source) {
+        model::Model ids_model(source, d.rm, d.schema);
+        ids_model.list_all();
+        ids_model.id_table(&d.ids, &d.nums);
+        d.env.write_data(ids_rel, ids_model.id_table_json().dump());
+        d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
+                     std::to_string(d.ids.size()) + " entries); no mod has registry content");
+        for (const auto& note : ids_model.take_notes()) d.log(0, "registry: " + note);
+    };
+    bool ledger_written = false;
+    if (freeze_old && ids_missing && src) {
+        // review4 nit: the ledger reads every resource, and the source kept for the first-use decode would hold them all
+        // until then. Write it, let that source go, and freeze the old writers' resources in a fresh one: still before any
+        // boot writer of this start writes, so the frozen bytes are the same.
+        write_id_ledger(*src);
+        ledger_written = true;
+        src->release();
+        src.reset();
+        src = d.env.source ? d.env.source(&why) : nullptr;
+    }
     if (freeze_old) {
         for (const auto& [key, type] : freeze) {
             std::string error;
@@ -1022,19 +1045,18 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     if (d.env.prepare_live && eager) need.all = true;
     bool hit = false;
     if (!src && !want_base) {
-        if (eager) d.log(1, "registry: the base could not be read at the stage (" + why + "); it is prepared at first use instead");
+        if (eager && d.env.prepare_live && !freeze.empty() && d.lazy_error.empty()) {
+            // review4 nit (NS1 edge): without a base at the stage the old boot writers' resources were not frozen either; a
+            // first-use decode would read their patched bytes as the game's and compose their edits over them again
+            d.lazy_error = "the registry's base could not be read at the stage (" + why + "), so the old boot writers' resources "
+                           "could not be frozen before they wrote; restart the game to use the registry API";
+            d.log(1, "registry: " + d.lazy_error);
+        } else if (eager) {
+            d.log(1, "registry: the base could not be read at the stage (" + why + "); it is prepared at first use instead");
+        }
         d.meta.base.origin = "none";
     } else if (!eager) {
-        if (ids_missing) {
-            // Only the once-per-build id ledger: no stable field decode on unused starts.
-            model::Model ids_model(*src, d.rm, d.schema);
-            ids_model.list_all();  // entries only (with the reference tables), no field decode
-            ids_model.id_table(&d.ids, &d.nums);
-            d.env.write_data(ids_rel, ids_model.id_table_json().dump());
-            d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
-                         std::to_string(d.ids.size()) + " entries); no mod has registry content");
-            for (const auto& note : ids_model.take_notes()) d.log(0, "registry: " + note);
-        }
+        if (ids_missing && !ledger_written) write_id_ledger(*src);
         if (freeze_old) d.lazy_source = std::move(src);
         else { src->release(); src.reset(); }
         d.meta.base.origin = "none";

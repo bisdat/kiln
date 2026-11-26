@@ -164,6 +164,44 @@ public sealed class RegistryContextTests
         context.Close();
     }
 
+    // review4 recheck nit: a bulk author pays one world check per tick step, not one native status call per cell.
+    [Fact]
+    public void AWorldBoundContextChecksItsWorldOncePerStep()
+    {
+        var owner = Mod(); ulong token = 1, step = 7; var checks = 0;
+        var context = new RegistryContext(owner, RegistryEntryPoint.WorldLoad, RegistryPhase.Alter,
+            new RegistryWorld(1, WorldKind.Server, "a"), "world", (_, _, _) => "10", (_, _) => new[] { "game:wood" })
+            { CurrentWorldToken = () => { ++checks; return token; }, CurrentStep = () => step };
+        using var scope = context.Enter();
+        var item = DataRegistry.For(context).Items["game:wood"];
+        for (var i = 0; i < 100; ++i) Assert.Equal(10, item.MaxStack);
+        Assert.Equal(1, checks);
+        token = 2; step = 8;  // the next step: checked again, and the world changed
+        Assert.Equal(RegistryContextError.WorldChanged, Assert.Throws<RegistryContextException>(() => item.MaxStack).Code);
+        Assert.Equal(2, checks);
+        context.Close();
+    }
+
+    // review4 nit: the code identity (Kiln.Host hashes the mod's DLLs for it) is composed only when Identity is read,
+    // never by Close; the identity read after Close is the one the callback would have read.
+    [Fact]
+    public void TheCodeIdentityIsComputedOnlyWhenIdentityIsRead()
+    {
+        var owner = Mod(); var hashed = 0;
+        var context = new RegistryContext(owner, RegistryEntryPoint.GameStart, RegistryPhase.Alter, null,
+            () => { ++hashed; return "code"; }, (_, _, _) => "10", (_, _) => new[] { "game:wood" });
+        var open = new RegistryContext(owner, RegistryEntryPoint.GameStart, RegistryPhase.Alter, null, "code", (_, _, _) => "10", (_, _) => new[] { "game:wood" });
+        using (context.Enter()) { }
+        context.Close();
+        Assert.Equal(0, hashed);
+        string expected;
+        using (open.Enter()) expected = open.Identity;
+        open.Close();
+        Assert.Equal(expected, context.Identity);
+        Assert.Equal(expected, context.Identity);
+        Assert.Equal(1, hashed);
+    }
+
     [Fact]
     public void AWorldBoundContextFailsBeforeReadingAfterTheWorldChanges()
     {

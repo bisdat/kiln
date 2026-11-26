@@ -70,6 +70,9 @@ struct LiveState {
     bool pending_application = false;
     bool pending_change = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
+    // P32: the Kiln place ("items[game:x].maxStack") of every slot a bound field had since the install, so a skipped
+    // write or revert is named in Kiln words even after its field was unbound (a removed pack, an ended world)
+    std::unordered_map<uintptr_t, std::string> slot_places;
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -910,16 +913,19 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     if (conv == "flags") {  // a bitmask of the game's enum (loot.rarities)
         const Field* f = rw.paths.size() == 1 ? sc.find(rw.paths[0]) : nullptr;
         if (!f) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is missing on this game build");
-        if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en || (writing && !f->writable))
-            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask, so it is not writable on this game build");
+        if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en)
+            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask on this game build");
+        if (writing && !f->writable) return refuse(fr, rows, "the game member " + rw.paths[0] + " is read-only on this game build");
         return bind_flags(b, f);
     }
     if (conv == "optionalEnum") {  // [the switch, the enum] (loot.fixedRarity)
         const Field* sw = rw.paths.size() == 2 ? sc.find(rw.paths[0]) : nullptr;
         const Field* en = rw.paths.size() == 2 ? sc.find(rw.paths[1]) : nullptr;
         if (!sw || !en) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[sw ? 1 : 0]) + " is missing on this game build");
-        if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en || (writing && (!sw->writable || !en->writable)))
-            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum, so they are not writable on this game build");
+        if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en)
+            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum on this game build");
+        if (writing && (!sw->writable || !en->writable))
+            return refuse(fr, rows, "the game member " + rw.paths[sw->writable ? 1 : 0] + " is read-only on this game build");
         return bind_optional_enum(b, sw, en);
     }
     if (conv == "formula") {
@@ -1076,6 +1082,13 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
     fo.formula_inputs = std::move(formula_inputs);
 }
 
+// A write compare-before-write skipped, in Kiln words (P32): the store's own row names the game's debug and member
+// names; the report names the Kiln place the slot's bound field had (slot_places, refreshed from g.fields per report).
+std::string skipped_text(const StoreSkipped& s) {
+    const auto it = g.slot_places.find(s.addr);
+    const std::string place = it != g.slot_places.end() ? it->second : "a game memory slot Kiln wrote";
+    return place + " was written by another writer after Kiln's layer: Kiln's " + (s.revert ? "revert" : "edit") + " not applied";
+}
 void report(bool application = true) {
     g.tables_changed = false;
     registry::Result r = g.in->result;
@@ -1090,9 +1103,11 @@ void report(bool application = true) {
     for (const registry::Refusal& x : g.refused) r.refused.push_back(x);
     const size_t live_end = r.refused.size();
     const std::vector<StoreSkipped> skipped = store_skipped();
+    for (const auto& [ref, field] : g.fields)
+        for (const LiveSlot& slot : field.slots) g.slot_places.insert_or_assign(slot.addr, ref.text());
     for (const StoreSkipped& s : skipped) {
         registry::Refusal x;
-        x.mod = s.mod, x.source = s.source, x.reason = s.text;
+        x.mod = s.mod, x.source = s.source, x.reason = skipped_text(s);
         r.refused.push_back(std::move(x));
     }
     // this application's refusals, then the skipped writes found since the last report (each once per world)
@@ -1723,6 +1738,7 @@ void registry_live_install(RegistryLive in) {
     g.pending_change = false;
     g.tables_changed = false;
     g.skipped_logged = 0;
+    g.slot_places.clear();
 }
 
 std::shared_ptr<const registry::Schema> registry_live_schema() {

@@ -6068,6 +6068,102 @@
       "unknown": "Kiln はどのゲームファイルを戻すことになるか判断できません: {reason}。"
     }
   },
+  "registry": {
+    "title": "レジストリの競合",
+    "gameUnavailable": "ゲームを選択できません",
+    "noGame": "ゲーム未選択",
+    "noGameHint": "設定でインストール済みのゲームを選ぶと、そのレジストリのスナップショットを読めます。",
+    "sub": "このゲームの保存済みレジストリのスナップショットです。リアルタイムの情報でも、次回起動の予測でもありません。",
+    "refresh": "レポートを更新",
+    "unavailable": "レジストリのレポートを読めません",
+    "missing": "レジストリのレポートはまだありません",
+    "missingHint": "Kiln はこのゲームの kiln/state/registry.json をまだ書いていません。確認できるレジストリのスナップショットはありません。",
+    "stale": "古いスナップショット",
+    "staleBody": "{reason} 以下の値は保存済みスナップショットのもので、現在のワールドや Mod リストと同じとは限りません。",
+    "snapshot": "スナップショット",
+    "snapshotSub": "{time} · 世代 {generation} · {phase}",
+    "baseOrigin": "ベースの出どころ: {origin}",
+    "archiveWriter": "アーカイブの書き込み元: {writer}",
+    "unverified": "対応付けは未検証",
+    "unverifiedBody": "フィールドの変更が Unproven として拒否されることがあります。各拒否の理由を確認してください。",
+    "certaintyHint": "確実 = Kiln が書き込み元を観測しました。ジャーナルから特定 = アーカイブの書き込み元による特定です。推定の差分は、誰が書いたかも、他に書き込み元がないことも証明しません。",
+    "partial": "一部のみのレポート",
+    "partialRows": {
+      "other": "ネイティブのレポートまたはこの画面の安全上の上限により {count} 行が省かれました。"
+    },
+    "partialWriters": {
+      "other": "書き込みチェーンから以前の書き込み元 {count} 件が省かれました。"
+    },
+    "partialBody": "テキストとリストの値にも上限があり、これは完全な履歴ではありません。",
+    "empty": "このスナップショットにレジストリの変更はありません",
+    "emptyHint": "レポートは存在し有効ですが、フィールド、競合、拒否、エントリの変更は含まれていません。",
+    "refused": "拒否された変更",
+    "refusedSub": "これらの変更は適用されていません。RestartRequired はゲームの再起動が必要です。Unproven は Kiln での検証済みの対応付けが必要です。",
+    "noRefused": "表示中のレポートに拒否された変更はありません。",
+    "conflicts": "競合と差分",
+    "conflictsSub": "勝者とほかの所有者は、スナップショット時点の記録どおりです。",
+    "noConflicts": "表示中のレポートに競合の行はありません。",
+    "conflictLine": "{kind} · 勝者: {winner} · ほかの所有者: {loser}",
+    "fields": "フィールドと書き込みチェーン",
+    "fieldsSub": "以前の書き込み元が先です。フィールドを開くとベース、操作、結果が表示されます。",
+    "filter": "フィールドや所有者で絞り込み",
+    "noMatch": "この絞り込みに合うフィールドはありません。",
+    "noFields": "表示中のレポートにフィールドの行はありません。",
+    "entries": "エントリの変更",
+    "noEntries": "エントリの変更はありません。",
+    "added": "追加",
+    "removed": "削除",
+    "previous": "前へ",
+    "next": "次へ",
+    "page": "{page} / {pages} ページ · 表示 {count} 行",
+    "summary": "勝者: {winner} · 結果: {result}",
+    "summaryOmitted": {
+      "other": "以前の書き込み元 {count} 件を省略"
+    },
+    "applies": "反映: {applies} · ベースの出どころ: {origin}",
+    "baseValue": "ベース値: {value}",
+    "writersOmitted": {
+      "other": "以前の書き込み元 {count} 件を省略しました。チェーンの保持された末尾のみ表示しています。"
+    },
+    "element": "要素: {element}",
+    "operation": "操作: {operation}",
+    "after": "変更後: {value}",
+    "noWriters": "書き込みの行はありません。結果はベースで決まります。",
+    "formula": "数式の入力 (評価順): {inputs}",
+    "winner": "勝者: {winner}",
+    "result": "結果:",
+    "certainty": {
+      "certain": "確実",
+      "named": "ジャーナルから特定",
+      "bestEffort": "推定の差分",
+      "unknown": "不明"
+    },
+    "advancedField": "上級フィールド (詳細非表示)",
+    "advancedReason": "上級フィールド (対応付けの詳細は非表示)。",
+    "advancedConflict": "上級フィールドの競合。対応付けの詳細は非表示です。",
+    "unknownField": "{field} (このランチャーが知らないフィールド)",
+    "elementHidden": "要素の詳細は非表示",
+    "baseOwner": "ベース",
+    "noOwner": "なし",
+    "referenceCheck": "Kiln の参照チェック",
+    "referenceOp": "参照チェック",
+    "fresh": {
+      "clock": "レポートの時刻を確認できません。",
+      "process": "現在のゲームのプロセスを確認できません。",
+      "stopped": "ゲームは起動していません。これは最後に保存されたスナップショットです。",
+      "previousStart": "このレポートは現在のゲーム起動より前のものです。",
+      "old": "このスナップショットは 24 時間以上前のものです。",
+      "start": "現在のゲーム起動を確認できません。"
+    },
+    "error": {
+      "tooLarge": "レジストリのレポートがこの画面で読める 8 MiB の上限を超えています。全体を読むにはゲームフォルダーの kiln/state/registry.json を開いてください。",
+      "nesting": "レジストリのレポートの入れ子の上限を超えました。",
+      "structure": "レジストリのレポートの構造の上限を超えました。",
+      "notJson": "レジストリのレポートが正しい JSON ではありません。",
+      "format": "対応していないレジストリのレポート形式です (想定: 1)。",
+      "malformed": "レジストリのレポートが不正です ({part})。"
+    }
+  },
   "playerStorage": {
     "tab": "保管庫",
     "title": "プレイヤー保管庫",

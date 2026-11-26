@@ -484,9 +484,62 @@ void run() {
     fs::remove_all(g_root);
 }
 
+// review2 S5 remainder: Content.Entry.Modified (KilnContentEntry.flags) follows registry layers. A registry write goes
+// through the shared store, never through Content's setters, so only the store's generation tells fill_entry's cache
+// (refresh_modified) that it changed: a registry layer makes the entry modified, its drop makes it unmodified again,
+// with no Content call in between.
+bool modified(const char* name) {
+    KilnContentEntry e{};
+    e.size = sizeof e;
+    const KilnResult rc = t_find(KILN_CONTENT_ITEMS, KilnStr{name, std::strlen(name)}, &e);
+    return rc == KILN_OK && (e.flags & KILN_CONTENT_MODIFIED) != 0;
+}
+void modified_follows_registry_layers() {
+    setup();
+    world_load();  // no mod has packs: nothing modified
+    check(!modified("Wood") && !modified("Stone"), "Modified: nothing differs from the game's original yet");
+    constexpr KilnOwner kRegistry = 0x7e9;  // the registry's owner (registry_live.cpp registry_owner)
+    const Entry* wood = reg(KILN_CONTENT_ITEMS).get(fnv1a("Wood", 4));
+    const uint32_t v = 40;
+    uint8_t b[4];
+    std::memcpy(b, &v, 4);
+    std::string err;
+    {
+        std::lock_guard lock(store_mutex());
+        check(wood && store_put(kRegistry, registry_seq(1), KILN_CONTENT_ITEMS, wood->id, 0, -1, kWood, 4, b, "registry"),
+              "a registry layer on Wood's maxStackSize");
+        store_flush(&err);
+    }
+    check(fake::read32(kWood) == 40, "the registry layer is written (40)");
+    check(modified("Wood") && !modified("Stone"), "Modified: Wood is modified by the registry layer alone (the store's generation, no Content setter)");
+    {
+        std::lock_guard lock(store_mutex());
+        store_drop_owner(kRegistry);
+        store_flush(&err);
+    }
+    check(fake::read32(kWood) == 10 && !modified("Wood"), "Modified: the registry layer's drop puts Wood back, unmodified");
+    {
+        std::lock_guard lock(store_mutex());
+        const uint32_t original = 10;
+        std::memcpy(b, &original, 4);
+        store_put(kRegistry, registry_seq(2), KILN_CONTENT_ITEMS, wood->id, 0, -1, kWood, 4, b, "registry");  // the original value
+        store_flush(&err);
+    }
+    check(!modified("Wood"), "Modified: a registry layer that writes the original value leaves the entry unmodified");
+    {
+        std::lock_guard lock(store_mutex());
+        store_drop_owner(kRegistry);
+        store_flush(&err);
+    }
+    world_reset(true, "is stopping");
+    reg(KILN_CONTENT_ITEMS) = Registry{};  // run() loads its own world
+    fs::remove_all(g_root);
+}
+
 }  // namespace
 
 int main() {
+    modified_follows_registry_layers();
     run();
     if (failures) std::printf("packreload-test: %d check(s) FAILED\n", failures);
     else std::printf("packreload-test: all checks passed\n");
