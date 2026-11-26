@@ -3,7 +3,9 @@
 // below what the design system puts on the body (dialogs at z-index 50, toasts at 60). In the launcher the sheet
 // (.k-sheet, z-index 3) already held them; the harness hosts the pages as Kilnwarden does, with nothing around them,
 // where Kilnwarden 0.1.3's dialogs over the map took no clicks (Leaflet's canvas took them). The clicks are spread over
-// the whole dialog (its buttons can happen to sit beside the map), then the dialog is used.
+// the whole dialog (its buttons can happen to sit beside the map), then the dialog is used. The map's own overlays (the
+// search results, the side toggle, its menu, the zoom buttons) stack inside .ka-map-root and must still take their
+// clicks, as must the toast its menu raises.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { kapServer } from "./fixtures/kapServer";
 
@@ -66,6 +68,39 @@ async function confirmOverMap(page: Page, where: string) {
   await expect(waypoint).toHaveCount(0);
 }
 
+/** On the map page: the map's own overlays, which stack inside .ka-map-root (the search results, the side toggle, its
+ * context menu, the zoom buttons), and the toast its menu raises (on the body, z-index 60; at this window size it sits
+ * below the map, so Kilnwarden's tour-map-dialogs.spec.ts checks one over the map), each clicked across. Not the route
+ * panel: in mock mode the map has no art, and the art banner (z-index 1001, same place) lies over it, as it did before
+ * the map's isolation (Kilnwarden hides that banner and checks the route panel). */
+async function overlaysOverMap(page: Page, where: string) {
+  const search = page.getByRole("searchbox", { name: "Search the map" });
+  await expect(search).toBeVisible(LOAD);
+  await expect(page.locator(".ka-map.leaflet-container")).toBeVisible();
+  await search.fill(WAYPOINT.name);
+  const results = page.locator(".ka-map-results");
+  await expect(results).toBeVisible();
+  expect.soft(await misses(results), `${where}: clicks on the search results that went elsewhere`).toEqual([]);
+  await search.fill("");
+  await page.locator(".ka-map-sidetoggle").click({ timeout: 5000 });
+  await expect(page.locator(".ka-map-side")).toBeHidden();
+  const waypoint = page.locator(".ka-wp", { hasText: WAYPOINT.name });
+  await expect(waypoint).toBeVisible(LOAD);
+  await waypoint.click({ button: "right" });
+  const menu = page.locator(".ka-map-menu");
+  await expect(menu).toBeVisible();
+  expect.soft(await misses(menu), `${where}: clicks on the map's menu that went elsewhere`).toEqual([]);
+  await menu.getByText("Measure from here", { exact: true }).click({ timeout: 5000 });
+  const toast = page.locator(".k-toast", { hasText: "Start point set" });
+  await expect(toast).toBeVisible();
+  await page.waitForTimeout(500); // its spring in
+  expect.soft(await misses(toast), `${where}: clicks on the toast that went elsewhere`).toEqual([]);
+  await expect(page.locator(".ka-map-route")).toBeVisible();
+  expect.soft(await misses(page.locator(".ka-map-zoom")), `${where}: clicks on the zoom buttons that went elsewhere`).toEqual([]);
+  await page.locator(".ka-map-sidetoggle").click({ timeout: 5000 });
+  await expect(page.locator(".ka-map-side")).toBeVisible();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((w) => localStorage.setItem("kiln.admin.history.v1.lab", JSON.stringify({ waypoints: [w] })), WAYPOINT);
 });
@@ -80,4 +115,16 @@ test("in a plain page (the pages as Kilnwarden hosts them), a dialog over the ad
   await kapServer(page);
   await page.goto(`${HARNESS}#/servers/lab/admin/map`);
   await confirmOverMap(page, "harness");
+});
+
+test("in the launcher, the map's own overlays and its toast take their clicks", async ({ page }) => {
+  await page.goto("/#/servers/lab/admin/map");
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  await overlaysOverMap(page, "launcher");
+});
+
+test("in a plain page (the pages as Kilnwarden hosts them), the map's own overlays and its toast take their clicks", async ({ page }) => {
+  await kapServer(page);
+  await page.goto(`${HARNESS}#/servers/lab/admin/map`);
+  await overlaysOverMap(page, "harness");
 });
