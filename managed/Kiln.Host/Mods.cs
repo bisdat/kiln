@@ -1004,6 +1004,13 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             directories.Add(mod.Directory);
             directories.AddRange(dependents.Select(d => d.Directory));
             cascade.AddRange(dependents.Select(d => d.Id));
+            // a new version that adds boot content can never load in this process: refused before anything unloads, so the
+            // running versions stay (before, the reload unloaded them and the new one was refused, until a restart)
+            if (NewBootRefusal(directories) is { } boot)
+            {
+                _host.Log(LogLevel.Warn, $"reload {id}: {boot}");
+                return new ModOperationResult(false, boot, [id]);
+            }
             mod = null;
             Unload(id, ModState.Unloaded, "reloading", out _, out _);
             var waiting = new HashSet<string>(cascade.Prepend(id).Where(UnloadWaiting), StringComparer.Ordinal);
@@ -1018,6 +1025,26 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
         else directories.Add(record!.Directory);
         return FinishReload(id, directories, cascade);
+    }
+
+    /// <summary>A reload's refusal before anything unloads: the new <c>kiln.mod.json</c> in one of <paramref name="directories"/>
+    /// (the mod's and its dependents' folders) has boot content this process's boot phase did not commit, which LoadCore's
+    /// BootLoadRefusal refuses after the unload (RestartRequiredBoot). A committed boot mod's new version is checked as its
+    /// load checks it. Null: the reload goes ahead (a manifest that does not read is the load's to report).</summary>
+    private string? NewBootRefusal(IEnumerable<string> directories)
+    {
+        foreach (var dir in directories)
+        {
+            if (ModCandidate.Read(dir).Manifest is not { Boot: not ManifestBoot.None } m) continue;
+            if (BootGeneration.Report(m.Id) is { State: BootModState.Committed })
+            {
+                if (BootLoadRefusal(m, dir) is { } changed) return changed;
+                continue;
+            }
+            return $"RestartRequiredBoot: mod {m.Id}'s new version has boot content (\"boot\" in kiln.mod.json), which loads only with " +
+                   "the boot phase at start; restart the game (or the server) to load it. The running version stays loaded";
+        }
+        return null;
     }
 
     /// <summary>Whether <paramref name="id"/> names a native mod (kiln_native.h): its drop-in folder <c>kiln/native/&lt;id&gt;</c>, or
