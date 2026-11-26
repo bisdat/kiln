@@ -209,8 +209,9 @@ async function routeBesideBanner(page: Page, where: string, action: boolean) {
     await copy.scrollIntoViewIfNeeded();
     await copy.click({ timeout: 5000 });
     await expect.poll(() => page.evaluate(() => (window as unknown as { __noArtClicks: number }).__noArtClicks)).toBe(1);
-    // the banner scrolled on its own: the map did not move, and the route panel stayed where it was, still clickable
-    expect(await page.locator(".ka-map-area").evaluate((e) => e.scrollTop)).toBe(0);
+    // the banner scrolled on its own: the map did not move (its root, overflow hidden, is the box scrollIntoView could
+    // scroll; the area, overflow visible, never scrolls), and the route panel stayed where it was, still clickable
+    expect(await page.locator(".ka-map-root").evaluate((e) => [e.scrollTop, e.scrollLeft])).toEqual([0, 0]);
     expect(await rectOf(route)).toEqual(r);
   }
   await route.locator(".ka-map-x").click({ timeout: 5000 });
