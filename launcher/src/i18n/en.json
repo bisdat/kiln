@@ -6826,6 +6826,7 @@
     "sfPackage": "{id} (ShroudForge package)",
     "emlPackage": "{id} (EML package)",
     "archiveUnattributed": "A startup write no package made (kiln-eml)",
+    "archiveOp": "Not known (kiln-eml's journal names the entry this package wrote, not this field)",
     "kind": {
       "archiveWriter": "Wrote this entry before Kiln (archive)",
       "drift": "Changed outside Kiln"

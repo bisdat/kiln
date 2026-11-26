@@ -174,7 +174,9 @@ export function parseRegistryReport(input: string): RegistryReport {
         const element = w.element === undefined || raw ? "" : isKilnField(text(f.registry), text(w.element)) ? text(w.element) : t("registry.elementHidden");
         const kind = text(w.kind), who = optional(w.who);
         return { element, owner: kind === "archiveWriter" && who ? archiveOwner(who) : who || optional(w.mod) || t("registry.referenceCheck"), kind: writerKind(kind), stage: optional(w.stage),
-          operation: w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
+          // an archive-writer package: kiln-eml's journal names the entry, not what the package did to this field
+          operation: kind === "archiveWriter" ? t("registry.archiveOp")
+            : w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
           value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty), certain: w.certainty === "certain" };
       }),
     };

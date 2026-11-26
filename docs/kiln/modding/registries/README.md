@@ -308,7 +308,9 @@ base).
 - The journal names a package per **entry**, not per field: a package that wrote one member of an item is listed on every
   field of that item a mod edits. "Wrote" means written, not changed: a package that set a value to what it already was is
   listed too. It can name a package that did not change a field; it never misses one that did, within its bounds (4,096
-  rows per package, 32,768 in all; `base.journal.truncated` says when it ran out).
+  rows per package, 32,768 in all; `base.journal.truncated` says when it ran out). So a package's row has no `op` (the
+  journal does not say what the package did to the field; its `value` is the archive's, the base) and a package is never a
+  field's `winner`: with no Kiln writer left, the archive's value stands as the base.
 - Only **items, drops and balance** are named: their entries are each one whole resource of the game's archive, which is
   what the journal lists. A recipe or a loot entry is an element of a resource its whole registry shares (the recipe list,
   the loot list), and the journal does not say which element a package wrote, so no package is named on recipes or loot

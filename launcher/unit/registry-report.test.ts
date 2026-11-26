@@ -53,6 +53,19 @@ describe("untrusted registry report", () => {
     expect(out[2].certainty).toBe("Best-effort drift");
     expect(out[3].kind).toBe("oldPack");
   });
+  test("an archive-writer row claims no operation on the field: the journal names the entry", () => {
+    const r = registryFixture();
+    r.fields[0].writers = [
+      { kind: "archiveWriter", who: "shroudforge:alpha", op: 10, value: 10, certainty: "named" },  // an older report's op is not shown either
+      { kind: "archiveWriter", who: "eml:bravo", value: 10, certainty: "named" },
+      ...r.fields[0].writers,
+    ] as typeof r.fields[0].writers;
+    const out = parse(r).fields[0].writers;
+    expect(out[0].operation).toBe("Not known (kiln-eml's journal names the entry this package wrote, not this field)");
+    expect(out[1].operation).toBe(out[0].operation);
+    expect(out[1].value).toBe("10");
+    expect(out[2].operation).not.toBe(out[0].operation);
+  });
   test("base.journal says whether the archive writer's packages are named", () => {
     const read = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 2, entries: 3, truncated: false, text: "x" } } });
     expect(read.journal).toBe("Archive-writer packages named from kiln-eml's change journal: 2 packages, 3 entries (items, drops and balance only: a recipe or loot entry is not named).");

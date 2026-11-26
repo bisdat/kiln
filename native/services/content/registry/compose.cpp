@@ -263,11 +263,12 @@ struct State {
             if (const FieldOutcome* p = parent ? parent->find_field(f) : nullptr) it->second = *p;
             else {
                 it->second.result = it->second.base = base_of(f);
-                // the packages that wrote the entry before Kiln, below every Kiln writer (archive_journal.h)
+                // the packages that wrote the entry before Kiln, below every Kiln writer (archive_journal.h). The journal names
+                // the entry, not the field: no package is the field's winner (with no Kiln writer the archive's value, the
+                // base, stands)
                 const EntryState* e = entry(f.registry, f.id);
                 if (e && !e->added && it->second.base.kind != Value::None)
                     for (const std::string& who : e->archive) it->second.chain.push_back(archive_row(who, it->second.base));
-                if (e && !e->added && !e->archive.empty()) it->second.winner = e->archive.back();
             }
         }
         return it->second;
@@ -1329,10 +1330,13 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                 if (!dropped_mods.empty()) {
                     resummarize(fo);
                     fo.result = v;
-                    fo.winner = fo.chain.empty() ? std::string() : fo.chain.back().who;
+                    // the winner is the last Kiln writer left; archive-writer packages (named per entry) never are one, and
+                    // a field only they are left on is no touched field any more
+                    const auto last = std::find_if(fo.chain.rbegin(), fo.chain.rend(), [](const ChainRow& r) { return r.kind != WriterKind::ArchiveWriter; });
+                    fo.winner = last == fo.chain.rend() ? std::string() : last->who;
                     // a conflict line naming an edit taken out no longer holds
                     std::erase_if(c.out.lines, [&](const Line& l) { return l.field == fr && (dropped_mods.count(l.winner) || dropped_mods.count(l.loser)); });
-                    if (fo.chain.empty()) s.fields.erase(it);
+                    if (last == fo.chain.rend()) s.fields.erase(it);
                 }
             }
             // 2: a game entry acts only on what the stage took away (an entry a mod removed, a retired id, one the game build

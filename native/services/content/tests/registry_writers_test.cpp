@@ -40,8 +40,11 @@ static Schema schema() {
     ms.name = "maxStack", ms.type = FieldType::Int, ms.min = 1, ms.max = 65535, ms.applies = Applies::WorldLoad;
     FieldSpec perks;
     perks.name = "perks", perks.type = FieldType::List, perks.element = FieldType::Id, perks.max_items = 5, perks.applies = Applies::Now;
+    FieldSpec up;
+    up.name = "upgradesTo", up.type = FieldType::Id, up.ref = "items", up.applies = Applies::Now;
     items.fields[ms.name] = ms;
     items.fields[perks.name] = perks;
+    items.fields[up.name] = up;
     s.registries["items"] = items;
     return s;
 }
@@ -53,6 +56,7 @@ static BaseModel base() {
         e.id = id;
         e.fields["maxStack"] = Value::integer(stack);
         e.fields["perks"] = Value::of_list({});
+        e.fields["upgradesTo"] = Value::text("game:material_t1_wood_logs");
         return e;
     };
     b.registries["items"] = {item(kStone, 25), item(kLogs, 10), item(kNew, 3)};
@@ -184,6 +188,16 @@ int main(int argc, char** argv) {
     const auto& oc = o.fields.at({"items", kStone, "maxStack"}).chain;
     CHECK(oc.size() == 4 && oc[2].kind == WriterKind::ArchiveWriter && oc[3].kind == WriterKind::OldPack && oc[3].after.i == 30,
           "an old pack lies above the archive's packages");
+    // review: a package is never a field's winner (per entry, not per field): an edit the reference check takes out leaves
+    // the field to the base, not to the last package, and a field only packages are left on is not reported as touched
+    const Result dropped = compose(s, bm, {}, {mod("ghost", {batch(s, "ghost", "alter", R"([{"registry": "items", "select": {"id": "game:material_t1_stone"}, "field": "upgradesTo", "op": "zz:ghost"}])")})});
+    const auto up = dropped.fields.find({"items", kStone, "upgradesTo"});
+    CHECK(up == dropped.fields.end() || (up->second.winner.empty() && up->second.winner.rfind("shroudforge:", 0) != 0),
+          "a dropped edit's field is not won by a package: " + (up == dropped.fields.end() ? std::string("gone") : up->second.winner));
+    CHECK(up == dropped.fields.end(), "a field only archive rows are left on is not a touched field");
+    bool refused_ghost = false;
+    for (const Refusal& x : dropped.refused) refused_ghost = refused_ghost || x.mod == "ghost";
+    CHECK(refused_ghost, "the edit naming no entry is refused");
     // a later entry point keeps the named rows of the start and names new places too
     const Result later = compose_after(s, bm, r, {mod("late", {batch(s, "late", "alter", R"([{"registry": "items", "select": {"id": "game:alpha_item"}, "field": "perks", "list": {"append": ["game:perk_x"]}}])")})});
     const auto& lp = later.fields.at({"items", kNew, "perks"}).chain;
@@ -202,8 +216,11 @@ int main(int argc, char** argv) {
     for (const json& f : doc["fields"])
         if (f["id"] == kStone) row = &f;
     CHECK(row && (*row)["writers"][0]["kind"] == "archiveWriter" && (*row)["writers"][0]["who"] == "shroudforge:alpha" &&
-              (*row)["writers"][0]["certainty"] == "named" && (*row)["writers"][0]["op"] == 25 && !(*row)["writers"][0].contains("mod"),
+              (*row)["writers"][0]["certainty"] == "named" && (*row)["writers"][0]["value"] == 25 && !(*row)["writers"][0].contains("mod"),
           "the field row names the package, certainty named");
+    // review: the journal names the entry, not the field: an archive row claims no operation on the field (no op, no list)
+    CHECK(row && !(*row)["writers"][0].contains("op") && !(*row)["writers"][0].contains("list"),
+          "an archive row has no op: what the package did to this field is not known: " + (row ? (*row)["writers"].dump() : std::string()));
     bool named_line = false;
     for (const json& c : doc["conflicts"]) named_line = named_line || (c["loser"] == "shroudforge:delta" && c["certainty"] == "named");
     CHECK(named_line, "the conflict line is named");

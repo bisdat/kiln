@@ -114,7 +114,7 @@ test("long field lists paginate, filter and disclose native omissions", async ({
 test("names archive-writer packages from kiln-eml's journal and labels drift best effort", async ({ page }) => {
   const r = registryFixture();
   const row = { ...r.fields[0], writers: [
-    { kind: "archiveWriter", who: "shroudforge:betterstacks", op: 10, value: 10, certainty: "named" },
+    { kind: "archiveWriter", who: "shroudforge:betterstacks", value: 10, certainty: "named" },
     { kind: "drift", who: "outside Kiln (best effort; suspects: xhl-core.dll)", op: 12, value: 12, certainty: "bestEffort" },
     { kind: "registry", mod: "stacker", stage: "alter", n: 0, op: { mul: 2 }, value: 24, certainty: "certain" },
   ], result: 24 };
@@ -132,6 +132,7 @@ test("names archive-writer packages from kiln-eml's journal and labels drift bes
   await expect(owners.nth(0)).toContainText("betterstacks (ShroudForge package)");
   await expect(owners.nth(0)).toContainText("Wrote this entry before Kiln (archive)");
   await expect(owners.nth(0)).toContainText("Named from journal");
+  await expect(owners.nth(0)).toContainText("Operation: Not known (kiln-eml's journal names the entry this package wrote, not this field)");
   await expect(owners.nth(1)).toContainText("outside Kiln (best effort; suspects: xhl-core.dll)");
   await expect(owners.nth(1)).toContainText("Changed outside Kiln");
   await expect(owners.nth(1)).toContainText("Best-effort drift");
