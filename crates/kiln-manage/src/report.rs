@@ -1398,19 +1398,34 @@ fn stood_aside(state: &serde_json::Value) -> bool {
         })
 }
 
-/// kiln-eml stood aside for ShroudForge while Kiln hosted it, not for EML's own loader (docs/kiln/eml.md, "ShroudForge
-/// asset mods and EML mods together"): ShroudForge is the one writer of the game data in such a start and runs the EML
-/// packages that are switched on in its mods folder. `sf_hosted_pid`: the pid of kiln/state/shroudforge.json when it
-/// says `hosted` and is of the last start. kiln-eml's file must name the same pid (two files of different starts, or
-/// one without a pid, prove nothing about one start: an older start's pair must not hide EML's own loader in a later
-/// one), and its `aside` must be the reason Kiln's ShroudForge plugin gives it (it starts with the engine's name; the
-/// reason for EML's own loader names the loader's DLL). A player's report of 13 Nov 2026 read "EML's own loader runs
-/// in the game" in a start that had no such loader.
-fn eml_under_hosted_shroudforge(kind: ModKind, state: &serde_json::Value, sf_hosted_pid: Option<u64>) -> bool {
-    kind == ModKind::Eml
-        && sf_hosted_pid.is_some()
-        && state.get("pid").and_then(|v| v.as_u64()) == sf_hosted_pid
-        && jstr(state.get("aside")).is_some_and(|a| a.starts_with("ShroudForge "))
+/// kiln-eml stood aside for ShroudForge, not for EML's own loader (docs/kiln/eml.md, "ShroudForge asset mods and EML mods
+/// together"): ShroudForge is the one writer of the game data in such a start and runs the EML packages that are switched
+/// on in its mods folder. kiln-eml's `aside` is the reason Kiln's ShroudForge plugin gives it when it takes the start's
+/// data writer (it starts with the engine's name; the reason for EML's own loader names the loader's DLL), so kiln-eml's
+/// own file says whom it stood aside for. Whether that file is of the last start is its pid's to say: the pid of
+/// kiln/state/shroudforge.json when that says `hosted` and is of the last start (`sf_hosted_pid`), or the last start's
+/// own (`last_pid`: kiln.log's last boot, else boot.json). A player's report of 13 Nov 2026 read "EML's own loader runs
+/// in the game" in a start that had no such loader; KR-YNQZ (26 Nov) again, written before ShroudForge's state file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmlHandoff {
+    /// In the last start; `kiln_hosted`: no ShroudForge state of that start says another mode than `hosted`.
+    LastStart { kiln_hosted: bool },
+    /// In the start the file is of (`pid`), which is not known to be the last start.
+    OtherStart { pid: Option<u64> },
+}
+
+/// The EML packs kiln-eml's file says run under ShroudForge (`own-loader` rows: "runs under ShroudForge ...").
+fn handed_packs(state: &serde_json::Value) -> usize {
+    engine_mod_lines(state).iter().filter(|(_, st, _)| st.as_deref() == Some("own-loader")).count()
+}
+
+fn eml_handoff(kind: ModKind, state: &serde_json::Value, sf: Option<(u64, &str)>, sf_hosted_pid: Option<u64>,
+               last_pid: Option<u64>) -> Option<EmlHandoff> {
+    if kind != ModKind::Eml || !jstr(state.get("aside")).is_some_and(|a| a.starts_with("ShroudForge ")) { return None; }
+    let pid = state.get("pid").and_then(|v| v.as_u64());
+    if pid.is_none() || (pid != sf_hosted_pid && pid != last_pid) { return Some(EmlHandoff::OtherStart { pid }); }
+    let kiln_hosted = !sf.is_some_and(|(p, mode)| Some(p) == pid && mode != "hosted");
+    Some(EmlHandoff::LastStart { kiln_hosted })
 }
 
 /// kiln-emf stood aside because EMF's own loader or core runs in the game (kiln-emf's `steppedAsideReason`, plugin.cpp
@@ -2009,6 +2024,17 @@ pub fn build(input: &ReportInput) -> Report {
         .find(|st| jstr(st.get("mode")).as_deref() == Some("hosted"))
         .and_then(|st| st.get("pid").and_then(|v| v.as_u64()))
         .filter(|pid| boot_pid.is_none_or(|b| b == *pid));
+    // ShroudForge's state file: its pid and mode (kiln-eml's handoff names Kiln's ShroudForge unless that start's file
+    // says another mode)
+    let sf_state: Option<(u64, String)> = engines.iter().filter(|e| e.kind == ModKind::ShroudForge).filter_map(|e| e.state.as_ref())
+        .find_map(|st| Some((st.get("pid").and_then(|v| v.as_u64())?, jstr(st.get("mode")).unwrap_or_default())));
+    let sf = sf_state.as_ref().map(|(p, m)| (*p, m.as_str()));
+    // the last start's process: kiln.log's last boot (written first: a start that did not get to boot.json, KR-YNQZ),
+    // else boot.json's
+    let log_pid = tail(&rel(&game, "kiln/logs/kiln.log"), KILN_LOG_MAX).ok().flatten()
+        .and_then(|(text, _)| crate::logs::boot_state(&text).pid).map(u64::from);
+    let last_pid = log_pid.or(boot_pid);
+    let handoff = |kind: ModKind, st: &serde_json::Value| eml_handoff(kind, st, sf, sf_hosted_pid, last_pid);
     let _ = writeln!(ls, "Engines:");
     let mut any_engine = false;
     for e in &engines {
@@ -2056,7 +2082,19 @@ pub fn build(input: &ReportInput) -> Report {
         if stood_aside(st) && let Some((id, engine, file)) = native_loaders.iter().find(|(_, en, _)| Some(*en) == e.kind.engine()) {
             cx.find("native-loader", Level::Problem, format!("{} stood aside at the last start: the profile's {}.",
                 e.plugin, crate::profile::native_loader_warning(id, *engine, file)));
-        } else if stood_aside(st) && eml_under_hosted_shroudforge(e.kind, st, sf_hosted_pid) {
+        } else if stood_aside(st) && let Some(EmlHandoff::OtherStart { pid }) = handoff(e.kind, st) {
+            // kiln-eml handed the packs to ShroudForge in the start its file is of: that, and not an own loader the file
+            // does not show (a loader in the game folder has its own finding: check_loaders_in_folder)
+            let n = handed_packs(st);
+            let of = match (pid, last_pid) {
+                (Some(p), Some(l)) => format!("an earlier start (pid {p}) than the last one (pid {l})"),
+                (Some(p), None) => format!("a start (pid {p}) that no file here names as the last one"),
+                (None, _) => "a start it does not name (no pid)".to_string(),
+            };
+            cx.find("eml-under-shroudforge", Level::Info, format!(
+                "{}'s state file is of {of}: in that start it handed {} to ShroudForge. It says nothing about the last start.",
+                e.plugin, if n == 0 { "its EML packs".to_string() } else { plural(n, "EML pack", "EML packs") }));
+        } else if stood_aside(st) && let Some(EmlHandoff::LastStart { kiln_hosted }) = handoff(e.kind, st) {
             // by design, and no own loader: the mods that did not run are the finding, if there are any
             let off: Vec<String> = engine_mod_lines(st).into_iter()
                 .filter(|(_, state, _)| matches!(state.as_deref(), Some("off-in-shroudforge" | "not-loaded")))
@@ -2067,16 +2105,20 @@ pub fn build(input: &ReportInput) -> Report {
                     && jstr(m.get("source")).is_some_and(|s| s != "profile")
             }));
             let (one, many) = if dropins { ("EML mod", "EML mods") } else { ("EML mod of the profile", "EML mods of the profile") };
+            let sf_name = if kiln_hosted { "Kiln's ShroudForge" } else { "ShroudForge" };
             if off.is_empty() {
+                // what kiln-eml did: the packs it handed over (KR-YNQZ: "handed your 8 EML packs to Kiln's ShroudForge")
+                let n = handed_packs(st);
+                let packs = if n == 0 { "the EML packs".to_string() } else { format!("your {}", plural(n, "EML pack", "EML packs")) };
                 cx.find("eml-under-shroudforge", Level::Info, format!(
-                    "{} stood aside at the last start for ShroudForge, which Kiln hosted: ShroudForge alone writes the game data then, \
-                     and it runs the EML mods that are switched on in its mods folder. This is how the two work together.", e.plugin));
+                    "{} handed {packs} to {sf_name} at the last start: ShroudForge alone writes the game data then, and it runs \
+                     the EML packs that are switched on in its mods folder. This is how the two work together.", e.plugin));
             } else {
                 cx.find("eml-under-shroudforge", Level::Warning, format!(
-                    "{} did not run at the last start: Kiln hosted ShroudForge, which runs the EML mods then, and {} switched off in \
+                    "{} did not run at the last start: {} ShroudForge, which runs the EML mods then, and {} switched off in \
                      ShroudForge or missing from its mods folder: {}. The lines under {} in \"The last start\" say what to do for each.",
-                    plural(off.len(), one, many), if off.len() == 1 { "this one is" } else { "these are" },
-                    off.join(", "), e.plugin));
+                    plural(off.len(), one, many), if kiln_hosted { "Kiln hosted" } else { "kiln-eml handed them to" },
+                    if off.len() == 1 { "this one is" } else { "these are" }, off.join(", "), e.plugin));
             }
         } else if stood_aside(st) && e.kind == ModKind::Shroudlink
             && let Some(core) = jstr(st.get("corePath")).filter(|p| !p.is_empty())
@@ -2132,7 +2174,7 @@ pub fn build(input: &ReportInput) -> Report {
         cx.find("sf-startup-skipped", Level::Warning, format!("{}.", s.text()));
     }
     let aside: Vec<ModKind> = engines.iter()
-        .filter(|e| e.state.as_ref().is_some_and(|st| stood_aside(st) && !eml_under_hosted_shroudforge(e.kind, st, sf_hosted_pid)))
+        .filter(|e| e.state.as_ref().is_some_and(|st| stood_aside(st) && handoff(e.kind, st).is_none()))
         .map(|e| e.kind).collect();
     // a plugin that says it did not stand aside, in a state file of the last start (boot.json's time or later)
     // of the last start: the process boot.json names (kiln-greeneye writes its pid; it writes before boot.json, so the

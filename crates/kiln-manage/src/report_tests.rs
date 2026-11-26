@@ -1246,7 +1246,7 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     assert!(!ids(&r).contains(&"own-loader"), "{:?}", ids(&r));
     let n = finding(&r, "eml-under-shroudforge");
     assert_eq!(n.level, Level::Info);
-    assert!(n.text.starts_with("kiln-eml stood aside at the last start for ShroudForge, which Kiln hosted"), "{}", n.text);
+    assert!(n.text.starts_with("kiln-eml handed your 1 EML pack to Kiln's ShroudForge at the last start: "), "{}", n.text);
     assert!(!r.summary.contains("EML's own loader runs in the game"), "{}", r.summary);
     // a mod ShroudForge has switched off, and one that is not in its folder: these did not run, and that is the finding
     let off = format!(r#"{on},{{"id":"b","state":"off-in-shroudforge","reason":"x"}},{{"id":"c","state":"not-loaded","reason":"y"}},{{"id":"d","state":"disabled"}}"#);
@@ -1265,11 +1265,49 @@ fn eml_aside_for_hosted_shroudforge_is_no_own_loader() {
     // EML's own loader in a start where Kiln hosts ShroudForge too: still the own-loader problem
     f.w("kiln/state/eml.json", eml(BOOT, "dbghelp.dll is loaded", on).as_bytes());
     assert!(ids(&build(&f.input())).contains(&"own-loader"));
-    // ShroudForge ran by itself: nothing says Kiln hosted it
+    // ShroudForge's file of that start says it ran by itself: kiln-eml handed the pack to ShroudForge, not Kiln's; the
+    // own loader that ran is ShroudForge's (its own finding), never EML's
     f.w("kiln/state/eml.json", eml(BOOT, WHY, on).as_bytes());
     f.w("kiln/state/shroudforge.json", sf(BOOT, "self-hosted").as_bytes());
     let r = build(&f.input());
-    assert!(ids(&r).contains(&"own-loader") && !r.findings.iter().any(|x| x.id == "eml-under-shroudforge"), "{:?}", ids(&r));
+    let n = finding(&r, "eml-under-shroudforge");
+    assert!(n.text.starts_with("kiln-eml handed your 1 EML pack to ShroudForge at the last start: "), "{}", n.text);
+    assert!(!r.summary.contains("EML's own loader runs"), "{}", r.summary);
+    assert!(r.findings.iter().filter(|x| x.id == "own-loader").all(|x| x.text.starts_with("kiln-shroudforge ")), "{:#?}", r.findings);
+}
+
+/// KR-YNQZ (31.11, 2026-11-26): Kiln hosted ShroudForge and kiln-eml handed all 8 EML packs to it, but the report was
+/// written before ShroudForge's state file (the start had not finished; no boot.json either). The summary said "kiln-eml
+/// stood aside at the last start: EML's own loader runs in the game", a problem, in a start with no such loader. kiln-eml's
+/// own file says whom it stood aside for (only Kiln's ShroudForge plugin gives that reason) and kiln.log names the last
+/// start's process: the two are enough. The fixtures are that report's eml.json and kiln.log.
+#[test]
+fn eml_handed_to_hosted_shroudforge_before_its_state_file_is_said_so() {
+    const EML: &str = include_str!("../tests/fixtures/kr-ynqz/eml.json");
+    const LOG: &str = include_str!("../tests/fixtures/kr-ynqz/kiln.log");
+    let f = Fx::healthy("kr-ynqz");
+    std::fs::remove_file(f.game.join("kiln/state/boot.json")).unwrap();
+    f.w("kiln/state/eml.json", EML.as_bytes());
+    f.w("kiln/logs/kiln.log", LOG.as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"own-loader"), "{:?}", ids(&r));
+    assert!(!r.summary.contains("EML's own loader runs"), "{}", r.summary);
+    let n = finding(&r, "eml-under-shroudforge");
+    assert_eq!(n.level, Level::Info);
+    assert!(n.text.starts_with("kiln-eml handed your 8 EML packs to Kiln's ShroudForge at the last start: "), "{}", n.text);
+    // the file of another start than the one kiln.log names: what it says, and that it is not the last start's; never
+    // EML's own loader, which nothing here shows
+    f.w("kiln/state/eml.json", EML.replace("\"pid\": 18264", "\"pid\": 9100").as_bytes());
+    let r = build(&f.input());
+    assert!(!ids(&r).contains(&"own-loader") && !r.summary.contains("EML's own loader runs"), "{}", r.summary);
+    let n = finding(&r, "eml-under-shroudforge");
+    assert_eq!(n.level, Level::Info);
+    assert!(n.text.starts_with("kiln-eml's state file is of an earlier start (pid 9100) than the last one (pid 18264): in that start it \
+        handed 8 EML packs to ShroudForge."), "{}", n.text);
+    // EML's own loader (its reason names the DLL): still the own-loader problem
+    f.w("kiln/state/eml.json", EML.replace("ShroudForge owns startup asset patching and runs EML packages in its mods folder", "dbghelp.dll is loaded").as_bytes());
+    let r = build(&f.input());
+    assert!(ids(&r).contains(&"own-loader") && !ids(&r).contains(&"eml-under-shroudforge"), "{:?}", ids(&r));
 }
 
 /// 0.2.0-dev.31.12, a player's report: a folder of his own in ShroudForge's mods folder, of a mod his profile had off, ran
@@ -1360,25 +1398,33 @@ fn an_off_native_mod_that_loads_as_a_chain_proxy_is_off_but_runs() {
 
 /// Review of 6a78171d: two files of one OLDER start said "hosted" and "aside for ShroudForge" while neither plugin ran
 /// in the last start; and a file without a pid stood for any start. Neither proves anything about the last start, so
-/// neither takes the place of the own-loader finding.
+/// neither says the last start was fine. KR-YNQZ (26 Nov): nor do they show EML's own loader, which the own-loader
+/// finding claimed: such a file now says what it does show (the start it is of) and that it says nothing about the last
+/// one. kiln-eml's file of the last start (its pid is kiln.log's last boot) speaks for that start by itself: only Kiln's
+/// ShroudForge plugin gives that reason, and ShroudForge's file may not be written yet, or be of an older start.
 #[test]
 fn state_files_of_another_start_do_not_stand_for_the_last_one() {
     const WHY: &str = "ShroudForge owns startup asset patching and runs EML packages in its mods folder";
     let f = Fx::healthy("eml-under-sf-stale");
-    let own_loader = |sf: &str, eml: &str| {
+    let said = |sf: &str, eml: &str| {
         f.w("kiln/state/shroudforge.json", sf.as_bytes());
         f.w("kiln/state/eml.json", eml.as_bytes());
         let r = build(&f.input());
-        ids(&r).contains(&"own-loader") && !r.findings.iter().any(|x| x.id == "eml-under-shroudforge")
+        assert!(!ids(&r).contains(&"own-loader") && !r.summary.contains("EML's own loader runs"), "{}", r.summary);
+        finding(&r, "eml-under-shroudforge").text.clone()
     };
     let sf = |pid: &str| format!(r#"{{{pid}"mode":"hosted","source":"bundled"}}"#);
     let eml = |pid: &str| format!(r#"{{{pid}"phase":"aside","aside":"{WHY}","mods":[]}}"#);
-    assert!(!own_loader(&sf(r#""pid":412,"#), &eml(r#""pid":412,"#)), "the last start's pair is the hosted case");
-    assert!(own_loader(&sf(r#""pid":7,"#), &eml(r#""pid":7,"#)), "an older start's pair");
-    assert!(own_loader(&sf(r#""pid":412,"#), &eml(r#""pid":7,"#)), "kiln-eml's file is older");
-    assert!(own_loader(&sf(r#""pid":7,"#), &eml(r#""pid":412,"#)), "ShroudForge's file is older");
-    assert!(own_loader(&sf(""), &eml(r#""pid":412,"#)), "ShroudForge's file names no pid");
-    assert!(own_loader(&sf(r#""pid":412,"#), &eml("")), "kiln-eml's file names no pid");
+    let last = |t: String| t.starts_with("kiln-eml handed the EML packs to Kiln's ShroudForge at the last start: ");
+    let other = |t: String, of: &str| t.starts_with(&format!("kiln-eml's state file is of {of}: in that start it handed its EML packs to \
+        ShroudForge. It says nothing about the last start."));
+    assert!(last(said(&sf(r#""pid":412,"#), &eml(r#""pid":412,"#))), "the last start's pair is the hosted case");
+    assert!(other(said(&sf(r#""pid":7,"#), &eml(r#""pid":7,"#)), "an earlier start (pid 7) than the last one (pid 412)"), "an older start's pair");
+    assert!(other(said(&sf(r#""pid":412,"#), &eml(r#""pid":7,"#)), "an earlier start (pid 7) than the last one (pid 412)"), "kiln-eml's file is older");
+    assert!(other(said(&sf(r#""pid":412,"#), &eml("")), "a start it does not name (no pid)"), "kiln-eml's file names no pid");
+    // kiln-eml's file is the last start's: it speaks for it, whatever ShroudForge's file is of
+    assert!(last(said(&sf(r#""pid":7,"#), &eml(r#""pid":412,"#))), "ShroudForge's file is older");
+    assert!(last(said(&sf(""), &eml(r#""pid":412,"#))), "ShroudForge's file names no pid");
 }
 
 /// Nexus report (11 Nov 2026, The Worst Map Mod): a Greeneye mod says what it found and patched only in its own log and
