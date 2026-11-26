@@ -177,3 +177,27 @@ fn a_check_held_by_the_request_limit_still_asks_after_it() {
     assert_eq!(gh.requests().len(), 2, "no change, no new request within the half hour");
     assert!(gh.unexpected().is_empty() && gh.unused().is_empty(), "{:?} {:?}", gh.unexpected(), gh.unused());
 }
+
+/// The extra request is only for an answer that offers the installed copy nothing: an update to a version below the
+/// newest the answer names (0.2.9 to 0.2.10 while it names 0.2.12), a roll back, or many mods updated at once by a
+/// modpack ask nobody within the half hour, as before. The notice names what the answer names.
+#[test]
+fn an_update_the_answer_still_offers_more_than_asks_nobody() {
+    let (t, dirs) = tmp("partial");
+    let (z9, z10) = (release_zip(&t.0, "0.2.9"), release_zip(&t.0, "0.2.10"));
+    let gh = FakeTransport::new();
+    library::import(&dirs, std::slice::from_ref(&z9), &mut NoProgress).unwrap();
+    gh.reply(Method::Get, LIST, Reply::bytes(200, &listing("0.2.12", &[("0.2.9", &z9), ("0.2.10", &z10)])));
+    let s = auto_loot(&check(&dirs, &gh, manual(NOW))).clone();
+    assert_eq!((s.state, s.candidate_version.as_deref()), (UpdateState::Available, Some("0.2.12")));
+    library::import(&dirs, std::slice::from_ref(&z10), &mut NoProgress).unwrap();
+    for minutes in [5, 10] {
+        let s = auto_loot(&check(&dirs, &gh, manual(NOW + minutes * MINUTE))).clone();
+        assert_eq!((s.state, s.installed_version.as_str(), s.candidate_version.as_deref()), (UpdateState::Available, "0.2.10", Some("0.2.12")));
+        // the daily check too
+        let s = auto_loot(&check(&dirs, &gh, CheckOptions { automatic: true, ..manual(NOW + minutes * MINUTE + 1) })).clone();
+        assert_eq!(s.candidate_version.as_deref(), Some("0.2.12"));
+    }
+    assert_eq!(gh.requests().len(), 1, "no request beyond the first");
+    assert!(gh.unexpected().is_empty() && gh.unused().is_empty(), "{:?} {:?}", gh.unexpected(), gh.unused());
+}
