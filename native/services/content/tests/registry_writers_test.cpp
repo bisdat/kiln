@@ -144,6 +144,51 @@ int main(int argc, char** argv) {
     CHECK(archive_writer_label("shroudforge:alpha") == "alpha (ShroudForge package)" && archive_writer_label("eml:bravo") == "bravo (EML package)",
           "a package's label in messages");
 
+    // ---- the contract with kiln-eml's writer (review): the record kiln-eml's own code makes of a fixed pass
+    // (gpl/kiln-eml/kiln-eml/tests/journal_contract.rs fails unless this fixture is byte for byte that record) is read and
+    // named here, so a format change on either side fails a test. Its GUIDs are the game's key bytes' text as Kiln's id
+    // table spells them (game.cpp guid_text: keen::Guid's Windows layout, printed the usual way). ----
+    {
+        std::ifstream wf(root + "/schema/sfi/eml-journal/fixtures/kiln-eml-writer.json");
+        std::stringstream ws;
+        ws << wf.rdbuf();
+        const std::string written = ws.str();
+        std::string live;
+        for (int i = 0; i < 32; ++i) live += "ab";
+        const ArchiveJournal w = parse_archive_journal(written, live);
+        const std::string stone = "1d622bd9-8170-41b1-822e-d3984b386d95", logs = "aaaaaaaa-0000-4000-8000-000000000001",
+                          made = "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13", own = "0e0e0e0e-1111-4222-8333-444444444444",
+                          table = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
+        CHECK(!written.empty() && w.state == "read" && w.dialect == "shroudforge" && !w.truncated, "kiln-eml's own record reads: " + w.state + " " + w.text);
+        CHECK(w.packages.size() == 3 && w.packages[0].id == "alpha" && w.packages[0].kind == "shroudforge" && w.packages[0].version == "1.2.0" &&
+                  w.packages[1].id == "bravo" && w.packages[1].kind == "eml" && w.packages[2].id == "charlie" && w.packages[2].version.empty(),
+              "its packages in run order, with kind and version");
+        CHECK(w.packages.size() == 3 && w.packages[0].changed == std::vector<std::string>({table, stone}) &&
+                  w.packages[0].created == std::vector<std::string>({made, own}) && w.packages[1].changed == std::vector<std::string>({made, stone}) &&
+                  w.packages[2].changed.empty() && w.unattributed.changed == std::vector<std::string>({logs}),
+              "what each package wrote and created, by the GUID text Kiln's id table holds");
+        CHECK(parse_archive_journal(written, std::string(64, 'c')).state == "stale", "the same record names nobody in another generation");
+        // named on the entries of the base whose resources they are
+        BaseModel wb;
+        auto entry = [](const std::string& id) {
+            BaseModel::Entry e;
+            e.id = id;
+            e.fields["maxStack"] = Value::integer(10);
+            return e;
+        };
+        wb.registries["items"] = {entry("game:stone"), entry("game:logs"), entry("alpha:made"), entry("game:own")};
+        wb.registries["balance"] = {entry("game:balance")};
+        wb.registries["recipes"] = {entry("game:craft_stone")};
+        const std::map<std::string, std::string> wids = {{"items|game:stone", stone},   {"items|game:logs", logs},        {"items|alpha:made", made},
+                                                         {"items|game:own", own},       {"balance|game:balance", table}, {"recipes|game:craft_stone", stone}};
+        CHECK(name_archive_writers(w, wids, {"items", "balance"}, &wb) == 5, "five entries named");
+        CHECK(wb.registries["items"][0].archive == std::vector<std::string>({"shroudforge:alpha", "eml:bravo"}) &&
+                  wb.registries["items"][1].archive == std::vector<std::string>({"kiln-eml:unattributed"}) &&
+                  wb.registries["items"][2].archive == std::vector<std::string>({"shroudforge:alpha", "eml:bravo"}) &&
+                  wb.registries["items"][3].archive == std::vector<std::string>({"shroudforge:alpha"}) &&
+                  wb.registries["balance"][0].archive == std::vector<std::string>({"shroudforge:alpha"}) && wb.registries["recipes"][0].archive.empty(),
+              "each entry names the packages that wrote or created its resource, in run order; never a recipe");
+    }
     // ---- the file (review: only from the game folder itself, bounded, never through a link) ----
     {
         namespace fs = std::filesystem;
