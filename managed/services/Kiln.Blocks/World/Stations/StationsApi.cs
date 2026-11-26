@@ -463,6 +463,9 @@ internal interface IStationsBackend
     /// <summary>kiln.stations takes FILL_LINKED (a fill from the player's fill-opted links; the table through
     /// set_build_stock, 0.2.0-dev.31.12).</summary>
     bool HasLinkedFills => false;
+    /// <summary>kiln.stations takes FILL_ITEM (the station screen's per-ingredient transfer from the player's links too;
+    /// its fill_flags says so, 0.2.0-dev.31.15).</summary>
+    bool HasItemFills => false;
     /// <summary>The table has base_stock_with_stations (Magic-chest stock plus finished station outputs).</summary>
     bool HasStockWithStations { get; }
     (int Rc, StationsNative.Stack[] Rows) BaseStockWithStations(uint index);
@@ -688,6 +691,8 @@ internal static unsafe partial class StationsCore
 
         public bool HasChests => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableChests;
         public bool HasLinkedFills => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableBuild;
+        public bool HasItemFills => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableItemFills && t->FillFlags != null &&
+                                    (t->FillFlags() & StationsNative.FillItem) != 0;
 
         public bool HasStockWithStations => T is var t && t != null && t->Header.Size >= (uint)StationsNative.TableStock &&
                                              t->BaseStockWithStations != null;

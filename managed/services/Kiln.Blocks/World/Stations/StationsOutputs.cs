@@ -126,6 +126,11 @@ internal static partial class StationsCore
     internal static void OnSourceFill(PlayerClientActionEvent e)
     {
         if (e.Canceled || !e.CanCancel || !string.Equals(e.Name, CraftingActionName, StringComparison.Ordinal)) return;
+        if (e.Payload.Length >= 0x41 && BinaryPrimitives.ReadUInt32LittleEndian(e.Payload[8..]) != 0)
+        {
+            OnItemPress(e);  // GitHub #132 (0.2.0-dev.31.15): a row's per-ingredient "+1" / "+n"
+            return;
+        }
         var options = SourceFill(e.Player.Entity, e.Payload, CanAccessInventories(e.Player), out var station, out var why);
         if (options is null)
         {
@@ -226,6 +231,101 @@ internal static partial class StationsCore
         return plan.Status is StationActionStatus.Done or StationActionStatus.Partial && plan.CraftsPlanned > 0 ? (uint)plan.CraftsPlanned : 0;
     }
 
+    // ---- GitHub #132 (0.2.0-dev.31.15): the station screen's per-ingredient "+1" / "+n" (docs/re/stations.md §10.9) ----
+    // The row's transfer is AutomaticTransfer with an item (UI command 0x39): on the server the game's AutoTransferItem
+    // from the bag and the player's base list A. When those cannot cover it and the player's fill-opted links can, Kiln
+    // cancels the held press and runs it as its own item fill (KILN_STATION_FILL_ITEM | FILL_LINKED): the same item and
+    // amount, the bag and the Magic chests first, all or nothing. native kiln.stations writes the one line per outcome.
+    private static void OnItemPress(PlayerClientActionEvent e)
+    {
+        var press = SourceItemFill(e.Player.Entity, e.Payload, CanAccessInventories(e.Player), out var station, out var why);
+        if (press is null)
+        {
+            if (why is not null) Kiln.Backend.Current.Log(0, LogLevel.Debug, $"kiln.stations: player {e.Player.Entity}'s transfer into station {station}: {why}");
+            return;
+        }
+        if (!RunItemPress(press))
+        {
+            Kiln.Backend.Current.Log(0, LogLevel.Warn,
+                $"kiln.stations: player {press.Player}'s transfer of {press.Amount} x item 0x{press.Item:x8} into station {press.Station} could not run as Kiln's item fill: left to the game");
+            return;
+        }
+        e.Cancel();  // Kiln's item fill runs it (the game's own would refuse: the bag and the chests are short)
+    }
+
+    /// <summary>Submits a press Kiln runs (tick thread). False when kiln.stations did not take it (the game's press then
+    /// runs, and refuses as it would have).</summary>
+    internal static bool RunItemPress(ItemPress press)
+    {
+        try
+        {
+            CheckAct(Stations.FillCapability, "kiln.stations item fill");
+            var (r, _, _) = ItemFillRequest(press.Station, press.Item, press.Amount, press.Player, linked: true, dryRun: false);
+            var t = Send(r, [], [], StationAction.Fill, "kiln.stations item fill");
+            return !t.IsCompleted || t is { IsCompletedSuccessfully: true, Result.Status: not StationActionStatus.QueueFull };
+        }
+        catch (Exception x) when (x is KilnUnavailableException or InvalidOperationException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The row's press as Kiln's item fill: the press when the player's bag and the Magic chests do not cover it and the
+    /// player's fill-opted links do; null (with why, null for "not a press this concerns") when the game should run it as
+    /// always. The game's own checks are kept (<see cref="SourceFillAllowed"/>: CanAccessInventories, the station's base).
+    /// </summary>
+    internal static ItemPress? SourceItemFill(EntityId player, ReadOnlySpan<byte> p, bool? mayAccess, out EntityId station, out string? why)
+    {
+        why = null;
+        station = EntityId.None;
+        if (p.Length < 0x41 || p[0x40] != (byte)StationPlayerAction.Fill) return null;
+        station = new EntityId(BinaryPrimitives.ReadUInt32LittleEndian(p));
+        var recipe = BinaryPrimitives.ReadUInt32LittleEndian(p[4..]);
+        var item = BinaryPrimitives.ReadUInt32LittleEndian(p[8..]);
+        var amount = BinaryPrimitives.ReadUInt16LittleEndian(p[0x0c..]);
+        var water = BinaryPrimitives.ReadUInt32LittleEndian(p[0x10..]);
+        // a recipe's fill (SourceFill's), a water fill and an empty one are not this
+        if (recipe != 0 || item == 0 || water != 0 || amount == 0) return null;
+        // only a player's fill-opted links change anything here; without them (or an older kiln-items.dll) the game's own
+        if (!FillLinksOf(player) || !Backend.HasItemFills || station.IsNone) return null;
+        if (!SourceFillAllowed(player, station, mayAccess, out why)) return null;
+        var plain = PlanItem(station, item, amount, player, linked: false);
+        if (plain.Status == StationActionStatus.Done) return PassItem(out why, "the player and the Magic chests cover it");
+        var linked = PlanItem(station, item, amount, player, linked: true);
+        if (linked.Status != StationActionStatus.Done) return PassItem(out why, $"not even with linked sources: {linked.Reason}");
+        return new ItemPress(station, item, amount, player);
+    }
+
+    internal static FillPlan PlanItem(EntityId station, uint item, int amount, EntityId player, bool linked)
+    {
+        var (r, keep, chests) = ItemFillRequest(station, item, amount, player, linked, dryRun: false);
+        return PlanOf(r, keep, chests);
+    }
+
+    /// <summary>A FILL_ITEM request: exactly <paramref name="amount"/> (1..65535) of <paramref name="item"/>, the
+    /// player's bag and the Magic chests first, then (with <paramref name="linked"/>) the player's fill-opted links.</summary>
+    internal static (StationsNative.Request Request, StationsNative.Stack[] Keep, uint[] Chests) ItemFillRequest(EntityId station, uint item,
+        int amount, EntityId player, bool linked, bool dryRun)
+    {
+        if (item == 0) throw new ArgumentException("an item fill names its item", nameof(item));
+        if (amount is < 1 or > 0xFFFF) throw new ArgumentException($"an item fill moves 1..65535 items (got {amount})", nameof(amount));
+        if (linked && player.IsNone) throw new ArgumentException("linked sources are a player's: give the player", nameof(player));
+        if (!Backend.HasItemFills) throw new InvalidOperationException("kiln.stations: this Kiln has no item fills (an older kiln-items.dll)");
+        var r = Request(station, StationsNative.Fill,
+            StationsNative.FillItem | (linked ? StationsNative.FillLinked : 0) | (dryRun ? StationsNative.DryRun : 0));
+        r.Crafts = (uint)amount;
+        r.Item = item;
+        r.Player = player.Value;
+        return (r, [], []);
+    }
+
+    private static ItemPress? PassItem(out string? why, string text)
+    {
+        why = text;
+        return null;
+    }
+
     /// <summary>The most crafts one fill asks for (the press above it stays the game's).</summary>
     internal const int MaxFillCrafts = 1000;
 
@@ -235,6 +335,9 @@ internal static partial class StationsCore
         return null;
     }
 }
+
+/// <summary>A row's per-ingredient press Kiln runs as its own item fill (GitHub #132, 0.2.0-dev.31.15).</summary>
+internal sealed record ItemPress(EntityId Station, uint Item, int Amount, EntityId Player);
 
 /// <summary>The opt-ins beside the save: kiln.saves' entity attachments under the scope <c>kiln:stations</c> (template and
 /// position at the save, as a mod's EntityData), each with the mod that set it. Set again in native when the entity is
