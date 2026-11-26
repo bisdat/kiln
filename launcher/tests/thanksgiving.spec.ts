@@ -111,6 +111,30 @@ test("reduced motion: the turkey stands still (uV 0: no rock, no drips), the gre
   expect((await rec(page)).draws).toBe(r.draws);
 });
 
+test("a GPU that cannot build the turkey's shader keeps every day's fire, without the greeting", async ({ page }) => {
+  await record(page);
+  // a driver that refuses the bigger shader (the turkey's) but builds every day's
+  await page.addInitScript(() => {
+    const P = WebGLRenderingContext.prototype;
+    const texts = new WeakMap<WebGLShader, string>();
+    const src = P.shaderSource, param = P.getShaderParameter;
+    P.shaderSource = function (s: WebGLShader, text: string) { texts.set(s, text); return src.call(this, s, text); };
+    P.getShaderParameter = function (s: WebGLShader, name: number) {
+      if (name === this.COMPILE_STATUS && texts.get(s)?.includes("roast(")) return false;
+      return param.call(this, s, name);
+    };
+  });
+  await open(page, "?turkey=1");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  const plain = await page.evaluate(async () => (await import("/src/shell/Stage.tsx")).FRAG as string);
+  const a = await rec(page);
+  expect(kinds(a.frags)).toContain(plain);
+  await expect.poll(async () => (await rec(page)).draws - a.draws).toBeGreaterThan(2);
+  expect((await rec(page)).uV).toEqual([]);
+  await expect(page.locator(".k-thanks")).toBeHidden();
+});
+
 test("Animated fire off: no turkey and no greeting, the CSS mouth as always", async ({ page }) => {
   await record(page);
   await open(page, "?turkey=1", "/settings");
