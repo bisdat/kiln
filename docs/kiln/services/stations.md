@@ -612,7 +612,8 @@ checks, the stand-downs), `respec_sources_sigdb_test.py` on the pinned exes, and
 a dedicated server (20 PASS, [docs/re/respec.md section 5](../../re/respec.md#5-lab-dev31-respec-lab)): the unlearn and the
 paid reset through the game's own input handler, paid from a linked chest. A lab has no logged-in player, so it starts the
 server with `KILN_STATIONS_CRAFT_LAB=1`, which also lets a spawned player character have respec links of its own (never
-a real player; kiln.log warns at start).
+a real player; only on a dedicated server, never in a client's process; at most 16; kiln.log warns at start and names
+each link).
 
 Needs `crafting.respec_sources` on the server or host. Where another module patched the respec payer or its payment call,
 Kiln stands the respec half down with one kiln.log line naming the function, the first foreign byte and its module; the
@@ -637,6 +638,10 @@ line naming the function, its state (`FOREIGN` / `UNKNOWN`), the first differing
   game's base stock list already holds every base's Magic chests; Kiln counts them once and adds only links not in it.
 - Building: the cursor's stock-count call and the stock count (Cross-Base Storage patches the latter: the building half
   stands down, Cross-Base Storage's own cross-base building applies), ApplyMaterials and the blueprint program's call.
+- The skill respec (since 0.2.0-dev.31.next, GitHub #150): the respec payer's entry and its payment call on a server or
+  host (the payment itself goes through the hook on InventoryPay's entry above), and on a Kiln client the skill tree's
+  unlearn check and the Flame Altar's reskill check; the respec tree's Rune row is checked apart and keeps the game's
+  count alone.
 - Fills run inside Kiln's own program through the game's `AutoTransferRecipe`; nothing of the game's is patched.
 
 ### Dyes from the same links

@@ -101,7 +101,8 @@ is sent. The server has no screen check of its own: a respec that reaches it is 
 **2026-11-26, server 26430253, `mods/tests/respec-test`, the craft lab's save (one base): 20 PASS, 0 FAIL.** A lab has no
 logged-in player, so the server ran with `KILN_STATIONS_CRAFT_LAB=1`: a spawned player character (`1_Player`, entity
 2619, standing in the base) gets respec links of its own through the private `kiln_stations_lab_respec_link` (only with
-that switch, only for an id outside the player range). The vanilla node `0xc01ee111` (cost 2) went into its tree as a
+that switch, only in a dedicated server's process, only for an id outside the player range, at most 16 links, each a
+kiln.log warning). The vanilla node `0xc01ee111` (cost 2) went into its tree as a
 save holds it (`GameTree.LabPutInSave`, `changeCount` bumped so the game rebuilt its masks: 2 points spent), and every
 unlearn and reset went through the game's own input handler (`GameTree.GameRequest`). Each case is read against Kiln's
 payment counters (`kiln_stations_craft_stats`, whose 14th value counts the respec payer's calls):
