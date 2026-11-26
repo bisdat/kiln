@@ -503,6 +503,34 @@ public void GrimoireOpensBesideBetterSpells()
 }
 ```
 
+  **Docked windows** (since 0.2.0-dev.31.next; [the guide](../ui.md#docking-windows-since-020-dev31next)):
+  `kiln.UiPlacement.FrameWindows()` plays one overlay frame of every open window of the harness's mods with Kiln.Ui's own
+  dock code (the group's leader first, the others beside it in the same frame, the group kept inside the viewport, a
+  docked window waiting for its closed target, Shift, a drop beside the old side) and returns where each one is, keyed by
+  window (one that waits is not in it). `PlayerDrags(window, x, y, shift: false)` is the player holding the window and
+  dragging its centre to (x, y) in the next frame; the frame after without another drag is the drop. A `PlayerPlaces`
+  that changes a window's size is a resize. The kit's clock moves 16 ms a frame (a docked window waits for its target 250
+  ms at most: 16 frames). Not modelled: which window's edge has the pointer where two touch, imgui.ini.
+
+```csharp
+[Fact]
+public void GrimoireMovesWithBetterSpells()
+{
+    using var kiln = new KilnHarness();
+    var spells = kiln.Load<BetterSpells>();   // Ui.Window("Better Spells", ..., new() { PlacementId = "spells", AcceptDock = true })
+    var grimoire = kiln.Load<Grimoire>();     // docks its window: DockTo(Ui.FindWindow("betterspells", "spells")!, DockSide.Right)
+    kiln.Step();
+    var bs = ((BetterSpells)spells.Instance).Window;
+    var g = ((Grimoire)grimoire.Instance).Window;
+    kiln.UiPlacement.PlayerDrags(bs, 0.5f, 0.5f);
+    var f = kiln.UiPlacement.FrameWindows();
+    Assert.Equal(f[bs].Right, f[g].Left, 3);  // in the same frame
+    kiln.UiPlacement.PlayerDrags(g, 0.8f, 0.2f, shift: true);
+    kiln.UiPlacement.FrameWindows();
+    Assert.Null(g.DockedTo);                  // Shift: moved alone, undocked
+}
+```
+
 - **Outlines in the world** (`kiln.Outlines`, since 0.2.0-dev.30.3) <a id="outlines"></a>. `Ui.World.Outline`'s own code
   runs on the kit's kiln.render, so what a mod outlines is tested offline. `kiln.Outlines.All` lists every request the
   harness got (`FakeOutline`: entity, colour, pulse, priority, duration, state, reason, group, `ColorShared`, the mod

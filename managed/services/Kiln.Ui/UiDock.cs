@@ -409,18 +409,19 @@ internal sealed class UiDockFrame
         }
         foreach (var n in nodes.Where(n => !n.Wait && n.Link != null).OrderBy(n => n.Link!.Seq))
         {
-            if (f.Open(n.Link!, n) is not { Wait: false } t) continue;
+            var link = n.Link!;
+            if (f.Open(link, n) is not { Wait: false } t) continue;
             Node a = Find(n), b = Find(t);
             if (a == b) continue;
             root[a] = b;
             n.Target = t;
             t.Docked.Add(n);
             var st = n.W.Dock;
-            var held = st.ActiveFrame == f._frame - 1 && st.EffectiveSeq == n.Link!.Seq;
+            var held = st.ActiveFrame == f._frame - 1 && st.EffectiveSeq == link.Seq;
             st.ActiveFrame = f._frame;
-            n.Side = held ? st.Effective : n.Link.Side;
+            n.Side = held ? st.Effective : link.Side;
             n.Fresh = !held;
-            n.Offset = n.Link.Offset * scale;
+            n.Offset = link.Offset * scale;
         }
 
         // the groups: the leader, then breadth first; who is placed from whom

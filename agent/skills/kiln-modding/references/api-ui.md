@@ -82,6 +82,21 @@ mod and id in `ui-placement.json` beside `keybinds.json` (config folder), across
 remembered > options; everything Kiln places stays inside the viewport. Beside another mod's screen:
 `MoveTo(other.Right, other.Y, pivotX: 0)` with the other's `Placement` shared through `Mods.Send`. Tests:
 `kiln.UiPlacement.Frame(screen)`, `PlayerPlaces`, `Remembered`, `Restart` (docs/kiln/ui.md "Placing screens and windows").
+**Docking windows (0.2.0-dev.31.next, GitHub issue 149; tested offline, not yet seen in a game).** Prefer it over
+`Mods.Send` + `MoveTo` for two windows that stay together. The target opts in with `UiWindowOptions.AcceptDock = true`
+(+ `PlacementId`); another mod gets `Ui.FindWindow(modId, placementId)` (a `UiWindowHandle`, null when that window is not
+there or does not accept docks; a name, so it survives the target's reload: `Available`, `Open`, `Placement`) and calls
+`window.DockTo(handle, DockSide.Left/Right/Top/Bottom, offset = 0)` (offset: pixels at UI scale 1 along the shared edge),
+`Undock()`, `DockedTo`, event `DockChanged` (`UiDockChange`: `DockedTo`, `Side`, `Offset`, `ByPlayer`). Kiln moves the pair
+together in the same frame on the render thread (drag of either one, a resize of the shared edge, `MoveTo` of either), keeps
+it inside the viewport (a dock that becomes active uses the other side when it does not fit), Shift+drag moves one alone and
+undocks it (`ByPlayer`), a drop within 16 px of the old side docks again; a docked window opened while its existing target
+is closed waits up to 250 ms for it (one key press for both: no flash). `DockTo` throws for itself and for loops. A
+remembering docked window keeps the player's own position, not the dock's. Only windows (not `UiScreen`) dock. Call
+`DockTo` when the window opens (the other mod may load later). `ui.WindowMovedByUser` / `WindowResizedByUser`: the player
+drags or resizes the current window this frame; `ui.HeldMods` (`KeyMods`, ImGui's io this frame, cleared on focus loss) is
+the Shift/Ctrl/Alt state: no `KeyInput` listener needed. Tests: `kiln.UiPlacement.FrameWindows()`, `PlayerDrags(window, x,
+y, shift)`. Samples: `mods/samples/DockBook` + `DockNotes` (docs/kiln/ui.md "Docking windows").
 dev.22+: `new UiScreenOptions { FullScreen = true }` is a whole-display screen (no title bar, not movable); draw your own
 layout with `ui.FontSize(36)`, `ui.BeginChild(id, w, h, UiChildFlags.NavFlattened)`, `ui.Cursor` / `ui.SetCursor`, `ui.LastItem`,
 `ui.Selectable(label, selected, width, height)`, `ui.DrawRect(UiLayer.Window, ...)`, `ui.PushColor` / `PushVar` and
