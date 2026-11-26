@@ -210,6 +210,8 @@ public class ProducerTests
     [Theory]
     [InlineData("int", 20.0, "registry-proof-test: the live transaction was not committed: items[game:x].levels.min: saves: items[game:x].levels.min narrows the level range (levels.min 20 -> 21): a world load clamps saved copies outside it and the save keeps the clamped level; this edit was not applied", 19L)]
     [InlineData("int", 2.0, "items[game:x].levels.min: saves: narrows the level range (levels.min 2 -> 3); this edit was not applied", 1L)]
+    // the lab's reason as the producer gets it: kiln.registry.live's reply cuts its reason to 192 bytes (the 31.x lab run)
+    [InlineData("int", 40.0, "commit outcome=2: the live transaction was not committed: items[game:armor_t6_mage_healer_helmet].levels.min: saves: items[game:armor_t6_mage_healer_helmet].levels.min narrows the level range (levels.min 40 -> ", 39L)]
     [InlineData("int", 1.0, "items[game:x].levels.min: saves: narrows the level range (levels.min 1 -> 2); this edit was not applied", null)]
     [InlineData("int", 0.0, "items[game:x].levels.min: saves: narrows the level range (levels.min 0 -> 1); this edit was not applied", null)]
     [InlineData("int", 20.0, "Unproven: items.levels.min is not proven for this game build (x); this edit was not applied", null)]

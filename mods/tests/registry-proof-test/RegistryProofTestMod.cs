@@ -733,11 +733,11 @@ public sealed unsafe partial class RegistryProofTestMod : Mod
     private static JsonArray FlagNames(string names) =>
         new(names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(n => (JsonNode)JsonValue.Create(n)!).ToArray());
 
-    /// <summary>A refusal of the registry's save checks (registry/saves.h: "saves: ... this edit was not applied"): the probe
-    /// would change what saves hold in a way Kiln refuses (an item's level range narrowed), which says nothing about the
-    /// mapping.</summary>
-    private static bool IsSaveCheck(string refusal) =>
-        refusal.Contains("saves: ", StringComparison.Ordinal) && refusal.Contains("this edit was not applied", StringComparison.Ordinal);
+    /// <summary>A refusal of the registry's save checks (registry/saves.h: "&lt;place&gt;: saves: ... this edit was not applied"): the
+    /// probe would change what saves hold in a way Kiln refuses (an item's level range narrowed), which says nothing about the
+    /// mapping. Known by the place's ": saves: " alone: kiln.registry.live's reply cuts its reason to 192 bytes, so the end of
+    /// the sentence is often not there (the 31.x lab run).</summary>
+    private static bool IsSaveCheck(string refusal) => refusal.Contains(": saves: ", StringComparison.Ordinal);
 
     /// <summary>The probe the other way after a save check refused one (registry-followups 4): a whole number one lower, at 1 or
     /// more (a lowest level raised narrows the range; lowered, it widens it). Null for any other refusal, a fraction, or a
