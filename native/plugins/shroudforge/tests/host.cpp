@@ -266,9 +266,17 @@ static void play_script() {
         ui_deliver(key(WM_KEYUP, VK_F9, 0xc0430001));
         ui_deliver(button(WM_XBUTTONDOWN, 4, 1));
         ui_deliver(button(WM_XBUTTONUP, 4, 0));
+        // Print Screen: Windows sends the window its WM_KEYUP alone, which the runtime counts as a press and its release
+        ui_deliver(key(WM_KEYUP, VK_SNAPSHOT, 0xc1370001));
         ui_capturing = false;
         ui_deliver(key(WM_KEYDOWN, VK_F9, 0x430001));
         ui_deliver(key(WM_KEYUP, VK_F9, 0xc0430001));
+        ui_deliver(key(WM_KEYUP, VK_SNAPSHOT, 0xc1370001));
+        // a WM_KEYDOWN of Print Screen in play (Wine may send one): held into Kiln's capture, its WM_KEYUP is a release
+        ui_deliver(key(WM_KEYDOWN, VK_SNAPSHOT, 0x1370001));
+        ui_capturing = true;
+        ui_deliver(key(WM_KEYUP, VK_SNAPSHOT, 0xc1370001));
+        ui_capturing = false;
     }
     if (GetEnvironmentVariableW(L"KILN_SF_FEED_UNREGISTER", nullptr, 0)) {
         // A held raw key/button must still get its legacy release after raw input stops.

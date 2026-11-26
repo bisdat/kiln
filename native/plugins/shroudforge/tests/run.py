@@ -367,9 +367,12 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     # status capturing) no press reaches the runtime, as Kiln's interpreter counts none then; releases always do, so
     # nothing stays held
     def capture_dropped(status, calls, out):
+        # Print Screen's lone WM_KEYUP is a press to the runtime: dropped while Kiln captures unless the runtime holds the
+        # key (its WM_KEYDOWN came in play)
         want = ['feed-raw 43 0 78', 'feed-raw 43 1 78', 'feed-raw 1a 1 db', 'feed-mouse 4 0', 'feed-raw 1a 0 db',
                 'feed-raw 1a 1 db', 'feed-window 78 c0430001', 'feed-mouse 4 0', 'feed-window 78 430001',
-                'feed-window 78 c0430001']
+                'feed-window 78 c0430001', 'feed-window 2c c1370001', 'feed-window 2c 1370001',
+                'feed-window 2c c1370001']
         assert feed_calls(calls) == ['feed-version', 'feed-begin'] + FED + want + ['feed-end'], feed_calls(calls)
     keys_case('keys-captured', installed='corrupt', runtime='runtime_feed',
               extra_env=dict(ui5, KILN_SF_FEED_CAPTURE='1'), verify=capture_dropped)
