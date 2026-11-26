@@ -6,7 +6,9 @@
 // grip held (RESIZING); the current window from inside its begin and from a child region; a follower placed from its
 // leader's rect of the same frame (SetNextWindowPos Always with a pivot) touching it in every frame of a drag of either one
 // and of a resize of the shared edge; an auto-sized follower's first shown frame already beside its target; a dragged
-// window kept inside the viewport by an Always position while the drag goes on; and the table's append-only layout.
+// window kept inside the viewport by an Always position while the drag goes on; a window held by its resize grip and
+// moved by an Always position grows by the move (why Kiln.Ui never moves a group's leader the player resizes); and the
+// table's append-only layout.
 #include "../draw_slots.h"
 #include <cmath>
 #include <cstdio>
@@ -326,6 +328,46 @@ int main() {
         ImGui::Render();
     }
     CHECK(shown >= 3 && beside == shown);
+
+    // ---- a window held by its resize grip and moved by an Always position grows: ImGui keeps the grip at the pointer and
+    // the top left corner where the position put it (UpdateWindowManualResize, absolute from the pointer), so Kiln.Ui never
+    // moves a group's leader the player resizes to keep the group inside the viewport (UiDock.cs Clamp): it would grow by
+    // that move every frame ----
+    {
+        auto frame_e = [](float set_x) {
+            ImGui::GetIO().DeltaTime = 1.0f / 60;
+            ImGui::NewFrame();
+            kui::drawing = true;
+            if (set_x > -1e8f) ImGui::SetNextWindowPos(ImVec2(set_x, 420), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(200, 150), ImGuiCond_FirstUseEver);
+            ImGui::Begin("E###kiln.w5", nullptr, ImGuiWindowFlags_NoSavedSettings);
+            ImGui::Text("resized");
+            const ImVec2 p = ImGui::GetWindowPos(), z = ImGui::GetWindowSize();
+            ImGui::End();
+            kui::drawing = false;
+            ImGui::Render();
+            return Rect{p.x, p.y, z.x, z.y};
+        };
+        frame_e(880);
+        Rect e = frame_e(-1e9f);
+        CHECK(near(e.x, 880) && near(e.w, 200));
+        const float ex = e.r() - 3, ey = e.b() - 3;
+        move(ex, ey);
+        frame_e(-1e9f);
+        button(true);
+        frame_e(-1e9f);
+        move(ex + 30, ey);
+        const Rect held = frame_e(-1e9f);
+        CHECK(near(held.x, e.x) && near(held.w, e.w + 30));  // resized by the pointer
+        const Rect moved = frame_e(held.x - 40);             // the pointer still, the window moved 40 to the left
+        CHECK(near(moved.x, held.x - 40));
+        CHECK(near(moved.r(), held.r()));   // the grip stayed at the pointer
+        CHECK(near(moved.w, held.w + 40));  // so it grew by the move
+        const Rect again = frame_e(moved.x - 40);
+        CHECK(near(again.r(), held.r()) && near(again.w, held.w + 80));  // and again the next frame
+        button(false);
+        frame_e(-1e9f);
+    }
 
     // ---- a window that does not move (NoMove) is never MOVING, even held ----
     for (int i = 0; i < 5; ++i) {
