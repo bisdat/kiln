@@ -80,7 +80,7 @@ out of range, an empty or too long text, no line or more than 32) throw `Argumen
   recent `Suppress`/`Replace`. When it clears, the next one shows, else the game's own lines.
 - **One Say per NPC.** It shows over any override and ends at its time, with `StopSaying`, or with a newer Say.
 - **It all ends** when the mod unloads (its overrides and Says) and when the world ends (everything). The owner is the
-  mod whose code makes the call (`ModContext.CurrentMod`: the tick thread, Kiln's tasks, event handlers); a call from a
+  mod whose code makes the call where Kiln runs mod code (the tick thread, Kiln's tasks, event handlers); a call from a
   thread the mod started itself belongs to no mod (`"kiln"`) and ends with the world, not with the mod. A
   `NpcSpeech` handle keeps the mod it was made for on any thread.
 - **Replace picks per greeting**: each time the game would pick a new line, the NPC shows one of yours (at random among
