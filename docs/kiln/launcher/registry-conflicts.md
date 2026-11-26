@@ -9,6 +9,12 @@ Refused edits retain their reasons, including `RestartRequired` and `Unproven`. 
 **Certain**, **Named from journal**, **Best-effort drift**, and **Unknown**; best-effort detection does not prove who
 wrote a value or that no other writer exists.
 
+**Waits for a restart** (since 0.2.0-dev.31.14) comes first when the snapshot has refused rows whose reason starts with
+the stable token `RestartRequired: `: the edits a reload, a runtime registry pass or a live edit left for the next start
+(a restart field a reloaded pack changed, a field the start never read, a section or entry operation added after the
+start). It shows `counts.restartRequired` (every such row, also those the native cap left out) and each retained row's
+mod, place and reason; the same rows stay in Refused edits.
+
 A missing file is different from a valid snapshot with no edits. Unreadable, malformed, unsupported and oversized
 reports show an error with **Refresh report** available. A stopped game, a report older than the current process start,
 an old snapshot (over 24 hours), or an unverifiable process start/clock is marked **Stale snapshot**. Its saved values

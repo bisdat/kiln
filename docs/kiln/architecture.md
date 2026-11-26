@@ -102,6 +102,37 @@ consumers run under a structured-exception guard: a faulting subscriber is remov
   `reload <id>`, `reload-test <id> <n>` (one reload per step, then a leak check), `gc`. A `reload` (or an `unload` and a
   `load`) takes the mod's data layers off and applies its current files again: data packs, Kiln.Quests' `quests/*.json` and
   Kiln.Blocks' `blocks/*.json` follow the mod's load, not only its id (0.2.0-dev.31.13; services/content.md "Reloads and edits").
+  What a reload covers, key by key, and what waits for a restart: [below](#what-reload-id-covers).
+
+### What `reload <id>` covers
+A reload unloads the mod and its dependents (dependents first), reads its `kiln.mod.json` and files again and loads them
+in a new load context, after the mods that stay loaded (0.2.0-dev.31.14 documents this table and enforces its refusals).
+
+| Part of the mod | `reload <id>` |
+|---|---|
+| `version`, `name`, `description`, `authors`, `license`, `url`, `updates`, `kilnBuild`, `systems` (a declaration for tools) | read again |
+| `entryAssembly`, `entryType`, the mod's DLLs, `exports` | the new code loads; dependents reload with it |
+| `apiVersion`, `dependencies`, `incompatible`, `features` | checked again. A refusal leaves the mod (and its dependents) unloaded, and the reply says why; a later `load` or `reload` retries |
+| `loadAfter`, `loadBefore` | the reloaded mods load after the ones that stay, and keep that place until the next start; a changed order takes effect then |
+| `side` | the mod loads again only on a side it names (else the reply fails, the mod stays unloaded); kiln.content reads it again for the mod's data packs |
+| `clients` | what joining players need follows at the next second (since 0.2.0-dev.31.14; before, up to a minute); players already in the world are not checked again |
+| `steamMessages`, `tests` | apply (the new load's owner gets the grant; `autoRun` runs after the load) |
+| `writes` | a new entry needs a restart: kiln.world reads the lists when the server starts, and the reloaded mod's tracked writes of a type it adds are refused (`NotDeclared`) until then |
+| `boot` | refused, `RestartRequiredBoot: ...`: a mod with boot content in this process (it stays as it was), and a mod whose new version adds `boot` (it does not load until a restart). Boot content (`OnBoot`, `resourcePatches`, `baseRules`, `gearRules`) never changes without a restart |
+| data packs (`content/*.json`) | apply again, whole, from the new files or the previous version (services/content.md "When a reload fails partway"); a pack that throws leaves nothing of the mod's new version behind |
+| a data pack's `registry` section | composed again with the other mods'; an edit the start fixed waits for a restart (a restart field, a field the start never read, a section or entry operation added after the start): registry.json says `RestartRequired: ...` ([modding/registries](modding/registries/README.md#what-a-reload-changes)) |
+| `blocks/*.json`, `quests/*.json` | apply again (Kiln.Blocks, Kiln.Quests) |
+| registry entry points (`[RegistryEntryPoints]`) | `HotReload` runs; `ModLoad` runs again when there is no `HotReload`; `WorldLoad` runs for the world that exists; `GameStart` does not run again: its edits stay as the start composed them, and when the reloaded code differs the reply says `RestartRequired: <id>'s OnRegistry runs at GameStart only ...` |
+| native mods (`native.json`, `kiln/native/<id>/`) | refused, `RestartRequired: <id> is a native mod ...`: kiln-core loads their DLLs at start and never unloads them |
+
+**The reply says what waits for a restart** (since 0.2.0-dev.31.14). `reload <id>`'s result waits for the reload's
+registry work (the mod's runtime pass, its data packs' application at kiln.content's next Pre; a few steps, at most 5 s),
+then adds `; registry: <n> edit(s) need(s) a restart: <mod> <place>, ...` to the message, and its `data` gets
+`registry`: `{known, settled, restartRequired, edits: [{mod, registry, id, field, reason, source}]}` for the reloaded
+mods (`settled: false`: the world was not ready, so their edits were not all applied yet). This is the hook for tools
+such as the Web Admin mod: read `data.registry` of the reload's result, and `counts.restartRequired` plus the `refused`
+rows whose reason starts with `RestartRequired: ` in `kiln/state/registry.json` for everything that waits (also what a
+live edit left). `kilnctl status` prints the same as one line, and the launcher's Conflicts view lists them first.
 
 ## Layout on a server
 See `tools/deploy-server.sh`. Kiln's own files live under `<server>/kiln/`; only `dinput8.dll` sits next to the exe.
