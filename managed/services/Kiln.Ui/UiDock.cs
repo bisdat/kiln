@@ -259,13 +259,13 @@ internal sealed class UiDockState
         lock (Lock) Link = Snap = new UiDockLink(target, side, offset, UiDocking.NextSeq());
     }
 
-    /// <summary>The player's change (render thread): only when the dock is still <paramref name="expected"/> (a DockTo from
-    /// another thread since the frame read it wins).</summary>
-    public bool PlayerSet(UiDockLink? expected, UiDockLink? link, UiDockLink? snap)
+    /// <summary>The player's change (render thread): only when the dock and the snap are still the ones the frame read
+    /// (<paramref name="expectedLink"/>, <paramref name="expectedSnap"/>): a DockTo or Undock from another thread since wins.</summary>
+    public bool PlayerSet(UiDockLink? expectedLink, UiDockLink? expectedSnap, UiDockLink? link, UiDockLink? snap)
     {
         lock (Lock)
         {
-            if (!ReferenceEquals(Link, expected)) return false;
+            if (!ReferenceEquals(Link, expectedLink) || !ReferenceEquals(Snap, expectedSnap)) return false;
             Link = link;
             Snap = snap;
             return true;
@@ -503,7 +503,7 @@ internal sealed class UiDockFrame
 
     private void PlayerUndock(Node n)
     {
-        if (n.Link is not { } l || !n.W.Dock.PlayerSet(l, null, l)) return;
+        if (n.Link is not { } l || !n.W.Dock.PlayerSet(l, Snap(n), null, l)) return;
         n.Link = null;
         _changes.Add((n.W, new UiDockChange(null, l.Side, l.Offset, byPlayer: true)));
     }
@@ -514,13 +514,29 @@ internal sealed class UiDockFrame
         return n.W.Placer.Last;
     }
 
-    // dropped near the side of the window its last dock named: docked there again, at the offset it was dropped at
+    // dropped near the side of the window its last dock named (the side it asked for, or the other one it was shown on
+    // when that did not fit): docked there again, at the offset it was dropped at
     private void TrySnap(Node d, float scale)
     {
         if (d.Link != null || Snap(d) is not { } s || Open(s, d) is not { } t || RectOf(d) is not { } a || RectOf(t) is not { } b) return;
-        float gap, offset;
+        var st = d.W.Dock;
+        var shown = st.EffectiveSeq == s.Seq ? st.Effective : s.Side;
+        DockSide side;
+        if (Near(a, b, s.Side, scale, out var offset)) side = s.Side;
+        else if (shown != s.Side && Near(a, b, shown, scale, out offset)) side = shown;
+        else return;
+        var link = new UiDockLink(s.Target, side, offset / scale, UiDocking.NextSeq());
+        if (!st.PlayerSet(null, s, link, link)) return;
+        d.Link = link;
+        _changes.Add((d.W, new UiDockChange(s.Target, side, link.Offset, byPlayer: true)));
+    }
+
+    // the rect a within the snap distance of side `side` of the rect b, overlapping along it; the offset along the edge
+    private static bool Near((float X, float Y, float W, float H) a, (float X, float Y, float W, float H) b, DockSide side, float scale, out float offset)
+    {
+        float gap;
         bool overlap;
-        switch (s.Side)
+        switch (side)
         {
             case DockSide.Left:
                 (gap, offset, overlap) = (a.X + a.W - b.X, a.Y - b.Y, a.Y < b.Y + b.H && a.Y + a.H > b.Y);
@@ -535,11 +551,7 @@ internal sealed class UiDockFrame
                 (gap, offset, overlap) = (a.Y - (b.Y + b.H), a.X - b.X, a.X < b.X + b.W && a.X + a.W > b.X);
                 break;
         }
-        if (!overlap || MathF.Abs(gap) > UiDocking.SnapDistance * scale) return;
-        var link = new UiDockLink(s.Target, s.Side, offset / scale, UiDocking.NextSeq());
-        if (!d.W.Dock.PlayerSet(null, link, link)) return;
-        d.Link = link;
-        _changes.Add((d.W, new UiDockChange(s.Target, s.Side, link.Offset, byPlayer: true)));
+        return overlap && MathF.Abs(gap) <= UiDocking.SnapDistance * scale;
     }
 
     private bool Fits((float X, float Y, float Px, float Py) at, (float W, float H) size, DockSide side)

@@ -488,6 +488,50 @@ public sealed unsafe class UiDockTests : IDisposable
     }
 
     [Fact]
+    public void A_window_shown_on_the_other_side_docks_again_when_dropped_there()
+    {
+        var spells = Window(_spells, "Better Spells", new UiWindowOptions { Width = 300, Height = 200, Position = (0.95f, 0.5f), AcceptDock = true, PlacementId = "spells" });
+        var book = Grimoire();
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        var t = Of(spells);
+        Assert.Equal(t.X - Of(book).W, Of(book).X, 3);  // shown on its left: no room on the right
+        _mods = (uint)KeyMods.Shift;
+        Drag(book, 300, 100);
+        Frame();
+        _mods = 0;
+        Release(book);
+        Frame();
+        Assert.Null(book.DockedTo);
+        var seen = new List<UiDockChange>();
+        book.DockChanged += c => seen.Add(c);
+        Drag(book, t.X - Of(book).W - 6, t.Y + 20);  // back where it was shown, 6 px off
+        Frame();
+        Release(book);
+        Frame();  // the drop
+        Assert.Equal(Handle(), book.DockedTo);
+        Assert.Equal(DockSide.Left, Assert.Single(seen).Side);
+        Frame();
+        Assert.Equal(t.X - Of(book).W, Of(book).X, 3);
+        Assert.Equal(t.Y + 20, Of(book).Y, 3);
+    }
+
+    [Fact]
+    public void A_drop_never_docks_again_over_an_Undock_from_another_thread()
+    {
+        Spells();
+        var book = Grimoire();
+        book.DockTo(Handle(), DockSide.Right);
+        var link = book.Dock.Link;
+        Assert.True(book.Dock.PlayerSet(link, link, null, link));  // the player's Shift drag: undocked, its snap kept
+        var read = book.Dock.Snap;  // the render thread reads it at the drop
+        book.Undock();               // the mod on another thread, before the drop docks it again
+        Assert.False(book.Dock.PlayerSet(null, read, read, read));
+        Assert.Null(book.DockedTo);
+        Assert.Null(book.Dock.Snap);
+    }
+
+    [Fact]
     public void After_Undock_from_the_mod_a_drop_near_the_old_side_does_not_dock()
     {
         var spells = Spells();
