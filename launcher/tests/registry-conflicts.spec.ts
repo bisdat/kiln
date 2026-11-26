@@ -20,7 +20,8 @@ test("missing report is explicit and reachable from launcher navigation", async 
 test("shows base, ordered owners and operations, winner, certainty and refusal reasons", async ({ page }) => {
   await report(page, registryFixture());
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
-  await expect(page.getByText(/RestartRequired: balance.levelCap/)).toBeVisible();
+  // the RestartRequired row is in the refused list, and (since 0.2.0-dev.31.14) in the restart card above it too
+  await expect(page.locator(".registry-line").filter({ hasText: /RestartRequired: balance.levelCap/ })).toHaveCount(2);
   await expect(page.getByText("Unproven: items.maxStack (no verified mapping for this build)", { exact: true })).toBeVisible();
   await expect(page.getByText("Best-effort drift", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Certain", { exact: true }).first()).toBeVisible();
@@ -34,6 +35,21 @@ test("shows base, ordered owners and operations, winner, certainty and refusal r
   await expect(owners.nth(1)).toContainText("stacker");
   await page.getByRole("button", { name: "Refresh report" }).click();
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
+});
+
+test("edits that wait for a restart come first, with their count, mod and field (0.2.0-dev.31.14)", async ({ page }) => {
+  await report(page, { ...registryFixture(), counts: { ...registryFixture().counts, restartRequired: 3 } });
+  await expect(page.getByRole("heading", { name: "Waits for a restart" })).toBeVisible();
+  await expect(page.getByText("3 registry edits wait for a restart", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 more are not shown here: state/registry.json lists every one.", { exact: true })).toBeVisible();
+  const row = page.getByTestId("registry-restart-row");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("late");
+  await expect(row).toContainText("balance · levelCap");
+  await expect(row).toContainText("RestartRequired: balance.levelCap is read at game start");
+  await report(page, { ...registryFixture(), refused: [registryFixture().refused[1]], counts: { ...registryFixture().counts, refused: 1, restartRequired: 0 } });
+  await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Waits for a restart" })).toHaveCount(0);
 });
 
 test("empty snapshot is different from a missing report", async ({ page }) => {

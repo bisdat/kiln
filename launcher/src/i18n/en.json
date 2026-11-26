@@ -6832,6 +6832,17 @@
     "emptyHint": "The report is present and valid, but contains no fields, conflicts, refusals or entry changes.",
     "refused": "Refused edits",
     "refusedSub": "These edits were not applied. RestartRequired needs a game restart; Unproven needs a proven mapping in Kiln.",
+    "restart": "Waits for a restart",
+    "restartSub": "A reload or a live edit changed these registry edits after the game started. They apply at the next start of the game (or the server); until then the game keeps the values it started with.",
+    "restartCount": {
+      "one": "{count} registry edit waits for a restart",
+      "other": "{count} registry edits wait for a restart"
+    },
+    "restartHint": "Restart the game, or the server, to apply them. Each reason says what the start fixed.",
+    "restartOmitted": {
+      "one": "{count} more is not shown here: state/registry.json lists every one.",
+      "other": "{count} more are not shown here: state/registry.json lists every one."
+    },
     "noRefused": "No refused edits in the displayed report.",
     "conflicts": "Conflicts and drift",
     "conflictsSub": "Winners and other owners are as recorded at snapshot time.",

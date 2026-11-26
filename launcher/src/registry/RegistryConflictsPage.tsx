@@ -46,6 +46,14 @@ function RegistryFor({ gameId }: { gameId: string }) {
           {r.omitted > 0 && `${t("registry.partialRows", { count: r.omitted })} `}
           {r.writersOmitted > 0 && `${t("registry.partialWriters", { count: r.writersOmitted })} `}
           {t("registry.partialBody")}</Banner>}
+        {r.restart.total > 0 && <Card title={t("registry.restart")} sub={t("registry.restartSub")}>
+          <Banner tone="warn" title={t("registry.restartCount", { count: r.restart.total })}>
+            {r.restart.total > r.restart.rows.length ? t("registry.restartOmitted", { count: r.restart.total - r.restart.rows.length }) : t("registry.restartHint")}
+          </Banner>
+          <Rows rows={r.restart.rows} empty={t("registry.noRefused")} render={(x, i) => <article key={i} className="registry-line" data-testid="registry-restart-row">
+            <strong>{x.owner}</strong>{x.field && <div className="k-mono">{x.field}</div>}<p>{x.reason}</p>
+          </article>} />
+        </Card>}
         {r.empty ? <EmptyState title={t("registry.empty")} hint={t("registry.emptyHint")} /> : <>
           <Card title={t("registry.refused")} sub={t("registry.refusedSub")}>
             <Rows rows={r.refused} empty={t("registry.noRefused")} render={(x, i) => <article key={i} className="registry-line">
@@ -104,3 +112,4 @@ function FieldChain({ field: f }: { field: RegistryField }) {
     </div>}
   </details>;
 }
+
