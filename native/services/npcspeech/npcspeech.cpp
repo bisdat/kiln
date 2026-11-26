@@ -135,7 +135,8 @@ bool install() {
     if (g_installed.load()) return true;
     if (!g_h_draw.install(g_api, g_owner, g_draw_at, reinterpret_cast<void*>(&hk_draw), "npcspeech/BubbleDraw") ||
         !g_h_bubble.install(g_api, g_owner, g_bubble_at, reinterpret_cast<void*>(&hk_bubble), "npcspeech/NpcBubble")) {
-        NS_W("the bubble hooks could not go in (%s%s): Kiln's NPC speech is off for this session", g_h_draw.error(), g_h_bubble.error());
+        NS_W("the bubble hooks could not go in (%s %s): Kiln's NPC speech is off for this session", g_h_draw.error() ? g_h_draw.error() : "",
+             g_h_bubble.error() ? g_h_bubble.error() : "");
         g_h_draw.revoke();
         g_h_bubble.revoke();
         g_install_failed.store(true);
