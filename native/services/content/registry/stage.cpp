@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 // kiln.content registry stage: the stage runner (stage.h).
 #include "stage.h"
+#include "saves.h"
 #include "unmapped.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
+#include <functional>
 #include <iterator>
 
 #include "services/kiln_caps.h"
@@ -162,6 +165,28 @@ bool key_parse(const std::string& s, KilnAssetKey* k) {
     k->part = static_cast<uint32_t>(std::stoul(s.substr(slash + 1)));
     return true;
 }
+
+// ---- plans (registry-rollback) ----
+bool is_hash(const std::string& s) {
+    return s.size() == 64 && std::all_of(s.begin(), s.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+// A plan's name: the SHA-256 of its document without "previous" (the link to the last good plan, which a later start may
+// rewrite; the content it names never changes).
+std::string plan_hash_of(json plan) {
+    plan.erase("previous");
+    return sha_hex(plan.dump());
+}
+bool has_registry_row(const FieldOutcome& fo) {
+    return std::any_of(fo.chain.begin(), fo.chain.end(), [](const ChainRow& c) { return c.kind == WriterKind::Registry; });
+}
+// "items[game:plank].maxStack" (FieldRef::text) back into its parts. false: not that shape.
+bool field_ref_of(const std::string& text, FieldRef* out) {
+    const size_t open = text.find('['), close = text.find("].");
+    if (open == std::string::npos || close == std::string::npos || close < open) return false;
+    *out = {text.substr(0, open), text.substr(open + 1, close - open - 1), text.substr(close + 2)};
+    return !out->registry.empty() && !out->id.empty() && !out->field.empty();
+}
+std::string short_hash(const std::string& h) { return h.substr(0, 12); }
 
 }  // namespace
 
@@ -356,6 +381,25 @@ struct Runner::Impl {
     ReportMeta meta;
     std::vector<BootResource> boot;
     std::map<std::string, uint64_t> edits_by_mod;
+    // plans (registry-rollback): plans/index.json as this start read it (the last good plan, the plan the last world ran on),
+    // and the plan this start runs on when a rollback applied (its hash and its own "previous")
+    json index = json::object();
+    std::string rollback, rollback_previous;
+    std::vector<std::string> left_out;  // a rolled-back start's mods the plan does not hold (registry.json rollback.leftOut)
+    // registry.json "saves" (saves.h): this start's notes from the stage itself (the max stack against the plan the last world
+    // ran on), and the lines already in kiln.log (each once per start)
+    std::vector<saves::SaveNote> stage_notes;
+    std::set<std::string> notes_logged;
+    json saves_json(const Result& r) {
+        std::vector<saves::SaveNote> all = stage_notes;
+        for (saves::SaveNote& n : saves::notes(r)) all.push_back(std::move(n));
+        std::vector<std::string> lines;
+        for (const saves::SaveNote& n : all) {
+            const std::string line = "registry: saves: " + n.field.text() + " " + n.text + " [" + n.decision + "]";
+            if (notes_logged.insert(line).second) log(n.decision == "report" ? 0 : 1, line);
+        }
+        return all.empty() ? json(nullptr) : saves::notes_json(all);
+    }
 
     void log(int level, const std::string& line) {
         if (env.log) env.log(level, line);
@@ -375,6 +419,72 @@ struct Runner::Impl {
             return false;
         }
         for (const std::string& e : rm_errs) log(1, "registry: regmap: " + e);
+        return true;
+    }
+
+    // kiln/data/content/registry/rollback.json asks this start to run on an earlier plan's edits. true: *out holds the plan's
+    // inputs, read and mapping-checked on this build, every mod of it loaded at the plan's version. false: *why says why the
+    // plan cannot start (nothing of it is used). *rb: registry.json's "rollback" so far; *from: the values of the plan rolled
+    // away from (the "changedBack" rows compare against them).
+    bool rollback_inputs(const std::string& request, const std::set<std::string>& loaded, const std::map<std::string, std::string>& versions,
+                         std::vector<ModInput>* out, json* rb, json* from, std::string* why) {
+        const json q = json::parse(request, nullptr, false);
+        if (!q.is_object() || q.value("format", 0) != 1 || !q.contains("plan") || !q["plan"].is_string() || !is_hash(q["plan"].get<std::string>())) {
+            *rb = {{"plan", nullptr}};
+            return *why = "the rollback request (kiln/data/content/registry/rollback.json) cannot be read: it is {\"format\": 1, \"plan\": \"<plan hash>\"}", false;
+        }
+        const std::string plan = q["plan"].get<std::string>();
+        const std::string from_hash = q.contains("from") && q["from"].is_string() && is_hash(q["from"].get<std::string>()) ? q["from"].get<std::string>() : "";
+        *rb = {{"plan", plan}, {"from", from_hash.empty() ? json(nullptr) : json(from_hash)}, {"requested", q.value("requested", "")}};
+        const std::string name = "plan " + short_hash(plan);
+        const auto text = env.read_data("plans/" + plan + ".json");
+        if (!text) return *why = name + " is not in kiln/data/content/registry/plans (it was removed or never written)", false;
+        const json p = json::parse(*text, nullptr, false);
+        if (!p.is_object()) return *why = name + " cannot be read (not JSON)", false;
+        if (p.value("format", 0) != 2 || !p.contains("inputs") || !p["inputs"].is_array())
+            return *why = name + " was written by an older Kiln and holds no edits to start on", false;
+        if (plan_hash_of(p) != plan) return *why = name + "'s file does not match its name (it was changed after Kiln wrote it)", false;
+        const json key = p.value("key", json::object());
+        if (key.value("side", env.side) != env.side) return *why = name + " is the " + key.value("side", std::string()) + "'s; this is the " + env.side, false;
+        if (key.value("exeSha256", env.exe_sha256) != env.exe_sha256) (*rb)["madeOnExe"] = key.value("exeSha256", std::string());
+        std::vector<std::string> differ;
+        for (const json& m : p["inputs"]) {
+            const std::string mod = m.value("mod", std::string()), version = m.value("version", std::string());
+            if (!loaded.count(mod)) { differ.push_back(mod + " is gone (not loaded in this start)"); continue; }
+            const auto v = versions.find(mod);
+            const std::string now = v == versions.end() ? std::string() : v->second;
+            if (now != version) differ.push_back(mod + " changed (" + version + ", now " + now + ")");
+        }
+        if (!differ.empty()) {
+            std::string all;
+            for (const std::string& x : differ) all += (all.empty() ? "" : "; ") + x;
+            return *why = name + "'s mods are not this start's: " + all, false;
+        }
+        for (const json& m : p["inputs"]) {
+            ModInput in;
+            in.id = m.value("mod", std::string());
+            for (const json& doc : m.value("batches", json::array())) {
+                Batch b;
+                std::vector<Refusal> refused;
+                std::string err;
+                if (!parse_batch(doc, schema, &b, &refused, &err)) return *why = name + ": an edit document of " + in.id + " cannot be read on this Kiln: " + err, false;
+                if (lc(b.mod) != lc(in.id)) return *why = name + ": a batch of " + in.id + " names mod " + b.mod, false;
+                refuse_unmapped(rm, schema, &b, &refused, env.entry_support);
+                if (!refused.empty()) {
+                    const Refusal& x = refused.front();
+                    return *why = name + ": " + x.mod + " " + x.source + " #" + std::to_string(x.n) + " is refused on this build: " + x.reason, false;
+                }
+                in.batches.push_back(std::move(b));
+            }
+            out->push_back(std::move(in));
+        }
+        (*rb)["previous"] = p.contains("previous") && p["previous"].is_string() ? p["previous"] : json(nullptr);
+        *from = json::object();
+        if (!from_hash.empty())
+            if (const auto ft = env.read_data("plans/" + from_hash + ".json")) {
+                const json f = json::parse(*ft, nullptr, false);
+                if (f.is_object() && f.contains("values") && f["values"].is_object()) *from = f["values"];
+            }
         return true;
     }
 
@@ -447,7 +557,10 @@ struct Runner::Impl {
     }
 };
 
-Runner::Runner(Env env) : d_(std::make_unique<Impl>()) { d_->env = std::move(env); }
+Runner::Runner(Env env) : d_(std::make_unique<Impl>()) {
+    d_->env = std::move(env);
+    if (d_->env.schema) d_->schema = *d_->env.schema;
+}
 Runner::~Runner() = default;
 
 KilnResult Runner::set_order(const std::string& order_json) {
@@ -628,9 +741,20 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
     refuse_unmapped(d_->rm, d_->schema, &b, &refused, d_->env.entry_support);
     Batch* out = d_->turn->out;
     if (out->source.empty()) out->source = "code:" + b.mod;
+    std::map<uint32_t, uint32_t> renumbered;  // the batch's edit numbers -> the turn's
     for (Edit& e : b.edits) {
+        renumbered[e.n] = static_cast<uint32_t>(out->edits.size());
         e.n = static_cast<uint32_t>(out->edits.size());
         out->edits.push_back(e);
+    }
+    // review: the schemas' id migrations of this batch ("#<n>: ...") go with its edits into the turn (registry.json "migrated")
+    for (const std::string& note : b.migrated) {
+        const size_t colon = note.find(": ");
+        uint32_t n = 0;
+        const bool numbered = note.size() > 1 && note[0] == '#' && colon != std::string::npos &&
+                              std::from_chars(note.data() + 1, note.data() + colon, n).ec == std::errc{};
+        const auto it = numbered ? renumbered.find(n) : renumbered.end();
+        if (it != renumbered.end()) out->migrated.push_back("#" + std::to_string(it->second) + note.substr(colon));  // a refused edit's: not in the turn
     }
     d_->pre_refused.insert(d_->pre_refused.end(), refused.begin(), refused.end());
     return say(KILN_OK);
@@ -769,13 +893,87 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         for (Batch& b : in.batches) refuse_unmapped(d.rm, d.schema, &b, &in.refused, d.env.entry_support);
         inputs.push_back(std::move(in));
     }
+    // registry-rollback: the plans' index (the last good plan, the plan the last world ran on), and a rollback request that
+    // starts this boot on an earlier plan's edits instead of the mods' current ones (kept until it is cleared)
+    json rb;                          // registry.json "rollback"; null: none asked
+    json from_values = json::object();
+    std::vector<ModInput> fallback;   // the mods' current inputs while the plan's are tried
+    bool rolled = false;
+    if (d.env.read_data) {
+        if (const auto t = d.env.read_data("plans/index.json")) {
+            const json idx = json::parse(*t, nullptr, false);
+            if (idx.is_object()) {
+                d.index = idx;
+            } else {
+                // review: a write cut short or a bad hand edit. Kept for a person to read; the next world's start writes a new
+                // index. The highest max stacks worlds started with are unknown now: the stack guard keeps every saved stack whole.
+                if (d.env.write_data) d.env.write_data("plans/index.unreadable.json", *t);
+                std::string w;
+                const bool guarded = d.env.stack_guard && d.env.stack_guard(&w);
+                d.log(1, "registry: kiln/data/content/registry/plans/index.json cannot be read (kept as plans/index.unreadable.json): the last good plan and "
+                         "the highest max stack a world started with are not known, so this start has no previous plan; " +
+                         std::string(guarded ? "Kiln's stack guard is on, so saved stacks stay whole"
+                                             : "Kiln's stack guard is not available here" + (w.empty() ? std::string() : " (" + w + ")") +
+                                                   ": a saved stack above an item's max stack loses the rest at its next move"));
+            }
+        }
+        // review: only plan hashes name plans (a hand-edited index is never passed on as registry.json plan.previous)
+        for (const char* k : {"good", "world"}) {
+            if (!d.index.contains(k)) continue;
+            json& row = d.index[k];
+            if (!row.is_object() || !row.contains("plan") || !row["plan"].is_string() || !is_hash(row["plan"].get<std::string>())) {
+                d.index.erase(k);
+                continue;
+            }
+            if (row.contains("previous") && !(row["previous"].is_string() && is_hash(row["previous"].get<std::string>()))) row["previous"] = nullptr;
+        }
+        if (const auto req = d.env.read_data("rollback.json")) {
+            std::vector<ModInput> plan_inputs;
+            std::string why;
+            bool usable = false;
+            try {
+                usable = d.rollback_inputs(*req, loaded, versions, &plan_inputs, &rb, &from_values, &why);
+            } catch (const std::exception& e) {
+                // review: a member of the request or the plan of another type than Kiln writes (a hand edit) threw from json::value;
+                // refused like any unreadable request, never thrown into the boot
+                if (!rb.is_object()) rb = {{"plan", nullptr}};
+                plan_inputs.clear();
+                from_values = json::object();
+                why = std::string("the rollback request or its plan cannot be read (") + e.what() + ")";
+            }
+            if (usable) {
+                for (const ModInput& in : plan_inputs)
+                    for (const Batch& b : in.batches)
+                        if (versions[in.id].empty()) versions[in.id] = b.mod_version;
+                json left = json::array();
+                for (const ModInput& in : inputs)
+                    if (std::none_of(plan_inputs.begin(), plan_inputs.end(), [&](const ModInput& x) { return x.id == in.id; })) left.push_back(in.id);
+                rb["leftOut"] = std::move(left);
+                fallback = std::move(inputs);
+                inputs = std::move(plan_inputs);
+                rolled = true;
+            } else {
+                rb["state"] = "refused";
+                rb["reason"] = why + "; this start runs on the mods' current registry edits";
+            }
+        }
+    }
     // the base
     std::string why;
     // no mod has registry content: nothing is read (an empty registry.json says so), except once per game build, when the
     // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
     const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
-    const bool want_base = !inputs.empty();
+    // the highest max stack a world ever started with, per item (plans/index.json "stacks", never lowered: a save that world
+    // wrote can hold such stacks), against this start's value, else the base's: lower, and a save can hold bigger stacks than
+    // this start allows (saves.h stackCut)
+    const json then = d.index.contains("stacks") && d.index["stacks"].is_object() ? d.index["stacks"] : json::object();
+    bool then_stacks = false;
+    for (auto it = then.begin(); it != then.end(); ++it) {
+        FieldRef ref;
+        then_stacks = then_stacks || (field_ref_of(it.key(), &ref) && ref.registry == "items" && ref.field == "maxStack");
+    }
+    const bool want_base = !inputs.empty() || !fallback.empty() || then_stacks;
     // A mod whose code uses the registry API (Kiln.Host's set_order flag): decode the stable base here, at resources-ready,
     // before kiln.content writes packs into resident resource pages, rather than at first use (review4 NS1).
     bool users = false;
@@ -801,19 +999,15 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     d.meta.kiln = d.env.kiln_version;
     d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.verified()};
     d.meta.base.writer = d.env.writer;
-    for (const ModInput& in : inputs) {
-        json edits = json::array();
-        for (const Batch& b : in.batches) {
-            json eb = {{"stage", stage_name(b.stage)}, {"source", b.source}, {"n", b.edits.size()}};
-            edits.push_back(eb);
-        }
-        d.meta.order.push_back({in.id, versions[in.id], sha_hex(edits.dump()).substr(0, 16)});
-    }
     BaseModel base;
     std::vector<OldWrite> old;
     std::unique_ptr<Inventory> inventory;  // before m: the model reads through it
     std::unique_ptr<model::Model> m;
-    model::Need need = model::needs_of(d.schema, inputs);
+    std::vector<ModInput> named_inputs = inputs;  // the plan's and the mods' current inputs: either may be composed below
+    named_inputs.insert(named_inputs.end(), fallback.begin(), fallback.end());
+    model::Need need = model::needs_of(d.schema, named_inputs);
+    named_inputs.clear();
+    if (then_stacks) need.fields["items"].insert("maxStack"), need.registries.insert("items");
     if (d.env.prepare_live && eager) need.all = true;
     bool hit = false;
     if (!src && !want_base) {
@@ -864,11 +1058,253 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         if (old_fn) old = old_fn(*m);
         for (const std::string& n : m->take_notes()) d.log(0, "registry: " + n);
     }
+    // compose, then the saves check of restart fields (saves.h; the live back-end checks every live write over the value under
+    // it): an edit the saves refuse is taken out before the boot back-end writes anything. A plan a rollback starts on is
+    // checked on every field, so it is refused whole rather than per entry at the world's load.
+    std::vector<Refusal> save_refused;
+    std::vector<std::string> plan_guards;  // a plan's live fields whose save check needs the stack guard (a lower max stack)
+    auto compose_checked = [&](const std::vector<ModInput>& in, bool plan) {
+        save_refused.clear();
+        plan_guards.clear();
+        Result x = compose(d.schema, base, old, in);
+        std::vector<FieldRef> drop;
+        for (const auto& [ref, fo] : x.fields) {
+            if (is_raw_field(ref.field) || !has_registry_row(fo)) continue;
+            const RegistrySpec* rs = d.schema.registry(ref.registry);
+            const FieldSpec* f = rs ? rs->field(ref.field) : nullptr;
+            if (!plan && !(f && f->applies == Applies::Restart)) continue;
+            const auto v = saves::judge(ref.registry, ref.field, saves::before_registry(fo), fo.result);
+            // review: the live back-end asks the guard per entry at the world's load; a plan asks it here, so a missing guard
+            // refuses the plan whole rather than some of its entries
+            if (v && v->decision == saves::Decision::Guard && plan) plan_guards.push_back(ref.text() + " " + v->text.substr(0, v->text.find(':')));
+            if (!v || v->decision != saves::Decision::Refuse) continue;
+            for (const ChainRow& c : fo.chain)
+                if (c.kind == WriterKind::Registry)
+                    save_refused.push_back({c.mod, c.source, c.stage, c.n, "saves: " + ref.text() + " " + v->text, "", ref.registry, ref.id, ref.field});
+            drop.push_back(ref);
+        }
+        for (const FieldRef& ref : drop) x.fields.erase(ref);
+        return x;
+    };
+    auto stacks_lowered = [&](const Result& x) {
+        std::vector<std::pair<FieldRef, std::pair<Value, Value>>> out;
+        for (auto it = then.begin(); it != then.end(); ++it) {
+            FieldRef ref;
+            if (!field_ref_of(it.key(), &ref) || ref.registry != "items" || ref.field != "maxStack" || !it.value().is_number()) continue;
+            Value now;
+            if (const auto f = x.fields.find(ref); f != x.fields.end()) now = f->second.result;
+            else if (const auto reg = base.registries.find("items"); reg != base.registries.end())
+                for (const BaseModel::Entry& e : reg->second)
+                    if (e.id == ref.id && e.fields.count("maxStack")) now = e.fields.at("maxStack");
+            const Value top = it.value().is_number_integer() ? Value::integer(it.value().get<int64_t>()) : Value::number(it.value().get<double>());
+            if (now.numeric() && now.as_double() < top.as_double()) out.push_back({ref, {top, now}});
+        }
+        return out;
+    };
+    // A field's value on this start without the registry's rows (after the older paths' writes; the base's when nothing writes
+    // it). None: the entry or field is not in this start's base.
+    auto bare = [&](const Result& x, const FieldRef& ref) -> Value {
+        if (const auto it = x.fields.find(ref); it != x.fields.end()) return saves::before_registry(it->second);
+        if (const auto reg = base.registries.find(ref.registry); reg != base.registries.end())
+            for (const BaseModel::Entry& e : reg->second)
+                if (e.id == ref.id) {
+                    const auto f = e.fields.find(ref.field);
+                    return f == e.fields.end() ? Value{} : f->second;
+                }
+        return Value{};
+    };
     Result r;
-    if (src) r = compose(d.schema, base, old, inputs);
-    // the edits refused before the stage are the report's too
+    // review: every value this start's registry edits give (and every value of another plan's) against that plan's values: one
+    // saves::judge verdict per field that changes what saves hold (the plan's value -> this start's)
+    auto judge_against = [&](const json& against, const std::function<void(const FieldRef&, const std::string&, const saves::Verdict&)>& each) {
+        std::set<std::string> keys;
+        for (auto it = against.begin(); it != against.end(); ++it) keys.insert(it.key());
+        for (const auto& [ref, fo] : r.fields)
+            if (has_registry_row(fo)) keys.insert(ref.text());
+        for (const std::string& k : keys) {
+            FieldRef ref;
+            if (!field_ref_of(k, &ref) || is_raw_field(ref.field)) continue;
+            const auto it = r.fields.find(ref);
+            const Value was = against.contains(k) ? saves::of_json(against[k]) : bare(r, ref);
+            const Value now = it != r.fields.end() && has_registry_row(it->second) ? it->second.result : bare(r, ref);
+            if (was.kind == Value::None || now.kind == Value::None) continue;  // not on one of the two (an entry this build lacks)
+            if (const auto v = saves::judge(ref.registry, ref.field, was, now)) each(ref, k, *v);
+        }
+    };
+    // the values of a kept plan (plans/<hash>.json "values"); empty: not there
+    auto plan_values = [&](const std::string& hash) -> json {
+        if (hash.empty() || !d.env.read_data) return json::object();
+        const auto t = d.env.read_data("plans/" + hash + ".json");
+        const json f = t ? json::parse(*t, nullptr, false) : json();
+        return f.is_object() && f.contains("values") && f["values"].is_object() ? f["values"] : json::object();
+    };
+    // a verdict's text against another plan: "<what changes> against plan <hash12>, <which>: <what it does to saves>" (a refusal's
+    // "this edit was not applied" left out: the caller says what happens)
+    auto against_text = [](std::string text, const std::string& plan, const std::string& which) {
+        if (const size_t cut = text.rfind("; this edit was not applied"); cut != std::string::npos) text.resize(cut);
+        const std::string where = " against plan " + short_hash(plan) + ", " + which;
+        const size_t colon = text.find(": ");
+        return plan.empty() ? text : colon == std::string::npos ? text + where : text.substr(0, colon) + where + text.substr(colon);
+    };
+    const std::string world_plan = d.index.contains("world") && d.index["world"].is_object() && d.index["world"].contains("plan") &&
+                                           d.index["world"]["plan"].is_string() ? d.index["world"]["plan"].get<std::string>() : "";
+    if (src) r = compose_checked(inputs, rolled);
+    std::string guard_why, plan_why;  // plan_why: the whole plan is refused by a check of all of it (not one edit)
+    std::vector<saves::SaveNote> rollback_notes;  // registry.json "saves": what the rollback does to saves against that plan
+    if (rolled && src && r.refused.empty() && save_refused.empty()) {
+        // review: the plan against the values of the plan it rolls away from (else the last world's): a world ran on those, so
+        // its saves can hold them. A Refuse verdict refuses the plan whole; a Guard verdict needs the stack guard here.
+        json against = from_values;
+        std::string against_plan = rb["from"].is_string() ? rb["from"].get<std::string>() : "";
+        if (against.empty()) {
+            against_plan = world_plan == rb.value("plan", std::string()) ? std::string() : world_plan;
+            against = plan_values(against_plan);
+        }
+        std::vector<std::string> needs_guard = plan_guards;
+        std::vector<saves::SaveNote> guard_notes;  // a lower max stack against that plan: the guard keeps such stacks whole
+        judge_against(against, [&](const FieldRef& ref, const std::string& k, const saves::Verdict& v) {
+            const std::string text = against_text(v.text, against_plan, "which it rolls away from");
+            if (v.decision == saves::Decision::Guard) {
+                needs_guard.push_back(k + " " + text.substr(0, text.find(": ")));
+                guard_notes.push_back({ref, v.cls, "guard", text});
+            }
+            if (v.decision == saves::Decision::Refuse && plan_why.empty()) plan_why = "saves: " + k + " " + text;
+            if (v.decision == saves::Decision::Warn || v.decision == saves::Decision::Report)
+                rollback_notes.push_back({ref, v.cls, saves::decision_name(v.decision), text});
+        });
+        const auto lowered = stacks_lowered(r);
+        if (plan_why.empty() && (!lowered.empty() || !needs_guard.empty()) && !(d.env.stack_guard && d.env.stack_guard(&guard_why))) {
+            const std::string what = !lowered.empty() ? "it lowers the largest stack of " + std::to_string(lowered.size()) + " item(s) (" + lowered.front().first.text() + " " +
+                                                            lowered.front().second.first.text_of() + " -> " + lowered.front().second.second.text_of() + ") below what a world already started with"
+                                                      : needs_guard.front();
+            plan_why = "saves: " + what + ", and Kiln's stack guard is not available here" + (guard_why.empty() ? "" : " (" + guard_why + ")") +
+                       ": the game would delete the part of a saved stack above it";
+        }
+        if (!plan_why.empty()) save_refused.push_back({"", "", Stage::Alter, 0, plan_why, ""});
+        for (const saves::SaveNote& n : guard_notes)  // the stack note below names the ones against a world's highest stack
+            if (std::none_of(lowered.begin(), lowered.end(), [&](const auto& l) { return l.first == n.field; })) rollback_notes.push_back(n);
+    }
+    if (rolled && (!src || !r.refused.empty() || !save_refused.empty())) {
+        // never half-applied: one refused edit of the plan on this start refuses the whole plan
+        std::string why = "the stage has no base to read";
+        if (src && !plan_why.empty()) {
+            why = plan_why;
+        } else if (src) {
+            std::vector<Refusal> all = r.refused;
+            all.insert(all.end(), save_refused.begin(), save_refused.end());
+            const Refusal& x = all.front();
+            why = "the plan's edit " + x.mod + " " + (x.source.empty() ? std::string("(no source)") : x.source) + " #" + std::to_string(x.n) +
+                  " is refused on this start: " + x.reason;
+            if (all.size() > 1) why += " (and " + std::to_string(all.size() - 1) + " more)";
+        }
+        rb["state"] = "refused";
+        rb["reason"] = "plan " + short_hash(rb.value("plan", std::string())) + ": " + why + "; nothing of the plan was applied, this start runs on the mods' current registry edits";
+        rb.erase("leftOut");
+        inputs = std::move(fallback);
+        fallback.clear();
+        rolled = false;
+        if (src) r = compose_checked(inputs, false);
+    }
+    // a start (or rollback) that gives items a lower max stack than a world already started with: the stack guard keeps the
+    // bigger stacks a save holds whole; without it the save loses them at their next move (warned: nothing here can be refused)
+    if (src) {
+        const auto lowered = stacks_lowered(r);
+        std::string w;
+        const bool guarded = !lowered.empty() && d.env.stack_guard && d.env.stack_guard(&w);
+        for (const auto& [ref, vals] : lowered) {
+            const std::string a = vals.first.text_of(), b = vals.second.text_of();
+            d.stage_notes.push_back({ref, "stackCut", guarded ? "guard" : "warn", guarded ?
+                "a world already started with the largest stack " + a + ", this start gives " + b + ": Kiln's stack guard keeps the bigger stacks a save holds whole" :
+                "a world already started with the largest stack " + a + ", this start gives " + b + ", and Kiln's stack guard is not available here" +
+                    (w.empty() ? "" : " (" + w + ")") + ": the game deletes the part of a saved stack above " + b + " at its next move"});
+        }
+    }
+    if (rolled) d.stage_notes.insert(d.stage_notes.end(), rollback_notes.begin(), rollback_notes.end());
+    // review: a start (not a rollback) against the plan the last world ran on. A narrower level range or a shorter build-zone
+    // list than that world's changes what its saves hold, and nothing can be refused for it (without the edit the value is
+    // the game's, narrower still): a warning. The other classes are judged against the value without the registry, as above.
+    if (src && !rolled && !world_plan.empty())
+        judge_against(plan_values(world_plan), [&](const FieldRef& ref, const std::string&, const saves::Verdict& v) {
+            if (v.decision != saves::Decision::Refuse) return;
+            d.stage_notes.push_back({ref, v.cls, "warn", against_text(v.text, world_plan, "which the last world ran on") +
+                                                         " (nothing to refuse: without this start's value the game's applies, narrower still)"});
+        });
+    if (rolled) {
+        // exactly what changed back: every value of the plan rolled away from, and of this start, that differs
+        std::map<std::string, json> now;
+        for (const auto& [ref, fo] : r.fields)
+            if (has_registry_row(fo)) now[ref.text()] = fo.result.to_json();
+        // review: a field only the plan edits had its value without the registry in the plan rolled away from (not the plan's)
+        auto without_registry = [&](const std::string& key) -> json {
+            FieldRef ref;
+            return field_ref_of(key, &ref) ? bare(r, ref).to_json() : json(nullptr);
+        };
+        std::set<std::string> keys;
+        for (auto it = from_values.begin(); it != from_values.end(); ++it) keys.insert(it.key());
+        for (const auto& [k, v] : now) keys.insert(k);
+        json changed = json::array();
+        size_t total = 0;
+        for (const std::string& k : keys) {
+            const json a = from_values.contains(k) ? from_values[k] : without_registry(k);
+            const auto n = now.find(k);
+            const json b = n != now.end() ? n->second : without_registry(k);
+            if (a == b) continue;
+            if (++total <= 2000) changed.push_back({{"field", k}, {"from", a}, {"to", b}});
+        }
+        rb["state"] = "applied";
+        rb["changedBack"] = std::move(changed);
+        rb["changedBackTotal"] = total;
+        if (from_values.empty() && rb["from"].is_string()) rb["fromValues"] = "the plan rolled away from is not in the plans folder: changedBack lists this start's values only";
+        const std::string plan = rb.value("plan", std::string());
+        d.log(1, "registry: rolled back to plan " + short_hash(plan) + " (kiln/data/content/registry/rollback.json): " + std::to_string(total) +
+                     " value(s) changed back; saves are not touched; kilnctl registry rollback --clear returns to the mods' current edits");
+        size_t shown = 0;
+        for (const json& row : rb["changedBack"]) {
+            if (++shown > 20) break;
+            d.log(0, "registry: rollback: " + row["field"].get<std::string>() + " " + (row["from"].is_null() ? std::string("(none)") : row["from"].dump()) + " -> " +
+                         (row["to"].is_null() ? std::string("(none)") : row["to"].dump()));
+        }
+        for (const json& m : rb["leftOut"]) d.log(1, "registry: rollback: mod " + m.get<std::string>() + "'s registry edits are left out (the plan does not hold them)");
+    } else if (rb.is_object()) {
+        d.log(1, "registry: the rollback " + (rb["plan"].is_string() ? "to plan " + short_hash(rb["plan"].get<std::string>()) + " " : std::string()) +
+                     "is refused: " + rb.value("reason", std::string()));
+    }
+    for (const ModInput& in : inputs) {
+        json edits = json::array();
+        for (const Batch& b : in.batches) {
+            json eb = {{"stage", stage_name(b.stage)}, {"source", b.source}, {"n", b.edits.size()}};
+            edits.push_back(eb);
+        }
+        d.meta.order.push_back({in.id, versions[in.id], sha_hex(edits.dump()).substr(0, 16)});
+    }
+    // the schemas' id migrations: what they renamed in the edits this start runs (ir.cpp parse_batch did the renaming)
+    json migrated = json::array();
+    size_t migrated_logged = 0;
+    // review: with the GameStart callbacks' turns (recorded during compose, added to the inputs below)
+    std::vector<std::pair<std::string, Batch>> turns;
+    {
+        std::lock_guard lk(d.mu);
+        for (const ModInput& in : inputs)
+            if (const auto it = d.recorded.find(in.id); it != d.recorded.end())
+                for (const Batch& t : it->second)
+                    if (!t.migrated.empty()) turns.push_back({in.id, Batch{t.mod, t.mod_version, t.source, t.stage, {}, t.migrated}});
+    }
+    auto note_batch = [&](const std::string& mod, const Batch& b) {
+        for (const std::string& note : b.migrated) {
+            if (migrated.size() < 2000) migrated.push_back({{"mod", mod}, {"source", b.source}, {"stage", stage_name(b.stage)}, {"note", note}});
+            if (++migrated_logged <= 50) d.log(0, "registry: migrated " + mod + " " + (b.source.empty() ? std::string("(no source)") : b.source) + " " + note);
+        }
+    };
+    for (const ModInput& in : inputs) {
+        for (const Batch& b : in.batches) note_batch(in.id, b);
+        for (const auto& [mod, t] : turns)
+            if (mod == in.id) note_batch(mod, t);
+    }
+    if (migrated_logged > 50) d.log(0, "registry: " + std::to_string(migrated_logged - 50) + " more migrated name(s): state/registry.json \"migrated\" lists them");
+    // the edits refused before the stage are the report's too (and the saves check's: kept across a reload like them)
     std::vector<Refusal> pre;
     for (const ModInput& in : inputs) pre.insert(pre.end(), in.refused.begin(), in.refused.end());
+    pre.insert(pre.end(), save_refused.begin(), save_refused.end());
     {
         std::lock_guard lk(d.mu);
         pre.insert(pre.end(), d.pre_refused.begin(), d.pre_refused.end());
@@ -903,6 +1339,18 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // A cache hit has not populated the model's entry locations yet. Locate boot targets before releasing its source.
     if (m) m->release();
     std::lock_guard lk(d.mu);
+    d.meta.migrated = std::move(migrated);
+    d.meta.rollback = rb;
+    if (rolled) {
+        d.rollback = rb.value("plan", std::string());
+        for (const json& m : rb.value("leftOut", json::array()))
+            if (m.is_string()) d.left_out.push_back(m.get<std::string>());
+        d.rollback_previous = rb.contains("previous") && rb["previous"].is_string() ? rb["previous"].get<std::string>() : std::string();
+        rb.erase("previous");
+        d.meta.rollback = rb;
+    } else if (rb.is_object()) {
+        d.meta.rollback.erase("previous");
+    }
     d.full_live = eager && need.all && bool(src);
     d.base = std::move(base);
     d.old = std::move(old);
@@ -1028,15 +1476,44 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         }
         json adds = json::array();
         for (const EntryRef& a : d.result.added) adds.push_back({{"registry", a.registry}, {"id", a.id}, {"guid", model::added_guid(a.registry, a.id)}});
+        json removed = json::array();
+        for (const EntryRef& e : d.result.removed) removed.push_back({{"registry", e.registry}, {"id", e.id}});
         json key = {{"exeSha256", d.env.exe_sha256}, {"side", d.env.side}, {"kiln", d.env.kiln_version}, {"decoder", model::kDecoderVersion},
                     {"regmapRecord", d.meta.regmap.record}, {"order", json::array()}};
         for (const auto& o : d.meta.order) key["order"].push_back({{"mod", o.mod}, {"version", o.version}, {"inputs", o.edits_hash}});
-        const json plan = {{"format", 1}, {"key", key}, {"boot", bootj}, {"live", livej}, {"adds", adds}};
-        const std::string hash = sha_hex(plan.dump());
-        if (d.env.write_data) {
-            plan_rel = "plans/" + hash + ".json", plan_text = plan.dump(1);
-            d.meta.plan = {hash, "kiln/data/content/registry/plans/" + hash + ".json", ""};
+        // registry-rollback: the plan keeps what a later start needs to run on it again: each mod's lowered edits (data
+        // sections, queued batches and recorded callback turns, in the order they composed) and the values they resolved to
+        json inputs = json::array();
+        for (const ModInput& in : d.inputs) {
+            std::string version;
+            for (const auto& o : d.meta.order)
+                if (o.mod == in.id) version = o.version;
+            json batches = json::array();
+            for (const Batch& b : in.batches) batches.push_back(batch_json(b));
+            inputs.push_back({{"mod", in.id}, {"version", version}, {"batches", std::move(batches)}});
         }
+        json values = json::object();
+        for (const auto& [ref, fo] : d.result.fields)
+            if (has_registry_row(fo)) values[ref.text()] = fo.result.to_json();
+        json plan = {{"format", 2}, {"key", key}, {"boot", bootj}, {"live", livej}, {"adds", adds}, {"removed", removed}, {"values", values}, {"inputs", inputs}};
+        const std::string hash = d.rollback.empty() ? plan_hash_of(plan) : d.rollback;
+        // previous: the last good plan that is not this one (a world started on it without a refused edit, plans/index.json)
+        std::string previous = d.rollback_previous;
+        if (d.rollback.empty()) {
+            const json good = d.index.contains("good") && d.index["good"].is_object() ? d.index["good"] : json::object();
+            const std::string g = good.contains("plan") && good["plan"].is_string() ? good["plan"].get<std::string>() : "";
+            const std::string gp = good.contains("previous") && good["previous"].is_string() ? good["previous"].get<std::string>() : "";
+            previous = g != hash ? g : gp;
+        }
+        if (d.env.write_data) {
+            // a rolled-back start runs on a plan that is already written (and named by its own content): it is not rewritten
+            if (d.rollback.empty()) {
+                plan["previous"] = previous.empty() ? json(nullptr) : json(previous);
+                plan_rel = "plans/" + hash + ".json", plan_text = plan.dump(1);
+            }
+            d.meta.plan = {hash, "kiln/data/content/registry/plans/" + hash + ".json", previous};
+        }
+        d.meta.saves = d.saves_json(d.result);
         const json doc = ::kc::registry::report_json(d.schema, d.result, d.meta);
         d.report = doc.dump();
         report_text = doc.dump(1);
@@ -1053,6 +1530,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         gen = d.generation;
         for (const auto& [h, s] : d.ready_subs) ready.push_back(h);
         live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
+        live.rollback = d.rollback;
+        live.left_out = d.left_out;
         live.check = [this](Batch* b, std::vector<Refusal>* refused) {
             std::lock_guard l2(d_->mu);
             refuse_unmapped(d_->rm, d_->schema, b, refused, d_->env.entry_support);
@@ -1060,9 +1539,32 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         auto publish = [this](const Result& r, bool application, bool world_event, bool world) {
             std::vector<uint64_t> handles;
             uint64_t g2 = 0;
-            std::string text;
+            std::string text, index_text;
             {
                 std::lock_guard l2(d_->mu);
+                // registry-rollback: a world started on this plan; without a refused edit it is the last good plan, and the good
+                // one before it stays its "previous" (plans/index.json)
+                if (world_event && !d_->meta.plan.hash.empty() && d_->env.write_data) {
+                    json& idx = d_->index;
+                    const std::string at = d_->env.now ? d_->env.now() : "";
+                    idx["format"] = 1;
+                    idx["world"] = {{"plan", d_->meta.plan.hash}, {"at", at}};
+                    // the highest max stack each item a registry edit touches had in a world (saves.h stackCut): never lowered
+                    if (!idx.contains("stacks") || !idx["stacks"].is_object()) idx["stacks"] = json::object();
+                    for (const auto& [ref, fo] : r.fields) {
+                        if (ref.registry != "items" || ref.field != "maxStack" || !has_registry_row(fo) || !fo.result.numeric()) continue;
+                        json& top = idx["stacks"][ref.text()];
+                        if (!top.is_number() || top.get<double>() < fo.result.as_double()) top = fo.result.to_json();
+                    }
+                    // review: a start whose stage had no base to read applied nothing of its plan: never the last good plan
+                    if (r.refused.empty() && !d_->counts.failed) {
+                        const json good = idx.contains("good") && idx["good"].is_object() ? idx["good"] : json::object();
+                        const std::string g = good.contains("plan") && good["plan"].is_string() ? good["plan"].get<std::string>() : "";
+                        if (g != d_->meta.plan.hash) idx["good"] = {{"plan", d_->meta.plan.hash}, {"previous", g.empty() ? json(nullptr) : json(g)}, {"at", at}};
+                        else idx["good"]["at"] = at;
+                    }
+                    index_text = idx.dump(1);
+                }
                 d_->result = r;
                 d_->counts.refused = static_cast<uint32_t>(r.refused.size());
                 d_->counts.conflicts = static_cast<uint32_t>(r.lines.size());
@@ -1079,11 +1581,13 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                     for (const auto& [h, s] : d_->ready_subs) handles.push_back(h);
                 }
                 d_->meta.written = d_->env.now ? d_->env.now() : "";
+                d_->meta.saves = d_->saves_json(d_->result);
                 const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
                 d_->report = doc2.dump();
                 text = doc2.dump(1);
             }
             // Outside the runner lock: transaction snapshots update the generation/file, never the ready event.
+            if (!index_text.empty() && !d_->env.write_data("plans/index.json", index_text)) d_->log(1, "registry: kiln/data/content/registry/plans/index.json could not be written");
             if (d_->env.write_report) d_->env.write_report(text);
             notify_ready(handles, Phase::WorldLoad, g2);
         };

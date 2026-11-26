@@ -646,6 +646,7 @@ void lazy_decode_reads_pristine_bytes() {
 }
 
 int main() {
+    g_registry_stack_guard = [](std::string*) { return true; };  // the host has no game code to patch: the guard as on a build that has it
     g_pack_root = std::filesystem::path(std::getenv("KILN_OUT")) / "content-tests/registry-live-review-packs";
     std::vector<std::string> errs;
     g_regmap = std::make_shared<registry::map::RegMap>();

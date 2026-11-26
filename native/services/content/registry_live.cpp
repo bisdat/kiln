@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.content: the registry's live back-end (registry P1 slice S9). What it does and why: registry_live.h.
 #include "registry_live.h"
+#include "registry/saves.h"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,7 @@
 namespace kc {
 
 uint32_t (*g_registry_type_size)(const char* qname) = &type_size;
+bool (*g_registry_stack_guard)(std::string* why) = [](std::string* why) { return guard_set(true, why); };
 
 namespace {
 
@@ -312,13 +314,32 @@ void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field
         }});
 }
 
+// ---- saves (registry/saves.h): a write that would change what existing saves hold ----
+// Refuse: the layer is not written (the value under it stays), the edit refused for this entry with why. Guard: the stack
+// guard goes on before the lowered max stack is written; where it cannot, the edit is refused for this entry. A read (no
+// write) only evaluates.
+bool save_check(const std::shared_ptr<Binding>& b, const Value& under, const Value& v, std::string* why) {
+    if (!b->row) return true;  // a raw member (Advanced tier): composed with its field or refused at composition
+    // review: a new entry's first values (its add's "fields", over the bytes of the entry it is like) are not an edit of
+    // anything a save holds; a refusal here would refuse the whole entry. Its later edits are checked like any other.
+    if (g.initializing_entry) return true;
+    const auto verdict = registry::saves::judge(b->ref.registry, b->ref.field, under, v);
+    if (!verdict) return true;
+    if (verdict->decision == registry::saves::Decision::Refuse) return *why = "saves: " + b->ref.text() + " " + verdict->text, false;
+    if (verdict->decision != registry::saves::Decision::Guard || g.reading) return true;
+    std::string w;
+    if (g_registry_stack_guard && g_registry_stack_guard(&w)) return true;
+    return *why = "saves: " + b->ref.text() + " " + verdict->unguarded + (w.empty() ? "" : " (" + w + ")"), false;
+}
+
 // ---- scalars: int, float, bool, time, enum; raw members ----
 void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
     const Field fc = *f;
     LayerEval ev = [b, fc](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
-        const Value v = registry::evaluate(b->rows, to_kiln(fc, row, b->spec, below), b->spec);
-        if (!in_range(b->spec, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
+        const Value under = to_kiln(fc, row, b->spec, below);
+        const Value v = registry::evaluate(b->rows, under, b->spec);
+        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");
@@ -1587,7 +1608,20 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
     std::map<std::string, uint64_t> hashes;
     for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
     g.refused.clear(), g.refused_keys.clear();
-    if (late || (g.applied && hashes != g.hashes)) {
+    if (!g.in->rollback.empty() && (late || (g.applied && hashes != g.hashes))) {
+        // registry-rollback: this start runs on a rolled-back plan's edits; a section's change is not composed over them
+        // (the first application of a late base: the stage already named the mods the plan leaves out, registry.json rollback.leftOut)
+        for (const RegistrySection& s : sections) {
+            const auto h = g.hashes.find(s.rel);
+            if (!g.applied || (h != g.hashes.end() && h->second == s.hash)) continue;
+            registry::Refusal r;
+            r.mod = s.mod, r.source = s.source;
+            r.reason = "RestartRequired: this start runs on the rolled-back registry plan " + g.in->rollback.substr(0, 12) +
+                       "; a data pack's registry section change applies after the rollback is cleared (kilnctl registry rollback --clear) and a restart";
+            g.refused.push_back(std::move(r));
+        }
+        LOGW("registry: a data pack's registry section changed, but this start runs on a rolled-back plan: not composed again");
+    } else if (late || (g.applied && hashes != g.hashes)) {
         LOGI("registry: a data pack's registry section changed: composing the registry again");
         recompose(sections);
     }
@@ -1755,11 +1789,19 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
     if (entry_restart) change->restart = change->entry_restart = true;
     batch.source = "live:" + std::to_string(handle) + ":" + std::to_string(change->point) + ":" + std::to_string(change->batches.size()) + ":" + batch.source;
     for (auto& row : refused) row.source = batch.source;
+    // review: what the schemas' id migrations renamed in a live change (the stage's registry.json "migrated" lists a start's)
+    for (const std::string& note : batch.migrated) LOGI("registry (live): migrated %s %s %s", change->mod.c_str(), batch.source.c_str(), note.c_str());
     std::erase_if(batch.edits, [&](const registry::Edit& edit) {
         std::string reason;
         const auto* reg = g.in->schema->registry(edit.registry);
         const auto* field = reg ? reg->field(edit.element.on ? edit.element.list : edit.field) : nullptr;
-        if (edit.entry != registry::EntryOp::None || !edit.raw.empty()) reason = "live changes use mapped Kiln fields, not entry add/remove or raw game paths";
+        const bool left_out = !g.in->rollback.empty() && std::find(g.in->left_out.begin(), g.in->left_out.end(), change->mod) != g.in->left_out.end();
+        if (left_out) {
+            // review: a mod the rolled-back plan leaves out has none of its registry edits applied, live ones neither
+            change->restart = true;
+            reason = "RestartRequired: this start runs on the rolled-back registry plan " + g.in->rollback.substr(0, 12) + ", which leaves mod " + change->mod +
+                     " out (registry.json rollback.leftOut); its registry edits apply after kilnctl registry rollback --clear and a restart";
+        } else if (edit.entry != registry::EntryOp::None || !edit.raw.empty()) reason = "live changes use mapped Kiln fields, not entry add/remove or raw game paths";
         else if (field && field->applies == registry::Applies::Restart) { change->restart = true; reason = "RestartRequired: " + edit.registry + "." + field->name + " is read at game start"; }
         else if (field && !g.in->decoded.count(edit.registry + "." + field->name)) { change->restart = true; reason = "RestartRequired: the base did not read " + edit.registry + "." + field->name + " at start"; }
         if (reason.empty()) return false;

@@ -11,5 +11,5 @@ r=$here/../registry
 g++ -std=c++20 -pthread -O1 -g -Wall -Wextra -Wno-unused-function -Wno-missing-field-initializers -D__fastcall= -ffunction-sections -fdata-sections \
     -fsanitize=address,undefined -I"$here/host" -I"$here/../../../core/abi" -I"$here/../../../third_party" \
     "$here/registry_stage_review_test.cpp" "$here/registry_model_fakes.cpp" "$r/stage.cpp" "$r/boot_bridge.cpp" "$r/model.cpp" "$r/regmap.cpp" \
-    "$r/ir.cpp" "$r/compose.cpp" "$r/report.cpp" "$r/formulas.cpp" "$here/../gear.cpp" -Wl,--gc-sections -o "$out/registry-stage-review-test"
+    "$r/ir.cpp" "$r/compose.cpp" "$r/saves.cpp" "$r/report.cpp" "$r/formulas.cpp" "$here/../gear.cpp" -Wl,--gc-sections -o "$out/registry-stage-review-test"
 "$out/registry-stage-review-test" "$here/../../../../regmap"

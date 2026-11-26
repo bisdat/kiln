@@ -186,6 +186,7 @@ void drop_case() {
 }
 }
 int main(int argc, char** argv) {
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     std::vector<std::string> errors; g_regmap = std::make_shared<registry::map::RegMap>();
     if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errors)) return 2;
     const std::string which = argc > 1 ? argv[1] : "all";

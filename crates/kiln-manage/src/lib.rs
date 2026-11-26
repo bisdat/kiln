@@ -60,6 +60,7 @@
 //! | [`util`] | paths, UTC time formatting, atomic writes, external commands (from kilnctl) |
 //! | [`wine`] | Wine runner selection and environment of server instances (from kilnctl) |
 //! | [`state`] | `kiln/state/{boot,mods,native,last-server}.json` |
+//! | [`registry_plan`] | the registry stage's plans and a rollback to the previous (last good) one: `kiln/data/content/registry/` |
 //! | [`server`] | dedicated server instances, settings, SteamCMD, run, backups, remote |
 //! | [`admin`] | KAP/1 protocol, admin client, file bridge, SSH tunnel, endpoint discovery |
 //! | [`modpack`] | server modpacks: build, publish, inspect, download, install |
@@ -155,6 +156,7 @@ pub mod report;
 pub mod tick_compare;
 pub mod saves;
 pub mod state;
+pub mod registry_plan;
 
 // servers, admin, modpacks
 pub mod admin;

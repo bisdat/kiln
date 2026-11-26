@@ -919,6 +919,7 @@ void retained_changes_are_capped_per_owner() {
 }
 }
 int main() {
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     std::vector<std::string> errs; g_regmap = std::make_shared<registry::map::RegMap>();
     if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errs)) return 2;
     int failed = 0;

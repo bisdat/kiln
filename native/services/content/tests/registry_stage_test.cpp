@@ -177,7 +177,10 @@ TreeView world() {
     v.add("keen::ecs::DefaultInventoryResource", g(300), {{"rootGroup", {{"stacks", json::array({{{"item", 1002}, {"itemRef", g(2)}, {"countMin", 1}, {"countMax", 1}, {"spawnProbability", 1.0}, {"weight", 1.0}}})}}}});
     v.add("keen::ecs::TemplateResource", g(400), {{"name", "Chest_A"}, {"components", json::array({{{"$type", "DefaultInventory"}, {"defaultInventory", g(300)}}})}});
     v.add("keen::BalancingTable", kBalance, {{"playerLevelCap", 50}, {"skillPointsPerLevel", 2}, {"genericWeaponSeed", 10.0}, {"powerCreepWeapon", 0.15},
-                                             {"armorSetup", {{"offset", 23.0}, {"gradient", 15.0}}}});
+                                             {"armorSetup", {{"offset", 23.0}, {"gradient", 15.0}}}, {"durabilityStart", 100.0},
+                                             {"buildzoneSizesPerAltarLevel", json::array({{{"x", 40.0}, {"y", 40.0}, {"z", 40.0}},
+                                                                                          {{"x", 60.0}, {"y", 60.0}, {"z", 60.0}},
+                                                                                          {{"x", 80.0}, {"y", 80.0}, {"z", 80.0}}})}});
     return v;
 }
 
@@ -390,6 +393,578 @@ void bridge_write() {
     out.clear();
     check(boothook::write(rb.key, rb.type, &bytes, rb, &out, &notes) == 0 && out.size() == 1 && !out[0].ok && !out[0].why.empty(), "a member that is not there: not written, with why: " + (out.empty() ? "" : out[0].why));
 }
+// ---- registry-rollback: the plan keeps its edits and values, the last good plan is "previous", a rollback starts on it ----
+std::string g_stacks = R"({"registry": {"alter": [
+    {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 4}},
+    {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+std::vector<stage::Env::DataFile> stacks(const Schema& schema) { return stage::read_sections("bigmod", "2.0.0", {{"content/b.json", g_stacks}}, schema); }
+const char* kGood = R"({"registry": {"alter": [
+    {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 4}},
+    {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+const char* kChanged = R"({"registry": {"alter": [
+    {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 8}},
+    {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 30},
+    {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+
+struct PlanStart {
+    json report;
+    std::vector<std::string> log;
+    std::string rollback;  // the live handoff's rolled-back plan
+    std::function<void(const Result&, bool)> world;
+    Result result;
+    bool callback_ran = false;
+};
+// One start over files; set_order with the given versions; a world load reported with (or without) a refusal.
+// The stack guard (stage::Env::stack_guard): available unless a test says not, counting its calls.
+bool g_guard_available = true;
+int g_guard_calls = 0;
+PlanStart plan_start(const std::string& dir, Files* files, TreeView* view, const std::string& order = R"([{"mod":"bigmod","version":"2.0.0"}])",
+                     bool world_refusal = false, bool with_callback = false) {
+    PlanStart out;
+    stage::Env env = env_of(view, files, dir, &stacks);
+    env.stack_guard = [](std::string* why) {
+        ++g_guard_calls;
+        if (!g_guard_available) *why = "not on this build";
+        return g_guard_available;
+    };
+    stage::Runner r(std::move(env));
+    if (!order.empty()) check(r.set_order(order) == KILN_OK, "set_order");
+    uint64_t h = 0;
+    if (with_callback)
+        r.subscribe_stage(5, "codemod", [&](Stage, const View&) { out.callback_ran = true; return true; }, &h);
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& hd) { out.world = hd.report, live_result = hd.result, out.rollback = hd.rollback; });
+    files->log.clear();
+    const auto boot = r.run({});
+    std::vector<stage::BootOutcome> outcomes;
+    for (const auto& b : boot)
+        for (const auto& f : b.fields) outcomes.push_back({f.field, true, f.rows.empty() ? Value::integer(60) : f.rows.back().after, ""});  // as composed
+    r.finish(outcomes);
+    out.report = json::parse(files->report);
+    if (out.world && live_result) {
+        Result world = *live_result;
+        if (world_refusal) world.refused.push_back({"bigmod", "content/b.json", Stage::Alter, 9, "a live refusal in this world", ""});
+        out.world(world, true);
+        out.result = world;
+    }
+    out.log = files->log;
+    return out;
+}
+std::string plan_hash(PlanStart s) { return s.report["plan"].is_object() && s.report["plan"]["hash"].is_string() ? s.report["plan"]["hash"].get<std::string>() : ""; }
+json field_row(json rep, const std::string& id, const std::string& field) {
+    for (const auto& f : rep["fields"])
+        if (f.value("id", "") == id && f.value("field", "") == field) return f;
+    return json::object();  // result: null
+}
+bool logged(const std::vector<std::string>& log, const std::string& what) {
+    for (const std::string& l : log)
+        if (l.find(what) != std::string::npos) return true;
+    return false;
+}
+
+void plans_link_the_last_good_plan(const std::string& dir) {
+    Files files;
+    TreeView v1 = world();
+    g_stacks = kGood;
+    PlanStart a = plan_start(dir, &files, &v1);
+    const std::string ha = plan_hash(a);
+    check(!ha.empty() && files.data.count("plans/" + ha + ".json"), "the first start writes its plan");
+    json pa = json::parse(files.data["plans/" + ha + ".json"]);
+    check(pa["format"] == 2 && pa["inputs"].is_array() && pa["inputs"].size() == 1 && pa["inputs"][0]["mod"] == "bigmod" &&
+              pa["inputs"][0]["version"] == "2.0.0" && pa["inputs"][0]["batches"].size() == 1 && pa["inputs"][0]["batches"][0]["ir"] == 1,
+          "the plan keeps the lowered edits of each mod (format 2): " + pa.dump().substr(0, 400));
+    check(pa["values"]["items[game:plank].maxStack"] == 80 && pa["values"]["balance[game:balance].levelCap"] == 60,
+          "the plan keeps the resolved values, restart fields as written: " + pa["values"].dump());
+    check(a.report["plan"]["previous"].is_null(), "no earlier good plan: previous is null");
+    check(files.data.count("plans/index.json") && json::parse(files.data["plans/index.json"]).value("good", json::object()).value("plan", "") == ha,
+          "a world started on it without refusals: it is the last good plan");
+    // the same mods again: the same plan; previous stays empty (there is no other good plan)
+    TreeView v2 = world();
+    PlanStart a2 = plan_start(dir, &files, &v2);
+    check(plan_hash(a2) == ha && a2.report["plan"]["previous"].is_null(), "the same edits give the same plan, and it is not its own previous");
+    // changed settings: a new plan, linked to the last good one
+    g_stacks = kChanged;
+    TreeView v3 = world();
+    PlanStart b = plan_start(dir, &files, &v3);
+    const std::string hb = plan_hash(b);
+    check(!hb.empty() && hb != ha && b.report["plan"]["previous"] == ha, "a changed plan names the last good plan as previous: " + b.report["plan"].dump());
+    json idx = json::parse(files.data["plans/index.json"]);
+    check(idx["good"]["plan"] == hb && idx["good"]["previous"] == ha && idx["world"]["plan"] == hb, "index: the new good plan and the one before it: " + idx.dump());
+    // the same changed plan again: previous is still the one before it
+    TreeView v4 = world();
+    PlanStart b2 = plan_start(dir, &files, &v4);
+    check(plan_hash(b2) == hb && b2.report["plan"]["previous"] == ha, "restarting on the good plan keeps the earlier one as previous");
+    // a world with a refusal is not good: previous does not move to it
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": 21}]}})";
+    TreeView v5 = world();
+    PlanStart c = plan_start(dir, &files, &v5, R"([{"mod":"bigmod","version":"2.0.0"}])", true);
+    json idx2 = json::parse(files.data["plans/index.json"]);
+    check(c.report["plan"]["previous"] == hb && idx2["good"]["plan"] == hb && idx2["world"]["plan"] == plan_hash(c),
+          "a world with a refusal is not a good plan (the last good one stays): " + idx2.dump());
+    // a refused edit at the stage also keeps the plan from being good
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "block", "op": 0.5}]}})";
+    TreeView v6 = world();
+    plan_start(dir, &files, &v6);
+    check(json::parse(files.data["plans/index.json"]).value("good", json::object()).value("plan", "") == hb, "a start with a refused edit is not a good plan");
+}
+
+void rollback_starts_on_the_previous_plan(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kChanged;
+    TreeView v2 = world();
+    PlanStart b = plan_start(dir, &files, &v2);
+    const std::string hb = plan_hash(b);
+    check(field_row(b.report, "game:plank", "maxStack")["result"] == 160, "the changed plan: plank 20 x8 = 160");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"from", hb}, {"requested", "2026-11-25T20:00:00Z"}, {"by", "test"}}.dump();
+    TreeView v3 = world();
+    PlanStart r = plan_start(dir, &files, &v3, R"([{"mod":"bigmod","version":"2.0.0"},{"mod":"codemod","version":"1.0.0"}])", false, true);
+    check(r.report["rollback"].is_object() && r.report["rollback"]["state"] == "applied" && r.report["rollback"]["plan"] == ha,
+          "registry.json: the rollback to the previous plan is applied: " + r.report["rollback"].dump());
+    check(field_row(r.report, "game:plank", "maxStack")["result"] == 80, "the start runs on the previous plan's values: plank 80");
+    check(field_row(r.report, "game:material_t1_wood_logs", "maxStack")["result"].is_null(), "wood logs: the changed plan's edit is not applied");
+    check(plan_hash(r) == ha && !files.data.count("plans/" + std::string(64, '0') + ".json"), "registry.json names the plan it started on");
+    json back = r.report["rollback"]["changedBack"];
+    bool plank = false, logs = false, cap = false;
+    for (const auto& row : back) {
+        plank = plank || (row["field"] == "items[game:plank].maxStack" && row["from"] == 160 && row["to"] == 80);
+        logs = logs || (row["field"] == "items[game:material_t1_wood_logs].maxStack" && row["from"] == 30 && row["to"] == 10);
+        cap = cap || row["field"] == "balance[game:balance].levelCap";
+    }
+    check(plank && logs && !cap, "it says exactly what changed back (plank 160 -> 80, logs 30 -> 10; levelCap was 60 in both): " + back.dump());
+    check(logged(r.log, "rolled back to plan " + ha.substr(0, 12)) && logged(r.log, "items[game:plank].maxStack 160 -> 80"), "and says so in kiln.log");
+    bool guarded = false;
+    for (const auto& n : r.report["saves"]) guarded = guarded || (n["field"] == "items[game:plank].maxStack" && n["decision"] == "guard");
+    check(guarded, "rolling the largest stack back down (160 -> 80) keeps the stacks the save holds whole: the stack guard is on: " + r.report["saves"].dump());
+    check(!r.callback_ran, "no mod's stage callback runs on a rolled-back start (the plan holds the edits)");
+    check(r.rollback == ha, "the live back-end is told the start runs on a rolled-back plan");
+    bool left = false;
+    for (const auto& m : r.report["rollback"]["leftOut"]) left = left || m == "codemod";
+    check(left, "a mod with registry code that the plan does not hold is named as left out: " + r.report["rollback"].dump());
+    check(files.data.count("rollback.json"), "the request stays until it is cleared: the next start runs on the same plan");
+    TreeView v4 = world();
+    PlanStart r2 = plan_start(dir, &files, &v4);
+    check(r2.report["rollback"]["state"] == "applied" && field_row(r2.report, "game:plank", "maxStack")["result"] == 80, "the next start is rolled back too");
+    files.data.erase("rollback.json");
+    TreeView v5 = world();
+    PlanStart n = plan_start(dir, &files, &v5);
+    check(n.report["rollback"].is_null() && field_row(n.report, "game:plank", "maxStack")["result"] == 160 && plan_hash(n) == hb,
+          "cleared: the mods' current edits again");
+}
+
+void rollback_refused_whole(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kChanged;
+    TreeView v2 = world();
+    const std::string hb = plan_hash(plan_start(dir, &files, &v2));
+    auto ask = [&](const std::string& plan) { files.data["rollback.json"] = json{{"format", 1}, {"plan", plan}, {"from", hb}}.dump(); };
+    auto refused = [&](PlanStart s, const std::string& why) {
+        check(s.report["rollback"].is_object() && s.report["rollback"]["state"] == "refused" &&
+                  s.report["rollback"]["reason"].get<std::string>().find(why) != std::string::npos,
+              "the rollback is refused (" + why + "): " + s.report["rollback"].dump());
+        check(field_row(s.report, "game:plank", "maxStack")["result"] == 160 && field_row(s.report, "game:material_t1_wood_logs", "maxStack")["result"] == 30,
+              "and the start runs on the mods' current edits, nothing of the plan half-applied");
+        check(logged(s.log, "rollback") && s.rollback.empty(), "said in kiln.log; the live back-end is not rolled back");
+    };
+    ask(ha);
+    TreeView v3 = world();
+    refused(plan_start(dir, &files, &v3, R"([{"mod":"bigmod","version":"2.1.0"}])"), "bigmod changed (2.0.0, now 2.1.0)");
+    TreeView v4 = world();
+    PlanStart gone = plan_start(dir, &files, &v4, R"([{"mod":"othermod","version":"1.0.0"}])");
+    check(gone.report["rollback"]["state"] == "refused" && gone.report["rollback"]["reason"].get<std::string>().find("bigmod is gone") != std::string::npos &&
+              field_row(gone.report, "game:plank", "maxStack")["result"].is_null() && gone.rollback.empty(),
+          "a plan whose mod is gone is refused, nothing of it applied (Kiln.Host did not load bigmod, so neither do its current edits): " +
+              gone.report["rollback"].dump());
+    ask(std::string(64, 'a'));
+    TreeView v5 = world();
+    refused(plan_start(dir, &files, &v5), "not in kiln/data/content/registry/plans");
+    ask(ha);
+    const std::string keep = files.data["plans/" + ha + ".json"];
+    json edited = json::parse(keep);
+    edited["values"]["items[game:plank].maxStack"] = 9999;
+    files.data["plans/" + ha + ".json"] = edited.dump();
+    TreeView v6 = world();
+    refused(plan_start(dir, &files, &v6), "does not match its name");
+    files.data["plans/" + ha + ".json"] = keep;
+    files.data["rollback.json"] = "{not json";
+    TreeView v7 = world();
+    refused(plan_start(dir, &files, &v7), "cannot be read");
+    // review: members of another type than Kiln writes (a hand edit) refuse the rollback, never throw into the boot
+    files.data["rollback.json"] = json{{"format", "1"}, {"plan", ha}}.dump();
+    TreeView v7b = world();
+    refused(plan_start(dir, &files, &v7b), "cannot be read");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"requested", 5}}.dump();
+    TreeView v7c = world();
+    refused(plan_start(dir, &files, &v7c), "cannot be read");
+    files.data["plans/" + ha + ".json"] = json{{"format", "2"}, {"inputs", json::array()}}.dump();
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    TreeView v7d = world();
+    refused(plan_start(dir, &files, &v7d), "cannot be read");
+    files.data["plans/" + ha + ".json"] = keep;
+    files.data["rollback.json"] = "{not json";  // as before these cases: the next start (plan C below) is no rollback
+    // a plan edit that no longer applies on this base (the entry is gone): refused whole, never half-applied
+    g_stacks = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": 70},
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 40}]}})";
+    TreeView v8 = world();
+    const std::string hc = plan_hash(plan_start(dir, &files, &v8));
+    g_stacks = kChanged;
+    ask(hc);
+    TreeView v9 = world();
+    v9.types["keen::ItemInfo"].erase(v9.types["keen::ItemInfo"].begin());  // the game build without wood logs
+    PlanStart s9 = plan_start(dir, &files, &v9);
+    check(s9.report["rollback"]["state"] == "refused" && s9.report["rollback"]["reason"].get<std::string>().find("material_t1_wood_logs") != std::string::npos &&
+              field_row(s9.report, "game:plank", "maxStack")["result"] == 160,
+          "a plan whose edit is refused on this base is refused whole: plank keeps the current 160, not the plan's 70: " + s9.report["rollback"].dump());
+    // the plan rolled back to lowers a max stack and the stack guard is not available here: refused whole
+    ask(ha);
+    g_guard_available = false;
+    TreeView v11 = world();
+    refused(plan_start(dir, &files, &v11), "stack guard is not available here");
+    g_guard_available = true;
+    // a format-1 plan (an older Kiln's) holds no edits to start on
+    json old = json::parse(keep);
+    old["format"] = 1;
+    old.erase("inputs");
+    old.erase("previous");
+    const std::string ho = kiln::boot_gd::hex_of(kiln::boot_gd::sha256(old.dump()));
+    files.data["plans/" + ho + ".json"] = old.dump();
+    ask(ho);
+    TreeView v10 = world();
+    refused(plan_start(dir, &files, &v10), "older Kiln");
+}
+// ---- registry-rollback, package K: field edits that change what existing saves hold (registry/saves.h) ----
+void save_checks_of_restart_fields(const std::string& dir) {
+    Files files;
+    g_stacks = R"({"registry": {"alter": [
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 40},
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "durability.start", "op": 50},
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "buildzoneSizesPerAltarLevel",
+         "list": {"replace": [{"x": 40, "y": 40, "z": 40}, {"x": 60, "y": 60, "z": 60}]}}]}})";
+    TreeView v = world();
+    stage::Runner r(env_of(&v, &files, dir, &stacks));
+    const auto boot = r.run({});
+    bool cap = false, dur = false, zones = false;
+    for (const auto& b : boot)
+        for (const auto& f : b.fields) {
+            cap = cap || f.field.field == "levelCap";
+            dur = dur || f.field.field == "durability.start";
+            zones = zones || f.field.field == "buildzoneSizesPerAltarLevel";
+        }
+    check(cap && dur && !zones, "the boot back-end writes levelCap and durability.start, never the refused shorter build-zone list");
+    std::vector<stage::BootOutcome> outcomes;
+    for (const auto& b : boot)
+        for (const auto& f : b.fields) outcomes.push_back({f.field, true, f.field.field == "levelCap" ? Value::integer(40) : Value::number(50), ""});
+    r.finish(outcomes);
+    json rep = json::parse(files.report);
+    bool refused_zones = false;
+    for (const auto& x : rep["refused"])
+        refused_zones = refused_zones || (x.value("field", "") == "buildzoneSizesPerAltarLevel" &&
+                                          x.value("reason", "").find("shortens the build-zone sizes to 2 altar level(s) from 3") != std::string::npos);
+    check(refused_zones, "a shorter build-zone list is refused, with why: " + rep["refused"].dump().substr(0, 600));
+    std::map<std::string, std::string> notes;
+    for (const auto& n : rep["saves"]) notes[n["field"].get<std::string>()] = n["class"].get<std::string>() + "/" + n["decision"].get<std::string>();
+    check(notes["balance[game:balance].levelCap"] == "progressionCap/warn" && notes["balance[game:balance].durability.start"] == "durability/report" && notes.size() == 2,
+          "registry.json saves: levelCap lowered warns, durability reports: " + rep["saves"].dump());
+    check(logged(files.log, "1 registry: saves: balance[game:balance].levelCap lowers the level cap 50 -> 40") &&
+              logged(files.log, "0 registry: saves: balance[game:balance].durability.start"),
+          "kiln.log: the warning and the line");
+}
+
+void stack_guard_against_the_last_world(const std::string& dir) {
+    Files files;
+    g_guard_calls = 0;
+    g_stacks = kGood;  // plank 20 x4 = 80; a world runs on it
+    TreeView v1 = world();
+    plan_start(dir, &files, &v1);
+    check(g_guard_calls == 0, "raising needs no guard at the stage");
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+    TreeView v2 = world();
+    PlanStart s = plan_start(dir, &files, &v2);  // the mod's stack edit is gone: plank is the game's 20 again
+    std::string row;
+    for (const auto& n : s.report["saves"])
+        if (n["field"] == "items[game:plank].maxStack") row = n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(g_guard_calls > 0 && row.rfind("guard: a world already started with the largest stack 80, this start gives 20:", 0) == 0,
+          "a start that gives an item a lower max stack than a world already started with turns the stack guard on: " + row);
+    check(json::parse(files.data["plans/index.json"])["stacks"]["items[game:plank].maxStack"] == 80,
+          "plans/index.json keeps the highest max stack a world started with (never lowered by the later world on 20)");
+    g_guard_available = false;
+    TreeView v3 = world();
+    s = plan_start(dir, &files, &v3);
+    row.clear();
+    for (const auto& n : s.report["saves"])
+        if (n["field"] == "items[game:plank].maxStack") row = n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    g_guard_available = true;
+    check(row.rfind("warn: ", 0) == 0 && row.find("not available here") != std::string::npos && logged(s.log, "1 registry: saves: items[game:plank].maxStack"),
+          "two starts later, and without the guard, still a warning (that save can still hold 80-stacks; nothing can be refused for an edit that is gone): " + row);
+}
+
+// review of registry-rollback: the high-water mark (plans/index.json "stacks"). A later world on a lower max stack never
+// lowers it, and a start with no registry content at all after a raise still asks the stack guard (the base is read for
+// that alone).
+void stack_high_water_mark(const std::string& dir) {
+    Files files;
+    auto plank = [](int v) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": )" + std::to_string(v) + "}]}}";
+    };
+    g_stacks = plank(80);
+    TreeView v1 = world();
+    plan_start(dir, &files, &v1);
+    g_stacks = plank(40);
+    TreeView v2 = world();
+    plan_start(dir, &files, &v2);
+    check(json::parse(files.data["plans/index.json"])["stacks"]["items[game:plank].maxStack"] == 80,
+          "a later world on 40 does not lower the mark (80): " + json::parse(files.data["plans/index.json"]).dump());
+    g_stacks = plank(50);
+    g_guard_calls = 0;
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    std::string row;
+    for (const auto& n : s.report.value("saves", json::array()))
+        if (n["field"] == "items[game:plank].maxStack") row = n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(g_guard_calls > 0 && row.rfind("guard: a world already started with the largest stack 80, this start gives 50:", 0) == 0,
+          "50 is below the 80 a world started with (not the last world's 40): the guard is asked: " + row);
+    // no registry content at all: the base is still read for the mark, and the guard asked
+    TreeView v4 = world();
+    stage::Env env = env_of(&v4, &files, dir, &no_sections);
+    g_guard_calls = 0;
+    env.stack_guard = [](std::string*) { ++g_guard_calls; return true; };
+    stage::Runner r(std::move(env));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    bool noted = false;
+    for (const auto& n : rep.value("saves", json::array())) noted = noted || (n["field"] == "items[game:plank].maxStack" && n["decision"] == "guard");
+    check(g_guard_calls > 0 && noted, "a start without registry content after a raise asks the guard: " + rep.value("saves", json::array()).dump());
+}
+
+// ---- review of registry-rollback ----
+const char* rb_row(const json& rep) { return rep["rollback"].is_object() && rep["rollback"]["state"].is_string() ? "" : "no rollback row"; }
+std::string reason_of(const PlanStart& s) {
+    return s.report["rollback"].is_object() && s.report["rollback"]["reason"].is_string() ? s.report["rollback"]["reason"].get<std::string>() : std::string();
+}
+
+// changedBack lists a value that only the plan rolled back to edits (the plan rolled away from left it at the game's value)
+void rollback_changed_back_names_every_value(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;  // plank x4 = 80, levelCap 60
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 8}}]}})";
+    TreeView v2 = world();
+    const std::string hb = plan_hash(plan_start(dir, &files, &v2));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"from", hb}}.dump();
+    TreeView v3 = world();
+    PlanStart r = plan_start(dir, &files, &v3);
+    check(r.report["rollback"].is_object() && r.report["rollback"]["state"] == "applied", std::string(rb_row(r.report)) + r.report["rollback"].dump());
+    bool plank = false, cap = false;
+    for (const auto& row : r.report["rollback"]["changedBack"]) {
+        plank = plank || (row["field"] == "items[game:plank].maxStack" && row["from"] == 160 && row["to"] == 80);
+        cap = cap || (row["field"] == "balance[game:balance].levelCap" && row["from"] == 50 && row["to"] == 60);
+    }
+    check(plank && cap && r.report["rollback"]["changedBackTotal"] == 2,
+          "changedBack: plank 160 -> 80 and levelCap 50 (the game's, plan B has no edit of it) -> 60: " + r.report["rollback"].dump());
+    check(logged(r.log, "registry: rollback: balance[game:balance].levelCap 50 -> 60"), "and kiln.log names it");
+}
+
+// A rollback is judged against the values of the plan it rolls away from (a world ran on them, so its saves can hold them):
+// a narrower level range or a shorter build-zone list than that plan's refuses the plan whole; a wider one is applied.
+void rollback_judged_against_the_plan_rolled_away_from(const std::string& dir) {
+    Files files;
+    auto levels = [](int max) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "levels.max", "op": )" + std::to_string(max) + "}]}}";
+    };
+    g_stacks = levels(10);
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = levels(20);
+    TreeView v2 = world();
+    const std::string hb = plan_hash(plan_start(dir, &files, &v2));
+    check(!ha.empty() && !hb.empty() && ha != hb, "two plans");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}, {"from", hb}}.dump();
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    check(s.report["rollback"].is_object() && s.report["rollback"]["state"] == "refused" &&
+              reason_of(s).find("items[game:plank].levels.max narrows the level range (levels.max 20 -> 10)") != std::string::npos &&
+              reason_of(s).find(hb.substr(0, 12)) != std::string::npos,
+          "rolling levels.max back from 20 to 10 would clamp copies a world on plan B saved: refused whole, naming that plan: " + s.report["rollback"].dump());
+    check(field_row(s.report, "game:plank", "levels.max")["result"] == 20 && s.rollback.empty(), "the mods' current edits run (20), not the plan's 10");
+    // the other way round widens the range: applied
+    g_stacks = levels(10);
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hb}, {"from", ha}}.dump();
+    TreeView v4 = world();
+    PlanStart w = plan_start(dir, &files, &v4);
+    check(w.report["rollback"]["state"] == "applied" && field_row(w.report, "game:plank", "levels.max")["result"] == 20,
+          "rolling back to a wider range (10 -> 20) is applied: " + w.report["rollback"].dump());
+    // without "from": judged against the plan the last world ran on (plans/index.json "world")
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    TreeView v5 = world();
+    PlanStart nf = plan_start(dir, &files, &v5);
+    check(nf.report["rollback"]["state"] == "refused" && reason_of(nf).find("levels.max 20 -> 10") != std::string::npos,
+          "no from: the last world's plan (B, 20) is the reference: " + nf.report["rollback"].dump());
+    // the build-zone list: plan D gives a fourth altar level, plan C none (the game's three)
+    files.data.erase("rollback.json");
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+    TreeView v6 = world();
+    const std::string hc = plan_hash(plan_start(dir, &files, &v6));
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60},
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "buildzoneSizesPerAltarLevel", "list": {"append": [{"x": 99, "y": 99, "z": 99}]}}]}})";
+    TreeView v7 = world();
+    PlanStart d = plan_start(dir, &files, &v7);
+    const std::string hd = plan_hash(d);
+    check(d.report["refused"].empty() && hd != hc, "plan D (four build-zone sizes) starts cleanly: " + d.report["refused"].dump().substr(0, 400));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hc}, {"from", hd}}.dump();
+    TreeView v8 = world();
+    PlanStart z = plan_start(dir, &files, &v8);
+    check(z.report["rollback"]["state"] == "refused" && reason_of(z).find("shortens the build-zone sizes to 3 altar level(s) from 4") != std::string::npos,
+          "rolling back to three build-zone sizes would leave a saved level-4 altar without one: refused whole: " + z.report["rollback"].dump());
+    // a warning class against that plan is reported (levelCap 70 -> 60; the game's 50 alone would say nothing)
+    files.data.erase("rollback.json");
+    auto cap = [](int c) {
+        return R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": )" + std::to_string(c) + "}]}}";
+    };
+    g_stacks = cap(60);
+    TreeView v9 = world();
+    const std::string hf = plan_hash(plan_start(dir, &files, &v9));
+    g_stacks = cap(70);
+    TreeView v10 = world();
+    const std::string he = plan_hash(plan_start(dir, &files, &v10));
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", hf}, {"from", he}}.dump();
+    TreeView v11 = world();
+    PlanStart c = plan_start(dir, &files, &v11);
+    std::string note;
+    for (const auto& n : c.report.value("saves", json::array()))
+        if (n["field"] == "balance[game:balance].levelCap") note = n["class"].get<std::string>() + "/" + n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(c.report["rollback"]["state"] == "applied" && note.rfind("progressionCap/warn: lowers the level cap 70 -> 60", 0) == 0 && note.find("against plan " + he.substr(0, 12)) != std::string::npos,
+          "registry.json saves: the rollback lowers the level cap against the plan it rolls away from: " + note);
+}
+
+// A start (not a rollback) whose level range is narrower than the last world's: applied with a warning (refusing it would
+// leave the game's range, narrower still)
+void a_start_below_the_last_worlds_range_warns(const std::string& dir) {
+    Files files;
+    auto levels = [](int max) {
+        return R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "levels.max", "op": )" + std::to_string(max) + "}]}}";
+    };
+    g_stacks = levels(20);
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = levels(15);
+    TreeView v2 = world();
+    PlanStart s = plan_start(dir, &files, &v2);
+    std::string note;
+    for (const auto& n : s.report.value("saves", json::array()))
+        if (n["field"] == "items[game:plank].levels.max") note = n["class"].get<std::string>() + "/" + n["decision"].get<std::string>() + ": " + n["text"].get<std::string>();
+    check(field_row(s.report, "game:plank", "levels.max")["result"] == 15 && s.report["refused"].empty(), "15 is applied (the game's 1 would be narrower still)");
+    check(note.rfind("levelRange/warn: narrows the level range (levels.max 20 -> 15)", 0) == 0 && note.find("against plan " + ha.substr(0, 12)) != std::string::npos &&
+              note.find("not applied") == std::string::npos,
+          "registry.json saves warns against the plan the last world ran on: " + note);
+    check(logged(s.log, "1 registry: saves: items[game:plank].levels.max narrows the level range"), "a kiln.log warning");
+}
+
+// A plan whose max stack is lower than the value under it needs the stack guard at the stage, not per entry at the world's load
+// (here the index was deleted, so no highest stack is known, and the request names no plan rolled away from).
+void rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(const std::string& dir) {
+    Files files;
+    g_stacks = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": 10}]}})";  // 20 -> 10
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kGood;
+    TreeView v2 = world();
+    plan_start(dir, &files, &v2);
+    files.data.erase("plans/index.json");
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", ha}}.dump();
+    g_guard_available = false;
+    TreeView v3 = world();
+    PlanStart s = plan_start(dir, &files, &v3);
+    g_guard_available = true;
+    check(s.report["rollback"].is_object() && s.report["rollback"]["state"] == "refused" && reason_of(s).find("stack guard is not available") != std::string::npos,
+          "the plan lowers plank's max stack 20 -> 10 and the guard is not available: refused whole at the stage: " + s.report["rollback"].dump());
+    check(field_row(s.report, "game:plank", "maxStack")["result"] == 80 && s.rollback.empty(), "the mods' current edits run (80)");
+    TreeView v4 = world();
+    g_guard_calls = 0;
+    PlanStart ok = plan_start(dir, &files, &v4);
+    check(ok.report["rollback"]["state"] == "applied" && g_guard_calls > 0, "with the guard: applied, the guard asked at the stage: " + ok.report["rollback"].dump());
+}
+
+// plans/index.json that cannot be read: kiln.log says so, the file is kept beside it, and since the highest stacks a world
+// started with are unknown the stack guard goes on; a hand-edited index naming no plan hash is never passed on as previous.
+void an_unreadable_index_is_kept_and_reported(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    const std::string cut = "{\"format\": 1, \"good\": {\"plan\": \"" + ha + "\"}, \"stacks\": {\"items[game:plank].maxStack\": 8";  // a write cut short
+    files.data["plans/index.json"] = cut;
+    g_stacks = R"({"registry": {"alter": [{"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60}]}})";
+    g_guard_calls = 0;
+    TreeView v2 = world();
+    PlanStart s = plan_start(dir, &files, &v2);
+    check(logged(s.log, "1 registry: kiln/data/content/registry/plans/index.json cannot be read"), "a warning in kiln.log");
+    check(files.data.count("plans/index.unreadable.json") && files.data["plans/index.unreadable.json"] == cut, "the unreadable index is kept beside it");
+    check(g_guard_calls > 0, "the highest max stacks a world started with are unknown: the stack guard is asked");
+    files.data["plans/index.json"] = json{{"format", 1}, {"good", {{"plan", "../../savegame/x"}, {"previous", 7}}}, {"stacks", {{"items[game:plank].maxStack", "big"}}}}.dump();
+    TreeView v3 = world();
+    PlanStart t = plan_start(dir, &files, &v3);
+    check(t.report["plan"]["previous"].is_null(), "an index entry that is no plan hash is not a previous plan: " + t.report["plan"].dump());
+}
+
+// The schemas' id migrations inside a GameStart callback's batch are named in registry.json "migrated" like a data section's
+// (a synthetic items 0.0.9 -> 0.1.0 step renaming stackSize to maxStack: test fixture only)
+void migrated_names_of_a_callback_turn(const std::string& dir) {
+    Files files;
+    TreeView view = world();
+    stage::Env env = env_of(&view, &files, dir, &no_sections);
+    Schema m = generated_schema();
+    m.registries["items"].migrations = {{"0.0.9", "0.1.0", {}, {{"stackSize", "maxStack"}}}};
+    env.schema = m;
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"codemod","version":"1.0.0"}])") == KILN_OK, "set_order");
+    uint64_t h = 0;
+    check(r.subscribe_stage(9, "codemod", [&](Stage s, const View&) {
+              if (s != Stage::Alter) return true;
+              uint32_t a = 0, b = 0;
+              std::string rep;
+              r.submit(9, "codemod", R"({"ir":1,"mod":"codemod","stage":"alter","edits":[{"n":7,"registry":"items","select":{"id":"game:plank"},"field":"stackSize","op":30}]})", &a, &b, &rep);
+              return true;
+          }, &h) == KILN_OK, "a native stage callback");
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    bool named = false;
+    for (const auto& x : rep.value("migrated", json::array()))
+        named = named || (x.value("mod", "") == "codemod" && x.value("note", "").find("#0: items.stackSize -> items.maxStack") != std::string::npos);
+    check(field_row(rep, "game:plank", "maxStack")["result"] == 30, "the old name is read as maxStack (30)");
+    check(named, "registry.json migrated names the turn's rename, numbered as the turn's edit: " + rep.value("migrated", json::array()).dump());
+}
+
+// A start whose stage had no base to read applied nothing: a world on it does not make it the last good plan
+void a_start_without_a_base_is_not_a_good_plan(const std::string& dir) {
+    Files files;
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const std::string ha = plan_hash(plan_start(dir, &files, &v1));
+    g_stacks = kChanged;
+    TreeView v2 = world();
+    stage::Env env = env_of(&v2, &files, dir, &stacks);
+    env.source = [](std::string* why) -> std::unique_ptr<model::Source> { *why = "the view is not ready"; return nullptr; };
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"}])") == KILN_OK, "set_order");
+    std::function<void(const Result&, bool)> world_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { world_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    check(bool(world_report) && live_result, "the live back-end is handed over");
+    world_report(*live_result, true);
+    const json idx = json::parse(files.data["plans/index.json"]);
+    check(idx["good"]["plan"] == ha, "the last good plan stays A: " + idx.dump());
+}
 }  // namespace
 
 // review3 S4: registry.json does not call a record verified when it was proven on another regmap/common (every row is off)
@@ -414,7 +989,20 @@ int main(int argc, char** argv) {
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
-        {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }}};
+        {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
+        {"plans_link_the_last_good_plan", [&] { plans_link_the_last_good_plan(dir); }},
+        {"rollback_starts_on_the_previous_plan", [&] { rollback_starts_on_the_previous_plan(dir); }},
+        {"rollback_refused_whole", [&] { rollback_refused_whole(dir); }},
+        {"save_checks_of_restart_fields", [&] { save_checks_of_restart_fields(dir); }},
+        {"stack_guard_against_the_last_world", [&] { stack_guard_against_the_last_world(dir); }},
+        {"stack_high_water_mark", [&] { stack_high_water_mark(dir); }},
+        {"rollback_changed_back_names_every_value", [&] { rollback_changed_back_names_every_value(dir); }},
+        {"rollback_judged_against_the_plan_rolled_away_from", [&] { rollback_judged_against_the_plan_rolled_away_from(dir); }},
+        {"a_start_below_the_last_worlds_range_warns", [&] { a_start_below_the_last_worlds_range_warns(dir); }},
+        {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }},
+        {"an_unreadable_index_is_kept_and_reported", [&] { an_unreadable_index_is_kept_and_reported(dir); }},
+        {"migrated_names_of_a_callback_turn", [&] { migrated_names_of_a_callback_turn(dir); }},
+        {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
