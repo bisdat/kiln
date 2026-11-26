@@ -467,7 +467,17 @@ SHA-256 of its content. It holds what the stage composed: each mod with its vers
 batches submitted before the stage and its `GameStart` `OnRegistry` turns, in the order they composed, as IR), the values
 they resolved to (`values`, `"<registry>[<id>].<field>"`, restart fields as the boot back-end wrote them; live fields as the
 stage composed them over the base), the entries added and removed, and the game build, side and Kiln version. The same mods
-with the same edits give the same plan. Plans are never deleted.
+with the same edits give the same plan.
+
+**Which plans are kept** (next release; before, none was ever removed, so the folder grew by one file for every changed set of
+mods and settings). At the end of a successful start Kiln keeps the last good plan and the good plan before it, the plan the
+last world ran on, this start's plan and its `previous`, every plan a pending `rollback.json` names (its `plan` and `from`,
+read again at that moment), and the newest 10 other plans (by the file's last write: a start on the same edits writes its plan
+again), and removes every other `plans/<sha256>.json`; kiln.log says how many (`registry: plans: removed ...`). Only plan files
+are removed: `plans/index.json`, a kept `plans/index.unreadable.json` and any other file stay. Nothing is removed by a start
+that failed or whose state is not known: one whose stage had no base to read, whose rollback request was refused (or cannot be
+read), whose `plans/index.json` could not be read, or that wrote no plan. `kilnctl registry rollback --to <hash>` can name
+only a plan that is still there (a removed one is refused: "not in kiln/data/content/registry/plans").
 
 **The last good plan** is the last one a world started on without a refused edit (`plans/index.json` keeps it, the good one
 before it, the plan the last world ran on, and the highest max stack a world started with per item); a start whose stage had
@@ -587,7 +597,7 @@ template, which take the `drops_` form. The table's GUID also selects it, as dat
 | `schema/registry-schema.schema.json` | the schema of those files |
 | `schema/registry/ids.lock.json` | every published registry and field name with its numeric id; never reused |
 | `schema/registry/migrations/` | id and field renames a breaking schema version ships (applied to every edit, "Versions" above) |
-| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan; the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
+| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan (the ones still needed and the newest 10 others are kept: "Which plans are kept"); the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
 | `<game>/kiln/data/content/registry/rollback.json` | a rollback request (`kilnctl registry rollback`), kept until `--clear` |
 | `schema/registry-section.schema.json` | the data section's schema (generated) |
 | `regmap/` | how each field maps onto the game, per game build (Kiln's part: mods never read it) |

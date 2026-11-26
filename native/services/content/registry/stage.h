@@ -59,6 +59,14 @@ struct Env {
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
     // The file is there (one file-system lookup, nothing read; proof-2 N7, as proof.h's exists); unset: read_data decides.
     std::function<bool(const std::string& rel)> data_exists;
+    // The files of a data folder (rel, e.g. "plans"; not its subfolders): each name and its last write time (any unit, later is
+    // larger), and removing one. The plans' pruning (registry-fixes item 6) uses them; unset: plans are never removed.
+    struct DataEntry {
+        std::string name;
+        int64_t time = 0;
+    };
+    std::function<std::vector<DataEntry>(const std::string& dir)> list_data;
+    std::function<bool(const std::string& rel)> remove_data;
     // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
     // Closes the interval between the core marking an owner dead and delivering its retiring notification.
     std::function<bool(uint64_t owner)> owner_alive;
@@ -84,6 +92,11 @@ struct Env {
 
 // The boot back-end's part of one resource: the registry rows of each boot-routed field, evaluated over the value the old
 // documents leave there and written after them, in the same copy (gamedata_bootpatch.cpp build).
+// The plans' pruning rule (registry-fixes item 6): of a plans folder's files, the plan files (<sha256>.json) to remove: every
+// one that `keep` does not name (plan hashes) and that is not among the `newest` others by time (ties: by name). Newest first.
+std::vector<std::string> plans_to_prune(const std::vector<Env::DataEntry>& files, const std::set<std::string>& keep, size_t newest);
+constexpr size_t kKeptOtherPlans = 10;  // the newest plans kept besides the named ones
+
 struct BootField {
     FieldRef field;
     const map::RegistryMap* reg = nullptr;
@@ -195,6 +208,7 @@ class Runner {
     bool on_stage_thread() const;
 
    private:
+    void prune_plans();  // at the end of a successful start (finish): the plans no start needs any more (registry-fixes item 6)
     bool prepare_live(LiveData* out, std::string* why);
     void notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation);
     struct Impl;

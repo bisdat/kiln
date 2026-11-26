@@ -189,6 +189,9 @@ struct Files {
     std::map<std::string, std::string> data;
     std::string report;
     std::vector<std::string> log;
+    std::map<std::string, int64_t> times;  // a data file's last write (a clock of this fake: later writes are larger)
+    int64_t clock = 1000;
+    std::vector<std::string> removed;     // data files the stage removed, in order
 };
 
 stage::Env env_of(TreeView* view, Files* files, const std::string& regmap_dir, std::vector<stage::Env::DataFile> (*data)(const Schema&)) {
@@ -205,11 +208,24 @@ stage::Env env_of(TreeView* view, Files* files, const std::string& regmap_dir, s
     e.data = data;
     e.folders = [] { return std::vector<std::pair<std::string, std::string>>{{"oldmod", "1.0.0"}, {"bigmod", "2.0.0"}, {"late", "1.0.0"}}; };
     e.write_report = [files](const std::string& t) { return files->report = t, true; };
-    e.write_data = [files](const std::string& rel, const std::string& t) { return files->data[rel] = t, true; };
+    e.write_data = [files](const std::string& rel, const std::string& t) { return files->data[rel] = t, files->times[rel] = ++files->clock, true; };
     e.read_data = [files](const std::string& rel) -> std::optional<std::string> {
         const auto it = files->data.find(rel);
         if (it == files->data.end()) return std::nullopt;
         return it->second;
+    };
+    e.list_data = [files](const std::string& dir) {
+        std::vector<stage::Env::DataEntry> out;
+        const std::string prefix = dir + "/";
+        for (const auto& [rel, text] : files->data)
+            if (rel.rfind(prefix, 0) == 0 && rel.find('/', prefix.size()) == std::string::npos)
+                out.push_back({rel.substr(prefix.size()), files->times.count(rel) ? files->times.at(rel) : 0});
+        return out;
+    };
+    e.remove_data = [files](const std::string& rel) {
+        files->removed.push_back(rel);
+        files->times.erase(rel);
+        return files->data.erase(rel) == 1;
     };
     e.log = [files](int level, const std::string& l) { files->log.push_back(std::to_string(level) + " " + l); };
     return e;
@@ -1084,6 +1100,120 @@ void a_start_without_a_base_is_not_a_good_plan(const std::string& dir) {
     const json idx = json::parse(files.data["plans/index.json"]);
     check(idx["good"]["plan"] == ha, "the last good plan stays A: " + idx.dump());
 }
+// registry-fixes item 6 (review-registry-rollback Q5): plans were never pruned, so the plans folder grew by one file per
+// changed mod set without bound. At the end of a successful start Kiln keeps the last good plan, its previous, the plan the
+// last world ran on, this start's plan, any plan a pending rollback.json names (and its "from"), and the newest 10 others,
+// and removes the other plans (only <sha256>.json files: the index, a kept unreadable index, temp files stay). A start that
+// failed (no base), whose rollback was refused (its error path) or whose index could not be read removes nothing.
+std::string junk_hash(int i) {
+    char b[65];
+    std::snprintf(b, sizeof b, "%064x", 0xabc000 + i);
+    return b;
+}
+void plan_files(Files& files, int n, int64_t from_time) {
+    for (int i = 0; i < n; ++i) {
+        const std::string rel = "plans/" + junk_hash(i) + ".json";
+        files.data[rel] = json{{"format", 2}, {"values", json::object()}, {"inputs", json::array()}}.dump();
+        files.times[rel] = from_time + i;  // junk 0 is the oldest
+    }
+}
+size_t plan_count(const Files& files) {
+    size_t n = 0;
+    for (const auto& [rel, t] : files.data)
+        if (rel.rfind("plans/", 0) == 0 && rel.size() == 6 + 64 + 5 && rel.compare(rel.size() - 5, 5, ".json") == 0) ++n;
+    return n;
+}
+bool has_plan(const Files& files, const std::string& hash) { return files.data.count("plans/" + hash + ".json") != 0; }
+
+void plans_are_pruned_at_the_end_of_a_successful_start(const std::string& dir) {
+    Files files;
+    plan_files(files, 15, 1);  // 15 plans of earlier starts, junk 0 the oldest
+    // the index names three of them: the last good plan (junk 0, the oldest), its previous (junk 1), the last world's (junk 2)
+    files.data["plans/index.json"] = json{{"format", 1}, {"good", {{"plan", junk_hash(0)}, {"previous", junk_hash(1)}, {"at", "x"}}},
+                                          {"world", {{"plan", junk_hash(2)}, {"at", "x"}}}}.dump();
+    files.data["plans/index.unreadable.json"] = "{cut";
+    files.data["plans/" + junk_hash(99) + ".json.tmp"] = "{";
+    files.data["plans/readme.txt"] = "a person's note";
+    g_stacks = kGood;
+    TreeView v1 = world();
+    const PlanStart a = plan_start(dir, &files, &v1);
+    const std::string ha = plan_hash(a);
+    check(!ha.empty() && has_plan(files, ha), "the start writes its plan");
+    check(has_plan(files, junk_hash(0)) && has_plan(files, junk_hash(1)) && has_plan(files, junk_hash(2)),
+          "the last good plan, its previous and the last world's plan stay");
+    bool newest = true;
+    for (int i = 5; i < 15; ++i) newest = newest && has_plan(files, junk_hash(i));
+    check(newest, "the newest 10 other plans stay");
+    check(!has_plan(files, junk_hash(3)) && !has_plan(files, junk_hash(4)), "the older others are removed");
+    check(plan_count(files) == 1 + 3 + 10, "14 plans are left: " + std::to_string(plan_count(files)));
+    check(files.data.count("plans/index.json") && files.data.count("plans/index.unreadable.json") &&
+              files.data.count("plans/" + junk_hash(99) + ".json.tmp") && files.data.count("plans/readme.txt"),
+          "files that are no plan stay (the index, the kept unreadable one, a temp file, a note)");
+    check(logged(a.log, "registry: plans: removed 2 older plan(s)"), "kiln.log says how many it removed");
+
+    // a pending rollback.json names a plan (and the plan it rolls away from): both stay. It is written after this start read the
+    // requests (as kilnctl registry rollback does while a game runs), so this start runs on the mods' edits and prunes.
+    plan_files(files, 15, 0);  // the junk again, all older than ha now
+    for (int i = 0; i < 15; ++i) files.times["plans/" + junk_hash(i) + ".json"] = i;  // junk 0 the oldest
+    g_stacks = kChanged;
+    TreeView v2 = world();
+    stage::Env env = env_of(&v2, &files, dir, &stacks);
+    auto read = env.read_data;
+    int rollback_reads = 0;
+    env.read_data = [&, read](const std::string& rel) -> std::optional<std::string> {
+        if (rel == "rollback.json" && ++rollback_reads > 1)  // the pruning's read, after the stage's
+            return json{{"format", 1}, {"plan", junk_hash(3)}, {"from", junk_hash(4)}, {"requested", "x"}, {"by", "test"}}.dump();
+        return read(rel);
+    };
+    {
+        stage::Runner r(std::move(env));
+        check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"}])") == KILN_OK, "set_order");
+        r.set_live([&](const stage::LiveHandoff&) {});
+        r.run({});
+        r.finish({});
+    }
+    check(rollback_reads >= 2, "the pruning reads the rollback request again at the end of the start");
+    check(has_plan(files, junk_hash(3)) && has_plan(files, junk_hash(4)), "the plans a pending rollback.json names stay");
+    check(has_plan(files, ha), "the start's previous (the last good plan) stays");
+
+    // error paths: a start whose rollback was refused, a start with an unreadable index, a start without a base remove nothing
+    plan_files(files, 15, 0);
+    files.data["rollback.json"] = json{{"format", 1}, {"plan", std::string(64, 'e')}, {"requested", "x"}, {"by", "test"}}.dump();  // no such plan
+    size_t before = plan_count(files);
+    files.removed.clear();
+    TreeView v3 = world();
+    const PlanStart refused = plan_start(dir, &files, &v3);
+    check(refused.report["rollback"].value("state", "") == "refused", "the rollback is refused (its plan is not there)");
+    check(files.removed.empty() && plan_count(files) >= before, "a start whose rollback was refused removes no plan");
+    files.data.erase("rollback.json");
+
+    files.data["plans/index.json"] = "{\"format\": 1, \"good\"";  // cut short
+    before = plan_count(files);
+    TreeView v4 = world();
+    plan_start(dir, &files, &v4);
+    check(files.removed.empty() && plan_count(files) >= before, "a start whose index could not be read removes no plan");
+
+    files.data["plans/index.json"] = json{{"format", 1}}.dump();
+    TreeView v5 = world();
+    stage::Env nobase = env_of(&v5, &files, dir, &stacks);
+    nobase.source = [](std::string* why) -> std::unique_ptr<model::Source> { *why = "the view is not ready"; return nullptr; };
+    {
+        stage::Runner r(std::move(nobase));
+        check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"}])") == KILN_OK, "set_order");
+        r.set_live([&](const stage::LiveHandoff&) {});
+        r.run({});
+        r.finish({});
+    }
+    check(files.removed.empty(), "a start without a base removes no plan");
+
+    // the rule itself: keep set, newest others by time, only plan names
+    const std::vector<stage::Env::DataEntry> listing = {{junk_hash(1) + ".json", 5}, {junk_hash(2) + ".json", 9}, {junk_hash(3) + ".json", 1},
+                                                        {"index.json", 0}, {junk_hash(4) + ".json.tmp", 0}, {junk_hash(5) + ".json", 7}};
+    const auto gone = stage::plans_to_prune(listing, {junk_hash(1)}, 1);
+    check(gone == std::vector<std::string>{junk_hash(5) + ".json", junk_hash(3) + ".json"},
+          "plans_to_prune keeps the named plans and the newest others, and names only plan files (oldest last)");
+}
+
 }  // namespace
 
 // review3 S4: registry.json does not call a record verified when it was proven on another regmap/common (every row is off)
@@ -1287,6 +1417,7 @@ int main(int argc, char** argv) {
         {"an_unreadable_index_is_kept_and_reported", [&] { an_unreadable_index_is_kept_and_reported(dir); }},
         {"migrated_names_of_a_callback_turn", [&] { migrated_names_of_a_callback_turn(dir); }},
         {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }},
+        {"plans_are_pruned_at_the_end_of_a_successful_start", [&] { plans_are_pruned_at_the_end_of_a_successful_start(dir); }},
         {"archive_journal_writers", [&] { archive_journal_writers(dir); }},
         {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }},
         {"old_writes_marks", [&] { old_writes_marks(dir); }},
