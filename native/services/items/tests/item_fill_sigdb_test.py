@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""GitHub #132 (0.2.0-dev.31.15): qualify stations.fill_items (sigdb server.d/stations.json, shared by the client) on static
+"""GitHub #132 (0.2.0-dev.31.17): qualify stations.fill_items (sigdb server.d/stations.json, shared by the client) on static
 copies of the pinned client (26430625, 5d9ef2f1) and dedicated server (26430253, f0d824be): the files are read, never run.
 
 What it pins (docs/re/stations.md section 10.9): the station screen's per-ingredient transfer reaches the server as

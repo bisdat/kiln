@@ -135,7 +135,7 @@ using PayFn = PayOut*(__fastcall*)(PayOut* out, void* tx, uint32_t entity, uint3
 struct Game {
     BaseAtFn base_at = nullptr;
     FillFn fill = nullptr;
-    ItemFillFn fill_item = nullptr;  // GitHub #132 (0.2.0-dev.31.15)
+    ItemFillFn fill_item = nullptr;  // GitHub #132 (0.2.0-dev.31.17)
     ResolveFn resolve = nullptr;
     InvalidateFn invalidate = nullptr;
     SpeedFn speed = nullptr;
@@ -2055,7 +2055,7 @@ void plan_tick(const KilnStationRequest& r, const KilnEntity* chest_ids, uint32_
     finish_plan(r, p);
 }
 
-// GitHub #132 (0.2.0-dev.31.15): the plan of an item fill (KILN_STATION_FILL_ITEM): the station's pile, the bag and the
+// GitHub #132 (0.2.0-dev.31.17): the plan of an item fill (KILN_STATION_FILL_ITEM): the station's pile, the bag and the
 // Magic chests of the station's base (the game's own call), the player's fill-opted links; one input {item, 1}.
 void plan_item_tick(const KilnStationRequest& r, PlanOut* p) {
     FsBytes fs{};
@@ -2566,7 +2566,7 @@ void run_fill(const Run& run, const Req& q, KilnStationResult* res) {
     finish(res, KILN_STATION_REFUSED, "the game's fill refused it (code %u)", static_cast<uint32_t>(at.code));
 }
 
-// ---- GitHub #132 (0.2.0-dev.31.15): the per-ingredient transfer (KILN_STATION_FILL_ITEM, docs/re/stations.md §10.9) ----
+// ---- GitHub #132 (0.2.0-dev.31.17): the per-ingredient transfer (KILN_STATION_FILL_ITEM, docs/re/stations.md §10.9) ----
 // The game's own AutoTransferItem, as the press runs it (player_crafting's AutomaticTransfer with an item), once per
 // layer inside one transaction: each link group's share from that group's containers with player 0, then the rest from
 // the station's base list A with the player (the bag first). Any code rolls everything back. One kiln.log line per
@@ -4517,7 +4517,7 @@ KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStati
         if (!bases) return KILN_ERR_UNAVAILABLE;
         const bool building = (flags & KILN_CRAFT_SOURCE_STOCK_BUILDING) != 0;
         // both leave out the Magic chests of the player's base: the bag and they pay first and are counted apart (FILLS
-        // since 0.2.0-dev.31.15, for the station screen's per-ingredient rows)
+        // since 0.2.0-dev.31.17, for the station screen's per-ingredient rows)
         const auto rows = link_rows(bases, player, craft_sources_copy(player), building ? &CraftSource::building : &CraftSource::fills,
                                     player_base_chests(player));
         *out_count = static_cast<uint32_t>(rows.size());
@@ -5063,7 +5063,7 @@ KilnResult KILN_CALL t_set_build_stock(uint32_t on, const KilnStationStack* rows
     return KILN_OK;
 }
 
-// GitHub #132 (0.2.0-dev.31.15): the FILL flags this build takes (the managed side asks before it names FILL_ITEM).
+// GitHub #132 (0.2.0-dev.31.17): the FILL flags this build takes (the managed side asks before it names FILL_ITEM).
 uint32_t KILN_CALL t_fill_flags() {
     if (!G.fill_ok || g_off.load()) return 0;
     uint32_t f = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER | KILN_STATION_FILL_NO_OUTPUTS;
@@ -5080,7 +5080,7 @@ const KilnStationsApi kTable = {
     &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock, &dyes_set_stock,
     &t_set_lock_stock, &t_lock_asks,
     &t_set_build_stock,  // GitHub #132 (0.2.0-dev.31.12), after #147's members
-    &t_fill_flags,       // GitHub #132 (0.2.0-dev.31.15)
+    &t_fill_flags,       // GitHub #132 (0.2.0-dev.31.17)
 };
 
 bool sym(const char* name, uintptr_t* out) {
@@ -5519,7 +5519,7 @@ void stations_resolve() {
                 sym("stations/FactoryInfoInvalidate", &G.invalidate) && E.setup_operator > 0 &&
                 E.setup_operator + 4 <= static_cast<int64_t>(kSetupBlock);
     G.control = G.read && feat("stations.control") && (G.invalidate || sym("stations/FactoryInfoInvalidate", &G.invalidate));
-    // GitHub #132 (0.2.0-dev.31.15): the per-ingredient transfer's own function, pinned by sigdb at the press's call
+    // GitHub #132 (0.2.0-dev.31.17): the per-ingredient transfer's own function, pinned by sigdb at the press's call
     // (@stations/AutoTransferAction.item: tx, list A, item, station, u16 amount, player)
     G.fill_items_ok = G.fill_ok && feat("stations.fill_items") && sym("stations/AutoTransferItem", &G.fill_item);
     if (!G.fill_items_ok && G.fill_ok && feat("stations.fill_items"))

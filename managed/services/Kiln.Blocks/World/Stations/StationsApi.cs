@@ -464,7 +464,7 @@ internal interface IStationsBackend
     /// set_build_stock, 0.2.0-dev.31.12).</summary>
     bool HasLinkedFills => false;
     /// <summary>kiln.stations takes FILL_ITEM (the station screen's per-ingredient transfer from the player's links too;
-    /// its fill_flags says so, 0.2.0-dev.31.15).</summary>
+    /// its fill_flags says so, 0.2.0-dev.31.17).</summary>
     bool HasItemFills => false;
     /// <summary>The table has base_stock_with_stations (Magic-chest stock plus finished station outputs).</summary>
     bool HasStockWithStations { get; }
