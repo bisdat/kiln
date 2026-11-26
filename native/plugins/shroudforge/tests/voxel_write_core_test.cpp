@@ -15,7 +15,7 @@ void check(bool ok, const char* what) {
 
 struct World {
     KilnVoxel cells[32 * 32 * 32]{};
-    KilnResult ready = KILN_OK, read = KILN_OK, write = KILN_OK;
+    KilnResult ready = KILN_OK, read = KILN_OK, write = KILN_OK, grid = KILN_OK;
     bool corrupt = false;        // the write commits something else (a mismatch on read back)
     int writes = 0, reads = 0, fault_after = -1;  // fault_after: the n-th write commits one block, then faults
     uint32_t flags_seen = 0;
@@ -62,7 +62,14 @@ KilnResult write(void* u, const KilnBuildWrite* bw, KilnBuildResult* r) {
     return KILN_OK;
 }
 std::string detail(void*) { return "writes are off: test"; }
-ksf::voxels::Io io(World& w) { return {&w, &ready, &read, &write, &detail}; }
+KilnResult grid(void* u, KilnBuildGrid* g) {  // kiln.build's grid: 32 x 32 cells (x, z); y has no engine bound
+    auto& w = *static_cast<World*>(u);
+    if (w.grid != KILN_OK) return w.grid;
+    g->cells_min[0] = g->cells_min[1] = g->cells_min[2] = 0;
+    g->cells_max[0] = 32, g->cells_max[1] = 8192, g->cells_max[2] = 32;
+    return KILN_OK;
+}
+ksf::voxels::Io io(World& w) { return {&w, &ready, &read, &write, &detail, &grid}; }
 }  // namespace
 
 int main() {
@@ -99,6 +106,24 @@ int main() {
         w.write = KILN_ERR_WRONG_THREAD;
         check(write_cells(io(w), o, d, v.data(), v.size(), why) == kRefused && why.find("wrong thread") != std::string::npos &&
               w.cells[World::at(2, 3, 4)] == 0, "kiln.build's refusal: outcome 1, nothing changed");
+    }
+    {  // only the voxel grid's cells, as ShroudForge's own writer: nothing below 0, x and z inside the grid; refused before
+       // any read or write (kiln.build checks no grid bounds; the engine's writer would commit blocks outside the world)
+        World w;
+        const int32_t outside[][3] = {{-1, 3, 4}, {2, -1, 4}, {2, 3, -1}, {29, 3, 4}, {2, 3, 30}, {INT32_MIN, 3, 4}};
+        for (const auto& at : outside)
+            check(write_cells(io(w), at, d, v.data(), v.size(), why) == kRefused && why.find("outside the voxel grid") != std::string::npos,
+                  "a box outside the voxel grid is refused");
+        check(w.writes == 0 && w.reads == 0, "and nothing was read or written for it");
+        const int32_t edge[3] = {28, 3, 29};  // ends exactly at 32 in x and z
+        check(write_cells(io(w), edge, d, v.data(), v.size(), why) == kWritten && w.cells[World::at(31, 4, 31)] == v[23],
+              "a box that ends at the grid's edge is written");
+        const int32_t high[3] = {2, INT32_MAX - 7 - 1, 4};  // y ends past ShroudForge's own bound (INT32_MAX - 7)
+        check(write_cells(io(w), high, d, v.data(), v.size(), why) == kRefused, "a box past y's bound is refused");
+        World g;
+        g.grid = KILN_ERR_UNAVAILABLE;
+        check(write_cells(io(g), o, d, v.data(), v.size(), why) == kRefused && g.writes == 0 && g.reads == 0,
+              "no grid yet: refused before any change");
     }
     {  // every write reads back wrong, the put-back too: outcome 3
         World w;

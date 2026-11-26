@@ -44,8 +44,8 @@ const KilnBuildApi* build() {
     if (const auto* b = v_build.load(std::memory_order_acquire)) return b;
     if (!v_api || !v_api->service) return nullptr;
     const auto* b = static_cast<const KilnBuildApi*>(v_api->service({KILN_BUILD_SERVICE, sizeof(KILN_BUILD_SERVICE) - 1}, 1));
-    if (!b || b->header.size < offsetof(KilnBuildApi, write) + sizeof(b->write) || !b->status || !b->ready || !b->read ||
-        !b->write)
+    if (!b || b->header.size < offsetof(KilnBuildApi, write) + sizeof(b->write) || !b->status || !b->grid || !b->ready ||
+        !b->read || !b->write)
         return nullptr;
     v_build.store(b, std::memory_order_release);  // service tables live as long as the process
     return b;
@@ -83,6 +83,7 @@ voxels::Io build_io(const KilnBuildApi* b) {
     };
     io.write = [](void* u, const KilnBuildWrite* w, KilnBuildResult* r) { return static_cast<KilnBuildApi*>(u)->write(w, r); };
     io.detail = [](void* u) { return build_detail(static_cast<KilnBuildApi*>(u)); };
+    io.grid = [](void* u, KilnBuildGrid* g) { return static_cast<KilnBuildApi*>(u)->grid(g); };
     return io;
 }
 
@@ -109,8 +110,8 @@ void KILN_CALL run_job(void* user) {
     uint32_t outcome = voxels::kUncertain;
     std::string why;
     try {
-        if (const auto* b = build()) outcome = voxels::write_cells(build_io(b), job.origin, job.dims, job.values.data(),
-                                                                   job.values.size(), why);
+        if (const auto* b = build())
+            outcome = voxels::write_cells(build_io(b), job.origin, job.dims, job.values.data(), job.values.size(), why);
         else outcome = voxels::kRefused, why = "kiln.build is not available in this start";
     } catch (...) {
         outcome = voxels::kUncertain;

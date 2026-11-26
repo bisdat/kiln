@@ -398,15 +398,26 @@ thread_local bool t_world_thread = false;
 bool g_post_refuses = false;
 std::mutex g_posts_mutex;
 std::vector<std::pair<KilnTaskFn, void*>> g_posts;
-KilnVoxel g_cells[16 * 16 * 16]{};
+KilnVoxel g_cells[16 * 16 * 16]{};  // the fake grid: 16 x 16 x 16 cells (x and z: one 16-cell tile each way)
 uint32_t g_write_flags = 0;
 int g_build_writes = 0;
+int g_outside = 0;      // cells kiln.build was asked to write outside the grid
 bool g_tick_ok = true;  // kiln.build's members answer only on the "server world's thread"
+bool inside(int64_t x, int64_t y, int64_t z) { return x >= 0 && x < 16 && y >= 0 && y < 16 && z >= 0 && z < 16; }
 size_t cell_at(int x, int y, int z) { return (static_cast<size_t>(z) * 16 + y) * 16 + x; }
 KilnResult KILN_CALL fb_status(KilnBuildStatus* st) {
     const uint32_t size = st->size;
     std::memset(st, 0, sizeof *st);
     st->size = size, st->read = st->write = st->world = 1;
+    return KILN_OK;
+}
+KilnResult KILN_CALL fb_grid(KilnBuildGrid* g) {
+    if (!t_world_thread) return g_tick_ok = false, KILN_ERR_WRONG_THREAD;
+    const uint32_t size = g->size;
+    std::memset(g, 0, sizeof *g);
+    g->size = size, g->cell_size = 0.5, g->block = 8;
+    g->cells_max[0] = 16, g->cells_max[1] = 8192, g->cells_max[2] = 16;  // as kiln.build: y has no engine bound
+    g->tile_cells[0] = g->tile_cells[1] = 16, g->tiles[0] = g->tiles[1] = 1;
     return KILN_OK;
 }
 KilnResult KILN_CALL fb_ready(const int32_t*, const uint32_t*) { return t_world_thread ? KILN_OK : (g_tick_ok = false, KILN_ERR_WRONG_THREAD); }
@@ -415,7 +426,10 @@ KilnResult KILN_CALL fb_read(const int32_t o[3], const uint32_t d[3], KilnVoxel*
     size_t j = 0;
     for (uint32_t z = 0; z < d[2]; ++z)
         for (uint32_t y = 0; y < d[1]; ++y)
-            for (uint32_t x = 0; x < d[0]; ++x) out[j++] = g_cells[cell_at(o[0] + x, o[1] + y, o[2] + z)];
+            for (uint32_t x = 0; x < d[0]; ++x) {
+                const int64_t cx = int64_t{o[0]} + x, cy = int64_t{o[1]} + y, cz = int64_t{o[2]} + z;
+                out[j++] = inside(cx, cy, cz) ? g_cells[cell_at(int(cx), int(cy), int(cz))] : KilnVoxel{0};
+            }
     return KILN_OK;
 }
 KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
@@ -425,7 +439,11 @@ KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
     size_t j = 0;
     for (uint32_t z = 0; z < w->dims[2]; ++z)
         for (uint32_t y = 0; y < w->dims[1]; ++y)
-            for (uint32_t x = 0; x < w->dims[0]; ++x) g_cells[cell_at(w->origin[0] + x, w->origin[1] + y, w->origin[2] + z)] = w->cells[j++];
+            for (uint32_t x = 0; x < w->dims[0]; ++x, ++j) {
+                const int64_t cx = int64_t{w->origin[0]} + x, cy = int64_t{w->origin[1]} + y, cz = int64_t{w->origin[2]} + z;
+                if (inside(cx, cy, cz)) g_cells[cell_at(int(cx), int(cy), int(cz))] = w->cells[j];
+                else ++g_outside;
+            }
     r->flags = KILN_BUILD_R_CHANGED | KILN_BUILD_R_VERIFIED;
     r->blocks_written = 1;
     return KILN_OK;
@@ -626,7 +644,7 @@ int main() {
     check(!g_host->voxel_write(at, box, cells, 4, &outcome) && outcome == 1, "no kiln.build: refused before any change");
     static KilnBuildApi fake{};
     fake.header.size = sizeof fake, fake.header.version = KILN_BUILD_VERSION;
-    fake.status = &fb_status, fake.ready = &fb_ready, fake.read = &fb_read, fake.write = &fb_write;
+    fake.status = &fb_status, fake.grid = &fb_grid, fake.ready = &fb_ready, fake.read = &fb_read, fake.write = &fb_write;
     g_fake_build = &fake;
     check(g_host->voxel_write_ready() == 0 && !g_host->voxel_write(at, box, cells, 4, &outcome) && outcome == 1,
           "no world this game hosts: not ready, refused");
@@ -650,6 +668,30 @@ int main() {
     g_post_refuses = true;
     check(!g_host->voxel_write(at, box, other, 4, &outcome) && outcome == 1, "a post Kiln refuses: refused");
     g_post_refuses = false;
+    // only the voxel grid's cells, as ShroudForge's own writer (read_registered_voxel_grid.cpp region(): no negative
+    // coordinate, x and z inside the grid's tiles): kiln.build checks no grid bounds, and the engine's block writer would
+    // commit blocks outside the world
+    {
+        const int writes_before = g_build_writes;
+        const int32_t outside[][3] = {{-1, 3, 4}, {2, -1, 4}, {2, 3, -2}, {15, 3, 4}, {2, 3, 15}, {INT32_MIN, 3, 4}};
+        const char* what[] = {"x below 0", "y below 0", "z below 0", "x past the grid", "z past the grid", "x at INT32_MIN"};
+        for (size_t i = 0; i < std::size(outside); ++i) {
+            run_posts(30);
+            outcome = 9;
+            const bool ok = g_host->voxel_write(outside[i], box, other, 4, &outcome);
+            check(!ok && outcome == 1, (std::string("a box outside the voxel grid is refused before any change: ") + what[i]).c_str());
+        }
+        check(g_build_writes == writes_before && g_outside == 0, "nothing outside the grid reaches kiln.build's writer");
+        const int32_t edge[3] = {14, 3, 14};
+        run_posts(30);
+        outcome = 9;
+        check(g_host->voxel_write(edge, box, other, 4, &outcome) && outcome == 0 && g_cells[cell_at(15, 3, 15)] == 4,
+              "a box that ends at the grid's edge is written");
+        std::lock_guard lock(g_log_mutex);
+        bool said = false;
+        for (const auto& l : g_lines) said |= l.find("outside the voxel grid") != std::string::npos;
+        check(said, "kiln.log says the box is outside the voxel grid");
+    }
     {
         std::lock_guard lock(g_log_mutex);
         bool said = false;
@@ -662,7 +704,8 @@ int main() {
         std::lock_guard lock(g_log_mutex);
         size_t errors = 0;
         for (const auto& l : g_lines)
-            if (l[0] == 'E' && l.find("faulted") == std::string::npos) ++errors, std::printf("  unexpected log: %s\n", l.c_str());
+            if (l[0] == 'E' && l.find("faulted") == std::string::npos)
+                ++errors, std::printf("  unexpected log: %s\n", l.c_str());
         if (errors) ++g_fail;
     }
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
