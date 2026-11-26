@@ -134,6 +134,16 @@ such as the Web Admin mod: read `data.registry` of the reload's result, and `cou
 rows whose reason starts with `RestartRequired: ` in `kiln/state/registry.json` for everything that waits (also what a
 live edit left). `kilnctl status` prints the same as one line, and the launcher's Conflicts view lists them first.
 
+**The reply says when a data pack threw** (next release). When a data pack of a reloaded mod throws while the
+application after the reload applies it, kiln.content sets the mod apart (services/content.md "When a reload fails
+partway"): the reply adds `; data packs: <mod>'s <mod folder>/content/<file> threw while it applied (<what>) and was set
+apart: what it did came off and the packs it had before apply again` (or `... and none of its packs apply`) before the
+registry part, and `data` gets `packs`: `{known, setApart: [{mod, file, reason, previous}]}` (`previous`: its packs from
+before apply again, whole; `known: false`: no pack report was read, for example without kiln.content). The reload itself
+still succeeded (`ok` true): the mod is loaded; what applies of its packs is what the reply says. Both parts are
+additive: the message starts as before, and `data.affected` and `data.registry` are unchanged. The same rows are the
+`setApart` list of kiln.content's pack report (`Content.PackReport()`'s source, `kiln_content.h` `report`).
+
 ## Layout on a server
 See `tools/deploy-server.sh`. Kiln's own files live under `<server>/kiln/`; only `dinput8.dll` sits next to the exe.
 A client adds the launcher's files: `kiln/profile.json`, `kiln/play-once.ini`, `kiln/chain.ini` + `kiln/chain/`, and

@@ -142,7 +142,9 @@ A mod's packs apply whole from one version, never half:
   mod's files after the one that threw as `<file> (not applied: an earlier pack of the mod threw)` and the mod as
   `<mod> (set apart)`; the log says `data packs of <mod>: a pack threw while it applied: what it did came off (<n>
   definition(s), clone(s) and section(s) besides its layers); the packs it had before apply again, whole` (or `none of
-  its packs apply`). What a service does with its own state beyond its section (a creature it already spawned from it)
+  its packs apply`). The report's `setApart` list has one row per mod set apart in that application (`mod`, `file`: the
+  pack that threw, `reason`: what it threw, `previous`: whether its packs from before apply again), and the reply of a
+  `reload <id>` names them (next release; [architecture.md](../architecture.md#what-reload-id-covers)). What a service does with its own state beyond its section (a creature it already spawned from it)
   is the service's.
 - Inside one application the layers change under one store lock: no reader that takes it (a drop table being acquired,
   the content sync's export) sees a mix of the old and the new layer.

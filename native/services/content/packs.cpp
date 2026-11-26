@@ -1058,6 +1058,7 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
         };
         // Applies one pack; a pack that throws (an unexpected value type) is reported and its mod set apart below. False:
         // it threw.
+        std::string threw_file, threw_why;  // the pack that threw last, and why (the report's setApart row)
         auto apply_one = [&](ParsedPack& pack, uint32_t file_index, ApplyResult* out) {
             const PackFile& p = pack.file;
             if (!pack.valid) return true;
@@ -1069,6 +1070,7 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             } catch (const std::exception& e) {
                 out->errors.push_back(p.rel + ": applying it failed (" + e.what() + ")");
                 threw.insert(p.mod);
+                threw_file = p.rel, threw_why = e.what();
                 ok = false;
             }
             t_pack_dir.clear();
@@ -1122,6 +1124,7 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
                 rep.files.emplace_back(rel, std::move(pack.report));
             }
             if (threw_here) {
+                PacksReport::SetApart apart{mod, threw_file, threw_why, false};
                 const uint32_t undone = roll_back(o);
                 std::vector<KeptFile> again;
                 {
@@ -1143,6 +1146,8 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
                         break;
                     }
                 }
+                apart.previous = again_ok;
+                rep.set_apart.push_back(std::move(apart));
                 if (again_ok) {
                     const uint64_t mi = mod_index(mod);
                     const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > mi; });
@@ -1242,6 +1247,10 @@ std::string report_json(const PacksReport& rep) {
         packs.push_back({{"file", rel}, {"applied", r.applied}, {"errors", r.errors}, {"warnings", r.warnings}});
     j["packs"] = packs;
     j["skipped"] = rep.skipped;
+    json apart = json::array();
+    for (const PacksReport::SetApart& a : rep.set_apart)
+        apart.push_back({{"mod", a.mod}, {"file", a.file}, {"reason", a.reason}, {"previous", a.previous}});
+    j["setApart"] = apart;
     json c = json::array();
     for (const Conflict& x : rep.conflicts)
         c.push_back({{"field", x.what}, {"winner", x.winner}, {"winnerValue", x.winner_value}, {"loser", x.loser}, {"loserValue", x.loser_value}});

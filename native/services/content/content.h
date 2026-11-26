@@ -411,6 +411,13 @@ struct PacksReport {
     std::vector<std::string> skipped;  // mods whose packs did not apply (not loaded)
     std::vector<std::pair<std::string, ApplyResult>> files;  // rel path -> result
     std::vector<Conflict> conflicts;
+    // mods set apart in this application: a pack of theirs threw while it applied, what their packs did came off, and their
+    // packs from before apply again whole (previous) or none of them do. The report's "setApart" (Kiln.Host's reload reply).
+    struct SetApart {
+        std::string mod, file, reason;
+        bool previous = false;
+    };
+    std::vector<SetApart> set_apart;
 };
 // Reverts every pack owner, applies every pack file in order, flushes. Returns the report. A mod's packs apply whole from
 // one version: a mod with a file that cannot be read or is no pack keeps the packs of its last application in which every

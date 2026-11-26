@@ -222,7 +222,9 @@ typedef struct KilnContentApi {
     KilnResult(KILN_CALL* dump)(KilnStr path, char* written, size_t cap, size_t* out_len);
     /* Re-reads every mod folder's content/<file>.json now (also happens when a file changes). */
     KilnResult(KILN_CALL* reload_packs)(void);
-    /* JSON report of the last data-pack application: packs, errors, conflicts. NUL-terminated, cut at cap. */
+    /* JSON report of the last data-pack application: generation, packs, errors, conflicts, skipped, and setApart (the mods a
+     * pack of which threw while it applied: [{"mod", "file", "reason", "previous"}], previous = their packs from before apply
+     * again). NUL-terminated, cut at cap (*out_len: the whole length). */
     KilnResult(KILN_CALL* report)(char* buffer, size_t cap, size_t* out_len);
 
     /* fn runs after every application (world load, pack reload), on the tick thread (Pre), after the data packs:
