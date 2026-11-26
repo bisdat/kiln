@@ -229,6 +229,37 @@ fn no_answer_in_time_is_unreachable() {
     assert_eq!(public::check(&nowhere, Duration::from_secs(3)), Err(public::Fallback::Unreachable));
 }
 
+/// (review) A peer that announces a TLS record and then sends it a byte at a time, each byte well within any one read's
+/// timeout: the check still ends at its deadline. rustls's handshake reads many times in one call, so a socket timeout
+/// set once before it would start again with every byte, and the click (and the web panels' lock) would wait as long
+/// as the peer likes.
+#[test]
+fn a_peer_that_drips_its_answer_still_gets_only_the_checks_time() {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut s = s;
+                // a 16 KiB handshake record, then one byte every 100 ms for 5 s
+                if s.write_all(&[0x16, 0x03, 0x03, 0x40, 0x00]).is_err() {
+                    return;
+                }
+                for _ in 0..50 {
+                    std::thread::sleep(Duration::from_millis(100));
+                    if s.write_all(&[0x02]).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    let slow = endpoint::PublicAddress::parse(&format!("https://localhost:{port}/"), &"ab".repeat(32)).unwrap();
+    let t = Instant::now();
+    assert_eq!(public::check(&slow, Duration::from_millis(800)), Err(public::Fallback::Unreachable));
+    assert!(t.elapsed() < Duration::from_millis(2000), "the check keeps to its time: {:?}", t.elapsed());
+}
+
 /// (review) A name with two addresses where the first swallows connections without a word (a broken IPv6 route, with
 /// the relay's AAAA record first in the answer): the next address still gets its turn within the check's time, as a
 /// browser's would, instead of the first one taking all of it and the panel always opening on this computer.

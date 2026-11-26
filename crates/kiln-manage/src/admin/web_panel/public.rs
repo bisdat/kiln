@@ -39,17 +39,17 @@ pub fn check(public: &PublicAddress, timeout: Duration) -> Result<(), Fallback> 
     let deadline = Instant::now() + timeout;
     let left = || deadline.saturating_duration_since(Instant::now());
     let addrs = resolve(&public.host, public.port, left()).ok_or(Fallback::Unreachable)?;
-    let mut socket = connect(&addrs, deadline).ok_or(Fallback::Unreachable)?;
+    let socket = connect(&addrs, deadline).ok_or(Fallback::Unreachable)?;
+    // every read and write waits at most until the deadline (rustls's handshake reads many times in one call)
+    let mut io = Deadlined { socket: &socket, deadline };
     let config = super::pin::pinned_config(&public.sha256).map_err(|_| Fallback::Refused)?;
     let name = rustls::pki_types::ServerName::try_from(public.host.clone()).map_err(|_| Fallback::Refused)?;
     let mut tls = rustls::ClientConnection::new(config, name).map_err(|_| Fallback::Refused)?;
     while tls.is_handshaking() {
-        timeouts(&socket, left())?;
-        tls.complete_io(&mut socket).map_err(|e| failure(&e))?;
+        tls.complete_io(&mut io).map_err(|e| failure(&e))?;
     }
-    timeouts(&socket, left())?;
     let host = if public.port == 443 { public.host.clone() } else { format!("{}:{}", public.host, public.port) };
-    let mut stream = rustls::Stream::new(&mut tls, &mut socket);
+    let mut stream = rustls::Stream::new(&mut tls, &mut io);
     stream
         .write_all(format!("GET /api/auth/status HTTP/1.1\r\nHost: {host}\r\nUser-Agent: kiln-launcher\r\nAccept: application/json\r\nConnection: close\r\n\r\n").as_bytes())
         .map_err(|e| failure(&e))?;
@@ -122,11 +122,37 @@ pub(super) fn connect(addrs: &[SocketAddr], deadline: Instant) -> Option<TcpStre
     None
 }
 
-fn timeouts(s: &TcpStream, left: Duration) -> Result<(), Fallback> {
-    if left.is_zero() {
-        return Err(Fallback::Unreachable);
+/// The check's socket: each read and write waits only until the deadline (and past it fails as timed out), however
+/// often it is called. A socket timeout set once would start again with every call, so a peer that sends a byte at a
+/// time could keep the check (and the web panels' lock it runs under) for as long as it likes.
+struct Deadlined<'a> {
+    socket: &'a TcpStream,
+    deadline: Instant,
+}
+
+impl Deadlined<'_> {
+    fn left(&self) -> std::io::Result<Duration> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() { Err(ErrorKind::TimedOut.into()) } else { Ok(left) }
     }
-    s.set_read_timeout(Some(left)).and_then(|_| s.set_write_timeout(Some(left))).map_err(|_| Fallback::Unreachable)
+}
+
+impl Read for Deadlined<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.socket.set_read_timeout(Some(self.left()?))?;
+        (&mut &*self.socket).read(buf)
+    }
+}
+
+impl Write for Deadlined<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.socket.set_write_timeout(Some(self.left()?))?;
+        (&mut &*self.socket).write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// A TLS refusal (another certificate, an alert) is a refusal; a timeout or a dropped connection is no answer.
