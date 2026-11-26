@@ -97,13 +97,20 @@ uint32_t* current_entity(void*, uint32_t* out) { *out = fixture::current; return
 std::mutex mid2_mu;
 std::map<uintptr_t,int> mid2_links;
 std::function<void(uintptr_t)> mid2_during;
+uintptr_t mid2_refuse = 0;            // review of 31.15: a target kiln.hooks cannot hook
+std::vector<uintptr_t> foreign;       // review of 31.15: addresses another module patched (code_state says FOREIGN)
 KilnResult KILN_CALL mid2(KilnOwner,uintptr_t target,const KilnHookOrder*,KilnMidFn,void*,KilnHandle* h) {
+    if (target && target == mid2_refuse) return KILN_ERR_UNAVAILABLE;
     { std::lock_guard lock(mid2_mu); ++mid2_links[target]; *h = 100 + mid2_links.size(); }
     if (mid2_during) mid2_during(target);
     return KILN_OK;
 }
 KilnResult KILN_CALL revoke(KilnHandle) { return KILN_OK; }
-KilnResult KILN_CALL code_state(uintptr_t,size_t,uint32_t* state,uint64_t* generation) { *state=KILN_CODE_ORIGINAL; *generation=0; return KILN_OK; }
+KilnResult KILN_CALL code_state(uintptr_t at,size_t n,uint32_t* state,uint64_t* generation) {
+    *state=KILN_CODE_ORIGINAL; *generation=0;
+    for (uintptr_t f : foreign) if (f >= at && f - at < n) *state = KILN_CODE_FOREIGN;
+    return KILN_OK;
+}
 KilnHooksApi hooks = [] { KilnHooksApi t{}; t.header = {sizeof t, KILN_HOOKS_VERSION}; t.mid2 = &mid2; t.revoke = &revoke; t.code_state = &code_state; return t; }();
 std::map<std::string,uint32_t> lowered;
 KilnResult KILN_CALL report(KilnOwner,KilnStr feature,uint32_t,uint32_t reason,KilnStr) {
@@ -116,6 +123,27 @@ const void* KILN_CALL service(KilnStr name,uint32_t) {
     return s == KILN_HOOKS_SERVICE ? static_cast<const void*>(&hooks) : s == KILN_CAPS_SERVICE ? static_cast<const void*>(&caps) : nullptr;
 }
 uint32_t KILN_CALL side() { return KILN_SIDE_CLIENT; }  // a hosting client: its server world and its client world
+// review of 31.15: lock_resolve against a symbol table; `code` holds the three calls call_matches checks
+alignas(16) uint8_t code[0x40] = {};
+std::map<std::string,uintptr_t> symbols;
+KilnResult KILN_CALL symbol(KilnStr name,uintptr_t* out) {
+    const auto it = symbols.find(std::string(name.ptr, name.len));
+    if (it == symbols.end()) return KILN_ERR_NOT_FOUND;
+    *out = it->second;
+    return KILN_OK;
+}
+KilnResult KILN_CALL constant(KilnStr name,int64_t* out) {
+    const std::string s(name.ptr, name.len);
+    *out = s == "locks/lock.item" ? 0x10 : s == "locks/lock.amount" ? 0x16 : s == "locks/lock.mask" ? 0x18 : -1;
+    return *out < 0 ? KILN_ERR_NOT_FOUND : KILN_OK;
+}
+bool KILN_CALL feature(KilnStr name) { return std::string_view(name.ptr, name.len) == "items.lock_sources"; }
+void put_call(size_t at, uintptr_t to) {  // an E8 at code + at calling `to`
+    const int32_t rel = static_cast<int32_t>(static_cast<intptr_t>(to) - reinterpret_cast<intptr_t>(code + at + 5));
+    code[at] = 0xe8;
+    std::memcpy(code + at + 1, &rel, 4);
+}
+uint16_t* __fastcall map_find(void*, const uint32_t*) { return nullptr; }
 }
 int main() {
     using namespace kitems;
@@ -126,7 +154,7 @@ int main() {
     api.service=&service;api.side=&side; g_api=&api;
     G.read=G.craft_ok=G.registered_ok=G.outputs_ok=true;G.pay=&pay;
     E.get_component=&component;E.job_storage=&job_storage;H_FACTORY=99;
-    g_lock_feat=true;g_lock_current=&current_entity;
+    g_lock_feat=true;g_lock_row_feat=true;g_lock_current=&current_entity;  // as lock_resolve on a client with both prompt sites
     for (LogLimit* l : {&g_log_lock_check,&g_log_lock_pay,&g_log_lock_stand,&g_log_lock_snap,&g_log_lock_prompt}) l->budget=100000;
     // the bases system: player 1's BasicPlayerInfos record (id 1, login 0, CanAccessInventories)
     uint8_t infos[0xa0*2]={};wr(infos,0,uint32_t{1});infos[0x9d]=2;
@@ -239,12 +267,16 @@ int main() {
         wr(rec,0xd8,PICK);
         // no item (a lock without one): untouched
         wr(rec,0xd8,uint32_t{0});CHECK(row(0)==(HIGH|0));wr(rec,0xd8,PICK);
-        // a fault in the hook: the feature stands down (the game's own counts), the tick thread lowers the row once
+        // a fault in the hook (review of 31.15): the line is display only, so the line alone stands down (the game's count);
+        // the press and the locked prompt keep counting the links, and no capability row is lowered (on a hosted world the
+        // same flag would have stood the server half's lock check and payment down for every player)
         KilnRegisters bad{};bad.r14=0x10;bad.r8=0;logs.clear();
         hk_lock_row(bad);
-        CHECK(g_lock_off.load() && logged("the lock prompt's requirement line hook faulted") && g_lock_fault_report.load());
-        CHECK(row(0)==(HIGH|0));  // off: nothing counted
-        g_lock_off=false;g_lock_fault_report=false;
+        CHECK(g_lock_row_off.load() && !g_lock_off.load() && !g_lock_fault_report.load() &&
+              logged("the lock prompt's requirement line hook faulted") && logged("the line keeps the game's count"));
+        CHECK(row(0)==(HIGH|0));  // the line: nothing counted
+        CHECK(eval(0)==3);        // the press: bag 0 + linked 3, as before the fault
+        g_lock_row_off=false;
         snap[1]={PICK,0};t_set_lock_stock(1,snap,2);
     }
     for(uint32_t i=0;i<40;++i){wr(lock,0x10,1000+i);eval(0);}
@@ -353,6 +385,67 @@ int main() {
         CHECK(g_lock_eval_on && g_lock_paid_on && g_lock_ui_on && g_lock_row_on);
         CHECK(logged("this client's lock checks count the bag plus linked sources (the press, the locked prompt and its requirement line)"));
         t_set_lock_stock(0,nullptr,0);g_registered.clear();
+    }
+    // ---- review of 31.15: the requirement line is display only. A hosting client is a client process, so whatever
+    // switches items.lock_sources off there also switches off its server half's lock check and payment for every player of
+    // the world. A client without the line's site (a build where only that pattern broke), with another module's patch on
+    // it, or whose hook cannot go in keeps the rest: only the line keeps the game's count, logged, and no row is lowered ----
+    {
+        const uintptr_t C = reinterpret_cast<uintptr_t>(code), count_fn = C + 0x30, pay_fn = C + 0x38;
+        put_call(0x00, count_fn); put_call(0x10, pay_fn); put_call(0x20, count_fn);  // LockCountRet, LockPaid, UiLockCountRet
+        symbols = {{"locks/LockCountRet", C + 5}, {"locks/InventoryItemCount", count_fn}, {"locks/LockPaid", C + 0x15},
+                   {"gems/PayMaterial", pay_fn}, {"world/CurrentEntityId", reinterpret_cast<uintptr_t>(&current_entity)},
+                   {"locks/client.UiLockCountRet", C + 0x25}, {"locks/client.LockRowCount", 0x140bf73be}};
+        api.symbol = &symbol; api.feature = &feature; api.constant = &constant; E.component_map_find = &map_find;
+        lowered.clear(); logs.clear(); g_lock = {};
+        lock_resolve();
+        CHECK(g_lock_feat && g_lock_row_feat && g_lock.ui_ret == C + 0x25 && g_lock.row == 0x140bf73be && lowered.empty());
+        symbols.erase("locks/client.LockRowCount"); g_lock = {};
+        lock_resolve();
+        CHECK(g_lock_feat && !g_lock_row_feat && !g_lock.row && lowered.empty() &&
+              logged("the lock prompt's requirement line keeps the game's count (the bag only): locks/client.LockRowCount did not resolve"));
+        symbols.erase("locks/client.UiLockCountRet"); g_lock = {}; lowered.clear();
+        lock_resolve();  // the locked prompt's site stays required, as since 31.12
+        CHECK(!g_lock_feat && !g_lock_row_feat && lowered["items.lock_sources"] == KILN_CAP_REASON_SYMBOL_MISSING);
+        api.symbol = nullptr; api.feature = nullptr; api.constant = nullptr; E.component_map_find = nullptr;
+
+        g_lock = {0x140b0a97,0x140a536e,0x1402bc483,0x14093a2a0,0x1401b0d60,0x140bf73be};
+        KilnStationStack on[1] = {{PICK,1}};
+        auto client = [&](bool row_feat) {  // a fresh client process's first client-world step with the snapshot on
+            g_lock_feat = true; g_lock_row_feat = row_feat; g_lock_off = false; g_lock_row_off = false;
+            g_lock_eval_on = g_lock_paid_on = g_lock_ui_on = g_lock_row_on = false;
+            mid2_links.clear(); lowered.clear();
+            CHECK(t_set_lock_stock(1,on,1) == KILN_OK);
+            logs.clear(); lock_client_pre();
+        };
+        auto rest_on = [&] {  // the press and the locked prompt count the links; nothing stood down, nothing lowered
+            return g_lock_eval_on && g_lock_ui_on && mid2_links[g_lock.count_ret] == 1 && mid2_links[g_lock.ui_ret] == 1 &&
+                   !g_lock_off && lowered.empty() && logged("this client's lock checks count the bag plus linked sources (the press, "
+                                                            "the locked prompt; the requirement line keeps the game's count)");
+        };
+        // another module patched the HUD's count: the line stands down alone
+        foreign = {g_lock.row - 0x10};
+        client(true);
+        CHECK(rest_on() && !g_lock_row_on && g_lock_row_off && !mid2_links.count(g_lock.row));
+        CHECK(logged("the lock prompt's requirement line stands down: the lock prompt's requirement line count code state FOREIGN"));
+        foreign.clear();
+        // its hook cannot go in: the same
+        mid2_refuse = g_lock.row;
+        client(true);
+        CHECK(rest_on() && !g_lock_row_on && g_lock_row_off && logged("locks/client.LockRowCount could not be hooked"));
+        mid2_refuse = 0;
+        // its site did not resolve: not tried
+        client(false);
+        CHECK(rest_on() && !g_lock_row_on && !g_lock_row_off && !mid2_links.count(g_lock.row));
+        logs.clear(); lock_client_pre();
+        CHECK(logs.empty() && mid2_links[g_lock.count_ret] == 1);  // done: the next steps return at once
+        // another module patched the locked prompt's count (required since 31.12): everything stands down, as before
+        foreign = {g_lock.ui_ret - 0x10};
+        client(true);
+        CHECK(g_lock_off && !g_lock_eval_on && lowered["items.lock_sources"] == KILN_CAP_REASON_FAULTED);
+        foreign.clear();
+        g_lock_feat = g_lock_row_feat = true; g_lock_off = false; g_lock_row_off = false;
+        t_set_lock_stock(0,nullptr,0);
     }
     std::printf("lock sources: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }

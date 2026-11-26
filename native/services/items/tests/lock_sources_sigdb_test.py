@@ -8,7 +8,7 @@ result, r14 the InteractionLock, [rsp+0x58] the context), interaction_attempt's 
 the transaction, [rsp+0x58] PayMaterial's result, r14 the guest, rsi the lock, the Consume test after it), the locked
 prompt's count (locks/client.UiLockCountRet, client only), the prompt's requirement row and its own bag count that
 decides the row's colour (locks/client.LockRowCount, client only), the InteractionLock offsets the patterns capture, and that a
-changed byte at each call turns the feature off."""
+changed byte at each call turns the feature off (a changed requirement row only that symbol: the line is display only)."""
 import argparse
 import copy
 import hashlib
@@ -144,7 +144,13 @@ def main():
     b = bytearray(raw)
     b[row + 1] = 0x90
     altered.img = bytes(b)
-    check(not Resolver(altered, doc_for('client')).run()[2]['locks'], 'client: a changed requirement row disables items.lock_sources')
+    # review of 31.15: the line is display only and a hosting client's server half shares items.lock_sources, so the
+    # row's symbol is not one of the feature's: a build where only it breaks keeps the feature, and the line alone keeps
+    # the game's count (kiln-items' lock_resolve)
+    found_alt, _, features_alt = Resolver(altered, doc_for('client')).run()
+    check(features_alt['locks'] and not found_alt['locks/client.LockRowCount']['ok'] and 'locks/client.LockRowCount' not in
+          {name: doc for name, doc, _ in compose('client')}['lock-sources.json']['features']['items.lock_sources']['symbols'],
+          'client: a changed requirement row leaves items.lock_sources on; only locks/client.LockRowCount does not resolve')
     check(not Resolver(s, {'symbols': {'locks/client.LockRowCount': copy.deepcopy(
               {name: doc for name, doc, _ in compose('client')}['lock-sources.json']['symbols']['locks/client.LockRowCount'])},
               'features': {'row': {'symbols': ['locks/client.LockRowCount']}}}).run()[2]['row'],
