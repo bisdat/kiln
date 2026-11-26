@@ -1586,10 +1586,10 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             for (const Batch& b : in.batches) batches.push_back(batch_json(b));
             inputs.push_back({{"mod", in.id}, {"version", version}, {"batches", std::move(batches)}});
         }
-        json values = json::object();
+        json plan_values = json::object();
         for (const auto& [ref, fo] : d.result.fields)
-            if (has_registry_row(fo)) values[ref.text()] = fo.result.to_json();
-        json plan = {{"format", 2}, {"key", key}, {"boot", bootj}, {"live", livej}, {"adds", adds}, {"removed", removed}, {"values", values}, {"inputs", inputs}};
+            if (has_registry_row(fo)) plan_values[ref.text()] = fo.result.to_json();
+        json plan = {{"format", 2}, {"key", key}, {"boot", bootj}, {"live", livej}, {"adds", adds}, {"removed", removed}, {"values", plan_values}, {"inputs", inputs}};
         const std::string hash = d.rollback.empty() ? plan_hash_of(plan) : d.rollback;
         // previous: the last good plan that is not this one (a world started on it without a refused edit, plans/index.json)
         std::string previous = d.rollback_previous;
