@@ -180,6 +180,7 @@ int main(int argc, char** argv) {
     // ---- registry.json ----
     ReportMeta meta;
     meta.written = "2026-11-25T20:00:00Z", meta.generation = 1, meta.base.writer = "kiln-eml";
+    meta.regmap = {"server", std::string(64, 'f'), "", false};  // a document the schema check accepts
     meta.base.journal = {j.state, j.text, j.packages.size(), named, j.truncated};
     const json doc = report_json(s, r, meta);
     CHECK(doc["base"]["journal"]["state"] == "read" && doc["base"]["journal"]["packages"] == 4 && doc["base"]["journal"]["entries"] == 2 &&
