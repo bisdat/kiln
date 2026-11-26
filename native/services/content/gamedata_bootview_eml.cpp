@@ -90,7 +90,7 @@ bool eml_state_live(std::string* hex, std::string* why) {
     size_t got = 0;
     if (t->state_json(text.data(), text.size(), &got) != KILN_OK || got != len)
         return *why = "kiln-eml's state of this start changed while it was read: no change journal is used", false;
-    return eml_state_generation(text, hex, why);
+    return registry::eml_state_generation(text, hex, why);
 }
 
 }  // namespace
