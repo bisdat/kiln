@@ -248,7 +248,8 @@ export function wakeStage() {
  *  canvas a new key to turn it back on). `onLit` hears whether the fire burns (the torch follows it).
  *  prefers-reduced-motion is followed while the fire runs (KDE's animation speed "Instant" turns it on): the fire stands
  *  still, writes no flicker and draws only when what it shows changed (wakeStage, a resize), with no timer meanwhile.
- *  `turkey`: Thanksgiving weekend's shader (FRAG_TURKEY; give the canvas a new key to switch); otherwise FRAG, as always. */
+ *  `turkey`: Thanksgiving weekend's shader (FRAG_TURKEY; give the canvas a new key to switch); otherwise FRAG, as always.
+ *  A driver that cannot build FRAG_TURKEY gets FRAG instead (no `data-turkey` on the app, so no greeting). */
 export function Stage({ root, enabled = true, turkey = false, onLit }: { root: RefObject<HTMLDivElement>; enabled?: boolean; turkey?: boolean; onLit?: (lit: boolean) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   // the latest callback, without restarting the fire when the parent renders a new one
@@ -276,6 +277,7 @@ export function Stage({ root, enabled = true, turkey = false, onLit }: { root: R
       clearTimeout(nap);
       raf = nap = 0;
       delete app.dataset.gl;
+      delete app.dataset.turkey;
       canvas.style.removeProperty("height");
       for (const p of ["transform", "width", "height"]) app.querySelector<HTMLElement>(".k-door")?.style.removeProperty(p);
       app.querySelector<HTMLElement>(".k-door-lab")?.style.removeProperty("--k");
@@ -293,11 +295,23 @@ export function Stage({ root, enabled = true, turkey = false, onLit }: { root: R
       if (!gl!.getShaderParameter(o, gl!.COMPILE_STATUS)) { console.warn(gl!.getShaderInfoLog(o)); return null; }
       return o;
     };
-    const vs = mk(gl.VERTEX_SHADER, VERT), fs = mk(gl.FRAGMENT_SHADER, turkey ? FRAG_TURKEY : FRAG);
-    if (!vs || !fs) { off("shader"); return; }
-    const prog = gl.createProgram()!;
-    gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { off("link"); return; }
+    const build = (frag: string): WebGLProgram | string => {
+      const vs = mk(gl!.VERTEX_SHADER, VERT), fs = mk(gl!.FRAGMENT_SHADER, frag);
+      if (!vs || !fs) return "shader";
+      const p = gl!.createProgram()!;
+      gl!.attachShader(p, vs); gl!.attachShader(p, fs); gl!.linkProgram(p);
+      return gl!.getProgramParameter(p, gl!.LINK_STATUS) ? p : "link";
+    };
+    // Thanksgiving weekend: a driver that cannot build the turkey's bigger shader (ANGLE's D3D back-end compiles it only at
+    // the link) keeps every day's fire, and the greeting stays away with the bird (data-turkey, base.css)
+    let roast = turkey;
+    let prog = build(roast ? FRAG_TURKEY : FRAG);
+    if (typeof prog === "string" && roast) {
+      console.warn(`Hearth fire: the Thanksgiving turkey's shader did not build (${prog}); every day's fire instead`);
+      roast = false;
+      prog = build(FRAG);
+    }
+    if (typeof prog === "string") { off(prog); return; }
     gl.useProgram(prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -305,10 +319,11 @@ export function Stage({ root, enabled = true, turkey = false, onLit }: { root: R
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     for (const n of UNIFORMS) U[n] = gl.getUniformLocation(prog, n);
-    const uV = turkey ? gl.getUniformLocation(prog, "uV") : null;
+    const uV = roast ? gl.getUniformLocation(prog, "uV") : null;
     const lost = (e: Event) => { e.preventDefault(); off("context lost"); };
     canvas.addEventListener("webglcontextlost", lost);
     app.dataset.gl = "1";
+    if (roast) app.dataset.turkey = "1";
     litCb.current?.(true);
 
     // the mouth's spring (k: 0 Play, 1 pilot light), the eased heat and the eased pointer
@@ -428,6 +443,7 @@ export function Stage({ root, enabled = true, turkey = false, onLit }: { root: R
       window.removeEventListener("resize", resume);
       if (wakeFire === resume) wakeFire = null;
       delete app.dataset.gl;
+      delete app.dataset.turkey;
       canvas.style.removeProperty("height");
       unflicker();
       litCb.current?.(false);

@@ -109,6 +109,8 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
   font-family: var(--k-font-display); font-weight: 600; line-height: 1.04; font-size: clamp(30px, calc(var(--kiln) * .084), 60px); letter-spacing: .01em;
   background-image: linear-gradient(0deg, #ffb35c 0%, #ffe08a 45%, #f8e8d4 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: brightness(calc(.86 + var(--fire, .5) * .22)) drop-shadow(0 0 14px rgba(255, 120, 30, .28)); animation: k-rise 1s var(--k-out) .4s backwards; }
+/* the turkey's shader did not build on this GPU (Stage.tsx: every day's fire instead): no greeting either */
+.k-app:not([data-turkey]) .k-thanks { display: none; }
 .k-thanks::before, .k-thanks::after { content: ""; flex: 0 0 auto; width: 7px; height: 7px; transform: rotate(45deg); background: var(--k-gold-400); opacity: .8; }
 .k-hero { position: absolute; left: 64px; top: 92px; bottom: 98px; width: min(630px, calc(100% - var(--kiln) - 170px)); display: flex; flex-direction: column; gap: 10px; pointer-events: auto;
   /* a short window (a Steam Deck's 1280x800 desktop, notices above the list): the column scrolls; the list keeps 3 rows */
