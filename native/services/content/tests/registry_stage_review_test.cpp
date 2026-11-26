@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 // kiln.content registry stage, host test: the registry line review's findings on the stage runner (out/registry-review,
 // R1-R5, moved here). Harness as registry_stage_test.cpp. registry_stage_review_test.sh builds and runs it.
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <thread>
-#include <set>
-#include <mutex>
 
 #include "../registry/boot_hooks.h"
 #include "../registry/schema_ir.h"
@@ -357,6 +358,101 @@ void report_writer_thread(const std::string& dir) {
     check(writes >= 2 && writes <= 22, "the writer wrote the live reports (" + std::to_string(writes) + " write(s) for 21 publishes)");
     check(threads.size() == 2 && threads.count(std::this_thread::get_id()), "the start's report on the stage thread, the live ones on the writer's");
     check(json::parse(files.report)["phase"] == "worldLoad" && json::parse(files.report)["generation"] == r.generation(), "the file holds the newest report");
+}
+// Review of Q1 (11-26): the writer makes the report's text outside the runner's lock. The tick takes that lock every step
+// (kiln.registry status with a runtime author: counts, generation), for reads and for the next publish, so it must never
+// wait while the writer dumps a large report (host bench: 51 ms at 10,000 fields, 87 ms at 40,000). The best of three runs
+// keeps a descheduled poller from failing it; held, every run waits about the whole dump.
+void live_report_text_outside_the_lock(const std::string& dir) {
+    using clk = std::chrono::steady_clock;
+    auto ms_since = [](clk::time_point t) { return std::chrono::duration<double, std::milli>(clk::now() - t).count(); };
+    TreeView view = world();
+    Files files;
+    auto env = env_of(&view, &files, dir, &sections);
+    std::vector<std::function<void()>> posted;
+    env.post_report = [&](std::function<void()> fn) { posted.push_back(std::move(fn)); };
+    stage::Runner r(env);
+    std::function<void(Result, bool)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    Result big = *live_result;
+    for (int i = 0; i < 3000; ++i) {  // code writers over every field, as BigStacks-like mods write: a report of several MB
+        FieldOutcome fo;
+        fo.base = Value::integer(20);
+        for (int k = 0; k < 4; ++k) {
+            ChainRow c;
+            c.kind = WriterKind::Code, c.mod = "writer" + std::to_string(k), c.who = c.mod + ": " + std::string(400, 'x');
+            c.op.set = true, c.op.value = c.after = Value::integer(100 + k);
+            fo.chain.push_back(std::move(c));
+        }
+        fo.result = Value::integer(103), fo.winner = "writer3";
+        big.fields[{"items", "game:item_" + std::to_string(i), "maxStack"}] = std::move(fo);
+    }
+    const json doc = report_json(generated_schema(), big, {});
+    const auto t = clk::now();
+    const size_t bytes = doc.dump().size();
+    const double dump_ms = ms_since(t);
+    double best = 1e9;
+    for (int run = 0; run < 3; ++run) {
+        posted.clear();
+        live_report(big, false);
+        std::atomic<bool> done{false};
+        std::thread writer([&] {
+            for (auto& fn : posted) fn();
+            done = true;
+        });
+        double longest = 0;
+        while (!done) {
+            const auto g0 = clk::now();
+            (void)r.generation();
+            longest = std::max(longest, ms_since(g0));
+        }
+        writer.join();
+        best = std::min(best, longest);
+    }
+    check(posted.size() == 1 && json::parse(files.report)["generation"] == r.generation(), "the writer wrote the big report");
+    check(best < dump_ms / 3, "a runner call on the tick waits " + std::to_string(best) + " ms while the writer dumps a " +
+                                  std::to_string(bytes / 1024) + " KB report (its dump: " + std::to_string(dump_ms) + " ms)");
+}
+// Review of Q1: a byte that is not UTF-8 in a live report (a code writer's label as a plugin gave it) used to throw from
+// nlohmann's dump on the publishing thread; now report_json (the kiln.registry C ABI getter, Kiln.Host's reload replies)
+// would throw it across the C boundary, and the writer would leave registry.json stale. The report is still made and
+// written, the byte replaced (U+FFFD).
+void live_report_bad_utf8(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    auto env = env_of(&view, &files, dir, &sections);
+    std::vector<std::function<void()>> posted;
+    env.post_report = [&](std::function<void()> fn) { posted.push_back(std::move(fn)); };
+    stage::Runner r(env);
+    std::function<void(Result, bool)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    Result late = *live_result;
+    ChainRow c;
+    c.kind = WriterKind::Code, c.mod = "plugin", c.who = "plugin: stacks \xff\xfe x4";
+    c.op.set = true, c.op.value = c.after = Value::integer(80);
+    late.fields.at({"items", "game:plank", "maxStack"}).chain.push_back(c);
+    live_report(late, true);
+    std::string text;
+    KilnResult rc = KILN_ERR_UNAVAILABLE;
+    try {
+        rc = r.report_json(&text);
+    } catch (const std::exception& e) {
+        check(false, std::string("report_json throws: ") + e.what());
+    }
+    check(rc == KILN_OK && text.find("stacks \xEF\xBF\xBD\xEF\xBF\xBD x4") != std::string::npos, "report_json has the report, the bytes replaced");
+    try {
+        for (auto& fn : posted) fn();
+    } catch (const std::exception& e) {
+        check(false, std::string("the writer throws: ") + e.what());
+    }
+    check(json::parse(files.report)["generation"] == r.generation() && files.report.find("\xEF\xBF\xBD") != std::string::npos,
+          "registry.json holds the newest report, the bytes replaced");
 }
 Files warm_id_table(const std::string& dir) {
     TreeView view = world(); Files files;
@@ -981,6 +1077,8 @@ int main(int argc, char** argv) {
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
         {"Q1 live_report_written_off_thread", [&] { live_report_written_off_thread(dir); }},
         {"Q1 report_writer_thread", [&] { report_writer_thread(dir); }},
+        {"Q1r live_report_text_outside_the_lock", [&] { live_report_text_outside_the_lock(dir); }},
+        {"Q1r live_report_bad_utf8", [&] { live_report_bad_utf8(dir); }},
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
