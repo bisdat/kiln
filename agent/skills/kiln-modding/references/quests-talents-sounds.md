@@ -122,6 +122,8 @@ s.Clear();                                                          // the game'
 - Several mods: highest `Priority`, then the most recent. A Say shows over any override; a newer Say replaces it
   (`SayOptions(Interrupt: false)` waits for another mod's). `Npcs.SpeechOf`, `IsSaying`, `CanSpeak` (tick), `Available`.
 - A mod on both sides decides on the host (`Lifecycle.IsServerRunning`); a joined client's own calls change only its screen.
+- Never guard the calls with `Npcs.Available` / `Capabilities.Is("npcspeech.bubble")`: both are false on a dedicated
+  server (no bubbles of its own), which still sends; guarded, no player sees anything. The calls never throw for it.
 - Not changed: farewell lines, the talk gesture when a player presses E. Tests: `KilnHarness.NpcSpeech` (`ModeOf`,
   `LinesOf`, `Saying`). Sample `HungryCrafter`. `services/npc-speech.md`.
 

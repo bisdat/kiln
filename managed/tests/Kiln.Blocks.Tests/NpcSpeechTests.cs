@@ -14,6 +14,8 @@ public sealed unsafe class NpcSpeechTests : IDisposable
     private static readonly List<string> Calls = new();
     private static readonly List<object> Wire = new();
     private static bool _host = true;
+    private static int _textRc;
+    private static Action<uint>? _onSet;
     private static SpeechNative.Table* _table;
 
     public NpcSpeechTests()
@@ -32,6 +34,8 @@ public sealed unsafe class NpcSpeechTests : IDisposable
         lock (Calls) Calls.Clear();
         Wire.Clear();
         _host = true;
+        _textRc = 0;
+        _onSet = null;
         NpcSpeechEngine.Clock = () => _now;
         NpcSpeechEngine.HostHook = () => _host;
         NpcSpeechEngine.SendHook = m => Wire.Add(m);
@@ -51,6 +55,7 @@ public sealed unsafe class NpcSpeechTests : IDisposable
     [UnmanagedCallersOnly]
     private static int FakeSet(uint npc, uint mode, uint* tags, uint n)
     {
+        _onSet?.Invoke(mode);
         var t = new List<string>();
         for (var i = 0; i < n; i++) t.Add(tags[i].ToString("x8"));
         lock (Calls) Calls.Add($"set {npc} {mode} [{string.Join(",", t)}]");
@@ -68,7 +73,7 @@ public sealed unsafe class NpcSpeechTests : IDisposable
     private static int FakeText(uint tag, byte* json, nuint len)
     {
         lock (Calls) Calls.Add($"text {tag:x8} {System.Text.Encoding.UTF8.GetString(json, (int)len)}");
-        return 0;
+        return _textRc;
     }
 
     [UnmanagedCallersOnly]
@@ -271,5 +276,20 @@ public sealed unsafe class NpcSpeechTests : IDisposable
         Assert.Equal(m.Lines, back.Lines);
         var bad = new NetWriter().UInt32(1).Byte(9).Byte(0);
         Assert.Throws<NetFormatException>(() => { var rr = new NetReader(bad.ToArray()); NpcSpeechEngine.DecodeSpeech(ref rr); });
+    }
+
+    // ------------------------------------------------------------------------------------- limits and edges ---
+
+    [Fact]
+    public void The_calls_a_server_mod_makes_name_no_capability()
+    {
+        // A dedicated server has no bubbles of its own (npcspeech.bubble is off there by design) and still sends. A
+        // [RequiresCapability] on these would make KILN121 (and its code fix) put a server mod's calls under
+        // Capabilities.Is("npcspeech.bubble"), so they would never reach the clients. None of them throws either.
+        var members = typeof(Npcs).GetMethods().Where(m => m.Name is "Say" or "StopSaying" or "Speech")
+            .Concat(typeof(NpcSpeech).GetMethods().Where(m => m.Name is "Suppress" or "Replace" or "Clear")).ToArray();
+        Assert.Equal(8, members.Length);   // Say x2, StopSaying, Speech; Suppress, Replace x2, Clear
+        foreach (var m in members)
+            Assert.True(m.GetCustomAttributes(typeof(RequiresCapabilityAttribute), false).Length == 0, $"{m.DeclaringType!.Name}.{m.Name}");
     }
 }

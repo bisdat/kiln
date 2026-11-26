@@ -54,13 +54,11 @@ public sealed class NpcSpeech
 
     /// <summary>No greeting bubble while this override is on, and no greeting voice-over (a player who presses E still
     /// gets the NPC's menu). Any thread.</summary>
-    [RequiresCapability(SpeechNative.BubbleCapability)]
     public SpeechResult Suppress() => NpcSpeechEngine.Set(Npc, ModId, SpeechMode.Suppress, [], Priority);
 
     /// <summary>The NPC's greeting bubble shows one of these lines instead of its own (a new pick each time the game
     /// picks a new line), with no voice-over. 1 to 32 lines of up to 200 characters, the same in every language. Any thread.</summary>
     /// <exception cref="ArgumentException">No line, more than 32, or an empty or too long one.</exception>
-    [RequiresCapability(SpeechNative.BubbleCapability)]
     public SpeechResult Replace(params string[] lines)
     {
         ArgumentNullException.ThrowIfNull(lines);
@@ -70,7 +68,6 @@ public sealed class NpcSpeech
     /// <summary>As <see cref="Replace(string[])"/>, with a text per language for each line
     /// (<c>UiText.Of(("en", "..."), ("de", "..."))</c>).</summary>
     /// <exception cref="ArgumentException">No line, more than 32, or an empty or too long one.</exception>
-    [RequiresCapability(SpeechNative.BubbleCapability)]
     public SpeechResult Replace(IEnumerable<UiText> lines)
     {
         ArgumentNullException.ThrowIfNull(lines);
@@ -98,7 +95,9 @@ public static class Npcs
 
     /// <summary>This game shows Kiln's speech in its own bubbles (a game client whose kiln.npcspeech found the bubble on
     /// this build: capability <c>npcspeech.bubble</c>). A dedicated server has no bubbles of its own and answers false;
-    /// it still sends what mods decide to its Kiln clients. Any thread.</summary>
+    /// it still sends what mods decide to its Kiln clients. Not a guard for the calls: <see cref="Say(EntityId, UiText,
+    /// TimeSpan, SayOptions?)"/>, <see cref="Speech"/> and its members work on every side (a server mod that skipped
+    /// them here would send nothing). Any thread.</summary>
     public static bool Available => SpeechNative.Loaded && Capabilities.Is(SpeechNative.BubbleCapability);
 
     /// <summary>Shows <paramref name="text"/> in the NPC's speech bubble for <paramref name="duration"/> (0.5 s to 60 s),
@@ -107,7 +106,6 @@ public static class Npcs
     /// Any thread.</summary>
     /// <exception cref="ArgumentException"><paramref name="npc"/> is None, the duration is out of range, or the text is
     /// empty or longer than 200 characters.</exception>
-    [RequiresCapability(SpeechNative.BubbleCapability)]
     public static SpeechResult Say(EntityId npc, string text, TimeSpan duration, SayOptions? options = null) =>
         Say(npc, new UiText(text ?? ""), duration, options);
 
@@ -115,7 +113,6 @@ public static class Npcs
     /// (<c>UiText.Of(("en", "I'm starving"), ("de", "Ich verhungere"))</c>).</summary>
     /// <exception cref="ArgumentException"><paramref name="npc"/> is None, the duration is out of range, or a text is
     /// empty or longer than 200 characters.</exception>
-    [RequiresCapability(SpeechNative.BubbleCapability)]
     public static SpeechResult Say(EntityId npc, UiText text, TimeSpan duration, SayOptions? options = null)
     {
         if (npc.IsNone) throw new ArgumentException("no NPC (EntityId.None)", nameof(npc));

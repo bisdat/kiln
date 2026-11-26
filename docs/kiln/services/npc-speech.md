@@ -99,7 +99,9 @@ out of range, an empty or too long text, no line or more than 32) throw `Argumen
   A mod that runs on both sides should decide on the host (`Lifecycle.IsServerRunning`) so the clients' copies do not
   decide again.
 - Channel `kiln:npcspeech` v1, `required: false` (messages: Speech, Say, Reset). A dedicated server has no bubbles of
-  its own: `Npcs.Available` is false there and the calls still go out to the clients.
+  its own: `Npcs.Available` is false there and the calls still go out to the clients. So do not put the calls under
+  `Npcs.Available` or `Capabilities.Is("npcspeech.bubble")`: on a server that skips them, and no player sees anything.
+  They carry no `[RequiresCapability]` for that reason and never throw `KilnUnavailableException`.
 
 ## What the game does, and what Kiln changes
 The bubble is the game client's own HUD: the NPC layer picks a line from the NPC's `NpcDialog` greetings when the NPC
@@ -128,7 +130,7 @@ Hooks go in with the first override or Say. Mods never call game functions.
 | Row | Meaning | Off |
 |---|---|---|
 | `kiln.npcspeech` | the service is here (game client) | dedicated server, or an unknown client build: the calls still go out from a host; a joined client's own calls answer `Ok: false` |
-| `npcspeech.bubble` | the bubble hooks resolve on this build | kiln.log `npcspeech: npcspeech.bubble is off ...`; NPCs keep the game's lines on this client |
+| `npcspeech.bubble` | this process shows Kiln's speech in its bubbles (`Npcs.Available`) | a dedicated server (wrong side: it sends, its clients show), or a client build without the bubble functions: kiln.log `npcspeech: npcspeech.bubble is off ...`, NPCs keep the game's lines on that client |
 | `npcspeech.voice` | the dialogue record's layout checks out | kiln.log `npcspeech: the dialogue record's layout did not check out ...`: texts change, voice-overs stay the game's |
 | `content.loca` | kiln.content's loca hooks | kiln.log `npcspeech: kiln.content's loca hooks ... are not here`: only Suppress works |
 
