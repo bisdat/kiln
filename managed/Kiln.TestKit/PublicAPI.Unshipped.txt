@@ -1,1 +1,7 @@
 #nullable enable
+Kiln.TestKit.HarnessNpcSpeech
+Kiln.TestKit.HarnessNpcSpeech.Calls.get -> int
+Kiln.TestKit.HarnessNpcSpeech.LinesOf(Kiln.EntityId npc, string! language = "en-us") -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessNpcSpeech.ModeOf(Kiln.EntityId npc) -> Kiln.SpeechMode
+Kiln.TestKit.HarnessNpcSpeech.Saying(Kiln.EntityId npc, string! language = "en-us") -> string?
+Kiln.TestKit.KilnHarness.NpcSpeech.get -> Kiln.TestKit.HarnessNpcSpeech!
