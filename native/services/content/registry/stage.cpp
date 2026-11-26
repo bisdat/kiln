@@ -403,15 +403,20 @@ struct Runner::Impl {
     void write_live_report() {
         std::lock_guard w(write_mu);
         std::shared_ptr<const ReportJob> job;
+        bool built = false;
         {
             std::lock_guard l(mu);
             job = report_job;
+            built = job && job->seq <= report_built;  // report_json made its text already
         }
         if (!job || job->seq <= report_written) return;  // an earlier run wrote it, or the start wrote a newer one
         const json doc = report_doc(*job);
-        {
+        // The text outside mu (review of Q1): the tick takes mu each step (status, reads, the next publish), and a large
+        // report's dump takes tens of milliseconds (51 ms at 10,000 fields on the host bench).
+        if (!built) {
+            std::string text = doc.dump();
             std::lock_guard l(mu);
-            if (job->seq > report_built) report = doc.dump(), report_built = job->seq;
+            if (job->seq > report_built) report = std::move(text), report_built = job->seq;
         }
         if (env.write_report && !env.write_report(doc.dump(1))) log(1, "registry: state/registry.json could not be written");
         report_written = job->seq;
