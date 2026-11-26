@@ -60,6 +60,43 @@ public sealed class RegistryDeclarationTests
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
+    // review4 recheck nit (NS1): a mod that only calls Registry.Change / Registry.Read (Kiln.Registry's Registry type) is
+    // a registry user, so the stage decodes its base at resources-ready; GameStart authorship stays MightOverride's.
+    [Fact]
+    public void AModThatOnlyCallsRegistryChangeIsARegistryUser()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "registry-users-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var change = Reference(directory, "ChangeOnly", "Kiln.Registry", "Kiln.Registry", "Registry");
+            Assert.True(RegistryDeclarations.UsesRegistry(change, new[] { directory }));
+            Assert.False(RegistryDeclarations.MightOverride(change, new[] { directory }), "not a GameStart author");
+            var context = Image(directory, "ContextUser", false);
+            Assert.True(RegistryDeclarations.UsesRegistry(context, new[] { directory }), "an OnRegistry author is one too");
+            var other = Path.Combine(directory, "plain");
+            Directory.CreateDirectory(other);
+            var plain = Reference(other, "Plain", "Kiln.Api", "Kiln", "Mod");
+            Assert.False(RegistryDeclarations.UsesRegistry(plain, new[] { other }), "a mod without the registry API is none");
+            Reference(other, "Helper", "Kiln.Registry", "Kiln.Registry", "Registry");
+            Assert.True(RegistryDeclarations.UsesRegistry(plain, new[] { other }), "a helper DLL of the mod's own folder that calls it counts");
+            Assert.False(RegistryDeclarations.UsesRegistry(Path.Combine(directory, "missing.dll"), new[] { directory }));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+    private static string Reference(string directory, string name, string assembly, string ns, string type)
+    {
+        var metadata = new MetadataBuilder();
+        metadata.AddModule(0, metadata.GetOrAddString(name + ".dll"), metadata.GetOrAddGuid(Guid.NewGuid()), default, default);
+        metadata.AddAssembly(metadata.GetOrAddString(name), new Version(1, 0), default, default, 0, AssemblyHashAlgorithm.None);
+        var reference = metadata.AddAssemblyReference(metadata.GetOrAddString(assembly), new Version(1, 0), default, default, 0, default);
+        metadata.AddTypeReference(reference, metadata.GetOrAddString(ns), metadata.GetOrAddString(type));
+        metadata.AddTypeDefinition(0, default, metadata.GetOrAddString("<Module>"), default, default, default);
+        var image = new BlobBuilder();
+        new ManagedPEBuilder(new PEHeaderBuilder(), new MetadataRootBuilder(metadata), new BlobBuilder()).Serialize(image);
+        var file = Path.Combine(directory, name + ".dll"); File.WriteAllBytes(file, image.ToArray()); return file;
+    }
+
     // review4 nit: the code identity hashes the mod's DLLs only when a context's Identity is first read (never when the mod
     // loads on the tick thread), and a DLL whose path, size and write time are unchanged is not read again.
     [Fact]
