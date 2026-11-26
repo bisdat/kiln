@@ -3,6 +3,7 @@
 // R1-R5, moved here). Harness as registry_stage_test.cpp. registry_stage_review_test.sh builds and runs it.
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -453,6 +454,34 @@ void live_report_bad_utf8(const std::string& dir) {
     }
     check(json::parse(files.report)["generation"] == r.generation() && files.report.find("\xEF\xBF\xBD") != std::string::npos,
           "registry.json holds the newest report, the bytes replaced");
+}
+// Review of Q1: the service's writer thread is never joined (a DLL detach at exit never waits), so a report it has not
+// written when the process ends (a server stopped right after a late rebuild or a pack reload) would be lost; kiln.content's
+// exit step (KilnPluginInfo.on_unload, stage_service.cpp flush_reports) waits for it, bounded.
+void report_writer_flush() {
+    kc::registry::ReportWriter writer;
+    std::mutex mu;
+    std::condition_variable cv;
+    bool release = false;
+    int ran = 0;
+    writer.post([&] {
+        std::unique_lock l(mu);
+        cv.wait(l, [&] { return release; });
+        ++ran;
+    });
+    check(!writer.flush(std::chrono::milliseconds(50)), "flush gives up after its time while a write runs");
+    writer.post([&] {
+        std::lock_guard l(mu);
+        ++ran;
+    });
+    {
+        std::lock_guard l(mu);
+        release = true;
+    }
+    cv.notify_all();
+    check(writer.flush(std::chrono::seconds(30)), "flush returns once the running and the pending write are done");
+    std::lock_guard l(mu);
+    check(ran == 2, "both writes ran before flush returned (" + std::to_string(ran) + ")");
 }
 Files warm_id_table(const std::string& dir) {
     TreeView view = world(); Files files;
@@ -1079,6 +1108,7 @@ int main(int argc, char** argv) {
         {"Q1 report_writer_thread", [&] { report_writer_thread(dir); }},
         {"Q1r live_report_text_outside_the_lock", [&] { live_report_text_outside_the_lock(dir); }},
         {"Q1r live_report_bad_utf8", [&] { live_report_bad_utf8(dir); }},
+        {"Q1r report_writer_flush", [&] { report_writer_flush(); }},
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
