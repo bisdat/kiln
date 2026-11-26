@@ -24,7 +24,8 @@
 //    recipes, loot) needs to know which element a package wrote: format 2's paths say it ("recipes[37]...", the element's
 //    index in the published resource), format 1 does not, so from a format-1 journal no recipe or loot entry is named (an
 //    element's own GUID member, recipeGuid, is no resource key: matching it could name a package that never wrote it).
-//    A list's membership written ("recipes[]": an element inserted, removed or the list cleared) names no other element;
+//    The list itself put in place ("recipes": the whole list replaced) names every element; its membership written
+//    ("recipes[]": an element inserted, removed or the list cleared) names no other element;
 //  - a journal is used only when its generation is the start's live generation: in a kiln-mode start the startup
 //    outcome's archiveSha256, in an EML start the receipt kiln-eml reports live in its state (eml.json "generation"). A
 //    writer that ignores the receipt (hosted ShroudForge, another loader) can leave one behind that names another
@@ -124,7 +125,8 @@ std::set<std::string> archive_fields_of(const std::map<std::string, std::vector<
 //    (format 1), gets the package on the whole entry; written with paths (format 2), on the fields they name
 //    (BaseModel::Entry::archive_fields; a path naming no Kiln field names nothing);
 //  - with `fields` and format-2 paths, an entry of an array registry gets the package when a path names its element
-//    ("<array>[<i>]": the whole element; "<array>[<i>].<member>": the fields that names; "": every element);
+//    ("<array>[<i>]": the whole element; "<array>[<i>].<member>": the fields that names; "" or "<array>" itself: every
+//    element);
 //  - any other entry is never named.
 // Returns how many entries were named.
 size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, const std::set<std::string>& whole,

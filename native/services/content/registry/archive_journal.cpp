@@ -268,7 +268,10 @@ size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::s
                 if (!elements || elements->empty()) continue;
                 std::map<int32_t, std::vector<std::string>> at;  // element -> its paths from the element's root
                 for (const std::string& path : pit->second) {
-                    if (path.empty()) {  // the whole resource: every element
+                    // the whole resource, or the list itself (or a member holding it) put in place: every element, whole
+                    const bool holds_list = array.compare(0, path.size(), path) == 0 &&
+                                            (array.size() == path.size() || array[path.size()] == '.' || array[path.size()] == '[');
+                    if (path.empty() || holds_list) {
                         for (const auto& [i, id] : *elements) at[i] = {std::string()};
                         continue;
                     }

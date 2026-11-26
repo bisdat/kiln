@@ -491,6 +491,28 @@ int main(int argc, char** argv) {
         }
         CHECK(named_field == "field" && named_entry == "entry", "registry.json says what the journal names the package on: " + named_field + "/" + named_entry);
         if (argc > 3) std::ofstream(argv[3]) << ed.dump(2);
+        // ---- review: a list replaced whole, a path per element past 64, a GUID listed twice, the unreadable text ----
+        {
+            auto fresh = [&] {
+                BaseModel b = eb;
+                for (auto& [reg, es2] : b.registries)
+                    for (auto& x : es2) x.archive.clear(), x.archive_fields.clear();
+                return b;
+            };
+            auto bravo_recipes = [&](const json& paths) {
+                json d = good;
+                for (json& c : d["packages"][1]["changed"])
+                    if (c["guid"] == recipes) c["paths"] = paths;
+                return d;
+            };
+            // the recipe list replaced whole ("recipes": a field of the resource's root holding every element)
+            BaseModel b1 = fresh();
+            const ArchiveJournal j1 = parse_archive_journal(bravo_recipes({"recipes"}).dump(), live);
+            name_archive_writers(j1, eids, {"items", "balance"}, &b1, &af);
+            CHECK(j1.state == "read" && b1.registries["recipes"][0].archive == std::vector<std::string>({"eml:bravo"}) &&
+                      b1.registries["recipes"][0].archive_fields.empty() && b1.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}),
+                  "the recipe list replaced whole names its mod on every recipe, whole: " + j1.state + " " + j1.text);
+        }
     }
     // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----
     {
