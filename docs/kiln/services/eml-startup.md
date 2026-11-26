@@ -300,6 +300,11 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
 - **Readers** use it only when `generation` is the start's live generation: a writer that ignores the receipt (hosted
   ShroudForge, another loader) can leave it naming a generation that is no longer live. Read it and close it at once (a
   reader that keeps it open on Windows can make the next kiln-mode start fail its removal).
+- **Kiln's registry stage** is one reader (since 0.2.0-dev.31.14, `native/services/content/registry/archive_journal.cpp`,
+  MIT code over this file format): once per start it checks `generation` against the identity kiln-eml granted for the
+  launch (`published_identity`'s `archive_sha256`) and names each package on the registry entries whose resource GUID it
+  lists (`changed` and `created`), as `archiveWriter` rows of certainty `named` in `kiln/state/registry.json`
+  ([registries guide](../modding/registries/README.md#who-else-wrote-a-field)).
 
 ## Tests
 

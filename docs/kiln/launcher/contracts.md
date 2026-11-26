@@ -897,7 +897,9 @@ All written atomically; a file whose `pid` is not a live process is stale.
   stage did. Per touched field (`fields[]`): its Kiln id and field (or, `raw: true`, the Advanced tier's game member path),
   `applies` (`now`, `worldLoad`, `restart`), the base value and its origin, every writer in the order they apply (Kiln's
   older paths and the archive writer's packages below, then the registry's edits by stage and load order; each with its
-  certainty: `certain` for Kiln's own writers, `named` for a ShroudForge/EML package), the result and the winner. Every
+  certainty: `certain` for Kiln's own writers, `named` for a ShroudForge/EML package kiln-eml's change journal names,
+  `bestEffort` for a `drift` row of the drift probe), the result and the winner; `base.journal` (since 0.2.0-dev.31.14)
+  says whether the journal named the archive writer's packages (`read`, `none`, `stale`, `unreadable`). Every
   conflict line (`conflicts[]`: `overridden`, `composed`, `composedOn`, `exclusive`, `dropped`, `yielded`, with winner,
   loser and one English sentence) and every refused edit (`refused[]`: mod, source, stage, ordinal, reason). `phase`
   `start` (restart fields final) or `worldLoad` (every field applied), `generation`, the regmap record of this build, the

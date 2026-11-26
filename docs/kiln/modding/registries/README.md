@@ -284,6 +284,46 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
 
+### Who else wrote a field
+
+Every field row in `kiln/state/registry.json` (and the launcher's **Conflicts** page) lists its writers, lowest first, each
+with a certainty:
+
+| Writer | Certainty | Where Kiln learns it |
+|---|---|---|
+| Kiln's older paths (boot resource patches, data packs, `Content.*` code) and registry edits | `certain` | Kiln applies them itself |
+| A ShroudForge or EML package that wrote the entry before Kiln (`archiveWriter`, who `shroudforge:<package>` or `eml:<package>`) | `named` | kiln-eml's change journal of a kiln-mode start (below) |
+| Something outside Kiln changed the game's value (`drift`, who `outside Kiln (best effort; suspects: ...)`) | `bestEffort` | the drift probe at each world load and pack reload (below) |
+
+**Archive-writer packages.** When Kiln's interpreter for ShroudForge mods runs the start (kiln mode), kiln-eml writes a
+change journal of its startup pass (`kiln/eml/ownership/<exe name>.change-journal.json`): which package wrote or created
+which of the game's resources, in the order the packages ran (ShroudForge packages and the EML packages the pass ran). The
+registry stage reads it once, only when it belongs to this start's archive, and names each package on the entries whose
+resource it lists: a row below every Kiln writer, valued at the base (what the package wrote is the archive Kiln reads),
+and a conflict line such as `items[game:material_stone].maxStack: betterstacks (ShroudForge package) wrote this entry in
+the game's archive before Kiln; bigmod's edit wins (D1): 25 -> 100`. Registry edits always win over these values, and
+relative edits compose on them. `exclusive` and `yield` do not count a package as an earlier writer (its value is the
+base).
+
+- The journal names a package per **entry**, not per field: a package that wrote one member of an item is listed on every
+  field of that item a mod edits. "Wrote" means written, not changed: a package that set a value to what it already was is
+  listed too. It can name a package that did not change a field; it never misses one that did, within its bounds (4,096
+  rows per package, 32,768 in all; `base.journal.truncated` says when it ran out).
+- `base.journal` in `registry.json` says what happened: `read` (with how many packages and entries), `none`, `stale` (a
+  journal left by an earlier start, which names nobody) or `unreadable`, with a sentence.
+- **No names without a journal.** Hosted or installed ShroudForge (the default), kiln-eml's own EML pass (EML mods without
+  kiln mode) and other loaders keep no change journal. What they wrote is still in the base, and registry edits still win
+  over it, but no row names them; the report says so (`base.journal.state` `none`).
+
+**The drift probe (best effort).** At each world load and each pack reload Kiln compares, for every field it writes live,
+the game's value just before Kiln's first write in that world with what the stage read at start plus the writers Kiln knows
+below the packs. When they differ, something outside Kiln changed the value (another DLL engine, a hook, a memory write):
+the row says so and names the suspects Kiln can see, the modules that patched game code before Kiln hooked it (the hook map,
+`kiln/state/hooks.json`) and hosted ShroudForge when it runs. A slot another writer changes after Kiln's layer gets the same
+row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything and costs one read per
+field per world load or reload, never per tick. A suspect list is a hint, not proof: a writer that hooks nothing is not
+seen, and a field nobody edits through the registry is not checked.
+
 ### Native callback and owner lifetime
 
 `kiln.registry` keeps submitted batches and callbacks under their caller's owner. Revoking that owner removes its queued
