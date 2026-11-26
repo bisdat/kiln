@@ -241,8 +241,11 @@ internal sealed class UiDockState
 
     // render thread
     public long DrawnFrame = long.MinValue;
+    /// <summary>Its placer's open count (<see cref="UiPlacer.Opens"/>) when it was drawn last: another one means it was
+    /// closed and opened again since, also over frames where Kiln.Ui drew no window at all.</summary>
+    public long DrawnOpens = -1;
     public bool WasMoving;
-    public long WaitStart = -1, WaitFrame = long.MinValue;
+    public long WaitStart = -1, WaitFrame = long.MinValue, WaitOpens = -1;
     /// <summary>The last frame its dock held (an accepted edge).</summary>
     public long ActiveFrame = long.MinValue;
     /// <summary>Its place came from its dock: RememberPlacement keeps the remembered position (only the size is written).</summary>
@@ -306,11 +309,12 @@ internal static class UiDocking
 /// <see cref="Order"/> <see cref="Place"/> before its Begin and <see cref="Drawn"/> after it, then <see cref="Finish"/>.</summary>
 internal sealed class UiDockFrame
 {
-    private sealed class Node(UiWindow w, UiWindowLive live, bool appearing, UiDockLink? link)
+    private sealed class Node(UiWindow w, UiWindowLive live, bool appearing, long opens, UiDockLink? link)
     {
         public readonly UiWindow W = w;
         public readonly UiWindowLive Live = live;
         public readonly bool Appearing = appearing;
+        public readonly long Opens = opens;
         public UiDockLink? Link = link;
         public bool Wait;
         // the accepted dock this frame: the window it docks to, on which side (the effective one), the offset in pixels
@@ -352,16 +356,19 @@ internal sealed class UiDockFrame
         if (open.All(w => w.Dock.Current == null && SnapOf(w) == null))
         {
             foreach (var w in open)
-                if (w.Dock.Placed) Track(new Node(w, live(w), false, null));
+                if (w.Dock.Placed) Track(new Node(w, live(w), false, w.Placer.Opens, null));
             f._order.AddRange(open);
             return f;
         }
         foreach (var w in open)
         {
             var st = w.Dock;
-            var appearing = st.DrawnFrame != f._frame - 1;
+            var opens = w.Placer.Opens;
+            // its first frame of this open: not drawn in the frame before, or closed and opened again since it was drawn
+            // (the frame count alone misses that: no frame runs Kiln.Ui's windows while none is open)
+            var appearing = st.DrawnFrame != f._frame - 1 || st.DrawnOpens != opens;
             if (appearing) st.WasMoving = false;
-            f._nodes[w] = new Node(w, live(w), appearing, st.Current);
+            f._nodes[w] = new Node(w, live(w), appearing, opens, st.Current);
         }
         var nodes = open.Select(w => f._nodes[w]).ToArray();
         var scale = vp.SafeScale;
@@ -393,7 +400,11 @@ internal sealed class UiDockFrame
                 if (n.Wait || !n.Appearing || n.Link is not { } l || l.Target.Resolve() is not { } t || ReferenceEquals(t, n.W)) continue;
                 if (f._nodes.TryGetValue(t, out var tn) && !tn.Wait) continue;  // open and drawn this frame
                 var st = n.W.Dock;
-                if (st.WaitStart < 0 || st.WaitFrame < f._frame - 1) st.WaitStart = now;  // a new open: a new wait
+                if (st.WaitStart < 0 || st.WaitFrame < f._frame - 1 || st.WaitOpens != n.Opens)
+                {
+                    st.WaitStart = now;  // a new open: a new wait
+                    st.WaitOpens = n.Opens;
+                }
                 if (now - st.WaitStart >= UiDocking.WaitMilliseconds) continue;
                 st.WaitFrame = f._frame;
                 n.Wait = changed = true;
@@ -417,7 +428,8 @@ internal sealed class UiDockFrame
             n.Target = t;
             t.Docked.Add(n);
             var st = n.W.Dock;
-            var held = st.ActiveFrame == f._frame - 1 && st.EffectiveSeq == link.Seq;
+            // the side it took when it became active holds while it stays active (both drawn in the frame before)
+            var held = !n.Appearing && !t.Appearing && st.ActiveFrame == f._frame - 1 && st.EffectiveSeq == link.Seq;
             st.ActiveFrame = f._frame;
             n.Side = held ? st.Effective : link.Side;
             n.Fresh = !held;
@@ -647,8 +659,10 @@ internal sealed class UiDockFrame
         var st = w.Dock;
         st.DrawnFrame = _frame;
         st.WaitStart = -1;
-        if (_nodes.TryGetValue(w, out var n) && width > 0 && height > 0 && float.IsFinite(x + y + width + height))
-            n.Rect = (x, y, width, height);
+        var found = _nodes.TryGetValue(w, out var n);
+        st.DrawnOpens = found ? n!.Opens : w.Placer.Opens;
+        if (found && width > 0 && height > 0 && float.IsFinite(x + y + width + height))
+            n!.Rect = (x, y, width, height);
     }
 
     /// <summary>After the windows: the player's dock changes go to their mods (DockChanged).</summary>

@@ -618,6 +618,44 @@ public sealed unsafe class UiDockTests : IDisposable
     }
 
     [Fact]
+    public void A_docked_window_opened_again_after_every_window_closed_waits_for_its_target()
+    {
+        var spells = Spells();
+        var book = Grimoire();
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        spells.Hide();
+        book.Hide();
+        Frame();  // nothing open: Kiln.Ui draws no window (kiln.ui may not even call it)
+        Frame();
+        book.Show();  // one key press for both, Grimoire's binding first
+        Frame();
+        Assert.DoesNotContain(book.Key, Begun);  // not at its own place first
+        spells.Show();
+        Frame();
+        Assert.Equal(new[] { spells.Key, book.Key }, Begun);
+        AssertRightOf(spells, book);
+    }
+
+    [Fact]
+    public void A_pair_opened_again_tries_the_docked_window_s_own_side_first()
+    {
+        var spells = Window(_spells, "Better Spells", new UiWindowOptions { Width = 300, Height = 200, Position = (0.95f, 0.5f), AcceptDock = true, PlacementId = "spells" });
+        var book = Grimoire();
+        book.DockTo(Handle(), DockSide.Right);
+        Frame();
+        Assert.Equal(Of(spells).X - Of(book).W, Of(book).X, 3);  // no room on the right: on the left
+        spells.Hide();
+        book.Hide();
+        Frame();
+        spells.MoveTo(0.3f, 0.5f);  // room on its right now
+        spells.Show();
+        book.Show();
+        Frame();
+        AssertRightOf(spells, book);
+    }
+
+    [Fact]
     public void An_unloaded_target_comes_back_with_its_reloaded_mod()
     {
         var spells = Spells();
