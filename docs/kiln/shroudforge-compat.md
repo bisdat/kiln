@@ -1117,9 +1117,14 @@ Since dev.31 the host table has two optional members, `voxel_write_ready` and `v
 `kiln/UPSTREAM-PATCHES.md`). With both, `kfc-runtime` passes the write and `runtime.has("runtime.world.voxel.write")` to
 the host and never resolves its own writer. The adapter (`src/host_voxels.cpp`, `src/voxel_write_core.h`) posts the write
 from ShroudForge's mods thread to the server world's thread and waits for it (a write the world has not begun within 2 s
-is cancelled there and refused). There it reads the box, returns success for an unchanged box, writes through
-`kiln.build` with `KILN_BUILD_F_IN_BASES | KILN_BUILD_F_GAME_SAVE` (no base guard and no Kiln save region, as ShroudForge:
-the game saves the cells inside base build zones), and checks the read-back. A mismatch is written back once (outcome 2);
+is cancelled there and refused). A write is for the server world the mod saw when it asked: one that reaches the world
+thread only after another server world began (kiln-core's count of server worlds) is refused there. The box must lie in
+the voxel grid as ShroudForge's own writer requires (no coordinate below 0, x and z inside the grid's tiles), because
+`kiln.build` checks no grid bounds. After an uncertain outcome (3) that world takes no further ShroudForge voxel write
+until it is loaded again, as ShroudForge's own writer marks its session's writes uncertain. On the world's thread it
+reads the box, returns success for an unchanged box, writes through `kiln.build` with
+`KILN_BUILD_F_IN_BASES | KILN_BUILD_F_GAME_SAVE` (no base guard and no Kiln save region, as ShroudForge: the game saves
+the cells inside base build zones, and in a chunk another Kiln edit keeps), and checks the read-back. A mismatch is written back once (outcome 2);
 a fault or a failed put-back is outcome 3. Every refusal or failure goes to kiln.log as "ShroudForge voxel write refused
 before changing the world: <box>: <why>" (or "failed"), the first ten each start and then every 100th. Differences from
 ShroudForge's writer: `kiln.build` commits only the 8x8x8 blocks whose cells change, and it asks the game for tiles that
@@ -1127,7 +1132,8 @@ are not streamed in (the write is then refused and the mod may try again). Calls
 game's own do. ShroudForge's own loader, the player's installed ShroudForge, and an older bundle keep upstream's writer.
 
 Tests: `native/plugins/shroudforge/tests/test-voxel-write.sh` (the core over a fake `kiln.build`, Linux),
-`test-host-chain.sh` section "the voxel writer" (posting, the wait and the cancel, Wine), the fork's
+`test-host-chain.sh` section "the voxel writer" (posting, the wait and the cancel, the grid's bounds, a changed world,
+no write after an uncertain outcome; Wine), the fork's
 `kfc-runtime-test-engine-hooks` section "voxel writer", and `native/services/build` `build-block-writer`
 (`KILN_BUILD_F_GAME_SAVE`).
 
