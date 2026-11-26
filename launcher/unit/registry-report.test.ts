@@ -89,7 +89,7 @@ describe("untrusted registry report", () => {
     const none = parse({ ...registryFixture(), base: { origin: "live", writer: "shroudforge-hosted", journal: { state: "none", packages: 0, entries: 0, truncated: false, text: "hosted ShroudForge keeps no change journal" } } });
     expect(none.journal).toBe("Archive-writer packages are not named in this start: hosted ShroudForge keeps no change journal");
     expect(parse({ ...registryFixture(), base: { origin: "live", writer: "none", journal: { state: "none", packages: 0, entries: 0, truncated: false } } }).journal).toBe("");
-    expect(parse(registryFixture()).journal).toBe("");  // a report from before 31.14 has no journal
+    expect(parse(registryFixture()).journal).toBe("");  // a report from an older Kiln has no journal
     const stale = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "stale", packages: 0, entries: 0, truncated: false, text: "left by an earlier start" } } });
     expect(stale.journal).toBe("Archive-writer packages are not named in this start: left by an earlier start");
   });
