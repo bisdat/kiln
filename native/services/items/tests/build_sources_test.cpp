@@ -301,6 +301,11 @@ int main() {
     {KilnRegisters r{};r.rax=1;r.rbx=0;r.rbp=9;r.rsi=0x10;r.rdi=reinterpret_cast<uintptr_t>(cursor);logs.clear();hk_build_cursor(r);
      CHECK(r.rax==1 && g_build_off.load() && logged("material hook faulted"));
      r.rsi=reinterpret_cast<uintptr_t>(query);r.rax=10;r.rbx=5;r.rbp=40;fixture::world_kind=0;hk_build_cursor(r);CHECK(r.rax==10);  // off: the game's
+     // review of #148: the fault lowers crafting.build_sources to faulted on the next Pre (docs: "faulted at run time"),
+     // as a lock hook's does; never from inside the hook (a game worker thread), and once
+     CHECK(!lowered.count("crafting.build_sources"));
+     build_client_pre();CHECK(lowered["crafting.build_sources"]==KILN_CAP_REASON_FAULTED);
+     lowered.clear();build_client_pre();build_server_pre(4);CHECK(lowered.empty());
      g_build_off.store(false);}
     // ---- review of 31.12: a building link to a Magic chest of the base the player stands in counts once ----
     // The cursor adds the links to the game's own count of the base (eax), and the placement pays the base list first and
@@ -436,6 +441,12 @@ int main() {
         gather(state.data(),0);
         CHECK(g_build_rows_off.load() && logged("material rows could not be read"));
         pools.pop_back();gather(state.data(),0);CHECK(stock(3,STONE)==-1 && stock(3,WOOD)==12);  // off: the game's
+        // review of #148: crafting.build_ui is lowered to faulted on the next Pre (docs: "a row could not be read"), once;
+        // the cursor and the placement keep theirs
+        CHECK(!lowered.count("crafting.build_ui"));
+        t_set_build_stock(0,nullptr,0);  // (the client's Pre then installs nothing here)
+        build_client_pre();CHECK(lowered["crafting.build_ui"]==KILN_CAP_REASON_FAULTED && !lowered.count("crafting.build_sources"));
+        lowered.clear();build_client_pre();CHECK(lowered.empty());
         g_build_rows_off.store(false);
         CHECK(rows_calls>=18);
         t_set_build_stock(0,nullptr,0);raw_links.clear();pools.clear();listed.clear();bag.clear();base_stock.clear();

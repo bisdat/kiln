@@ -4400,6 +4400,10 @@ std::mutex g_build_snap_mu;  // a Kiln client's snapshot from its server
 std::unordered_map<uint32_t, uint64_t> g_build_have;
 std::atomic<bool> g_build_on{false};
 LogLimit g_log_build{16}, g_log_build_snap{4};
+// A fault in a building hook (a game worker or UI thread): its half stands down at once, its capability row on the next
+// Pre (build_fault_lower, as a lock hook's: lock_fault_lower). The cursor's: crafting.build_sources; the menu's rows:
+// crafting.build_ui.
+std::atomic<bool> g_build_fault_report{false}, g_build_rows_fault_report{false};
 std::atomic<uint64_t> g_build_last_line{0};  // the cursor runs every frame: one line per change of (world, item, need, verdict)
 
 void build_cache_refresh(uint64_t step) {
@@ -4484,8 +4488,10 @@ void hk_build_cursor(KilnRegisters& r) {
     __try {
         if (!g_build_off.load(std::memory_order_relaxed)) build_cursor_impl(r);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (!g_build_off.exchange(true))
+        if (!g_build_off.exchange(true)) {
             LOGE("build: the build cursor's material hook faulted (0x%08lx): block placements from linked sources stand down", GetExceptionCode());
+            g_build_fault_report.store(true);
+        }
     }
 }
 
@@ -4729,8 +4735,10 @@ void build_rows_add(uint8_t* state, uintptr_t frame, const uint8_t* pool, uint64
     unsigned long code = 0;
     if (!guard(&build_rows_add_impl, &j, &code)) {
         call->linked.reset();
-        if (!g_build_rows_off.exchange(true))
+        if (!g_build_rows_off.exchange(true)) {
             LOGE("build: the build menu's material rows could not be read (0x%08lx): its counts are the game's again", code);
+            g_build_rows_fault_report.store(true);
+        }
         return;
     }
     if (j.added && g_build_rows_added.fetch_add(1, std::memory_order_relaxed) == 0)
@@ -4814,8 +4822,17 @@ bool build_install_cursor() {
     g_build_cursor_on.store(true);
     return true;
 }
+// Either world's Pre: the capability row of a building hook's fault, once.
+void build_fault_lower() {
+    if (g_build_fault_report.exchange(false))
+        lower("crafting.build_sources", KILN_CAP_REASON_FAULTED,
+              "a building hook faulted (see kiln.log): the game's own material check and payment are used");
+    if (g_build_rows_fault_report.exchange(false))
+        lower("crafting.build_ui", KILN_CAP_REASON_FAULTED, "the build menu's material rows could not be read (see kiln.log)");
+}
 // The server world's Pre (tick thread): the cache, then both hooks once a link with Building exists.
 void build_server_pre(uint64_t step) {
+    build_fault_lower();
     if (!g_build_feat || !G.registered_ok || !G.craft_ok || g_build_off.load()) return;
     if (!g_build_apply_on.load() && !g_registered.any_building()) return;
     build_cache_refresh(step);
@@ -4850,6 +4867,7 @@ void build_server_pre(uint64_t step) {
 }
 // The client world's Pre (a client process): the cursor hook once a Kiln server's building snapshot is on.
 void build_client_pre() {
+    build_fault_lower();
     if (!g_build_feat || g_build_off.load() || !g_build_on.load(std::memory_order_acquire)) return;
     if (g_build_cursor_on.load()) {  // a hosting client's server Pre may have put the cursor's hook in first
         if (!g_build_rows_on.load() && !g_build_rows_off.load()) {
