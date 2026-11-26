@@ -103,15 +103,17 @@ test("a host's long words stay inside the map: the banner scrolls and its action
   // the box ends inside the map, and what does not fit scrolls inside it (the map clips everything past its edge)
   expect((await rect(".ka-map-area .ka-map-noart")).bottom).toBeLessThanOrEqual(area.bottom);
   expect(await box.evaluate((e) => e.scrollHeight > e.clientHeight && getComputedStyle(e).overflowY === "auto")).toBe(true);
-  await box.evaluate((e) => { e.scrollTop = e.scrollHeight; });
+  // the action, wherever the banner puts it, is brought into view by scrolling the banner alone
   const action = box.getByRole("button", { name: "Copy it from the Kiln Launcher" });
+  await action.scrollIntoViewIfNeeded();
   const at = await action.evaluate((e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; });
   expect(at.top).toBeGreaterThanOrEqual(area.top);
   expect(at.bottom).toBeLessThanOrEqual(area.bottom);
   await action.click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __noArtClicks: number }).__noArtClicks)).toBe(1);
-  // the map itself did not move for it (nothing scrolled the map's root)
+  // the map itself did not move for it (nothing scrolled the map's root or its area)
   expect(await page.locator(".ka-map-root").evaluate((e) => e.scrollTop)).toBe(0);
+  expect(await page.locator(".ka-map-area").evaluate((e) => e.scrollTop)).toBe(0);
 });
 
 test("the launcher, without the hook, keeps its own words", async ({ page }) => {
