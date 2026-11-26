@@ -11,7 +11,11 @@ internal static class BlocksRows
     internal static readonly ServiceCapRows Rows = new("kiln.blocks", Report);
 
     // Factions' wrapper remembers kiln.npcai's miss: forgotten when the refresh finds the table
-    static BlocksRows() => ServiceCaps.WhenFound("kiln.npcai", AiNative.LookAgain);
+    static BlocksRows()
+    {
+        ServiceCaps.WhenFound("kiln.npcai", AiNative.LookAgain);
+        ServiceCaps.WhenFound(SpeechNative.Name, SpeechNative.LookAgain);
+    }
 
     private static void Report()
     {
@@ -31,6 +35,7 @@ internal static class BlocksRows
         // blocks.vfx_registration is kiln.vfx's row (Blocks.Define(name, VfxBlock, options)); without its table nobody reports it
         VfxCaps.ReportBudgetRows();
         WorldTablesNative.ReportBudgetRows();
+        SpeechNative.ReportRows();  // npcspeech.bubble / .voice: sigdb's rows on a client; said here where kiln.npcspeech is not
     }
 }
 

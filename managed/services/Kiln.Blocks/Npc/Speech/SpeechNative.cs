@@ -57,6 +57,20 @@ internal static unsafe class SpeechNative
 
     public static bool Loaded => T != null;
 
+    /// <summary>Without kiln.npcspeech, its sigdb features are lowered, and where sigdb never declared them (a dedicated
+    /// server: the bubble is client data) they get a row that says why (Kiln.Npcs' members name them).</summary>
+    internal static void ReportRows()
+    {
+        if (ServiceCaps.Probe(Name)) return;  // the service is here: sigdb's rows say what works
+        ServiceCaps.LowerFeatures(Name, BubbleCapability, VoiceCapability);
+        var server = !Client.IsClient;
+        foreach (var row in new[] { BubbleCapability, VoiceCapability })
+            if (Capabilities.Get(row).Reason == CapabilityReason.Unknown)
+                ServiceCaps.Report(row, CapabilityState.Unavailable, server ? CapabilityReason.WrongSide : CapabilityReason.ServiceMissing,
+                    server ? "the NPC speech bubble is the game client's: a server sends Kiln.Npcs' decisions to its Kiln clients, which show them"
+                           : "kiln.npcspeech is not here: this game shows no Kiln speech");
+    }
+
     public static Status? Read()
     {
         var t = T;
