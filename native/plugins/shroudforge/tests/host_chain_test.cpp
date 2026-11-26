@@ -394,6 +394,7 @@ const json* target_of(const json& map, uintptr_t live_addr) {
 // ---- a fake kiln.build and server world for the voxel writer (host_voxels.cpp) ----
 const void* g_fake_build = nullptr;
 uintptr_t g_server_world = 0;
+uint32_t g_server_session = 1;  // kiln-core's count of server worlds since boot (KilnSessionInfo.sessions)
 thread_local bool t_world_thread = false;
 bool g_post_refuses = false;
 std::mutex g_posts_mutex;
@@ -448,11 +449,13 @@ KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
     r->blocks_written = 1;
     return KILN_OK;
 }
-// the "server world": runs what was posted, on its own thread, after `delay_ms`
-void run_posts(unsigned delay_ms) {
-    std::thread([delay_ms] {
+// the "server world": runs what was posted, on its own thread, after `delay_ms`; new_world: another server world has
+// begun by then (kiln-core counts it before it runs the posts of that world's first step)
+void run_posts(unsigned delay_ms, bool new_world = false) {
+    std::thread([delay_ms, new_world] {
         Sleep(delay_ms);
         t_world_thread = true;
+        if (new_world) ++g_server_session;
         std::vector<std::pair<KilnTaskFn, void*>> todo;
         {
             std::lock_guard lock(g_posts_mutex);
@@ -501,6 +504,15 @@ int main() {
     };
     api.world = [](uint32_t kind) -> uintptr_t { return kind == KILN_WORLD_SERVER ? g_server_world : 0; };
     api.on_tick_thread = []() -> bool { return t_world_thread; };
+    api.session = [](KilnSessionInfo* out) -> KilnResult {
+        if (!out || out->size < sizeof(KilnSessionInfo)) return KILN_ERR_INVALID_ARGUMENT;
+        *out = KilnSessionInfo{};
+        out->size = sizeof *out;
+        out->worlds[KILN_WORLD_SERVER] = g_server_world;
+        out->sessions[KILN_WORLD_SERVER] = g_server_session;
+        out->state = g_server_world ? KILN_SESSION_DEDICATED : KILN_SESSION_NONE;
+        return KILN_OK;
+    };
     api.post = [](KilnOwner, KilnTaskFn fn, void* user) -> KilnResult {
         if (g_post_refuses) return KILN_ERR_UNAVAILABLE;
         std::lock_guard lock(g_posts_mutex);
@@ -691,6 +703,20 @@ int main() {
         bool said = false;
         for (const auto& l : g_lines) said |= l.find("outside the voxel grid") != std::string::npos;
         check(said, "kiln.log says the box is outside the voxel grid");
+    }
+    // a write the server world runs only after another world began (a hosted game left and a new one loaded): the box
+    // was meant for the world the mod saw; refused, nothing written
+    {
+        const int writes_before = g_build_writes;
+        const uint16_t again[4] = {9, 9, 9, 9};
+        run_posts(30, /*new_world=*/true);
+        outcome = 9;
+        check(!g_host->voxel_write(at, box, again, 4, &outcome) && outcome == 1, "a write that reaches another world is refused");
+        check(g_build_writes == writes_before && g_cells[cell_at(2, 3, 4)] != 9, "and writes nothing there");
+        run_posts(30);
+        outcome = 9;
+        check(g_host->voxel_write(at, box, again, 4, &outcome) && outcome == 0 && g_cells[cell_at(2, 3, 4)] == 9,
+              "the next write, asked in the new world, is written");
     }
     {
         std::lock_guard lock(g_log_mutex);

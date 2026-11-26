@@ -11,7 +11,9 @@
 // How: the call comes on ShroudForge's mods thread. It is posted to the server world's thread (api->post), where
 // voxel_write_core.h writes through kiln.build (the same engine writer and store commit, called through the hooks as
 // the game calls it), and the mods thread waits for the answer. A write the server world has not started within
-// kPostWaitMs is cancelled there and refused (outcome 1: it can no longer run); one that started is waited for.
+// kPostWaitMs is cancelled there and refused (outcome 1: it can no longer run); one that started is waited for. A write
+// is for the server world the mod saw when it asked: one that the world thread reaches only after another server world
+// began (kiln-core's count of them, KilnSessionInfo.sessions) is refused there before anything is read or written.
 // Every refusal or failure goes to kiln.log with its box and its reason (the first ones each time, then every 100th).
 #include <atomic>
 #include <chrono>
@@ -59,11 +61,28 @@ std::string build_detail(const KilnBuildApi* b) {
     return st.detail;
 }
 
+// The server world a write is for: its pointer and kiln-core's count of server worlds since boot (any thread). False
+// when no server world runs in this process (a joined client, the main menu) or the core cannot say.
+struct WorldId {
+    uintptr_t world = 0;
+    uint32_t session = 0;
+    bool operator==(const WorldId&) const = default;
+};
+bool server_world(WorldId& out) {
+    if (!v_api || v_api->size < offsetof(KilnApi, session) + sizeof v_api->session || !v_api->session) return false;
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    if (v_api->session(&s) != KILN_OK || !s.worlds[KILN_WORLD_SERVER]) return false;
+    out = WorldId{s.worlds[KILN_WORLD_SERVER], s.sessions[KILN_WORLD_SERVER]};
+    return true;
+}
+
 // why a write cannot be tried now, or "" when it can (any thread)
 std::string not_ready() {
     const auto* b = build();
     if (!b) return "kiln.build is not available in this start";
-    if (!v_api->world || !v_api->world(KILN_WORLD_SERVER))
+    WorldId id;
+    if (!server_world(id))
         return "no world runs in this game as its host (a joined client's world is the host's to change)";
     KilnBuildStatus st{};
     st.size = sizeof st;
@@ -91,6 +110,7 @@ struct Job {
     std::mutex mu;
     std::condition_variable cv;
     enum State { Pending, Running, Done, Cancelled } state = Pending;
+    WorldId world;  // the server world when the mod asked
     int32_t origin[3]{};
     uint32_t dims[3]{};
     std::vector<uint16_t> values;
@@ -110,7 +130,11 @@ void KILN_CALL run_job(void* user) {
     uint32_t outcome = voxels::kUncertain;
     std::string why;
     try {
-        if (const auto* b = build())
+        WorldId now;
+        if (!server_world(now) || now != job.world)
+            outcome = voxels::kRefused,
+            why = "the server world changed before the write ran (the box was meant for the world the mod saw when it asked)";
+        else if (const auto* b = build())
             outcome = voxels::write_cells(build_io(b), job.origin, job.dims, job.values.data(), job.values.size(), why);
         else outcome = voxels::kRefused, why = "kiln.build is not available in this start";
     } catch (...) {
@@ -167,6 +191,10 @@ bool __cdecl voxel_write(const int32_t* origin, const uint32_t* dims, const uint
         return false;
     }
     auto job = std::make_shared<Job>();
+    if (!server_world(job->world)) {
+        report(origin, dims, voxels::kRefused, "no world runs in this game as its host (a joined client's world is the host's to change)");
+        return false;
+    }
     std::memcpy(job->origin, origin, sizeof job->origin);
     std::memcpy(job->dims, dims, sizeof job->dims);
     job->values.assign(values, values + count);
