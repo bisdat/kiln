@@ -238,7 +238,7 @@ impl Witnessed {
 }
 
 /// A witness refused: no DLL loads and no plan package runs. `code` is the inspector's or `plan-stale`,
-/// `lock-busy`, `baseline-shroudforge-output`, `baseline-capture-failed`, `changed`.
+/// `lock-busy`, `baseline-shroudforge-output`, `baseline-stale-data`, `baseline-capture-failed`, `changed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refused {
     pub code: String,
@@ -813,6 +813,13 @@ pub fn witness(
         })?;
     }
     if base.evidence == "current-set" {
+        // kiln-eml (stale game data, review): game files that hold a known mod's program never become the working
+        // baseline (a loader's first copy of patched game files kept that mod in every start after it was removed)
+        if let Ok(live) = KFCFile::from_path(&header, false)
+            && let Some(text) = startup_host::known_leftover_refusal(stem, &live, true)
+        {
+            return Err(refuse("baseline-stale-data", text));
+        }
         startup_host::capture_baseline(header.as_std_path(), guard, SfHandoff::Deferred).map_err(|e| {
             refuse(
                 "baseline-capture-failed",
@@ -830,6 +837,11 @@ pub fn witness(
         )
     };
     let reference = KFCFile::from_path(game.join(format!("{stem}.kfc.bak")), false).map_err(|e| changed(&e))?;
+    // kiln-eml (stale game data, review): nothing is built from a working baseline that holds a known mod's program
+    // (only its header is looked at: no extra read of the game data)
+    if let Some(text) = startup_host::known_leftover_refusal(stem, &reference, false) {
+        return Err(refuse("baseline-stale-data", text));
+    }
     // The reference index the pass reads by resource type: a bundle range outside the index is refused
     // here, not met as a panic in an attempt
     if !reference.bundles_in_range() {

@@ -53,12 +53,55 @@ pub struct Listed {
 
 /// What Steam's manifests say about the asset files of `stem` in the game folder `root`.
 pub fn installed_files(root: &Path, stem: &str) -> Installed {
+    let files = [root.join(format!("{stem}.kfc")), root.join(format!("{stem}.kfc_resources"))];
+    compare(root, stem, &files)
+}
+
+/// kiln-eml (stale game data, 0.2.0-dev.31.next): what Steam's manifests say about the working baseline of `stem`,
+/// `<stem>.kfc.bak` and `<stem>.kfc_resources.bak`: whether they are byte for byte the `<stem>.kfc` and
+/// `<stem>.kfc_resources` Steam installed for the installed build. A backup an earlier start took of game files another
+/// loader had already patched is sealed, whole and built over, so nothing but Steam's word tells it from the game's
+/// own (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program in the clean copy). Kiln's ShroudForge fork asks
+/// the same (`installed_backups` in `check_steam_installed_files.rs`).
+pub fn installed_backups(root: &Path, stem: &str) -> Installed {
+    let files = [root.join(format!("{stem}.kfc.bak")), root.join(format!("{stem}.kfc_resources.bak"))];
+    compare(root, stem, &files)
+}
+
+/// Compares `files` (in the place of `<stem>.kfc` and `<stem>.kfc_resources`) with what Steam's manifests of the
+/// installed build list for those two names.
+fn compare(root: &Path, stem: &str, files: &[PathBuf; 2]) -> Installed {
+    let (build, listed) = match lookup(root, stem) {
+        Ok(found) => found,
+        Err(why) => return Installed::Unknown(why),
+    };
+    for (path, listed) in files.iter().zip(&listed) {
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        match differs(path, listed) {
+            Ok(None) => {}
+            Ok(Some(what)) => return Installed::Differs { build, what: format!("{name} {what}") },
+            Err(error) => return Installed::Unknown(format!("{name} cannot be read: {error}")),
+        }
+    }
+    Installed::Same { build }
+}
+
+/// kiln-eml (stale game data, review): what Steam's manifest of the installed build lists for `<stem>.kfc` and
+/// `<stem>.kfc_resources` (in that order), with the build id; None where no manifest of the installed build lists both
+/// (the same search as [`installed_files`]). Reads no game file. Kiln's ShroudForge fork has the same (`listed_files`).
+pub fn listed_files(root: &Path, stem: &str) -> Option<(Option<String>, [Listed; 2])> {
+    lookup(root, stem).ok()
+}
+
+/// The build id and the entries of `<stem>.kfc` and `<stem>.kfc_resources` in the first depot manifest of the installed
+/// build that lists both, or why there is none.
+fn lookup(root: &Path, stem: &str) -> Result<(Option<String>, [Listed; 2]), String> {
     let app = if stem == "enshrouded_server" { "2278520" } else { "1203620" };
     let Some((steamapps, acf)) = app_manifest(root, app) else {
-        return Installed::Unknown(format!("there is no Steam manifest appmanifest_{app}.acf for the game folder"));
+        return Err(format!("there is no Steam manifest appmanifest_{app}.acf for the game folder"));
     };
     let Some(state) = parse_vdf(&acf).and_then(|root| root.get("AppState").and_then(Vdf::table).cloned()) else {
-        return Installed::Unknown(format!("Steam's appmanifest_{app}.acf cannot be read"));
+        return Err(format!("Steam's appmanifest_{app}.acf cannot be read"));
     };
     let build = state.get("buildid").and_then(Vdf::text).map(str::to_owned);
     let depots: Vec<(String, String)> = state
@@ -74,7 +117,7 @@ pub fn installed_files(root: &Path, stem: &str) -> Installed {
         })
         .unwrap_or_default();
     if depots.is_empty() {
-        return Installed::Unknown(format!("Steam's appmanifest_{app}.acf names no installed depot"));
+        return Err(format!("Steam's appmanifest_{app}.acf names no installed depot"));
     }
     let names = [format!("{stem}.kfc"), format!("{stem}.kfc_resources")];
     let (mut why, mut read) = (Vec::new(), false);
@@ -93,22 +136,14 @@ pub fn installed_files(root: &Path, stem: &str) -> Installed {
             }
         };
         read = true;
-        if listed.len() != names.len() {
-            continue;
+        if let Ok(listed) = <[Listed; 2]>::try_from(listed) {
+            return Ok((build, listed));
         }
-        for (name, listed) in names.iter().zip(&listed) {
-            match differs(&root.join(name), listed) {
-                Ok(None) => {}
-                Ok(Some(what)) => return Installed::Differs { build, what: format!("{name} {what}") },
-                Err(error) => return Installed::Unknown(format!("{name} cannot be read: {error}")),
-            }
-        }
-        return Installed::Same { build };
     }
     if read {
-        return Installed::Unknown(format!("no installed depot lists {} and {}", names[0], names[1]));
+        return Err(format!("no installed depot lists {} and {}", names[0], names[1]));
     }
-    Installed::Unknown(why.join("; "))
+    Err(why.join("; "))
 }
 
 /// `appmanifest_<app>.acf` of the library the game folder is in (`<library>/steamapps/common/<game>`), or of a SteamCMD
@@ -191,18 +226,38 @@ fn differs(path: &Path, listed: &Listed) -> std::io::Result<Option<String>> {
     if metadata.len() != listed.size {
         return Ok(Some(format!("has {} bytes, Steam's manifest lists {}", metadata.len(), listed.size)));
     }
-    let mut file = fs::File::open(path)?;
+    let (digest, _) = sha1_reader(fs::File::open(path)?)?;
+    Ok((digest != listed.sha1).then(|| "has other bytes than Steam's manifest lists (SHA-1)".into()))
+}
+
+/// The SHA-1 of what `reader` gives, and how many bytes that was.
+fn sha1_reader(mut reader: impl Read) -> std::io::Result<([u8; 20], u64)> {
     let mut hasher = Sha1::new();
     let mut buffer = vec![0u8; 1 << 20];
+    let mut total = 0u64;
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
+        total += read as u64;
         hasher.update(&buffer[..read]);
     }
-    let digest = hasher.finalize();
-    Ok((digest.as_slice() != listed.sha1).then(|| "has other bytes than Steam's manifest lists (SHA-1)".into()))
+    Ok((hasher.finalize().into(), total))
+}
+
+/// kiln-eml (stale game data, review): the file at `path` is the file Steam lists as `listed` with more bytes after it:
+/// it is longer, and its first `listed.size` bytes have the listed SHA-1. That is what an archive writer leaves when it
+/// adds resources to Steam's resource file (every writer Kiln knows keeps the file up to its last chunk and only
+/// appends), so a copy of such a file carries additions on top of the build Steam installed. Reads `listed.size`
+/// bytes, and only when the file is longer than that. Kiln's ShroudForge fork has the same (`extends`).
+pub fn extends(path: &Path, listed: &Listed) -> std::io::Result<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.len() <= listed.size {
+        return Ok(false);
+    }
+    let (digest, read) = sha1_reader(fs::File::open(path)?.take(listed.size))?;
+    Ok(read == listed.size && digest == listed.sha1)
 }
 
 /// The entries of `names` in the depot manifest at `path`, in that order (only those found).
@@ -549,6 +604,49 @@ mod tests {
         fs::write(game.join("enshrouded.kfc"), FILES[1].1).unwrap();
         assert!(matches!(installed_files(&game, "enshrouded"),
             Installed::Differs { what, .. } if what == "enshrouded.kfc_resources has 37 bytes, Steam's manifest lists 29"));
+    }
+
+    /// kiln-eml (stale game data): the working backups are compared with what Steam installed under the game files' names.
+    #[test]
+    fn backups_are_compared_with_the_files_steam_installed() {
+        let (library, game) = library(&FILES);
+        install_steam_records(&library.0.join("steamapps"), "26430625", &FILES);
+        fs::write(game.join("enshrouded.kfc.bak"), FILES[1].1).unwrap();
+        fs::write(game.join("enshrouded.kfc_resources.bak"), FILES[2].1).unwrap();
+        assert_eq!(installed_backups(&game, "enshrouded"), Installed::Same { build: Some("26430625".into()) });
+        fs::write(game.join("enshrouded.kfc.bak"), b"the header Steam installeD").unwrap();
+        assert_eq!(
+            installed_backups(&game, "enshrouded"),
+            Installed::Differs {
+                build: Some("26430625".into()),
+                what: "enshrouded.kfc.bak has other bytes than Steam's manifest lists (SHA-1)".into()
+            }
+        );
+        assert_eq!(installed_files(&game, "enshrouded"), Installed::Same { build: Some("26430625".into()) });
+    }
+
+    /// kiln-eml (review): what Steam's manifest of the installed build lists is read without any game file, and a file
+    /// is Steam's with more after it only when it is longer and its first bytes are Steam's to the listed length.
+    #[test]
+    fn a_file_is_steams_with_more_after_it_only_when_its_start_is_steams() {
+        let (library, game) = library(&FILES);
+        assert_eq!(listed_files(&game, "enshrouded"), None);
+        install_steam_records(&library.0.join("steamapps"), "26430625", &FILES);
+        let (build, [header, resources]) = listed_files(&game, "enshrouded").unwrap();
+        assert_eq!(build.as_deref(), Some("26430625"));
+        assert_eq!((header.size, resources.size), (FILES[1].1.len() as u64, FILES[2].1.len() as u64));
+        let file = game.join("enshrouded.kfc_resources.bak");
+        fs::write(&file, FILES[2].1).unwrap();
+        assert!(!extends(&file, &resources).unwrap(), "Steam's own bytes, nothing after them");
+        fs::write(&file, [FILES[2].1, b" and a mod's resources"].concat()).unwrap();
+        assert!(extends(&file, &resources).unwrap(), "Steam's bytes and a mod's after them");
+        fs::write(&file, b"the resources of another build, longer").unwrap();
+        assert!(!extends(&file, &resources).unwrap(), "other bytes of a greater length");
+        fs::write(&file, b"short").unwrap();
+        assert!(!extends(&file, &resources).unwrap());
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        assert!(!extends(&file, &resources).unwrap(), "not a regular file");
     }
 
     #[test]
