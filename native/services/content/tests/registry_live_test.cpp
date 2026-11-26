@@ -864,6 +864,70 @@ void drift_probe() {
     apply_registry_files(files);
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["writers"][0]["kind"] == "drift", "a reload reports it again");
 }
+// registry-followups 1 (the compat rehearsal: EMF's big_stacks raised the logs to 1200 after the world load's report, and
+// registry.json said 300 until the next pack reload). A write made after the report reaches registry.json without a reload:
+// another loader's code change through kiln.content (as EMF's set_item_max_stack makes one) once the store's generation moved
+// and a short wait passed, and a write outside Kiln's store (a DLL writing game memory) at the next modest timer. Looks in
+// between do nothing (never per tick), a look that finds nothing changed rebuilds nothing, and a drift row is never a refusal.
+uint64_t g_now = 1000;
+void later_writes_reach_the_report() {
+    world();
+    g_registry_now_ms = [] { return g_now; };
+    g_files = {{"compat/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 30}]}})"}};
+    const auto files = files_of({{"compat", "compat/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    const registry::FieldRef logs{"items", "game:material_t1_wood_logs", "maxStack"};
+    check(at<uint32_t>(WOOD_AT) == 30 && json_field(logs)["result"] == 30, "the world load's report: the registry's 30");
+    const int reports = g_reports;
+    const size_t refused = g_last_report.refused.size();
+    // EMF's big_stacks after the report: a code layer through kiln.content's set() (its source in the game's words)
+    uint8_t b[4] = {120, 0, 0, 0};
+    store_put(CODE, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, b, "owner 44: items Material_T1_Wood_Logs.maxStackSize");
+    store_flush(nullptr);
+    check(at<uint32_t>(WOOD_AT) == 120, "the code change is in the game");
+    registry_live_publish();
+    check(g_reports == reports, "not at the next tick: the look waits");
+    g_now += 500;
+    registry_live_publish();
+    check(g_reports == reports, "nor half a second later");
+    g_now += 2000;
+    registry_live_publish();
+    check(g_reports == reports + 1, "the store moved and the wait passed: registry.json is rebuilt (" + std::to_string(g_reports - reports) + ")");
+    auto row = json_field(logs);
+    check(row["result"] == 120 && row["writers"].back()["kind"] == "code" && row["writers"].back()["certainty"] == "certain",
+          "the report has the later code writer: " + row.dump());
+    // nothing changed since: later looks rebuild nothing, also a mod that sets the same value again
+    g_now += 20000;
+    registry_live_publish();
+    store_put(CODE, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, b, "owner 44: items Material_T1_Wood_Logs.maxStackSize");
+    store_flush(nullptr);
+    g_now += 3000;
+    registry_live_publish();
+    check(g_reports == reports + 1, "the same value set again rebuilds nothing (" + std::to_string(g_reports - reports) + ")");
+    // a write outside Kiln's store: the store's generation does not move, the timer's look finds it
+    mem<uint32_t>(WOOD_AT, 777);
+    g_now += 1000;
+    registry_live_publish();
+    check(g_reports == reports + 1, "not before the timer");
+    g_now += 15000;
+    registry_live_publish();
+    check(g_reports == reports + 2, "the timer's look rebuilds registry.json (" + std::to_string(g_reports - reports) + ")");
+    row = json_field(logs);
+    const auto& last = row["writers"].back();
+    check(row["result"] == 777 && last["kind"] == "drift" && last["certainty"] == "bestEffort" && last["value"] == 777 &&
+              last["who"].get<std::string>().rfind("outside Kiln (best effort", 0) == 0 && row["winner"] == last["who"],
+          "a later write outside Kiln is a best-effort row, last: " + row.dump());
+    bool line = false;
+    for (const registry::Line& l : g_last_report.lines)
+        line = line || (l.field == logs && l.certainty == registry::Certainty::BestEffort && l.text.find("after Kiln's last write") != std::string::npos);
+    check(line, "with a best-effort line");
+    check(g_last_report.refused.size() == refused, "never a refusal");
+    check(at<uint32_t>(WOOD_AT) == 777, "and nothing was written over it");
+    g_registry_now_ms = &steady_ms;
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1130,6 +1194,7 @@ int main() {
         {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},
         {"drift_probe", drift_probe},
         {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
+        {"later_writes_reach_the_report", later_writes_reach_the_report},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
