@@ -3,9 +3,12 @@
 //! journal (kiln-eml's `sf_startup::journal`, format 2). Never a value.
 //!
 //! **Who.** The runner runs one mod's entrypoint at a time (`LuaModRunner::run`: `require("mods.<id>")`); while it runs
-//! that mod is the writer ([`begin`]), whoever's code it calls (a shared module, another mod's function): the running
-//! entrypoint is the writer, as ShroudForge's journal names its packages. A write while no entrypoint runs is
-//! unattributed (normally none: the runner runs no Lua between entrypoints).
+//! that mod is the writer ([`Record::begin`]), whoever's code it calls (a shared module, another mod's function): the
+//! running entrypoint is the writer, as ShroudForge's journal names its packages. A mod's entry module is that mod's
+//! own code wherever it runs: another mod that requires it (`require("mods.<id>")`) before its turn runs it then, and
+//! its turn finds it loaded and runs nothing, so while an entry module first runs its mod is the writer
+//! ([`Record::enter`], `RunnerState::require`). A write while no entrypoint runs is unattributed (normally none: the
+//! runner runs no Lua between entrypoints).
 //!
 //! **Where.** Every value wrapper of a resource's data (`MappedStructValue`, `StructValue`, the arrays, the variants) keeps
 //! a small log ([`Writes`]) of the writes made through it: a struct field assigned (`Field`), the value itself put in
@@ -147,6 +150,15 @@ impl Drop for Entrypoint {
     }
 }
 
+/// A mod's entry module running inside another writer's code: its mod writes until the guard is dropped, then the
+/// writer before it again.
+pub(crate) struct Entered(u32);
+impl Drop for Entered {
+    fn drop(&mut self) {
+        WRITER.with(|w| w.set(self.0));
+    }
+}
+
 /// What one run noted beside the value logs: its writers in the order their entrypoints ran, and the resource-level
 /// writes (a resource's data replaced, a resource or content created).
 #[derive(Default)]
@@ -158,15 +170,32 @@ pub(crate) struct Record {
 }
 
 impl Record {
+    /// `package`'s writer number: the one it got when its code first ran, else the next.
+    fn number(&mut self, package: &str) -> u32 {
+        match self.packages.iter().position(|p| p == package) {
+            Some(i) => i as u32 + 1,
+            None => {
+                self.packages.push(package.to_owned());
+                self.packages.len() as u32
+            }
+        }
+    }
     /// `package`'s entrypoint begins.
     pub(crate) fn begin(record: &RefCell<Record>, package: &str) -> Entrypoint {
-        let mut r = record.borrow_mut();
-        r.packages.push(package.to_owned());
-        let n = r.packages.len() as u32;
+        let n = record.borrow_mut().number(package);
         if recording() {
             WRITER.with(|w| w.set(n));
         }
         Entrypoint(())
+    }
+    /// `package`'s entry module runs (whoever required it): its writes are `package`'s until the guard is dropped.
+    pub(crate) fn enter(record: &RefCell<Record>, package: &str) -> Entered {
+        let before = writer();
+        if recording() {
+            let n = record.borrow_mut().number(package);
+            WRITER.with(|w| w.set(n));
+        }
+        Entered(before)
     }
     /// The running entrypoint replaced `id`'s data.
     pub(crate) fn replaced(record: &RefCell<Record>, id: ResourceId) {

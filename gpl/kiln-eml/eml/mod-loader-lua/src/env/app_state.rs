@@ -195,6 +195,12 @@ impl AppState {
         writes::Record::begin(&self.writes, package)
     }
 
+    /// kiln-eml: `package`'s entry module runs, whoever required it: what it writes is `package`'s until the guard is
+    /// dropped (env/writes.rs).
+    pub(crate) fn enter_writer(&self, package: &str) -> writes::Entered {
+        writes::Record::enter(&self.writes, package)
+    }
+
     /// kiln-eml: the running entrypoint created `id` (`explicit`: with its own GUID and part), or the content `hash`.
     pub(crate) fn note_created(&self, id: ResourceId, explicit: bool) {
         writes::Record::created(&self.writes, id, explicit);

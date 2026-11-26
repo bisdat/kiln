@@ -138,3 +138,33 @@ fn a_failed_mods_writes_are_not_in_the_journal() {
     assert_eq!(paths(package(&j, "whole"), 0), [""], "the data replaced: the whole resource");
     assert_eq!(out.generation.as_deref(), Some(receipt_sha256(&f).as_str()));
 }
+
+// Review (mod identity): a mod's entry module is that mod's code. EML runs its mods in its mod table's order (a hash map:
+// any order); a mod that requires another's entry module (`require("mods.alpha")`) before that mod's turn runs it then,
+// and alpha's own turn finds it loaded and runs nothing. Its writes are alpha's all the same, never the requiring mod's.
+// Three passes with four such mods each: whatever the order, alpha is named on its write and none of them is.
+#[test]
+fn an_entry_module_another_mod_requires_first_writes_as_its_own_mod() {
+    for pass in 0..3 {
+        let f = ArchiveFixture::new(&format!("eml-journal-require-{pass}"));
+        f.package("alpha", &format!("{GET}res(0).data.child.base = 41\nreturn {{ ready = true }}\n"), &["patch"]);
+        let mut ids = vec!["alpha".to_string()];
+        for n in 1..=4 {
+            let id = format!("user{n}");
+            f.package(&id, &format!("{GET}assert(require(\"mods.alpha\").ready)\nres(3).data.child.extra = {n}\n"), &["patch"]);
+            ids.push(id);
+        }
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let out = run(&f, &ids);
+        assert_eq!(out.mods.iter().filter(|m| m.state == "loaded").count(), 5, "{:?}", out.mods);
+        let j = journal(&f, &format!("eml_require_{pass}"));
+        assert_eq!(paths(package(&j, "alpha"), 0), ["child.base"], "pass {pass}: alpha's own write: {j}");
+        for n in 1..=4 {
+            let user = package(&j, &format!("user{n}"));
+            assert_eq!(paths(user, 3), ["child.extra"], "pass {pass}");
+            assert_eq!(user["changed"].as_array().unwrap().len(), 1, "pass {pass}: user{n} is not named on alpha's write: {j}");
+        }
+        let ids: Vec<&str> = j["packages"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids.len(), 5, "each mod once: {ids:?}");
+    }
+}
