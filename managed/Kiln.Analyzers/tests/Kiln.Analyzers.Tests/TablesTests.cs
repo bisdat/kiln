@@ -10,6 +10,9 @@ public sealed class TablesTests
     [InlineData("M:Kiln.Chat.Broadcast(System.String)")]              // Services.RequireTickThread
     [InlineData("M:Kiln.Combat.SetHealth(Kiln.EntityId,System.Int32)")]
     [InlineData("M:Kiln.Events.Post``1(``0)")]                         // Game.AssertTickThread
+    // Creative effects (0.2.0-dev.31.2, Kiln.Rules): missing from the table until its regeneration for 0.2.0-dev.31.14
+    [InlineData("M:Kiln.Creative.Effects(Kiln.EntityId)")]
+    [InlineData("M:Kiln.Creative.SetEffect(Kiln.EntityId,System.String,System.Boolean)")]
     public void Tick_thread_members(string id) => Assert.Contains(id, KilnApis.TickThread);
 
     [Theory]
@@ -57,6 +60,10 @@ public sealed class TablesTests
     [InlineData("P:Kiln.Content.Available", "kiln.content")]               // T from Backend.Current.Service("kiln.content")
     [InlineData("P:Kiln.World.SupportsTrackedWrites", "world.tracked_writes")] // not named ...Available: WorldCapabilities.Is(...)
     [InlineData("P:Kiln.Settings.Ready", "kiln.settings")]                 // => T != null && ...
+    // 0.2.0-dev.31.13's APIs, in the table since its regeneration for 0.2.0-dev.31.14
+    [InlineData("P:Kiln.Crosshair.Available", "kiln.client.crosshair")]    // => CrosshairNative.Members != null && Capabilities.Is(...)
+    [InlineData("P:Kiln.Crosshair.Available", "client.crosshair")]
+    [InlineData("P:Kiln.PadInput.Available", "kiln.ui.input")]             // UiNative.Input == null: false
     public void Capability_guards(string property, string row) =>
         Assert.Contains(KilnApis.CapabilityGuards, g => g.StartsWith(property + "=", StringComparison.Ordinal) && g.Substring(property.Length + 1).Split(',').Contains(row));
 

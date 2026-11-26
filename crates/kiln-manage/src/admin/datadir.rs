@@ -1,13 +1,13 @@
 //! Where a server's mods keep their data. By default `<server>/kiln/data/<mod id>`; a profile with `dataDir: profile`
 //! ([`crate::profile::DataDirMode::Profile`]) moves it to `<data>/profiles/<pid>/data/<mod id>` (or the copy-mode
-//! folder in the game), and Kiln.Admin and Kiln Web Admin then write endpoint.json, admin-token and
+//! folder in the game), and Kiln.Admin and Kilnwarden then write endpoint.json, admin-token and
 //! launcher-endpoint.json there. kiln-core says which folder the running server booted with in
 //! `kiln/state/boot.json` `profile.dataDir` (the profile's game-side path: absolute Windows, `Z:` under Wine, or
 //! relative to `<server>/kiln/`).
 //!
 //! The server's data root is that folder when boot.json names one this launcher can map, else `<server>/kiln/data`:
 //! one folder, never a mix. Every mod of a running server writes under the same root, so a reader that needs files of
-//! two mods (Open web panel: Kiln Web Admin's listener and Kiln.Admin's token) resolves the root once and reads both
+//! two mods (Open web panel: Kilnwarden's listener and Kiln.Admin's token) resolves the root once and reads both
 //! from it. (Before the review of 0.2.0-dev.31.12 each file fell back to `kiln/data` on its own when the booted folder
 //! lacked it, so a server could pair its own listener with another folder's Kiln.Admin.)
 

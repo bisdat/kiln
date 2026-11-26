@@ -20,6 +20,7 @@ import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerStatus, 
 import { kilnUpdateFor, shortKiln } from "./kilnUpdate";
 import { webPanelLines, webPanelOf } from "./webPanel";
 import { useT } from "../../i18n";
+import { webPanelMod } from "./webPanelMod";
 
 /** Windows (WebView2): a Steam install starts without Wine there. */
 const WIN = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
@@ -124,7 +125,7 @@ function Steady({ id }: { id: string }) {
   const query = useQuery({ queryKey: sk.query(id), queryFn: () => api.serverQuery(id), enabled: running, refetchInterval: 15000, retry: false });
   const bundles = useQuery({ queryKey: ["runtime_list"], queryFn: api.runtimeList, staleTime: 60_000 });
   const mods = useQuery({ queryKey: sk.mods(id), queryFn: () => api.serverMods(id) as Promise<ServerModX[]>, retry: false, staleTime: 15_000 });
-  const webPanel = running && mods.data?.some((mod) => mod.id === "kiln-webadmin" && mod.enabled);
+  const webPanel = running && webPanelMod(mods.data) !== null;
   const backups = useQuery({ queryKey: sk.backups(id), queryFn: () => api.serverBackups(id), retry: false, staleTime: 30_000 });
   const { ticks } = useTicks({ server: id });
   const showDeploy = useDeployDialog((d) => d.show);

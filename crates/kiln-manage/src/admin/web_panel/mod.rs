@@ -1,4 +1,5 @@
-//! "Open web panel" (Servers Overview): opens a server's Kiln Web Admin in the browser, signed in as the owner.
+//! "Open web panel" (Servers Overview): opens a server's web panel (Kilnwarden, or Kiln Web Admin, its old name:
+//! [`ids`]) in the browser, signed in as the owner.
 //!
 //! (0.2.0-dev.31.12) Every panel opens through its own gateway ([`gateway`]) on its own loopback address
 //! ([`origins`]), so:
@@ -16,6 +17,7 @@
 
 pub mod endpoint;
 pub mod gateway;
+pub mod ids;
 pub mod origins;
 pub mod pin;
 /// The same-user check ([`crate::admin::peer`]; the SSH tunnel uses it too).
@@ -104,7 +106,7 @@ impl WebPanels {
         self.sweep();
         // one data root for everything below: the panel's listener and the Kiln.Admin that mints its login
         let root = endpoint::root(server)?;
-        let ep = endpoint::read_in(server, &root)?;
+        let (panel, ep) = endpoint::find_in(server, &root)?;
         let target = SocketAddr::new(ep.host, ep.port);
         let upstream = match &server.remote {
             Some(spec) => Upstream::Ssh(spec.clone(), target),
@@ -136,10 +138,9 @@ impl WebPanels {
             return Err(e);
         }
         let admin = AdminClient::connect_at(server, &root)?;
-        let args = serde_json::json!({ "consumer": endpoint::MOD_ID, "label": "Kiln Launcher" });
         let ticket = admin
-            .call("login_mint", args.as_object().cloned().unwrap_or_default())
-            .map_err(|_| Error::new(ErrorCode::AdminUnavailable, "Kiln.Admin could not issue a one-time Web Admin login."))?;
+            .call("login_mint", panel.login_mint_args())
+            .map_err(|_| Error::new(ErrorCode::AdminUnavailable, "Kiln.Admin could not issue a one-time web panel login."))?;
         let secret = ticket["secret"]
             .as_str()
             .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))

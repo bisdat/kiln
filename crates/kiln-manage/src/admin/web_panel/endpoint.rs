@@ -1,15 +1,16 @@
-//! `launcher-endpoint.json` (Kiln Web Admin writes it while its panel listens, docs/protocol-relay-broker.md §7):
-//! `{"format":1,"host":"<address>","port":<port>,"sha256":"<certificate SHA-256 hex>"|null}`, in the mod's data folder.
+//! `launcher-endpoint.json` (the web panel mod writes it while its panel listens, docs/protocol-relay-broker.md §7):
+//! `{"format":1,"host":"<address>","port":<port>,"sha256":"<certificate SHA-256 hex>"|null}`, in the mod's data folder:
+//! Kilnwarden's (`kilnwarden`) or, before its rename, Kiln Web Admin's (`kiln-webadmin`), Kilnwarden first ([`super::ids`]).
 //! That folder follows the profile's `dataDir` (`DataDirMode::Profile`): see [`crate::admin::datadir`].
 
+use super::ids::{self, PanelMod};
 use crate::admin::datadir;
 use crate::server::instance::ServerInstance;
-use crate::{Error, ErrorCode, Result};
+use crate::{Error, Result};
 use serde::Deserialize;
 use std::net::IpAddr;
 
-pub const FILE: &str = "launcher-endpoint.json";
-pub const MOD_ID: &str = "kiln-webadmin";
+pub const FILE: &str = ids::ENDPOINT_FILE;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Endpoint {
@@ -21,7 +22,7 @@ pub struct Endpoint {
 
 impl Endpoint {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        let invalid = || Error::invalid("invalid Kiln Web Admin listener description");
+        let invalid = || Error::invalid("invalid web panel listener description");
         if bytes.len() > 4096 {
             return Err(invalid());
         }
@@ -42,10 +43,6 @@ impl Endpoint {
     }
 }
 
-fn not_listening() -> Error {
-    Error::new(ErrorCode::AdminUnavailable, "Kiln Web Admin is not listening. Check that the current mod is loaded.")
-}
-
 /// The server's data root as it booted ([`datadir`]): read once by [`super::WebPanels::open`], which takes both this
 /// file and Kiln.Admin's from it.
 pub fn root(server: &ServerInstance) -> Result<datadir::DataRoot> {
@@ -58,28 +55,34 @@ pub fn root(server: &ServerInstance) -> Result<datadir::DataRoot> {
     }
 }
 
-/// The server's endpoint (`<data root>/kiln-webadmin/launcher-endpoint.json`), locally or over ssh.
+/// The server's endpoint (`<data root>/<panel mod id>/launcher-endpoint.json`), locally or over ssh.
 pub fn read(server: &ServerInstance) -> Result<Endpoint> {
     read_in(server, &root(server)?)
 }
 
 /// The endpoint in the data root `root`.
 pub fn read_in(server: &ServerInstance, root: &datadir::DataRoot) -> Result<Endpoint> {
-    match (&server.remote, root) {
-        (Some(spec), datadir::DataRoot::Remote(_)) => {
-            let dir = root.remote_mod(MOD_ID).unwrap_or_default();
-            match crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}")) {
-                Ok(b) => Endpoint::parse(&b),
-                Err(_) => Err(not_listening()),
-            }
-        }
-        (None, datadir::DataRoot::Local(_)) => {
-            let dir = root.local_mod(MOD_ID).unwrap_or_default();
-            match std::fs::read(dir.join(FILE)) {
-                Ok(b) => Endpoint::parse(&b),
-                Err(_) => Err(not_listening()),
-            }
-        }
-        _ => Err(Error::invalid("a local server's data folder is on this machine, a remote server's on that one")),
-    }
+    find_in(server, root).map(|(_, ep)| ep)
+}
+
+/// (0.2.0-dev.31.14) The web panel mod with an endpoint in the data root `root` ([`ids::find`]: Kilnwarden first, the
+/// old copy when both have one and the server's `kiln/state/mods.json` has the old copy loaded), and that endpoint: the
+/// mod whose id the one-time login is minted for.
+pub fn find_in(server: &ServerInstance, root: &datadir::DataRoot) -> Result<(PanelMod, Endpoint)> {
+    let mods_json = crate::paths::game::MODS_JSON;
+    let (panel, bytes) = match (&server.remote, root) {
+        (Some(spec), datadir::DataRoot::Remote(_)) => ids::find(
+            |m| {
+                let dir = root.remote_mod(m.id).unwrap_or_default();
+                crate::server::remote::read_abs_file(spec, &format!("{dir}/{FILE}"))
+            },
+            || crate::server::remote::read_file(spec, mods_json).is_ok_and(|b| ids::old_copy_in_mods_json(&b)),
+        )?,
+        (None, datadir::DataRoot::Local(_)) => ids::find(
+            |m| std::fs::read(root.local_mod(m.id).unwrap_or_default().join(FILE)),
+            || server.dir.as_deref().and_then(|d| std::fs::read(d.join(mods_json)).ok()).is_some_and(|b| ids::old_copy_in_mods_json(&b)),
+        )?,
+        _ => return Err(Error::invalid("a local server's data folder is on this machine, a remote server's on that one")),
+    };
+    Ok((panel, Endpoint::parse(&bytes)?))
 }
