@@ -168,10 +168,15 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   below decide as before). Since the stale-game-data patch (0.2.0-dev.31.next) both also ask Steam's manifest about the
   pair itself before they build from it or put it back: a pair an earlier start took of game files another loader had
   patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program, weeks after the mod was removed) is whole,
-  sealed and built over, and only Steam's word shows it is not the game's own. Such a pair is refused with "Your game
-  files still contain changes from a mod that isn't installed. Verify the game files in Steam (Properties > Installed
-  Files > Verify integrity), then start again." and nothing changes; without a manifest, a pair that holds a known mod's
-  program is refused the same way. Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
+  sealed and built over, and only Steam's word shows it is not the game's own. A pair Steam lists otherwise is retaken
+  from the game's files when Steam lists those as they are; otherwise it is refused, with "Your game files still contain
+  changes from a mod that isn't installed. Verify the game files in Steam (Properties > Installed Files > Verify
+  integrity), then start again." and nothing changed, only where it is proven to carry a mod's changes (a known mod's
+  program in it, or a resource file that is Steam's own with more data after it); without that proof it is used as
+  before and the start logs why it is in doubt. Without a manifest only a known mod's program refuses. A kiln-mode
+  start refuses (`baseline-stale-data`) a working baseline, or game files it would take as one, that holds a known
+  mod's program; it looks at the header only. A pair kiln-eml replaces is set aside in
+  `kiln/eml/backups/outdated/<stem>/<generation>/` (the newest one kept), never overwritten. Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
   resource prefix) and seals it; a sealed pair counts as replaced, not damaged, only when the files' lengths differ
   from what the seal recorded, and a same-length mismatch stays refused. The old receipt then lists other backups, so
   nothing is taken for EML's output and the old build's bytes never go back. ShroudForge writes its backup copies to
