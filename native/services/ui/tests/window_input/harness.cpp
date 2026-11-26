@@ -1656,6 +1656,26 @@ UINT send_b() {
     in[1].ki.dwFlags |= KEYEVENTF_KEYUP;
     return SendInput(2, in, sizeof(INPUT));
 }
+// A character typed from the game's process (KEYEVENTF_UNICODE: an on-screen keyboard or a paste), down and up
+UINT send_char(wchar_t c) {
+    INPUT in[2]{};
+    for (INPUT& i : in) {
+        i.type = INPUT_KEYBOARD;
+        i.ki.wScan = static_cast<WORD>(c);
+        i.ki.dwFlags = KEYEVENTF_UNICODE;
+    }
+    in[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    return SendInput(2, in, sizeof(INPUT));
+}
+// The presses of `vk` Kiln's own key handling got (g_kiln_keys)
+int kiln_downs(uint32_t vk) {
+    char want[32];
+    std::snprintf(want, sizeof want, "vk=%u ", vk);
+    int n = 0;
+    for (const auto& x : kui::g_kiln_keys)
+        if (x.rfind(want, 0) == 0 && x.find(" down=1 ") != std::string::npos) ++n;
+    return n;
+}
 void mod_sent_key_in_text_field() {
     fresh();
     ImGui::CreateContext();
@@ -1705,6 +1725,64 @@ void mod_sent_key_in_text_field() {
     tap('B', 0x30, 'b', false);
     kui::input_replay();
     check(imgui_text() == "b", "text field: another program's input types: \"%s\"", imgui_text().c_str());
+    imgui_events_taken();
+
+    // two Bs in a row, the sent one's and the player's, with both raw records ahead of the key messages (a message pump
+    // takes the posted WM_INPUTs first): one types, and Kiln's key handling gets both
+    kui::g_kiln_keys.clear();
+    send_b();
+    {
+        const LPARAM sent_down = raw_key(0x30, RI_KEY_MAKE, 'B'), sent_up = raw_key(0x30, RI_KEY_BREAK, 'B');
+        const LPARAM own_down = raw_key(0x30, RI_KEY_MAKE, 'B'), own_up = raw_key(0x30, RI_KEY_BREAK, 'B');
+        g_raw[own_down - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+        g_raw[own_up - kRawBase].header.hDevice = reinterpret_cast<HANDLE>(0x10041);
+        send(WM_INPUT, RIM_INPUT, sent_down);
+        send(WM_INPUT, RIM_INPUT, sent_up);
+        send(WM_INPUT, RIM_INPUT, own_down);
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+        send(WM_CHAR, 'b', key_l(0x30, false, false));
+        send(WM_KEYUP, 'B', key_l(0x30, false, true));
+        send(WM_INPUT, RIM_INPUT, own_up);
+        send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+        send(WM_CHAR, 'b', key_l(0x30, false, false));
+        send(WM_KEYUP, 'B', key_l(0x30, false, true));
+    }
+    kui::input_replay();
+    check(imgui_text() == "b" && imgui_key_downs(ImGuiKey_B) == 1,
+          "text field: a sent B and the player's B, their raw records first: one types (\"b\", 1 B down): \"%s\", %d B downs",
+          imgui_text().c_str(), imgui_key_downs(ImGuiKey_B));
+    check(kiln_downs('B') == 2, "text field: Kiln's key handling gets both B presses (%d):%s", kiln_downs('B'),
+          join(kui::g_kiln_keys).c_str());
+    imgui_events_taken();
+
+    // a sent B whose key message comes without a raw record although raw keyboard records came before (Proton need not
+    // deliver every key as one): kept out all the same, and the player's A and B after it type, in that order
+    send_b();
+    send(WM_KEYDOWN, 'B', key_l(0x30, false, false));
+    send(WM_CHAR, 'b', key_l(0x30, false, false));
+    send(WM_KEYUP, 'B', key_l(0x30, false, true));
+    tap('A', 0x1E, 'a');
+    tap('B', 0x30, 'b');
+    kui::input_replay();
+    check(imgui_text() == "ab", "text field: a sent B without its raw record types nothing, the player's \"ab\" after it types: \"%s\"",
+          imgui_text().c_str());
+    imgui_events_taken();
+
+    // a character typed from the game's process (KEYEVENTF_UNICODE: an on-screen keyboard or a paste, text by intent and
+    // never a game key) types, with a raw record or without
+    send_char(L'x');
+    send(WM_INPUT, RIM_INPUT, raw_key(0, RI_KEY_MAKE, VK_PACKET));
+    send(WM_KEYDOWN, VK_PACKET, key_l(0, false, false));
+    send(WM_CHAR, 'x', key_l(0, false, false));
+    send(WM_INPUT, RIM_INPUT, raw_key(0, RI_KEY_BREAK, VK_PACKET));
+    send(WM_KEYUP, VK_PACKET, key_l(0, false, true));
+    send_char(L'y');
+    send(WM_KEYDOWN, VK_PACKET, key_l(0, false, false));
+    send(WM_CHAR, 'y', key_l(0, false, false));
+    send(WM_KEYUP, VK_PACKET, key_l(0, false, true));
+    kui::input_replay();
+    check(imgui_text() == "xy", "text field: characters typed from the game's process (KEYEVENTF_UNICODE) type (\"xy\"): \"%s\"",
+          imgui_text().c_str());
     imgui_events_taken();
 
     // no text field has the keyboard: nothing is written down, a sent press is a key like any other
