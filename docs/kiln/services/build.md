@@ -65,8 +65,8 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   save), a transient write is refused (`BuildException`, "unavailable"). `Transient` with `Unloaded` is refused
   (`ArgumentException`): the put-back needs the real earlier cells.
 - **The game's own save rule** (native `KILN_BUILD_F_GAME_SAVE`, since 0.2.0-dev.31; not in `BuildFlags`): the write adds no
-  Kiln region, so the game saves its cells inside base build zones only and they regrow elsewhere at the next restart,
-  as for the game's own tools and ShroudForge. Kiln's host for ShroudForge's `runtime.world.voxel.write` writes this way.
+  Kiln region, so the game saves its cells inside base build zones (and in a chunk another Kiln edit keeps) and they
+  regrow elsewhere at the next restart, as for the game's own tools and ShroudForge. Kiln's host for ShroudForge's `runtime.world.voxel.write` writes this way.
   It needs no save-region hook, takes cells it sets out of the transient journal like a kept write, and is refused with
   `KILN_BUILD_F_TRANSIENT`.
 - **Crash behaviour.** The game writes the world when it saves (every 30 s, on a player leaving, on shutdown, on
