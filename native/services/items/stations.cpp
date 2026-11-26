@@ -25,6 +25,7 @@
 #include "storage_guard.h"
 
 #include <windows.h>
+#include <intrin.h>
 
 #include <algorithm>
 #include <atomic>
@@ -4497,40 +4498,68 @@ using BuildApplyFn = bool(__fastcall*)(void* ctx, void* list, uint8_t take);
 // traced stays the game's payment (bag and base), with one kiln.log line per module.
 std::mutex g_build_foreign_mu;
 std::vector<std::string> g_build_foreign;
-void note_foreign_take(uintptr_t ret, uintptr_t site) {
+void note_foreign_take(uintptr_t ret, uintptr_t site, bool by_frame = false) {
     char module[128];
     kiln::module_name(ret, module, sizeof module);
     const bool blueprint = site && site == g_build.blueprint_ret;
     {
         std::lock_guard lock(g_build_foreign_mu);
-        const std::string key = std::string(module) + (blueprint ? "|b" : site ? "|g" : "|-");
+        const std::string key = std::string(module) + (blueprint ? (by_frame ? "|f" : "|b") : site ? "|g" : "|-");
         if (g_build_foreign.size() > 64 || std::find(g_build_foreign.begin(), g_build_foreign.end(), key) != g_build_foreign.end()) return;
         g_build_foreign.push_back(key);
     }
     if (blueprint)
-        LOGI("build: %s makes the blueprint program's payments (its code calls ApplyMaterials for the game's call): block "
-             "placements through it pay from linked sources too", module);
+        LOGI("build: %s makes the blueprint program's payments (its code calls ApplyMaterials for the game's call%s): block "
+             "placements through it pay from linked sources too", module,
+             by_frame ? ", found by the program's own frame" : "");
     else if (!site)
         LOGW("build: a materials take from %s could not be traced to the game's call behind it: it pays from the bag and the "
              "base only (the game's payment)", module);
 }
-uintptr_t build_payment_site(uintptr_t ret) {
+// GitHub #148: Building Tools 0.34.0's placements still paid from the bag and the base alone in a hosted game: the walk of
+// the stack through its code did not reach the game's call (kiln.log, Fuzen777). The blueprint program passes
+// ApplyMaterials its own cost context, ctx = its rsp + 0x50 (lea rcx,[rsp+0x50], pinned by build/BlueprintApplyRet's
+// pattern), so the return address its call pushed lies at ctx - 0x58. A module that makes the call for it passes that ctx
+// on (Building Tools' pay_hook does). So when that slot, on this thread's stack above this hook's frame, still holds
+// build/BlueprintApplyRet, the ctx is mode 0 (the server world's transaction) and that transaction lies in the same frame
+// (rbp + 0x520, ctx + 0x5d0), the take is the blueprint program's call in progress, whoever made it. `here`: the hook's
+// own return slot. Any fault or doubt: 0.
+uintptr_t blueprint_frame_site(const void* ctx, uintptr_t here) {
+    const auto c = reinterpret_cast<uintptr_t>(ctx);
+    if (!c || !g_build.blueprint_ret || c < 0x58 || c - 0x58 <= here) return 0;
+    ULONG_PTR lo = 0, hi = 0;
+    GetCurrentThreadStackLimits(&lo, &hi);
+    const uintptr_t slot = c - 0x58;
+    if (slot < lo || c + 0x10 > hi) return 0;
+    __try {
+        if (*reinterpret_cast<const uintptr_t*>(slot) != g_build.blueprint_ret || *reinterpret_cast<const uint8_t*>(c) != 0) return 0;
+        const uintptr_t tx = *reinterpret_cast<const uintptr_t*>(c + 8);
+        return tx > c && tx < hi && tx - c < 0x8000 ? g_build.blueprint_ret : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+uintptr_t build_payment_site(uintptr_t ret, const void* ctx, uintptr_t here) {
     const auto* h = kiln::hooks_v2(g_api);
     const bool readable = h && h->header.size >= offsetof(KilnHooksApi, read_original) + sizeof(h->read_original) && h->read_original;
-    const uintptr_t site = kiln::game_call_of(ret, g_build.apply, [&](uintptr_t at, void* out, size_t n) {
+    uintptr_t site = kiln::game_call_of(ret, g_build.apply, [&](uintptr_t at, void* out, size_t n) {
         return readable && h->read_original(at, out, n) == KILN_OK;
     });
-    if (site != ret) note_foreign_take(ret, site);
+    bool by_frame = false;
+    if (!site && ret && ret != g_build.blueprint_ret) by_frame = (site = blueprint_frame_site(ctx, here)) != 0;
+    if (site != ret) note_foreign_take(ret, site, by_frame);
     return site;
 }
-bool __fastcall hk_build_apply(void* ctx, void* list, uint8_t take) {
+// never inlined: `here` must be this function's own return slot (blueprint_frame_site looks above it)
+__declspec(noinline) bool __fastcall hk_build_apply(void* ctx, void* list, uint8_t take) {
     const uintptr_t ret = h_build_apply.caller();  // before the original
+    const auto here = reinterpret_cast<uintptr_t>(_AddressOfReturnAddress());
     struct Scope {
         bool saved = t_build_pay;
         ~Scope() { t_build_pay = saved; }
     } scope;
     const bool candidate = take != 0 && g_build.blueprint_ret && !g_build_off.load(std::memory_order_relaxed);
-    const uintptr_t site = candidate && ret != g_build.blueprint_ret ? build_payment_site(ret) : ret;
+    const uintptr_t site = candidate && ret != g_build.blueprint_ret ? build_payment_site(ret, ctx, here) : ret;
     t_build_pay = candidate && site == g_build.blueprint_ret;
     return h_build_apply.original<BuildApplyFn>()(ctx, list, take);
 }

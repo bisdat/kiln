@@ -348,6 +348,28 @@ int main() {
         // code): with no game call of ApplyMaterials behind it on this stack, the take is the game's, and kiln.log says so
         apply_caller=0x7ff800001234;
         CHECK(hk_build_apply(nullptr,list,1) && !seen_scope && logged("could not be traced to the game's call behind it"));
+        // GitHub #148: Building Tools 0.34.0's pay_hook passes the blueprint program's own cost context on. That context is
+        // the program's rsp + 0x50, so its call's return slot (build/BlueprintApplyRet) is ctx - 0x58, and its transaction
+        // lies in the same frame (ctx + 0x5d0): a stack frame laid out so is the program's call in progress
+        {
+            alignas(16) uint64_t frame[0xd0] = {};                       // on this thread's stack, above the hook's frame
+            auto* fctx = reinterpret_cast<uint8_t*>(frame) + 0x58;
+            frame[0] = g_build.blueprint_ret;
+            wr<uint64_t>(fctx, 8, reinterpret_cast<uint64_t>(fctx + 0x5d0));
+            logs.clear();
+            CHECK(hk_build_apply(fctx,list,1) && seen_scope && !t_build_pay);
+            CHECK(logged("makes the blueprint program's payments (its code calls ApplyMaterials for the game's call, found by the program's own frame)"));
+            CHECK(hk_build_apply(fctx,list,0) && !seen_scope);                                    // a give: never
+            frame[0] = g_build.blueprint_ret + 1;CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // another call's slot
+            frame[0] = g_build.blueprint_ret;fctx[0] = 1;CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // not mode 0
+            fctx[0] = 0;wr<uint64_t>(fctx, 8, uint64_t{0x10});CHECK(hk_build_apply(fctx,list,1) && !seen_scope);  // its tx elsewhere
+            wr<uint64_t>(fctx, 8, reinterpret_cast<uint64_t>(fctx + 0x5d0));
+            std::vector<uint8_t> heap(0x700, 0);                             // a context that is not on this stack
+            wr<uint64_t>(heap.data(), 0, g_build.blueprint_ret);wr<uint64_t>(heap.data() + 0x58, 8, reinterpret_cast<uint64_t>(heap.data() + 0x628));
+            CHECK(hk_build_apply(heap.data() + 0x58,list,1) && !seen_scope);
+            apply_caller=g_build.blueprint_ret;frame[0] = 0;
+            CHECK(hk_build_apply(fctx,list,1) && seen_scope);                // the game's own call: its return address decides
+        }
         apply_caller=g_build.blueprint_ret;
         g_build_off.store(false);h_build_apply={};raw_links.clear();
     }
