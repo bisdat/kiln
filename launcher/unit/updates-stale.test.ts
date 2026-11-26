@@ -98,4 +98,48 @@ describe("the Library changes", () => {
     await settle();
     expect(runs).toBe(2);
   });
+
+  // The offline check is shared (checkModUpdates hands a second caller the running one's answer): a change that comes
+  // while it runs would get an answer read before that change. One run at a time, and one more after it for whatever
+  // changed meanwhile.
+  test("a change while the work runs is worked out again after it, once", async () => {
+    const qc = new QueryClient();
+    let runs = 0;
+    const done: [() => void, (e: Error) => void][] = [];
+    const stop = watchLibrary(qc, () => { runs += 1; return new Promise<void>((ok, fail) => done.push([ok, fail])); }, 0);
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    qc.setQueryData(["library_list", null], entry("0.2.9"));
+    qc.setQueryData(["library_list", null], entry("0.2.10"));
+    await settle();
+    expect(runs).toBe(1);
+    // two drops while it runs
+    qc.setQueryData(["library_list", null], entry("0.2.11"));
+    await settle();
+    qc.setQueryData(["library_list", null], entry("0.2.12"));
+    await settle();
+    expect(runs).toBe(1);
+    done.shift()![0]();
+    await settle();
+    expect(runs).toBe(2);
+    // a run that fails does not stop the watcher
+    qc.setQueryData(["library_list", null], entry("0.2.13"));
+    await settle();
+    expect(runs).toBe(2);
+    done.shift()![1](new Error("the check failed"));
+    await settle();
+    expect(runs).toBe(3);
+    done.shift()![0]();
+    await settle();
+    expect(runs).toBe(3);
+    // stopped while a run is waited for: nothing after it
+    qc.setQueryData(["library_list", null], entry("0.2.14"));
+    await settle();
+    expect(runs).toBe(4);
+    qc.setQueryData(["library_list", null], entry("0.2.15"));
+    await settle();
+    stop();
+    done.shift()![0]();
+    await settle();
+    expect(runs).toBe(4);
+  });
 });

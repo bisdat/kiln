@@ -69,13 +69,25 @@ const rowOffered = (s: ModUpdateStatus, installed?: string) =>
 /** Keeps the shared result in step with the Library: when a Library list query reads other entries than before (a
  *  drop, Add mod, the Library's import, a catalog install, a roll back, a removal, a take-over), `run` works the
  *  update result out again; by default an offline check (no request to any provider: what is remembered, compared
- *  with what is installed now), and the Catalog's list of what it installed is read again. Returns the unsubscribe. */
-export function watchLibrary(qc: QueryClient, run: () => void = () => {
-  void checkModUpdates(qc, { offline: true }).catch(() => {});
+ *  with what is installed now), and the Catalog's list of what it installed is read again. Returns the unsubscribe.
+ *  One run at a time: checkModUpdates hands a second offline check the running one's answer, read before the change
+ *  that asked for it, so a change while a run is going on is worked out again once it is done (once, however many). */
+export function watchLibrary(qc: QueryClient, run: () => unknown = () => {
   void qc.invalidateQueries({ queryKey: nx.nk.installed });
+  return checkModUpdates(qc, { offline: true });
 }, delay = 300): () => void {
   const seen = new Map<string, string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let live = true, running = false, again = false;
+  const fire = () => {
+    if (!live) return;
+    if (running) { again = true; return; }
+    running = true;
+    void Promise.resolve().then(run).catch(() => {}).finally(() => {
+      running = false;
+      if (again) { again = false; fire(); }
+    });
+  };
   const off = qc.getQueryCache().subscribe((e) => {
     if (e.type !== "updated" || e.action.type !== "success" || e.query.queryKey[0] !== "library_list") return;
     const entries = (e.query.state.data ?? []) as api.LibraryEntry[];
@@ -84,9 +96,9 @@ export function watchLibrary(qc: QueryClient, run: () => void = () => {
     seen.set(e.query.queryHash, print);
     if (before === undefined || before === print) return;
     clearTimeout(timer);
-    timer = setTimeout(run, delay);
+    timer = setTimeout(fire, delay);
   });
-  return () => { clearTimeout(timer); off(); };
+  return () => { live = false; clearTimeout(timer); off(); };
 }
 
 /** A mod row's update notice, in the row's note line. An update is a link to its page (the browser opens it; nothing
