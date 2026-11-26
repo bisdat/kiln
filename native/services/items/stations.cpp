@@ -1018,9 +1018,13 @@ LogLimit g_log_respec_pay{24}, g_log_respec_world{2};
 // Labs only (KILN_STATIONS_CRAFT_LAB=1, as for the craft lab): a lab has no logged-in player, so a spawned player character
 // (an id outside the player range, never a real player) may have respec links of its own, set through the private
 // kiln_stations_lab_respec_link below. They pay only its respec (the respec branch), with the container checks of a real
-// link and no player record (the character has none). Never on a real server: the switch is off without the variable.
+// link and no player record (the character has none). Never on a real server: the switch is off without the variable,
+// which kiln-items reads once at its start, before any mod runs. Review of #150: only a dedicated server's process (never
+// a client's, so never a hosted world), at most kMaxRespecLab links in all, each named in kiln.log.
 std::mutex g_respec_lab_mu;
 std::vector<std::pair<uint32_t, uint32_t>> g_respec_lab;  // (character, container), g_respec_lab_mu
+constexpr size_t kMaxRespecLab = 16;
+bool respec_lab_on() { return g_craft_lab && g_api && g_api->side() == KILN_SIDE_SERVER; }
 std::vector<CraftSource> respec_lab_sources(uint32_t character) {
     std::vector<CraftSource> out;
     std::lock_guard lock(g_respec_lab_mu);
@@ -1093,7 +1097,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
                                         [&](const CraftSource& s) { return respec ? !s.respec : !s.building; }),
                          registered.end());
     // labs only: a spawned character's lab links (respec_lab_sources); a real player's links are the registry's
-    const bool lab_payer = respec && g_craft_lab && owner > kMaxPlayerEntity;
+    const bool lab_payer = respec && owner > kMaxPlayerEntity && respec_lab_on();
     if (lab_payer) registered = respec_lab_sources(owner);
     if (respec && !registered.empty() && !respec_may_pay(owner)) return 0;  // a stand-down: the game's (bag and Magic chests)
     {
@@ -5732,7 +5736,7 @@ void respec_stand_down(const char* what, const LockCodeRefusal& why) {
 void respec_server_pre() {
     respec_fault_lower();
     if (!g_respec_feat || !G.registered_ok || g_respec_off.load() || g_respec_ready.load()) return;
-    if (!g_registered.any_respec() && !(g_craft_lab && respec_lab_any())) return;
+    if (!g_registered.any_respec() && !(respec_lab_on() && respec_lab_any())) return;
     LockCodeRefusal why;
     if (!respec_code_ok(false, true, &why)) {
         g_respec_off.store(true);
@@ -6111,7 +6115,8 @@ void stations_resolve() {
         g_craft_lab = GetEnvironmentVariableA("KILN_STATIONS_CRAFT_LAB", lab, sizeof lab) > 0 && lab[0] == '1';
         if (g_craft_lab)
             LOGW("stations: KILN_STATIONS_CRAFT_LAB is set: a spawned player character's craft counts the base's Magic "
-                 "chests without the game's inventory right (labs only). Never set this on a real server");
+                 "chests without the game's inventory right%s (labs only). Never set this on a real server",
+                 g_api->side() == KILN_SIDE_SERVER ? ", and it may have respec links of its own (GitHub #150)" : "");
     }
     G.events = G.read && feat("stations.events");
     if (!G.read) {
@@ -6326,14 +6331,25 @@ KilnResult stations_publish(const KilnApi* api, KilnOwner owner) {
 }  // namespace kitems
 
 // Labs only (GitHub #150): a respec link of a spawned player character, as Crafting.AddSource's Respec gives a player.
-// Answers 0 unless the server started with KILN_STATIONS_CRAFT_LAB=1, the character's id is outside the player range and
-// the container is an entity; container 0 removes the character's lab links. Not an ABI (as kiln_stations_craft_stats).
+// Answers 0 unless this is a dedicated server started with KILN_STATIONS_CRAFT_LAB=1 (never a client's process, so never
+// a hosted world), the character's id is outside the player range and the container is an entity, and while fewer than
+// 16 lab links exist (one already there answers 1 again); container 0 removes the character's lab links. Each new link is
+// a kiln.log warning. Not an ABI (as kiln_stations_craft_stats).
 extern "C" KILN_EXPORT int kiln_stations_lab_respec_link(uint32_t character, uint32_t container) {
-    if (!kitems::g_craft_lab || character <= kitems::kMaxPlayerEntity || (container && container <= kitems::kMaxPlayerEntity)) return 0;
-    std::lock_guard lock(kitems::g_respec_lab_mu);
-    auto& v = kitems::g_respec_lab;
-    if (!container) v.erase(std::remove_if(v.begin(), v.end(), [&](const auto& l) { return l.first == character; }), v.end());
-    else if (std::find(v.begin(), v.end(), std::make_pair(character, container)) == v.end()) v.emplace_back(character, container);
+    if (!kitems::respec_lab_on() || character <= kitems::kMaxPlayerEntity || (container && container <= kitems::kMaxPlayerEntity)) return 0;
+    {
+        std::lock_guard lock(kitems::g_respec_lab_mu);
+        auto& v = kitems::g_respec_lab;
+        if (!container) {
+            v.erase(std::remove_if(v.begin(), v.end(), [&](const auto& l) { return l.first == character; }), v.end());
+            return 1;
+        }
+        if (std::find(v.begin(), v.end(), std::make_pair(character, container)) != v.end()) return 1;
+        if (v.size() >= kitems::kMaxRespecLab) return 0;
+        v.emplace_back(character, container);
+    }
+    kitems::items_log(KILN_LOG_WARN, "respec: lab respec link: spawned character %u's skill respec may pay from container %u "
+                      "(KILN_STATIONS_CRAFT_LAB, labs only)", character, container);
     return 1;
 }
 

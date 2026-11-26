@@ -334,8 +334,14 @@ int main() {
         constexpr uint32_t CHAR=3000, LABCHEST=2300;
         CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==0);            // the switch off: refused, nothing kept
         g_craft_lab=true;
+        // review of #150: a client process (a hosted world, where real players play) never takes a lab link, even with the
+        // switch set: only a dedicated server
+        side_now=KILN_SIDE_CLIENT;
+        CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==0 && !respec_lab_any());
+        side_now=KILN_SIDE_SERVER;
         CHECK(kiln_stations_lab_respec_link(PLAYER,LABCHEST)==0 && kiln_stations_lab_respec_link(CHAR,5)==0);  // never a real player
-        CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==1);
+        logs.clear();
+        CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==1 && logged("respec: lab respec link"));  // kiln.log names each one
         auto lab=[&](uint32_t bag,uint32_t chest,uint32_t* rc,uintptr_t ret=0) {
             wr(line,0x14,uint32_t{2});
             fixture::inventory={{CHAR,{{RUNE,bag}}},{LABCHEST,{{RUNE,chest}}},{CHEST,{{RUNE,0}}}};
@@ -345,10 +351,21 @@ int main() {
         CHECK(lab(0,5,&rc)==0 && fixture::calls.empty());                 // not a character (the transaction's view): nothing
         fixture::lab_character=CHAR;
         CHECK(lab(0,5,&rc)==1 && rc==0 && fixture::inventory[LABCHEST][RUNE]==3);  // the Runes only in the linked chest
+        // review of #150: the same lab link is never used in a client process (a hosting client's server world)
+        side_now=KILN_SIDE_CLIENT;
+        CHECK(lab(0,5,&rc)==0 && fixture::calls.empty() && fixture::inventory[LABCHEST][RUNE]==5);
+        side_now=KILN_SIDE_SERVER;
         CHECK(lab(2,5,&rc)==0 && fixture::calls.empty());                 // the bag covers it: the game's
         CHECK(lab(0,1,&rc)==0 && fixture::calls.empty() && logged("short by 1"));  // short: the game refuses
         CHECK(lab(0,5,&rc,0x1234)==0 && fixture::calls.empty());          // a craft never pays from a lab link
         CHECK(kiln_stations_lab_respec_link(CHAR,0)==1 && lab(0,5,&rc)==0 && fixture::calls.empty());  // removed
+        // review of #150: at most 16 lab links in all (a lab needs one); one already there is accepted again
+        {
+            bool all = true;
+            for (uint32_t i = 0; i < 16; ++i) all = kiln_stations_lab_respec_link(CHAR, LABCHEST + i) == 1 && all;
+            CHECK(all && kiln_stations_lab_respec_link(CHAR + 1, LABCHEST) == 0 && kiln_stations_lab_respec_link(CHAR, LABCHEST) == 1);
+            CHECK(kiln_stations_lab_respec_link(CHAR, 0) == 1 && !respec_lab_any());
+        }
         g_craft_lab=false;fixture::lab_character=0;
     }
     g_registered.remove(10,craft_only);g_registered.remove(10,link2);
