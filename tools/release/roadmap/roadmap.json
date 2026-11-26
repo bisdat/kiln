@@ -3840,7 +3840,7 @@
         },
         {
           "title": "Less hitching from big registry packs",
-          "text": "After the world loads, Kiln writes registry.json on a thread of its own instead of the game's tick, and still writes it when the server stops right after a change.",
+          "text": "After the world loads, Kiln writes registry.json on a thread of its own instead of the game's tick, and a start with registry content no longer fills kiln.log with tens of thousands of lines.",
           "area": "servers",
           "kind": "improved"
         },
