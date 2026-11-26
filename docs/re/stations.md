@@ -1089,7 +1089,26 @@ list pays them and keeps them out of the links. A RawHook on `ApplyMaterials` se
 thread-local scope only for a take whose caller is `build/BlueprintApplyRet`; inside it, the craft adapter (§10.1, §10.7)
 accepts `build/ApplyMaterialsPaid` and pays with the building links only (no station outputs): the owner and the base list
 in the game's order first, then the links, all or nothing; any fault or remainder returns 4, `ApplyMaterials` answers false
-and the placement is not made. Foreign code on the cursor's call (98 bytes before and 6 after the return), the stock
+and the placement is not made.
+
+**The blueprint transaction's accessors (GitHub #148).** `player_building_blueprints` builds its setup at `rbp+0x290`
+(S `0xc49d2`..`0xc4aef`, C `0x2d8a32`..`0x2d8b4f`) and stores `+0x60`..`+0xbf` from zeroed `xmm0`/`xmm1` (the six
+`movdqa` at S `0xc4a57` / C `0x2d8ab7`): `+0x70`, the Fuel accessor, stays 0, and `InventoryTxInit` (S `0x1b9300`, C
+`0x419140`; `mov rax,[rdx+0x70]; mov [rcx+0x38],rax` at + `0x6f`) copies it to `tx+0x38`, the word kiln.items'
+`access_from_tx` reads as Fuel (`w[7]`). That check needs every accessor, so it refused every placement (`the server
+world's craft transaction did not check out (its accessors) ... (mode 1, payer 1)`, five times in Fuzen777's 31.13 log,
+once per try) and the game paid from the bag and the base alone. A placement's payment reads only InventorySetup and
+Inventory (the link counts, the setup flags) and takes through `PayMaterial` on the transaction itself: since #148 it is
+checked by those two (`access_from_tx_reads`, as a lock's payment), crafts keep the full check.
+`build_sources_sigdb_test.py` checks the zeroed slot, the copy and the word on both executables.
+
+**Building Tools 0.34.0 (#148).** Its `pay_hook` (the blueprint call's redirect) calls `ApplyMaterials` with the program's
+own cost context. kiln_call_site.hpp's walk of the stack to the game's call did not reach it in Fuzen777's hosted game
+(`a materials take from BuildingTools.dll could not be traced`; why is not known from the static copies: BuildingTools'
+own unwind data was not read). The fallback: the program's context is `rsp+0x50` at its call (`lea rcx,[rsp+0x50]`,
+pinned by `build/BlueprintApplyRet`), so that call's return slot is `ctx-0x58`. When that slot, on the thread's stack
+above the hook, still holds `build/BlueprintApplyRet`, the context is mode 0 and its transaction lies in the same frame
+(`ctx+0x5d0` in the game: `rbp+0x520`, `rbp = rsp+0x100`), the take is that call's, whoever made it. Foreign code on the cursor's call (98 bytes before and 6 after the return), the stock
 count's entry, ApplyMaterials' entry, its take's call or the blueprint program's call stands the building half down with
 one line. A fault inside the cursor hook does the same.
 
@@ -1101,18 +1120,35 @@ it counts and pays links on top. Its own client prediction of the base counts is
 
 **The build menu's material counts** (client only, `client.d/build-ui.json`, feature `crafting.build_ui`). The material
 selector's gatherer `0x40e5d0` (`void(selectorState, access, bool currentOnly)`, docs/re/building.md 1.2.2) walks seven
-groups of `0x648` bytes (`imul rcx,rax,0x648` at `0x40ee37`; the current-group byte after them at `+0x2bf8`). A group it
-rebuilds is zeroed first (`mov [r15-0x630],rbp` at `0x40e694`: its row count), then gets a zero row per known pool material
-(`0x40e750` loop, `0x40c010` with the default key), the bag's stacks, and per pool material the client's published base
-stock map's `u16` (`0x40ee46`, return `0x40ee4b`). `0x40c010` finds a row by item and adds the count at `+0x10` of a
-24-byte row (`0x40c0f4`). With `currentOnly` only the current group is rebuilt; the others keep their rows. CBS swaps the
-base's stock list for its merged one around the count rebuild (`0x46f460` on this build, "menu counts" in its log). Kiln
-wraps the gatherer instead, from inside (its mid hooks after the prologue and at the epilogue, the same two sites as
-kiln-tools' picker, docs/re/building.md 1.2.2; an entry hook until 0.2.0-dev.31.13): before the body, each row that still shows exactly what Kiln wrote gets the game's value back; after
-it, the first row of each item in the building snapshot gets the links' count added, and both values are noted per
-(selector, group, item). So a rebuilt row gets the links once, a kept row is not raised twice, a row the game changed in
-between keeps the game's value plus the links. A row that cannot be read stands the menu's half down (a fault guard). A
-material only the links hold still has its row: the game adds a zero row for every known pool material first.
+groups of `0x648` bytes (`imul rcx,rax,0x648` at `0x40ee37`; the current-group byte after them at `+0x2bf8`), one per
+material pool kind (`0xe`..`0x14` -> groups 0, 1, 6, 2, 3, 4, 5; 7 for none). Each group's byte `+0x638` is its sort mode,
+the material catalogue's tab (Building Tools 0.34.0's source names mode 0 "backpack and magic chests"; the code shows the
+rest): **0** Backpack & Magic Chests, **1** Last Used, **2** by amount (sorted by `0x40be40` after the counts), **3** All
+Materials / item sets, **4** Favorites. Per rebuilt group: modes 1, 2 and 4 drop their rows (mode 0 when it is not the
+current group, groups 0 and 1 by two access flags; mode 3 never), every row's stock is zeroed (`0x40e7bd`..`0x40e98d`), and **only modes 1 and 4 get a zero row
+per listed material** (`0x40e6ab`: `[access+0x58]` lists, `0x40e750` loop, `0x40c010` with the no-container key at
+`0x152d040` and pool-row 1). Then the bag's stacks and, per pool material, the client's published base stock map's `u16`
+(`0x40ee46`, return `0x40ee4b`). `0x40c010` finds a row by item and adds the count at `+0x10` of a 24-byte row
+(`0x40c0f4`), else appends one, except in modes 1 and 4 for anything but a zero row (`0x40c04b`); a full group grows by its
+callback at `+0x18`, and with none the game stops (`0x40c11e`).
+
+So the doc's earlier claim ("a material only the links hold still has its row") was wrong: such a material has a row only
+in Last Used and Favorites. 31.12 to 31.14 raised the rows after the gatherer, and Fuzen777 (#148, 31.13) saw exactly that:
+the hammer's list empty, `0 / needed` under the cursor, 0 in Backpack & Magic Chests, All Materials and the amount sort,
+the right counts in Last Used and Favorites, and after a placement try that one material listed (inferred, not traced to the end: player_ui's
+selection add `0x40c150`, C `0x2bce24`, gives the used material a row in the current group, and a mode 0 current group
+keeps its rows).
+
+Kiln since #148 adds the links where the game adds the base's stock: a mid hook at `0x40ee4b` (`build/client.StockRowsRet`,
+7 bytes: `mov eax,[r15+0xc]; inc r14`), the stock loop's step to the next material, reached on every path of the loop (the
+five not-found jumps and the add) and only for a group the call rebuilds; `rsi` the state, `r15` the pool (materials: i32
+offset `+8` from `+8`, count `+0xc`), `r14` the index, `r12b` the group. It calls `0x40c010` itself with `{item, linked
+count, 0}`, the no-container key and pool-row 0, once per group and call: so the row is appended where the base's stock
+would append it (never in Last Used and Favorites), the amount sort sees the sum, and the next rebuild zeroes it again
+(nothing to take back). A group without room and without a grow callback is skipped. The hook's call is opened and closed
+by the two mid hooks after the prologue and at the epilogue (kiln-tools' picker uses the same two sites; an entry hook until
+0.2.0-dev.31.13), paired by rsp, which is the same at all three. A row or pool that cannot be read stands the menu's half
+down (a fault guard). The step is off Building Tools' checked bytes (its call at + `0x876` ends at + `0x87b`).
 
 Not done: props (`place_prop`'s two `ApplyMaterials` calls), undo, dismantle and terraforming. Not run in a lab or a game.
 ---------------------------------------------------------------------------------------------------------------------
