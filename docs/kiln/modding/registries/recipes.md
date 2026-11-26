@@ -13,20 +13,20 @@ Schema version 0.1.0, experimental (KILNX031: may change in any release until it
 
 ## Fields
 
-Applies: `now` = takes effect at the next use; `worldLoad` = takes effect when a world loads; `restart` = takes effect after a game restart. Ops: `number` = a value or the relative operations (mul, add, min, max, raiseOnly, lowerOnly); `set` = a value; `list` = clear, append, remove, replace; `indexed` = a list of fixed length, edited one element at a time (`xpPerLevel[2]`) with a value or a number operation. A field of a list's elements is named with [] in this table and with the element's index in an edit (`entries[3].chance`, or [*] for every element). Mapping: whether this Kiln maps the field onto the game; an unproven or unmapped field is refused per entry, with the reason, until a Kiln update maps it.
+Applies: `now` = takes effect at the next use; `worldLoad` = takes effect when a world loads; `restart` = takes effect after a game restart. Ops: `number` = a value or the relative operations (mul, add, min, max, raiseOnly, lowerOnly); `set` = a value; `list` = clear, append, remove, replace; `indexed` = a list of fixed length, edited one element at a time (`xpPerLevel[2]`) with a value or a number operation. A field of a list's elements is named with [] in this table and with the element's index in an edit (`entries[3].chance`, or [*] for every element). Mapping: whether this Kiln maps the field onto the game; an unproven or unmapped field is refused per entry, with the reason, until a Kiln update maps it. Joined client: when a joined Kiln client consumes a server edit; see [README](README.md#what-a-joined-client-sees).
 
-| Field | Type | Applies | Ops | Since | Mapping | About |
-|---|---|---|---|---|---|---|
-| `inputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | What one craft takes: an item or an input category, and a count. |
-| `inputs[].item` | ref items, optional | now | set | 0.1.0 | mapped | The item; absent when the input is a category. |
-| `inputs[].category` | ref inputCategories, optional | now | set | 0.1.0 | mapped | An input category (any item of it); absent when the input is an item. |
-| `inputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped | How many of the item or category one craft takes. |
-| `outputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | What one craft makes. |
-| `outputs[].item` | ref items | now | set | 0.1.0 | mapped | The item one craft makes. |
-| `outputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped | How many of the item one craft makes. |
-| `duration` | time s 0..86400 | now | number | 0.1.0 | mapped | How long a station takes for one craft. |
-| `unlock` | enum (game, always) | now | set | 0.1.0 | mapped | When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's). Read by game clients only. |
-| `station` | ref stations | restart | read-only | 0.1.0 | mapped | The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start. |
+| Field | Type | Applies | Ops | Since | Mapping | Joined client | About |
+|---|---|---|---|---|---|---|---|
+| `inputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | now | What one craft takes: an item or an input category, and a count. |
+| `inputs[].item` | ref items, optional | now | set | 0.1.0 | mapped | now | The item; absent when the input is a category. |
+| `inputs[].category` | ref inputCategories, optional | now | set | 0.1.0 | mapped | now | An input category (any item of it); absent when the input is an item. |
+| `inputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped | now | How many of the item or category one craft takes. |
+| `outputs` | list of entries, at most 32 | now | list | 0.1.0 | mapped | now | What one craft makes. |
+| `outputs[].item` | ref items | now | set | 0.1.0 | mapped | now | The item one craft makes. |
+| `outputs[].count` | int 1..65535 | now | number | 0.1.0 | mapped | now | How many of the item one craft makes. |
+| `duration` | time s 0..86400 | now | number | 0.1.0 | mapped | now | How long a station takes for one craft. |
+| `unlock` | enum (game, always) | now | set | 0.1.0 | mapped | localOnly | When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's). Read by game clients only. |
+| `station` | ref stations | restart | read-only | 0.1.0 | unproven: a recipe's station is a stations id, and Kiln has no stations registry yet, so no recipe's station reads as a Kiln id on any build | serverOnly | The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start. |
 
 ## Traits
 

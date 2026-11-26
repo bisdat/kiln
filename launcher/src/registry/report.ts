@@ -20,11 +20,15 @@ export interface RegistryField {
 }
 export interface RegistryConflict { field: string; kind: string; winner: string; loser: string; certainty: string; certain: boolean; text: string }
 export interface RegistryRefusal { owner: string; field: string; stage: string; reason: string }
+/** Edits that wait for a restart: refused rows whose reason starts with the stable token
+ * "RestartRequired: " (native report.h). total: counts.restartRequired (every row, also those the native cap left out). */
+export interface RegistryRestart { total: number; rows: RegistryRefusal[] }
+export const RESTART_TOKEN = "RestartRequired: ";
 export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
-  /** Whether the archive writer's packages are named (base.journal, next release); empty: nothing to say. */
+  /** Whether the archive writer's packages are named (base.journal, since 0.2.0-dev.31.17); empty: nothing to say. */
   journal: string;
-  fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[];
+  fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[]; restart: RegistryRestart;
   entries: { kind: string; registry: string; id: string; state: string; owner: string; source: string; reason: string }[]; omitted: number; empty: boolean;
   /** Earlier writers left out of field chains: native's truncated.writers plus this view's own 64-writer cut. */
   writersOmitted: number;
@@ -76,7 +80,7 @@ function writerKind(kind: string, named?: unknown): string {
   if (kind === "archiveWriter") return t(named === "field" ? "registry.kind.archiveWriterField" : "registry.kind.archiveWriter");
   return kind === "drift" ? t("registry.kind.drift") : kind;
 }
-// base.journal: absent in a report from before the next release, and nothing to say when the start had no archive writer.
+// base.journal: absent in a report from before 0.2.0-dev.31.17, and nothing to say when the start had no archive writer.
 function journalLine(base: ObjectRow): string {
   if (base.journal === undefined) return "";
   const j = object(base.journal), state = text(j.state);
@@ -184,8 +188,20 @@ export function parseRegistryReport(input: string): RegistryReport {
       }),
     };
   });
+  const refusedRows = refused.slice(0, REPORT_LIMITS.rows).map(x => {
+    // Only a refusal the runtime marks raw (an Advanced-tier raw path, report.cpp) is redacted. A name the lock does not
+    // know (a typo, or a field of a newer Kiln) is what the author wrote, and the reason is the one thing they can act on.
+    const f = object(x), field = optional(f.field), registry = optional(f.registry), reason = redactRaw(text(f.reason));
+    const raw = f.raw === true;
+    const unknown = !raw && !!field && !isKilnField(registry, field);
+    const place = [registry, optional(f.id), field].filter(Boolean).join(" · ");
+    return { owner: text(f.mod), field: raw ? ADVANCED_FIELD() : unknown ? unknownField(place) : place,
+      stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}${t("registry.advancedReason")}` : reason };
+  });
+  const restartRows = refusedRows.filter(x => x.reason.startsWith(RESTART_TOKEN));
   return {
     written, generation: count(r.generation), phase: text(r.phase), baseOrigin: text(base.origin), baseWriter: text(base.writer), verified: regmap.verified,
+    restart: { total: Math.max(totals.restartRequired === undefined ? 0 : count(totals.restartRequired), restartRows.length), rows: restartRows },
     journal: journalLine(base),
     fields: fieldRows, writersOmitted: omitted(truncated.writers) + launcherWriterCut,
     conflicts: conflicts.slice(0, REPORT_LIMITS.rows).map(x => {
@@ -195,16 +211,7 @@ export function parseRegistryReport(input: string): RegistryReport {
       return { field: raw ? ADVANCED_FIELD() : unknown ? unknownField(field) : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? t("registry.noOwner") : text(c.loser),
         certainty: certainty(c.certainty), certain: c.certainty === "certain", text: raw ? t("registry.advancedConflict") : redactRaw(text(c.text)) };
     }),
-    refused: refused.slice(0, REPORT_LIMITS.rows).map(x => {
-      // Only a refusal the runtime marks raw (an Advanced-tier raw path, report.cpp) is redacted. A name the lock does not
-      // know (a typo, or a field of a newer Kiln) is what the author wrote, and the reason is the one thing they can act on.
-      const f = object(x), field = optional(f.field), registry = optional(f.registry), reason = redactRaw(text(f.reason));
-      const raw = f.raw === true;
-      const unknown = !raw && !!field && !isKilnField(registry, field);
-      const place = [registry, optional(f.id), field].filter(Boolean).join(" · ");
-      return { owner: text(f.mod), field: raw ? ADVANCED_FIELD() : unknown ? unknownField(place) : place,
-        stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}${t("registry.advancedReason")}` : reason };
-    }),
+    refused: refusedRows,
     entries: [added, removed].flatMap((rows, index) => rows.slice(0, REPORT_LIMITS.rows).map(x => {
       const e = object(x);
       const state = typeof e.state === "string" && ["pendingWorld", "registered", "hidden", "disabled"].includes(e.state) ? e.state : "";

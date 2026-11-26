@@ -862,6 +862,57 @@ void gd_packs_end() {
     after_changes();
 }
 
+namespace {
+KilnOwner g_pack_mark = 0;  // gd_pack_mark .. gd_pack_unmark: the owner whose pack application may be rolled back
+}
+
+void gd_pack_mark(KilnOwner owner) {
+    clones_pack_mark(owner);
+    g_pack_mark = owner;
+}
+
+void gd_pack_unmark() {
+    clones_pack_unmark();
+    g_pack_mark = 0;
+}
+
+uint32_t gd_pack_rollback(KilnOwner owner) {
+    if (!owner || owner != g_pack_mark) return 0;
+    uint32_t n = clones_pack_rollback(owner);
+    // config adds: their arrays are layers of the owner, which store_drop_owner took off; the elements it added go with
+    // them, so a pack that applies again in its place builds its array from the game's elements, not with these
+    {
+        std::lock_guard lock(store_mutex());
+        for (auto it = g_added.begin(); it != g_added.end();)
+            if (it->first.first == owner) {
+                n += static_cast<uint32_t>(it->second.size());
+                it = g_added.erase(it);
+            } else {
+                ++it;
+            }
+    }
+    // other services' sections: what the owner's packs applied comes off (every source of the owner: the service takes
+    // its whole part off), and this application forgets them; its packs that apply again in its place apply theirs again
+    const std::string ot = owner_text(owner);
+    std::vector<const External*> xs;
+    {
+        std::lock_guard lock(g_ext_mu);
+        std::set<std::string> sections;
+        for (const Applied& a : g_ext_cur)
+            if (a.o == owner) sections.insert(a.section);
+        for (const Applied& a : g_ext_prev)
+            if (a.o == owner) sections.insert(a.section);  // replaced by what threw: off too, applied again by what comes back
+        n += static_cast<uint32_t>(std::erase_if(g_ext_cur, [&](const Applied& a) { return a.o == owner; }));
+        n += static_cast<uint32_t>(std::erase_if(g_stash, [&](const Applied& a) { return a.o == owner; }));
+        for (const std::string& s : sections)
+            if (const External* x = find_ext(s)) xs.push_back(x);
+    }
+    for (const External* x : xs) call_revert(*x, ot, "");
+    if (!xs.empty()) LOGI("gamedata: %zu section(s) of other services taken off for %s", xs.size(), ot.c_str());
+    after_changes();
+    return n;
+}
+
 void gd_owner_gone(KilnOwner owner) {
     for (auto it = g_added.begin(); it != g_added.end();) it = it->first.first == owner ? g_added.erase(it) : std::next(it);
     const std::string ot = owner_text(owner);

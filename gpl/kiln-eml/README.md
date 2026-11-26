@@ -575,7 +575,35 @@ Each is marked `kiln-eml:` in the source.
     `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
     adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
     is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
-43. `mod-loader-lua` `env/writes.rs` (new), the value wrappers (`value/mapped.rs`, `value/simple.rs`, `value.rs`
+43. `mod-loader-lua` `steam_files.rs` (`installed_backups`, `compare`, `lookup`, `listed_files`, `extends`), `load.rs`
+    (`create_backup_with`, `restore_backup_as`, `judge`, `Verdict`, `stale_words`, `stale_live_words`, `doubt_words`,
+    `set_aside_backups`, `STALE_WORDS`, `KNOWN_LEFTOVERS`), `startup_host.rs` (`known_leftover_refusal`), `ownership.rs`
+    (`SF_PREPARED_SCHEMES`), `kiln-eml` `startup.rs` (`witness`: `baseline-stale-data`) (kiln-eml's own code, stale game
+    data, 0.2.0-dev.31.16, and its review): a working baseline that passes every check (its seal, its containers, a
+    live header built over it) is still not the game's own when an earlier start took it of game files another loader
+    had patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program). Before kiln-eml builds from the pair
+    in EML mode or puts it back, Steam's manifest of the installed build is asked about the backups themselves (in the
+    place of `<stem>.kfc` and `<stem>.kfc_resources`; SHA-1 of both, read only on a patch run or a restore). Listed
+    otherwise: beside game files Steam lists as they are, those become the new pair; otherwise refused with "Your game
+    files still contain changes from a mod that isn't installed. Verify the game files in Steam (Properties > Installed
+    Files > Verify integrity), then start again." (the server's words name SteamCMD's validate), and nothing changes,
+    only where the pair is proven to carry a mod's changes (a known mod's program in it, or a resource backup that is
+    Steam's resource file with more data after it); without that proof the pair is used and restored as before and the
+    start logs why it is in doubt (Steam's appmanifest can name a build whose files are not in the folder). Without a
+    manifest only a known mod's program refuses. A kiln-mode start (`witness`) refuses, header only, a working baseline
+    or game files it would take as one that hold a known mod's program. A pair kiln-eml replaces (another build's, one
+    built over the game's header, one that is not the installed build's own) is set aside in
+    `kiln/eml/backups/outdated/<stem>/<generation>/`, header backup first, and only the newest generation is kept; it was
+    overwritten before. Kiln's ShroudForge fork decides the same (`verify_working_baseline.rs` `proven`), and its prepared
+    record of scheme 3 (written by a pass that proved its pair) is accepted as hosted ShroudForge output like schemes 1
+    and 2. Tests: load.rs `a_backup_that_carries_a_mods_changes_is_neither_built_from_nor_restored`,
+    `a_backup_steam_does_not_vouch_for_is_used_as_before_when_nothing_in_it_shows_a_mods_changes`,
+    `a_backup_of_the_previous_build_under_files_steam_installed_is_set_aside_and_retaken`,
+    `a_backup_whose_resource_file_is_steams_with_more_after_it_is_refused`, `steam_files`
+    `backups_are_compared_with_the_files_steam_installed`, `a_file_is_steams_with_more_after_it_only_when_its_start_is_steams`,
+    `m6_stale_backup` `kiln_mode_never_takes_or_builds_from_game_data_that_holds_a_known_mods_program`, `ownership`
+    `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
+44. `mod-loader-lua` `env/writes.rs` (new), the value wrappers (`value/mapped.rs`, `value/simple.rs`, `value.rs`
     `walk_writes`/`note_put`), `env/app_state.rs`, `env/game/assets.rs`, `runner/mod.rs`, `runner/state.rs`, `lib.rs` (`RunResult::journal`,
     `RunResult::generation`) (kiln-eml's own code, next release): EML's pass records which mod wrote which resource
     and where, for the EML dialect's change journal (kiln-eml `sf_startup/journal.rs`, format 2). The runner names the

@@ -4424,6 +4424,106 @@ bool nc_registry_apply_visibility(std::string* why) {
     return true;
 }
 
+namespace {
+// One mod's pack application (nc_pack_mark .. nc_pack_unmark, content.h): each definition the owner's packs added or
+// changed since the mark, in the order of its first change, with a copy of it from before that change (null: the packs
+// added it). Under store_mutex; apply_all_packs holds it for the whole application, so no other definition comes between.
+struct PackJournal {
+    KilnOwner owner = 0;
+    std::vector<std::pair<DefPtr, std::shared_ptr<const Def>>> touched;
+    bool has(const DefPtr& d) const {
+        return std::any_of(touched.begin(), touched.end(), [&](const auto& t) { return t.first == d; });
+    }
+} g_journal;
+
+// Before a pack of the marked owner changes `d` (store_mutex held): the first change keeps a copy.
+void journal_change(const DefPtr& d, KilnOwner owner, bool pack) {
+    if (!pack || !owner || owner != g_journal.owner || g_journal.has(d)) return;
+    g_journal.touched.emplace_back(d, std::make_shared<const Def>(*d));
+}
+void journal_added(const DefPtr& d, KilnOwner owner, bool pack) {
+    if (!pack || !owner || owner != g_journal.owner || g_journal.has(d)) return;
+    g_journal.touched.emplace_back(d, nullptr);
+}
+}  // namespace
+
+void nc_pack_mark(KilnOwner owner) {
+    std::lock_guard lock(store_mutex());
+    g_journal = PackJournal{owner, {}};
+}
+
+void nc_pack_unmark() {
+    std::lock_guard lock(store_mutex());
+    g_journal = PackJournal{};
+}
+
+uint32_t nc_pack_rollback(KilnOwner owner) {
+    std::vector<DefPtr> rebuilt;  // their definition changed back: its texts and icon again
+    uint32_t n = 0;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!owner || owner != g_journal.owner) return 0;
+        for (auto it = g_journal.touched.rbegin(); it != g_journal.touched.rend(); ++it) {
+            const DefPtr& d = it->first;
+            const Def* was = it->second.get();
+            ++n;
+            if (!was) {
+                // added by the packs: off as a removed pack's definition is (its id stays registered until the server
+                // restarts, so nothing that holds it breaks; a recipe leaves its station). Its packs from before define it
+                // again when they have it.
+                d->seen = false;
+                d->orphan = true;
+                LOGI("new content: %s %s (%s) comes off: the pack that added it threw while it applied",
+                     d->kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d->name.c_str(), d->guid_s.c_str());
+                continue;
+            }
+            if (d->version != was->version || d->text != was->text || d->placeholder != was->placeholder) {
+                // its definition as at the mark, as a new version (as a redefinition), with the clones, the recipe and the
+                // random-loot entry the game had then (their memory stays valid, as the memory of the version that threw
+                // does): the next sync points the game's maps at them again. A layer is an address in them, so the layers
+                // other packs put on the definition's fields (an earlier mod's rule that matches the item, its own pack's
+                // rules for one taken over) reach the game again; clones built anew would have none of them until the next
+                // application.
+                const std::string now_name = d->name;
+                Def back = *was;
+                back.version = d->version + 1;
+                back.at = d->at;
+                back.info_version = was->info && was->info_version == was->version ? back.version : ~0ull;
+                back.loot_version = was->loot_entry && was->loot_version == was->version ? back.version : ~0ull;
+                back.listed.clear();
+                back.listed_as = 0;
+                *d = std::move(back);
+                g_index.rename(d, now_name);
+                rebuilt.push_back(d);
+            } else {
+                d->owner = was->owner, d->owner_label = was->owner_label, d->source = was->source, d->pack = was->pack;
+                d->mod = was->mod;
+            }
+            d->seen = was->seen;
+            d->orphan = was->orphan;
+            LOGI("new content: %s %s (%s) is back as it was before the pack that threw (%s)", d->kind == KILN_CONTENT_ITEMS ? "item" : "recipe",
+                 d->name.c_str(), d->guid_s.c_str(), d->owner_label.c_str());
+        }
+        g_journal.touched.clear();  // the mark stays: what applies next in its place is journaled from here
+    }
+    for (const DefPtr& d : rebuilt) {
+        if (d->kind == KILN_CONTENT_ITEMS) {
+            for (int i = 0; i < kTextSlots; ++i) set_texts(d->tags[i], d->texts[i]);
+            if (!d->icon_file.empty())  // its own icon file again, as nc_define registers it
+                if (const KilnAssetsApi* a = assets_api(); a && a->icon_register_file)
+                    a->icon_register_file(d->owner, d->guid, KilnStr{d->icon_file.data(), d->icon_file.size()});
+        } else if (!d->display.empty()) {
+            set_text(d->tags[0], d->display);
+        }
+    }
+    if (n) {
+        g_version.fetch_add(1);
+        const uintptr_t aw = active_world();
+        if (aw && g_api->on_world_thread(active_kind())) sync_world(active_kind(), aw);
+    }
+    return n;
+}
+
 KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bool pack, const std::string& source,
                      std::string* report) {
     PhaseTimer pt(PH_DEFINE);
@@ -4628,6 +4728,7 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
             const bool same = cur->text == d->text;
             const bool adopt = cur->orphan || cur->owner != owner;
             const bool takeover = cur->placeholder && !d->placeholder;
+            journal_change(cur, owner, pack);  // a pack of a marked owner: as it was, for its rollback
             cur->owner = owner, cur->owner_label = d->owner_label, cur->source = source, cur->pack = pack;
             cur->seen = true;
             if (cur->orphan) {
@@ -4655,6 +4756,7 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
             d->at = g_defs.size();
             g_defs.push_back(d);
             g_index.add(d);
+            journal_added(d, owner, pack);
             changed = true;
             out["state"] = d->placeholder ? "placeholder" : "defined";
         }

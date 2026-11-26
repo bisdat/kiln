@@ -14,8 +14,11 @@ It asserts
       sigdb-<side>, next to kiln/sigdb/<side>.json;
   (c) a per-side install is complete: the components whose kiln-runtime.json "sides" name the side hold, together,
       kiln/regmap/common/*.json, kiln/regmap/<side>/*.json and kiln/sigdb/<side>.json.
-KILNCTL=<path to a built kilnctl>: also runs the real kilnctl bundle create on the stage (skipped otherwise; the
-same rule runs in Python either way). KILN_STAGE_SH=<file>: gate another stage.sh (for example the one before
+EveryComponent adds a marker file for each other component stage.sh knows (admin, emf, samples, eml, shroudforge,
+enshwick, sfi) and judges their manifest entries the same way; their real files need the builds, so their paths are
+judged by the real kilnctl bundle create release.sh runs on the full stage.
+KILNCTL=<path to a built kilnctl>: also runs the real kilnctl bundle create on both stages (skipped otherwise; the
+same rule runs in Python either way). tools/check.sh sets it when it finds a built kilnctl; release.sh always does. KILN_STAGE_SH=<file>: gate another stage.sh (for example the one before
 d76a2aba, to see the gate fail). If a regmap line of stage.sh moves out of the cut blocks, the gate fails and says so.
 """
 import json
@@ -56,17 +59,26 @@ def cut(text):
     return "\n".join(lines[a:b]), "\n".join(lines[c:d + 1]), [(a + 1, b), (c + 1, d + 1)]
 
 
-def run_stage(stage_sh, stage, scratch):
-    """A minimal stage: core fixture + stage.sh's own sigdb/regmap step + its kiln-runtime.json writer."""
+def known_components(stage_sh):
+    """The component names stage.sh's kiln-runtime.json writer knows (its `known` table)."""
+    _, runtime, _ = cut(Path(stage_sh).read_text(encoding="utf-8"))
+    return re.findall(r'^\s*"([a-z][a-z0-9-]*)": \{"sides"', runtime, re.M)
+
+
+def run_stage(stage_sh, stage, scratch, extra=()):
+    """A minimal stage: core fixture + stage.sh's own sigdb/regmap step + its kiln-runtime.json writer. extra: component
+    folders to add, each with one marker file of its own (their real files need the native, managed and Rust builds)."""
     sigdb, runtime, _ = cut(Path(stage_sh).read_text(encoding="utf-8"))
     dotnet = Path(scratch) / "dotnet"
-    (dotnet / "shared" / "Microsoft.NETCore.App" / "10.0.0").mkdir(parents=True)
+    (dotnet / "shared" / "Microsoft.NETCore.App" / "10.0.0").mkdir(parents=True, exist_ok=True)
+    markers = [f'mkdir -p "$stage/{c}/kiln/gate" && printf "{c}" >"$stage/{c}/kiln/gate/{c}.txt"' for c in extra]
     script = "\n".join([
         "set -euo pipefail",
         'repo=$1 stage=$2 dotnet_root=$3',
         'rm -rf "$stage" && mkdir -p "$stage/core/kiln"',
         "printf 'MZ proxy' >\"$stage/core/dinput8.dll\"",
         "printf '{\"policy\": \"verified-only\"}\\n' >\"$stage/core/kiln/kiln.json\"",
+        *markers,
         sigdb,
         runtime,
     ]) + "\n"
@@ -196,6 +208,55 @@ class StageBundle(unittest.TestCase):
                                 "--git", "0123abc", "--epoch", "1794072134"],
                                capture_output=True, text=True, timeout=120)
             self.assertEqual(p.returncode, 0, f"kilnctl bundle create refused the stage:\n{p.stdout}{p.stderr}")
+
+
+class EveryComponent(unittest.TestCase):
+    """The other components (admin, emf, samples, eml, shroudforge, enshwick, sfi): their manifest entries, judged on a
+    stage that has every one of them. Their real files come from the native, managed, Rust and GPL builds, so which paths
+    they hold is not judged here: release.sh runs the real kilnctl bundle create on the full stage before the runtime
+    zip, and lib/plugins.py check then requires every compatibility plugin in a default component for both sides."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(prefix="kiln-stage-gate-all-")
+        cls.stage = Path(cls.tmp.name) / "stage"
+        cls.known = known_components(STAGE_SH)
+        cls.extra = [c for c in cls.known if c != "core" and not c.startswith("sigdb-")]
+        run_stage(STAGE_SH, cls.stage, cls.tmp.name, cls.extra)
+        cls.owners, cls.manifest, cls.problems = bundle_files(cls.stage)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_the_cut_knows_the_components(self):
+        for c in ("admin", "emf", "samples", "eml", "shroudforge", "enshwick", "sfi"):
+            self.assertIn(c, self.extra, f"stage.sh's kiln-runtime.json writer no longer knows {c}: update this gate")
+
+    def test_every_component_is_declared_and_well_formed(self):
+        self.assertEqual(sorted(self.manifest["components"]), sorted(self.known))
+        self.assertEqual(self.problems, [], "kilnctl bundle create would refuse a stage with every component")
+        for name, c in self.manifest["components"].items():
+            with self.subTest(component=name):
+                self.assertTrue(set(c["sides"]) <= set(SIDES), c["sides"])
+                if name != "core":
+                    self.assertIn("core", c.get("requires", []), f"{name} needs core")
+                self.assertIsInstance(c.get("default"), bool)
+
+    def test_requires_are_on_the_same_sides(self):
+        comps = self.manifest["components"]
+        for name, c in comps.items():
+            for r in c.get("requires", []):
+                with self.subTest(component=name, requires=r):
+                    self.assertTrue(set(c["sides"]) <= set(comps[r]["sides"]), f"{name} runs on a side {r} does not")
+
+    @unittest.skipUnless(KILNCTL, "KILNCTL is not set (the same rule ran in Python above)")
+    def test_kilnctl_bundle_create(self):
+        with tempfile.TemporaryDirectory(prefix="kiln-stage-gate-dist-") as out:
+            p = subprocess.run([KILNCTL, "bundle", "create", str(self.stage), "--out", out,
+                                "--git", "0123abc", "--epoch", "1794072134"],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(p.returncode, 0, f"kilnctl bundle create refused a stage with every component:\n{p.stdout}{p.stderr}")
 
 
 if __name__ == "__main__":

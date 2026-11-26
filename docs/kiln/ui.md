@@ -259,7 +259,84 @@ KeyBindings.Register("grimoire.open", "F3", () =>
 Kiln clamps the move, so a Better Spells screen at the right edge puts Grimoire as far right as still fits. Placement
 needs nothing new in kiln.ui (the managed side uses the window position, size and rect slots it already had). Tested
 without a game, not yet seen in a running game. In the test kit: `KilnHarness.UiPlacement`
-([unit tests](modding/unit-tests.md#ui-placement)).
+([unit tests](modding/unit-tests.md#ui-placement)). For two windows that stay together, use
+[docking](#docking-windows-since-020-dev3116-mod-api-0223) instead: no messages, no lag.
+
+### Docking windows (since 0.2.0-dev.31.16, mod API 0.2.23)
+A window can dock to another window, also one of another mod, and Kiln keeps the two together in every frame, on the
+render thread (GitHub issue 149, thanks Fuzen777: what Grimoire and Better Spells did with messages, frame counting and
+a Shift listener, a frame or two late). Windows (`UiWindow`) only; screens do not dock.
+
+| Member | What it does |
+|---|---|
+| `UiWindowOptions.AcceptDock` | other windows may dock to this one; default false. Without it a window cannot be found, docked to, read or moved by another mod |
+| `Ui.FindWindow(modId, placementId)` | a `UiWindowHandle` for that mod's window with that `PlacementId` (else its title when made) that accepts docks; null when there is none now |
+| `UiWindowHandle.Available`, `.Open`, `.Placement`, `.ModId`, `.PlacementId` | read only; a handle is a name, looked up each time (two of the same mod and id are equal, also with `==`) |
+| `UiWindow.DockTo(handle, side, offset = 0)` | docks this window on `DockSide.Left` / `Right` / `Top` / `Bottom` of that one, `offset` pixels at UI scale 1 along the shared edge (down for Left and Right, right for Top and Bottom) |
+| `UiWindow.Undock()`, `UiWindow.DockedTo` | leaves the dock (stays where it is); the handle it is docked to, or null |
+| `UiWindow.DockChanged` | a `UiDockChange` (`DockedTo`, `Side`, `Offset`, `ByPlayer`) whenever the dock changes |
+| `UiDraw.WindowMovedByUser`, `UiDraw.WindowResizedByUser` | inside a window's draw: the player holds it to drag it, or holds a resize grip or border, this frame |
+
+- **Together in the same frame.** Kiln draws each group of docked windows from the one that leads it this frame (the one
+  the player drags or resizes, else one with a waiting `MoveTo`, else the window the others dock to, unless that one is
+  just opening beside a window already on the screen: then that window) and places every other one from its
+  neighbour's rect of that same frame. So a drag, a resize of the shared edge, or a `MoveTo` of either
+  window moves the other with it, with no lag. Docking only moves windows, it never resizes them.
+- **Both ways.** Dragging the docked window moves the window it is docked to as well: the pair moves as one. A `MoveTo`
+  of the docked window moves the pair too. That is why the target has to accept docks.
+- **Shift.** Holding Shift while dragging one of them, the player moves it alone: it leaves its dock (`DockChanged`
+  with `ByPlayer`), and so do windows docked to it. Dropped again within 16 pixels (UI scale 1) of its old side (the
+  side it asked for, or the other one it was shown on), while the two overlap along it, it docks again there, at the
+  offset it was dropped at (`DockChanged`, `ByPlayer`, with that side). After your own `Undock()`, a drop does not dock
+  it again.
+- **Kept on the screen.** The group is kept inside the viewport (the player drags it against a wall), and a dock that
+  becomes active (the window or its target opens, `DockTo`, a drop) uses the other side when the window that goes
+  beside the other does not fit on its own side but fits there (a target at the right edge: the window docked Right
+  opens on its left). `DockTo` does not change: the next time the dock becomes active it tries its own side first. A
+  group too big for the viewport keeps the window the others dock to inside first, then as many of the windows docked
+  to it as still fit: a docked window (a wide one, a far offset) never pushes the window it docks to off the screen.
+  While the player holds a resize border the group is not moved (ImGui would grow the window instead); it goes back
+  inside when they let go.
+- **Opening.** A window docked to an open window appears beside it in its first frame, and a window others dock to
+  that opens while one of them is on the screen appears beside that one: a window already shown never jumps. When the
+  docked window opens while its target exists but is closed (one key press opening both, its binding first), it is not
+  drawn until the target opens, a quarter of a second at most: it never shows at its own place first. With the target
+  closed longer, it is drawn where it is, and the target opens beside it.
+- **Closed, unloaded, back.** While the target is closed, or its mod is not loaded, the docked window is free and
+  `DockedTo` stays: the dock comes back when the target opens again (beside the docked window when that is shown), also
+  a reloaded mod's new window with the same `PlacementId` that accepts docks (the handle is the name). A window docked
+  to nothing open is drawn exactly as before.
+- **Loops.** `DockTo` refuses the window itself (`ArgumentException`) and a target that is docked to it, directly or
+  through others (`InvalidOperationException`). A loop that only forms later, as mods come and go, is cut each frame:
+  the newer dock is left out. A window docks to one window; several may dock to one, and chains work.
+- **Remembering.** A remembering window (`RememberPlacement`) does not remember a place it only got from its dock:
+  its size is kept, its position stays the player's own, so opened alone it goes back there. The window the others dock
+  to remembers where the group went. Remember the dock itself, if you want to, from `DockChanged`.
+- **Threads.** `DockTo`, `Undock`, `DockedTo` and the handle's members work on any thread. `DockChanged` runs as your
+  mod, on the calling thread for your own calls and on the render thread for the player's (keep it short).
+
+Grimoire docked to the right of Better Spells; both open with F3:
+```csharp
+// Better Spells: accepts docks, nothing else
+_window = Ui.Window("Better Spells", DrawSpells, new UiWindowOptions { PlacementId = "spells", AcceptDock = true, RememberPlacement = true });
+KeyBindings.Register("betterspells.open", "F3", _window.Toggle);
+
+// Grimoire: docks when it opens (Better Spells may load after it, or not at all)
+_window = Ui.Window("Grimoire", DrawGrimoire, new UiWindowOptions { PlacementId = "grimoire", RememberPlacement = true });
+_window.DockChanged += c => { if (c.ByPlayer) _alone = c.DockedTo is null; };  // Shift-dragged away: leave it alone
+KeyBindings.Register("grimoire.open", "F3", () =>
+{
+    if (!_window.Open && !_alone && _window.DockedTo is null && Ui.FindWindow("betterspells", "spells") is { } spells)
+        _window.DockTo(spells, DockSide.Right);
+    _window.Toggle();
+});
+```
+The samples `mods/samples/DockBook` and `mods/samples/DockNotes` are two such mods. Native: kiln.ui's `window_state`
+(see [C](#c-native-plugins)) tells Kiln.Ui before each window's `Begin` where it is and whether the player drags or
+resizes it; with an older kiln-ui.dll the window the others dock to always leads, so dragging a docked window does not
+move its target. In the test kit: `KilnHarness.UiPlacement.FrameWindows` and `PlayerDrags`
+([unit tests](modding/unit-tests.md#ui-placement)). Tested without a game (Kiln.Ui's code over a model of ImGui's
+windows, and ImGui's own drag and resize headless in kiln.ui's host tests), not yet seen in a running game.
 
 ### Crafting menus
 ```csharp
@@ -716,6 +793,11 @@ if (ui.KeyPressed(UiKey.Tab, claim: true)) NextTab();                  // claim:
   `DrawRect` / `DrawText` on a `UiLayer` (the current window, behind or over everything), `MeasureText(text, size, wrap)`,
   `PushColor(UiColorSlot, color)` / `PushVar(UiStyleVar, x, y)` (scopes), `KeyPressed(UiKey, repeat, claim)`, `HeldMods`,
   `ScrollHere(ratio)`.
+- `ui.HeldMods` is the `KeyMods` (Ctrl, Shift, Alt) Dear ImGui's io has this frame, from the game window's key messages,
+  whether or not Kiln has the input; a focus loss (alt-tab) clears it, so a release lost to alt-tab never leaves Shift
+  held. For a Shift+drag or Shift+wheel there is no need for a `KeyInput` listener of your own.
+  `ui.WindowMovedByUser` / `ui.WindowResizedByUser` (since 0.2.0-dev.31.16, mod API 0.2.23) say the player drags or resizes the
+  current window this frame ([docking](#docking-windows-since-020-dev3116-mod-api-0223)).
 - `ui.HasLayout` is false on an older kiln.ui: each call then falls back to the older one or does nothing.
 
 ### The pointer, held buttons and drag and drop (since 0.2.0-dev.30.3)
@@ -1142,6 +1224,11 @@ listener.Dispose();                           // or let the mod's unload end it
 - Every press comes, also while the Kiln menu, a Kiln screen or a Kiln text field has the input: `KeyPress.Captured` and
   `KeyPress.TextInput` say so. `Down` is false for a release; a wheel notch is a press with no release. `Mods` holds
   Ctrl, Shift and Alt.
+- A key press that a module of the game's process sends (`SendInput`, `keybd_event`) while a Kiln text field has the
+  keyboard reaches the listeners and the game as before, but never that field, as a key or as a character (since
+  0.2.0-dev.31.16: a mod that taps B when its own key goes down no longer types a "b"; kiln.log names the sender, up to 3
+  lines). Characters sent as text (`KEYEVENTF_UNICODE`) still type, and input from outside the game's process (an
+  on-screen keyboard, a remapper) is not affected.
 - `KeyPress.Code` (and `KeyInput.PressCode(vk, scan)`) is the code the Keys page stores: a punctuation key by its place
   on a US keyboard, found by its scan code on any layout, every other key by its virtual key. `KeyPress.Chord` is the
   press as the Keys page saves it, and its `ToString()` parses back with `KeyChord.TryParse` and `KeyBindings.Rebind`.
@@ -1440,6 +1527,10 @@ too (the stuck-press guard). `disown(handle, vk, controller)` (vk 0: all), `owns
 The pointer and drag and drop (0.2.0-dev.30.3): `pointer(&KilnUiPointer)`, `drag_source(kind, payload, len, preview)` and
 `drop_target(kind, out, capacity, &len)`, inside a frame callback, a size-guarded tail at byte 1056
 ([services/ui.md](services/ui.md#the-pointer-and-drag-and-drop-020-dev303)).
+
+A window's state (0.2.0-dev.31.16, mod API 0.2.23, GitHub issue 149): `window_state(name, &KilnUiWindowState)`, inside a frame
+callback, a size-guarded tail at byte 1088: where a window is now and whether the player drags or resizes it, what
+Kiln.Ui's window docking reads ([services/ui.md](services/ui.md#a-windows-state-for-docking-020-dev3116-mod-api-0223-github-issue-149)).
 
 `kiln_ui.h` (later additions, check `header.size`): `screen`, `subscribe_screen`, `subscribe_ui_tick`,
 `menu_add` / `menu_set` (`KILN_UI_MENU_MAIN` / `PAUSE`), `push_style` / `pop_style`, `image_*`, `combo`,

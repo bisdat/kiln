@@ -383,6 +383,11 @@ bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out) {
     return true;
 }
 
+void store_set_gate(uintptr_t addr) {
+    std::lock_guard lock(g_mu);
+    if (auto it = g_slots.find(addr); it != g_slots.end()) it->second.gate = true;
+}
+
 bool store_slot_copy(uintptr_t addr, Slot* out) {
     std::lock_guard lock(g_mu);
     auto it = g_slots.find(addr);
@@ -504,8 +509,8 @@ size_t store_flush(std::string* error) { return store_flush_checked(error, nullp
 size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten) {
     PhaseTimer pt(PH_FLUSH);
     std::lock_guard lock(g_mu);
-    std::vector<Write> writes;
-    std::vector<uintptr_t> addrs;
+    // the flush's writes; gate slots (store_set_gate) apart: the ones that close (to all zero) go first, the ones that open last
+    std::vector<Write> writes, closing, opening;
     std::vector<std::map<uintptr_t, Slot>::iterator> dirty;
     dirty.reserve(g_dirty.size());
     for (uintptr_t a : g_dirty)
@@ -539,15 +544,44 @@ size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten
         if (!skip_foreign && std::memcmp(want, s.current, s.n) != 0) {
             Write w{addr, s.n, {}};
             std::memcpy(w.bytes, want, s.n);
-            writes.push_back(w);
-            addrs.push_back(addr);
+            if (!s.gate) writes.push_back(w);
+            else (std::all_of(want, want + s.n, [](uint8_t b) { return b == 0; }) ? closing : opening).push_back(w);
         }
     }
     uintptr_t failed = 0;
     size_t done = 0;
-    if (!writes.empty()) {
-        PhaseTimer wt(PH_WRITE_BATCH);
-        done = write_batch(writes, &failed);
+    if (closing.empty() && opening.empty()) {
+        if (!writes.empty()) {
+            PhaseTimer wt(PH_WRITE_BATCH);
+            done = write_batch(writes, &failed);
+        }
+    } else {
+        // Three batches, so a game thread that reads a gate and then what it gates never sees it open over values it was not
+        // opened with. An entry whose gate did not close, or one of whose other writes did not land, is held: its later writes
+        // are not made (they stay unwritten, and the caller sees them fail), so it is never left open over a half-write.
+        std::set<std::pair<uint32_t, uint32_t>> held;
+        auto entry_of = [](uintptr_t a) { const Slot& s = g_slots.at(a); return std::make_pair(s.kind, s.id); };
+        auto run = [&](const std::vector<Write>& ws) {
+            std::vector<Write> go;
+            for (const Write& w : ws)
+                if (!held.count(entry_of(w.addr))) go.push_back(w);
+                else if (!failed) failed = w.addr;
+            if (!go.empty()) {
+                PhaseTimer wt(PH_WRITE_BATCH);
+                uintptr_t f = 0;
+                done += write_batch(go, &f);
+                if (f && !failed) failed = f;
+            }
+            for (const Write& w : ws) {
+                uint8_t now[kSlotBytes] = {};
+                if (!rd(w.addr, now, w.n) || std::memcmp(now, w.bytes, w.n) != 0) held.insert(entry_of(w.addr));
+            }
+        };
+        run(closing);
+        run(writes);
+        run(opening);
+        writes.insert(writes.begin(), closing.begin(), closing.end());
+        writes.insert(writes.end(), opening.begin(), opening.end());
     }
     if (unwritten)  // each write whose bytes are not in memory now: attributed per slot by the caller (review4 NM1)
         for (const Write& w : writes) {
@@ -836,8 +870,9 @@ std::vector<StoreSkipped> store_skipped() {
         const Field* f = nullptr;
         StoreSkipped x;
         x.addr = r.addr, x.kind = r.kind, x.id = r.id, x.mod = r.mod, x.source = r.source, x.revert = r.revert;
-        x.what = slot_what(s, &field, &f);
-        x.text = x.what + " was written by another writer after Kiln's layer: Kiln's " + (r.revert ? "revert" : "edit") + " not applied";
+        x.what = slot_what(s, &field, &f);  // game debug and member names: diagnostics only, never a report row (P32)
+        // the registry's report names the Kiln place instead (registry_live.cpp skipped_text)
+        x.text = std::string("a slot Kiln wrote was written by another writer after Kiln's layer: Kiln's ") + (r.revert ? "revert" : "edit") + " not applied";
         out.push_back(std::move(x));
     }
     return out;

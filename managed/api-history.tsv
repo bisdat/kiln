@@ -6311,6 +6311,17 @@ managed	Kiln.Blocks	Kiln.NpcPlace.InBase.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.NpcPlace.NpcPlace() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.NpcPlace.Once.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.NpcPlace.Once.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	Kiln.NpcSpeech	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Clear() -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.ModId.get -> string!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Mode.get -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Npc.get -> Kiln.EntityId	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Priority.get -> int	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Priority.set -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Replace(System.Collections.Generic.IEnumerable<Kiln.UiText!>! lines) -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Replace(params string![]! lines) -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.NpcSpeech.Suppress() -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.Npcs	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	Kiln.ObjectiveBlock	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ObjectiveBlock.<Clone>$() -> Kiln.ObjectiveBlock!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ObjectiveBlock.Build.get -> Kiln.BuildGoal?	<=0.2.0-dev.26	<=0.2.1
@@ -7064,6 +7075,13 @@ managed	Kiln.Blocks	Kiln.Sampler.Clamp = 2 -> Kiln.Sampler	<=0.2.0-dev.26	<=0.2.
 managed	Kiln.Blocks	Kiln.Sampler.ClampToZero = 3 -> Kiln.Sampler	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.Sampler.Mirror = 1 -> Kiln.Sampler	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.Sampler.Wrap = 0 -> Kiln.Sampler	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	Kiln.SayOptions	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.<Clone>$() -> Kiln.SayOptions!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.Deconstruct(out bool Interrupt) -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.Equals(Kiln.SayOptions? other) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.Interrupt.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.Interrupt.init -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SayOptions.SayOptions(bool Interrupt = true) -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	Kiln.ScreenEffectBlock	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ScreenEffectBlock.Comment.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.ScreenEffectBlock.Equals(Kiln.ScreenEffectBlock? other) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -7152,6 +7170,19 @@ managed	Kiln.Blocks	Kiln.SpawnShape	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.SpawnShape.<Clone>$() -> Kiln.SpawnShape!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.SpawnShape.Equals(Kiln.SpawnShape? other) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.SpawnShape.SpawnShape() -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechMode.Game = 0 -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechMode.Replace = 2 -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechMode.Suppress = 1 -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.<Clone>$() -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Deconstruct(out bool Ok, out string? Reason) -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Equals(Kiln.SpeechResult? other) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Ok.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Ok.init -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Reason.get -> string?	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.Reason.init -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	Kiln.SpeechResult.SpeechResult(bool Ok, string? Reason) -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	Kiln.SpellBlock	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.SpellBlock.<Clone>$() -> Kiln.SpellBlock!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	Kiln.SpellBlock.Cast.get -> Kiln.CastBlock!	<=0.2.0-dev.26	<=0.2.1
@@ -9552,6 +9583,7 @@ managed	Kiln.Blocks	override Kiln.NpcPerceptionStats.ToString() -> string!	0.2.0
 managed	Kiln.Blocks	override Kiln.NpcPlace.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.NpcPlace.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.NpcPlace.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	override Kiln.NpcSpeech.ToString() -> string!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	override Kiln.ObjectiveBlock.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ObjectiveBlock.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ObjectiveBlock.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -9679,6 +9711,9 @@ managed	Kiln.Blocks	override Kiln.RuleBlock.ToString() -> string!	<=0.2.0-dev.26
 managed	Kiln.Blocks	override Kiln.RunningBlock.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.RunningBlock.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.RunningBlock.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	override Kiln.SayOptions.Equals(object? obj) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	override Kiln.SayOptions.GetHashCode() -> int	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	override Kiln.SayOptions.ToString() -> string!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	override Kiln.ScreenEffectBlock.<Clone>$() -> Kiln.ScreenEffectBlock!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ScreenEffectBlock.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.ScreenEffectBlock.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
@@ -9721,6 +9756,9 @@ managed	Kiln.Blocks	override Kiln.SpawnBlock.ToString() -> string!	<=0.2.0-dev.2
 managed	Kiln.Blocks	override Kiln.SpawnShape.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.SpawnShape.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.SpawnShape.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	override Kiln.SpeechResult.Equals(object? obj) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	override Kiln.SpeechResult.GetHashCode() -> int	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	override Kiln.SpeechResult.ToString() -> string!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	override Kiln.SpellBlock.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.SpellBlock.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	override Kiln.SpellBlock.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -10667,6 +10705,14 @@ managed	Kiln.Blocks	static Kiln.NpcPerceptionStats.operator !=(Kiln.NpcPerceptio
 managed	Kiln.Blocks	static Kiln.NpcPerceptionStats.operator ==(Kiln.NpcPerceptionStats? left, Kiln.NpcPerceptionStats? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Blocks	static Kiln.NpcPlace.operator !=(Kiln.NpcPlace? left, Kiln.NpcPlace? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.NpcPlace.operator ==(Kiln.NpcPlace? left, Kiln.NpcPlace? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static Kiln.Npcs.Available.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.CanSpeak(Kiln.EntityId npc) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.IsSaying(Kiln.EntityId npc) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.Say(Kiln.EntityId npc, Kiln.UiText! text, System.TimeSpan duration, Kiln.SayOptions? options = null) -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.Say(Kiln.EntityId npc, string! text, System.TimeSpan duration, Kiln.SayOptions? options = null) -> Kiln.SpeechResult!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.Speech(Kiln.EntityId npc) -> Kiln.NpcSpeech!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.SpeechOf(Kiln.EntityId npc) -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.Npcs.StopSaying(Kiln.EntityId npc) -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	static Kiln.ObjectiveBlock.operator !=(Kiln.ObjectiveBlock? left, Kiln.ObjectiveBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.ObjectiveBlock.operator ==(Kiln.ObjectiveBlock? left, Kiln.ObjectiveBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.OnHitBlock.operator !=(Kiln.OnHitBlock? left, Kiln.OnHitBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -10788,6 +10834,8 @@ managed	Kiln.Blocks	static Kiln.RuleBlock.operator !=(Kiln.RuleBlock? left, Kiln
 managed	Kiln.Blocks	static Kiln.RuleBlock.operator ==(Kiln.RuleBlock? left, Kiln.RuleBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.RunningBlock.operator !=(Kiln.RunningBlock? left, Kiln.RunningBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.RunningBlock.operator ==(Kiln.RunningBlock? left, Kiln.RunningBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static Kiln.SayOptions.operator !=(Kiln.SayOptions? left, Kiln.SayOptions? right) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.SayOptions.operator ==(Kiln.SayOptions? left, Kiln.SayOptions? right) -> bool	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	static Kiln.ScreenEffectBlock.operator !=(Kiln.ScreenEffectBlock? left, Kiln.ScreenEffectBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.ScreenEffectBlock.operator ==(Kiln.ScreenEffectBlock? left, Kiln.ScreenEffectBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.ScreenRef.implicit operator Kiln.ScreenRef!(Kiln.BlockHandle<Kiln.ScreenEffectBlock!>! handle) -> Kiln.ScreenRef!	<=0.2.0-dev.26	<=0.2.1
@@ -10827,6 +10875,8 @@ managed	Kiln.Blocks	static Kiln.SpawnShape.Shell(float radius) -> Kiln.SpawnShap
 managed	Kiln.Blocks	static Kiln.SpawnShape.Sphere(float radius, float? inner = null) -> Kiln.SpawnShape!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.SpawnShape.operator !=(Kiln.SpawnShape? left, Kiln.SpawnShape? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.SpawnShape.operator ==(Kiln.SpawnShape? left, Kiln.SpawnShape? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static Kiln.SpeechResult.operator !=(Kiln.SpeechResult? left, Kiln.SpeechResult? right) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static Kiln.SpeechResult.operator ==(Kiln.SpeechResult? left, Kiln.SpeechResult? right) -> bool	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	static Kiln.SpellBlock.operator !=(Kiln.SpellBlock? left, Kiln.SpellBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.SpellBlock.operator ==(Kiln.SpellBlock? left, Kiln.SpellBlock? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static Kiln.Sphere.Of(double radius) -> Kiln.ColliderBlock!	<=0.2.0-dev.26	<=0.2.1
@@ -11212,6 +11262,8 @@ managed	Kiln.Blocks	static readonly Kiln.ItemKind.WateringCan -> Kiln.ItemKind!	
 managed	Kiln.Blocks	static readonly Kiln.LidBlock.Open -> System.Guid	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static readonly Kiln.LidBlock.Shut -> System.Guid	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static readonly Kiln.MaterialReflectance.FromParams -> Kiln.MaterialReflectance	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Blocks	static readonly Kiln.Npcs.MaxSay -> System.TimeSpan	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Blocks	static readonly Kiln.Npcs.MinSay -> System.TimeSpan	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Blocks	static readonly Kiln.PlayerStateRef.Eaten -> Kiln.PlayerStateRef	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static readonly Kiln.PlayerStateRef.Eating -> Kiln.PlayerStateRef	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Blocks	static readonly Kiln.ProjectileLook.Fireball -> Kiln.ProjectileLook!	<=0.2.0-dev.26	<=0.2.1
@@ -24058,6 +24110,8 @@ managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryEntryOperations	0.2.0-dev.
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.Applies.get -> Kiln.RegistryApplies	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.Field.get -> string!	0.2.0-dev.31	0.2.17
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.get -> string!	0.2.0-dev.31.17	0.2.24
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.JoinedClient.set -> void	0.2.0-dev.31.17	0.2.24
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldAttribute.RegistryFieldAttribute(string! field, Kiln.RegistryApplies applies) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Applies.get -> Kiln.RegistryApplies	0.2.0-dev.31	0.2.17
@@ -24066,6 +24120,7 @@ managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Field.get -> str
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.FixedLength.get -> int	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Formula.get -> string?	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Id.get -> int	0.2.0-dev.31	0.2.17
+managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.JoinedClient.get -> string!	0.2.0-dev.31.17	0.2.24
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthField.get -> string?	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.LengthOffset.get -> int	0.2.0-dev.31	0.2.17
 managed	Kiln.Registry	[KILNX031]Kiln.Registry.RegistryFieldSpec.Max.get -> double?	0.2.0-dev.31	0.2.17
@@ -28388,6 +28443,11 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcBodies.Clear() -> void	0.2.0-dev.31	
 managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcBodies.Failed(string! mod, string! npc, string! reason, ulong generation = 0) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcBodies.Ready(string! mod, string! npc, System.Guid template = default(System.Guid), System.Guid model = default(System.Guid), System.Guid graph = default(System.Guid), string? closure = null, ulong generation = 1) -> void	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcBodies.Removed(string! mod, string! npc, ulong generation = 0) -> void	0.2.0-dev.31	0.2.17
+managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcSpeech	0.2.0-dev.31.16	0.2.23
+managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcSpeech.Calls.get -> int	0.2.0-dev.31.16	0.2.23
+managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcSpeech.LinesOf(Kiln.EntityId npc, string! language = "en-us") -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcSpeech.ModeOf(Kiln.EntityId npc) -> Kiln.SpeechMode	0.2.0-dev.31.16	0.2.23
+managed	Kiln.TestKit	Kiln.TestKit.HarnessNpcSpeech.Saying(Kiln.EntityId npc, string! language = "en-us") -> string?	0.2.0-dev.31.16	0.2.23
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines	0.2.0-dev.30.3	0.2.13
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int	0.2.0-dev.30.3	0.2.13
@@ -28573,6 +28633,8 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.ContentSize.set -> void	0.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.FilePath.get -> string?	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiScreen! screen) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiWindow! window) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.FrameWindows() -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWindow!, Kiln.UiPlacement>!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.PlayerDrags(Kiln.UiWindow! window, float x, float y, bool shift = false) -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiScreen! screen, float x, float y, float width, float height) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiWindow! window, float x, float y, float width, float height) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiScreen! screen) -> Kiln.UiPlacement?	0.2.0-dev.31.11	0.2.20
@@ -28670,6 +28732,7 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.Mo
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!	0.2.0-dev.31	0.2.17
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.NpcBodies.get -> Kiln.TestKit.HarnessNpcBodies!	0.2.0-dev.31	0.2.17
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.NpcSpeech.get -> Kiln.TestKit.HarnessNpcSpeech!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void	0.2.0-dev.29.18	0.2.10
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!	0.2.0-dev.30.3	0.2.13
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.PlayerStorage.get -> Kiln.TestKit.HarnessPlayerStorage!	0.2.0-dev.30.7	0.2.16
@@ -29574,6 +29637,11 @@ managed	Kiln.Ui	Kiln.CraftingScreen.Station.get -> Kiln.EntityId	0.2.0-dev.29.15
 managed	Kiln.Ui	Kiln.CraftingScreen.Station.init -> void	0.2.0-dev.29.15	0.2.7
 managed	Kiln.Ui	Kiln.CraftingScreen.Workshop.get -> uint	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.CraftingScreen.Workshop.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.DockSide	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.DockSide.Bottom = 3 -> Kiln.DockSide	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.DockSide.Left = 0 -> Kiln.DockSide	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.DockSide.Right = 1 -> Kiln.DockSide	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.DockSide.Top = 2 -> Kiln.DockSide	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.GameLanguage	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.GameScreen.Crafting.get -> Kiln.CraftingScreen?	<=0.2.0-dev.26	<=0.2.1
@@ -30309,6 +30377,12 @@ managed	Kiln.Ui	Kiln.UiCursor.X.get -> float	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiCursor.X.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiCursor.Y.get -> float	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiCursor.Y.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiDockChange	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiDockChange.ByPlayer.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiDockChange.DockedTo.get -> Kiln.UiWindowHandle?	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiDockChange.Offset.get -> float	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiDockChange.Side.get -> Kiln.DockSide	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiDockChange.UiDockChange() -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiDraw	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiDraw.BeginChild(string! id, float width = 0, float height = 0) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiDraw.BeginChild(string! id, float width, float height, Kiln.UiChildFlags flags, Kiln.UiWindowFlags windowFlags = Kiln.UiWindowFlags.None) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -30417,7 +30491,9 @@ managed	Kiln.Ui	Kiln.UiDraw.Tooltip(string! text) -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiDraw.TreeNode(string! label) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiDraw.TreePop() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiDraw.Width.get -> float	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiDraw.WindowMovedByUser.get -> bool	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiDraw.WindowRect.get -> (float X, float Y, float Width, float Height)	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiDraw.WindowResizedByUser.get -> bool	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiFont	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiFont.Default = 0 -> Kiln.UiFont	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiFont.Game = 1 -> Kiln.UiFont	<=0.2.0-dev.26	<=0.2.1
@@ -31003,6 +31079,9 @@ managed	Kiln.Ui	Kiln.UiWheelOptions.Title.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWheelOptions.UiWheelOptions() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Dispose() -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindow.DockChanged -> System.Action<Kiln.UiDockChange>?	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindow.DockTo(Kiln.UiWindowHandle! target, Kiln.DockSide side, float offset = 0) -> void	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindow.DockedTo.get -> Kiln.UiWindowHandle?	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiWindow.Hide() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void	0.2.0-dev.31.11	0.2.20
 managed	Kiln.Ui	Kiln.UiWindow.Open.get -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -31013,14 +31092,24 @@ managed	Kiln.Ui	Kiln.UiWindow.Resize(float width, float height) -> void	0.2.0-de
 managed	Kiln.Ui	Kiln.UiWindow.Show() -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Title.get -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindow.Toggle() -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindow.Undock() -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowFlags.AlwaysVerticalScrollbar = 16384 -> Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowFlags.NoBackground = 128 -> Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowFlags.NoScrollWithMouse = 16 -> Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowFlags.NoScrollbar = 8 -> Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowFlags.None = 0 -> Kiln.UiWindowFlags	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindowHandle	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.Available.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.Equals(Kiln.UiWindowHandle? other) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.ModId.get -> string!	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.Open.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.Placement.get -> Kiln.UiPlacement?	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowHandle.PlacementId.get -> string!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiWindowOptions	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.<Clone>$() -> Kiln.UiWindowOptions!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	Kiln.UiWindowOptions.AcceptDock.get -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	Kiln.UiWindowOptions.AcceptDock.init -> void	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	Kiln.UiWindowOptions.AutoResize.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.AutoResize.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	Kiln.UiWindowOptions.BackgroundAlpha.get -> float?	<=0.2.0-dev.26	<=0.2.1
@@ -31272,6 +31361,9 @@ managed	Kiln.Ui	override Kiln.UiValueIdentity.GetHashCode() -> int	0.2.0-dev.28	
 managed	Kiln.Ui	override Kiln.UiWheelOptions.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.UiWheelOptions.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.UiWheelOptions.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	override Kiln.UiWindowHandle.Equals(object? obj) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	override Kiln.UiWindowHandle.GetHashCode() -> int	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	override Kiln.UiWindowHandle.ToString() -> string!	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	override Kiln.UiWindowOptions.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.UiWindowOptions.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	override Kiln.UiWindowOptions.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
@@ -31377,6 +31469,7 @@ managed	Kiln.Ui	static Kiln.Ui.Crafting.AddTab(uint workshop, Kiln.UiText! label
 managed	Kiln.Ui	static Kiln.Ui.Crafting.Current.get -> Kiln.CraftingScreen?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Ui.Crafting.Describe(uint workshop = 0) -> string!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Ui.Crafting.MenuAvailable.get -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	static Kiln.Ui.FindWindow(string! modId, string! placementId) -> Kiln.UiWindowHandle?	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	static Kiln.Ui.Frame -> System.Action<Kiln.UiDraw!>?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.Ui.Inventory.AddChestButton(string! caption, System.Action<Kiln.InventoryScreen>! handler) -> System.IDisposable!	0.2.0-dev.31	0.2.17
 managed	Kiln.Ui	static Kiln.Ui.Inventory.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.InventoryScreen>! draw, Kiln.InventoryPanelOptions? options = null) -> System.IDisposable!	0.2.0-dev.30	0.2.12
@@ -31501,6 +31594,8 @@ managed	Kiln.Ui	static Kiln.UiWheel.IsValidHoldKey(uint vk) -> bool	<=0.2.0-dev.
 managed	Kiln.Ui	static Kiln.UiWheel.PageCount(int entries) -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.UiWheelOptions.operator !=(Kiln.UiWheelOptions? left, Kiln.UiWheelOptions? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.UiWheelOptions.operator ==(Kiln.UiWheelOptions? left, Kiln.UiWheelOptions? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Ui	static Kiln.UiWindowHandle.operator !=(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool	0.2.0-dev.31.16	0.2.23
+managed	Kiln.Ui	static Kiln.UiWindowHandle.operator ==(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool	0.2.0-dev.31.16	0.2.23
 managed	Kiln.Ui	static Kiln.UiWindowOptions.operator !=(Kiln.UiWindowOptions? left, Kiln.UiWindowOptions? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.UiWindowOptions.operator ==(Kiln.UiWindowOptions? left, Kiln.UiWindowOptions? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Ui	static Kiln.VisibleSlot.operator !=(Kiln.VisibleSlot? left, Kiln.VisibleSlot? right) -> bool	0.2.0-dev.28	0.2.3
@@ -33341,6 +33436,11 @@ native	services/kiln_npcai.h	services/kiln_npcai.h:KilnNpcAiApi:relation_get	0.2
 native	services/kiln_npcai.h	services/kiln_npcai.h:KilnNpcAiApi:relation_set	0.2.0-dev.16	0.2.0
 native	services/kiln_npcai.h	services/kiln_npcai.h:KilnNpcAiApi:status	0.2.0-dev.16	0.2.0
 native	services/kiln_npcai.h	services/kiln_npcai.h:KilnNpcAiApi:tick_step	0.2.0-dev.16	0.2.0
+native	services/kiln_npcspeech.h	services/kiln_npcspeech.h:KilnNpcSpeechApi:clear_all	0.2.0-dev.31.16	0.2.23
+native	services/kiln_npcspeech.h	services/kiln_npcspeech.h:KilnNpcSpeechApi:say	0.2.0-dev.31.16	0.2.23
+native	services/kiln_npcspeech.h	services/kiln_npcspeech.h:KilnNpcSpeechApi:set	0.2.0-dev.31.16	0.2.23
+native	services/kiln_npcspeech.h	services/kiln_npcspeech.h:KilnNpcSpeechApi:status	0.2.0-dev.31.16	0.2.23
+native	services/kiln_npcspeech.h	services/kiln_npcspeech.h:KilnNpcSpeechApi:text	0.2.0-dev.31.16	0.2.23
 native	services/kiln_pacing.h	services/kiln_pacing.h:KilnPacingApi:arm	0.2.0-dev.20	0.2.0
 native	services/kiln_pacing.h	services/kiln_pacing.h:KilnPacingApi:cap_task_workers	0.2.0-dev.20	0.2.0
 native	services/kiln_pacing.h	services/kiln_pacing.h:KilnPacingApi:set_receiver	0.2.0-dev.20	0.2.0
@@ -33564,6 +33664,7 @@ native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:collect
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:craft_items	0.2.0-dev.29.17	0.2.9
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:events	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:fill_asks	0.2.0-dev.29.19	0.2.11
+native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:fill_flags	0.2.0-dev.31.16	0.2.23
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:last_seq	0.2.0-dev.29.14	0.2.6
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:lock_asks	0.2.0-dev.31.12	0.2.21
 native	services/kiln_stations.h	services/kiln_stations.h:KilnStationsApi:max_chests	0.2.0-dev.29.17	0.2.9
@@ -33800,6 +33901,7 @@ native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:wheel_active	0.2.0-dev.20
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:wheel_close	0.2.0-dev.20	0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:wheel_open	0.2.0-dev.20	0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:window_rect	<=0.2.0-dev.10	<=0.2.0
+native	services/kiln_ui.h	services/kiln_ui.h:KilnUiApi:window_state	0.2.0-dev.31.16	0.2.23
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:in_menu	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:subscribe	<=0.2.0-dev.10	<=0.2.0
 native	services/kiln_ui.h	services/kiln_ui.h:KilnUiTickApi:unsubscribe	<=0.2.0-dev.10	<=0.2.0

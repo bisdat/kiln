@@ -24,26 +24,30 @@
           "min": 0,
           "max": 65535,
           "ops": "number",
-          "doc": "The smallest stack a drop has."
+          "doc": "The smallest stack a drop has.",
+          "joinedClient": "serverOnly"
         },
         "max": {
           "type": "int",
           "min": 0,
           "max": 65535,
           "ops": "number",
-          "doc": "The largest stack a drop has."
+          "doc": "The largest stack a drop has.",
+          "joinedClient": "serverOnly"
         },
         "scalable": {
           "type": "bool",
           "ops": "set",
-          "doc": "The stack grows with the world's loot amount, up to maxScaled."
+          "doc": "The stack grows with the world's loot amount, up to maxScaled.",
+          "joinedClient": "serverOnly"
         },
         "maxScaled": {
           "type": "int",
           "min": 0,
           "max": 65535,
           "ops": "number",
-          "doc": "The largest stack a drop has with the world's loot amount applied (when scalable)."
+          "doc": "The largest stack a drop has with the world's loot amount applied (when scalable).",
+          "joinedClient": "serverOnly"
         }
       },
       "typeName": "ItemLootStack"
@@ -60,7 +64,8 @@
       "applies": "now",
       "ops": "set",
       "doc": "The rarities a drop may roll.",
-      "typeName": "RegistryRarities"
+      "typeName": "RegistryRarities",
+      "joinedClient": "serverOnly"
     },
     "fixedRarity": {
       "type": "enum",
@@ -75,7 +80,8 @@
       "applies": "now",
       "ops": "set",
       "doc": "A rarity every drop gets (none: rolled from rarities).",
-      "typeName": "ItemLootRarity"
+      "typeName": "ItemLootRarity",
+      "joinedClient": "serverOnly"
     }
   },
   "entry": {

@@ -6215,6 +6215,173 @@
       "unknown": "Kiln non sa dire quali file del gioco rimetterebbe: {reason}."
     }
   },
+  "registry": {
+    "title": "Conflitti del registro",
+    "gameUnavailable": "Selezione del gioco non disponibile",
+    "noGame": "Nessun gioco selezionato",
+    "noGameHint": "Scegli un gioco installato nelle Impostazioni per leggere la sua istantanea del registro.",
+    "sub": "L'istantanea salvata del registro di questo gioco, non dati in tempo reale né una previsione del prossimo avvio.",
+    "refresh": "Aggiorna il rapporto",
+    "unavailable": "Rapporto del registro non disponibile",
+    "missing": "Ancora nessun rapporto del registro",
+    "missingHint": "Kiln non ha scritto kiln/state/registry.json per questo gioco. Non c'è alcuna istantanea del registro da esaminare.",
+    "stale": "Istantanea non aggiornata",
+    "staleBody": "{reason} I valori qui sotto appartengono all'istantanea salvata, non per forza al mondo o all'elenco di mod attuali.",
+    "snapshot": "Istantanea",
+    "snapshotSub": "{time} · generazione {generation} · {phase}",
+    "baseOrigin": "Origine della base: {origin}",
+    "archiveWriter": "Scrittore dell'archivio: {writer}",
+    "journal": {
+      "read": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (solo oggetti, drop e bilanciamento: una voce di ricetta o di bottino non viene indicata).",
+      "truncated": "Pacchetti dello scrittore dell'archivio indicati dal diario delle modifiche di kiln-eml: {packages} pacchetti, {entries} voci (solo oggetti, drop e bilanciamento: una voce di ricetta o di bottino non viene indicata). Il diario è troncato, quindi un pacchetto può aver scritto voci che non indica.",
+      "notNamed": "I pacchetti dello scrittore dell'archivio non sono indicati in questo avvio: {reason}",
+      "none": "lo scrittore dell'archivio di questo avvio non tiene un diario delle modifiche.",
+      "stale": "il diario delle modifiche appartiene a un avvio precedente.",
+      "unreadable": "non è stato possibile leggere il diario delle modifiche."
+    },
+    "sfPackage": "{id} (pacchetto ShroudForge)",
+    "emlPackage": "{id} (pacchetto EML)",
+    "archiveUnattributed": "Una scrittura all'avvio che nessun pacchetto ha fatto (kiln-eml)",
+    "archiveOp": "Non nota (il diario di kiln-eml indica la voce scritta da questo pacchetto, non questo campo)",
+    "kind": {
+      "archiveWriter": "Ha scritto questa voce prima di Kiln (archivio)",
+      "drift": "Cambiato fuori da Kiln"
+    },
+    "unverified": "Mappatura non verificata",
+    "unverifiedBody": "Le modifiche ai campi possono essere rifiutate come Unproven. Leggi il motivo di ogni rifiuto.",
+    "certaintyHint": "Certo = Kiln ha osservato lo scrittore. Indicato dal diario = un pacchetto ShroudForge o EML che il diario delle modifiche di kiln-eml indica come autore della voce prima di Kiln; la modifica di Kiln prevale su di esso. Deriva stimata = il valore del gioco è cambiato fuori da Kiln; i sospetti sono un indizio, non una prova di chi l'ha scritto né che non esistano altri scrittori.",
+    "partial": "Rapporto parziale",
+    "partialRows": {
+      "one": "{count} riga è stata omessa dal rapporto nativo o dai limiti di sicurezza di questa vista.",
+      "other": "{count} righe sono state omesse dal rapporto nativo o dai limiti di sicurezza di questa vista."
+    },
+    "partialWriters": {
+      "one": "{count} scrittore precedente è stato escluso dalle catene di scrittori.",
+      "other": "{count} scrittori precedenti sono stati esclusi dalle catene di scrittori."
+    },
+    "partialBody": "Anche i testi e i valori degli elenchi sono limitati; questa non è la cronologia completa.",
+    "empty": "Nessuna modifica del registro in questa istantanea",
+    "emptyHint": "Il rapporto c'è ed è valido, ma non contiene campi, conflitti, rifiuti o modifiche alle voci.",
+    "refused": "Modifiche rifiutate",
+    "refusedSub": "Queste modifiche non sono state applicate. RestartRequired richiede il riavvio del gioco; Unproven richiede una mappatura verificata in Kiln.",
+    "restart": "In attesa di un riavvio",
+    "restartSub": "Un ricaricamento o una modifica dal vivo ha cambiato queste modifiche del registro dopo l'avvio del gioco. Si applicano al prossimo avvio del gioco (o del server); fino ad allora il gioco mantiene i valori con cui è stato avviato.",
+    "restartCount": {
+      "one": "{count} modifica del registro attende un riavvio",
+      "other": "{count} modifiche del registro attendono un riavvio"
+    },
+    "restartHint": "Riavvia il gioco, o il server, per applicarle. Ogni motivo dice che cosa ha fissato l'avvio.",
+    "plan": {
+      "title": "Piano del registro",
+      "sub": "Le modifiche con cui è partito l'ultimo avvio e l'ultimo piano buono prima di esso. Un ripristino fa partire il prossimo avvio con quel piano; i salvataggi non vengono toccati.",
+      "rollback": "Ripristina",
+      "clear": "Rimuovi",
+      "unavailable": "Non è stato possibile leggere i piani del registro",
+      "current": "Piano dell'ultimo avvio: {plan}",
+      "previous": "Piano precedente (ultimo buono): {plan}",
+      "none": "nessuno",
+      "lastRollback": "Ripristino all'ultimo avvio: {state} (piano {plan}) {reason}",
+      "noLastRollback": "Ripristino all'ultimo avvio: nessuno",
+      "pending": "Richiesta di ripristino: piano {plan}, richiesta {requested} da {by}. Il prossimo avvio parte con esso.",
+      "noPending": "Richiesta di ripristino: nessuna",
+      "dryRun": {
+        "one": "Al prossimo avvio, il piano {plan} riporta indietro {count} valore",
+        "other": "Al prossimo avvio, il piano {plan} riporta indietro {count} valori"
+      },
+      "targetMods": "Mod di quel piano: {mods}",
+      "noMods": "nessuna modifica del registro",
+      "changesUnknown": "Qui non si sa che cosa torna indietro ({why}); l'avvio lo elenca.",
+      "noChanges": "Nessun valore torna indietro: i due piani danno gli stessi valori.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "nessuna modifica del registro",
+      "moreChanges": {
+        "one": "… e {count} in più (registry.json li elenca tutti dopo l'avvio).",
+        "other": "… e {count} in più (registry.json li elenca tutti dopo l'avvio)."
+      },
+      "runningKeeps": "Non cambia nulla in un gioco o server in esecuzione ora: mantiene il piano con cui è stato avviato finché non si riavvia.",
+      "refusedWhole": "Non viene scritto nulla finché non confermi. L'avvio rifiuta il piano per intero, e usa le modifiche attuali delle mod, quando una delle sue mod non è caricata nella sua versione, una delle sue modifiche viene rifiutata su quella versione del gioco o cambierebbe ciò che contengono i salvataggi.",
+      "confirmRollback": "Conferma il ripristino",
+      "confirmClear": "Conferma la rimozione",
+      "cancel": "Annulla",
+      "clearTitle": "Rimuovi la richiesta di ripristino per il piano {plan}",
+      "clearBody": "Il prossimo avvio torna a usare le modifiche attuali del registro delle mod.",
+      "failed": "Non è stato possibile cambiare la richiesta di ripristino",
+      "requested": "Richiesto: il prossimo avvio parte con il piano {plan}, e così ogni avvio successivo finché non la rimuovi.",
+      "cleared": "Richiesta di ripristino rimossa",
+      "nothingToClear": "Non c'era alcuna richiesta di ripristino da rimuovere",
+      "savesUntouched": "I salvataggi non vengono toccati. Riavvia il gioco (o il server) perché abbia effetto."
+    },
+    "restartOmitted": {
+      "one": "{count} in più non è mostrata qui: state/registry.json le elenca tutte.",
+      "other": "{count} in più non sono mostrate qui: state/registry.json le elenca tutte."
+    },
+    "noRefused": "Nessuna modifica rifiutata nel rapporto mostrato.",
+    "conflicts": "Conflitti e derive",
+    "conflictsSub": "Vincitori e altri proprietari come registrati al momento dell'istantanea.",
+    "noConflicts": "Nessuna riga di conflitto nel rapporto mostrato.",
+    "conflictLine": "{kind} · Vincitore: {winner} · Altro proprietario: {loser}",
+    "fields": "Campi e catene di scrittori",
+    "fieldsSub": "Prima gli scrittori precedenti; espandi un campo per vederne base, operazioni e risultato.",
+    "filter": "Filtra campi o proprietari",
+    "noMatch": "Nessun campo mostrato corrisponde a questo filtro.",
+    "noFields": "Nessuna riga di campo nel rapporto mostrato.",
+    "entries": "Modifiche alle voci",
+    "noEntries": "Nessuna modifica alle voci.",
+    "added": "Aggiunta",
+    "removed": "Rimossa",
+    "previous": "Precedente",
+    "next": "Successiva",
+    "page": "Pagina {page} di {pages} · {count} righe mostrate",
+    "summary": "Vincitore: {winner} · Risultato: {result}",
+    "summaryOmitted": {
+      "one": "{count} scrittore precedente omesso",
+      "other": "{count} scrittori precedenti omessi"
+    },
+    "applies": "Si applica: {applies} · Origine della base: {origin}",
+    "baseValue": "Valore base: {value}",
+    "writersOmitted": {
+      "one": "{count} scrittore precedente omesso. Viene mostrata solo la parte finale conservata della catena.",
+      "other": "{count} scrittori precedenti omessi. Viene mostrata solo la parte finale conservata della catena."
+    },
+    "element": "Elemento: {element}",
+    "operation": "Operazione: {operation}",
+    "after": "Dopo: {value}",
+    "noWriters": "Nessuna riga di scrittori; la base decide il risultato.",
+    "formula": "Input della formula (ordine di valutazione): {inputs}",
+    "winner": "Vincitore: {winner}",
+    "result": "Risultato:",
+    "certainty": {
+      "certain": "Certo",
+      "named": "Indicato dal diario",
+      "bestEffort": "Deriva stimata",
+      "unknown": "Sconosciuto"
+    },
+    "advancedField": "Campo avanzato (dettagli nascosti)",
+    "advancedReason": "Campo avanzato (dettagli della mappatura nascosti).",
+    "advancedConflict": "Conflitto su un campo avanzato; dettagli della mappatura nascosti.",
+    "unknownField": "{field} (campo sconosciuto a questo launcher)",
+    "elementHidden": "dettagli dell'elemento nascosti",
+    "baseOwner": "Base",
+    "noOwner": "Nessuno",
+    "referenceCheck": "Controllo dei riferimenti di Kiln",
+    "referenceOp": "Controllo dei riferimenti",
+    "fresh": {
+      "clock": "Non è possibile verificare l'orario del rapporto.",
+      "process": "Non è possibile verificare il processo attuale del gioco.",
+      "stopped": "Il gioco non è in esecuzione; questa è la sua ultima istantanea salvata.",
+      "previousStart": "Il rapporto è precedente all'avvio attuale del gioco.",
+      "old": "Questa istantanea ha più di 24 ore.",
+      "start": "Non è possibile verificare l'avvio attuale del gioco."
+    },
+    "error": {
+      "tooLarge": "Il rapporto del registro supera il limite di 8 MiB letto da questa vista. Apri kiln/state/registry.json nella cartella del gioco per leggerlo per intero.",
+      "nesting": "Superato il limite di annidamento del rapporto del registro.",
+      "structure": "Superato il limite di struttura del rapporto del registro.",
+      "notJson": "Il rapporto del registro non è JSON valido.",
+      "format": "Formato del rapporto del registro non supportato (atteso 1).",
+      "malformed": "Rapporto del registro non valido ({part})."
+    }
+  },
   "playerStorage": {
     "tab": "Deposito",
     "title": "Deposito del giocatore",

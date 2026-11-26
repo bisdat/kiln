@@ -57,12 +57,20 @@ struct Env {
     std::function<bool(const std::string& text)> write_report;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // The file is there (one file-system lookup, nothing read; proof-2 N7, as proof.h's exists); unset: read_data decides.
+    std::function<bool(const std::string& rel)> data_exists;
     // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
     // Closes the interval between the core marking an owner dead and delivering its retiring notification.
     std::function<bool(uint64_t owner)> owner_alive;
     std::function<void(uint64_t owner)> owner_gone; // queued live-layer cleanup, outside the runner lock
     bool prepare_live = false; // support a cached full stable base, deferred until the first registry user
     std::function<bool(const std::string& registry, bool add, std::string* why)> entry_support;
+    // kiln.content's stack guard on (store.cpp guard_set): before a start (or a rollback) gives an item a lower max stack than a
+    // world already started with (plans/index.json "stacks"), so the game keeps the bigger stacks a save holds whole
+    // (registry/saves.h). false + *why: not available here. Unset: not available.
+    std::function<bool(std::string* why)> stack_guard;
+    // The registries' schema (tests: a fixture's, with id migrations); unset: the generated one (schema_ir.h).
+    std::optional<Schema> schema;
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;
@@ -126,6 +134,11 @@ struct LiveHandoff {
     std::function<void(const Result&, bool world)> changed;
     // Empty when the full copied base was prepared during the stage. Serialized and cached otherwise.
     std::function<bool(LiveData*, std::string*)> prepare;
+    // Not empty: this start runs on a rolled-back plan (its hash; kiln/data/content/registry/rollback.json). The inputs are the
+    // plan's edits: a pack reload does not replace them (it is reported RestartRequired until the rollback is cleared).
+    std::string rollback;
+    // review: the mods a rolled-back start leaves out (registry.json rollback.leftOut): their live changes are RestartRequired too.
+    std::vector<std::string> left_out;
 };
 
 class Runner {

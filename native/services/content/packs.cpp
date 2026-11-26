@@ -1074,49 +1074,95 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             t_pack_dir.clear();
             return ok;
         };
-        uint32_t file_index = 0;
-        for (ParsedPack& pack : packs) {
-            apply_one(pack, ++file_index, &pack.report);
-            std::string rel = pack.file.rel;
-            if (kept_mods.count(pack.file.mod)) rel += " (kept from generation " + std::to_string(kept_generation[pack.file.mod]) + ")";
-            rep.files.emplace_back(rel, std::move(pack.report));
-        }
-        for (ParsedPack& r : refused) rep.files.emplace_back(r.file.rel + " (not applied)", std::move(r.report));
-        // A mod whose pack threw part-way: none of that application's layers stay. Its packs from before apply again
-        // when it has them (and they were not what threw), else none of its packs apply.
-        for (const std::string& mod : threw) {
-            const KilnOwner o = owner_of(mod);
+        // What one mod's packs did in this application that a store or drop layer does not hold comes off whole when one
+        // of them throws: the definitions of its "add" lists (newcontent), gamedata clones and config adds, what it
+        // applied in other services' sections, and the stack guard (the whole game's: an earlier pack of the mod may have
+        // switched it with "options": {"stackGuard": ...}, or a raised max stack turned it on). Its layers and drop rules
+        // come off with its owner.
+        bool guard_at_mark = guard_on();
+        auto roll_back = [&](KilnOwner o) {
             store_drop_owner(o);
             drops_drop_owner(o);
-            std::vector<KeptFile> again;
-            {
-                std::lock_guard kl(g_kept_mu);
-                if (auto k = g_kept.find(mod); k != g_kept.end() && !kept_mods.count(mod)) again = k->second.files;
+            if (guard_on() != guard_at_mark) {
+                std::string why;
+                if (!guard_set(guard_at_mark, &why)) LOGW("data packs: the stack guard could not be put back %s: %s", guard_at_mark ? "on" : "off", why.c_str());
             }
-            // The registry stage gets the sections of what applies: not this application's sections of the mod, the
-            // kept packs' (in the mod's place in the load order), or none.
-            std::erase_if(sections, [&](const RegistrySection& s) { return s.mod == mod; });
-            std::vector<RegistrySection> again_sections;
-            ApplyResult r;
-            uint32_t fi = 0x800;
-            bool again_ok = !again.empty();
-            for (const KeptFile& kf : again) {
-                ParsedPack p = parse_pack(kf.file, kf.text, true);
-                stage_pack(p, live_schema.get(), &again_sections);
-                again_ok = apply_one(p, ++fi, &r) && again_ok;  // an ordinary problem in r (a field error) is no reason to drop it
+            uint32_t n = nc_pack_rollback(o);
+#if KC_GAMEDATA
+            n += gd_pack_rollback(o);
+#endif
+            return n;
+        };
+        // Each mod's packs apply in its place in the load order. A pack that throws partway (an unexpected value type)
+        // ends that mod's application: what its packs did in it comes off, then its packs from before apply again in its
+        // place, whole, when it has them (and they were not what threw), else none of its packs apply. Mods after it
+        // apply over that, so every other mod's layers are as they would be without the pack that threw.
+        uint32_t file_index = 0;
+        for (size_t at = 0; at < packs.size();) {
+            const std::string mod = packs[at].file.mod;
+            size_t end = at;
+            while (end < packs.size() && packs[end].file.mod == mod) ++end;
+            const KilnOwner o = owner_of(mod);
+            nc_pack_mark(o);
+            guard_at_mark = guard_on();
+#if KC_GAMEDATA
+            gd_pack_mark(o);
+#endif
+            bool threw_here = false;
+            for (size_t i = at; i < end; ++i) {
+                ParsedPack& pack = packs[i];
+                ++file_index;
+                std::string rel = pack.file.rel;
+                if (kept_mods.count(mod)) rel += " (kept from generation " + std::to_string(kept_generation[mod]) + ")";
+                if (threw_here) {  // the mod's application ended at the pack that threw
+                    rep.files.emplace_back(rel + " (not applied: an earlier pack of the mod threw)", std::move(pack.report));
+                    continue;
+                }
+                threw_here = !apply_one(pack, file_index, &pack.report);
+                rep.files.emplace_back(rel, std::move(pack.report));
             }
-            if (again_ok) {
-                const uint64_t at = mod_index(mod);
-                const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > at; });
-                sections.insert(pos, std::make_move_iterator(again_sections.begin()), std::make_move_iterator(again_sections.end()));
-                LOGW("data packs of %s: a pack threw while it applied: the packs it had before apply again, whole", mod.c_str());
-            } else {
-                store_drop_owner(o);
-                drops_drop_owner(o);
-                LOGW("data packs of %s: a pack threw while it applied: none of its packs apply", mod.c_str());
+            if (threw_here) {
+                const uint32_t undone = roll_back(o);
+                std::vector<KeptFile> again;
+                {
+                    std::lock_guard kl(g_kept_mu);
+                    if (auto k = g_kept.find(mod); k != g_kept.end() && !kept_mods.count(mod)) again = k->second.files;
+                }
+                // The registry stage gets the sections of what applies: not this application's sections of the mod, the
+                // kept packs' (in the mod's place in the load order), or none.
+                std::erase_if(sections, [&](const RegistrySection& s) { return s.mod == mod; });
+                std::vector<RegistrySection> again_sections;
+                ApplyResult r;
+                uint32_t fi = 0x800;
+                bool again_ok = !again.empty();
+                for (const KeptFile& kf : again) {
+                    ParsedPack p = parse_pack(kf.file, kf.text, true);
+                    stage_pack(p, live_schema.get(), &again_sections);
+                    if (!apply_one(p, ++fi, &r)) {  // an ordinary problem in r (a field error) is no reason to drop them
+                        again_ok = false;
+                        break;
+                    }
+                }
+                if (again_ok) {
+                    const uint64_t mi = mod_index(mod);
+                    const auto pos = std::find_if(sections.begin(), sections.end(), [&](const RegistrySection& s) { return mod_index(s.mod) > mi; });
+                    sections.insert(pos, std::make_move_iterator(again_sections.begin()), std::make_move_iterator(again_sections.end()));
+                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s), clone(s) and "
+                         "section(s) besides its layers); the packs it had before apply again, whole", mod.c_str(), undone);
+                } else {
+                    roll_back(o);
+                    LOGW("data packs of %s: a pack threw while it applied: what it did came off (%u definition(s), clone(s) and "
+                         "section(s) besides its layers); none of its packs apply", mod.c_str(), undone);
+                }
+                rep.files.emplace_back(mod + " (set apart)", std::move(r));
             }
-            rep.files.emplace_back(mod + " (set apart)", std::move(r));
+            nc_pack_unmark();
+#if KC_GAMEDATA
+            gd_pack_unmark();
+#endif
+            at = end;
         }
+        for (ParsedPack& r : refused) rep.files.emplace_back(r.file.rel + " (not applied)", std::move(r.report));
         registry_live_apply(sections, live_schema.get());  // re-evaluate over the legacy packs, recomposing when a section changed
         std::string ferr;
         store_flush(&ferr);

@@ -22,21 +22,25 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private IDisposable? _ready;
     private bool _dispatchingWorld, _starting, _flushing;
     private readonly RegistryWorldBinding _worldBinding = new();
-    private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, string code)
+    // The code each GameStart author ran with at this start (its folder's DLL hash), and the reloaded mods whose GameStart
+    // edits wait for the next start: the reload reply names them (ReloadReplies).
+    private readonly Dictionary<string, Func<string>> _gameStartCode = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _restartNotes = new(StringComparer.Ordinal);
+    private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, Func<string> code)
     {
         internal readonly Mod Instance = instance;
         internal readonly ModContext Context = context;
         internal readonly AssemblyLoadContext Assembly = assembly;
-        internal readonly string Code = code;
+        internal readonly Func<string> Code = code;
         internal readonly Dictionary<string, ConfigFile> Inputs = new(StringComparer.Ordinal);
         internal IDisposable? Subscription;
     }
-    private sealed class Runtime(Mod instance, ModContext context, RegistryEntryPoint points, string code, bool reload)
+    private sealed class Runtime(Mod instance, ModContext context, RegistryEntryPoint points, Func<string> code, bool reload)
     {
         internal readonly Mod Instance = instance;
         internal readonly ModContext Context = context;
         internal readonly RegistryEntryPoint Points = points;
-        internal readonly string Code = code;
+        internal readonly Func<string> Code = code;
         internal readonly bool Reload = reload;
         internal bool Pending = true, Faulted;
         internal ulong World;
@@ -55,6 +59,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     internal void Prepare(ulong hostOwner)
     {
         RegistryRuntime.Host = this;
+        BootFingerprint.RegistrySource = _native.Fingerprint;
         RegistryRuntime.Available = () => _native.LiveAvailable;
         RegistryRuntime.Manual = Manual;
         RegistryRuntime.Revert = (mod, handle) =>
@@ -81,6 +86,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 var code = Code(directory);
                 var loaded = mods.CreateRegistryAuthor(manifest, directory, candidates);
                 if (loaded is null) continue;
+                _gameStartCode[manifest.Id] = code;
                 var (instance, context, assembly) = loaded.Value;
                 author = new Author(instance, context, assembly, code);
                 _authors.Add(author);
@@ -114,6 +120,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 record = new Runtime(instance, context, points, Code(directory), reload);
                 _runtime.Add(record);
             }
+            if (reload) NoteGameStart(context.Info.Id, points, record?.Code);
         }
         catch (Exception e) { Log(context.Info.Id + " runtime author setup", e); }
     }
@@ -140,15 +147,79 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         finally { _flushing = false; }
         TryWorld();
     }
-    private static string Code(string directory)
+    // A reloaded mod's GameStart edits run again only at the next start ("Already committed GameStart layers stay until process
+    // restart, including through a runtime hot reload", registries/README.md): when its code changed (or it was no GameStart
+    // author at this start) and no runtime point of its own re-runs OnRegistry, say so, rather than leave the new code with the
+    // old edits silently.
+    private void NoteGameStart(string id, RegistryEntryPoint points, Func<string>? code)
+    {
+        _restartNotes.Remove(id);
+        if ((points & RegistryEntryPoint.GameStart) == 0 || (points & (RegistryEntryPoint.ModLoad | RegistryEntryPoint.HotReload)) != 0 || code is null) return;
+        // the code identities are computed here only (a reload of a GameStart-only author), off the mod-load path (review4 nit)
+        var ran = _gameStartCode.TryGetValue(id, out var was);
+        if (ran && was!() == code()) return;
+        var why = ran ? "the reloaded code" : "it was no GameStart author at this start: its code";
+        _restartNotes[id] = $"RestartRequired: {id}'s OnRegistry runs at GameStart only ([RegistryEntryPoints] has no HotReload or ModLoad): " +
+                            $"{why} changes its registry edits at the next start; until then the start's edits stay";
+        mods.Host.Log(LogLevel.Warn, $"registry: {_restartNotes[id]}");
+    }
+    /// <summary>What a reload of <paramref name="mods"/> left for the next start outside registry.json: GameStart edits whose
+    /// code changed (NoteGameStart). (mod, reason) pairs.</summary>
+    internal IReadOnlyList<(string Mod, string Reason)> RestartNotes(IReadOnlyCollection<string> mods) =>
+        _restartNotes.Where(n => mods.Contains(n.Key)).Select(n => (n.Key, n.Value)).ToList();
+    /// <summary>Whether a runtime pass of one of <paramref name="mods"/> still waits (its ModLoad / HotReload point after a
+    /// load or reload): the reload reply waits for it (ReloadReplies).</summary>
+    internal bool PassPending(IReadOnlyCollection<string> mods) =>
+        !_closed && _runtime.Exists(r => r.Pending && r.Context.Alive && mods.Contains(r.Context.Info.Id));
+    /// <summary>registry.json's text as kiln.registry has it now; null without the registry.</summary>
+    internal string? ReportJson() => _native.Available ? _native.ReportJson() : null;
+    internal bool Available => !_closed && _native.Available;
+    // review4 nit: the code identity (a hash of the mod folder's DLLs) is computed at the first RegistryContext.Identity
+    // read, not when a mod loads on the tick thread. At load only the folder's DLL names are listed (metadata: a folder
+    // that is gone still fails there, contained by Loaded); each DLL's content hash is kept by path, size and write time,
+    // so a reload or a second context of unchanged files reads nothing again.
+    private static readonly Dictionary<(string Path, long Length, long Written), byte[]> FileHashes = new();
+    private static readonly Dictionary<string, int> FileReads = new(StringComparer.Ordinal);
+    internal static int FileHashReads(string file) { lock (FileHashes) return FileReads.GetValueOrDefault(Path.GetFullPath(file)); }  // tests
+    internal static Func<string> Code(string directory)
+    {
+        var files = Directory.EnumerateFiles(directory, "*.dll").Order(StringComparer.Ordinal).ToArray();
+        string? identity = null;
+        return () => identity ??= CodeIdentity(files);
+    }
+    private static string CodeIdentity(string[] files)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var file in Directory.EnumerateFiles(directory, "*.dll").Order(StringComparer.Ordinal))
+        foreach (var file in files)
         {
             hash.AppendData(System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(file)));
-            using var input = File.OpenRead(file); hash.AppendData(SHA256.HashData(input));
+            hash.AppendData(FileHash(file));
         }
         return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
+    private static byte[] FileHash(string file)
+    {
+        try
+        {
+            var info = new FileInfo(file);
+            var key = (Path.GetFullPath(file), info.Length, info.LastWriteTimeUtc.Ticks);
+            lock (FileHashes)
+            {
+                if (FileHashes.TryGetValue(key, out var known)) return known;
+            }
+            byte[] sum;
+            using (var input = File.OpenRead(file)) sum = SHA256.HashData(input);
+            lock (FileHashes)
+            {
+                FileHashes[key] = sum; FileReads[key.Item1] = FileReads.GetValueOrDefault(key.Item1) + 1;
+            }
+            return sum;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // gone or locked since the mod loaded: named as such, so Identity still answers (and differs from the file's)
+            return System.Text.Encoding.UTF8.GetBytes("unreadable");
+        }
     }
     private RegistryWorld? World(bool bound = true)
     {
@@ -163,14 +234,14 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         return _worldBinding.Matches(world) || _worldBinding.Bind(world) ? world : world with { Id = null };
     }
     private RegistryContext Context(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
-        string code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)
+        Func<string> code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)
     {
         var nativeOwner = owner.Owner; // transport delegates must not retain a collectible mod context
         return new(owner, point, phase, world, code,
             pass ? (registry, id, field) => _native.ReadPass(nativeOwner, registry, id, field)
                  : (registry, id, field) => _native.Read(nativeOwner, stage, registry, id, field),
             (registry, pattern) => _native.Select(stage, registry, pattern), inputs)
-            { ReadOnly = readOnly, CurrentWorldToken = () => _native.Status().World };
+            { ReadOnly = readOnly, CurrentWorldToken = () => _native.Status().World, CurrentStep = static () => ServiceTick.Step };
     }
     private void Stage(Author author, RegistryPhase phase)
     {
@@ -395,7 +466,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         if (!_native.LiveAvailable) throw new KilnUnavailableException("kiln.registry.live");
         var world = World();
         if (world is null) return new(4, 0, 0, 0, 0, 0, 0, "a world is required");
-        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Alter, world, "manual:" + owner.Info.Version, false, new());
+        var code = "manual:" + owner.Info.Version; // a string, not the owner: the context must not hold the mod
+        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Alter, world, () => code, false, new());
         using var scope = context.Enter(); ulong handle = 0;
         try
         {
@@ -410,7 +482,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     {
         Game.AssertTickThread();
         if (!_native.LiveAvailable || _native.StageStatus().Phase < 4) throw new KilnUnavailableException("kiln.registry");
-        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), "resolved", false, new(), readOnly: true);
+        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), static () => "resolved", false, new(), readOnly: true);
         using var scope = context.Enter();
         try { action(context); } finally { context.Close(); }
     }
@@ -451,6 +523,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         _retirements.Clear(); _runtime.Clear(); _changes.Clear(); _scopedChanges.Clear();
         if (ReferenceEquals(RegistryRuntime.Host, this))
         {
+            BootFingerprint.RegistrySource = null;
             RegistryRuntime.Host = null; RegistryRuntime.Available = null; RegistryRuntime.Manual = null;
             RegistryRuntime.Revert = null; RegistryRuntime.Read = null; RegistryRuntime.WorldChanged = null;
             RegistryRuntime.LastReady = null;
@@ -485,6 +558,16 @@ internal sealed partial class ModManager
             _registryFault = e.Message;
         }
     }
+    /// <summary>The reload reply waits for this (ReloadReplies): a runtime registry pass of one of <paramref name="mods"/>, or
+    /// a data-pack application kiln.content has queued for its next Pre.</summary>
+    internal bool RegistryAvailable => _registry?.Available ?? false;
+    internal bool RegistryWorkPending(IReadOnlyCollection<string> mods) =>
+        (_registry?.PassPending(mods) ?? false) || ContentStatusProbe.ReloadPending(_host);
+    /// <summary>registry.json's text now (kiln.registry report_json); null without the registry.</summary>
+    internal string? RegistryReportJson() => _registry?.ReportJson();
+    /// <summary>The reloaded mods' GameStart edits that wait for the next start (RegistryDispatch.RestartNotes).</summary>
+    internal IReadOnlyList<(string Mod, string Reason)> RegistryRestartNotes(IReadOnlyCollection<string> mods) =>
+        _registry?.RestartNotes(mods) ?? [];
     internal List<(Manifest Manifest, string Directory)> RegistryCandidates()
     {
         var byId = BootCandidates().GroupBy(c => c.Manifest.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);

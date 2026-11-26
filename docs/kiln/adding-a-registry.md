@@ -59,13 +59,15 @@ Write it down in `docs/re/<area>.md` (evidence the regmap rows cite) before any 
 | What identifies an entry (GUID member, 32-bit id member, debug name)? Do all entries have names? Are names unique? | the id rule (`name`, `guid`, `id`, `unnamed`, clash suffixes) | drop tables have no names: named after the templates that use them (`nameFrom`) |
 | The member path and storage type of each field, per build (reflection) | the row's `paths` and `conv`; the schema range must fit the storage | `maxStackSize` is u16, so `items.maxStack` max 65535 |
 | Is the storage the same for every entry? | a field whose storage varies per entry needs per-entry checks (pitfall P3) | mana/stamina costs: Sint32 or float impact config per item |
-| Is the data resident and when is it loaded? | lazily loaded data cannot be bound at world load and cannot be proven by a playerless lab (P6) | drop tables are acquired when a player needs them |
+| Is the data resident and when is it loaded? | lazily loaded data cannot be bound at world load; a playerless lab must make the game load it (P6) | drop tables are acquired when something needs them: the lab spawns loot containers |
 | **When does the game read the value**: at each use (`now`), once before the save is read (`worldLoad`), once at process start (`restart`)? | the row's `read` and the schema's `applies`; picks the back-end | balance table: restart (boot back-end); `maxStack`: before the save is read (stacks are cut) |
 | Does a vanilla client show or predict it from its own copy? | the row's `clientNeeds` | item costs: the tooltip follows on the client |
 
 A read time you have not traced is a finding, not a guess: the row ships `"read": "unknown"`, `"state": "unproven"` with a
 reason, and the schema field gets the cautious `applies` (worldLoad or restart, never now). That is how `items.block`,
-`items.comfort`, `items.fuel.burnTime` shipped (P7).
+`items.comfort`, `items.fuel.burnTime` shipped in dev.31 (P7); 31.x traced them (docs/re/content.md section 11). A field the
+game never reads (`items.fuel.burnTime`: no reader in either exe) stays unproven with that as its reason: an edit of it
+would change nothing, so it is refused.
 
 ### 2.2 Schema rows and registrygen
 
@@ -78,7 +80,9 @@ reason, and the schema field gets the cautious `applies` (worldLoad or restart, 
   `LATER_REGISTRIES` (registrygen.py) until it has a schema.
 - `python3 -I tools/registrygen/registrygen.py lock`, then `registrygen.py` (writes the outputs), then `--check`.
   `ids.lock.json` ids are never reused; a removed field is `retire`d, not deleted. Within 0.x a breaking change needs a
-  minor bump plus a migration file (README "Versions").
+  minor bump plus a migration file (README "Versions"). registrygen builds the migration into `schema.g.h` (`kRenames`) and
+  `ir.cpp` `parse_batch` reads every edit through it at run time; it does not keep an `[Obsolete]` C# property under a renamed
+  field's old name yet, so add one by hand (PublicAPI is additive).
 - The generated doc page has a Mapping column from regmap; never edit the page by hand.
 
 Done when `registrygen.py --check` passes and `git status` shows the generated files.
@@ -124,16 +128,20 @@ Reuse one if the shape fits. A new conv touches all of these, in one change:
 
 1. `regmap_check.py` `check_conv` (which member types it needs);
 2. `model.cpp` `decode`/`encode` (base values, boot writes, values export);
-3. `registry_live.cpp` `bind` (:713) if any field using it is `now`/`worldLoad` (without a binder the live back-end refuses
-   it: "the live back-end does not write <conv> fields yet", :781);
+3. `registry_live.cpp` `bind` if any field using it is `now`/`worldLoad` (without a binder the live back-end refuses
+   it: "the live back-end does not write <conv> fields yet");
 4. `kilnctl` round-trip comparison (`roundtrip.rs` raw kinds) and the producer's raw read (`RegistryProofTestMod.cs`);
 5. the conv table in regmap/README.md.
 
-Scalar convs (`int`, `float`, `bool`, `time`, `enum`) already bind generically (`bind_scalar`). `flags` and
-`optionalEnum` decode in the model but have **no live binder yet**: loot.rarities and loot.fixedRarity are unproven in
-regmap/common, so this has not shown; a new registry with such a live field needs the binder first. Lists, references,
-impact configs, unlock and drop walks each have their own binder today (`bind_recipe_list`, `bind_perks`, `bind_impact`,
-`bind_unlock`, `bind_drops`) tied to their store kind (:775-780), so a list or ref field in a new registry needs its own.
+Scalar convs (`int`, `float`, `bool`, `time`, `enum`) already bind generically (`bind_scalar`). `flags` binds generically too
+(`bind_flags`: the bitmask's bits for the row's names, written over the value below so bits Kiln has no name for stay the
+game's; a name this build's enum lacks is refused, named), and so does `optionalEnum` (`bind_optional_enum`: two slots, the
+switch and the enum, each evaluated over the other's value below the registry; `none` turns the switch off and leaves the
+enum below it as it is; the switch is a store gate, `store_set_gate`, so a flush writes it after the enum when it turns on
+and before the enum when it turns off). Both keep compare-before-write, rollback and per-entry refusals (31.x; tests `loot_flags_*`,
+`loot_fixed_rarity_*` in registry_live_transactions_test.cpp). Lists, references, impact configs, unlock and drop walks each
+have their own binder (`bind_recipe_list`, `bind_perks`, `bind_impact`, `bind_unlock`, `bind_drops`) tied to their store
+kind, so a list or ref field in a new registry needs its own.
 
 Pick the schema type from the storage: a schema `int` rounds a relative op's result to the nearest whole number by
 design (ir.cpp:639); where some entries store whole numbers and others fractions, the schema field is `float` and the
@@ -170,6 +178,15 @@ entry point is `RestartRequired`, never applied (owner ruling 2026-11-22 on entr
 - Runtime entry points refuse per entry; Manual transactions are atomic (P19). A failed write is charged to the change
   that owns the slot (P17).
 
+### 2.8a Fields that change existing saves
+
+Decide for each field whether an edit of it changes what a save holds (a cap the game enforces on saved data, a range a load
+clamps saved copies into, a list a saved index points into) and add its case to `registry/saves.cpp` `judge`: refuse, guard,
+warn or report (README "Edits that change existing saves"), with a `registry_saves` test. Restart fields are judged at the
+stage (`stage.cpp` `compose_checked`), live scalar fields at each write over the value under them (`registry_live.cpp`
+`save_check`; a new entry's first values are not judged), and every field of a rollback's plan also against the plan it rolls
+away from (`stage.cpp`, whole plan); a field read only at use or for new copies needs nothing.
+
 ### 2.9 Managed typed API and analyzers
 
 - Generated: `Kiln.Registry/Generated/<R>.gen.cs` and the catalog. Hand-written: the registry property on `RegistryStage`
@@ -195,9 +212,22 @@ The lab writes the evidence kilnctl judges (regmap/README.md "The producer"):
 - Boot fields and read-only fields: `registry/proof.cpp` samples them generically from the base; nothing to add unless
   the registry's entries are array elements (boot samples skip array entries: "boot fields of array entries are not
   sampled").
-- Live fields: `mods/tests/registry-proof-test/RegistryProofTestMod.cs` lists the live registries (:38), enumerates their
-  entries through `Content.*` (:122) and reads raw bytes by resource (`ResourceOf`, :129-131). A new live registry needs
-  an entry there; if `Content.*` has no list for it, take the entries from the id table, as drops do (:381-398).
+- Live fields: `mods/tests/registry-proof-test/RegistryProofTestMod.cs` lists the live registries (`Live`), enumerates their
+  entries through `Content.*` (`RegistryOf`) and reads raw bytes by resource (`ResourceOf`). A new live registry needs
+  an entry there. Phase 1 runs at the world's first content ready; phase 2 (`RegistryProofTestMod.Later.cs`) runs once the
+  world runs: it loads drop tables the way the game does for a player (`LoadDropTables`: a few of the game's loot containers
+  spawned next to a container of the lab's world, or at the lab world's spot when it has none, whose default_inventory
+  program acquires their tables), samples the drop
+  rows over them, and drives real loot rolls (`Rolls`). Data the game loads on demand needs such a loader, or its rows stay
+  unproven with the producer's `unsampled` reason.
+- **When the game reads a field is regmap/common's decision, never the round trip's** (P7). Where a lab can show it, the
+  producer shows it: `Rolls` gives every loot entry each step's values in one Manual change, spawns the game's random pickup
+  spawners (with a creature's loot labels; a default inventory never rolls random loot, docs/re/content.md section 11) and
+  reads each roll from the spawner's own record (count for `stack.scalable`/`maxScaled`, rarity for `rarities`/`fixedRarity`).
+  The results go into the suite's `effects` and kiln.log (PASS/FAIL/INCONCLUSIVE); kilnctl does not judge them. In the
+  playerless lab of 31.x the spawners recorded no roll (INCONCLUSIVE; also with the slot's generic pickup given, which the
+  spawner program needs: the gate left is its loot generation version check, docs/re/content.md section 11), so these
+  effects need a lab with a player.
 - A probe must change the value, be in range, and exercise every storage kind the build has (P3, P4, P10). A field the
   producer cannot sample gets an `unsampled` reason in Kiln words, which becomes the row's unproven reason.
 
@@ -227,6 +257,7 @@ Commands and file contracts: [sigport.md](sigport.md#the-registry-proof-kilnctl-
 | `registry_stage`, `registry_stage_review` | a start with a section editing it; caps rows; id table complete (P12) |
 | `registry_live`, `registry_live_review`, `registry_live_transactions`, `registry_store` | each live field: write, read, revert, foreign write, pending/late data, per-entry refusal |
 | `registry_report`, `registry_proof` | report rows; boot/read-only producer samples |
+| `registry_saves` | the field's save class, if it has one (2.8a) |
 | Python `tools/registrygen/tests` | id rule cases, conv checks |
 | `cargo test` in `runner/kilnctl` | new raw kind, new kind counts, id rule agreement |
 | managed: Kiln.Registry.Tests, Kiln.Host.Tests, Kiln.Contract.Tests, Kiln.TestKit.Tests, Kiln.Analyzers.Tests; `gen-apis` | the typed property, PublicAPI |
@@ -257,8 +288,8 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 | P3 | `manaCost 67.5` became 68, `2.5` became 2 in game | some items store the cost as a Sint32 config, others as float; `encode` rounds into an int (refl.cpp:412) | refuse an inexact value per entry with the stable token `not_exact: `, never round; float-config entries keep fractions (ruling 2026-11-22 9:09 PM; wire form 10:45 PM) | `registry_live.cpp:659-662` (`bind_impact`); `kiln_registry_live.h:62-64` `KILN_REGISTRY_LIVE_REASON_NOT_EXACT`; tests `fractional_integer_cost_is_refused`, `whole_and_float_costs_still_work`, `staged_fractional_integer_cost_is_refused`, `entry_point_inexact_cost_drops_only_that_entry` |
 | P4 | mana/stamina could never be proven on f0d824be; then the record said "138 entries" while 141 items hold a cost | kilnctl demanded a float-config round trip on a build with no float configs; and the producer's count skipped 3 items the lab world does not load | evidence only for kinds the build has ("none on this build" recorded); entries in the id table but not in the world are counted `notInWorld` and listed; counts are checked against the values export; unknown kind names block | `RegistryProofTestMod.cs` `CountKinds` (:430); `roundtrip.rs` tests `impact_configs_need_evidence_only_for_the_kinds_the_build_has`, `every_entry_that_holds_an_impact_config_is_classified`; record `"kinds"` (regmap/README.md) |
 | P5 | `balance.altarsPerFlameLevel` read as `"(21 bytes)"`; missing from the values export | byte arrays went through the dump summary, not as numbers | read byte arrays as lists, through guarded reads bounded to the resource; over 65,536 is refused, never cut | `model_bytes.cpp:45-56`; `registry_model_test` `byte_array_bounds`; `registry_proof_test` `byte_array_lists` |
-| P6 | drop-table edits reported changed but the game kept the old chance; later, 6 drops rows could not be proven | the game acquires drop tables when a player needs them: the bind ran only for packs with drop rules and only once, and newcontent repoints a table's stacks; a playerless lab world loads no table | bind on every acquire, after newcontent, rules or not; a table not loaded yet is pending, not refused; the producer says why in Kiln words, so the rows stay unproven with that reason | `content.cpp:511` -> `registry_live.cpp:1438` `drops_table_loaded`; pending at `:730`; `registry_live_review_test` `drop_table_without_old_rules`, `drop_table_repointed_by_newcontent`; producer `unsampled` (`RegistryProofTestMod.cs:398`) |
-| P7 | `items.block`, `comfort`, `fuel.burnTime` and four loot rows are off on every build | when the game reads them is not traced (or not seen in a lab roll) | ship `read: unknown` / `state: unproven` with the reason and the cautious `applies`; a lab round trip does not lift a row regmap/common marks unproven (it proves the mapping, not the read time) | `regmap/common/items.json`, `loot.json` (`"state": "unproven"`); `regmap.cpp:362-371`; kilnctl `a_row_unproven_in_common_stays_unproven_whatever_the_lab_shows` (mod.rs) |
+| P6 | drop-table edits reported changed but the game kept the old chance; later, 6 drops rows could not be proven | the game acquires drop tables when something needs them: the bind ran only for packs with drop rules and only once, and newcontent repoints a table's stacks; a playerless lab world loads no table | bind on every acquire, after newcontent, rules or not; a table not loaded yet is pending, not refused; the producer's phase 2 loads tables in the playerless lab by spawning the game's loot containers next to a container of the world, or at the lab world's spot (31.x), and says why in Kiln words when it cannot | `content.cpp` -> `registry_live.cpp` `drops_table_loaded`; tests `drop_table_without_old_rules`, `drop_table_repointed_by_newcontent`; producer `LoadDropTables` (`RegistryProofTestMod.Later.cs`), `unsampled` |
+| P7 | `items.block`, `comfort`, `fuel.burnTime` and four loot rows were off on every build | when the game reads them was not traced (or not seen in a lab roll) | ship `read: unknown` / `state: unproven` with the reason and the cautious `applies`; a lab round trip does not lift a row regmap/common marks unproven (it proves the mapping, not the read time). 31.x traced them (displacement scans of both exes, LootFind's callers; docs/re/content.md section 11): block, comfort and the loot rows read now; `fuel.burnTime` has no reader and stays unproven with that reason. No playerless lab path rolls random loot (a default inventory skips random stacks; the pickup spawner waits for more than a spawn), so the loot rows' read times rest on the disassembly, as `stack.min`/`stack.max` did | `regmap/common/items.json`, `loot.json`; `regmap.cpp` `check_routing`; kilnctl `a_row_unproven_in_common_stays_unproven_whatever_the_lab_shows` (mod.rs); producer `Rolls` |
 | P8 | `KILN_REGISTRY_VIEW_BASE` and registry.json showed data-pack values as the game's | with no registry user at the stage, the base was decoded at first use from resident pages kiln.content had already written | Kiln.Host flags mods whose code uses the registry API (`"registry": true` in the stage order) so the stage decodes at resources-ready; a later first-use decode restores Kiln's own store originals over the bytes (`PristineView`) and runs outside the store lock | `stage.cpp:434-440`, `:754-758`; `registry/pristine.h`; `stage_service.cpp:68-80`; `store.cpp:487` `store_pristine`; tests `registry_users_decode_at_the_stage`, `lazy_base_keeps_pre_patch_resource_bytes`, `lazy_decode_reads_pristine_bytes` |
 
 ### Proof and records
@@ -273,6 +304,12 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 | P14 | a structural write refusal (no such member) came out `unproven`, pointing maintainers at the lab instead of the mapping; a null raw value hid other failed steps | all refusals were filed as missing evidence; null raw skipped the sample | structural refusals are an `error` sample (`changed`); guard, range and entry-specific refusals stay missing evidence; a null raw member skips only the raw comparison | `proof.cpp:144` `disagreement`; `RegistryProofTestMod.cs:258` `IsDisagreement`; `registry_proof_test` `structural_refusals_are_disagreements`; `roundtrip.rs` `unreadable_raw_members_do_not_hide_failed_steps` |
 | P15 | the default lab gate went red on every new build and blocked the sigport mark | no record for the new exe = every live read refused = zero samples = FAIL | the proof test is evidence only (never decides the gate); the gate installs a reflection-checked candidate record only into its disposable copy so the live guard can sample | `runner/kilnctl/src/gate.rs` `evidence_only` (:189), `proof_candidate` (:251), `COPY_CLEAN` (:239) |
 | P16 | a stale record or stale lab files could verify a mapping no lab ran | kilnctl took the tree's old record when regmap_check failed; lab files carried no mapping identity; removals were seen only in the candidate | fresh candidate only; suites and exports carry `regmapDigest`; the old build is the newest with a verified regmap record and its removal history must carry; `--mirror` accepts only `provenBy: lab` | kilnctl `the_old_builds_record_carries_the_removal_history`, `the_default_old_build_has_a_verified_regmap_record`, `a_values_export_of_another_mapping_proves_nothing`; mirror `the_mirror_fails_closed` |
+| P33 | a one-flag or empty bitmask could never prove `loot.rarities` | kiln.content gives a bitmask's names as text (`"Common,Rare"`, `"Epic"`, `""`); the producer turned only text with a comma into a list | a flags row's raw value is always the list of the game's names | `RegistryProofTestMod.cs` `FlagsRaw`, `FlagNames`; host test `Flags_raw_values_are_lists` |
+| P34 | drop entries' counts and chances got no sample; a chance of 1.0 was probed to 1.25 | kiln.registry.live's struct values have flat dotted keys (`"count.min"`) and the producer looked them up nested; probes ignored the range | leaves read flat keys first; a list element's probe changes a count first and halves a chance; a float probe refused for its range is tried again at 0.75 x on the same entry | `Leaf`, `SetLeaf`, `Probe`, `LowerProbe`; host tests `Element_leaves_read_and_write_flat_dotted_keys`, `Drop_entry_probe_stays_in_range`, `A_float_probe_refused_for_its_range_is_tried_lower` |
+| P35 | a later `none` over a fixed rarity seemed to leave the earlier change's enum | live changes compose into one registry layer per slot, evaluated over the bytes below the registry, not one layer per change | expected: `none` leaves the game's own enum below the switch; reverting the later change restores the earlier one | `bind_optional_enum`; test `loot_fixed_rarity_read_write_revert` |
+| P36 | with an item removal active, every Manual change (an item's maxStack) reported PendingResource, so `Result.Ok` was false | the commit's outcome looked at every drop-table field waiting for its table (the removal's disabled slots in tables the world had not loaded), not at the change's own | the outcome is PendingResource only when a pending field's chain holds a row of this change | `registry_live.cpp` `registry_live_commit` (`own_pending`); test `unrelated_pending_table_keeps_a_change_applied`; lab: registry-entries-test "later field edits bind the stable added id" |
+| P37 | a fixed rarity turned on was, for one write, on over the enum it had before (a roll on a game thread could take that rarity); a failed enum write left the switch on over it until the rollback | the switch (+5) and the enum (+6) are two slots of one flush, and write_batch writes in address order: switch first | a gate slot (`store_set_gate`, the switch) is written after the flush's other writes when it opens and before them when it closes; it does not open when another write of its entry failed | `store.cpp` `store_flush_checked`; `bind_optional_enum`; test `loot_fixed_rarity_switch_never_on_over_a_stale_enum` |
+| P38 | the lab round trip of `loot.fixedRarity` wrote the switch alone (`none` -> `common` over an entry whose enum below was already Common), so the enum's write was never seen | the probe took the first rarity, whatever the enum below the switch holds | from `none` the producer takes the first rarity whose game enum differs from the raw enum below, so both members change | `RegistryProofTestMod.cs` `ProbeOf`; host test `An_optional_enum_probe_changes_the_enum_below_too` |
 
 ### Composition, live changes, entry points
 
@@ -291,6 +328,12 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 | P27 | runtime mods' `OnRegistry` ran on the native loader thread | the ready callback ran dispatch inline | ready only records; dispatch happens on the next host tick; tick-thread asserts | `RegistryDispatch.cs`; test `ForeignReadyWaitsForTheNextHostPreBeforeRunningRuntimeAuthors` |
 | P28 | a base cache hit missed an added resource and a changed regmap | the cache key lacked listed keys and the mapping | cache listed types' key digests; the family includes `regmapDigest` and `commonDigest` | `stage.cpp:195-220`; test `cache_misses_added_resource` |
 | P29 | a hot reload wiped stage refusals and boot outcomes from registry.json | recompose rebuilt the result from scratch | keep outside-compose refusals and boot outcomes across recompose; run the mapping guard on reloaded batches | `registry_live_review_test` `reload_loses_stage_refusals`, `reload_keeps_boot_outcomes_and_checks_sections` |
+| P39 | a mod that only calls `Registry.Change`/`Registry.Read` had its base decoded on the tick thread at first use | the order's `"registry": true` flag came from `MightOverride`, which looks for `RegistryContext` only | `RegistryDeclarations.UsesRegistry`: also a reference to Kiln.Registry's `Registry` type, in the entry assembly or another DLL of the mod's folder; GameStart authorship stays `MightOverride`'s | test `AModThatOnlyCallsRegistryChangeIsARegistryUser` |
+| P40 | a flagged start whose stage could not read the base composed the old boot writers' edits over their own patched bytes at first use (x2 twice) | without a base nothing was frozen, and the first use read the live bytes | the first use refuses with the reason (`lazy_error`: restart to use the registry API) instead of decoding unfrozen bytes | test `flagged_stage_without_a_base_refuses_first_use` |
+| P41 | the first start of a new build with an old boot writer kept every resource the id ledger read in memory until the first registry use | the ledger and the freeze shared one source, kept whole for the lazy decode | the ledger's source is released; the old writers' resources are frozen in a fresh one, before any boot writer writes | test `ledger_reads_are_not_kept_for_first_use` |
+| P42 | a bulk WorldLoad/HotReload/Manual author paid a native status call (store lock) per cell; the code identity hashed every DLL when a mod loaded on the tick thread | the registry context asked for the world token on every cell access; the code identity was hashed when the mod loaded | the world check runs once per tick step (`CurrentStep`); the code identity is hashed at the first `Identity` read and each DLL's hash is kept by path, size and write time | tests `AWorldBoundContextChecksItsWorldOncePerStep`, `TheCodeIdentityIsHashedAtFirstUseAndCached` |
+| P43 | (constraint, not fixed) a first-use decode restores only store slots to the game's bytes | `PristineView` takes back what the store wrote; a resident write outside the store (newcontent's crafting-menu header writes) stays | never map a registry field onto memory Kiln writes outside the store; such a field needs its own original copy first | review4 recheck nit |
+| P44 | (kept, lane decision for review) one failed game memory write takes back the whole change for that world, also in an entry-point pass | a write that fails after every retry is rolled back with its change, so the change is all there or not there (`Unverified` if the take-back fails); entry-point passes refuse per entry only at binding and evaluation (DECISIONS NS6) | keep: a per-entry write refusal would leave a change half-written after the store rolled the flush back; the failure is charged to the change that owns the slot only (P17) | review4 recheck nit, registries README "Refusals per entry" |
 
 ### Honesty and privacy
 
@@ -298,7 +341,7 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 |---|---|---|---|---|
 | P30 | registry.json reported 67 removals; the game removed nothing | entry add/remove composed but no back-end applied it | refuse what no back-end applies, per edit, with a reason; never report an unapplied change as done (ruling 2026-11-21 5:47 PM). Slice 5 lifts this for item and recipe add/remove and loot remove only | `registry/unmapped.h` `refuse_unmapped_edits` |
 | P31 | a live raw refusal repeated the mod's raw member path in the Conflicts view; reasons carried process addresses | refusal text was copied verbatim | refusals carry `registry/id/field` plus `raw: true`; the view hides raw paths; write failures name Kiln places | `report.cpp:101/131/143`; `launcher/src/registry/report.ts:52-60` `redactRaw`; `registry_live.cpp:1014` `places_of`; tests `live_raw_refusals_keep_place_metadata`, `raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not` |
-| P32 | (still open) `store_skipped` rows name the game's debug and member names ("Material_T1_Wood_Logs.maxStackSize was written by another writer") | older store.cpp text | do not copy that shape into a new registry's messages; fix when touching store.cpp | review4 nits, open |
+| P32 | `store_skipped` rows named the game's debug and member names ("Material_T1_Wood_Logs.maxStackSize was written by another writer") | older store.cpp text | the report names the Kiln place the slot's bound field had (`registry_live.cpp` `skipped_text`: "items[game:material_t1_wood_logs].maxStack was written by another writer ..."), also for a revert after the field was unbound; `StoreSkipped::what` keeps the game names for diagnostics only. A new registry's messages name Kiln places the same way | review4 nits; closed in registry-hygiene (`registry_live_test` `another_writer_in_the_report`, `skipped_revert_names_the_kiln_place`) |
 
 Regmap reasons are player-facing (P31's rule for records): `regmap_check.py:324-330`. A reason must say what is not
 known in Kiln words, without nested parentheses (kiln.content wraps it in parentheses).

@@ -173,6 +173,48 @@ public sealed class BootPhaseTests : ModsFixture
         Assert.Contains(report.Issues, i => i.Code == "MissedPhase");
     }
 
+    // `reload <id>` of a running mod whose new version adds boot content: that version can never load in this process (its
+    // OnBoot and boot files need a boot phase), so the reload is refused before anything unloads and the running version
+    // stays. Before, the reload unloaded it (its data packs came off at the next Pre) and then refused the new one, leaving
+    // the server without the mod until a restart. A dependent's new version that adds boot is refused the same way.
+    [Theory]
+    [InlineData(0)]  // this process ran no boot phase (mods.boot off)
+    [InlineData(1)]  // a boot phase ran, without the mod
+    public void A_reload_whose_new_version_adds_boot_is_refused_before_the_running_version_unloads(int generation)
+    {
+        BootGeneration.Record((ulong)generation, [], new Dictionary<string, IReadOnlyList<BootStaged>>());
+        var dir = WriteManifest("late-boot", """{ "id": "late-boot", "name": "l", "version": "1.0.0", "apiVersion": "0.2", "side": "both" }""");
+        var dep = WriteManifest("late-dep", """{ "id": "late-dep", "name": "d", "version": "1.0.0", "apiVersion": "0.2", "side": "both", "dependencies": {"late-boot": ">=1.0.0"} }""");
+        using var mods = NewManager(new FakeHost());
+        mods.LoadAll();
+        Assert.NotNull(mods.Find("late-boot"));
+        Assert.NotNull(mods.Find("late-dep"));
+        File.WriteAllText(Path.Combine(dir, Manifest.FileName), """{ "id": "late-boot", "name": "l", "version": "1.1.0", "apiVersion": "0.2", "side": "both", "boot": true }""");
+        var r = mods.ReloadCore("late-boot");
+        Assert.False(r.Ok);
+        Assert.StartsWith("RestartRequiredBoot: mod late-boot", r.Message);
+        Assert.Contains("restart", r.Message);
+        Assert.Equal("1.0.0", mods.Find("late-boot")?.Manifest.Version);  // the running version stays loaded
+        Assert.NotNull(mods.Find("late-dep"));                              // and so does its dependent
+        Assert.NotEqual(BootModState.MissedPhase, Mods.BootState("late-boot").State);  // the running version has no boot content to miss
+
+        // a dependent whose new version adds boot: the reload of what it depends on is refused the same way
+        File.WriteAllText(Path.Combine(dir, Manifest.FileName), """{ "id": "late-boot", "name": "l", "version": "1.2.0", "apiVersion": "0.2", "side": "both" }""");
+        File.WriteAllText(Path.Combine(dep, Manifest.FileName), """{ "id": "late-dep", "name": "d", "version": "1.1.0", "apiVersion": "0.2", "side": "both", "boot": true, "dependencies": {"late-boot": ">=1.0.0"} }""");
+        var d = mods.ReloadCore("late-boot");
+        Assert.False(d.Ok);
+        Assert.StartsWith("RestartRequiredBoot: mod late-dep", d.Message);
+        Assert.Equal("1.0.0", mods.Find("late-boot")?.Manifest.Version);
+        Assert.Equal("1.0.0", mods.Find("late-dep")?.Manifest.Version);
+
+        // without boot in the new versions the reload goes ahead as before
+        File.WriteAllText(Path.Combine(dep, Manifest.FileName), """{ "id": "late-dep", "name": "d", "version": "1.1.0", "apiVersion": "0.2", "side": "both", "dependencies": {"late-boot": ">=1.0.0"} }""");
+        var ok = mods.ReloadCore("late-boot");
+        Assert.True(ok.Ok, ok.Message);
+        Assert.Equal("1.2.0", mods.Find("late-boot")?.Manifest.Version);
+        Assert.Equal("1.1.0", mods.Find("late-dep")?.Manifest.Version);
+    }
+
     [Fact]
     public void BOOT_RUNTIME_REACTIVATE_an_unchanged_committed_mod_loads_again_a_changed_one_needs_a_restart()
     {

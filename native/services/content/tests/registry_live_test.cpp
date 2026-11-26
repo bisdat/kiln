@@ -3,9 +3,11 @@
 // the real IR / composition (registry/ir.cpp, compose.cpp), the real formulas and the committed regmap (regmap/common + the
 // server record), on a made-up game memory: the fields of a composed stage written as evaluated layers above packs and below
 // code, relative edits re-evaluated over a pack's new value, hot reload (a changed section recomposed, a removed one leaving
-// nothing behind, a new field refused "needs a restart"), loud refusals, compare-before-write in the report.
+// nothing behind, a new field refused "RestartRequired: ..."), what a reload leaves for the next start (restart fields,
+// new fields, new sections: RestartRequired rows and counts.restartRequired), loud refusals, compare-before-write in the report.
 // registry_live_test.sh builds and runs it.
 #include <windows.h>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +20,7 @@
 #include "../registry/report.h"
 #include "../registry/schema_ir.h"
 #include "../registry_live.h"
+#include "../registry/live_table.h"
 #include "../store.cpp"
 #include "../registry_live.cpp"
 
@@ -34,6 +37,8 @@ Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
 std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
 std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::function<void()> g_after_each_write; // test-only: after every single write lands (what a game thread could read between two)
+std::set<uintptr_t> g_fail_addrs; // test-only: writes to these addresses fail; the batch goes on with the others (as write_batch does)
 std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
@@ -56,9 +61,13 @@ size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
     for (size_t i = 0; i < writes.size(); ++i) {
         const Write& w = writes[i];
         if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        if (g_fail_addrs.count(w.addr)) { if (failed && !*failed) *failed = w.addr; continue; }
         std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+        if (g_after_each_write) g_after_each_write();
     }
-    return writes.size();
+    size_t done = writes.size();
+    for (const Write& w : writes) done -= g_fail_addrs.count(w.addr);
+    return done;
 }
 void* near_alloc(uintptr_t, size_t n) {
     void* p = g_arena + g_near;
@@ -200,7 +209,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
-    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_write_limits.clear(); g_before_write = {}; g_after_each_write = {}; g_fail_addrs.clear(); g_integer_impacts.clear();
     g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);
@@ -239,8 +248,19 @@ void world() {
     L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
     add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
     add_field(L.schema, fld("stackSizeMax", 0x04, 4, KILN_CV_INT));
+    // the game's LootableItemInfo: a Bitmask8<ItemRarity>, the fixed rarity's switch and the fixed rarity (an enum)
+    Field mask = fld("rarities", 0x08, 1, KILN_CV_INT);
+    mask.enum_kind = KILN_CONTENT_FLAGS;
+    mask.en = rar.en;
+    add_field(L.schema, mask);
+    add_field(L.schema, fld("useUiRarity", 0x09, 1, KILN_CV_BOOL));
+    Field fixed = fld("uiRarity", 0x0A, 1, KILN_CV_INT);
+    fixed.enum_kind = KILN_CONTENT_ENUM;
+    fixed.en = rar.en;
+    add_field(L.schema, fixed);
     add_entry(L, WOOD, "Material_T1_Wood_Logs", 0x40000, G1);
     mem<uint32_t>(0x40000, 1), mem<uint32_t>(0x40004, 5);
+    mem<uint8_t>(0x40008, 0x07), mem<uint8_t>(0x40009, 0), mem<uint8_t>(0x4000A, 2);  // common, uncommon, rare; no fixed rarity (rare below)
     mem<uint32_t>(STONE_AT, 50);
     mem<float>(SWORD_AT + 0x08, 1.0f), mem<float>(SWORD_AT + 0x0C, 1.0f), mem<uint32_t>(SWORD_AT + 0x10, 10), mem<uint32_t>(SWORD_AT + 0x14, 15);
     mem<float>(SWORD_AT + 0x90, 1.0f);
@@ -321,7 +341,13 @@ registry::BaseModel base() {
     lt.id = "game:material_t1_wood_logs";
     lt.fields["stack.min"] = registry::Value::integer(1);
     lt.fields["stack.max"] = registry::Value::integer(5);
+    lt.fields["rarities"] = registry::Value::of_list({registry::Value::text("common"), registry::Value::text("uncommon"), registry::Value::text("rare")});
+    lt.fields["fixedRarity"] = registry::Value::text("none");
     b.registries["loot"].push_back(lt);
+    registry::BaseModel::Entry bal;  // a restart field's entry (the boot back-end's): a reload changes it at the next start
+    bal.id = "game:balance";
+    bal.fields["levelCap"] = registry::Value::integer(25);
+    b.registries["balance"].push_back(bal);
     return b;
 }
 
@@ -336,7 +362,8 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 }
 
 // What S11 does at resources-ready: lower the sections, compose, install.
-void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}, const std::vector<registry::OldWrite>& old = {}) {
+void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}, const std::string& rollback = "",
+           const std::vector<std::string>& left_out = {}, const std::vector<registry::OldWrite>& old = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -365,11 +392,19 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
-    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "loot.rarities", "loot.fixedRarity", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
     };
+    // the restart fields as the boot back-end wrote them at the start (stage.cpp hands these over): a reload changes them
+    // only at the next start
+    for (const auto& [ref, field] : in.result.fields) {
+        const registry::RegistrySpec* rs = sc.registry(ref.registry);
+        const registry::FieldSpec* sp = rs ? rs->field(ref.field) : nullptr;
+        if (sp && sp->applies == registry::Applies::Restart) in.boot_fields[ref] = field;
+    }
+    in.rollback = rollback, in.left_out = left_out;  // a rolled-back start (stage.h LiveHandoff::rollback, left_out)
     registry_live_install(std::move(in));
 }
 
@@ -699,7 +734,61 @@ void hot_reload() {
     files = files_of({{"b", "b/content/b.json"}});
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "levels.min", "op": 5}]}})";
     apply_registry_files(files);
-    check(reported("needs a restart"), "a field the start never decoded: refused, needs a restart");
+    check(reported("RestartRequired: items.levels.min: the base was read at start"), "a field the start never decoded: refused, needs a restart (the stable token first)");
+}
+
+// A reload whose registry edits need a restart says so where the admin looks: every such row of
+// registry.json starts with the stable token "RestartRequired: " and names the mod and the place, and counts has their
+// number. Before, only kiln.log said a restart field changes at the next start, and a new field's row had no token.
+std::vector<registry::Refusal> restart_rows() {
+    std::vector<registry::Refusal> out;
+    for (const registry::Refusal& r : g_last_report.refused)
+        if (r.reason.rfind("RestartRequired: ", 0) == 0) out.push_back(r);
+    return out;
+}
+const registry::Refusal* restart_row(const std::string& mod, const std::string& field) {
+    static registry::Refusal found;
+    for (const registry::Refusal& r : restart_rows())
+        if (r.mod == mod && r.field == field) return &(found = r);
+    return nullptr;
+}
+void restart_required_on_reload() {
+    world();
+    const std::string start = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 50},
+        {"registry": "balance", "select": {"id": "*"}, "field": "levelCap", "op": 30}]}})";
+    g_files = {{"m/content/a.json", start}};
+    const auto only_m = files_of({{"m", "m/content/a.json"}});
+    stage(only_m);
+    apply_registry_files(only_m);
+    check(restart_rows().empty(), "restart: at the start nothing waits for a restart");
+    // the reload: m's restart field changes, m names a field the start never decoded, and n brings a registry section the
+    // start did not have
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 50},
+        {"registry": "balance", "select": {"id": "*"}, "field": "levelCap", "op": 40},
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "levels.min", "op": 5}]}})";
+    g_files["n/content/n.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 2}}]}})";
+    const auto both = files_of({{"m", "m/content/a.json"}, {"n", "n/content/n.json"}});
+    apply_registry_files(both);
+    for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s: %s\n", r.mod.c_str(), r.reason.c_str());
+    check(at<uint32_t>(WOOD_AT) == 50, "restart: the live field still applies (maxStack 50)");
+    const registry::Refusal* cap = restart_row("m", "levelCap");
+    check(cap && cap->registry == "balance" && cap->reason.find("next start") != std::string::npos,
+          "restart: a changed restart field is a RestartRequired row naming m, balance and levelCap, applying at the next start");
+    const registry::Refusal* min = restart_row("m", "levels.min");
+    check(min && min->registry == "items" && min->id == "game:material_t1_wood_logs",
+          "restart: a field the start never decoded is a RestartRequired row naming m, items, the entry and levels.min");
+    check(std::any_of(restart_rows().begin(), restart_rows().end(), [](const registry::Refusal& r) { return r.mod == "n"; }),
+          "restart: a section added after the start is a RestartRequired row naming n");
+    const registry::json doc = registry::report_json(registry_schema(), g_last_report, {});
+    check(doc["counts"].value("restartRequired", 0) == 3, "restart: registry.json counts the three (counts.restartRequired)");
+    // back to the start's edits: nothing waits any more
+    g_files["m/content/a.json"] = start;
+    apply_registry_files(only_m);
+    check(restart_rows().empty(), "restart: the start's edits again, nothing waits for a restart");
+    check(registry::report_json(registry_schema(), g_last_report, {})["counts"].value("restartRequired", -1) == 0,
+          "restart: counts.restartRequired is 0");
 }
 
 // compare-before-write in the report: another writer's value stays
@@ -715,6 +804,9 @@ void another_writer_in_the_report() {
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
+    // P32: the row names the Kiln place, never the game's debug or member names
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer"), "the skipped row names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
     // the drift probe: the slot another writer changed after Kiln's layer gets a best-effort writer row, last
     const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
     check(!row["writers"].empty(), "the field row has writers: " + row.dump());
@@ -722,6 +814,20 @@ void another_writer_in_the_report() {
     check(last["kind"] == "drift" && last["certainty"] == "bestEffort" && last["value"] == 777 && !last.contains("mod") &&
               last["who"].get<std::string>().rfind("outside Kiln (best effort", 0) == 0,
           "the foreign write is a best-effort drift row: " + row["writers"].dump());
+}
+// P32: a skipped revert (the pack removed after another writer took the slot) still names the Kiln place it had
+void skipped_revert_names_the_kiln_place() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    stage(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    apply_registry_files(files_of({{"bigstacks", "bigstacks/content/a.json"}}));
+    mem<uint32_t>(WOOD_AT, 777);
+    apply_registry_files({});  // the pack removed: Kiln's revert is skipped
+    check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
+    check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer: Kiln's revert not applied"),
+          "the skipped revert names the Kiln field");
+    check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
 }
 
 // The drift probe (commitment 7): a value that changed outside Kiln between the stage's read (10) and Kiln's first write at
@@ -766,7 +872,7 @@ void drift_probe_kiln_boot_patch() {
     const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
     registry::OldWrite mark;
     mark.kind = registry::WriterKind::OldPatch, mark.mod = "oldmod", mark.who = "oldmod/stacks", mark.field = {"items", "game:material_t1_wood_logs", ""};
-    stage(files, {}, {mark});
+    stage(files, {}, "", {}, {mark});
     mem<uint32_t>(WOOD_AT, 12);   // oldmod's boot patch: the game holds 12 where the stage read 10
     mem<uint32_t>(STONE_AT, 70);  // the stone: no document wrote it, so a change there is still drift
     apply_registry_files(files);
@@ -800,6 +906,97 @@ void live_transactions() {
     check(registry_live_revert(77, h, &reply) == KILN_ERR_NOT_FOUND, "revert does not reuse stale handles");
 }
 
+// review2 S5 remainder: kiln.registry.live's C table (registry/live_table.cpp: the wrappers kiln-content.dll registers),
+// bound to a fake owner table and generation: argument and owner checks, the result struct, the copies out.
+std::string fake_bound_mod(KilnOwner owner, bool* revoked) {
+    *revoked = owner == 99;  // revoked (or never made)
+    return owner == 77 ? "change" : std::string();  // 55: an owner bound to no mod id
+}
+bool utf8_whole(const char* s) {
+    for (size_t i = 0; s[i];) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const size_t n = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 0;
+        if (!n) return false;
+        for (size_t k = 1; k < n; ++k)
+            if ((static_cast<unsigned char>(s[i + k]) & 0xc0) != 0x80) return false;
+        i += n;
+    }
+    return true;
+}
+void live_c_table() {
+    world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({});
+    registry::stage::LiveTableEnv env;
+    env.bound_mod = &fake_bound_mod;
+    env.generation = [] { return uint64_t(41); };
+    const KilnRegistryLiveApi* t = registry::stage::live_table(env);
+    check(t->header.size == sizeof(KilnRegistryLiveApi) && t->header.version == KILN_REGISTRY_LIVE_VERSION, "C table: header size and version");
+    KilnHandle h = 0;
+    check(t->begin(77, KILN_REGISTRY_LIVE_MANUAL, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C begin: no out handle is refused");
+    check(t->begin(0, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_INVALID_ARGUMENT && !h, "C begin: owner 0 is refused");
+    check(t->begin(55, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_INVALID_ARGUMENT && !h, "C begin: an owner bound to no mod is refused");
+    check(t->begin(99, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_ERR_REVOKED && !h, "C begin: a revoked owner is REVOKED");
+    check(t->begin(77, KILN_REGISTRY_LIVE_MANUAL, &h) == KILN_OK && h, "C begin: the bound owner gets a handle");
+    const std::string ir = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":3}}]})";
+    const KilnStr irs{ir.data(), ir.size()};
+    KilnRegistryLiveResult r{};
+    r.size = sizeof r - 8;
+    check(t->submit(77, h, irs, &r, nullptr, 0, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a result struct shorter than v1 is refused");
+    r.size = sizeof r;
+    check(t->submit(77, h, irs, &r, nullptr, 8, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a cap without a buffer is refused");
+    check(t->submit(77, h, KilnStr{nullptr, 4}, &r, nullptr, 0, nullptr) == KILN_ERR_INVALID_ARGUMENT, "C submit: a null text with a length is refused");
+    check(t->submit(99, h, irs, &r, nullptr, 0, nullptr) == KILN_ERR_REVOKED, "C submit: a revoked owner is REVOKED");
+    size_t len = 0;
+    char rep[8];
+    check(t->submit(77, h, irs, &r, rep, sizeof rep, &len) == KILN_OK && r.size == sizeof r && r.accepted == 1 && r.generation == 41,
+          "C submit: accepted, the result struct filled (size, accepted, the stage's generation)");
+    check(len > 0 && std::strlen(rep) == std::min(len, sizeof rep - 1), "C submit: the report is cut to the buffer, 0-terminated, its whole length in out_len");
+    std::memset(&r, 0x5a, sizeof r);
+    r.size = sizeof r + 16;  // a newer caller's bigger struct: v1's part is written, the size says v1
+    const KilnResult committed = t->commit(77, h, &r);
+    const size_t used = strnlen(r.reason, sizeof r.reason);
+    check(committed == KILN_OK && r.outcome == KILN_REGISTRY_LIVE_APPLIED && r.size == sizeof r && r.generation == 41 && r.reserved == 0 &&
+              used < sizeof r.reason && std::all_of(r.reason + used, r.reason + sizeof r.reason, [](char c) { return c == 0; }),
+          "C commit: Applied, the struct zeroed then filled (outcome " + std::to_string(r.outcome) + ", reason \"" + std::string(r.reason, used) + "\")");
+    check(at<uint32_t>(WOOD_AT) == 30, "C commit: the change is written (10 x3)");
+    char buf[2];
+    len = 0;
+    const char* reg = "items"; const char* id = "game:material_t1_wood_logs"; const char* field = "maxStack";
+    const KilnStr R{reg, 5}, I{id, std::strlen(id)}, F{field, std::strlen(field)};
+    check(t->read(77, R, I, F, buf, sizeof buf, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 2 && buf[0] == '3' && buf[1] == 0,
+          "C read: a buffer too small says so, the cut text 0-terminated, the whole length in out_len");
+    char whole[16];
+    check(t->read(77, R, I, F, whole, sizeof whole, &len) == KILN_OK && std::string(whole) == "30", "C read: the value as text");
+    check(t->read(77, R, I, F, nullptr, 4, &len) == KILN_ERR_INVALID_ARGUMENT, "C read: a cap without a buffer is refused");
+    check(t->read(55, R, I, F, whole, sizeof whole, &len) == KILN_ERR_INVALID_ARGUMENT, "C read: an owner bound to no mod is refused");
+    KilnRegistryLiveStatus st{};
+    st.size = sizeof st - 4;
+    check(t->status(&st) == KILN_ERR_INVALID_ARGUMENT && t->status(nullptr) == KILN_ERR_INVALID_ARGUMENT, "C status: a short or missing struct is refused");
+    st.size = sizeof st;
+    check(t->status(&st) == KILN_OK && st.size == sizeof st && st.generation == 41 && st.world != 0 && st.world_kind == KILN_WORLD_SERVER && st.active >= 1,
+          "C status: the world, its kind, the generation and the active changes");
+    check(t->revert(99, h, &r) == KILN_ERR_REVOKED && at<uint32_t>(WOOD_AT) == 30, "C revert: a revoked owner is REVOKED, nothing changes");
+    r.size = 4;
+    check(t->revert(77, h, &r) == KILN_ERR_INVALID_ARGUMENT && at<uint32_t>(WOOD_AT) == 30, "C revert: a short result struct is refused before anything changes");
+    r.size = sizeof r;
+    check(t->revert(77, h, &r) == KILN_OK && r.outcome == KILN_REGISTRY_LIVE_REVERTED && at<uint32_t>(WOOD_AT) == 10, "C revert: Reverted, the value back");
+    check(t->commit(77, h, nullptr) == KILN_ERR_NOT_FOUND, "C commit: a reverted handle is gone (a null result struct is allowed)");
+    // a long reason is cut on a UTF-8 boundary: an entry id of 2-byte characters (no such entry in this world, so the
+    // binding refuses it and names its place) runs past the 192-byte reason; the odd prefix puts a cut inside a character
+    for (const char* prefix : {"game:x", "game:xy"}) {
+        KilnHandle h2 = 0;
+        t->begin(77, KILN_REGISTRY_LIVE_MANUAL, &h2);
+        std::string id = prefix;
+        for (int i = 0; i < 150; ++i) id += "\xc3\xa9";  // é
+        const std::string bad = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":")" + id + R"(","field":"maxStack","op":3}]})";
+        t->submit(77, h2, KilnStr{bad.data(), bad.size()}, &r, nullptr, 0, nullptr);
+        t->commit(77, h2, &r);
+        const size_t n = std::strlen(r.reason);
+        check(n > 0 && n < sizeof r.reason && utf8_whole(r.reason) && r.outcome != KILN_REGISTRY_LIVE_APPLIED,
+              "C result: a long reason is cut on a UTF-8 boundary and 0-terminated (" + std::to_string(n) + " bytes): " + std::string(r.reason, std::min<size_t>(n, 60)));
+        t->revert(77, h2, &r);
+    }
+}
+
 void live_transaction_foreign_revert() {
     world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({});
     uint64_t h = 0; RegistryLiveReply reply;
@@ -829,8 +1026,86 @@ void live_transaction_points_and_revoke() {
 }
 }  // namespace
 
+// registry-rollback, package K (registry/saves.h): a write that would change what existing saves hold, at the world's load
+int g_guard_calls = 0;
+bool g_guard_ok = true;
+bool fake_guard(std::string* why) {
+    ++g_guard_calls;
+    if (!g_guard_ok) *why = "not on this build";
+    return g_guard_ok;
+}
+void save_checks_at_world_load() {
+    world();
+    g_registry_stack_guard = &fake_guard;
+    g_guard_calls = 0, g_guard_ok = true;
+    // a lower max stack than the old pack's (30): the stack guard goes on, then the layer is written
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 20}]}})"}};
+    auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    put_pack(WOOD_AT, 30);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20 && g_guard_calls > 0, "lowering the old pack's 30 to 20: written, the stack guard on first (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    check(!reported("saves:"), "and not refused");
+    // the guard not available here: refused for that entry, the pack's 30 stays (no saved stack loses items)
+    world();
+    g_guard_ok = false;
+    stage(files);
+    put_pack(WOOD_AT, 30);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 30 && reported("stack guard is not available here") && reported("this edit was not applied"),
+          "without the guard the lowering is refused, with why; the value under it stays (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    // raising needs no guard from the registry (the store's own guard follows a raise, as before)
+    world();
+    g_guard_calls = 0, g_guard_ok = false;
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 40 && g_guard_calls == 0 && !reported("saves:"), "a raise is written without asking the guard");
+    // a narrower level range: refused (a load would clamp saved copies and the save keep it); a wider one is written
+    world();
+    g_guard_ok = true;
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:sword_t2"}, "field": "levels.max", "op": 12}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(SWORD_AT + 0x14) == 15 && reported("narrows the level range"), "levels.max 15 -> 12: refused, the range stays 15");
+    world();
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:sword_t2"}, "field": "levels.max", "op": 20}]}})";
+    stage(files);
+    apply_registry_files(files);
+    check(at<uint32_t>(SWORD_AT + 0x14) == 20 && !reported("saves:"), "levels.max 15 -> 20: written");
+    g_registry_stack_guard = &fake_guard, g_guard_ok = true;
+}
+
+// review of registry-rollback: a start on a rolled-back plan. A pack reload's changed registry section is RestartRequired, not
+// composed over the plan's edits; a mod the plan leaves out has its live changes RestartRequired too; a plan mod's are applied.
+void rolled_back_start_live() {
+    world();
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 20}]}})"}};
+    auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files, {}, std::string(64, 'a'), {"later"});
+    registry_live_world_begin();
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20, "the plan's edit is written at the world's load");
+    g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": 40}]}})";
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 20 && reported("RestartRequired: this start runs on the rolled-back registry plan aaaaaaaaaaaa"),
+          "a pack reload's changed section is not composed over the plan: RestartRequired");
+    uint64_t h = 0;
+    RegistryLiveReply reply;
+    check(registry_live_begin(88, "later", 4, &h) == KILN_OK, "begin (a mod the plan leaves out)");
+    registry_live_submit(88, h, R"({"ir":1,"mod":"later","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    check(registry_live_commit(88, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::RestartRequired && at<uint32_t>(WOOD_AT) == 20,
+          "a left-out mod's live change is RestartRequired, nothing written (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+    uint64_t h2 = 0;
+    check(registry_live_begin(77, "m", 4, &h2) == KILN_OK, "begin (a mod of the plan)");
+    registry_live_submit(77, h2, R"({"ir":1,"mod":"m","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":30}]})", &reply, nullptr);
+    check(registry_live_commit(77, h2, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 30,
+          "a plan mod's live change is applied over the plan (" + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
+}
+
 int main() {
     std::vector<std::string> errs;
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     g_regmap = std::make_shared<registry::map::RegMap>();
     if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errs) || !g_regmap->has_build) {
         std::printf("FAIL cannot load the regmap at %s\n", KILN_REGMAP_DIR);
@@ -846,12 +1121,17 @@ int main() {
         {"perks_costs_unlock_loot", perks_costs_unlock_loot},
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
+        {"restart_required_on_reload", restart_required_on_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"live_c_table", live_c_table},
+        {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},
         {"drift_probe", drift_probe},
         {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
+        {"save_checks_at_world_load", save_checks_at_world_load},
+        {"rolled_back_start_live", rolled_back_start_live},
     };
     int failed = 0;
     for (auto& [name, fn] : tests) {

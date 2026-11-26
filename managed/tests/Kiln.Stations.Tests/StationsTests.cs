@@ -127,6 +127,7 @@ public sealed unsafe class StationsTests : IDisposable
         public uint[] LastChests = [];
         public bool HasChests { get; set; } = true;
         public bool HasLinkedFills { get; set; } = true;  // GitHub #132
+        public bool HasItemFills { get; set; } = true;    // GitHub #132, 0.2.0-dev.31.16: the per-ingredient transfer
         // base_stock_with_stations (0.2.0-dev.29.17): off unless a test sets it
         public bool HasStockWithStations { get; set; }
         public StationsNative.Stack[] StockWithStations = [];
@@ -307,6 +308,11 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Request>("Keep"));
         Assert.Equal(88, (int)Marshal.OffsetOf<StationsNative.Request>("ChestCount"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Request>("Chests"));
+        Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Request>("Item"));      // 0.2.0-dev.31.16: reserved[0] before
+        Assert.Equal(76, (int)Marshal.OffsetOf<StationsNative.Request>("Reserved"));
+        Assert.Equal(8 + 39 * sizeof(nint), sizeof(StationsNative.Table));          // fill_flags after set_build_stock
+        Assert.Equal(StationsNative.TableBuild + sizeof(nint), StationsNative.TableItemFills);
+        Assert.Equal(0x200u, StationsNative.FillItem);
         Assert.Equal(32, sizeof(StationsNative.MoveChange));
         Assert.Equal(1248, sizeof(StationsNative.Result));  // GitHub #132: FromLinked, ReservedLinked appended
         Assert.Equal(1240, (int)Marshal.OffsetOf<StationsNative.Result>("FromLinked"));
@@ -332,7 +338,8 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(312, sizeof(StationsNative.Table));  // GitHub #147: SetLockStock, LockAsks; #132: SetBuildStock appended
+        Assert.Equal(320, sizeof(StationsNative.Table));  // GitHub #147: SetLockStock, LockAsks; #132: SetBuildStock, FillFlags appended
+        Assert.Equal(312, (int)Marshal.OffsetOf<StationsNative.Table>("FillFlags"));
         Assert.Equal(304, (int)Marshal.OffsetOf<StationsNative.Table>("SetBuildStock"));
         Assert.Equal(312, StationsNative.TableBuild);
         Assert.Equal(40, sizeof(StationsNative.SourceRequest));  // GitHub #147: Flags, Reserved after the 32-byte V1
@@ -876,6 +883,17 @@ public sealed unsafe class StationsTests : IDisposable
         return p;
     }
 
+    // the station screen's per-ingredient "+1" / "+n": AutomaticTransfer with an item and no recipe (docs/re/stations.md §10.9)
+    private static byte[] ItemPress(uint station = 3300, uint item = 0x10, ushort amount = 7)
+    {
+        var p = new byte[68];
+        BitConverter.TryWriteBytes(p.AsSpan(0), station);
+        BitConverter.TryWriteBytes(p.AsSpan(8), item);
+        BitConverter.TryWriteBytes(p.AsSpan(0x0c), amount);
+        p[0x40] = (byte)StationPlayerAction.Fill;
+        return p;
+    }
+
     private void AddStation(uint entity, int baseIndex, double x = 2)
     {
         var s = _fake.StationRows[3300];
@@ -1111,6 +1129,120 @@ public sealed unsafe class StationsTests : IDisposable
         _fake.Planned.Clear();
         Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, FillPress(), true, out _, out why)));
         Assert.Empty(_fake.Planned);
+    }
+
+    [Fact]
+    public void TheIngredientRowsTransferTakesFromAPlayersFillOptedLinks()
+    {
+        // GitHub #132 (0.2.0-dev.31.16): the per-ingredient "+1" / "+n" of a production station's screen
+        using var kiln = Kiln();
+        AddStation(5, 0, x: 3);    // the player, in the forge's base
+        var player = new EntityId(5);
+        string? why = null;
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillLinked) != 0 ? StationActionStatus.Done : StationActionStatus.NotEnough);
+        // no fill-opted link: the game's own transfer, never planned
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+        var session = LinkPurposes.Fills.Track(player);
+        // the bag and the Magic chests do not cover it, the links do: Kiln's item fill, exactly the press's item and amount
+        var press = kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(amount: 7), true, out _, out why));
+        Assert.NotNull(press);
+        Assert.Equal((new EntityId(3300), 0x10u, 7, player), (press!.Station, press.Item, press.Amount, press.Player));
+        var plain = _fake.Planned[0];
+        var linked = _fake.Planned[^1];
+        Assert.Equal(StationsNative.FillItem, plain.Flags & (StationsNative.FillItem | StationsNative.FillLinked));  // plain first
+        Assert.Equal(StationsNative.FillItem | StationsNative.FillLinked, linked.Flags & (StationsNative.FillItem | StationsNative.FillLinked));
+        Assert.Equal((0x10u, 7u, 0u, 5u, StationsNative.Fill), (linked.Item, linked.Crafts, linked.RecipeId, linked.Player, linked.Action));
+        var (req, _, _) = StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 7, player, true, false);
+        Assert.Equal(linked.Flags, req.Flags);
+        // the bag and the chests cover it: the game's own transfer
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.Done);
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), true, out _, out why)));
+        Assert.Contains("cover", why);
+        // not even with the links: the game's (it refuses, nothing moves), said so
+        _fake.PlanFor = _ => PlanWith(StationActionStatus.NotEnough);
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), true, out _, out why)));
+        Assert.Contains("linked sources", why);
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillLinked) != 0 ? StationActionStatus.Done : StationActionStatus.NotEnough);
+        // the press's own rules: CanAccessInventories, the station's base
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), false, out _, out why)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), null, out _, out why)));
+        AddStation(6, -1);
+        var away = LinkPurposes.Fills.Track(new EntityId(6));
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(new EntityId(6), ItemPress(), true, out _, out why)));
+        Assert.Contains("another base", why);
+        LinkPurposes.Fills.Untrack(new EntityId(6), away);
+        // a recipe fill, a water fill, an empty one: not this path
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, FillPress(), true, out _, out why)));
+        var water = ItemPress();
+        BitConverter.TryWriteBytes(water.AsSpan(0x10), 64u);
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, water, true, out _, out why)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(amount: 0), true, out _, out why)));
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(item: 0), true, out _, out why)));
+        // and the recipe fill's path leaves the item press alone
+        Assert.Null(kiln.Run(() => StationsCore.SourceFill(player, ItemPress(), true, out _, out why)));
+        // an older kiln-items.dll (no FILL_ITEM): the game's own transfer, never planned
+        _fake.HasItemFills = false;
+        _fake.Planned.Clear();
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+        Assert.Throws<InvalidOperationException>(() => StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 7, player, true, false));
+        _fake.HasItemFills = true;
+        // the request's own limits: an item, 1..65535, a player for the links
+        Assert.Throws<ArgumentException>(() => StationsCore.ItemFillRequest(new EntityId(3300), 0, 7, player, true, false));
+        Assert.Throws<ArgumentException>(() => StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 0, player, true, false));
+        Assert.Throws<ArgumentException>(() => StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 65536, player, true, false));
+        Assert.Throws<ArgumentException>(() => StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 7, EntityId.None, true, false));
+        Assert.Equal(StationsNative.FillItem | StationsNative.DryRun,
+            StationsCore.ItemFillRequest(new EntityId(3300), 0x10, 7, player, false, true).Request.Flags);
+        // the link went: vanilla again
+        LinkPurposes.Fills.Untrack(player, session);
+        _fake.Planned.Clear();
+        Assert.Null(kiln.Run(() => StationsCore.SourceItemFill(player, ItemPress(), true, out _, out why)));
+        Assert.Empty(_fake.Planned);
+    }
+
+    [Fact]
+    public void AnIngredientPressThatKilnRunsIsCanceledAndSubmittedAsAnItemFill()
+    {
+        using var kiln = Kiln();
+        AddStation(5, 0, x: 3);
+        var player = new EntityId(5);
+        var session = LinkPurposes.Fills.Track(player);
+        _fake.PlanFor = r => PlanWith((r.Flags & StationsNative.FillLinked) != 0 ? StationActionStatus.Done : StationActionStatus.NotEnough);
+        _fake.Submitted.Clear();
+        var ran = kiln.Run(() => StationsCore.RunItemPress(new ItemPress(new EntityId(3300), 0x10, 7, player)));
+        Assert.True(ran);
+        var (r, keep, _, _) = Assert.Single(_fake.Submitted);
+        Assert.Equal((StationsNative.Fill, 0x10u, 7u, 5u, 0u), (r.Action, r.Item, r.Crafts, r.Player, r.RecipeId));
+        Assert.Equal(StationsNative.FillItem | StationsNative.FillLinked, r.Flags);
+        Assert.Empty(keep);
+        LinkPurposes.Fills.Untrack(player, session);
+    }
+
+    [Fact]
+    public void AnIngredientPressKilnCannotQueueIsLeftToTheGame()
+    {
+        // GitHub #132 (0.2.0-dev.31.16): RunItemPress false = the press is not canceled (the game's own transfer runs and
+        // refuses as before); never a canceled press with nothing queued
+        using var kiln = Kiln();
+        var press = new ItemPress(new EntityId(3300), 0x10, 7, new EntityId(5));
+        _fake.Submitted.Clear();
+        foreach (var rc in new[] { StationsNative.BufferTooSmall, StationsNative.Unavailable, StationsNative.InvalidArgument })
+        {
+            _fake.SubmitResult = rc;
+            Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        }
+        _fake.SubmitResult = 0;
+        _fake.HasItemFills = false;  // an older kiln-items.dll
+        Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        _fake.HasItemFills = true;
+        _fake.State = (true, false, true, true, "stations.fill is off");
+        Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        Assert.Empty(_fake.Submitted);
+        _fake.State = (true, true, true, true, "");
+        Assert.True(kiln.Run(() => StationsCore.RunItemPress(press)));
+        Assert.Single(_fake.Submitted);
     }
 
     [Fact]

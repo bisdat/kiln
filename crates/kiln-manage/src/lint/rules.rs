@@ -1267,6 +1267,22 @@ fn manifest_rules(out: &mut Out, m: &LMod, _defs: &Defs, _mi: usize) {
     let c = contents(m);
     let at = root.member("clients").map(|x| x.value.span).or_else(|| root.member("side").map(|x| x.key_span)).unwrap_or(Span::new(root.span.start, root.span.start + 1));
     let how = if explicit { format!("\"clients\": \"{clients}\"") } else { format!("no \"clients\" (side \"{side}\" means \"{clients}\")") };
+    if let Some(suggested) = super::registry::clients(m)
+        && side != "client"
+        && (clients != suggested || suggested == "mod" && side != "both")
+    {
+        let why = match suggested {
+            "none" => "these fields need no client copy; requiring Kiln would also refuse vanilla clients",
+            "kiln" => "ContentSync supplies these live values to Kiln clients; vanilla UI/prediction keeps its own values",
+            _ => "each client must author these values locally; use side \"both\" and matching files/settings (boot values require a restart)",
+        };
+        let choice = if suggested == "kiln" { " (an intentional vanilla UI/prediction difference may keep \"none\")" } else { "" };
+        let d = Diagnostic::new(&mf.display, codes::REGISTRY_CLIENTS, at, &format!(
+            "this registry-only pack says {how}; its fields suggest \"clients\": \"{suggested}\": {why}{choice}"
+        ));
+        // Advice only: changing admission or a mod's side is the author/operator's choice.
+        out.push(d);
+    }
     if let Some((file, span, what)) = &c.definition
         && clients == "none"
     {

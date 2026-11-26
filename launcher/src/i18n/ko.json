@@ -6068,6 +6068,165 @@
       "unknown": "Kiln은 어떤 게임 파일을 되돌릴지 알 수 없습니다: {reason}."
     }
   },
+  "registry": {
+    "title": "레지스트리 충돌",
+    "gameUnavailable": "게임 선택 불가",
+    "noGame": "선택된 게임 없음",
+    "noGameHint": "설정에서 설치된 게임을 선택하면 해당 게임의 레지스트리 스냅샷을 읽을 수 있습니다.",
+    "sub": "이 게임의 저장된 레지스트리 스냅샷입니다. 실시간 정보도, 다음 시작의 예측도 아닙니다.",
+    "refresh": "보고서 새로 고침",
+    "unavailable": "레지스트리 보고서를 읽을 수 없음",
+    "missing": "아직 레지스트리 보고서가 없음",
+    "missingHint": "Kiln이 이 게임의 kiln/state/registry.json을 아직 쓰지 않았습니다. 살펴볼 레지스트리 스냅샷이 없습니다.",
+    "stale": "오래된 스냅샷",
+    "staleBody": "{reason} 아래 값은 저장된 스냅샷의 값이며, 현재 월드나 모드 목록과 같다고 보장되지 않습니다.",
+    "snapshot": "스냅샷",
+    "snapshotSub": "{time} · 세대 {generation} · {phase}",
+    "baseOrigin": "기준 출처: {origin}",
+    "archiveWriter": "아카이브 작성자: {writer}",
+    "journal": {
+      "read": "kiln-eml 변경 저널로 확인한 아카이브 작성자 패키지: 패키지 {packages}개, 항목 {entries}개 (아이템, 드롭, 밸런스만 해당하며 레시피나 전리품 항목은 확인하지 않습니다).",
+      "truncated": "kiln-eml 변경 저널로 확인한 아카이브 작성자 패키지: 패키지 {packages}개, 항목 {entries}개 (아이템, 드롭, 밸런스만 해당하며 레시피나 전리품 항목은 확인하지 않습니다). 저널이 잘려 있어 패키지가 확인되지 않은 항목에도 썼을 수 있습니다.",
+      "notNamed": "이번 시작에서는 아카이브 작성자 패키지를 확인하지 않습니다: {reason}",
+      "none": "이번 시작의 아카이브 작성자는 변경 저널을 남기지 않습니다.",
+      "stale": "변경 저널이 이전 시작의 것입니다.",
+      "unreadable": "변경 저널을 읽을 수 없습니다."
+    },
+    "sfPackage": "{id} (ShroudForge 패키지)",
+    "emlPackage": "{id} (EML 패키지)",
+    "archiveUnattributed": "어떤 패키지도 하지 않은 시작 시 쓰기 (kiln-eml)",
+    "archiveOp": "알 수 없음 (kiln-eml 저널은 이 패키지가 쓴 항목만 알려 주며 이 필드는 알려 주지 않습니다)",
+    "kind": {
+      "archiveWriter": "Kiln보다 먼저 이 항목을 씀 (아카이브)",
+      "drift": "Kiln 밖에서 변경됨"
+    },
+    "unverified": "매핑 미검증",
+    "unverifiedBody": "필드 변경이 Unproven으로 거부될 수 있습니다. 각 거부의 이유를 확인하세요.",
+    "certaintyHint": "확실 = Kiln이 작성자를 관찰했습니다. 저널로 확인 = kiln-eml 변경 저널이 Kiln보다 먼저 항목을 썼다고 알려 주는 ShroudForge 또는 EML 패키지이며, Kiln의 변경이 우선합니다. 추정 차이 = 게임의 값이 Kiln 밖에서 바뀌었습니다. 용의자는 단서일 뿐이며 누가 썼는지도, 다른 작성자가 없다는 것도 증명하지 않습니다.",
+    "partial": "일부 보고서",
+    "partialRows": {
+      "other": "네이티브 보고서 또는 이 화면의 안전 한도 때문에 {count}개 행이 빠졌습니다."
+    },
+    "partialWriters": {
+      "other": "이전 작성자 {count}명이 작성자 체인에서 빠졌습니다."
+    },
+    "partialBody": "텍스트와 목록 값도 제한되므로 전체 기록이 아닙니다.",
+    "empty": "이 스냅샷에는 레지스트리 변경이 없음",
+    "emptyHint": "보고서는 있고 유효하지만 필드, 충돌, 거부, 항목 변경이 없습니다.",
+    "refused": "거부된 변경",
+    "refusedSub": "이 변경은 적용되지 않았습니다. RestartRequired는 게임을 다시 시작해야 하고, Unproven은 Kiln에 검증된 매핑이 필요합니다.",
+    "restart": "다시 시작 대기",
+    "restartSub": "게임이 시작된 뒤 다시 불러오기나 실시간 변경이 이 레지스트리 변경을 바꿨습니다. 게임(또는 서버)을 다음에 시작할 때 적용되며, 그때까지 게임은 시작할 때의 값을 유지합니다.",
+    "restartCount": {
+      "other": "레지스트리 변경 {count}개가 다시 시작을 기다립니다"
+    },
+    "restartHint": "적용하려면 게임이나 서버를 다시 시작하세요. 각 이유에 시작 시 무엇이 고정되었는지 나와 있습니다.",
+    "plan": {
+      "title": "레지스트리 계획",
+      "sub": "마지막 시작이 사용한 변경과 그 이전의 마지막 정상 계획입니다. 롤백하면 다음 시작이 그 계획으로 실행되며, 저장 데이터는 건드리지 않습니다.",
+      "rollback": "롤백",
+      "clear": "지우기",
+      "unavailable": "레지스트리 계획을 읽을 수 없습니다",
+      "current": "마지막 시작의 계획: {plan}",
+      "previous": "이전(마지막 정상) 계획: {plan}",
+      "none": "없음",
+      "lastRollback": "마지막 시작의 롤백: {state} (계획 {plan}) {reason}",
+      "noLastRollback": "마지막 시작의 롤백: 없음",
+      "pending": "롤백 요청: 계획 {plan}, {requested}에 {by}이(가) 요청. 다음 시작은 이 계획으로 실행됩니다.",
+      "noPending": "롤백 요청: 없음",
+      "dryRun": {
+        "other": "다음 시작에서 계획 {plan}이(가) 값 {count}개를 되돌립니다"
+      },
+      "targetMods": "그 계획의 모드: {mods}",
+      "noMods": "레지스트리 변경이 전혀 없음",
+      "changesUnknown": "무엇이 되돌아가는지 여기서는 알 수 없습니다({why}). 시작할 때 목록이 나옵니다.",
+      "noChanges": "되돌아가는 값이 없습니다. 두 계획이 같은 값이 됩니다.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "레지스트리 변경 없음",
+      "moreChanges": {
+        "other": "… 그리고 {count}개 더 (시작 후 registry.json에 모두 나옵니다)."
+      },
+      "runningKeeps": "지금 실행 중인 게임이나 서버에서는 아무것도 바뀌지 않습니다. 다시 시작할 때까지 시작할 때의 계획을 유지합니다.",
+      "refusedWhole": "확인하기 전에는 아무것도 쓰지 않습니다. 계획의 모드 중 하나가 그 버전으로 로드되지 않았거나, 변경 중 하나가 그 게임 빌드에서 거부되거나, 저장 데이터의 내용을 바꾸게 되면 시작은 계획 전체를 거부하고 모드의 현재 변경을 사용합니다.",
+      "confirmRollback": "롤백 확인",
+      "confirmClear": "지우기 확인",
+      "cancel": "취소",
+      "clearTitle": "계획 {plan}에 대한 롤백 요청 지우기",
+      "clearBody": "다음 시작은 다시 모드의 현재 레지스트리 변경으로 실행됩니다.",
+      "failed": "롤백 요청을 바꿀 수 없습니다",
+      "requested": "요청됨: 다음 시작은 계획 {plan}으로 실행되며, 지울 때까지 이후의 모든 시작도 마찬가지입니다.",
+      "cleared": "롤백 요청을 지웠습니다",
+      "nothingToClear": "지울 롤백 요청이 없었습니다",
+      "savesUntouched": "저장 데이터는 건드리지 않습니다. 적용하려면 게임(또는 서버)을 다시 시작하세요."
+    },
+    "restartOmitted": {
+      "other": "{count}개는 여기에 표시되지 않습니다. state/registry.json에 모두 있습니다."
+    },
+    "noRefused": "표시된 보고서에 거부된 변경이 없습니다.",
+    "conflicts": "충돌 및 차이",
+    "conflictsSub": "승자와 다른 주체는 스냅샷 시점에 기록된 그대로입니다.",
+    "noConflicts": "표시된 보고서에 충돌 행이 없습니다.",
+    "conflictLine": "{kind} · 승자: {winner} · 다른 주체: {loser}",
+    "fields": "필드 및 작성자 체인",
+    "fieldsSub": "이전 작성자가 먼저 나옵니다. 필드를 펼치면 기준, 작업, 결과가 보입니다.",
+    "filter": "필드나 주체로 필터",
+    "noMatch": "이 필터에 맞는 표시 필드가 없습니다.",
+    "noFields": "표시된 보고서에 필드 행이 없습니다.",
+    "entries": "항목 변경",
+    "noEntries": "항목 변경이 없습니다.",
+    "added": "추가됨",
+    "removed": "제거됨",
+    "previous": "이전",
+    "next": "다음",
+    "page": "{pages}쪽 중 {page}쪽 · 표시된 행 {count}개",
+    "summary": "승자: {winner} · 결과: {result}",
+    "summaryOmitted": {
+      "other": "이전 작성자 {count}명 생략"
+    },
+    "applies": "적용: {applies} · 기준 출처: {origin}",
+    "baseValue": "기준 값: {value}",
+    "writersOmitted": {
+      "other": "이전 작성자 {count}명을 생략했습니다. 체인의 보존된 끝부분만 표시합니다."
+    },
+    "element": "요소: {element}",
+    "operation": "작업: {operation}",
+    "after": "이후: {value}",
+    "noWriters": "작성자 행이 없습니다. 기준 값이 결과를 정합니다.",
+    "formula": "수식 입력(계산 순서): {inputs}",
+    "winner": "승자: {winner}",
+    "result": "결과:",
+    "certainty": {
+      "certain": "확실",
+      "named": "저널로 확인",
+      "bestEffort": "추정 차이",
+      "unknown": "알 수 없음"
+    },
+    "advancedField": "고급 필드(세부 정보 숨김)",
+    "advancedReason": "고급 필드(매핑 세부 정보 숨김).",
+    "advancedConflict": "고급 필드 충돌. 매핑 세부 정보는 숨겨집니다.",
+    "unknownField": "{field} (이 런처가 모르는 필드)",
+    "elementHidden": "요소 세부 정보 숨김",
+    "baseOwner": "기준",
+    "noOwner": "없음",
+    "referenceCheck": "Kiln 참조 검사",
+    "referenceOp": "참조 검사",
+    "fresh": {
+      "clock": "보고서 시각을 확인할 수 없습니다.",
+      "process": "현재 게임 프로세스를 확인할 수 없습니다.",
+      "stopped": "게임이 실행 중이 아닙니다. 마지막으로 저장된 스냅샷입니다.",
+      "previousStart": "이 보고서는 현재 게임 시작보다 이전의 것입니다.",
+      "old": "이 스냅샷은 24시간이 넘었습니다.",
+      "start": "현재 게임 시작을 확인할 수 없습니다."
+    },
+    "error": {
+      "tooLarge": "레지스트리 보고서가 이 화면이 읽는 8 MiB 한도를 넘습니다. 전체를 읽으려면 게임 폴더의 kiln/state/registry.json을 여세요.",
+      "nesting": "레지스트리 보고서의 중첩 한도를 넘었습니다.",
+      "structure": "레지스트리 보고서의 구조 한도를 넘었습니다.",
+      "notJson": "레지스트리 보고서가 올바른 JSON이 아닙니다.",
+      "format": "지원하지 않는 레지스트리 보고서 형식입니다(예상 값: 1).",
+      "malformed": "잘못된 레지스트리 보고서입니다({part})."
+    }
+  },
   "playerStorage": {
     "tab": "보관함",
     "title": "플레이어 보관함",

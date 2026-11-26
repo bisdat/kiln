@@ -6215,6 +6215,173 @@
       "unknown": "Kiln kann nicht sagen, welche Spieldateien es zurücksetzen würde: {reason}."
     }
   },
+  "registry": {
+    "title": "Registerkonflikte",
+    "gameUnavailable": "Spielauswahl nicht verfügbar",
+    "noGame": "Kein Spiel ausgewählt",
+    "noGameHint": "Wähle in den Einstellungen ein installiertes Spiel, um seinen Register-Snapshot zu lesen.",
+    "sub": "Der gespeicherte Register-Snapshot dieses Spiels, keine Live-Daten und keine Vorhersage des nächsten Starts.",
+    "refresh": "Bericht neu laden",
+    "unavailable": "Registerbericht nicht verfügbar",
+    "missing": "Noch kein Registerbericht",
+    "missingHint": "Kiln hat für dieses Spiel noch keine kiln/state/registry.json geschrieben. Es gibt keinen Register-Snapshot zum Ansehen.",
+    "stale": "Veralteter Snapshot",
+    "staleBody": "{reason} Die Werte unten gehören zum gespeicherten Snapshot, nicht unbedingt zur aktuellen Welt oder Modliste.",
+    "snapshot": "Snapshot",
+    "snapshotSub": "{time} · Generation {generation} · {phase}",
+    "baseOrigin": "Herkunft der Basis: {origin}",
+    "archiveWriter": "Archiv-Schreiber: {writer}",
+    "journal": {
+      "read": "Archiv-Schreiber-Pakete aus dem Änderungsjournal von kiln-eml benannt: {packages} Pakete, {entries} Einträge (nur Gegenstände, Drops und Balance: ein Rezept- oder Beute-Eintrag wird nicht benannt).",
+      "truncated": "Archiv-Schreiber-Pakete aus dem Änderungsjournal von kiln-eml benannt: {packages} Pakete, {entries} Einträge (nur Gegenstände, Drops und Balance: ein Rezept- oder Beute-Eintrag wird nicht benannt). Das Journal ist gekürzt, daher kann ein Paket Einträge geschrieben haben, die es nicht nennt.",
+      "notNamed": "Archiv-Schreiber-Pakete werden in diesem Start nicht benannt: {reason}",
+      "none": "der Archiv-Schreiber dieses Starts führt kein Änderungsjournal.",
+      "stale": "das Änderungsjournal gehört zu einem früheren Start.",
+      "unreadable": "das Änderungsjournal konnte nicht gelesen werden."
+    },
+    "sfPackage": "{id} (ShroudForge-Paket)",
+    "emlPackage": "{id} (EML-Paket)",
+    "archiveUnattributed": "Ein Schreibvorgang beim Start, den kein Paket gemacht hat (kiln-eml)",
+    "archiveOp": "Nicht bekannt (das Journal von kiln-eml nennt den Eintrag, den dieses Paket geschrieben hat, nicht dieses Feld)",
+    "kind": {
+      "archiveWriter": "Hat diesen Eintrag vor Kiln geschrieben (Archiv)",
+      "drift": "Außerhalb von Kiln geändert"
+    },
+    "unverified": "Zuordnung nicht geprüft",
+    "unverifiedBody": "Feldänderungen können als Unproven abgelehnt werden. Lies bei jeder Ablehnung ihren Grund.",
+    "certaintyHint": "Sicher = Kiln hat den Schreiber beobachtet. Aus Journal benannt = ein ShroudForge- oder EML-Paket, das laut Änderungsjournal von kiln-eml den Eintrag vor Kiln geschrieben hat; Kilns Änderung gewinnt darüber. Abweichung nach bestem Wissen = der Wert des Spiels wurde außerhalb von Kiln geändert; die Verdächtigen sind ein Hinweis, kein Beweis dafür, wer ihn geschrieben hat oder dass es keinen anderen Schreiber gibt.",
+    "partial": "Unvollständiger Bericht",
+    "partialRows": {
+      "one": "{count} Zeile wurde vom nativen Bericht oder von den Sicherheitsgrenzen dieser Ansicht ausgelassen.",
+      "other": "{count} Zeilen wurden vom nativen Bericht oder von den Sicherheitsgrenzen dieser Ansicht ausgelassen."
+    },
+    "partialWriters": {
+      "one": "{count} früherer Schreiber wurde in den Schreiberketten ausgelassen.",
+      "other": "{count} frühere Schreiber wurden in den Schreiberketten ausgelassen."
+    },
+    "partialBody": "Texte und Listenwerte sind ebenfalls begrenzt; dies ist nicht der vollständige Verlauf.",
+    "empty": "Keine Registeränderungen in diesem Snapshot",
+    "emptyHint": "Der Bericht ist vorhanden und gültig, enthält aber keine Felder, Konflikte, Ablehnungen oder Eintragsänderungen.",
+    "refused": "Abgelehnte Änderungen",
+    "refusedSub": "Diese Änderungen wurden nicht angewendet. RestartRequired braucht einen Neustart des Spiels; Unproven braucht eine geprüfte Zuordnung in Kiln.",
+    "restart": "Wartet auf einen Neustart",
+    "restartSub": "Ein Neuladen oder eine Live-Änderung hat diese Registeränderungen nach dem Spielstart geändert. Sie gelten ab dem nächsten Start des Spiels (oder des Servers); bis dahin behält das Spiel die Werte, mit denen es gestartet ist.",
+    "restartCount": {
+      "one": "{count} Registeränderung wartet auf einen Neustart",
+      "other": "{count} Registeränderungen warten auf einen Neustart"
+    },
+    "restartHint": "Starte das Spiel oder den Server neu, um sie anzuwenden. Jeder Grund sagt, was der Start festgelegt hat.",
+    "plan": {
+      "title": "Registerplan",
+      "sub": "Die Änderungen, mit denen der letzte Start lief, und der letzte gute Plan davor. Ein Rollback lässt den nächsten Start mit diesem Plan laufen; Spielstände bleiben unberührt.",
+      "rollback": "Zurückrollen",
+      "clear": "Entfernen",
+      "unavailable": "Die Registerpläne konnten nicht gelesen werden",
+      "current": "Plan des letzten Starts: {plan}",
+      "previous": "Vorheriger (letzter guter) Plan: {plan}",
+      "none": "keiner",
+      "lastRollback": "Rollback beim letzten Start: {state} (Plan {plan}) {reason}",
+      "noLastRollback": "Rollback beim letzten Start: keiner",
+      "pending": "Rollback-Anfrage: Plan {plan}, angefragt {requested} von {by}. Der nächste Start läuft mit ihm.",
+      "noPending": "Rollback-Anfrage: keine",
+      "dryRun": {
+        "one": "Beim nächsten Start setzt Plan {plan} {count} Wert zurück",
+        "other": "Beim nächsten Start setzt Plan {plan} {count} Werte zurück"
+      },
+      "targetMods": "Mods dieses Plans: {mods}",
+      "noMods": "überhaupt keine Registeränderungen",
+      "changesUnknown": "Was zurückgesetzt wird, ist hier nicht bekannt ({why}); der Start listet es auf.",
+      "noChanges": "Kein Wert wird zurückgesetzt: Beide Pläne ergeben dieselben Werte.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "keine Registeränderung",
+      "moreChanges": {
+        "one": "… und {count} weiterer (registry.json listet nach dem Start jeden auf).",
+        "other": "… und {count} weitere (registry.json listet nach dem Start jeden auf)."
+      },
+      "runningKeeps": "In einem Spiel oder Server, der gerade läuft, ändert sich nichts: Er behält den Plan, mit dem er gestartet ist, bis er neu startet.",
+      "refusedWhole": "Nichts wird geschrieben, bevor du bestätigst. Der Start lehnt den Plan als Ganzes ab und verwendet die aktuellen Änderungen der Mods, wenn einer seiner Mods nicht in seiner Version geladen ist, eine seiner Änderungen auf diesem Spiel-Build abgelehnt wird oder er ändern würde, was Spielstände enthalten.",
+      "confirmRollback": "Zurückrollen bestätigen",
+      "confirmClear": "Entfernen bestätigen",
+      "cancel": "Abbrechen",
+      "clearTitle": "Rollback-Anfrage für Plan {plan} entfernen",
+      "clearBody": "Der nächste Start läuft wieder mit den aktuellen Registeränderungen der Mods.",
+      "failed": "Die Rollback-Anfrage konnte nicht geändert werden",
+      "requested": "Angefragt: Der nächste Start läuft mit Plan {plan}, ebenso jeder Start danach, bis du die Anfrage entfernst.",
+      "cleared": "Rollback-Anfrage entfernt",
+      "nothingToClear": "Es gab keine Rollback-Anfrage zum Entfernen",
+      "savesUntouched": "Spielstände bleiben unberührt. Starte das Spiel (oder den Server) neu, damit es wirkt."
+    },
+    "restartOmitted": {
+      "one": "{count} weitere wird hier nicht angezeigt: state/registry.json listet jede auf.",
+      "other": "{count} weitere werden hier nicht angezeigt: state/registry.json listet jede auf."
+    },
+    "noRefused": "Keine abgelehnten Änderungen im angezeigten Bericht.",
+    "conflicts": "Konflikte und Abweichungen",
+    "conflictsSub": "Gewinner und andere Besitzer wie zum Zeitpunkt des Snapshots festgehalten.",
+    "noConflicts": "Keine Konfliktzeilen im angezeigten Bericht.",
+    "conflictLine": "{kind} · Gewinner: {winner} · Anderer Besitzer: {loser}",
+    "fields": "Felder und Schreiberketten",
+    "fieldsSub": "Frühere Schreiber zuerst; klappe ein Feld auf für Basis, Operationen und Ergebnis.",
+    "filter": "Felder oder Besitzer filtern",
+    "noMatch": "Keine angezeigten Felder passen zu diesem Filter.",
+    "noFields": "Keine Feldzeilen im angezeigten Bericht.",
+    "entries": "Eintragsänderungen",
+    "noEntries": "Keine Eintragsänderungen.",
+    "added": "Hinzugefügt",
+    "removed": "Entfernt",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "page": "Seite {page} von {pages} · {count} angezeigte Zeilen",
+    "summary": "Gewinner: {winner} · Ergebnis: {result}",
+    "summaryOmitted": {
+      "one": "{count} früherer Schreiber ausgelassen",
+      "other": "{count} frühere Schreiber ausgelassen"
+    },
+    "applies": "Wirkt: {applies} · Herkunft der Basis: {origin}",
+    "baseValue": "Basiswert: {value}",
+    "writersOmitted": {
+      "one": "{count} früherer Schreiber ausgelassen. Nur das behaltene Ende der Kette wird gezeigt.",
+      "other": "{count} frühere Schreiber ausgelassen. Nur das behaltene Ende der Kette wird gezeigt."
+    },
+    "element": "Element: {element}",
+    "operation": "Operation: {operation}",
+    "after": "Danach: {value}",
+    "noWriters": "Keine Schreiberzeilen; die Basis bestimmt das Ergebnis.",
+    "formula": "Formeleingaben (Auswertungsreihenfolge): {inputs}",
+    "winner": "Gewinner: {winner}",
+    "result": "Ergebnis:",
+    "certainty": {
+      "certain": "Sicher",
+      "named": "Aus Journal benannt",
+      "bestEffort": "Abweichung nach bestem Wissen",
+      "unknown": "Unbekannt"
+    },
+    "advancedField": "Erweitertes Feld (Details ausgeblendet)",
+    "advancedReason": "Erweitertes Feld (Zuordnungsdetails ausgeblendet).",
+    "advancedConflict": "Konflikt bei einem erweiterten Feld; Zuordnungsdetails ausgeblendet.",
+    "unknownField": "{field} (Feld, das dieser Launcher nicht kennt)",
+    "elementHidden": "Elementdetails ausgeblendet",
+    "baseOwner": "Basis",
+    "noOwner": "Keiner",
+    "referenceCheck": "Kiln-Referenzprüfung",
+    "referenceOp": "Referenzprüfung",
+    "fresh": {
+      "clock": "Die Uhrzeit des Berichts lässt sich nicht prüfen.",
+      "process": "Der aktuelle Spielprozess lässt sich nicht prüfen.",
+      "stopped": "Das Spiel läuft nicht; dies ist sein zuletzt gespeicherter Snapshot.",
+      "previousStart": "Der Bericht ist älter als der aktuelle Spielstart.",
+      "old": "Dieser Snapshot ist älter als 24 Stunden.",
+      "start": "Der aktuelle Spielstart lässt sich nicht prüfen."
+    },
+    "error": {
+      "tooLarge": "Der Registerbericht ist größer als die 8 MiB, die diese Ansicht liest. Öffne kiln/state/registry.json im Spielordner, um ihn vollständig zu lesen.",
+      "nesting": "Verschachtelungsgrenze des Registerberichts überschritten.",
+      "structure": "Strukturgrenze des Registerberichts überschritten.",
+      "notJson": "Der Registerbericht ist kein gültiges JSON.",
+      "format": "Nicht unterstütztes Format des Registerberichts (erwartet: 1).",
+      "malformed": "Ungültiger Registerbericht ({part})."
+    }
+  },
   "playerStorage": {
     "tab": "Lager",
     "title": "Spielerlager",

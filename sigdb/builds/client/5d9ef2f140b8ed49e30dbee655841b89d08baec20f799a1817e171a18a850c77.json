@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 1104,
-    "constants": 1144,
-    "features": 294
+    "symbols": 1112,
+    "constants": 1156,
+    "features": 297
   },
   "features": {
     "abilities.attributes": true,
@@ -157,6 +157,8 @@
     "net.kick": true,
     "net.players": true,
     "net.withhold": true,
+    "npcspeech.bubble": true,
+    "npcspeech.voice": true,
     "pacing.loop_wait": true,
     "pacing.message_wait": true,
     "pacing.server_wait": true,
@@ -235,6 +237,7 @@
     "stations.craft_ui": true,
     "stations.events": true,
     "stations.fill": true,
+    "stations.fill_items": true,
     "stations.fill_ui": true,
     "stations.output_sources": true,
     "stations.read": true,
@@ -384,6 +387,7 @@
     "build/client.MaterialRows": "0x40e5d0",
     "build/client.MaterialRowsBody": "0x40e5f3",
     "build/client.MaterialRowsDone": "0x40f05a",
+    "build/client.NoContainerKey": "0x152d040",
     "build/client.StockRowsRet": "0x40ee4b",
     "build/voxel.base_size": "0x13d47a0",
     "camera/RenderFovSelected": "0x87b9fd",
@@ -652,6 +656,9 @@
     "npcai/FactionFriendValue": "0xea34a0",
     "npcai/FactionHostile": "0xea2e50",
     "npcai/FactionHostileValue": "0xea2f10",
+    "npcspeech/BubbleDraw": "0xd0dda0",
+    "npcspeech/NpcBubble": "0xcc7760",
+    "npcspeech/PickLines": "0xd99e10",
     "outline/ColorConvert": "0x125b80",
     "outline/DynamicModelSet": "0x309975",
     "outline/Instance": "0xf8420",
@@ -834,6 +841,7 @@
     "spawn/CreateEntity": "0x987e50",
     "spawn/DestroyEntity": "0x9a2a10",
     "stations/AutoTransferAction": "0x2c6b30",
+    "stations/AutoTransferItem": "0x3f7950",
     "stations/AutoTransferRecipe": "0x3f7ab0",
     "stations/BaseAtPosition": "0x470410",
     "stations/BaseStockForPlayer": "0x46fa10",
@@ -1521,6 +1529,18 @@
     "net/rec.state": "0xa",
     "net/rec.stride": "0x148",
     "net/sockets.machines": "0x28",
+    "npcspeech/bubble.reset": "0x5",
+    "npcspeech/bubble.show": "0x4",
+    "npcspeech/bubble.text": "0x0",
+    "npcspeech/entry.record": "0x8",
+    "npcspeech/rec.entry_line": "0x0",
+    "npcspeech/rec.entry_size": "0x294",
+    "npcspeech/rec.entry_vo": "0x8c",
+    "npcspeech/rec.plain_count": "0x5340",
+    "npcspeech/rec.plain_list": "0x5338",
+    "npcspeech/rec.prio_count": "0x98",
+    "npcspeech/rec.prio_list": "0x90",
+    "npcspeech/rec.vo_slots": "0x20",
     "outline/inst.group": "0x78",
     "outline/pal.group1": "0x58",
     "outline/pal.group2": "0x5c",
@@ -2496,11 +2516,13 @@
       "date": "2026-11-25",
       "evidence": "resolved offline (tools/sigport/build_record.py)",
       "symbols": {
+        "@build/client.NoContainerKey.site": "static",
         "build/client.MaterialRowAdd": "static",
         "build/client.MaterialRowStock": "static",
         "build/client.MaterialRows": "static",
         "build/client.MaterialRowsBody": "static",
         "build/client.MaterialRowsDone": "static",
+        "build/client.NoContainerKey": "static",
         "build/client.StockRowsRet": "static"
       },
       "constants": {},
@@ -4205,6 +4227,35 @@
       "constants": {},
       "features": {}
     },
+    "npcspeech": {
+      "level": "static",
+      "date": "2026-11-25",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@npcspeech/PickLines.fields": "static",
+        "npcspeech/BubbleDraw": "static",
+        "npcspeech/NpcBubble": "static",
+        "npcspeech/PickLines": "static"
+      },
+      "constants": {
+        "npcspeech/bubble.reset": "static",
+        "npcspeech/bubble.show": "static",
+        "npcspeech/bubble.text": "static",
+        "npcspeech/entry.record": "static",
+        "npcspeech/rec.entry_line": "static",
+        "npcspeech/rec.entry_size": "static",
+        "npcspeech/rec.entry_vo": "static",
+        "npcspeech/rec.plain_count": "static",
+        "npcspeech/rec.plain_list": "static",
+        "npcspeech/rec.prio_count": "static",
+        "npcspeech/rec.prio_list": "static",
+        "npcspeech/rec.vo_slots": "static"
+      },
+      "features": {
+        "npcspeech.bubble": "static",
+        "npcspeech.voice": "static"
+      }
+    },
     "outline": {
       "level": "static",
       "date": "2026-11-21",
@@ -4918,6 +4969,7 @@
       "evidence": "resolved offline (tools/sigport/build_record.py)",
       "symbols": {
         "@stations/AutoTransferAction.calls": "static",
+        "@stations/AutoTransferAction.item": "static",
         "@stations/AutoTransferRecipe.take": "static",
         "@stations/BaseAtPosition.fields": "static",
         "@stations/BaseStockForPlayer.fields": "static",
@@ -4928,6 +4980,7 @@
         "@stations/PlayerCrafting.dispatch": "static",
         "@stations/ResolveInput.calls": "static",
         "stations/AutoTransferAction": "static",
+        "stations/AutoTransferItem": "static",
         "stations/AutoTransferRecipe": "static",
         "stations/BaseAtPosition": "static",
         "stations/BaseStockForPlayer": "static",
@@ -4989,6 +5042,7 @@
         "stations.craft_sources": "static",
         "stations.events": "static",
         "stations.fill": "static",
+        "stations.fill_items": "static",
         "stations.output_sources": "static",
         "stations.read": "static"
       }

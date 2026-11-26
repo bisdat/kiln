@@ -110,6 +110,13 @@ internal sealed unsafe class RegistryNative(IHostServices host)
         }
         throw new KilnUnavailableException("kiln.registry", "the registry response kept changing");
     }
+    // The small schema snapshot includes bootSync too. Do not fetch the potentially multi-MiB writer report at a join.
+    internal string? Fingerprint()
+    {
+        if (!Available || Stage->Schema == 0) return null;
+        var schema = (delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int>)Stage->Schema;
+        return Text((buffer, cap, length) => schema(buffer, cap, length));
+    }
     internal RegistryStageStatus StageStatus()
     {
         if (!Available) throw new KilnUnavailableException("kiln.registry");
@@ -132,6 +139,12 @@ internal sealed unsafe class RegistryNative(IHostServices host)
             return Read(owner, false, registry, id, field);
         return NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(id, i => NativeCalls.WithUtf8(field, f =>
             Text((buffer, cap, length) => t->ReadPass(owner, r, i, f, buffer, cap, length)))));
+    }
+    /// <summary>registry.json's text as kiln.registry has it now (report_json).</summary>
+    internal string ReportJson()
+    {
+        if (!Available || Stage->Report == null) throw new KilnUnavailableException("kiln.registry");
+        return Text((buffer, cap, length) => Stage->Report(buffer, cap, length));
     }
     internal IReadOnlyList<string> Select(bool stage, string registry, string pattern) =>
         NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(JsonSerializer.Serialize(pattern), selector =>

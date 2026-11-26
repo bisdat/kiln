@@ -81,7 +81,7 @@ void check(bool ok, const std::string& why) {
 uintptr_t rec(const TType& t) { return reinterpret_cast<uintptr_t>(&t); }
 // The client's reflection (26430625): ItemTagReference -> ObjectReference<ItemTag>; ItemRegistryResource.itemTags at +8,
 // a BlobArray of 20-byte ItemTagInfo {tagGuid +0, labelId +16}.
-TType guid_t, u32, item_tag, obj_ref, tag_ref, info, info_list, registry;
+TType guid_t, u32, item_tag, obj_ref, tag_ref, info, info_list, item_registry;
 // keen::VoxelModelResource (client 26430625): size uint3 +0, data BlobArray<uint8> +12, isTerrain bool +20; 24 bytes.
 TType u8, uint3, bytes_t, model, shape_def, terrain_def, shape_ref, terrain_ref;
 std::vector<uint8_t> shape_model(24, 0), terrain_model(24, 0);
@@ -97,8 +97,8 @@ void types() {
     tag_ref.name = "keen::ItemTagReference", tag_ref.kind = K_TYPEDEF, tag_ref.size = 16, tag_ref.inner_rec = rec(obj_ref);
     info.name = "keen::ItemTagInfo", info.kind = K_STRUCT, info.size = 20, info.fields = {{"tagGuid", rec(guid_t), 0}, {"labelId", rec(u32), 16}};
     info_list.name = "keen::BlobArray<keen::ItemTagInfo>", info_list.kind = K_BLOBARRAY, info_list.size = 8, info_list.inner_rec = rec(info);
-    registry.name = "keen::ItemRegistryResource", registry.kind = K_STRUCT, registry.size = 72, registry.hash = 0x72ab1cb6u;
-    registry.fields = {{"itemRefs", rec(info_list), 0}, {"itemTags", rec(info_list), 8}};
+    item_registry.name = "keen::ItemRegistryResource", item_registry.kind = K_STRUCT, item_registry.size = 72, item_registry.hash = 0x72ab1cb6u;
+    item_registry.fields = {{"itemRefs", rec(info_list), 0}, {"itemTags", rec(info_list), 8}};
     u8.name = "keen::bool", u8.kind = K_BOOL, u8.size = 1;
     uint3.name = "keen::uint3", uint3.kind = K_STRUCT, uint3.size = 12;
     bytes_t.name = "keen::BlobArray<keen::uint8>", bytes_t.kind = K_BLOBARRAY, bytes_t.size = 8, bytes_t.inner_rec = rec(u8);
@@ -127,15 +127,15 @@ void lay_out(uint32_t n) {
 }  // namespace
 
 namespace kc::gd {
-const TType* type_hash(uint32_t h) { return h == registry.hash ? &registry : nullptr; }
+const TType* type_hash(uint32_t h) { return h == item_registry.hash ? &item_registry : nullptr; }
 const TType* type_named(const std::string& n) {
-    for (const TType* t : {&registry, &tag_ref, &obj_ref, &info, &item_tag, &model, &shape_def, &terrain_def, &shape_ref, &terrain_ref})
+    for (const TType* t : {&item_registry, &tag_ref, &obj_ref, &info, &item_tag, &model, &shape_def, &terrain_def, &shape_ref, &terrain_ref})
         if (t->name == n) return t;
     return nullptr;
 }
 bool res_list(uint32_t type, std::vector<std::array<uint8_t, 16>>* out) {
     out->clear();
-    if (type != registry.hash || !registry_listed) return true;
+    if (type != item_registry.hash || !registry_listed) return true;
     std::array<uint8_t, 16> k{};
     std::memcpy(k.data(), registry_key, 16);
     out->push_back(k);
@@ -148,7 +148,7 @@ uintptr_t res_data(const uint8_t g[16], uint32_t type, uint64_t* size) {
         if (size) *size = m->size();
         return reinterpret_cast<uintptr_t>(m->data());
     }
-    if (type != registry.hash || std::memcmp(g, registry_key, 16)) return 0;  // no keen::ItemTag resource exists
+    if (type != item_registry.hash || std::memcmp(g, registry_key, 16)) return 0;  // no keen::ItemTag resource exists
     if (size) *size = resource.size();
     return reinterpret_cast<uintptr_t>(resource.data());
 }
@@ -210,9 +210,9 @@ void tags() {
     lay_out(3);
     check(!encode("08aea6cf-e0e8-4d6c-8a29-a21f4693e006", out), "no item registry resource: nothing to check against, refused");
     registry_listed = true;
-    registry.fields = {{"itemRefs", rec(info_list), 0}};
+    item_registry.fields = {{"itemRefs", rec(info_list), 0}};
     check(!encode("08aea6cf-e0e8-4d6c-8a29-a21f4693e006", out), "a build whose registry has no itemTags field: refused, no offset guessed");
-    registry.fields = {{"itemRefs", rec(info_list), 0}, {"itemTags", rec(info_list), 8}};
+    item_registry.fields = {{"itemRefs", rec(info_list), 0}, {"itemTags", rec(info_list), 8}};
 }
 }  // namespace
 

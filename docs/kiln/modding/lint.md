@@ -446,6 +446,18 @@ locales/de.json:5:3: hint KL212: "shop.sel": en.json has no such key (a typo, or
 ```
 Fix: add the texts (or leave them to English on purpose and turn the rule off with `--off locale-key`), or correct the key.
 
+### KL213 registry-clients
+
+Warning. A server-loaded, data-only pack containing only `registry` sections declares a `clients` requirement different from the
+fields it edits. The strictest known field wins: server-only `loot`/`drops` need `none`; client-needed live
+item/recipe values suggest `kiln`; boot balance values or client-only fields require `mod` and matching client-side
+files/settings. Entry operations need at least `kiln`. The diagnostic suggests a value, not an automatic policy
+change: `none` can deliberately admit vanilla clients with their vanilla UI/prediction numbers for existing-item
+and recipe tweaks. See [registry client requirements](registries/README.md#registry-only-packs-choosing-clients).
+
+Code mods, mixed packs, raw edits and unknown fields are not grounds for lowering a requirement, so this rule does
+not guess for them. `unknown` read timing remains a mapping refusal, not a reason to tell players rejoining will fix it.
+
 ### KL209 manifest-refused
 Error. The real manifest reader refuses the file for a reason the schema cannot express. It is reported only when the
 schema found no error in the file.

@@ -300,7 +300,7 @@ created, never a value; at most 4096 entries per package and 32768 in all (`trun
 - **Readers** use it only when `generation` is the start's live generation: a writer that ignores the receipt (hosted
   ShroudForge, another loader) can leave it naming a generation that is no longer live. Read it and close it at once (a
   reader that keeps it open on Windows can make the next kiln-mode start fail its removal).
-- **Kiln's registry stage** is one reader (next release, `native/services/content/registry/archive_journal.cpp`,
+- **Kiln's registry stage** is one reader (since 0.2.0-dev.31.17, `native/services/content/registry/archive_journal.cpp`,
   MIT code over this file format): once per start it checks `generation` against the identity kiln-eml granted for the
   launch (`published_identity`'s `archive_sha256`) and names each package on the registry entries whose resource GUID it
   lists (`changed` and `created`; only registries whose entries are whole resources: items, drops, balance, never the
@@ -315,7 +315,7 @@ EML mod of the committed run, in the order their entrypoints ran, the resources 
 wrote in each, at their places in the published resource (`maxStackSize`, `recipes[37].craftingDuration`, `input[]` for a
 list's members, `""` for the whole resource), the ones it created and the contents it created; no plan digests (`null`).
 
-- **Recording:** EML's runtime (mod-loader-lua `env/writes.rs`, kiln-eml README change 43) names the running entrypoint
+- **Recording:** EML's runtime (mod-loader-lua `env/writes.rs`, kiln-eml README change 44) names the running entrypoint
   and keeps a small log on each value wrapper of the writes made through it; once the mods ran it walks the values as
   they will be written, once, into paths. A write into a value detached from its resource is not listed; a copy assigned
   into a resource is the assigning mod's; a value put in place over another (a field, an element, a variant's value, the

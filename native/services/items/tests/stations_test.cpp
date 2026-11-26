@@ -24,6 +24,22 @@ KilnStationRequest req(uint32_t action) {
     return r;
 }
 
+KilnEntity* named_one() {
+    static KilnEntity e[1] = {4000};
+    return e;
+}
+
+// The game's AutoTransferItem (S 0x198bf0 / C 0x3f7950, docs/re/stations.md section 10.9) on plain numbers: the player's
+// bag, then each list-A source in order, take what is still missing; short -> 4; then all of it into the station (no
+// room -> 2). One call per layer, as Kiln's item fill makes them, each moving exactly what it is asked.
+int game_item_fill(uint64_t* source, uint32_t amount, uint64_t room, uint64_t* station) {
+    if (*source < amount) return 4;
+    if (*station + amount > room) return 2;
+    *source -= amount;
+    *station += amount;
+    return 0;
+}
+
 // The game's AutoTransferRecipe, as read from the code (docs/re/stations.md §3.1), on plain numbers: returns 0 and
 // fills `moved` per input, or 4 when the stock is short, 2 when the station cannot hold it (water: its capacity). The
 // water input (kWaterItem) counts in "loaded" as the game counts it. Used to check the planner never asks for what the
@@ -64,7 +80,7 @@ int main() {
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 38 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+    static_assert(sizeof(KilnStationsApi) == 8 + 39 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
                   offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
                   offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8 &&
                   offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8 &&
@@ -76,7 +92,10 @@ int main() {
     // GitHub #147 (0.2.0-dev.31.12): the lock members after set_dye_stock; a 32-byte request is the older caller's
     static_assert(offsetof(KilnStationsApi, set_lock_stock) == 288 && offsetof(KilnStationsApi, lock_asks) == 296 &&
                   KILN_CRAFT_SOURCE_REQUEST_V1 == 32 && KILN_STATIONS_MAX_LOCK_STOCK == 256 && KILN_STATIONS_MAX_LOCK_ASKS == 16);
-    static_assert(offsetof(KilnStationsApi, set_build_stock) == 304 && sizeof(KilnStationsApi) == 312);  // after #147's members
+    static_assert(offsetof(KilnStationsApi, set_build_stock) == 304);  // after #147's members
+    // GitHub #132 (0.2.0-dev.31.16): fill_flags after set_build_stock; the request's item where reserved[0] was
+    static_assert(offsetof(KilnStationsApi, fill_flags) == 312 && sizeof(KilnStationsApi) == 320);
+    static_assert(offsetof(KilnStationRequest, item) == 72 && offsetof(KilnStationRequest, reserved) == 76 && KILN_STATION_FILL_ITEM == 0x200);
     static_assert(KILN_CRAFT_SOURCE_FILLS == 2 && KILN_CRAFT_SOURCE_BUILDING == 4 && KILN_CRAFT_SOURCE_STOCK_FILLS == 4 &&
                   KILN_CRAFT_SOURCE_STOCK_BUILDING == 8 && KILN_STATION_FILL_LINKED == 0x100);
     static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024 && KILN_STATIONS_MAX_FILL_KEYS == 16);
@@ -85,7 +104,7 @@ int main() {
     static_assert(((KILN_STATION_COLLECT_OUTPUTS | KILN_STATION_COLLECT_LEFTOVERS | KILN_STATION_COLLECT_TO_BASE) &
                    (KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
                     KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
-                    KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED)) == 0);
+                    KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED | KILN_STATION_FILL_ITEM)) == 0);
     static_assert(KILN_STATION_COLLECT_OUTPUTS == 0x10000u && KILN_STATION_COLLECT_LEFTOVERS == 0x20000u &&
                   KILN_STATION_COLLECT_TO_BASE == 0x40000u);
     static_assert(offsetof(KilnStationResult, from_outputs) == 60);
@@ -138,11 +157,70 @@ int main() {
         r.flags = KILN_STATION_FILL_LINKED;
         CHECK(!request_valid(r));
     }
+    // GitHub #132 (0.2.0-dev.31.16): the station screen's per-ingredient transfer: one item, an amount in items, no recipe
+    r = req(KILN_STATION_FILL);
+    r.flags = KILN_STATION_FILL_ITEM;
+    r.item = 0x2b0cf1d5;
+    r.player = 1;
+    CHECK(request_valid(r));
+    r.crafts = 9999;  // items, not crafts: more than a fill's 1000
+    CHECK(request_valid(r));
+    r.crafts = 0xFFFF;
+    CHECK(request_valid(r));
+    r.crafts = 0x10000;  // the game's amount is a u16
+    CHECK(!request_valid(r));
+    r.crafts = 0;
+    CHECK(!request_valid(r));
+    r.crafts = 5;
+    r.flags = KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED | KILN_STATION_DRY_RUN | KILN_STATION_FILL_ADD |
+              KILN_STATION_FILL_EXACT | KILN_STATION_NO_WATER | KILN_STATION_FILL_NO_OUTPUTS;
+    CHECK(request_valid(r));
+    r.player = 0;  // linked sources are a player's
+    CHECK(!request_valid(r));
+    r.flags = KILN_STATION_FILL_ITEM;  // Kiln's own item fill without a player: the Magic chests alone
+    CHECK(request_valid(r));
+    r.player = 2550;  // never another entity
+    CHECK(!request_valid(r));
+    r.player = 1;
+    r.item = 0;  // no item
+    CHECK(!request_valid(r));
+    r.item = 0x2b0cf1d5;
+    r.recipe = 0x5568cc2b;  // an item fill names no recipe
+    CHECK(!request_valid(r));
+    r.recipe = 0;
+    r.choices[0].category = 0xee5ae93f;
+    CHECK(!request_valid(r));
+    r.choices[0].category = 0;
+    KilnStationStack keep1{0x2b0cf1d5, 3};
+    r.keep_count = 1;
+    r.keep = &keep1;  // reserves are the recipe fill's
+    CHECK(!request_valid(r));
+    r.keep_count = 0;
+    r.keep = nullptr;
+    r.chest_count = 1;
+    r.chests = named_one();
+    CHECK(!request_valid(r));  // named chests too
+    r.chest_count = 0;
+    r.chests = nullptr;
+    CHECK(request_valid(r));
+    r.reserved[0] = 1;
+    CHECK(!request_valid(r));
+    r.reserved[0] = 0;
+    r.flags = KILN_STATION_FILL_LINKED;  // an item named on a recipe fill: refused, never read as one
+    CHECK(!request_valid(r));
+    for (uint32_t action : {KILN_STATION_STOP, KILN_STATION_RESUME, KILN_STATION_SELECT}) {
+        r = req(action);
+        r.flags = KILN_STATION_FILL_ITEM;
+        CHECK(!request_valid(r));
+        r.flags = 0;
+        r.item = 7;
+        CHECK(!request_valid(r));
+    }
     r = req(KILN_STATION_FILL);
     r.station = 0;
     CHECK(!request_valid(r));
     r = req(KILN_STATION_FILL);
-    r.reserved[3] = 1;
+    r.reserved[2] = 1;
     CHECK(!request_valid(r));
     r = req(7);
     CHECK(!request_valid(r));
@@ -1089,6 +1167,52 @@ int main() {
         CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("(the bag") == std::string::npos);  // not counted: nothing added
         t.stage = 200;  // never a stage: still one bounded line
         CHECK(!craft_trace_text(t, 1, 0x77, 3000, 0).empty());
+    }
+
+    // ---- GitHub #132 (0.2.0-dev.31.16): the per-ingredient transfer as a one-input fill of count 1 ----
+    {
+        // 7 in the station; the bag and the Magic chests hold 3, the BeforeStationOutputs links 10, the After links 4
+        const InputNow x = item_fill_input(0x2b0cf1d5, 7, 3, 10, 4);
+        CHECK(x.item == 0x2b0cf1d5 && x.count == 1 && x.have == 7 && x.stock == 17 && x.linked == 10 && x.linked_after == 4);
+        ItemFill f = item_fill_plan(KILN_STATION_FILL_ITEM, 2, x);  // the bag and the chests cover it: no link pays
+        CHECK(f.math.status == KILN_STATION_DONE && f.math.planned == 2 && f.game == 2 && f.linked == 0 && f.linked_after == 0);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED, 12, x);  // 3 game, 9 from the Before links
+        CHECK(f.math.status == KILN_STATION_DONE && f.math.wanted == 12 && f.game == 3 && f.linked == 9 && f.linked_after == 0);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED, 16, x);  // the After links pay last
+        CHECK(f.math.status == KILN_STATION_DONE && f.game == 3 && f.linked == 10 && f.linked_after == 3);
+        CHECK(f.game + f.linked + f.linked_after == 16);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED, 18, x);  // one short: all or nothing
+        CHECK(f.math.status == KILN_STATION_NOT_ENOUGH && f.math.planned == 0 && f.math.limit.item == 0x2b0cf1d5 &&
+              f.math.limit.why == KILN_STATION_LIMIT_STOCK && f.game == 0 && f.linked == 0 && f.linked_after == 0);
+        CHECK(f.math.affordable == 17);
+        // never a partial move, whatever the request's ADD / EXACT bits
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED | KILN_STATION_FILL_ADD, 18, x);
+        CHECK(f.math.status == KILN_STATION_NOT_ENOUGH);
+        // the loaded count is the station's pile (count 1): never "already loaded"
+        const InputNow full = item_fill_input(0x2b0cf1d5, 900, 3, 0, 0);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM, 3, full);
+        CHECK(f.math.status == KILN_STATION_DONE && f.math.loaded == 900 && f.game == 3);
+        // each layer as the game's own call takes it: links first (player 0), then the game's call (bag, then chests)
+        uint64_t before = 10, after = 4, game = 3, station = 7;
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED, 16, x);
+        CHECK(game_item_fill(&before, f.linked, UINT64_MAX, &station) == 0 && game_item_fill(&after, f.linked_after, UINT64_MAX, &station) == 0 &&
+              game_item_fill(&game, f.game, UINT64_MAX, &station) == 0 && station == 7 + 16 && before == 0 && after == 1 && game == 0);
+        // a bag or chest that pays less than counted: the game's call refuses (4) and the whole transaction rolls back
+        uint64_t less = 2;
+        CHECK(game_item_fill(&less, f.game, UINT64_MAX, &station) == 4);
+        // the game's u16: an item fill never asks more than 0xFFFF
+        const InputNow big = item_fill_input(0x2b0cf1d5, 0, 70000, 0, 0);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM, 0xFFFF, big);
+        CHECK(f.math.status == KILN_STATION_DONE && f.game == 0xFFFF);
+        // without FILL_LINKED the links' counts never pay (a caller that did not ask)
+        f = item_fill_plan(KILN_STATION_FILL_ITEM, 12, x);
+        CHECK(f.math.status == KILN_STATION_NOT_ENOUGH && f.linked == 0 && f.game == 0);
+        // the line for a decision: what paid, or why nothing moved
+        CHECK(item_fill_text(f, 0x2b0cf1d5, 12, 3300, 5).find("player 5's transfer of 12 x item 0x2b0cf1d5 into station 3300") != std::string::npos);
+        CHECK(item_fill_text(f, 0x2b0cf1d5, 12, 3300, 5).find("short") != std::string::npos);
+        f = item_fill_plan(KILN_STATION_FILL_ITEM | KILN_STATION_FILL_LINKED, 16, x);
+        CHECK(item_fill_text(f, 0x2b0cf1d5, 16, 3300, 5).find("3 from the bag and the base's Magic chests, 13 from linked sources") !=
+              std::string::npos);
     }
 
     std::printf("stations: %d checks, %d failures\n", checks, failed);

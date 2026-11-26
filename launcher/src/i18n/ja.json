@@ -6068,6 +6068,165 @@
       "unknown": "Kiln はどのゲームファイルを戻すことになるか判断できません: {reason}。"
     }
   },
+  "registry": {
+    "title": "レジストリの競合",
+    "gameUnavailable": "ゲームを選択できません",
+    "noGame": "ゲーム未選択",
+    "noGameHint": "設定でインストール済みのゲームを選ぶと、そのレジストリのスナップショットを読めます。",
+    "sub": "このゲームの保存済みレジストリのスナップショットです。リアルタイムの情報でも、次回起動の予測でもありません。",
+    "refresh": "レポートを更新",
+    "unavailable": "レジストリのレポートを読めません",
+    "missing": "レジストリのレポートはまだありません",
+    "missingHint": "Kiln はこのゲームの kiln/state/registry.json をまだ書いていません。確認できるレジストリのスナップショットはありません。",
+    "stale": "古いスナップショット",
+    "staleBody": "{reason} 以下の値は保存済みスナップショットのもので、現在のワールドや Mod リストと同じとは限りません。",
+    "snapshot": "スナップショット",
+    "snapshotSub": "{time} · 世代 {generation} · {phase}",
+    "baseOrigin": "ベースの出どころ: {origin}",
+    "archiveWriter": "アーカイブの書き込み元: {writer}",
+    "journal": {
+      "read": "kiln-eml の変更ジャーナルから特定したアーカイブの書き込み元パッケージ: {packages} 個のパッケージ、{entries} 件のエントリ (アイテム、ドロップ、バランスのみ。レシピやルートのエントリは特定されません)。",
+      "truncated": "kiln-eml の変更ジャーナルから特定したアーカイブの書き込み元パッケージ: {packages} 個のパッケージ、{entries} 件のエントリ (アイテム、ドロップ、バランスのみ。レシピやルートのエントリは特定されません)。ジャーナルが途中で切れているため、パッケージが特定されていないエントリにも書き込んでいる可能性があります。",
+      "notNamed": "この起動ではアーカイブの書き込み元パッケージは特定されません: {reason}",
+      "none": "この起動のアーカイブの書き込み元は変更ジャーナルを残しません。",
+      "stale": "変更ジャーナルは以前の起動のものです。",
+      "unreadable": "変更ジャーナルを読み取れませんでした。"
+    },
+    "sfPackage": "{id} (ShroudForge パッケージ)",
+    "emlPackage": "{id} (EML パッケージ)",
+    "archiveUnattributed": "どのパッケージにもよらない起動時の書き込み (kiln-eml)",
+    "archiveOp": "不明 (kiln-eml のジャーナルはこのパッケージが書いたエントリを示すだけで、このフィールドは示しません)",
+    "kind": {
+      "archiveWriter": "Kiln より前にこのエントリを書き込み (アーカイブ)",
+      "drift": "Kiln の外で変更"
+    },
+    "unverified": "対応付けは未検証",
+    "unverifiedBody": "フィールドの変更が Unproven として拒否されることがあります。各拒否の理由を確認してください。",
+    "certaintyHint": "確実 = Kiln が書き込み元を観測しました。ジャーナルから特定 = kiln-eml の変更ジャーナルが Kiln より前にエントリを書いたと示す ShroudForge または EML のパッケージです。Kiln の変更がそれより優先されます。推定の差分 = ゲームの値が Kiln の外で変わりました。容疑者は手がかりであり、誰が書いたかも、他に書き込み元がないことも証明しません。",
+    "partial": "一部のみのレポート",
+    "partialRows": {
+      "other": "ネイティブのレポートまたはこの画面の安全上の上限により {count} 行が省かれました。"
+    },
+    "partialWriters": {
+      "other": "書き込みチェーンから以前の書き込み元 {count} 件が省かれました。"
+    },
+    "partialBody": "テキストとリストの値にも上限があり、これは完全な履歴ではありません。",
+    "empty": "このスナップショットにレジストリの変更はありません",
+    "emptyHint": "レポートは存在し有効ですが、フィールド、競合、拒否、エントリの変更は含まれていません。",
+    "refused": "拒否された変更",
+    "refusedSub": "これらの変更は適用されていません。RestartRequired はゲームの再起動が必要です。Unproven は Kiln での検証済みの対応付けが必要です。",
+    "restart": "再起動待ち",
+    "restartSub": "ゲームの起動後に、再読み込みまたはライブ変更によってこれらのレジストリ変更が変わりました。ゲーム (またはサーバー) の次回の起動から適用されます。それまでゲームは起動時の値を保ちます。",
+    "restartCount": {
+      "other": "{count} 件のレジストリ変更が再起動を待っています"
+    },
+    "restartHint": "適用するにはゲームまたはサーバーを再起動してください。各理由に、起動時に何が確定したかが書かれています。",
+    "plan": {
+      "title": "レジストリプラン",
+      "sub": "前回の起動が使った変更と、その前の最後の正常なプランです。ロールバックすると次回の起動がそのプランで動きます。セーブデータには触れません。",
+      "rollback": "ロールバック",
+      "clear": "取り消す",
+      "unavailable": "レジストリプランを読み取れませんでした",
+      "current": "前回の起動のプラン: {plan}",
+      "previous": "以前の (最後の正常な) プラン: {plan}",
+      "none": "なし",
+      "lastRollback": "前回の起動でのロールバック: {state} (プラン {plan}) {reason}",
+      "noLastRollback": "前回の起動でのロールバック: なし",
+      "pending": "ロールバックの依頼: プラン {plan}、{requested} に {by} が依頼。次回の起動はこのプランで動きます。",
+      "noPending": "ロールバックの依頼: なし",
+      "dryRun": {
+        "other": "次回の起動で、プラン {plan} は {count} 個の値を元に戻します"
+      },
+      "targetMods": "そのプランの Mod: {mods}",
+      "noMods": "レジストリ変更はまったくありません",
+      "changesUnknown": "何が元に戻るかはここでは分かりません ({why})。起動時に一覧になります。",
+      "noChanges": "元に戻る値はありません。2 つのプランは同じ値になります。",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "レジストリ変更なし",
+      "moreChanges": {
+        "other": "… ほかに {count} 件 (起動後に registry.json にすべて載ります)。"
+      },
+      "runningKeeps": "いま動いているゲームやサーバーでは何も変わりません。次に起動し直すまで、起動時のプランを保ちます。",
+      "refusedWhole": "確認するまで何も書き込まれません。プランの Mod がそのバージョンで読み込まれていないとき、変更のひとつがそのゲームビルドで拒否されるとき、またはセーブデータの中身が変わるとき、起動はプラン全体を拒否し、Mod の現在の変更を使います。",
+      "confirmRollback": "ロールバックを確定",
+      "confirmClear": "取り消しを確定",
+      "cancel": "キャンセル",
+      "clearTitle": "プラン {plan} へのロールバックの依頼を取り消す",
+      "clearBody": "次回の起動は再び Mod の現在のレジストリ変更で動きます。",
+      "failed": "ロールバックの依頼を変更できませんでした",
+      "requested": "依頼しました: 次回の起動はプラン {plan} で動き、取り消すまでその後の起動も同じです。",
+      "cleared": "ロールバックの依頼を取り消しました",
+      "nothingToClear": "取り消すロールバックの依頼はありませんでした",
+      "savesUntouched": "セーブデータには触れません。反映するにはゲーム (またはサーバー) を再起動してください。"
+    },
+    "restartOmitted": {
+      "other": "ほかに {count} 件はここに表示されません。state/registry.json にすべて載っています。"
+    },
+    "noRefused": "表示中のレポートに拒否された変更はありません。",
+    "conflicts": "競合と差分",
+    "conflictsSub": "勝者とほかの所有者は、スナップショット時点の記録どおりです。",
+    "noConflicts": "表示中のレポートに競合の行はありません。",
+    "conflictLine": "{kind} · 勝者: {winner} · ほかの所有者: {loser}",
+    "fields": "フィールドと書き込みチェーン",
+    "fieldsSub": "以前の書き込み元が先です。フィールドを開くとベース、操作、結果が表示されます。",
+    "filter": "フィールドや所有者で絞り込み",
+    "noMatch": "この絞り込みに合うフィールドはありません。",
+    "noFields": "表示中のレポートにフィールドの行はありません。",
+    "entries": "エントリの変更",
+    "noEntries": "エントリの変更はありません。",
+    "added": "追加",
+    "removed": "削除",
+    "previous": "前へ",
+    "next": "次へ",
+    "page": "{page} / {pages} ページ · 表示 {count} 行",
+    "summary": "勝者: {winner} · 結果: {result}",
+    "summaryOmitted": {
+      "other": "以前の書き込み元 {count} 件を省略"
+    },
+    "applies": "反映: {applies} · ベースの出どころ: {origin}",
+    "baseValue": "ベース値: {value}",
+    "writersOmitted": {
+      "other": "以前の書き込み元 {count} 件を省略しました。チェーンの保持された末尾のみ表示しています。"
+    },
+    "element": "要素: {element}",
+    "operation": "操作: {operation}",
+    "after": "変更後: {value}",
+    "noWriters": "書き込みの行はありません。結果はベースで決まります。",
+    "formula": "数式の入力 (評価順): {inputs}",
+    "winner": "勝者: {winner}",
+    "result": "結果:",
+    "certainty": {
+      "certain": "確実",
+      "named": "ジャーナルから特定",
+      "bestEffort": "推定の差分",
+      "unknown": "不明"
+    },
+    "advancedField": "上級フィールド (詳細非表示)",
+    "advancedReason": "上級フィールド (対応付けの詳細は非表示)。",
+    "advancedConflict": "上級フィールドの競合。対応付けの詳細は非表示です。",
+    "unknownField": "{field} (このランチャーが知らないフィールド)",
+    "elementHidden": "要素の詳細は非表示",
+    "baseOwner": "ベース",
+    "noOwner": "なし",
+    "referenceCheck": "Kiln の参照チェック",
+    "referenceOp": "参照チェック",
+    "fresh": {
+      "clock": "レポートの時刻を確認できません。",
+      "process": "現在のゲームのプロセスを確認できません。",
+      "stopped": "ゲームは起動していません。これは最後に保存されたスナップショットです。",
+      "previousStart": "このレポートは現在のゲーム起動より前のものです。",
+      "old": "このスナップショットは 24 時間以上前のものです。",
+      "start": "現在のゲーム起動を確認できません。"
+    },
+    "error": {
+      "tooLarge": "レジストリのレポートがこの画面で読める 8 MiB の上限を超えています。全体を読むにはゲームフォルダーの kiln/state/registry.json を開いてください。",
+      "nesting": "レジストリのレポートの入れ子の上限を超えました。",
+      "structure": "レジストリのレポートの構造の上限を超えました。",
+      "notJson": "レジストリのレポートが正しい JSON ではありません。",
+      "format": "対応していないレジストリのレポート形式です (想定: 1)。",
+      "malformed": "レジストリのレポートが不正です ({part})。"
+    }
+  },
   "playerStorage": {
     "tab": "保管庫",
     "title": "プレイヤー保管庫",

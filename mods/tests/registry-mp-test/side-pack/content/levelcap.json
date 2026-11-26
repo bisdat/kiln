@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "registry": {
+    "alter": [
+      { "registry": "balance", "select": { "id": "game:balance" }, "field": "levelCap", "op": 70 }
+    ]
+  }
+}

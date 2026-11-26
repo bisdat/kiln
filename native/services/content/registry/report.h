@@ -47,10 +47,18 @@ struct ReportMeta {
         std::string mod, version, edits_hash;
     };
     std::vector<Order> order;                // the mods, in the order the stage ran them
+    json boot_sync = nullptr;  // immutable start snapshot: resolved client-needed boot values + participating registry order
     std::string order_source = "kiln.host";  // "kiln.host" (Kiln.Host's runtime load order) | "folders" (no .NET: kiln.content's mod folders)
     struct Plan {
-        std::string hash, file, previous;  // the lowered plan (P1-PLAN.md section 6); empty: none written
+        std::string hash, file, previous;  // the plan this start runs on; previous: the last good plan before it (a rollback's target)
     } plan;
+    // registry.json "rollback" (stage.cpp fills it when kiln/data/content/registry/rollback.json asks for one): {plan, from,
+    // requested, state applied | refused, reason, changedBack [{field, from, to}], changedBackTotal, leftOut}; null: none asked.
+    json rollback;
+    // registry.json "saves": edits that change what existing saves hold (saves.h), one row each; null: none.
+    json saves;
+    // registry.json "migrated": what the schemas' id migrations renamed in this start's edits ({mod, source, stage, note}).
+    json migrated;
     // A game entry's base origin per field (S5 / S10); unset: "archive" (the game's data as the archive writer published it).
     // An entry a mod added always reports "added".
     std::function<std::string(const FieldRef&)> origin;
@@ -62,6 +70,13 @@ struct ReportCaps {
     size_t log = 50;                                                          // kiln.log lines per start, plus one total
     size_t list_entries = 64;                                                 // first entries kept per list value or operand
 };
+
+// A refused row that waits for a restart starts with this stable token: a reload or a runtime pass changed
+// an edit the start fixed (a restart field, a field the start never decoded, a section or an entry operation added after
+// it), or a live edit named such a field. registry.json counts them (counts.restartRequired); the kiln/control reload reply,
+// kilnctl status and the launcher's Conflicts view list them.
+inline constexpr const char* RESTART_REQUIRED_TOKEN = "RestartRequired: ";
+inline bool restart_required(const Refusal& r) { return r.reason.rfind(RESTART_REQUIRED_TOKEN, 0) == 0; }
 
 // The registry.json document (format 1).
 json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, const ReportCaps& caps = {});

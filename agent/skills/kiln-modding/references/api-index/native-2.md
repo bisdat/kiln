@@ -1,23 +1,6 @@
-# Native ABI rows (mod API 0.2.22): part 2 of 3
+# Native ABI rows (mod API 0.2.24): part 2 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
-
-## services/kiln_gemcraft.h — service `kiln.gemcraft`
-### KilnGemcraftApi — 120 bytes
-- kiln_gemcraft.h `KilnGemcraftApi.status` @8 `0.2.5`
-- kiln_gemcraft.h `KilnGemcraftApi.submit` @16 `0.2.5` — Queues a code action.
-- kiln_gemcraft.h `KilnGemcraftApi.cancel` @24 `0.2.5` — Drops a code action's callback (the action may still run).
-- kiln_gemcraft.h `KilnGemcraftApi.hold` @32 `0.2.5` — Holds players' new forge actions for the next 'steps' steps (1..250; 0 stops at once: what is held runs).
-- kiln_gemcraft.h `KilnGemcraftApi.held` @40 `0.2.5` — The actions held since the last call (each once). *out_count = how many were written...
-- kiln_gemcraft.h `KilnGemcraftApi.decide` @48 `0.2.5` — The answer for a held action (player, version): cancel 1 = refuse it, 0 = let it run.
-- kiln_gemcraft.h `KilnGemcraftApi.watch` @56 `0.2.5` — 1: players' actions that ran are reported by crafted() (code actions always are).
-- kiln_gemcraft.h `KilnGemcraftApi.crafted` @64 `0.2.5` — The actions that ran since the last call, players' (while watched) and code's (DONE only), and every...
-- kiln_gemcraft.h `KilnGemcraftApi.extras` @72 `0.2.7` — appended in 0.2.0-dev.29.15 (header.size covers them) ---- Which appended parts run here...
-- kiln_gemcraft.h `KilnGemcraftApi.offer` @80 `0.2.7` — Offers gems to players (any number of players and holders in one call): each gets a new token and its expiry.
-- kiln_gemcraft.h `KilnGemcraftApi.withdraw` @88 `0.2.7` — Withdraws the owner's offers (owner 0: every owner's) to 'player' (0: every player) in 'holder' (0: every...
-- kiln_gemcraft.h `KilnGemcraftApi.sources` @96 `0.2.7` — The live offers to 'player' (every owner's), in offer order.
-- kiln_gemcraft.h `KilnGemcraftApi.payers` @104 `0.2.7` — Who would pay for 'player' with pay_from / pay_holder now, in order (what a request resolves in the step...
-- kiln_gemcraft.h `KilnGemcraftApi.forge_material` @112 `0.2.7` — The forge's own upgrade material (ShroudForge.upgradeMaterial), what payers other than the player pay in.
 
 ## services/kiln_hooks.h — service `kiln.hooks`
 ### KilnHooksApi — 328 bytes
@@ -226,6 +209,14 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_npcai.h `KilnNpcAiApi.status` @80 `0.2.0` — Thread-safe; entity counts and mapped count describe the last Pre.
 - kiln_npcai.h `KilnNpcAiApi.entity_lifetime` @88 `0.2.0` — Added in v1; check header.size.
 - kiln_npcai.h `KilnNpcAiApi.tick_step` @96 `0.2.0` — Added in v1; check header.size.
+
+## services/kiln_npcspeech.h — service `kiln.npcspeech`
+### KilnNpcSpeechApi — 48 bytes
+- kiln_npcspeech.h `KilnNpcSpeechApi.set` @8 `0.2.23` — The effective override of one NPC (the caller resolves owners and priorities). mode KILN_SPEECH_*; tags/n...
+- kiln_npcspeech.h `KilnNpcSpeechApi.say` @16 `0.2.23` — One tag in the NPC's bubble for ms (1..KILN_SPEECH_MAX_SAY_MS); tag 0 or ms 0 ends a running Say.
+- kiln_npcspeech.h `KilnNpcSpeechApi.text` @24 `0.2.23` — The texts of a loca tag: "text" or {"en": "...", "de": "..."} ("*" = every language), UTF-8 JSON.
+- kiln_npcspeech.h `KilnNpcSpeechApi.clear_all` @32 `0.2.23` — Ends every override and Say (a world's end, a reset).
+- kiln_npcspeech.h `KilnNpcSpeechApi.status` @40 `0.2.23` — Any thread.
 
 ## services/kiln_pacing.h — service `kiln.pacing`
 ### KilnPacingApi — 48 bytes

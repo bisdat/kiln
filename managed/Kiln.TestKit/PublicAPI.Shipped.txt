@@ -897,6 +897,11 @@ Kiln.TestKit.HarnessNpcBodies.Clear() -> void
 Kiln.TestKit.HarnessNpcBodies.Failed(string! mod, string! npc, string! reason, ulong generation = 0) -> void
 Kiln.TestKit.HarnessNpcBodies.Ready(string! mod, string! npc, System.Guid template = default(System.Guid), System.Guid model = default(System.Guid), System.Guid graph = default(System.Guid), string? closure = null, ulong generation = 1) -> void
 Kiln.TestKit.HarnessNpcBodies.Removed(string! mod, string! npc, ulong generation = 0) -> void
+Kiln.TestKit.HarnessNpcSpeech
+Kiln.TestKit.HarnessNpcSpeech.Calls.get -> int
+Kiln.TestKit.HarnessNpcSpeech.LinesOf(Kiln.EntityId npc, string! language = "en-us") -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessNpcSpeech.ModeOf(Kiln.EntityId npc) -> Kiln.SpeechMode
+Kiln.TestKit.HarnessNpcSpeech.Saying(Kiln.EntityId npc, string! language = "en-us") -> string?
 Kiln.TestKit.HarnessOutlines
 Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
 Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int
@@ -1082,6 +1087,8 @@ Kiln.TestKit.HarnessUiPlacement.ContentSize.set -> void
 Kiln.TestKit.HarnessUiPlacement.FilePath.get -> string?
 Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiScreen! screen) -> Kiln.UiPlacement?
 Kiln.TestKit.HarnessUiPlacement.Frame(Kiln.UiWindow! window) -> Kiln.UiPlacement?
+Kiln.TestKit.HarnessUiPlacement.FrameWindows() -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWindow!, Kiln.UiPlacement>!
+Kiln.TestKit.HarnessUiPlacement.PlayerDrags(Kiln.UiWindow! window, float x, float y, bool shift = false) -> void
 Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiScreen! screen, float x, float y, float width, float height) -> void
 Kiln.TestKit.HarnessUiPlacement.PlayerPlaces(Kiln.UiWindow! window, float x, float y, float width, float height) -> void
 Kiln.TestKit.HarnessUiPlacement.Remembered(Kiln.UiScreen! screen) -> Kiln.UiPlacement?
@@ -1179,6 +1186,7 @@ Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ModValues.get -> Kiln.TestKit.HarnessModValues!
 Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!
 Kiln.TestKit.KilnHarness.NpcBodies.get -> Kiln.TestKit.HarnessNpcBodies!
+Kiln.TestKit.KilnHarness.NpcSpeech.get -> Kiln.TestKit.HarnessNpcSpeech!
 Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
 Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
 Kiln.TestKit.KilnHarness.PlayerStorage.get -> Kiln.TestKit.HarnessPlayerStorage!

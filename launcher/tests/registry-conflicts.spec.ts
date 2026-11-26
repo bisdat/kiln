@@ -4,7 +4,8 @@ import { emptyRegistryFixture, registryFixture } from "./fixtures/registryReport
 async function report(page: Page, value: unknown, error = false) {
   await page.route("**/src/registry/mock.ts*", route => route.fulfill({
     contentType: "application/javascript",
-    body: `export async function readMockRegistryReport() { ${error ? 'throw new Error("fixture: report unreadable")' : `return ${JSON.stringify(value === null ? null : typeof value === "string" ? value : JSON.stringify(value))}`}; }`,
+    body: `export async function readMockRegistryReport() { ${error ? 'throw new Error("fixture: report unreadable")' : `return ${JSON.stringify(value === null ? null : typeof value === "string" ? value : JSON.stringify(value))}`}; }
+export async function mockRegistryRollback(o) { return { plan: null, previous: null, rollback: null, pending: null, target: null, changes: [], changesUnknown: null, blocked: "fixture: no plans", dryRun: o.dryRun, wrote: false, cleared: o.clear ? false : null }; }`,
   }));
   await page.goto("/#/conflicts");
   await expect(page.getByRole("heading", { name: "Registry conflicts", exact: true })).toBeVisible();
@@ -20,7 +21,8 @@ test("missing report is explicit and reachable from launcher navigation", async 
 test("shows base, ordered owners and operations, winner, certainty and refusal reasons", async ({ page }) => {
   await report(page, registryFixture());
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
-  await expect(page.getByText(/RestartRequired: balance.levelCap/)).toBeVisible();
+  // the RestartRequired row is in the refused list, and in the restart card above it too
+  await expect(page.locator(".registry-line").filter({ hasText: /RestartRequired: balance.levelCap/ })).toHaveCount(2);
   await expect(page.getByText("Unproven: items.maxStack (no verified mapping for this build)", { exact: true })).toBeVisible();
   await expect(page.getByText("Best-effort drift", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Certain", { exact: true }).first()).toBeVisible();
@@ -34,6 +36,24 @@ test("shows base, ordered owners and operations, winner, certainty and refusal r
   await expect(owners.nth(1)).toContainText("stacker");
   await page.getByRole("button", { name: "Refresh report" }).click();
   await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
+});
+
+test("edits that wait for a restart come first, with their count, mod and field", async ({ page }) => {
+  await report(page, { ...registryFixture(), counts: { ...registryFixture().counts, restartRequired: 3 } });
+  await expect(page.getByRole("heading", { name: "Waits for a restart" })).toBeVisible();
+  await expect(page.getByText("3 registry edits wait for a restart", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 more are not shown here: state/registry.json lists every one.", { exact: true })).toBeVisible();
+  const row = page.getByTestId("registry-restart-row");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("late");
+  await expect(row).toContainText("balance · levelCap");
+  await expect(row).toContainText("RestartRequired: balance.levelCap is read at game start");
+});
+
+test("without edits that wait for a restart there is no restart card", async ({ page }) => {
+  await report(page, { ...registryFixture(), refused: [registryFixture().refused[1]], counts: { ...registryFixture().counts, refused: 1, restartRequired: 0 } });
+  await expect(page.getByRole("heading", { name: "Refused edits" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Waits for a restart" })).toHaveCount(0);
 });
 
 test("empty snapshot is different from a missing report", async ({ page }) => {

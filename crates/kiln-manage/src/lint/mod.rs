@@ -18,6 +18,7 @@ pub mod docs;
 pub mod json;
 mod regex;
 mod programs;
+mod registry;
 mod rules;
 pub mod schema;
 mod suggest;

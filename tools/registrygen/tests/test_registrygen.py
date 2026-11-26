@@ -73,6 +73,27 @@ class SchemaChecks(unittest.TestCase):
         finally:
             t.close()
 
+    def test_joined_client_marker_is_additive_and_generated(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["size"]["joinedClient"] = "worldLoad"
+        t = Tree(s)
+        try:
+            model = rg.load(t.root)
+            self.assertEqual(model.errors, [])
+            rg.update_lock(t.root)
+            doc = rg.render_doc(model, t.lock(), model.registries["things"])
+            self.assertIn("Joined client", doc)
+            self.assertIn("worldLoad", doc)
+            cs = rg.render_cs_catalog(model, t.lock())
+            self.assertIn('JoinedClient = "worldLoad"', cs)
+        finally:
+            t.close()
+
+    def test_invalid_joined_client_marker_is_refused(self):
+        s = copy.deepcopy(MINI)
+        s["fields"]["size"]["joinedClient"] = "laterMaybe"
+        self.assertTrue(any("joinedClient" in e for e in self.errors_of(s)))
+
     def test_mini_is_valid(self):
         self.assertEqual(self.errors_of(MINI), [])
 
@@ -483,6 +504,29 @@ class Outputs(unittest.TestCase):
         finally:
             t.close()
 
+    def test_native_carries_the_migrations(self):
+        """A synthetic breaking step 0.1.0 -> 0.2.0 (test fixture only): kiln.content gets its renames in schema.g.h."""
+        t = Tree()
+        try:
+            rg.update_lock(t.root)
+            s = copy.deepcopy(MINI)
+            s["version"] = "0.2.0"
+            s["fields"]["length"] = s["fields"].pop("size")
+            t.write(s)
+            rg.retire(t.root, "things.size", "0.2.0")
+            migration(t, "0.1.0", "0.2.0", ids={"game:old_thing": "game:new_thing"}, fields={"size": "length"})
+            rg.update_lock(t.root)
+            h = rg.render(rg.load(t.root), rg.read_lock(t.root))["native/services/content/registry/schema.g.h"]
+            self.assertIn('{"things", "0.1.0", "0.2.0", true, "size", "length"},', h)
+            self.assertIn('{"things", "0.1.0", "0.2.0", false, "game:old_thing", "game:new_thing"},', h)
+            self.assertLess(h.index('"size", "length"'), h.index("{nullptr, nullptr, nullptr, false, nullptr, nullptr}"), "rows before the end mark")
+        finally:
+            t.close()
+
+    def test_no_migration_no_rows(self):
+        h = self.out["native/services/content/registry/schema.g.h"]
+        self.assertIn("inline constexpr Rename kRenames[] = {\n    {nullptr, nullptr, nullptr, false, nullptr, nullptr},\n};", h)
+
     def test_check_finds_stale_files(self):
         rg.write_outputs(self.t.root, self.out)
         self.assertEqual(rg.stale(self.t.root, self.out), [])
@@ -503,7 +547,10 @@ class Repository(unittest.TestCase):
         for r in m.registries.values():
             for f in r.rows:
                 self.assertIn(f.applies, ("now", "worldLoad", "restart"), f.qualified)
-            self.assertEqual(r.version, "0.1.0")
+                self.assertIn(f.spec.get("joinedClient"), rg.JOINED_CLIENT, f.qualified)
+        # experimental 0.x; items 0.1.1 since 31.x (block and comfort apply now: an earlier applies, additive)
+        self.assertEqual({n: r.version for n, r in m.registries.items()},
+                         {"balance": "0.1.0", "drops": "0.1.0", "items": "0.1.1", "loot": "0.1.0", "recipes": "0.1.0"})
 
 
 if __name__ == "__main__":

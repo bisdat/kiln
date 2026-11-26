@@ -9,13 +9,38 @@ Refused edits retain their reasons, including `RestartRequired` and `Unproven`. 
 **Certain**, **Named from journal**, **Best-effort drift**, and **Unknown**; best-effort detection does not prove who
 wrote a value or that no other writer exists.
 
+**Waits for a restart** (since 0.2.0-dev.31.17) comes first when the snapshot has refused rows whose reason starts with
+the stable token `RestartRequired: `: the edits a reload, a runtime registry pass or a live edit left for the next start
+(a restart field a reloaded pack changed, a field the start never read, a section or entry operation added after the
+start). It shows `counts.restartRequired` (every such row, also those the native cap left out) and each retained row's
+mod, place and reason; the same rows stay in Refused edits.
+
+**Registry plan** (since 0.2.0-dev.31.17) names the plan the last start ran on, the previous (last good) plan, the
+rollback of the last start (applied or refused, with why) and a rollback request waiting for the next start.
+**Roll back** first shows the dry run: the plan it goes to, its mods and versions, and every value that changes back
+(`field: from → to`, at most 50 shown); nothing is written until **Confirm roll back**. **Clear** (when a request waits)
+says the next start runs on the mods' current edits again and removes the request on **Confirm clear**. Saves are never
+touched; the request takes effect at the next start (a game or server that runs keeps the plan it started on, and the dry
+run says so before **Confirm roll back**), which refuses the plan whole when one of its mods is not loaded at its
+version, one of its edits is refused on that game build, or it would change what saves hold
+([registries README](../modding/registries/README.md#plans-and-rollback)). The same as `kilnctl registry rollback`. A new
+report (the game started again) reads the plans again.
+
 A missing file is different from a valid snapshot with no edits. Unreadable, malformed, unsupported and oversized
 reports show an error with **Refresh report** available. A stopped game, a report older than the current process start,
 an old snapshot (over 24 hours), or an unverifiable process start/clock is marked **Stale snapshot**. Its saved values
 remain readable. Windows report PIDs are not compared with host PIDs because Proton uses a different PID namespace.
 The page refreshes the snapshot periodically and also offers an explicit refresh.
 
-## Read-only launcher command
+## Launcher commands
+
+`registry_rollback({ gameId: string, clear: boolean, dryRun: boolean })` (since 0.2.0-dev.31.17) works on the known game
+folder's `kiln/data/content/registry/` through `kiln_manage::registry_plan`, as `kilnctl registry rollback`: with `dryRun`
+it writes nothing and answers `{plan, previous, rollback, pending, target: {hash, mods}, changes: [{field, from, to}],
+changesUnknown, blocked, dryRun, wrote, cleared}`; without it, it writes the request for the previous (last good) plan
+(`by: "launcher"`), or with `clear` removes the request. `blocked` says why a rollback cannot be asked for (no plan yet, no
+earlier good plan, the previous plan's file gone or written by an older Kiln); `changesUnknown`, why the changes could not
+be computed (the start lists them under `rollback.changedBack`).
 
 `registry_report_read({ gameId: string })` returns a UTF-8 string, or `null` when no file exists, using the launcher's
 normal structured error on I/O failure. The caller cannot supply a path. The native reader resolves the known game

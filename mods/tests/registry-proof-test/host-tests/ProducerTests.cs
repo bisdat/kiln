@@ -129,4 +129,85 @@ public class ProducerTests
         }
         finally { Marshal.FreeHGlobal(memory); }
     }
+
+    private static object? Call(string name, params object?[] args) =>
+        typeof(RegistryProofTestMod).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, args);
+
+    // A drop entry's leaves are flat keys with dots ({"count.min": 1}, kiln.registry.live's struct), nested ones are read too.
+    [Fact]
+    public void Element_leaves_read_and_write_flat_dotted_keys()
+    {
+        var el = JsonNode.Parse("""{"chance":0.5,"count.max":3,"count.min":1,"item":"game:x","weight":1}""")!.AsObject();
+        Assert.Equal(1, ((JsonNode)Call("Leaf", el, "count.min")!).GetValue<int>());
+        Call("SetLeaf", el, "count.min", JsonValue.Create(2));
+        Assert.Equal(2, el["count.min"]!.GetValue<int>());
+        Assert.Null(el["count"]);
+        var nested = JsonNode.Parse("""{"count":{"min":4}}""")!.AsObject();
+        Assert.Equal(4, ((JsonNode)Call("Leaf", nested, "count.min")!).GetValue<int>());
+    }
+
+    // A bitmask's raw value is a list of the game's names (regmap/README.md), also with one flag or none set: kiln.content's
+    // name text is "Common,Rare", "Epic" or "".
+    [Theory]
+    [InlineData("Common,Rare", """["Common","Rare"]""")]
+    [InlineData("Epic", """["Epic"]""")]
+    [InlineData("", "[]")]
+    public void Flags_raw_values_are_lists(string names, string expected) =>
+        Assert.Equal(expected, ((JsonNode)Call("FlagNames", names)!).ToJsonString());
+
+    // A drop entry probe changes a leaf within its range: chance 1.0 + 1 would leave 0..1, a count's + 1 never does.
+    [Fact]
+    public void Drop_entry_probe_stays_in_range()
+    {
+        var list = JsonNode.Parse("""[{"chance":1.0,"count.max":3,"count.min":1,"item":"game:x","weight":1}]""")!;
+        var probe = (JsonArray)Call("Probe", list, new JsonObject { ["conv"] = "inventoryWalk" }, Array.Empty<string>())!;
+        var el = probe[0]!.AsObject();
+        Assert.Equal(4, el["count.max"]!.GetValue<long>());
+        Assert.Equal(1.0, el["chance"]!.GetValue<double>());
+    }
+
+    // After a range refusal of a float probe (1.25 x), the producer tries 0.75 x on the same entry; whole-number and other
+    // kinds have no second probe.
+    [Theory]
+    [InlineData("float", 1.0, 0.75)]
+    [InlineData("float", 0.25, 0.1875)]
+    [InlineData("int", 3.0, null)]
+    public void A_float_probe_refused_for_its_range_is_tried_lower(string conv, double before, double? expected)
+    {
+        var lower = (JsonNode?)Call("LowerProbe", JsonValue.Create(before), new JsonObject { ["conv"] = conv });
+        Assert.Equal(expected, lower?.GetValue<double>());
+    }
+
+    // review registry-proof: an optional enum's probe from "none" turns the switch on with a rarity whose game enum differs
+    // from the enum below it (the raw [switch, enum]), so the round trip writes both members: "common" over an entry whose
+    // enum below is already Common wrote the switch alone (the 31.x lab sample). From a rarity it probes "none".
+    [Theory]
+    [InlineData("\"none\"", "[false,\"Common\"]", "\"uncommon\"")]
+    [InlineData("\"none\"", "[false,\"Rare\"]", "\"common\"")]
+    [InlineData("\"none\"", "[false,\"common\"]", "\"uncommon\"")]
+    [InlineData("\"none\"", null, "\"common\"")]
+    [InlineData("\"epic\"", "[true,\"Epic\"]", "\"none\"")]
+    public void An_optional_enum_probe_changes_the_enum_below_too(string read, string? raw, string expected)
+    {
+        var row = JsonNode.Parse("""{"conv":"optionalEnum","values":{"none":"","common":"Common","uncommon":"Uncommon","rare":"Rare","epic":"Epic","legendary":"Legendary"}}""")!.AsObject();
+        var probe = (JsonNode?)Call("ProbeOf", JsonNode.Parse(read), raw is null ? null : JsonNode.Parse(raw)!.AsArray(), row, Array.Empty<string>());
+        Assert.Equal(expected, probe?.ToJsonString());
+    }
+
+    // Every other conversion probes as Probe does: ProbeOf only adds what the raw value tells.
+    [Fact]
+    public void Other_probes_are_unchanged()
+    {
+        var row = new JsonObject { ["conv"] = "int" };
+        Assert.Equal("4", ((JsonNode)Call("ProbeOf", JsonNode.Parse("3"), JsonNode.Parse("[3]")!.AsArray(), row, Array.Empty<string>())!).ToJsonString());
+    }
+
+    // The roll's scaled stack (0x16db30): n x the world's loot amount, at least 1, at most maxScaled.
+    [Theory]
+    [InlineData(3, 2.0, 1000, 6)]
+    [InlineData(3, 2.0, 4, 4)]
+    [InlineData(3, 1.0, 1000, 3)]
+    [InlineData(0, 2.0, 10, 1)]
+    public void Scaled_stack_is_clamped(int n, double amount, int maxScaled, int expected) =>
+        Assert.Equal(expected, (int)Call("ScaledCount", n, amount, maxScaled)!);
 }

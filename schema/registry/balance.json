@@ -24,7 +24,8 @@
       "applies": "restart",
       "ops": "indexed",
       "doc": "The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]).",
-      "fixedLength": 5
+      "fixedLength": 5,
+      "joinedClient": "restart"
     },
     "xpCurve": {
       "type": "struct",
@@ -36,35 +37,40 @@
           "min": 0,
           "max": 100000000,
           "ops": "number",
-          "doc": "One end of the curve's base range (base = min(start, end) + |end - start| * level / levelMax)."
+          "doc": "One end of the curve's base range (base = min(start, end) + |end - start| * level / levelMax).",
+          "joinedClient": "restart"
         },
         "end": {
           "type": "int",
           "min": 0,
           "max": 100000000,
           "ops": "number",
-          "doc": "The other end of the curve's base range."
+          "doc": "The other end of the curve's base range.",
+          "joinedClient": "restart"
         },
         "levelMax": {
           "type": "int",
           "min": 1,
           "max": 100000,
           "ops": "number",
-          "doc": "The level at which the base has moved the whole way from one end of the range to the other."
+          "doc": "The level at which the base has moved the whole way from one end of the range to the other.",
+          "joinedClient": "restart"
         },
         "seed": {
           "type": "int",
           "min": 0,
           "max": 100000000,
           "ops": "number",
-          "doc": "The factor the base is multiplied by (with 1.5) to give the experience a level needs."
+          "doc": "The factor the base is multiplied by (with 1.5) to give the experience a level needs.",
+          "joinedClient": "restart"
         },
         "fromKnowledge": {
           "type": "int",
           "min": 0,
           "max": 100000000,
           "ops": "number",
-          "doc": "Experience added to every level's need after the factor."
+          "doc": "Experience added to every level's need after the factor.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceXpCurve"
@@ -75,7 +81,8 @@
       "max": 1000,
       "applies": "restart",
       "ops": "number",
-      "doc": "The highest player level."
+      "doc": "The highest player level.",
+      "joinedClient": "restart"
     },
     "skillPointsPerLevel": {
       "type": "int",
@@ -83,7 +90,8 @@
       "max": 1000,
       "applies": "restart",
       "ops": "number",
-      "doc": "Skill points a level gives."
+      "doc": "Skill points a level gives.",
+      "joinedClient": "restart"
     },
     "flameLevelMax": {
       "type": "int",
@@ -91,7 +99,8 @@
       "max": 1000,
       "applies": "restart",
       "doc": "The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long.",
-      "readOnly": true
+      "readOnly": true,
+      "joinedClient": "restart"
     },
     "altarsPerFlameLevel": {
       "type": "list",
@@ -104,7 +113,8 @@
       "ops": "indexed",
       "doc": "Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]).",
       "lengthField": "flameLevelMax",
-      "lengthOffset": 1
+      "lengthOffset": 1,
+      "joinedClient": "restart"
     },
     "waterSourcesPerFlameLevel": {
       "type": "list",
@@ -117,7 +127,8 @@
       "ops": "indexed",
       "doc": "Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time.",
       "lengthField": "flameLevelMax",
-      "lengthOffset": 1
+      "lengthOffset": 1,
+      "joinedClient": "restart"
     },
     "buildzoneSizesPerAltarLevel": {
       "type": "list",
@@ -134,7 +145,8 @@
             "min": 0,
             "max": 100000,
             "ops": "number",
-            "doc": "The build zone's size along x, in metres."
+            "doc": "The build zone's size along x, in metres.",
+            "joinedClient": "restart"
           },
           "y": {
             "type": "float",
@@ -142,7 +154,8 @@
             "min": 0,
             "max": 100000,
             "ops": "number",
-            "doc": "The build zone's size along y (height), in metres."
+            "doc": "The build zone's size along y (height), in metres.",
+            "joinedClient": "restart"
           },
           "z": {
             "type": "float",
@@ -150,11 +163,13 @@
             "min": 0,
             "max": 100000,
             "ops": "number",
-            "doc": "The build zone's size along z, in metres."
+            "doc": "The build zone's size along z, in metres.",
+            "joinedClient": "restart"
           }
         },
         "typeName": "BalanceZoneSize"
-      }
+      },
+      "joinedClient": "restart"
     },
     "fogResistance": {
       "type": "struct",
@@ -166,14 +181,16 @@
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "A player's shroud time before any flame level."
+          "doc": "A player's shroud time before any flame level.",
+          "joinedClient": "restart"
         },
         "perFlameLevel": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The shroud time each flame level adds."
+          "doc": "The shroud time each flame level adds.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceFogResistance"
@@ -188,14 +205,16 @@
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The maximum durability of a level 1 item, before the rarity factor."
+          "doc": "The maximum durability of a level 1 item, before the rarity factor.",
+          "joinedClient": "restart"
         },
         "growth": {
           "type": "float",
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The maximum durability each item level above 1 adds, before the rarity factor."
+          "doc": "The maximum durability each item level above 1 adds, before the rarity factor.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceDurability"
@@ -210,35 +229,40 @@
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The durability factor of common items."
+          "doc": "The durability factor of common items.",
+          "joinedClient": "restart"
         },
         "uncommon": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The durability factor of uncommon items."
+          "doc": "The durability factor of uncommon items.",
+          "joinedClient": "restart"
         },
         "rare": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The durability factor of rare items."
+          "doc": "The durability factor of rare items.",
+          "joinedClient": "restart"
         },
         "epic": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The durability factor of epic items."
+          "doc": "The durability factor of epic items.",
+          "joinedClient": "restart"
         },
         "legendary": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The durability factor of legendary items."
+          "doc": "The durability factor of legendary items.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceRarityDurability"
@@ -253,35 +277,40 @@
           "min": 0,
           "max": 1,
           "ops": "number",
-          "doc": "The chance a new common weapon gets a gem socket."
+          "doc": "The chance a new common weapon gets a gem socket.",
+          "joinedClient": "restart"
         },
         "uncommon": {
           "type": "float",
           "min": 0,
           "max": 1,
           "ops": "number",
-          "doc": "The chance a new uncommon weapon gets a gem socket."
+          "doc": "The chance a new uncommon weapon gets a gem socket.",
+          "joinedClient": "restart"
         },
         "rare": {
           "type": "float",
           "min": 0,
           "max": 1,
           "ops": "number",
-          "doc": "The chance a new rare weapon gets a gem socket."
+          "doc": "The chance a new rare weapon gets a gem socket.",
+          "joinedClient": "restart"
         },
         "epic": {
           "type": "float",
           "min": 0,
           "max": 1,
           "ops": "number",
-          "doc": "The chance a new epic weapon gets a gem socket."
+          "doc": "The chance a new epic weapon gets a gem socket.",
+          "joinedClient": "restart"
         },
         "legendary": {
           "type": "float",
           "min": 0,
           "max": 1,
           "ops": "number",
-          "doc": "The chance a new legendary weapon gets a gem socket."
+          "doc": "The chance a new legendary weapon gets a gem socket.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceSocketChance"
@@ -296,49 +325,56 @@
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The base cost of a perk unlock, before the creep and the kind's factor."
+          "doc": "The base cost of a perk unlock, before the creep and the kind's factor.",
+          "joinedClient": "restart"
         },
         "creep": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "How much the cost grows with each unlock step, as a factor of the base."
+          "doc": "How much the cost grows with each unlock step, as a factor of the base.",
+          "joinedClient": "restart"
         },
         "weapons": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The cost factor of weapon and shield perks."
+          "doc": "The cost factor of weapon and shield perks.",
+          "joinedClient": "restart"
         },
         "armor": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The cost factor of armour perks."
+          "doc": "The cost factor of armour perks.",
+          "joinedClient": "restart"
         },
         "rings": {
           "type": "float",
           "min": 0,
           "max": 100,
           "ops": "number",
-          "doc": "The cost factor of ring perks."
+          "doc": "The cost factor of ring perks.",
+          "joinedClient": "restart"
         },
         "advanced": {
           "type": "float",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The numerator of an advanced perk's cost."
+          "doc": "The numerator of an advanced perk's cost.",
+          "joinedClient": "restart"
         },
         "advancedFrom": {
           "type": "int",
           "min": 0,
           "max": 5,
           "ops": "number",
-          "doc": "The perk level (0 to 5) from which the advanced cost applies."
+          "doc": "The perk level (0 to 5) from which the advanced cost applies.",
+          "joinedClient": "restart"
         }
       },
       "typeName": "BalanceUnlockCost"
@@ -353,25 +389,29 @@
           "type": "float",
           "min": 0,
           "max": 100000,
-          "doc": "The base of the damage power formula: base power = int(seed * creep * level + seed)."
+          "doc": "The base of the damage power formula: base power = int(seed * creep * level + seed).",
+          "joinedClient": "serverOnly"
         },
         "creep": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "doc": "The share of seed the base power grows by with each level."
+          "doc": "The share of seed the base power grows by with each level.",
+          "joinedClient": "serverOnly"
         },
         "armorOffset": {
           "type": "float",
           "min": 0,
           "max": 100000,
-          "doc": "The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share)."
+          "doc": "The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share).",
+          "joinedClient": "serverOnly"
         },
         "armorGradient": {
           "type": "float",
           "min": 0,
           "max": 100000,
-          "doc": "The armour each level adds in the armour formula, before the item's share."
+          "doc": "The armour each level adds in the armour formula, before the item's share.",
+          "joinedClient": "serverOnly"
         }
       },
       "typeName": "BalanceGear"

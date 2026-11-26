@@ -94,12 +94,16 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     }
     doc["order"] = std::move(order);
     doc["orderSource"] = meta.order_source;
+    if (!meta.boot_sync.is_null()) doc["bootSync"] = meta.boot_sync;
     if (meta.plan.hash.empty()) {
         doc["plan"] = nullptr;
     } else {
         doc["plan"] = {{"hash", meta.plan.hash}, {"file", meta.plan.file}};
         doc["plan"]["previous"] = meta.plan.previous.empty() ? json(nullptr) : json(meta.plan.previous);
     }
+    doc["rollback"] = meta.rollback.is_object() ? meta.rollback : json(nullptr);
+    if (meta.saves.is_array() && !meta.saves.empty()) doc["saves"] = meta.saves;
+    if (meta.migrated.is_array() && !meta.migrated.empty()) doc["migrated"] = meta.migrated;
 
     std::set<EntryRef> added(r.added.begin(), r.added.end());
     size_t writers_cut = 0;
@@ -179,6 +183,9 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     doc["removed"] = entries(r.removed, false);
 
     doc["counts"] = {{"fields", r.fields.size()}, {"conflicts", r.lines.size()}, {"refused", r.refused.size()}, {"added", r.added.size()}, {"removed", r.removed.size()}};
+    // refused rows that wait for a restart (the stable token RESTART_REQUIRED_TOKEN first): what a reload, a live edit or a
+    // runtime pass left for the next start. Counted over every row, also those the refused cap leaves out.
+    doc["counts"]["restartRequired"] = std::count_if(r.refused.begin(), r.refused.end(), [](const Refusal& x) { return restart_required(x); });
     doc["truncated"] = {{"fields", r.fields.size() - doc["fields"].size()},
                         {"conflicts", r.lines.size() - doc["conflicts"].size()},
                         {"refused", r.refused.size() - doc["refused"].size()},

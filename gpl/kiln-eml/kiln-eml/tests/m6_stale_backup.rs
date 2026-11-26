@@ -297,3 +297,46 @@ fn another_loaders_appended_output_does_not_replace_the_original_backup() {
     assert_eq!(read(&f, &name("kfc.bak.integrity")), seal);
     live_contents_hold(&f).unwrap();
 }
+
+/// Review of the stale-game-data fix (HadToRegister, 2026-11-26): a kiln-mode start never takes game files that hold a
+/// known mod's program (Auto Loot Plus's auto-smash program) as its working baseline, and never builds from a working
+/// baseline that holds one: a loader's first copy of game files another loader had patched kept that mod in every
+/// start for weeks after it was removed. The witness refuses with the plain words and the one thing to do, and nothing
+/// changes. Only the archive header is looked at.
+#[test]
+fn kiln_mode_never_takes_or_builds_from_game_data_that_holds_a_known_mods_program() {
+    use kfc::{guid::{Guid, ResourceId}, reflection::LookupKey};
+    use kiln_eml::sf_pass::StartupDialect;
+    const ALP_PROGRAM: &str = "a5c0de5a-1e00-4d0d-9a11-0000000a5000";
+    const LEAD: &str = "Your game files still contain changes from a mod that isn't installed. Verify the game files in \
+        Steam (Properties > Installed Files > Verify integrity), then start again.";
+    // the game files as Kiln first finds them: another loader patched Auto Loot Plus's program into them
+    let types = Rc::new(fixture::types::registry());
+    let root = types.get_by_name(LookupKey::Qualified(fixture::types::ROOT)).unwrap();
+    let bytes = fixture::types::root_value().to_bytes(&types, root).unwrap();
+    let program = ResourceId::new(Guid::parse(ALP_PROGRAM).unwrap(), fixture::archive::resource_id(0).type_hash(), 0);
+    let resources = vec![(fixture::archive::resource_id(0), bytes.clone()), (program, bytes)];
+    let f = ArchiveFixture::with_contents("stale-data-kiln", types, &resources, &fixture::archive::BLOBS);
+    fs::write(f.game.join(name("exe")), startup_support::EXE).unwrap();
+    fs::create_dir_all(f.game.join("mods")).unwrap();
+    let start = startup_support::Start::over(f);
+    start.patch("fresh", &[], &[], &startup_support::content("fresh content"));
+    let live = (read(&start.f, &name("kfc")), read(&start.f, &name("kfc_resources")));
+    let refused = start.witness(&start.plan(StartupDialect::None, &[])).expect_err("the patched game files became the baseline");
+    assert_eq!(refused.code, "baseline-stale-data", "{refused:?}");
+    assert!(refused.text.starts_with(LEAD), "{refused:?}");
+    assert!(refused.text.contains("the game's current files hold Auto Loot Plus's auto-smash program"), "{refused:?}");
+    assert!(!start.f.game.join(name("kfc.bak")).exists(), "no clean copy was taken of them");
+    assert_eq!((read(&start.f, &name("kfc")), read(&start.f, &name("kfc_resources"))), live);
+
+    // the same files as the working baseline an earlier start took up: nothing is built from it
+    for ext in ["kfc", "kfc_resources"] {
+        fs::copy(start.f.game.join(name(ext)), start.f.game.join(name(&format!("{ext}.bak")))).unwrap();
+    }
+    let refused = start.witness(&start.plan(StartupDialect::None, &[])).expect_err("built from the patched baseline");
+    assert_eq!(refused.code, "baseline-stale-data", "{refused:?}");
+    assert!(refused.text.starts_with(LEAD), "{refused:?}");
+    assert!(refused.text.contains("Kiln's clean copy of the game data"), "{refused:?}");
+    assert!(refused.text.contains("it holds Auto Loot Plus's auto-smash program"), "{refused:?}");
+    assert_eq!((read(&start.f, &name("kfc")), read(&start.f, &name("kfc_resources"))), live);
+}

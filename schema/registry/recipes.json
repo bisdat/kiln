@@ -31,25 +31,29 @@
             "registry": "items",
             "doc": "The item; absent when the input is a category.",
             "ops": "set",
-            "optional": true
+            "optional": true,
+            "joinedClient": "now"
           },
           "category": {
             "type": "ref",
             "registry": "inputCategories",
             "doc": "An input category (any item of it); absent when the input is an item.",
             "ops": "set",
-            "optional": true
+            "optional": true,
+            "joinedClient": "now"
           },
           "count": {
             "type": "int",
             "min": 1,
             "max": 65535,
             "ops": "number",
-            "doc": "How many of the item or category one craft takes."
+            "doc": "How many of the item or category one craft takes.",
+            "joinedClient": "now"
           }
         },
         "typeName": "RecipeInput"
-      }
+      },
+      "joinedClient": "now"
     },
     "outputs": {
       "type": "list",
@@ -64,18 +68,21 @@
             "type": "ref",
             "registry": "items",
             "ops": "set",
-            "doc": "The item one craft makes."
+            "doc": "The item one craft makes.",
+            "joinedClient": "now"
           },
           "count": {
             "type": "int",
             "min": 1,
             "max": 65535,
             "ops": "number",
-            "doc": "How many of the item one craft makes."
+            "doc": "How many of the item one craft makes.",
+            "joinedClient": "now"
           }
         },
         "typeName": "RecipeOutput"
-      }
+      },
+      "joinedClient": "now"
     },
     "duration": {
       "type": "time",
@@ -84,7 +91,8 @@
       "max": 86400,
       "applies": "now",
       "ops": "number",
-      "doc": "How long a station takes for one craft."
+      "doc": "How long a station takes for one craft.",
+      "joinedClient": "now"
     },
     "unlock": {
       "type": "enum",
@@ -96,14 +104,16 @@
       "ops": "set",
       "side": "client",
       "doc": "When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's).",
-      "typeName": "RecipeUnlockMode"
+      "typeName": "RecipeUnlockMode",
+      "joinedClient": "localOnly"
     },
     "station": {
       "type": "ref",
       "registry": "stations",
       "readOnly": true,
       "applies": "restart",
-      "doc": "The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start."
+      "doc": "The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start.",
+      "joinedClient": "serverOnly"
     }
   },
   "entry": {

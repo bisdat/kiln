@@ -32,8 +32,10 @@ internal static unsafe class RegistryHost
 {
     /// <summary>The order as set_order takes it: [{"mod", "version"}], every mod once, in order. A mod whose code uses the
     /// registry API carries "registry": true: the stage then decodes the game's base at resources-ready, before kiln.content
-    /// writes packs into resident resource pages (review4 NS1).</summary>
-    internal static string OrderJson(IEnumerable<(string Id, string Version)> order, ISet<string>? registryUsers = null)
+    /// writes packs into resident resource pages (review4 NS1). A mod of one side carries "side": "server" | "client": the join's
+    /// registry fingerprint leaves out the fields it writes (docs/kiln/network.md "Registry boot values and order").</summary>
+    internal static string OrderJson(IEnumerable<(string Id, string Version)> order, ISet<string>? registryUsers = null,
+        IReadOnlyDictionary<string, ManifestSide>? sides = null)
     {
         var a = new JsonArray();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -42,6 +44,8 @@ internal static unsafe class RegistryHost
             if (!seen.Add(id)) continue;
             var row = new JsonObject { ["mod"] = id, ["version"] = version };
             if (registryUsers?.Contains(id) == true) row["registry"] = true;
+            if (sides is not null && sides.TryGetValue(id, out var side) && side != ManifestSide.Both)
+                row["side"] = side == ManifestSide.Client ? "client" : "server";
             a.Add(row);
         }
         return a.ToJsonString();
@@ -83,7 +87,9 @@ internal static unsafe class RegistryHost
             }
             var order = mods.RegistryOrder();
             var users = mods.RegistryUsers();
-            var json = OrderJson(order.Select(m => (m.Id, m.Version)), users);
+            var sides = new Dictionary<string, ManifestSide>(StringComparer.Ordinal);
+            foreach (var mod in order) sides.TryAdd(mod.Id, mod.Side);
+            var json = OrderJson(order.Select(m => (m.Id, m.Version)), users, sides);
             var rc = NativeCalls.WithUtf8(json, s => t->SetOrder(s));
             log(rc == KilnAbi.Ok ? LogLevel.Info : LogLevel.Warn,
                 rc == KilnAbi.Ok ? $"registry: stage order = Kiln.Host load order, {order.Count} mod(s), {users.Count} using the registry API"
@@ -139,12 +145,12 @@ internal sealed partial class ModManager
 {
     /// <summary>The runtime load order of this start's Kiln mods, as the resolver orders them (the order LoadAll loads them in):
     /// every enabled mod folder that resolves, dependencies first.</summary>
-    internal List<(string Id, string Version)> RegistryOrder()
+    internal List<(string Id, string Version, ManifestSide Side)> RegistryOrder()
     {
         var input = BootCandidates().Select(c => new ModCandidate { Manifest = c.Manifest, Directory = c.Directory }).ToList();
         var env = new ResolveEnvironment(_kilnVersion, _apiVersion, _options.Side, _options.HasFeature, ResolveEnvironment.NoneLoaded)
             { Hosting = _options.Side == ManifestSide.Client && _options.HostedServerMods, Capability = _options.Capability };
-        return Resolver.Resolve(input, env).Order.Where(c => c.Manifest is not null).Select(c => (c.Manifest!.Id, c.Manifest!.Version)).ToList();
+        return Resolver.Resolve(input, env).Order.Where(c => c.Manifest is not null).Select(c => (c.Manifest!.Id, c.Manifest!.Version, c.Manifest!.Side)).ToList();
     }
 
     /// <summary>The mods whose code references the registry API (OnRegistry, Registry.Change/Read), from metadata only: the
@@ -157,7 +163,7 @@ internal sealed partial class ModManager
             var candidates = RegistryCandidates();
             var directories = candidates.Select(c => c.Directory).ToArray();
             foreach (var (manifest, directory) in candidates)
-                if (manifest.HasCode && RegistryDeclarations.MightOverride(Path.Combine(directory, manifest.EntryAssembly), directories))
+                if (manifest.HasCode && RegistryDeclarations.UsesRegistry(Path.Combine(directory, manifest.EntryAssembly), directories))
                     users.Add(manifest.Id);
         }
         catch (Exception) { /* metadata only: an unreadable folder is no registry user, and the stage stays lazy */ }

@@ -219,6 +219,7 @@ struct Slot {
     bool registry = false;  // a registry layer was on it at the last flush or since (its revert is compared too)
     bool foreign = false;   // another writer wrote it after Kiln's registry layer: registry layers left out for this world
     bool old_changed = false;  // a layer of an older path (not the registry) was put or dropped since the last flush
+    bool gate = false;      // store_set_gate: written after a flush's other writes when it opens, before them when it closes
     std::vector<Layer> layers;
 };
 struct Conflict {
@@ -289,6 +290,10 @@ bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
 // it as they are: what a registry reader sees without some registry rows (review4 NS5). Memory when there is no slot or
 // another writer owns it for this world.
 bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out);
+// The slot at addr (one that exists: after a put) is a gate, a switch the game reads before the slots it gates (a fixed
+// rarity's useUiRarity before uiRarity): a flush writes it last when it opens (any byte not zero) and first when it closes
+// (all zero), and does not open it when another write of its entry did not land, so no reader sees it on over stale values.
+void store_set_gate(uintptr_t addr);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is
@@ -297,10 +302,10 @@ bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and 
 struct StoreSkipped {
     uintptr_t addr = 0;
     uint32_t kind = 0, id = 0;
-    std::string what;  // "items Material_T1_Wood_Logs.maxStackSize"
+    std::string what;  // "items Material_T1_Wood_Logs.maxStackSize": game names, diagnostics only, never in a report (P32)
     std::string mod, source;  // the registry layer's
     bool revert = false;      // the revert of a dropped registry layer
-    std::string text;         // the report line
+    std::string text;         // without a place ("a slot Kiln wrote ..."); registry_live names the Kiln field
 };
 std::vector<StoreSkipped> store_skipped();
 bool store_drop(KilnOwner owner, uintptr_t addr);  // removes one layer
@@ -456,6 +461,15 @@ void nc_world_ready(uintptr_t world, uint32_t kind);  // try_ready: the active w
 void nc_world_stopping(uintptr_t world);          // world_reset, before the store is reset (world intact)
 void nc_packs_begin();                            // apply_packs, before apply_all_packs
 void nc_packs_end();                              // ... after: pack definitions not seen again are orphaned
+// One mod's pack application (apply_all_packs, store_mutex held), so that a pack that throws partway leaves nothing behind:
+// nc_pack_mark(owner) before the mod's first pack; nc_pack_rollback(owner) puts every definition the
+// owner's packs added or changed since the mark back as it was then (one it added is orphaned, as a removed pack's is:
+// its id stays registered until a restart) and returns how many; the journal starts again from there (a rollback, then
+// the packs it had before, then a rollback again leaves the mark's state). nc_pack_unmark() ends it. Other owners'
+// definitions, and definitions made outside the mark, are never touched.
+void nc_pack_mark(KilnOwner owner);
+uint32_t nc_pack_rollback(KilnOwner owner);
+void nc_pack_unmark();
 // A data pack's "add" list (items / recipes): defines every entry as `owner`'s. Called by apply_pack (store_mutex
 // held, on the active world's thread).
 void nc_pack_add(KilnOwner owner, uint32_t kind, const std::string& list_json, const std::string& source,

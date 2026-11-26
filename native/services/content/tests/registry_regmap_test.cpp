@@ -44,15 +44,16 @@ int main(int argc, char** argv) {
             "rows": {
               "maxStack": {"paths": ["maxStackSize"], "conv": "int", "read": "worldLoad", "backend": "live", "clientNeeds": true},
               "rarity": {"paths": ["rarity"], "conv": "enum", "values": {"common": "Common", "uncommon": "Uncommon", "rare": "Rare", "epic": "Epic", "legendary": "Legendary"}, "read": "now", "backend": "live"},
-              "comfort": {"paths": ["comfortSetup.comfortAmount"], "conv": "int", "read": "unknown", "backend": "live", "state": "unproven", "reason": "the read time is not traced"}
+              "fuel.burnTime": {"paths": ["fuelSetup.burnTime"], "conv": "time", "read": "unknown", "backend": "live", "state": "unproven", "reason": "the read time is not traced"}
             }})", &errs);
         CHECK(errs.empty());
         CHECK(m.registry == "items" && m.entries.kind == map::EntryKind::Resource && m.entries.resource_type == "keen::ItemInfo");
         CHECK(m.rows.size() == 3 && m.rows.at("maxStack").paths == std::vector<std::string>({"maxStackSize"}));
         CHECK(m.rows.at("maxStack").read == map::Read::WorldLoad && m.rows.at("maxStack").backend == map::Backend::Live && m.rows.at("maxStack").client_needs);
         CHECK(m.rows.at("rarity").values.at("epic") == "Epic");
-        CHECK(m.rows.at("comfort").state == map::RowState::Unproven);
-        // the routing rule against the generated schema: none of these breaks it
+        CHECK(m.rows.at("fuel.burnTime").state == map::RowState::Unproven);
+        // the routing rule against the generated schema: none of these breaks it (an untraced read needs the cautious applies:
+        // fuel.burnTime's worldLoad; items.comfort applies now since its reader was traced, 31.x)
         CHECK(map::check_routing(m).empty());
     }
     // ---- malformed rows are refused with the field named
@@ -323,7 +324,19 @@ int main(int argc, char** argv) {
             // (owner ruling 2026-11-23: no client proof of its own), and keeps the server's reasons.
             std::string why;
             CHECK(one.mapping("items", "maxStack", &why) == Mapping::Mapped);
-            CHECK(one.mapping("items", "block", &why) == Mapping::Unproven && why.find("not traced") != std::string::npos);
+            // registry-proof (31.x): the drop rows (lab drop tables), the loot rows (the roll's disassembly), block and comfort (their readers
+            // found) are proven; two rows stay off with a proven reason, refused cleanly
+            for (const auto& [reg, field] : {std::pair{"items", "block"}, {"items", "comfort"}, {"loot", "rarities"}, {"loot", "fixedRarity"},
+                                             {"loot", "stack.scalable"}, {"loot", "stack.maxScaled"}, {"drops", "entries"}, {"drops", "entries[].item"},
+                                             {"drops", "entries[].count.min"}, {"drops", "entries[].count.max"}, {"drops", "entries[].chance"},
+                                             {"drops", "entries[].weight"}}) {
+                const bool ok = one.mapping(reg, field, &why) == Mapping::Mapped;
+                if (!ok) std::printf("  %s: %s.%s: %s\n", side, reg, field, why.c_str());
+                CHECK(ok);
+            }
+            CHECK(one.mapping("items", "fuel.burnTime", &why) == Mapping::Unproven && why.find("no game code reads") != std::string::npos);
+            CHECK(one.mapping("recipes", "station", &why) == Mapping::Unproven && why.find("no stations registry") != std::string::npos);
+            CHECK(mapped == static_cast<int>(std::size(gen::kFields)) - 2 && unproven == 2);
             if (std::string(side) == "client") {
                 // review3 N4: row for row only where the client's layout of the registry's root type is the server's (a
                 // later client layout may differ legitimately: those rows are unproven); never ok where the server is not

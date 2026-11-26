@@ -295,6 +295,9 @@ pub const KILN_UI_WINDOW_NO_RESIZE: i32 = 2;
 pub const KILN_UI_WINDOW_NO_SAVED_SETTINGS: i32 = 256;
 pub const KILN_UI_WINDOW_NO_SCROLLBAR: i32 = 8;
 pub const KILN_UI_WINDOW_NO_TITLE_BAR: i32 = 1;
+pub const KILN_UI_WINDOW_STATE_EXISTS: i32 = 1;
+pub const KILN_UI_WINDOW_STATE_MOVING: i32 = 2;
+pub const KILN_UI_WINDOW_STATE_RESIZING: i32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -409,6 +412,17 @@ pub struct KilnUiPopups {
     pub count: u32,
     pub frame: u64,
     pub rect: [KilnUiPopupRect; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnUiWindowState {
+    pub size: u32,
+    pub flags: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[repr(C)]
@@ -843,6 +857,7 @@ pub struct KilnUiApi {
     pub drag_source: Option<unsafe extern "C" fn(KilnStr, *const core::ffi::c_void, usize, KilnStr) -> bool>,
     pub drop_target: Option<unsafe extern "C" fn(KilnStr, *mut core::ffi::c_void, usize, *mut usize) -> bool>,
     pub popups: Option<unsafe extern "C" fn(*mut KilnUiPopups) -> KilnResult>,
+    pub window_state: Option<unsafe extern "C" fn(KilnStr, *mut KilnUiWindowState) -> bool>,
 }
 
 #[repr(C)]

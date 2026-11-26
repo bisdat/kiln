@@ -104,19 +104,25 @@ public sealed class RegistryContext
 {
     private readonly WeakReference<ModContext> _owner;
     private readonly int _thread = Environment.CurrentManagedThreadId;
-    private readonly string _code;
+    private readonly Func<string> _codeOf;  // the code identity, computed at the first Identity read (review4 nit)
+    private string? _code;
     private readonly IncrementalHash _settings = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     private readonly HashSet<string> _observedSettings = new(StringComparer.Ordinal);
     private volatile bool _open = true;
-    private string? _closedIdentity;
+    private string? _closedIdentity, _closedSettings;  // the identity is composed when it is read, after Close too
     [ThreadStatic] internal static RegistryContext? Current;
     [ThreadStatic] private static bool _observing;
 
     internal RegistryContext(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
         string codeIdentity, Func<string, string, string, string> read, Func<string, string, IReadOnlyList<string>> select,
         Dictionary<string, ConfigFile>? inputs = null)
+        : this(owner, point, phase, world, () => codeIdentity, read, select, inputs) { }
+    /// <summary>codeIdentity runs at the first <see cref="Identity"/> read only (Kiln.Host hashes the mod's DLLs there).</summary>
+    internal RegistryContext(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
+        Func<string> codeIdentity, Func<string, string, string, string> read, Func<string, string, IReadOnlyList<string>> select,
+        Dictionary<string, ConfigFile>? inputs = null)
     {
-        _owner = new(owner); ModId = owner.Info.Id; EntryPoint = point; Phase = phase; World = world; _code = codeIdentity;
+        _owner = new(owner); ModId = owner.Info.Id; EntryPoint = point; Phase = phase; World = world; _codeOf = codeIdentity;
         ReadValue = read; SelectIds = select; InputConfigs = inputs ?? new(StringComparer.Ordinal);
     }
     /// <summary>The author's mod id.</summary>
@@ -132,11 +138,16 @@ public sealed class RegistryContext
     {
         get
         {
-            if (!_open) return _closedIdentity!;
+            if (!_open) return _closedIdentity ??= Compose(_closedSettings!);
             if (_thread != Environment.CurrentManagedThreadId) throw Error(RegistryContextError.WrongThread, "use the callback's own thread");
-            var inputs = FormattableString.Invariant($"{_code}\n{EntryPoint}\n{Phase}\n{World?.Token}\n{World?.Kind}\n{World?.Id}\n{Convert.ToHexStringLower(_settings.GetCurrentHash())}");
-            return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(inputs)));
+            return Compose(Convert.ToHexStringLower(_settings.GetCurrentHash()));
         }
+    }
+    private string Compose(string settings)
+    {
+        _code ??= _codeOf();
+        var inputs = FormattableString.Invariant($"{_code}\n{EntryPoint}\n{Phase}\n{World?.Token}\n{World?.Kind}\n{World?.Id}\n{settings}");
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(inputs)));
     }
 
     internal Func<string, string, string, string> ReadValue { get; }
@@ -144,6 +155,11 @@ public sealed class RegistryContext
     internal object? Adapter;
     internal bool ReadOnly { get; init; }
     internal Func<ulong>? CurrentWorldToken { get; init; }
+    /// <summary>The tick step (Kiln.Host: the service tick's): the world check asks <see cref="CurrentWorldToken"/> (a
+    /// native status call under the store lock) once per step, not once per cell (review4 recheck nit). The context lives
+    /// on one thread for one callback, so its world cannot end inside a step. Null or 0: every access checks.</summary>
+    internal Func<ulong>? CurrentStep { get; init; }
+    private ulong _worldCheckedStep;
     internal Func<string?>? Capture;
     internal Dictionary<string, ConfigFile> InputConfigs { get; private set; }
     /// <summary>A per-world setting was read in this frame (it survives Close: the host decides the change's lifetime after).</summary>
@@ -155,8 +171,13 @@ public sealed class RegistryContext
         if (!_open) throw Error(RegistryContextError.Closed, "the registry callback returned");
         if (_thread != Environment.CurrentManagedThreadId) throw Error(RegistryContextError.WrongThread, "use the callback's own thread");
         if (World is { } world && EntryPoint is RegistryEntryPoint.WorldLoad or RegistryEntryPoint.HotReload or RegistryEntryPoint.Manual &&
-            CurrentWorldToken is { } current && current() != world.Token)
-            throw Error(RegistryContextError.WorldChanged, "the context's world ended or changed");
+            CurrentWorldToken is { } current)
+        {
+            var step = CurrentStep?.Invoke() ?? 0;
+            if (step != 0 && step == _worldCheckedStep) return;
+            if (current() != world.Token) throw Error(RegistryContextError.WorldChanged, "the context's world ended or changed");
+            _worldCheckedStep = step;
+        }
     }
     internal void EnsureWorldSettings()
     {
@@ -193,7 +214,7 @@ public sealed class RegistryContext
     internal void Close()
     {
         if (!_open) return;
-        _closedIdentity = Identity; _open = false; Capture = null; Adapter = null; InputConfigs = new(); _settings.Dispose(); _observedSettings.Clear();
+        _closedSettings = Convert.ToHexStringLower(_settings.GetCurrentHash()); _open = false; Capture = null; Adapter = null; InputConfigs = new(); _settings.Dispose(); _observedSettings.Clear();
     }
     internal IDisposable Enter() { Ensure(); return new Scope(this); }
     internal static RegistryContextException Error(RegistryContextError code, string message) => new(code, message);

@@ -21,11 +21,11 @@ public sealed partial class ItemLootEntry : IRegistryEntry
     public ItemLootStack Stack => new(_c, _i);
 
     /// <summary>The rarities a drop may roll.</summary>
-    [RegistryField("loot.rarities", RegistryApplies.Now)]
+    [RegistryField("loot.rarities", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public RegistryRarities Rarities { get => (RegistryRarities)RegistryCells.Flags(_c, ItemLootFields.Rarities, _i, RegistryRaritiesNames.All); set => RegistryCells.SetFlags(_c, ItemLootFields.Rarities, _i, RegistryRaritiesNames.All, (uint)value); }
 
     /// <summary>A rarity every drop gets (none: rolled from rarities).</summary>
-    [RegistryField("loot.fixedRarity", RegistryApplies.Now)]
+    [RegistryField("loot.fixedRarity", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public ItemLootRarity FixedRarity { get => (ItemLootRarity)RegistryCells.Enum(_c, ItemLootFields.FixedRarity, _i, ItemLootRarityNames.All); set => RegistryCells.SetEnum(_c, ItemLootFields.FixedRarity, _i, ItemLootRarityNames.All, (int)value); }
 }
 
@@ -38,19 +38,19 @@ public sealed partial class ItemLootStack
     internal ItemLootStack(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The smallest stack a drop has.</summary>
-    [RegistryField("loot.stack.min", RegistryApplies.Now)]
+    [RegistryField("loot.stack.min", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public int Min { get => RegistryCells.Int(_c, ItemLootFields.StackMin, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMin, _i, value); }
 
     /// <summary>The largest stack a drop has.</summary>
-    [RegistryField("loot.stack.max", RegistryApplies.Now)]
+    [RegistryField("loot.stack.max", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public int Max { get => RegistryCells.Int(_c, ItemLootFields.StackMax, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMax, _i, value); }
 
     /// <summary>The stack grows with the world's loot amount, up to maxScaled.</summary>
-    [RegistryField("loot.stack.scalable", RegistryApplies.Now)]
+    [RegistryField("loot.stack.scalable", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public bool Scalable { get => RegistryCells.Bool(_c, ItemLootFields.StackScalable, _i); set => RegistryCells.Set(_c, ItemLootFields.StackScalable, _i, value); }
 
     /// <summary>The largest stack a drop has with the world's loot amount applied (when scalable).</summary>
-    [RegistryField("loot.stack.maxScaled", RegistryApplies.Now)]
+    [RegistryField("loot.stack.maxScaled", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public int MaxScaled { get => RegistryCells.Int(_c, ItemLootFields.StackMaxScaled, _i); set => RegistryCells.Set(_c, ItemLootFields.StackMaxScaled, _i, value); }
 }
 

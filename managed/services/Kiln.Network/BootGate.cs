@@ -15,6 +15,59 @@ internal static class BootGate
 {
     /// <summary>The handshake property: <c>id=&lt;16 hex&gt;</c> or <c>id=out</c>, comma-separated, ids in ordinal order.</summary>
     public const string Key = "kiln.boot";
+    internal const string RegistryKey = "kiln.registry.boot";
+    private static Func<string?>? _registryHost;
+
+    private static string? RegistryOwn()
+    {
+        try
+        {
+            if (_registryHost is null)
+            {
+                var host = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Kiln.Host");
+                var method = host?.GetType("Kiln.Host.BootFingerprint")?.GetMethod("RegistryCurrent", BindingFlags.Static | BindingFlags.NonPublic, Type.EmptyTypes);
+                if (method?.ReturnType == typeof(string)) _registryHost = method.CreateDelegate<Func<string?>>();
+            }
+            return RegistryValue(_registryHost?.Invoke());
+        }
+        catch (Exception) { return null; }
+    }
+
+    private static string? RegistryValue(string? value) => value is { Length: 131 } && value.StartsWith("1:", StringComparison.Ordinal) &&
+        value[66] == ':' && value.AsSpan(2, 64).IndexOfAnyExcept("0123456789abcdef") < 0 &&
+        value.AsSpan(67, 64).IndexOfAnyExcept("0123456789abcdef") < 0 ? value : null;
+
+    /// <summary>The registry part's message when the values differ, or null when it is not compared or the values agree. It is one hash
+    /// over every participating mod, so it cannot honour the mod-list rules per mod: it is compared only when both sides run the same
+    /// side-both mods in the same versions (<see cref="SameSharedMods"/>). Otherwise the missing/versionMatch/optionalMods/extra rules
+    /// decide alone, as before. The values cover every compared field's resolved value, so equal values mean the client runs what the
+    /// server runs: an order or contribution difference alone (another load order, a setting a later mod overrides) only gives
+    /// <paramref name="note"/> for the server's log, never a refusal or a player warning.</summary>
+    internal static string? RegistryDifference(IReadOnlyDictionary<string, string> properties, IEnumerable<Wire.ModEntry> serverMods,
+        IEnumerable<Wire.ModEntry> clientMods, out string? note)
+    {
+        note = null;
+        if (!SameSharedMods(serverMods, clientMods)) return null;
+        var own = RegistryOwn();
+        var peer = RegistryValue(properties.GetValueOrDefault(RegistryKey));
+        if (own is null || peer is null) return null; // additive: old peers compare nothing
+        if (!own.AsSpan(2, 64).SequenceEqual(peer.AsSpan(2, 64)))
+            return "The registry boot values differ from this server's. Use the server's modpack and settings, then restart the game.";
+        if (!own.AsSpan(67, 64).SequenceEqual(peer.AsSpan(67, 64)))
+            note = "registry boot edits or load order differ from this server's, with the same resulting values (nothing differs in the game)";
+        return null;
+    }
+
+    /// <summary>Both lists hold the same side-both mods (ids and exact versions). Side client and server mods are not compared: each runs
+    /// on one side only, and the native stage leaves the fields they write out of the registry part.</summary>
+    internal static bool SameSharedMods(IEnumerable<Wire.ModEntry> serverMods, IEnumerable<Wire.ModEntry> clientMods)
+    {
+        static Dictionary<string, string> Shared(IEnumerable<Wire.ModEntry> mods) => mods.Where(m => m.Side == ModSide.Both)
+            .GroupBy(m => m.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Version, StringComparer.Ordinal);
+        var s = Shared(serverMods);
+        var c = Shared(clientMods);
+        return s.Count == c.Count && s.All(kv => c.TryGetValue(kv.Key, out var v) && string.Equals(v, kv.Value, StringComparison.Ordinal));
+    }
 
     /// <summary>A boot mod in this process's generation that was left out of it (or whose content faulted since).</summary>
     public const string Out = "out";
@@ -83,11 +136,13 @@ internal static class BootGate
     public static Dictionary<string, string> Properties()
     {
         var own = Own();
-        if (own.Count == 0) return [];
         var value = Encode(own, out var left);
         if (left > 0 && Interlocked.Exchange(ref _cutLogged, 1) == 0)
             NetEngine.Log(LogLevel.Warn, $"boot content: {left} boot mod(s) do not fit the handshake ({MaxValueBytes} bytes): their boot content is not compared at the join");
-        return value.Length == 0 ? [] : new Dictionary<string, string>(StringComparer.Ordinal) { [Key] = value };
+        var properties = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (value.Length != 0) properties[Key] = value;
+        if (RegistryOwn() is { } registry) properties[RegistryKey] = registry;
+        return properties;
     }
 
     /// <summary>The property's value: <c>id=fp</c> pairs in ordinal id order, within <see cref="MaxValueBytes"/>; <paramref name="left"/>:

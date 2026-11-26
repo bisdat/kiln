@@ -132,7 +132,7 @@
         },
         "journal": {
           "type": "object",
-          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json: format 1 from a kiln-mode start, format 2 (next release) from an EML start, EML's own pass): read when it is this start's and its packages are named where they wrote (writer rows of kind archiveWriter, certainty named; format 1 per entry, on registries whose entries are each a whole resource only: items, drops, balance, never a recipe or loot entry; format 2 per field from its member paths, recipe and loot entries by their element); none when this start has none (hosted or installed ShroudForge and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a journal of format 1 or 2. Since the next release.",
+          "description": "The archive writer's change journal (kiln-eml's <stem>.change-journal.json: format 1 from a kiln-mode start, format 2 (next release) from an EML start, EML's own pass): read when it is this start's and its packages are named where they wrote (writer rows of kind archiveWriter, certainty named; format 1 per entry, on registries whose entries are each a whole resource only: items, drops, balance, never a recipe or loot entry; format 2 per field from its member paths, recipe and loot entries by their element); none when this start has none (hosted or installed ShroudForge and other loaders keep none: what they changed is part of the base, unnamed); stale when the file names another generation; unreadable when it is not a journal of format 1 or 2. Since 0.2.0-dev.31.17 (format 2: the next release).",
           "required": ["state", "packages", "entries", "truncated"],
           "properties": {
             "state": { "enum": ["read", "none", "stale", "unreadable"] },
@@ -178,7 +178,7 @@
       "description": "kiln.host: Kiln.Host's runtime load order (the launcher profile's order). folders: no .NET this start, kiln.content's mod folder order."
     },
     "plan": {
-      "description": "The lowered plan the stage wrote (kiln/data/registry/plans/<hash>.json), and the one before it for rollback; null when none was written.",
+      "description": "The plan this start runs on (kiln/data/content/registry/plans/<hash>.json, format 2: each mod's lowered edits and the values they resolved to) and previous, the last good plan before it (a world started on it without a refused edit): what kilnctl registry rollback starts the next boot on. Null when none was written.",
       "oneOf": [
         {
           "type": "null"
@@ -208,6 +208,167 @@
         }
       ]
     },
+    "rollback": {
+      "description": "A rollback asked by kiln/data/content/registry/rollback.json (kilnctl registry rollback): applied (this start runs on that plan's edits instead of the mods' current ones; saves are not touched) or refused whole (its mods are not this start's, its file is missing or changed, or one of its edits is refused on this start: the mods' current edits run). Null: none asked.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "plan",
+            "state"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "from": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "requested": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "applied",
+                "refused"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "changedBack": {
+              "type": "array",
+              "description": "Every value that differs from the plan rolled away from (the first 2,000).",
+              "items": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "type": "string"
+                  },
+                  "from": {},
+                  "to": {}
+                }
+              }
+            },
+            "changedBackTotal": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "leftOut": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Mods with registry edits now that the plan does not hold: their edits are not applied while the rollback holds."
+            },
+            "madeOnExe": {
+              "type": "string",
+              "description": "The plan was made on another game build (that exe's SHA-256)."
+            },
+            "fromValues": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "saves": {
+      "description": "Registry edits that change what existing saves hold (native/services/content/registry/saves.h): guard (applied, Kiln protects the saves), warn (applied; what saved data means changes, or what the game does is not traced), report (applied; saves follow the new value). Refused ones are in refused. Absent: none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "field",
+          "registry",
+          "id",
+          "class",
+          "decision",
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "registry": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "stackCut",
+              "levelRange",
+              "perkSlots",
+              "durability",
+              "progressionCap",
+              "experienceCurve",
+              "baseLimits",
+              "listShape"
+            ]
+          },
+          "decision": {
+            "enum": [
+              "guard",
+              "warn",
+              "report"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "migrated": {
+      "description": "What the schemas' id migrations (schema/registry/migrations) renamed in this start's edits before they were matched. Absent: nothing.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "mod",
+          "source",
+          "stage",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "mod": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "add",
+              "alter",
+              "final"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "fields": {
       "type": "array",
       "items": {
@@ -222,7 +383,7 @@
     },
     "refused": {
       "type": "array",
-      "description": "Edits that were not applied, each with its reason (a malformed edit, an unmapped or unproven field, an entry that is not there or was removed by the game build, a conflict with an exclusive edit, a raw path that does not resolve on this build).",
+      "description": "Edits that were not applied, each with its reason (a malformed edit, an unmapped or unproven field, an entry that is not there or was removed by the game build, a conflict with an exclusive edit, a raw path that does not resolve on this build). A reason that starts with the stable token \"RestartRequired: \" is an edit that waits for the next start (a restart field a reload changed, a field the start never read, a section or entry operation added after the start); counts.restartRequired has their number.",
       "items": {
         "type": "object",
         "required": [
@@ -317,6 +478,11 @@
         "removed": {
           "type": "integer",
           "minimum": 0
+        },
+        "restartRequired": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Refused rows whose reason starts with the stable token \"RestartRequired: \" (since 0.2.0-dev.31.17): edits a reload, a runtime pass or a live edit left for the next start. Counted over every row, also those the refused cap leaves out."
         }
       },
       "additionalProperties": false
@@ -359,6 +525,25 @@
         }
       },
       "additionalProperties": false
+    },
+    "bootSync": {
+      "type": "object",
+      "description": "Immutable successful client-needed boot registry values and participating mod-order hashes. Optional for old writers, and absent when this start could not apply its side-both mods' client-held boot edits as asked (then nothing is compared at joins: docs/kiln/network.md); full hashes are computed before report caps. Neither server-only fields nor live layers contribute.",
+      "required": [
+        "values",
+        "order"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "values": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "order": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     }
   },
   "additionalProperties": false,
@@ -507,7 +692,7 @@
             "check",
             "drift"
           ],
-          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource (or, see named, this field) in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed). drift (next release): the best-effort drift probe found the game's value changed outside Kiln (between the stage's read and Kiln's first write in the world, or after Kiln's layer) with no writer Kiln knows to explain it; who names the suspects Kiln can see, certainty bestEffort."
+          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource (or, see named, this field) in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed). drift (since 0.2.0-dev.31.17): the best-effort drift probe found the game's value changed outside Kiln (between the stage's read and Kiln's first write in the world, or after Kiln's layer) with no writer Kiln knows to explain it; who names the suspects Kiln can see, certainty bestEffort."
         },
         "mod": {
           "type": "string",

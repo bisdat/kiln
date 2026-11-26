@@ -473,6 +473,7 @@ KilnUiApi make_table() {
     t.pointer = &t_pointer;  // the pointer and drag and drop (0.2.0-dev.30.3)
     t.drag_source = &t_drag_source;
     t.drop_target = &t_drop_target;
+    t.window_state = &t_window_state;  // window docking (issue 149)
     return t;
 }
 KilnUiApi g_table;

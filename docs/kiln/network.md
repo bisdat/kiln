@@ -129,6 +129,48 @@ and the server compares.
   operator or modpack) and restart the game. The boot content is made at the start, so a config sync or a reload of the
   mod cannot change it.
 
+### Registry boot values and order
+
+Registry edits have a separate additive property, `kiln.registry.boot`, in HELLO and WELCOME:
+`1:<64 lower-case SHA-256 hex digits of values>:<64 lower-case SHA-256 hex digits of order>`.
+It does **not** change the existing `kiln.boot` hashes. A new peer compares this part only when both peers send a
+valid version-1 property. An absent property (older managed or native Kiln), malformed property or unknown version
+compares nothing; old peers ignore the new property and join exactly as before.
+
+The native stage fingerprints successfully resolved, boot-routed registry fields whose mapping says a client needs
+its own copy. It uses Kiln registry/entry/field names and the values actually written, not archive bytes, resource
+addresses, game executable hashes, runtime live layers or report truncation. Server-only fields do not contribute.
+The order hash covers participating mods and their resolved field contributions in registry load order; mods with no
+participating boot edits do not contribute. A field that a mod with side `server` or `client` writes (by any path) is
+left out, because the other side never runs that mod; `kiln.boot` leaves such mods out too. The immutable start snapshot remains available as `bootSync` in
+`kiln/state/registry.json` after world load and hot reload too.
+
+Each side hashes its own fields, so a field that one side leaves out and the other keeps would make every join differ,
+with nothing the player can change. A start therefore sends no `kiln.registry.boot` (and registry.json has no
+`bootSync`) when it could not apply the client-held boot edits of its side-`both` mods as asked: such an edit was
+refused (by this game build's mapping, by composition or by the write) or no write reached it, a refusal names no
+field (a stage callback that faulted, a registry section that could not be read), the stage could not read the game's
+base, or a side `server`/`client` mod writes a field that a side-`both` mod edits too. kiln.log says which (`registry:
+this start's registry boot values are not compared at joins (...)`). Nothing is compared with that process then: the
+mod-list rules and `kiln.boot` decide alone, as for an older peer. A side `server`/`client` mod on fields no
+side-`both` mod edits does not stop the part.
+
+The server compares the part only when both peers run the same side-`both` mods in the same versions. When the mod
+lists differ, the mod-list rules above decide alone, as before: a missing required mod, a version difference, an
+`optionalMods` entry the player lacks, another version that `versionMatch` accepts, or an extra client mod. One hash
+over all mods cannot honour those rules per mod, so it does not try. Client- and server-side mods in the lists do not stop
+the comparison.
+
+A values mismatch reports **registry boot values differ** with instructions to use the server's modpack/settings and
+restart. It uses the ordinary handshake missing-details/report line: REJECT under `modSync: refuse`, WELCOME warning
+under `warn` (including the default), and no player warning under `off` (the line stays in
+`NetClientHandshakeEvent.Missing`). The values cover the resolved value of every compared field, so when they match the
+player's game runs what the server runs. An order or contribution difference alone (another load order, or a setting
+that a later mod overrides) is then only named in the server's log line for that player (**registry boot edits or load
+order differ**, with the same resulting values); it is never refused, warned about or put in `Missing`. This detects
+data-only registry packs too, without requiring an `OnBoot` override. It does not transfer boot values or rebuild them
+after joining.
+
 ## NPC bodies at the join
 Since 0.2.0-dev.31. An NPC block with a body of its own ([modding/npc-blocks.md](modding/npc-blocks.md)) is built by each
 side's game at its start: model, skeleton, graph and motion sequences. A player whose game built it differently, or not at

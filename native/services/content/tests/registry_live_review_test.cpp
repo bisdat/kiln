@@ -113,6 +113,10 @@ bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v
 bool read_recipe_stacks(const Entry&, uint32_t, std::vector<KilnContentStack>*) { return false; }
 bool nc_is_new(uint32_t, uint32_t) { return false; }
 void nc_pack_add(KilnOwner, uint32_t, const std::string&, const std::string&, ApplyResult*) {}
+// packs.cpp's per-mod rollback of a pack that throws: no new content in this test
+void nc_pack_mark(KilnOwner) {}
+uint32_t nc_pack_rollback(KilnOwner) { return 0; }
+void nc_pack_unmark() {}
 bool is_kitbash_key(const Schema&, const std::string&) { return false; }
 void kitbash(const Schema&, const std::string&, const nlohmann::ordered_json&, const ItemFind&,
              const std::vector<uintptr_t>&, KitbashOut*, uintptr_t) {}
@@ -646,6 +650,7 @@ void lazy_decode_reads_pristine_bytes() {
 }
 
 int main() {
+    g_registry_stack_guard = [](std::string*) { return true; };  // the host has no game code to patch: the guard as on a build that has it
     g_pack_root = std::filesystem::path(std::getenv("KILN_OUT")) / "content-tests/registry-live-review-packs";
     std::vector<std::string> errs;
     g_regmap = std::make_shared<registry::map::RegMap>();

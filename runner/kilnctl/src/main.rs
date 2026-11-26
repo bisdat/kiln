@@ -14,6 +14,7 @@ mod preflight;
 mod profiles;
 mod procs;
 mod regproof;
+mod registry;
 mod report;
 mod run;
 mod server;
@@ -358,6 +359,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ClientCmd,
     },
+    /// The registry stage's plans: status, and a rollback of the next start to the previous (last good) plan
+    Registry {
+        #[command(subcommand)]
+        cmd: RegistryCmd,
+    },
     /// The launcher's mod library ($KILN_DATA_DIR or ~/.local/share/kiln): import, list
     Library {
         #[command(subcommand)]
@@ -414,6 +420,40 @@ enum LibraryCmd {
     Rollback {
         profile: String,
         entry: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RegistryCmd {
+    /// The plan the last start ran on, the previous (last good) plan, a rollback in effect or asked for (read-only)
+    Status {
+        /// Server instance [default: --dir, else the client Steam knows]
+        name: Option<String>,
+        /// A server or client folder
+        #[arg(long, conflicts_with = "name")]
+        dir: Option<PathBuf>,
+    },
+    /// Start the next boot on the previous (last good) registry plan: its mods' edits as they were then, every start
+    /// after it too until --clear. Says what changes back; never touches saves. The start refuses the plan whole (and
+    /// runs the mods' current edits) when one of its mods is not loaded at the plan's version
+    Rollback {
+        /// Server instance [default: --dir, else the client Steam knows]
+        name: Option<String>,
+        /// A server or client folder
+        #[arg(long, conflicts_with = "name")]
+        dir: Option<PathBuf>,
+        /// Roll back to this plan (a hash in kiln/data/content/registry/plans) instead of the previous one
+        #[arg(long)]
+        to: Option<String>,
+        /// Remove the rollback: the next start runs on the mods' current registry edits again
+        #[arg(long, conflicts_with_all = ["to", "dry_run"])]
+        clear: bool,
+        /// Say what would change back; write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Allow a folder inside a Steam library (the real game)
+        #[arg(long)]
+        real: bool,
     },
 }
 
@@ -612,6 +652,14 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
                 LibraryCmd::Rollback { profile, entry } => profiles::rollback(&profile, &entry),
             };
         }
+        Cmd::Registry { cmd } => {
+            return match cmd {
+                RegistryCmd::Status { name, dir } => registry::status(name, dir),
+                RegistryCmd::Rollback { name, dir, to, clear, dry_run, real } => {
+                    registry::rollback(registry::RollbackArgs { name, dir, to, clear, dry_run, real })
+                }
+            };
+        }
         Cmd::Profile { cmd } => {
             return match cmd {
                 ProfileCmd::Create { name, copy_from } => profiles::create(&name, copy_from),
@@ -661,6 +709,8 @@ fn data_use(cmd: &Cmd) -> lock::Use {
         Cmd::Init { .. } | Cmd::Install { .. } | Cmd::Prefix { .. } | Cmd::Preflight { .. } | Cmd::Run { .. } => Use::None,
         Cmd::Start { .. } | Cmd::Stop { .. } | Cmd::Status { .. } | Cmd::Logs { .. } | Cmd::Port { .. } | Cmd::Gate { .. } => Use::None,
         Cmd::List | Cmd::Cmd { .. } | Cmd::TickCompare { .. } | Cmd::Regproof { .. } => Use::None,
+        // the game folder's kiln/state and kiln/data only (a server's or a client's), never the launcher's data root
+        Cmd::Registry { .. } => Use::None,
         Cmd::Deploy { bundle, .. } => if bundle.is_some() { Use::Whole } else { Use::None },
         Cmd::Update { .. } => Use::Part,
         Cmd::Backup { .. } | Cmd::Report { .. } | Cmd::Library { .. } | Cmd::Profile { .. } | Cmd::Client { .. } => Use::Whole,
@@ -732,6 +782,7 @@ mod data_use_tests {
             &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
             &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
             &["regproof", "s"], &["regproof", "--tree", "k", "--new-exe", "x"],
+            &["registry", "status", "s"], &["registry", "rollback", "s"], &["registry", "rollback", "--dir", "/g", "--clear"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

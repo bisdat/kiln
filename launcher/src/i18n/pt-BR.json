@@ -6215,6 +6215,173 @@
       "unknown": "O Kiln não consegue dizer quais arquivos do jogo devolveria: {reason}."
     }
   },
+  "registry": {
+    "title": "Conflitos do registro",
+    "gameUnavailable": "Seleção de jogo indisponível",
+    "noGame": "Nenhum jogo selecionado",
+    "noGameHint": "Escolha um jogo instalado em Configurações para ler o retrato do registro dele.",
+    "sub": "O retrato salvo do registro deste jogo, não dados ao vivo nem uma previsão da próxima inicialização.",
+    "refresh": "Atualizar relatório",
+    "unavailable": "Relatório do registro indisponível",
+    "missing": "Ainda não há relatório do registro",
+    "missingHint": "O Kiln não gravou kiln/state/registry.json para este jogo. Não há retrato do registro para inspecionar.",
+    "stale": "Retrato desatualizado",
+    "staleBody": "{reason} Os valores abaixo pertencem ao retrato salvo, não necessariamente ao mundo ou à lista de mods atuais.",
+    "snapshot": "Retrato",
+    "snapshotSub": "{time} · geração {generation} · {phase}",
+    "baseOrigin": "Origem da base: {origin}",
+    "archiveWriter": "Gravador do arquivo: {writer}",
+    "journal": {
+      "read": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (somente itens, drops e balanceamento: uma entrada de receita ou de saque não é nomeada).",
+      "truncated": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (somente itens, drops e balanceamento: uma entrada de receita ou de saque não é nomeada). O diário está truncado, então um pacote pode ter gravado entradas que ele não nomeia.",
+      "notNamed": "Os pacotes do gravador do arquivo não são nomeados nesta inicialização: {reason}",
+      "none": "o gravador do arquivo desta inicialização não mantém um diário de alterações.",
+      "stale": "o diário de alterações pertence a uma inicialização anterior.",
+      "unreadable": "não foi possível ler o diário de alterações."
+    },
+    "sfPackage": "{id} (pacote do ShroudForge)",
+    "emlPackage": "{id} (pacote do EML)",
+    "archiveUnattributed": "Uma gravação na inicialização que nenhum pacote fez (kiln-eml)",
+    "archiveOp": "Desconhecida (o diário do kiln-eml nomeia a entrada que este pacote gravou, não este campo)",
+    "kind": {
+      "archiveWriter": "Gravou esta entrada antes do Kiln (arquivo)",
+      "drift": "Alterado fora do Kiln"
+    },
+    "unverified": "Mapeamento não verificado",
+    "unverifiedBody": "Alterações de campos podem ser recusadas como Unproven. Leia o motivo de cada recusa.",
+    "certaintyHint": "Certo = o Kiln observou o gravador. Nomeado pelo diário = um pacote do ShroudForge ou EML que o diário de alterações do kiln-eml aponta como tendo gravado a entrada antes do Kiln; a alteração do Kiln prevalece sobre ele. Divergência estimada = o valor do jogo mudou fora do Kiln; os suspeitos são uma pista, não uma prova de quem o gravou nem de que não exista outro gravador.",
+    "partial": "Relatório parcial",
+    "partialRows": {
+      "one": "{count} linha foi omitida pelo relatório nativo ou pelos limites de segurança desta visualização.",
+      "other": "{count} linhas foram omitidas pelo relatório nativo ou pelos limites de segurança desta visualização."
+    },
+    "partialWriters": {
+      "one": "{count} gravador anterior ficou de fora das cadeias de gravadores.",
+      "other": "{count} gravadores anteriores ficaram de fora das cadeias de gravadores."
+    },
+    "partialBody": "Textos e valores de listas também são limitados; este não é o histórico completo.",
+    "empty": "Nenhuma alteração do registro neste retrato",
+    "emptyHint": "O relatório existe e é válido, mas não contém campos, conflitos, recusas nem alterações de entradas.",
+    "refused": "Alterações recusadas",
+    "refusedSub": "Estas alterações não foram aplicadas. RestartRequired exige reiniciar o jogo; Unproven exige um mapeamento verificado no Kiln.",
+    "restart": "Aguarda um reinício",
+    "restartSub": "Um recarregamento ou uma alteração ao vivo mudou estas alterações do registro depois que o jogo iniciou. Elas valem no próximo início do jogo (ou do servidor); até lá o jogo mantém os valores com que iniciou.",
+    "restartCount": {
+      "one": "{count} alteração do registro aguarda um reinício",
+      "other": "{count} alterações do registro aguardam um reinício"
+    },
+    "restartHint": "Reinicie o jogo, ou o servidor, para aplicá-las. Cada motivo diz o que o início fixou.",
+    "plan": {
+      "title": "Plano do registro",
+      "sub": "As alterações com que o último início rodou e o último plano bom antes dele. Uma reversão faz o próximo início rodar nesse plano; os saves não são tocados.",
+      "rollback": "Reverter",
+      "clear": "Remover",
+      "unavailable": "Não foi possível ler os planos do registro",
+      "current": "Plano do último início: {plan}",
+      "previous": "Plano anterior (último bom): {plan}",
+      "none": "nenhum",
+      "lastRollback": "Reversão no último início: {state} (plano {plan}) {reason}",
+      "noLastRollback": "Reversão no último início: nenhuma",
+      "pending": "Pedido de reversão: plano {plan}, pedido {requested} por {by}. O próximo início roda nele.",
+      "noPending": "Pedido de reversão: nenhum",
+      "dryRun": {
+        "one": "No próximo início, o plano {plan} volta {count} valor",
+        "other": "No próximo início, o plano {plan} volta {count} valores"
+      },
+      "targetMods": "Mods desse plano: {mods}",
+      "noMods": "nenhuma alteração do registro",
+      "changesUnknown": "O que volta não é conhecido aqui ({why}); o início lista.",
+      "noChanges": "Nenhum valor volta: os dois planos dão os mesmos valores.",
+      "change": "{field}: {from} → {to}",
+      "noEdit": "nenhuma alteração do registro",
+      "moreChanges": {
+        "one": "… e mais {count} (registry.json lista todas depois do início).",
+        "other": "… e mais {count} (registry.json lista todas depois do início)."
+      },
+      "runningKeeps": "Nada muda num jogo ou servidor que está rodando agora: ele mantém o plano com que iniciou até iniciar de novo.",
+      "refusedWhole": "Nada é gravado até você confirmar. O início recusa o plano inteiro, e usa as alterações atuais dos mods, quando um dos mods dele não está carregado na sua versão, uma das alterações dele é recusada nessa versão do jogo ou ele mudaria o que os saves guardam.",
+      "confirmRollback": "Confirmar reversão",
+      "confirmClear": "Confirmar remoção",
+      "cancel": "Cancelar",
+      "clearTitle": "Remover o pedido de reversão para o plano {plan}",
+      "clearBody": "O próximo início volta a rodar nas alterações atuais do registro dos mods.",
+      "failed": "Não foi possível mudar o pedido de reversão",
+      "requested": "Pedido: o próximo início roda no plano {plan}, assim como cada início seguinte até você removê-lo.",
+      "cleared": "Pedido de reversão removido",
+      "nothingToClear": "Não havia pedido de reversão para remover",
+      "savesUntouched": "Os saves não são tocados. Reinicie o jogo (ou o servidor) para que tenha efeito."
+    },
+    "restartOmitted": {
+      "one": "Mais {count} não é mostrada aqui: state/registry.json lista todas.",
+      "other": "Mais {count} não são mostradas aqui: state/registry.json lista todas."
+    },
+    "noRefused": "Nenhuma alteração recusada no relatório exibido.",
+    "conflicts": "Conflitos e divergências",
+    "conflictsSub": "Vencedores e outros donos como registrados no momento do retrato.",
+    "noConflicts": "Nenhuma linha de conflito no relatório exibido.",
+    "conflictLine": "{kind} · Vencedor: {winner} · Outro dono: {loser}",
+    "fields": "Campos e cadeias de gravadores",
+    "fieldsSub": "Gravadores anteriores primeiro; expanda um campo para ver a base, as operações e o resultado.",
+    "filter": "Filtrar campos ou donos",
+    "noMatch": "Nenhum campo exibido corresponde a este filtro.",
+    "noFields": "Nenhuma linha de campo no relatório exibido.",
+    "entries": "Alterações de entradas",
+    "noEntries": "Nenhuma alteração de entradas.",
+    "added": "Adicionada",
+    "removed": "Removida",
+    "previous": "Anterior",
+    "next": "Próxima",
+    "page": "Página {page} de {pages} · {count} linhas exibidas",
+    "summary": "Vencedor: {winner} · Resultado: {result}",
+    "summaryOmitted": {
+      "one": "{count} gravador anterior omitido",
+      "other": "{count} gravadores anteriores omitidos"
+    },
+    "applies": "Aplica-se: {applies} · Origem da base: {origin}",
+    "baseValue": "Valor base: {value}",
+    "writersOmitted": {
+      "one": "{count} gravador anterior omitido. Só o final mantido da cadeia é exibido.",
+      "other": "{count} gravadores anteriores omitidos. Só o final mantido da cadeia é exibido."
+    },
+    "element": "Elemento: {element}",
+    "operation": "Operação: {operation}",
+    "after": "Depois: {value}",
+    "noWriters": "Nenhuma linha de gravador; a base decide o resultado.",
+    "formula": "Entradas da fórmula (ordem de avaliação): {inputs}",
+    "winner": "Vencedor: {winner}",
+    "result": "Resultado:",
+    "certainty": {
+      "certain": "Certo",
+      "named": "Nomeado pelo diário",
+      "bestEffort": "Divergência estimada",
+      "unknown": "Desconhecido"
+    },
+    "advancedField": "Campo avançado (detalhes ocultos)",
+    "advancedReason": "Campo avançado (detalhes do mapeamento ocultos).",
+    "advancedConflict": "Conflito em um campo avançado; detalhes do mapeamento ocultos.",
+    "unknownField": "{field} (campo desconhecido para este launcher)",
+    "elementHidden": "detalhes do elemento ocultos",
+    "baseOwner": "Base",
+    "noOwner": "Nenhum",
+    "referenceCheck": "Verificação de referências do Kiln",
+    "referenceOp": "Verificação de referências",
+    "fresh": {
+      "clock": "Não é possível verificar o horário do relatório.",
+      "process": "Não é possível verificar o processo atual do jogo.",
+      "stopped": "O jogo não está em execução; este é o último retrato salvo dele.",
+      "previousStart": "O relatório é anterior à inicialização atual do jogo.",
+      "old": "Este retrato tem mais de 24 horas.",
+      "start": "Não é possível verificar a inicialização atual do jogo."
+    },
+    "error": {
+      "tooLarge": "O relatório do registro passa do limite de 8 MiB que esta visualização lê. Abra kiln/state/registry.json na pasta do jogo para lê-lo por inteiro.",
+      "nesting": "Limite de aninhamento do relatório do registro excedido.",
+      "structure": "Limite de estrutura do relatório do registro excedido.",
+      "notJson": "O relatório do registro não é um JSON válido.",
+      "format": "Formato de relatório do registro não suportado (esperado 1).",
+      "malformed": "Relatório do registro inválido ({part})."
+    }
+  },
   "playerStorage": {
     "tab": "Armazenamento",
     "title": "Armazenamento do jogador",

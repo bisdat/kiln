@@ -3,6 +3,7 @@
 #include "registry_live_test.cpp"
 #undef main
 int main() {
+    g_registry_stack_guard = &fake_guard;  // the host has no game code to patch: the guard as on a build that has it
     int failures = 0, entry_checks = 0;
     auto entry_check = [&](bool yes, const char* text) { ++entry_checks; if (!yes) { ++failures; std::printf("FAIL %s\n", text); } };
     std::vector<std::string> errors;
@@ -19,7 +20,7 @@ int main() {
     entry_check(registry_live_status().active == 0, "initializing a definition creates no live transaction");
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"notAField", 99}}, &why), "unknown field refuses the unpublished definition");
     entry_check(why.find("notAField") != std::string::npos, "initialization failure names the Kiln field");
-    entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"block", 0.5}}, &why), "unproven field does not bypass mapping guards");
+    entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"fuel.burnTime", 30}}, &why), "unproven field does not bypass mapping guards");
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"hasDamage", true}}, &why), "read-only initialization is refused");
     Entry sword_clone = *reg(KILN_CONTENT_ITEMS).get(SWORD);
     // The fake config resolver recognizes this id and resolves slots from this clone's own address.
@@ -29,6 +30,10 @@ int main() {
     entry_check(!registry_live_initialize_entry(KILN_CONTENT_ITEMS, sword_clone, "a:sword", {{"manaCost", 1.5}}, &why), "inexact whole-number config refuses the clone");
     entry_check(why.starts_with("not_exact: "), "whole-number refusal keeps the stable reason token");
     g_integer_impacts.clear();
+    // review of registry-rollback: a new entry's own values are no edit of a saved copy (the save checks are for later edits)
+    why.clear();
+    entry_check(registry_live_initialize_entry(KILN_CONTENT_ITEMS, sword_clone, "a:sword", {{"levels.max", 12}}, &why) && at<uint32_t>(0x42000 + 0x14) == 12,
+                ("a new sword like Sword_T2 (levels 10..15) with levels.max 12 is initialized, not refused as a narrower range: " + why).c_str());
     RegistryLive in = *g.in;
     in.added_guid = [](const auto&, const auto&) { return "12345678-1234-5678-9123-123456789abc"; };
     registry::EntryDefinition d;

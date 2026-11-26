@@ -1,0 +1,10 @@
+{
+  "id": "npcspeech-test",
+  "name": "NPC speech lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "NpcSpeechTest.dll",
+  "side": "server",
+  "clients": "none",
+  "description": "Lab driver for Kiln.Npcs (docs/kiln/services/npc-speech.md): the console command npcspeech-test say|replace|suppress|clear|stop|status <entity> runs one call and replies with its result; tools/nettest/npcspeechtest.py checks what Kiln peers are sent on kiln:npcspeech and that a vanilla peer gets nothing."
+}

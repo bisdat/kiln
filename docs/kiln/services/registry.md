@@ -10,6 +10,14 @@ owner-bound staged IR, stage callbacks, ready notifications and the current repo
 then alter, then final, in Host load order. Successful callback turns are retained for later live recomposition; no
 native callback or mod assembly is invoked again by a pack reload.
 
+The existing `schema_json` member also exposes each field's additive `joinedClient` marker, separate from `applies`
+([visibility values](../modding/registries/README.md#what-a-joined-client-sees)). After start it includes `bootSync` with
+full SHA-256 `values` and `order` hashes of client-needed boot registry edits (left out when this start could not apply
+them as asked: [join compatibility](../network.md#registry-boot-values-and-order)). The same immutable snapshot is in the
+registry report; it is not affected by report caps or later live layers. The Host reads the small schema snapshot for
+join fingerprints rather than loading the entire writer report. These are additive JSON members; the table and
+field-info ABI layouts are unchanged. [Join compatibility](../network.md#registry-boot-values-and-order)
+
 Owner revocation removes queued work and callbacks. Already-taken start-time edits remain until the next start.
 Callbacks already in flight are not waited for; their function and user state must remain valid until they return.
 A faulted stage turn is dropped; a fault in either callback kind removes its subscription.
@@ -99,7 +107,8 @@ lacks, an inexact whole-number value) is refused alone and counted, the rest app
 has two refusal boundaries: any entry-operation refusal commits none of its valid fields, and a binding or evaluation
 refusal of any field takes the whole candidate back. Field-only parse/mapping/composition-conflict/restart-field refusals
 remain per edit: valid live fields in that draft may still commit. A candidate's own failed write takes it back too;
-an unproved take-back is **Unverified**, not success.
+an unproved take-back is **Unverified**, not success. A failed write is whole-change at an entry point as well: per entry
+refusals are for binding and evaluation, which happen before anything is written.
 
 Cost storage is checked per entry on the running build. A fractional mana/stamina cost for an entry with whole-number
 storage is refused, never rounded; float-config entries keep fractional values. A Manual transaction's result uses
@@ -115,7 +124,7 @@ applied. A retained change that cannot apply at a later application (a binding o
 one of its own slots) is inactive for that world only: its handle stays valid, a Mod load change is tried again in the next
 world, and the report names its mod. A failed write is charged to the change that owns the slot, never to another change,
 an unrelated pack edit or a committing candidate's own failure. The current wording is “another
-writer”; naming a ShroudForge runtime package needs the later owner-write journal integration. From the next release the
+writer”; naming a ShroudForge runtime package needs the later owner-write journal integration. Since 0.2.0-dev.31.17 the
 field's row in `registry.json` also gets a best-effort `drift` writer naming the suspects Kiln can see (the drift probe,
 [registries guide](../modding/registries/README.md#who-else-wrote-a-field)). This is not a promise to identify arbitrary
 DLL writes.

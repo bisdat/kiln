@@ -71,6 +71,10 @@ inline void refuse_unmapped_edits(const map::RegMap& rm, const Schema& schema, B
             continue;
         }
         Refusal r{b->mod, b->source, b->stage, e.n, reason, ""};
+        // the place, as compose's refusals name it (the join's registry part asks which field a refusal hit: stage.cpp finish)
+        r.registry = e.registry;
+        r.raw = !e.element.on && e.field.empty() && !e.raw.empty();
+        r.field = e.element.on || !e.field.empty() ? e.field : r.raw ? e.raw.front().path : "";
         if (e.entry == EntryOp::Add) r.entry = e.registry + "|" + unmapped_lower(e.add_id);
         refused->push_back(std::move(r));
     }

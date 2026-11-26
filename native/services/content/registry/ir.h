@@ -72,10 +72,22 @@ struct FieldSpec {
 // "inputs[3].count" and "inputs[*].count" as the schema names them: "inputs[].count".
 std::string generic_path(const std::string& path);
 
+// One breaking step of a registry schema's versions and its id migration (schema/registry/migrations/<registry>-<from>-<to>.json,
+// generated into schema.g.h): Kiln ids and field paths, old -> new.
+struct Migration {
+    std::string from, to;
+    std::map<std::string, std::string> ids, fields;
+};
+
 struct RegistrySpec {
     std::string name;
     std::string version;  // the registry schema's "version" ("1.0.0"): registry.json "schema.registries"
     std::map<std::string, FieldSpec> fields;
+    // The id migrations of its breaking steps, oldest first. parse_batch reads every edit through them before it is matched:
+    // a field path this schema does not have, and a Kiln id (selected, a "like", a reference value), that a step renames is read
+    // as its new name, through every later step too. Old names are never reused (ids.lock.json), so this is right whatever
+    // schema version the edit was written for; a name the schema has is never renamed.
+    std::vector<Migration> migrations;
     bool add = true, remove = true;
     bool raw = false;  // "raw": "allowed": edits may name the game's member paths (the Advanced tier, D5)
     // A field by its path; an element's index ("[3]", "[*]") reads as "[]": "inputs[2].count" is "inputs[].count".
@@ -196,6 +208,9 @@ struct Batch {
     std::string mod, mod_version, source;
     Stage stage = Stage::Alter;
     std::vector<Edit> edits;
+    // What the schemas' id migrations changed in this batch's edits ("#2: items.stackSize -> items.maxStack (items schema
+    // 0.1.0 -> 0.2.0)"): for kiln.log and registry.json "migrated". Not IR.
+    std::vector<std::string> migrated;
 };
 
 struct Refusal {
@@ -221,6 +236,11 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
 // checked as parse_batch checks it (refusals in *refused).
 bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,
                    std::vector<Batch>* out, std::vector<Refusal>* refused, std::string* err);
+
+// The IR document of a batch, as parse_batch reads it back: the same edits, ordinals, selectors, values and flags (the
+// Kiln-internal Selector::except and Edit::per_entry are not IR and are left out). The stage keeps a start's lowered edits in
+// its plan with it (the plan a rollback starts on, stage.h).
+json batch_json(const Batch& b);
 
 // Today's numeric operation on a value (packs.cpp parse_value's order): the base for a relative op. Integer fields round.
 // false + *why: the result is not finite, or past what a whole-number field holds (checked before any rounding).

@@ -262,6 +262,18 @@
         },
         "lengthOffset": {
           "type": "integer"
+        },
+        "joinedClient": {
+          "enum": [
+            "now",
+            "worldLoad",
+            "rejoin",
+            "restart",
+            "serverOnly",
+            "localOnly",
+            "unknown"
+          ],
+          "description": "Separate from local applies: when a joined Kiln client can consume a server edit. unknown: no proven promise; localOnly: client authors it itself; serverOnly: no client copy required."
         }
       }
     }

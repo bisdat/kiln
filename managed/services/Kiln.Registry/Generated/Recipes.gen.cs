@@ -18,23 +18,23 @@ public sealed partial class RecipeEntry : IRegistryEntry
     public string Registry => "recipes";
 
     /// <summary>What one craft takes: an item or an input category, and a count.</summary>
-    [RegistryField("recipes.inputs", RegistryApplies.Now)]
+    [RegistryField("recipes.inputs", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryEntryList<RecipeInput> Inputs => new(_c, RecipeFields.Inputs, static (c, i) => new RecipeInput(c, i), static (c, i) => RegistryCells.Snapshot(c, i, RecipeFields.InputsElement));
 
     /// <summary>What one craft makes.</summary>
-    [RegistryField("recipes.outputs", RegistryApplies.Now)]
+    [RegistryField("recipes.outputs", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryEntryList<RecipeOutput> Outputs => new(_c, RecipeFields.Outputs, static (c, i) => new RecipeOutput(c, i), static (c, i) => RegistryCells.Snapshot(c, i, RecipeFields.OutputsElement));
 
     /// <summary>How long a station takes for one craft.</summary>
-    [RegistryField("recipes.duration", RegistryApplies.Now)]
+    [RegistryField("recipes.duration", RegistryApplies.Now, JoinedClient = "now")]
     public global::System.TimeSpan Duration { get => RegistryCells.Time(_c, RecipeFields.Duration, _i); set => RegistryCells.Set(_c, RecipeFields.Duration, _i, value); }
 
     /// <summary>When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's).</summary>
-    [RegistryField("recipes.unlock", RegistryApplies.Now)]
+    [RegistryField("recipes.unlock", RegistryApplies.Now, JoinedClient = "localOnly")]
     public RecipeUnlockMode Unlock { get => (RecipeUnlockMode)RegistryCells.Enum(_c, RecipeFields.Unlock, _i, RecipeUnlockModeNames.All); set => RegistryCells.SetEnum(_c, RecipeFields.Unlock, _i, RecipeUnlockModeNames.All, (int)value); }
 
     /// <summary>The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start.</summary>
-    [RegistryField("recipes.station", RegistryApplies.Restart)]
+    [RegistryField("recipes.station", RegistryApplies.Restart, JoinedClient = "serverOnly")]
     public RegistryId Station => RegistryCells.Id(_c, RecipeFields.Station, _i);
 }
 
@@ -50,15 +50,15 @@ public sealed partial class RecipeInput
     public int Index => _i;
 
     /// <summary>The item; absent when the input is a category.</summary>
-    [RegistryField("recipes.inputs[].item", RegistryApplies.Now)]
+    [RegistryField("recipes.inputs[].item", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryId? Item { get => RegistryCells.OptionalId(_c, RecipeFields.InputsItem, _i); set => RegistryCells.SetOptional(_c, RecipeFields.InputsItem, _i, value); }
 
     /// <summary>An input category (any item of it); absent when the input is an item.</summary>
-    [RegistryField("recipes.inputs[].category", RegistryApplies.Now)]
+    [RegistryField("recipes.inputs[].category", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryId? Category { get => RegistryCells.OptionalId(_c, RecipeFields.InputsCategory, _i); set => RegistryCells.SetOptional(_c, RecipeFields.InputsCategory, _i, value); }
 
     /// <summary>How many of the item or category one craft takes.</summary>
-    [RegistryField("recipes.inputs[].count", RegistryApplies.Now)]
+    [RegistryField("recipes.inputs[].count", RegistryApplies.Now, JoinedClient = "now")]
     public int Count { get => RegistryCells.Int(_c, RecipeFields.InputsCount, _i); set => RegistryCells.Set(_c, RecipeFields.InputsCount, _i, value); }
 }
 
@@ -74,11 +74,11 @@ public sealed partial class RecipeOutput
     public int Index => _i;
 
     /// <summary>The item one craft makes.</summary>
-    [RegistryField("recipes.outputs[].item", RegistryApplies.Now)]
+    [RegistryField("recipes.outputs[].item", RegistryApplies.Now, JoinedClient = "now")]
     public RegistryId Item { get => RegistryCells.Id(_c, RecipeFields.OutputsItem, _i); set => RegistryCells.Set(_c, RecipeFields.OutputsItem, _i, value); }
 
     /// <summary>How many of the item one craft makes.</summary>
-    [RegistryField("recipes.outputs[].count", RegistryApplies.Now)]
+    [RegistryField("recipes.outputs[].count", RegistryApplies.Now, JoinedClient = "now")]
     public int Count { get => RegistryCells.Int(_c, RecipeFields.OutputsCount, _i); set => RegistryCells.Set(_c, RecipeFields.OutputsCount, _i, value); }
 }
 

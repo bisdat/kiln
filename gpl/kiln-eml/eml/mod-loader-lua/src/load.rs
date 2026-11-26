@@ -241,7 +241,26 @@ pub fn create_backup_with(
             anyhow::bail!("create_backup: backup pair {bak_path} and {resources} does not match the seal Kiln recorded for the game's own files; verify the game files in Steam, then start through Kiln again");
         }
     }
-    if retake || !bak_path.exists() || !validate_backup(path, bak_path) {
+    let mut usable = !retake && bak_path.exists() && validate_backup(path, bak_path);
+    // kiln-eml (stale game data, 0.2.0-dev.31.16): a pair that passes every check above is still not the game's own
+    // when an earlier start took it of game files another loader had patched (HadToRegister, 2026-11-26: Auto Loot
+    // Plus's auto-smash program, weeks after the mod was removed). Steam's manifest of the installed build says whether
+    // it is Steam's. A pair it lists otherwise is refused only where it is proven to carry a mod's changes; beside game
+    // files Steam lists as they are, those are the new clean copy; otherwise it is used as before, with the doubt said
+    // (review: an appmanifest naming a build whose files are not in the folder must not stop every EML mod).
+    if usable {
+        match judge(path, bak_path, true) {
+            Verdict::Own => {}
+            Verdict::Doubt(why) => warn!("{}", doubt_words(stem, &why)),
+            Verdict::Proven(why) => anyhow::bail!("{}", stale_words(stem, &why)),
+            Verdict::SteamsFiles(why) => {
+                warn!("The vanilla backup {bak_path} is not the installed build's own ({why}): it is set aside and a new \
+                       backup is taken from the game files");
+                usable = false;
+            }
+        }
+    }
+    if !usable {
         // kiln-eml (0.2.0-dev.31.13): a new working baseline is taken from the game files (none yet, one of another game
         // build, or a stale one). Where Steam's manifest of the installed build is there, it says whether they are the
         // files Steam installed; files it does not list as they are were changed by some program since, and are never
@@ -264,6 +283,13 @@ pub fn create_backup_with(
             crate::progress::human(size(path) + size(&live))
         );
         load_kfc_file(path).context("create_backup")?;
+        // kiln-eml (review of the stale-game-data fix): a pair that is replaced (another build's, one built over the game's
+        // header, one that is not the installed build's own) is set aside, never overwritten
+        if let Some(kept) = set_aside_backups(root.as_std_path(), stem)
+            .with_context(|| format!("create_backup: could not set the old backups of {path} aside"))?
+        {
+            warn!("The old vanilla backup pair was set aside in {}", kept.display());
+        }
         // Snapshot resources before committing the matching header backup. Existing EML-only backups may lack this.
         let resources = path.with_extension("kfc_resources");
         let resources_backup = path.with_extension("kfc_resources.bak");
@@ -331,6 +357,16 @@ pub(crate) fn restore_backup_as(
 
     let root = path.parent().ok_or(())?;
     let stem = path.file_stem().ok_or(())?;
+    // kiln-eml (stale game data): a backup proven to carry a mod's changes never goes back over the game files; one
+    // Steam's manifest only does not vouch for goes back as before, with the doubt said
+    match judge(path, bak_path, false) {
+        Verdict::Own | Verdict::SteamsFiles(_) => {}
+        Verdict::Doubt(why) => warn!(path = ?path, backup_path = ?bak_path, "{}", doubt_words(stem, &why)),
+        Verdict::Proven(why) => {
+            warn!(path = ?path, backup_path = ?bak_path, "{}", stale_words(stem, &why));
+            return Err(());
+        }
+    }
     // kiln-eml: the backup goes live only when every container it lists is there at its size (the game refuses to start
     // on a container of another size): a backup that does not describe the game's data files is never put back.
     let base = KFCFile::from_path(bak_path, false).map_err(|_| ())?;
@@ -375,6 +411,172 @@ pub(crate) fn restore_backup_as(
         tracing::warn!(%error, "The vanilla data is back; container files EML had added were left in place");
     }
     Ok(())
+}
+
+/// kiln-eml (stale game data): the plain words a refusal of a working baseline that is not the game's own begins with
+/// (Kiln's launcher looks for them; Kiln's ShroudForge fork says the same, `verify_working_baseline.rs`).
+pub const STALE_WORDS: &str = "still contain changes from a mod that isn't installed";
+
+/// kiln-eml (stale game data): programs that known mods create and that are never in the game's own data: a backup that
+/// holds one is not the game's own, also where no Steam manifest is there to say so (the same list as the fork's).
+const KNOWN_LEFTOVERS: [(&str, &str); 2] = [
+    (
+        "a5c0de5a-1e00-4d0d-9a11-0000000a5000",
+        "Auto Loot Plus's auto-smash program (it breaks props within 15 m of the player every second)",
+    ),
+    ("a5c0de5a-1e00-4d0d-9a11-0000000a5002", "Auto Loot Plus's auto-smash aura"),
+];
+
+/// kiln-eml (stale game data): the first known leftover the archive `header` lists, in words with its resource id.
+pub(crate) fn leftover(header: &KFCFile) -> Option<String> {
+    KNOWN_LEFTOVERS.iter().find_map(|(guid, what)| {
+        let wanted = kfc::guid::Guid::parse(guid)?;
+        header.resources().keys().iter().any(|id| id.guid() == wanted).then(|| format!("{what}, resource {guid}"))
+    })
+}
+
+/// kiln-eml (stale game data): what Steam's manifest of the installed build says about the working baseline.
+enum Verdict {
+    /// Steam lists it byte for byte, or no manifest is there and it holds no known leftover.
+    Own,
+    /// Steam lists other bytes, and nothing in it shows a mod's changes (why): it is used as before, with that said.
+    Doubt(String),
+    /// It is proven to carry a mod's changes (why): a known mod's program, or a resource file that is Steam's own with
+    /// more data after it. Nothing is built from it and it never goes back.
+    Proven(String),
+    /// Steam lists other bytes, and the game's files as they are (why): those are the new clean copy.
+    SteamsFiles(String),
+}
+
+/// kiln-eml (stale game data): what the working baseline `bak` of the game archive `path` is, by Steam's manifest of the
+/// installed build (see [`Verdict`]). `live_may_be_taken`: the game's files may become the new clean copy (a backup is
+/// being made), so Steam's word on them is asked too. Reads both backups (SHA-1) where a manifest lists them at their
+/// size; the game's files only when a manifest lists other bytes for the backups and they may be taken; the resource
+/// backup's first bytes once more only when it is longer than Steam's resource file. Kiln's ShroudForge fork decides
+/// the same way (`verify_working_baseline.rs` `proven`).
+fn judge(path: &Path, bak: &Path, live_may_be_taken: bool) -> Verdict {
+    use crate::steam_files::{self, Installed};
+    let (Some(root), Some(stem)) = (path.parent(), path.file_stem()) else { return Verdict::Own };
+    let std_root = root.as_std_path();
+    let held = || KFCFile::from_path(bak, false).ok().as_ref().and_then(leftover).map(|found| format!("it holds {found}"));
+    match steam_files::installed_backups(std_root, stem) {
+        Installed::Same { .. } => Verdict::Own,
+        Installed::Unknown(_) => held().map_or(Verdict::Own, Verdict::Proven),
+        Installed::Differs { build, what } => {
+            let steam = format!("{what} for {}", Installed::build_words(&build));
+            if live_may_be_taken && let Installed::Same { build } = steam_files::installed_files(std_root, stem) {
+                return Verdict::SteamsFiles(format!(
+                    "{steam}; Steam's manifest of {} lists the game's files as they are",
+                    Installed::build_words(&build)
+                ));
+            }
+            // the resource backup is Steam's resource file of the installed build with more after it: a writer appended
+            let appended = || {
+                let (_, [_, listed]) = steam_files::listed_files(std_root, stem)?;
+                let resources = path.with_extension("kfc_resources.bak");
+                steam_files::extends(resources.as_std_path(), &listed).ok()?.then(|| {
+                    let more = std::fs::metadata(&resources).map_or(0, |m| m.len()).saturating_sub(listed.size);
+                    format!(
+                        "its {stem}.kfc_resources.bak is the {stem}.kfc_resources Steam installed for {} with {more} bytes \
+                         more after it (a mod's resources)",
+                        Installed::build_words(&build)
+                    )
+                })
+            };
+            match held().or_else(appended) {
+                Some(proof) => Verdict::Proven(format!("{steam}; {proof}")),
+                None => Verdict::Doubt(steam),
+            }
+        }
+    }
+}
+
+/// kiln-eml (stale game data): the plain words and what the player does, first in every refusal of stale game data.
+fn stale_lead(stem: &str) -> String {
+    if stem == "enshrouded_server" {
+        format!("Your server files {STALE_WORDS}. Update the server files with SteamCMD's validate (app_update 2278520 validate), then start again.")
+    } else {
+        format!("Your game files {STALE_WORDS}. Verify the game files in Steam (Properties > Installed Files > Verify integrity), then start again.")
+    }
+}
+
+/// kiln-eml (stale game data, review): the refusal of game files that would become the working baseline and hold a known
+/// mod's program (`found`, in words).
+pub(crate) fn stale_live_words(stem: &str, found: &str) -> String {
+    format!(
+        "{} (the game's current files hold {found}, so Kiln takes no clean copy of the game data from them, and nothing \
+         was changed.)",
+        stale_lead(stem)
+    )
+}
+
+/// kiln-eml (stale game data): the refusal of a working baseline proven to carry a mod's changes: the plain words and
+/// what the player does first (Kiln's launcher cuts long words), then why.
+pub(crate) fn stale_words(stem: &str, why: &str) -> String {
+    let what = stale_lead(stem);
+    format!(
+        "{what} (Kiln's clean copy of the game data, {stem}.kfc.bak, {stem}.kfc_resources.bak and {stem}.kfc.bak.integrity, \
+         is not the game's own: {why}. Kiln neither builds the game data from it nor puts it back, and nothing was \
+         changed.)"
+    )
+}
+
+/// kiln-eml (stale game data, review): what a start says when it uses a working baseline Steam's manifest does not vouch
+/// for while nothing in it shows a mod's changes: why, and the one thing the player does if a removed mod still acts.
+fn doubt_words(stem: &str, why: &str) -> String {
+    let cure = if stem == "enshrouded_server" {
+        "update the server files with SteamCMD's validate (app_update 2278520 validate)"
+    } else {
+        "verify the game files in Steam (Properties > Installed Files > Verify integrity)"
+    };
+    format!(
+        "Steam's manifest does not list Kiln's clean copy of the game data ({stem}.kfc.bak, {stem}.kfc_resources.bak) as \
+         the installed build's own ({why}), but nothing in it shows a mod's changes, so it is used as before. If a mod you \
+         removed still acts in the game, {cure}, then start again"
+    )
+}
+
+/// kiln-eml (review of the stale-game-data fix): the working baseline of `stem` (`<stem>.kfc.bak`, its resource backup and
+/// its seal, those of them that are there) moved out of the game folder into a generation of its own under
+/// `kiln/eml/backups/outdated/<stem>/`, before a new pair takes their names: replaced pairs are set aside, never
+/// overwritten. The header backup goes first, so a start interrupted in between finds no header backup and takes the
+/// pair anew (what is left of the old one is set aside then). Only the generation just made is kept (the disk holds at
+/// most one old pair). None when there was nothing to move.
+fn set_aside_backups(root: &std::path::Path, stem: &str) -> std::io::Result<Option<std::path::PathBuf>> {
+    crate::ownership::check_stem(stem)?;
+    let names = [format!("{stem}.kfc.bak"), format!("{stem}.kfc_resources.bak"), format!("{stem}.kfc.bak.integrity")];
+    let mut found = Vec::new();
+    for name in &names {
+        let from = root.join(name);
+        match std::fs::symlink_metadata(&from) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+            Ok(m) if m.is_file() => found.push(name),
+            Ok(_) => return Err(std::io::Error::other(format!("{name} is not a regular file"))),
+        }
+    }
+    if found.is_empty() {
+        return Ok(None);
+    }
+    let parent = root.join("kiln/eml/backups/outdated").join(stem);
+    let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let kept = parent.join(format!("{seconds}-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+    crate::ownership::checked_path(root, &kept)?;
+    std::fs::create_dir_all(&kept)?;
+    crate::ownership::checked_path(root, &kept)?;
+    for name in found {
+        std::fs::rename(root.join(name), kept.join(name))?;
+    }
+    crate::transaction::sync_dir(&kept)?;
+    crate::transaction::sync_dir(root)?;
+    // the generations set aside before this one go: at most one old pair is kept
+    for entry in std::fs::read_dir(&parent)?.flatten() {
+        let older = entry.path();
+        if older != kept && entry.file_type().is_ok_and(|t| t.is_dir()) {
+            let _ = std::fs::remove_dir_all(&older);
+        }
+    }
+    Ok(Some(kept))
 }
 
 /// kiln-eml: the seal is there, and the backups' lengths are not the ones it recorded (a game update changes the header
@@ -990,6 +1192,165 @@ mod kiln_tests {
         rewrite(&dir, "updated fixture", b"content another program wrote");
         assert!(format!("{:#}", create_backup(&kfc).unwrap_err()).contains("are not the files Steam installed"));
         assert!(!dir.join("g.kfc.bak").exists() && !dir.join("g.kfc_resources.bak").exists());
+        std::fs::remove_dir_all(library).unwrap();
+    }
+    // kiln-eml (stale game data, HadToRegister 2026-11-26): a working baseline that an earlier start (with no Steam proof
+    // yet) took of game files another loader had already patched (Auto Loot Plus's auto-smash program), sealed, and
+    // built over at every start since. Its seal and its containers are right and the live header is built over it:
+    // only Steam's manifest tells that it is not the game's own. Nothing is built from it and it is not restored; the
+    // start says in plain words what the player does, and nothing changes. After Steam's file check the next start
+    // takes Steam's files as the new clean copy.
+    #[test]
+    fn a_backup_that_carries_a_mods_changes_is_neither_built_from_nor_restored() {
+        use kfc::guid::ContentHash;
+        let (library, dir) = library_fixture("stale-copy");
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        let steams = steam_lists(&library, &dir, "26430625");
+        // another loader writes a mod into the game files (Auto Loot Plus's auto-smash program, the resource its Lua part
+        // creates)
+        let types = program_types();
+        other_loader_writes_resource(&dir, "a5c0de5a-1e00-4d0d-9a11-0000000a5000", b"the auto-smash program");
+        // an earlier start's first backup of them, sealed
+        std::fs::copy(&kfc, &bak).unwrap();
+        std::fs::copy(dir.join("g.kfc_resources"), dir.join("g.kfc_resources.bak")).unwrap();
+        write_backup_seal(&kfc, &bak).unwrap();
+        // and its run over that backup
+        let base = Rc::new(KFCFile::from_path(&bak, false).unwrap());
+        let mut patch = create_writer(&dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"today's mods"), b"today's mods").unwrap();
+        patch.finalize().unwrap();
+        assert!(crate::ownership::owns_output(dir.as_std_path(), "g").unwrap());
+        let names = ["g.kfc", "g.kfc_resources", "g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"];
+        let before: Vec<Vec<u8>> = names.iter().map(|n| std::fs::read(dir.join(n)).unwrap()).collect();
+
+        let error = format!("{:#}", create_backup(&kfc).unwrap_err());
+        assert!(error.contains("Your game files still contain changes from a mod that isn't installed. Verify the game \
+            files in Steam (Properties > Installed Files > Verify integrity), then start again."), "{error}");
+        assert!(error.contains("g.kfc.bak has "), "{error}");
+        assert!(error.contains("Auto Loot Plus's auto-smash program"), "the leftover is named: {error}");
+        assert_eq!(error.matches("Verify the game files").count(), 1, "one way out: {error}");
+        assert!(!error.contains("move those three files"), "and no second one: {error}");
+        assert!(restore_backup(&kfc).is_err(), "nor is it restored");
+        for (name, bytes) in names.iter().zip(&before) {
+            assert_eq!(&std::fs::read(dir.join(name)).unwrap(), bytes, "{name} stays as it was");
+        }
+        // Steam's file check: the next start takes Steam's files as the new clean copy
+        std::fs::write(&kfc, &steams.0).unwrap();
+        std::fs::write(dir.join("g.kfc_resources"), &steams.1).unwrap();
+        let bak = create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), steams.0);
+        assert_eq!(std::fs::read(dir.join("g.kfc_resources.bak")).unwrap(), steams.1);
+        // review: the old pair is set aside, not overwritten
+        let kept = set_aside_generations(&dir);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(std::fs::read(kept[0].join("g.kfc.bak")).unwrap(), before[2]);
+        assert_eq!(std::fs::read(kept[0].join("g.kfc_resources.bak")).unwrap(), before[3]);
+        assert_eq!(std::fs::read(kept[0].join("g.kfc.bak.integrity")).unwrap(), before[4]);
+        std::fs::remove_dir_all(library).unwrap();
+    }
+    /// kiln-eml (review of the stale-game-data fix): the one resource type the tests' resources are bundled under.
+    const PROGRAM_TYPE: u32 = 0x5a5a_5a5a;
+    fn program_types() -> Rc<TypeRegistry> {
+        Rc::new(serde_json::from_str(&format!(
+            r#"{{"version":"test","types":[{{"index":0,"name":"Program","impactName":"Program","qualifiedName":"Program",
+            "size":0,"alignment":0,"elementAlignment":0,"fieldCount":0,"primitiveType":"NONE","flags":"",
+            "nameHash":1,"impactHash":1,"qualifiedHash":{PROGRAM_TYPE},"internalHash":7}}]}}"#
+        )).unwrap())
+    }
+    /// kiln-eml (review): another program (no Kiln receipt) writes the resource `guid` into the game files over them.
+    fn other_loader_writes_resource(dir: &PathBuf, guid: &str, data: &[u8]) {
+        let base = Rc::new(KFCFile::from_path(dir.join("g.kfc"), false).unwrap());
+        let mut writer: crate::transaction::Writer =
+            KFCWriter::new_incremental_with_options(dir, "g", base, program_types(), KFCWriteOptions::default()).unwrap();
+        let id = kfc::guid::ResourceId::new(kfc::guid::Guid::parse(guid).unwrap(), PROGRAM_TYPE, 0);
+        writer.write_resource(&id, data).unwrap();
+        writer.finalize().unwrap();
+    }
+    /// kiln-eml (review): the pairs a retake set aside (`kiln/eml/backups/outdated/g/<generation>`).
+    fn set_aside_generations(dir: &PathBuf) -> Vec<PathBuf> {
+        std::fs::read_dir(dir.join("kiln/eml/backups/outdated/g"))
+            .map(|entries| entries.map(|e| PathBuf::from_path_buf(e.unwrap().path()).unwrap()).collect())
+            .unwrap_or_default()
+    }
+    /// kiln-eml (review of the stale-game-data fix): Steam's manifest of the installed build lists other bytes than the
+    /// working baseline has, and nothing in it shows a mod's changes (Steam's appmanifest names a build whose files are
+    /// not the ones in the folder: an update it has not finished, a folder copied from another PC). Refusing there would
+    /// stop every EML mod on a guess, and Steam's file check may not cure it: the pair is used and restored as before.
+    #[test]
+    fn a_backup_steam_does_not_vouch_for_is_used_as_before_when_nothing_in_it_shows_a_mods_changes() {
+        use kfc::guid::ContentHash;
+        let (library, dir) = library_fixture("doubt");
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        create_backup(&kfc).unwrap();
+        let types = Rc::new(TypeRegistry::default());
+        let base = Rc::new(KFCFile::from_path(&bak, false).unwrap());
+        let mut patch = create_writer(&dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"today's mods"), b"today's mods").unwrap();
+        patch.finalize().unwrap();
+        // Steam's appmanifest names another build, whose files are not in the folder
+        let (other_library, other) = library_fixture("doubt-other");
+        rewrite(&other, "fixture", b"content of the build Steam names");
+        let (k, r) = (std::fs::read(other.join("g.kfc")).unwrap(), std::fs::read(other.join("g.kfc_resources")).unwrap());
+        crate::steam_files::fixture::install_steam_records(library.join("steamapps").as_std_path(), "26430625",
+            &[("g.kfc", &k), ("g.kfc_resources", &r)]);
+        let names = ["g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"];
+        let before: Vec<Vec<u8>> = names.iter().map(|n| std::fs::read(dir.join(n)).unwrap()).collect();
+        assert_eq!(create_backup(&kfc).unwrap(), bak);
+        for (name, bytes) in names.iter().zip(&before) {
+            assert_eq!(&std::fs::read(dir.join(name)).unwrap(), bytes, "{name} stays as it was");
+        }
+        assert!(restore_backup(&kfc).is_ok(), "and it is restored as before");
+        assert_eq!(std::fs::read(&kfc).unwrap(), before[0]);
+        std::fs::remove_dir_all(library).unwrap();
+        std::fs::remove_dir_all(other_library).unwrap();
+    }
+    /// kiln-eml (review): a game update whose header Steam built over the previous one (it only appended) leaves a sealed
+    /// pair the game's files are built over, of the previous build; Steam's manifest lists the game's files as they are:
+    /// they are the new clean copy (as Kiln's ShroudForge fork takes them), and the old pair is set aside.
+    #[test]
+    fn a_backup_of_the_previous_build_under_files_steam_installed_is_set_aside_and_retaken() {
+        let (library, dir) = library_fixture("appended-update");
+        let kfc = dir.join("g.kfc");
+        create_backup(&kfc).unwrap();
+        let names = ["g.kfc.bak", "g.kfc_resources.bak", "g.kfc.bak.integrity"];
+        let old: Vec<Vec<u8>> = names.iter().map(|n| std::fs::read(dir.join(n)).unwrap()).collect();
+        // the update appends to the game's own archive, and Steam lists the result
+        other_loader_writes_resource(&dir, "5eed0000-0000-4000-8000-000000000001", b"a resource of the new build");
+        let steams = steam_lists(&library, &dir, "26430626");
+        create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(dir.join("g.kfc.bak")).unwrap(), steams.0, "the new clean copy is Steam's");
+        assert_eq!(std::fs::read(dir.join("g.kfc_resources.bak")).unwrap(), steams.1);
+        let kept = set_aside_generations(&dir);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        for (name, bytes) in names.iter().zip(&old) {
+            assert_eq!(&std::fs::read(kept[0].join(name)).unwrap(), bytes, "{name} is set aside");
+        }
+        std::fs::remove_dir_all(library).unwrap();
+    }
+    /// kiln-eml (review): a working baseline whose resource file is the one Steam installed with more data after it (an
+    /// archive writer only appends there) carries a mod's changes even when the mod is none Kiln knows by name: refused,
+    /// and the refusal says what proves it.
+    #[test]
+    fn a_backup_whose_resource_file_is_steams_with_more_after_it_is_refused() {
+        use kfc::guid::ContentHash;
+        let (library, dir) = library_fixture("extended");
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        other_loader_writes_resource(&dir, "5eed0000-0000-4000-8000-000000000001", b"a resource of the game's own");
+        steam_lists(&library, &dir, "26430625");
+        other_loader_writes_resource(&dir, "0dd00000-0000-4000-8000-000000000002", b"a resource some mod made");
+        std::fs::copy(&kfc, &bak).unwrap();
+        std::fs::copy(dir.join("g.kfc_resources"), dir.join("g.kfc_resources.bak")).unwrap();
+        write_backup_seal(&kfc, &bak).unwrap();
+        let types = program_types();
+        let base = Rc::new(KFCFile::from_path(&bak, false).unwrap());
+        let mut patch = create_writer(&dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"today's mods"), b"today's mods").unwrap();
+        patch.finalize().unwrap();
+        let error = format!("{:#}", create_backup(&kfc).unwrap_err());
+        assert!(error.contains("Your game files still contain changes from a mod that isn't installed."), "{error}");
+        assert!(error.contains("its g.kfc_resources.bak is the g.kfc_resources Steam installed for build 26430625 with"),
+            "{error}");
+        assert!(restore_backup(&kfc).is_err());
         std::fs::remove_dir_all(library).unwrap();
     }
     #[test]

@@ -269,8 +269,9 @@ bool scalar_of(const json& j, FieldType type, const FieldSpec& f, Value* out, st
                 if (f.optional) return *out = Value{}, true;
                 return *err = f.name + ": a reference that is not optional cannot be cleared (null)", false;
             }
-            // TODO(S5): an id named as a value (a perk, an item of a recipe) is not checked to exist here; S5's model refuses one
-            // that names no entry (per edit, at composition).
+            // An id named as a value (a perk, an item of a recipe) is only checked for its shape here. Composition refuses a
+            // mod id that names no entry (compose.cpp check_references), and the back-end refuses a game id this build or
+            // world lacks when it writes (registry_live.cpp id_num), per edit.
             if (!j.is_string() || j.get<std::string>().find(':') == std::string::npos)
                 return *err = f.name + ": an id (\"game:<name>\" or \"<mod>:<name>\") is expected, not " + brief(j), false;
             *out = Value::text(j.get<std::string>());
@@ -650,6 +651,193 @@ Value apply_op(const Op& op, const Value& base, const FieldSpec& f) {
     return op_result(op, base, f, &x, &why) ? x : base;
 }
 
+namespace {
+// ---- id migrations (RegistrySpec::migrations): an edit written for an older schema version, read as this one ----
+struct Renamer {
+    const Schema& schema;
+    std::vector<std::string> notes;
+    // name through every step of registry reg, oldest first; empty: no step renames it
+    std::string chain(const RegistrySpec& reg, const std::string& name, bool field, std::string* steps) const {
+        std::string cur = name, first, last;
+        for (const Migration& m : reg.migrations) {
+            const auto& map = field ? m.fields : m.ids;
+            const auto it = map.find(cur);
+            if (it == map.end()) continue;
+            if (first.empty()) first = m.from;
+            last = m.to;
+            cur = it->second;
+        }
+        if (first.empty() || cur == name) return "";
+        *steps = reg.name + " schema " + first + " -> " + last;
+        return cur;
+    }
+    void note(const RegistrySpec& reg, const std::string& from, const std::string& to, const std::string& steps, bool field) {
+        notes.push_back((field ? reg.name + "." + from + " -> " + reg.name + "." + to : from + " -> " + to) + " (" + steps + ")");
+    }
+    // A field path ("stackSize", "inputs[2].count", "inputs[*].item"): renamed only where this schema does not have it.
+    void field(const RegistrySpec& reg, json* f) {
+        if (!f->is_string()) return;
+        const std::string path = f->get<std::string>();
+        std::string steps;
+        const size_t open = path.find('[');
+        if (open == std::string::npos) {
+            if (reg.field(path)) return;
+            const std::string to = chain(reg, path, true, &steps);
+            if (!to.empty()) note(reg, path, to, steps, true), *f = to;
+            return;
+        }
+        const size_t close = path.find(']', open);
+        if (close == std::string::npos) return;
+        std::string list = path.substr(0, open), leaf = close + 1 < path.size() && path[close + 1] == '.' ? path.substr(close + 2) : "";
+        const std::string index = path.substr(open, close - open + 1);
+        if (!leaf.empty() && !reg.field(list + "[]." + leaf)) {
+            const std::string to = chain(reg, list + "[]." + leaf, true, &steps);
+            const size_t at = to.find("[].");
+            if (at != std::string::npos) {
+                note(reg, path, to.substr(0, at) + index + "." + to.substr(at + 3), steps, true);
+                *f = to.substr(0, at) + index + "." + to.substr(at + 3);
+                return;
+            }
+        }
+        if (!reg.field(list)) {
+            const std::string to = chain(reg, list, true, &steps);
+            if (!to.empty()) {
+                const std::string now = to + index + (leaf.empty() ? "" : "." + leaf);
+                note(reg, path, now, steps, true), *f = now;
+            }
+        }
+    }
+    // A Kiln id of registry `of` (an exact selector, a "like", a reference value): renamed by that registry's steps.
+    void id(const std::string& of, json* v) {
+        const RegistrySpec* reg = schema.registry(of);
+        if (!reg || reg->migrations.empty() || !v->is_string()) return;
+        const std::string from = v->get<std::string>();
+        if (from.find_first_of("*?") != std::string::npos) return;  // a glob names no one entry
+        std::string steps;
+        const std::string to = chain(*reg, from, false, &steps);
+        if (!to.empty()) note(*reg, from, to, steps, false), *v = to;
+    }
+    // Not empty: the edit names one field twice, by an old name and by the name a step gave it (review of registry-rollback):
+    // refused, since which of the two values it meant is unknown.
+    std::string error;
+    // An object keyed by field names (an add's "fields", a "where", an element's leaves): each key renamed by rename(key) (empty:
+    // kept), and a key that a rename makes equal to another refuses the edit.
+    template <class Rename, class Each>
+    void keys(json* o, const std::string& what, Rename rename, Each each) {
+        if (!o->is_object()) return;
+        json renamed = json::object();
+        std::map<std::string, std::string> written;  // the new key -> the key as the edit wrote it
+        for (auto it = o->begin(); it != o->end(); ++it) {
+            std::string k = rename(it.key());
+            if (k.empty()) k = it.key();
+            if (const auto seen = written.find(k); seen != written.end()) {
+                if (error.empty())
+                    error = "names " + what + k + " twice (" + (seen->second == k ? it.key() : seen->second) + " is its name before a schema migration): " +
+                            "use " + k + " only";
+                return;
+            }
+            written[k] = it.key();
+            json v = it.value();
+            each(k, it.key(), &v);
+            renamed[k] = std::move(v);
+        }
+        *o = std::move(renamed);
+    }
+    // Every name a list of reg has had (its current name first): an element's leaf is renamed by a step keyed by any of them.
+    std::vector<std::string> list_names(const RegistrySpec& reg, const std::string& list, const std::string& written) const {
+        std::vector<std::string> out{list};
+        if (written != list) out.push_back(written);
+        for (const Migration& m : reg.migrations)
+            for (const auto& [from, to] : m.fields) {
+                std::string steps;
+                if (from.find('[') == std::string::npos && chain(reg, from, true, &steps) == list &&
+                    std::find(out.begin(), out.end(), from) == out.end())
+                    out.push_back(from);
+            }
+        return out;
+    }
+    // An element's leaf ("amount" of the list written as `written`, now `list`): its name now, or empty when no step renames it.
+    std::string leaf_name(const RegistrySpec& reg, const FieldSpec& list, const std::string& written, const std::string& leaf) {
+        if (list.element_field(leaf)) return "";
+        for (const std::string& name : list_names(reg, list.name, written)) {
+            std::string steps;
+            const std::string to = chain(reg, name + "[]." + leaf, true, &steps);
+            if (to.rfind(list.name + "[].", 0) == 0) {
+                note(reg, name + "[]." + leaf, to, steps, true);
+                return to.substr(list.name.size() + 3);
+            }
+        }
+        return "";
+    }
+    // Reference values in a value of field f (an id, a list of ids, elements with reference leaves), and the leaf names of its
+    // elements. written: the list's path as the edit wrote it (an old name's leaves are keyed by it).
+    void values(const RegistrySpec& reg, const FieldSpec& f, const std::string& written, json* v) {
+        if (v->is_object() && v->contains("set") && v->size() == 1) return values(reg, f, written, &(*v)["set"]);
+        if (!f.ref.empty() && f.type == FieldType::Id) return id(f.ref, v);
+        if (f.type != FieldType::List) return;
+        auto element = [&](json* x) {
+            if (f.element == FieldType::Struct && x->is_object()) {
+                keys(x, reg.name + "." + f.name + "[].", [&](const std::string& k) { return leaf_name(reg, f, written, k); },
+                     [&](const std::string& k, const std::string&, json* lv) {
+                         if (const FieldSpec* leaf = f.element_field(k); leaf && !leaf->ref.empty()) id(leaf->ref, lv);
+                     });
+            } else if (!f.ref.empty()) {
+                id(f.ref, x);
+            }
+        };
+        if (v->is_array()) for (json& x : *v) element(&x);
+        else element(v);
+    }
+    // A field name of reg as an object key ("fields", "where"): renamed where this schema does not have it.
+    std::string key_name(const RegistrySpec& reg, const std::string& k) {
+        json j = k;
+        field(reg, &j);
+        return j.get<std::string>() == k ? std::string() : j.get<std::string>();
+    }
+    void edit(const RegistrySpec& reg, json* e) {
+        const std::string written = e->contains("field") && (*e)["field"].is_string() ? (*e)["field"].get<std::string>() : "";
+        if (e->contains("field")) field(reg, &(*e)["field"]);
+        if (e->contains("select")) {
+            json& s = (*e)["select"];
+            if (s.is_string()) id(reg.name, &s);
+            else if (s.is_object() && s.contains("id")) id(reg.name, &s["id"]);
+            // a where condition names an entry's own fields; a plain value of a reference field is an id
+            if (s.is_object() && s.contains("where"))
+                keys(&s["where"], reg.name + ".", [&](const std::string& k) { return key_name(reg, k); }, [&](const std::string& k, const std::string&, json* c) {
+                    if (const FieldSpec* f = reg.field(k); f && f->type == FieldType::Id && !f->ref.empty()) id(f->ref, c);
+                });
+        }
+        if (e->contains("like")) id(reg.name, &(*e)["like"]);
+        if (e->contains("fields"))
+            keys(&(*e)["fields"], reg.name + ".", [&](const std::string& k) { return key_name(reg, k); }, [&](const std::string& k, const std::string& old, json* v) {
+                if (const FieldSpec* f = reg.field(k)) values(reg, *f, old, v);
+            });
+        if (!error.empty() || !e->contains("field") || !(*e)["field"].is_string()) return;
+        const std::string path = (*e)["field"].get<std::string>();
+        // an element edit's op is that element's (or leaf's) value; a whole field's op or list op its own. review: the list's
+        // spec for an element path ("inputs[0]" names no field of its own, so its whole-element op was skipped)
+        const bool element = path.find('[') != std::string::npos;
+        const FieldSpec* f = reg.field(element ? path.substr(0, path.find('[')) : path);
+        if (!f) return;
+        const std::string written_list = written.substr(0, written.find('['));
+        if (e->contains("op")) {
+            json& op = (*e)["op"];
+            if (!element) values(reg, *f, written_list, &op);
+            else if (f->type == FieldType::List) {
+                const size_t dot = path.find("].");
+                if (dot != std::string::npos) {
+                    if (const FieldSpec* leaf = f->element_field(path.substr(dot + 2)); leaf && !leaf->ref.empty()) id(leaf->ref, op.is_object() && op.contains("set") ? &op["set"] : &op);
+                } else {
+                    values(reg, *f, written_list, op.is_object() && op.contains("set") ? &op["set"] : &op);
+                }
+            }
+        }
+        if (e->contains("list") && (*e)["list"].is_object())
+            for (auto it = (*e)["list"].begin(); it != (*e)["list"].end(); ++it) values(reg, *f, written_list, &it.value());
+    }
+};
+}  // namespace
+
 bool parse_batch(const std::string& text, const Schema& schema, Batch* out, std::vector<Refusal>* refused, std::string* err) {
     *out = Batch{};
     if (text.size() > kMaxIrBytes) return *err = "the IR document is larger than 16 MiB", false;
@@ -702,7 +890,27 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
                 refused->push_back({out->mod, out->source, out->stage, x.n, "the edit number " + std::to_string(x.n) + " is used twice in this batch", "", "", "", ""});
                 continue;
             }
-            ok = edit_of(e, *out, schema, &x, &why);
+            // id migrations first: an old field or id is read as the running schema's before the edit is checked and matched
+            const RegistrySpec* reg = e.is_object() && e.contains("registry") && e["registry"].is_string() ? schema.registry(e["registry"].get<std::string>()) : nullptr;
+            bool any_steps = false;
+            if (reg) any_steps = !reg->migrations.empty();
+            for (const auto& [n, r] : schema.registries) any_steps = any_steps || (!r.migrations.empty() && reg);
+            if (any_steps) {
+                json m = e;
+                Renamer rn{schema, {}, {}};
+                rn.edit(*reg, &m);
+                if (!rn.error.empty()) {
+                    ok = false;
+                    why = "the edit " + rn.error;
+                } else if (!rn.notes.empty()) {
+                    for (const std::string& note : rn.notes) out->migrated.push_back("#" + std::to_string(x.n) + ": " + note);
+                    ok = edit_of(m, *out, schema, &x, &why);
+                } else {
+                    ok = edit_of(e, *out, schema, &x, &why);
+                }
+            } else {
+                ok = edit_of(e, *out, schema, &x, &why);
+            }
         } catch (const std::exception& ex) {
             ok = false;
             why = std::string("this edit could not be read: ") + ex.what();
@@ -725,6 +933,68 @@ bool parse_batch(const json& doc, const Schema& schema, Batch* out, std::vector<
         refused->push_back(std::move(r));
     }
     return true;
+}
+
+namespace {
+json selector_json(const Selector& s) {
+    json o = {{"id", s.id}};
+    if (s.where.is_object() && !s.where.empty()) o["where"] = s.where;
+    if (!s.has.empty()) o["has"] = s.has;
+    if (!s.has_not.empty()) o["hasNot"] = s.has_not;
+    return o;
+}
+// An op as edit_of reads it: a whole element with fields only as {"set": {...}} (a plain object reads as relative numbers).
+json op_json(const Op& op) {
+    if (op.set && op.value.kind == Value::Struct) return {{"set", op.value.to_json()}};
+    return op.to_json();
+}
+json values_json(const std::vector<Value>& vs) {
+    json a = json::array();
+    for (const Value& v : vs) a.push_back(v.to_json());
+    return a;
+}
+}  // namespace
+
+json batch_json(const Batch& b) {
+    json edits = json::array();
+    for (const Edit& e : b.edits) {
+        json o = {{"n", e.n}, {"registry", e.registry}};
+        if (e.exclusive) o["exclusive"] = true;
+        if (e.yield) o["yield"] = true;
+        if (!e.raw.empty()) {
+            o["select"] = selector_json(e.select);
+            json raw = json::object();
+            for (const RawWrite& w : e.raw) raw[w.path] = w.op;
+            o["raw"] = std::move(raw);
+        } else if (e.entry == EntryOp::Add) {
+            o["entry"] = "add";
+            o["id"] = e.add_id;
+            if (!e.like.empty()) o["like"] = e.like;
+            if (!e.add_fields.empty()) {
+                json f = json::object();
+                for (const auto& [k, v] : e.add_fields) f[k] = v.to_json();
+                o["fields"] = std::move(f);
+            }
+        } else if (e.entry == EntryOp::Remove) {
+            o["entry"] = "remove";
+            o["select"] = selector_json(e.select);
+        } else {
+            o["select"] = selector_json(e.select);
+            o["field"] = e.field;
+            switch (e.list) {
+                case ListOp::None: o["op"] = op_json(e.op); break;
+                case ListOp::Clear: o["list"] = {{"clear", true}}; break;
+                case ListOp::Append: o["list"] = {{"append", values_json(e.list_values)}}; break;
+                case ListOp::Remove: o["list"] = {{"remove", values_json(e.list_values)}}; break;
+                case ListOp::Replace: o["list"] = {{"replace", values_json(e.list_values)}}; break;
+            }
+        }
+        edits.push_back(std::move(o));
+    }
+    json doc = {{"ir", 1}, {"mod", b.mod}, {"stage", stage_name(b.stage)}, {"edits", std::move(edits)}};
+    if (!b.mod_version.empty()) doc["modVersion"] = b.mod_version;
+    if (!b.source.empty()) doc["source"] = b.source;
+    return doc;
 }
 
 bool lower_section(const json& section, const std::string& mod, const std::string& mod_version, const std::string& source, const Schema& schema,

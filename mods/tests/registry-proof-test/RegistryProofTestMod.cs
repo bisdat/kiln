@@ -25,7 +25,7 @@ using Kiln;
 
 namespace RegistryProofTest;
 
-public sealed unsafe class RegistryProofTestMod : Mod
+public sealed unsafe partial class RegistryProofTestMod : Mod
 {
     [StructLayout(LayoutKind.Sequential)] private struct Str { public byte* Ptr; public nuint Len; }
     [StructLayout(LayoutKind.Sequential)] private struct Reply
@@ -54,14 +54,22 @@ public sealed unsafe class RegistryProofTestMod : Mod
         Log.Info($"registry-proof-test: {(ok ? "PASS" : "FAIL")} {text}");
     }
 
+    // Phase 1 at the world's first content ready: every live registry but the drop tables. Phase 2 once the world runs (the
+    // game loads a drop table when something needs it: Spawn puts a few of the game's loot containers next to a container of
+    // the lab's world, whose default_inventory program acquires their tables), then the drop rows and the loot rolls; the suite
+    // is written once, at the end, and SUMMARY follows it.
     public override void OnLoad() => Content.OnReady(e =>
     {
         if (_ran || e.Reload) return;
         _ran = true;
-        try { Run(); }
+        var later = false;
+        try { later = Run(); }
         catch (Exception x) { Check(false, x.ToString()); }
-        finally { Log.Info($"registry-proof-test: SUMMARY registry-proof-test: {_pass} PASS, {_fail} FAIL"); }
+        finally { if (!later) Summary(); }
+        if (later) _ = Later();
     });
+
+    private void Summary() => Log.Info($"registry-proof-test: SUMMARY registry-proof-test: {_pass} PASS, {_fail} FAIL");
 
     // ---- the native table ----
     private static Str S(byte[] b, byte* p) => new() { Ptr = p, Len = (nuint)b.Length };
@@ -84,7 +92,14 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return null;
     }
 
-    private (bool Ok, string Why, bool ExactRefusal) Change(string registry, string id, string field, JsonNode value, out ulong handle)
+    private (bool Ok, string Why, bool ExactRefusal) Change(string registry, string id, string field, JsonNode value, out ulong handle) =>
+        Change(new JsonArray(Edit(registry, id, field, value)), out handle);
+
+    private static JsonObject Edit(string registry, string select, string field, JsonNode value) =>
+        new() { ["registry"] = registry, ["select"] = select, ["field"] = field, ["op"] = value.DeepClone() };
+
+    /// <summary>One Manual transaction of <paramref name="edits"/> (all or nothing), committed; the handle reverts it.</summary>
+    private (bool Ok, string Why, bool ExactRefusal) Change(JsonArray edits, out ulong handle)
     {
         handle = 0;
         ulong h = 0;
@@ -92,12 +107,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
         var rc = begin(_owner, Manual, &h);
         if (rc != 0 || h == 0) return (false, $"begin rc={rc}", false);
         var ir = new JsonObject { ["ir"] = 1, ["mod"] = "registry-proof-test", ["stage"] = "alter", ["source"] = "registry-proof",
-            ["edits"] = new JsonArray(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = field, ["op"] = value.DeepClone() }) };
+            ["edits"] = edits.DeepClone() };
         var bytes = Encoding.UTF8.GetBytes(ir.ToJsonString());
         var reply = new Reply { Size = (uint)sizeof(Reply) };
         var submit = *(delegate* unmanaged[Cdecl]<ulong, ulong, Str, Reply*, byte*, nuint, nuint*, int>*)(_table + 16);
         fixed (byte* p = bytes) rc = submit(_owner, h, S(bytes, p), &reply, null, 0, null);
-        if (rc != 0 || reply.Accepted != 1) { Finish(h, true); return (false, $"submit rc={rc} accepted={reply.Accepted} refused={reply.Refused}: {Why(reply)}", IsExactRefusal(reply)); }
+        if (rc != 0 || reply.Accepted != (uint)edits.Count) { Finish(h, true); return (false, $"submit rc={rc} accepted={reply.Accepted} refused={reply.Refused}: {Why(reply)}", IsExactRefusal(reply)); }
         var commit = Finish(h, false);
         if (commit.Outcome != Applied) { Finish(h, true); return (false, $"commit outcome={commit.Outcome}: {Why(commit)}", IsExactRefusal(commit)); }
         handle = h;
@@ -311,10 +326,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 var copy = (JsonArray)a.DeepClone();
                 if (copy[0] is JsonObject el)
                 {
-                    foreach (var (k, leaf) in el.ToList())
-                        if (leaf is JsonValue lv && lv.TryGetValue<double>(out var num) && k is "count" or "min" or "max" or "weight" or "chance")
+                    // a count first (+1 stays in its range), then a weight; a chance (0..1) halves, or becomes 0.5 from 0
+                    foreach (var k in new[] { "count", "count.max", "max", "count.min", "min", "weight", "chance" })
+                        if (el[k] is JsonValue lv && lv.TryGetValue<double>(out var num))
                         {
-                            el[k] = num == Math.Floor(num) ? JsonValue.Create((long)num + 1) : JsonValue.Create(Math.Round(num * 1.25, 4));
+                            el[k] = k == "chance" ? JsonValue.Create(num == 0 ? 0.5 : Math.Round(num * 0.5, 6))
+                                : num == Math.Floor(num) ? JsonValue.Create((long)num + 1) : JsonValue.Create(Math.Round(num * 1.25, 4));
                             return copy;
                         }
                     return null;
@@ -327,6 +344,20 @@ public sealed unsafe class RegistryProofTestMod : Mod
         }
     }
 
+    /// <summary>The probe of a field over what the entry reads and its raw members: <see cref="Probe"/>, except that an
+    /// optional enum read as "none" takes the first rarity whose game enum differs from the enum below the switch (raw
+    /// [switch, enum]), so the round trip writes both members, not the switch alone (review registry-proof: "common" over an
+    /// entry whose enum below was already Common).</summary>
+    private static JsonNode? ProbeOf(JsonNode? v, JsonArray? raw, JsonObject row, IReadOnlyList<string> otherIds)
+    {
+        if ((string?)row["conv"] == "optionalEnum" && (string?)v == "none" && row["values"] is JsonObject values &&
+            raw is { Count: 2 } && raw[1] is JsonValue below && below.TryGetValue<string>(out var enumBelow))
+            foreach (var (kiln, game) in values)
+                if (kiln != "none" && game is JsonValue g && g.TryGetValue<string>(out var name) && !string.Equals(name, enumBelow, StringComparison.OrdinalIgnoreCase))
+                    return JsonValue.Create(kiln);
+        return Probe(v, row, otherIds);
+    }
+
     private static string Digest(string common)
     {
         var sb = new StringBuilder();
@@ -335,39 +366,52 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
 
-    private void Run()
+    // what phase 1 gathered, for phase 2 and the suite
+    private string _proof = "", _side = "server", _exe = "";
+    private JsonObject _ids = new();
+    private readonly JsonArray _samples = new(), _effects = new();
+    private readonly JsonObject _kinds = new(), _notInWorld = new(), _unsampled = new();
+    private readonly List<EntityId> _spawned = new();
+    private WorldPosition? _at;
+
+    /// <summary>Phase 1. True when phase 2 follows (it then writes the suite and the summary).</summary>
+    private bool Run()
     {
         _kiln = Path.GetFullPath(Path.Combine(Context.Info.Directory, "..", ".."));
-        var proof = Path.Combine(_kiln, "data", "content", "registry", "proof");
+        var proof = _proof = Path.Combine(_kiln, "data", "content", "registry", "proof");
         if (!File.Exists(Path.Combine(proof, "request.json")))
         {
             Log.Info("registry-proof-test: no content/registry/proof/request.json: nothing to prove (lab only)");
-            return;
+            return false;
         }
         var bridge = typeof(Content).Assembly.GetType("Kiln.BlocksBridge");
         _table = (byte*)(nint)(bridge?.GetMethod("ServiceTable", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?
             .Invoke(null, new object[] { "kiln.registry.live", 1u }) ?? (nint)0);
         _owner = (ulong)(typeof(ModContext).GetProperty("Owner", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(Context) ?? 0UL);
         Check(_table != null && *(uint*)_table >= 56 && _owner != 0, "kiln.registry.live v1 and the mod's owner");
-        if (_table == null || *(uint*)_table < 56 || _owner == 0) return;
+        if (_table == null || *(uint*)_table < 56 || _owner == 0) return false;
         var stateFile = Path.Combine(_kiln, "state", "registry.json");
-        if (!File.Exists(stateFile)) { Log.Info("registry-proof-test: unproven: no registry state yet"); return; }
+        if (!File.Exists(stateFile)) { Log.Info("registry-proof-test: unproven: no registry state yet"); return false; }
         var state = JsonNode.Parse(File.ReadAllText(stateFile))!;
-        var side = (string?)state["regmap"]?["side"] ?? "server";
-        var exe = (string?)state["regmap"]?["exeSha256"] ?? "";
+        var side = _side = (string?)state["regmap"]?["side"] ?? "server";
+        var exe = _exe = (string?)state["regmap"]?["exeSha256"] ?? "";
         var idsFile = Path.Combine(_kiln, "data", "content", "registry", $"ids-{side}-{exe}.json");
-        if (!File.Exists(idsFile)) { Log.Info("registry-proof-test: unproven: no id table yet"); return; }
-        var ids = JsonNode.Parse(File.ReadAllText(idsFile))!["registries"]!.AsObject();
+        if (!File.Exists(idsFile)) { Log.Info("registry-proof-test: unproven: no id table yet"); return false; }
+        var ids = _ids = JsonNode.Parse(File.ReadAllText(idsFile))!["registries"]!.AsObject();
         Check(exe.Length == 64, $"the running build {exe}");
-        var samples = new JsonArray();
-        var kinds = new JsonObject();
-        var notInWorld = new JsonObject();
-        var unsampled = new JsonObject(); // a field the lab could not sample, why (Kiln words: kilnctl's unproven reason)
-        foreach (var registry in Live)
+        foreach (var registry in Live.Where(r => r != "drops")) SampleRegistry(registry);
+        return true;
+    }
+
+    /// <summary>Every mapped row of one live registry over the entries Content lists now (a field it gets no sample of: the
+    /// log says why, and <see cref="_unsampled"/> where the producer knows why in Kiln words).</summary>
+    private void SampleRegistry(string registry)
+    {
+        var (ids, samples, kinds, notInWorld, unsampled) = (_ids, _samples, _kinds, _notInWorld, _unsampled);
         {
             var map = JsonNode.Parse(File.ReadAllText(Path.Combine(_kiln, "regmap", "common", registry + ".json")))!;
             var table = ids[registry]?.AsObject();
-            if (table is null) { Log.Info($"registry-proof-test: unproven: {registry}: no id table yet"); continue; }
+            if (table is null) { Log.Info($"registry-proof-test: unproven: {registry}: no id table yet"); return; }
             // the registry's entries with their Kiln ids (GUID, else "#<32-bit id>")
             var entries = new List<(ContentEntry E, string Id)>();
             var seen = 0;
@@ -395,7 +439,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 if (readable == 0)
                     foreach (var (field, rowNode) in map["rows"]!.AsObject())
                         if ((string?)rowNode?["state"] != "unmapped")
-                            unsampled[$"{registry}.{field}"] = NoDropTables;
+                            unsampled[$"{registry}.{field}"] = _noTables;
             }
             foreach (var (field, rowNode) in map["rows"]!.AsObject())
             {
@@ -413,13 +457,18 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 }
             }
         }
-        var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = side, ["exeSha256"] = exe, ["generation"] = "live",
-            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(ids), ["kinds"] = kinds, ["notInWorld"] = notInWorld, ["unsampled"] = unsampled, ["samples"] = samples };
-        Directory.CreateDirectory(proof);
-        var path = Path.Combine(proof, $"roundtrip-{side}-live.json");
+    }
+
+    private void WriteSuite()
+    {
+        var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = _side, ["exeSha256"] = _exe, ["generation"] = "live",
+            ["regmapDigest"] = Digest(Path.Combine(_kiln, "regmap", "common")), ["constants"] = Constants(_ids), ["kinds"] = _kinds, ["notInWorld"] = _notInWorld,
+            ["unsampled"] = _unsampled, ["samples"] = _samples, ["effects"] = _effects };
+        Directory.CreateDirectory(_proof);
+        var path = Path.Combine(_proof, $"roundtrip-{_side}-live.json");
         File.WriteAllText(path + ".tmp", doc.ToJsonString());
         File.Move(path + ".tmp", path, true);
-        Log.Info($"registry-proof-test: {(samples.Count == 0 ? "unproven: no evidence; " : "")}wrote {samples.Count} live samples to {path}");
+        Log.Info($"registry-proof-test: {(_samples.Count == 0 ? "unproven: no evidence; " : "")}wrote {_samples.Count} live samples and {_effects.Count} roll effects to {path}");
     }
 
     /// <summary>How many of the build's entries (every entry of the id table, also those Content's enumeration does not list)
@@ -502,7 +551,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         // a structured value (list, reference, unlock...) is not one scalar member: its raw view is the entry's resource bytes;
         // a scalar of a recipe's list element (outputs[].count), which Content.Get does not address, from the game's stacks
         JsonArray RawOf(ContentEntry e, AssetKey? key) =>
-            new(rawPaths.Select((p, i) => (conv == "impactConfig" ? ConfigRaw(e, configPath) : Raw(e, p)) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
+            new(rawPaths.Select((p, i) => FlagsRaw(conv, conv == "impactConfig" ? ConfigRaw(e, configPath) : Raw(e, p)) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
                 ?? (Compared.Contains(conv) ? null : JsonValue.Create("resource:" + BytesSha(key)))).ToArray());
         var tries = 0;
         var why = new SortedDictionary<string, int>(StringComparer.Ordinal); // why the entries tried gave no sample (the log, when none did)
@@ -532,6 +581,11 @@ public sealed unsafe class RegistryProofTestMod : Mod
             if (readText is null) { Skip($"read rc={rc}"); continue; }
             var whole = JsonNode.Parse(readText);
             JsonNode? read = whole;
+            if (registry == "drops" && whole is JsonArray dl && dl.Any(x => x is JsonObject o && ((string?)o["item"])?.StartsWith('#') == true))
+            {
+                Skip("a random-loot stack (no item) in the table"); // its item reads as no Kiln id: a table of plain stacks is sampled
+                continue;
+            }
             if (element)
             {
                 if (whole is not JsonArray a || a.Count == 0 || a[0] is not JsonObject el) { Skip("an empty list"); continue; }
@@ -546,7 +600,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
             s["bytesBefore"] = before;
             if (backend != "live") return s; // read-only (and none): read only
             var probe = mode == "sint32" && read is JsonValue iv && iv.TryGetValue<double>(out var integer)
-                ? JsonValue.Create(integer + (integer < int.MaxValue ? 1 : -1)) : Probe(read, row, ids);
+                ? JsonValue.Create(integer + (integer < int.MaxValue ? 1 : -1)) : ProbeOf(read, s["rawBefore"] as JsonArray, row, ids);
             if (mode.Length > 0) s["configKind"] = mode == "float" ? "float" : "sint32";
             if (probe is null || JsonNode.DeepEquals(probe, read)) { Skip("no probe"); continue; } // another entry may take one
             JsonNode op = probe;
@@ -557,6 +611,19 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 op = copy;
             }
             var (ok, refusal, exactRefusal) = Change(registry, id, element ? list : field, op, out var handle);
+            // a float at the top of its range (a chance of 1.0): the parse refuses 1.25 x, sometimes without a reason text
+            if (!ok && mode.Length == 0 && !IsDisagreement(refusal) && LowerProbe(read, row) is { } lower && !JsonNode.DeepEquals(lower, read))
+            {
+                probe = lower;  // the same entry with 0.75 x
+                op = probe;
+                if (element)
+                {
+                    var copy = (JsonArray)whole!.DeepClone();
+                    SetLeaf((JsonObject)copy[0]!, leafName, probe);
+                    op = copy;
+                }
+                (ok, refusal, exactRefusal) = Change(registry, id, element ? list : field, op, out handle);
+            }
             s["probe"] = probe.DeepClone();
             if (mode == "sint32-refusal")
             {
@@ -620,8 +687,11 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return $"{h[..8]}-{h[8..12]}-{h[12..16]}-{h[16..20]}-{h[20..]}";
     }
 
+    /// <summary>An element's leaf: a flat key with dots first (kiln.registry.live's struct values: a drop entry's
+    /// <c>"count.min"</c>), else nested objects.</summary>
     private static JsonNode? Leaf(JsonObject el, string leaf)
     {
+        if (el.ContainsKey(leaf)) return el[leaf];
         JsonNode? cur = el;
         foreach (var part in leaf.Split('.')) cur = (cur as JsonObject)?[part];
         return cur;
@@ -629,9 +699,28 @@ public sealed unsafe class RegistryProofTestMod : Mod
 
     private static void SetLeaf(JsonObject el, string leaf, JsonNode value)
     {
+        if (el.ContainsKey(leaf) || !leaf.Contains('.')) { el[leaf] = value.DeepClone(); return; }
         var parts = leaf.Split('.');
         var cur = el;
         for (var i = 0; i < parts.Length - 1; i++) cur = (JsonObject)cur[parts[i]]!;
         cur[parts[^1]] = value.DeepClone();
     }
+
+    /// <summary>A flags row's raw member as the list of the game's names (also one name or none); other rows as they are.</summary>
+    private static JsonNode? FlagsRaw(string conv, JsonNode? raw) =>
+        conv == "flags" && raw is JsonValue v && v.TryGetValue<string>(out var names) ? FlagNames(names) : raw;
+
+    /// <summary>A bitmask's raw value: the list of the game's names kiln.content gives as text ("Common,Rare", "Epic", "").</summary>
+    private static JsonArray FlagNames(string names) =>
+        new(names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(n => (JsonNode)JsonValue.Create(n)!).ToArray());
+
+    /// <summary>A second probe for a float the field's range refused at 1.25 x (a chance of 1.0, a block of 1.0): 0.75 x.
+    /// Null for every other conversion (no second guess).</summary>
+    private static JsonNode? LowerProbe(JsonNode? v, JsonObject row) =>
+        (string?)row["conv"] == "float" && v is JsonValue f && f.TryGetValue<double>(out var x) && x != 0 ? JsonValue.Create(Math.Round(x * 0.75, 6)) : null;
+
+    /// <summary>A loot roll's scaled stack (0x16db30 on 26430253): n x the world's loot amount, at least 1, at most
+    /// <paramref name="maxScaled"/> (for a whole product; the game rounds a fraction up by chance).</summary>
+    private static int ScaledCount(int n, double amount, int maxScaled) =>
+        Math.Min(Math.Max((int)Math.Round(n * amount, MidpointRounding.AwayFromZero), 1), maxScaled);
 }

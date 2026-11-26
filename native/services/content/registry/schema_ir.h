@@ -5,8 +5,8 @@
 // Struct). Kinds map as: int -> Int, float and time (seconds) -> Float, bool -> Bool, enum -> Enum, flags -> Flags,
 // ref -> Id (its registry in FieldSpec::ref, so references are checked), list -> List (its element's kind; Struct for
 // elements with fields). Each field's ops (none, set, number, list, indexed), the schema's optional refs, the lengths of
-// indexed lists (fixed, or another field's value plus an offset), each registry's version and raw flag and the schema
-// format are carried over.
+// indexed lists (fixed, or another field's value plus an offset), each registry's version and raw flag, the id migrations of
+// its breaking steps (kRenames) and the schema format are carried over.
 #pragma once
 #include <string>
 #include <vector>
@@ -93,6 +93,15 @@ inline Schema generated_schema() {
             if (f.kind == gen::Kind::Flags) x.max_items = x.enum_values.size();
             reg.fields[x.name] = std::move(x);
         }
+    }
+    // the id migrations of the breaking steps, oldest first per registry (one Migration per step)
+    for (const gen::Rename& r : gen::kRenames) {
+        if (!r.registry) break;
+        const auto reg = s.registries.find(r.registry);
+        if (reg == s.registries.end()) continue;
+        auto& steps = reg->second.migrations;
+        if (steps.empty() || steps.back().from != r.from || steps.back().to != r.to) steps.push_back({r.from, r.to, {}, {}});
+        (r.field ? steps.back().fields : steps.back().ids)[r.old_name] = r.new_name;
     }
     link_elements(&s);
     return s;

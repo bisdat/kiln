@@ -30,6 +30,21 @@ describe("untrusted registry report", () => {
   test("refusals retain RestartRequired and Unproven reasons", () => {
     expect(parse(registryFixture()).refused.map(x => x.reason)).toEqual(registryFixture().refused.map(x => x.reason));
   });
+  test("edits that wait for a restart are the refused rows with the token, counted over every row", () => {
+    const r = parse(registryFixture());
+    expect(r.restart.total).toBe(1);  // counts has no restartRequired here (an older Kiln): the rows it lists
+    expect(r.restart.rows.map(x => x.owner)).toEqual(["late"]);
+    expect(r.restart.rows[0].field).toBe("balance · levelCap");
+    const counted = parse({ ...registryFixture(), counts: { ...registryFixture().counts, restartRequired: 7 } });
+    expect(counted.restart.total).toBe(7);  // the native cap may leave rows out: the count says how many there are
+    expect(counted.restart.rows.length).toBe(1);
+    expect(parse(emptyRegistryFixture()).restart).toEqual({ total: 0, rows: [] });
+    const raw = parse({ ...emptyRegistryFixture(), refused: [{ mod: "adv", source: "", stage: "alter", n: 0, registry: "items", id: "game:x", field: "secret.member", raw: true, reason: "RestartRequired: the base did not read secret.member at start" }],
+      counts: { fields: 0, conflicts: 0, refused: 1, added: 0, removed: 0, restartRequired: 1 } });
+    expect(raw.restart.rows[0].reason.startsWith("RestartRequired: ")).toBe(true);  // still counted, the raw path hidden
+    expect(JSON.stringify(raw.restart)).not.toContain("secret.member");
+    expect(() => parse({ ...registryFixture(), counts: { ...registryFixture().counts, restartRequired: -1 } })).toThrow();
+  });
   test("does not upgrade unknown certainty to certain", () => {
     const r = registryFixture(); r.conflicts[0].certainty = "future";
     expect(parse(r).conflicts.map(x => x.certainty)).toEqual(["Unknown", "Best-effort drift"]);
@@ -88,7 +103,7 @@ describe("untrusted registry report", () => {
     const none = parse({ ...registryFixture(), base: { origin: "live", writer: "shroudforge-hosted", journal: { state: "none", packages: 0, entries: 0, truncated: false, text: "hosted ShroudForge keeps no change journal" } } });
     expect(none.journal).toBe("Archive-writer packages are not named in this start: hosted ShroudForge keeps no change journal");
     expect(parse({ ...registryFixture(), base: { origin: "live", writer: "none", journal: { state: "none", packages: 0, entries: 0, truncated: false } } }).journal).toBe("");
-    expect(parse(registryFixture()).journal).toBe("");  // a report from before 31.14 has no journal
+    expect(parse(registryFixture()).journal).toBe("");  // a report from an older Kiln has no journal
     const stale = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "stale", packages: 0, entries: 0, truncated: false, text: "left by an earlier start" } } });
     expect(stale.journal).toBe("Archive-writer packages are not named in this start: left by an earlier start");
   });
