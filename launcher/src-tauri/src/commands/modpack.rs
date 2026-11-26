@@ -242,13 +242,15 @@ mod tests {
         let mut w = refusal("2026-11-26T13:29:19Z", true);
         w.outcome = JoinOutcome::Welcome;
         assert!(worth_showing_in(&w, None, &dir), "someone else's server");
-        w.hosted = true;
+        w.hosted = Some(true);
         assert!(!worth_showing_in(&w, None, &dir), "hosted: true (Kiln after 0.2.0-dev.31.17)");
-        w.hosted = false;
+        w.hosted = None;
         std::fs::write(dir.join(kiln_manage::modpack::SERVER_ID_FILE), "srv-d09b032bfe63\n").unwrap();
         assert!(!worth_showing_in(&w, None, &dir), "an older file: the game's own server id");
+        w.hosted = Some(false);
+        assert!(worth_showing_in(&w, None, &dir), "hosted: false (no world ran here): a server with this game's id is offered");
         let mut r = refusal("2026-11-26T13:29:19Z", true);
-        r.hosted = true;
+        r.hosted = Some(true);
         assert!(worth_showing_in(&r, None, &dir), "a refusal from the own world still shows");
         let _ = std::fs::remove_dir_all(&dir);
     }
