@@ -230,7 +230,9 @@ internal static partial class KilnApis
         "M:Kiln.ContentRegistry.get_Item(System.Int32)", // ContentRegistry.this[int].get: via Content.Require(string)
         "M:Kiln.ContentSync.CheckRoundTrip", // ContentSync.CheckRoundTrip(): via Content.Require(string)
         "M:Kiln.Crafting.AddSource(Kiln.EntityId,Kiln.EntityId,Kiln.CraftSourceOptions)", // Crafting.AddSource(EntityId, EntityId, CraftSourceOptions?): Services.RequireTickThread
+        "M:Kiln.Creative.Effects(Kiln.EntityId)", // Creative.Effects(EntityId): Game.AssertTickThread
         "M:Kiln.Creative.Set(Kiln.EntityId,System.Boolean)", // Creative.Set(EntityId, bool): Game.AssertTickThread
+        "M:Kiln.Creative.SetEffect(Kiln.EntityId,System.String,System.Boolean)", // Creative.SetEffect(EntityId, string, bool): Game.AssertTickThread
         "M:Kiln.Creative.SetFlight(Kiln.EntityId,Kiln.CharacterFlightMode)", // Creative.SetFlight(EntityId, CharacterFlightMode): Game.AssertTickThread
         "M:Kiln.CreativeTools.Found(Kiln.EntityId)", // CreativeTools.Found(EntityId): Game.AssertTickThread
         "M:Kiln.CreativeTools.Give(Kiln.EntityId,Kiln.ItemId,System.Int32,System.Nullable{System.Int32},System.Nullable{Kiln.ItemRarity})", // CreativeTools.Give(EntityId, ItemId, int, int?, ItemRarity?): via CreativeTools.Give(EntityId, ItemId, int, int?, ItemRarity?, int, bool)
@@ -918,6 +920,7 @@ internal static partial class KilnApis
         "P:Kiln.Content.StackGuard=kiln.content", // returns false first when the table of kiln.content is null
         "P:Kiln.CreatureControl.Available=kiln.creature_control", // CreatureControlNative.T != null: Services.Get("kiln.creature_control")
         "P:Kiln.Creatures.Available=kiln.creatures", // CreaturesNative.T != null: Services.Get("kiln.creatures")
+        "P:Kiln.Crosshair.Available=client.crosshair,kiln.client.crosshair", // CrosshairNative.Members != null: Services.Get("kiln.client.crosshair"); Is("client.crosshair")
         "P:Kiln.EcsPrograms.Available=kiln.world", // Table != null: Services.Get("kiln.world")
         "P:Kiln.EcsPrograms.SupportsOtherWrites=kiln.world", // Table != null: Services.Get("kiln.world")
         "P:Kiln.EntityData.Available=kiln.saves,kiln.spawn", // via Kiln.Saves.Available; via Kiln.SpawnLink.Available
@@ -943,6 +946,7 @@ internal static partial class KilnApis
         "P:Kiln.Knowledge.Available=kiln.knowledge", // KnowledgeNative.T != null: Services.Get("kiln.knowledge")
         "P:Kiln.MarkersLab.Available=kiln.markers.lab", // T != null: Services.Get("kiln.markers.lab")
         "P:Kiln.NoClip.Available=rules.noclip", // Is("rules.noclip")
+        "P:Kiln.PadInput.Available=kiln.ui.input", // returns false first when the table of kiln.ui.input is null
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
         "P:Kiln.PlayerCharacters.Available=kiln.characters", // T != null: Services.Get("kiln.characters")
         "P:Kiln.PlayerStates.Available=kiln.playerstate", // returns false first when the table of kiln.playerstate is null
