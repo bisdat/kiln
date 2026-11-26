@@ -562,6 +562,15 @@ lines, then one every 10 s); at debug level why a press stayed the game's.
 
 - **The build menu's material counts** (a Kiln client, capability `crafting.build_ui`): each material row shows the bag,
   the base's Magic chests and the building links (the same snapshot), so the menu, the cursor and the placement agree.
+  Since GitHub #148 the links are added where the game adds the base's Magic chests, so a material only the links hold is
+  listed too: in the hammer's list, under the cursor and in every tab of the material catalogue (Backpack & Magic Chests,
+  All Materials, the amount sort; Last Used and Favorites list only their own materials, as for the base's chests).
+  Until then only rows the game had made counted the links, which in practice were Last Used and Favorites.
+- **With Building Tools** (0.34.0 routes the blueprint program's payment through its own code): Kiln finds the game's call
+  behind it on the stack, and since #148, where that walk does not reach the game, by the blueprint program's own frame
+  (the cost context it passed on); `build: BuildingTools.dll makes the blueprint program's payments ...` says so once.
+  A placement whose cost list has more than 32 lines (a large Building Tools area action or blueprint of many materials)
+  stays the game's payment, from the bag and the base only (`... left to the game (it names more than 32 cost lines ...`).
 
 Not covered (the game's own, unchanged): props, undo and dismantle refunds, terraforming tools and impact natives, and a
 vanilla client's menu and cursor (they show the bag and the base; its game does not send a placement only links cover). Cross-Base Storage's
@@ -573,7 +582,10 @@ building half down with one kiln.log line naming the function, the first foreign
 module's behaviour alone; crafting, fills and locks from the same links keep working. kiln.log: `build: a link opted in
 with Building: ...` once, then per change `build: the server world's material check of item 0x... (player P) counts the
 building links: bag b + base s + linked l, needs n` (or `refused: short count`), and `stations: a block placement paid n
-from additional crafting sources ...` / `... left to the game ...` / `... rolled back ...`.
+from additional crafting sources ...` / `... left to the game ...` / `... rolled back ...`, and when the server
+world's transaction does not check out, `stations: the server world's block placement transaction did not check out
+(its accessors) ...` (a placement's transaction is checked by its InventorySetup and Inventory accessors since #148: the
+blueprint program's has no Fuel accessor, and before that every placement paid from the bag and the base alone).
 
 ### Beside other native mods
 
