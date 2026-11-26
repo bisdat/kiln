@@ -1221,6 +1221,31 @@ public sealed unsafe class StationsTests : IDisposable
     }
 
     [Fact]
+    public void AnIngredientPressKilnCannotQueueIsLeftToTheGame()
+    {
+        // GitHub #132 (0.2.0-dev.31.15): RunItemPress false = the press is not canceled (the game's own transfer runs and
+        // refuses as before); never a canceled press with nothing queued
+        using var kiln = Kiln();
+        var press = new ItemPress(new EntityId(3300), 0x10, 7, new EntityId(5));
+        _fake.Submitted.Clear();
+        foreach (var rc in new[] { StationsNative.BufferTooSmall, StationsNative.Unavailable, StationsNative.InvalidArgument })
+        {
+            _fake.SubmitResult = rc;
+            Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        }
+        _fake.SubmitResult = 0;
+        _fake.HasItemFills = false;  // an older kiln-items.dll
+        Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        _fake.HasItemFills = true;
+        _fake.State = (true, false, true, true, "stations.fill is off");
+        Assert.False(kiln.Run(() => StationsCore.RunItemPress(press)));
+        Assert.Empty(_fake.Submitted);
+        _fake.State = (true, true, true, true, "");
+        Assert.True(kiln.Run(() => StationsCore.RunItemPress(press)));
+        Assert.Single(_fake.Submitted);
+    }
+
+    [Fact]
     public void LinkedCountsComeBackInThePlanAndTheResult()
     {
         using var kiln = Kiln();
