@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Lab-only (see RegistryProofTestMod.cs): the producer's phase 2, once the lab's world runs. It loads drop tables the way the
-// game does for a player (a few of the game's loot containers spawned next to a container of the world: their default_inventory
-// program acquires each table), samples the drop rows over them, and drives real loot rolls for the loot rows' read times. A
-// separate part of the class because the main part is an unsafe context, where C# allows no await.
+// game does for a player (a few of the game's loot containers spawned next to a container of the world, else at the lab world's
+// spot: their default_inventory program acquires each table), samples the drop rows over them, and drives real loot rolls for
+// the loot rows' read times. A separate part of the class because the main part is an unsafe context, where C# allows no
+// await.
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Kiln;
@@ -119,6 +120,7 @@ public sealed partial class RegistryProofTestMod
     [StructLayout(LayoutKind.Explicit, Size = 32)]
     private struct PickupLootSlot
     {
+        [FieldOffset(0x00)] public Guid GenericPickupItem;  // the TemplateReference of the pickup a rolled item spawns as
         [FieldOffset(0x10)] public uint SpawnedPickupEntity;
         [FieldOffset(0x14)] public byte ShouldSpawnItem;
         [FieldOffset(0x18)] public uint SpawnItem;
@@ -131,8 +133,14 @@ public sealed partial class RegistryProofTestMod
     // mask, the fixed rarity, the stack counts) and the loot labels it rolls from: a creature template's (RandomLoot.defaultLabels;
     // the spawner template has none of its own, world placements give theirs).
     private const string Spawner = "Base_LootPickup_RandomLoot_Spawner";
+    // review registry-proof: the spawner program (0x1abdef on 26430253) returns before any roll while the slot's
+    // genericPickupItem (+0x00) is empty, so the harness gives the generic random-loot pickup in the slot it spawns with. In
+    // the 31.x lab that did not make a spawner roll either (the loot generation version check 0x16c050 is left; docs/re/content.md
+    // section 11): the slot is logged after the wait, and the roll stays INCONCLUSIVE
+    private const string GenericPickup = "Base_LootPickup_RandomLoot_Generic";
     private byte[]? _labels;
     private string _labelsFrom = "";
+    private bool _slotLogged;
 
     /// <summary>Fresh random pickup spawners, each rolling once; what each rolled (item, count, rarity) as its PickupLootSlot
     /// records it. The pickups they spawn are removed with them.</summary>
@@ -142,7 +150,14 @@ public sealed partial class RegistryProofTestMod
         var at = _at!.Value;
         var loot = new byte[36];  // keen::ecs::RandomLoot: disableRandomLoot, defaultLabels, forwardSpecialItemLabels
         _labels!.CopyTo(loot, 4);
-        var options = new SpawnOptions { Tag = Tag, Flags = SpawnFlags.Transient, Components = new[] { SpawnComponent.Of("RandomLoot", loot) } };
+        var components = new List<SpawnComponent> { SpawnComponent.Of("RandomLoot", loot) };
+        if (Spawn.Templates.FirstOrDefault(t => t.Name == GenericPickup) is { } generic)
+        {
+            var slot = new byte[32];  // keen::ecs::PickupLootSlot: genericPickupItem, the rest as a fresh slot has it (zero)
+            generic.Id.ToByteArray().CopyTo(slot, 0);
+            components.Add(SpawnComponent.Of("PickupLootSlot", slot));
+        }
+        var options = new SpawnOptions { Tag = Tag, Flags = SpawnFlags.Transient, Components = components.ToArray() };
         for (var i = 0; i < n; i++)
         {
             try { made.Add(await Spawn.Entity(Spawner, at with { X = at.X + 2.0 * (i % 5), Z = at.Z + 4.0 + 2.0 * (i / 5) }, options: options)); }
@@ -150,6 +165,15 @@ public sealed partial class RegistryProofTestMod
         }
         bool Rolled(EntityId e) => World.TryRead<PickupLootSlot>(e, "PickupLootSlot", out var v) && (v.SpawnItem != 0 || v.SpawnedPickupEntity != 0);
         for (var t = 0; t < 150 && made.Any(e => !Rolled(e)); t++) await Context.Scheduler.NextTick();
+        if (!_slotLogged && made.Count > 0)
+        {
+            // what the spawner's slot holds after the wait: why a spawner did not roll, when none did
+            _slotLogged = true;
+            var ok = World.TryRead<PickupLootSlot>(made[0], "PickupLootSlot", out var s0);
+            Log.Info($"registry-proof-test: roll: {Spawner} {made[0]}'s PickupLootSlot after the wait: " + (ok
+                ? $"genericPickupItem {s0.GenericPickupItem}, shouldSpawnItem {s0.ShouldSpawnItem}, spawnItem {s0.SpawnItem:x8}, spawned {s0.SpawnedPickupEntity}, rarity {s0.SpawnItemRarity}, amount {s0.SpawnItemAmount}"
+                : "not readable"));
+        }
         var rolled = new List<Rolled>();
         foreach (var e in made)
         {

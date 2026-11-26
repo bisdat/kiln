@@ -646,7 +646,20 @@ and LootItems (`0x93d3b0` / `0xe96190`). Listings and the scan's JSON: `dev31/ou
   `random_pickup_loot_spawner` (interval 1, every step) waits for more than a spawn (a player's presence or the loot
   system's update; not traced). The proof producer keeps the harness (registry-proof-test, phase 2: it reports
   INCONCLUSIVE with that reason), and the loot rows' read times rest on the disassembly above, as `stack.min`/`stack.max`
-  always did. A lab with a player (or the trace of that gate) can show it.
+  always did (their row has cited only `0x16b5f0` since R1, ede25e81). A lab with a player (or the trace of that gate) can
+  show it.
+- **The spawner's gates (review of registry-proof, 31.x) [dis] [lab].** The spawner chunk `0x1abdef` returns before any
+  roll while `PickupLootSlot.genericPickupItem` (`+0x00`, a TemplateReference) is empty (`0x1abe7c`: `[slot+8] | [slot]`),
+  then on `shouldSpawnItem` (`+0x14`) and a player-base test of its position (`0x209fa0` -> `0x208c60`), and right before
+  the roll `0x16c050(out, LootGenerationSystem, key)` refuses (`out[0] = 1`, no roll) while the system's `+0x58` is null and
+  otherwise compares the loot generation version of the spawner's loot node (`+0x60`, keyed by `SceneLootNodeId` or
+  `RandomLootContainer.parentNodeId`; 1 without one) with `RandomLootContainer.spawnedLootVersion` (`0x1ac70e`), so each
+  node rolls once per version. A spawn given `genericPickupItem` =
+  `Base_LootPickup_RandomLoot_Generic` (`c15a5c9d-…`, harness 31.x) still rolled nothing in 80 spawners: after 150 steps the
+  slot reads `genericPickupItem c15a5c9d…, shouldSpawnItem 0, spawnItem 0, spawned 0`. Left: the version check (whether
+  `+0x58` is filled without a player) or the roll's own refusal; not traced further (time-boxed). The destroy path
+  (`spawn_random_loot_on_destroy`, `0xebff0` -> `0x16d020` without the version check) needs a HitEvent on a destructible
+  prop, which Kiln's hits do not give (no `CombatFlags.handleHits` on props).
 - **Drop tables without a player.** A spawned container with a `DefaultInventory` has the table acquired and applied
   (fixed stacks only) by `default_inventory` near any point of the lab's world: the producer spawns three
   (`game:base_lootchest_random_cairn_sarcophagus_wood`, `game:base_trashheap`, `game:lootcontainer_enemy_scavenger_melee01`)

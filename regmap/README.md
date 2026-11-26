@@ -154,7 +154,8 @@ the write and after the revert; a structured value's raw view is its resource's 
 gets no sample and stays unproven (kiln.log says why: "registry-proof-test: no sample of <field>"); where the producer
 knows why in Kiln words it says so in the suite's `"unsampled": {"<field>": "<why>"}`, and kilnctl takes that as the row's
 reason. Drop tables, which the game loads only when something needs them, are loaded by the producer's second phase once the
-world runs: it spawns a few of the game's loot containers next to a container of the lab's world (their default_inventory
+world runs: it spawns a few of the game's loot containers next to a container of the lab's world, or at the lab world's spot
+when it has none (their default_inventory
 program acquires their tables), then samples the drop rows over them; only when that fails does `unsampled` say why. The
 same phase drives real loot rolls (the loot entries edited through kiln.registry.live, the game's random pickup spawners
 spawned with a creature's loot labels, each roll read from the spawner's record) and writes what came out into the suite's

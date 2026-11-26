@@ -126,8 +126,8 @@ Reuse one if the shape fits. A new conv touches all of these, in one change:
 
 1. `regmap_check.py` `check_conv` (which member types it needs);
 2. `model.cpp` `decode`/`encode` (base values, boot writes, values export);
-3. `registry_live.cpp` `bind` (:713) if any field using it is `now`/`worldLoad` (without a binder the live back-end refuses
-   it: "the live back-end does not write <conv> fields yet", :781);
+3. `registry_live.cpp` `bind` if any field using it is `now`/`worldLoad` (without a binder the live back-end refuses
+   it: "the live back-end does not write <conv> fields yet");
 4. `kilnctl` round-trip comparison (`roundtrip.rs` raw kinds) and the producer's raw read (`RegistryProofTestMod.cs`);
 5. the conv table in regmap/README.md.
 
@@ -205,7 +205,8 @@ The lab writes the evidence kilnctl judges (regmap/README.md "The producer"):
   entries through `Content.*` (`RegistryOf`) and reads raw bytes by resource (`ResourceOf`). A new live registry needs
   an entry there. Phase 1 runs at the world's first content ready; phase 2 (`RegistryProofTestMod.Later.cs`) runs once the
   world runs: it loads drop tables the way the game does for a player (`LoadDropTables`: a few of the game's loot containers
-  spawned next to a container of the lab's world, whose default_inventory program acquires their tables), samples the drop
+  spawned next to a container of the lab's world, or at the lab world's spot when it has none, whose default_inventory
+  program acquires their tables), samples the drop
   rows over them, and drives real loot rolls (`Rolls`). Data the game loads on demand needs such a loader, or its rows stay
   unproven with the producer's `unsampled` reason.
 - **When the game reads a field is regmap/common's decision, never the round trip's** (P7). Where a lab can show it, the
@@ -213,7 +214,9 @@ The lab writes the evidence kilnctl judges (regmap/README.md "The producer"):
   spawners (with a creature's loot labels; a default inventory never rolls random loot, docs/re/content.md section 11) and
   reads each roll from the spawner's own record (count for `stack.scalable`/`maxScaled`, rarity for `rarities`/`fixedRarity`).
   The results go into the suite's `effects` and kiln.log (PASS/FAIL/INCONCLUSIVE); kilnctl does not judge them. In the
-  playerless lab of 31.x the spawners recorded no roll (INCONCLUSIVE), so these effects need a lab with a player.
+  playerless lab of 31.x the spawners recorded no roll (INCONCLUSIVE; also with the slot's generic pickup given, which the
+  spawner program needs: the gate left is its loot generation version check, docs/re/content.md section 11), so these
+  effects need a lab with a player.
 - A probe must change the value, be in range, and exercise every storage kind the build has (P3, P4, P10). A field the
   producer cannot sample gets an `unsampled` reason in Kiln words, which becomes the row's unproven reason.
 
@@ -273,7 +276,7 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 | P3 | `manaCost 67.5` became 68, `2.5` became 2 in game | some items store the cost as a Sint32 config, others as float; `encode` rounds into an int (refl.cpp:412) | refuse an inexact value per entry with the stable token `not_exact: `, never round; float-config entries keep fractions (ruling 2026-11-22 9:09 PM; wire form 10:45 PM) | `registry_live.cpp:659-662` (`bind_impact`); `kiln_registry_live.h:62-64` `KILN_REGISTRY_LIVE_REASON_NOT_EXACT`; tests `fractional_integer_cost_is_refused`, `whole_and_float_costs_still_work`, `staged_fractional_integer_cost_is_refused`, `entry_point_inexact_cost_drops_only_that_entry` |
 | P4 | mana/stamina could never be proven on f0d824be; then the record said "138 entries" while 141 items hold a cost | kilnctl demanded a float-config round trip on a build with no float configs; and the producer's count skipped 3 items the lab world does not load | evidence only for kinds the build has ("none on this build" recorded); entries in the id table but not in the world are counted `notInWorld` and listed; counts are checked against the values export; unknown kind names block | `RegistryProofTestMod.cs` `CountKinds` (:430); `roundtrip.rs` tests `impact_configs_need_evidence_only_for_the_kinds_the_build_has`, `every_entry_that_holds_an_impact_config_is_classified`; record `"kinds"` (regmap/README.md) |
 | P5 | `balance.altarsPerFlameLevel` read as `"(21 bytes)"`; missing from the values export | byte arrays went through the dump summary, not as numbers | read byte arrays as lists, through guarded reads bounded to the resource; over 65,536 is refused, never cut | `model_bytes.cpp:45-56`; `registry_model_test` `byte_array_bounds`; `registry_proof_test` `byte_array_lists` |
-| P6 | drop-table edits reported changed but the game kept the old chance; later, 6 drops rows could not be proven | the game acquires drop tables when something needs them: the bind ran only for packs with drop rules and only once, and newcontent repoints a table's stacks; a playerless lab world loads no table | bind on every acquire, after newcontent, rules or not; a table not loaded yet is pending, not refused; the producer's phase 2 loads tables in the playerless lab by spawning the game's loot containers next to a container of the world (31.x), and says why in Kiln words when it cannot | `content.cpp` -> `registry_live.cpp` `drops_table_loaded`; tests `drop_table_without_old_rules`, `drop_table_repointed_by_newcontent`; producer `LoadDropTables` (`RegistryProofTestMod.Later.cs`), `unsampled` |
+| P6 | drop-table edits reported changed but the game kept the old chance; later, 6 drops rows could not be proven | the game acquires drop tables when something needs them: the bind ran only for packs with drop rules and only once, and newcontent repoints a table's stacks; a playerless lab world loads no table | bind on every acquire, after newcontent, rules or not; a table not loaded yet is pending, not refused; the producer's phase 2 loads tables in the playerless lab by spawning the game's loot containers next to a container of the world, or at the lab world's spot (31.x), and says why in Kiln words when it cannot | `content.cpp` -> `registry_live.cpp` `drops_table_loaded`; tests `drop_table_without_old_rules`, `drop_table_repointed_by_newcontent`; producer `LoadDropTables` (`RegistryProofTestMod.Later.cs`), `unsampled` |
 | P7 | `items.block`, `comfort`, `fuel.burnTime` and four loot rows were off on every build | when the game reads them was not traced (or not seen in a lab roll) | ship `read: unknown` / `state: unproven` with the reason and the cautious `applies`; a lab round trip does not lift a row regmap/common marks unproven (it proves the mapping, not the read time). 31.x traced them (displacement scans of both exes, LootFind's callers; docs/re/content.md section 11): block, comfort and the loot rows read now; `fuel.burnTime` has no reader and stays unproven with that reason. No playerless lab path rolls random loot (a default inventory skips random stacks; the pickup spawner waits for more than a spawn), so the loot rows' read times rest on the disassembly, as `stack.min`/`stack.max` did | `regmap/common/items.json`, `loot.json`; `regmap.cpp` `check_routing`; kilnctl `a_row_unproven_in_common_stays_unproven_whatever_the_lab_shows` (mod.rs); producer `Rolls` |
 | P8 | `KILN_REGISTRY_VIEW_BASE` and registry.json showed data-pack values as the game's | with no registry user at the stage, the base was decoded at first use from resident pages kiln.content had already written | Kiln.Host flags mods whose code uses the registry API (`"registry": true` in the stage order) so the stage decodes at resources-ready; a later first-use decode restores Kiln's own store originals over the bytes (`PristineView`) and runs outside the store lock | `stage.cpp:434-440`, `:754-758`; `registry/pristine.h`; `stage_service.cpp:68-80`; `store.cpp:487` `store_pristine`; tests `registry_users_decode_at_the_stage`, `lazy_base_keeps_pre_patch_resource_bytes`, `lazy_decode_reads_pristine_bytes` |
 
