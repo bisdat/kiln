@@ -83,7 +83,13 @@ reads them through one helper, `assetsRoot()` (`src/admin/catalog.ts`):
 
 Dev uses the vite path because WebKitGTK refuses custom-scheme images and CSS from the `http://localhost:1420` page
 under `tauri dev`. Without the assets the map shows a banner (with the import button in the launcher) and draws the
-live overlays on the plain world plane; Spawn falls back to the enemy types the server has seen.
+live overlays on the plain world plane; Spawn falls back to the enemy types the server has seen. A host words that banner
+and the Markers tab's line itself through `useMapNoArt` (the host seam, below).
+
+The Map page fills the height its parent gives it when that parent is a flex column (the launcher's server page,
+Kilnwarden's frame), and the map fills the page whatever the side panel holds: Markers, Find & filter and Live scroll
+inside the map's height. In a parent of no set height the map is the window's height under the page, less 18 px.
+`tests/admin-map-layout.spec.ts` checks both at 1920×1080, 1360×860, 1280×800 (the Deck) and 1024×640.
 
 ## Development and testing
 - Browser mock (no backend): `bun x vite` (1420) or `KILN_ADMIN_MOCK=1 bun x vite --config vite.admin.config.ts`
@@ -129,7 +135,12 @@ The protocol on the socket: [admin-protocol.md](admin-protocol.md) section 12.
 
 The host seam (`configureAdmin`'s `host`, all optional): `assetsRoot()` (where the map art is: the launcher's
 `kiln-asset` protocol in a release build; default `/assets-local/`), `useArtStatus()` (a hook: the launcher's Game
-art state, so the map probes again), `crashReportsFromDisk(serverId)` (the launcher reads a stopped server's crash
+art state, so the map probes again), `useMapNoArt(art)` (a hook, called on every render of the map with
+`useArtStatus()`'s state: what the Map page says while it has no map art, `{title, body?, action?: {label, onClick,
+busy?}, markers?}` (`AdminMapNoArt`): `title` (null: no banner over the map, the host has its own notice), `body` (text
+or the host's elements) and `action` replace the banner's "Preparing map art…" / "Map art needs the Enshrouded client",
+`markers` (default: the title) the Markers tab's "No map data yet: the launcher prepares it…"; undefined: the
+launcher's words; `tests/admin-map-noart.spec.ts`), `crashReportsFromDisk(serverId)` (the launcher reads a stopped server's crash
 reports), `restartManagedServer(serverId)` (the launcher restarts a server it manages: its Tauri command
 `server_restart`). Without them the pages leave those parts out: no folder crash list, no "Restart now" for a staged
 restore. Kiln.Admin's op `server_restart` is something else, a KAP request (`kapOps(call).serverRestart`), and the
