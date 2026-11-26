@@ -78,7 +78,9 @@ reason, and the schema field gets the cautious `applies` (worldLoad or restart, 
   `LATER_REGISTRIES` (registrygen.py) until it has a schema.
 - `python3 -I tools/registrygen/registrygen.py lock`, then `registrygen.py` (writes the outputs), then `--check`.
   `ids.lock.json` ids are never reused; a removed field is `retire`d, not deleted. Within 0.x a breaking change needs a
-  minor bump plus a migration file (README "Versions").
+  minor bump plus a migration file (README "Versions"). registrygen builds the migration into `schema.g.h` (`kRenames`) and
+  `ir.cpp` `parse_batch` reads every edit through it at run time; it does not keep an `[Obsolete]` C# property under a renamed
+  field's old name yet, so add one by hand (PublicAPI is additive).
 - The generated doc page has a Mapping column from regmap; never edit the page by hand.
 
 Done when `registrygen.py --check` passes and `git status` shows the generated files.
@@ -170,6 +172,15 @@ entry point is `RestartRequired`, never applied (owner ruling 2026-11-22 on entr
 - Runtime entry points refuse per entry; Manual transactions are atomic (P19). A failed write is charged to the change
   that owns the slot (P17).
 
+### 2.8a Fields that change existing saves
+
+Decide for each field whether an edit of it changes what a save holds (a cap the game enforces on saved data, a range a load
+clamps saved copies into, a list a saved index points into) and add its case to `registry/saves.cpp` `judge`: refuse, guard,
+warn or report (README "Edits that change existing saves"), with a `registry_saves` test. Restart fields are judged at the
+stage (`stage.cpp` `compose_checked`), live scalar fields at each write over the value under them (`registry_live.cpp`
+`save_check`; a new entry's first values are not judged), and every field of a rollback's plan also against the plan it rolls
+away from (`stage.cpp`, whole plan); a field read only at use or for new copies needs nothing.
+
 ### 2.9 Managed typed API and analyzers
 
 - Generated: `Kiln.Registry/Generated/<R>.gen.cs` and the catalog. Hand-written: the registry property on `RegistryStage`
@@ -227,6 +238,7 @@ Commands and file contracts: [sigport.md](sigport.md#the-registry-proof-kilnctl-
 | `registry_stage`, `registry_stage_review` | a start with a section editing it; caps rows; id table complete (P12) |
 | `registry_live`, `registry_live_review`, `registry_live_transactions`, `registry_store` | each live field: write, read, revert, foreign write, pending/late data, per-entry refusal |
 | `registry_report`, `registry_proof` | report rows; boot/read-only producer samples |
+| `registry_saves` | the field's save class, if it has one (2.8a) |
 | Python `tools/registrygen/tests` | id rule cases, conv checks |
 | `cargo test` in `runner/kilnctl` | new raw kind, new kind counts, id rule agreement |
 | managed: Kiln.Registry.Tests, Kiln.Host.Tests, Kiln.Contract.Tests, Kiln.TestKit.Tests, Kiln.Analyzers.Tests; `gen-apis` | the typed property, PublicAPI |

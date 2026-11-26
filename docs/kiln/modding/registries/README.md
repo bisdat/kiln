@@ -22,9 +22,20 @@ release; from API 1.0.0 the stable registries' contract is frozen (additive only
 line (0.<minor> while experimental, <major> from 1.0.0) a field may only be added, widen its range, get new enum values
 at the end, or apply earlier; anything else (a narrower range, other values, another type, a later applies, a removed
 field) needs the next breaking version (0.2.0 after 0.1.x; 2.0.0 after 1.x) and ships an id migration
-(`schema/registry/migrations/<registry>-<from>-<to>.json`, ids and fields old -> new), applied to edits before they are
-matched. `schema/registry/ids.lock.json` keeps every field's contract and every registry's version history;
-`tools/registrygen/registrygen.py` refuses the rest.
+(`schema/registry/migrations/<registry>-<from>-<to>.json`, Kiln ids and field paths old -> new). `schema/registry/ids.lock.json`
+keeps every field's contract and every registry's version history; `tools/registrygen/registrygen.py` refuses the rest.
+
+**What a migration does.** registrygen builds every migration into Kiln (one row per rename), and Kiln reads every edit
+through them before it checks and matches it: a data pack's `registry` section, a C# or native mod's batch, a live change,
+the plan a rollback starts on. A field path the running schema does not have (an edit's `field`, the fields of an add's
+`fields` and of a `where`, the leaves of a list's elements), and a Kiln id (an exact selector, a `like`, a reference value
+such as a recipe input's item, plain or as `{"set": ...}`), that a step renames is read as the new name, through every later
+step too. Old names are never reused, so this is right whatever schema version the edit was written for, and a name the
+running schema has is never renamed. A glob selector is not renamed. An edit that names one field twice, by its old name and
+its new one, is refused (which value it meant is unknown). kiln.log (`registry: migrated ...`) and registry.json
+`migrated` name every rename of a start's edits (a live change's: kiln.log, `registry (live): migrated ...`); a name no migration knows is refused as before ("items has no field ..."). C# mods name fields
+through the generated properties of the Kiln.Registry they run with, so their edits always carry the running names. No
+registry has a breaking step yet: every schema is 0.1.0, and Kiln ships no migration rows.
 
 | Registry | Entries | Page |
 |---|---|---|
@@ -106,7 +117,9 @@ for example, a WorldLoad append stacks on a retained GameStart append. Prefer ab
 when the same intended value is authored at several points.
 
 Contexts carry `EntryPoint`, `Phase`, `World` (Kiln token, kind and bound save id), and `Identity`. Code, point/pass,
-world identity and settings actually observed in that callback contribute to Identity; no executable plan cache is used.
+world identity and settings actually observed in that callback contribute to Identity. The stage keeps each start's plan
+("Plans and rollback" below) but never starts from a kept plan by itself: only a rollback someone asks for does. There is
+no plan cache keyed by what the edits read.
 Global `Config.Register<T>()` and `WorldConfig<T>()` can be used as inputs; fallback authoring snapshots do not install
 watchers or write defaults. Register live settings in `OnLoad` to get ordinary change events. Per-world settings are
 refused at GameStart/ModLoad, and while a world's settings are unbound. Later points never write restart-only fields:
@@ -341,6 +354,77 @@ count in `resultEntriesLeftOut`, `base.entriesLeftOut`, or the writer's `valueEn
 `opEntriesLeftOut` as applicable. Formula rows keep the numeric `result` and include `formulaInputs` in evaluation order.
 Power lists the damage factor, attack speed factor, and minimum level. Armor lists the armor share and minimum level.
 
+## Plans and rollback
+
+Each start's stage writes its **plan**: `<game>/kiln/data/content/registry/plans/<sha256>.json` (format 2), named by the
+SHA-256 of its content. It holds what the stage composed: each mod with its version and its lowered edits (data sections,
+batches submitted before the stage and its `GameStart` `OnRegistry` turns, in the order they composed, as IR), the values
+they resolved to (`values`, `"<registry>[<id>].<field>"`, restart fields as the boot back-end wrote them; live fields as the
+stage composed them over the base), the entries added and removed, and the game build, side and Kiln version. The same mods
+with the same edits give the same plan. Plans are never deleted.
+
+**The last good plan** is the last one a world started on without a refused edit (`plans/index.json` keeps it, the good one
+before it, the plan the last world ran on, and the highest max stack a world started with per item); a start whose stage had
+no base to read applied nothing and is never good. registry.json `plan.previous` names the last good plan that is not this
+start's: what a rollback goes back to. On a rolled-back start it is the `previous` that plan was written with. An index that
+cannot be read is kept as `plans/index.unreadable.json` with a kiln.log warning; that start has no previous plan, and since
+the highest stacks are unknown Kiln's stack guard goes on. An index entry that names no plan hash is ignored.
+
+**Rollback.** `kilnctl registry rollback <server instance>` (a client: `--dir <game folder>`, or the client Steam knows with
+`--real`) says what changes back, then writes `kiln/data/content/registry/rollback.json`. From the next start on, until
+`kilnctl registry rollback --clear`:
+- the stage runs the plan's edits instead of the mods' current registry edits: data sections, queued batches and `GameStart`
+  callbacks (those are not called; the plan holds their edits). Old paths (packs, boot patches, `OnBoot`, hooks) run as always;
+- registry.json `rollback` says `applied`, lists every value that changed back (`changedBack`: field, from, to; also in
+  kiln.log) and the mods with registry edits the plan does not hold (`leftOut`: not applied while the rollback holds);
+- `ModLoad`, `WorldLoad`, `HotReload` passes and `Registry.Change` of the plan's mods still run as the mods make them (they
+  are not part of a plan); a left-out mod's live changes are `RestartRequired`, and so is a pack reload's changed `registry`
+  section.
+
+The plan is **refused whole**, and the start runs the mods' current edits (registry.json `rollback.state` `refused`, with the
+reason, and a kiln.log warning), when the request cannot be read, the plan file is missing, was written by an older Kiln
+(format 1), or does not match its name, it is the other side's, one of its mods is not loaded (`<mod> is gone`) or not at
+its version (`<mod> changed (1.0.0, now 1.1.0)`), or one of its edits is refused on this start (a field this build does not
+map, an entry this build does not have, a save check below). The save checks judge every value of the plan twice: against
+the value without the registry (as for any edit) and against the plan it rolls away from (the request's `from`; without one,
+the plan the last world ran on), since a world ran on those values and its saves can hold them. A narrower level range or a
+shorter build-zone list than that plan's refuses the rollback whole; a lower max stack needs the stack guard at the stage. It
+is never half-applied. Refusals that only a world's load can make (an entry that world lacks) stay per entry, as on any start.
+A plan made on another game build may start when every edit of it maps there (`rollback.madeOnExe` says so); schema
+migrations apply to it like to any edit.
+
+A rollback **never touches saves**: it writes one file beside the plans. When it gives an item a lower max stack than a world
+already started with, or than the value under it, Kiln's stack guard keeps the bigger stacks a save holds whole; where the guard is not available the
+rollback is refused. `kilnctl registry status` shows the plan of the last start, the previous one and any rollback.
+
+## Edits that change existing saves
+
+A registry edit changes the game's data, never a save. Some fields are read against what a save holds, so Kiln checks each
+edit of them against the value without it (the game's, or what an older path wrote) and decides:
+
+| Class | Edit | What it would do to saves | Kiln |
+|---|---|---|---|
+| `stackCut` | `items.maxStack` lower | the game deletes the part of a saved stack above the new cap at its next move | **guard**: applied, the stack guard keeps such stacks whole (new stacks hold at most the new cap); refused for that entry where the guard is not available |
+| `stackCut` | any start (or rollback) giving an item a lower max stack than a world already started with (`plans/index.json` `stacks`: the highest per item, never lowered) | the same, for stacks such a world saved | **guard**; where the guard is not available, a warning (nothing is left to refuse), and a rollback is refused whole |
+| `levelRange` | `items.levels.max` lower, `items.levels.min` higher | a world load clamps saved copies into the range and the save keeps the clamped level | **refused** for that entry |
+| `listShape` | `balance.buildzoneSizesPerAltarLevel` shorter | a saved altar at a higher level has no build-zone size | **refused** |
+| `perkSlots` | `items.perks`: a filled slot changed or emptied | saved copies keep rarity and unlocked count, and have the slot's new perk (perks are read from the item's slots while it is used) | **warning**, applied |
+| `progressionCap` | `balance.levelCap`, `balance.skillPointsPerLevel` lower | saved characters keep their level and spent points; what the game does past the new cap is not traced | **warning**, applied |
+| `experienceCurve` | `balance.xpPerLevel`, `balance.xpCurve.*` changed | saved characters keep their experience; a level whose threshold moved is not recomputed by Kiln | **warning**, applied |
+| `baseLimits` | `balance.altarsPerFlameLevel`, `waterSourcesPerFlameLevel`, `buildzoneSizesPerAltarLevel` values lower | saved bases keep what they hold above the new limit; what the game does with it is not traced | **warning**, applied |
+| `durability` | `balance.durability.*`, `balance.rarityDurability.*` | each saved copy keeps its share of durability; max and current follow the new value at load | **reported**, applied |
+| (none) | everything else: recipes, loot, drops; an item's rarity, rolled, socket, power, speed, damage, armour, costs; the balance table's gear, unlock, socket chance and fog numbers | read at use, or only for new copies | applied |
+
+Refusals are in registry.json `refused` and kiln.log (`saves: ...; this edit was not applied`), the rest in registry.json
+`saves` (field, class, decision, text) and kiln.log (`registry: saves: ...`). Restart fields are checked at the stage, live
+fields at each write over the value under them (an older pack's included), so a ModLoad, WorldLoad or Manual edit is checked
+too. A new entry's first values (its add's `fields`, over the entry it is like) are not checked: no save holds a copy of it
+yet; its later edits are. The value under an edit is the game's (or an older path's), not what an earlier start gave it, so
+a mod that lowers its own earlier raise of `items.levels.max` is not refused (without the edit the game's value applies,
+lower still); a start whose level range is narrower, or whose build-zone list is shorter, than the plan the last world ran on
+gets a `levelRange` or `listShape` warning in `saves` instead. A rollback is judged against the plan it rolls away from and
+refused whole ("Plans and rollback"). Balance fields stay restart-only.
+
 ## Ids
 
 Every entry has a Kiln id: `game:<stable name>` for the game's entries, `<mod id>:<name>` for a mod's. The grammar is
@@ -393,7 +477,9 @@ template, which take the `drops_` form. The table's GUID also selects it, as dat
 | `schema/registry/<registry>.json` | a registry's schema: fields, types, ranges, ops, applies, ids rule (Kiln names only) |
 | `schema/registry-schema.schema.json` | the schema of those files |
 | `schema/registry/ids.lock.json` | every published registry and field name with its numeric id; never reused |
-| `schema/registry/migrations/` | id and field renames a major schema version ships |
+| `schema/registry/migrations/` | id and field renames a breaking schema version ships (applied to every edit, "Versions" above) |
+| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan; the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
+| `<game>/kiln/data/content/registry/rollback.json` | a rollback request (`kilnctl registry rollback`), kept until `--clear` |
 | `schema/registry-section.schema.json` | the data section's schema (generated) |
 | `regmap/` | how each field maps onto the game, per game build (Kiln's part: mods never read it) |
 | `tools/registrygen/registrygen.py` | the generator; `--check` fails on stale output, `lock` and `retire` keep the ids |

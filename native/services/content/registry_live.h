@@ -71,6 +71,12 @@ struct RegistryLive {
     // Checked under store_mutex against the token/kind that gates all live accesses; false/missing fails closed.
     std::function<bool(uint32_t kind)> on_world_thread;
     std::function<bool(registry::stage::LiveData*, std::string*)> prepare; // optional copied-base preparation on first use
+    // Not empty: the start runs on this rolled-back plan (stage.h LiveHandoff::rollback). mods hold the plan's edits; a pack
+    // reload's changed registry sections do not replace them and are reported RestartRequired until the rollback is cleared.
+    std::string rollback;
+    // The mods that plan leaves out (registry.json rollback.leftOut): their live changes are RestartRequired until the rollback
+    // is cleared, like their GameStart edits.
+    std::vector<std::string> left_out;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).
@@ -135,6 +141,10 @@ void registry_live_world_stop();
 void registry_live_owner_gone(KilnOwner owner); // notification thread: mark only, never call the game
 // How the live back-end sizes a game type (type_size; tests replace it).
 extern uint32_t (*g_registry_type_size)(const char* qname);
+// Switches kiln.content's stack guard on (store.cpp guard_set) before a registry layer lowers a max stack below the value
+// under it, so the game keeps the stacks a save holds whole (registry/saves.h "stackCut"); false + *why: not available
+// (the edit is refused for that entry). Tests replace it.
+extern bool (*g_registry_stack_guard)(std::string* why);
 // The owner of the registry's layers (created on first use).
 KilnOwner registry_owner();
 

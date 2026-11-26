@@ -162,6 +162,22 @@ inline constexpr Field kFields[] = {
     {0x00050028u, "balance", "gear.armorGradient", Kind::Float, Kind::Float, true, true, 0.0, 100000.0, 0u, "", "", "", true, Applies::Restart, Ops::None, "", "", false, 0u, "", 0},
 };
 
+// The id migrations of the schemas' breaking steps (schema/registry/migrations/<registry>-<from>-<to>.json), oldest
+// first per registry: kiln.content reads an edit naming an old field or Kiln id as the new one before it is matched
+// (ir.cpp parse_batch). The last row is empty (registry nullptr).
+struct Rename {
+    const char* registry;
+    const char* from;      // the breaking step's versions
+    const char* to;
+    bool field;            // a field path (else a Kiln id)
+    const char* old_name;
+    const char* new_name;
+};
+
+inline constexpr Rename kRenames[] = {
+    {nullptr, nullptr, nullptr, false, nullptr, nullptr},
+};
+
 // Field ids by name: <registry>_<path> with '.' as '_' and '[]' left out.
 namespace field {
 inline constexpr uint32_t items_maxStack = 0x00010001u;

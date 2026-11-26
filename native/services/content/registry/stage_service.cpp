@@ -226,6 +226,7 @@ Env make_env() {
     e.write_data = [](const std::string& rel, const std::string& text) { return write_whole(data_root() / u8(rel), text); };
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
     e.entry_support = &nc_registry_supports;
+    e.stack_guard = [](std::string* why) { return guard_set(true, why); };
     e.log = [](int level, const std::string& line) {
         if (level >= 2) LOGE("%s", line.c_str());
         else if (level == 1) LOGW("%s", line.c_str());
@@ -596,6 +597,8 @@ void bind_service() {
         in.report = h.report;
         in.changed = h.changed;
         in.prepare = h.prepare;
+        in.rollback = h.rollback;
+        in.left_out = h.left_out;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         if (!in.result.definitions.empty()) registry_entries_prepare(&in);
         const Result reconciled = in.result;
