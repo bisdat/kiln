@@ -4655,7 +4655,6 @@ KilnResult KILN_CALL t_lock_asks(KilnItemId* out, uint32_t capacity, uint32_t* o
 // reskill dialog (respec/client.AltarCountRet, against the points spent). Mid hooks at those returns add the server's
 // respec snapshot (set_respec_stock), as the lock checks do; the respec tree's Rune row (respec/client.HeaderCountRet) is
 // display only and degrades alone.
-std::atomic<bool> g_respec_dirty{true};  // a registration changed (the managed snapshot reads source_stock on the tick)
 // A Kiln client's snapshot from the server (g_respec_snap_mu): on, the rows.
 std::mutex g_respec_snap_mu;
 std::atomic<bool> g_respec_on{false};
@@ -4665,7 +4664,7 @@ std::atomic<bool> g_respec_row_off{false};             // the Rune row's own sta
 kiln::MidHook2 h_respec_node, h_respec_altar, h_respec_row;
 std::atomic<bool> g_respec_node_on{false}, g_respec_altar_on{false}, g_respec_row_on{false};
 std::atomic<bool> g_respec_fault_report{false};  // a hook faulted: the next Pre lowers crafting.respec_sources (faulted)
-LogLimit g_log_respec_snap{8}, g_log_respec_check{24}, g_log_respec_stand{8};
+LogLimit g_log_respec_snap{8}, g_log_respec_check{24};
 std::atomic<uint64_t> g_respec_last[3]{};        // per client site: the last logged (item, state), the UI runs every frame
 
 // The client's snapshot (any thread). False: no snapshot (a vanilla or older server, no respec link). *row: the item named.
@@ -4817,20 +4816,17 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session,flags);
     g_lock_dirty.store(true, std::memory_order_relaxed);
     g_build_dirty.store(true, std::memory_order_relaxed);
-    g_respec_dirty.store(true, std::memory_order_relaxed);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
     g_lock_dirty.store(true, std::memory_order_relaxed);
     g_build_dirty.store(true, std::memory_order_relaxed);
-    g_respec_dirty.store(true, std::memory_order_relaxed);
     return g_registered.remove(owner,handle) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
 void KILN_CALL t_cancel_sources(KilnOwner owner) {
     g_registered.cancel_owner(owner);
     g_lock_dirty.store(true, std::memory_order_relaxed);
     g_build_dirty.store(true, std::memory_order_relaxed);
-    g_respec_dirty.store(true, std::memory_order_relaxed);
 }
 
 KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
