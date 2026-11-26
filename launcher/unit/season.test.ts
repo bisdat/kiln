@@ -6,6 +6,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { festiveOffered, festiveSeasonOf, isFestiveSeason, seasonNow, themeOverride } from "../src/shell/season";
 import { isThanksgivingWeekend, turkeyTime } from "../src/shell/thanksgiving";
 import { FRAG, FRAG_FESTIVE, FRAG_TURKEY } from "../src/shell/Stage";
+import de from "../src/i18n/de.json";
+import ko from "../src/i18n/ko.json";
 
 const TZ0 = process.env.TZ;
 afterAll(() => {
@@ -126,6 +128,19 @@ describe("the address and automation", () => {
     expect(seasonNow(dec, "?theme=auto", true, null, null)).toBe("festive");
     expect(seasonNow(thursday, "?theme=auto", true, null, null)).toBe("turkey");
     expect(turkeyTime(thursday, "", true)).toBe(false);
+  });
+});
+
+describe("the season's words", () => {
+  // the season runs into January: Korean says "the year's end and the New Year" (연말연시), not just the year's end (연말);
+  // the snow outside the arch falls (내리고), it does not hang like the garlands (걸립니다); German calls the holidays
+  // Festtage (Festzeit is a fair's or a festival's opening hours)
+  test("Korean and German name the whole season, naturally", () => {
+    expect(ko.shell.appShell.festive).toBe("즐거운 연말연시 보내세요");
+    expect(ko.settings.appearance.festive).toBe("연말연시");
+    expect(ko.settings.appearance.festiveMore).toContain("아치 밖에는 눈이 내리고, 페이지에는 화환이 걸립니다");
+    expect(de.settings.appearance.festive).toBe("Festtage");
+    expect(de.shell.appShell.festive).toBe("Frohe Festtage");
   });
 });
 
