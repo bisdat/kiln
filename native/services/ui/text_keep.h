@@ -4,19 +4,19 @@
 //
 // A module in the game's process that answers a key with a key of its own (SendInput, keybd_event) typed that key into
 // Kiln's field too: ShroudLink's client add-on taps B (the game's backpack key, to open the player menu) when its MODS
-// key goes down (in its source; players know it as the key that opens its Assistants panel), and with that key on T every
-// "t" typed in the Kiln menu's search came out "tb" (HadToRegister, 0.2.0-dev.31.13). The add-on's window procedure sits
-// above Kiln's, so it sees the T before Kiln can keep it.
+// key goes down (so its source names it; players know it as the key that opens its Assistants panel), and with that key
+// on T every "t" typed in the Kiln menu's search came out "tb" (HadToRegister, 0.2.0-dev.31.13). The add-on's window
+// procedure sits above Kiln's, so it sees the T before Kiln can keep it.
 //  - Sent: Kiln's hooks of SendInput and keybd_event write down each key press a module of the game's process sends
 //    while a Kiln text field has the keyboard (any thread; sent_key). Releases are not written down: a release types
 //    nothing. Nor are characters (KEYEVENTF_UNICODE): those are text, and they type.
 //  - Field (the window's thread): the next key message of that key (WM_KEYDOWN, WM_SYSKEYDOWN) takes it, whether or
 //    not a raw record (WM_INPUT) came for it: what reaches Kiln's field is the key messages and their characters, and
 //    one key's key messages come in the order its presses were made. A raw record may come ahead of the key messages
-//    of earlier presses (a pump takes the posted WM_INPUTs first), or not at all (Proton need not deliver every key as
-//    one). That press's key message and the characters it makes (WM_CHAR, WM_SYSCHAR, WM_UNICHAR) stay out of Kiln's
-//    field; the game, Kiln's key handling and the mods' key listeners get them as before (Kiln keeps every key press
-//    from the game while its menu or a screen has the input anyway).
+//    of earlier presses (a message pump may take the WM_INPUTs first), or not at all (Proton need not deliver every
+//    key as one). That press's key message and the characters it makes (WM_CHAR, WM_SYSCHAR, WM_UNICHAR) stay out of
+//    Kiln's field; the game, Kiln's key handling and the mods' key listeners get them as before (Kiln keeps every key
+//    press from the game while its menu or a screen has the input anyway).
 // Input from other programs (an on-screen keyboard, a key remapper, a password manager typing) is not sent from the
 // game's process, so it types as always. A sent press whose input never came (another desktop had the input) is
 // forgotten after kSentMs; one sent press keeps one press out, so a player's own press of the same key right after it
@@ -33,12 +33,12 @@ constexpr int kMaxSent = 32;        // sent presses waiting at once; more are no
 // KEYEVENTF_* (winuser.h: input.cpp checks they match)
 constexpr uint32_t kExtendedKey = 0x1, kKeyUp = 0x2, kUnicode = 0x4, kScanCode = 0x8;
 
-// The key a key press a module sends (a KEYBDINPUT of SendInput, or keybd_event's arguments) comes to the window as, its
-// key messages' virtual key; 0 = nothing to write down. A release types nothing. A character (KEYEVENTF_UNICODE) is
-// text by intent, never a game key (an on-screen keyboard or a paste typing from the game's process): it types into
+// The key a key press a module sends (a KEYBDINPUT of SendInput, or keybd_event's arguments) comes to the window as,
+// its key messages' virtual key; 0 = nothing to write down. A release types nothing. A character (KEYEVENTF_UNICODE)
+// is text by intent, never a game key (an on-screen keyboard or a paste typing from the game's process): it types into
 // Kiln's field as before. A press sent by scan code, or with no virtual key, is its scan code's key: `scan_vk(code)`
-// (MapVirtualKey MAPVK_VSC_TO_VK; 0xE0xx for an extended key). A left or right Shift, Ctrl or Alt is the generic key, as
-// the key messages name it (VK_SHIFT, not VK_LSHIFT).
+// (MapVirtualKey MAPVK_VSC_TO_VK; 0xE0xx for an extended key). A left or right Shift, Ctrl or Alt is the generic key,
+// as the key messages name it (VK_SHIFT, not VK_LSHIFT).
 template <class ScanVk>
 uint32_t sent_key(uint32_t vk, uint32_t scan, uint32_t flags, ScanVk scan_vk) {
     if (flags & (kKeyUp | kUnicode)) return 0;

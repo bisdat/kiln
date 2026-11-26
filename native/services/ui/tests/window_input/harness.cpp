@@ -1728,7 +1728,7 @@ void mod_sent_key_in_text_field() {
     imgui_events_taken();
 
     // two Bs in a row, the sent one's and the player's, with both raw records ahead of the key messages (a message pump
-    // takes the posted WM_INPUTs first): one types, and Kiln's key handling gets both
+    // may take the WM_INPUTs first): one types, and Kiln's key handling gets both
     kui::g_kiln_keys.clear();
     send_b();
     {
