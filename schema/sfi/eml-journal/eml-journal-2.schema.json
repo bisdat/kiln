@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-journal/eml-journal-2.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "kiln-eml's change journal of an EML-dialect pass, format 2 (0.2.0-dev.31.18): the same file as format 1, <game>/kiln/eml/ownership/<stem>.change-journal.json, written by EML's own pass outside kiln mode after it published a generation. Per mod of the run (in the order their entrypoints ran), the archive resources its entrypoint wrote, each with the member paths it wrote there, the ones it created and the contents it created, never a value. Bound to the ownership receipt the publication wrote: 'generation' and 'receiptSha256' are that receipt's SHA-256, which kiln-eml's eml.json reports as 'generation' for the start whose live data it is (a publication, or an unchanged start that found that receipt's output live); every publication and restore removes the journal before it changes the receipt or the live files, and an unchanged start keeps it byte for byte. A reader uses it only when 'generation' is the start's live generation. A typed serializer writes the fields in this order. Attribution: a write is listed for the mod whose entrypoint was running when it was made (code that runs inside an entrypoint is that entrypoint's, whoever wrote it); the member paths come from EML's value wrappers walked once the mods ran, as the resource is written: a write that no longer reaches the published resource (into a value detached from it) is not listed; a value put in place over another (a field, an element, a variant's value, the resource's data) takes over the writes logged in the one it replaced, member by member where it has that member (a copy has them all), so they move with their members afterwards (the new value can be a copy of it); a mod's entry module writes as that mod, whoever requires it first. A mod whose id is not 1-80 of A-Z a-z 0-9 . _ - is listed in 'unattributed'. Bounds: at most 4096 entries (changed, created, contents) per package and in 'unattributed', 32768 in all, at most 16384 paths per changed resource (more: the whole resource, ['']), a path at most 256 bytes (longer: the member holding it), at most 8 MiB of paths in all (a resource past that: the whole resource, so a journal stays below the 16 MiB a reader takes); over the entry bounds, entries are left out and 'truncated' is true on the package and the journal. A format-1 reader refuses this record (format 2) and so names nobody from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "stem",
+    "generation",
+    "receiptSha256",
+    "dialect",
+    "attempt",
+    "truncated",
+    "packages",
+    "unattributed"
+  ],
+  "properties": {
+    "format": {
+      "const": 2
+    },
+    "stem": {
+      "enum": [
+        "enshrouded",
+        "enshrouded_server"
+      ],
+      "description": "The archive (the side)."
+    },
+    "generation": {
+      "$ref": "#/$defs/sha256",
+      "description": "The SHA-256 of the ownership receipt of the generation the pass published (kiln-eml's eml.json 'generation' while it is live)."
+    },
+    "receiptSha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "The same receipt's SHA-256 (format 1 binds a generation digest and its receipt; an EML-dialect generation is its receipt)."
+    },
+    "dialect": {
+      "enum": [
+        "eml"
+      ],
+      "description": "The startup dialect whose pass the journal records: EML's own pass."
+    },
+    "attempt": {
+      "enum": [
+        "first",
+        "retry"
+      ],
+      "description": "retry: a mod's Lua failed and the pass ran again without it; only the committed run's writes are recorded."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Some package's or the unattributed bucket's entries were left out (exactly when one of them is truncated)."
+    },
+    "packages": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/package"
+      },
+      "description": "Every mod whose entrypoint ran in the committed run, in the order they ran, with nothing listed for one that changed nothing. One entry per id."
+    },
+    "unattributed": {
+      "$ref": "#/$defs/changes",
+      "description": "What was written or created while no entrypoint ran (normally nothing), and by mods whose id the record cannot name."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case hex SHA-256."
+    },
+    "sfId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,80}$",
+      "description": "A ShroudForge identifier, as sfi-state.schema.json's sfId."
+    },
+    "guid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "A GUID as the game's archive and ShroudForge's Resource.guid write it (lower-case)."
+    },
+    "u32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ordinal": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "nullableSha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sha256"
+        }
+      ],
+      "description": "A plan digest; null when no launch plan froze it (an EML start outside kiln mode)."
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]*(\\[[0-9]*\\])*(\\.[A-Za-z_][A-Za-z0-9_]*(\\[[0-9]*\\])*)*$",
+      "description": "A member path from the resource's root at its published place: member names joined by '.', a list element as [<0-based index>], a list's membership as [] (an insertion, removal or clear, or a plain element set); '' is the whole resource (its data replaced). A path names everything below it."
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "contentSha256",
+        "settingsSha256",
+        "truncated",
+        "changed",
+        "created",
+        "contents"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/sfId",
+          "description": "The EML mod's id (its mod.json)."
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Its mod.json version (null when not known)."
+        },
+        "kind": {
+          "enum": [
+            "eml"
+          ],
+          "description": "An EML mod."
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "settingsSha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "changed": {
+          "$ref": "#/$defs/changedList"
+        },
+        "created": {
+          "$ref": "#/$defs/createdList"
+        },
+        "contents": {
+          "$ref": "#/$defs/contentList"
+        }
+      }
+    },
+    "changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truncated",
+        "changed",
+        "created",
+        "contents"
+      ],
+      "properties": {
+        "truncated": {
+          "type": "boolean"
+        },
+        "changed": {
+          "$ref": "#/$defs/changedList"
+        },
+        "created": {
+          "$ref": "#/$defs/createdList"
+        },
+        "contents": {
+          "$ref": "#/$defs/contentList"
+        }
+      }
+    },
+    "changedList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "typeHash",
+          "part",
+          "createdBy",
+          "paths"
+        ],
+        "properties": {
+          "guid": {
+            "$ref": "#/$defs/guid"
+          },
+          "typeHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$",
+            "description": "The resource's type hash (the qualified type name's FNV-1a), 8 lower-case hex digits."
+          },
+          "part": {
+            "$ref": "#/$defs/u32"
+          },
+          "createdBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "package",
+                  "ordinal"
+                ],
+                "properties": {
+                  "package": {
+                    "$ref": "#/$defs/sfId"
+                  },
+                  "ordinal": {
+                    "$ref": "#/$defs/ordinal"
+                  }
+                }
+              }
+            ],
+            "description": "For a resource another package created in this pass: that package and its ordinal (the created resource's name across runs); null for an archive resource."
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16384,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/path"
+            },
+            "description": "The member paths the entrypoint wrote in this resource, sorted, each once; [''] (alone): the whole resource."
+          }
+        }
+      },
+      "description": "The resources the entrypoint wrote, in resource-key order (GUID bytes, type hash, part), each once with the member paths it wrote; never one the package created itself."
+    },
+    "createdList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ordinal",
+          "guid",
+          "typeHash",
+          "part",
+          "explicit"
+        ],
+        "properties": {
+          "ordinal": {
+            "$ref": "#/$defs/ordinal"
+          },
+          "guid": {
+            "$ref": "#/$defs/guid"
+          },
+          "typeHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}$",
+            "description": "The resource's type hash (the qualified type name's FNV-1a), 8 lower-case hex digits."
+          },
+          "part": {
+            "$ref": "#/$defs/u32"
+          },
+          "explicit": {
+            "type": "boolean",
+            "description": "The package gave the GUID and part (stable across runs); false: drawn at random (differs per publication; the ordinal names it)."
+          }
+        }
+      },
+      "description": "The resources the entrypoint created, in creation order, ordinals 1, 2, ... (the ones over the bound are the last, left out). A created resource is named <package id>:<ordinal> across runs, which holds while the package creates in the same order: the Lua runtime seeds its string hashing anew for every run, so creations made while walking a table with string keys (pairs, next) can be numbered differently from run to run. A consumer matches a created resource by (package id, version, contentSha256, typeHash, part, ordinal) and expects such a mismatch; an explicit GUID is always stable."
+    },
+    "contentList": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "size"
+        ],
+        "properties": {
+          "guid": {
+            "$ref": "#/$defs/guid",
+            "description": "The content's hash as a GUID (Content.guid): content-derived, the same for the same bytes."
+          },
+          "size": {
+            "$ref": "#/$defs/u32",
+            "description": "Its size in bytes (also the GUID's first group, little-endian)."
+          }
+        }
+      },
+      "description": "The contents the entrypoint created (create_content), each once, in the order first created."
+    }
+  }
+}

@@ -312,6 +312,7 @@ void clones_packs_begin();
 void clones_packs_end();
 void clones_pack_mark(KilnOwner owner);         // gd_pack_mark's part for the clones
 uint32_t clones_pack_rollback(KilnOwner owner);  // gd_pack_rollback's part for the clones
+size_t clones_pack_journal_copies();               // clones the journal copied since the mark (only for a definition that changes one)
 void clones_pack_unmark();
 // The buff mirror follows the game's buff records (their layers); store_mutex held. Cheap when nothing changed.
 void buffs_sync();

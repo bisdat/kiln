@@ -21,6 +21,8 @@ macro_rules! failpoint {
 
 // kiln-eml: what a run spent fingerprinting the game's files (bytes read, files reused), for the log and Kiln's state.
 pub use cache::FingerprintStats;
+// kiln-eml: who wrote which resource member in a run (env/writes.rs): the EML dialect's change journal.
+pub use env::writes::{CreatedResource, PackageWrites, WriteRecord, WrittenResource};
 // kiln-eml: what a run is doing, for the people waiting for it (progress.rs).
 pub use progress::{Event, Progress, ProgressGuard, Sink, Stage, Timing};
 // kiln-eml: the startup pass's progress from the archive work itself (progress.rs)
@@ -99,6 +101,11 @@ pub struct RunResult {
     pub fingerprint: FingerprintStats,
     /// kiln-eml: ShroudForge asset mods (`<id> <version>`) whose prepared output this run's publication replaced.
     pub sf_displaced: Vec<String>,
+    /// kiln-eml: the live generation once the run ended well: the SHA-256 of the ownership receipt of the output it
+    /// published, or that an unchanged start found live (`Checked::Hit`). None: no output of this run is proven live.
+    pub generation: Option<String>,
+    /// kiln-eml: who wrote what in the published generation (a patch run that published): its change journal's record.
+    pub journal: Option<WriteRecord>,
 }
 
 pub fn run(
@@ -146,7 +153,7 @@ fn run_steps(
     // kiln-eml: run_with is prepared execution, the sole publisher and cache completion, composed as before; the
     // prepared half is shared with `startup_host::StartupHost::prepare_eml`, which stops before publication.
     let planned = match check(env, args, progress, prints) {
-        Checked::Hit { .. } => return Ok(RunResult { cached: true, fingerprint: stats(prints), ..RunResult::default() }),
+        Checked::Hit { receipt } => return Ok(RunResult { cached: true, fingerprint: stats(prints), generation: Some(receipt), ..RunResult::default() }),
         Checked::Run(planned) => *planned,
     };
     let cache_unchanged = planned.cache_diff.is_none();
@@ -168,6 +175,7 @@ fn run_steps(
 
     let mut patched = 0;
     let mut published = None;
+    let record = executed.record.take();
 
     if let Some(staged) = executed.staged.take() {
         // Same error text as EML's `finalize`: an I/O failure of the publisher is a KFCWriteError.
@@ -182,9 +190,11 @@ fn run_steps(
 
     // create a new cache file
 
+    let mut generation = None;
     if let Some((published, completion)) = published {
         progress.stage(Stage::Saving);
         completion.finish(&published, env, prints);
+        generation = published.receipt.clone();
     }
 
     let app_state = executed.runner.lua.app_data_ref::<AppState>().unwrap();
@@ -195,6 +205,8 @@ fn run_steps(
         patched,
         fingerprint: stats(prints),
         sf_displaced: ownership::displaced(),
+        journal: generation.as_ref().and(record),
+        generation,
         dlls: app_state.registered_dlls()
             .into_iter()
             .map(|path| path.into_std_path_buf())
@@ -303,6 +315,8 @@ pub(crate) struct Executed {
     /// Patch runs: the staged writer holding this run's resources, with every reader of the vanilla data closed.
     pub(crate) staged: Option<Staged>,
     pub(crate) applied: usize,
+    /// kiln-eml: who wrote what (env/writes.rs), taken before the resources were serialized (patch runs).
+    pub(crate) record: Option<WriteRecord>,
 }
 
 pub(crate) struct Staged {
@@ -348,8 +362,11 @@ pub(crate) fn execute(
 
     if !app_state.has_feature(AppFeatures::PATCH) {
         drop(app_state);
-        return Ok(Executed { runner, staged: None, applied: 0 });
+        return Ok(Executed { runner, staged: None, applied: 0, record: None });
     }
+
+    // kiln-eml: who wrote what, from the values as they will be written (env/writes.rs)
+    let record = Some(app_state.write_record()?);
 
     progress.stage(Stage::Checking);
     let mut inputs_now = FileStateCache::default();
@@ -414,7 +431,7 @@ pub(crate) fn execute(
         mods_before,
         inputs_before,
     };
-    Ok(Executed { runner, staged: Some(Staged { writer, completion }), applied: applied_resources })
+    Ok(Executed { runner, staged: Some(Staged { writer, completion }), applied: applied_resources, record })
 }
 
 /// kiln-eml: one staged generation's identity, so that a cache completion can only ever be the one of the publication

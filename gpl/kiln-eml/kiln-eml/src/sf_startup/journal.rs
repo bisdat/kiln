@@ -36,6 +36,14 @@
 //!
 //! The record (startup-journal.schema.json v1) is written by the startup controller beside the ownership receipt, bound
 //! to the published generation (startup.rs); this module only records and formats.
+//!
+//! **The EML dialect (format 2).** EML's own pass (`runner::run` outside kiln mode) records its writes in EML's runtime
+//! (mod-loader-lua `env/writes.rs`: per mod, the resources its entrypoint wrote with the member paths it wrote, at their
+//! published places, the ones it created and the contents it created); [`Journal::from_eml`] bounds that record as this
+//! module bounds its own, and [`Journal::json`] writes it as format 2 (eml-journal-2.schema.json): the same record with a
+//! `paths` list on each changed resource (`[""]`: the whole resource) and no plan digests (`null`: no launch plan froze
+//! them). The runner writes it beside the receipt the publication wrote, bound to that receipt (`generation` is its
+//! SHA-256, as kiln-eml's eml.json reports the live generation).
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeSet, HashMap, HashSet},
@@ -50,6 +58,16 @@ use super::resource_values::WriteOwner;
 pub const PACKAGE_ENTRIES: usize = 4096;
 /// The most entries a journal keeps in all.
 pub const TOTAL_ENTRIES: usize = 32768;
+/// Format 2: the most member paths one changed resource lists; over that it is the whole resource (`[""]`). Room for a
+/// path per element of the game's largest shared resource (2,542 recipes in one `RecipeRegistryResource`) several times
+/// over: below it a recipe or loot mod is named on the elements and fields it wrote, not on every one.
+pub const RESOURCE_PATHS: usize = 16384;
+/// Format 2: the longest member path (bytes); a longer one is cut back to the member that holds it.
+pub const PATH_BYTES: usize = 256;
+/// Format 2: the most bytes the member paths of one journal take as written (each path with its quotes and comma); a
+/// changed resource whose paths would go past it is listed whole (`[""]`). With the entry bounds this keeps a journal
+/// well below the 16 MiB a reader takes (`StartupJournal::read`, Kiln's reader): past that it would name nobody.
+pub const JOURNAL_PATH_BYTES: usize = 8 << 20;
 
 /// A resource a package created, the `ordinal`-th (1-based) of its creations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +83,9 @@ pub struct Created {
 pub struct Changed {
     pub id: ResourceId,
     pub created_by: Option<(String, u32)>,
+    /// The EML dialect (format 2): the member paths written, sorted, each once (`[""]`: the whole resource). None in the
+    /// ShroudForge dialect, whose record is per resource (format 1).
+    pub paths: Option<Vec<String>>,
 }
 
 /// What one package's entrypoint (or, without an id, everything outside an entrypoint) changed.
@@ -237,6 +258,7 @@ impl Recorder {
                     created_by: creators
                         .get(id)
                         .and_then(|(creator, ordinal)| Some((names[*creator].clone()?, *ordinal))),
+                    paths: None,
                 })
                 .collect(),
             id: b.id,
@@ -324,7 +346,14 @@ fn changes(c: &Changes) -> String {
                 Some((package, ordinal)) => format!("{{\"package\":{},\"ordinal\":{ordinal}}}", text(package)),
                 None => "null".into(),
             };
-            format!("{{{},\"createdBy\":{by}}}", key(&e.id))
+            match &e.paths {
+                // format 2 (the EML dialect)
+                Some(paths) => {
+                    let paths: Vec<String> = paths.iter().map(|p| text(p)).collect();
+                    format!("{{{},\"createdBy\":{by},\"paths\":[{}]}}", key(&e.id), paths.join(","))
+                }
+                None => format!("{{{},\"createdBy\":{by}}}", key(&e.id)),
+            }
         })
         .collect();
     let created: Vec<String> = c
@@ -353,11 +382,115 @@ fn changes(c: &Changes) -> String {
     )
 }
 
+/// A ShroudForge identifier, as the record names a package (sfi-state's sfId): 1 to 80 of A-Z a-z 0-9 . _ -
+pub fn is_sf_id(id: &str) -> bool {
+    (1..=80).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Format 2: a member path cut back to the member that holds it when longer than [`PATH_BYTES`] (at a `.` or `[`).
+fn bounded_path(path: &str) -> String {
+    if path.len() <= PATH_BYTES {
+        return path.to_owned();
+    }
+    let mut end = PATH_BYTES + 1;
+    while !path.is_char_boundary(end) {
+        end -= 1;
+    }
+    path[..end].rfind(['.', '[']).map_or_else(String::new, |at| path[..at].to_owned())
+}
+
+/// Format 2: a changed resource's paths as the record lists them: bounded, sorted, each once; `[""]` for the whole.
+fn bounded_paths(paths: &[String]) -> Vec<String> {
+    let set: BTreeSet<String> = paths.iter().map(|p| bounded_path(p)).collect();
+    if set.contains("") || set.len() > RESOURCE_PATHS { vec![String::new()] } else { set.into_iter().collect() }
+}
+
 impl Journal {
-    /// The record (startup-journal.schema.json v1), compact, every field in the schema's order (a typed serializer).
+    /// The EML dialect's journal (format 2) from the record of EML's pass (mod-loader-lua `WriteRecord`), bounded as the
+    /// ShroudForge dialect's: at most [`PACKAGE_ENTRIES`] entries per package and in the unattributed bucket (created
+    /// first, then contents, then changed), [`TOTAL_ENTRIES`] in all, what is over left out and marked `truncated`. A mod
+    /// whose id is no ShroudForge identifier cannot be named: its writes go to the unattributed bucket (its creations
+    /// numbered after that bucket's own, writes into them named as no package's).
+    pub fn from_eml(record: &mod_loader::lua::WriteRecord) -> Journal {
+        let mut unattributed = record.unattributed.clone();
+        let mut packages = Vec::new();
+        for p in &record.packages {
+            if p.id.as_deref().is_some_and(is_sf_id) {
+                packages.push(p.clone());
+                continue;
+            }
+            let base = unattributed.created.len() as u32;
+            unattributed.created.extend(p.created.iter().map(|c| mod_loader::lua::CreatedResource { ordinal: base + c.ordinal, ..c.clone() }));
+            for hash in &p.contents {
+                if !unattributed.contents.contains(hash) {
+                    unattributed.contents.push(*hash);
+                }
+            }
+            for c in &p.changed {
+                match unattributed.changed.iter_mut().find(|u| u.id == c.id) {
+                    Some(u) => u.paths.extend(c.paths.iter().cloned()),
+                    None => unattributed.changed.push(c.clone()),
+                }
+            }
+        }
+        let unnamed: Vec<&str> = record.packages.iter().filter_map(|p| p.id.as_deref()).filter(|id| !is_sf_id(id)).collect();
+        let mut entries = 0usize;
+        let mut truncated = false;
+        let mut path_bytes = 0usize;
+        let mut bound = |w: &mod_loader::lua::PackageWrites| -> Changes {
+            let mut c = Changes { id: w.id.clone(), ..Changes::default() };
+            let mut room = |c: &mut Changes| {
+                if c.changed.len() + c.created.len() + c.contents.len() < PACKAGE_ENTRIES && entries < TOTAL_ENTRIES {
+                    entries += 1;
+                    true
+                } else {
+                    c.truncated = true;
+                    truncated = true;
+                    false
+                }
+            };
+            for x in &w.created {
+                if !room(&mut c) {
+                    break;
+                }
+                c.created.push(Created { ordinal: x.ordinal, id: x.id, explicit: x.explicit });
+            }
+            for hash in &w.contents {
+                if !room(&mut c) {
+                    break;
+                }
+                c.contents.push(*hash);
+            }
+            let mut changed: Vec<_> = w.changed.iter().collect();
+            changed.sort_by_key(|x| x.id); // resource-key order, as the record lists them
+            for x in changed {
+                if !room(&mut c) {
+                    break;
+                }
+                let created_by = x.created_by.clone().filter(|(by, _)| !unnamed.contains(&by.as_str()));
+                let mut paths = bounded_paths(&x.paths);
+                let cost: usize = paths.iter().map(|p| p.len() + 3).sum();
+                if path_bytes + cost > JOURNAL_PATH_BYTES {
+                    paths = vec![String::new()]; // past the journal's path budget: the whole resource
+                }
+                path_bytes += paths.iter().map(|p| p.len() + 3).sum::<usize>();
+                c.changed.push(Changed { id: x.id, created_by, paths: Some(paths) });
+            }
+            c
+        };
+        let unattributed = bound(&unattributed);
+        let packages = packages.iter().map(&mut bound).collect();
+        Journal { packages, unattributed, truncated }
+    }
+
+    /// The record, compact, every field in the schema's order (a typed serializer): format 1
+    /// (startup-journal.schema.json) for the ShroudForge dialect, format 2 (eml-journal-2.schema.json) for the EML
+    /// dialect (`paths` on each changed resource; a plan digest that no launch plan froze, all zero, is null).
     /// `identity`: each package's plan identity (a package the plan does not name has none, which the startup controller never
     /// passes: every package of the pass is a plan member).
     pub fn json(&self, header: &Header<'_>, identity: &dyn Fn(&str) -> Option<Identity>) -> String {
+        let eml = header.dialect == "eml";
+        let digest = |d: &[u8; 32]| if eml && *d == [0; 32] { "null".to_owned() } else { format!("\"{}\"", hex(d)) };
         let packages: Vec<String> = self
             .packages
             .iter()
@@ -365,24 +498,25 @@ impl Journal {
                 let id = c.id.as_deref().unwrap_or_default();
                 let identity = identity(id).unwrap_or(Identity {
                     version: None,
-                    kind: "shroudforge",
+                    kind: if eml { "eml" } else { "shroudforge" },
                     content_sha256: [0; 32],
                     settings_sha256: [0; 32],
                 });
                 format!(
-                    "{{\"id\":{},\"version\":{},\"kind\":\"{}\",\"contentSha256\":\"{}\",\"settingsSha256\":\"{}\",{}}}",
+                    "{{\"id\":{},\"version\":{},\"kind\":\"{}\",\"contentSha256\":{},\"settingsSha256\":{},{}}}",
                     text(id),
                     identity.version.as_deref().map_or_else(|| "null".into(), text),
                     identity.kind,
-                    hex(&identity.content_sha256),
-                    hex(&identity.settings_sha256),
+                    digest(&identity.content_sha256),
+                    digest(&identity.settings_sha256),
                     changes(c)
                 )
             })
             .collect();
         format!(
-            "{{\"format\":1,\"stem\":{},\"generation\":\"{}\",\"receiptSha256\":\"{}\",\"dialect\":\"{}\",\
+            "{{\"format\":{},\"stem\":{},\"generation\":\"{}\",\"receiptSha256\":\"{}\",\"dialect\":\"{}\",\
              \"attempt\":\"{}\",\"truncated\":{},\"packages\":[{}],\"unattributed\":{{{}}}}}",
+            if eml { 2 } else { 1 },
             text(header.stem),
             hex(&header.generation),
             hex(&header.receipt_sha256),
@@ -442,7 +576,8 @@ mod tests {
             a.changed,
             [Changed {
                 id: id(0),
-                created_by: None
+                created_by: None,
+                paths: None
             }]
         );
         assert_eq!(
@@ -467,11 +602,13 @@ mod tests {
             [
                 Changed {
                     id: id(0),
-                    created_by: None
+                    created_by: None,
+                    paths: None
                 },
                 Changed {
                     id: id(101),
-                    created_by: Some(("a".into(), 2))
+                    created_by: Some(("a".into(), 2)),
+                    paths: None
                 }
             ]
         );
@@ -486,11 +623,110 @@ mod tests {
             journal.unattributed.changed,
             [Changed {
                 id: id(9),
-                created_by: None
+                created_by: None,
+                paths: None
             }]
         );
         assert!(!journal.truncated);
         assert_eq!(r.take().packages.len(), 0, "taken once");
+    }
+
+    // The EML dialect (format 2): a resource's paths are bounded (too many: the whole resource; too long: cut back to the
+    // member holding it), a mod the record cannot name is unattributed (and a creation of its is nobody's), a bucket is
+    // bounded as the ShroudForge dialect's; the record is format 2 with paths and null plan digests.
+    #[test]
+    fn the_eml_record_is_bounded_and_written_as_format_2() {
+        use mod_loader::lua::{CreatedResource, PackageWrites, WriteRecord, WrittenResource};
+        let long = format!("a.{}.b", "x".repeat(PATH_BYTES));
+        let written = |n: u32, paths: Vec<String>| WrittenResource { id: id(n), created_by: None, paths };
+        let many: Vec<String> = (0..=RESOURCE_PATHS).map(|i| format!("f{i:03}")).collect();
+        let record = WriteRecord {
+            packages: vec![
+                PackageWrites {
+                    id: Some("ok".into()),
+                    changed: vec![
+                        written(2, vec![long.clone()]),
+                        written(1, many),
+                        WrittenResource { id: id(5), created_by: Some(("not ok".into(), 1)), paths: vec!["x".into()] },
+                    ],
+                    ..PackageWrites::default()
+                },
+                PackageWrites {
+                    id: Some("not ok".into()),
+                    changed: vec![written(3, vec!["y".into()])],
+                    created: vec![CreatedResource { ordinal: 1, id: id(5), explicit: false }],
+                    ..PackageWrites::default()
+                },
+            ],
+            unattributed: PackageWrites::default(),
+        };
+        let j = Journal::from_eml(&record);
+        assert_eq!(j.packages.len(), 1, "only a nameable id is a package");
+        let ok = &j.packages[0];
+        assert_eq!(ok.changed.iter().map(|c| c.id).collect::<Vec<_>>(), [id(1), id(2), id(5)], "resource-key order");
+        assert_eq!(ok.changed[0].paths.as_deref(), Some(&[String::new()][..]), "over the path bound: the whole resource");
+        assert_eq!(ok.changed[1].paths.as_deref(), Some(&["a".to_string()][..]), "a long path: its holding member");
+        assert_eq!(ok.changed[2].created_by, None, "a creation of an unnamed mod is nobody's");
+        assert_eq!(j.unattributed.changed[0].id, id(3));
+        assert_eq!(j.unattributed.created.len(), 1);
+        let header = Header { stem: "enshrouded", generation: [1; 32], receipt_sha256: [1; 32], dialect: "eml", attempt: "first" };
+        let text = j.json(&header, &|_| None);
+        assert!(text.starts_with("{\"format\":2,") && text.contains("\"kind\":\"eml\",\"contentSha256\":null"), "{text}");
+        assert!(text.contains("\"paths\":[\"\"]"), "{text}");
+        // the bounds
+        let big = WriteRecord {
+            packages: vec![PackageWrites {
+                id: Some("big".into()),
+                changed: (0..PACKAGE_ENTRIES as u32 + 3).map(|n| written(n, vec!["x".into()])).collect(),
+                ..PackageWrites::default()
+            }],
+            unattributed: PackageWrites::default(),
+        };
+        let b = Journal::from_eml(&big);
+        assert!(b.truncated && b.packages[0].truncated && b.packages[0].changed.len() == PACKAGE_ENTRIES);
+    }
+
+    // Review (the path bounds): a mod that writes one field of a hundred recipes, elements of one shared resource, keeps
+    // a path per recipe (64 made it the whole resource: named on every field of every recipe); and a record whose paths
+    // would make the file larger than a reader takes (16 MiB) stays below it, the resources past its path budget listed
+    // whole.
+    #[test]
+    fn the_eml_record_keeps_a_path_per_element_and_stays_readable() {
+        use mod_loader::lua::{PackageWrites, WriteRecord, WrittenResource};
+        let recipes: Vec<String> = (0..100).map(|i| format!("recipes[{i}].craftingDuration")).collect();
+        let one = WriteRecord {
+            packages: vec![PackageWrites {
+                id: Some("faster".into()),
+                changed: vec![WrittenResource { id: id(1), created_by: None, paths: recipes.clone() }],
+                ..PackageWrites::default()
+            }],
+            unattributed: PackageWrites::default(),
+        };
+        let mut sorted = recipes.clone();
+        sorted.sort();
+        assert_eq!(Journal::from_eml(&one).packages[0].changed[0].paths.as_deref(), Some(&sorted[..]), "a path per recipe");
+        let long = |r: u32, i: u32| format!("m{r:05}.{}.f{i:02}", "x".repeat(230));
+        let big = WriteRecord {
+            packages: (0..2u32)
+                .map(|p| PackageWrites {
+                    id: Some(format!("big{p}")),
+                    changed: (0..1800u32)
+                        .map(|r| WrittenResource { id: id(p * 10_000 + r), created_by: None, paths: (0..20).map(|i| long(r, i)).collect() })
+                        .collect(),
+                    ..PackageWrites::default()
+                })
+                .collect(),
+            unattributed: PackageWrites::default(),
+        };
+        let j = Journal::from_eml(&big);
+        let header = Header { stem: "enshrouded", generation: [1; 32], receipt_sha256: [1; 32], dialect: "eml", attempt: "first" };
+        let text = j.json(&header, &|_| None);
+        assert!(text.len() < 16 << 20, "the record is {} bytes: more than a reader takes", text.len());
+        let first = &j.packages[0].changed[0];
+        assert_eq!(first.paths.as_ref().map(Vec::len), Some(20), "the first resources keep their paths");
+        let last = j.packages[1].changed.last().unwrap();
+        assert_eq!(last.paths.as_deref(), Some(&[String::new()][..]), "past the budget: the whole resource");
+        assert_eq!(j.packages.iter().map(|p| p.changed.len()).sum::<usize>(), 3600, "every resource is still listed");
     }
 
     // Over the bounds: a package keeps its first PACKAGE_ENTRIES entries and is truncated, ordinals keep counting, the

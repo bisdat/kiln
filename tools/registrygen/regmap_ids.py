@@ -105,13 +105,22 @@ def _sanitized(src, entry):
     return name.encode("ascii") != raw
 
 
+def _key(e):
+    """An entry's key in an id table: its GUID (lower case), else "#<32-bit id>" (kiln.content's key of a loot entry)."""
+    g = e.get("guid", "")
+    if g:
+        return g.lower()
+    return f"#{e['id']}" if isinstance(e.get("id"), int) and e.get("id") else ""
+
+
 def record_aliases(registry, src, previous, previous_table, entries, build, by_item_id=None):
     """(aliases, ids, table) of one registry on a new build. previous: the registry's aliases in the previous record;
     previous_table: GUID -> id of the previous build (may be empty: then the pins alone hold the ids)."""
     pinned = {g.lower(): i for g, i in (previous.get("pinned") or {}).items()}
     removed = dict(previous.get("removed") or {})
     table = {g.lower(): i for g, i in (previous_table or {}).items()}
-    now = {e.get("guid", "").lower() for e in entries if e.get("guid")}
+    # an entry without a GUID (a loot entry) is keyed by its 32-bit id, "#<id>", as kiln.content's id table keys it
+    now = {k for k in map(_key, entries) if k}
     for g, i in list(table.items()) + list(pinned.items()):
         if g not in now:
             removed.setdefault(i, build)
@@ -138,7 +147,7 @@ def record_aliases(registry, src, previous, previous_table, entries, build, by_i
         g = e.get("guid", "").lower()
         if g and _sanitized(src, e):
             pinned[g] = i
-    new_table = {e.get("guid", "").lower(): i for e, i in zip(entries, ids) if e.get("guid")}
+    new_table = {_key(e): i for e, i in zip(entries, ids) if _key(e)}
     return {"pinned": dict(sorted(pinned.items())), "removed": dict(sorted(removed.items()))}, ids, new_table
 
 

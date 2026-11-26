@@ -351,14 +351,16 @@ public static unsafe partial class Content
         _syncSoon = true;  // at the next tick, not within 25 steps
     }
 
-    /// <summary>Tells the native service which mods are loaded, in load order: their data packs apply, others not; and
-    /// which of them were loaded again under the same id (a reload, or an unload and a load since the last sync): their
-    /// packs come off and apply again from their current files, as after an unload and a load.</summary>
+    /// <summary>Tells the native service which mods are loaded, in the data-pack order (the load order, each mod keeping the place it
+    /// first had: PackModLoads.InPackOrder): their data packs apply, others not; and which of them were loaded again under the same
+    /// id (a reload, or an unload and a load since the last sync): their packs come off and apply again from their current files,
+    /// as after an unload and a load.</summary>
     internal static void SyncMods()
     {
         _syncSoon = false;
         if (ModsBackend.Current is null || _table == null) return;
-        var loaded = Kiln.Mods.All.Where(m => m.State == ModState.Loaded).OrderBy(m => m.LoadIndex).ToArray();
+        // in the data-pack order: each mod in the place it first had (a reloaded mod keeps the start's), not by load index
+        var loaded = Loads.InPackOrder(Kiln.Mods.All.Where(m => m.State == ModState.Loaded).OrderBy(m => m.LoadIndex), m => m.Id).ToArray();
         var loads = new List<(string, ulong, string)>(loaded.Length);
         foreach (var entry in loaded)
         {

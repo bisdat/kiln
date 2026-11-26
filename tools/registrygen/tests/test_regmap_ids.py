@@ -47,6 +47,22 @@ class AcrossBuilds(unittest.TestCase):
     def record(self, registry, src, entries, previous=None, table=None, build="2"):
         return ri.record_aliases(registry, src, previous or {}, table or {}, entries, build)
 
+    def test_loot_entries_keyed_by_item_id_are_kept_across_builds(self):
+        # loot entries have no GUID: kiln.content's id table keys them "#<32-bit id>" (the kept table of the previous build
+        # holds those rows). The next build has the same entries: none of them is removed, and no id is retired
+        # (the first real update rehearsal, 26404334 -> 26430253, retired all 4,213 and blocked the proof).
+        loot = {"key": "items", "unnamed": "item_%08x"}
+        items = {1: "game:sword", 2: "game:axe"}
+        entries = [E("", "", 1), E("", "", 2)]
+        prev = {"#1": "game:sword", "#2": "game:axe"}
+        al, ids, table = ri.record_aliases("loot", loot, {}, prev, entries, "2", items)
+        self.assertEqual(ids, ["game:sword", "game:axe"])
+        self.assertEqual(al["removed"], {})
+        self.assertEqual(table, prev)
+        # an entry the new build no longer has is removed, as for any registry
+        al, ids, table = ri.record_aliases("loot", loot, {}, prev, entries[:1], "2", items)
+        self.assertEqual(al["removed"], {"game:axe": "2"})
+
     def test_first_build(self):
         al, ids, table = self.record("items", ITEMS, [E(G[0], "Sword", 1), E(G[1], "Sword", 2), E(G[2], "Axe", 3)], build="1")
         self.assertEqual(ids, ["game:sword", f"game:sword~{G[1][:8]}", "game:axe"])

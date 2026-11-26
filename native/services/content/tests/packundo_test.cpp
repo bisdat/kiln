@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <ctime>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -293,10 +295,97 @@ void run() {
           "listing: Y, Z and K stay (pending: no world in this test)");
 }
 
+// registry-fixes item 4 (review-registry-reload perf note): packs.cpp marks every mod at every application (world load, each
+// pack reload), so the journal runs for every definition a pack re-applies, not only when a pack throws. It copied every such
+// definition and found them by a linear scan of what it held: quadratic per mod, tens of ms on the world thread at about
+// 4,000 definitions. Membership is a hash lookup now, and an unchanged redefinition (the common case: the same pack applies
+// again) keeps only what it changes, no copy of the definition.
+// The thread's own CPU time (review-registry-fixes): a wall clock also counts the time the thread waits while other work runs,
+// and the slot tool runs these tests at the lowest CPU priority, so on a busy runner a timed run that was paused read several
+// times longer (x50 to x62 for a linear x8 in 3 of 8 runs of gdundo beside three busy loops on its core). Best of five rounds,
+// the two sizes in turn in each, so a slower moment of the runner falls on both.
+double cpu_seconds() {
+    timespec t{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+    return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_nsec) * 1e-9;
+}
+constexpr int kRounds = 5;
+std::string bench_guid(int i) {
+    char b[40];
+    std::snprintf(b, sizeof b, "44444444-0000-4000-8000-%012d", i);
+    return b;
+}
+void journal_cost() {
+    constexpr KilnOwner kP = 41;
+    constexpr int kSmall = 1000, kLarge = 8000;
+    fake::owner_labels[kP] = "pack p";
+    std::vector<kc::DefPtr> defs;
+    kc::nc_packs_begin();
+    for (int i = 0; i < kLarge; ++i) {
+        const std::string g = bench_guid(i), n = "Bench_" + std::to_string(i);
+        define(kP, item(g.c_str(), n.c_str(), n.c_str()));
+        defs.push_back(def(g.c_str()));
+    }
+    kc::nc_packs_end();
+    check(defs.size() == kLarge && std::all_of(defs.begin(), defs.end(), [](const kc::DefPtr& d) { return d != nullptr; }),
+          "cost: pack p defines " + std::to_string(kLarge) + " items");
+    // the journal's lookup alone: a second change of each of n definitions under the mark finds the first one's entry (best of
+    // five; the first changes, which add the entries, are not timed). Linear: x8 for x8 definitions; a scan of what the journal
+    // holds: about x64. One round: the lookups' CPU time, kept when it is the best so far.
+    auto journal = [&](int n, double* best) {
+        kc::nc_pack_mark(kP);
+        for (int i = 0; i < n; ++i) kc::journal_change(defs[i], kP, true);
+        const double t0 = cpu_seconds();
+        for (int i = 0; i < n; ++i) kc::journal_change(defs[i], kP, true);
+        *best = std::min(*best, cpu_seconds() - t0);
+        kc::nc_pack_unmark();
+    };
+    double small = 1e9, large = 1e9;
+    for (int k = 0; k < kRounds; ++k) journal(kSmall, &small), journal(kLarge, &large);
+    const double ratio = large / std::max(small, 1e-9);
+    std::printf("  info journal: %d lookups %.3f ms, %d lookups %.3f ms (x%.1f for x%d)\n", kSmall, small * 1e3, kLarge, large * 1e3, ratio,
+                kLarge / kSmall);
+    check(ratio < 24, "cost: the journal's lookup grows linearly with the definitions a pack changes (x" + std::to_string(ratio) +
+                          " for x8, at most x24)");
+
+    // the whole path at about 4,000 definitions: the same pack applies again under the mark (unchanged), then a rollback
+    constexpr int kPath = 4000;
+    kc::nc_packs_begin();
+    kc::nc_pack_mark(kP);
+    double t0 = cpu_seconds();
+    for (int i = 0; i < kPath; ++i) {
+        const std::string g = bench_guid(i), n = "Bench_" + std::to_string(i);
+        define(kP, item(g.c_str(), n.c_str(), n.c_str()));
+    }
+    const double again = cpu_seconds() - t0;
+    check(kc::nc_pack_journal_copies() == 0, "cost: the same pack applying again copies no definition (" +
+                                                 std::to_string(kc::nc_pack_journal_copies()) + " copies)");
+    t0 = cpu_seconds();
+    const uint32_t back = kc::nc_pack_rollback(kP);
+    const double rollback = cpu_seconds() - t0;
+    std::printf("  info journal: %d unchanged redefinitions under the mark %.1f ms, their rollback %.1f ms\n", kPath, again * 1e3, rollback * 1e3);
+    check(back == kPath, "cost: the rollback counts every definition the pack touched (" + std::to_string(back) + ")");
+    check(std::none_of(defs.begin(), defs.begin() + kPath, [](const kc::DefPtr& d) { return d->seen; }) &&
+              std::all_of(defs.begin(), defs.begin() + kPath, [](const kc::DefPtr& d) { return d->owner == kP && !d->orphan; }),
+          "cost: an unchanged redefinition rolled back is as at the mark (not seen in this application yet, its owner, no orphan)");
+    // one of them changed, then rolled back: its definition from before comes back (the copy is taken at the change)
+    const std::string g0 = bench_guid(0);
+    const std::string text0 = defs[0]->text;
+    check(define(kP, item(g0.c_str(), "Bench_0", "Bench_0")) && define(kP, item(g0.c_str(), "Bench_0", "Bench zero, changed")) &&
+              defs[0]->text != text0,
+          "cost: Bench_0 redefined unchanged, then changed, in one application");
+    check(kc::nc_pack_journal_copies() == 1, "cost: the change of its text copied it, once");
+    check(kc::nc_pack_rollback(kP) == 1 && defs[0]->text == text0 && defs[0]->display == "Bench_0" && !defs[0]->seen,
+          "cost: the rollback gives Bench_0 the definition it had at the mark");
+    kc::nc_pack_unmark();
+    kc::nc_packs_end();
+}
+
 }  // namespace
 
 int main() {
     run();
+    journal_cost();
     if (failures) std::printf("packundo-test: %d check(s) FAILED\n", failures);
     else std::printf("packundo-test: all checks passed\n");
     return failures ? 1 : 0;

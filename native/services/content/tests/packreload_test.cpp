@@ -594,6 +594,19 @@ void run() {
               "throw: the registry stage gets the section of the packs that apply (the one from before), not the throwing pack's");
         check(g_report.find("applying it failed") != std::string::npos && g_report.find("type_error") != std::string::npos,
               "throw: the report names the file and the throw");
+        // registry-fixes item 3: the report lists the mod set apart, the pack that threw and whether its packs from before
+        // apply again (the reload reply of Kiln.Host reads it): {"setApart": [{"mod", "file", "reason", "previous"}]}
+        auto set_apart = [] {
+            const nlohmann::json j = nlohmann::json::parse(g_report, nullptr, false);
+            return j.is_object() && j.contains("setApart") && j["setApart"].is_array() ? j["setApart"] : nlohmann::json(nullptr);
+        };
+        {
+            const nlohmann::json rows = set_apart();
+            check(rows.is_array() && rows.size() == 1 && rows[0].value("mod", "") == "skilltest" &&
+                      rows[0].value("file", "") == "skilltest/content/skills.json" &&
+                      rows[0].value("reason", "").find("type_error") != std::string::npos && rows[0].value("previous", false) == true,
+                  "throw: the report's setApart row names the mod, the file, the throw, and that its packs from before apply again: " + rows.dump());
+        }
         // and once more: the bookkeeping still holds the version before (not the one that threw)
         reloaded("skilltest", "was reloaded");
         step();
@@ -608,11 +621,18 @@ void run() {
         check(logged("a pack threw while it applied: what it did came off") && logged("; none of its packs apply"),
               "throw without a version before: a line says none apply");
         check(staged_of("skilltest").empty(), "throw without a version before: no registry section of the mod reaches the stage");
+        {
+            const nlohmann::json rows = set_apart();
+            check(rows.is_array() && rows.size() == 1 && rows[0].value("mod", "") == "skilltest" && rows[0].contains("previous") &&
+                      rows[0]["previous"] == false,
+                  "throw without a version before: the setApart row says none of its packs apply (previous false): " + rows.dump());
+        }
         // fixed: the new version applies
         pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
         reloaded("skilltest", "was reloaded");
         step();
         check(fake::read32(kWood) == 90 && fake::read32(kStone) == 25, "throw fixed: the new version applies (Wood 90)");
+        check(set_apart().is_array() && set_apart().empty(), "throw fixed: no mod is set apart in this application: " + set_apart().dump());
     }
 
     // ---- a pack that throws leaves nothing of its mod behind: what its "add" lists defined or changed,

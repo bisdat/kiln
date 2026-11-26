@@ -377,6 +377,18 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   loader wrote into the game's archive before Kiln, and are reported with them. Old mods are never refused because of a
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
+- `Content.*` changes made by code (`Content.Apply`, `ContentEntry.Set`, another loader's change through Kiln's content
+  service) sit **above** registry edits and win, as they win over data packs. A relative op such code gives (`mul`, `add`,
+  `min`, `max`, `raiseOnly`, `lowerOnly`) is computed by kiln.content on the **game's original value**, as for any data pack
+  ([services/content.md](../../services/content.md#data-packs)), never on what a registry edit made of it: BigStacks'
+  `{"mul": 4, "max": 9999, "raiseOnly": true}` gives wood logs 250 x 4 = 1000 even where a registry pack made them 2000
+  (`raiseOnly` means "never below the game's value", not "never below the value under the layer"). That has been so since
+  registry edits exist and stays so, since changing it would change what existing mod sets get. registry.json says so
+  (0.2.0-dev.31.18): the code writer is the field's winner and one certain `overridden` line names it, the registry edit it
+  replaced and both values ("... (a Content change made by code) sets 1000 over registry-mixed-test's 2000 (code wins over
+  registry edits; a relative change made through Content is computed on the game's value, 250, not on the registry's)").
+  A mod that wants its change to stack on the registry's value makes it a registry edit (a relative op there composes on
+  the value below it).
 
 ### Who else wrote a field
 
@@ -386,35 +398,71 @@ with a certainty:
 | Writer | Certainty | Where Kiln learns it |
 |---|---|---|
 | Kiln's older paths (boot resource patches, data packs, `Content.*` code) and registry edits | `certain` | Kiln applies them itself |
-| A ShroudForge or EML package that wrote the entry before Kiln (`archiveWriter`, who `shroudforge:<package>` or `eml:<package>`) | `named` | kiln-eml's change journal of a kiln-mode start (below) |
+| A change made through Kiln's content service by code, also another loader's (an EMF DLL mod's `set_item_max_stack`) | `certain` | named `<who>: <Kiln place>`, `<who>` being the mod, else the loader's own name for its mod (`emf:big_stacks`); a label the mod gave its change (`Content.Apply(json, "bigstacks x4")`) stays as it wrote it (0.2.0-dev.31.18; before, such a row named the game's item and member, `owner 67: items Material_T1_Wood_Logs.maxStackSize`) |
+| A ShroudForge or EML package that wrote the entry (or, from EML's own pass, the field) before Kiln (`archiveWriter`, who `shroudforge:<package>` or `eml:<package>`) | `named` | kiln-eml's change journal of the start's archive writer (below) |
 | Something outside Kiln changed the game's value (`drift`, who `outside Kiln (best effort; suspects: ...)`) | `bestEffort` | the drift probe at each world load and pack reload (below) |
 
-**Archive-writer packages.** When Kiln's interpreter for ShroudForge mods runs the start (kiln mode), kiln-eml writes a
-change journal of its startup pass (`kiln/eml/ownership/<exe name>.change-journal.json`): which package wrote or created
-which of the game's resources, in the order the packages ran (ShroudForge packages and the EML packages the pass ran). The
-registry stage reads it once, only when it belongs to this start's archive, and names each package on the entries whose
-resource it lists: a row below every Kiln writer, valued at the base (what the package wrote is the archive Kiln reads),
-and a conflict line such as `items[game:material_stone].maxStack: betterstacks (ShroudForge package) wrote this entry in
+**Archive-writer packages.** kiln-eml writes a change journal of its startup pass beside its ownership receipt
+(`kiln/eml/ownership/<exe name>.change-journal.json`): which package wrote or created which of the game's resources, in
+the order the packages ran. Two kinds of start write one:
+
+- **EML mods** (kiln-eml's own EML pass, a start with EML mods and without Kiln's interpreter for ShroudForge mods; next
+  release): per EML mod, the resources it wrote and the **member paths** it wrote in each, at their places in the data
+  the game reads (format 2). A start that changed nothing keeps the journal of the start that published.
+- **Kiln's interpreter for ShroudForge mods** (kiln mode): per ShroudForge package (and the EML packages its pass ran),
+  the resources it wrote or created (format 1, per resource).
+
+The registry stage reads it once per start, only when it belongs to this start's archive (the generation kiln-eml
+published or found live this start; a journal left by an earlier start is `stale` and names nobody), and names each
+package where it wrote: a row below every Kiln writer, valued at the base (what the package wrote is the archive Kiln
+reads), and a conflict line such as `items[game:material_stone].maxStack: betterstacks (EML package) wrote this field in
 the game's archive before Kiln; bigmod's edit wins (D1): 25 -> 100`. Registry edits always win over these values, and
 relative edits compose on them. `exclusive` and `yield` do not count a package as an earlier writer (its value is the
 base).
 
-- The journal names a package per **entry**, not per field: a package that wrote one member of an item is listed on every
-  field of that item a mod edits. "Wrote" means written, not changed: a package that set a value to what it already was is
-  listed too. It can name a package that did not change a field; it never misses one that did, within its bounds (4,096
-  rows per package, 32,768 in all; `base.journal.truncated` says when it ran out). So a package's row has no `op` (the
-  journal does not say what the package did to the field; its `value` is the archive's, the base) and a package is never a
-  field's `winner`: with no Kiln writer left, the archive's value stands as the base.
-- Only **items, drops and balance** are named: their entries are each one whole resource of the game's archive, which is
-  what the journal lists. A recipe or a loot entry is an element of a resource its whole registry shares (the recipe list,
-  the loot list), and the journal does not say which element a package wrote, so no package is named on recipes or loot
-  (`base.journal.text` says so). The balance table is one entry: a package that wrote any balance value is listed on every
-  balance field a mod edits.
+- **Per field (EML mods).** A mod is named on the Kiln fields its member paths hold or lie in: a mod that set an item's
+  `maxStackSize` is named on `items.maxStack` only; one that wrote `damageSetup.dmgMod` on `items.power` (the field
+  Kiln computes from it); one that replaced a struct or a list on every field inside it; one that replaced the resource
+  whole on every field of the entry. A recipe or a loot entry (an element of the recipe list or the loot list) is named by
+  its element (`recipes[37].craftingDuration` names `recipes.duration` of the 38th recipe; a recipe put in place whole
+  names that recipe on every field; the recipe list replaced whole names every recipe). Inserting, removing or clearing
+  elements of a list names no other element. A mod that wrote a member before another mod replaced the value holding it
+  (a struct, an element, the resource's data) stays named there, since the new value can be a copy of the old one; its
+  write moves with the member of the copy (a recipe inserted in front of it afterwards moves it too). A
+  mod's own entry module (`src/mod.lua`) writes as that mod, even when another mod requires it first. The field row's
+  writer has `"named": "field"`.
+- **Per entry (ShroudForge packages, created entries).** The kiln-mode journal names a package per **entry**: a package
+  that wrote one member of an item is listed on every field of that item a mod edits (`"named": "entry"`). Only **items,
+  drops and balance** are named from it: their entries are each one whole resource, which is what that journal lists; a
+  recipe or a loot entry is an element of a resource its whole registry shares and that journal does not say which
+  element a package wrote, so no ShroudForge package is named on recipes or loot (`base.journal.text` says so). The
+  balance table is one entry: a package that wrote any balance value is listed on every balance field a mod edits. A
+  package that created an entry is named on the whole entry.
+- "Wrote" means written, not changed: a package that set a value to what it already was is listed too. The journal can
+  name a package that did not change a field; it never misses one that did, within its bounds (4,096 rows per package,
+  32,768 in all, 16,384 member paths per resource and 8 MiB of paths in all; `base.journal.truncated` says when it ran
+  out of rows; more paths than that name the whole resource). So a package's row has no `op` (the journal does not say what the package did to the
+  field; its `value` is the archive's, the base) and a package is never a field's `winner`: with no Kiln writer left, the
+  archive's value stands as the base.
 - `base.journal` in `registry.json` says what happened: `read` (with how many packages and entries), `none`, `stale` (a
   journal left by an earlier start, which names nobody) or `unreadable`, with a sentence.
-- **No names without a journal.** Hosted or installed ShroudForge (the default), kiln-eml's own EML pass (EML mods without
-  kiln mode) and other loaders keep no change journal. What they wrote is still in the base, and registry edits still win
-  over it, but no row names them; the report says so (`base.journal.state` `none`).
+- **No names without a journal.** Hosted or installed ShroudForge (the default for ShroudForge mods) runs its pregame pass
+  in its own runtime (Kiln's bundled fork, or the player's copy): kiln-eml stands aside and sees none of its writes, and
+  ShroudForge's own record of the pass (`shroudforge/state.json` `assets`) lists the asset mods it applied, not which
+  resource each wrote, and names no generation Kiln could check it against. Naming them needs a per-package write record
+  in ShroudForge's own pass (as kiln-eml keeps for EML's), which is ShroudForge-side work: its packages are not named. Other loaders (EML's own `dbghelp.dll`/`dinput8.dll`, other DLL
+  engines) keep none either. What they wrote is still in the base, and registry edits still win over it, but no row names
+  them; the report says so (`base.journal.state` `none`). (The first start after a Kiln update runs the EML mods again,
+  as kiln-eml's change cache belongs to one kiln-eml build, so an EML start gets its journal then.)
+- **Who published the base** (0.2.0-dev.31.18; before, `base.writer` said `none` on every start but a kiln-mode one, also where
+  kiln-eml or hosted ShroudForge had patched the archive): `base.writer` is this start's archive writer: `kiln-eml` (its EML
+  pass, or Kiln's interpreter in kiln mode), `shroudforge-hosted` or `shroudforge-installed` (ShroudForge reserved the startup
+  data writer), `external` (another loader's proxy ran instead of kiln-eml, or the game data differs from kiln-eml's vanilla
+  backup and is not its output) or `none` (the game's data as shipped, as far as kiln-eml can tell). `base.archive` says what
+  that rests on: kiln-eml's state of the start (`phase`, `patched`, `cached`, `restored`, `mods`), the name of kiln-eml's
+  ownership receipt (`receipt`, `kiln/eml/ownership/<stem>.json`) or of ShroudForge's record of its pass (`record`,
+  `<stem>.kfc.prepared.json`; named, never read), and a sentence. kilnctl's values diff still takes only `none` as the game's
+  own data ([regmap/README.md](../../../../regmap/README.md)).
 
 **The drift probe (best effort).** At each world load and each pack reload Kiln compares, for every field it writes live,
 the game's value just before Kiln's first write in that world with what the stage read at start plus the writers Kiln knows
@@ -424,7 +472,19 @@ the row says so and names the suspects Kiln can see, the modules that patched ga
 row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything. It runs whenever Kiln
 rebuilds `registry.json`'s live rows (at each world load and pack reload, and when a live change or a drop table the game
 loads later changes them; never per tick) and costs one more read of each field it writes live, about a tenth of what
-rebuilding the rows costs anyway. A suspect list is a hint, not proof: a writer that hooks nothing is not
+rebuilding the rows costs anyway.
+
+**Writes after the last report** (0.2.0-dev.31.18; before, they stayed out of `registry.json` until the next pack reload or
+world load: the compat rehearsal saw wood logs at 300 there while EMF's big_stacks had made them 1200). Kiln also looks
+again between those rebuilds, never per tick: about 2 s after a change through Kiln's content service (code, another
+loader's change through Kiln) and every 10 s for a write outside it, comparing each field it writes live with what the last
+report saw. When one changed, `registry.json` and the Conflicts view get the field's new writers and result (a code writer
+as above; a write outside Kiln as a best-effort row last, with a line: "the game's value changed outside Kiln after Kiln's
+last write in this world"); no new generation, no ready event, nothing written into the game. A field that keeps changing
+is looked at less often (up to once a minute). kiln.log says so once. A look reads each slot Kiln writes live, at most
+1,024 of them a tick (a pack over every entry's stacks or drops writes tens of thousands: its look takes a few dozen ticks),
+and rebuilds nothing when nothing changed; when something did, the rebuild costs what a pack reload's report costs. A write
+outside Kiln that comes back to Kiln's value between two looks is not seen. A suspect list is a hint, not proof: a writer that hooks nothing is not
 seen, and a field nobody edits through the registry is not checked. Neither is an entry an old boot resource patch (an
 `OnBoot` or `resourcePatches` document) writes: the game holds Kiln's own patch there, and many of its paths (a formula's
 input, an element of a list of structs, `[*]` over every recipe) have no field row to explain it, so a change there is
@@ -467,7 +527,18 @@ SHA-256 of its content. It holds what the stage composed: each mod with its vers
 batches submitted before the stage and its `GameStart` `OnRegistry` turns, in the order they composed, as IR), the values
 they resolved to (`values`, `"<registry>[<id>].<field>"`, restart fields as the boot back-end wrote them; live fields as the
 stage composed them over the base), the entries added and removed, and the game build, side and Kiln version. The same mods
-with the same edits give the same plan. Plans are never deleted.
+with the same edits give the same plan.
+
+**Which plans are kept** (0.2.0-dev.31.18; before, none was ever removed, so the folder grew by one file for every changed set of
+mods and settings). At the end of a successful start Kiln keeps the last good plan and the good plan before it, the plan the
+last world ran on, this start's plan and its `previous`, every plan a pending `rollback.json` names (its `plan` and `from`,
+read again at that moment), and the newest 10 other plans (by the file's last write: a start on the same edits writes its plan
+again), and removes every other `plans/<sha256>.json`; kiln.log says how many (`registry: plans: removed ...`). Only plan files
+are removed: `plans/index.json`, a kept `plans/index.unreadable.json` and any other file stay. Nothing is removed by a start
+that failed or whose state is not known: one whose stage had no base to read, whose rollback request was refused (or cannot be
+read), whose `plans/index.json` could not be read, or that wrote no plan (a rolled-back start runs on a plan that is already
+there and writes none, so it removes none either). `kilnctl registry rollback --to <hash>` can name
+only a plan that is still there (a removed one is refused: "not in kiln/data/content/registry/plans").
 
 **The last good plan** is the last one a world started on without a refused edit (`plans/index.json` keeps it, the good one
 before it, the plan the last world ran on, and the highest max stack a world started with per item); a start whose stage had
@@ -587,7 +658,7 @@ template, which take the `drops_` form. The table's GUID also selects it, as dat
 | `schema/registry-schema.schema.json` | the schema of those files |
 | `schema/registry/ids.lock.json` | every published registry and field name with its numeric id; never reused |
 | `schema/registry/migrations/` | id and field renames a breaking schema version ships (applied to every edit, "Versions" above) |
-| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan; the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
+| `<game>/kiln/data/content/registry/plans/<sha256>.json`, `plans/index.json` | each start's plan (the ones still needed and the newest 10 others are kept: "Which plans are kept"); the last good plan and the plan the last world ran on ("Plans and rollback"); `plans/index.unreadable.json`: an index that could not be read, kept |
 | `<game>/kiln/data/content/registry/rollback.json` | a rollback request (`kilnctl registry rollback`), kept until `--clear` |
 | `schema/registry-section.schema.json` | the data section's schema (generated) |
 | `regmap/` | how each field maps onto the game, per game build (Kiln's part: mods never read it) |

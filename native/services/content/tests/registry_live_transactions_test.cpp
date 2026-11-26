@@ -972,7 +972,7 @@ void loot_flags_value_missing_on_the_build_is_refused() {
     L.schema.fields[L.schema.by_path.at("rarities")].en = fewer;
     const auto h = change(71, "a", "[{" + wood + R"("op":75},{)" + loot_wood + R"("field":"rarities","op":["legendary"]}])");
     registry_live_commit(71, h, &reply);
-    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of rarities on this game build") != std::string::npos,
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of loot.rarities on this game build") != std::string::npos,
           "a name the build's enum lacks is refused, named: " + reply.reason);
     check(at<uint8_t>(MASK_AT) == 0x07 && at<uint32_t>(WOOD_AT) == 10, "nothing of the manual transaction is written");
 }
@@ -1015,6 +1015,83 @@ void loot_fixed_rarity_read_only_is_refused_as_read_only() {
               reply.reason.find("are not a switch and an enum") == std::string::npos,
           "a read-only switch or enum says read-only: " + reply.reason);
 }
+// registry-fixes item 5 (registry-hygiene "before release"): live refusals named the game's members ("the game member
+// maxStackSize is not writable on this game build"). Mods and players see Kiln names, never the game's members (owner's
+// principle): a refusal names the Kiln field and entry; kiln.log keeps the regmap path at debug level for maintainers.
+bool names_no_member(const std::string& reason, std::initializer_list<const char*> members) {
+    if (reason.find("game member") != std::string::npos) return false;
+    for (const char* m : members)
+        if (reason.find(m) != std::string::npos) return false;
+    return true;
+}
+bool debug_names(const std::string& member) {
+    return std::any_of(g_log_lines.begin(), g_log_lines.end(), [&](const std::string& l) {
+        return l.rfind(std::to_string(KILN_LOG_DEBUG) + " ", 0) == 0 && l.find(member) != std::string::npos;
+    });
+}
+void live_refusals_name_kiln_fields_never_game_members() {
+    RegistryLiveReply reply;
+    auto refused = [&](const std::string& what, std::initializer_list<const char*> members, const std::string& place, const std::string& says) {
+        check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find(place) != std::string::npos &&
+                  reply.reason.find(says) != std::string::npos && names_no_member(reply.reason, members),
+              what + ": the refusal names the Kiln field, never the game's member: " + reply.reason);
+    };
+    // a scalar the build does not let Kiln write
+    fresh_live(); g_log_lines.clear();
+    g_regs[KILN_CONTENT_ITEMS].schema.fields[g_regs[KILN_CONTENT_ITEMS].schema.by_path.at("maxStackSize")].writable = false;
+    registry_live_commit(71, change(71, "a", "[{" + wood + R"("op":50}])"), &reply);
+    refused("not writable", {"maxStackSize"}, "items[game:material_t1_wood_logs].maxStack", "is not writable on this game build");
+    check(debug_names("maxStackSize"), "not writable: kiln.log names the regmap path at debug level, for maintainers");
+    // a scalar the build does not have
+    fresh_live();
+    {
+        auto& sc = g_regs[KILN_CONTENT_ITEMS].schema;
+        sc.by_path.erase("maxStackSize"), sc.by_lower.erase("maxstacksize");
+    }
+    registry_live_commit(71, change(71, "a", "[{" + wood + R"("op":50}])"), &reply);
+    refused("missing", {"maxStackSize"}, "items[game:material_t1_wood_logs].maxStack", "is missing on this game build");
+    // a value its storage cannot hold
+    fresh_live();
+    {
+        Field& f = g_regs[KILN_CONTENT_ITEMS].schema.fields[g_regs[KILN_CONTENT_ITEMS].schema.by_path.at("maxStackSize")];
+        f.bytes = 1;  // a build that keeps max stacks in one byte
+    }
+    registry_live_commit(71, change(71, "a", "[{" + wood + R"("op":300}])"), &reply);
+    refused("does not fit", {"maxStackSize"}, "items[game:material_t1_wood_logs].maxStack", "does not fit");
+    // a formula whose input the build does not have
+    fresh_live();
+    {
+        auto& sc = g_regs[KILN_CONTENT_ITEMS].schema;
+        sc.by_path.erase("damageSetup.speedMod"), sc.by_lower.erase("damagesetup.speedmod");
+    }
+    registry_live_commit(71, change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"power","op":{"mul":2}}])"), &reply);
+    refused("formula input", {"damageSetup", "speedMod"}, "items[game:sword_t2].power", "is missing on this game build");
+    // the optional enum: missing, not a switch and an enum, read-only
+    fresh_loot();
+    {
+        auto& sc = g_regs[KILN_CONTENT_LOOT].schema;
+        sc.by_path.erase("uiRarity"), sc.by_lower.erase("uirarity");
+    }
+    registry_live_commit(71, change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])"), &reply);
+    refused("optional enum missing", {"uiRarity", "useUiRarity"}, "loot[game:material_t1_wood_logs].fixedRarity", "is missing on this game build");
+    fresh_loot();
+    g_regs[KILN_CONTENT_LOOT].schema.fields[g_regs[KILN_CONTENT_LOOT].schema.by_path.at("useUiRarity")].vt = KILN_CV_INT;
+    registry_live_commit(71, change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])"), &reply);
+    refused("optional enum shape", {"uiRarity", "useUiRarity"}, "loot[game:material_t1_wood_logs].fixedRarity", "are not a switch and an enum on this game build");
+    fresh_loot();
+    g_regs[KILN_CONTENT_LOOT].schema.fields[g_regs[KILN_CONTENT_LOOT].schema.by_path.at("useUiRarity")].writable = false;
+    registry_live_commit(71, change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"epic"}])"), &reply);
+    refused("optional enum read-only", {"uiRarity", "useUiRarity"}, "loot[game:material_t1_wood_logs].fixedRarity", "is read-only on this game build");
+    // review-registry-fixes: the perk slots the build does not have (refList: references and ids in step)
+    fresh_live(); g_log_lines.clear();
+    {
+        auto& sc = g_regs[KILN_CONTENT_ITEMS].schema;
+        sc.by_path.erase("perkIds[0]"), sc.by_lower.erase("perkids[0]");
+    }
+    registry_live_commit(71, change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"perks","list":{"append":["game:perk_b"]}}])"), &reply);
+    refused("perk slots", {"perkReferences", "perkIds"}, "items[game:material_t1_wood_logs].perks", "have no perk slots Kiln can write");
+    check(debug_names("perkIds"), "perk slots: kiln.log names the game's members at debug level, for maintainers");
+}
 void loot_fixed_rarity_read_write_revert() {
     fresh_loot(); RegistryLiveReply reply;
     check(loot_read("fixedRarity") == R"("none")", "the switch off reads as none (the enum below it is the game's own)");
@@ -1051,7 +1128,7 @@ void loot_fixed_rarity_value_missing_on_the_build_is_refused() {
     L.schema.fields[L.schema.by_path.at("uiRarity")].en = fewer;
     const auto h = change(71, "a", "[{" + loot_wood + R"("field":"fixedRarity","op":"legendary"}])");
     registry_live_commit(71, h, &reply);
-    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of uiRarity on this game build") != std::string::npos,
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.reason.find("\"legendary\" is not a value of loot.fixedRarity on this game build") != std::string::npos,
           "a name the build's enum lacks is refused, named: " + reply.reason);
     check(at<uint8_t>(SWITCH_AT) == 0 && at<uint8_t>(FIXED_AT) == 2, "neither slot is written");
 }
@@ -1195,6 +1272,7 @@ int main() {
         {"loot_flags_foreign_revert_is_skipped", loot_flags_foreign_revert_is_skipped},
         {"loot_flags_read_only_is_refused_as_read_only", loot_flags_read_only_is_refused_as_read_only},
         {"loot_fixed_rarity_read_only_is_refused_as_read_only", loot_fixed_rarity_read_only_is_refused_as_read_only},
+        {"live_refusals_name_kiln_fields_never_game_members", live_refusals_name_kiln_fields_never_game_members},
         {"loot_fixed_rarity_read_write_revert", loot_fixed_rarity_read_write_revert},
         {"loot_fixed_rarity_none_keeps_the_games_enum", loot_fixed_rarity_none_keeps_the_games_enum},
         {"loot_fixed_rarity_value_missing_on_the_build_is_refused", loot_fixed_rarity_value_missing_on_the_build_is_refused},
