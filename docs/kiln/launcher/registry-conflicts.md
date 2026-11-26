@@ -20,9 +20,11 @@ rollback of the last start (applied or refused, with why) and a rollback request
 **Roll back** first shows the dry run: the plan it goes to, its mods and versions, and every value that changes back
 (`field: from → to`, at most 50 shown); nothing is written until **Confirm roll back**. **Clear** (when a request waits)
 says the next start runs on the mods' current edits again and removes the request on **Confirm clear**. Saves are never
-touched; the request takes effect at the next start, which refuses the plan whole when one of its mods is not loaded at
-its version, one of its edits is refused on that game build, or it would change what saves hold
-([registries README](../modding/registries/README.md#plans-and-rollback)). The same as `kilnctl registry rollback`.
+touched; the request takes effect at the next start (a game or server that runs keeps the plan it started on, and the dry
+run says so before **Confirm roll back**), which refuses the plan whole when one of its mods is not loaded at its
+version, one of its edits is refused on that game build, or it would change what saves hold
+([registries README](../modding/registries/README.md#plans-and-rollback)). The same as `kilnctl registry rollback`. A new
+report (the game started again) reads the plans again.
 
 A missing file is different from a valid snapshot with no edits. Unreadable, malformed, unsupported and oversized
 reports show an error with **Refresh report** available. A stopped game, a report older than the current process start,

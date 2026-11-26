@@ -50,7 +50,9 @@ test("Roll back shows the dry run's changes first and writes only on confirm", a
   await open(page, status);
   const card = page.getByTestId("registry-plan");
   await card.getByRole("button", { name: "Roll back", exact: true }).click();
-  await expect(card.getByText(`Rolling back to plan ${A.slice(0, 12)} changes 2 values back`, { exact: true })).toBeVisible();
+  await expect(card.getByText(`At the next start, plan ${A.slice(0, 12)} changes 2 values back`, { exact: true })).toBeVisible();
+  // a game or server that runs now keeps its plan: the request is for the next start, and the card says so before confirm
+  await expect(card).toContainText("Nothing changes in a game or server that runs now: it keeps the plan it started on until it starts again.");
   await expect(card.getByTestId("registry-plan-change")).toHaveCount(2);
   await expect(card.getByTestId("registry-plan-change").first()).toHaveText("items[game:fixture_stack].maxStack: 160 → 80");
   await expect(card.getByTestId("registry-plan-change").nth(1)).toHaveText("balance[game:balance].levelCap: 70 → no registry edit");
@@ -90,6 +92,18 @@ test("a plan that cannot be rolled back says why, with Roll back off", async ({ 
 test("the last start's rollback is shown with its state and reason", async ({ page }) => {
   await open(page, { ...status, rollback: { plan: A, from: B, state: "refused", reason: "bigpack is not loaded at 1.0.0" } });
   await expect(page.getByTestId("registry-plan")).toContainText(`Rollback at the last start: refused (plan ${A.slice(0, 12)}) bigpack is not loaded at 1.0.0`);
+});
+
+test("a request that cannot be written says so, and nothing claims it was", async ({ page }) => {
+  await open(page, status);
+  const card = page.getByTestId("registry-plan");
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fail = "write"; });
+  await card.getByRole("button", { name: "Roll back", exact: true }).click();
+  await card.getByRole("button", { name: "Confirm roll back", exact: true }).click();
+  await expect(card.getByText("The rollback request could not be changed", { exact: true })).toBeVisible();
+  await expect(card).toContainText("access denied");
+  await expect(card).not.toContainText("Requested: the next start runs on plan");
+  await expect(card).toContainText("Rollback request: none");
 });
 
 test("plans that cannot be read say so, with Roll back off", async ({ page }) => {

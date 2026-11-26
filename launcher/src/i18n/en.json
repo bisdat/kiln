@@ -6853,8 +6853,8 @@
       "pending": "Rollback request: plan {plan}, requested {requested} by {by}. The next start runs on it.",
       "noPending": "Rollback request: none",
       "dryRun": {
-        "one": "Rolling back to plan {plan} changes {count} value back",
-        "other": "Rolling back to plan {plan} changes {count} values back"
+        "one": "At the next start, plan {plan} changes {count} value back",
+        "other": "At the next start, plan {plan} changes {count} values back"
       },
       "targetMods": "That plan's mods: {mods}",
       "noMods": "no registry edits at all",
@@ -6866,6 +6866,7 @@
         "one": "… and {count} more (registry.json lists every one after the start).",
         "other": "… and {count} more (registry.json lists every one after the start)."
       },
+      "runningKeeps": "Nothing changes in a game or server that runs now: it keeps the plan it started on until it starts again.",
       "refusedWhole": "Nothing is written until you confirm. The start refuses the plan whole, and runs the mods' current edits, when one of its mods is not loaded at its version, one of its edits is refused on that game build, or it would change what saves hold.",
       "confirmRollback": "Confirm roll back",
       "confirmClear": "Confirm clear",

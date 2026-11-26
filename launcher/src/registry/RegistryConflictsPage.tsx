@@ -162,6 +162,7 @@ function RegistryPlanCard({ gameId, snapshot }: { gameId: string; snapshot: stri
             {t("registry.plan.change", { field: c.field, from: planValue(c.from, t("registry.plan.noEdit")), to: planValue(c.to, t("registry.plan.noEdit")) })}
           </li>)}</ul>}
       {s.changes.length > 50 && <p>{t("registry.plan.moreChanges", { count: s.changes.length - 50 })}</p>}
+      <p>{t("registry.plan.runningKeeps")}</p>
       <p className="registry-hint">{t("registry.plan.refusedWhole")}</p>
     </Banner>}
     {confirm === "clear" && s?.pending && <Banner tone="info" title={t("registry.plan.clearTitle", { plan: short(s.pending.plan) })}
