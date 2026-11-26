@@ -3869,7 +3869,9 @@ uint64_t KILN_CALL t_last_seq() {
 //    of the code for all three. A mid hook at the count's return (locks/LockCountRet) adds, when the bag alone is short:
 //    in the server world the server's own count of the player's lock-opted links (g_lock_cache, read on the tick thread
 //    each 30 steps); in a client world the server's snapshot (set_lock_stock). The locked prompt (player_ui, client
-//    only, locks/client.UiLockCountRet) adds the snapshot the same way.
+//    only, locks/client.UiLockCountRet) adds the snapshot the same way, and so does the prompt's requirement line
+//    ("Required: Lockpick", the HUD, locks/client.LockRowCount): the HUD counts the bag again itself and colours the
+//    line by that count alone (red when short), whatever player_ui decided (GitHub #147 follow-up, 0.2.0-dev.31.15).
 //  - the payment: interaction_attempt pays the item with PayMaterial(tx, guest, item, amount) inside its own
 //    transaction, then commits (Consume) or rolls back (a presence test). A mid hook after that call (locks/LockPaid)
 //    pays what the bag left from the opted-in links, in their order, inside the same transaction, after a recount of
@@ -3878,21 +3880,28 @@ uint64_t KILN_CALL t_last_seq() {
 // Hooks go in on demand: the server's when a link with Locks exists, the client's when a Kiln server's snapshot is on.
 constexpr uint64_t kLockRefreshSteps = 30;
 struct LockSites {
-    uintptr_t count_ret = 0, paid = 0, ui_ret = 0, count_fn = 0, pay_fn = 0;
+    uintptr_t count_ret = 0, paid = 0, ui_ret = 0, count_fn = 0, pay_fn = 0, row = 0;
 };
 LockSites g_lock;
 using CurrentEntityFn = uint32_t* (*)(void* ctx, uint32_t* out);
 CurrentEntityFn g_lock_current = nullptr;
 bool g_lock_feat = false;          // items.lock_sources resolved with its pinned layout (stations_resolve)
 std::atomic<bool> g_lock_off{false};  // a stand-down: a foreign patch, a failed hook, a fault
-kiln::MidHook2 h_lock_eval, h_lock_paid, h_lock_ui;
-std::atomic<bool> g_lock_eval_on{false}, g_lock_paid_on{false}, g_lock_ui_on{false};
+// The prompt's requirement line (locks/client.LockRowCount) is display only, and a hosting client's server half shares
+// g_lock_feat and g_lock_off: so the line is not part of items.lock_sources. Its site missing, another module's patch on
+// it, its hook not going in or faulting leave only the line to the game (logged); nothing else stands down, no row lowered.
+bool g_lock_row_feat = false;             // locks/client.LockRowCount resolved (stations_resolve, a client)
+std::atomic<bool> g_lock_row_off{false};  // the line's own stand-down
+kiln::MidHook2 h_lock_eval, h_lock_paid, h_lock_ui, h_lock_row;
+std::atomic<bool> g_lock_eval_on{false}, g_lock_paid_on{false}, g_lock_ui_on{false}, g_lock_row_on{false};
 // A hosting client puts the hooks in from two threads: its server world's Pre (the tick thread) and its client world's
 // Pre (the main thread). Both may want h_lock_eval; the installs and their failure flags go under one lock.
 std::mutex g_lock_install_mu;
 // A hook that faulted on a game worker thread: the next Pre lowers items.lock_sources (faulted), on the tick thread.
 std::atomic<bool> g_lock_fault_report{false};
-LogLimit g_log_lock_check{16}, g_log_lock_pay{24}, g_log_lock_stand{8}, g_log_lock_snap{8};
+LogLimit g_log_lock_check{16}, g_log_lock_pay{24}, g_log_lock_stand{8}, g_log_lock_snap{8}, g_log_lock_prompt{12};
+// The requirement line's last logged state (item << 8 | LockState): the HUD runs every frame, the line logs per change.
+std::atomic<uint64_t> g_lock_prompt_last{0};
 
 // The server's own counts of each player's lock-opted links (tick thread writes, any thread reads). `linked`: the player
 // has links of this login; `opted`: one of them has Locks.
@@ -4039,28 +4048,49 @@ uint32_t ctx_entity(void* ctx) {
     }
 }
 
+// What one lock check decided (lock_decide): not asked (the bag covers it, no item, a stand-down, nothing linked), the
+// links counted, or why not.
+enum LockState : uint8_t { kLockUnasked = 0, kLockCounted, kLockNoSnapshot, kLockNoRow, kLockShortCount, kLockNotOpted };
+struct LockDecision {
+    uint32_t counted = 0;
+    uint64_t linked = 0;
+    LockState state = kLockUnasked;
+    const char* why = nullptr;  // a refusal's text
+};
+LockDecision lock_decide(uint8_t world, uint32_t player, uint32_t item, uint32_t bag, uint32_t need) {
+    LockDecision d;
+    d.counted = bag;
+    if (!item || !need || bag >= need || g_lock_off.load(std::memory_order_relaxed)) return d;
+    if (world == 0) {
+        bool opted = false;
+        if (!lock_cached(player, item, &d.linked, &opted)) return d;  // nothing linked: the game's lock, no line
+        if (!opted) d.state = kLockNotOpted, d.why = lock_why_text(kLockNotOptedIn);
+        else if (bag + d.linked < need) d.state = kLockShortCount, d.why = "short count";
+    } else {
+        bool row = false;
+        if (!lock_snapshot(item, &d.linked, &row))
+            d.state = kLockNoSnapshot, d.why = "no snapshot from the server (a vanilla or older server, or no link opted in with Locks)";
+        else if (!row)
+            d.state = kLockNoRow, d.why = "no snapshot row for the item yet (the client asks the server for it)";
+        else if (bag + d.linked < need)
+            d.state = kLockShortCount, d.why = "short count";
+    }
+    if (!d.why) {
+        d.state = kLockCounted;
+        d.counted = lock_counted(bag, d.linked, need);
+    }
+    return d;
+}
+
 // One lock check (the press, or the locked prompt): the game counted `bag` of `item`, the lock needs `need`. Returns the
 // count the game should see. `world`: the context's world (the prompt: client). Logs a press's decision when links or a
 // snapshot were asked.
 uint32_t lock_check(uint8_t world, uint32_t player, uint32_t item, uint32_t bag, uint32_t need, bool press) {
-    if (!item || !need || bag >= need || g_lock_off.load(std::memory_order_relaxed)) return bag;
-    uint64_t linked = 0;
-    const char* why = nullptr;
-    if (world == 0) {
-        bool opted = false;
-        if (!lock_cached(player, item, &linked, &opted)) return bag;  // nothing linked: the game's lock, no line
-        if (!opted) why = lock_why_text(kLockNotOptedIn);
-        else if (bag + linked < need) why = "short count";
-    } else {
-        bool row = false;
-        if (!lock_snapshot(item, &linked, &row))
-            why = "no snapshot from the server (a vanilla or older server, or no link opted in with Locks)";
-        else if (!row)
-            why = "no snapshot row for the item yet (the client asks the server for it)";
-        else if (bag + linked < need)
-            why = "short count";
-    }
-    const uint32_t counted = why ? bag : lock_counted(bag, linked, need);
+    const LockDecision d = lock_decide(world, player, item, bag, need);
+    if (d.state == kLockUnasked) return d.counted;
+    const uint64_t linked = d.linked;
+    const char* const why = d.why;
+    const uint32_t counted = d.counted;
     if (press)
         if (const uint32_t n = g_log_lock_check.take()) {
             const char* where = world == 0 ? "server" : world == 2 ? "client" : world == 1 ? "prediction" : "unknown";
@@ -4120,6 +4150,43 @@ void hk_lock_ui(KilnRegisters& r) {
         if (counted != bag) wr<uint32_t>(out, 8, counted);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         lock_fault("the locked prompt's hook", GetExceptionCode());
+    }
+}
+// locks/client.LockRowCount (GitHub #147 follow-up): the HUD's requirement line of the looked-at lock. r8d is the HUD's own
+// count of the item in the local player's bag (the UI's inventory mirror), r14 the prompt record (player_ui's +0x2bc0:
+// item +0xd8, amount u16 +0xdc), all pinned by the pattern. The line is met (not red) when the count reaches max(amount,
+// 1); the count is shown too, so it is raised to bag + linked as the press and the locked prompt count. Logs the line's
+// state once per change (the HUD runs every frame), so a player's log shows whether the line counted the links and why not.
+void lock_row_impl(KilnRegisters& r) {
+    const auto* rec = reinterpret_cast<const uint8_t*>(r.r14);
+    const uint32_t item = rd<uint32_t>(rec, 0xd8), amount = rd<uint16_t>(rec, 0xdc);
+    const uint32_t need = amount > 1 ? amount : 1, bag = static_cast<uint32_t>(r.r8);
+    const LockDecision d = lock_decide(2, 0, item, bag, need);
+    if (d.state == kLockUnasked) return;
+    if (d.counted != bag) r.r8 = d.counted;  // a 32-bit register write: the upper half is zero
+    const uint64_t key = (uint64_t{item} << 8) | d.state;
+    if (g_lock_prompt_last.exchange(key, std::memory_order_relaxed) == key) return;
+    if (const uint32_t n = g_log_lock_prompt.take()) {
+        if (d.state == kLockCounted)
+            LOGI("locks: the lock prompt's requirement line counts the linked sources: item 0x%08x, bag %u + linked %llu, needs %u "
+                 "(shown met)%s", item, bag, static_cast<unsigned long long>(d.linked), need, n > 1 ? " (more held back)" : "");
+        else
+            LOGI("locks: the lock prompt's requirement line counts the bag only: item 0x%08x, %s (bag %u, linked %llu, needs %u)%s",
+                 item, d.why, bag, static_cast<unsigned long long>(d.linked), need, n > 1 ? " (more held back)" : "");
+    }
+}
+// A fault in the requirement line's hook: the line alone keeps the game's count from then on (g_lock_row_off).
+void lock_row_fault(unsigned long code) {
+    if (g_lock_row_off.exchange(true)) return;
+    LOGE("locks: the lock prompt's requirement line hook faulted (0x%08lx): the line keeps the game's count (the bag only); the lock "
+         "checks, the locked prompt and the payment still count linked sources", code);
+}
+void hk_lock_row(KilnRegisters& r) {
+    if (g_lock_row_off.load(std::memory_order_relaxed)) return;
+    __try {
+        lock_row_impl(r);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        lock_row_fault(GetExceptionCode());
     }
 }
 
@@ -4929,6 +4996,7 @@ bool rules_hook(uint32_t bit, std::string* why, uint32_t* reason) {
 // stations_resolve: items.lock_sources with its pinned layout (the patterns pin rbp-0x68, [rsp+0x58], rbp+0x620,
 // rbp+0x230; the captured InteractionLock offsets must be the ones the handlers read).
 void lock_resolve() {
+    g_lock_row_feat = false;
     if (!feat("items.lock_sources")) return;
     int64_t item = -1, amount = -1, mask = -1;
     const bool layout = cst("locks/lock.item", &item) && cst("locks/lock.amount", &amount) && cst("locks/lock.mask", &mask) &&
@@ -4937,8 +5005,14 @@ void lock_resolve() {
                   sym("locks/LockPaid", &g_lock.paid) && sym("gems/PayMaterial", &g_lock.pay_fn) &&
                   sym("world/CurrentEntityId", &g_lock_current) && call_matches(g_lock.count_ret, g_lock.count_fn) &&
                   call_matches(g_lock.paid, g_lock.pay_fn) && E.job_storage && E.component_map_find;
-    if (g_lock_feat && g_api->side() == KILN_SIDE_CLIENT)
+    if (g_lock_feat && g_api->side() == KILN_SIDE_CLIENT) {
         g_lock_feat = sym("locks/client.UiLockCountRet", &g_lock.ui_ret) && call_matches(g_lock.ui_ret, g_lock.count_fn);
+        // the requirement line: display only, not part of the feature (g_lock_row_feat)
+        g_lock_row_feat = g_lock_feat && sym("locks/client.LockRowCount", &g_lock.row);
+        if (g_lock_feat && !g_lock_row_feat)
+            LOGW("locks: the lock prompt's requirement line keeps the game's count (the bag only): locks/client.LockRowCount did not "
+                 "resolve on this build; the lock checks, the locked prompt and the payment still count linked sources");
+    }
     if (!G.pay) sym("gems/PayMaterial", &G.pay);
     if (!g_lock_feat) {
         LOGW("locks: locks from linked sources are unavailable: a symbol or the InteractionLock layout of items.lock_sources did not check out");
@@ -4990,26 +5064,29 @@ struct LockCodeRefusal {
     uint32_t state = KILN_CODE_UNKNOWN;
     KilnResult rc = KILN_ERR_UNAVAILABLE;
 };
-bool lock_code_ok(bool client_sites, bool server_sites, LockCodeRefusal* why) {
+bool lock_dep_ok(uintptr_t at, size_t size, const char* name, LockCodeRefusal* why) {
     const auto* h = kiln::hooks_v2(g_api);
     if (!h || h->header.size < offsetof(KilnHooksApi, code_state) + sizeof(h->code_state) || !h->code_state) {
         why->name = "kiln.hooks' code-state check";
         return false;
     }
+    uint32_t state = KILN_CODE_UNKNOWN;
+    uint64_t generation = 0;
+    const KilnResult rc = at ? h->code_state(at, size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
+    if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
+        *why = {name, at, size, state, rc};
+        return false;
+    }
+    return true;
+}
+bool lock_code_ok(bool client_sites, bool server_sites, LockCodeRefusal* why) {
     struct Dep { uintptr_t at; size_t size; const char* name; bool want; };
     for (const Dep& d : {Dep{g_lock.count_ret ? g_lock.count_ret - 0x32 : 0, 0x48, "the lock check's item count call", true},
                          Dep{g_lock.count_fn, 0x40, "InventoryItemCount", true},
                          Dep{g_lock.ui_ret ? g_lock.ui_ret - 0x49 : 0, 0x6a, "the locked prompt's item count call", client_sites},
                          Dep{g_lock.paid ? g_lock.paid - 0x20 : 0, 0x3c, "interaction_attempt's lock payment call", server_sites},
                          Dep{g_lock.pay_fn, 0x2b, "PayMaterial", server_sites}}) {
-        if (!d.want) continue;
-        uint32_t state = KILN_CODE_UNKNOWN;
-        uint64_t generation = 0;
-        const KilnResult rc = d.at ? h->code_state(d.at, d.size, &state, &generation) : KILN_ERR_INVALID_ARGUMENT;
-        if (rc != KILN_OK || (state != KILN_CODE_ORIGINAL && state != KILN_CODE_MANAGED)) {
-            *why = {d.name, d.at, d.size, state, rc};
-            return false;
-        }
+        if (d.want && !lock_dep_ok(d.at, d.size, d.name, why)) return false;
     }
     return true;
 }
@@ -5029,6 +5106,33 @@ bool lock_install(kiln::MidHook2& hook, std::atomic<bool>& on, uintptr_t at, voi
         return false;
     }
     on.store(true);
+    return true;
+}
+
+// The requirement line's hook (a client's Pre, under g_lock_install_mu), after the press and the locked prompt went in. On
+// its own: its code check, a failed install (and later a fault, lock_row_fault) leave only the line to the game. False:
+// not in.
+bool lock_row_install() {
+    if (g_lock_row_on.load()) return true;
+    if (!g_lock_row_feat || g_lock_row_off.load()) return false;
+    LockCodeRefusal why;
+    if (!lock_dep_ok(g_lock.row - 0x44, 0x6f, "the lock prompt's requirement line count", &why)) {
+        g_lock_row_off.store(true);
+        PreviewCodeRefusal p{why.name, why.at, why.size, why.state, why.rc};
+        char note[512]{};
+        preview_code_note(p, note, sizeof note);
+        LOGW("locks: the lock prompt's requirement line stands down%s (the line keeps the game's count, the bag only; the lock "
+             "checks, the locked prompt and the payment still count linked sources)", note);
+        return false;
+    }
+    if (!h_lock_row.install(g_api, g_owner, g_lock.row, &hk_lock_row, "locks/client.LockRowCount")) {
+        g_lock_row_off.store(true);
+        LOGW("locks: locks/client.LockRowCount could not be hooked (%s): the lock prompt's requirement line keeps the game's count "
+             "(the bag only); the lock checks, the locked prompt and the payment still count linked sources",
+             h_lock_row.error() ? h_lock_row.error() : "refused");
+        return false;
+    }
+    g_lock_row_on.store(true);
     return true;
 }
 
@@ -5062,9 +5166,13 @@ void lock_server_pre(uint64_t step) {
 void lock_client_pre() {
     lock_fault_lower();
     if (!g_lock_feat || g_lock_off.load() || !g_lock_on.load(std::memory_order_acquire)) return;
-    if (g_lock_eval_on.load() && g_lock_ui_on.load()) return;
+    // the requirement line is settled when its hook is in or it stays the game's (lock_row_install)
+    const auto done = [] {
+        return g_lock_eval_on.load() && g_lock_ui_on.load() && (g_lock_row_on.load() || !g_lock_row_feat || g_lock_row_off.load());
+    };
+    if (done()) return;
     std::lock_guard install(g_lock_install_mu);
-    if (g_lock_off.load() || (g_lock_eval_on.load() && g_lock_ui_on.load())) return;
+    if (g_lock_off.load() || done()) return;
     static bool failed = false;
     if (failed) return;
     LockCodeRefusal why;
@@ -5079,7 +5187,9 @@ void lock_client_pre() {
         failed = true;
         return;
     }
-    LOGI("locks: the server's lock snapshot is on: this client's lock checks count the bag plus linked sources");
+    const bool row = lock_row_install();
+    LOGI("locks: the server's lock snapshot is on: this client's lock checks count the bag plus linked sources (the press, the "
+         "locked prompt%s)", row ? " and its requirement line" : "; the requirement line keeps the game's count");
 }
 
 // Tick thread, every Pre: what the payment reads off the tick thread, the rows' check, the craft hook's demand.
@@ -5172,6 +5282,7 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
 void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
     t_set_lock_stock(0, nullptr, 0);  // the lock snapshot named this session's lock items
+    g_lock_prompt_last.store(0, std::memory_order_relaxed);  // the next world's requirement line logs its state again
     t_set_build_stock(0, nullptr, 0);  // and the building snapshot this session's materials (GitHub #132)
     {
         std::lock_guard lock(g_build_rows_mu);  // a selector of the next world may reuse an address: nothing to take back
