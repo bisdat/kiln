@@ -500,16 +500,42 @@ fn the_always_on_this_computer_setting_is_kept_per_server_and_survives_a_restart
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert_eq!(saved, serde_json::json!({"format": 1, "servers": {"remote-box": {"alwaysLocal": true}}}));
     assert!(!WebPanels::new(registry.clone()).settings("lab").always_local);
-    // a file that can't be read counts as on for every server (the panel then opens on this computer) until a change
-    // writes a new one; a missing file is all off
+    // a file that can't be read counts as on for every server (the panel then opens on this computer), and a change
+    // leaves it as it is (a_change_never_replaces_an_unreadable_settings_file_...); a missing file is all off
     std::fs::write(&file, b"{ not json").unwrap();
     assert!(settings::get(&file, "lab").always_local && settings::get(&file, "anyone").always_local);
     std::fs::write(&file, br#"{"format":2,"servers":{}}"#).unwrap();
     assert!(settings::get(&file, "lab").always_local, "a newer format is not guessed at");
-    settings::set(&file, "lab", on).unwrap();
-    assert!(settings::get(&file, "lab").always_local && !settings::get(&file, "anyone").always_local);
+    assert!(settings::set(&file, "lab", on).is_err());
+    assert!(settings::get(&file, "lab").always_local && settings::get(&file, "anyone").always_local);
     std::fs::remove_file(&file).unwrap();
     assert!(!settings::get(&file, "lab").always_local);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file that is there but can't be read counts as on for every server, so a change must never replace it: that would
+/// turn every other server's "Always open the web panel on this computer" off (as far as the launcher could tell they
+/// were all on), and drop a newer launcher's file. The change is refused, says which file, and leaves it as it was.
+#[test]
+fn a_change_never_replaces_an_unreadable_settings_file_so_no_other_server_loses_the_setting() {
+    let dir = temp("settings-unreadable");
+    let file = dir.join(settings::FILE);
+    let panels = WebPanels::new(dir.join(origins::FILE));
+    let on = settings::WebPanelSettings { always_local: true };
+    let off = settings::WebPanelSettings::default();
+    for bad in [&b"{ not json"[..], br#"{"format":2,"servers":{"lab":{"alwaysLocal":false}}}"#, b""] {
+        std::fs::write(&file, bad).unwrap();
+        for s in [off, on] {
+            let e = panels.set_settings("lab", s).expect_err("a change over a file that can't be read is refused");
+            assert!(e.message.contains(settings::FILE), "{}", e.message);
+            assert_eq!(std::fs::read(&file).unwrap(), bad, "the file stays as it was");
+            assert!(panels.settings("lab").always_local && panels.settings("other").always_local, "still on for every server");
+        }
+    }
+    // once it is fixed or deleted, changes work again
+    std::fs::remove_file(&file).unwrap();
+    assert_eq!(panels.set_settings("lab", on).unwrap(), on);
+    assert!(panels.settings("lab").always_local && !panels.settings("other").always_local);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

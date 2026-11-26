@@ -8,11 +8,13 @@
 //!   for local and remote (ssh) servers alike. Off by default.
 //!
 //! A file that is there but can't be read (hand-edited, or a newer format) counts as `alwaysLocal` for every server,
-//! so a setting that was on never turns into a check of the public address by accident; the next change writes a new
-//! file. An entry stays when its server is removed (a new server with the same id starts with the old setting, the
-//! more private one). Reads and writes of a change hold `web-panel-settings.json.lock`, as origins does.
+//! so a setting that was on never turns into a check of the public address by accident. A change never replaces such
+//! a file: that would turn every other server's setting off (and drop a newer launcher's file), so it is refused and
+//! says which file to fix or delete. An entry stays when its server is removed (a new server with the same id starts
+//! with the old setting, the more private one). Reads and writes of a change hold `web-panel-settings.json.lock`, as
+//! origins does.
 
-use crate::Result;
+use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -33,30 +35,39 @@ struct SettingsFile {
     servers: BTreeMap<String, WebPanelSettings>,
 }
 
-/// The file's servers; None when it is there but can't be read (or is not format 1).
-fn read(path: &Path) -> Option<SettingsFile> {
-    match std::fs::read(path) {
-        Ok(b) => serde_json::from_slice::<SettingsFile>(&b).ok().filter(|f| f.format == 1),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(SettingsFile { format: 1, servers: BTreeMap::new() }),
-        Err(_) => None,
+/// The file's servers (none when there is no file); an error when it is there but can't be read (or is not format 1).
+fn read(path: &Path) -> Result<SettingsFile> {
+    let b = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SettingsFile { format: 1, servers: BTreeMap::new() }),
+        Err(e) => return Err(crate::util::io_at(path, "reading")(e)),
+    };
+    match serde_json::from_slice::<SettingsFile>(&b) {
+        Ok(f) if f.format == 1 => Ok(f),
+        Ok(f) => Err(Error::new(ErrorCode::Parse, format!("{} is format {}, which this launcher doesn't know", path.display(), f.format))),
+        Err(e) => Err(Error::new(ErrorCode::Parse, format!("{}: {e}", path.display()))),
     }
 }
 
 /// The settings of `server_id` (the defaults when it has none; see the module's note on an unreadable file).
 pub fn get(path: &Path, server_id: &str) -> WebPanelSettings {
     match read(path) {
-        Some(f) => f.servers.get(server_id).copied().unwrap_or_default(),
-        None => WebPanelSettings { always_local: true },
+        Ok(f) => f.servers.get(server_id).copied().unwrap_or_default(),
+        Err(_) => WebPanelSettings { always_local: true },
     }
 }
 
-/// Saves the settings of `server_id`; what they are now. An unreadable file is replaced by one with this server's entry.
+/// Saves the settings of `server_id`; what they are now. A file that is there but can't be read is left as it is and
+/// the change refused (every server's panel keeps opening on this computer until it is fixed or deleted).
 pub fn set(path: &Path, server_id: &str, s: WebPanelSettings) -> Result<WebPanelSettings> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let _held = lock(path)?;
-    let mut f = read(path).unwrap_or(SettingsFile { format: 1, servers: BTreeMap::new() });
+    let mut f = read(path).map_err(|e| {
+        Error::new(e.code, format!("{FILE} in the launcher's data folder can't be read, so every server's web panel opens on this computer: fix or delete it to change this setting."))
+            .with_detail(serde_json::json!({ "path": path.display().to_string(), "reason": e.message }))
+    })?;
     if s == WebPanelSettings::default() {
         f.servers.remove(server_id);
     } else {
