@@ -1491,6 +1491,8 @@
       "samples": [
         "AffixSword",
         "BigCan",
+        "DockBook",
+        "DockNotes",
         "HungryCrafter",
         "ItemData",
         "MarkersSample",

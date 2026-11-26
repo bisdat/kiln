@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.22): part 2 of 3
+# Native ABI rows (mod API 0.2.23): part 2 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -212,11 +212,11 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 
 ## services/kiln_npcspeech.h — service `kiln.npcspeech`
 ### KilnNpcSpeechApi — 48 bytes
-- kiln_npcspeech.h `KilnNpcSpeechApi.set` @8 `0.2.22` — The effective override of one NPC (the caller resolves owners and priorities). mode KILN_SPEECH_*; tags/n...
-- kiln_npcspeech.h `KilnNpcSpeechApi.say` @16 `0.2.22` — One tag in the NPC's bubble for ms (1..KILN_SPEECH_MAX_SAY_MS); tag 0 or ms 0 ends a running Say.
-- kiln_npcspeech.h `KilnNpcSpeechApi.text` @24 `0.2.22` — The texts of a loca tag: "text" or {"en": "...", "de": "..."} ("*" = every language), UTF-8 JSON.
-- kiln_npcspeech.h `KilnNpcSpeechApi.clear_all` @32 `0.2.22` — Ends every override and Say (a world's end, a reset).
-- kiln_npcspeech.h `KilnNpcSpeechApi.status` @40 `0.2.22` — Any thread.
+- kiln_npcspeech.h `KilnNpcSpeechApi.set` @8 `0.2.23` — The effective override of one NPC (the caller resolves owners and priorities). mode KILN_SPEECH_*; tags/n...
+- kiln_npcspeech.h `KilnNpcSpeechApi.say` @16 `0.2.23` — One tag in the NPC's bubble for ms (1..KILN_SPEECH_MAX_SAY_MS); tag 0 or ms 0 ends a running Say.
+- kiln_npcspeech.h `KilnNpcSpeechApi.text` @24 `0.2.23` — The texts of a loca tag: "text" or {"en": "...", "de": "..."} ("*" = every language), UTF-8 JSON.
+- kiln_npcspeech.h `KilnNpcSpeechApi.clear_all` @32 `0.2.23` — Ends every override and Say (a world's end, a reset).
+- kiln_npcspeech.h `KilnNpcSpeechApi.status` @40 `0.2.23` — Any thread.
 
 ## services/kiln_pacing.h — service `kiln.pacing`
 ### KilnPacingApi — 48 bytes

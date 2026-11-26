@@ -1,9 +1,9 @@
-# Native ABI rows (mod API 0.2.22): part 3 of 3
+# Native ABI rows (mod API 0.2.23): part 3 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
 ## services/kiln_stations.h — service `kiln.stations`
-### KilnStationsApi — 312 bytes
+### KilnStationsApi — 320 bytes
 - kiln_stations.h `KilnStationsApi.status` @8 `0.2.6`
 - kiln_stations.h `KilnStationsApi.base_count` @16 `0.2.6` — The game's bases. base_at: index 0..count-1. base_of: the base the entity stands in (KILN_ERR_NOT_FOUND...
 - kiln_stations.h `KilnStationsApi.base_at` @24 `0.2.6`
@@ -42,6 +42,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_stations.h `KilnStationsApi.set_lock_stock` @288 `0.2.21` — locks from linked sources, since 0.2.0-dev.31.12 (GitHub #147; capability items.lock_sources; header.size...
 - kiln_stations.h `KilnStationsApi.lock_asks` @296 `0.2.21` — A Kiln client: the lock items its lock checks (the press and the locked prompt) met while the snapshot was...
 - kiln_stations.h `KilnStationsApi.set_build_stock` @304 `0.2.21` — block placements from linked sources, since 0.2.0-dev.31.12 (GitHub #132; capability...
+- kiln_stations.h `KilnStationsApi.fill_flags` @312 `0.2.23` — since 0.2.0-dev.31.16 (GitHub #132; header.size tells whether this is here) ---- The KILN_STATION_FILL_*...
 
 ## services/kiln_stations_client.h — service `kiln.stations.client`
 ### KilnStationsClientApi — 32 bytes
@@ -146,7 +147,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_types.h `KilnTypesApi.ecs_registry` @208 `0.2.10` — Appended to v1 (check header.size): the engine's component registration catalog for 'world_kind'...
 
 ## services/kiln_ui.h — service `kiln.ui`, `kiln.ui.tick`, `kiln.craftmenu`
-### KilnUiApi — 1088 bytes
+### KilnUiApi — 1096 bytes
 - kiln_ui.h `KilnUiApi.status` @8
 - kiln_ui.h `KilnUiApi.subscribe_frame` @16
 - kiln_ui.h `KilnUiApi.subscribe_key` @24
@@ -282,6 +283,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_ui.h `KilnUiApi.drag_source` @1064 `0.2.13`
 - kiln_ui.h `KilnUiApi.drop_target` @1072 `0.2.13`
 - kiln_ui.h `KilnUiApi.popups` @1080 `0.2.19` — Additive size-guarded tail (0.2.0-dev.31.9; check header.size >= offsetof(KilnUiApi, popups) +...
+- kiln_ui.h `KilnUiApi.window_state` @1088 `0.2.23` — Additive size-guarded tail (0.2.0-dev.31.16, GitHub issue 149; check header.size >= offsetof(KilnUiApi...
 ### KilnUiTickApi — 32 bytes
 - kiln_ui.h `KilnUiTickApi.subscribe` @8
 - kiln_ui.h `KilnUiTickApi.unsubscribe` @16
