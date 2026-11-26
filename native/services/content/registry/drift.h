@@ -7,8 +7,10 @@
 // read at resources-ready and the writers Kiln knows below the packs (archive-writer packages, old boot patches). When they
 // differ and none of them explains it, something outside Kiln changed the value (another DLL engine, a hook, a memory
 // write): a writer row of kind "drift", certainty "bestEffort", naming the suspects Kiln can see, never a refusal. A slot
-// another writer changed after Kiln's layer (the store's compare-before-write) gets the same row. Kiln cannot see a writer
-// that hooks nothing (a thread writing memory), so a suspect list is a hint, not proof, and an empty one proves nothing.
+// another writer changed after Kiln's layer (the store's compare-before-write) gets the same row. An entry an old boot
+// document wrote (an OldPatch row or entry mark in RegistryLive::old) is not checked: the game holds Kiln's own patch there
+// and many of its paths have no row to explain it. Kiln cannot see a writer that hooks nothing (a thread writing memory),
+// so a suspect list is a hint, not proof, and an empty one proves nothing.
 //
 // Suspects: the modules the hook map (kiln.hooks map_json, state/hooks.json) lists as having patched game code before
 // Kiln hooked it ("foreign", not Kiln's own), and hosted ShroudForge when it runs this start (its run-time mods write game

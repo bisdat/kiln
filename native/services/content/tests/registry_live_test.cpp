@@ -336,7 +336,7 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 }
 
 // What S11 does at resources-ready: lower the sections, compose, install.
-void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}) {
+void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}, const std::vector<registry::OldWrite>& old = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -357,7 +357,8 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.regmap = g_regmap;
     in.base = base();
     in.mods = mods;
-    in.result = registry::compose(sc, in.base, {}, mods);
+    in.old = old;
+    in.result = registry::compose(sc, in.base, old, mods);
     in.ids = {{"items|game:material_t1_wood_logs", guid_text(G1)}, {"items|game:sword_t2", guid_text(G2)}, {"items|game:material_stone", guid_text(G4)},
               {"recipes|game:plank_recipe", guid_text(G3)}, {"drops|game:dt_wolf", guid_text(G3)},
               {"loot|game:material_t1_wood_logs", guid_text(G1)}, {"perks|game:perk_a", guid_text(P1)}, {"perks|game:perk_b", guid_text(P2)}};
@@ -754,6 +755,30 @@ void drift_probe() {
     apply_registry_files(files);
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["writers"][0]["kind"] == "drift", "a reload reports it again");
 }
+// Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
+// covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
+// value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
+void drift_probe_kiln_boot_patch() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}},
+                                           {"registry": "items", "select": {"id": "game:material_stone"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
+    registry::OldWrite mark;
+    mark.kind = registry::WriterKind::OldPatch, mark.mod = "oldmod", mark.who = "oldmod/stacks", mark.field = {"items", "game:material_t1_wood_logs", ""};
+    stage(files, {}, {mark});
+    mem<uint32_t>(WOOD_AT, 12);   // oldmod's boot patch: the game holds 12 where the stage read 10
+    mem<uint32_t>(STONE_AT, 70);  // the stone: no document wrote it, so a change there is still drift
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 48, "Kiln's x4 composes on the value the game holds");
+    const auto logs = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    for (const auto& w : logs["writers"]) check(w["kind"] != "drift", "no drift row on an entry Kiln's boot patch wrote: " + logs.dump());
+    for (const registry::Line& l : g_last_report.lines)
+        check(!(l.field.id == "game:material_t1_wood_logs" && l.certainty == registry::Certainty::BestEffort), "no best-effort line there: " + l.text);
+    const auto stone = json_field({"items", "game:material_stone", "maxStack"});
+    check(!stone["writers"].empty() && stone["writers"][0]["kind"] == "drift" && stone["writers"][0]["value"] == 70,
+          "an entry no document wrote is still checked: " + stone.dump());
+}
 // P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
 void live_transactions() {
     world();
@@ -823,6 +848,7 @@ int main() {
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
         {"drift_probe", drift_probe},
+        {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

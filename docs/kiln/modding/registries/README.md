@@ -329,7 +329,10 @@ the row says so and names the suspects Kiln can see, the modules that patched ga
 `kiln/state/hooks.json`) and hosted ShroudForge when it runs. A slot another writer changes after Kiln's layer gets the same
 row (Kiln's edit is then skipped for that world, as before). The probe never refuses anything and costs one read per
 field per world load or reload, never per tick. A suspect list is a hint, not proof: a writer that hooks nothing is not
-seen, and a field nobody edits through the registry is not checked.
+seen, and a field nobody edits through the registry is not checked. Neither is an entry an old boot resource patch (an
+`OnBoot` or `resourcePatches` document) writes: the game holds Kiln's own patch there, and many of its paths (a formula's
+input, an element of a list of structs, `[*]` over every recipe) have no field row to explain it, so a change there is
+never called another loader's.
 
 ### Native callback and owner lifetime
 

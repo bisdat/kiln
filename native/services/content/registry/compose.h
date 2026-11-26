@@ -87,6 +87,9 @@ struct OldWrite {
     WriterKind kind = WriterKind::OldPatch;
     std::string mod;  // the Kiln mod behind it (empty for an archive-writer package)
     std::string who;  // "<mod>/<key>", "<mod>: content/<file>", "shroudforge:<package>"
+    // field.field empty: an entry mark (boot_bridge.cpp old_writes), not a write: an old boot document wrote this entry,
+    // whatever its paths map to. Composition skips it; the live drift probe (drift.h) never calls a change there another
+    // loader's.
     FieldRef field;
     Op op;
     ListOp list = ListOp::None;  // a list write (op unused): clear, append, remove, replace

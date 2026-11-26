@@ -6,6 +6,7 @@
 // game recipe removed with the item it needs, registry.json and its phases, the id table and the plan written to the data
 // folder, a second start from the cache giving the same registry.json, Kiln.Host's order, a native stage callback's edits,
 // the registry's writes on a resource's bytes after the old documents.
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -509,6 +510,38 @@ void archive_journal_shared_resources(const std::string& dir) {
           "base.journal says recipes cannot be named from it: " + rep["base"].dump());
 }
 
+// Review (registry-writers): old_writes marks every entry an old boot document writes (an OldPatch row with no field),
+// also where no Kiln field's row covers the path ("[*]" over the recipes, a formula's input): the live drift probe takes a
+// change there for Kiln's own patch. Composition skips the marks; an entry no document writes has none.
+void old_writes_marks(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &recipe_sections));
+    boothook::OldDoc faster;
+    faster.mod = "oldmod", faster.key = "faster";
+    faster.res = key_of(g(100), "keen::RecipeRegistryResource"), faster.type = "keen::RecipeRegistryResource";
+    faster.sets = {{"recipes[*].craftingDuration", {{"mul", 0.5}}}};
+    boothook::OldDoc hits;
+    hits.mod = "oldmod", hits.key = "hits";
+    hits.res = key_of(g(2), "keen::ItemInfo"), hits.type = "keen::ItemInfo";
+    hits.sets = {{"damageSetup.dmgMod", 2.0}};
+    std::vector<OldWrite> got;
+    r.run([&](model::Model& m) { return got = boothook::old_writes({faster, hits}, m); });
+    r.finish({});
+    auto marked = [&](const std::string& reg, const std::string& id) {
+        return std::any_of(got.begin(), got.end(), [&](const OldWrite& w) {
+            return w.kind == WriterKind::OldPatch && w.field.registry == reg && w.field.id == id && w.field.field.empty() && w.who.rfind("oldmod/", 0) == 0;
+        });
+    };
+    check(marked("recipes", "game:craft_planks"), "a \"[*]\" document over the recipes marks the recipe");
+    check(marked("items", "game:plank"), "a formula input's path marks the item");
+    check(!marked("items", "game:material_t1_wood_logs"), "an item no document writes is not marked");
+    const json rep = json::parse(files.report);
+    for (const json& f : rep["fields"])
+        for (const json& w : f["writers"]) check(!(w["kind"] == "oldPatch" && f["field"] == ""), "a mark is never a chain row: " + f.dump());
+    check(!rep["fields"].empty() && rep["refused"].empty(), "the recipe edit still composes: " + rep.dump().substr(0, 600));
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
@@ -516,7 +549,8 @@ int main(int argc, char** argv) {
         {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
         {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
         {"archive_journal_writers", [&] { archive_journal_writers(dir); }},
-        {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }}};
+        {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }},
+        {"old_writes_marks", [&] { old_writes_marks(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

@@ -70,6 +70,7 @@ struct LiveState {
     bool pending_change = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
     std::vector<std::string> suspects;  // the drift probe's suspects in this world (drift.h), read at world begin
+    std::set<registry::EntryRef> boot_written;  // entries an old boot document wrote (RegistryLive::old's OldPatch rows), per report
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -880,11 +881,14 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
         if (c.kind != registry::WriterKind::Registry && c.kind != registry::WriterKind::Check && c.kind != registry::WriterKind::OldPack && c.kind != registry::WriterKind::Code) chain.push_back(c);
     // The drift probe (drift.h): the game's value just before Kiln's first write in this world (the slots' originals, before
     // any pack) against what the stage read and the writers Kiln knows below the packs (archive packages, old boot patches).
-    // A difference no known writer explains is a best-effort row, never a refusal. An entry a mod added is Kiln's own clone.
+    // A difference no known writer explains is a best-effort row, never a refusal. An entry a mod added is Kiln's own clone;
+    // an entry an old boot document wrote holds Kiln's own patch, which many of its paths have no row to explain (a formula's
+    // input, an element of a list of structs, "[*]" over a registry's elements): never another loader's change there.
     bool drift = false;
     std::string drift_was, drift_now;
-    const bool added = std::find(r.added.begin(), r.added.end(), registry::EntryRef{ref.registry, ref.id}) != r.added.end();
-    if (!added && fo.base.kind != Value::None) {
+    const registry::EntryRef entry{ref.registry, ref.id};
+    const bool added = std::find(r.added.begin(), r.added.end(), entry) != r.added.end();
+    if (!added && fo.base.kind != Value::None && !g.boot_written.count(entry)) {
         const Value& expected = chain.empty() ? fo.base : chain.back().after;
         if (auto observed = field.decode(bytes, nullptr); observed && !(*observed == expected)) {
             ChainRow row;
@@ -975,6 +979,9 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
 void report(bool application = true) {
     g.tables_changed = false;
     registry::Result r = g.in->result;
+    g.boot_written.clear();
+    for (const registry::OldWrite& w : g.in->old)
+        if (w.kind == registry::WriterKind::OldPatch) g.boot_written.insert({w.field.registry, w.field.id});
     for (const auto& [ref, field] : g.fields) live_row(r, ref, field);
     if (g.world && g.in->record_entry) for (const auto& [entry, body] : g.in->entry_bodies) {
         auto fields = body.value("registryFields", registry::json::object());
