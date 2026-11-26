@@ -988,7 +988,7 @@
           "size": 72
         }
       },
-      "sha256": "d918425d6c8fd40c87b753daf2fa5ab1cd01f41bf6e698378da3d902bb095bd0"
+      "sha256": "0594bdc511cf74e692b06db7621c9dfef31004aa5da4f4ee5214d6eff05ba6ae"
     },
     "native/core/abi/services/kiln_camera.h": {
       "function_macros": [],
@@ -10371,7 +10371,7 @@
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
     "src/services/kiln_base_rules.rs": "051981ceeb97a78f02f625d8fb573289c0b388bd10a2dd303fa99a20fd53c53a",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
-    "src/services/kiln_build.rs": "aa7aa753e9a3cc411b48d3e1cb32144efaf5c60bf3bdaf9818ca295dcbd008c9",
+    "src/services/kiln_build.rs": "92054a5cae61df45406955bfb847d2dee853d54e714cebf53b6f2ece3834b060",
     "src/services/kiln_camera.rs": "ae8af992fc075f61140c42b7864c0391b93a31ea214fe47ac9c8200cd157c0f7",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
