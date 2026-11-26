@@ -477,6 +477,7 @@ void nc_packs_end();                              // ... after: pack definitions
 void nc_pack_mark(KilnOwner owner);
 uint32_t nc_pack_rollback(KilnOwner owner);
 void nc_pack_unmark();
+size_t nc_pack_journal_copies();  // definitions the journal copied since the mark (only at a change of a definition's text)
 // A data pack's "add" list (items / recipes): defines every entry as `owner`'s. Called by apply_pack (store_mutex
 // held, on the active world's thread).
 void nc_pack_add(KilnOwner owner, uint32_t kind, const std::string& list_json, const std::string& source,
