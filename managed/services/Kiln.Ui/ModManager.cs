@@ -355,7 +355,7 @@ internal sealed class ModManagerPage
         if (!typing && tab) Section = ModManagerLogic.Step(Section, (ui.HeldMods & KeyMods.Shift) != 0 ? -1 : 1);
         if (ui.KeyPressed(UiKey.GamepadRB, claim: true) && !typing) Section = ModManagerLogic.Step(Section, 1);
         if (ui.KeyPressed(UiKey.GamepadLB, claim: true) && !typing) Section = ModManagerLogic.Step(Section, -1);
-        if (Section == ModManagerSection.Mods && (ui.HeldMods & KeyMods.Ctrl) != 0 && ui.KeyPressed(UiKey.F)) FocusSearch = true;
+        if (Section == ModManagerSection.Mods && (ui.HeldMods & KeyMods.Ctrl) != 0 && ui.KeyPressed(UiKey.F) && !ShroudForgeUi.Capturing) FocusSearch = true;
 
         var win = ui.Cursor;
         ui.SetCursor(r.X - win.WindowX, r.Y - win.WindowY);

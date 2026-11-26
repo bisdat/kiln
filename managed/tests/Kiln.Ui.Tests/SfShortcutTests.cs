@@ -14,14 +14,14 @@ namespace Kiln.SfShortcutTests;
 [Collection(UiSerial.Name)]
 public sealed class SfShortcutTests : IDisposable
 {
-    private readonly Func<uint, uint, uint>? _layout = SfShortcuts.MapVirtualKey;
+    private readonly Func<uint, uint, uint>? _layout = KeyLayout.Map;
     private readonly string _root = Path.Combine(Path.GetTempPath(), "kiln-sfkeys-" + Guid.NewGuid().ToString("N"));
 
-    public SfShortcutTests() => SfShortcuts.MapVirtualKey = null;  // a US keyboard unless a test plays another layout
+    public SfShortcutTests() => KeyLayout.Map = null;  // a US keyboard unless a test plays another layout
 
     public void Dispose()
     {
-        SfShortcuts.MapVirtualKey = _layout;
+        KeyLayout.Map = _layout;
         try { Directory.Delete(_root, true); }
         catch (IOException) { }
     }
@@ -113,7 +113,7 @@ public sealed class SfShortcutTests : IDisposable
     [Fact]
     public void A_key_sent_by_virtual_key_alone_takes_its_place_in_the_layout()
     {
-        SfShortcuts.MapVirtualKey = German;
+        KeyLayout.Map = German;
         Assert.Equal(("SDL:28", SfShortcuts.Refusal.None), SfShortcuts.FromPress('Z', 0, KeyMods.None));
         Assert.Equal(("SDL:47", SfShortcuts.Refusal.None), SfShortcuts.FromPress(0xBA, 0, KeyMods.None));
     }
@@ -163,12 +163,12 @@ public sealed class SfShortcutTests : IDisposable
     [Fact]
     public void A_key_typed_as_its_character_on_this_keyboard_is_that_key()
     {
-        SfShortcuts.MapVirtualKey = German;
+        KeyLayout.Map = German;
         Assert.Equal("SDL:47", SfShortcuts.Normalize("Ü"));
         Assert.Equal("Ctrl+SDL:47", SfShortcuts.Normalize("Ctrl+ü"));
         Assert.Equal("SDL:45", SfShortcuts.Normalize("ß"));
         Assert.Equal("SDL:28", SfShortcuts.Normalize("Z"));  // the German Z, at the place of a US Y
-        SfShortcuts.MapVirtualKey = null;
+        KeyLayout.Map = null;
         Assert.Null(SfShortcuts.Normalize("Ü"));
     }
 
@@ -193,7 +193,7 @@ public sealed class SfShortcutTests : IDisposable
     [Fact]
     public void A_layout_key_is_shown_as_the_character_it_makes_on_this_keyboard()
     {
-        SfShortcuts.MapVirtualKey = German;
+        KeyLayout.Map = German;
         Assert.Equal("Ü", SfShortcuts.Label("SDL:47"));
         Assert.Equal("Ctrl + Z", SfShortcuts.Label("Ctrl+SDL:28"));
         Assert.Equal("^", SfShortcuts.Label("SDL:53"));

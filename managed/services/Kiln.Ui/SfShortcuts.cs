@@ -11,7 +11,6 @@
 // (kiln-sfi input/feed.rs SET1). kiln.ui hands Kiln.Ui the same make code and E0 flag (KilnUiKey.scan: the make code,
 // 0x100 for E0), so a key pressed in the capture box becomes exactly the scancode ShroudForge later sees for that key.
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Kiln;
@@ -97,33 +96,6 @@ internal static class SfShortcuts
         return d;
     }
 
-    // ---------------------------------------------------------------------------------------- the keyboard layout ----
-
-    /// <summary>The keyboard layout's MapVirtualKeyExW (code, map type) on Windows; null elsewhere (the tests set it to play a
-    /// layout). Used only for the keys whose name depends on the layout (letters, digits, punctuation): to show the
-    /// player's own character for a key, and to read one typed as that character.</summary>
-    internal static Func<uint, uint, uint>? MapVirtualKey = OperatingSystem.IsWindows() ? WindowsMap : null;
-
-    private const uint MapVkToVscEx = 4, MapVscToVkEx = 3, MapVkToChar = 2;
-
-    private static uint WindowsMap(uint code, uint type)
-    {
-        try { return MapVirtualKeyExW(code, type, Layout()); }
-        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return 0; }
-    }
-
-    // the game window's layout (the player may switch layouts per window), else this thread's
-    private static nint Layout()
-    {
-        var w = GetForegroundWindow();
-        if (w != 0)
-        {
-            var thread = GetWindowThreadProcessId(w, out var pid);
-            if (pid == (uint)Environment.ProcessId) return GetKeyboardLayout(thread);
-        }
-        return GetKeyboardLayout(0);
-    }
-
     // ---------------------------------------------------------------------------------------- codes ----
 
     /// <summary>The SDL code of a kiln.ui scan code (the make code, 0x100 for E0); 0 for none.</summary>
@@ -159,8 +131,8 @@ internal static class SfShortcuts
     // virtual key does); 0 without a layout or a place
     private static int LayoutSdl(uint vk)
     {
-        if (MapVirtualKey is not { } map) return 0;
-        var sc = map(vk, MapVkToVscEx);
+        if (KeyLayout.Map is not { } map) return 0;
+        var sc = map(vk, KeyLayout.VkToVscEx);
         var high = sc >> 8;
         return (sc & 0xFF) != 0 && high is 0 or 0xE0 ? SdlOfScan((sc & 0xFF) | (high != 0 ? 0x100u : 0u)) : 0;
     }
@@ -289,31 +261,17 @@ internal static class SfShortcuts
         if (word.Equals("NumpadEnter", StringComparison.OrdinalIgnoreCase)) return (88, 0);
         // a key typed as the character it makes on this keyboard ("Ü", "ß", "^")
         foreach (var (index, sdl) in Set1)
-            if (index < 0x80 && CharOf(index) is { } c && string.Equals(c, word, StringComparison.CurrentCultureIgnoreCase)) return (sdl, 0);
+            if (index < 0x80 && KeyLayout.CharOfScan((uint)index) is { } c && string.Equals(c, word, StringComparison.CurrentCultureIgnoreCase)) return (sdl, 0);
         return (0, 0);
     }
 
     // ---------------------------------------------------------------------------------------- names ----
 
-    /// <summary>The character the layout's key at set-1 index <paramref name="index"/> makes (upper case), for the keys a
-    /// layout moves (letters, punctuation); null without a layout or for any other key. A dead key ("^" of a German
-    /// keyboard) gives its accent.</summary>
-    private static string? CharOf(int index)
-    {
-        if (MapVirtualKey is not { } map || index is 0 or >= 0x80) return null;
-        var vk = map((uint)index, MapVscToVkEx);
-        // (a digit keeps its digit: the top row of a French keyboard makes & é " without Shift)
-        if (vk is not (>= 'A' and <= 'Z') && !KeyNames.Oem(vk)) return null;
-        var ch = (char)(map(vk, MapVkToChar) & 0xFFFF);
-        if (ch == 0 || char.IsControl(ch) || char.IsWhiteSpace(ch) || char.IsSurrogate(ch)) return null;
-        return ch.ToString().ToUpperInvariant();
-    }
-
     /// <summary>The name of a key by its SDL code: the character it makes on this keyboard for a letter or punctuation key ("Ü" on a German one), else Kiln's name of the key ("F5", "Numpad7", "LeftBracket" without a layout), else
     /// ShroudForge's own "SDL:n".</summary>
     public static string KeyName(int sdl)
     {
-        if (IndexOf.TryGetValue(sdl, out var index) && CharOf(index) is { } c) return c;
+        if (IndexOf.TryGetValue(sdl, out var index) && KeyLayout.CharOfScan((uint)index) is { } c) return c;
         if (VkBySdl.TryGetValue(sdl, out var vk)) return KeyNames.Name(vk);
         if (sdl == 88) return "NumpadEnter";
         return "SDL:" + sdl.ToString(CultureInfo.InvariantCulture);
@@ -342,16 +300,4 @@ internal static class SfShortcuts
         }
         return string.Join(" / ", chords);
     }
-
-    [DllImport("user32", EntryPoint = "MapVirtualKeyExW")]
-    private static extern uint MapVirtualKeyExW(uint code, uint mapType, nint layout);
-
-    [DllImport("user32")]
-    private static extern nint GetKeyboardLayout(uint thread);
-
-    [DllImport("user32")]
-    private static extern nint GetForegroundWindow();
-
-    [DllImport("user32")]
-    private static extern uint GetWindowThreadProcessId(nint window, out uint pid);
 }
