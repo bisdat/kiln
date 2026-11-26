@@ -76,6 +76,7 @@ std::atomic<bool> g_stopping{false};
 std::atomic<bool> g_faulted{false};  // the status writer observes this without taking the window callback's lock
 bool g_raw_keys = false;          // the window has given a raw keyboard record (g_mu)
 bool g_raw_buttons = false;       // ...a raw mouse button record (g_mu)
+bool g_print_screen = false;      // a press of Print Screen was passed and its release not yet (g_mu)
 
 // The exports are foreign code: a fault stops the feed instead of the window thread (POD-only frames).
 template <class F, class... A> bool guarded(F fn, A... args) {
@@ -107,6 +108,20 @@ bool is_press(const KilnUiWindowInput* r) {
     }
 }
 
+// The key of a record is Print Screen (SDL_SCANCODE_PRINTSCREEN) by the fork's own rules (host_keyboard.c): a raw record
+// E0 37 (or no make code, E0 and VK_SNAPSHOT); a key message with scan code 37 and the extended bit, or no scan code and
+// VK_SNAPSHOT. Windows sends a window Print Screen's WM_KEYUP alone, which the runtime counts as a press and its release
+// (host_input.rs window_key) unless it holds the key already.
+bool print_screen(const KilnUiWindowInput* r) {
+    if (r->kind == KILN_UI_INPUT_RAW_KEY)
+        return (r->flags & RI_KEY_E0) &&
+               ((r->make_code & 0xFF) == 0x37 || ((r->make_code & 0xFFFF) == 0 && (r->vkey & 0xFFFF) == VK_SNAPSHOT));
+    if (r->kind != KILN_UI_INPUT_WINDOW_KEY) return false;
+    const uint32_t flags = static_cast<uint32_t>(static_cast<uint64_t>(r->lparam) >> 16) & 0xFFFF;
+    const uint32_t scan = flags & 0x7F;
+    return scan ? scan == 0x37 && (flags & KF_EXTENDED) : (r->wparam & 0xFFFF) == VK_SNAPSHOT;
+}
+
 // One key goes through one of the two key functions (input_host.h): the raw record once the window gives raw keyboard
 // input, the window message while it has given none. The window gets both for a key (the game registers raw input
 // without RIDEV_NOLEGACY) and may take WM_INPUT ahead of the messages: a tap can arrive as raw press, raw release, then
@@ -115,7 +130,8 @@ bool is_press(const KilnUiWindowInput* r) {
 // is removed or targets a different window, resume legacy input, including the release of an already held raw key.
 // While Kiln has the keyboard (kiln_captures: its menu, a text field, a shortcut's capture box) no press reaches the
 // runtime, as Kiln's interpreter counts none then (0.2.0-dev.31.18, netjunk: a key typed or captured in Kiln's menu also
-// fired a ShroudForge mod's shortcut); every release does, so nothing stays held for ShroudForge.
+// fired a ShroudForge mod's shortcut); every release does, so nothing stays held for ShroudForge. Print Screen's lone
+// WM_KEYUP, which the runtime counts as a press, is a press here too unless the runtime holds the key.
 void KILN_CALL on_window_input(const KilnUiWindowInput* r, void*) {
     if (!r || r->size < sizeof(KilnUiWindowInput)) return;
     if (g_stopping.load(std::memory_order_acquire)) return;
@@ -128,12 +144,15 @@ void KILN_CALL on_window_input(const KilnUiWindowInput* r, void*) {
             g_raw_keys = true;
             if (press && kiln_captures()) return;
             ok = guarded(g_fn.raw_key, r->make_code, r->flags, r->vkey);
+            if (print_screen(r)) g_print_screen = press;
             break;
         case KILN_UI_INPUT_WINDOW_KEY:
             if (g_raw_keys && kui::raw_input::registered_for(6, GetFocus())) return;
             g_raw_keys = false;
-            if (press && kiln_captures()) return;
+            // Print Screen's lone WM_KEYUP is a press to the runtime too, unless it holds the key (a WM_KEYDOWN passed)
+            if ((press || (print_screen(r) && !g_print_screen)) && kiln_captures()) return;
             ok = guarded(g_fn.window_key, static_cast<uintptr_t>(r->wparam), static_cast<intptr_t>(r->lparam));
+            if (print_screen(r)) g_print_screen = press;
             break;
         case KILN_UI_INPUT_MOUSE_BUTTON:
             if (r->message == WM_INPUT) g_raw_buttons = true;
@@ -146,6 +165,7 @@ void KILN_CALL on_window_input(const KilnUiWindowInput* r, void*) {
             break;
         case KILN_UI_INPUT_FOCUS_LOST:
             ok = guarded(g_fn.reset);
+            g_print_screen = false;
             break;
         default:
             return;
@@ -229,7 +249,7 @@ KeySource key_feed_start(const KilnApi* api, KilnOwner owner, HMODULE runtime, c
     }
     {
         std::lock_guard lock(g_mu);
-        g_raw_keys = g_raw_buttons = false;
+        g_raw_keys = g_raw_buttons = g_print_screen = false;
         g_ui = ui;
         g_sub = sub;
         g_begun = true;
@@ -260,7 +280,7 @@ bool key_feed_attach(const KilnApi* api, KilnOwner owner, KeySource* out) {
             decided = true;
             g_waiting = false;
             if (subscribed) {
-                g_raw_keys = g_raw_buttons = false;
+                g_raw_keys = g_raw_buttons = g_print_screen = false;
                 g_ui = ui;
                 g_sub = sub;
                 g_live = true;
