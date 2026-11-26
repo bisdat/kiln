@@ -22,9 +22,9 @@ async function withoutArt(page: Page) {
 
 /** A host as Kilnwarden's: the art's state says it makes none (canExtract false), and its own words when there is none;
  *  `banner: false` drops the banner over the map (the host shows its own notice). Counts the action's clicks and keeps
- *  the art states the hook was given. */
-async function host(page: Page, banner: boolean) {
-  await page.addInitScript((banner) => {
+ *  the art states the hook was given. `body`: the banner's words under its title. */
+async function host(page: Page, banner: boolean, body = "The map shows players and zones on a plain background until it has.") {
+  await page.addInitScript(({ banner, body }) => {
     const w = window as unknown as { __kilnHarnessHost: unknown; __noArtClicks: number; __noArtGiven: unknown[] };
     w.__noArtClicks = 0;
     w.__noArtGiven = [];
@@ -35,14 +35,14 @@ async function host(page: Page, banner: boolean) {
         return banner
           ? {
             title: "This server has no map art yet",
-            body: "The map shows players and zones on a plain background until it has.",
+            body,
             action: { label: "Copy it from the Kiln Launcher", onClick: () => { w.__noArtClicks++; } },
             markers: "No markers without the map art: copy it from the Kiln Launcher (the notice over the map).",
           }
           : { title: null, markers: "No markers without the map art: see the notice above the map." };
       },
     };
-  }, banner);
+  }, { banner, body });
 }
 
 async function markersTab(page: Page) {
@@ -86,6 +86,32 @@ test("a host may drop the banner over the map (its own notice says it) and still
   await expect(panel).not.toContainText(LAUNCHER_MARKERS);
   await expect(page.locator(".ka-map-area .k-banner")).toHaveCount(0);
   await expect(page.locator(".ka-map-area")).not.toContainText(LAUNCHER_BANNER);
+});
+
+test("a host's long words stay inside the map: the banner scrolls and its action stays in reach", async ({ page }) => {
+  // a host's body may be steps or a fix with its progress (AdminMapNoArt.body); on a short map it is taller than the map
+  const long = Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: copy the map and data folders from the Kiln Launcher's admin-assets into the server's folder.`).join(" ");
+  await withoutArt(page);
+  await host(page, true, long);
+  await kapServer(page);
+  await page.setViewportSize({ width: 1024, height: 480 });
+  await page.goto(HARNESS);
+  const box = page.locator(".ka-map-area .ka-map-noart");
+  await expect(box.locator(".k-banner")).toBeVisible(LOAD);
+  const rect = (sel: string) => page.locator(sel).evaluate((e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; });
+  const area = await rect(".ka-map-area");
+  // the box ends inside the map, and what does not fit scrolls inside it (the map clips everything past its edge)
+  expect((await rect(".ka-map-area .ka-map-noart")).bottom).toBeLessThanOrEqual(area.bottom);
+  expect(await box.evaluate((e) => e.scrollHeight > e.clientHeight && getComputedStyle(e).overflowY === "auto")).toBe(true);
+  await box.evaluate((e) => { e.scrollTop = e.scrollHeight; });
+  const action = box.getByRole("button", { name: "Copy it from the Kiln Launcher" });
+  const at = await action.evaluate((e) => { const b = e.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; });
+  expect(at.top).toBeGreaterThanOrEqual(area.top);
+  expect(at.bottom).toBeLessThanOrEqual(area.bottom);
+  await action.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __noArtClicks: number }).__noArtClicks)).toBe(1);
+  // the map itself did not move for it (nothing scrolled the map's root)
+  expect(await page.locator(".ka-map-root").evaluate((e) => e.scrollTop)).toBe(0);
 });
 
 test("the launcher, without the hook, keeps its own words", async ({ page }) => {
