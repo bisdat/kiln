@@ -42,7 +42,7 @@ function RegistryFor({ gameId }: { gameId: string }) {
           {!r.verified && <Banner tone="warn" title={t("registry.unverified")}>{t("registry.unverifiedBody")}</Banner>}
           <p className="registry-hint">{t("registry.certaintyHint")}</p>
         </Card>
-        <RegistryPlanCard gameId={gameId} generation={r.generation} />
+        <RegistryPlanCard gameId={gameId} snapshot={`${r.written}#${r.generation}`} />
         {(r.omitted > 0 || r.writersOmitted > 0) && <Banner tone="warn" title={t("registry.partial")}>
           {r.omitted > 0 && `${t("registry.partialRows", { count: r.omitted })} `}
           {r.writersOmitted > 0 && `${t("registry.partialWriters", { count: r.writersOmitted })} `}
@@ -122,10 +122,12 @@ function planValue(v: unknown, none: string): string {
 }
 
 /** The registry stage's plans (kiln_manage::registry_plan) and a rollback to the previous (last good) one: the dry run's
- * changes are shown before anything is written; Clear removes a waiting request. Saves are never touched. */
-function RegistryPlanCard({ gameId, generation }: { gameId: string; generation: number }) {
+ * changes are shown before anything is written; Clear removes a waiting request. Saves are never touched. `snapshot`: the
+ * report's write time and generation, so a new report (a new start: its generation starts again at 1) reads the plans
+ * again. */
+function RegistryPlanCard({ gameId, snapshot }: { gameId: string; snapshot: string }) {
   const t = useT();
-  const status = useQuery({ queryKey: ["registry_rollback", gameId, generation], retry: false,
+  const status = useQuery({ queryKey: ["registry_rollback", gameId, snapshot], retry: false,
     queryFn: () => registryRollback(gameId, { clear: false, dryRun: true }) });
   const [confirm, setConfirm] = useState<"rollback" | "clear" | null>(null);
   const [done, setDone] = useState<RegistryRollback | null>(null);
