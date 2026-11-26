@@ -2,7 +2,7 @@
   "format": 1,
   "side": "client",
   "extends": "server.d/lock-sources.json",
-  "comment": "GitHub #147, Kiln clients: player_ui's locked prompt (C 0x2b8430) counts the lock's item with the same InventoryItemCount and marks the prompt locked when it is short (G38UiPlayData +0x2c98 item, +0x2c9c amount, +0x2ca4 locked). locks/client.UiLockCountRet is that call's return address. Client-only UI code: the dedicated server has no player_ui update. Client 26430625 (5d9ef2f1) only. docs/re/locks.md.",
+  "comment": "GitHub #147, Kiln clients: player_ui's locked prompt (C 0x2b8430) counts the lock's item with the same InventoryItemCount and marks the prompt locked when it is short (G38UiPlayData +0x2c98 item, +0x2c9c amount, +0x2ca4 locked). locks/client.UiLockCountRet is that call's return address. Client-only UI code: the dedicated server has no player_ui update. The HUD draws the prompt's requirement line (\"Required: Lockpick\") from +0x2c98/+0x2c9c with its own count of the item in the local player's bag and colours it by that count alone (C 0xbf73a2-0xbf73e6, GitHub #147 follow-up, 31.15): locks/client.LockRowCount is right after that count. It is not one of items.lock_sources' symbols: the line is display only and a hosting client's server half shares the feature, so where it does not resolve only the line keeps the game's count (kiln-items, review of 31.15). Client 26430625 (5d9ef2f1) only. docs/re/locks.md.",
   "symbols": {
     "locks/client.UiLockCountRet": {
       "comment": "mov ebx,[rdi+requiredItem]; test; cmp byte [rax],0 (DynamicInteractionLock.destroy); [rsp+0x28] = item; call InventoryItemCount; mov [rsi+0x2c98],ebx; movzx eax,word [rdi+requiredItemAmount]. The return address; kiln-items' mid hook there reads rbp+0x620 (count +0x628) and rdi, which the literal bytes pin. Client 26430625 0x2bc483",
@@ -10,6 +10,15 @@
         {
           "pattern": "8B 5F 10 85 DB 74 ?? 80 38 00 75 ?? 48 8B 85 ?? ?? ?? ?? 48 8D 8D 20 06 00 00 4C 8B 8D ?? ?? ?? ?? 4C 8B 85 ?? ?? ?? ?? 48 8B 95 ?? ?? ?? ?? 48 89 44 24 30 48 8B 85 ?? ?? ?? ?? 89 5C 24 28 48 89 44 24 20 E8 {locks/InventoryItemCount:rel32} 89 9E ?? ?? ?? ?? 0F B7 47 16 66 89 86 ?? ?? ?? ?? 80 BD 20 06 00 00 00 75 ?? 0F B7 47 16 39 85 28 06 00 00",
           "offset": 73
+        }
+      ]
+    },
+    "locks/client.LockRowCount": {
+      "comment": "The HUD's requirement row of the looked-at lock (C 0xbf5d80, the prompt draw): call the local player's UI inventory mirror (C 0xd40fe0); mov r11d,[r14+0xd8] (the item, player_ui's +0x2c98 with r14 = +0x2bc0); mov r8d,edi (0); the loop over its slot list adds each stack of the item to r8d; then movzx ecx,word [r14+0xdc] (the amount, +0x2c9c), ecx = max(amount, 1), the row's count = r8d and met = r8d >= ecx (setae; the row draw C 0xbf1ea0 colours the line by it). The address of that movzx; kiln-items' mid hook there raises r8d from the server's lock snapshot when the bag is short. Client 26430625 0xbf73be",
+      "find": [
+        {
+          "pattern": "E8 ?? ?? ?? ?? 45 8B 9E D8 00 00 00 44 8B C7 48 85 C0 74 30 4C 8B 48 10 4D 85 C9 74 27 4C 8B 90 ?? ?? ?? ?? 48 8B 48 08 8B 01 48 8D 14 C0 45 39 5C D2 08 75 05 45 03 44 D2 10 48 83 C1 04 49 83 E9 01 75 E4 41 0F B7 8E DC 00 00 00 B8 01 00 00 00 66 3B C1 44 89 85 ?? ?? ?? ?? 0F 47 C8 B8 02 00 00 00 44 3B C1 89 8D ?? ?? ?? ?? 0F 93 85",
+          "offset": 68
         }
       ]
     }

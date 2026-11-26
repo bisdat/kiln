@@ -7,7 +7,9 @@ addresses are RVAs, client `C`, server `S`. Read from the exe files only (never 
 capstone disassembly, the offline resolver (`tools/sigport/sigdb_check.py`), the reflection dump in
 `sigdb/types/<side>/<sha>.json`. Tags as in the other RE pages: **[desc]** descriptor, **[dis]** disassembly, **[refl]**
 reflection, **[sig]** the sigdb rows `sigdb/symbols/server.d/lock-sources.json` and `client.d/lock-sources.json`, qualified
-by `native/services/items/tests/lock_sources_sigdb_test.py` (38 checks on both exes). No runtime evidence yet **[rt: none]**.
+by `native/services/items/tests/lock_sources_sigdb_test.py` (46 checks on both exes). Runtime: Fuzen777's hosted world on
+0.2.0-dev.31.13 (GitHub #147) opened a lockpick lock from a linked chest and took the pick there, while the prompt's
+requirement line stayed red (section 4a) **[rt: player report]**.
 
 ## 1. The component
 `keen::ecs::InteractionLock` (hash `0xFBA1F222`, 256 bytes) **[refl]**: `requiredItemRef` +0 (ItemReference),
@@ -25,6 +27,7 @@ and `DynamicInteractionLock {destroy +0, itemUsed +1}`.
 | `player_control_action_sequence` | `0x2dcca0` | `0xc8c40` | the press: calls the lock check (below) at C `0x2dd34c`, S `0xc92ec`; sends `AcceptOfferedInteractionEvent` only for an unlocked press |
 | `interaction_attempt` | `0x2a7a10` | `0xa4e80` | events-in `AcceptOfferedInteractionEvent`; other-tpl `InteractionLock`; writes `Inventory`, `DynamicInteractionLock`, `ClientInteractionLock`; the payment (below) |
 | `player_ui` | `0x2b8430` | (client program, no update in S) | the locked prompt: counts the item the same way (below) |
+| (HUD, not a program) | `0xbf5d80` | (none) | draws the prompt; its requirement line counts the item once more (section 4a) |
 | `interaction_query_new` | `0x2aa360` | `0xa77d0` | target selection; reads InteractionLock (not a count) |
 
 `player_control_action_sequence` runs in every world: the server world (dedicated, or a hosting client's own) and, on a
@@ -60,6 +63,25 @@ rbp+0x620, ctx = [rbp+0x2d5e0], …, item = ebx); return **`locks/client.UiLockC
 G38UiPlayData `+0x2c98` = item, `+0x2c9c` = amount, and when error != 0 or count `[rbp+0x628]` < amount, `+0x2ca0` =
 item and `+0x2ca4` = 1 (the prompt shows locked). Client-only UI code: the server exe has no such site **[sig]**.
 
+## 4a. The prompt's requirement line: the HUD's own count, C `0xbf7283`–`0xbf7469` **[dis]**
+The red "Required: Lockpick" is not decided by player_ui's count. The HUD's prompt draw (C `0xbf5d80`, `r15` =
+G38UiPlayData, `r14` = `r15+0x2bc0`, so `+0xd8` = `+0x2c98` and `+0xdc` = `+0x2c9c`) reads only the item and amount
+player_ui wrote and **counts the item again itself**:
+- `mov ecx,[r14+0xd8]; test ecx,ecx; je` (no item: no line); the item's name and icon through C `0xe94470`;
+- `call 0xd40fe0` = the local player's UI inventory mirror (G38UiPlayData's player list `+0x3060`, stride `0x8f70`,
+  matched by the local player's id), then `mov r11d,[r14+0xd8]; mov r8d,edi` (0) and a loop over the mirror's slot
+  list (`[rax+8]`, count `[rax+0x10]`) into its stacks (`[rax+0x2d8]`, stride `0x48`): `cmp [stack+8],r11d; jne; add
+  r8d,[stack+0x10]` (C `0xbf73a2`–`0xbf73bc`). The bag only.
+- at **`locks/client.LockRowCount`** = C `0xbf73be`: `movzx ecx,word [r14+0xdc]` (the amount), `ecx = max(amount, 1)`,
+  `[rbp+0x244] = r8d` (the count the line shows), `cmp r8d,ecx; setae [rbp+0x248]` (**met**), then the row goes to the
+  row draw C `0xbf1ea0` (call at `0xbf7469`), which picks the line's colour (theme `+0xf060` / `+0xf068`, C `0xbf2141`)
+  and text style (`+0xba28` / `+0xba58`, C `0xbf2455`) by that met byte (row `+0x30`).
+- `+0x2ca0` / `+0x2ca4` (player_ui's locked flags) only feed the prompt's own locked look (C `0xbf71be`–`0xbf71db`); no
+  other code reads `+0x2c98`–`+0x2ca4` by displacement (a scan of the client's `.text`).
+
+So a hook at player_ui's count alone (section 6 before 0.2.0-dev.31.15) makes the prompt unlocked but leaves the line
+red whenever the bag is short. Client-only HUD code: the dedicated server has no such site **[sig]**.
+
 ## 5. The interaction's payment: inside `interaction_attempt` **[dis]**
 For an accepted offer whose host has an InteractionLock with `requiredItem != 0` and `DynamicInteractionLock.itemUsed ==
 0` (S `0xa5228`–`0xa5251`): an inventory transaction on the stack (`items/InventoryTxCtor` + `items/InventoryTxInit` with
@@ -89,6 +111,21 @@ and answers the rest in `left`.
   prediction world adds the server's lock snapshot (`set_lock_stock`). Never more than the game's count when the bag
   covers the lock.
 - **Mid hook at `locks/client.UiLockCountRet`** (client): the same for the prompt, from the snapshot.
+- **Mid hook at `locks/client.LockRowCount`** (client, since 0.2.0-dev.31.15): the requirement line (section 4a). When
+  the HUD's count `r8d` is below `max(amount, 1)`, `r8d` becomes bag + the snapshot's row, so the line shows met and its
+  count the same as the press. kiln.log logs the line's state once per change (the HUD runs every frame):
+  `locks: the lock prompt's requirement line counts the linked sources: item 0x..., bag a + linked b, needs n (shown
+  met)` or `... counts the bag only: item 0x..., <check> (bag a, linked b, needs n)`. The line is display only and a
+  hosting client's server half shares `items.lock_sources`, so this site is not part of the feature: where it does not
+  resolve, another module patched its code, its hook cannot go in or it faults, only the line keeps the game's count
+  (`locks: the lock prompt's requirement line keeps the game's count ...` / `... stands down ...` / `... hook faulted
+  ...`); the checks, the locked prompt and the payment keep counting the links and the capability row is not lowered.
+- **A hosted world:** the host's process has one kiln-items for its server and client worlds. The server half's
+  `LockStock` hands the host's own player its message in process (`Client.IsHosting && Client.LocalPlayer == player`,
+  no network; the host's asks go straight to the server half's queue), so the host's client world gets
+  `set_lock_stock` and its Pre (`lock_client_pre`) puts the client hooks in, as a joined Kiln client's does on the
+  channel. A prompt shown before its row arrives asks for it (the HUD and player_ui both note the item); the HUD and
+  player_ui count again every frame, so the line turns met once the row is in, without looking away.
 - **Mid hook at `locks/LockPaid`** (server world): when PayMaterial answered error 0 with `left > 0`, the rest is paid from
   the opted-in links in link order through PayMaterial **in the same transaction**, after a recount of each link through
   the transaction's own InventorySetup/Inventory accessors; on success `left` is set to 0 and the game commits (Consume)
@@ -116,6 +153,8 @@ may first play the lock's failed attempt, until the server's state reaches it. A
 prompt and prediction agree with the server; it is not what lets the press through.
 
 ## 9. Not seen yet
-No lab or client run. Open questions only a game answers: what a vanilla client shows when the server opens a lock its
-prediction refused (section 8: the decision itself is read from the code, not seen); the prompt's look while the
-snapshot row is on its way; a hosting client's three worlds in one process.
+No lab or client run of our own. Fuzen777's hosted run (0.2.0-dev.31.13) saw the opening and the payment from a linked
+chest; the requirement line's fix (section 4a, 0.2.0-dev.31.15) is read from the code only. Open questions only a game
+answers: what a vanilla client shows when the server opens a lock its prediction refused (section 8: the decision itself
+is read from the code, not seen); the line's look in the moment before the snapshot row arrives; a joined client's line
+on a dedicated server.
