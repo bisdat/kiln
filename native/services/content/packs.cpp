@@ -1075,11 +1075,18 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             return ok;
         };
         // What one mod's packs did in this application that a store or drop layer does not hold comes off whole when one
-        // of them throws: the definitions of its "add" lists (newcontent), gamedata clones and config adds, and what it
-        // applied in other services' sections. Its layers and drop rules come off with its owner.
+        // of them throws: the definitions of its "add" lists (newcontent), gamedata clones and config adds, what it
+        // applied in other services' sections, and the stack guard (the whole game's: an earlier pack of the mod may have
+        // switched it with "options": {"stackGuard": ...}, or a raised max stack turned it on). Its layers and drop rules
+        // come off with its owner.
+        bool guard_at_mark = guard_on();
         auto roll_back = [&](KilnOwner o) {
             store_drop_owner(o);
             drops_drop_owner(o);
+            if (guard_on() != guard_at_mark) {
+                std::string why;
+                if (!guard_set(guard_at_mark, &why)) LOGW("data packs: the stack guard could not be put back %s: %s", guard_at_mark ? "on" : "off", why.c_str());
+            }
             uint32_t n = nc_pack_rollback(o);
 #if KC_GAMEDATA
             n += gd_pack_rollback(o);
@@ -1097,6 +1104,7 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
             while (end < packs.size() && packs[end].file.mod == mod) ++end;
             const KilnOwner o = owner_of(mod);
             nc_pack_mark(o);
+            guard_at_mark = guard_on();
 #if KC_GAMEDATA
             gd_pack_mark(o);
 #endif

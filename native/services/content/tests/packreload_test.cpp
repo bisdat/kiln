@@ -18,6 +18,7 @@
 //    a model of newcontent.cpp's bookkeeping and pack journal here; packundo_test.cpp runs the real one)
 //  - built with kiln.gamedata's hooks (packreload_test.sh's second build): its template clones, config adds and other
 //    services' sections come off the same way (a model again; gdundo_test.cpp runs the real ones)
+//  - a pack that throws after an earlier pack of its mod switched the stack guard off: the guard is as before the reload
 //  - 300 reloads (good, broken, throwing): no new owners, nothing left queued
 // packreload_test.sh builds and runs it.
 #include <windows.h>
@@ -115,7 +116,13 @@ size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
     return writes.size();
 }
 WriteStats write_stats() { return {}; }
-bool patch_code_byte(uintptr_t, uint8_t, uint8_t) { return false; }
+// the stack clamp's `jbe` (0x76; the guard makes it a `jmp`, 0xEB): only reached once a case sets E.guard
+uint8_t g_clamp_byte = 0x76;
+bool patch_code_byte(uintptr_t, uint8_t expect, uint8_t to) {
+    if (g_clamp_byte != expect) return false;
+    g_clamp_byte = to;
+    return true;
+}
 void* near_alloc(uintptr_t, size_t) { return nullptr; }
 uint32_t fnv1a(const void* p, size_t n) {
     uint32_t h = 2166136261u;
@@ -678,6 +685,32 @@ void run() {
         fs::remove_all(mod_dir("late"));
         pack_mods(R"(["other","skilltest"])");
         step();
+    }
+
+    // ---- the stack guard is the whole game's: a pack of the mod that throws took it off ("options": {"stackGuard": false})
+    // before a later pack of the mod threw. It is as before the reload again (on: the game keeps stacks above an item's max),
+    // not off until the next application, with saved stacks cut down meanwhile.
+    {
+        E.guard = true, E.stack_clamp = 0x9000;
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 5}}})");  // lowers: no reason for the guard
+        reloaded("skilltest", "was reloaded");
+        step();
+        std::string why;
+        check(guard_set(true, &why) && guard_on(), "guard: on before the reload (another mod raised a max stack)");
+        pack("skilltest", "skills.json", R"({"format": 1, "options": {"stackGuard": false}, "items": {"Wood": {"maxStackSize": 5}}})");
+        pack("skilltest", "throws.json", R"({"format": 1, "items": {"add": [{"throw": 1}]}})");
+        reloaded("skilltest", "was reloaded");
+        fake::lines.clear();
+        step();
+        check(logged("a pack threw while it applied: what it did came off"), "guard: the mod's later pack threw");
+        check(fake::read32(kWood) == 5, "guard: the packs from before apply again (Wood 5)");
+        check(guard_on(), "guard: the stack guard the throwing mod's earlier pack switched off is on again, as before the reload");
+        fs::remove(mod_dir("skilltest") / "content" / "throws.json");
+        pack("skilltest", "skills.json", R"({"format": 1, "items": {"Wood": {"maxStackSize": 90}}})");
+        reloaded("skilltest", "was reloaded");
+        step();
+        guard_set(false, &why);
+        E.guard = false, E.stack_clamp = 0;
     }
 
     // ---- many reloads (good, broken, throwing, in turn): no new owners, nothing left queued, the last good version applies

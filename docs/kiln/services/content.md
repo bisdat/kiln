@@ -115,14 +115,17 @@ A mod's packs apply whole from one version, never half:
   (next release; before, only its field and drop layers did, after every other mod had applied):
   - its field and drop layers;
   - the new items and recipes of its `add` lists. One it changed is the definition it had before again, as a new
-    version with the clone, recipe and random-loot entry the game had (the game's maps point at them again), so what other
-    mods' packs set on its fields applies as before. One it took from another mod's pack is that pack's again. One it added comes off as a removed pack's does: its id stays registered until the next
-    start, so nothing that holds it breaks, and a recipe leaves its station;
+    version with the clone, recipe and random-loot entry the game had (the game's maps point at them again), so what
+    other mods' packs set on its fields applies as before. One it took from another mod's pack is that pack's again.
+    One it added comes off as a removed pack's does: its id stays registered until the next start, so nothing that holds
+    it breaks, and a recipe leaves its station;
   - kiln.gamedata's `add` clones (templates, sequences, perks, buffs), the same way, and the configs its item paths added
     to an item (`impactValues.<config>` the item did not have);
   - what it applied in a section of another service (`creatures`, `abilities`): the service takes the mod's part off
     (`pack:<mod>`, every source), also a section it had from the application before. A section that waited for its
-    service is forgotten.
+    service is forgotten;
+  - the stack guard, which is the whole game's: on or off as it was when the mod's packs began, if one of them switched
+    it (`"options": {"stackGuard": false}`, or a raised max stack turned it on).
 
   Then its packs from the last application in which every file read apply again in that place, whole, with their
   `registry` sections (ordinary problems in them, such as an unknown field, are reported as before and do not stop them).
