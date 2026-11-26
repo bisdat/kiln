@@ -720,6 +720,14 @@ kiln-shroudforge feeds it (`native/plugins/shroudforge/src/key_feed.cpp`):
   and buttons). A failed registration query keeps the existing source. A focus loss calls `reset` once
   (kiln.ui sends one record for `WM_ACTIVATEAPP` 0 and `WM_KILLFOCUS` together; `reset` re-reads about 500 key names
   on the window thread).
+- **While Kiln has the keyboard** (since 0.2.0-dev.31.18): while kiln.ui's status says `capturing` (Kiln's menu, a Kiln
+  screen or text field, a ShroudForge shortcut's capture box), no press of a key or button is passed; releases always
+  are, so a key held before Kiln took the keyboard is let go. Kiln's interpreter (kiln-sfi `input/feed.rs`) counts no
+  press then either, and SF's own Modloader answers "not pressed" while it records a shortcut. Before, a key typed in
+  Kiln's search or pressed in a mod's own shortcut box also ran that mod's shortcut (likely netjunk's Altar Cleanup
+  "nothing to undo", logged the moment his Kiln menu opened). A status that cannot be read counts as not capturing. Known
+  limit: a modifier pressed while Kiln has the keyboard and still held after it lets go is not seen by SF until it is
+  pressed again. `run.py` `keys-captured`.
 - **Teardown** (the worker, also after a failed create or update): unsubscribe (kiln.ui waits for a record in flight),
   then `end` under the adapter's lock, then `shroudforge_destroy`. The chosen runtime DLL is never unloaded. No export
   is called after `end` or destroy, even when the window thread delivers a record during teardown or kiln.ui's
