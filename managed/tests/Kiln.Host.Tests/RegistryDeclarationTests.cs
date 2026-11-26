@@ -60,6 +60,33 @@ public sealed class RegistryDeclarationTests
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
+    // review4 nit: the code identity hashes the mod's DLLs only when a context's Identity is first read (never when the mod
+    // loads on the tick thread), and a DLL whose path, size and write time are unchanged is not read again.
+    [Fact]
+    public void TheCodeIdentityIsHashedAtFirstUseAndCached()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "registry-code-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var dll = Path.Combine(directory, "Mod.dll");
+            File.WriteAllBytes(dll, [1, 2, 3]);
+            File.SetLastWriteTimeUtc(dll, new DateTime(2026, 11, 25, 0, 0, 0, DateTimeKind.Utc));
+            var code = RegistryDispatch.Code(directory);
+            Assert.Equal(0, RegistryDispatch.FileHashReads(dll));
+            var first = code();
+            Assert.Equal(1, RegistryDispatch.FileHashReads(dll));
+            Assert.Equal(first, code());
+            Assert.Equal(first, RegistryDispatch.Code(directory)());  // a reload of the same files
+            Assert.Equal(1, RegistryDispatch.FileHashReads(dll));
+            File.WriteAllBytes(dll, [1, 2, 3, 4]);
+            File.SetLastWriteTimeUtc(dll, new DateTime(2026, 11, 25, 1, 0, 0, DateTimeKind.Utc));
+            Assert.NotEqual(first, RegistryDispatch.Code(directory)());
+            Assert.Equal(2, RegistryDispatch.FileHashReads(dll));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     private static string Image(string directory, string name, bool genericBase)
     {
         var metadata = new MetadataBuilder();

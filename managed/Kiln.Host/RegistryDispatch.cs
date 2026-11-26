@@ -22,21 +22,21 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private IDisposable? _ready;
     private bool _dispatchingWorld, _starting, _flushing;
     private readonly RegistryWorldBinding _worldBinding = new();
-    private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, string code)
+    private sealed class Author(Mod instance, ModContext context, AssemblyLoadContext assembly, Func<string> code)
     {
         internal readonly Mod Instance = instance;
         internal readonly ModContext Context = context;
         internal readonly AssemblyLoadContext Assembly = assembly;
-        internal readonly string Code = code;
+        internal readonly Func<string> Code = code;
         internal readonly Dictionary<string, ConfigFile> Inputs = new(StringComparer.Ordinal);
         internal IDisposable? Subscription;
     }
-    private sealed class Runtime(Mod instance, ModContext context, RegistryEntryPoint points, string code, bool reload)
+    private sealed class Runtime(Mod instance, ModContext context, RegistryEntryPoint points, Func<string> code, bool reload)
     {
         internal readonly Mod Instance = instance;
         internal readonly ModContext Context = context;
         internal readonly RegistryEntryPoint Points = points;
-        internal readonly string Code = code;
+        internal readonly Func<string> Code = code;
         internal readonly bool Reload = reload;
         internal bool Pending = true, Faulted;
         internal ulong World;
@@ -141,15 +141,52 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         finally { _flushing = false; }
         TryWorld();
     }
-    private static string Code(string directory)
+    // review4 nit: the code identity (a hash of the mod folder's DLLs) is computed at the first RegistryContext.Identity
+    // read, not when a mod loads on the tick thread. At load only the folder's DLL names are listed (metadata: a folder
+    // that is gone still fails there, contained by Loaded); each DLL's content hash is kept by path, size and write time,
+    // so a reload or a second context of unchanged files reads nothing again.
+    private static readonly Dictionary<(string Path, long Length, long Written), byte[]> FileHashes = new();
+    private static readonly Dictionary<string, int> FileReads = new(StringComparer.Ordinal);
+    internal static int FileHashReads(string file) { lock (FileHashes) return FileReads.GetValueOrDefault(Path.GetFullPath(file)); }  // tests
+    internal static Func<string> Code(string directory)
+    {
+        var files = Directory.EnumerateFiles(directory, "*.dll").Order(StringComparer.Ordinal).ToArray();
+        string? identity = null;
+        return () => identity ??= CodeIdentity(files);
+    }
+    private static string CodeIdentity(string[] files)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var file in Directory.EnumerateFiles(directory, "*.dll").Order(StringComparer.Ordinal))
+        foreach (var file in files)
         {
             hash.AppendData(System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(file)));
-            using var input = File.OpenRead(file); hash.AppendData(SHA256.HashData(input));
+            hash.AppendData(FileHash(file));
         }
         return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
+    private static byte[] FileHash(string file)
+    {
+        try
+        {
+            var info = new FileInfo(file);
+            var key = (Path.GetFullPath(file), info.Length, info.LastWriteTimeUtc.Ticks);
+            lock (FileHashes)
+            {
+                if (FileHashes.TryGetValue(key, out var known)) return known;
+            }
+            byte[] sum;
+            using (var input = File.OpenRead(file)) sum = SHA256.HashData(input);
+            lock (FileHashes)
+            {
+                FileHashes[key] = sum; FileReads[key.Item1] = FileReads.GetValueOrDefault(key.Item1) + 1;
+            }
+            return sum;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // gone or locked since the mod loaded: named as such, so Identity still answers (and differs from the file's)
+            return System.Text.Encoding.UTF8.GetBytes("unreadable");
+        }
     }
     private RegistryWorld? World(bool bound = true)
     {
@@ -164,14 +201,14 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         return _worldBinding.Matches(world) || _worldBinding.Bind(world) ? world : world with { Id = null };
     }
     private RegistryContext Context(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
-        string code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)
+        Func<string> code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)
     {
         var nativeOwner = owner.Owner; // transport delegates must not retain a collectible mod context
         return new(owner, point, phase, world, code,
             pass ? (registry, id, field) => _native.ReadPass(nativeOwner, registry, id, field)
                  : (registry, id, field) => _native.Read(nativeOwner, stage, registry, id, field),
             (registry, pattern) => _native.Select(stage, registry, pattern), inputs)
-            { ReadOnly = readOnly, CurrentWorldToken = () => _native.Status().World };
+            { ReadOnly = readOnly, CurrentWorldToken = () => _native.Status().World, CurrentStep = static () => ServiceTick.Step };
     }
     private void Stage(Author author, RegistryPhase phase)
     {
@@ -396,7 +433,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         if (!_native.LiveAvailable) throw new KilnUnavailableException("kiln.registry.live");
         var world = World();
         if (world is null) return new(4, 0, 0, 0, 0, 0, 0, "a world is required");
-        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Alter, world, "manual:" + owner.Info.Version, false, new());
+        var code = "manual:" + owner.Info.Version; // a string, not the owner: the context must not hold the mod
+        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Alter, world, () => code, false, new());
         using var scope = context.Enter(); ulong handle = 0;
         try
         {
@@ -411,7 +449,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     {
         Game.AssertTickThread();
         if (!_native.LiveAvailable || _native.StageStatus().Phase < 4) throw new KilnUnavailableException("kiln.registry");
-        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), "resolved", false, new(), readOnly: true);
+        var context = Context(owner, RegistryEntryPoint.Manual, RegistryPhase.Final, World(), static () => "resolved", false, new(), readOnly: true);
         using var scope = context.Enter();
         try { action(context); } finally { context.Close(); }
     }
