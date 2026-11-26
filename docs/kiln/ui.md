@@ -1224,6 +1224,11 @@ listener.Dispose();                           // or let the mod's unload end it
 - Every press comes, also while the Kiln menu, a Kiln screen or a Kiln text field has the input: `KeyPress.Captured` and
   `KeyPress.TextInput` say so. `Down` is false for a release; a wheel notch is a press with no release. `Mods` holds
   Ctrl, Shift and Alt.
+- A key press that a module of the game's process sends (`SendInput`, `keybd_event`) while a Kiln text field has the
+  keyboard reaches the listeners and the game as before, but never that field, as a key or as a character (since
+  0.2.0-dev.31.16: a mod that taps B when its own key goes down no longer types a "b"; kiln.log names the sender, up to 3
+  lines). Characters sent as text (`KEYEVENTF_UNICODE`) still type, and input from outside the game's process (an
+  on-screen keyboard, a remapper) is not affected.
 - `KeyPress.Code` (and `KeyInput.PressCode(vk, scan)`) is the code the Keys page stores: a punctuation key by its place
   on a US keyboard, found by its scan code on any layout, every other key by its virtual key. `KeyPress.Chord` is the
   press as the Keys page saves it, and its `ToString()` parses back with `KeyChord.TryParse` and `KeyBindings.Rebind`.
