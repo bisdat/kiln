@@ -23,7 +23,8 @@
     "modpack": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/modpackRef" }] },
     "required": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/requiredMod" }, "default": [] },
     "truncated": { "type": "boolean", "default": false, "description": "required[] was cut to keep the frame <= 7 KB." },
-    "missing": { "type": "array", "items": { "type": "string" }, "default": [], "description": "On a refusal: the mods the REJECT names (what the server refused for). Otherwise: required ids this client lacks or has with another hash." },
+    "missing": { "type": "array", "items": { "type": "string" }, "default": [], "description": "On a refusal: the mods the REJECT names (what the server refused for). From the hosted world (hosted): none. Otherwise: required ids this game lacks or has with another hash, of every kind (Kiln and native mods, and other engines' mods in the game folder, compared by the hash the server advertises)." },
+    "hosted": { "type": "boolean", "default": false, "description": "The server is this game's own world (a player hosting it: the server runs in this game and advertised this game's server id). Nothing it advertises can be missing then; the launcher offers no modpack for it. Written by Kiln after 0.2.0-dev.31.17 (absent before: false)." },
     "history": { "type": "array", "maxItems": 20, "items": { "$ref": "#" } }
   },
   "additionalProperties": true

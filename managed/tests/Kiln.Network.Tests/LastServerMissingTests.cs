@@ -171,6 +171,65 @@ public sealed class LastServerMissingTests : IDisposable
         Assert.Empty(LastServer.Lacking(required, [], player));
     }
 
+    [Fact]
+    public void This_games_own_server_id_with_its_server_running_is_the_hosted_world()
+    {
+        var game = Game("host");
+        KilnPaths.Root = Path.Combine(game, "kiln");
+        Write(NetAdvertise.IdFile, "srv-8383ec52951c\n");
+        NetAdvertise.Reset();
+        NetEngine.TestServerRole = true;
+        Assert.True(LastServer.IsHosted(Advert("srv-8383ec52951c")));
+        Assert.False(LastServer.IsHosted(Advert("srv-0123456789ab")));  // a dedicated server
+        Assert.False(LastServer.IsHosted(Advert(null)));                // an old Kiln server, or a vanilla one
+        NetEngine.TestServerRole = false;
+        Assert.False(LastServer.IsHosted(Advert("srv-8383ec52951c")));  // no world runs here: some other server with this id
+    }
+
+    [Fact]
+    public void A_client_that_never_served_writes_no_server_id_when_it_joins()
+    {
+        var game = Game("player");
+        KilnPaths.Root = Path.Combine(game, "kiln");
+        NetAdvertise.Reset();
+        NetEngine.TestServerRole = false;
+        Assert.False(LastServer.IsHosted(Advert("srv-8383ec52951c")));
+        Assert.False(File.Exists(NetAdvertise.IdFile));
+    }
+
+    // What last-server.json and kiln.log say: the hosted world is named as such, lacks nothing, and the entry says hosted.
+    [Fact]
+    public void The_welcome_of_a_hosted_world_says_so_and_lists_nothing()
+    {
+        var game = Game("host");
+        var required = Advertised(game);
+        var advert = Advert("srv-8383ec52951c", required);
+        // even when the comparison would find a difference (a mod rewritten since the server hashed it), the world runs here
+        File.WriteAllText(Path.Combine(game, "mods", "combat_tweaks", "combat.dll"), "MZ rebuilt");
+        var hosted = LastServer.Answer("welcome", null, advert, "0.2.0-dev.31.17", null, hosted: true, [], game, DateTime.UtcNow);
+        Assert.Empty((JsonArray)hosted["missing"]!);
+        Assert.True(hosted["hosted"]!.GetValue<bool>());
+        Assert.Equal("last-server.json: welcome from your hosted world (srv-8383ec52951c, this game), nothing missing", LastServer.LogLine(hosted));
+
+        var remote = LastServer.Answer("welcome", null, advert with { ServerName = "Ember Isles" }, null, null, hosted: false, [], game, DateTime.UtcNow);
+        Assert.False(remote["hosted"]!.GetValue<bool>());
+        Assert.Equal(["combat_tweaks"], ((JsonArray)remote["missing"]!).Select(n => n!.GetValue<string>()));
+        Assert.Equal("last-server.json: welcome from server srv-8383ec52951c \"Ember Isles\", missing combat_tweaks (this game lacks them or has another version)",
+            LastServer.LogLine(remote));
+    }
+
+    // A refusal still names what the server named, hosted or not (a hosted world can refuse its own player: a mod switched
+    // off in the profile the server still runs).
+    [Fact]
+    public void A_refusal_keeps_the_mods_the_server_named()
+    {
+        var game = Game("host");
+        var advert = Advert("srv-8383ec52951c", Advertised(game));
+        var e = LastServer.Answer("rejected", "needs mods", advert, null, ["creative 3.2.0 (missing)"], hosted: true, [], game, DateTime.UtcNow);
+        Assert.Equal(["creative"], ((JsonArray)e["missing"]!).Select(n => n!.GetValue<string>()));
+        Assert.Equal("last-server.json: rejected by your hosted world (srv-8383ec52951c, this game), missing creative", LastServer.LogLine(e));
+    }
+
     private static string Folder(string game, NetRequiredMod r) => r.Kind switch
     {
         "eml" => Path.Combine(game, "kiln", "eml", "mods", r.Id),

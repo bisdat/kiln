@@ -27,20 +27,57 @@ internal static class LastServer
         {
             try
             {
-                var lacking = Lacking(advert.Required, local, KilnPaths.Server);
-                var missing = refusedFor is null ? lacking : NetRefusal.Missing(refusedFor, lacking);
-                var entry = Build(outcome, reason, advert, serverKiln, missing, DateTime.UtcNow);
+                var entry = Answer(outcome, reason, advert, serverKiln, refusedFor, IsHosted(advert), local, KilnPaths.Server, DateTime.UtcNow);
                 Write(FilePath, entry);
-                NetEngine.Log(LogLevel.Info, $"last-server.json: {outcome}" +
-                                              (advert.ServerId is { } id ? $" from {id}" : "") +
-                                              (entry["missing"] is JsonArray m && m.Count > 0 ? $", missing {string.Join(", ", m.Select(x => x?.GetValue<string>()))}" : "") +
-                                              (advert.Modpack is { } mp ? $", modpack {mp.Url}" : ""));
+                NetEngine.Log(LogLevel.Info, LogLine(entry));
             }
             catch (Exception e)
             {
                 NetEngine.Log(LogLevel.Warn, $"last-server.json: {e.Message}");
             }
         });
+    }
+
+    /// <summary>The server is this game's own world (a player hosting it, single-player or co-op): the server role runs in
+    /// this process and the server id it advertised is this game's (NetAdvertise.ServerId; one id file per game folder).
+    /// Then the client and the server are one install and nothing it advertises can be missing here. A client that serves
+    /// no world never reads (and so never makes) a server id.</summary>
+    internal static bool IsHosted(NetServerAdvert advert)
+    {
+        if (advert.ServerId is not { } id) return false;
+        var serving = NetEngine.TestServerRole ?? NetNative.ReadStatus() is { ServerReady: not 0 };
+        return serving && string.Equals(id, NetAdvertise.ServerId(NetEngine.Config), StringComparison.Ordinal);
+    }
+
+    /// <summary>The entry for an answer. <c>missing</c>: on a refusal the mods the server named; from the hosted world
+    /// none; else the required mods this game lacks (<see cref="Lacking"/>).</summary>
+    internal static JsonObject Answer(string outcome, string? reason, NetServerAdvert advert, string? serverKiln,
+        IReadOnlyList<string>? refusedFor, bool hosted, List<Local> local, string game, DateTime now)
+    {
+        IReadOnlyList<string> missing = refusedFor is not null ? NetRefusal.Missing(refusedFor, Lacking(advert.Required, local, game))
+            : hosted ? [] : Lacking(advert.Required, local, game);
+        var entry = Build(outcome, reason, advert, serverKiln, missing, now);
+        entry["hosted"] = hosted;
+        return entry;
+    }
+
+    /// <summary>kiln.log's line for an entry: which server (the hosted world said as such, so a player's own world is not
+    /// read as a dedicated server lacking mods), what is missing, the modpack.</summary>
+    internal static string LogLine(JsonObject entry)
+    {
+        var outcome = entry["outcome"]?.GetValue<string>() ?? "?";
+        var hosted = entry["hosted"]?.GetValue<bool>() == true;
+        var id = entry["server"]?["id"]?.GetValue<string>();
+        var name = entry["server"]?["name"]?.GetValue<string>();
+        var who = id is null ? "a server without Kiln's server properties"
+            : hosted ? $"your hosted world ({id}, this game)"
+            : $"server {id}" + (string.IsNullOrWhiteSpace(name) ? "" : $" \"{name}\"");
+        var line = $"last-server.json: {outcome} {(outcome == "rejected" ? "by" : "from")} {who}";
+        var missing = entry["missing"] is JsonArray m ? m.Select(x => x?.GetValue<string>()).ToList() : [];
+        if (missing.Count > 0) line += $", missing {string.Join(", ", missing)}" + (hosted ? "" : " (this game lacks them or has another version)");
+        else if (outcome == "welcome") line += ", nothing missing";
+        if (entry["modpack"]?["url"]?.GetValue<string>() is { } url) line += $", modpack {url}";
+        return line;
     }
 
     /// <summary>One last-server entry (without history).</summary>
