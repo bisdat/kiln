@@ -143,3 +143,37 @@ fn after_an_update_the_offer_clears_and_the_next_check_names_the_newest_release(
     assert_eq!(gh.requests().len(), 2, "no change, no new request within the half hour");
     assert!(gh.unexpected().is_empty() && gh.unused().is_empty(), "{:?} {:?}", gh.unexpected(), gh.unused());
 }
+
+/// The check after an update meets GitHub's request limit (the answer before the update used the hour's last request):
+/// it asks nobody, and it does not forget that another copy is installed. The first check after the limit asks again,
+/// although the last answer is still within the half hour, and names the newest release. (Before: the held check wrote
+/// the new copy down as compared, and every check for the next half hour said "up to date" from the old answer.)
+#[test]
+fn a_check_held_by_the_request_limit_still_asks_after_it() {
+    let (t, dirs) = tmp("limit");
+    let (z9, z10) = (release_zip(&t.0, "0.2.9"), release_zip(&t.0, "0.2.10"));
+    let gh = FakeTransport::new();
+    library::import(&dirs, std::slice::from_ref(&z9), &mut NoProgress).unwrap();
+    gh.reply(Method::Get, LIST, Reply::bytes(200, &listing("0.2.10", &[("0.2.9", &z9), ("0.2.10", &z10)]))
+        .with_header("x-ratelimit-remaining", "0").with_header("x-ratelimit-reset", &(NOW + 5 * MINUTE).to_string()));
+    let s = auto_loot(&check(&dirs, &gh, manual(NOW))).clone();
+    assert_eq!((s.state, s.candidate_version.as_deref()), (UpdateState::Available, Some("0.2.10")));
+    assert_eq!(gh.requests().len(), 1);
+
+    library::import(&dirs, std::slice::from_ref(&z10), &mut NoProgress).unwrap();
+    // within GitHub's limit: nobody is asked, whatever changed
+    let s = auto_loot(&check(&dirs, &gh, manual(NOW + 2 * MINUTE))).clone();
+    assert_eq!(gh.requests().len(), 1, "nothing is asked under the request limit");
+    assert_ne!((s.state, s.candidate_version.as_deref()), (UpdateState::Available, Some("0.2.10")));
+
+    // the limit is over; the last answer is 8 minutes old, but it was never compared with 0.2.10 by an answer that
+    // could have named something newer: asked again
+    gh.reply(Method::Get, LIST, Reply::bytes(200, &listing("0.2.12", &[("0.2.9", &z9), ("0.2.10", &z10)])));
+    let s = auto_loot(&check(&dirs, &gh, manual(NOW + 8 * MINUTE))).clone();
+    assert_eq!(gh.requests().len(), 2, "the first check after the limit asks again");
+    assert_eq!((s.state, s.installed_version.as_str(), s.candidate_version.as_deref()), (UpdateState::Available, "0.2.10", Some("0.2.12")));
+    // and only once
+    let _ = auto_loot(&check(&dirs, &gh, manual(NOW + 9 * MINUTE)));
+    assert_eq!(gh.requests().len(), 2, "no change, no new request within the half hour");
+    assert!(gh.unexpected().is_empty() && gh.unused().is_empty(), "{:?} {:?}", gh.unexpected(), gh.unused());
+}

@@ -398,9 +398,13 @@ impl<'a> GithubProvider<'a> {
         }
         let receipt = item.receipt.as_ref();
         let receipt_confirmed = !receipt_changed || (held.is_none() && entry.status != Some(Attempt::Failed));
+        // A check that would have asked again for another copy but could not (GitHub's request limit, the cap on
+        // sources, the wait after a failure) keeps the copy the remembered answer was compared with, so the next check
+        // that may ask still asks; otherwise the change would be forgotten until the answer ages out.
+        let (version, hash) = if installed_changed && held.is_some() { (before.receipt.version.clone(), before.receipt.hash.clone()) } else { (installed.version.clone(), installed.hash.clone()) };
         entry.receipt = InstalledIdentity {
-            version: item.target.library_ref.version.clone(),
-            hash: item.target.library_ref.hash.clone(),
+            version,
+            hash,
             artifact_sha256: receipt.and_then(|r| r.artifact_sha256.clone()),
             release_id: if receipt_confirmed { receipt_release.map(str::to_string) } else { before.receipt.release_id.clone() },
         };
