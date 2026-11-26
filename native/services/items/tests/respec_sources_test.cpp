@@ -18,6 +18,7 @@ bool in_base = false;
 void* expected_tx = nullptr;
 bool wrong_tx = false;
 uint32_t refuse = 0;
+uint32_t lab_character = 0;                                   // a spawned player character (labs only)
 }
 namespace kitems {
 Engine E{};
@@ -59,7 +60,7 @@ bool read_pages(const Access&,KilnEntity e,PageSet* out,bool* initialized) {
     for (auto [item,count] : fixture::inventory[e]) { if(i==8)break; out->p[0].s[i++] = {0,item,count,0}; }
     return true;
 }
-void player_guard(const Access&,KilnEntity e,PlayerGuard* out) { *out = {}; out->is_player = e <= 1023; }
+void player_guard(const Access&,KilnEntity e,PlayerGuard* out) { *out = {}; out->is_player = e <= 1023 || e == fixture::lab_character; }
 bool inventory_matches(uintptr_t,KilnEntity e,uint32_t,bool* match,unsigned long*) { *match = e > 1023 && fixture::inventory.count(e); return true; }
 }
 namespace {
@@ -323,6 +324,29 @@ int main() {
         CHECK(mid2_links.empty() && g_respec_off.load() && lowered["crafting.respec_sources"]==KILN_CAP_REASON_FAULTED &&
               logged("respec: the client's respec checks from linked sources stands down"));
         foreign.clear();
+    }
+    // ---- labs only (KILN_STATIONS_CRAFT_LAB=1): a spawned player character's respec links ----
+    {
+        side_now=KILN_SIDE_SERVER;g_respec_off.store(false);lowered.clear();
+        constexpr uint32_t CHAR=3000, LABCHEST=2300;
+        CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==0);            // the switch off: refused, nothing kept
+        g_craft_lab=true;
+        CHECK(kiln_stations_lab_respec_link(PLAYER,LABCHEST)==0 && kiln_stations_lab_respec_link(CHAR,5)==0);  // never a real player
+        CHECK(kiln_stations_lab_respec_link(CHAR,LABCHEST)==1);
+        auto lab=[&](uint32_t bag,uint32_t chest,uint32_t* rc,uintptr_t ret=0) {
+            wr(line,0x14,uint32_t{2});
+            fixture::inventory={{CHAR,{{RUNE,bag}}},{LABCHEST,{{RUNE,chest}}},{CHEST,{{RUNE,0}}}};
+            fixture::paid.clear();fixture::calls.clear();logs.clear();*rc=99;
+            return craft_pay_impl(tx,&costs,CHAR,1,nullptr,ret?ret:g_respec.paid,rc);
+        };
+        CHECK(lab(0,5,&rc)==0 && fixture::calls.empty());                 // not a character (the transaction's view): nothing
+        fixture::lab_character=CHAR;
+        CHECK(lab(0,5,&rc)==1 && rc==0 && fixture::inventory[LABCHEST][RUNE]==3);  // the Runes only in the linked chest
+        CHECK(lab(2,5,&rc)==0 && fixture::calls.empty());                 // the bag covers it: the game's
+        CHECK(lab(0,1,&rc)==0 && fixture::calls.empty() && logged("short by 1"));  // short: the game refuses
+        CHECK(lab(0,5,&rc,0x1234)==0 && fixture::calls.empty());          // a craft never pays from a lab link
+        CHECK(kiln_stations_lab_respec_link(CHAR,0)==1 && lab(0,5,&rc)==0 && fixture::calls.empty());  // removed
+        g_craft_lab=false;fixture::lab_character=0;
     }
     g_registered.remove(10,craft_only);g_registered.remove(10,link2);
     std::printf("respec sources: %d checks, %d failed\n",checks,failed);return failed?1:0;
