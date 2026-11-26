@@ -230,7 +230,7 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetBuildStock;
         // ---- the FILL flags this kiln.stations takes (GitHub #132, 0.2.0-dev.31.16). Header.Size tells whether it is here. ----
         public delegate* unmanaged[Cdecl]<uint> FillFlags;
-        // ---- the skill tree's respec from linked sources (GitHub #150, 0.2.0-dev.31.next). Header.Size tells whether it is here. ----
+        // ---- the skill tree's respec from linked sources (GitHub #150, 0.2.0-dev.31.18). Header.Size tells whether it is here. ----
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetRespecStock;
     }
 

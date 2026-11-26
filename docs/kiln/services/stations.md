@@ -589,7 +589,7 @@ blueprint program's has no Fuel accessor, and before that every placement paid f
 
 ### The skill respec from linked sources
 
-**Since 0.2.0-dev.31.next (GitHub #150)**, a link registered with `new CraftSourceOptions { Respec = true }` also pays
+**Since 0.2.0-dev.31.18 (GitHub #150)**, a link registered with `new CraftSourceOptions { Respec = true }` also pays
 its player's **skill respec**: unlearning one node on the skill tree and the Flame Altar's skill reset, both of which cost
 the game's respec item (Runes). docs/re/respec.md has the game's code.
 - **The payment** (server or host): the game's respec payer takes the cost from the bag, then the Magic chests of the
@@ -638,7 +638,7 @@ line naming the function, its state (`FOREIGN` / `UNKNOWN`), the first differing
   game's base stock list already holds every base's Magic chests; Kiln counts them once and adds only links not in it.
 - Building: the cursor's stock-count call and the stock count (Cross-Base Storage patches the latter: the building half
   stands down, Cross-Base Storage's own cross-base building applies), ApplyMaterials and the blueprint program's call.
-- The skill respec (since 0.2.0-dev.31.next, GitHub #150): the respec payer's entry and its payment call on a server or
+- The skill respec (since 0.2.0-dev.31.18, GitHub #150): the respec payer's entry and its payment call on a server or
   host (the payment itself goes through the hook on InventoryPay's entry above), and on a Kiln client the skill tree's
   unlearn check and the Flame Altar's reskill check; the respec tree's Rune row is checked apart and keeps the game's
   count alone.
@@ -1132,7 +1132,7 @@ native slot for them.
 
 ## Changelog
 
-- **0.2.0-dev.31.next (GitHub #150):** `CraftSourceOptions.Respec`: the skill tree's unlearn and the Flame Altar's skill
+- **0.2.0-dev.31.18 (GitHub #150):** `CraftSourceOptions.Respec`: the skill tree's unlearn and the Flame Altar's skill
   reset count and pay their Runes from the player's respec links after the bag and the base's Magic chests, all or
   nothing, with a Kiln client's respec snapshot for its two respec screens; the free reset stays free; capability
   `crafting.respec_sources`. Thanks Fuzen777.

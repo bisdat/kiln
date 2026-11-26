@@ -298,7 +298,7 @@ int main() {
     {KilnRegisters r{};r.rax=4;r.rbx=reinterpret_cast<uintptr_t>(ui);hk_respec_row(r);CHECK(r.rax==24);}
     // the row faults: only the row keeps the game's count; the checks go on
     {KilnRegisters r{};r.rax=4;r.rbx=0xdead000000000000ull;logs.clear();hk_respec_row(r);  // a non-canonical address faults
-    
+
      CHECK(r.rax==4 && g_respec_row_off.load() && !g_respec_off.load() && logged("the row keeps the game's count"));
      r.rbx=reinterpret_cast<uintptr_t>(ui);hk_respec_row(r);CHECK(r.rax==4);}
     CHECK(node_check(2,5)==22);

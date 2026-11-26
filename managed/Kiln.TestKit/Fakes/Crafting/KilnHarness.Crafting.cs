@@ -24,7 +24,7 @@ public sealed record FakeCraftSourceRegistration(ulong Owner, EntityId Player, E
     public bool Fills { get; init; }
     /// <summary>Registered with <see cref="CraftSourceOptions.Building"/>: block placements may count and pay from it. Since 0.2.0-dev.31.12.</summary>
     public bool Building { get; init; }
-    /// <summary>Registered with <see cref="CraftSourceOptions.Respec"/>: the skill respec may count and pay its respec item from it. Since 0.2.0-dev.31.next.</summary>
+    /// <summary>Registered with <see cref="CraftSourceOptions.Respec"/>: the skill respec may count and pay its respec item from it. Since 0.2.0-dev.31.18.</summary>
     public bool Respec { get; init; }
 }
 
@@ -70,7 +70,7 @@ public sealed class HarnessCrafting
 
     /// <summary>The counts the skill respec (a node's unlearn, the Flame Altar's reset) may use: the links registered with
     /// <see cref="CraftSourceOptions.Respec"/> only, every item, likewise (the game pays only its respec item, the Runes).
-    /// No respec payment or respec screen is simulated. Since 0.2.0-dev.31.next.</summary>
+    /// No respec payment or respec screen is simulated. Since 0.2.0-dev.31.18.</summary>
     public IReadOnlyDictionary<ItemId, long> RespecStock(EntityId player) => _harness.Run(() =>
         (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value, respec: true)
             .ToDictionary(x => new ItemId(x.Key), x => x.Value));

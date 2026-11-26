@@ -988,7 +988,7 @@
           "size": 72
         }
       },
-      "sha256": "12a8676e9d047fa975ec21d05897cd0995b9fdca12c384a439cbbfe696ce6c3a"
+      "sha256": "b506c216dc7beaf5368adddf0b5cf44b829183764efc9b139e4477dd0b3a90d0"
     },
     "native/core/abi/services/kiln_camera.h": {
       "function_macros": [],
@@ -7093,7 +7093,7 @@
           "size": 188
         }
       },
-      "sha256": "e868f3a3fe0836dcddd122fde0d6df1b2ba438d131ef341d341f242c9b57089c"
+      "sha256": "06da9a763a0e23d09f9ab0b6959bf48e54732fe1526b4fc4d9d56b8c8aea4f38"
     },
     "native/core/abi/services/kiln_stations_client.h": {
       "function_macros": [],

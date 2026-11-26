@@ -161,7 +161,7 @@ source.Dispose();                                        // any thread; unload r
   serves crafting and kiln.log says why once. Every refusal logs one `locks:` line (no snapshot, not opted in, short
   count, a stack the server no longer sees, a foreign patch). TestKit: `h.Crafting.Sources[i].Locks`,
   `h.Crafting.LockStock(player)`; no lock check or interaction payment is simulated. Not seen in a real game yet.
-- **The skill respec too (since 0.2.0-dev.31.next, GitHub #150):** `new CraftSourceOptions { Respec = true }` lets the
+- **The skill respec too (since 0.2.0-dev.31.18, GitHub #150):** `new CraftSourceOptions { Respec = true }` lets the
   same link pay the skill tree's unlearn and the Flame Altar's skill reset, which cost the game's respec item (Runes).
   The bag and the Magic chests of the player's base pay first (the game's own order), then the opted-in links in link
   order, in the game's all-or-nothing respec payment; nothing from the links when the bag and the chests cover it. The

@@ -63,7 +63,7 @@ public sealed class CraftSourceOptions
     /// skill tree no longer checks out at join) stays free. Needs capability <see cref="Crafting.RespecSourcesCapability"/>
     /// on the server or host: the server pays, so it works for every player, but only a Kiln client's skill tree and Flame
     /// Altar offer the unlearn and the reset when the bag and the Magic chests alone are short (a vanilla client greys
-    /// them out and sends nothing). Without the capability the link still serves crafting. Since 0.2.0-dev.31.next.</summary>
+    /// them out and sends nothing). Without the capability the link still serves crafting. Since 0.2.0-dev.31.18.</summary>
     public bool Respec { get; init; }
 }
 
@@ -137,7 +137,7 @@ public static class Crafting
     /// registered with <see cref="CraftSourceOptions.Respec"/>: on a server or host the respec payment (the bag and the Magic
     /// chests first), on a Kiln client the skill tree's unlearn check and the Flame Altar's reset check (from the server's
     /// snapshot). Off, or faulted, when a symbol, a hook or the game's code it relies on is missing or patched by another
-    /// module (kiln.log names it). Since 0.2.0-dev.31.next.</summary>
+    /// module (kiln.log names it). Since 0.2.0-dev.31.18.</summary>
     public const string RespecSourcesCapability = "crafting.respec_sources";
 
     /// <summary>Registers a container for this player, in any base or none. The mod decides which containers the player

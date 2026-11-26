@@ -95,7 +95,7 @@ int main() {
     static_assert(offsetof(KilnStationsApi, set_build_stock) == 304);  // after #147's members
     // GitHub #132 (0.2.0-dev.31.16): fill_flags after set_build_stock; the request's item where reserved[0] was
     static_assert(offsetof(KilnStationsApi, fill_flags) == 312);
-    // GitHub #150 (0.2.0-dev.31.next): set_respec_stock after fill_flags; RESPEC the next link flag and stock flag
+    // GitHub #150 (0.2.0-dev.31.18): set_respec_stock after fill_flags; RESPEC the next link flag and stock flag
     static_assert(offsetof(KilnStationsApi, set_respec_stock) == 320 && sizeof(KilnStationsApi) == 328 &&
                   KILN_CRAFT_SOURCE_RESPEC == 8 && KILN_CRAFT_SOURCE_STOCK_RESPEC == 16 && KILN_STATIONS_MAX_RESPEC_STOCK == 16);
     static_assert(offsetof(KilnStationRequest, item) == 72 && offsetof(KilnStationRequest, reserved) == 76 && KILN_STATION_FILL_ITEM == 0x200);
