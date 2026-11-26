@@ -144,7 +144,7 @@ pub fn plan(game: &Path, hash: &str) -> Result<Plan> {
     let doc: Value = serde_json::from_str(&t).map_err(|e| Error::new(ErrorCode::Parse, format!("plan {short} is not JSON: {e}")))?;
     if doc.get("format").and_then(Value::as_u64) != Some(2) || !doc.get("inputs").is_some_and(Value::is_array) {
         return Err(Error::invalid(format!(
-            "plan {short} was written by an older Kiln and holds no edits to start on (a plan of 0.2.0-dev.31.13 or later is needed)"
+            "plan {short} was written by an older Kiln and holds no edits to start on (a plan of 0.2.0-dev.31.17 or later is needed)"
         )));
     }
     let key = doc.get("key").cloned().unwrap_or(Value::Null);
