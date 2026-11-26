@@ -169,7 +169,7 @@ with it (the id without its kind prefix, lower case). An owner that is not alive
 One table is a service's and has one consumer, the managed host: `kiln.internal.registry`
 (`native/services/content/include/kiln_registry_host.h`), published by kiln-content.dll. Kiln.Host calls
 `set_order` with its runtime load order (`[{"mod", "version"}]`, the order players see in the launcher profile; optional
-`"registry": true` and, since 0.2.0-dev.31, `"side": "server" | "client"` for a one-side mod, whose boot fields the join's
+`"registry": true` and, since 0.2.0-dev.31.17, `"side": "server" | "client"` for a one-side mod, whose boot fields the join's
 registry fingerprint leaves out; an older kiln-content.dll ignores both) before the
 boot phase, and `set_mode` when kiln.json says `"registry": {"stage": "onBoot"}` (`managed/Kiln.Host/RegistryHost.cs`). The
 registry stage runs every mod's registry edits in that order; without the table (an older kiln-content.dll) it runs in the mod
