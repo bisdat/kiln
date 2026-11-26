@@ -320,7 +320,8 @@ base).
   its element (`recipes[37].craftingDuration` names `recipes.duration` of the 38th recipe; a recipe put in place whole
   names that recipe on every field; the recipe list replaced whole names every recipe). Inserting, removing or clearing
   elements of a list names no other element. A mod that wrote a member before another mod replaced the value holding it
-  (a struct, an element, the resource's data) stays named there, since the new value can be a copy of the old one. A
+  (a struct, an element, the resource's data) stays named there, since the new value can be a copy of the old one; its
+  write moves with the member of the copy (a recipe inserted in front of it afterwards moves it too). A
   mod's own entry module (`src/mod.lua`) writes as that mod, even when another mod requires it first. The field row's
   writer has `"named": "field"`.
 - **Per entry (ShroudForge packages, created entries).** The kiln-mode journal names a package per **entry**: a package

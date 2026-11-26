@@ -319,7 +319,8 @@ list's members, `""` for the whole resource), the ones it created and the conten
   and keeps a small log on each value wrapper of the writes made through it; once the mods ran it walks the values as
   they will be written, once, into paths. A write into a value detached from its resource is not listed; a copy assigned
   into a resource is the assigning mod's; a value put in place over another (a field, an element, a variant's value, the
-  resource's data) keeps the writes logged in the one it replaced, at that place (the new value can be a copy of it); a
+  resource's data) takes over the writes logged in the one it replaced, member by member where it has that member (a copy
+  has them all), so they move with their members afterwards (the new value can be a copy of the old one); a
   mod's entry module writes as that mod, whoever requires it first. Off outside a run; in a run one thread-local read
   and a scan of a few entries per write (5,000 recipes, 10,546 writes: about +3 to 5 % on the mods' Lua time; the walk
   1.4 ms with nothing logged, 3.6 ms with those writes, beside 3.5 ms for EML's own conversion of the same tree).
