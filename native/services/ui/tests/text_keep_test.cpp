@@ -99,6 +99,31 @@ int main() {
         check(n == kui::textkeep::kMaxSent, "at most kMaxSent sent presses wait at once");
         check(!s.take(300, 120) && !s.take(0, 120), "keys outside 1..255 are never sent presses");
     }
+    {
+        using kui::textkeep::sent_key;
+        namespace tk = kui::textkeep;
+        uint32_t asked = 0;
+        auto scan_vk = [&](uint32_t code) {  // MapVirtualKey MAPVK_VSC_TO_VK, as a US layout answers
+            asked = code;
+            return code == 0x30 ? 'B' : code == 0x2A ? 0x10u : code == 0xE01D ? 0x11u : 0u;
+        };
+        check(sent_key('B', 0x30, 0, scan_vk) == 'B' && asked == 0, "a press sent by virtual key is that key");
+        check(sent_key(0, 0x30, tk::kScanCode, scan_vk) == 'B' && asked == 0x30,
+              "a press sent by scan code is the scan code's key (ShroudLink's B)");
+        check(sent_key('Q', 0x30, tk::kScanCode, scan_vk) == 'B', "by scan code the virtual key is ignored, as Windows does");
+        check(sent_key(0, 0x1D, tk::kScanCode | tk::kExtendedKey, scan_vk) == 0x11 && asked == 0xE01D,
+              "an extended scan code is asked as 0xE0xx (right Ctrl: Ctrl)");
+        check(sent_key(0xA0, 0, 0, scan_vk) == 0x10 && sent_key(0xA1, 0, 0, scan_vk) == 0x10 &&
+                  sent_key(0xA2, 0, 0, scan_vk) == 0x11 && sent_key(0xA3, 0, 0, scan_vk) == 0x11 &&
+                  sent_key(0xA4, 0, 0, scan_vk) == 0x12 && sent_key(0xA5, 0, 0, scan_vk) == 0x12,
+              "a left or right Shift, Ctrl or Alt is the generic key, as the window's key messages name it");
+        check(sent_key('B', 0x30, tk::kKeyUp, scan_vk) == 0 && sent_key(0, 0x30, tk::kScanCode | tk::kKeyUp, scan_vk) == 0,
+              "a release is not written down: it types nothing");
+        check(sent_key(0, 'x', tk::kUnicode, scan_vk) == 0 && sent_key(0, 0xE9, tk::kUnicode, scan_vk) == 0,
+              "a character (KEYEVENTF_UNICODE: an on-screen keyboard or a paste typing) is not written down: it types");
+        check(sent_key(0, 0x7F, tk::kScanCode, scan_vk) == 0 && sent_key(0x1FF, 0, 0, scan_vk) == 0,
+              "no key (an unknown scan code, a virtual key above 255) is nothing to write down");
+    }
     std::printf("%s: %d passed, %d failed\n", g_fail ? "FAIL" : "PASS", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -1298,18 +1298,18 @@ namespace {
 // the call goes on, so the window thread can keep it out of the field when it comes (it may come before the call
 // returns). The input itself goes on unchanged.
 SafetyHookInline g_send_input_hook, g_keybd_event_hook;
-thread_local bool t_in_keybd_event = false;  // keybd_event may go through SendInput (Wine's does): one press, one mark
+thread_local bool t_in_keybd_event = false;  // keybd_event may go through SendInput (older Wine's did): one press, one mark
 std::atomic<int> g_sent_said{0};
 
-// The virtual key a sent press comes as: the scan code's when it is sent by scan code (wVk is ignored then), VK_PACKET
-// for a character, the generic key as the window's messages and raw records name it (VK_SHIFT, not VK_LSHIFT).
+static_assert(textkeep::kExtendedKey == KEYEVENTF_EXTENDEDKEY && textkeep::kKeyUp == KEYEVENTF_KEYUP &&
+                  textkeep::kUnicode == KEYEVENTF_UNICODE && textkeep::kScanCode == KEYEVENTF_SCANCODE,
+              "text_keep.h's KEYEVENTF_* are winuser.h's");
+static_assert(VK_LSHIFT == 0xA0 && VK_RMENU == 0xA5 && VK_SHIFT == 0x10 && VK_CONTROL == 0x11 && VK_MENU == 0x12,
+              "text_keep.h's virtual keys are winuser.h's");
+
+// The key a sent press comes to the window as, 0 = none to write down (a release, a character: text_keep.h sent_key).
 uint32_t sent_vk(WORD vk, WORD scan, DWORD flags) {
-    if (flags & KEYEVENTF_UNICODE) return VK_PACKET;
-    if (vk == 0 || (flags & KEYEVENTF_SCANCODE)) {
-        const UINT code = (flags & KEYEVENTF_EXTENDEDKEY) ? (0xE000u | (scan & 0xFFu)) : scan;
-        return MapVirtualKeyW(code, MAPVK_VSC_TO_VK);
-    }
-    return vk;
+    return textkeep::sent_key(vk, scan, flags, [](uint32_t code) { return static_cast<uint32_t>(MapVirtualKeyW(code, MAPVK_VSC_TO_VK)); });
 }
 
 void note_sent(uint32_t vk, void* caller) {
@@ -1332,8 +1332,7 @@ void note_sent(uint32_t vk, void* caller) {
 void note_sent_inputs(UINT n, const INPUT* in, void* caller) {
     __try {
         for (UINT i = 0; i < n; ++i)
-            if (in[i].type == INPUT_KEYBOARD && !(in[i].ki.dwFlags & KEYEVENTF_KEYUP))
-                note_sent(sent_vk(in[i].ki.wVk, in[i].ki.wScan, in[i].ki.dwFlags), caller);
+            if (in[i].type == INPUT_KEYBOARD) note_sent(sent_vk(in[i].ki.wVk, in[i].ki.wScan, in[i].ki.dwFlags), caller);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
@@ -1345,8 +1344,7 @@ UINT WINAPI hk_send_input(UINT n, LPINPUT in, int size) {
 }
 
 void WINAPI hk_keybd_event(BYTE vk, BYTE scan, DWORD flags, ULONG_PTR extra) {
-    if (!(flags & KEYEVENTF_KEYUP) && g_text_input.load(std::memory_order_relaxed))
-        note_sent(sent_vk(vk, scan, flags), _ReturnAddress());
+    if (g_text_input.load(std::memory_order_relaxed)) note_sent(sent_vk(vk, scan, flags), _ReturnAddress());
     const bool outer = t_in_keybd_event;
     t_in_keybd_event = true;
     g_keybd_event_hook.call<void>(vk, scan, flags, extra);

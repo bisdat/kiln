@@ -28,6 +28,30 @@ namespace kui::textkeep {
 constexpr uint64_t kSentMs = 1000;  // a sent press not seen by then never comes
 constexpr int kMaxSent = 32;        // sent presses waiting at once; more are not written down
 
+// KEYEVENTF_* (winuser.h: input.cpp checks they match)
+constexpr uint32_t kExtendedKey = 0x1, kKeyUp = 0x2, kUnicode = 0x4, kScanCode = 0x8;
+
+// The key a key press a module sends (a KEYBDINPUT of SendInput, or keybd_event's arguments) comes to the window as, its
+// key messages' virtual key; 0 = nothing to write down. A release types nothing. A character (KEYEVENTF_UNICODE) is
+// text by intent, never a game key (an on-screen keyboard or a paste typing from the game's process): it types into
+// Kiln's field as before. A press sent by scan code, or with no virtual key, is its scan code's key: `scan_vk(code)`
+// (MapVirtualKey MAPVK_VSC_TO_VK; 0xE0xx for an extended key). A left or right Shift, Ctrl or Alt is the generic key, as
+// the key messages name it (VK_SHIFT, not VK_LSHIFT).
+template <class ScanVk>
+uint32_t sent_key(uint32_t vk, uint32_t scan, uint32_t flags, ScanVk scan_vk) {
+    if (flags & (kKeyUp | kUnicode)) return 0;
+    if (vk == 0 || (flags & kScanCode)) vk = scan_vk((flags & kExtendedKey) ? (0xE000u | (scan & 0xFFu)) : scan);
+    switch (vk) {
+        case 0xA0:  // VK_LSHIFT, VK_RSHIFT: VK_SHIFT
+        case 0xA1: return 0x10;
+        case 0xA2:  // VK_LCONTROL, VK_RCONTROL: VK_CONTROL
+        case 0xA3: return 0x11;
+        case 0xA4:  // VK_LMENU, VK_RMENU: VK_MENU
+        case 0xA5: return 0x12;
+        default: return vk <= 255 ? vk : 0;
+    }
+}
+
 class Sent {
 public:
     // A key press (virtual key 1..255) a module of the game's process sent at `now` (ms).
