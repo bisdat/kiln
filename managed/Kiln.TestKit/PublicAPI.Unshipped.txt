@@ -1,1 +1,4 @@
 #nullable enable
+Kiln.TestKit.FakeCraftSourceRegistration.Respec.get -> bool
+Kiln.TestKit.FakeCraftSourceRegistration.Respec.init -> void
+Kiln.TestKit.HarnessCrafting.RespecStock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
