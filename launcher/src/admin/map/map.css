@@ -6,7 +6,11 @@
    column it grows or shrinks to the page. Before, .ka-map-root { flex: 1 } in a page of no set height took the side
    panel's content height: the map grew and shrank with the tab (tests/admin-map-layout.spec.ts). */
 .ka-mapwrap-page { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; padding-bottom: 18px; }
-.ka-map-root { display: flex; flex: 1 1 auto; min-height: 0; position: relative; background: #0d0907; border-radius: var(--k-radius-m); overflow: hidden; box-shadow: inset 0 0 0 1px var(--k-line-strong); }
+/* isolation: the map is a stacking context of its own. Leaflet's panes, its canvas and controls and the map's own overlays
+   (search results, context menu) use z-indexes of 400 to 1200; held here, they stay below what a host puts on the body
+   (the design system's dialogs at 50, its toasts at 60) on any page, with or without the launcher's sheet around the
+   map (tests/admin-map-dialogs.spec.ts) */
+.ka-map-root { display: flex; flex: 1 1 auto; min-height: 0; position: relative; isolation: isolate; background: #0d0907; border-radius: var(--k-radius-m); overflow: hidden; box-shadow: inset 0 0 0 1px var(--k-line-strong); }
 .ka-map-root.noside .ka-map-side { display: none; }
 .ka-map-side { position: relative; width: 300px; flex: none; display: flex; flex-direction: column; box-shadow: inset -1px 0 0 var(--k-line); background: rgba(10, 7, 5, .9); min-height: 0; }
 .ka-map-area { flex: 1; position: relative; min-width: 0; }
