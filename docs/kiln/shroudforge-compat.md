@@ -1035,7 +1035,7 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 | Modloader window, World Editor window | starts installed `shroudforge.exe` only; bundled runtime has no helper windows | in-game Mods → ShroudForge handles switches/settings, not the World Editor | helper lifecycle windowless tests; rendering client check |
 | Debug Console window | not started (kiln.log has SF's log as `[sf]`) | Kiln console | by design |
 | SF self-update / repair | not run when hosted | Kiln launcher (pending: SF update source) | by design |
-| notifications feed (`shroudforge.notifications.publish`) | plugin (SF's state.json `events`); hosted without a ShroudForge window: Kiln.Ui toasts each new notice and lists a mod's newest three in its details (`ShroudForgeNews.cs`, 0.2.0-dev.31.next) | Kiln.Ui toasts | managed tests (`ShroudForgeNewsTests`); client: — |
+| notifications feed (`shroudforge.notifications.publish`) | plugin (SF's state.json `events`); hosted without a ShroudForge window: Kiln.Ui toasts each new notice and lists a mod's newest three in its details (`ShroudForgeNews.cs`, 0.2.0-dev.31.19) | Kiln.Ui toasts | managed tests (`ShroudForgeNewsTests`); client: — |
 | effect reports (`runtime.report_effect`) | plugin; kiln-manage `effects` | mod status in `state/mods.json` | done; lab |
 
 ### 8.2 `shroudforge.*` (mod API, `lua/shroudforge/v1/definitions/mod_api.lua`)
