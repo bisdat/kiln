@@ -1113,6 +1113,37 @@ void later_writes_look_a_batch_a_tick() {
     check(g_reports == after, "a whole look over unchanged slots rebuilds nothing");
     g_registry_now_ms = &steady_ms;
 }
+// Review (registry-followups 1): kiln.gamedata's values (t_set, t_set_json) word their layer "<label>: items <game name>.<config
+// path>" as kiln.content's do, on a slot of a gamedata kind: the config value items.manaCost and items.staminaCost write. Its
+// row kept the game's item and member names ("mod spelltweaks: items Sword_T2.impactValues.0xaf236ece.value"); it is in Kiln
+// words like the other code writers.
+void gamedata_code_writer_in_kiln_words() {
+    world();
+    g_files = {{"m/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:sword_t2"}, "field": "manaCost", "op": {"mul": 1.5}}]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    check(at<float>(SWORD_AT + 0x40) == 15.0f, "the registry's x1.5 on the mana cost");
+    set_owner_label(45, "mod spelltweaks");
+    const float v = 20.0f;
+    uint8_t b[4];
+    std::memcpy(b, &v, 4);
+    // as gamedata_api.cpp t_set_json puts it, on the config value's slot (gd_item_config_slot: a gamedata kind, the item's id)
+    check(store_put(45, next_code_seq(), 1000, SWORD, 7, -1, A(SWORD_AT + 0x40), 4, b, "mod spelltweaks: items Sword_T2.impactValues.0xaf236ece.value"),
+          "kiln.gamedata's code layer");
+    store_flush(nullptr);
+    apply_registry_files(files);
+    const auto row = json_field({"items", "game:sword_t2", "manaCost"});
+    registry::json code;
+    for (const auto& w : row["writers"])
+        if (w["kind"] == "code") code = w;
+    check(!code.is_null() && code["who"] == "spelltweaks: items[game:sword_t2].manaCost" && code["mod"] == "spelltweaks",
+          "the mod and the Kiln place: " + row["writers"].dump());
+    check(row.dump().find("Sword_T2") == std::string::npos && row.dump().find("impactValues") == std::string::npos,
+          "no game item or member name in the row: " + row.dump());
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1383,6 +1414,7 @@ int main() {
         {"code_writers_are_named_in_kiln_words", code_writers_are_named_in_kiln_words},
         {"code_over_a_registry_value_is_reported", code_over_a_registry_value_is_reported},
         {"later_writes_look_a_batch_a_tick", later_writes_look_a_batch_a_tick},
+        {"gamedata_code_writer_in_kiln_words", gamedata_code_writer_in_kiln_words},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

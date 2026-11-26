@@ -1039,7 +1039,11 @@ void name_code_writer(ChainRow& row, const Layer& layer, const Slot& slot, const
     const std::string label = owner_label(layer.owner);
     const std::string head = label + ": ";
     if (layer.source.rfind(head, 0) != 0) return;
-    const Entry* e = slot.kind >= KILN_CONTENT_ITEMS && slot.kind <= KILN_CONTENT_DROPS ? reg(slot.kind).get(slot.id) : nullptr;
+    // the entry: a kiln.content slot carries its registry's kind; a kiln.gamedata value slot (an item's config value, which
+    // items.manaCost and items.staminaCost write) carries a gamedata kind and the item's own id (review: its row kept the game's
+    // item and member names)
+    const uint32_t kind = slot.kind >= KILN_CONTENT_ITEMS && slot.kind <= KILN_CONTENT_DROPS ? slot.kind : kind_of(ref.registry);
+    const Entry* e = kind ? reg(kind).get(slot.id) : nullptr;
     const std::string rest = layer.source.substr(head.size());
     const size_t space = rest.find(' ');
     if (!e || e->name.empty() || space == std::string::npos || space == 0 || rest.compare(space + 1, e->name.size(), e->name) != 0 ||
