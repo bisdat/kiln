@@ -45,6 +45,9 @@ whole before either backup gets its name and keeps a set-aside whole pair beside
 game update, when the pass fails"), and on top of it fork branch `kiln-dev31-fast-encode` (`6cb84f34`): a pregame
 pass encodes block-compressed textures on the PC's threads with the serial encode's bytes, and `game.assets.get_content`
 answers a blob created earlier in the same pass (section 5.0, "Textures on every core, and blobs made earlier in the pass").
+The stale-game-data patch (0.2.0-dev.31.next) pins fork branch `kiln-dev31-stale-data` (`26b9fece`, on top of `6cb84f34`): a
+clean copy of the game data goes back only when Steam's manifest of the installed build lists it byte for byte (section
+5.0, "A clean copy that carries an uninstalled mod's changes").
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -195,6 +198,54 @@ cannot be finished, the hosted toggle-key migration), `set_aside_working_baselin
 pair), red before; Linux and native Windows (kiln-win1). kiln-eml `load::kiln_tests` (2 new) and `steam_files` (6),
 kiln-manage `tests/sf_startup.rs` (2 new), red before; native `run.py` `prepare-fails`. Not run against a real game
 update or a real client.
+
+**A clean copy that carries an uninstalled mod's changes** (fork branch `kiln-dev31-stale-data`, `26b9fece`,
+0.2.0-dev.31.next). HadToRegister (2026-11-25/26) saw props break on their own within 15 m, through walls, with
+20,000/200,000 damage numbers, for weeks, with Kiln Auto Loot off; Steam's "Verify integrity of game files" ended it.
+The cause was Auto Loot Plus (his first mod, long removed), whose Lua part creates an impact program
+(`a5c0de5a-1e00-4d0d-9a11-0000000a5000`, `autosmash.impact`: every second, `ForEachEntityWithFactionInRange` over
+Environment within 15 m, `ApplyDamage`) and an aura template (`...0a5002`) in the game data. That program was in the
+working baseline, not only in the live files:
+- his game folder lists `enshrouded_055.dat` (3,977,216 bytes) and the empty `_056` to `_063` written 2026-11-13 15:18
+  and `_064` to `_127` written by the pass of 11-26 01:50. A pass's writer appends its containers after the
+  baseline's, so the baseline (`enshrouded.kfc.bak`, `enshrouded.kfc_resources.bak`, both 2026-11-13 18:00) lists
+  `_000` to `_063`: nine containers, one of them with 3.9 MB of content, that the game's own build (`_000` to `_054`,
+  10-24 to 11-03) does not have. `enshrouded_055.dat (2).DERP` of 11-12 02:32 (right after `.kiln-eml.lock`, 11-12 02:31)
+  has the same 3,977,216 bytes: the same mods' output, Auto Loot Plus's among them (its log runs to 11-19). The writer
+  pads to a power of two (55 + 1 = 56, padded to 64), so `_055` to `_063` are one pass over the game's own 55. His
+  `enshrouded.kfc_resources.bak` has 216,432,640 bytes; Steam's manifest of the same build (26430625, read on
+  kiln-win1) lists `enshrouded.kfc_resources` at 215,052,288: the copy is 1,380,352 bytes of resource data longer.
+- the pair was taken on 11-13 18:00 of game files that already carried that output, and sealed by kiln-eml
+  (`enshrouded.kfc.bak.integrity`, 18:00:32). No start before 0.2.0-dev.31.13 asked Steam whether game files a new
+  copy is made of are Steam's. On 11-23 21:01 the first start with baseline records took the whole pair up and
+  recorded it (`enshrouded.kfc.baseline.json`: "a whole pair without a record is taken up").
+- from then on `check_working_baseline` found the pair whole (its record) and the game's files built over it, and
+  returned `Restore` (`verify_working_baseline.rs:132` at `6cb84f34`) before anything asked Steam. 0.2.0-dev.31.13's
+  Steam proof sat only in `replacement()` (`:173`), the path that takes a new copy from the game's files; a pair that
+  goes back was never compared with Steam's manifest. The pass restored the pair and built today's mods over it, and
+  the starts between reused that pass (`kiln-sf-prepared 2`; his last start's pass took 380 ms).
+- Steam's file check wrote Steam's own `enshrouded.kfc`; the pair then listed more than the game's header, so the game's
+  files were no longer built over it, `replacement()` found them Steam's and the pass retook the copy from them. That is
+  why the check ended it, and the old pair is in `shroudforge/backups/outdated-working-baseline/`.
+Now (`proven` in `verify_working_baseline.rs`) a pair that would go back is first compared with Steam's manifest of the
+installed build (`steam_files::installed_backups`: the backups in the place of `enshrouded.kfc` and
+`enshrouded.kfc_resources`; the baseline record keeps each backup's SHA-1 since this patch, so a recorded pair is not read
+again, and an older record is hashed once and recorded anew). Listed byte for byte: restored. Listed otherwise: the
+pair is not the game's own; when the game's files are Steam's (and no pass of this runtime wrote them) the pair is set
+aside and a new one is taken of them, otherwise the pass refuses with "Your game files still contain changes from a mod
+that isn't installed. Verify the game files in Steam (Properties > Installed Files > Verify integrity), then start
+again." followed by why (the server's words name SteamCMD's `app_update 2278520 validate`). No manifest (a SteamCMD
+server, a folder outside a Steam library): restored as before, unless the pair holds a known mod's program
+(`KNOWN_LEFTOVERS`: Auto Loot Plus's auto-smash program and aura), which is refused and named. A prepared record of
+scheme 2 no longer lets a start skip its pass (scheme 3), so the first start after the update runs the check. A refusal
+changes no file; its recovery refuses the same and the game starts without ShroudForge's mods, the record's
+`recoveryError` keeps the words, and the launcher's engine line and the Deck's note lead with them
+(`crates/kiln-manage/src/sf_startup.rs`, `staleGameData`). kiln-eml asks the same before it builds from or restores
+its pair (`load.rs` `not_the_games_own`, README item 43) and accepts the fork's scheme 3 record as hosted ShroudForge
+output. Tests: the fork's `verify_working_baseline` (3 new), `kiln_baseline_tests.rs`
+(`a_clean_copy_with_an_uninstalled_mods_changes_is_refused_until_the_game_files_are_verified`), `prepared_stamp`,
+`baseline_record`, `steam_files` (1 new each); kiln-eml `load::kiln_tests` (1 new), `ownership` (scheme 3),
+`steam_files` (1 new); kiln-manage `tests/sf_startup.rs` (1 new); red before. Not run against his files or a real client.
 
 **Textures on every core, and blobs made earlier in the pass** (fork branch `kiln-dev31-fast-encode`, `6cb84f34`,
 0.2.0-dev.31.13). Players with EMF Beastmaster's creature packs, and any mod that needs ShroudForge's runtime beside

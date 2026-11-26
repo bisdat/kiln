@@ -165,7 +165,13 @@ This is EML's own runner (`mod_loader::lua::run`), on the listed mods:
   refused by SF's own settings, left the old pair and no ShroudForge mod ran), and neither SF nor kiln-eml takes a new
   pair from game files that Steam's manifest of the installed build does not list as they are (size and SHA-1, read
   from `<Steam>/depotcache`; refused with "Verify the game files in Steam", the old pair stays; no manifest: the rules
-  below decide as before). Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
+  below decide as before). Since the stale-game-data patch (0.2.0-dev.31.next) both also ask Steam's manifest about the
+  pair itself before they build from it or put it back: a pair an earlier start took of game files another loader had
+  patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash program, weeks after the mod was removed) is whole,
+  sealed and built over, and only Steam's word shows it is not the game's own. Such a pair is refused with "Your game
+  files still contain changes from a mod that isn't installed. Verify the game files in Steam (Properties > Installed
+  Files > Verify integrity), then start again." and nothing changes; without a manifest, a pair that holds a known mod's
+  program is refused the same way. Either way kiln-eml takes up the new pair by the unsealed rule (the live build, the live
   resource prefix) and seals it; a sealed pair counts as replaced, not damaged, only when the files' lengths differ
   from what the seal recorded, and a same-length mismatch stays refused. The old receipt then lists other backups, so
   nothing is taken for EML's output and the old build's bytes never go back. ShroudForge writes its backup copies to

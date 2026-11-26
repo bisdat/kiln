@@ -575,6 +575,21 @@ Each is marked `kiln-eml:` in the source.
     `a_backup_of_another_build_is_not_replaced_by_files_steam_did_not_install` (then Steam's files are taken: the
     adoption), `a_backup_of_another_build_is_replaced_by_the_files_steam_installed`, `steam_files` (6). The appmanifest
     is read 16 tables deep at most (one nested without end overflowed the stack: `an_appmanifest_nested_without_end_tells_nothing`).
+43. `mod-loader-lua` `steam_files.rs` (`installed_backups`, `compare`), `load.rs` (`create_backup_with`,
+    `restore_backup_as`, `not_the_games_own`, `stale_words`, `STALE_WORDS`, `KNOWN_LEFTOVERS`), `ownership.rs`
+    (`SF_PREPARED_SCHEMES`) (kiln-eml's own code, stale game data, 0.2.0-dev.31.next): a working baseline that passes
+    every check (its seal, its containers, a live header built over it) is still not the game's own when an earlier
+    start took it of game files another loader had patched (HadToRegister, 2026-11-26: Auto Loot Plus's auto-smash
+    program). Before kiln-eml builds from the pair or puts it back, Steam's manifest of the installed build is asked
+    about the backups themselves (in the place of `<stem>.kfc` and `<stem>.kfc_resources`; SHA-1 of both, read only on
+    a patch run or a restore). Listed otherwise, or, without a manifest, holding a known mod's program: refused with
+    "Your game files still contain changes from a mod that isn't installed. Verify the game files in Steam (Properties >
+    Installed Files > Verify integrity), then start again." (the server's words name SteamCMD's validate), and nothing
+    changes; after Steam's file check the pair is replaced by the existing rules (a pair built over the game's header is
+    retaken). Kiln's ShroudForge fork decides the same (`verify_working_baseline.rs` `proven`), and its prepared record
+    of scheme 3 (written by a pass that proved its pair) is accepted as hosted ShroudForge output like schemes 1 and 2.
+    Tests: load.rs `a_backup_that_carries_a_mods_changes_is_neither_built_from_nor_restored`, `steam_files`
+    `backups_are_compared_with_the_files_steam_installed`, `ownership` `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
